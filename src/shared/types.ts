@@ -206,7 +206,7 @@ export interface GmailMessage {
   labels: string[]
 }
 
-export interface Dashboard {
+export interface TodayDashboard {
   google: GoogleStatus
   todos: Todo[]
   todo_stats: { open: number; overdue: number; today: number }
@@ -226,6 +226,8 @@ export interface Settings {
   extractionModel: string
   autoLearn: boolean
   theme: 'dark' | 'light' | 'system'
+  /** Electron accelerator for the global Gather/Scatter shortcut. */
+  gatherShortcut: string
   tools: Record<string, ToolMode | boolean>
   maxToolRounds: number
   braveApiKey: string
@@ -293,6 +295,29 @@ export interface PersonalOSApi {
   backendStatus: () => Promise<{ running: boolean; url: string; error: string | null }>
   platform: NodeJS.Platform
   onMenu: (cb: (action: string) => void) => () => void
+  popout: {
+    open: (windowId: string, req?: PopoutOpenRequest) => Promise<boolean>
+    close: (windowId: string) => Promise<boolean>
+    focus: (windowId: string) => Promise<boolean>
+    setPinned: (windowId: string, pinned: boolean) => Promise<boolean>
+    setMinSize: (windowId: string, minWidth: number, minHeight: number) => Promise<boolean>
+    list: () => Promise<PopoutInfo[]>
+    gather: () => Promise<GatherState>
+    scatter: () => Promise<GatherState>
+    onChanged: (cb: (c: PopoutChange) => void) => () => void
+  }
+  bus: {
+    send: (msg: BusMessage) => void
+    on: (cb: (msg: BusMessage) => void) => () => void
+  }
+  shortcuts: {
+    gather: () => Promise<ShortcutState>
+    setGather: (accelerator: string) => Promise<ShortcutState>
+    onFailure: (cb: (s: ShortcutState) => void) => () => void
+  }
+  /** Closes the BrowserWindow this renderer lives in: the Cmd-W fall-through when no canvas window has focus. */
+  closeSelf: () => void
+  minimizeSelf: () => void
 }
 
 export interface BoardColumn { id: string; board_id: string; name: string; position: number; wip_limit: number | null }
@@ -313,3 +338,100 @@ export interface Widget {
 }
 export interface Dashboard { id: string; name: string; description: string; created_at: number; widget_count?: number; widgets: Widget[] }
 export interface Recap { day: string; content: string; created_at: number; cached?: boolean }
+
+// ---------------- Canvas Mode ----------------
+
+/** Every widget a canvas window can host. Source of truth for `WIDGET_KINDS` in backend/personal_os/canvas.py. */
+export type WidgetKind =
+  | 'chat' | 'todos' | 'calendar' | 'board' | 'note' | 'dashboard-widget'
+  | 'memory' | 'graph' | 'documents' | 'recap' | 'project' | 'usage'
+
+export type WindowState = 'normal' | 'minimized' | 'maximized' | 'popped'
+export type SnapMode = 'off' | 'grid' | 'guides' | 'both'
+
+/** Canvas-space rect in canvas points. Never screen pixels: those are PopoutBounds. */
+export interface Rect { x: number; y: number; w: number; h: number }
+
+/** Screen bounds of a detached window: Electron's Rectangle plus the Display.id it was last seen on. */
+export interface PopoutBounds { x: number; y: number; width: number; height: number; display?: number }
+
+export interface CanvasWindow {
+  id: string; canvas_id: string; kind: WidgetKind; ref_id: string | null
+  project_id: string | null
+  /** '' = derive the title from the underlying object */
+  title: string
+  x: number; y: number; w: number; h: number; z: number
+  state: WindowState
+  /** bounds to restore when un-maximizing */
+  restore_bounds: Rect | null
+  popout_bounds: PopoutBounds | null
+  /** 0 | 1 — SQLite has no boolean. Always-on-top while popped. */
+  pinned: number
+  config: Record<string, unknown>
+  created_at: number; updated_at: number
+}
+
+export interface Canvas {
+  id: string; name: string; project_id: string | null; position: number
+  snap_mode: SnapMode; grid_size: number; zoom: number; pan_x: number; pan_y: number
+  wallpaper: string; created_at: number; updated_at: number
+  windows: CanvasWindow[]
+}
+
+/** One row of the bulk `PUT /canvases/{id}/layout` body; every field but `id` is optional. */
+export interface WindowLayout { id: string; x?: number; y?: number; w?: number; h?: number; z?: number; state?: WindowState }
+
+export interface Note { id: string; project_id: string | null; body: string; color: string; created_at: number; updated_at: number }
+
+export type DragKind = 'conversation' | 'todo' | 'document' | 'memory' | 'board-card' | 'project' | 'widget' | 'note' | 'file' | 'nav'
+
+export interface DragPayload {
+  kind: DragKind
+  /** The underlying object's id. For kind 'nav' this is a WidgetKind; for 'file' it is ''. */
+  id: string
+  label: string
+  projectId?: string | null
+  /** kind 'widget' only: the dashboard the widget belongs to, since there is no GET /widgets/{id}. */
+  dashboardId?: string
+}
+
+/** Run state of one chat session. Travels the cross-window bus, so it is a shared type, not a store-local one. */
+export type SessionStatus = 'idle' | 'working' | 'done' | 'error' | 'needs-approval'
+
+/** 200 body of POST /conversations/{id}/chat once the run is a background task. */
+export interface ChatRunStarted {
+  run_id: string
+  /** seq of the last event already produced; open the stream with ?since=<seq> */
+  seq: number
+}
+
+export interface RunInfo {
+  run_id: string
+  conversation_id: string
+  message_id: string | null
+  seq: number
+  started_at: number
+  live: boolean
+}
+
+/** 409 detail of POST /conversations/{id}/chat when that conversation already has a live run. */
+export interface RunConflict { message: string; run_id: string; seq: number }
+
+/** One detached widget window as the main process sees it. */
+export interface PopoutInfo { windowId: string; bounds: PopoutBounds; pinned: boolean }
+
+export interface PopoutOpenRequest { bounds?: Partial<PopoutBounds>; minWidth?: number; minHeight?: number; title?: string; pinned?: boolean }
+
+export interface PopoutChange { windowId: string; event: 'opened' | 'closed'; bounds: PopoutBounds | null }
+
+export interface GatherState { gathered: boolean; popped: string[] }
+
+export interface ShortcutState { accelerator: string; ok: boolean; message: string | null }
+
+export type BusKind = 'window-bounds' | 'window-state' | 'window-config' | 'chat-status' | 'todo-changed' | 'note-changed' | 'canvas-invalidate'
+
+/**
+ * Optimistic cross-window hint relayed renderer -> main -> every other renderer.
+ * The backend stays authoritative; a bus message never creates state.
+ */
+export interface BusMessage { kind: BusKind; windowId?: string; canvasId?: string; refId?: string; data?: Record<string, unknown> }

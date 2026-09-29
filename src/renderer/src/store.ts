@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { Conversation, ConversationSettings, Document, GraphData, Memory, Message, ModelInfo, Settings, Project, ToolInfo, Todo, GoogleStatus, Dashboard, Recap } from '@shared/types'
+import type { Conversation, ConversationSettings, Document, GraphData, Memory, Message, ModelInfo, Settings, Project, ToolInfo, Todo, GoogleStatus, TodayDashboard, Recap } from '@shared/types'
 import { api, chatStream, setBase, type Scope } from './lib/api'
 
 export type View = 'home' | 'chat' | 'todos' | 'calendar' | 'boards' | 'dashboards' | 'memory' | 'documents' | 'project'
@@ -19,7 +19,7 @@ interface State {
   modelsError: string | null
   tools: ToolInfo[]
   google: GoogleStatus | null
-  dashboard: Dashboard | null
+  dashboard: TodayDashboard | null
   todos: Todo[]
   recap: Recap | null
   recapLoading: boolean
@@ -192,7 +192,7 @@ export const useStore = create<State>((set, get) => {
   return {
     ready: false,
     backendError: null,
-    settings: { baseUrl: '', apiKey: '', defaultModel: '', systemPrompt: '', extractionModel: '', autoLearn: true, theme: 'dark', tools: {}, maxToolRounds: 8, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {} },
+    settings: { baseUrl: '', apiKey: '', defaultModel: '', systemPrompt: '', extractionModel: '', autoLearn: true, theme: 'dark', gatherShortcut: '', tools: {}, maxToolRounds: 8, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {} },
     models: [],
     modelsError: null,
     tools: [],

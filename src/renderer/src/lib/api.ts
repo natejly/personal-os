@@ -1,5 +1,5 @@
 import type {
-  ChatEvent, ToolInfo, Todo, GoogleStatus, Dashboard as DashboardData, CalendarEvent, GmailMessage, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Recap, Conversation, ConversationSettings, ContextUsed, Document, GraphData, GraphEdge, GraphNode,
+  ChatEvent, ToolInfo, Todo, GoogleStatus, TodayDashboard, CalendarEvent, GmailMessage, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Recap, Conversation, ConversationSettings, ContextUsed, Document, GraphData, GraphEdge, GraphNode,
   Memory, ModelInfo, ModelPrice, Settings, Project, UsageReport
 } from '@shared/types'
 
@@ -40,7 +40,7 @@ export const api = {
   },
   models: () => req<ModelInfo[]>('/models'),
   tools: () => req<{ tools: ToolInfo[]; enabled: Record<string, boolean> }>('/tools'),
-  dashboard: () => req<DashboardData>('/dashboard'),
+  dashboard: () => req<TodayDashboard>('/dashboard'),
   recap: (force = false) => req<Recap>(`/recap?force=${force}`),
   approve: (callId: string, decision: 'allow' | 'deny' | 'always_chat' | 'always_global') => req(`/approvals/${callId}`, { method: 'POST', body: json({ decision }) }),
   boards: {

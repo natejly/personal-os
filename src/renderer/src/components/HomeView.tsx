@@ -5,6 +5,7 @@ import TodoItem from './TodoItem'
 import ProjectChip from './ProjectChip'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { SAFE_MD } from './Message'
 
 function greeting(): string {
   const h = new Date().getHours()
@@ -74,7 +75,7 @@ export default function HomeView(): JSX.Element {
               <button className="icon-btn sm" title="Regenerate" onClick={() => void refreshRecap(true)}><RefreshCw size={13} className={recapLoading ? 'spin' : ''} /></button>
               <button className="icon-btn sm" title="Hide" onClick={() => setRecapOpen(false)}>×</button>
             </header>
-            {recapLoading && !recap?.content ? <p className="muted">Writing your recap…</p> : <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{recap?.content ?? ''}</ReactMarkdown></div>}
+            {recapLoading && !recap?.content ? <p className="muted">Writing your recap…</p> : <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={SAFE_MD}>{recap?.content ?? ''}</ReactMarkdown></div>}
           </section>
         )}
         <div className="widgets">

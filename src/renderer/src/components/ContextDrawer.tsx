@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { X, Brain, Share2, FileText, Wand2, Eye, Globe, Wrench, Activity } from 'lucide-react'
+import { X, Brain, Share2, FileText, Wand2, Eye, Globe, Wrench, Activity, ShieldAlert } from 'lucide-react'
 import { ToolOverrides } from './ToolPermissions'
 import TraceView from './TraceView'
 import { useStore, useProject } from '../store'
@@ -128,6 +128,16 @@ export default function ContextDrawer(): JSX.Element {
           <div className="ctx-tools">
             <button className="link small" onClick={() => setToolsOpen((o) => !o)}>{toolsOpen ? 'hide per-tool overrides' : 'per-tool overrides…'}</button>
             {toolsOpen && <ToolOverrides value={cs.tools ?? {}} onChange={(tools) => void setChatSettings({ tools })} effectiveBase={projectBase} compact />}
+          </div>
+        )}
+        {convo && cs.tainted && (
+          <div className="muted small" style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 0 4px 24px' }}>
+            <ShieldAlert size={14} style={{ flexShrink: 0, marginTop: 2 }} />
+            <span>
+              This chat has read untrusted content{cs.taint_sources?.length ? ` (${cs.taint_sources.join(', ')})` : ''}. External
+              actions ask every time, and fetch_url only reads links you or a web search supplied.
+              <button className="link small" onClick={() => void setChatSettings({ tainted: false, taint_sources: [] })}>clear</button>
+            </span>
           </div>
         )}
         {!convo && <p className="muted small">Toggles apply per chat once it exists.</p>}

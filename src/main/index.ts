@@ -1,9 +1,41 @@
 import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
 import { join } from 'path'
-import { backendStatus, backendUrl, startBackend, stopBackend } from './backend'
+import { backendStatus, backendToken, backendUrl, startBackend, stopBackend } from './backend'
 
 let win: BrowserWindow | null = null
 const isMac = process.platform === 'darwin'
+
+const openExternal = (url: string): void => {
+  if (/^https?:\/\//i.test(url)) void shell.openExternal(url)
+}
+
+/**
+ * The app's own webContents carries the preload (window.os.backendToken()), so it must never navigate to a page
+ * the model or a fetched document supplied: one click on a markdown link would hand out the sidecar's shared secret.
+ * Top-level navigation is not covered by CSP, so it is blocked here and handed to the system browser instead.
+ */
+function guardNavigation(contents: Electron.WebContents): void {
+  const local = (url: string, frame: boolean): boolean => {
+    if (url === 'about:blank' || url.startsWith('file://')) return true
+    const dev = process.env.ELECTRON_RENDERER_URL
+    if (dev && url.startsWith(dev)) return true
+    const base = backendUrl()
+    return frame && !!base && url.startsWith(`${base}/`) // widget iframes are served by the sidecar
+  }
+  contents.on('will-navigate', (e, url) => {
+    if (local(url, false)) return
+    e.preventDefault()
+    openExternal(url)
+  })
+  contents.on('will-frame-navigate', (details) => {
+    if (details.isMainFrame || local(details.url, true)) return // the main frame is handled by will-navigate
+    details.preventDefault()
+  })
+  contents.setWindowOpenHandler(({ url }) => {
+    openExternal(url)
+    return { action: 'deny' }
+  })
+}
 
 function createWindow(): void {
   win = new BrowserWindow({
@@ -27,10 +59,7 @@ function createWindow(): void {
   })
 
   win.once('ready-to-show', () => win?.show())
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url)
-    return { action: 'deny' }
-  })
+  guardNavigation(win.webContents)
 
   if (process.env.ELECTRON_RENDERER_URL) {
     void win.loadURL(process.env.ELECTRON_RENDERER_URL)
@@ -103,6 +132,7 @@ function buildMenu(): void {
 app.whenReady().then(async () => {
   ipcMain.handle('backend:url', () => backendUrl())
   ipcMain.handle('backend:status', () => backendStatus())
+  ipcMain.handle('backend:token', () => backendToken())
   buildMenu()
   try {
     await startBackend()

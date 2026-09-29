@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { MessageSquarePlus, Pencil, PanelLeftOpen, FileText, Brain, MessageSquare, BookOpen, Trash2 } from 'lucide-react'
 import { useStore, useProject } from '../store'
+import ChatPulse from './ChatPulse'
 import MemoryPanel from './MemoryPanel'
 import DocumentsView from './DocumentsView'
 
@@ -11,7 +12,6 @@ export default function ProjectView(): JSX.Element {
   const project = useProject(id)
   const conversations = useStore((s) => s.conversations)
   const sidebarOpen = useStore((s) => s.sidebarOpen)
-  const streaming = useStore((s) => s.streaming)
   const { toggleSidebar, newChat, selectChat, deleteChat, setProjectModal, updateProject, loadScope } = useStore()
   const [tab, setTab] = useState<Tab>('chats')
   const [prompt, setPrompt] = useState(project?.system_prompt ?? '')
@@ -64,7 +64,7 @@ export default function ProjectView(): JSX.Element {
             {chats.map((c) => (
               <div key={c.id} className="chat-row" onClick={() => void selectChat(c.id)} role="button" tabIndex={0}>
                 <MessageSquare size={14} />
-                <span className="chat-row-title">{streaming?.conversationId === c.id && <span className="pulse" />}{c.title}</span>
+                <span className="chat-row-title"><ChatPulse conversationId={c.id} />{c.title}</span>
                 <span className="muted small">{c.model} · {new Date(c.updated_at * 1000).toLocaleDateString()}</span>
                 <button className="icon-btn ghost danger" onClick={(e) => { e.stopPropagation(); void deleteChat(c.id) }}><Trash2 size={13} /></button>
               </div>

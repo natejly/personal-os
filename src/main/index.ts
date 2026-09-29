@@ -1,6 +1,9 @@
 import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
 import { join } from 'path'
 import { backendStatus, backendUrl, startBackend, stopBackend } from './backend'
+import { registerBus } from './bus'
+import { registerPopouts, restorePopouts } from './popouts'
+import { registerShortcuts } from './shortcuts'
 
 let win: BrowserWindow | null = null
 const isMac = process.platform === 'darwin'
@@ -103,6 +106,11 @@ function buildMenu(): void {
 app.whenReady().then(async () => {
   ipcMain.handle('backend:url', () => backendUrl())
   ipcMain.handle('backend:status', () => backendStatus())
+  ipcMain.on('window:close-self', (e) => BrowserWindow.fromWebContents(e.sender)?.close())
+  ipcMain.on('window:minimize-self', (e) => BrowserWindow.fromWebContents(e.sender)?.minimize())
+  registerPopouts(() => win)
+  registerBus()
+  registerShortcuts(() => win)
   buildMenu()
   try {
     await startBackend()
@@ -110,8 +118,10 @@ app.whenReady().then(async () => {
     console.error('[main] backend failed to start:', (e as Error).message)
   }
   createWindow()
+  void restorePopouts()
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+    // A live pop-out keeps getAllWindows() non-empty, which used to make the main window unrecoverable.
+    if (!win || win.isDestroyed()) createWindow()
   })
 })
 

@@ -18,6 +18,7 @@
   --user-bubble: #2f2d2a;
   --danger: #e5484d;
   --ok: #46a758;
+  --warn: #febc2e;
   --hover: rgba(255, 255, 255, 0.06);
   --active: rgba(255, 255, 255, 0.1);
 }
@@ -170,6 +171,10 @@ kbd {
   flex-shrink: 0;
 }
 @keyframes pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+.pulse.working { background: var(--warn); }
+.pulse.needs-approval { background: var(--accent); animation-duration: 1s; }
+.pulse.done { background: var(--ok); animation: none; }
+.pulse.error { background: var(--danger); animation: none; }
 .empty-hint { color: var(--text-faint); font-size: 13px; padding: 12px 8px; }
 .sidebar-bottom { border-top: 1px solid var(--border); padding: 6px 0; }
 
@@ -422,8 +427,6 @@ kbd {
 .project-current:hover { background: var(--active); }
 .project-current svg.rot { transform: rotate(180deg); }
 .project-current > svg { color: var(--text-muted); margin-left: auto; transition: transform 0.15s; }
-.project-dot { width: 16px; height: 16px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; color: #fff; flex-shrink: 0; background: var(--text-faint); }
-.project-dot.sm { width: 10px; height: 10px; }
 .project-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
 .popover-backdrop { position: fixed; inset: 0; z-index: 30; }
 .project-menu { position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 31; background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: 10px; padding: 4px; box-shadow: 0 12px 32px rgba(0,0,0,0.35); }
@@ -575,7 +578,7 @@ button.tag:disabled { cursor: default; }
 .add-edge input { flex: 1; min-width: 0; padding: 5px 8px; font-size: 12px; }
 
 /* ---------- Projects (Claude-style groups of chats) ---------- */
-.project-dot { width: 12px; height: 12px; border-radius: 4px; display: inline-block; flex-shrink: 0; }
+.project-dot { width: 12px; height: 12px; border-radius: 4px; display: inline-block; flex-shrink: 0; background: var(--text-faint); }
 .project-dot.sm { width: 8px; height: 8px; border-radius: 2px; }
 .section-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px 2px 14px; }
 .section-toggle { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); padding: 2px 0; }
@@ -631,11 +634,13 @@ textarea.instructions:focus { border-color: var(--accent); }
 .memory-panel.embedded .memory-body { min-height: 520px; }
 
 /* Segmented split / list / graph switch */
-.seg { display: flex; align-items: center; border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; }
-.seg button { display: inline-flex; align-items: center; gap: 5px; padding: 5px 9px; font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+.seg { display: inline-flex; align-items: center; border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; flex-shrink: 0; }
+.seg button { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; font-size: 12px; color: var(--text-muted); white-space: nowrap; border-right: 1px solid var(--border); }
 .seg button + button { border-left: 1px solid var(--border-strong); }
+.seg button:last-child { border-right: 0; }
 .seg button:hover { color: var(--text); background: var(--hover); }
 .seg button.active { background: var(--bg-input); color: var(--text); }
+.seg button.on { background: var(--accent); color: #fff; }
 
 /* Floating graph controls, so the canvas keeps the full pane */
 .graph-tools { position: absolute; top: 10px; left: 10px; z-index: 2; display: flex; align-items: center; gap: 2px; padding: 4px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elev); box-shadow: 0 2px 8px rgba(0,0,0,0.18); }
@@ -810,8 +815,8 @@ textarea.instructions:focus { border-color: var(--accent); }
 .trace-ms { font-size: 10px; color: var(--text-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .trace-bar-track { position: relative; height: 4px; margin: 4px 0 0 23px; border-radius: 2px; background: var(--border); }
 .trace-bar { position: absolute; top: 0; height: 100%; border-radius: 2px; background: var(--span); min-width: 2px; }
-.trace-row.running .trace-bar { animation: pulse 1s ease-in-out infinite; }
-@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+.trace-row.running .trace-bar { animation: trace-pulse 1s ease-in-out infinite; }
+@keyframes trace-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 .trace-meta { margin: 8px 0 2px 23px; font-size: 10.5px; white-space: pre-wrap; word-break: break-word; background: var(--bg-input); border-radius: 6px; padding: 8px; max-height: 260px; overflow: auto; color: var(--text-muted); }
 
 /* ---------- Approvals ---------- */
@@ -821,10 +826,6 @@ textarea.instructions:focus { border-color: var(--accent); }
 .approval-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .tag.ask { background: rgba(217,119,87,0.15); color: var(--accent); }
 .tag.p1, .tag.overdue { background: rgba(229,72,77,0.15); color: var(--danger); }
-.seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; flex-shrink: 0; }
-.seg button { padding: 4px 10px; font-size: 12px; color: var(--text-muted); border-right: 1px solid var(--border); }
-.seg button:last-child { border-right: 0; }
-.seg button.on { background: var(--accent); color: #fff; }
 .tool-perm.row { justify-content: space-between; padding: 6px 0; }
 .tool-perm.unavailable { opacity: 0.5; }
 .tool-perm.unavailable .tool-perm-name::after, .tool-perm.unavailable .toggle-text > b::after { content: ' · not connected'; color: var(--text-faint); font-weight: 400; font-size: 11px; }
@@ -936,7 +937,6 @@ textarea.instructions:focus { border-color: var(--accent); }
 .usage-ranges button.active { background: var(--active); color: var(--text); font-weight: 600; }
 .usage-head .icon-btn { margin-left: auto; }
 .spin { animation: spin 0.9s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
 .usage-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-bottom: 14px; }
 .usage-tile { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-elev); }
 .usage-tile-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); }

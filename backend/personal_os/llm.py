@@ -44,6 +44,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "extractionModel": "",
     "autoLearn": True,
     "theme": "dark",
+    "gatherShortcut": "Control+Alt+Command+Space",
     # tools: {tool_name: bool}; missing = on
     "tools": {},
     "maxToolRounds": 8,

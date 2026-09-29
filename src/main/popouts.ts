@@ -1,0 +1,301 @@
+/**
+ * Detached widget windows. One BrowserWindow per canvas window id, its screen bounds persisted back
+ * to the backend, plus gather/scatter: centre every pop-out on the display under the cursor and undo it.
+ */
+import { app, BrowserWindow, ipcMain, screen, shell } from 'electron'
+import { join } from 'path'
+import { backendUrl } from './backend'
+import type { GatherState, PopoutBounds, PopoutChange, PopoutInfo, PopoutOpenRequest } from '../shared/types'
+
+const isMac = process.platform === 'darwin'
+const MAX_POPOUTS = 6
+const MIN_W = 280
+const MIN_H = 200
+const SAVE_MS = 400
+/** Programmatic bounds changes keep firing move/resize for a while; never persist those. */
+const QUIET_MS = 600
+const GAP = 20
+const MARGIN = 0.1
+
+interface Entry {
+  win: BrowserWindow
+  pinned: boolean
+  /** epoch ms until which move/resize is our own doing and must not be saved */
+  quietUntil: number
+  saveTimer: NodeJS.Timeout | null
+  /** scattered bounds, captured on the gather that first moved this window */
+  previousBounds: PopoutBounds | null
+}
+
+const popouts = new Map<string, Entry>()
+let gathered = false
+/** Set in before-quit so the 'closed' handler does not erase state:'popped' before relaunch reads it. */
+let quitting = false
+let getMain: () => BrowserWindow | null = () => null
+
+const state = (): GatherState => ({ gathered, popped: [...popouts.keys()] })
+
+const emit = (change: PopoutChange): void => {
+  const m = getMain()
+  if (m && !m.isDestroyed()) m.webContents.send('popout:changed', change)
+}
+
+const boundsOf = (w: BrowserWindow): PopoutBounds => {
+  const b = w.getBounds()
+  return { x: b.x, y: b.y, width: b.width, height: b.height, display: screen.getDisplayMatching(b).id }
+}
+
+const persist = async (windowId: string, body: Record<string, unknown>): Promise<void> => {
+  const base = backendUrl()
+  if (!base) return
+  try {
+    await fetch(`${base}/windows/${windowId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+  } catch {
+    /* the canvas re-reads from the backend; a dropped write is not worth surfacing */
+  }
+}
+
+const quiet = (e: Entry): void => {
+  e.quietUntil = Date.now() + QUIET_MS
+  if (e.saveTimer) {
+    clearTimeout(e.saveTimer)
+    e.saveTimer = null
+  }
+}
+
+const scheduleSave = (windowId: string, e: Entry): void => {
+  if (gathered || Date.now() < e.quietUntil) return
+  if (e.saveTimer) clearTimeout(e.saveTimer)
+  e.saveTimer = setTimeout(() => {
+    e.saveTimer = null
+    if (gathered || e.win.isDestroyed()) return
+    void persist(windowId, { popout_bounds: boundsOf(e.win) })
+  }, SAVE_MS)
+}
+
+const load = (w: BrowserWindow, windowId: string): void => {
+  if (process.env.ELECTRON_RENDERER_URL) {
+    void w.loadURL(`${process.env.ELECTRON_RENDERER_URL}/?surface=widget&window=${encodeURIComponent(windowId)}`)
+  } else {
+    void w.loadFile(join(__dirname, '../renderer/index.html'), { query: { surface: 'widget', window: windowId } })
+  }
+}
+
+export const openPopout = (windowId: string, req: PopoutOpenRequest = {}): boolean => {
+  if (popouts.has(windowId)) return focusPopout(windowId)
+  if (popouts.size >= MAX_POPOUTS) return false
+
+  const b = req.bounds ?? {}
+  const minWidth = Math.max(MIN_W, Math.round(req.minWidth ?? MIN_W))
+  const minHeight = Math.max(MIN_H, Math.round(req.minHeight ?? MIN_H))
+  const win = new BrowserWindow({
+    width: Math.max(minWidth, Math.round(b.width ?? 520)),
+    height: Math.max(minHeight, Math.round(b.height ?? 640)),
+    ...(typeof b.x === 'number' && typeof b.y === 'number' ? { x: Math.round(b.x), y: Math.round(b.y) } : {}),
+    minWidth,
+    minHeight,
+    show: false,
+    title: req.title || 'Personal OS',
+    frame: false,
+    roundedCorners: true,
+    hasShadow: true,
+    // vibrancy with a transparent backgroundColor, never transparent:true — on macOS the two fight
+    backgroundColor: '#00000000',
+    vibrancy: isMac ? 'under-window' : undefined,
+    visualEffectState: 'active',
+    webPreferences: {
+      preload: join(__dirname, '../preload/index.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false
+    }
+  })
+
+  const entry: Entry = { win, pinned: !!req.pinned, quietUntil: Date.now() + QUIET_MS, saveTimer: null, previousBounds: null }
+  popouts.set(windowId, entry)
+  if (entry.pinned || gathered) win.setAlwaysOnTop(true, 'floating')
+
+  win.once('ready-to-show', () => win.show())
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    void shell.openExternal(url)
+    return { action: 'deny' }
+  })
+  const onBounds = (): void => scheduleSave(windowId, entry)
+  win.on('move', onBounds)
+  win.on('resize', onBounds)
+  win.on('closed', () => {
+    if (entry.saveTimer) clearTimeout(entry.saveTimer)
+    popouts.delete(windowId)
+    if (popouts.size === 0) gathered = false
+    if (!quitting) void persist(windowId, { state: 'normal' })
+    emit({ windowId, event: 'closed', bounds: null })
+  })
+
+  load(win, windowId)
+  emit({ windowId, event: 'opened', bounds: boundsOf(win) })
+  return true
+}
+
+export const closePopout = (windowId: string): boolean => {
+  const e = popouts.get(windowId)
+  if (!e || e.win.isDestroyed()) return false
+  e.win.close()
+  return true
+}
+
+export const focusPopout = (windowId: string): boolean => {
+  const e = popouts.get(windowId)
+  if (!e || e.win.isDestroyed()) return false
+  quiet(e)
+  if (e.win.isMinimized()) e.win.restore()
+  e.win.show()
+  e.win.focus()
+  return true
+}
+
+export const setPopoutPinned = (windowId: string, pinned: boolean): boolean => {
+  const e = popouts.get(windowId)
+  if (!e || e.win.isDestroyed()) return false
+  e.pinned = pinned
+  e.win.setAlwaysOnTop(pinned || gathered, 'floating')
+  return true
+}
+
+export const setPopoutMinSize = (windowId: string, minWidth: number, minHeight: number): boolean => {
+  const e = popouts.get(windowId)
+  if (!e || e.win.isDestroyed()) return false
+  const w = Math.max(MIN_W, Math.round(minWidth))
+  const h = Math.max(MIN_H, Math.round(minHeight))
+  quiet(e)
+  e.win.setMinimumSize(w, h)
+  const b = e.win.getBounds()
+  if (b.width < w || b.height < h) e.win.setBounds({ ...b, width: Math.max(b.width, w), height: Math.max(b.height, h) })
+  return true
+}
+
+export const listPopouts = (): PopoutInfo[] =>
+  [...popouts.entries()]
+    .filter(([, e]) => !e.win.isDestroyed())
+    .map(([windowId, e]) => ({ windowId, bounds: boundsOf(e.win), pinned: e.pinned }))
+
+export const gatherState = (): GatherState => state()
+
+const place = (e: Entry, target: Electron.Rectangle): void => {
+  quiet(e)
+  e.win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
+  e.win.showInactive()
+  e.win.setBounds(target, true)
+  e.win.moveTop()
+  e.win.setAlwaysOnTop(true, 'floating')
+}
+
+/** Centre every pop-out in a grid on the display under the cursor. Nothing popped out: raise the app. */
+export const gather = (): GatherState => {
+  const live = [...popouts.entries()].filter(([, e]) => !e.win.isDestroyed())
+  if (!live.length) {
+    const m = getMain()
+    if (m && !m.isDestroyed()) {
+      if (m.isMinimized()) m.restore()
+      m.show()
+      m.focus()
+    }
+    app.focus({ steal: true })
+    return state()
+  }
+
+  const area = screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea
+  const n = live.length
+  const cols = Math.ceil(Math.sqrt(n))
+  const rows = Math.ceil(n / cols)
+  const marginX = Math.round(area.width * MARGIN)
+  const marginY = Math.round(area.height * MARGIN)
+  const cellW = (area.width - marginX * 2 - GAP * (cols - 1)) / cols
+  const cellH = (area.height - marginY * 2 - GAP * (rows - 1)) / rows
+
+  // One scale for every window, so their relative sizes survive the gather.
+  const sizes = live.map(([, e]) => e.win.getBounds())
+  const scale = Math.min(1, ...sizes.map((b) => Math.min(cellW / b.width, cellH / b.height)))
+  const targets = sizes.map((b) => ({ width: Math.max(1, Math.round(b.width * scale)), height: Math.max(1, Math.round(b.height * scale)) }))
+
+  for (const [, e] of live) if (!gathered || !e.previousBounds) e.previousBounds = boundsOf(e.win)
+  gathered = true
+
+  const rowHeights = Array.from({ length: rows }, (_, r) =>
+    Math.max(...targets.slice(r * cols, r * cols + cols).map((t) => t.height))
+  )
+  const blockH = rowHeights.reduce((a, h) => a + h, 0) + GAP * (rows - 1)
+  let y = Math.round(area.y + (area.height - blockH) / 2)
+  for (let r = 0; r < rows; r++) {
+    const from = r * cols
+    const to = Math.min(n, from + cols)
+    const row = targets.slice(from, to)
+    const rowW = row.reduce((a, t) => a + t.width, 0) + GAP * (row.length - 1)
+    let x = Math.round(area.x + (area.width - rowW) / 2)
+    for (let i = from; i < to; i++) {
+      const t = targets[i]
+      place(live[i][1], { x, y: y + Math.round((rowHeights[r] - t.height) / 2), width: t.width, height: t.height })
+      x += t.width + GAP
+    }
+    y += rowHeights[r] + GAP
+  }
+
+  app.focus({ steal: true })
+  return state()
+}
+
+export const scatter = (): GatherState => {
+  for (const [, e] of popouts) {
+    if (e.win.isDestroyed()) continue
+    quiet(e)
+    e.win.setVisibleOnAllWorkspaces(false)
+    const b = e.previousBounds
+    if (b) e.win.setBounds({ x: b.x, y: b.y, width: b.width, height: b.height }, true)
+    e.previousBounds = null
+    e.win.setAlwaysOnTop(e.pinned, 'floating')
+  }
+  gathered = false
+  return state()
+}
+
+export const toggleGather = (): GatherState => (gathered ? scatter() : gather())
+
+/** Reopens what was popped out when the app last quit. Silent when the backend has no canvas routes yet. */
+export const restorePopouts = async (): Promise<void> => {
+  const base = backendUrl()
+  if (!base) return
+  try {
+    const r = await fetch(`${base}/canvases`)
+    if (!r.ok) return
+    const canvases = (await r.json()) as { windows?: { id: string; state?: string; title?: string; pinned?: number; popout_bounds?: PopoutBounds | null }[] }[]
+    for (const c of canvases) {
+      for (const w of c.windows ?? []) {
+        if (w.state !== 'popped') continue
+        openPopout(w.id, { bounds: w.popout_bounds ?? undefined, pinned: !!w.pinned, title: w.title || undefined })
+      }
+    }
+  } catch {
+    /* nothing to restore */
+  }
+}
+
+export const registerPopouts = (mainWindow: () => BrowserWindow | null): void => {
+  getMain = mainWindow
+  ipcMain.handle('popout:open', (_e, windowId: string, req?: PopoutOpenRequest) => openPopout(windowId, req ?? {}))
+  ipcMain.handle('popout:close', (_e, windowId: string) => closePopout(windowId))
+  ipcMain.handle('popout:focus', (_e, windowId: string) => focusPopout(windowId))
+  ipcMain.handle('popout:set-pinned', (_e, windowId: string, pinned: boolean) => setPopoutPinned(windowId, pinned))
+  ipcMain.handle('popout:set-min-size', (_e, windowId: string, minWidth: number, minHeight: number) =>
+    setPopoutMinSize(windowId, minWidth, minHeight)
+  )
+  ipcMain.handle('popout:list', () => listPopouts())
+  ipcMain.handle('popout:gather', () => gather())
+  ipcMain.handle('popout:scatter', () => scatter())
+  app.on('before-quit', () => {
+    quitting = true
+    for (const [, e] of popouts) if (!e.win.isDestroyed()) e.win.destroy()
+  })
+}

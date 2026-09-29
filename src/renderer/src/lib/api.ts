@@ -1,6 +1,7 @@
 import type {
   ChatEvent, ToolInfo, Todo, GoogleStatus, TodayDashboard, CalendarEvent, GmailMessage, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Recap, Conversation, ConversationSettings, ContextUsed, Document, GraphData, GraphEdge, GraphNode,
-  Memory, ModelInfo, ModelPrice, Settings, Project, UsageReport
+  Memory, ModelInfo, ModelPrice, Settings, Project, UsageReport,
+  Canvas, CanvasWindow, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState
 } from '@shared/types'
 
 let base = ''
@@ -71,6 +72,7 @@ export const api = {
     delete: (id: string) => req(`/dashboards/${id}`, { method: 'DELETE' }),
     addWidget: (id: string, w: { kind: string; title?: string; prompt?: string; source_ids?: string[]; code?: string; output?: string; width?: number; height?: number }) => req<Widget>(`/dashboards/${id}/widgets`, { method: 'POST', body: json(w) })
   },
+  /** AI dashboard widgets (`/widgets/{id}`). Not `api.windows`, which is a canvas window. */
   widgets: {
     update: (id: string, patch: Record<string, unknown>) => req<Widget>(`/widgets/${id}`, { method: 'PUT', body: json(patch) }),
     refresh: (id: string, regenerate = false) => req<Widget>(`/widgets/${id}/refresh?regenerate=${regenerate}`, { method: 'POST' }),
@@ -144,6 +146,34 @@ export const api = {
       return req<Document>('/documents', { method: 'POST', body: fd })
     },
     delete: (id: string) => req(`/documents/${id}`, { method: 'DELETE' })
+  },
+  canvases: {
+    list: () => req<Canvas[]>('/canvases'),
+    get: (id: string) => req<Canvas>(`/canvases/${id}`),
+    create: (c: { name?: string; project_id?: string | null; copy_from?: string | null }) => req<Canvas>('/canvases', { method: 'POST', body: json(c) }),
+    update: (id: string, patch: { name?: string; project_id?: string | null; position?: number; snap_mode?: SnapMode; grid_size?: number; zoom?: number; pan_x?: number; pan_y?: number; wallpaper?: string; clear_project?: boolean }) =>
+      req<Canvas>(`/canvases/${id}`, { method: 'PUT', body: json(patch) }),
+    delete: (id: string) => req(`/canvases/${id}`, { method: 'DELETE' }),
+    addWindow: (id: string, w: { kind: WidgetKind; ref_id?: string | null; project_id?: string | null; title?: string; x?: number; y?: number; w?: number; h?: number; config?: Record<string, unknown> }) =>
+      req<CanvasWindow>(`/canvases/${id}/windows`, { method: 'POST', body: json(w) }),
+    /** Bulk geometry write, debounced on pointerup. Returns the rowcount, not the canvas. */
+    layout: (id: string, windows: WindowLayout[]) => req<{ ok: boolean; updated: number }>(`/canvases/${id}/layout`, { method: 'PUT', body: json({ windows }) })
+  },
+  /** Canvas windows (`/windows/{id}`). Not `api.widgets`, which is an AI dashboard widget. */
+  windows: {
+    get: (id: string) => req<CanvasWindow>(`/windows/${id}`),
+    /** `config` merges server-side, so one key is safe to send on its own. */
+    update: (id: string, patch: { title?: string; config?: Record<string, unknown>; state?: WindowState; pinned?: boolean; x?: number; y?: number; w?: number; h?: number; z?: number; canvas_id?: string; restore_bounds?: Rect; popout_bounds?: PopoutBounds; clear_restore_bounds?: boolean; clear_popout_bounds?: boolean }) =>
+      req<CanvasWindow>(`/windows/${id}`, { method: 'PUT', body: json(patch) }),
+    raise: (id: string) => req<CanvasWindow>(`/windows/${id}/raise`, { method: 'POST' }),
+    delete: (id: string) => req(`/windows/${id}`, { method: 'DELETE' })
+  },
+  notes: {
+    list: (s: Scope = 'all', q = '') => req<Note[]>(`/notes?project_id=${encodeURIComponent(s)}&q=${encodeURIComponent(q)}`),
+    get: (id: string) => req<Note>(`/notes/${id}`),
+    create: (n: { body?: string; color?: string; project_id?: string | null }) => req<Note>('/notes', { method: 'POST', body: json(n) }),
+    update: (id: string, patch: { body?: string; color?: string; project_id?: string | null; clear_project?: boolean }) => req<Note>(`/notes/${id}`, { method: 'PUT', body: json(patch) }),
+    delete: (id: string) => req(`/notes/${id}`, { method: 'DELETE' })
   }
 }
 

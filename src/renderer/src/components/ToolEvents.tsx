@@ -25,7 +25,7 @@ function pretty(v: unknown): string {
   return JSON.stringify(v, null, 2)
 }
 
-export default function ToolEvents({ events }: { events: ToolEvent[] }): JSX.Element {
+export default function ToolEvents({ events, conversationId }: { events: ToolEvent[]; conversationId: string }): JSX.Element {
   const [open, setOpen] = useState<Record<string, boolean>>({})
   const approveTool = useStore((s) => s.approveTool)
   return (
@@ -55,10 +55,10 @@ export default function ToolEvents({ events }: { events: ToolEvent[] }): JSX.Ele
               <div className="approval-text"><b>{t.name.replace(/_/g, ' ')}</b> wants to run. This acts outside the app.</div>
               <pre className="approval-args">{pretty(t.arguments)}</pre>
               <div className="approval-actions">
-                <button className="primary-btn" onClick={() => void approveTool(t.id, 'allow')}>Allow once</button>
-                <button className="ghost-btn" onClick={() => void approveTool(t.id, 'always_chat')}>Always in this chat</button>
-                <button className="ghost-btn" onClick={() => void approveTool(t.id, 'always_global')}>Always</button>
-                <button className="ghost-btn danger" onClick={() => void approveTool(t.id, 'deny')}>Deny</button>
+                <button className="primary-btn" onClick={() => void approveTool(t.id, 'allow', conversationId)}>Allow once</button>
+                <button className="ghost-btn" onClick={() => void approveTool(t.id, 'always_chat', conversationId)}>Always in this chat</button>
+                <button className="ghost-btn" onClick={() => void approveTool(t.id, 'always_global', conversationId)}>Always</button>
+                <button className="ghost-btn danger" onClick={() => void approveTool(t.id, 'deny', conversationId)}>Deny</button>
               </div>
             </div>
           )}

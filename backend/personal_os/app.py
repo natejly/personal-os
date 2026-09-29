@@ -23,8 +23,10 @@ from .extract_text import extract_text
 from .learn import learn_from_exchange
 from .repos import ALL, Conversations, Documents, Graph, Memories, Projects
 from .boards import Boards
+from .canvas import SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
 from .dashboards import Dashboards, generate_recap, generate_summary, generate_widget_code
 from .google import Google, GoogleNotConnected, json_safe
+from .notes import Notes
 from .todos import Todos
 from .tools import Toolbox, summarize_result
 from .trace import Tracer, now_ms
@@ -1262,3 +1264,220 @@ async def recap(force: bool = False) -> dict[str, Any]:
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, str(e)) from e
     return {**dashboards.save_recap(day, content), "cached": False}
+
+
+# ---------------- canvas mode: spaces, windows, notes ----------------
+canvases = Canvases(db)
+notes = Notes(db)
+canvases.reset_popped()
+
+
+class CanvasIn(BaseModel):
+    name: str = "Desk"
+    project_id: str | None = None
+    copy_from: str | None = None
+
+
+class CanvasPatch(BaseModel):
+    name: str | None = None
+    project_id: str | None = None
+    position: int | None = None
+    snap_mode: str | None = None
+    grid_size: int | None = None
+    zoom: float | None = None
+    pan_x: float | None = None
+    pan_y: float | None = None
+    wallpaper: str | None = None
+    clear_project: bool = False
+
+
+class WindowIn(BaseModel):
+    kind: str
+    ref_id: str | None = None
+    project_id: str | None = None
+    title: str = ""
+    x: float = 0
+    y: float = 0
+    w: float = 520
+    h: float = 640
+    config: dict[str, Any] = {}
+
+
+class WindowPatch(BaseModel):
+    title: str | None = None
+    config: dict[str, Any] | None = None
+    state: str | None = None
+    pinned: bool | None = None
+    x: float | None = None
+    y: float | None = None
+    w: float | None = None
+    h: float | None = None
+    z: int | None = None
+    canvas_id: str | None = None
+    restore_bounds: dict[str, Any] | None = None
+    popout_bounds: dict[str, Any] | None = None  # PopoutBounds.display is an int; dict[str, float] would round it
+    clear_restore_bounds: bool = False
+    clear_popout_bounds: bool = False
+
+
+class WindowLayoutIn(BaseModel):
+    id: str
+    x: float | None = None
+    y: float | None = None
+    w: float | None = None
+    h: float | None = None
+    z: int | None = None
+    state: str | None = None
+
+
+class LayoutIn(BaseModel):
+    windows: list[WindowLayoutIn] = []
+
+
+class NoteIn(BaseModel):
+    body: str = ""
+    color: str = "yellow"
+    project_id: str | None = None
+
+
+class NotePatch(BaseModel):
+    body: str | None = None
+    color: str | None = None
+    project_id: str | None = None
+    clear_project: bool = False
+
+
+@app.get("/canvases")
+def list_canvases() -> list[dict[str, Any]]:
+    return canvases.list()
+
+
+@app.post("/canvases")
+def create_canvas(body: CanvasIn) -> dict[str, Any]:
+    c = canvases.create(body.name, sid(body.project_id), body.copy_from)
+    if not c:
+        raise HTTPException(404, "Unknown copy_from canvas")
+    return c
+
+
+@app.get("/canvases/{id}")
+def get_canvas(id: str) -> dict[str, Any]:
+    c = canvases.get(id)
+    if not c:
+        raise HTTPException(404)
+    return c
+
+
+@app.put("/canvases/{id}")
+def update_canvas(id: str, body: CanvasPatch) -> dict[str, Any]:
+    patch = body.model_dump(exclude_none=True, exclude={"clear_project"})
+    if patch.get("snap_mode") not in (None, *SNAP_MODES):
+        raise HTTPException(400, f"Unknown snap_mode: {patch['snap_mode']}")
+    if body.clear_project:
+        patch["project_id"] = None
+    elif "project_id" in patch:
+        patch["project_id"] = sid(patch["project_id"])
+    c = canvases.update(id, patch)
+    if not c:
+        raise HTTPException(404)
+    return c
+
+
+@app.delete("/canvases/{id}")
+def delete_canvas(id: str) -> dict[str, bool]:
+    canvases.delete(id)
+    return {"ok": True}
+
+
+@app.post("/canvases/{id}/windows")
+def add_canvas_window(id: str, body: WindowIn) -> dict[str, Any]:
+    if body.kind not in WIDGET_KINDS:
+        raise HTTPException(400, f"Unknown widget kind: {body.kind}")
+    w = canvases.add_window(id, body.kind, body.ref_id, sid(body.project_id), body.title, body.x, body.y, body.w, body.h, body.config)
+    if not w:
+        raise HTTPException(404)
+    return w
+
+
+@app.put("/canvases/{id}/layout")
+def put_canvas_layout(id: str, body: LayoutIn) -> dict[str, Any]:
+    for e in body.windows:
+        if e.state is not None and e.state not in WINDOW_STATES:
+            raise HTTPException(400, f"Unknown window state: {e.state}")
+    return {"ok": True, "updated": canvases.set_layout(id, [e.model_dump() for e in body.windows])}
+
+
+@app.get("/windows/{wid}")
+def get_canvas_window(wid: str) -> dict[str, Any]:
+    w = canvases.window(wid)
+    if not w:
+        raise HTTPException(404)
+    return w
+
+
+@app.put("/windows/{wid}")
+def update_canvas_window(wid: str, body: WindowPatch) -> dict[str, Any]:
+    patch = body.model_dump(exclude_none=True, exclude={"clear_restore_bounds", "clear_popout_bounds"})
+    if patch.get("state") not in (None, *WINDOW_STATES):
+        raise HTTPException(400, f"Unknown window state: {patch['state']}")
+    if body.clear_restore_bounds:
+        patch["restore_bounds"] = None
+    if body.clear_popout_bounds:
+        patch["popout_bounds"] = None
+    w = canvases.update_window(wid, patch)
+    if not w:
+        raise HTTPException(404)
+    return w
+
+
+@app.post("/windows/{wid}/raise")
+def raise_canvas_window(wid: str) -> dict[str, Any]:
+    w = canvases.raise_window(wid)
+    if not w:
+        raise HTTPException(404)
+    return w
+
+
+@app.delete("/windows/{wid}")
+def delete_canvas_window(wid: str) -> dict[str, bool]:
+    canvases.delete_window(wid)
+    return {"ok": True}
+
+
+@app.get("/notes")
+def list_notes(project_id: str | None = "all", q: str = "") -> list[dict[str, Any]]:
+    scope = "__all__" if project_id in (None, "all") else sid(project_id)
+    return notes.list(scope, q)
+
+
+@app.post("/notes")
+def create_note(body: NoteIn) -> dict[str, Any]:
+    return notes.create(body.body, body.color, sid(body.project_id))
+
+
+@app.get("/notes/{id}")
+def get_note(id: str) -> dict[str, Any]:
+    n = notes.get(id)
+    if not n:
+        raise HTTPException(404)
+    return n
+
+
+@app.put("/notes/{id}")
+def update_note(id: str, body: NotePatch) -> dict[str, Any]:
+    patch = body.model_dump(exclude_none=True, exclude={"clear_project"})
+    if body.clear_project:
+        patch["project_id"] = None
+    elif "project_id" in patch:
+        patch["project_id"] = sid(patch["project_id"])
+    n = notes.update(id, patch)
+    if not n:
+        raise HTTPException(404)
+    return n
+
+
+@app.delete("/notes/{id}")
+def delete_note(id: str) -> dict[str, bool]:
+    notes.delete(id)
+    canvases.delete_windows_for("note", id)
+    return {"ok": True}

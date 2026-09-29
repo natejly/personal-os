@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { MessageSquarePlus, Search, Settings, Trash2, PanelLeftClose, Sparkles, Brain, FileText, Plus, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard } from 'lucide-react'
 import { useStore, type View } from '../store'
+import ChatPulse from './ChatPulse'
 import type { Conversation } from '@shared/types'
 
 const DAY = 86_400_000
@@ -28,8 +29,7 @@ const NAV: { view: View; label: string; icon: JSX.Element }[] = [
 export default function Sidebar(): JSX.Element {
   const conversations = useStore((s) => s.conversations)
   const projects = useStore((s) => s.projects)
-  const activeId = useStore((s) => s.activeId)
-  const streaming = useStore((s) => s.streaming)
+  const focusedId = useStore((s) => s.focusedConversationId)
   const view = useStore((s) => s.view)
   const projectViewId = useStore((s) => s.projectViewId)
   const personalStats = useStore((s) => s.personalStats)
@@ -111,8 +111,8 @@ export default function Sidebar(): JSX.Element {
                   <div className="project-chats">
                     {chats.length === 0 && <button className="convo-item sub muted" onClick={() => newChat(p.id)}><MessageSquarePlus size={12} /> New chat in project</button>}
                     {chats.slice(0, 12).map((c) => (
-                      <div key={c.id} className={`convo-item sub ${c.id === activeId && view === 'chat' ? 'active' : ''}`} onClick={() => void selectChat(c.id)} role="button" tabIndex={0}>
-                        <span className="convo-title">{streaming?.conversationId === c.id && <span className="pulse" />}{c.title}</span>
+                      <div key={c.id} className={`convo-item sub ${c.id === focusedId && view === 'chat' ? 'active' : ''}`} onClick={() => void selectChat(c.id)} role="button" tabIndex={0}>
+                        <span className="convo-title"><ChatPulse conversationId={c.id} />{c.title}</span>
                         <button className="icon-btn ghost" title="Delete" onClick={(e) => { e.stopPropagation(); void deleteChat(c.id) }}><Trash2 size={13} /></button>
                       </div>
                     ))}
@@ -135,9 +135,9 @@ export default function Sidebar(): JSX.Element {
           <section key={g.label}>
             <h4>{g.label}</h4>
             {g.items.map((c) => (
-              <div key={c.id} className={`convo-item ${c.id === activeId && view === 'chat' ? 'active' : ''}`} onClick={() => void selectChat(c.id)} role="button" tabIndex={0}>
+              <div key={c.id} className={`convo-item ${c.id === focusedId && view === 'chat' ? 'active' : ''}`} onClick={() => void selectChat(c.id)} role="button" tabIndex={0}>
                 <span className="convo-title">
-                  {streaming?.conversationId === c.id && <span className="pulse" />}
+                  <ChatPulse conversationId={c.id} />
                   {c.project_id && projectById[c.project_id] && <span className="project-dot sm" style={{ background: projectById[c.project_id].color }} title={projectById[c.project_id].name} />}
                   {c.title}
                 </span>

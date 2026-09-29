@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { X, Brain, Share2, FileText, Wand2, Eye, Globe, Wrench, Activity } from 'lucide-react'
 import { ToolOverrides } from './ToolPermissions'
 import TraceView from './TraceView'
-import { useStore, useProject } from '../store'
+import { useStore, useProject, useConversation, useStreamingMessageId } from '../store'
 import { api } from '../lib/api'
 import type { ContextUsed, ConversationSettings } from '@shared/types'
 
@@ -58,8 +58,8 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
   )
 }
 
-export default function ContextDrawer(): JSX.Element {
-  const convo = useStore((s) => s.active)
+export default function ContextDrawer({ conversationId }: { conversationId?: string }): JSX.Element {
+  const convo = useConversation(conversationId)
   const draftProjectId = useStore((s) => s.draftProjectId)
   const settings = useStore((s) => s.settings)
   const projectId = convo?.project_id ?? draftProjectId
@@ -67,7 +67,7 @@ export default function ContextDrawer(): JSX.Element {
   const { toggleContext, setChatSettings, openProject, setContextTab: setTab } = useStore()
   const tab = useStore((s) => s.contextTab)
   const traceMessageId = useStore((s) => s.traceMessageId)
-  const streaming = useStore((s) => s.streaming)
+  const streamingMessageId = useStreamingMessageId(conversationId)
   const [query, setQuery] = useState('')
   const [preview, setPreview] = useState<ContextUsed | null>(null)
 
@@ -119,15 +119,15 @@ export default function ContextDrawer(): JSX.Element {
 
       <section className="ctx-section">
         <h4>{convo ? 'This chat uses' : 'New chats use'}</h4>
-        <Toggle icon={<Brain size={14} />} label="Memory" hint="Pinned, recent and matching memories" value={cs.useMemory} onChange={(v) => void setChatSettings({ useMemory: v })} />
-        <Toggle icon={<Share2 size={14} />} label="Knowledge graph" hint="Entities mentioned + their neighbours" value={cs.useGraph} onChange={(v) => void setChatSettings({ useGraph: v })} />
-        <Toggle icon={<FileText size={14} />} label="Documents" hint="Best matching excerpts (full-text search)" value={cs.useDocuments} onChange={(v) => void setChatSettings({ useDocuments: v })} />
-        <Toggle icon={<Wand2 size={14} />} label="Auto-learn" hint={settings.autoLearn ? 'Extract memories & graph after each reply' : 'Disabled globally in settings'} value={cs.autoLearn && settings.autoLearn} onChange={(v) => void setChatSettings({ autoLearn: v })} />
-        <Toggle icon={<Wrench size={14} />} label="Tools" hint="Web, documents, memory, graph, todos, boards, Python… External actions ask first." value={cs.useTools} onChange={(v) => void setChatSettings({ useTools: v })} />
+        <Toggle icon={<Brain size={14} />} label="Memory" hint="Pinned, recent and matching memories" value={cs.useMemory} onChange={(v) => void setChatSettings({ useMemory: v }, conversationId)} />
+        <Toggle icon={<Share2 size={14} />} label="Knowledge graph" hint="Entities mentioned + their neighbours" value={cs.useGraph} onChange={(v) => void setChatSettings({ useGraph: v }, conversationId)} />
+        <Toggle icon={<FileText size={14} />} label="Documents" hint="Best matching excerpts (full-text search)" value={cs.useDocuments} onChange={(v) => void setChatSettings({ useDocuments: v }, conversationId)} />
+        <Toggle icon={<Wand2 size={14} />} label="Auto-learn" hint={settings.autoLearn ? 'Extract memories & graph after each reply' : 'Disabled globally in settings'} value={cs.autoLearn && settings.autoLearn} onChange={(v) => void setChatSettings({ autoLearn: v }, conversationId)} />
+        <Toggle icon={<Wrench size={14} />} label="Tools" hint="Web, documents, memory, graph, todos, boards, Python… External actions ask first." value={cs.useTools} onChange={(v) => void setChatSettings({ useTools: v }, conversationId)} />
         {cs.useTools && (
           <div className="ctx-tools">
             <button className="link small" onClick={() => setToolsOpen((o) => !o)}>{toolsOpen ? 'hide per-tool overrides' : 'per-tool overrides…'}</button>
-            {toolsOpen && <ToolOverrides value={cs.tools ?? {}} onChange={(tools) => void setChatSettings({ tools })} effectiveBase={projectBase} compact />}
+            {toolsOpen && <ToolOverrides value={cs.tools ?? {}} onChange={(tools) => void setChatSettings({ tools }, conversationId)} effectiveBase={projectBase} compact />}
           </div>
         )}
         {!convo && <p className="muted small">Toggles apply per chat once it exists.</p>}
@@ -143,7 +143,7 @@ export default function ContextDrawer(): JSX.Element {
         lastCtx ? <ContextUsedView ctx={lastCtx} /> : <p className="muted ctx-empty">Send a message to see what context was injected.</p>
       ) : tab === 'trace' ? (
         traceMsg ? (
-          <TraceView spans={traceMsg.trace ?? []} live={streaming?.messageId === traceMsg.id} model={traceMsg.model} />
+          <TraceView spans={traceMsg.trace ?? []} live={streamingMessageId === traceMsg.id} model={traceMsg.model} />
         ) : (
           <p className="muted ctx-empty">Send a message to see its execution trace: context assembly, each model call, tool calls and auto-learn, with timings and token counts.</p>
         )

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { PanelLeftOpen, ChevronDown, RefreshCw, Pencil, SlidersHorizontal } from 'lucide-react'
-import { useStore, useProject } from '../store'
+import { useStore, useProject, useConversation, useIsStreaming, useStreamingMessageId } from '../store'
 import ProjectChip from './ProjectChip'
 import MessageView from './Message'
 import Composer from './Composer'
@@ -28,10 +28,12 @@ function greeting(): string {
   return 'Good evening.'
 }
 
-export default function ChatView(): JSX.Element {
-  const convo = useStore((s) => s.active)
+/** `conversationId` is omitted in classic mode, where the focused session is the only one on screen. */
+export default function ChatView({ conversationId }: { conversationId?: string }): JSX.Element {
+  const convo = useConversation(conversationId)
   const settings = useStore((s) => s.settings)
-  const streaming = useStore((s) => s.streaming)
+  const isStreamingHere = useIsStreaming(conversationId)
+  const streamingMessageId = useStreamingMessageId(conversationId)
   const sidebarOpen = useStore((s) => s.sidebarOpen)
   const contextOpen = useStore((s) => s.contextOpen)
   const draftProjectId = useStore((s) => s.draftProjectId)
@@ -54,7 +56,6 @@ export default function ChatView(): JSX.Element {
     if (el) setStick(el.scrollHeight - el.scrollTop - el.clientHeight < 80)
   }
 
-  const isStreamingHere = !!streaming && streaming.conversationId === convo?.id
   const last = msgs[msgs.length - 1]
 
   return (
@@ -75,7 +76,7 @@ export default function ChatView(): JSX.Element {
         </div>
         <div className="no-drag header-right">
           <ProjectChip projectId={convo?.project_id ?? draftProjectId} />
-          <ModelPicker value={model} onChange={(m) => void setChatModel(m)} />
+          <ModelPicker value={model} onChange={(m) => void setChatModel(m, conversationId)} />
           <button className={`icon-btn ${contextOpen ? 'on' : ''}`} title="Context panel (⌘I)" onClick={toggleContext}><SlidersHorizontal size={16} /></button>
         </div>
       </header>
@@ -90,18 +91,18 @@ export default function ChatView(): JSX.Element {
               </div>
             ) : (
               <div className="messages-inner">
-                {msgs.map((m) => <MessageView key={m.id} message={m} streaming={isStreamingHere && streaming?.messageId === m.id} />)}
+                {msgs.map((m) => <MessageView key={m.id} message={m} streaming={isStreamingHere && streamingMessageId === m.id} />)}
                 {!isStreamingHere && last?.role === 'assistant' && (
                   <div className="regen-row">
-                    <button className="ghost-btn" onClick={() => void regenerate()}><RefreshCw size={13} /> Regenerate</button>
+                    <button className="ghost-btn" onClick={() => void regenerate(conversationId)}><RefreshCw size={13} /> Regenerate</button>
                   </div>
                 )}
               </div>
             )}
           </div>
-          <Composer />
+          <Composer conversationId={conversationId} />
         </div>
-        {contextOpen && <ContextDrawer />}
+        {contextOpen && <ContextDrawer conversationId={conversationId} />}
       </div>
     </main>
   )

@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { ArrowUp, Square, Paperclip } from 'lucide-react'
-import { useStore } from '../store'
+import { useStore, useIsStreaming } from '../store'
 
-export default function Composer(): JSX.Element {
+export default function Composer({ conversationId }: { conversationId?: string }): JSX.Element {
   const [text, setText] = useState('')
   const ref = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
-  const streaming = useStore((s) => s.streaming)
-  const activeId = useStore((s) => s.activeId)
-  const uploadTarget = useStore((s) => s.active?.project_id ?? s.draftProjectId)
+  const streaming = useIsStreaming(conversationId)
+  const activeId = useStore((s) => conversationId ?? s.focusedConversationId)
+  const uploadTarget = useStore((s) => s.sessions[conversationId ?? s.focusedConversationId ?? '']?.conversation.project_id ?? s.draftProjectId)
   const hasKey = useStore((s) => !!s.settings.apiKey)
   const { send, stop, setSettingsOpen, uploadDocuments } = useStore()
 
@@ -24,7 +24,7 @@ export default function Composer(): JSX.Element {
     if (streaming || !text.trim()) return
     const t = text
     setText('')
-    void send(t)
+    void send(t, conversationId)
   }
 
   return (
@@ -39,7 +39,7 @@ export default function Composer(): JSX.Element {
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit() } }} />
         {streaming ? (
-          <button className="send stop" title="Stop" onClick={() => void stop()}><Square size={14} /></button>
+          <button className="send stop" title="Stop" onClick={() => void stop(conversationId)}><Square size={14} /></button>
         ) : (
           <button className="send" title="Send" disabled={!text.trim()} onClick={submit}><ArrowUp size={16} /></button>
         )}

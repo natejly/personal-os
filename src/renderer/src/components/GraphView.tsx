@@ -16,7 +16,9 @@ const TYPES = Object.keys(TYPE_COLORS).filter((t) => t !== 'entity')
 
 function NodePanel({ node, onClose }: { node: GraphNode; onClose: () => void }): JSX.Element {
   const graph = useStore((s) => s.graph)
-  const { refreshGraph, refreshProjects, toast } = useStore()
+  const refreshGraph = useStore((s) => s.refreshGraph)
+  const refreshProjects = useStore((s) => s.refreshProjects)
+  const toast = useStore((s) => s.toast)
   const projectId = node.project_id
   const [label, setLabel] = useState(node.label)
   const [type, setType] = useState(node.type)
@@ -96,11 +98,15 @@ function NodePanel({ node, onClose }: { node: GraphNode; onClose: () => void }):
  * The knowledge-graph half of the Memory panel. The panel owns the scope filter
  * and the search box and passes the query down; this component renders only the
  * canvas, its floating tools and the selected-node inspector.
+ * `paused` idles the force simulation without tearing it down — a canvas window
+ * that is not focused keeps its layout but stops burning frames on it.
  */
-export default function GraphView({ projectId: scopedProjectId, query = '' }: { projectId?: string; query?: string }): JSX.Element {
+export default function GraphView({ projectId: scopedProjectId, query = '', paused = false }: { projectId?: string; query?: string; paused?: boolean }): JSX.Element {
   const graph = useStore((s) => s.graph)
   const libraryScope = useStore((s) => s.libraryScope)
-  const { refreshGraph, refreshProjects } = useStore()
+  // Selectors, not `useStore()`: a bare subscription re-renders the whole SVG on every streamed token.
+  const refreshGraph = useStore((s) => s.refreshGraph)
+  const refreshProjects = useStore((s) => s.refreshProjects)
   const scope: Scope = scopedProjectId ?? libraryScope
   const projectId = scope === 'all' || scope === 'personal' ? null : scope
   const wrapRef = useRef<HTMLDivElement>(null)
@@ -113,6 +119,9 @@ export default function GraphView({ projectId: scopedProjectId, query = '' }: { 
   const [selected, setSelected] = useState<string | null>(null)
   const [newLabel, setNewLabel] = useState('')
   const dragging = useRef<{ node?: SimNode; panStart?: { x: number; y: number; vx: number; vy: number } } | null>(null)
+  // Read by the rebuild effect, which must not itself depend on `paused` — a rebuild would hand the
+  // in-flight node drag a stale SimNode.
+  const pausedRef = useRef(paused)
 
   useEffect(() => {
     const el = wrapRef.current
@@ -144,8 +153,21 @@ export default function GraphView({ projectId: scopedProjectId, query = '' }: { 
       .force('collide', forceCollide<SimNode>().radius((d) => 22 + d.degree * 2))
       .alpha(prev && Object.keys(prev).length ? 0.5 : 1)
       .on('tick', () => setTick((t) => t + 1))
+    if (pausedRef.current) {
+      simRef.current.stop()
+      // A cold graph built while paused has random positions; settle it once instead of ticking on.
+      if (Object.keys(prev).length === 0) { simRef.current.tick(120); setTick((t) => t + 1) }
+    }
     return () => { simRef.current?.stop() }
   }, [graph, size.w, size.h])
+
+  useEffect(() => {
+    const sim = simRef.current
+    if (!sim) return
+    if (paused) sim.stop()
+    else if (pausedRef.current) sim.alpha(0.3).restart()
+    pausedRef.current = paused
+  }, [paused])
 
   const toWorld = (cx: number, cy: number): { x: number; y: number } => ({ x: (cx - view.x) / view.k, y: (cy - view.y) / view.k })
 

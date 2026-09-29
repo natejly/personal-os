@@ -117,6 +117,8 @@ export interface State {
   selectChat: (id: string | null) => Promise<void>
   /** Load a conversation into `sessions` without focusing it: one canvas chat window per call. */
   openSession: (conversationId: string) => Promise<void>
+  /** `openSession`, plus attach to a reply already in flight elsewhere so the window paints amber. */
+  attachSession: (conversationId: string) => Promise<void>
   /** Drop a session and abort whatever it was streaming. */
   closeSession: (conversationId: string) => void
   /** Called on focus: clears unread and maps done/error back to idle, but never needs-approval. */
@@ -199,12 +201,19 @@ const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean): ChatSessio
   switch (ev.event) {
     case 'user_message':
       return withMsgs([...msgs, ev.data])
-    case 'assistant_message':
+    case 'assistant_message': {
+      // Merge by id: attaching to a run replays this event into a conversation row that may already
+      // hold the message, and appending it twice is the duplicate the ring used to paint. An empty
+      // replayed body keeps whatever content we have, so a mid-reply attach loses nothing.
+      const held = msgs.some((m) => m.id === ev.data.id)
       return {
-        ...withMsgs([...msgs, ev.data]),
+        ...(held
+          ? mapMsg(ev.data.id, (m) => ({ ...ev.data, content: ev.data.content || m.content }))
+          : withMsgs([...msgs, ev.data])),
         streaming: s.streaming && { ...s.streaming, messageId: ev.data.id },
-        unread: focused ? s.unread : s.unread + 1
+        unread: focused || held ? s.unread : s.unread + 1
       }
+    }
     case 'title':
       return { ...s, conversation: { ...c, title: ev.data.title } }
     case 'removed_message':
@@ -258,25 +267,12 @@ export const useStore = create<State>((set, get) => {
     void get().refreshProjects()
   }
 
-  const runStream = async (convId: string, body: { content?: string; model?: string }): Promise<void> => {
+  /** Consume one run's events into a session. `attached` means the run was started by someone else. */
+  const watchRun = async (convId: string, run: ChatRunStarted, from: { messageId: string | null; approvals: number; attached: boolean }): Promise<void> => {
     const abort = new AbortController()
-    let run: ChatRunStarted
-    let attached = false
-    try {
-      run = await api.chat(convId, body)
-    } catch (e) {
-      const conflict = runConflict(e)
-      if (!conflict) {
-        get().toast((e as Error).message, 'error')
-        patchSession(convId, (s) => ({ ...s, status: 'error', finishedAt: Date.now() }))
-        return
-      }
-      // Another window already started this reply: watch it from its tail rather than erroring.
-      run = { run_id: conflict.run_id, seq: conflict.seq }
-      attached = true
-    }
+    const attached = from.attached
     clearHold(convId)
-    patchSession(convId, (s) => ({ ...s, streaming: { messageId: null, runId: run.run_id, abort }, status: 'working', finishedAt: null, pendingApprovals: 0, touchedAt: Date.now() }))
+    patchSession(convId, (s) => ({ ...s, streaming: { messageId: from.messageId, runId: run.run_id, abort }, status: settleApprovals('working', from.approvals), finishedAt: null, pendingApprovals: from.approvals, touchedAt: Date.now() }))
     try {
       for await (const ev of chatStream(convId, run.seq, abort.signal)) {
         const focused = get().focusedConversationId === convId
@@ -316,6 +312,25 @@ export const useStore = create<State>((set, get) => {
       // An attached run wrote deltas this window never saw; the persisted message is the whole reply.
       if (attached) void get().openSession(convId)
     }
+  }
+
+  const runStream = async (convId: string, body: { content?: string; model?: string }): Promise<void> => {
+    let run: ChatRunStarted
+    let attached = false
+    try {
+      run = await api.chat(convId, body)
+    } catch (e) {
+      const conflict = runConflict(e)
+      if (!conflict) {
+        get().toast((e as Error).message, 'error')
+        patchSession(convId, (s) => ({ ...s, status: 'error', finishedAt: Date.now() }))
+        return
+      }
+      // Another window already started this reply: watch it from its tail rather than erroring.
+      run = { run_id: conflict.run_id, seq: conflict.seq }
+      attached = true
+    }
+    await watchRun(convId, run, { messageId: null, approvals: 0, attached })
   }
 
   return {
@@ -476,6 +491,17 @@ export const useStore = create<State>((set, get) => {
     openSession: async (conversationId) => {
       if (get().sessions[conversationId]?.streaming) return
       putSession(await api.conversations.get(conversationId))
+    },
+    attachSession: async (conversationId) => {
+      if (get().sessions[conversationId]?.streaming) return
+      // A run started before this window existed: `GET /runs` is the only way it can know.
+      const runs = await api.runs().catch(() => null)
+      const run = runs?.find((r) => r.conversation_id === conversationId && r.live)
+      await get().openSession(conversationId)
+      const s = get().sessions[conversationId]
+      if (!run || !s || s.streaming) return
+      // From the run's own seq, so the tail streams live and no past delta is applied twice.
+      await watchRun(conversationId, { run_id: run.run_id, seq: run.seq }, { messageId: run.message_id, approvals: countApprovals(s.conversation), attached: true })
     },
     closeSession: (conversationId) => {
       clearHold(conversationId)

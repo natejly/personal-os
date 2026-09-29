@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react'
 import { MessageSquarePlus, Search, Settings, Trash2, PanelLeftClose, Sparkles, Brain, FileText, Plus, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard } from 'lucide-react'
 import { useStore, type View } from '../store'
 import ChatPulse from './ChatPulse'
-import type { Conversation } from '@shared/types'
+import { dragProps } from '../canvas/dnd'
+import type { Conversation, WidgetKind } from '@shared/types'
 
 const DAY = 86_400_000
 function groupLabel(ts: number): string {
@@ -16,14 +17,18 @@ function groupLabel(ts: number): string {
   return 'Older'
 }
 
-const NAV: { view: View; label: string; icon: JSX.Element }[] = [
-  { view: 'home', label: 'Today', icon: <Home size={15} /> },
-  { view: 'todos', label: 'Todos', icon: <CheckSquare size={15} /> },
-  { view: 'calendar', label: 'Calendar', icon: <Calendar size={15} /> },
+/**
+ * `kind` makes the row a canvas drag source (contract §7, payload kind 'nav'). Boards and Dashboards
+ * have none: their widgets need a `ref_id`, so a bare drag would open a window with nothing in it.
+ */
+const NAV: { view: View; label: string; icon: JSX.Element; kind?: WidgetKind }[] = [
+  { view: 'home', label: 'Today', icon: <Home size={15} />, kind: 'recap' },
+  { view: 'todos', label: 'Todos', icon: <CheckSquare size={15} />, kind: 'todos' },
+  { view: 'calendar', label: 'Calendar', icon: <Calendar size={15} />, kind: 'calendar' },
   { view: 'boards', label: 'Boards', icon: <KanbanSquare size={15} /> },
   { view: 'dashboards', label: 'Dashboards', icon: <LayoutDashboard size={15} /> },
-  { view: 'memory', label: 'Memory', icon: <Brain size={15} /> },
-  { view: 'documents', label: 'Documents', icon: <FileText size={15} /> }
+  { view: 'memory', label: 'Memory', icon: <Brain size={15} />, kind: 'memory' },
+  { view: 'documents', label: 'Documents', icon: <FileText size={15} />, kind: 'documents' }
 ]
 
 export default function Sidebar(): JSX.Element {
@@ -81,7 +86,8 @@ export default function Sidebar(): JSX.Element {
 
       <nav className="nav">
         {NAV.map((n) => (
-          <button key={n.view} className={`nav-item ${view === n.view ? 'active' : ''}`} onClick={() => setView(n.view)}>
+          <button key={n.view} className={`nav-item ${view === n.view ? 'active' : ''}`} onClick={() => setView(n.view)}
+            {...(n.kind ? dragProps({ kind: 'nav', id: n.kind, label: n.label }) : {})}>
             {n.icon}<span>{n.label}</span>{libCount(n.view) !== null && <span className="count">{libCount(n.view)}</span>}
           </button>
         ))}
@@ -101,7 +107,8 @@ export default function Sidebar(): JSX.Element {
             const isOpen = expanded[p.id] ?? (view === 'project' && projectViewId === p.id) ?? false
             return (
               <div key={p.id} className="project-group">
-                <div className={`project-item ${view === 'project' && projectViewId === p.id ? 'active' : ''}`} onClick={() => openProject(p.id)} role="button" tabIndex={0}>
+                <div className={`project-item ${view === 'project' && projectViewId === p.id ? 'active' : ''}`} onClick={() => openProject(p.id)} role="button" tabIndex={0}
+                  {...dragProps({ kind: 'project', id: p.id, label: p.name })}>
                   <button className="icon-btn ghost xs" title={isOpen ? 'Collapse' : 'Expand chats'} onClick={(e) => { e.stopPropagation(); setExpanded((x) => ({ ...x, [p.id]: !isOpen })) }}><ChevronRight size={12} className={isOpen ? 'rot90' : ''} /></button>
                   <span className="project-dot" style={{ background: p.color }} />
                   <span className="project-name">{p.name}</span>
@@ -111,7 +118,8 @@ export default function Sidebar(): JSX.Element {
                   <div className="project-chats">
                     {chats.length === 0 && <button className="convo-item sub muted" onClick={() => newChat(p.id)}><MessageSquarePlus size={12} /> New chat in project</button>}
                     {chats.slice(0, 12).map((c) => (
-                      <div key={c.id} className={`convo-item sub ${c.id === focusedId && view === 'chat' ? 'active' : ''}`} onClick={() => void selectChat(c.id)} role="button" tabIndex={0}>
+                      <div key={c.id} className={`convo-item sub ${c.id === focusedId && view === 'chat' ? 'active' : ''}`} onClick={() => void selectChat(c.id)} role="button" tabIndex={0}
+                        {...dragProps({ kind: 'conversation', id: c.id, label: c.title, projectId: p.id })}>
                         <span className="convo-title"><ChatPulse conversationId={c.id} />{c.title}</span>
                         <button className="icon-btn ghost" title="Delete" onClick={(e) => { e.stopPropagation(); void deleteChat(c.id) }}><Trash2 size={13} /></button>
                       </div>
@@ -135,7 +143,8 @@ export default function Sidebar(): JSX.Element {
           <section key={g.label}>
             <h4>{g.label}</h4>
             {g.items.map((c) => (
-              <div key={c.id} className={`convo-item ${c.id === focusedId && view === 'chat' ? 'active' : ''}`} onClick={() => void selectChat(c.id)} role="button" tabIndex={0}>
+              <div key={c.id} className={`convo-item ${c.id === focusedId && view === 'chat' ? 'active' : ''}`} onClick={() => void selectChat(c.id)} role="button" tabIndex={0}
+                {...dragProps({ kind: 'conversation', id: c.id, label: c.title, projectId: c.project_id })}>
                 <span className="convo-title">
                   <ChatPulse conversationId={c.id} />
                   {c.project_id && projectById[c.project_id] && <span className="project-dot sm" style={{ background: projectById[c.project_id].color }} title={projectById[c.project_id].name} />}

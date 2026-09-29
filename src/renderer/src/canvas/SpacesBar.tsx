@@ -3,23 +3,19 @@ import { AlignJustify, LayoutGrid, Plus, Trash2 } from 'lucide-react'
 import type { DragPayload, SnapMode } from '@shared/types'
 import { api } from '../lib/api'
 import { useProject, useStore } from '../store'
+import { hasDrag, readDrag } from './dnd'
 import { GRID_SIZES } from './snapping'
 import { useCanvas } from './store'
 
 /** Reorder payload, local to the bar: a space tab is not one of the shared `DragKind`s. */
 const SPACE_MIME = 'application/x-personal-os-space'
-/** Contract §7. Replace with `readDrag` from widgets' `dnd.ts` once it lands. */
-const DRAG_MIME = 'application/x-personal-os'
 
 const SNAP_LABEL: Record<SnapMode, string> = { off: 'No snap', grid: 'Grid', guides: 'Guides', both: 'Grid + guides' }
 
+/** §7: a project dropped on a tab binds the space; every other payload belongs to the plane. */
 const projectDrag = (dt: DataTransfer): DragPayload | null => {
-  try {
-    const p = JSON.parse(dt.getData(DRAG_MIME)) as DragPayload
-    return p && p.kind === 'project' && typeof p.id === 'string' ? p : null
-  } catch {
-    return null
-  }
+  const p = readDrag(dt)
+  return p && p.kind === 'project' ? p : null
 }
 
 /** `position` is writable but the store has no `reorderSpace`, so the bar renumbers and reloads. */
@@ -70,7 +66,7 @@ function Tab({ canvasId, index }: { canvasId: string; index: number }): JSX.Elem
       }}
       onDragEnd={() => setDragging(false)}
       onDragOver={(e) => {
-        const kind = e.dataTransfer.types.includes(SPACE_MIME) ? 'space' : e.dataTransfer.types.includes(DRAG_MIME) ? 'project' : ''
+        const kind = e.dataTransfer.types.includes(SPACE_MIME) ? 'space' : hasDrag(e.dataTransfer) ? 'project' : ''
         if (!kind) return
         e.preventDefault()
         e.dataTransfer.dropEffect = kind === 'space' ? 'move' : 'link'

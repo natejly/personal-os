@@ -4,20 +4,8 @@ import {
   Notebook, FolderKanban, Sparkles, Gauge
 } from 'lucide-react'
 import type { CanvasWindow, WidgetKind } from '@shared/types'
+import { WIDGETS, type WidgetProps } from './registry'
 import { useCanvas } from './store'
-
-/**
- * Structurally identical to widgets' `WidgetProps` (contract §6). It lives here so windowmgr
- * compiles before `registry.ts` exists; Wave 3 swaps it for `import type { WidgetProps }`.
- */
-export interface WidgetBodyProps {
-  window: CanvasWindow
-  focused: boolean
-  /** false when off-screen, minimized, below 60 % zoom, or over the heavy cap */
-  live: boolean
-  onConfig: (patch: Record<string, unknown>) => void
-  onTitle: (t: string) => void
-}
 
 /** Placeholder catalog. Wave 3 reads `WIDGETS[kind].label` / `.icon` instead. */
 export const KIND_LABEL: Record<WidgetKind, string> = {
@@ -50,36 +38,18 @@ export const KIND_ICON: Record<WidgetKind, JSX.Element> = {
   usage: <Gauge size={18} />
 }
 
-/** Every widget's low-cost stand-in: what Overview draws, and what a non-live window falls back to. */
-function Proxy({ window: win }: WidgetBodyProps): JSX.Element {
-  return (
-    <div className="proxy-card">
-      {KIND_ICON[win.kind]}
-      <strong>{win.title || KIND_LABEL[win.kind]}</strong>
-      <span>Paused while off-screen</span>
-    </div>
-  )
-}
-
-function Stub(props: WidgetBodyProps): JSX.Element {
-  const { window: win, live } = props
-  if (!live) return <Proxy {...props} />
-  const keys = Object.keys(win.config)
+/** A row the backend accepted that this build has no widget for: still titled, still closable. */
+function Unknown({ window: win }: WidgetProps): JSX.Element {
   return (
     <div className="win-stub">
-      <div className="win-stub-kind">{KIND_LABEL[win.kind]}</div>
-      <div className="win-stub-ref">{win.ref_id ? `ref ${win.ref_id}` : 'no ref'}</div>
-      {keys.length > 0 && <div className="win-stub-ref">{keys.map((k) => `${k}=${String(win.config[k])}`).join(' · ')}</div>}
-      <p className="muted small">The real widget lands in Wave 3.</p>
+      <div className="win-stub-kind">{win.kind}</div>
+      <p className="muted small">No widget for this kind in this build.</p>
     </div>
   )
 }
 
-/**
- * The single function widgets rewrites in this file (contract §1), to
- * `(kind) => WIDGETS[kind].Component`. Everything else here is windowmgr's.
- */
-const resolveWidget = (_kind: WidgetKind): FC<WidgetBodyProps> => Stub
+/** The catalog is the resolver; an unknown kind degrades to a placeholder instead of tearing the plane. */
+const resolveWidget = (kind: WidgetKind): FC<WidgetProps> => WIDGETS[kind]?.Component ?? Unknown
 
 export default function WindowHost({ win, focused, live }: { win: CanvasWindow; focused: boolean; live: boolean }): JSX.Element {
   const setWindowConfig = useCanvas((s) => s.setWindowConfig)
@@ -87,5 +57,6 @@ export default function WindowHost({ win, focused, live }: { win: CanvasWindow; 
   const onConfig = useCallback((patch: Record<string, unknown>) => void setWindowConfig(win.id, patch), [setWindowConfig, win.id])
   const onTitle = useCallback((t: string) => void setWindowTitle(win.id, t), [setWindowTitle, win.id])
   const Body = resolveWidget(win.kind)
+  // The ring lives in the title bar's `.win-status`, filled by Canvas: a body may never render chrome.
   return <Body window={win} focused={focused} live={live} onConfig={onConfig} onTitle={onTitle} />
 }

@@ -1,20 +1,21 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Maximize2, Minus, X } from 'lucide-react'
 import type { CanvasWindow } from '@shared/types'
+import { WIDGETS } from './registry'
 import { useCanvas, useIsFocused } from './store'
 import { getDragOverlay, rectStyle, subscribeDragOverlay, useWindowDrag, type DragOverlay } from './useDrag'
 import WindowHost, { KIND_LABEL } from './WindowHost'
 import type { Handle } from './snapping'
 
 const HANDLES: Handle[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
-/** Fallbacks until widgets injects the registry; `useDrag` applies the same floor. */
+/** Floor for a kind the registry has no entry for; `useDrag` applies the same one. */
 const MIN = { w: 200, h: 140 }
 
 export interface WindowFrameProps {
   win: CanvasWindow
   live: boolean
   selected?: boolean
-  /** Status-ring slot. Wave 3 passes `<StatusRing>`; `null` leaves the slot empty. */
+  /** Status-ring slot: Canvas passes a `<StatusRing>` for a statusful kind, `null` for the rest. */
   status?: ReactNode
 }
 
@@ -31,7 +32,9 @@ export default function WindowFrame({ win, live, selected = false, status = null
   const setWindowState = useCanvas((s) => s.setWindowState)
   const setWindowTitle = useCanvas((s) => s.setWindowTitle)
   const returnToCanvas = useCanvas((s) => s.returnToCanvas)
-  const { onDragPointerDown, onResizePointerDown } = useWindowDrag(win, { node, min: MIN })
+  const def = WIDGETS[win.kind]
+  // §6/§10: the registry is the floor a resize honours, and the natural size the bottom-centre zone restores to.
+  const { onDragPointerDown, onResizePointerDown } = useWindowDrag(win, { node, min: def?.minSize ?? MIN, natural: def?.defaultSize })
   const [editing, setEditing] = useState<string | null>(null)
 
   useEffect(() => {
@@ -47,6 +50,8 @@ export default function WindowFrame({ win, live, selected = false, status = null
   }, [win.id])
 
   const label = win.title || KIND_LABEL[win.kind]
+  /** §6 'minimal': a note gets a close button and no hand-rename — its title is its own first line. */
+  const minimal = def?.chrome === 'minimal'
   const commit = (): void => {
     const next = (editing ?? '').trim()
     setEditing(null)
@@ -63,10 +68,14 @@ export default function WindowFrame({ win, live, selected = false, status = null
       <div className="win-bar" onPointerDown={onDragPointerDown} onDoubleClick={() => void setWindowState(win.id, win.state === 'maximized' ? 'normal' : 'maximized')}>
         <div className="win-lights" onPointerDown={(e) => e.stopPropagation()}>
           <button className="win-light close" title="Close (⌘W)" onClick={() => void closeWindow(win.id)}><X size={8} strokeWidth={3} /></button>
-          <button className="win-light min" title="Minimize (⌘M)" onClick={() => void setWindowState(win.id, 'minimized')}><Minus size={8} strokeWidth={3} /></button>
-          <button className="win-light max" title="Zoom" onClick={() => void setWindowState(win.id, win.state === 'maximized' ? 'normal' : 'maximized')}><Maximize2 size={7} strokeWidth={3} /></button>
+          {!minimal && (
+            <>
+              <button className="win-light min" title="Minimize (⌘M)" onClick={() => void setWindowState(win.id, 'minimized')}><Minus size={8} strokeWidth={3} /></button>
+              <button className="win-light max" title="Zoom" onClick={() => void setWindowState(win.id, win.state === 'maximized' ? 'normal' : 'maximized')}><Maximize2 size={7} strokeWidth={3} /></button>
+            </>
+          )}
         </div>
-        <div className="win-title" title={label} onDoubleClick={(e) => { e.stopPropagation(); setEditing(win.title || label) }}>
+        <div className="win-title" title={label} onDoubleClick={minimal ? undefined : (e) => { e.stopPropagation(); setEditing(win.title || label) }}>
           {editing === null ? (
             label
           ) : (

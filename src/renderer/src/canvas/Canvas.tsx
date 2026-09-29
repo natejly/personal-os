@@ -1,11 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import type { CanvasWindow, DragPayload, Rect, WidgetKind } from '@shared/types'
+import type { CanvasWindow, Rect, WidgetKind } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore } from '../store'
 import Dock from './Dock'
 import Overview from './Overview'
 import SpacesBar from './SpacesBar'
+import StatusRing from './StatusRing'
 import WindowFrame from './WindowFrame'
+import { hasDrag, hasFiles, readDrag } from './dnd'
+import { WIDGETS } from './registry'
 import { canvasFromScreen, screenFromCanvas, snapValue, visibleRect, type Point, type Viewport } from './snapping'
 import { setViewportEl, useActiveCanvas, useCanvas, useWindows, viewport, viewportPoint } from './store'
 import { getDragOverlay, subscribeDragOverlay } from './useDrag'
@@ -21,21 +24,10 @@ const GRID_ZOOM = 0.75
 const HEAVY: ReadonlySet<WidgetKind> = new Set(['calendar', 'dashboard-widget', 'graph', 'usage'])
 const HEAVY_CAP = 6
 const GHOST = { w: 420, h: 360 }
-/** Contract §7. Replace with `readDrag` from widgets' `dnd.ts` once it lands. */
-const DRAG_MIME = 'application/x-personal-os'
 const IDLE_MS = 180
 
 const clamp = (n: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, n))
 const hits = (a: Rect, b: Rect): boolean => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
-
-const readDrag = (dt: DataTransfer): DragPayload | null => {
-  try {
-    const p = JSON.parse(dt.getData(DRAG_MIME)) as DragPayload
-    return p && typeof p.kind === 'string' && typeof p.id === 'string' ? p : null
-  } catch {
-    return null
-  }
-}
 
 /**
  * Which windows may keep polling, mount iframes and run a simulation. Pure so it is testable: this
@@ -241,7 +233,7 @@ export default function Canvas(): JSX.Element {
 
   const onDragOver = (e: ReactDragEvent<HTMLDivElement>): void => {
     const dt = e.dataTransfer
-    if (!dt.types.includes(DRAG_MIME) && !dt.types.includes('Files')) return
+    if (!hasDrag(dt) && !hasFiles(dt)) return
     e.preventDefault()
     dt.dropEffect = 'copy'
     // dragover fires continuously; only a changed landing cell is worth a render.
@@ -257,7 +249,7 @@ export default function Canvas(): JSX.Element {
 
   const onDrop = async (e: ReactDragEvent<HTMLDivElement>): Promise<void> => {
     const dt = e.dataTransfer
-    if (!dt.types.includes(DRAG_MIME) && !dt.files.length) return
+    if (!hasDrag(dt) && !dt.files.length) return
     e.preventDefault()
     setGhost(null)
     const at = landing(e)
@@ -312,7 +304,15 @@ export default function Canvas(): JSX.Element {
         {!sidebarOpen && <div className="canvas-drag-strip drag" />}
         {showGrid && <div className="canvas-grid" style={{ backgroundSize: `${pitch}px ${pitch}px`, backgroundPosition: `${panX}px ${panY}px` }} />}
         <div className="canvas-plane" style={{ transform: `translate(${panX}px, ${panY}px) scale(${zoom})` }}>
-          {shown.map((w) => <WindowFrame key={w.id} win={w} live={liveIds.has(w.id)} selected={selected.includes(w.id)} status={null} />)}
+          {shown.map((w) => (
+            <WindowFrame
+              key={w.id}
+              win={w}
+              live={liveIds.has(w.id)}
+              selected={selected.includes(w.id)}
+              status={WIDGETS[w.kind]?.statusful ? <StatusRing conversationId={w.ref_id} /> : null}
+            />
+          ))}
         </div>
         <div className="canvas-guides">
           <Guides view={view} />

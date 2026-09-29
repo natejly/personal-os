@@ -108,6 +108,12 @@ export const setDefaultSizes = (f: (kind: WidgetKind) => Size | undefined): void
   sizeOf = f
 }
 
+let configOf: ((kind: WidgetKind) => Record<string, unknown> | undefined) | null = null
+/** The same injection for §6's `defaultConfig`: an explicit config still wins, key by key. */
+export const setDefaultConfigs = (f: (kind: WidgetKind) => Record<string, unknown> | undefined): void => {
+  configOf = f
+}
+
 const byZ = (a: CanvasWindow, b: CanvasWindow): number => a.z - b.z || a.created_at - b.created_at
 const topZ = (ws: CanvasWindow[]): number => ws.reduce((n, w) => Math.max(n, w.z), -1)
 
@@ -317,7 +323,7 @@ export const useCanvas = create<CanvasState>((set, get) => {
           x: Math.round(pos.x),
           y: Math.round(pos.y),
           ...(sizeOf?.(kind) ?? {}),
-          config: config ?? {}
+          config: { ...(configOf?.(kind) ?? {}), ...(config ?? {}) }
         })
         putWindow(w)
         set({ focusedWindowId: w.id })

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Check, Trash2, Calendar } from 'lucide-react'
 import { useStore } from '../store'
 import type { Todo } from '@shared/types'
+import { dragProps } from '../canvas/dnd'
 import ProjectChip from './ProjectChip'
 
 export const dueLabel = (due: string | null): { text: string; cls: string } => {
@@ -17,7 +18,8 @@ export const dueLabel = (due: string | null): { text: string; cls: string } => {
 }
 
 export default function TodoItem({ todo, showProject = true, compact = false }: { todo: Todo; showProject?: boolean; compact?: boolean }): JSX.Element {
-  const { updateTodo, deleteTodo } = useStore()
+  const updateTodo = useStore((s) => s.updateTodo)
+  const deleteTodo = useStore((s) => s.deleteTodo)
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(todo.title)
   const due = dueLabel(todo.due)
@@ -26,8 +28,11 @@ export default function TodoItem({ todo, showProject = true, compact = false }: 
     if (title.trim() && title !== todo.title) void updateTodo(todo.id, { title: title.trim() })
     else setTitle(todo.title)
   }
+  // A drag source for every canvas drop target that takes a todo; while the title is being edited the
+  // attribute would eat the caret, so it comes off.
+  const drag = dragProps({ kind: 'todo', id: todo.id, label: todo.title, projectId: todo.project_id })
   return (
-    <div className={`todo ${todo.done ? 'done' : ''} p${todo.priority} ${compact ? 'compact' : ''}`}>
+    <div className={`todo ${todo.done ? 'done' : ''} p${todo.priority} ${compact ? 'compact' : ''}`} {...(editing ? {} : drag)}>
       <button className="todo-check" onClick={() => void updateTodo(todo.id, { done: !todo.done })} title={todo.done ? 'Reopen' : 'Complete'}>
         {todo.done ? <Check size={12} /> : null}
       </button>

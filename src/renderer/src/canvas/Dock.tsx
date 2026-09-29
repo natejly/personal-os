@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { WIDGETS } from './registry'
+import StatusRing from './StatusRing'
 import { useCanvas, useWindows } from './store'
 import { KIND_ICON, KIND_LABEL } from './WindowHost'
 
@@ -29,6 +31,8 @@ export default function Dock(): JSX.Element | null {
           }}
         >
           {KIND_ICON[w.kind]}
+          {/* §8: the tile reads the same `useRingStatus` as the window, so a minimized chat still shows amber. */}
+          {WIDGETS[w.kind]?.statusful && <StatusRing conversationId={w.ref_id} size={12} />}
           <span className="dock-tile-label">{w.title || KIND_LABEL[w.kind]}</span>
         </button>
       ))}

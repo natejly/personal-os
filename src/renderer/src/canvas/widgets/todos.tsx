@@ -1,0 +1,159 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { CheckSquare, Plus } from 'lucide-react'
+import type { DragKind, DragPayload, Todo } from '@shared/types'
+import TodoItem from '../../components/TodoItem'
+import { useStore } from '../../store'
+import type { Scope } from '../../lib/api'
+import { useDropTarget } from '../dnd'
+import type { WidgetDef, WidgetProps } from '../registry'
+
+const ACCEPTS: DragKind[] = ['todo', 'board-card']
+
+interface Cfg { scope: Scope; includeDone: boolean; q: string }
+
+/** `config` is whatever the backend last stored, so every field is read defensively. */
+const cfg = (c: Record<string, unknown>): Cfg => ({
+  scope: typeof c.scope === 'string' && c.scope ? c.scope : 'all',
+  includeDone: c.includeDone === true,
+  q: typeof c.q === 'string' ? c.q : ''
+})
+
+const midnight = (): number => new Date(new Date().toDateString()).getTime()
+const dueAt = (t: Todo): number => (t.due ? new Date(`${t.due}T00:00:00`).getTime() : Infinity)
+const today = (): string => new Date().toISOString().slice(0, 10)
+
+function TodosWidget({ window: win, live, onConfig }: WidgetProps): JSX.Element {
+  const c = cfg(win.config)
+  const [q, setQ] = useState(c.q)
+  const [draft, setDraft] = useState('')
+  const loaded = useRef(false)
+  const todos = useStore((s) => s.todos)
+  const projects = useStore((s) => s.projects)
+  const projectId = c.scope === 'all' || c.scope === 'personal' ? null : c.scope
+
+  // One fetch, at the widest scope, and only once this window is actually on screen: every todos
+  // window filters the same array client-side so two different scopes cannot thrash the same GET.
+  useEffect(() => {
+    if (!live || loaded.current) return
+    loaded.current = true
+    void useStore.getState().refreshTodos('all', true)
+  }, [live])
+
+  // The query is typed locally and persisted once the typing stops; one PUT per keystroke is not it.
+  useEffect(() => {
+    if (q === c.q) return
+    const t = setTimeout(() => onConfig({ q }), 400)
+    return () => clearTimeout(t)
+  }, [q, c.q, onConfig])
+
+  const rows = useMemo(() => {
+    const needle = q.trim().toLowerCase()
+    return todos
+      .filter((t) => (c.includeDone || !t.done)
+        && (c.scope === 'all' || (c.scope === 'personal' ? !t.project_id : t.project_id === c.scope))
+        && (!needle || t.title.toLowerCase().includes(needle) || (t.notes ?? '').toLowerCase().includes(needle)))
+      .sort((a, b) => dueAt(a) - dueAt(b) || a.priority - b.priority)
+  }, [todos, c.scope, c.includeDone, q])
+
+  const open = rows.filter((t) => !t.done)
+  const cut = midnight()
+  const day = today()
+  const overdue = open.filter((t) => t.due && dueAt(t) < cut)
+  const dueToday = open.filter((t) => t.due === day)
+  const upcoming = open.filter((t) => t.due && dueAt(t) > cut && t.due !== day)
+  const someday = open.filter((t) => !t.due)
+  const done = rows.filter((t) => t.done)
+
+  const add = async (): Promise<void> => {
+    const title = draft.trim()
+    if (!title) return
+    setDraft('')
+    const app = useStore.getState()
+    await app.addTodo({ title, project_id: projectId })
+    // `addTodo` refreshes at the default scope, which drops the done rows this window may be showing.
+    await app.refreshTodos('all', true)
+  }
+
+  const onDrop = async (p: DragPayload | null): Promise<void> => {
+    if (!p) return
+    const app = useStore.getState()
+    if (p.kind === 'board-card') {
+      await app.addTodo({ title: p.label, project_id: projectId })
+      await app.refreshTodos('all', true)
+      return
+    }
+    // A todo dragged in from another window joins this one's scope; under 'all' there is nothing to change.
+    if (p.kind === 'todo' && c.scope !== 'all' && p.projectId !== projectId) {
+      await app.updateTodo(p.id, projectId ? { project_id: projectId } : { clear_project: true })
+    }
+  }
+
+  const drop = useDropTarget(ACCEPTS, (p) => void onDrop(p))
+
+  // Off-screen or zoomed out: every row unmounts, taking its store subscription with it.
+  if (!live) {
+    return (
+      <div className="proxy-card">
+        <CheckSquare size={18} />
+        <strong>{win.title || 'Todos'}</strong>
+        <span>{open.length} open · paused while off-screen</span>
+      </div>
+    )
+  }
+
+  // A function, not a component: a component declared in a render body is a new type every render,
+  // which would remount every row — and with it the inline title editor — on each keystroke.
+  const section = (label: string, items: Todo[]): JSX.Element | null =>
+    items.length ? (
+      <section key={label}>
+        <h4 className="section-h">{label} <span>{items.length}</span></h4>
+        {items.map((t) => <TodoItem key={t.id} todo={t} compact showProject={c.scope === 'all'} />)}
+      </section>
+    ) : null
+
+  return (
+    <div className={drop.over ? 'widget drop-over' : 'widget'} {...drop.handlers}>
+      <div className="widget-bar">
+        <input className="widget-input" placeholder="Filter…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <select className="widget-input" style={{ width: 'auto', maxWidth: 130 }} value={c.scope} title="Project"
+          onChange={(e) => onConfig({ scope: e.target.value })}>
+          <option value="all">All</option>
+          <option value="personal">Personal</option>
+          {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </select>
+        <button className={c.includeDone ? 'widget-chip on' : 'widget-chip'} title="Show completed"
+          onClick={() => onConfig({ includeDone: !c.includeDone })}>done</button>
+      </div>
+
+      <div className="widget-scroll">
+        {!rows.length && <p className="widget-sub">Nothing matches.</p>}
+        {section('Overdue', overdue)}
+        {section('Today', dueToday)}
+        {section('Upcoming', upcoming)}
+        {section('Someday', someday)}
+        {section('Done', done)}
+      </div>
+
+      <div className="widget-bar">
+        <input className="widget-input" placeholder="Add a todo…" value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') void add() }} />
+        <button className="icon-btn sm" title="Add" disabled={!draft.trim()} onClick={() => void add()}><Plus size={14} /></button>
+      </div>
+    </div>
+  )
+}
+
+export const def: WidgetDef = {
+  kind: 'todos',
+  label: 'Todos',
+  icon: <CheckSquare size={18} />,
+  defaultSize: { w: 380, h: 520 },
+  minSize: { w: 280, h: 240 },
+  chrome: 'full',
+  defaultConfig: { scope: 'all', includeDone: false, q: '' },
+  accepts: ACCEPTS,
+  Component: TodosWidget
+}
+
+export default TodosWidget

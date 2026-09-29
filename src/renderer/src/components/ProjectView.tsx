@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { MessageSquarePlus, Pencil, PanelLeftOpen, FileText, Brain, MessageSquare, BookOpen, Trash2 } from 'lucide-react'
 import { useStore, useProject } from '../store'
+import { dragProps } from '../canvas/dnd'
 import ChatPulse from './ChatPulse'
 import MemoryPanel from './MemoryPanel'
 import DocumentsView from './DocumentsView'
@@ -62,7 +63,8 @@ export default function ProjectView(): JSX.Element {
           )}
           <div className="chat-rows">
             {chats.map((c) => (
-              <div key={c.id} className="chat-row" onClick={() => void selectChat(c.id)} role="button" tabIndex={0}>
+              <div key={c.id} className="chat-row" onClick={() => void selectChat(c.id)} role="button" tabIndex={0}
+                {...dragProps({ kind: 'conversation', id: c.id, label: c.title, projectId: id })}>
                 <MessageSquare size={14} />
                 <span className="chat-row-title"><ChatPulse conversationId={c.id} />{c.title}</span>
                 <span className="muted small">{c.model} · {new Date(c.updated_at * 1000).toLocaleDateString()}</span>

@@ -48,10 +48,14 @@ their own instructions, knowledge files, memories and graph.
   auto-learn and tools; an inspector showing exactly what was injected into
   each reply; a live preview for a draft message.
 - **Charts and diagrams.** Replies can include a ```` ```chart ```` block (a small
-  JSON spec rendered as an interactive bar / line / area / pie / scatter chart,
-  each with chart, data-table and source views) or a ```` ```mermaid ```` block.
+  JSON spec rendered as a bar / line / area / pie / scatter chart, each with
+  chart, data-table and source views) or a ```` ```mermaid ```` block.
   The Python sandbox has numpy and matplotlib, and any figure a script saves is
   shown inline on the tool card.
+- **Interactive charts.** An ```` ```interactive ```` block adds sliders, number
+  fields, dropdowns and toggles, and plots formulas over them — so you can drag
+  an assumption and watch the curve move. It recomputes locally, with no new
+  request to the model.
 - **Traces.** Every reply records what it did: context assembly, each model
   round with time-to-first-token and token counts, each tool call, and the
   auto-learn pass. Spans stream live into a waterfall in the Context panel.
@@ -183,7 +187,7 @@ Everything used is stored on the assistant message (`context_used`,
 ## Charts, diagrams and images
 
 Rich output is a fenced code block the UI knows how to render, so it works with
-any model and streams naturally. The system prompt describes two block types:
+any model and streams naturally. The system prompt describes three block types:
 
 ````markdown
 ```chart
@@ -198,6 +202,37 @@ any model and streams naturally. The system prompt describes two block types:
 objects (`{"key", "label", "type"}`) to mix bars and lines in one chart.
 Chart.js-style `labels`/`datasets` and plain `{"A": 1, "B": 2}` maps are
 accepted too, and a malformed block degrades to its source rather than an error.
+
+An ```` ```interactive ```` block is a chart you can steer. It names some
+controls and plots formulas over them, and dragging a slider redraws it locally —
+no round trip to the model:
+
+````markdown
+```interactive
+{"title": "Compound growth", "unit": "$",
+ "controls": [{"id": "start", "label": "Starting amount", "type": "number", "value": 5000},
+              {"id": "rate", "label": "Annual return", "type": "slider",
+               "min": 0, "max": 15, "step": 0.25, "value": 7, "unit": "%"}],
+ "x": {"id": "year", "label": "Year", "from": 0, "to": 30, "steps": 120},
+ "series": [{"key": "balance", "label": "Balance", "expr": "start * pow(1 + rate/100, year)"}],
+ "readouts": [{"label": "Final balance", "expr": "balance_last", "unit": "$"}]}
+```
+````
+
+A control is a `slider` (the default), `number`, `select` (with `options`) or
+`toggle`. The x axis is a swept range (`from`/`to`/`steps`, any of which may
+itself be a formula, so one slider can set another's range) or a fixed
+`values` list; pass `data` rows instead and formulas can transform real columns.
+`readouts` are scalar tiles under the chart and can use `<series>_last`,
+`_first`, `_min`, `_max`, `_sum` and `_mean`.
+
+Formulas are **not** evaluated with `eval`. `src/renderer/src/lib/expr.ts` is a
+small parser that compiles them to closures, with a fixed whitelist of maths
+functions and no property access, indexing or assignment — a spec is written by
+the model, which may have read an untrusted page, so a formula must not be able
+to become code in the renderer. The worst a hostile one can do is return NaN.
+`npm run test:expr` covers the grammar and that boundary.
+
 Diagrams use ```` ```mermaid ```` (loaded lazily, so it costs nothing until
 used). For anything those cannot express, `run_python` has numpy and matplotlib;
 figures saved with `plt.savefig()` come back as images attached to the tool

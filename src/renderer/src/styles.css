@@ -778,6 +778,33 @@ textarea.instructions:focus { border-color: var(--accent); }
 .mermaid-svg { padding: 14px; overflow: auto; display: flex; justify-content: center; background: var(--bg-elev); }
 .mermaid-svg svg { max-width: 100%; height: auto; }
 
+/* Interactive charts (```interactive): controls sit in one row above the plot, readouts below it. */
+/* A grid, not wrapping flex: each control owns its cell, so its right-aligned value can never crowd
+   the label of the control beside it. */
+.iv-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 7px 30px; padding: 11px 14px; border-bottom: 1px solid var(--border); background: var(--bg); }
+.iv-control { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-muted); min-width: 0; }
+.iv-control.toggle { cursor: pointer; }
+.iv-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.iv-control.slider .iv-label, .iv-control:not(.toggle) .iv-label { flex: 0 1 auto; max-width: 46%; }
+.iv-unit { color: var(--text-faint); font-size: 11px; }
+/* The value changes on every drag frame, so the digits hold a fixed width and the row never reflows. */
+.iv-value { margin-left: auto; min-width: 58px; text-align: right; color: var(--text); font-family: var(--mono); font-size: 11px; font-variant-numeric: tabular-nums; }
+.iv-control input[type=number] { width: 84px; margin-left: auto; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 6px; padding: 3px 6px; color: var(--text); font-size: 12px; outline: 0; font-variant-numeric: tabular-nums; }
+.iv-control select { margin-left: auto; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 6px; padding: 3px 6px; color: var(--text); font-size: 12px; outline: 0; }
+.iv-control input[type=number]:focus, .iv-control select:focus { border-color: var(--accent); }
+.iv-control input[type=checkbox] { accent-color: var(--accent); }
+
+.iv-control input[type=range] { -webkit-appearance: none; appearance: none; flex: 1 1 90px; min-width: 70px; height: 18px; background: transparent; outline: 0; cursor: grab; }
+.iv-control input[type=range]:active { cursor: grabbing; }
+.iv-control input[type=range]::-webkit-slider-runnable-track { height: 3px; border-radius: 2px; background: var(--border-strong); }
+.iv-control input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 13px; height: 13px; margin-top: -5px; border-radius: 50%; background: var(--accent); border: 2px solid var(--bg-elev); box-shadow: 0 1px 3px rgba(0,0,0,0.35); }
+.iv-control input[type=range]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--active); }
+
+.iv-readouts { display: flex; flex-wrap: wrap; gap: 4px 24px; padding: 10px 14px; border-top: 1px solid var(--border); background: var(--bg); }
+.iv-readout { display: flex; flex-direction: column; gap: 1px; min-width: 96px; }
+.iv-readout-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); }
+.iv-readout-value { font-size: 18px; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; line-height: 1.2; }
+
 /* ---------- Tool images (e.g. matplotlib figures) ---------- */
 .tool-images { display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 10px 10px; }
 .tool-images figure { margin: 0; max-width: 100%; }

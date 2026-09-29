@@ -10,10 +10,10 @@ import { BarChart3, Table2, Code2, Copy, Check, AlertCircle } from 'lucide-react
  * Accepts the documented shape plus a couple of common variants (Chart.js-style labels/datasets, key→value maps).
  */
 
-type Row = Record<string, unknown>
-type ChartType = 'bar' | 'line' | 'area' | 'pie' | 'scatter'
-interface Series { key: string; label: string; type: ChartType }
-interface Spec {
+export type Row = Record<string, unknown>
+export type ChartType = 'bar' | 'line' | 'area' | 'pie' | 'scatter'
+export interface Series { key: string; label: string; type: ChartType }
+export interface Spec {
   type: ChartType
   title: string
   x: string
@@ -23,13 +23,18 @@ interface Spec {
   xLabel: string
   yLabel: string
   unit: string
+  /**
+   * A continuous x axis, scaled by value rather than one slot per row. Interactive blocks set this for a
+   * swept range so 200 sample points do not become 200 category ticks; ```chart blocks leave it unset.
+   */
+  xType?: 'category' | 'number'
 }
 
-const TYPES: ChartType[] = ['bar', 'line', 'area', 'pie', 'scatter']
+export const TYPES: ChartType[] = ['bar', 'line', 'area', 'pie', 'scatter']
 const MAX_ROWS = 500
-const COLORS = 8 // --chart-1 … --chart-8 in styles.css
+export const COLORS = 8 // --chart-1 … --chart-8 in styles.css
 
-function num(v: unknown): number | null {
+export function num(v: unknown): number | null {
   if (typeof v === 'number') return Number.isFinite(v) ? v : null
   if (typeof v === 'string' && v.trim() !== '' && !Number.isNaN(Number(v))) return Number(v)
   return null
@@ -97,7 +102,7 @@ export function parseSpec(source: string): Spec {
   }
 }
 
-const fmtNum = (v: unknown, unit = ''): string => {
+export const fmtNum = (v: unknown, unit = ''): string => {
   const n = num(v)
   if (n === null) return String(v ?? '')
   const s = new Intl.NumberFormat(undefined, { maximumFractionDigits: Math.abs(n) >= 100 ? 0 : 2, notation: Math.abs(n) >= 100000 ? 'compact' : 'standard' }).format(n)
@@ -106,19 +111,27 @@ const fmtNum = (v: unknown, unit = ''): string => {
   return unit ? `${s} ${unit}` : s
 }
 
-const color = (i: number): string => `var(--chart-${(i % COLORS) + 1})`
+export const color = (i: number): string => `var(--chart-${(i % COLORS) + 1})`
 const tick = { fill: 'var(--chart-ink)', fontSize: 11 }
 const tooltipStyle = { background: 'var(--bg-elev)', border: '1px solid var(--border-strong)', borderRadius: 8, fontSize: 12, color: 'var(--text)', boxShadow: '0 4px 16px rgba(0,0,0,0.25)' }
 
-function Chart({ spec }: { spec: Spec }): JSX.Element {
+export function Chart({ spec }: { spec: Spec }): JSX.Element {
   const { type, x, series, data, stacked, unit } = spec
   // keep series in the order the spec lists them (Recharts 3 sorts legends/tooltips alphabetically by default)
   const legend = series.length > 1 ? <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} iconType="circle" iconSize={8} itemSorter={null} /> : null
   const tooltip = <Tooltip contentStyle={tooltipStyle} cursor={{ fill: 'var(--hover)', stroke: 'var(--chart-axis)' }} formatter={(v: unknown) => fmtNum(v, unit)} itemSorter={() => 0} />
-  const xAxis = <XAxis dataKey={x} tick={tick} axisLine={{ stroke: 'var(--chart-axis)' }} tickLine={false} label={spec.xLabel ? { value: spec.xLabel, position: 'insideBottom', offset: -2, fill: 'var(--chart-ink)', fontSize: 11 } : undefined} />
+  const numericX = spec.xType === 'number'
+  const xAxis = (
+    <XAxis dataKey={x} tick={tick} axisLine={{ stroke: 'var(--chart-axis)' }} tickLine={false}
+      type={numericX ? 'number' : 'category'}
+      domain={numericX ? ['dataMin', 'dataMax'] : undefined}
+      tickFormatter={numericX ? (v: unknown) => fmtNum(v) : undefined}
+      label={spec.xLabel ? { value: spec.xLabel, position: 'insideBottom', offset: -2, fill: 'var(--chart-ink)', fontSize: 11 } : undefined} />
+  )
   // bars need a zero baseline; lines/areas read better zoomed to the data range
   const yDomain: [string | number, string | number] = type === 'line' && !stacked ? ['auto', 'auto'] : [0, 'auto']
-  const yAxis = <YAxis tick={tick} axisLine={false} tickLine={false} width={48} domain={yDomain} tickFormatter={(v: unknown) => fmtNum(v, unit)} label={spec.yLabel ? { value: spec.yLabel, angle: -90, position: 'insideLeft', fill: 'var(--chart-ink)', fontSize: 11 } : undefined} />
+  // The axis needs extra width when it carries a label, or the rotated text sits on top of the ticks.
+  const yAxis = <YAxis tick={tick} axisLine={false} tickLine={false} width={spec.yLabel ? 66 : 48} domain={yDomain} tickFormatter={(v: unknown) => fmtNum(v, unit)} label={spec.yLabel ? { value: spec.yLabel, angle: -90, position: 'insideLeft', fill: 'var(--chart-ink)', fontSize: 11 } : undefined} />
   const grid = <CartesianGrid vertical={false} stroke="var(--chart-grid)" />
   const margin = { top: 8, right: 12, bottom: spec.xLabel ? 16 : 0, left: 0 }
 
@@ -167,7 +180,7 @@ function Chart({ spec }: { spec: Spec }): JSX.Element {
   )
 }
 
-function DataTable({ spec }: { spec: Spec }): JSX.Element {
+export function DataTable({ spec }: { spec: Spec }): JSX.Element {
   return (
     <div className="chart-table">
       <table>

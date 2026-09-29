@@ -49,6 +49,9 @@ model_list:
     litellm_params:
       model: fireworks_ai/accounts/fireworks/models/qwen3-embedding-8b
       api_key: os.environ/FIREWORKS_API_KEY
+    # `mode` belongs here, not in litellm_params: there it is forwarded to Fireworks as an
+    # unknown body field and every embedding call fails with a 400.
+    model_info:
       mode: embedding
 
 litellm_settings:

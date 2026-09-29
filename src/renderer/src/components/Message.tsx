@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { remarkPlugins, rehypePlugins, normalizeMath } from '../lib/markdown'
-import { Copy, Check, AlertCircle, User, Sparkles, Brain, Share2, FileText, Activity, ChevronRight, Lightbulb } from 'lucide-react'
+import { Copy, Check, AlertCircle, User, Sparkles, Brain, Share2, FileText, Activity, ChevronRight, Lightbulb, History } from 'lucide-react'
 import type { Message } from '@shared/types'
 import { useStore } from '../store'
 import ToolEvents from './ToolEvents'
@@ -59,7 +59,8 @@ const MessageView = memo(function MessageView({ message, streaming }: { message:
   const isUser = message.role === 'user'
   const { toggleContext, contextOpen, openTrace } = useStore()
   const ctx = message.context_used
-  const ctxCount = ctx ? ctx.memories.length + ctx.nodes.length + ctx.chunks.length : 0
+  const recalled = ctx?.recalled?.length ?? 0
+  const ctxCount = ctx ? ctx.memories.length + ctx.nodes.length + ctx.chunks.length + recalled : 0
   const trace = message.trace && message.trace.length > 0 ? traceSummary(message.trace) : null
   return (
     <div className={`msg ${message.role}`}>
@@ -90,6 +91,7 @@ const MessageView = memo(function MessageView({ message, streaming }: { message:
                 {ctx.memories.length > 0 && <span><Brain size={11} />{ctx.memories.length}</span>}
                 {ctx.nodes.length > 0 && <span><Share2 size={11} />{ctx.nodes.length}</span>}
                 {ctx.chunks.length > 0 && <span><FileText size={11} />{ctx.chunks.length}</span>}
+                {recalled > 0 && <span title={`${recalled} earlier turn${recalled === 1 ? '' : 's'} recalled from this chat`}><History size={11} />{recalled}</span>}
               </button>
             )}
             {trace && (

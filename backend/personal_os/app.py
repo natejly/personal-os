@@ -20,12 +20,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from . import llm, tools
+from . import llm, recall, tools
 from .context import build_context, estimate_tokens
 from .db import Database, data_dir_from_env, new_id
 from .extract_text import extract_text
 from .learn import learn_from_exchange
-from .repos import ALL, Conversations, Documents, Graph, Memories, Projects
+from .repos import ALL, Conversations, Documents, Graph, Memories, Projects, Turns
 from .boards import Boards
 from .dashboards import Dashboards, generate_recap, generate_summary, generate_widget_code
 from .google import Google, GoogleNotConnected, json_safe
@@ -42,6 +42,7 @@ convos = Conversations(db)
 memories = Memories(db)
 graph = Graph(db)
 documents = Documents(db)
+turns = Turns(db)
 
 
 def _resolve_auth_token() -> str:
@@ -424,7 +425,11 @@ async def _chat_stream(conv_id: str, body: ChatIn) -> AsyncIterator[str]:
     tracer = Tracer()
     llm.usage_context.set({"conversation_id": conv_id, "project_id": conv["project_id"]})
     await pricing.refresh(cfg)
-    history = convos.history(conv_id)
+    # Recent turns go back verbatim; anything past the budget is dropped from the transcript and
+    # recalled by relevance instead, so a long chat stops growing without losing what was said.
+    cs = conv["settings"]
+    budget = cs.get("maxHistoryTokens", cfg.get("maxHistoryTokens"))
+    history, dropped = convos.history_window(conv_id, int(budget or 0))
     project = projects.get(conv["project_id"]) if conv["project_id"] else None
     cspan = tracer.start("context", "Assemble context", {"model": model})
     system, used = build_context(
@@ -432,8 +437,23 @@ async def _chat_stream(conv_id: str, body: ChatIn) -> AsyncIterator[str]:
         project=project, project_id=conv["project_id"], query=user_text,
         settings=cfg, conv_settings=conv["settings"], global_system_prompt=cfg["systemPrompt"],
     )
+    recalled: list[dict[str, Any]] = []
+    if dropped and cfg.get("useRecall", True) and conv["settings"].get("useRecall", True):
+        try:
+            recalled = await recall.recall(
+                settings=cfg, turns=turns, conv_id=conv_id, query=user_text,
+                only_message_ids=set(dropped),
+                limit=int(cs.get("recallTurns", cfg.get("recallTurns")) or 0),
+            )
+        except Exception:  # noqa: BLE001 - recall is an optimisation; never fail a reply over it
+            recalled = []
+        if recalled:
+            system = system + "\n\n" + recall.as_context_block(recalled)
+    used["recalled"] = [{"id": h["id"], "message_id": h["message_id"], "summary": h["summary"]} for h in recalled]
+    used["history_dropped"] = len(dropped)
+    used["system_prompt"] = system
     tracer.end(cspan, {"memories": len(used["memories"]), "entities": len(used["nodes"]), "excerpts": len(used["chunks"]),
-                       "history_messages": len(history)})
+                       "history_messages": len(history), "history_dropped": len(dropped), "recalled": len(recalled)})
 
     am = convos.add_message(conv_id, "assistant", "", model=model)
 
@@ -659,6 +679,21 @@ async def _chat_stream(conv_id: str, body: ChatIn) -> AsyncIterator[str]:
     if tool_ctx.get("learned"):
         yield sse("learned", tool_ctx["learned"])
 
+    # Index this exchange so it can be recalled once it ages out of the resent window. Indexed on
+    # every reply, not only long chats, because the chat that needs recall later is not knowable now.
+    if not error and text and cfg.get("useRecall", True) and conv["settings"].get("useRecall", True):
+        rspan = tracer.start("recall", cfg.get("extractionModel") or model, {"phase": "index"})
+        yield sse("span", {"message_id": am["id"], "span": rspan})
+        try:
+            row = await recall.index_turn(
+                settings=cfg, turns=turns, conv_id=conv_id, message_id=am["id"],
+                user_text=user_text, assistant_text=text, model=model,
+            )
+            tracer.end(rspan, {"summary": row["summary"], "keys": row["keys"], "turns_indexed": turns.count(conv_id)})
+        except Exception as e:  # noqa: BLE001 - indexing must never break a delivered reply
+            tracer.end(rspan, error=str(e))
+        yield sse("span", {"message_id": am["id"], "span": rspan})
+
     if not error and text and cfg.get("autoLearn", True) and conv["settings"].get("autoLearn", True):
         lspan = tracer.start("learn", cfg.get("extractionModel") or model)
         yield sse("span", {"message_id": am["id"], "span": lspan})
@@ -675,7 +710,10 @@ async def _chat_stream(conv_id: str, body: ChatIn) -> AsyncIterator[str]:
             tracer.end(lspan, error=str(e))
             yield sse("span", {"message_id": am["id"], "span": lspan})
             yield sse("learn_error", {"message": str(e)})
-        convos.set_trace(am["id"], tracer.spans)
+
+    # Re-persist the trace once the post-reply phases are done, so the recall and learn spans are
+    # part of it even when auto-learn is off.
+    convos.set_trace(am["id"], tracer.spans)
 
 
 @app.post("/conversations/{id}/chat")

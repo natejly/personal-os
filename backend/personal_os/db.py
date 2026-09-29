@@ -131,6 +131,24 @@ CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
   content, memory_id UNINDEXED, tokenize='porter unicode61'
 );
+
+-- Semantic layer over chat history: one row per completed exchange. `summary` and `keys` are the
+-- searchable key; `raw` is the verbatim exchange, returned as the value so quotes stay faithful.
+CREATE TABLE IF NOT EXISTS turns (
+  id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  message_id TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  keys TEXT NOT NULL,
+  raw TEXT NOT NULL,
+  embedding BLOB,
+  created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_turns_conv ON turns(conversation_id, created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_turns_msg ON turns(message_id);
+CREATE VIRTUAL TABLE IF NOT EXISTS turns_fts USING fts5(
+  summary, keys, turn_id UNINDEXED, tokenize='porter unicode61'
+);
 """
 
 

@@ -17,6 +17,10 @@ export interface ContextUsed {
   nodes: { id: string; label: string; type: string }[]
   edges: { id: string; relation: string; source_id: string; target_id: string }[]
   chunks: { chunk_id: string; document_id: string; name: string; idx: number; text: string }[]
+  /** Older turns of this same chat, pulled back in by conversational recall. */
+  recalled?: { id: string; message_id: string; summary: string }[]
+  /** How many messages were left out of the resent transcript by the history budget. */
+  history_dropped?: number
   system_prompt: string
   tokens_estimate: number
 }
@@ -241,6 +245,12 @@ export interface Settings {
   systemPrompt: string
   extractionModel: string
   autoLearn: boolean
+  /** Conversational recall: semantic index over this chat's own history. */
+  embeddingModel?: string
+  /** Transcript budget before older turns are dropped and recalled instead; 0 = resend everything. */
+  maxHistoryTokens?: number
+  recallTurns?: number
+  useRecall?: boolean
   theme: 'dark' | 'light' | 'system'
   tools: Record<string, ToolMode | boolean>
   maxToolRounds: number

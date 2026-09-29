@@ -179,6 +179,36 @@ class Conversations:
             ).fetchall()
         return [{"role": r["role"], "content": r["content"]} for r in rows]
 
+    def history_window(self, conv_id: str, budget_tokens: int) -> tuple[list[dict[str, str]], list[str]]:
+        """The tail of the conversation that fits in `budget_tokens`, plus the ids of what was cut.
+
+        Walks newest-first so the most recent turns are always kept verbatim, then restores
+        chronological order. budget_tokens <= 0 means no limit (the old behaviour). The dropped ids
+        are what conversational recall searches over, so nothing is lost — it is just not resent.
+        """
+        with self.db.tx() as c:
+            rows = c.execute(
+                "SELECT id, role, content FROM messages WHERE conversation_id=? AND content != '' ORDER BY created_at, rowid",
+                (conv_id,),
+            ).fetchall()
+        msgs = [{"id": r["id"], "role": r["role"], "content": r["content"]} for r in rows]
+        if budget_tokens <= 0:
+            return [{"role": m["role"], "content": m["content"]} for m in msgs], []
+        kept: list[dict[str, str]] = []
+        used = 0
+        for m in reversed(msgs):
+            cost = max(1, len(m["content"]) // 4)
+            # Always keep at least the latest message, however long it is: dropping the question
+            # the user just asked would be worse than overrunning the budget.
+            if kept and used + cost > budget_tokens:
+                break
+            used += cost
+            kept.append(m)
+        kept.reverse()
+        keep_ids = {m["id"] for m in kept}
+        dropped = [m["id"] for m in msgs if m["id"] not in keep_ids]
+        return [{"role": m["role"], "content": m["content"]} for m in kept], dropped
+
 
 # ---------------- Memories ----------------
 class Memories:
@@ -456,3 +486,64 @@ class Documents:
                 (fq, *args, limit),
             ).fetchall()
         return [dict(r) for r in rows]
+
+
+# ---------------- Conversational recall (semantic layer over chat history) ----------------
+class Turns:
+    """One row per completed exchange: a semantic key (summary + keys) over verbatim raw text.
+
+    The keys are what retrieval matches on; `raw` is what is handed back to the model, so recalled
+    history is quoted exactly as it happened rather than paraphrased by an extraction pass.
+    """
+
+    def __init__(self, db: Database):
+        self.db = db
+
+    def add(self, conv_id: str, message_id: str, summary: str, keys: list[str], raw: str,
+            embedding: bytes | None = None) -> dict[str, Any]:
+        tid = new_id()
+        t = now()
+        keys_text = ", ".join(keys)
+        with self.db.tx() as c:
+            # One row per assistant message, so a regenerate replaces its entry instead of duplicating it.
+            old = c.execute("SELECT id FROM turns WHERE message_id=?", (message_id,)).fetchone()
+            if old:
+                c.execute("DELETE FROM turns_fts WHERE turn_id=?", (old["id"],))
+                c.execute("DELETE FROM turns WHERE id=?", (old["id"],))
+            c.execute(
+                "INSERT INTO turns(id,conversation_id,message_id,summary,keys,raw,embedding,created_at) VALUES(?,?,?,?,?,?,?,?)",
+                (tid, conv_id, message_id, summary, keys_text, raw, embedding, t),
+            )
+            c.execute("INSERT INTO turns_fts(summary, keys, turn_id) VALUES(?,?,?)", (summary, keys_text, tid))
+        return {"id": tid, "conversation_id": conv_id, "message_id": message_id, "summary": summary,
+                "keys": keys_text, "raw": raw, "created_at": t}
+
+    def vectors(self, conv_id: str) -> list[dict[str, Any]]:
+        """Every indexed turn with an embedding, for similarity search."""
+        with self.db.tx() as c:
+            rows = c.execute(
+                """SELECT id, message_id, summary, keys, raw, embedding FROM turns
+                   WHERE conversation_id=? AND embedding IS NOT NULL ORDER BY created_at""",
+                (conv_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def search(self, conv_id: str, query: str, limit: int = 20) -> list[dict[str, Any]]:
+        """BM25 over the semantic keys - the lexical half of hybrid recall."""
+        fq = fts_query(query)
+        if not fq:
+            return []
+        with self.db.tx() as c:
+            rows = c.execute(
+                """SELECT t.id, t.message_id, t.summary, t.keys, t.raw, bm25(turns_fts) AS score
+                   FROM turns_fts f JOIN turns t ON t.id = f.turn_id
+                   WHERE turns_fts MATCH ? AND t.conversation_id = ?
+                   ORDER BY score LIMIT ?""",
+                (fq, conv_id, limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def count(self, conv_id: str) -> int:
+        with self.db.tx() as c:
+            r = c.execute("SELECT COUNT(*) AS n FROM turns WHERE conversation_id=?", (conv_id,)).fetchone()
+        return int(r["n"])

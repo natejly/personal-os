@@ -43,6 +43,13 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     ),
     "extractionModel": "",
     "autoLearn": True,
+    # Conversational recall: a semantic index over this chat's own history. Older turns are dropped
+    # from the resent transcript once it exceeds maxHistoryTokens, then searched and re-injected
+    # verbatim when they are relevant. 0 tokens = resend everything (the old, unbounded behaviour).
+    "embeddingModel": "qwen3-embedding-8b",
+    "maxHistoryTokens": 24_000,
+    "recallTurns": 6,
+    "useRecall": True,
     "theme": "dark",
     # tools: {tool_name: bool}; missing = on
     "tools": {},
@@ -163,6 +170,28 @@ async def stream_chat(
     # usage_est is always present: this route often omits `usage` on streamed replies, and a budget cannot run on None.
     yield {"type": "end", "finish_reason": finish, "tool_calls": [calls[i] for i in sorted(calls)], "usage": usage,
            "usage_est": {"prompt_tokens": p_chars // 4, "completion_tokens": c_chars // 4}}
+
+
+async def embed(settings: dict[str, Any], texts: list[str], kind: str = "embed") -> list[list[float]]:
+    """Embed a batch of texts, returning one vector per input in the same order."""
+    if not texts:
+        return []
+    model = settings.get("embeddingModel") or DEFAULT_SETTINGS["embeddingModel"]
+    t0 = time.time()
+    async with httpx.AsyncClient(timeout=60) as client:
+        r = await client.post(
+            f"{_base(settings)}/v1/embeddings",
+            headers=_headers(settings),
+            json={"model": model, "input": texts},
+        )
+    if r.status_code >= 400:
+        raise LLMError(f"{r.status_code}: {r.text[:300]}")
+    data = r.json()
+    # The API may return rows out of order; `index` is authoritative.
+    rows = sorted(data.get("data", []), key=lambda d: d.get("index", 0))
+    usage = data.get("usage") if isinstance(data.get("usage"), dict) else None
+    _emit_usage(model, kind, usage, int((time.time() - t0) * 1000), sum(len(t) for t in texts), 0)
+    return [row["embedding"] for row in rows]
 
 
 async def complete(settings: dict[str, Any], model: str, messages: list[dict[str, str]], kind: str = "learn") -> str:

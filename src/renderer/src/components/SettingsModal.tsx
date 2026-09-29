@@ -69,6 +69,24 @@ export default function SettingsModal(): JSX.Element {
         </section>
 
         <section>
+          <h3>Conversation context</h3>
+          <p className="muted">Long chats stop resending the whole transcript. Recent turns always go back word for word; older ones are indexed by what they were about and pulled back in only when they are relevant.</p>
+          <label className="toggle-row plain">
+            <span className="toggle-text"><b>Recall older turns</b><small>Search this chat&apos;s earlier exchanges and re-include the relevant ones verbatim. Can be overridden per chat.</small></span>
+            <input type="checkbox" checked={draft.useRecall ?? true} onChange={(e) => patch({ useRecall: e.target.checked })} /><span className="switch" />
+          </label>
+          <label><span>History budget <small className="muted">(tokens of transcript resent verbatim; 0 = resend everything)</small></span>
+            <input type="number" min={0} step={1000} value={draft.maxHistoryTokens ?? 24000} onChange={(e) => patch({ maxHistoryTokens: Number(e.target.value) })} />
+          </label>
+          <label><span>Turns recalled <small className="muted">(how many older exchanges may be re-included per reply)</small></span>
+            <input type="number" min={0} max={20} value={draft.recallTurns ?? 6} onChange={(e) => patch({ recallTurns: Number(e.target.value) })} />
+          </label>
+          <label><span>Embedding model <small className="muted">(used to match older turns by meaning; lexical search still works without it)</small></span>
+            <input list="model-options" value={draft.embeddingModel ?? ''} onChange={(e) => patch({ embeddingModel: e.target.value })} placeholder="qwen3-embedding-8b" spellCheck={false} />
+          </label>
+        </section>
+
+        <section>
           <h3>Integrations</h3>
           <GoogleSettings clientId={draft.googleClientId ?? ''} clientSecret={draft.googleClientSecret ?? ''} onChange={(p) => patch(p)}
             onSaveCreds={() => saveSettings({ googleClientId: draft.googleClientId, googleClientSecret: draft.googleClientSecret })} />

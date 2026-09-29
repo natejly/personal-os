@@ -1,7 +1,6 @@
 import { memo, useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import rehypeHighlight from 'rehype-highlight'
+import { remarkPlugins, rehypePlugins, normalizeMath } from '../lib/markdown'
 import { Copy, Check, AlertCircle, User, Sparkles, Brain, Share2, FileText, Activity, ChevronRight, Lightbulb } from 'lucide-react'
 import type { Message } from '@shared/types'
 import { useStore } from '../store'
@@ -67,13 +66,15 @@ const MessageView = memo(function MessageView({ message, streaming }: { message:
       <div className="avatar">{isUser ? <User size={14} /> : <Sparkles size={14} />}</div>
       <div className="bubble">
         {isUser ? (
-          <div className="user-text">{message.content}</div>
+          <div className="user-text markdown">
+            <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins}>{normalizeMath(message.content)}</ReactMarkdown>
+          </div>
         ) : (
           <div className="markdown">
             {message.reasoning && <Reasoning text={message.reasoning} live={streaming && !message.content} />}
             {message.tool_events && message.tool_events.length > 0 && <ToolEvents events={message.tool_events} />}
             {message.content ? (
-              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={{ pre: (p) => <Pre {...p} streaming={streaming} /> }}>{message.content}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={{ pre: (p) => <Pre {...p} streaming={streaming} /> }}>{normalizeMath(message.content)}</ReactMarkdown>
             ) : streaming && !message.reasoning && !message.tool_events?.some((t) => t.pending) ? (
               <span className="thinking"><span /><span /><span /></span>
             ) : null}

@@ -4,7 +4,7 @@ import { useStore } from '../store'
 import TodoItem from './TodoItem'
 import ProjectChip from './ProjectChip'
 import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import { remarkPlugins, rehypePlugins, normalizeMath } from '../lib/markdown'
 
 function greeting(): string {
   const h = new Date().getHours()
@@ -74,7 +74,7 @@ export default function HomeView(): JSX.Element {
               <button className="icon-btn sm" title="Regenerate" onClick={() => void refreshRecap(true)}><RefreshCw size={13} className={recapLoading ? 'spin' : ''} /></button>
               <button className="icon-btn sm" title="Hide" onClick={() => setRecapOpen(false)}>×</button>
             </header>
-            {recapLoading && !recap?.content ? <p className="muted">Writing your recap…</p> : <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{recap?.content ?? ''}</ReactMarkdown></div>}
+            {recapLoading && !recap?.content ? <p className="muted">Writing your recap…</p> : <div className="markdown"><ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins}>{normalizeMath(recap?.content ?? '')}</ReactMarkdown></div>}
           </section>
         )}
         <div className="widgets">

@@ -651,6 +651,14 @@ textarea.instructions:focus { border-color: var(--accent); }
 .graph-tools .sep { width: 1px; height: 18px; background: var(--border); margin: 0 3px; }
 
 /* ---------- Tool events in messages ---------- */
+/* KaTeX: inherit the bubble's size, and let a wide display formula scroll instead of overflowing. */
+.markdown .katex { font-size: 1.05em; }
+.markdown .katex-display { margin: 12px 0; overflow-x: auto; overflow-y: hidden; padding-bottom: 2px; }
+.markdown .katex-error { color: var(--danger, #e5484d); font-family: var(--mono); font-size: 0.9em; }
+/* User bubbles render markdown now; keep them tight so a one-line message stays one line. */
+.user-text.markdown > :first-child { margin-top: 0; }
+.user-text.markdown > :last-child { margin-bottom: 0; }
+
 /* Reasoning model chain-of-thought: same chrome as a tool event, dimmer body. */
 .reasoning { border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elev); font-size: 12px; margin: 0 0 12px; }
 .reasoning.live { border-color: var(--accent); }

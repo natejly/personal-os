@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Plus, Trash2, PanelLeftOpen, LayoutDashboard, RefreshCw, Wand2, Database, ChevronDown, X, Sparkles, Code2, Pencil } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import { remarkPlugins, rehypePlugins, normalizeMath } from '../lib/markdown'
 import { useStore } from '../store'
 import { api, getBase } from '../lib/api'
 import type { Dashboard, DataSource, Widget } from '@shared/types'
@@ -128,8 +128,8 @@ function WidgetCard({ w, sources, onChange }: { w: Widget; sources: DataSource[]
           : <div className="dw-empty">{busy ? 'Generating…' : w.output || 'No code generated yet. Click refresh.'}</div>
       )}
       {w.kind === 'html' && showCode && <pre className="dw-code">{w.code}</pre>}
-      {w.kind === 'summary' && <div className="dw-md markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{w.output || (busy ? 'Summarizing…' : 'No summary yet.')}</ReactMarkdown></div>}
-      {w.kind === 'markdown' && <div className="dw-md markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{w.output}</ReactMarkdown></div>}
+      {w.kind === 'summary' && <div className="dw-md markdown"><ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins}>{normalizeMath(w.output || (busy ? 'Summarizing…' : 'No summary yet.'))}</ReactMarkdown></div>}
+      {w.kind === 'markdown' && <div className="dw-md markdown"><ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins}>{normalizeMath(w.output)}</ReactMarkdown></div>}
     </div>
   )
 }

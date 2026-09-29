@@ -159,6 +159,7 @@ next calendar or mail call with an opaque error.
 | ⌘7 | Memory, opened on the knowledge graph |
 | ⌘B | Toggle sidebar |
 | ⌘I | Toggle context panel |
+| ⌘⇧C | Toggle canvas (artifacts) |
 | ⌘U | Upload document |
 | ⌘, | Settings |
 | Enter / Shift+Enter | Send / newline |
@@ -183,6 +184,31 @@ next calendar or mail call with an opaque error.
 
 Everything used is stored on the assistant message (`context_used`,
 `tool_events`) and shown in the Context panel.
+
+## Artifacts and the canvas
+
+Charts and diagrams stay inline. Anything substantial — a working app, a page, a
+document — goes in an ```` ```artifact ```` block whose first line is a JSON
+header, and opens as a live document on a canvas beside the thread:
+
+````markdown
+```artifact
+{"id": "expense-tracker", "title": "Expense tracker", "kind": "react"}
+function App() { return <div className="p-6">…</div> }
+```
+````
+
+`kind` is `html | svg | react | markdown | code`. Re-using an `id` in a later
+turn saves a **new version** of the same artifact rather than a second one, so
+"make the chart green" revises in place; the panel keeps every version and can
+restore any of them. The canvas has a preview and an editor: edits you make by
+hand are versions too.
+
+Artifacts render in a sandboxed iframe served by the sidecar, under a CSP with
+`connect-src 'none'` and a data-only `img-src` — so an artifact that quotes
+untrusted text a tool fetched has no way to send it anywhere. The cost is that
+artifacts cannot load remote images or fonts; inline SVG and CSS instead.
+See [docs/artifacts.md](docs/artifacts.md).
 
 ## Charts, diagrams and images
 
@@ -241,11 +267,13 @@ src/renderer/       React UI (store.ts holds all state; lib/api.ts is the client
 src/shared/         Types shared between processes
 backend/personal_os app.py routes · repos.py storage · context.py · learn.py
                     tools.py · sandbox.py · google.py · todos.py · boards.py
-                    dashboards.py · usage.py · trace.py · llm.py
+                    dashboards.py · artifacts.py · usage.py · trace.py · llm.py
+backend/tests/      pytest-style suites (test_ssrf.py, test_artifacts.py)
 scripts/dev.sh      LiteLLM + backend + Electron
 scripts/litellm.sh  LiteLLM proxy alone
 litellm.yaml        Model routing (Fireworks by default)
 docs/research.md    Feature research and roadmap
+docs/artifacts.md   The artifact protocol, canvas and its sandbox
 ```
 
 ## Roadmap

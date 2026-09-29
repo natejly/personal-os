@@ -113,6 +113,7 @@ function buildMenu(): void {
         { type: 'separator' },
         { label: 'Toggle Sidebar', accelerator: 'CmdOrCtrl+B', click: () => sendMenu('toggle-sidebar') },
         { label: 'Toggle Context Panel', accelerator: 'CmdOrCtrl+I', click: () => sendMenu('toggle-context') },
+        { label: 'Toggle Canvas', accelerator: 'CmdOrCtrl+Shift+C', click: () => sendMenu('toggle-canvas') },
         { type: 'separator' },
         { role: 'reload' },
         { role: 'toggleDevTools' },

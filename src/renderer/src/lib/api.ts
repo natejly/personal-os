@@ -1,5 +1,5 @@
 import type {
-  ChatEvent, ToolInfo, Todo, GoogleStatus, Dashboard as DashboardData, CalendarEvent, GmailMessage, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Recap, Conversation, ConversationSettings, ContextUsed, Document, GraphData, GraphEdge, GraphNode,
+  Artifact, ArtifactVersion, ChatEvent, ToolInfo, Todo, GoogleStatus, Dashboard as DashboardData, CalendarEvent, GmailMessage, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Recap, Conversation, ConversationSettings, ContextUsed, Document, GraphData, GraphEdge, GraphNode,
   Memory, ModelInfo, ModelPrice, Settings, Project, UsageReport
 } from '@shared/types'
 
@@ -93,6 +93,18 @@ export const api = {
     refresh: (id: string, regenerate = false) => req<Widget>(`/widgets/${id}/refresh?regenerate=${regenerate}`, { method: 'POST' }),
     revise: (id: string, instruction: string) => req<Widget>(`/widgets/${id}/revise`, { method: 'POST', body: json({ instruction }) }),
     delete: (id: string) => req(`/widgets/${id}`, { method: 'DELETE' })
+  },
+  artifacts: {
+    list: (conversationId?: string) => req<Artifact[]>(conversationId ? `/conversations/${conversationId}/artifacts` : '/artifacts'),
+    get: (id: string) => req<Artifact>(`/artifacts/${id}`),
+    update: (id: string, patch: { content?: string; title?: string; kind?: string; lang?: string }) =>
+      req<Artifact>(`/artifacts/${id}`, { method: 'PUT', body: json(patch) }),
+    versions: (id: string) => req<ArtifactVersion[]>(`/artifacts/${id}/versions`),
+    revert: (id: string, version: number) => req<Artifact>(`/artifacts/${id}/revert`, { method: 'POST', body: json({ version }) }),
+    delete: (id: string) => req(`/artifacts/${id}`, { method: 'DELETE' }),
+    /** Stage an unsaved document (a streaming reply, or an uncommitted edit) and get the URL its iframe loads. */
+    preview: (d: { content: string; kind: string; title?: string; lang?: string }) =>
+      req<{ id: string; render_url: string }>('/artifacts/preview', { method: 'POST', body: json(d) })
   },
   todos: {
     list: (s: Scope = 'all', includeDone = false, q = '') => req<Todo[]>(`/todos?project_id=${encodeURIComponent(s)}&include_done=${includeDone}&q=${encodeURIComponent(q)}`),

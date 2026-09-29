@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { PanelLeftOpen, ChevronDown, RefreshCw, Pencil, SlidersHorizontal } from 'lucide-react'
+import { PanelLeftOpen, ChevronDown, RefreshCw, Pencil, SlidersHorizontal, LayoutTemplate } from 'lucide-react'
 import { useStore, useProject } from '../store'
 import ProjectChip from './ProjectChip'
 import MessageView from './Message'
 import Composer from './Composer'
 import ContextDrawer from './ContextDrawer'
+import CanvasPanel from './CanvasPanel'
 
 function ModelPicker({ value, onChange }: { value: string; onChange: (m: string) => void }): JSX.Element {
   const models = useStore((s) => s.models)
@@ -36,7 +37,9 @@ export default function ChatView(): JSX.Element {
   const contextOpen = useStore((s) => s.contextOpen)
   const draftProjectId = useStore((s) => s.draftProjectId)
   const project = useProject(convo?.project_id ?? draftProjectId)
-  const { toggleSidebar, toggleContext, setChatModel, renameChat, regenerate } = useStore()
+  const { toggleSidebar, toggleContext, setChatModel, renameChat, regenerate, toggleCanvas } = useStore()
+  const canvasOpen = useStore((s) => s.canvas.open)
+  const canvasCount = useStore((s) => new Set([...s.artifacts.map((a) => a.identifier), ...Object.keys(s.artifactDrafts)]).size)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [stick, setStick] = useState(true)
   const [editingTitle, setEditingTitle] = useState(false)
@@ -76,6 +79,9 @@ export default function ChatView(): JSX.Element {
         <div className="no-drag header-right">
           <ProjectChip projectId={convo?.project_id ?? draftProjectId} />
           <ModelPicker value={model} onChange={(m) => void setChatModel(m)} />
+          {canvasCount > 0 && (
+            <button className={`icon-btn ${canvasOpen ? 'on' : ''}`} title="Canvas (⌘⇧C)" onClick={toggleCanvas}><LayoutTemplate size={16} /></button>
+          )}
           <button className={`icon-btn ${contextOpen ? 'on' : ''}`} title="Context panel (⌘I)" onClick={toggleContext}><SlidersHorizontal size={16} /></button>
         </div>
       </header>
@@ -101,6 +107,7 @@ export default function ChatView(): JSX.Element {
           </div>
           <Composer />
         </div>
+        <CanvasPanel />
         {contextOpen && <ContextDrawer />}
       </div>
     </main>

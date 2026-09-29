@@ -8,6 +8,7 @@ import { useStore } from '../store'
 import ToolEvents from './ToolEvents'
 import ChartBlock from './ChartBlock'
 import MermaidBlock from './MermaidBlock'
+import ArtifactBlock from './ArtifactBlock'
 import { traceSummary, fmtMs } from './TraceView'
 
 function CopyButton({ text }: { text: string }): JSX.Element {
@@ -47,6 +48,7 @@ function Pre({ streaming, ...props }: React.HTMLAttributes<HTMLPreElement> & { s
   // Blocks the model can use to render rich content instead of code (see RENDER_HINT in the backend).
   if (lang === 'chart') return <ChartBlock source={code} streaming={!!streaming} />
   if (lang === 'mermaid') return <MermaidBlock source={code} streaming={!!streaming} />
+  if (lang === 'artifact') return <ArtifactBlock source={code} streaming={!!streaming} />
   return (
     <div className="code-block">
       <div className="code-head"><span>{lang || 'text'}</span><CopyButton text={code} /></div>

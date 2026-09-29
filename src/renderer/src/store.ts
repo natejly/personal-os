@@ -1,11 +1,22 @@
 import { create } from 'zustand'
-import type { Conversation, ConversationSettings, Document, GraphData, Memory, Message, ModelInfo, Settings, Project, ToolInfo, Todo, GoogleStatus, Dashboard, Recap } from '@shared/types'
+import type { Artifact, ArtifactDraft, Conversation, ConversationSettings, Document, GraphData, Memory, Message, ModelInfo, Settings, Project, ToolInfo, Todo, GoogleStatus, Dashboard, Recap } from '@shared/types'
 import { api, chatStream, setBase, type Scope } from './lib/api'
 
 export type View = 'home' | 'chat' | 'todos' | 'calendar' | 'boards' | 'dashboards' | 'memory' | 'documents' | 'project'
 /** How the Memory panel lays out its two halves: the memory list and the knowledge graph. */
 export type MemoryMode = 'split' | 'list' | 'graph'
 export type ContextTab = 'last' | 'preview' | 'trace'
+export type CanvasTab = 'preview' | 'code'
+
+/** The artifact canvas: one document at a time, beside the thread. */
+interface Canvas {
+  open: boolean
+  /** Conversation-scoped identifier of the document on screen. */
+  identifier: string | null
+  tab: CanvasTab
+  /** Identifier the user closed by hand, so a still-streaming reply does not reopen it. */
+  dismissed: string | null
+}
 export type { Scope }
 
 interface Streaming { conversationId: string; messageId: string | null; abort: AbortController }
@@ -56,6 +67,12 @@ interface State {
   graph: GraphData
   documents: Document[]
 
+  /** Artifacts persisted for the active conversation. */
+  artifacts: Artifact[]
+  /** Artifacts seen mid-reply, keyed by identifier, until the backend persists them. */
+  artifactDrafts: Record<string, ArtifactDraft>
+  canvas: Canvas
+
   init: () => Promise<void>
   loadModels: () => Promise<void>
   saveSettings: (patch: Partial<Settings>) => Promise<void>
@@ -91,6 +108,18 @@ interface State {
   regenerate: () => Promise<void>
   stop: () => Promise<void>
 
+  refreshArtifacts: (conversationId?: string) => Promise<void>
+  /** Register (or update) an artifact from a reply that is still streaming. */
+  noteArtifact: (draft: ArtifactDraft) => void
+  openCanvas: (identifier: string, tab?: CanvasTab) => void
+  closeCanvas: () => void
+  /** Show the canvas, or hide it; picks the most recent artifact when none is selected. */
+  toggleCanvas: () => void
+  setCanvasTab: (tab: CanvasTab) => void
+  saveArtifact: (id: string, patch: { content?: string; title?: string }) => Promise<void>
+  revertArtifact: (id: string, version: number) => Promise<void>
+  deleteArtifact: (id: string) => Promise<void>
+
   refreshMemories: (q?: string) => Promise<void>
   addMemory: (content: string, kind: string, projectId: string | null) => Promise<void>
   updateMemory: (id: string, patch: Parameters<typeof api.memories.update>[1]) => Promise<void>
@@ -113,6 +142,13 @@ interface State {
 }
 
 let toastSeq = 0
+
+/** Switching conversation empties the canvas: artifacts are conversation-scoped. */
+const CLEAR_CANVAS = {
+  artifacts: [] as Artifact[],
+  artifactDrafts: {} as Record<string, ArtifactDraft>,
+  canvas: { open: false, identifier: null, tab: 'preview' as const, dismissed: null }
+}
 
 export const useStore = create<State>((set, get) => {
   const patchActive = (fn: (c: Conversation) => Conversation): void => {
@@ -167,6 +203,15 @@ export const useStore = create<State>((set, get) => {
             set({ streaming: null })
             void get().refreshConversations()
             break
+          case 'artifacts': {
+            const incoming = ev.data.artifacts
+            set((st) => ({
+              artifacts: [...incoming, ...st.artifacts.filter((a) => !incoming.some((n) => n.id === a.id))],
+              // the persisted row supersedes the draft the renderer built while the reply streamed
+              artifactDrafts: Object.fromEntries(Object.entries(st.artifactDrafts).filter(([k]) => !incoming.some((n) => n.identifier === k)))
+            }))
+            break
+          }
           case 'learned': {
             const { memories, nodes, edges } = ev.data
             get().toast(`Learned ${memories.length} memor${memories.length === 1 ? 'y' : 'ies'}, ${nodes.length} entities, ${edges.length} relations`, 'learned')
@@ -223,6 +268,9 @@ export const useStore = create<State>((set, get) => {
     memories: [],
     graph: { nodes: [], edges: [] },
     documents: [],
+    artifacts: [],
+    artifactDrafts: {},
+    canvas: { open: false, identifier: null, tab: 'preview', dismissed: null },
 
     init: async () => {
       const status = await window.os.backendStatus()
@@ -249,6 +297,7 @@ export const useStore = create<State>((set, get) => {
         else if (action === 'settings') s.setSettingsOpen(true)
         else if (action === 'toggle-sidebar') s.toggleSidebar()
         else if (action === 'toggle-context') s.toggleContext()
+        else if (action === 'toggle-canvas') s.toggleCanvas()
         else if (action === 'view:graph') s.openMemory('graph')
         else if (action.startsWith('view:')) s.setView(action.slice(5) as View)
         else if (action === 'upload') {
@@ -325,13 +374,17 @@ export const useStore = create<State>((set, get) => {
     },
 
     refreshConversations: async () => set({ conversations: await api.conversations.list('all') }),
-    newChat: (projectId = null) => set({ activeId: null, active: null, draftProjectId: projectId, view: 'chat', settingsOpen: false }),
+    newChat: (projectId = null) =>
+      set({ activeId: null, active: null, draftProjectId: projectId, view: 'chat', settingsOpen: false, ...CLEAR_CANVAS }),
     selectChat: async (id) => {
-      set({ view: 'chat', settingsOpen: false, traceMessageId: null })
+      set({ view: 'chat', settingsOpen: false, traceMessageId: null, ...CLEAR_CANVAS })
       if (!id) return set({ activeId: null, active: null })
       set({ activeId: id })
       const c = await api.conversations.get(id)
-      if (get().activeId === id) set({ active: c, draftProjectId: c.project_id })
+      if (get().activeId === id) {
+        set({ active: c, draftProjectId: c.project_id })
+        void get().refreshArtifacts(id)
+      }
     },
     deleteChat: async (id) => {
       await api.conversations.delete(id)
@@ -382,6 +435,68 @@ export const useStore = create<State>((set, get) => {
       if (!st) return
       if (st.messageId) await api.stop(st.messageId).catch(() => undefined)
       else st.abort.abort()
+    },
+
+    refreshArtifacts: async (conversationId) => {
+      const id = conversationId ?? get().activeId
+      if (!id) return set({ artifacts: [] })
+      try {
+        const artifacts = await api.artifacts.list(id)
+        if (get().activeId === id) set({ artifacts })
+      } catch {
+        /* an empty canvas is a better failure than a toast on every chat switch */
+      }
+    },
+    noteArtifact: (draft) => {
+      const prev = get().artifactDrafts[draft.identifier]
+      if (prev && prev.content === draft.content && prev.title === draft.title && prev.kind === draft.kind && prev.complete === draft.complete) return
+      set((st) => ({ artifactDrafts: { ...st.artifactDrafts, [draft.identifier]: draft } }))
+      // A document appearing mid-reply opens the canvas; re-reading an old chat does not, or every
+      // visit to a chat with artifacts would hijack the pane.
+      const { canvas, streaming } = get()
+      if (streaming && !canvas.open && canvas.dismissed !== draft.identifier) {
+        set({ canvas: { ...canvas, open: true, identifier: draft.identifier } })
+      }
+    },
+    openCanvas: (identifier, tab) =>
+      set((st) => ({ canvas: { open: true, identifier, tab: tab ?? st.canvas.tab, dismissed: null } })),
+    closeCanvas: () => set((st) => ({ canvas: { ...st.canvas, open: false, dismissed: st.canvas.identifier } })),
+    toggleCanvas: () => {
+      const { canvas, artifacts, artifactDrafts } = get()
+      if (canvas.open) return get().closeCanvas()
+      const known = [...artifacts.map((a) => a.identifier), ...Object.keys(artifactDrafts)]
+      const pick = canvas.identifier && known.includes(canvas.identifier) ? canvas.identifier : known[0]
+      if (!pick) return get().toast('No artifacts in this chat yet')
+      get().openCanvas(pick)
+    },
+    setCanvasTab: (tab) => set((st) => ({ canvas: { ...st.canvas, tab } })),
+    saveArtifact: async (id, patch) => {
+      try {
+        const a = await api.artifacts.update(id, patch)
+        set((st) => ({ artifacts: st.artifacts.map((x) => (x.id === id ? a : x)) }))
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+        throw e
+      }
+    },
+    revertArtifact: async (id, version) => {
+      try {
+        const a = await api.artifacts.revert(id, version)
+        set((st) => ({ artifacts: st.artifacts.map((x) => (x.id === id ? a : x)) }))
+        get().toast(`Restored version ${version} as v${a.version}`)
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    deleteArtifact: async (id) => {
+      const a = get().artifacts.find((x) => x.id === id)
+      await api.artifacts.delete(id)
+      set((st) => ({
+        artifacts: st.artifacts.filter((x) => x.id !== id),
+        // the transcript still holds the block, so the draft has to go too or the card comes back
+        artifactDrafts: Object.fromEntries(Object.entries(st.artifactDrafts).filter(([k]) => k !== a?.identifier)),
+        canvas: st.canvas.identifier === a?.identifier ? { ...st.canvas, open: false, identifier: null, dismissed: a?.identifier ?? null } : st.canvas
+      }))
     },
 
     refreshMemories: async (q = '') => set({ memories: await api.memories.list(get().dataScope, q) }),

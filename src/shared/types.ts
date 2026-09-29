@@ -235,6 +235,54 @@ export interface Dashboard {
   errors: Record<string, string>
 }
 
+/** A model-authored document that opens on the canvas beside the thread. */
+export type ArtifactKind = 'html' | 'svg' | 'react' | 'markdown' | 'code'
+/** Kinds whose preview is a live page in the sandboxed iframe; the rest the panel renders itself. */
+export const LIVE_ARTIFACT_KINDS: ArtifactKind[] = ['html', 'svg', 'react']
+
+export interface Artifact {
+  id: string
+  conversation_id: string | null
+  project_id: string | null
+  message_id: string | null
+  /** Model-chosen slug, stable across rewrites: re-using it makes a new version, not a new artifact. */
+  identifier: string
+  title: string
+  kind: ArtifactKind
+  /** Syntax-highlight hint, kind 'code' only. */
+  lang: string
+  content: string
+  version: number
+  created_at: number
+  updated_at: number
+  /** Capability-scoped path the iframe loads; expires, so it is re-read with the artifact. */
+  render_url: string
+}
+
+export interface ArtifactVersion {
+  id: string
+  artifact_id: string
+  version: number
+  title: string
+  kind: ArtifactKind
+  lang: string
+  content: string
+  message_id: string | null
+  source: 'model' | 'user'
+  created_at: number
+}
+
+/** An artifact seen in a reply that is still streaming, before the backend has persisted it. */
+export interface ArtifactDraft {
+  identifier: string
+  title: string
+  kind: ArtifactKind
+  lang: string
+  content: string
+  /** The closing fence has arrived, so the document is whole and worth rendering. */
+  complete: boolean
+}
+
 export interface Settings {
   baseUrl: string
   apiKey: string
@@ -308,6 +356,7 @@ export type ChatEvent =
   | { event: 'span'; data: { message_id: string; span: Span } }
   | { event: 'done'; data: { id: string; error: string | null; context_used: ContextUsed; tool_events: ToolEvent[]; trace: Span[]; stopped: boolean; partial?: PartialReason | null; tainted?: boolean; taint_sources?: string[] } }
   | { event: 'taint'; data: { message_id: string; source: string } }
+  | { event: 'artifacts'; data: { message_id: string; artifacts: Artifact[] } }
   | { event: 'learned'; data: { memories: Memory[]; nodes: GraphNode[]; edges: GraphEdge[] } }
   | { event: 'learn_error'; data: { message: string } }
   | { event: 'error'; data: { message: string } }

@@ -19,12 +19,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
+from . import artifacts as artifacts_mod
 from . import llm, tools
 from .context import build_context, estimate_tokens
 from .db import Database, data_dir_from_env, new_id
 from .extract_text import extract_text
 from .learn import learn_from_exchange
 from .repos import ALL, Conversations, Documents, Graph, Memories, Projects
+from .artifacts import Artifacts
 from .boards import Boards
 from .dashboards import Dashboards, generate_recap, generate_summary, generate_widget_code
 from .google import Google, GoogleNotConnected, json_safe
@@ -79,6 +81,31 @@ WIDGET_CSP = ("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe
               "font-src data:; connect-src 'self'; base-uri 'none'; form-action 'none'")
 
 
+RENDER_TOKEN_TTL = 12 * 3600
+
+
+def _render_token(kind: str, ident: str, exp: int) -> str:
+    """Capability for one artifact's iframe. The iframe is a separate origin and cannot send the app
+    token, and its URL is also what 'Open in browser' hands to the system browser, so it expires."""
+    return hmac.new(AUTH_TOKEN.encode(), f"render:{kind}:{ident}:{exp}".encode(), "sha256").hexdigest()[:32]
+
+
+def render_url(kind: str, ident: str) -> str:
+    exp = int(time.time()) + RENDER_TOKEN_TTL
+    return f"/{kind}/{ident}/render?t={_render_token(kind, ident, exp)}&e={exp}"
+
+
+def _render_ok(path: str, t: str, e: str) -> bool:
+    parts = path.strip("/").split("/")
+    if len(parts) != 3 or parts[2] != "render" or parts[0] not in ("artifacts", "previews"):
+        return False
+    try:
+        exp = int(e)
+    except ValueError:
+        return False
+    return bool(t) and exp >= time.time() and _token_eq(t, _render_token(parts[0], parts[1], exp))
+
+
 def _widget_fetch_token(wid: str, exp: int) -> str:
     """Capability handed to one widget's iframe: scoped to that widget's sources, and expiring, because it rides in the URL."""
     return hmac.new(AUTH_TOKEN.encode(), f"widget:{wid}:{exp}".encode(), "sha256").hexdigest()[:32]
@@ -102,6 +129,9 @@ app = FastAPI(title="Personal OS", version="0.1.0")
 async def _require_token(request: Request, call_next):  # type: ignore[no-untyped-def]
     p = request.url.path
     if request.method == "OPTIONS" or p in PUBLIC_PATHS or (p.startswith("/widgets/") and p.endswith("/render")):
+        return await call_next(request)
+    # Artifact iframes carry a short-lived per-artifact capability in the URL instead of the app token.
+    if p.endswith("/render") and _render_ok(p, request.query_params.get("t") or "", request.query_params.get("e") or ""):
         return await call_next(request)
     auth = request.headers.get("authorization", "")
     sent = request.headers.get("x-personal-os-token") or (auth[7:].strip() if auth[:7].lower() == "bearer " else "")
@@ -153,6 +183,7 @@ def settings() -> dict[str, Any]:
 todos = Todos(db)
 boards = Boards(db)
 dashboards = Dashboards(db)
+artifacts = Artifacts(db)
 google = Google(settings, db.set_settings)
 usage = Usage(db)
 pricing = Pricing()
@@ -330,7 +361,23 @@ RENDER_HINT = """## Rendering
 Besides normal markdown, the UI renders two fenced code blocks inline:
 - ```chart — a small JSON spec for a data chart: {"type": "bar" | "line" | "area" | "pie" | "scatter", "title": "...", "x": "<key used for the x axis / category>", "series": ["<numeric key>", ...], "data": [{"<x key>": ..., "<numeric key>": ..., ...}, ...], "stacked": false, "xLabel": "...", "yLabel": "...", "unit": ""}. `data` is an array of objects (one per x value); keep it under 200 rows. Use a chart whenever numbers would be clearer that way (comparisons, trends, breakdowns).
 - ```mermaid — diagrams (flowchart, sequenceDiagram, gantt, mindmap, timeline, ...).
-Only chart real values you have or computed; never invent data for decoration. Text before and after a block is shown as usual."""
+Only chart real values you have or computed; never invent data for decoration. Text before and after a block is shown as usual.
+
+## Artifacts (the canvas)
+Substantial, self-contained things the user will keep, re-read or edit go in an ```artifact block instead of inline. It opens as a live document on a canvas beside the chat, where it can be edited, versioned and popped out. The first line inside the block is a JSON header, and everything after it is the document:
+
+```artifact
+{"id": "expense-tracker", "title": "Expense tracker", "kind": "react"}
+function App() { return <div className="p-6">...</div> }
+```
+
+- `id` is a short stable slug. **Re-use the same `id` to revise an artifact** - that saves a new version of the same document. A new `id` starts a separate one.
+- `kind` is one of: `html` (a page or fragment; Tailwind classes work), `svg` (one `<svg>` element), `react` (JSX defining `function App()`; React 18 hooks are already in scope, Tailwind classes work, no imports are resolved), `markdown` (a long document), `code` (a file to keep; add `"lang": "python"`).
+- Always emit the **whole** document, never a diff or a fragment of a previous version.
+- The sandbox has **no network access**: no fetch, no XHR, no remote images or fonts. Inline the data you were given, and use inline SVG or CSS instead of image URLs.
+- The page follows the app's light/dark theme (`data-theme` on `<html>`, and `color-scheme`), so **any surface you give a background must also get an explicit text colour** - a light panel with inherited text is unreadable in dark mode.
+
+Use an artifact for a working app, tool, page, diagram, or a document over ~20 lines that stands on its own. Keep ordinary answers, short snippets and anything that only makes sense as part of the conversation in the reply itself."""
 
 TOOLS_HINT = "You have tools. Use them when they would make the answer more accurate or current; otherwise answer directly. After using tools, write the final answer for the user."
 
@@ -652,9 +699,17 @@ async def _chat_stream(conv_id: str, body: ChatIn) -> AsyncIterator[str]:
         srcs = sorted(set(tool_ctx["taint_sources"]))
         if not conv["settings"].get("tainted") or srcs != sorted(set(conv["settings"].get("taint_sources") or [])):
             convos.update(conv_id, {"settings": {"tainted": True, "taint_sources": srcs}})
+    saved: list[dict[str, Any]] = []
+    if text:
+        try:
+            saved = artifacts.save_from_reply(text, conv_id, conv["project_id"], am["id"])
+        except Exception as e:  # noqa: BLE001 - a malformed artifact must not cost the user the reply
+            log.warning("artifact save failed: %s", e)
     yield sse("done", {"id": am["id"], "error": error, "context_used": used, "tool_events": tool_events,
                        "trace": tracer.spans, "stopped": stop.is_set(), "partial": partial,
                        "tainted": tool_ctx["tainted"], "taint_sources": tool_ctx["taint_sources"]})
+    if saved:
+        yield sse("artifacts", {"message_id": am["id"], "artifacts": [_artifact_out(a) for a in saved]})
     if tool_ctx.get("learned"):
         yield sse("learned", tool_ctx["learned"])
 
@@ -1459,6 +1514,129 @@ def render_widget(wid: str) -> HTMLResponse:
     body = re.sub(r"(/sources/[0-9a-f]+/fetch)(\?)?",
                   lambda m: f"{m.group(1)}?wt={wt}&w={wid}&we={exp}" + ("&" if m.group(2) else ""), code)
     return HTMLResponse(body, headers={"Content-Security-Policy": WIDGET_CSP, "X-Content-Type-Options": "nosniff"})
+
+
+# ---------------- artifacts (the canvas) ----------------
+#: Unsaved documents the panel wants to preview: a streaming reply, or an edit not yet committed.
+#: Capped and short-lived because it is only ever a staging area for the iframe.
+_previews: dict[str, tuple[float, dict[str, Any]]] = {}
+PREVIEW_TTL = 30 * 60
+PREVIEW_MAX = 64
+PREVIEW_MAX_BYTES = 512 * 1024
+
+
+def _artifact_out(a: dict[str, Any]) -> dict[str, Any]:
+    return {**a, "render_url": render_url("artifacts", a["id"])}
+
+
+def _artifact_or_404(aid: str) -> dict[str, Any]:
+    a = artifacts.get(aid)
+    if not a:
+        raise HTTPException(404, "No such artifact")
+    return a
+
+
+def _artifact_page(kind: str, content: str, title: str, theme: str, lang: str) -> HTMLResponse:
+    page = artifacts_mod.document(kind, content, title, theme, lang)
+    return HTMLResponse(page, headers={"Content-Security-Policy": artifacts_mod.CSP,
+                                       "X-Content-Type-Options": "nosniff",
+                                       "Cache-Control": "no-store",
+                                       "Referrer-Policy": "no-referrer"})
+
+
+@app.get("/artifacts")
+def list_artifacts(conversation_id: str | None = None, project_id: str | None = None, limit: int = 200) -> list[dict[str, Any]]:
+    return [_artifact_out(a) for a in artifacts.list(conversation_id, sid(project_id) if project_id else None, limit)]
+
+
+@app.get("/conversations/{id}/artifacts")
+def list_conversation_artifacts(id: str) -> list[dict[str, Any]]:
+    return [_artifact_out(a) for a in artifacts.list(conversation_id=id)]
+
+
+class PreviewIn(BaseModel):
+    content: str
+    kind: str = "html"
+    title: str = ""
+    lang: str = ""
+
+
+@app.post("/artifacts/preview")
+def create_preview(body: PreviewIn) -> dict[str, str]:
+    """Stage one unsaved document and hand back the URL its iframe should load."""
+    if len(body.content.encode()) > PREVIEW_MAX_BYTES:
+        raise HTTPException(413, "Artifact is too large to preview")
+    cutoff = time.time() - PREVIEW_TTL
+    for k in [k for k, (ts, _) in _previews.items() if ts < cutoff]:
+        _previews.pop(k, None)
+    while len(_previews) >= PREVIEW_MAX:
+        _previews.pop(min(_previews, key=lambda k: _previews[k][0]), None)
+    pid = new_id()
+    _previews[pid] = (time.time(), body.model_dump())
+    return {"id": pid, "render_url": render_url("previews", pid)}
+
+
+@app.get("/previews/{pid}/render")
+def render_preview(pid: str, theme: str = "light") -> HTMLResponse:
+    entry = _previews.get(pid)
+    if not entry:
+        raise HTTPException(404, "Preview expired")
+    d = entry[1]
+    return _artifact_page(d["kind"], d["content"], d.get("title", ""), theme, d.get("lang", ""))
+
+
+@app.get("/artifacts/{aid}")
+def get_artifact(aid: str) -> dict[str, Any]:
+    return _artifact_out(_artifact_or_404(aid))
+
+
+@app.get("/artifacts/{aid}/versions")
+def get_artifact_versions(aid: str) -> list[dict[str, Any]]:
+    _artifact_or_404(aid)
+    return artifacts.versions(aid)
+
+
+class ArtifactPatch(BaseModel):
+    content: str | None = None
+    title: str | None = None
+    kind: str | None = None
+    lang: str | None = None
+
+
+@app.put("/artifacts/{aid}")
+def update_artifact(aid: str, body: ArtifactPatch) -> dict[str, Any]:
+    _artifact_or_404(aid)
+    patch = {k: v for k, v in body.model_dump().items() if v is not None}
+    a = artifacts.update(aid, patch, source="user")
+    if not a:
+        raise HTTPException(404, "No such artifact")
+    return _artifact_out(a)
+
+
+class RevertIn(BaseModel):
+    version: int
+
+
+@app.post("/artifacts/{aid}/revert")
+def revert_artifact(aid: str, body: RevertIn) -> dict[str, Any]:
+    _artifact_or_404(aid)
+    a = artifacts.revert(aid, body.version)
+    if not a:
+        raise HTTPException(404, "No such version")
+    return _artifact_out(a)
+
+
+@app.delete("/artifacts/{aid}")
+def delete_artifact(aid: str) -> dict[str, bool]:
+    return {"ok": artifacts.delete(aid)}
+
+
+@app.get("/artifacts/{aid}/render")
+def render_artifact(aid: str, theme: str = "light", version: int | None = None) -> HTMLResponse:
+    a = _artifact_or_404(aid)
+    src = artifacts.version(aid, version) if version else None
+    d = src or a
+    return _artifact_page(d["kind"], d["content"], d["title"], theme, d.get("lang", ""))
 
 
 @app.get("/recap")

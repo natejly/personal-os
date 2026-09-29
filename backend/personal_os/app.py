@@ -27,6 +27,7 @@ from .canvas import SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
 from .dashboards import Dashboards, generate_recap, generate_summary, generate_widget_code
 from .google import Google, GoogleNotConnected, json_safe
 from .notes import Notes
+from .runs import Run, RunBus
 from .todos import Todos
 from .tools import Toolbox, summarize_result
 from .trace import Tracer, now_ms
@@ -44,7 +45,9 @@ documents = Documents(db)
 app = FastAPI(title="Personal OS", version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-# Active chat streams so they can be aborted from the client.
+# Live runs, one per conversation, each owning its own task. Any number of clients may watch one.
+bus = RunBus()
+# Active chat streams so they can be aborted from the client: message_id -> that run's stop event.
 _active: dict[str, asyncio.Event] = {}
 # Pending tool-call approvals: call_id -> Future[decision]
 _approvals: dict[str, asyncio.Future] = {}
@@ -105,10 +108,6 @@ def sid(project_id: str | None) -> str | None:
     if project_id == "all":
         return ALL
     return project_id
-
-
-def sse(event: str, data: Any) -> str:
-    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
 # ---------------- health / settings / models ----------------
@@ -268,10 +267,11 @@ def _title_from(text: str) -> str:
     return (t[:48].rstrip() + "…") if len(t) > 48 else (t or "New chat")
 
 
-async def _chat_stream(conv_id: str, body: ChatIn) -> AsyncIterator[str]:
+async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event) -> AsyncIterator[tuple[str, Any]]:
+    """Yield (event, payload) pairs. The run bus formats them and fans them out; see runs.sse."""
     conv = convos.get(conv_id)
     if not conv:
-        yield sse("error", {"message": "Conversation not found"})
+        yield "error", {"message": "Conversation not found"}
         return
     cfg = settings()
     model = body.model or conv["model"]
@@ -281,23 +281,23 @@ async def _chat_stream(conv_id: str, body: ChatIn) -> AsyncIterator[str]:
     if body.content is not None:
         user_text = body.content.strip()
         if not user_text:
-            yield sse("error", {"message": "Empty message"})
+            yield "error", {"message": "Empty message"}
             return
         um = convos.add_message(conv_id, "user", user_text)
-        yield sse("user_message", um)
+        yield "user_message", um
         if conv["title"] == "New chat" and not [m for m in conv["messages"] if m["role"] == "user"]:
             title = _title_from(user_text)
             convos.update(conv_id, {"title": title})
-            yield sse("title", {"id": conv_id, "title": title})
+            yield "title", {"id": conv_id, "title": title}
     else:
         # regenerate: drop trailing assistant message
         msgs = conv["messages"]
         if msgs and msgs[-1]["role"] == "assistant":
             convos.delete_message(msgs[-1]["id"])
-            yield sse("removed_message", {"id": msgs[-1]["id"]})
+            yield "removed_message", {"id": msgs[-1]["id"]}
         users = [m for m in msgs if m["role"] == "user"]
         if not users:
-            yield sse("error", {"message": "Nothing to regenerate"})
+            yield "error", {"message": "Nothing to regenerate"}
             return
         user_text = users[-1]["content"]
 
@@ -317,7 +317,6 @@ async def _chat_stream(conv_id: str, body: ChatIn) -> AsyncIterator[str]:
 
     am = convos.add_message(conv_id, "assistant", "", model=model)
 
-    stop = asyncio.Event()
     _active[am["id"]] = stop
     buf: list[str] = []
     error: str | None = None
@@ -329,16 +328,18 @@ async def _chat_stream(conv_id: str, body: ChatIn) -> AsyncIterator[str]:
     used["system_prompt"] = system
     used["tokens_estimate"] = estimate_tokens(system)
     messages = [{"role": "system", "content": system}] + history
-    yield sse("assistant_message", {**am, "context_used": used})
-    yield sse("span", {"message_id": am["id"], "span": cspan})
+    yield "assistant_message", {**am, "context_used": used}
+    yield "span", {"message_id": am["id"], "span": cspan}
 
     max_rounds = int(cfg.get("maxToolRounds") or 8)
     try:
         for _round in range(max_rounds + 1):
+            if stop.is_set():
+                break
             round_start = len(buf)
             end: dict[str, Any] = {}
             lspan = tracer.start("llm", model, {"round": _round + 1, "messages": len(messages), "tools": len(tool_schemas)})
-            yield sse("span", {"message_id": am["id"], "span": lspan})
+            yield "span", {"message_id": am["id"], "span": lspan}
             first_token: int | None = None
             async for ev in llm.stream_chat(cfg, model, messages, tool_schemas or None):
                 if stop.is_set():
@@ -347,7 +348,7 @@ async def _chat_stream(conv_id: str, body: ChatIn) -> AsyncIterator[str]:
                     if first_token is None:
                         first_token = now_ms()
                     buf.append(ev["text"])
-                    yield sse("delta", {"id": am["id"], "text": ev["text"]})
+                    yield "delta", {"id": am["id"], "text": ev["text"]}
                 else:
                     end = ev
             calls = end.get("tool_calls") or []
@@ -355,7 +356,7 @@ async def _chat_stream(conv_id: str, body: ChatIn) -> AsyncIterator[str]:
                                "ttft_ms": (first_token - lspan["start"]) if first_token else None,
                                "output_chars": len("".join(buf[round_start:])), "tool_calls": [c["name"] for c in calls]},
                        error="Stopped by user" if stop.is_set() else None)
-            yield sse("span", {"message_id": am["id"], "span": lspan})
+            yield "span", {"message_id": am["id"], "span": lspan}
             if stop.is_set() or not calls or _round == max_rounds:
                 break
             # execute tool calls, then continue the loop with their results
@@ -363,7 +364,7 @@ async def _chat_stream(conv_id: str, body: ChatIn) -> AsyncIterator[str]:
                              "tool_calls": [{"id": c["id"], "type": "function", "function": {"name": c["name"], "arguments": c["arguments"] or "{}"}} for c in calls]})
             if buf and buf[-1] and not buf[-1].endswith("\n"):
                 buf.append("\n\n")
-                yield sse("delta", {"id": am["id"], "text": "\n\n"})
+                yield "delta", {"id": am["id"], "text": "\n\n"}
             for c in calls:
                 try:
                     args = json.loads(c["arguments"] or "{}")
@@ -372,9 +373,9 @@ async def _chat_stream(conv_id: str, body: ChatIn) -> AsyncIterator[str]:
                 except ValueError:
                     args = {"_raw": c["arguments"]}
                 mode = modes.get(c["name"], "off")
-                yield sse("tool_call", {"message_id": am["id"], "id": c["id"], "name": c["name"], "arguments": args, "needs_approval": mode == "ask"})
+                yield "tool_call", {"message_id": am["id"], "id": c["id"], "name": c["name"], "arguments": args, "needs_approval": mode == "ask"}
                 tspan = tracer.start("tool", c["name"], {"round": _round + 1, "arguments": _short(args), "mode": mode})
-                yield sse("span", {"message_id": am["id"], "span": tspan})
+                yield "span", {"message_id": am["id"], "span": tspan}
                 t0 = time.time()
                 decision = "allow"
                 if mode == "ask":
@@ -388,10 +389,10 @@ async def _chat_stream(conv_id: str, body: ChatIn) -> AsyncIterator[str]:
                                 fut.set_result("deny")
                                 break
                             try:
-                                await asyncio.wait_for(asyncio.shield(fut), timeout=10)
+                                # Short, so an approval-blocked run notices a stop or a shutdown promptly.
+                                await asyncio.wait_for(asyncio.shield(fut), timeout=2)
                             except asyncio.TimeoutError:
-                                waited += 10
-                                yield ": keepalive\n\n"
+                                waited += 2
                                 if waited >= 600:
                                     fut.set_result("deny")
                         decision = fut.result()
@@ -422,47 +423,87 @@ async def _chat_stream(conv_id: str, body: ChatIn) -> AsyncIterator[str]:
                          "error": err, "images": images or None, "approval": (decision if mode == "ask" else None)}
                 tracer.end(tspan, {"result_chars": len(preview), "images": len(images or [])}, error=err)
                 tool_events.append(event)
-                yield sse("tool_result", {"message_id": am["id"], **event})
-                yield sse("span", {"message_id": am["id"], "span": tspan})
+                yield "tool_result", {"message_id": am["id"], **event}
+                yield "span", {"message_id": am["id"], "span": tspan}
                 for_model = {**result, "images_shown_to_user": [i["name"] for i in images]} if images and isinstance(result, dict) else result
                 messages.append({"role": "tool", "tool_call_id": c["id"], "content": summarize_result(for_model, 24000)})
+    except asyncio.CancelledError:
+        # Shutdown or a dropped task, not a user Stop: persist what was written and re-raise.
+        partial = "".join(buf).strip()
+        convos.finish_message(am["id"], partial, None if partial else "Cancelled", used, tool_events, tracer.spans)
+        convos.touch(conv_id)
+        raise
     except Exception as e:  # noqa: BLE001
         error = str(e)
         for s in tracer.fail_open(error):
-            yield sse("span", {"message_id": am["id"], "span": s})
+            yield "span", {"message_id": am["id"], "span": s}
     finally:
         _active.pop(am["id"], None)
 
     text = "".join(buf).strip()
     convos.finish_message(am["id"], text, error, used, tool_events, tracer.spans)
     convos.touch(conv_id)
-    yield sse("done", {"id": am["id"], "error": error, "context_used": used, "tool_events": tool_events, "trace": tracer.spans, "stopped": stop.is_set()})
+    yield "done", {"id": am["id"], "error": error, "context_used": used, "tool_events": tool_events, "trace": tracer.spans, "stopped": stop.is_set()}
     if tool_ctx.get("learned"):
-        yield sse("learned", tool_ctx["learned"])
+        yield "learned", tool_ctx["learned"]
 
     if not error and text and cfg.get("autoLearn", True) and conv["settings"].get("autoLearn", True):
         lspan = tracer.start("learn", cfg.get("extractionModel") or model)
-        yield sse("span", {"message_id": am["id"], "span": lspan})
+        yield "span", {"message_id": am["id"], "span": lspan}
         try:
             learned = await learn_from_exchange(
                 settings=cfg, memories=memories, graph=graph, project_id=conv["project_id"],
                 user_text=user_text, assistant_text=text, model=model,
             )
             tracer.end(lspan, {"memories": len(learned["memories"]), "entities": len(learned["nodes"]), "relations": len(learned["edges"])})
-            yield sse("span", {"message_id": am["id"], "span": lspan})
+            yield "span", {"message_id": am["id"], "span": lspan}
             if learned["memories"] or learned["nodes"] or learned["edges"]:
-                yield sse("learned", learned)
+                yield "learned", learned
         except Exception as e:  # noqa: BLE001
             tracer.end(lspan, error=str(e))
-            yield sse("span", {"message_id": am["id"], "span": lspan})
-            yield sse("learn_error", {"message": str(e)})
+            yield "span", {"message_id": am["id"], "span": lspan}
+            yield "learn_error", {"message": str(e)}
         convos.set_trace(am["id"], tracer.spans)
 
 
+async def _run_chat(run: Run, body: ChatIn) -> None:
+    async for event, data in _chat_stream(run.conversation_id, body, run.stop):
+        if event == "assistant_message":
+            run.message_id = data.get("id")
+        run.publish(event, data)
+
+
 @app.post("/conversations/{id}/chat")
-async def chat(id: str, body: ChatIn) -> StreamingResponse:
-    return StreamingResponse(_chat_stream(id, body), media_type="text/event-stream",
+async def chat(id: str, body: ChatIn) -> dict[str, Any]:
+    """Start the reply as a background task. Watch it on GET /conversations/{id}/stream?since=seq."""
+    if not convos.get(id):
+        raise HTTPException(404, "Conversation not found")
+    running = bus.live(id)
+    if running:
+        raise HTTPException(409, {"message": "That conversation already has a running reply",
+                                 "run_id": running.run_id, "seq": running.seq})
+    run = bus.start(id, lambda r: _run_chat(r, body))
+    return {"run_id": run.run_id, "seq": run.seq}
+
+
+@app.get("/conversations/{id}/stream")
+async def stream_conversation(id: str, since: int = 0) -> StreamingResponse:
+    """Any number of clients may attach; detaching one never touches the run."""
+    run = bus.get(id)
+    return StreamingResponse(run.subscribe(since) if run else iter(()), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.get("/runs")
+async def list_runs() -> list[dict[str, Any]]:
+    return bus.list()
+
+
+# async, so the run's asyncio.Event is set on the loop that owns it rather than from a threadpool.
+@app.post("/conversations/{id}/stop")
+async def stop_run(id: str, run_id: str | None = None) -> dict[str, bool]:
+    """Stop before the assistant message exists: detaching a stream would only drop a viewer."""
+    return {"ok": bus.stop(id, run_id)}
 
 
 class ApprovalIn(BaseModel):
@@ -699,7 +740,8 @@ def search_documents(id: str, q: str) -> list[dict[str, Any]]:  # convenience fo
 
 
 @app.on_event("shutdown")
-def _shutdown() -> None:
+async def _shutdown() -> None:
+    await bus.shutdown()  # before the rmtree: a live run's sandboxed run_python writes in there
     shutil.rmtree(db.data_dir / "tmp", ignore_errors=True)
 
 

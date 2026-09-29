@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ChatEvent, Conversation, ConversationSettings, Document, GraphData, Memory, Message, ModelInfo, Settings, Project, SessionStatus, ToolInfo, Todo, GoogleStatus, TodayDashboard, Recap } from '@shared/types'
+import type { ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Document, GraphData, Memory, Message, ModelInfo, Settings, Project, RunConflict, SessionStatus, ToolInfo, Todo, GoogleStatus, TodayDashboard, Recap } from '@shared/types'
 import { api, chatStream, setBase, type Scope } from './lib/api'
 import { finishStatus, reduceStatus, settleApprovals } from './sessionStatus'
 
@@ -11,7 +11,8 @@ export type ContextTab = 'last' | 'preview' | 'trace'
 export type Mode = 'classic' | 'canvas'
 export type { Scope, SessionStatus }
 
-export interface Streaming { messageId: string | null; abort: AbortController }
+/** `abort` only detaches this window from the run's SSE; ending the run itself is `api.stopRun(runId)`. */
+export interface Streaming { messageId: string | null; runId: string; abort: AbortController }
 
 /** One live conversation. Store-local: a running AbortController must never cross the IPC bus. */
 export interface ChatSession {
@@ -161,6 +162,16 @@ const clearHold = (convId: string): void => {
   }
 }
 
+/** A 409 from `POST /chat` arrives as a `RunConflict` JSON-encoded in the error detail. */
+const runConflict = (e: unknown): RunConflict | null => {
+  try {
+    const d = JSON.parse((e as Error).message) as RunConflict
+    return typeof d?.run_id === 'string' && typeof d.seq === 'number' ? d : null
+  } catch {
+    return null
+  }
+}
+
 /** LRU by `touchedAt`, never evicting the focused session, a live run, or unread replies. */
 const evict = (sessions: Record<string, ChatSession>, keepId: string | null): Record<string, ChatSession> => {
   const ids = Object.keys(sessions)
@@ -249,10 +260,25 @@ export const useStore = create<State>((set, get) => {
 
   const runStream = async (convId: string, body: { content?: string; model?: string }): Promise<void> => {
     const abort = new AbortController()
-    clearHold(convId)
-    patchSession(convId, (s) => ({ ...s, streaming: { messageId: null, abort }, status: 'working', finishedAt: null, pendingApprovals: 0, touchedAt: Date.now() }))
+    let run: ChatRunStarted
+    let attached = false
     try {
-      for await (const ev of chatStream(convId, body, abort.signal)) {
+      run = await api.chat(convId, body)
+    } catch (e) {
+      const conflict = runConflict(e)
+      if (!conflict) {
+        get().toast((e as Error).message, 'error')
+        patchSession(convId, (s) => ({ ...s, status: 'error', finishedAt: Date.now() }))
+        return
+      }
+      // Another window already started this reply: watch it from its tail rather than erroring.
+      run = { run_id: conflict.run_id, seq: conflict.seq }
+      attached = true
+    }
+    clearHold(convId)
+    patchSession(convId, (s) => ({ ...s, streaming: { messageId: null, runId: run.run_id, abort }, status: 'working', finishedAt: null, pendingApprovals: 0, touchedAt: Date.now() }))
+    try {
+      for await (const ev of chatStream(convId, run.seq, abort.signal)) {
         const focused = get().focusedConversationId === convId
         patchSession(convId, (s) => {
           const next = applyEvent(s, ev, focused)
@@ -287,6 +313,8 @@ export const useStore = create<State>((set, get) => {
       }
     } finally {
       patchSession(convId, (s) => (s.streaming?.abort === abort ? { ...s, streaming: null, status: finishStatus(s.status) } : s))
+      // An attached run wrote deltas this window never saw; the persisted message is the whole reply.
+      if (attached) void get().openSession(convId)
     }
   }
 
@@ -513,10 +541,11 @@ export const useStore = create<State>((set, get) => {
     },
     stop: async (conversationId) => {
       const id = conversationId ?? get().focusedConversationId
-      const st = id ? get().sessions[id]?.streaming : null
-      if (!st) return
+      const st = id && get().sessions[id]?.streaming
+      if (!id || !st) return
+      // Aborting the fetch would only detach this window, so a stop is always a request to the run.
       if (st.messageId) await api.stop(st.messageId).catch(() => undefined)
-      else st.abort.abort()
+      else await api.stopRun(id, st.runId).catch(() => undefined)
     },
 
     refreshMemories: async (q = '') => set({ memories: await api.memories.list(get().dataScope, q) }),

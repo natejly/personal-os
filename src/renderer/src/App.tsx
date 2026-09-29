@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useStore } from './store'
 import Sidebar from './components/Sidebar'
 import ChatView from './components/ChatView'
@@ -12,6 +12,8 @@ import CalendarView from './components/CalendarView'
 import DashboardsView from './components/DashboardsView'
 import SettingsModal from './components/SettingsModal'
 import ProjectModal from './components/ProjectModal'
+import Canvas from './canvas/Canvas'
+import { useCanvas } from './canvas/store'
 import { AlertTriangle } from 'lucide-react'
 
 function Toasts(): JSX.Element {
@@ -28,6 +30,7 @@ function Toasts(): JSX.Element {
 export default function App(): JSX.Element {
   const { ready, backendError, init, sidebarOpen, settingsOpen, projectModal, view } = useStore()
   const theme = useStore((s) => s.settings.theme)
+  const mode = useStore((s) => s.mode)
 
   useEffect(() => {
     void init()
@@ -35,6 +38,17 @@ export default function App(): JSX.Element {
   useEffect(() => {
     document.documentElement.dataset.theme = theme
   }, [theme])
+  // `load()` is also what registers the canvas store's menu, bus and pop-out listeners. Every
+  // widget filters client-side, so canvas mode loads each shared dataset once at the widest scope.
+  const entered = useRef(false)
+  useEffect(() => {
+    if (mode !== 'canvas' || entered.current) return
+    entered.current = true
+    const s = useStore.getState()
+    void useCanvas.getState().load()
+    void s.loadScope('all')
+    void s.refreshTodos('all', true)
+  }, [mode])
 
   if (!ready) return <div className="app loading" />
   if (backendError) {
@@ -57,15 +71,21 @@ export default function App(): JSX.Element {
   return (
     <div className={`app ${sidebarOpen ? '' : 'sidebar-collapsed'}`}>
       <Sidebar />
-      {view === 'home' && <HomeView />}
-      {view === 'chat' && <ChatView />}
-      {view === 'todos' && <TodosView />}
-      {view === 'calendar' && <CalendarView />}
-      {view === 'boards' && <BoardsView />}
-      {view === 'dashboards' && <DashboardsView />}
-      {view === 'memory' && <MemoryPanel />}
-      {view === 'documents' && <DocumentsView />}
-      {view === 'project' && <ProjectView />}
+      {mode === 'canvas' ? (
+        <Canvas />
+      ) : (
+        <>
+          {view === 'home' && <HomeView />}
+          {view === 'chat' && <ChatView />}
+          {view === 'todos' && <TodosView />}
+          {view === 'calendar' && <CalendarView />}
+          {view === 'boards' && <BoardsView />}
+          {view === 'dashboards' && <DashboardsView />}
+          {view === 'memory' && <MemoryPanel />}
+          {view === 'documents' && <DocumentsView />}
+          {view === 'project' && <ProjectView />}
+        </>
+      )}
       {settingsOpen && <SettingsModal />}
       {projectModal && <ProjectModal />}
       <Toasts />

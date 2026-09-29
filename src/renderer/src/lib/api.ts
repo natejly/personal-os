@@ -1,6 +1,6 @@
 import type {
   ChatEvent, ToolInfo, Todo, GoogleStatus, TodayDashboard, CalendarEvent, GmailMessage, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Recap, Conversation, ConversationSettings, ContextUsed, Document, GraphData, GraphEdge, GraphNode,
-  Memory, ModelInfo, ModelPrice, Settings, Project, UsageReport,
+  Memory, ModelInfo, ModelPrice, Settings, Project, UsageReport, ChatRunStarted, RunInfo,
   Canvas, CanvasWindow, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState
 } from '@shared/types'
 
@@ -112,6 +112,11 @@ export const api = {
     deleteMessage: (id: string, mid: string) => req(`/conversations/${id}/messages/${mid}`, { method: 'DELETE' })
   },
   stop: (mid: string) => req(`/messages/${mid}/stop`, { method: 'POST' }),
+  /** Starts the reply as a background task and returns at once; watch it with `chatStream(convId, seq)`. Throws a 409 carrying a `RunConflict` when that conversation already has a live run. */
+  chat: (convId: string, body: { content?: string; model?: string }) => req<ChatRunStarted>(`/conversations/${convId}/chat`, { method: 'POST', body: json(body) }),
+  runs: () => req<RunInfo[]>('/runs'),
+  /** Stops a run before its assistant message exists. Detaching the stream would only drop a viewer. */
+  stopRun: (convId: string, runId?: string) => req<{ ok: boolean }>(`/conversations/${convId}/stop${runId ? `?run_id=${encodeURIComponent(runId)}` : ''}`, { method: 'POST' }),
   usage: {
     report: (days = 30) => req<UsageReport>(`/usage?days=${days}`),
     setPrices: (modelPrices: Record<string, { input: number; output: number }>) =>
@@ -177,18 +182,9 @@ export const api = {
   }
 }
 
-/** POST to the chat endpoint and iterate its server-sent events. */
-export async function* chatStream(
-  convId: string,
-  body: { content?: string; model?: string },
-  signal?: AbortSignal
-): AsyncGenerator<ChatEvent> {
-  const r = await fetch(`${base}/conversations/${convId}/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-    signal
-  })
+/** Attach to a conversation's run and iterate its server-sent events from `since`. Any number of clients may. */
+export async function* chatStream(convId: string, since = 0, signal?: AbortSignal): AsyncGenerator<ChatEvent> {
+  const r = await fetch(`${base}/conversations/${convId}/stream?since=${since}`, { signal })
   if (!r.ok || !r.body) throw new Error(`${r.status} ${r.statusText}`)
   const reader = r.body.getReader()
   const dec = new TextDecoder()

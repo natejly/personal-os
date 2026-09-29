@@ -37,7 +37,7 @@ function CardModal({ card, board, onClose, onChange }: { card: BoardCard; board:
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
       <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
-        <header><h2>Card</h2><button className="icon-btn" onClick={onClose}><X size={16} /></button></header>
+        <header><h2>Card</h2><button className="icon-btn" aria-label="Close card" onClick={onClose}><X size={16} /></button></header>
         <section>
           <label><span>Title</span><input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} /></label>
           <label><span>Description</span><textarea rows={5} value={desc} onChange={(e) => setDesc(e.target.value)} placeholder="Details, links, acceptance criteria…" /></label>
@@ -89,8 +89,8 @@ function Column({ col, cards, board, onChange, onOpen }: { col: BoardColumn; car
           <span className="kcol-name" onClick={() => setRenaming(true)}>{col.name}</span>
         )}
         <span className="count">{cards.length}{col.wip_limit ? `/${col.wip_limit}` : ''}</span>
-        <button className="icon-btn ghost sm" title="Add card" onClick={() => setAdding(true)}><Plus size={14} /></button>
-        <button className="icon-btn ghost sm danger" title="Delete column" onClick={() => { if (cards.length === 0 || confirm(`Delete "${col.name}" and its ${cards.length} cards?`)) void api.boards.deleteColumn(col.id).then(onChange) }}><Trash2 size={13} /></button>
+        <button className="icon-btn ghost sm" title="Add card" aria-label={`Add card to ${col.name}`} onClick={() => setAdding(true)}><Plus size={14} /></button>
+        <button className="icon-btn ghost sm danger" title="Delete column" aria-label={`Delete column ${col.name}`} onClick={() => { if (cards.length === 0 || confirm(`Delete "${col.name}" and its ${cards.length} cards?`)) void api.boards.deleteColumn(col.id).then(onChange) }}><Trash2 size={13} /></button>
       </header>
       <div className="kcol-cards">
         {cards.map((c) => (
@@ -122,6 +122,7 @@ export default function BoardsView(): JSX.Element {
   const [open, setOpen] = useState<BoardCard | null>(null)
   const [newName, setNewName] = useState('')
   const [creating, setCreating] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const colName = useRef<HTMLInputElement>(null)
 
   const loadList = async (): Promise<void> => {
@@ -131,7 +132,7 @@ export default function BoardsView(): JSX.Element {
   }
   const loadBoard = async (): Promise<void> => { if (activeId) setBoard(await api.boards.get(activeId)) }
   useEffect(() => { void loadList() }, [])
-  useEffect(() => { void loadBoard() }, [activeId])
+  useEffect(() => { setConfirmDelete(false); void loadBoard() }, [activeId])
 
   const create = async (): Promise<void> => {
     if (!newName.trim()) return
@@ -148,38 +149,47 @@ export default function BoardsView(): JSX.Element {
   return (
     <main className="page board-page">
       <header className="page-header drag">
-        {!sidebarOpen && <button className="icon-btn no-drag" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
+        {!sidebarOpen && <button className="icon-btn no-drag" aria-label="Show sidebar" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
         <h2><KanbanSquare size={16} /> Boards</h2>
         <div className="no-drag header-right">
+          {/* Delete sits at the far end from "New board", and takes two clicks (same pattern as ProjectModal). */}
+          {board && (confirmDelete
+            ? <button className="ghost-btn danger" onClick={() => void api.boards.delete(board.id).then(() => { setConfirmDelete(false); setActiveId(null); setBoard(null); void loadList() })}><Trash2 size={14} /> Really delete this board and its cards</button>
+            : <button className="icon-btn danger" title="Delete board" aria-label={`Delete board ${board.name}`} onClick={() => setConfirmDelete(true)}><Trash2 size={15} /></button>
+          )}
           {boards.length > 0 && (
             <label className="model-picker">
-              <select value={activeId ?? ''} onChange={(e) => setActiveId(e.target.value)}>{boards.map((b) => <option key={b.id} value={b.id}>{b.name} ({b.card_count})</option>)}</select>
+              <select aria-label="Active board" value={activeId ?? ''} onChange={(e) => setActiveId(e.target.value)}>{boards.map((b) => <option key={b.id} value={b.id}>{b.name} ({b.card_count})</option>)}</select>
               <ChevronDown size={14} />
             </label>
           )}
           {board && (
             <label className="model-picker" title="Project">
-              <select value={board.project_id ?? ''} onChange={(e) => void api.boards.update(board.id, { project_id: e.target.value || null }).then(loadBoard)}>
+              <select aria-label="Board project" value={board.project_id ?? ''} onChange={(e) => void api.boards.update(board.id, { project_id: e.target.value || null }).then(loadBoard)}>
                 <option value="">No project</option>{projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
               <ChevronDown size={14} />
             </label>
           )}
           {creating ? (
-            <div className="add-inline"><input autoFocus placeholder="Board name" value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void create(); if (e.key === 'Escape') setCreating(false) }} /><button className="primary-btn" onClick={() => void create()}>Create</button></div>
+            <div className="add-inline"><input autoFocus aria-label="Board name" placeholder="Board name" value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void create(); if (e.key === 'Escape') setCreating(false) }} /><button className="primary-btn" onClick={() => void create()}>Create</button></div>
           ) : (
             <button className="primary-btn" onClick={() => setCreating(true)}><Plus size={14} /> New board</button>
           )}
-          {board && <button className="icon-btn danger" title="Delete board" onClick={() => { if (confirm(`Delete board "${board.name}"?`)) void api.boards.delete(board.id).then(() => { setActiveId(null); setBoard(null); void loadList() }) }}><Trash2 size={15} /></button>}
         </div>
       </header>
       {!board ? (
-        <div className="page-body"><p className="empty-hint big">No boards yet.</p></div>
+        <div className="page-body">
+          <div className="empty-hint big">
+            <p>No boards yet. Create one, or ask the assistant: “make a board for my apartment move”.</p>
+            <button className="primary-btn" onClick={() => setCreating(true)}><Plus size={14} /> New board</button>
+          </div>
+        </div>
       ) : (
         <div className="kanban">
           {board.columns.map((col) => <Column key={col.id} col={col} cards={byCol[col.id] ?? []} board={board} onChange={() => void loadBoard()} onOpen={setOpen} />)}
           <div className="kcol new">
-            <input ref={colName} placeholder="+ Add column" onKeyDown={(e) => { if (e.key === 'Enter' && colName.current?.value.trim()) { void api.boards.addColumn(board.id, colName.current.value.trim()).then(() => { colName.current!.value = ''; void loadBoard() }).catch((err) => toast(err.message, 'error')) } }} />
+            <input ref={colName} aria-label="Add column" placeholder="+ Add column" onKeyDown={(e) => { if (e.key === 'Enter' && colName.current?.value.trim()) { void api.boards.addColumn(board.id, colName.current.value.trim()).then(() => { colName.current!.value = ''; void loadBoard() }).catch((err) => toast(err.message, 'error')) } }} />
           </div>
         </div>
       )}

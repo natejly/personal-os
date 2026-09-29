@@ -68,13 +68,13 @@ function PriceEditor({ report, onSaved }: { report: UsageReport; onSaved: (price
   return (
     <div className="usage-prices">
       <table>
-        <thead><tr><th>Model</th><th>Input $/M</th><th>Output $/M</th><th /></tr></thead>
+        <thead><tr><th scope="col">Model</th><th scope="col">Input $/M</th><th scope="col">Output $/M</th><th scope="col" aria-label="Price source" /></tr></thead>
         <tbody>
           {models.map((m) => (
             <tr key={m}>
-              <td className="mono">{m}</td>
-              <td><input type="number" min={0} step="0.01" value={valueOf(m, 'input')} placeholder="—" onChange={(e) => edit(m, 'input', e.target.value)} /></td>
-              <td><input type="number" min={0} step="0.01" value={valueOf(m, 'output')} placeholder="—" onChange={(e) => edit(m, 'output', e.target.value)} /></td>
+              <th scope="row" className="mono">{m}</th>
+              <td><input type="number" aria-label={`${m} input price, $ per million tokens`} min={0} step="0.01" value={valueOf(m, 'input')} placeholder="—" onChange={(e) => edit(m, 'input', e.target.value)} /></td>
+              <td><input type="number" aria-label={`${m} output price, $ per million tokens`} min={0} step="0.01" value={valueOf(m, 'output')} placeholder="—" onChange={(e) => edit(m, 'output', e.target.value)} /></td>
               <td className="usage-price-src">{draft[m] ? 'edited' : report.prices[m]?.source === 'override' ? 'custom' : report.prices[m] ? 'proxy' : 'unpriced'}</td>
             </tr>
           ))}
@@ -138,7 +138,7 @@ export default function UsageView(): JSX.Element {
         <div className="usage-ranges">
           {RANGES.map((d) => <button key={d} className={days === d ? 'active' : ''} onClick={() => setDays(d)}>{d}d</button>)}
         </div>
-        <button className="icon-btn ghost" title="Refresh" onClick={() => void load(days)}><RefreshCw size={13} className={loading ? 'spin' : ''} /></button>
+        <button className="icon-btn ghost" aria-label="Refresh usage" title="Refresh" onClick={() => void load(days)}><RefreshCw size={13} className={loading ? 'spin' : ''} /></button>
       </div>
 
       {empty ? (

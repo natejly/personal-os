@@ -58,10 +58,10 @@ export default function HomeView(): JSX.Element {
   return (
     <main className="page home">
       <header className="page-header drag">
-        {!sidebarOpen && <button className="icon-btn no-drag" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
+        {!sidebarOpen && <button className="icon-btn no-drag" aria-label="Show sidebar" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
         <h2>Today <span className="muted">{new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</span></h2>
         <div className="no-drag header-right">
-          <button className="icon-btn" title="Refresh" onClick={() => void refresh()}><RefreshCw size={15} className={busy ? 'spin' : ''} /></button>
+          <button className="icon-btn" title="Refresh" aria-label="Refresh today’s data" onClick={() => void refresh()}><RefreshCw size={15} className={busy ? 'spin' : ''} /></button>
           <div className="home-customize-wrap">
             <button className={`icon-btn ${customizing ? 'on' : ''}`} title="Choose what shows here" onClick={() => setCustomizing((v) => !v)}><SlidersHorizontal size={15} /></button>
             {customizing && (
@@ -84,7 +84,7 @@ export default function HomeView(): JSX.Element {
       </header>
       <div className="page-body wide">
         <div className="home-hero">
-          <h1>{greeting()}.</h1>
+          <h1 role="heading" aria-level={2}>{greeting()}.</h1>
           <div className="quick-ask">
             <MessageSquare size={16} />
             <input placeholder="Ask anything…" value={quick} onChange={(e) => setQuick(e.target.value)}
@@ -100,8 +100,8 @@ export default function HomeView(): JSX.Element {
           <section className="recap">
             <header>Daily recap <span className="muted small">{recap?.cached ? 'generated earlier today' : 'fresh'}</span>
               <span style={{ flex: 1 }} />
-              <button className="icon-btn sm" title="Regenerate" onClick={() => void refreshRecap(true)}><RefreshCw size={13} className={recapLoading ? 'spin' : ''} /></button>
-              <button className="icon-btn sm" title="Hide" onClick={() => setRecapOpen(false)}><X size={13} /></button>
+              <button className="icon-btn sm" title="Regenerate" aria-label="Regenerate daily recap" onClick={() => void refreshRecap(true)}><RefreshCw size={13} className={recapLoading ? 'spin' : ''} /></button>
+              <button className="icon-btn sm" title="Hide" aria-label="Hide daily recap" onClick={() => setRecapOpen(false)}><X size={13} /></button>
             </header>
             {recapLoading && !recap?.content ? <p className="muted">Writing your recap…</p> : <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={SAFE_MD}>{recap?.content ?? ''}</ReactMarkdown></div>}
           </section>
@@ -116,7 +116,7 @@ export default function HomeView(): JSX.Element {
             ) : d?.errors.calendar ? <p className="msg-error">{d.errors.calendar}</p> : events.length === 0 ? <p className="muted">Nothing scheduled.</p> : (
               <ul className="events">
                 {todayEvents.map((e) => (
-                  <li key={e.id}><span className="ev-time">{fmtTime(e.start, e.all_day)}</span><span className="ev-title">{e.summary}</span>{e.link && <a href={e.link} target="_blank" rel="noreferrer" className="icon-btn ghost sm"><ExternalLink size={11} /></a>}</li>
+                  <li key={e.id}><span className="ev-time">{fmtTime(e.start, e.all_day)}</span><span className="ev-title">{e.summary}</span>{e.link && <a href={e.link} target="_blank" rel="noreferrer" className="icon-btn ghost sm" aria-label={`Open “${e.summary}” in Google Calendar`}><ExternalLink size={11} /></a>}</li>
                 ))}
                 {laterEvents.length > 0 && <li className="ev-sep">Tomorrow</li>}
                 {laterEvents.map((e) => (

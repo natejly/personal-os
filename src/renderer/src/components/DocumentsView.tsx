@@ -35,16 +35,21 @@ export default function DocumentsView({ projectId, embedded = false }: { project
     <div className={`page-body ${drag ? 'dragging' : ''}`} onDragOver={(e) => { e.preventDefault(); setDrag(true) }} onDragLeave={() => setDrag(false)}
       title="Drop files to upload"
       onDrop={(e) => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files.length) void uploadDocuments(e.dataTransfer.files, targetProject) }}>
-      {embedded && <div className="add-row">{uploadBtn}<span className="muted small">.txt, .md, .pdf, .docx and code files.</span></div>}
-      {!embedded && <p className="muted small">.txt, .md, .pdf, .docx and common code/text files. Matching excerpts are pulled into chats automatically: personal documents everywhere, project documents only inside that project.</p>}
-      {documents.length === 0 && <p className="empty-hint big">No documents yet.</p>}
+      {embedded && <div className="add-row">{uploadBtn}<span className="muted small">Knowledge for this project: .txt, .md, .pdf, .docx and code files. Drop files anywhere here.</span></div>}
+      {!embedded && <p className="muted small">Supports .txt, .md, .pdf, .docx and common code/text files. Documents are chunked and full-text indexed; the best matching excerpts are pulled into chats automatically. Personal documents are available everywhere; project documents only inside that project. Drop files anywhere here.</p>}
+      {documents.length === 0 && (
+        <div className="empty-hint big">
+          <p>No documents here yet.</p>
+          <button className="primary-btn" onClick={() => fileRef.current?.click()}><Upload size={14} /> Upload{targetProject ? ' to project' : ''}</button>
+        </div>
+      )}
       <div className="doc-grid">
         {documents.map((d) => (
           <div key={d.id} className="doc-card" onClick={() => void view(d)}>
             <div className="doc-head">
               <FileText size={16} />
               <span className="doc-name" title={d.name}>{d.name}</span>
-              <button className="icon-btn ghost danger" onClick={(e) => { e.stopPropagation(); void deleteDocument(d.id) }}><Trash2 size={13} /></button>
+              <button className="icon-btn ghost danger" aria-label={`Delete ${d.name}`} onClick={(e) => { e.stopPropagation(); void deleteDocument(d.id) }}><Trash2 size={13} /></button>
             </div>
             <p className="doc-preview">{d.preview || '(no text extracted)'}</p>
             <div className="doc-meta">{scope === 'all' && <ProjectChip projectId={d.project_id} showPersonal />} {fmtSize(d.size)} · {d.chunk_count} chunks · {new Date(d.created_at * 1000).toLocaleDateString()}</div>
@@ -54,7 +59,7 @@ export default function DocumentsView({ projectId, embedded = false }: { project
       {open && (
         <div className="modal-backdrop" onMouseDown={() => setOpen(null)}>
           <div className="modal wide" onMouseDown={(e) => e.stopPropagation()}>
-            <header><h2>{open.name}</h2><button className="icon-btn" onClick={() => setOpen(null)}><X size={16} /></button></header>
+            <header><h2>{open.name}</h2><button className="icon-btn" aria-label="Close document" onClick={() => setOpen(null)}><X size={16} /></button></header>
             <pre className="doc-text">{open.text}</pre>
           </div>
         </div>
@@ -66,7 +71,7 @@ export default function DocumentsView({ projectId, embedded = false }: { project
   return (
     <main className="page">
       <header className="page-header drag">
-        {!sidebarOpen && <button className="icon-btn no-drag" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
+        {!sidebarOpen && <button className="icon-btn no-drag" aria-label="Show sidebar" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
         <h2><FileText size={16} /> Documents</h2>
         <div className="no-drag header-right">
           <ScopeSelect value={libraryScope} onChange={(s) => void setLibraryScope(s)} />

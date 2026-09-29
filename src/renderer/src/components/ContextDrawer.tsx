@@ -11,7 +11,7 @@ function Toggle({ label, hint, value, onChange, icon }: { label: string; hint: s
     <label className="toggle-row">
       <span className="toggle-icon">{icon}</span>
       <span className="toggle-text"><b>{label}</b><small>{hint}</small></span>
-      <input type="checkbox" checked={value} onChange={(e) => onChange(e.target.checked)} />
+      <input type="checkbox" aria-label={label} checked={value} onChange={(e) => onChange(e.target.checked)} />
       <span className="switch" />
     </label>
   )
@@ -43,7 +43,7 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
       )}
       {ctx.nodes.length > 0 && (
         <section>
-          <h5><Share2 size={12} /> Graph ({ctx.nodes.length} entities, {ctx.edges.length} relations) <button className="link" onClick={() => openMemory('graph')}>edit</button></h5>
+          <h5><Share2 size={12} /> Graph ({ctx.nodes.length} entit{ctx.nodes.length === 1 ? 'y' : 'ies'}, {ctx.edges.length} relation{ctx.edges.length === 1 ? '' : 's'}) <button className="link" onClick={() => openMemory('graph')}>edit</button></h5>
           <ul>
             {ctx.edges.map((e) => {
               const s = ctx.nodes.find((n) => n.id === e.source_id)?.label
@@ -56,7 +56,7 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
       )}
       {ctx.chunks.length > 0 && (
         <section>
-          <h5><FileText size={12} /> Documents ({ctx.chunks.length} excerpts) <button className="link" onClick={() => setView('documents')}>manage</button></h5>
+          <h5><FileText size={12} /> Documents ({ctx.chunks.length} excerpt{ctx.chunks.length === 1 ? '' : 's'}) <button className="link" onClick={() => setView('documents')}>manage</button></h5>
           <ul>{ctx.chunks.map((c) => <li key={c.chunk_id}><b>{c.name}</b> · chunk {c.idx + 1}<div className="chunk-preview">{c.text}</div></li>)}</ul>
         </section>
       )}
@@ -112,7 +112,7 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
     <aside className="context-drawer">
       <header>
         <h3>Context</h3>
-        <button className="icon-btn" onClick={toggleContext}><X size={16} /></button>
+        <button className="icon-btn" aria-label="Close context panel" onClick={toggleContext}><X size={16} /></button>
       </header>
 
       <section className="ctx-section">

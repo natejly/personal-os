@@ -3,6 +3,7 @@ import { X, Eye, EyeOff, Plug } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import { HOME_MODULES, OPTIONAL_VIEWS } from '../modules'
+import { useModal } from '../lib/useModal'
 import type { Settings, ShortcutState } from '@shared/types'
 import { ToolGlobalToggles } from './ToolPermissions'
 import GoogleSettings from './GoogleSettings'
@@ -18,6 +19,8 @@ export default function SettingsModal(): JSX.Element {
   const [test, setTest] = useState<{ state: 'idle' | 'testing' | 'ok' | 'fail'; msg?: string }>({ state: 'idle' })
   const [shortcut, setShortcut] = useState<ShortcutState | null>(null)
   const patch = (p: Partial<Settings>): void => setDraft((d) => ({ ...d, ...p }))
+  // Closing discards `draft` — Escape and the backdrop are exactly the Cancel button.
+  const { titleId, backdrop, modal } = useModal(() => setSettingsOpen(false))
 
   // A shortcut that another app owns fails at startup, long before this modal mounts, so the current
   // state is pulled as well as watched.
@@ -57,18 +60,18 @@ export default function SettingsModal(): JSX.Element {
     patch({ homeWidgets: { ...(draft.homeWidgets ?? {}), [k]: !homeOn(k) } })
 
   return (
-    <div className="modal-backdrop" onMouseDown={() => setSettingsOpen(false)}>
-      <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
-        <header><h2>Settings</h2><button className="icon-btn" onClick={() => setSettingsOpen(false)}><X size={16} /></button></header>
+    <div className="modal-backdrop" {...backdrop}>
+      <div className="modal" {...modal}>
+        <header><h2 id={titleId}>Settings</h2><button className="icon-btn" aria-label="Close settings" title="Close" onClick={() => setSettingsOpen(false)}><X size={16} /></button></header>
 
         <section>
           <h3>Provider</h3>
-          <p className="muted">Any model your <a href="https://docs.litellm.ai/" target="_blank" rel="noreferrer">LiteLLM</a> proxy can route to works here.</p>
-          <label><span>LiteLLM base URL</span><input value={draft.baseUrl} onChange={(e) => patch({ baseUrl: e.target.value })} placeholder="http://localhost:4000" spellCheck={false} /></label>
+          <p className="muted">Personal OS talks to a <a href="https://docs.litellm.ai/" target="_blank" rel="noreferrer">LiteLLM</a> proxy, so any model LiteLLM can route to works here. Point it at your proxy and paste a virtual key.</p>
+          <label><span>LiteLLM base URL</span><input autoFocus value={draft.baseUrl} onChange={(e) => patch({ baseUrl: e.target.value })} placeholder="http://localhost:4000" spellCheck={false} /></label>
           <label><span>API key</span>
             <div className="input-row">
               <input type={showKey ? 'text' : 'password'} value={draft.apiKey} onChange={(e) => patch({ apiKey: e.target.value })} placeholder="sk-…" spellCheck={false} />
-              <button className="icon-btn" type="button" onClick={() => setShowKey((v) => !v)}>{showKey ? <EyeOff size={14} /> : <Eye size={14} />}</button>
+              <button className="icon-btn" type="button" aria-label={showKey ? 'Hide API key' : 'Show API key'} aria-pressed={showKey} title={showKey ? 'Hide API key' : 'Show API key'} onClick={() => setShowKey((v) => !v)}>{showKey ? <EyeOff size={14} /> : <Eye size={14} />}</button>
             </div>
           </label>
           <div className="test-row">

@@ -1,10 +1,12 @@
 import { useState } from 'react'
 import { X, Trash2 } from 'lucide-react'
 import { useStore } from '../store'
+import { useModal } from '../lib/useModal'
 import { ToolOverrides } from './ToolPermissions'
 import type { ToolOverride } from '@shared/types'
 
 const COLORS = ['#d97757', '#e5484d', '#e5a13b', '#46a758', '#3b9edb', '#8e6fdb', '#d95c9e', '#8b8b8b']
+const COLOR_NAMES = ['Terracotta', 'Red', 'Amber', 'Green', 'Blue', 'Purple', 'Pink', 'Gray']
 
 export default function ProjectModal(): JSX.Element {
   const modal = useStore((s) => s.projectModal)!
@@ -19,6 +21,7 @@ export default function ProjectModal(): JSX.Element {
   const allTools = useStore((s) => s.tools)
   const globalTools = Object.fromEntries(allTools.map((t) => { const v = globalToolsRaw?.[t.name]; return [t.name, v === true ? 'on' : v === false ? 'off' : v === 'on' || v === 'ask' || v === 'off' ? v : t.default_mode] }))
   const [confirmDelete, setConfirmDelete] = useState(false)
+  const { titleId, backdrop, modal: dialog } = useModal(() => setProjectModal(null))
 
   const save = async (): Promise<void> => {
     if (!name.trim()) return
@@ -32,15 +35,15 @@ export default function ProjectModal(): JSX.Element {
   }
 
   return (
-    <div className="modal-backdrop" onMouseDown={() => setProjectModal(null)}>
-      <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
-        <header><h2>{existing ? 'Edit project' : 'New project'}</h2><button className="icon-btn" onClick={() => setProjectModal(null)}><X size={16} /></button></header>
+    <div className="modal-backdrop" {...backdrop}>
+      <div className="modal" {...dialog}>
+        <header><h2 id={titleId}>{existing ? 'Edit project' : 'New project'}</h2><button className="icon-btn" aria-label={existing ? 'Close edit project' : 'Close new project'} title="Close" onClick={() => setProjectModal(null)}><X size={16} /></button></header>
         <section>
           <label><span>Name</span><input autoFocus value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void save()} /></label>
           <label><span>Description</span><input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Shown to the model" /></label>
           <label><span>Instructions</span><textarea rows={4} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Extra system prompt for chats in this project…" /></label>
           <label><span>Color</span>
-            <div className="color-row">{COLORS.map((c) => <button key={c} className={`swatch ${c === color ? 'on' : ''}`} style={{ background: c }} onClick={() => setColor(c)} />)}</div>
+            <div className="color-row">{COLORS.map((c, i) => <button key={c} type="button" className={`swatch ${c === color ? 'on' : ''}`} style={{ background: c }} aria-label={COLOR_NAMES[i]} aria-pressed={c === color} title={COLOR_NAMES[i]} onClick={() => setColor(c)} />)}</div>
           </label>
         </section>
         <section>

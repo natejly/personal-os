@@ -30,7 +30,7 @@ export function ToolOverrides({ value, onChange, effectiveBase, compact = false 
             <span className="tool-icon">{GROUP_ICON[t.group] ?? <Wrench size={13} />}</span>
             <span className="tool-perm-name">{t.name.replace(/_/g, ' ')}<small>{DANGER_LABEL[t.danger]}</small></span>
             {eff === 'ask' && <span className="tag ask">asks</span>}
-            <select value={ov} onChange={(e) => onChange({ ...value, [t.name]: e.target.value as ToolOverride })}>
+            <select aria-label={`Permission for ${t.name.replace(/_/g, ' ')}`} value={ov} onChange={(e) => onChange({ ...value, [t.name]: e.target.value as ToolOverride })}>
               <option value="inherit">inherit ({MODE_LABEL[base]})</option>
               <option value="on">always on</option>
               <option value="ask">ask each time</option>

@@ -57,7 +57,7 @@ function NodePanel({ node, onClose }: { node: GraphNode; onClose: () => void }):
         <span className="project-dot sm" style={{ background: colorFor(type) }} />
         <h3>{node.label}</h3>
         {node.project_id === null && <span className="tag global"><Globe size={10} />personal</span>}
-        <button className="icon-btn" onClick={onClose}><X size={16} /></button>
+        <button className="icon-btn" aria-label={`Close details for ${node.label}`} onClick={onClose}><X size={16} /></button>
       </header>
       <label><span>Label</span><input value={label} onChange={(e) => setLabel(e.target.value)} onBlur={() => void save()} /></label>
       <label><span>Type</span>
@@ -75,9 +75,9 @@ function NodePanel({ node, onClose }: { node: GraphNode; onClose: () => void }):
           return (
             <li key={e.id}>
               <span className="dir">{out ? '→' : '←'}</span>
-              <input className="rel" defaultValue={e.relation} onBlur={(ev) => ev.target.value !== e.relation && void api.graph.updateEdge(e.id, { relation: ev.target.value }).then(refreshGraph)} />
+              <input className="rel" aria-label={`Relation ${out ? 'to' : 'from'} ${other?.label ?? 'unknown entity'}`} defaultValue={e.relation} onBlur={(ev) => ev.target.value !== e.relation && void api.graph.updateEdge(e.id, { relation: ev.target.value }).then(refreshGraph)} />
               <span className="other">{other?.label ?? '?'}</span>
-              <button className="icon-btn ghost danger" onClick={() => void api.graph.deleteEdge(e.id).then(refreshGraph)}><Trash2 size={12} /></button>
+              <button className="icon-btn ghost danger" aria-label={`Delete relation "${e.relation}" ${out ? 'to' : 'from'} ${other?.label ?? 'unknown entity'}`} onClick={() => void api.graph.deleteEdge(e.id).then(refreshGraph)}><Trash2 size={12} /></button>
             </li>
           )
         })}
@@ -87,7 +87,7 @@ function NodePanel({ node, onClose }: { node: GraphNode; onClose: () => void }):
         <input placeholder="relation (e.g. works on)" value={relation} onChange={(e) => setRelation(e.target.value)} />
         <input list="node-labels" placeholder="target entity" value={target} onChange={(e) => setTarget(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void addEdge()} />
         <datalist id="node-labels">{graph.nodes.filter((n) => n.id !== node.id).map((n) => <option key={n.id} value={n.label} />)}</datalist>
-        <button className="icon-btn" title="Add relation (creates the target if new)" onClick={() => void addEdge()}><Plus size={14} /></button>
+        <button className="icon-btn" aria-label="Add relation" title="Add relation (creates the target if new)" onClick={() => void addEdge()}><Plus size={14} /></button>
       </div>
       <button className="ghost-btn danger full" onClick={() => void del()}><Trash2 size={14} /> Delete entity and its relations</button>
     </aside>
@@ -228,9 +228,9 @@ export default function GraphView({ projectId: scopedProjectId, query = '', paus
       <div className="graph-canvas" ref={wrapRef} onWheel={onWheel} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerLeave={onPointerUp}>
         <div className="graph-tools">
           <input placeholder="New entity" value={newLabel} onChange={(e) => setNewLabel(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void addNode()} />
-          <button className="icon-btn" title="Add entity (Enter)" onClick={() => void addNode()}><Plus size={15} /></button>
+          <button className="icon-btn" aria-label="Add entity" title="Add entity (Enter)" onClick={() => void addNode()}><Plus size={15} /></button>
           <span className="sep" />
-          <button className="icon-btn" title="Reset view" onClick={() => setView({ x: 0, y: 0, k: 1 })}><Maximize2 size={15} /></button>
+          <button className="icon-btn" aria-label="Reset graph view" title="Reset view" onClick={() => setView({ x: 0, y: 0, k: 1 })}><Maximize2 size={15} /></button>
         </div>
         {graph.nodes.length === 0 && <p className="empty-hint big center">No entities yet. Chat with auto-learn on, or add one here.</p>}
         <svg width={size.w} height={size.h} onPointerDown={(e) => { if (e.target === e.currentTarget) { setSelected(null); onPointerDown(e) } }}>

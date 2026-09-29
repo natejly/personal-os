@@ -3,6 +3,8 @@
   --mono: 'SF Mono', Menlo, Consolas, monospace;
   --radius: 10px;
   --sidebar-w: 260px;
+  /* Native form controls / dropdowns follow the app theme. */
+  color-scheme: dark;
 
   --bg: #1a1918;
   --bg-elev: #232220;
@@ -12,9 +14,17 @@
   --border-strong: rgba(255, 255, 255, 0.16);
   --text: #ecebe8;
   --text-muted: #9c9a94;
-  --text-faint: #6c6a65;
+  /* 5.29:1 on --bg, 4.79:1 on --bg-elev (WCAG AA body text). */
+  --text-faint: #8f8d86;
   --accent: #d97757;
   --accent-hover: #e08a6d;
+  /* Fill behind --on-accent text: white on --accent is only 3.12:1. */
+  --accent-solid: #b0522f;
+  --accent-solid-hover: #9c4526;
+  --on-accent: #ffffff;
+  --focus-ring: #e08a6d;
+  /* Scope chips / calendar events: the flat #3b9edb is 4.3:1 on its own tint. */
+  --info: #7cc2ea;
   --user-bubble: #2f2d2a;
   --danger: #e5484d;
   --ok: #46a758;
@@ -24,6 +34,8 @@
 }
 
 :root[data-theme='light'] {
+  color-scheme: light;
+
   --bg: #f7f6f3;
   --bg-elev: #ffffff;
   --bg-input: #ffffff;
@@ -32,13 +44,25 @@
   --border-strong: rgba(0, 0, 0, 0.18);
   --text: #1f1e1c;
   --text-muted: #6b6963;
-  --text-faint: #a09e98;
+  /* 4.79:1 on --bg, 5.18:1 on --bg-elev. */
+  --text-faint: #6f6d66;
+  /* 5.16:1 on --bg: the dark-theme #d97757 is only 2.89:1 here, and #b04d26
+     left .link at 4.42:1 on the tinted .notice-bar. */
+  --accent: #a84722;
+  --accent-hover: #9c4522;
+  --accent-solid: #b04d26;
+  --accent-solid-hover: #9c4522;
+  --focus-ring: #b04d26;
+  /* Scope chips: the dark-theme blue is far too light on a light tint. */
+  --info: #1c6890;
   --user-bubble: #ebe8e2;
   --hover: rgba(0, 0, 0, 0.05);
   --active: rgba(0, 0, 0, 0.09);
 }
 @media (prefers-color-scheme: light) {
   :root[data-theme='system'] {
+    color-scheme: light;
+
     --bg: #f7f6f3;
     --bg-elev: #ffffff;
     --bg-input: #ffffff;
@@ -47,7 +71,17 @@
     --border-strong: rgba(0, 0, 0, 0.18);
     --text: #1f1e1c;
     --text-muted: #6b6963;
-    --text-faint: #a09e98;
+    /* 4.79:1 on --bg, 5.18:1 on --bg-elev. */
+    --text-faint: #6f6d66;
+    /* 5.16:1 on --bg: the dark-theme #d97757 is only 2.89:1 here, and #b04d26
+       left .link at 4.42:1 on the tinted .notice-bar. */
+    --accent: #a84722;
+    --accent-hover: #9c4522;
+    --accent-solid: #b04d26;
+    --accent-solid-hover: #9c4522;
+    --focus-ring: #b04d26;
+    /* Scope chips: the dark-theme blue is far too light on a light tint. */
+    --info: #1c6890;
     --user-bubble: #ebe8e2;
     --hover: rgba(0, 0, 0, 0.05);
     --active: rgba(0, 0, 0, 0.09);
@@ -124,6 +158,8 @@ kbd {
   display: flex;
   align-items: center;
   gap: 6px;
+  min-height: 24px;
+  padding: 0 2px;
   font-weight: 600;
   font-size: 13px;
   color: var(--text-muted);
@@ -172,15 +208,21 @@ kbd {
 .convo-item.active { background: var(--active); }
 .convo-item .ghost { opacity: 0; }
 .convo-item:hover .ghost { opacity: 1; }
+/* Block, not flex: a flex container ignores text-overflow, so the title used to
+   hard-cut mid-glyph. The badges become inline-block so they keep their size. */
 .convo-title {
   flex: 1;
   min-width: 0;
+  display: block;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  line-height: 1.4;
+}
+.convo-title > * {
+  display: inline-block;
+  vertical-align: middle;
+  margin-right: 6px;
 }
 .pulse {
   width: 6px; height: 6px; border-radius: 50%;
@@ -339,7 +381,7 @@ kbd {
 .code-block pre code { background: none; padding: 0; font-size: 12.5px; line-height: 1.5; }
 
 /* ---------- Composer ---------- */
-.composer-wrap { padding: 8px 24px 12px; max-width: 808px; width: 100%; margin: 0 auto; }
+.composer-wrap { padding: 8px 24px 22px; max-width: 808px; width: 100%; margin: 0 auto; }
 .notice {
   font-size: 13px; color: var(--text-muted); text-align: center; margin-bottom: 8px;
 }
@@ -385,9 +427,9 @@ kbd {
 .ghost-btn:hover:not(:disabled) { background: var(--hover); color: var(--text); }
 .ghost-btn:disabled { opacity: 0.5; }
 .primary-btn {
-  padding: 7px 16px; border-radius: 8px; background: var(--accent); color: #fff; font-weight: 500;
+  padding: 7px 16px; border-radius: 8px; background: var(--accent-solid); color: var(--on-accent); font-weight: 500;
 }
-.primary-btn:hover { background: var(--accent-hover); }
+.primary-btn:hover { background: var(--accent-solid-hover); }
 
 /* ---------- Settings modal ---------- */
 .modal-backdrop {
@@ -395,7 +437,7 @@ kbd {
   display: flex; align-items: center; justify-content: center; z-index: 50;
 }
 .modal {
-  width: 560px; max-width: calc(100vw - 40px); max-height: calc(100vh - 60px);
+  width: 560px; max-width: calc(100vw - 80px); max-height: calc(100vh - 60px);
   overflow-y: auto;
   background: var(--bg-elev); border: 1px solid var(--border);
   border-radius: 14px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
@@ -403,11 +445,12 @@ kbd {
 .modal header {
   display: flex; align-items: center; justify-content: space-between;
   padding: 16px 20px; border-bottom: 1px solid var(--border);
-  position: sticky; top: 0; background: var(--bg-elev);
+  position: sticky; top: 0; z-index: 2; background: var(--bg-elev);
 }
 .modal h2 { margin: 0; font-size: 16px; }
 .modal section { padding: 16px 20px; border-bottom: 1px solid var(--border); }
-.modal h3 { margin: 0 0 6px; font-size: 13px; font-weight: 600; color: var(--text-muted); }
+.modal > section:last-of-type { border-bottom: 0; }
+.modal h3 { margin: 0 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); }
 .muted { color: var(--text-muted); font-size: 13px; margin: 0 0 12px; line-height: 1.5; }
 .modal label { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; font-size: 13px; }
 .modal label > span { color: var(--text-muted); }
@@ -421,7 +464,17 @@ kbd {
 .test-row { display: flex; align-items: center; gap: 10px; margin: -4px 0 14px; font-size: 13px; }
 .test-msg.ok { color: var(--ok); }
 .test-msg.fail { color: var(--danger); }
-.modal footer { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px; }
+/* Pinned to the bottom of the scroller, so Save/Cancel is always reachable. */
+.modal footer {
+  display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px;
+  position: sticky; bottom: 0; z-index: 2;
+  background: var(--bg-elev); border-top: 1px solid var(--border);
+}
+/* Narrow windows: keep a real gutter instead of going nearly full-bleed. */
+@media (max-width: 720px) {
+  .modal { max-width: calc(100vw - 32px); }
+  .modal header, .modal section, .modal footer { padding-left: 14px; padding-right: 14px; }
+}
 
 ::-webkit-scrollbar { width: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 10px; border: 3px solid transparent; background-clip: content-box; }
@@ -461,8 +514,11 @@ kbd {
 .nav { display: flex; flex-direction: column; padding: 0 10px; margin-bottom: 6px; }
 .nav-item { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; color: var(--text-muted); font-size: 13px; }
 .nav-item:hover { background: var(--hover); color: var(--text); }
-.nav-item.active { background: var(--active); color: var(--text); font-weight: 500; }
-.nav-item .count { margin-left: auto; font-size: 11px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.nav-item.active { background: var(--active); color: var(--text); }
+/* --text-faint drops to 3.85:1 over the lighter .active row background. */
+.nav-item .count { margin-left: auto; font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.new-chat { margin-top: 2px; border-top: 1px solid var(--border); border-radius: 0; padding-top: 12px; }
+.new-chat:hover { border-radius: 8px; }
 .icon-btn.on { background: var(--active); color: var(--text); }
 .icon-btn.danger:hover { color: var(--danger); }
 .ghost-btn.danger { color: var(--danger); border-color: rgba(229,72,77,0.4); }
@@ -477,8 +533,14 @@ kbd {
 .ctx-section { padding: 12px 14px; border-bottom: 1px solid var(--border); }
 .ctx-section h4, .node-panel h4 { margin: 0 0 8px; font-size: 11px; font-weight: 600; color: var(--text-faint); }
 .scope-line { display: flex; align-items: center; gap: 8px; }
-.toggle-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; cursor: pointer; }
-.toggle-row input { display: none; }
+.toggle-row { position: relative; display: flex; align-items: center; gap: 10px; padding: 6px 0; cursor: pointer; }
+/* Visually hidden but still focusable and announced: `display: none` dropped the
+   real checkbox out of the tab order and the accessibility tree. */
+.toggle-row input {
+  position: absolute; left: 0; top: 50%;
+  width: 1px; height: 1px; margin: 0;
+  opacity: 0; pointer-events: none;
+}
 .toggle-icon { color: var(--text-muted); }
 .toggle-text { flex: 1; display: flex; flex-direction: column; }
 .toggle-text small { color: var(--text-faint); font-size: 11px; }
@@ -526,7 +588,7 @@ kbd {
 .add-row select, .mem-meta select, .add-inline input, .node-panel select, .node-panel input, .node-panel textarea { background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 7px 10px; outline: 0; }
 .check { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-muted); white-space: nowrap; }
 .tag { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; padding: 2px 7px; border-radius: 10px; background: var(--hover); color: var(--text-muted); }
-.tag.global { background: rgba(59,158,219,0.15); color: #3b9edb; }
+.tag.global { background: rgba(59,158,219,0.15); color: var(--info); }
 button.tag:hover:not(:disabled) { background: var(--active); }
 button.tag:disabled { cursor: default; }
 
@@ -598,12 +660,12 @@ button.tag:disabled { cursor: default; }
 .project-dot { width: 12px; height: 12px; border-radius: 4px; display: inline-block; flex-shrink: 0; background: var(--text-faint); }
 .project-dot.sm { width: 8px; height: 8px; border-radius: 2px; }
 .section-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px 2px 14px; }
-.section-toggle { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; color: var(--text-faint); padding: 2px 0; }
+.section-toggle { display: inline-flex; align-items: center; gap: 5px; min-height: 24px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); padding: 2px 4px 2px 0; }
 .section-toggle:hover { color: var(--text-muted); }
 .section-toggle.static { cursor: default; }
 .section-toggle svg.rot90 { transform: rotate(90deg); }
 .section-toggle svg { transition: transform 0.15s; }
-.icon-btn.sm { width: 22px; height: 22px; }
+.icon-btn.sm { width: 24px; height: 24px; }
 .section-row .ghost { opacity: 0.6; }
 .section-row:hover .ghost { opacity: 1; }
 .project-list { padding: 0 10px; }
@@ -656,8 +718,8 @@ textarea.instructions:focus { border-color: var(--accent); }
 .memory-panel.embedded .memory-body { min-height: 520px; }
 
 /* Segmented split / list / graph switch */
-.seg { display: inline-flex; align-items: center; border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; flex-shrink: 0; }
-.seg button { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; font-size: 12px; color: var(--text-muted); white-space: nowrap; border-right: 1px solid var(--border); }
+.seg { display: flex; align-items: center; border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; }
+.seg button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 24px; padding: 5px 9px; font-size: 12px; color: var(--text-muted); white-space: nowrap; }
 .seg button + button { border-left: 1px solid var(--border-strong); }
 .seg button:last-child { border-right: 0; }
 .seg button:hover { color: var(--text); background: var(--hover); }
@@ -753,7 +815,9 @@ textarea.instructions:focus { border-color: var(--accent); }
 .todo.compact { padding: 5px 6px; background: none; border-radius: 8px; box-shadow: none; }
 .todo.compact:hover { background: var(--hover); }
 .todo.done .todo-title { text-decoration: line-through; color: var(--text-faint); }
-.todo-check { width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid var(--border-strong); display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 2px; color: #fff; }
+.todo-check { position: relative; width: 18px; height: 18px; border-radius: 50%; border: 1.5px solid var(--border-strong); display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 2px; color: #fff; }
+/* Keep the 18px circle, but give it a 24px click/tap target. */
+.todo-check::before { content: ''; position: absolute; top: 50%; left: 50%; width: 24px; height: 24px; transform: translate(-50%, -50%); }
 .todo.p1 .todo-check { border-color: var(--danger); }
 .todo.p3 .todo-check { border-color: var(--text-faint); }
 .todo.done .todo-check { background: var(--ok); border-color: var(--ok); }
@@ -772,7 +836,14 @@ textarea.instructions:focus { border-color: var(--accent); }
 .todo .ghost { opacity: 0; }
 .todo:hover .ghost { opacity: 1; }
 .todo-section { margin-bottom: 10px; }
-.date-input { width: 150px; padding: 8px 10px; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; color-scheme: dark; }
+/* The title input is the flexible one; the date field is fixed. Both selectors above
+   (.add-row > input) also match the date field, hence the explicit flex reset here. */
+.add-row input[type=date], .add-row .date-input { flex: 0 0 150px; width: 150px; }
+.date-input { padding: 8px 10px; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; outline: 0; color-scheme: inherit; }
+.date-input:focus { border-color: var(--accent); }
+input[type=date] { appearance: none; font: inherit; }
+input[type=date]::-webkit-calendar-picker-indicator { opacity: 0.55; cursor: pointer; }
+input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 
 /* ---------- Integrations ---------- */
 .integration { border: 1px solid var(--border); border-radius: 10px; padding: 12px; background: var(--bg-input); }
@@ -811,6 +882,9 @@ textarea.instructions:focus { border-color: var(--accent); }
   }
 }
 .chart-block { margin: 0 0 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-elev); overflow: hidden; }
+/* .code-head's #adbac7 is tuned for the always-dark .code-block; a chart's head
+   sits on --bg-elev, where that grey is 1.98:1 in the light theme. */
+.chart-block .code-head { color: var(--text-muted); }
 .chart-block.placeholder { display: flex; align-items: center; gap: 8px; padding: 14px; color: var(--text-faint); font-size: 12px; }
 .chart-block.error { border-color: rgba(229,72,77,0.5); }
 .chart-block pre { margin: 0; padding: 12px; font-size: 12px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
@@ -917,7 +991,10 @@ textarea.instructions:focus { border-color: var(--accent); }
 .recap .markdown { font-size: 13.5px; }
 
 /* ---------- Kanban ---------- */
-.kanban { flex: 1; display: flex; gap: 12px; padding: 16px 20px; overflow-x: auto; align-items: flex-start; }
+/* Scroll stays inside the board area: the scrollbar sits above the window edge and
+   a trailing spacer keeps the last column off the right edge. */
+.kanban { flex: 1; display: flex; gap: 12px; padding: 16px 20px 8px; margin-bottom: 8px; min-height: 0; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; align-items: flex-start; }
+.kanban::after { content: ''; flex: 0 0 8px; align-self: stretch; }
 .kcol { width: 272px; flex-shrink: 0; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; max-height: 100%; }
 .kcol.over { border-color: var(--accent); }
 .kcol > header { display: flex; align-items: center; gap: 6px; padding: 10px 10px 6px 12px; font-weight: 600; font-size: 13px; }
@@ -948,21 +1025,23 @@ textarea.instructions:focus { border-color: var(--accent); }
 .notice-bar { padding: 8px 16px; font-size: 13px; color: var(--text-muted); background: var(--hover); border-bottom: 1px solid var(--border); }
 .notice-bar.error { color: var(--danger); }
 .cal-scroll { flex: 1; overflow: auto; position: relative; }
-.cal-grid { display: grid; grid-template-columns: 56px repeat(7, 1fr); min-width: 760px; }
+/* minmax(0, 1fr), not 1fr: plain 1fr floors each track at its content width, so a
+   long all-day chip used to stretch its own day column. */
+.cal-grid { display: grid; grid-template-columns: 56px repeat(7, minmax(0, 1fr)); min-width: 760px; }
 .cal-corner, .cal-dayhead, .cal-allday-label, .cal-allday { position: sticky; background: var(--bg); z-index: 2; border-bottom: 1px solid var(--border); }
 .cal-corner, .cal-dayhead { top: 0; }
 .cal-allday-label, .cal-allday { top: 46px; min-height: 26px; }
 .cal-dayhead { height: 46px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 12px; color: var(--text-muted); border-left: 1px solid var(--border); }
 .cal-dayhead .dom { font-size: 18px; color: var(--text); font-weight: 500; }
-.cal-dayhead.today .dom { background: var(--accent); color: #fff; border-radius: 50%; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; }
+.cal-dayhead.today .dom { background: var(--accent-solid); color: var(--on-accent); border-radius: 50%; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; }
 .cal-allday-label { font-size: 10px; color: var(--text-faint); padding: 6px 4px; text-align: right; }
-.cal-allday { border-left: 1px solid var(--border); padding: 3px 4px; display: flex; flex-direction: column; gap: 2px; }
-.cal-chip { font-size: 11px; padding: 2px 6px; border-radius: 4px; background: rgba(59,158,219,0.25); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.cal-allday { border-left: 1px solid var(--border); padding: 3px 4px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cal-chip { font-size: 11px; padding: 2px 6px; border-radius: 4px; background: rgba(59,158,219,0.25); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; min-width: 0; max-width: 100%; }
 .cal-chip.todo { background: var(--hover); color: var(--text-muted); }
 .cal-chip.todo.p1 { color: var(--danger); }
 .cal-hours { position: relative; }
 .cal-hour { font-size: 10px; color: var(--text-faint); text-align: right; padding-right: 6px; transform: translateY(-6px); }
-.cal-col { position: relative; border-left: 1px solid var(--border); }
+.cal-col { position: relative; border-left: 1px solid var(--border); min-width: 0; }
 .cal-col.today { background: rgba(217,119,87,0.03); }
 .cal-line { position: absolute; left: 0; right: 0; border-top: 1px solid var(--border); }
 .cal-now { position: absolute; left: 0; right: 0; border-top: 2px solid var(--accent); z-index: 1; }
@@ -980,8 +1059,13 @@ textarea.instructions:focus { border-color: var(--accent); }
 .dw-composer textarea { flex: 1; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 10px; padding: 10px 12px; outline: 0; font: inherit; resize: vertical; }
 .dw-composer textarea:focus { border-color: var(--accent); }
 .src-picker { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
-.chip-check { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 12px; border: 1px solid var(--border-strong); font-size: 12px; cursor: pointer; color: var(--text-muted); }
-.chip-check input { display: none; }
+.chip-check { position: relative; display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 12px; border: 1px solid var(--border-strong); font-size: 12px; cursor: pointer; color: var(--text-muted); }
+/* Same fix as .toggle-row input: hidden, but still focusable and announced. */
+.chip-check input {
+  position: absolute; left: 0; top: 50%;
+  width: 1px; height: 1px; margin: 0;
+  opacity: 0; pointer-events: none;
+}
 .chip-check.on { border-color: var(--accent); color: var(--text); background: rgba(217,119,87,0.12); }
 .dgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
 .dwidget { border: 1px solid var(--border); border-radius: 12px; background: var(--bg-elev); display: flex; flex-direction: column; overflow: hidden; }
@@ -1021,9 +1105,12 @@ textarea.instructions:focus { border-color: var(--accent); }
 .usage-sub { margin: 18px 0 4px; font-size: 12px; font-weight: 600; color: var(--text-faint); }
 .usage-prices { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-top: 8px; }
 .usage-prices table { width: 100%; border-collapse: collapse; font-size: 12px; }
-.usage-prices th { text-align: left; padding: 6px 10px; color: var(--text-faint); font-weight: 600; background: var(--hover); font-size: 11px; }
+/* --text-faint is only 4.01:1 over the --hover header fill. */
+.usage-prices th { text-align: left; padding: 6px 10px; color: var(--text-muted); font-weight: 600; background: var(--hover); font-size: 11px; }
 .usage-prices td { padding: 4px 10px; border-top: 1px solid var(--border); }
-.usage-prices td.mono { font-family: var(--mono); font-size: 11px; }
+/* Row headers carry the model name: semantics of a th, appearance of a td. */
+.usage-prices th[scope='row'] { padding: 4px 10px; border-top: 1px solid var(--border); background: none; color: inherit; font-weight: 400; }
+.usage-prices td.mono, .usage-prices th.mono { font-family: var(--mono); font-size: 11px; }
 .usage-prices input { width: 92px; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 6px; padding: 3px 6px; font-size: 12px; outline: 0; font-variant-numeric: tabular-nums; }
 .usage-price-src { font-size: 10px; color: var(--text-faint); text-align: right; }
 .usage-prices .test-row { padding: 8px 10px; border-top: 1px solid var(--border); }
@@ -1231,3 +1318,69 @@ textarea.instructions:focus { border-color: var(--accent); }
 .act-indicator.paused { color: var(--warn); background: rgba(254,188,46,0.1); }
 .act-indicator.paused:hover { background: rgba(254,188,46,0.18); }
 .act-indicator.paused .act-dot { background: var(--warn); }
+/* ---------- Form controls (one select treatment everywhere) ---------- */
+/* .model-picker draws its own chevron in markup, so it stays out of these lists. */
+.add-row select, .node-panel select, .modal select {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='7' viewBox='0 0 10 7' fill='none' stroke='%238f8d86' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1.5l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  background-size: 10px 7px;
+  padding-right: 26px;
+  cursor: pointer;
+}
+.mem-meta select, .tool-perms.compact select, .todo-prio, .dw-width {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='7' viewBox='0 0 10 7' fill='none' stroke='%238f8d86' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1.5l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 5px center;
+  background-size: 8px 6px;
+  padding-right: 17px;
+  cursor: pointer;
+}
+/* Guard: a .model-picker select nested in one of the containers above keeps its
+   markup chevron and never gets a second painted one. */
+.model-picker select { background-image: none; }
+
+/* ---------- Focus ---------- */
+/* Most inputs above zero out `outline`; one authoritative keyboard ring beats them
+   all without re-listing every selector (and stays off mouse clicks). */
+a:focus-visible,
+button:focus-visible,
+summary:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[role='button']:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--focus-ring) !important;
+  outline-offset: 2px;
+}
+/* The real checkbox is visually hidden, so the ring goes on the switch it drives. */
+.toggle-row input:focus-visible { outline: 0 !important; }
+.toggle-row input:focus-visible + .switch {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+/* Its checkbox is hidden too, so the ring goes on the chip itself. */
+.chip-check input:focus-visible { outline: 0 !important; }
+.chip-check:has(input:focus-visible) {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* ---------- Reduced motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0s !important;
+    scroll-behavior: auto !important;
+  }
+  /* Indefinite loops read as static instead of flashing once. */
+  .pulse, .thinking span, .cursor, .spin, .trace-row.running .trace-bar, .toast {
+    animation: none !important;
+    opacity: 1;
+  }
+}

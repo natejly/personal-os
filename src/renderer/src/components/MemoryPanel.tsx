@@ -60,7 +60,7 @@ export default function MemoryPanel({ projectId, embedded = false }: { projectId
     return (
       <div className="memory-panel embedded">
         <div className="memory-toolbar">
-          <span className="muted small">{memories.length} memories · {graph.nodes.length} entities, {graph.edges.length} relations</span>
+          <span className="muted small">{memories.length} memor{memories.length === 1 ? 'y' : 'ies'} · {graph.nodes.length} entit{graph.nodes.length === 1 ? 'y' : 'ies'}, {graph.edges.length} relation{graph.edges.length === 1 ? '' : 's'}</span>
           <div className="toolbar-right">{search}{modeToggle}</div>
         </div>
         {body}
@@ -71,8 +71,8 @@ export default function MemoryPanel({ projectId, embedded = false }: { projectId
   return (
     <main className="page memory-panel">
       <header className="page-header drag">
-        {!sidebarOpen && <button className="icon-btn no-drag" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
-        <h2><Brain size={16} /> Memory <span className="muted">· {memories.length} memories, {graph.nodes.length} entities</span></h2>
+        {!sidebarOpen && <button className="icon-btn no-drag" aria-label="Show sidebar" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
+        <h2><Brain size={16} /> Memory <span className="muted">· {memories.length} memor{memories.length === 1 ? 'y' : 'ies'}, {graph.nodes.length} entit{graph.nodes.length === 1 ? 'y' : 'ies'}</span></h2>
         <div className="no-drag header-right">
           <ScopeSelect value={libraryScope} onChange={(s) => void setLibraryScope(s)} />
           {search}

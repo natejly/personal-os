@@ -25,7 +25,7 @@ function MemoryRow({ m, showProject }: { m: Memory; showProject: boolean }): JSX
           <p onClick={() => setEditing(true)} title="Click to edit">{m.content}</p>
         )}
         <div className="mem-meta">
-          <select value={m.kind} onChange={(e) => void updateMemory(m.id, { kind: e.target.value })}>{KINDS.map((k) => <option key={k}>{k}</option>)}</select>
+          <select aria-label="Memory kind" value={m.kind} onChange={(e) => void updateMemory(m.id, { kind: e.target.value })}>{KINDS.map((k) => <option key={k}>{k}</option>)}</select>
           <span className="tag" title={m.source === 'auto' ? 'Extracted automatically' : 'Added by you'}>{m.source === 'auto' ? <Wand2 size={10} /> : <User size={10} />}{m.source}</span>
           {showProject && <ProjectChip projectId={m.project_id} showPersonal />}
           {m.project_id && <button className="link small" title="Make this memory available in every chat" onClick={() => void updateMemory(m.id, { move_to_global: true })}>make personal</button>}
@@ -33,8 +33,8 @@ function MemoryRow({ m, showProject }: { m: Memory; showProject: boolean }): JSX
         </div>
       </div>
       <div className="mem-actions">
-        <button className="icon-btn" title={m.pinned ? 'Unpin' : 'Pin (always in context)'} onClick={() => void updateMemory(m.id, { pinned: !m.pinned })}>{m.pinned ? <PinOff size={14} /> : <Pin size={14} />}</button>
-        <button className="icon-btn danger" title="Forget" onClick={() => void deleteMemory(m.id)}><Trash2 size={14} /></button>
+        <button className="icon-btn" aria-label={m.pinned ? `Unpin memory: ${m.content.slice(0, 60)}` : `Pin memory (always in context): ${m.content.slice(0, 60)}`} title={m.pinned ? 'Unpin' : 'Pin (always in context)'} onClick={() => void updateMemory(m.id, { pinned: !m.pinned })}>{m.pinned ? <PinOff size={14} /> : <Pin size={14} />}</button>
+        <button className="icon-btn danger" aria-label={`Forget memory: ${m.content.slice(0, 60)}`} title="Forget" onClick={() => void deleteMemory(m.id)}><Trash2 size={14} /></button>
       </div>
     </div>
   )
@@ -66,7 +66,7 @@ export default function MemoryView({ projectId, query = '' }: { projectId?: stri
     <div className="page-body mem-body">
       <div className="add-row">
         <input placeholder={`Remember something${targetProject ? ' in this project' : ''}…`} value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void add()} />
-        <select value={kind} onChange={(e) => setKind(e.target.value)}>{KINDS.map((k) => <option key={k}>{k}</option>)}</select>
+        <select aria-label="Kind for the new memory" value={kind} onChange={(e) => setKind(e.target.value)}>{KINDS.map((k) => <option key={k}>{k}</option>)}</select>
         <button className="primary-btn" onClick={() => void add()} disabled={!draft.trim()}><Plus size={14} /> Add</button>
       </div>
       <p className="muted small">

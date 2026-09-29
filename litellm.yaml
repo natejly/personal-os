@@ -1,0 +1,58 @@
+# LiteLLM proxy config for Personal OS, routing to Fireworks AI.
+# Start with:  ./scripts/litellm.sh   (reads .env)
+# The model_name on the left is what you pick inside the app. Add any other provider
+# here (openai/, anthropic/, gemini/, ollama/ ...) and it shows up automatically.
+# Catalog checked against https://api.fireworks.ai/inference/v1/models on 2026-09-29.
+model_list:
+  - model_name: kimi-k3
+    litellm_params:
+      model: fireworks_ai/accounts/fireworks/models/kimi-k3
+      api_key: os.environ/FIREWORKS_API_KEY
+  - model_name: kimi-k3-fast          # Fireworks "fast" router of the same model
+    litellm_params:
+      model: fireworks_ai/accounts/fireworks/routers/kimi-k3-fast
+      api_key: os.environ/FIREWORKS_API_KEY
+  - model_name: deepseek-v4-pro
+    litellm_params:
+      model: fireworks_ai/accounts/fireworks/models/deepseek-v4-pro
+      api_key: os.environ/FIREWORKS_API_KEY
+  - model_name: deepseek-v4-flash     # cheap + fast: default for auto-learn extraction
+    litellm_params:
+      model: fireworks_ai/accounts/fireworks/models/deepseek-v4p1-flash
+      api_key: os.environ/FIREWORKS_API_KEY
+  - model_name: qwen3.8-max
+    litellm_params:
+      model: fireworks_ai/accounts/fireworks/models/qwen3p8-max
+      api_key: os.environ/FIREWORKS_API_KEY
+  - model_name: glm-5.3
+    litellm_params:
+      model: fireworks_ai/accounts/fireworks/models/glm-5p3
+      api_key: os.environ/FIREWORKS_API_KEY
+  - model_name: glm-5.3-flash
+    litellm_params:
+      model: fireworks_ai/accounts/fireworks/models/glm-5p3-flash
+      api_key: os.environ/FIREWORKS_API_KEY
+  - model_name: minimax-m3
+    litellm_params:
+      model: fireworks_ai/accounts/fireworks/models/minimax-m3
+      api_key: os.environ/FIREWORKS_API_KEY
+  - model_name: gpt-oss-120b
+    litellm_params:
+      model: fireworks_ai/accounts/fireworks/models/gpt-oss-120b
+      api_key: os.environ/FIREWORKS_API_KEY
+  - model_name: kimi-k2.7-code
+    litellm_params:
+      model: fireworks_ai/accounts/fireworks/models/kimi-k2p7-code
+      api_key: os.environ/FIREWORKS_API_KEY
+  # Embeddings + reranking (for hybrid retrieval; see docs/research.md)
+  - model_name: qwen3-embedding-8b
+    litellm_params:
+      model: fireworks_ai/accounts/fireworks/models/qwen3-embedding-8b
+      api_key: os.environ/FIREWORKS_API_KEY
+      mode: embedding
+
+litellm_settings:
+  drop_params: true
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY

@@ -1,0 +1,14 @@
+node_modules
+out
+dist
+.DS_Store
+*.log
+backend/.venv
+backend/data
+backend/**/__pycache__
+backend/*.egg-info
+.env
+data/
+
+# build info
+*.tsbuildinfo

@@ -1,0 +1,158 @@
+import { useEffect, useMemo, useState } from 'react'
+import { X, Brain, Share2, FileText, Wand2, Eye, Globe, Wrench, Activity } from 'lucide-react'
+import { ToolOverrides } from './ToolPermissions'
+import TraceView from './TraceView'
+import { useStore, useProject } from '../store'
+import { api } from '../lib/api'
+import type { ContextUsed, ConversationSettings } from '@shared/types'
+
+function Toggle({ label, hint, value, onChange, icon }: { label: string; hint: string; value: boolean; onChange: (v: boolean) => void; icon: JSX.Element }): JSX.Element {
+  return (
+    <label className="toggle-row">
+      <span className="toggle-icon">{icon}</span>
+      <span className="toggle-text"><b>{label}</b><small>{hint}</small></span>
+      <input type="checkbox" checked={value} onChange={(e) => onChange(e.target.checked)} />
+      <span className="switch" />
+    </label>
+  )
+}
+
+function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
+  const { setView, openMemory, memories } = useStore()
+  const [showPrompt, setShowPrompt] = useState(false)
+  const has = ctx.memories.length + ctx.nodes.length + ctx.chunks.length > 0
+  return (
+    <div className="ctx-used">
+      <div className="ctx-meta">
+        ~{ctx.tokens_estimate} tokens of context
+        <button className="link" onClick={() => setShowPrompt((v) => !v)}>{showPrompt ? 'hide' : 'view full system prompt'}</button>
+      </div>
+      {showPrompt && <pre className="ctx-prompt">{ctx.system_prompt}</pre>}
+      {!has && <p className="muted">Nothing from memory, graph, or documents was relevant.</p>}
+      {ctx.memories.length > 0 && (
+        <section>
+          <h5><Brain size={12} /> Memories ({ctx.memories.length}) <button className="link" onClick={() => openMemory('list')}>edit</button></h5>
+          <ul>{ctx.memories.map((m) => <li key={m.id} className={memories.some((x) => x.id === m.id) ? '' : 'stale'}>{m.project_id ? '' : <Globe size={10} />} {m.content}</li>)}</ul>
+        </section>
+      )}
+      {ctx.nodes.length > 0 && (
+        <section>
+          <h5><Share2 size={12} /> Graph ({ctx.nodes.length} entities, {ctx.edges.length} relations) <button className="link" onClick={() => openMemory('graph')}>edit</button></h5>
+          <ul>
+            {ctx.edges.map((e) => {
+              const s = ctx.nodes.find((n) => n.id === e.source_id)?.label
+              const t = ctx.nodes.find((n) => n.id === e.target_id)?.label
+              return <li key={e.id}>{s} <em>{e.relation}</em> {t}</li>
+            })}
+            {ctx.nodes.filter((n) => !ctx.edges.some((e) => e.source_id === n.id || e.target_id === n.id)).map((n) => <li key={n.id}>{n.label} <small>({n.type})</small></li>)}
+          </ul>
+        </section>
+      )}
+      {ctx.chunks.length > 0 && (
+        <section>
+          <h5><FileText size={12} /> Documents ({ctx.chunks.length} excerpts) <button className="link" onClick={() => setView('documents')}>manage</button></h5>
+          <ul>{ctx.chunks.map((c) => <li key={c.chunk_id}><b>{c.name}</b> · chunk {c.idx + 1}<div className="chunk-preview">{c.text}</div></li>)}</ul>
+        </section>
+      )}
+    </div>
+  )
+}
+
+export default function ContextDrawer(): JSX.Element {
+  const convo = useStore((s) => s.active)
+  const draftProjectId = useStore((s) => s.draftProjectId)
+  const settings = useStore((s) => s.settings)
+  const projectId = convo?.project_id ?? draftProjectId
+  const project = useProject(projectId)
+  const { toggleContext, setChatSettings, openProject, setContextTab: setTab } = useStore()
+  const tab = useStore((s) => s.contextTab)
+  const traceMessageId = useStore((s) => s.traceMessageId)
+  const streaming = useStore((s) => s.streaming)
+  const [query, setQuery] = useState('')
+  const [preview, setPreview] = useState<ContextUsed | null>(null)
+
+  const cs: ConversationSettings = convo?.settings ?? { useMemory: true, useGraph: true, useDocuments: true, autoLearn: true, useTools: true, tools: {} }
+  const [toolsOpen, setToolsOpen] = useState(false)
+  const allTools = useStore((s) => s.tools)
+  const norm = (v: unknown, fb: 'on' | 'ask' | 'off'): 'on' | 'ask' | 'off' => (v === true ? 'on' : v === false ? 'off' : v === 'on' || v === 'ask' || v === 'off' ? v : fb)
+  const projectBase = Object.fromEntries(allTools.map((t) => {
+    const g = norm(settings.tools?.[t.name], t.default_mode)
+    const p = project?.tools?.[t.name] ?? 'inherit'
+    return [t.name, p === 'inherit' ? g : norm(p, g)]
+  }))
+  const lastCtx = useMemo(() => {
+    const ms = convo?.messages ?? []
+    for (let i = ms.length - 1; i >= 0; i--) if (ms[i].context_used) return ms[i].context_used
+    return null
+  }, [convo?.messages])
+  const traceMsg = useMemo(() => {
+    const ms = convo?.messages ?? []
+    const picked = traceMessageId ? ms.find((m) => m.id === traceMessageId) : undefined
+    if (picked?.trace?.length) return picked
+    for (let i = ms.length - 1; i >= 0; i--) if (ms[i].trace?.length) return ms[i]
+    return null
+  }, [convo?.messages, traceMessageId])
+
+  useEffect(() => {
+    if (tab !== 'preview') return
+    const t = setTimeout(() => {
+      void api.contextPreview(projectId, query, cs).then(setPreview).catch(() => setPreview(null))
+    }, 300)
+    return () => clearTimeout(t)
+  }, [tab, query, projectId, cs.useMemory, cs.useGraph, cs.useDocuments])
+
+  return (
+    <aside className="context-drawer">
+      <header>
+        <h3>Context</h3>
+        <button className="icon-btn" onClick={toggleContext}><X size={16} /></button>
+      </header>
+
+      <section className="ctx-section">
+        <h4>Scope</h4>
+        <div className="scope-line">
+          <span className="project-dot sm" style={{ background: project?.color ?? 'var(--text-faint)' }} />
+          <span>{project ? `${project.name} + personal` : 'Personal'}</span>
+          {project && <button className="link" onClick={() => openProject(project.id)}>open project</button>}
+        </div>
+      </section>
+
+      <section className="ctx-section">
+        <h4>{convo ? 'This chat uses' : 'New chats use'}</h4>
+        <Toggle icon={<Brain size={14} />} label="Memory" hint="Pinned, recent and matching memories" value={cs.useMemory} onChange={(v) => void setChatSettings({ useMemory: v })} />
+        <Toggle icon={<Share2 size={14} />} label="Knowledge graph" hint="Entities mentioned + their neighbours" value={cs.useGraph} onChange={(v) => void setChatSettings({ useGraph: v })} />
+        <Toggle icon={<FileText size={14} />} label="Documents" hint="Best matching excerpts (full-text search)" value={cs.useDocuments} onChange={(v) => void setChatSettings({ useDocuments: v })} />
+        <Toggle icon={<Wand2 size={14} />} label="Auto-learn" hint={settings.autoLearn ? 'Extract memories & graph after each reply' : 'Disabled globally in settings'} value={cs.autoLearn && settings.autoLearn} onChange={(v) => void setChatSettings({ autoLearn: v })} />
+        <Toggle icon={<Wrench size={14} />} label="Tools" hint="Web, documents, memory, graph, todos, boards, Python… External actions ask first." value={cs.useTools} onChange={(v) => void setChatSettings({ useTools: v })} />
+        {cs.useTools && (
+          <div className="ctx-tools">
+            <button className="link small" onClick={() => setToolsOpen((o) => !o)}>{toolsOpen ? 'hide per-tool overrides' : 'per-tool overrides…'}</button>
+            {toolsOpen && <ToolOverrides value={cs.tools ?? {}} onChange={(tools) => void setChatSettings({ tools })} effectiveBase={projectBase} compact />}
+          </div>
+        )}
+        {!convo && <p className="muted small">Toggles apply per chat once it exists.</p>}
+      </section>
+
+      <div className="ctx-tabs">
+        <button className={tab === 'last' ? 'active' : ''} onClick={() => setTab('last')}>Last reply</button>
+        <button className={tab === 'preview' ? 'active' : ''} onClick={() => setTab('preview')}><Eye size={12} /> Preview</button>
+        <button className={tab === 'trace' ? 'active' : ''} onClick={() => setTab('trace')}><Activity size={12} /> Trace</button>
+      </div>
+
+      {tab === 'last' ? (
+        lastCtx ? <ContextUsedView ctx={lastCtx} /> : <p className="muted ctx-empty">Send a message to see what context was injected.</p>
+      ) : tab === 'trace' ? (
+        traceMsg ? (
+          <TraceView spans={traceMsg.trace ?? []} live={streaming?.messageId === traceMsg.id} model={traceMsg.model} />
+        ) : (
+          <p className="muted ctx-empty">Send a message to see its execution trace: context assembly, each model call, tool calls and auto-learn, with timings and token counts.</p>
+        )
+      ) : (
+        <div className="ctx-preview">
+          <input placeholder="Type a draft message to preview what would be retrieved…" value={query} onChange={(e) => setQuery(e.target.value)} />
+          {preview && <ContextUsedView ctx={preview} />}
+        </div>
+      )}
+    </aside>
+  )
+}

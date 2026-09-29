@@ -1,0 +1,152 @@
+import { useEffect, useState } from 'react'
+import { Calendar, Mail, CheckSquare, Brain, FolderKanban, Sparkles, RefreshCw, PanelLeftOpen, ExternalLink, Plus, MessageSquare } from 'lucide-react'
+import { useStore } from '../store'
+import TodoItem from './TodoItem'
+import ProjectChip from './ProjectChip'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+
+function greeting(): string {
+  const h = new Date().getHours()
+  return h < 5 ? 'Still up?' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'
+}
+const fmtTime = (iso: string, allDay: boolean): string => (allDay ? 'All day' : new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }))
+const dayKey = (iso: string): string => new Date(iso.length === 10 ? iso + 'T00:00:00' : iso).toDateString()
+const fromName = (s: string | null): string => (s ?? '').replace(/<.*>/, '').replace(/"/g, '').trim() || (s ?? '')
+
+export default function HomeView(): JSX.Element {
+  const d = useStore((s) => s.dashboard)
+  const google = useStore((s) => s.google)
+  const sidebarOpen = useStore((s) => s.sidebarOpen)
+  const { toggleSidebar, refreshDashboard, setView, newChat, send, openProject, selectChat, addTodo, setSettingsOpen, refreshRecap } = useStore()
+  const recap = useStore((s) => s.recap)
+  const recapLoading = useStore((s) => s.recapLoading)
+  const [recapOpen, setRecapOpen] = useState(true)
+  const [quick, setQuick] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  useEffect(() => { void refreshDashboard() }, [refreshDashboard])
+
+  const brief = async (): Promise<void> => {
+    newChat(null)
+    await send('Give me my daily brief: check my calendar for today and tomorrow, scan unread email for anything that needs a reply, list my open todos (flag overdue ones), and end with the 3 things I should do first. Be concise and use headers.')
+  }
+  const refresh = async (): Promise<void> => { setBusy(true); await refreshDashboard(); setBusy(false) }
+  const quickAdd = async (): Promise<void> => {
+    if (!quick.trim()) return
+    await addTodo({ title: quick })
+    setQuick('')
+  }
+
+  const today = new Date().toDateString()
+  const events = d?.calendar ?? []
+  const todayEvents = events.filter((e) => dayKey(e.start) === today)
+  const laterEvents = events.filter((e) => dayKey(e.start) !== today)
+
+  return (
+    <main className="page home">
+      <header className="page-header drag">
+        {!sidebarOpen && <button className="icon-btn no-drag" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
+        <h2><Sparkles size={16} /> Today <span className="muted">· {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</span></h2>
+        <div className="no-drag header-right">
+          <button className="icon-btn" title="Refresh" onClick={() => void refresh()}><RefreshCw size={15} className={busy ? 'spin' : ''} /></button>
+          <button className="primary-btn" onClick={() => void brief()}><Sparkles size={14} /> Brief me</button>
+        </div>
+      </header>
+      <div className="page-body wide">
+        <div className="home-hero">
+          <h1>{greeting()}.</h1>
+          <div className="quick-ask">
+            <MessageSquare size={16} />
+            <input placeholder="Ask anything, or type a todo and press ⌘↵…" value={quick} onChange={(e) => setQuick(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void quickAdd() }
+                else if (e.key === 'Enter' && quick.trim()) { e.preventDefault(); const q = quick; setQuick(''); newChat(null); void send(q) }
+              }} />
+            <button className="ghost-btn" onClick={() => void quickAdd()} disabled={!quick.trim()} title="Add as todo (⌘↵)"><Plus size={13} /> Todo</button>
+          </div>
+        </div>
+
+        {(recap?.content || recapLoading) && recapOpen && (
+          <section className="recap">
+            <header><Sparkles size={14} /> Daily recap <span className="muted small">{recap?.cached ? 'generated earlier today' : 'fresh'}</span>
+              <span style={{ flex: 1 }} />
+              <button className="icon-btn sm" title="Regenerate" onClick={() => void refreshRecap(true)}><RefreshCw size={13} className={recapLoading ? 'spin' : ''} /></button>
+              <button className="icon-btn sm" title="Hide" onClick={() => setRecapOpen(false)}>×</button>
+            </header>
+            {recapLoading && !recap?.content ? <p className="muted">Writing your recap…</p> : <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{recap?.content ?? ''}</ReactMarkdown></div>}
+          </section>
+        )}
+        <div className="widgets">
+          <section className="widget">
+            <header><Calendar size={14} /> Calendar {google?.connected && <span className="muted small">next 48h</span>}</header>
+            {!google?.connected ? (
+              <div className="widget-empty">
+                <p>Connect Google to see your calendar, triage email, and let the assistant schedule things.</p>
+                <button className="primary-btn" onClick={() => setSettingsOpen(true)}>Connect Google</button>
+              </div>
+            ) : d?.errors.calendar ? <p className="msg-error">{d.errors.calendar}</p> : events.length === 0 ? <p className="muted">Nothing scheduled.</p> : (
+              <ul className="events">
+                {todayEvents.map((e) => (
+                  <li key={e.id}><span className="ev-time">{fmtTime(e.start, e.all_day)}</span><span className="ev-title">{e.summary}</span>{e.link && <a href={e.link} target="_blank" rel="noreferrer" className="icon-btn ghost sm"><ExternalLink size={11} /></a>}</li>
+                ))}
+                {laterEvents.length > 0 && <li className="ev-sep">Tomorrow</li>}
+                {laterEvents.map((e) => (
+                  <li key={e.id}><span className="ev-time">{fmtTime(e.start, e.all_day)}</span><span className="ev-title">{e.summary}</span></li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section className="widget">
+            <header><CheckSquare size={14} /> Todos <span className="muted small">{d?.todo_stats.open ?? 0} open{d?.todo_stats.overdue ? ` · ${d.todo_stats.overdue} overdue` : ''}</span><button className="link small" onClick={() => setView('todos')}>all</button></header>
+            {(d?.todos.length ?? 0) === 0 ? <p className="muted">All clear. Add one above.</p> : d!.todos.slice(0, 8).map((t) => <TodoItem key={t.id} todo={t} compact />)}
+          </section>
+
+          <section className="widget">
+            <header><Mail size={14} /> Inbox {google?.connected && <span className="muted small">unread, 3 days</span>}</header>
+            {!google?.connected ? <p className="muted">Connect Google to see unread mail here.</p> : d?.errors.gmail ? <p className="msg-error">{d.errors.gmail}</p> : (d?.gmail?.length ?? 0) === 0 ? <p className="muted">Inbox zero.</p> : (
+              <ul className="mails">
+                {d!.gmail!.slice(0, 8).map((m) => (
+                  <li key={m.id} onClick={() => { newChat(null); void send(`Summarize this email and suggest a reply if one is needed. Gmail message id: ${m.id} (subject: ${m.subject})`) }} title="Ask the assistant about this email">
+                    <span className="mail-from">{fromName(m.from)}</span>
+                    <span className="mail-subject">{m.subject || '(no subject)'}</span>
+                    <span className="mail-snippet">{m.snippet}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section className="widget">
+            <header><FolderKanban size={14} /> Projects</header>
+            {(d?.projects.length ?? 0) === 0 ? <p className="muted">No projects yet.</p> : (
+              <ul className="proj-list">
+                {d!.projects.map((p) => (
+                  <li key={p.id} onClick={() => openProject(p.id)}>
+                    <span className="project-dot" style={{ background: p.color }} /><span className="ev-title">{p.name}</span>
+                    <span className="muted small">{p.stats?.conversations ?? 0} chats · {p.stats?.documents ?? 0} docs</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section className="widget">
+            <header><Brain size={14} /> Recently learned <button className="link small" onClick={() => setView('memory')}>all</button></header>
+            {(d?.recent_memories.length ?? 0) === 0 ? <p className="muted">Nothing yet. Chat with auto-learn on.</p> : (
+              <ul className="mem-list">{d!.recent_memories.map((m) => <li key={m.id}>{m.content} <ProjectChip projectId={m.project_id} clickable={false} /></li>)}</ul>
+            )}
+          </section>
+
+          <section className="widget">
+            <header><MessageSquare size={14} /> Recent chats</header>
+            {(d?.recent_conversations.length ?? 0) === 0 ? <p className="muted">No chats yet.</p> : (
+              <ul className="proj-list">{d!.recent_conversations.map((c) => <li key={c.id} onClick={() => void selectChat(c.id)}><span className="ev-title">{c.title}</span><ProjectChip projectId={c.project_id} clickable={false} /></li>)}</ul>
+            )}
+          </section>
+        </div>
+      </div>
+    </main>
+  )
+}

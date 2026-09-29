@@ -1,0 +1,162 @@
+"""Provider-agnostic LLM access through a LiteLLM proxy (OpenAI-compatible API)."""
+from __future__ import annotations
+
+import json
+import time
+from contextvars import ContextVar
+from typing import Any, AsyncIterator, Callable
+
+import httpx
+
+# Usage accounting. The app registers a listener; callers that know the chat/project set usage_context.
+UsageListener = Callable[[dict[str, Any]], None]
+_usage_listeners: list[UsageListener] = []
+usage_context: ContextVar[dict[str, Any]] = ContextVar("usage_context", default={})
+
+
+def on_usage(fn: UsageListener) -> None:
+    _usage_listeners.append(fn)
+
+
+def _emit_usage(model: str, kind: str, usage: dict[str, Any] | None, duration_ms: int, prompt_chars: int, completion_chars: int) -> None:
+    est = not usage or usage.get("prompt_tokens") is None
+    rec = {
+        "model": model, "kind": kind, "duration_ms": duration_ms, "estimated": est,
+        "prompt_tokens": int((usage or {}).get("prompt_tokens") or prompt_chars // 4),
+        "completion_tokens": int((usage or {}).get("completion_tokens") or completion_chars // 4),
+        **usage_context.get(),
+    }
+    for fn in _usage_listeners:
+        try:
+            fn(rec)
+        except Exception:  # noqa: BLE001 - accounting must never break a reply
+            pass
+
+DEFAULT_SETTINGS: dict[str, Any] = {
+    "baseUrl": "http://localhost:4000",
+    "apiKey": "",
+    "defaultModel": "gpt-4o",
+    "systemPrompt": (
+        "You are the assistant inside the user's personal AI OS. Be direct, concise, and useful. "
+        "Use markdown when it helps. You may be given memories, a knowledge graph, and document "
+        "excerpts as context; use them when relevant and don't mention them unless asked."
+    ),
+    "extractionModel": "",
+    "autoLearn": True,
+    "theme": "dark",
+    # tools: {tool_name: bool}; missing = on
+    "tools": {},
+    "maxToolRounds": 8,
+    "braveApiKey": "",
+    "tavilyApiKey": "",
+    # {model: {"input": $/M tokens, "output": $/M tokens}} overrides for cost accounting (proxy prices are used otherwise)
+    "modelPrices": {},
+    "googleClientId": "",
+    "googleClientSecret": "",
+    "googleToken": {},
+}
+
+
+class LLMError(Exception):
+    pass
+
+
+def _base(settings: dict[str, Any]) -> str:
+    return str(settings.get("baseUrl") or DEFAULT_SETTINGS["baseUrl"]).rstrip("/")
+
+
+def _headers(settings: dict[str, Any]) -> dict[str, str]:
+    h = {"Content-Type": "application/json"}
+    if settings.get("apiKey"):
+        h["Authorization"] = f"Bearer {settings['apiKey']}"
+    return h
+
+
+async def list_models(settings: dict[str, Any]) -> list[dict[str, str]]:
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(f"{_base(settings)}/v1/models", headers=_headers(settings))
+    if r.status_code >= 400:
+        raise LLMError(f"{r.status_code}: {r.text[:300]}")
+    data = r.json().get("data", [])
+    return sorted(({"id": m["id"]} for m in data if "id" in m), key=lambda m: m["id"])
+
+
+async def stream_chat(
+    settings: dict[str, Any], model: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None, kind: str = "chat"
+) -> AsyncIterator[dict[str, Any]]:
+    """Stream a chat completion.
+
+    Yields {"type": "delta", "text": str} for content, and finally
+    {"type": "end", "finish_reason": str|None, "tool_calls": [{"id","name","arguments"}], "usage": {...}|None}.
+    """
+    body: dict[str, Any] = {"model": model, "messages": messages, "stream": True, "stream_options": {"include_usage": True}}
+    if tools:
+        body["tools"] = tools
+        body["tool_choice"] = "auto"
+    calls: dict[int, dict[str, Any]] = {}
+    finish: str | None = None
+    usage: dict[str, Any] | None = None
+    t0 = time.time()
+    out_chars = 0
+    async with httpx.AsyncClient(timeout=httpx.Timeout(10, read=None)) as client:
+        async with client.stream(
+            "POST",
+            f"{_base(settings)}/v1/chat/completions",
+            headers=_headers(settings),
+            json=body,
+        ) as r:
+            if r.status_code >= 400:
+                body = (await r.aread()).decode("utf-8", "replace")
+                raise LLMError(f"{r.status_code} {r.reason_phrase}: {body[:500]}")
+            async for line in r.aiter_lines():
+                line = line.strip()
+                if not line.startswith("data:"):
+                    continue
+                data = line[5:].strip()
+                if data == "[DONE]":
+                    break
+                try:
+                    obj = json.loads(data)
+                except ValueError:
+                    continue
+                if obj.get("error"):
+                    err = obj["error"]
+                    raise LLMError(err.get("message") if isinstance(err, dict) else str(err))
+                if isinstance(obj.get("usage"), dict):
+                    usage = {k: obj["usage"].get(k) for k in ("prompt_tokens", "completion_tokens", "total_tokens") if obj["usage"].get(k) is not None}
+                choice = (obj.get("choices") or [{}])[0]
+                delta = choice.get("delta") or {}
+                if delta.get("content"):
+                    out_chars += len(delta["content"])
+                    yield {"type": "delta", "text": delta["content"]}
+                for tc in delta.get("tool_calls") or []:
+                    idx = tc.get("index", 0)
+                    cur = calls.setdefault(idx, {"id": tc.get("id") or f"call_{idx}", "name": "", "arguments": ""})
+                    if tc.get("id"):
+                        cur["id"] = tc["id"]
+                    fn = tc.get("function") or {}
+                    if fn.get("name"):
+                        cur["name"] += fn["name"]
+                    if fn.get("arguments"):
+                        cur["arguments"] += fn["arguments"]
+                if choice.get("finish_reason"):
+                    finish = choice["finish_reason"]
+    _emit_usage(model, kind, usage, int((time.time() - t0) * 1000), len(json.dumps(messages)), out_chars + sum(len(c["arguments"]) for c in calls.values()))
+    yield {"type": "end", "finish_reason": finish, "tool_calls": [calls[i] for i in sorted(calls)], "usage": usage}
+
+
+async def complete(settings: dict[str, Any], model: str, messages: list[dict[str, str]], kind: str = "learn") -> str:
+    """Non-streaming completion (used for extraction)."""
+    t0 = time.time()
+    async with httpx.AsyncClient(timeout=120) as client:
+        r = await client.post(
+            f"{_base(settings)}/v1/chat/completions",
+            headers=_headers(settings),
+            json={"model": model, "messages": messages, "stream": False},
+        )
+    if r.status_code >= 400:
+        raise LLMError(f"{r.status_code}: {r.text[:500]}")
+    data = r.json()
+    text = data["choices"][0]["message"]["content"] or ""
+    _emit_usage(model, kind, data.get("usage") if isinstance(data.get("usage"), dict) else None, int((time.time() - t0) * 1000), len(json.dumps(messages)), len(text))
+    return text

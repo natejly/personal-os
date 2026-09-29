@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { X, Eye, EyeOff, Plug } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
-import type { Settings } from '@shared/types'
+import type { Settings, ShortcutState } from '@shared/types'
 import { ToolGlobalToggles } from './ToolPermissions'
 import GoogleSettings from './GoogleSettings'
 import UsageView from './UsageView'
@@ -14,7 +14,15 @@ export default function SettingsModal(): JSX.Element {
   const [draft, setDraft] = useState<Settings>(settings)
   const [showKey, setShowKey] = useState(false)
   const [test, setTest] = useState<{ state: 'idle' | 'testing' | 'ok' | 'fail'; msg?: string }>({ state: 'idle' })
+  const [shortcut, setShortcut] = useState<ShortcutState | null>(null)
   const patch = (p: Partial<Settings>): void => setDraft((d) => ({ ...d, ...p }))
+
+  // A shortcut that another app owns fails at startup, long before this modal mounts, so the current
+  // state is pulled as well as watched.
+  useEffect(() => {
+    void window.os.shortcuts.gather().then(setShortcut).catch(() => undefined)
+    return window.os.shortcuts.onFailure(setShortcut)
+  }, [])
 
   const testConnection = async (): Promise<void> => {
     setTest({ state: 'testing' })
@@ -27,8 +35,13 @@ export default function SettingsModal(): JSX.Element {
     }
   }
 
+  /** A rejected accelerator keeps the modal open: it is the only place the reason is readable. */
   const save = async (): Promise<void> => {
-    await saveSettings(draft)
+    const accel = draft.gatherShortcut.trim()
+    const applied = accel === settings.gatherShortcut.trim() ? null : await window.os.shortcuts.setGather(accel)
+    if (applied) setShortcut(applied)
+    await saveSettings({ ...draft, gatherShortcut: applied?.accelerator ?? draft.gatherShortcut })
+    if (applied && !applied.ok) return
     setSettingsOpen(false)
   }
 
@@ -97,6 +110,13 @@ export default function SettingsModal(): JSX.Element {
               <option value="dark">Dark</option><option value="light">Light</option><option value="system">System</option>
             </select>
           </label>
+          <label><span>Gather widgets shortcut <small className="muted">(global; brings every detached widget to the front and back again)</small></span>
+            <input value={draft.gatherShortcut} onChange={(e) => patch({ gatherShortcut: e.target.value })}
+              placeholder={shortcut?.accelerator || 'Control+Alt+Command+Space'} spellCheck={false} />
+          </label>
+          {shortcut && !shortcut.ok && (
+            <p className="test-msg fail">{shortcut.message ?? `${shortcut.accelerator} could not be registered.`} The menubar icon gathers them too.</p>
+          )}
         </section>
 
         <footer>

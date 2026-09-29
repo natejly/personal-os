@@ -2,8 +2,9 @@ import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
 import { join } from 'path'
 import { backendStatus, backendUrl, startBackend, stopBackend } from './backend'
 import { registerBus } from './bus'
-import { registerPopouts, restorePopouts } from './popouts'
+import { gather, registerPopouts, restorePopouts } from './popouts'
 import { registerShortcuts } from './shortcuts'
+import { createTray } from './tray'
 
 let win: BrowserWindow | null = null
 const isMac = process.platform === 'darwin'
@@ -42,7 +43,44 @@ function createWindow(): void {
   }
 }
 
+/** A live pop-out keeps getAllWindows() non-empty, which used to make the main window unrecoverable. */
+function showMain(): void {
+  if (!win || win.isDestroyed()) return createWindow()
+  if (win.isMinimized()) win.restore()
+  win.show()
+  win.focus()
+}
+
+/** The stored accelerator, so a gather shortcut the user chose is still registered after a relaunch. */
+async function storedGather(): Promise<string | undefined> {
+  const base = backendUrl()
+  if (!base) return undefined
+  try {
+    const r = await fetch(`${base}/settings`)
+    if (!r.ok) return undefined
+    const s = (await r.json()) as { gatherShortcut?: string }
+    return s.gatherShortcut?.trim() || undefined
+  } catch {
+    return undefined
+  }
+}
+
 const sendMenu = (action: string): void => win?.webContents.send('menu', action)
+
+/**
+ * Window-scoped actions go to whoever has focus, not to the main window: a pop-out must answer ⌘W and
+ * its own pin itself. App-wide actions keep using `sendMenu`, which the canvas only ever hosts.
+ */
+const sendWindowMenu = (action: string): void => {
+  const target = BrowserWindow.getFocusedWindow() ?? win
+  if (target && !target.isDestroyed()) target.webContents.send('menu', action)
+}
+
+const SPACES: Electron.MenuItemConstructorOptions[] = Array.from({ length: 9 }, (_, i) => ({
+  label: `Space ${i + 1}`,
+  accelerator: `Control+${i + 1}`,
+  click: () => sendMenu(`canvas:space:${i + 1}`)
+}))
 
 function buildMenu(): void {
   const template: Electron.MenuItemConstructorOptions[] = [
@@ -66,9 +104,14 @@ function buildMenu(): void {
       submenu: [
         { label: 'New Chat', accelerator: 'CmdOrCtrl+N', click: () => sendMenu('new-chat') },
         { label: 'Upload Document…', accelerator: 'CmdOrCtrl+U', click: () => sendMenu('upload') },
-        { type: 'separator' },
-        ...(isMac ? [] : [{ label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => sendMenu('settings') }]),
-        isMac ? { role: 'close' } : { role: 'quit' }
+        // ⌘W lives in the Window menu now: `role: 'close'` here could not be intercepted by the canvas.
+        ...(isMac
+          ? []
+          : [
+              { type: 'separator' as const },
+              { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => sendMenu('settings') },
+              { role: 'quit' as const }
+            ])
       ]
     },
     { role: 'editMenu' },
@@ -85,20 +128,52 @@ function buildMenu(): void {
         { label: 'Memory: Knowledge Graph', accelerator: 'CmdOrCtrl+7', click: () => sendMenu('view:graph') },
         { label: 'Documents', accelerator: 'CmdOrCtrl+8', click: () => sendMenu('view:documents') },
         { type: 'separator' },
+        { label: 'Canvas Mode', accelerator: 'CmdOrCtrl+Shift+C', click: () => sendMenu('toggle-mode') },
         { label: 'Toggle Sidebar', accelerator: 'CmdOrCtrl+B', click: () => sendMenu('toggle-sidebar') },
         { label: 'Toggle Context Panel', accelerator: 'CmdOrCtrl+I', click: () => sendMenu('toggle-context') },
         { type: 'separator' },
         { role: 'reload' },
         { role: 'toggleDevTools' },
         { type: 'separator' },
-        { role: 'resetZoom' },
+        // Explicit, because ⌘0 is Today above and resetZoom's default would have been the dead duplicate.
+        { role: 'resetZoom', accelerator: 'CmdOrCtrl+Alt+0' },
         { role: 'zoomIn' },
         { role: 'zoomOut' },
         { type: 'separator' },
         { role: 'togglefullscreen' }
       ]
     },
-    { role: 'windowMenu' }
+    {
+      label: 'Spaces',
+      submenu: [
+        { label: 'New Space', accelerator: 'Control+Command+N', click: () => sendMenu('canvas:new-space') },
+        { type: 'separator' },
+        // ⌥⌘arrows, not ⌃arrows: macOS owns ⌃←/⌃→/⌃↑ and an app accelerator loses to a system one.
+        { label: 'Previous Space', accelerator: 'Alt+Command+Left', click: () => sendMenu('canvas:prev-space') },
+        { label: 'Next Space', accelerator: 'Alt+Command+Right', click: () => sendMenu('canvas:next-space') },
+        { label: 'Overview', accelerator: 'Alt+Command+Up', click: () => sendMenu('canvas:overview') },
+        { type: 'separator' },
+        ...SPACES,
+        { type: 'separator' },
+        { label: 'Tidy Up', accelerator: 'Control+Command+T', click: () => sendMenu('canvas:tidy') }
+      ]
+    },
+    {
+      label: 'Window',
+      submenu: [
+        // Plain items, never roles: the canvas gets first refusal on ⌘W/⌘M and the renderer falls
+        // through to closeSelf()/minimizeSelf() when no canvas window has focus.
+        { label: 'Close Window', accelerator: 'CmdOrCtrl+W', click: () => sendWindowMenu('close-window') },
+        { label: 'Minimize', accelerator: 'CmdOrCtrl+M', click: () => sendWindowMenu('minimize-window') },
+        ...(isMac ? [{ role: 'zoom' as const }, { type: 'separator' as const }, { role: 'front' as const }] : []),
+        { type: 'separator' },
+        { label: 'Pop Out', accelerator: 'Control+Command+O', click: () => sendWindowMenu('canvas:popout') },
+        { label: 'Return to Canvas', accelerator: 'Control+Command+Shift+O', click: () => sendWindowMenu('canvas:unpopout') },
+        { label: 'Pin on Top', accelerator: 'Control+Command+P', click: () => sendWindowMenu('canvas:pin') },
+        { type: 'separator' },
+        { label: 'Gather Widgets', accelerator: 'Alt+Command+G', click: () => void gather() }
+      ]
+    }
   ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
@@ -110,19 +185,18 @@ app.whenReady().then(async () => {
   ipcMain.on('window:minimize-self', (e) => BrowserWindow.fromWebContents(e.sender)?.minimize())
   registerPopouts(() => win)
   registerBus()
-  registerShortcuts(() => win)
   buildMenu()
+  createTray(showMain)
   try {
     await startBackend()
   } catch (e) {
     console.error('[main] backend failed to start:', (e as Error).message)
   }
+  // After the backend, so the stored accelerator wins over the default; still before any renderer exists.
+  registerShortcuts(() => win, await storedGather())
   createWindow()
   void restorePopouts()
-  app.on('activate', () => {
-    // A live pop-out keeps getAllWindows() non-empty, which used to make the main window unrecoverable.
-    if (!win || win.isDestroyed()) createWindow()
-  })
+  app.on('activate', showMain)
 })
 
 app.on('window-all-closed', () => {

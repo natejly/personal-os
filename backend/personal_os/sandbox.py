@@ -4,8 +4,8 @@ Defense in depth, best effort for a single-user desktop app:
   * fresh temp working directory per run, deleted afterwards
   * `python -I` (isolated mode: no user site, no env vars like PYTHONPATH)
   * wall-clock timeout, CPU + memory rlimits
-  * on macOS, wrapped in `sandbox-exec` with a profile that denies network and
-    restricts writes to the work directory (when available)
+  * on macOS, wrapped in `sandbox-exec` with a profile that denies network, allowlists
+    reads/exec/mach-lookup and restricts writes to the work directory (when available)
 """
 from __future__ import annotations
 
@@ -19,21 +19,85 @@ import sys
 import tempfile
 from typing import Any
 
-MAC_PROFILE = """(version 1)
-(deny default)
-(allow process-exec process-fork sysctl-read mach-lookup)
-(allow file-read*)
-(allow file-write* (subpath "{work}"))
-(allow file-write* (subpath "/private/tmp") (subpath "/private/var/folders"))
-(deny network*)
-"""
-
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
 MAX_IMAGE_BYTES = 3_000_000
 MAX_IMAGES = 6
 
 # matplotlib builds a font cache on first import; keep it between runs so plots don't pay ~3s each time.
 MPL_CACHE = os.path.join(tempfile.gettempdir(), "personal-os-mplconfig")
+
+
+def _q(p: str) -> str:
+    """A path as a quoted SBPL literal (the repo path contains a space)."""
+    return '"' + p.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _mac_profile(work: str, py: str) -> str:
+    """Least-privilege sandbox-exec profile for one run_python call.
+
+    Threat model: the script is model-written, the model's context routinely holds
+    untrusted third-party text, and run_python stdout flows straight back into that
+    context. Network is denied, so *reads are the exfiltration channel*: anything the
+    script can open can be printed. Reads are therefore an allowlist (interpreter,
+    site-packages, the work dir, the matplotlib cache, system libs/fonts/tzdata) with
+    the app's own secrets (.env, personal-os.db*, .auth_token), ssh/aws/gpg keys and
+    browser profiles denied outright. process-exec and mach-lookup are allowlisted too,
+    so the "executes" tier cannot shell out to osascript and silently become "external".
+
+    SBPL evaluates every rule and the last match wins: blanket deny, then the allows,
+    then the targeted denies.
+    """
+    exe = os.path.realpath(py)
+    base = os.path.dirname(os.path.dirname(exe))                    # interpreter + stdlib + lib-dynload
+    venv = os.path.realpath(os.path.dirname(os.path.dirname(py)))   # site-packages: numpy, matplotlib, PIL/.dylibs
+    mpl = os.path.realpath(MPL_CACHE)
+    work = os.path.realpath(work)
+    home = os.path.expanduser("~")
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    try:
+        from .db import data_dir_from_env  # lazy: avoids an import cycle
+        data = str(data_dir_from_env())
+    except Exception:
+        data = os.path.join(root, "data")
+    return f"""(version 1)
+(deny default)
+(deny network*)
+(allow sysctl-read)
+(allow process-fork)
+(allow signal (target self))
+(allow file-read-metadata)
+(allow ipc-posix-shm-read* (ipc-posix-name "apple.shm.notification_center"))
+(allow process-exec (literal {_q(py)}) (literal {_q(exe)}) (subpath {_q(base)}))
+(allow file-read* (subpath {_q(base)}) (subpath {_q(venv)}) (subpath {_q(work)}) (subpath {_q(mpl)})
+                  (subpath "/usr/lib") (subpath "/usr/share") (subpath "/System/Library")
+                  (subpath "/Library/Fonts") (subpath "/private/var/db/timezone")
+                  (literal "/private/etc/localtime") (literal "/dev/null") (literal "/dev/zero")
+                  (literal "/dev/random") (literal "/dev/urandom") (subpath "/dev/fd")
+                  (literal "/"))                    ; dyld stats the root dir; without it python aborts at startup
+(allow file-write* (subpath {_q(work)}) (subpath {_q(mpl)}))
+(allow file-write-data (literal "/dev/null") (literal "/dev/stdout") (literal "/dev/stderr"))
+(allow mach-lookup
+  (global-name "com.apple.system.opendirectoryd.libinfo")
+  (global-name "com.apple.system.opendirectoryd.membership")
+  (global-name "com.apple.system.notification_center")
+  (global-name "com.apple.system.logger")
+  (global-name "com.apple.logd")
+  (global-name "com.apple.logd.events")
+  (global-name "com.apple.diagnosticd")
+  (global-name "com.apple.bsd.dirhelper"))
+(deny appleevent-send)
+(deny file-read* (literal {_q(os.path.join(root, ".env"))}) (subpath {_q(data)})
+                 (subpath {_q(os.path.join(root, "backend", "personal_os"))})
+                 (subpath {_q(os.path.join(home, ".ssh"))}) (subpath {_q(os.path.join(home, ".aws"))})
+                 (subpath {_q(os.path.join(home, ".config"))}) (subpath {_q(os.path.join(home, ".gnupg"))})
+                 (subpath {_q(os.path.join(home, ".kube"))})
+                 (subpath {_q(os.path.join(home, "Library", "Keychains"))})
+                 (subpath {_q(os.path.join(home, "Library", "Application Support", "Google", "Chrome"))})
+                 (subpath {_q(os.path.join(home, "Library", "Application Support", "BraveSoftware"))})
+                 (subpath {_q(os.path.join(home, "Library", "Application Support", "Firefox"))})
+                 (subpath {_q(os.path.join(home, "Library", "Safari"))})
+                 (regex #"/\\.env$") (regex #"/\\.auth_token$") (regex #"/personal-os\\.db"))
+"""
 
 
 def _collect_images(work: str, files: list[str]) -> list[dict[str, Any]]:
@@ -73,7 +137,7 @@ def run_python(code: str, timeout: int = 30, python: str | None = None) -> dict[
     cmd = [py, "-I", script]
     os.makedirs(MPL_CACHE, exist_ok=True)
     if sys.platform == "darwin" and shutil.which("sandbox-exec"):
-        cmd = ["sandbox-exec", "-p", MAC_PROFILE.format(work=os.path.realpath(work)), *cmd]
+        cmd = ["sandbox-exec", "-p", _mac_profile(work, py), *cmd]
     try:
         p = subprocess.run(
             cmd, cwd=work, capture_output=True, text=True, timeout=timeout,

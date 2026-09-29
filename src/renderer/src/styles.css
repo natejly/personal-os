@@ -78,6 +78,8 @@ kbd {
 .app {
   display: grid;
   grid-template-columns: var(--sidebar-w) 1fr;
+  /* Definite row: a view can never push the window taller, it scrolls inside. */
+  grid-template-rows: minmax(0, 1fr);
   height: 100%;
   transition: grid-template-columns 0.18s ease;
 }
@@ -490,7 +492,7 @@ kbd {
 .muted.small, .small { font-size: 12px; }
 
 /* ---------- Generic pages ---------- */
-.page { background: var(--bg); display: flex; flex-direction: column; min-width: 0; height: 100%; }
+.page { background: var(--bg); display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; }
 .page-header { height: 52px; display: flex; align-items: center; gap: 12px; padding: 0 16px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .page-header h2 { flex: 1; margin: 0; font-size: 14px; font-weight: 600; display: flex; align-items: center; gap: 8px; white-space: nowrap; overflow: hidden; }
 .page-header .search { margin: 0; width: 220px; }
@@ -616,14 +618,19 @@ textarea.instructions:focus { border-color: var(--accent); }
 .memory-panel .page-header .header-right { gap: 8px; }
 .memory-body { flex: 1; display: flex; min-height: 0; }
 .memory-body .graph-body { flex: 1; min-width: 0; }
-.mem-pane { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; background: var(--bg); }
+.mem-pane { display: flex; flex-direction: column; min-height: 0; overflow: hidden; background: var(--bg); }
 .memory-body.mode-list .mem-pane { flex: 1; }
 .memory-body.mode-split .mem-pane { width: 400px; flex-shrink: 0; border-left: 1px solid var(--border); }
 .memory-body.mode-split .mem-body { max-width: none; padding: 14px 16px 32px; }
 .memory-body.mode-split .mem-body .add-row { flex-wrap: wrap; }
+.memory-body.mode-split .mem-body .add-row > input { flex: 1 1 100%; }
+.memory-body.mode-split .mem-body .add-row select { margin-left: auto; }
 .memory-body.mode-split .mem-row { padding: 9px 10px; font-size: 12.5px; }
+.memory-body.mode-split .mem-meta { flex-wrap: wrap; row-gap: 4px; }
 .memory-body.mode-split .empty-hint.big { padding: 32px 0; }
 
+/* Three columns (graph + inspector + memories) need a narrower list on small windows. */
+@media (max-width: 1400px) { .memory-body.mode-split .mem-pane { width: 340px; } }
 .memory-toolbar { display: flex; align-items: center; gap: 12px; padding: 10px 24px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .memory-toolbar .toolbar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 .memory-toolbar .search { margin: 0; width: 180px; }

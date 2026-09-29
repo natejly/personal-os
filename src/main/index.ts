@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
 import { join } from 'path'
-import { backendStatus, backendUrl, startBackend, stopBackend } from './backend'
+import { backendStatus, backendToken, backendUrl, startBackend, stopBackend } from './backend'
 
 let win: BrowserWindow | null = null
 const isMac = process.platform === 'darwin'
@@ -103,6 +103,7 @@ function buildMenu(): void {
 app.whenReady().then(async () => {
   ipcMain.handle('backend:url', () => backendUrl())
   ipcMain.handle('backend:status', () => backendStatus())
+  ipcMain.handle('backend:token', () => backendToken())
   buildMenu()
   try {
     await startBackend()

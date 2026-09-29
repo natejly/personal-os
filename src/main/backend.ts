@@ -4,16 +4,36 @@
  */
 import { app } from 'electron'
 import { ChildProcess, spawn } from 'child_process'
+import { randomBytes } from 'crypto'
 import { existsSync, readFileSync } from 'fs'
 import { createServer } from 'net'
 import { join } from 'path'
 
 let child: ChildProcess | null = null
 let url = ''
+let token = ''
 let lastError: string | null = null
 
 export function backendUrl(): string {
   return url
+}
+
+/** Shared secret for the X-Personal-OS-Token header; empty until the backend is up. */
+export function backendToken(): string {
+  return token
+}
+
+/** Dev only: the backend mints <data-dir>/.auth_token (0600) when Electron did not spawn it. */
+function readTokenFile(): string {
+  const dataDir = process.env.PERSONAL_OS_DATA_DIR
+  for (const p of [dataDir ? join(dataDir, '.auth_token') : '', join(app.getPath('userData'), 'data', '.auth_token')]) {
+    try {
+      if (p && existsSync(p)) return readFileSync(p, 'utf8').trim()
+    } catch {
+      /* unreadable: try the next candidate */
+    }
+  }
+  return ''
 }
 
 export function backendStatus(): { running: boolean; url: string; error: string | null } {
@@ -89,6 +109,8 @@ async function waitHealthy(base: string, timeoutMs: number): Promise<void> {
 export async function startBackend(): Promise<string> {
   if (process.env.PERSONAL_OS_BACKEND_URL) {
     url = process.env.PERSONAL_OS_BACKEND_URL.replace(/\/+$/, '')
+    token = (process.env.PERSONAL_OS_AUTH_TOKEN ?? '').trim() || readTokenFile()
+    if (!token) console.warn('[main] no backend auth token; requests will be rejected')
     await waitHealthy(url, 10_000)
     return url
   }
@@ -97,11 +119,12 @@ export async function startBackend(): Promise<string> {
   const py = pythonBin(dir)
   const dataDir = join(app.getPath('userData'), 'data')
   url = `http://127.0.0.1:${port}`
+  token = randomBytes(32).toString('base64url')
   lastError = null
 
   child = spawn(py, ['-m', 'personal_os', '--port', String(port), '--data-dir', dataDir], {
     cwd: dir,
-    env: { ...loadDotEnv(), ...process.env, PYTHONUNBUFFERED: '1' },
+    env: { ...loadDotEnv(), ...process.env, PYTHONUNBUFFERED: '1', PERSONAL_OS_AUTH_TOKEN: token },
     stdio: ['ignore', 'pipe', 'pipe']
   })
   child.stdout?.on('data', (d) => process.stdout.write(`[backend] ${d}`))
@@ -124,4 +147,5 @@ export async function startBackend(): Promise<string> {
 export function stopBackend(): void {
   if (child && child.exitCode === null) child.kill()
   child = null
+  token = ''
 }

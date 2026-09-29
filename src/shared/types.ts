@@ -31,6 +31,8 @@ export interface ToolInfo {
   danger: 'safe' | 'writes' | 'network' | 'executes' | 'external'
   available: boolean
   default_mode: ToolMode
+  /** Results carry untrusted third-party content, so one call taints the rest of the reply. */
+  taints?: boolean
 }
 
 export interface ToolImage {
@@ -53,7 +55,17 @@ export interface ToolEvent {
   pending?: boolean
   needs_approval?: boolean
   approval?: string | null
+  /** This result carried untrusted third-party content. */
+  tainted?: boolean
+  /** Set when a circuit breaker refused the call instead of running it. */
+  blocked?: string
+  breaker?: PartialReason
+  /** Approval was forced by taint even though the tool is set to 'on'. */
+  forced?: boolean
 }
+
+/** Why a reply stopped early: a budget axis, or the repetition breaker. */
+export type PartialReason = 'rounds' | 'tokens' | 'time' | 'cost' | 'loop'
 
 export type SpanKind = 'context' | 'llm' | 'tool' | 'learn'
 
@@ -81,6 +93,8 @@ export interface Message {
   tool_events: ToolEvent[] | null
   trace: Span[] | null
   created_at: number
+  /** Set when the reply ran out of budget or hit a breaker; not persisted. */
+  partial?: PartialReason | null
 }
 
 export interface ConversationSettings {
@@ -228,6 +242,12 @@ export interface Settings {
   theme: 'dark' | 'light' | 'system'
   tools: Record<string, ToolMode | boolean>
   maxToolRounds: number
+  /** Per-reply budgets; 0 means unlimited. */
+  maxRunTokens?: number
+  maxRunSeconds?: number
+  maxRunCost?: number
+  /** Hosts fetch_url may still read once the reply has seen untrusted content. */
+  fetchAllowlist?: string[]
   braveApiKey: string
   tavilyApiKey: string
   /** Per-model cost overrides, $ per million tokens. Proxy prices are used for models not listed. */
@@ -280,10 +300,11 @@ export type ChatEvent =
   | { event: 'removed_message'; data: { id: string } }
   | { event: 'title'; data: { id: string; title: string } }
   | { event: 'delta'; data: { id: string; text: string } }
-  | { event: 'tool_call'; data: { message_id: string; id: string; name: string; arguments: Record<string, unknown>; needs_approval?: boolean } }
+  | { event: 'tool_call'; data: { message_id: string; id: string; name: string; arguments: Record<string, unknown>; needs_approval?: boolean; forced?: boolean } }
   | { event: 'tool_result'; data: ToolEvent & { message_id: string } }
   | { event: 'span'; data: { message_id: string; span: Span } }
-  | { event: 'done'; data: { id: string; error: string | null; context_used: ContextUsed; tool_events: ToolEvent[]; trace: Span[]; stopped: boolean } }
+  | { event: 'done'; data: { id: string; error: string | null; context_used: ContextUsed; tool_events: ToolEvent[]; trace: Span[]; stopped: boolean; partial?: PartialReason | null; tainted?: boolean; taint_sources?: string[] } }
+  | { event: 'taint'; data: { message_id: string; source: string } }
   | { event: 'learned'; data: { memories: Memory[]; nodes: GraphNode[]; edges: GraphEdge[] } }
   | { event: 'learn_error'; data: { message: string } }
   | { event: 'error'; data: { message: string } }
@@ -291,6 +312,7 @@ export type ChatEvent =
 export interface PersonalOSApi {
   backendUrl: () => Promise<string>
   backendStatus: () => Promise<{ running: boolean; url: string; error: string | null }>
+  backendToken: () => Promise<string>
   platform: NodeJS.Platform
   onMenu: (cb: (action: string) => void) => () => void
 }

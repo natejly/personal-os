@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, PanelLeftOpen, Calendar as CalIcon, Plus, ExternalLink, X } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
@@ -22,6 +22,9 @@ export default function CalendarView(): JSX.Element {
   const [creating, setCreating] = useState<{ day: string; hour: number } | null>(null)
   const [title, setTitle] = useState('')
   const [open, setOpen] = useState<CalendarEvent | null>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const hoursRef = useRef<HTMLDivElement>(null)
+  const [scrollToNow, setScrollToNow] = useState(0)
 
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(week, i)), [week])
 
@@ -38,6 +41,13 @@ export default function CalendarView(): JSX.Element {
   }
   useEffect(() => { void load() }, [week, google?.connected])
   useEffect(() => { void refreshTodos('all', false) }, [refreshTodos])
+  // Open on the current time (with ~2.5h of context above it) instead of midnight. Runs on mount and when "Today" is pressed.
+  useEffect(() => {
+    const el = scrollRef.current, hours = hoursRef.current
+    if (!el || !hours) return
+    const n = new Date()
+    el.scrollTop = Math.max(0, hours.offsetTop + (n.getHours() + n.getMinutes() / 60) * HOUR_PX - 2.5 * HOUR_PX)
+  }, [scrollToNow])
 
   const eventsByDay = useMemo(() => {
     const m: Record<string, CalendarEvent[]> = {}
@@ -71,12 +81,12 @@ export default function CalendarView(): JSX.Element {
   return (
     <main className="page cal-page">
       <header className="page-header drag">
-        {!sidebarOpen && <button className="icon-btn no-drag" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
+        {!sidebarOpen && <button className="icon-btn no-drag" aria-label="Show sidebar" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
         <h2><CalIcon size={16} /> Calendar <span className="muted">· {days[0].toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – {days[6].toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span></h2>
         <div className="no-drag header-right">
-          <button className="ghost-btn" onClick={() => setWeek(startOfWeek(new Date()))}>Today</button>
-          <button className="icon-btn" onClick={() => setWeek(addDays(week, -7))}><ChevronLeft size={16} /></button>
-          <button className="icon-btn" onClick={() => setWeek(addDays(week, 7))}><ChevronRight size={16} /></button>
+          <button className="ghost-btn" onClick={() => { setWeek(startOfWeek(new Date())); setScrollToNow((n) => n + 1) }}>Today</button>
+          <button className="icon-btn" aria-label="Previous week" onClick={() => setWeek(addDays(week, -7))}><ChevronLeft size={16} /></button>
+          <button className="icon-btn" aria-label="Next week" onClick={() => setWeek(addDays(week, 7))}><ChevronRight size={16} /></button>
           <button className="primary-btn" onClick={() => { newChat(null); void send('Help me plan this week. Look at my calendar for the next 7 days and my open todos, then propose a schedule.') }}>Plan my week</button>
         </div>
       </header>
@@ -86,7 +96,7 @@ export default function CalendarView(): JSX.Element {
       )}
       {error && <div className="notice-bar error">{error}</div>}
 
-      <div className="cal-scroll">
+      <div className="cal-scroll" ref={scrollRef}>
         <div className="cal-grid">
           <div className="cal-corner" />
           {days.map((d) => (
@@ -102,7 +112,7 @@ export default function CalendarView(): JSX.Element {
               {(todosByDay[key(d)] ?? []).map((t) => <div key={t.id} className={`cal-chip todo p${t.priority}`} title="Todo due">○ {t.title}</div>)}
             </div>
           ))}
-          <div className="cal-hours">
+          <div className="cal-hours" ref={hoursRef}>
             {Array.from({ length: 24 }, (_, h) => <div key={h} className="cal-hour" style={{ height: HOUR_PX }}>{h === 0 ? '' : `${h % 12 || 12}${h < 12 ? 'am' : 'pm'}`}</div>)}
           </div>
           {days.map((d) => {
@@ -125,7 +135,7 @@ export default function CalendarView(): JSX.Element {
                 {creating?.day === dk && (
                   <div className="cal-create" style={{ top: creating.hour * HOUR_PX }}>
                     <input autoFocus placeholder={`New event at ${creating.hour}:00`} value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void create(); if (e.key === 'Escape') { setCreating(null); setTitle('') } }} />
-                    <button className="icon-btn" onClick={() => void create()}><Plus size={13} /></button>
+                    <button className="icon-btn" aria-label="Add event" onClick={() => void create()}><Plus size={13} /></button>
                   </div>
                 )}
               </div>
@@ -139,7 +149,7 @@ export default function CalendarView(): JSX.Element {
       {open && (
         <div className="modal-backdrop" onMouseDown={() => setOpen(null)}>
           <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
-            <header><h2>{open.summary}</h2><button className="icon-btn" onClick={() => setOpen(null)}><X size={16} /></button></header>
+            <header><h2>{open.summary}</h2><button className="icon-btn" aria-label="Close event details" onClick={() => setOpen(null)}><X size={16} /></button></header>
             <section>
               <p>{open.all_day ? 'All day' : `${new Date(open.start).toLocaleString()} – ${fmtT(new Date(open.end))}`}</p>
               {open.location && <p className="muted">{open.location}</p>}

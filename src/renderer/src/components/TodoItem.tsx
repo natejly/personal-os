@@ -35,7 +35,7 @@ export default function TodoItem({ todo, showProject = true, compact = false }: 
         {editing ? (
           <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') { setTitle(todo.title); setEditing(false) } }} />
         ) : (
-          <span className="todo-title" onClick={() => setEditing(true)}>{todo.title}</span>
+          <span className="todo-title" role="button" tabIndex={0} onClick={() => setEditing(true)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setEditing(true) } }}>{todo.title}</span>
         )}
         {!compact && todo.notes && <span className="todo-notes">{todo.notes}</span>}
       </div>
@@ -44,14 +44,14 @@ export default function TodoItem({ todo, showProject = true, compact = false }: 
         <label className={`todo-due ${due.cls}`} title="Due date">
           <Calendar size={11} />
           <span>{due.text || 'no date'}</span>
-          <input type="date" value={todo.due ?? ''} onChange={(e) => void updateTodo(todo.id, e.target.value ? { due: e.target.value } : { clear_due: true })} />
+          <input type="date" aria-label={`Due date for ${todo.title}`} value={todo.due ?? ''} onChange={(e) => void updateTodo(todo.id, e.target.value ? { due: e.target.value } : { clear_due: true })} />
         </label>
         {!compact && (
           <select className="todo-prio" value={todo.priority} onChange={(e) => void updateTodo(todo.id, { priority: Number(e.target.value) })} title="Priority">
             <option value={1}>P1</option><option value={2}>P2</option><option value={3}>P3</option>
           </select>
         )}
-        <button className="icon-btn ghost danger" onClick={() => void deleteTodo(todo.id)}><Trash2 size={13} /></button>
+        <button className="icon-btn ghost danger" aria-label={`Delete todo: ${todo.title}`} onClick={() => void deleteTodo(todo.id)}><Trash2 size={13} /></button>
       </div>
     </div>
   )

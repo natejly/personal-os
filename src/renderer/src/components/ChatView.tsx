@@ -12,7 +12,7 @@ function ModelPicker({ value, onChange }: { value: string; onChange: (m: string)
   const options = models.some((m) => m.id === value) ? models : [{ id: value }, ...models]
   return (
     <label className="model-picker" title={modelsError ?? 'Model (served via LiteLLM)'}>
-      <select value={value} onChange={(e) => onChange(e.target.value)}>
+      <select aria-label="Model" value={value} onChange={(e) => onChange(e.target.value)}>
         {options.map((m) => <option key={m.id} value={m.id}>{m.id}</option>)}
       </select>
       <ChevronDown size={14} />
@@ -60,10 +60,10 @@ export default function ChatView(): JSX.Element {
   return (
     <main className="chat">
       <header className="chat-header drag">
-        {!sidebarOpen && <button className="icon-btn no-drag" title="Show sidebar (⌘B)" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
+        {!sidebarOpen && <button className="icon-btn no-drag" title="Show sidebar (⌘B)" aria-label="Show sidebar" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
         <div className="chat-title no-drag">
           {convo && editingTitle ? (
-            <input autoFocus defaultValue={convo.title}
+            <input autoFocus aria-label="Chat title" defaultValue={convo.title}
               onBlur={(e) => { void renameChat(convo.id, e.target.value); setEditingTitle(false) }}
               onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); if (e.key === 'Escape') setEditingTitle(false) }} />
           ) : (
@@ -76,7 +76,7 @@ export default function ChatView(): JSX.Element {
         <div className="no-drag header-right">
           <ProjectChip projectId={convo?.project_id ?? draftProjectId} />
           <ModelPicker value={model} onChange={(m) => void setChatModel(m)} />
-          <button className={`icon-btn ${contextOpen ? 'on' : ''}`} title="Context panel (⌘I)" onClick={toggleContext}><SlidersHorizontal size={16} /></button>
+          <button className={`icon-btn ${contextOpen ? 'on' : ''}`} title="Context panel (⌘I)" aria-label="Toggle context panel" aria-pressed={contextOpen} onClick={toggleContext}><SlidersHorizontal size={16} /></button>
         </div>
       </header>
 

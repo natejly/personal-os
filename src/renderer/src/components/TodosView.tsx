@@ -41,7 +41,7 @@ export default function TodosView(): JSX.Element {
   return (
     <main className="page">
       <header className="page-header drag">
-        {!sidebarOpen && <button className="icon-btn no-drag" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
+        {!sidebarOpen && <button className="icon-btn no-drag" aria-label="Show sidebar" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
         <h2><CheckSquare size={16} /> Todos</h2>
         <div className="no-drag header-right">
           <label className="check"><input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} /> show done</label>
@@ -50,9 +50,9 @@ export default function TodosView(): JSX.Element {
       </header>
       <div className="page-body">
         <div className="add-row">
-          <input placeholder="Add a todo… (or just tell the assistant in chat)" value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void add()} />
-          <input type="date" value={due} onChange={(e) => setDue(e.target.value)} className="date-input" />
-          <select value={priority} onChange={(e) => setPriority(Number(e.target.value))}><option value={1}>P1</option><option value={2}>P2</option><option value={3}>P3</option></select>
+          <input aria-label="Todo title" placeholder="Add a todo… (or just tell the assistant in chat)" value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void add()} />
+          <input type="date" aria-label="Due date (optional)" value={due} onChange={(e) => setDue(e.target.value)} className="date-input" />
+          <select aria-label="Priority" value={priority} onChange={(e) => setPriority(Number(e.target.value))}><option value={1}>P1</option><option value={2}>P2</option><option value={3}>P3</option></select>
           <button className="primary-btn" onClick={() => void add()} disabled={!title.trim()}><Plus size={14} /> Add</button>
         </div>
         {todos.length === 0 && <p className="empty-hint big">Nothing here. Add a todo above, or ask the assistant: “remind me to renew my passport next week”.</p>}

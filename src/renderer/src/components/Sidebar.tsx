@@ -72,7 +72,7 @@ export default function Sidebar(): JSX.Element {
     <aside className="sidebar">
       <div className="sidebar-top drag">
         <button className="brand no-drag" onClick={() => setView('home')}><Sparkles size={15} /><span>Personal OS</span></button>
-        <button className="icon-btn no-drag" title="Hide sidebar (⌘B)" onClick={toggleSidebar}><PanelLeftClose size={16} /></button>
+        <button className="icon-btn no-drag" aria-label="Hide sidebar" title="Hide sidebar (⌘B)" onClick={toggleSidebar}><PanelLeftClose size={16} /></button>
       </div>
 
       <button className="new-chat" onClick={() => newChat(null)}>
@@ -91,7 +91,7 @@ export default function Sidebar(): JSX.Element {
         <button className="section-toggle" onClick={() => setProjectsOpen((o) => !o)}>
           <ChevronRight size={12} className={projectsOpen ? 'rot90' : ''} /><FolderKanban size={13} /> Projects
         </button>
-        <button className="icon-btn ghost sm" title="New project" onClick={() => setProjectModal({ mode: 'create' })}><Plus size={14} /></button>
+        <button className="icon-btn ghost sm" aria-label="New project" title="New project" onClick={() => setProjectModal({ mode: 'create' })}><Plus size={14} /></button>
       </div>
       {projectsOpen && (
         <div className="project-list">
@@ -102,7 +102,7 @@ export default function Sidebar(): JSX.Element {
             return (
               <div key={p.id} className="project-group">
                 <div className={`project-item ${view === 'project' && projectViewId === p.id ? 'active' : ''}`} onClick={() => openProject(p.id)} role="button" tabIndex={0}>
-                  <button className="icon-btn ghost xs" title={isOpen ? 'Collapse' : 'Expand chats'} onClick={(e) => { e.stopPropagation(); setExpanded((x) => ({ ...x, [p.id]: !isOpen })) }}><ChevronRight size={12} className={isOpen ? 'rot90' : ''} /></button>
+                  <button className="icon-btn ghost xs" aria-label={isOpen ? `Collapse ${p.name}` : `Expand chats in ${p.name}`} aria-expanded={isOpen} title={isOpen ? 'Collapse' : 'Expand chats'} onClick={(e) => { e.stopPropagation(); setExpanded((x) => ({ ...x, [p.id]: !isOpen })) }}><ChevronRight size={12} className={isOpen ? 'rot90' : ''} /></button>
                   <span className="project-dot" style={{ background: p.color }} />
                   <span className="project-name">{p.name}</span>
                   <span className="count">{chats.length}</span>
@@ -113,7 +113,7 @@ export default function Sidebar(): JSX.Element {
                     {chats.slice(0, 12).map((c) => (
                       <div key={c.id} className={`convo-item sub ${c.id === activeId && view === 'chat' ? 'active' : ''}`} onClick={() => void selectChat(c.id)} role="button" tabIndex={0}>
                         <span className="convo-title">{streaming?.conversationId === c.id && <span className="pulse" />}{c.title}</span>
-                        <button className="icon-btn ghost" title="Delete" onClick={(e) => { e.stopPropagation(); void deleteChat(c.id) }}><Trash2 size={13} /></button>
+                        <button className="icon-btn ghost" aria-label={`Delete chat: ${c.title}`} title="Delete" onClick={(e) => { e.stopPropagation(); void deleteChat(c.id) }}><Trash2 size={13} /></button>
                       </div>
                     ))}
                     {chats.length > 12 && <button className="link small sub" onClick={() => openProject(p.id)}>all {chats.length} chats…</button>}
@@ -141,7 +141,7 @@ export default function Sidebar(): JSX.Element {
                   {c.project_id && projectById[c.project_id] && <span className="project-dot sm" style={{ background: projectById[c.project_id].color }} title={projectById[c.project_id].name} />}
                   {c.title}
                 </span>
-                <button className="icon-btn ghost" title="Delete" onClick={(e) => { e.stopPropagation(); void deleteChat(c.id) }}><Trash2 size={14} /></button>
+                <button className="icon-btn ghost" aria-label={`Delete chat: ${c.title}`} title="Delete" onClick={(e) => { e.stopPropagation(); void deleteChat(c.id) }}><Trash2 size={14} /></button>
               </div>
             ))}
           </section>

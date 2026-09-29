@@ -48,7 +48,7 @@ function SourcesPanel({ sources, internal, onChange, onClose }: { sources: DataS
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
       <div className="modal wide" onMouseDown={(e) => e.stopPropagation()}>
-        <header><h2><Database size={16} /> Data sources</h2><button className="icon-btn" onClick={onClose}><X size={16} /></button></header>
+        <header><h2><Database size={16} /> Data sources</h2><button className="icon-btn" aria-label="Close data sources" onClick={onClose}><X size={16} /></button></header>
         <section>
           <p className="muted">Sources feed widgets. API keys are stored locally and injected server-side; the generated widget code never sees them.</p>
           {sources.length === 0 && <p className="empty-hint">No sources yet.</p>}
@@ -62,7 +62,7 @@ function SourcesPanel({ sources, internal, onChange, onClose }: { sources: DataS
                   {!testing[s.id] && s.last_status && <div className={`muted small ${s.last_status.startsWith('error') ? 'err' : ''}`}>last: {s.last_status}</div>}
                 </div>
                 <button className="ghost-btn" onClick={() => void test(s)}>Test</button>
-                <button className="icon-btn danger" onClick={() => void api.sources.delete(s.id).then(onChange)}><Trash2 size={14} /></button>
+                <button className="icon-btn danger" aria-label={`Delete source ${s.name}`} onClick={() => void api.sources.delete(s.id).then(onChange)}><Trash2 size={14} /></button>
               </div>
             ))}
           </div>
@@ -112,11 +112,11 @@ function WidgetCard({ w, sources, onChange }: { w: Widget; sources: DataSource[]
         <span className="muted small">{w.source_ids.map((id) => sources.find((s) => s.id === id)?.name).filter(Boolean).join(', ')}</span>
         <span style={{ flex: 1 }} />
         {w.refreshed_at && <span className="muted small">{new Date(w.refreshed_at * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}</span>}
-        {w.kind === 'html' && <button className="icon-btn sm" title="Revise with AI" onClick={() => setRevising((v) => !v)}><Wand2 size={13} /></button>}
-        {w.kind === 'html' && <button className="icon-btn sm" title="View code" onClick={() => setShowCode((v) => !v)}><Code2 size={13} /></button>}
-        <button className="icon-btn sm" title="Refresh" onClick={() => void run(() => api.widgets.refresh(w.id))}><RefreshCw size={13} className={busy ? 'spin' : ''} /></button>
-        <select className="dw-width" value={w.width} title="Width" onChange={(e) => void run(() => api.widgets.update(w.id, { width: Number(e.target.value) }))}><option value={1}>1×</option><option value={2}>2×</option><option value={3}>3×</option></select>
-        <button className="icon-btn sm danger" onClick={() => void run(() => api.widgets.delete(w.id))}><Trash2 size={13} /></button>
+        {w.kind === 'html' && <button className="icon-btn sm" title="Revise with AI" aria-label={`Revise ${w.title} with AI`} onClick={() => setRevising((v) => !v)}><Wand2 size={13} /></button>}
+        {w.kind === 'html' && <button className="icon-btn sm" title="View code" aria-label={`View code for ${w.title}`} onClick={() => setShowCode((v) => !v)}><Code2 size={13} /></button>}
+        <button className="icon-btn sm" title="Refresh" aria-label={`Refresh ${w.title}`} onClick={() => void run(() => api.widgets.refresh(w.id))}><RefreshCw size={13} className={busy ? 'spin' : ''} /></button>
+        <select className="dw-width" value={w.width} title="Width" aria-label={`Width of ${w.title}`} onChange={(e) => void run(() => api.widgets.update(w.id, { width: Number(e.target.value) }))}><option value={1}>1×</option><option value={2}>2×</option><option value={3}>3×</option></select>
+        <button className="icon-btn sm danger" aria-label={`Delete widget ${w.title}`} onClick={() => void run(() => api.widgets.delete(w.id))}><Trash2 size={13} /></button>
       </header>
       {revising && (
         <div className="dw-revise">
@@ -180,28 +180,28 @@ export default function DashboardsView(): JSX.Element {
   return (
     <main className="page dash-page">
       <header className="page-header drag">
-        {!sidebarOpen && <button className="icon-btn no-drag" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
+        {!sidebarOpen && <button className="icon-btn no-drag" aria-label="Show sidebar" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
         <h2><LayoutDashboard size={16} /> Dashboards</h2>
         <div className="no-drag header-right">
           {list.length > 0 && (
-            <label className="model-picker"><select value={activeId ?? ''} onChange={(e) => setActiveId(e.target.value)}>{list.map((d) => <option key={d.id} value={d.id}>{d.name} ({d.widget_count})</option>)}</select><ChevronDown size={14} /></label>
+            <label className="model-picker"><select aria-label="Active dashboard" value={activeId ?? ''} onChange={(e) => setActiveId(e.target.value)}>{list.map((d) => <option key={d.id} value={d.id}>{d.name} ({d.widget_count})</option>)}</select><ChevronDown size={14} /></label>
           )}
           <button className="ghost-btn" onClick={() => setShowSources(true)}><Database size={14} /> Sources <span className="count">{sources.length}</span></button>
           {creating ? (
-            <div className="add-inline"><input autoFocus placeholder="Dashboard name" value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void create(); if (e.key === 'Escape') setCreating(false) }} /><button className="primary-btn" onClick={() => void create()}>Create</button></div>
+            <div className="add-inline"><input autoFocus aria-label="Dashboard name" placeholder="Dashboard name" value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void create(); if (e.key === 'Escape') setCreating(false) }} /><button className="primary-btn" onClick={() => void create()}>Create</button></div>
           ) : (
             <button className="ghost-btn" onClick={() => setCreating(true)}><Plus size={14} /> New dashboard</button>
           )}
           {dash && <button className="primary-btn" onClick={() => setComposer((v) => !v)}><Wand2 size={14} /> Add widget</button>}
-          {dash && <button className="icon-btn danger" title="Delete dashboard" onClick={() => { if (confirm(`Delete "${dash.name}"?`)) void api.dashboards.delete(dash.id).then(() => { setActiveId(null); setDash(null); void loadList() }) }}><Trash2 size={15} /></button>}
+          {dash && <button className="icon-btn danger" title="Delete dashboard" aria-label={`Delete dashboard ${dash.name}`} onClick={() => { if (confirm(`Delete "${dash.name}"?`)) void api.dashboards.delete(dash.id).then(() => { setActiveId(null); setDash(null); void loadList() }) }}><Trash2 size={15} /></button>}
         </div>
       </header>
 
       {composer && dash && (
         <div className="dw-composer">
           <div className="row">
-            <label className="model-picker"><select value={kind} onChange={(e) => setKind(e.target.value as 'html' | 'summary')}><option value="html">Interactive widget (AI-coded)</option><option value="summary">AI summary</option></select><ChevronDown size={14} /></label>
-            <label className="model-picker"><select value={width} onChange={(e) => setWidth(Number(e.target.value))}><option value={1}>1 column</option><option value={2}>2 columns</option><option value={3}>full width</option></select><ChevronDown size={14} /></label>
+            <label className="model-picker"><select aria-label="Widget type" value={kind} onChange={(e) => setKind(e.target.value as 'html' | 'summary')}><option value="html">Interactive widget (AI-coded)</option><option value="summary">AI summary</option></select><ChevronDown size={14} /></label>
+            <label className="model-picker"><select aria-label="Widget width" value={width} onChange={(e) => setWidth(Number(e.target.value))}><option value={1}>1 column</option><option value={2}>2 columns</option><option value={3}>full width</option></select><ChevronDown size={14} /></label>
             <div className="src-picker">
               {sources.length === 0 && <span className="muted small">No sources yet: <button className="link" onClick={() => setShowSources(true)}>add one</button> or build a static widget.</span>}
               {sources.map((s) => (
@@ -219,10 +219,20 @@ export default function DashboardsView(): JSX.Element {
       )}
 
       {!dash ? (
-        <div className="page-body"><p className="empty-hint big">No dashboards yet. Create one, add a data source (an API URL and key, an RSS feed, or your own todos/calendar), then describe the widget you want.</p></div>
+        <div className="page-body">
+          <div className="empty-hint big">
+            <p>No dashboards yet. Create one, add a data source (an API URL and key, an RSS feed, or your own todos/calendar), then describe the widget you want.</p>
+            <button className="primary-btn" onClick={() => setCreating(true)}><Plus size={14} /> New dashboard</button>
+          </div>
+        </div>
       ) : (
         <div className="page-body wide">
-          {dash.widgets.length === 0 && <p className="empty-hint big">Empty dashboard. Click <b>Add widget</b> and describe what you want to see.</p>}
+          {dash.widgets.length === 0 && (
+            <div className="empty-hint big">
+              <p>Empty dashboard. Describe what you want to see and it gets built for you.</p>
+              <button className="primary-btn" onClick={() => setComposer(true)}><Wand2 size={14} /> Add widget</button>
+            </div>
+          )}
           <div className="dgrid">{dash.widgets.map((w) => <WidgetCard key={w.id} w={w} sources={sources} onChange={() => void loadDash()} />)}</div>
         </div>
       )}

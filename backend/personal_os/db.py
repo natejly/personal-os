@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS messages (
   error TEXT,
   context_used TEXT,
   tool_events TEXT,
+  reasoning TEXT,
   created_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_msg_conv ON messages(conversation_id, created_at);
@@ -156,7 +157,7 @@ class Database:
         """Add columns introduced after the first release (CREATE TABLE IF NOT EXISTS won't)."""
         wanted = {
             "projects": {"tools": "TEXT NOT NULL DEFAULT '{}'"},
-            "messages": {"tool_events": "TEXT", "trace": "TEXT"},
+            "messages": {"tool_events": "TEXT", "trace": "TEXT", "reasoning": "TEXT"},
         }
         for table, cols in wanted.items():
             have = {r["name"] for r in c.execute(f"PRAGMA table_info({table})")}

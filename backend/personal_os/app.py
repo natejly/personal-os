@@ -439,6 +439,9 @@ async def _chat_stream(conv_id: str, body: ChatIn) -> AsyncIterator[str]:
     stop = asyncio.Event()
     _active[am["id"]] = stop
     buf: list[str] = []
+    # Chain-of-thought from reasoning models, kept out of `buf` so it never lands in the message
+    # content or in the history sent back to the model on the next turn.
+    rbuf: list[str] = []
     error: str | None = None
     tool_events: list[dict[str, Any]] = []
     tool_ctx: dict[str, Any] = {
@@ -473,7 +476,10 @@ async def _chat_stream(conv_id: str, body: ChatIn) -> AsyncIterator[str]:
         async for ev in llm.stream_chat(cfg, model, messages, None):
             if stop.is_set():
                 break
-            if ev["type"] == "delta":
+            if ev["type"] == "reasoning":
+                rbuf.append(ev["text"])
+                yield sse("reasoning", {"id": am["id"], "text": ev["text"]})
+            elif ev["type"] == "delta":
                 buf.append(ev["text"])
                 yield sse("delta", {"id": am["id"], "text": ev["text"]})
             else:
@@ -495,7 +501,12 @@ async def _chat_stream(conv_id: str, body: ChatIn) -> AsyncIterator[str]:
             async for ev in llm.stream_chat(cfg, model, messages, tool_schemas or None):
                 if stop.is_set():
                     break
-                if ev["type"] == "delta":
+                if ev["type"] == "reasoning":
+                    if first_token is None:
+                        first_token = now_ms()
+                    rbuf.append(ev["text"])
+                    yield sse("reasoning", {"id": am["id"], "text": ev["text"]})
+                elif ev["type"] == "delta":
                     if first_token is None:
                         first_token = now_ms()
                     buf.append(ev["text"])
@@ -637,11 +648,13 @@ async def _chat_stream(conv_id: str, body: ChatIn) -> AsyncIterator[str]:
         _active.pop(am["id"], None)
 
     text = "".join(buf).strip()
-    convos.finish_message(am["id"], text, error, used, tool_events, tracer.spans)
+    reasoning = "".join(rbuf).strip()
+    convos.finish_message(am["id"], text, error, used, tool_events, tracer.spans, reasoning)
     convos.touch(conv_id)
     yield sse("done", {"id": am["id"], "error": error, "context_used": used, "tool_events": tool_events,
                        "trace": tracer.spans, "stopped": stop.is_set(), "partial": partial,
-                       "tainted": tool_ctx["tainted"], "taint_sources": tool_ctx["taint_sources"]})
+                       "tainted": tool_ctx["tainted"], "taint_sources": tool_ctx["taint_sources"],
+                       "reasoning": reasoning or None})
     if tool_ctx.get("learned"):
         yield sse("learned", tool_ctx["learned"])
 

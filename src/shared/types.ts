@@ -92,6 +92,8 @@ export interface Message {
   context_used: ContextUsed | null
   tool_events: ToolEvent[] | null
   trace: Span[] | null
+  /** A reasoning model's chain-of-thought. Never sent back to the model as history. */
+  reasoning: string | null
   created_at: number
   /** Set when the reply ran out of budget or hit a breaker; not persisted. */
   partial?: PartialReason | null
@@ -300,10 +302,11 @@ export type ChatEvent =
   | { event: 'removed_message'; data: { id: string } }
   | { event: 'title'; data: { id: string; title: string } }
   | { event: 'delta'; data: { id: string; text: string } }
+  | { event: 'reasoning'; data: { id: string; text: string } }
   | { event: 'tool_call'; data: { message_id: string; id: string; name: string; arguments: Record<string, unknown>; needs_approval?: boolean; forced?: boolean } }
   | { event: 'tool_result'; data: ToolEvent & { message_id: string } }
   | { event: 'span'; data: { message_id: string; span: Span } }
-  | { event: 'done'; data: { id: string; error: string | null; context_used: ContextUsed; tool_events: ToolEvent[]; trace: Span[]; stopped: boolean; partial?: PartialReason | null; tainted?: boolean; taint_sources?: string[] } }
+  | { event: 'done'; data: { id: string; error: string | null; context_used: ContextUsed; tool_events: ToolEvent[]; trace: Span[]; stopped: boolean; partial?: PartialReason | null; tainted?: boolean; taint_sources?: string[]; reasoning?: string | null } }
   | { event: 'taint'; data: { message_id: string; source: string } }
   | { event: 'learned'; data: { memories: Memory[]; nodes: GraphNode[]; edges: GraphEdge[] } }
   | { event: 'learn_error'; data: { message: string } }

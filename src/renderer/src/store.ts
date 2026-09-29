@@ -149,6 +149,9 @@ export const useStore = create<State>((set, get) => {
           case 'delta':
             patchMessage(ev.data.id, (m) => ({ ...m, content: m.content + ev.data.text }))
             break
+          case 'reasoning':
+            patchMessage(ev.data.id, (m) => ({ ...m, reasoning: (m.reasoning ?? '') + ev.data.text }))
+            break
           case 'tool_call':
             patchMessage(ev.data.message_id, (m) => ({ ...m, tool_events: [...(m.tool_events ?? []), { id: ev.data.id, name: ev.data.name, arguments: ev.data.arguments, result_preview: '', duration_ms: 0, error: null, pending: true, needs_approval: !!ev.data.needs_approval }] }))
             break
@@ -163,7 +166,7 @@ export const useStore = create<State>((set, get) => {
             })
             break
           case 'done':
-            patchMessage(ev.data.id, (m) => ({ ...m, error: ev.data.error, context_used: ev.data.context_used, tool_events: ev.data.tool_events?.length ? ev.data.tool_events : m.tool_events, trace: ev.data.trace?.length ? ev.data.trace : m.trace }))
+            patchMessage(ev.data.id, (m) => ({ ...m, error: ev.data.error, context_used: ev.data.context_used, tool_events: ev.data.tool_events?.length ? ev.data.tool_events : m.tool_events, trace: ev.data.trace?.length ? ev.data.trace : m.trace, reasoning: ev.data.reasoning ?? m.reasoning }))
             set({ streaming: null })
             void get().refreshConversations()
             break

@@ -92,7 +92,8 @@ async def stream_chat(
 ) -> AsyncIterator[dict[str, Any]]:
     """Stream a chat completion.
 
-    Yields {"type": "delta", "text": str} for content, and finally
+    Yields {"type": "delta", "text": str} for content, {"type": "reasoning", "text": str} for a
+    reasoning model's chain-of-thought, and finally
     {"type": "end", "finish_reason": str|None, "tool_calls": [{"id","name","arguments"}], "usage": {...}|None,
      "usage_est": {"prompt_tokens": int, "completion_tokens": int}}.
     """
@@ -105,6 +106,7 @@ async def stream_chat(
     usage: dict[str, Any] | None = None
     t0 = time.time()
     out_chars = 0
+    reason_chars = 0
     async with httpx.AsyncClient(timeout=httpx.Timeout(10, read=None)) as client:
         async with client.stream(
             "POST",
@@ -133,6 +135,13 @@ async def stream_chat(
                     usage = {k: obj["usage"].get(k) for k in ("prompt_tokens", "completion_tokens", "total_tokens") if obj["usage"].get(k) is not None}
                 choice = (obj.get("choices") or [{}])[0]
                 delta = choice.get("delta") or {}
+                # Reasoning models (kimi-k3, glm-5.3, deepseek-v4) stream their chain-of-thought in a
+                # separate field and put only the final answer in `content`. It gets its own event so
+                # the UI can show progress instead of sitting silent for the whole thinking phase.
+                reason = delta.get("reasoning_content") or delta.get("reasoning")
+                if reason:
+                    reason_chars += len(reason)
+                    yield {"type": "reasoning", "text": reason}
                 if delta.get("content"):
                     out_chars += len(delta["content"])
                     yield {"type": "delta", "text": delta["content"]}
@@ -148,7 +157,8 @@ async def stream_chat(
                         cur["arguments"] += fn["arguments"]
                 if choice.get("finish_reason"):
                     finish = choice["finish_reason"]
-    p_chars, c_chars = len(json.dumps(messages)), out_chars + sum(len(c["arguments"]) for c in calls.values())
+    # Reasoning is billed as completion tokens, so it counts toward cost and the run budget.
+    p_chars, c_chars = len(json.dumps(messages)), out_chars + reason_chars + sum(len(c["arguments"]) for c in calls.values())
     _emit_usage(model, kind, usage, int((time.time() - t0) * 1000), p_chars, c_chars)
     # usage_est is always present: this route often omits `usage` on streamed replies, and a budget cannot run on None.
     yield {"type": "end", "finish_reason": finish, "tool_calls": [calls[i] for i in sorted(calls)], "usage": usage,

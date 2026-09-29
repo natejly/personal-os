@@ -651,6 +651,20 @@ textarea.instructions:focus { border-color: var(--accent); }
 .graph-tools .sep { width: 1px; height: 18px; background: var(--border); margin: 0 3px; }
 
 /* ---------- Tool events in messages ---------- */
+/* Reasoning model chain-of-thought: same chrome as a tool event, dimmer body. */
+.reasoning { border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elev); font-size: 12px; margin: 0 0 12px; }
+.reasoning.live { border-color: var(--accent); }
+.reasoning-head { width: 100%; display: flex; align-items: center; gap: 8px; padding: 6px 10px; color: var(--text-muted); text-align: left; }
+.reasoning-head:hover { color: var(--text); }
+.reasoning-head svg.rot90 { transform: rotate(90deg); }
+.reasoning-head > svg:first-child { transition: transform 0.15s; flex-shrink: 0; }
+.reasoning.live .reasoning-head > svg + svg { color: var(--accent); }
+.reasoning-label { font-weight: 600; }
+.reasoning-body {
+  max-height: 220px; overflow-y: auto; padding: 0 10px 10px;
+  font-family: var(--mono); font-size: 11px; line-height: 1.55;
+  color: var(--text-faint); white-space: pre-wrap; word-break: break-word;
+}
 .tool-events { display: flex; flex-direction: column; gap: 4px; margin: 0 0 12px; }
 .tool-event { border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elev); font-size: 12px; }
 .tool-event.error { border-color: rgba(229,72,77,0.5); }

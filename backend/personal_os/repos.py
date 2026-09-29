@@ -152,15 +152,15 @@ class Conversations:
                 (mid, conv_id, role, content, model, t),
             )
             c.execute("UPDATE conversations SET updated_at=? WHERE id=?", (t, conv_id))
-        return {"id": mid, "conversation_id": conv_id, "role": role, "content": content, "model": model, "created_at": t, "error": None, "context_used": None, "tool_events": None, "trace": None}
+        return {"id": mid, "conversation_id": conv_id, "role": role, "content": content, "model": model, "created_at": t, "error": None, "context_used": None, "tool_events": None, "trace": None, "reasoning": None}
 
     def finish_message(self, mid: str, content: str, error: str | None, context_used: dict[str, Any] | None, tool_events: list[dict[str, Any]] | None = None,
-                       trace: list[dict[str, Any]] | None = None) -> None:
+                       trace: list[dict[str, Any]] | None = None, reasoning: str | None = None) -> None:
         with self.db.tx() as c:
             c.execute(
-                "UPDATE messages SET content=?, error=?, context_used=?, tool_events=?, trace=? WHERE id=?",
+                "UPDATE messages SET content=?, error=?, context_used=?, tool_events=?, trace=?, reasoning=? WHERE id=?",
                 (content, error, json.dumps(context_used) if context_used else None, json.dumps(tool_events) if tool_events else None,
-                 json.dumps(trace) if trace else None, mid),
+                 json.dumps(trace) if trace else None, reasoning or None, mid),
             )
 
     def set_trace(self, mid: str, trace: list[dict[str, Any]]) -> None:

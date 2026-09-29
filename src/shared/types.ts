@@ -226,6 +226,8 @@ export interface Settings {
   extractionModel: string
   autoLearn: boolean
   theme: 'dark' | 'light' | 'system'
+  /** Which shell the app opens in: the single-pane router, or the window canvas. */
+  mode: 'classic' | 'canvas'
   /** Electron accelerator for the global Gather/Scatter shortcut. */
   gatherShortcut: string
   tools: Record<string, ToolMode | boolean>

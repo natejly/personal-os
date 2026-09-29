@@ -336,7 +336,7 @@ export const useStore = create<State>((set, get) => {
   return {
     ready: false,
     backendError: null,
-    settings: { baseUrl: '', apiKey: '', defaultModel: '', systemPrompt: '', extractionModel: '', autoLearn: true, theme: 'dark', gatherShortcut: '', tools: {}, maxToolRounds: 8, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {} },
+    settings: { baseUrl: '', apiKey: '', defaultModel: '', systemPrompt: '', extractionModel: '', autoLearn: true, theme: 'dark', mode: 'classic', gatherShortcut: '', tools: {}, maxToolRounds: 8, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {} },
     models: [],
     modelsError: null,
     tools: [],
@@ -380,7 +380,7 @@ export const useStore = create<State>((set, get) => {
       const [settings, projects, personalStats, conversations] = await Promise.all([
         api.settings.get(), api.projects.list(), api.projects.globalStats(), api.conversations.list('all')
       ])
-      set({ settings, projects, personalStats, conversations, ready: true, settingsOpen: !settings.apiKey && conversations.length === 0 })
+      set({ settings, mode: settings.mode === 'canvas' ? 'canvas' : 'classic', projects, personalStats, conversations, ready: true, settingsOpen: !settings.apiKey && conversations.length === 0 })
       void get().loadModels()
       void get().loadScope('all')
       void api.tools().then((t) => set({ tools: t.tools })).catch(() => undefined)
@@ -415,7 +415,11 @@ export const useStore = create<State>((set, get) => {
       if ('baseUrl' in patch || 'apiKey' in patch) void get().loadModels()
       if ('googleClientId' in patch || 'googleClientSecret' in patch) void get().refreshGoogle()
     },
-    toggleMode: () => set((s) => ({ mode: s.mode === 'canvas' ? 'classic' : 'canvas' })),
+    toggleMode: () => {
+      const mode = get().mode === 'canvas' ? 'classic' : 'canvas'
+      set({ mode })
+      void get().saveSettings({ mode })
+    },
     setView: (view) => {
       set({ view })
       if (view === 'home') void get().refreshDashboard()

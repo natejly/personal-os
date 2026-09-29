@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { MessageSquarePlus, Search, Settings, Trash2, PanelLeftClose, Sparkles, Brain, FileText, Plus, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard } from 'lucide-react'
+import { MessageSquarePlus, Search, Settings, Trash2, PanelLeftClose, Sparkles, Brain, FileText, Plus, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid } from 'lucide-react'
 import { useStore, type View } from '../store'
 import ChatPulse from './ChatPulse'
 import { dragProps } from '../canvas/dnd'
@@ -38,7 +38,8 @@ export default function Sidebar(): JSX.Element {
   const view = useStore((s) => s.view)
   const projectViewId = useStore((s) => s.projectViewId)
   const personalStats = useStore((s) => s.personalStats)
-  const { newChat, selectChat, deleteChat, setSettingsOpen, toggleSidebar, setView, openProject, setProjectModal } = useStore()
+  const mode = useStore((s) => s.mode)
+  const { newChat, toggleMode, selectChat, deleteChat, setSettingsOpen, toggleSidebar, setView, openProject, setProjectModal } = useStore()
   const [query, setQuery] = useState('')
   const [projectsOpen, setProjectsOpen] = useState(true)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
@@ -77,6 +78,7 @@ export default function Sidebar(): JSX.Element {
     <aside className="sidebar">
       <div className="sidebar-top drag">
         <button className="brand no-drag" onClick={() => setView('home')}><Sparkles size={15} /><span>Personal OS</span></button>
+        <button className={`icon-btn no-drag ${mode === 'canvas' ? 'on' : ''}`} title={mode === 'canvas' ? 'Leave Canvas (⌘⇧C)' : 'Canvas Mode (⌘⇧C)'} onClick={toggleMode}><LayoutGrid size={16} /></button>
         <button className="icon-btn no-drag" title="Hide sidebar (⌘B)" onClick={toggleSidebar}><PanelLeftClose size={16} /></button>
       </div>
 

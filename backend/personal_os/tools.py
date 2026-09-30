@@ -659,6 +659,20 @@ def _register_google(self: Toolbox) -> None:
     R("google_tasks_complete", ToolSpec("google_tasks_complete", "Mark a Google Task complete.",
         _obj({"task_id": {"type": "string"}}, ["task_id"]), gtasks_complete, "google", "external", examples=[{"task_id": "MTIzNDU2Nzg5"}]))
 
+    async def gdrive_search(ctx: dict[str, Any], query: str = "", max_results: int = 20, offset: int = 0) -> Any:
+        off, n = max(0, int(offset)), max(1, min(int(max_results), 50))
+        rows = await run(g.drive_files, query, off + n)
+        return page(rows, offset=off, limit=n, key="files")
+    R("google_drive_search", ToolSpec("google_drive_search", "Search the user's Google Drive by file name and content. Empty query lists recently modified files.",
+        _obj({"query": {"type": "string", "default": ""}, "max_results": {"type": "integer", "default": 20}, "offset": {"type": "integer", "default": 0}}, []), gdrive_search, "google",
+        examples=[{}, {"query": "quarterly report"}, {"query": "invoice", "max_results": 10}], taints=True))
+
+    async def gdrive_read(ctx: dict[str, Any], file_id: str, max_chars: int = 8000) -> Any:
+        return await run(g.drive_read, file_id, max_chars)
+    R("google_drive_read", ToolSpec("google_drive_read", "Read a Drive file's text by id (from google_drive_search). Google Docs export as text, Sheets as CSV; binary files return only a link.",
+        _obj({"file_id": {"type": "string"}, "max_chars": {"type": "integer", "default": 8000}}, ["file_id"]), gdrive_read, "google",
+        examples=[{"file_id": "1r5tYw3xKj2mN8pQvLsHhGdE0aZcBfXo4"}], taints=True))
+
 
 def _register_boards(self: Toolbox) -> None:
     R = self.specs.__setitem__

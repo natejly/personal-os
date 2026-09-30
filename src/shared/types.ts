@@ -227,6 +227,22 @@ export interface GmailMessage {
   labels: string[]
 }
 
+export interface GmailFullMessage {
+  id: string
+  thread_id: string
+  from: string | null
+  to: string | null
+  subject: string | null
+  date: string | null
+  body: string
+}
+
+export interface GmailLabel {
+  id: string
+  name: string
+  type: 'system' | 'user'
+}
+
 export interface TodayDashboard {
   google: GoogleStatus
   todos: Todo[]

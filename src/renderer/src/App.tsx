@@ -9,6 +9,7 @@ import HomeView from './components/HomeView'
 import TodosView from './components/TodosView'
 import BoardsView from './components/BoardsView'
 import CalendarView from './components/CalendarView'
+import MailView from './components/MailView'
 import DashboardsView from './components/DashboardsView'
 import SettingsModal from './components/SettingsModal'
 import ProjectModal from './components/ProjectModal'
@@ -94,6 +95,7 @@ export default function App(): JSX.Element {
           {view === 'chat' && <ChatView />}
           {view === 'todos' && <TodosView />}
           {view === 'calendar' && <CalendarView />}
+          {view === 'mail' && <MailView />}
           {view === 'boards' && <BoardsView />}
           {view === 'dashboards' && <DashboardsView />}
           {view === 'memory' && <MemoryPanel />}

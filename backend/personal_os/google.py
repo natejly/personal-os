@@ -307,6 +307,11 @@ class Google:
         self._svc("gmail", "v1").users().messages().modify(userId="me", id=message_id, body={"addLabelIds": add, "removeLabelIds": rem}).execute()
         return {"ok": True, "added": add, "removed": rem}
 
+    def gmail_labels(self) -> list[dict[str, Any]]:
+        res = self._svc("gmail", "v1").users().labels().list(userId="me").execute()
+        labels = [{"id": l["id"], "name": l.get("name", l["id"]), "type": l.get("type", "user")} for l in res.get("labels", [])]
+        return sorted(labels, key=lambda x: (x["type"] != "system", x["name"].lower()))
+
     # ---------- Tasks ----------
     def tasks_lists(self) -> list[dict[str, Any]]:
         res = self._svc("tasks", "v1").tasklists().list(maxResults=50).execute()

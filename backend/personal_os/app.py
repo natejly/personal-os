@@ -1186,9 +1186,26 @@ def google_gmail(q: str = "is:unread newer_than:3d", max_results: int = 12) -> A
     return _gcall(google.gmail_search, q, max_results)
 
 
+# Registered before the {message_id} route so "labels" is not read as a message id.
+@app.get("/integrations/google/gmail/labels")
+def google_gmail_labels() -> Any:
+    return _gcall(google.gmail_labels)
+
+
 @app.get("/integrations/google/gmail/{message_id}")
 def google_gmail_message(message_id: str) -> Any:
     return _gcall(google.gmail_get, message_id)
+
+
+class GmailModifyIn(BaseModel):
+    mark_read: bool | None = None
+    archive: bool = False
+    star: bool | None = None
+
+
+@app.post("/integrations/google/gmail/{message_id}/modify")
+def google_gmail_modify(message_id: str, body: GmailModifyIn) -> Any:
+    return _gcall(google.gmail_modify, message_id, body.mark_read, body.archive, body.star)
 
 
 @app.get("/integrations/google/tasks")

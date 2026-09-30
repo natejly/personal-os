@@ -3,7 +3,7 @@ import type { ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc
 import { api, chatStream, setBase, type Scope } from './lib/api'
 import { finishStatus, mergeConversation, pickEvictions, reduceStatus, settleApprovals } from './sessionStatus'
 
-export type View = 'home' | 'chat' | 'todos' | 'calendar' | 'boards' | 'dashboards' | 'memory' | 'documents' | 'project'
+export type View = 'home' | 'chat' | 'todos' | 'calendar' | 'mail' | 'boards' | 'dashboards' | 'memory' | 'documents' | 'project'
 /** How the Memory panel lays out its two halves: the memory list and the knowledge graph. */
 export type MemoryMode = 'split' | 'list' | 'graph'
 export type ContextTab = 'last' | 'preview' | 'trace'

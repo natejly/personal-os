@@ -46,6 +46,14 @@ CREATE TABLE IF NOT EXISTS doc_revisions (
 CREATE INDEX IF NOT EXISTS idx_rev_doc ON doc_revisions(doc_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_rev_pending ON doc_revisions(status, created_at DESC);
 
+-- Folders are rows, not just a string on each doc: a folder you made and have not filled yet has
+-- to survive a reload, and nesting needs a name for "Work/Research" even when only its children hold
+-- docs. `docs.folder` stays the path, so every existing doc keeps working untouched.
+CREATE TABLE IF NOT EXISTS doc_folders (
+  path TEXT PRIMARY KEY,
+  created_at REAL NOT NULL
+);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
   title, content, doc_id UNINDEXED, tokenize='porter unicode61'
 );
@@ -54,6 +62,28 @@ CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
 # A burst of keystrokes is one edit, not forty. Consecutive user revisions inside this window are
 # folded into the newest one, so the history reads as sessions rather than as a keylogger.
 COALESCE_SECONDS = 180.0
+
+
+# A folder path is "Work/Research/2026": segments joined by a slash. Kept in the doc's own `folder`
+# column rather than a foreign key, so a doc is never orphaned by a folder row going missing.
+MAX_FOLDER_DEPTH = 8
+MAX_SEGMENT = 60
+
+
+def folder_path(raw: str | None) -> str:
+    """Normalise whatever the UI or a model passed into a storable path. '' is the root."""
+    segs = []
+    for seg in str(raw or "").replace("\\", "/").split("/"):
+        seg = seg.strip().strip(".")[:MAX_SEGMENT].strip()
+        if seg:
+            segs.append(seg)
+    return "/".join(segs[:MAX_FOLDER_DEPTH])
+
+
+def ancestors(path: str) -> list[str]:
+    """['Work', 'Work/Research'] for 'Work/Research' — every folder a path implies, itself included."""
+    segs = [s for s in path.split("/") if s]
+    return ["/".join(segs[: i + 1]) for i in range(len(segs))]
 
 
 def word_count(text: str) -> int:
@@ -179,7 +209,7 @@ class Docs:
         with self.db.tx() as c:
             c.execute(
                 "INSERT INTO docs(id,project_id,title,content,folder,starred,created_at,updated_at) VALUES(?,?,?,?,?,0,?,?)",
-                (did, project_id, (title or "Untitled").strip()[:200], content, folder.strip(), t, t))
+                (did, project_id, (title or "Untitled").strip()[:200], content, folder_path(folder), t, t))
             self._reindex(c, did, title, content)
             if content:
                 c.execute(
@@ -225,6 +255,8 @@ class Docs:
             fields["title"] = (str(fields["title"]).strip()[:200]) or "Untitled"
         if "starred" in fields:
             fields["starred"] = 1 if fields["starred"] else 0
+        if "folder" in fields:
+            fields["folder"] = folder_path(fields["folder"])
         fields["updated_at"] = now()
         with self.db.tx() as c:
             c.execute(f"UPDATE docs SET {', '.join(f'{k}=?' for k in fields)} WHERE id=?", (*fields.values(), id))
@@ -237,6 +269,90 @@ class Docs:
         with self.db.tx() as c:
             c.execute("DELETE FROM docs WHERE id=?", (id,))
             c.execute("DELETE FROM docs_fts WHERE doc_id=?", (id,))
+
+    # ---- folders ----
+    def folders(self) -> list[dict[str, Any]]:
+        """Every folder, with the doc counts the tree renders. Ancestors implied by a path are
+        included even if nothing ever created them, so a tree never has a hole in the middle."""
+        with self.db.tx() as c:
+            named = [r["path"] for r in c.execute("SELECT path FROM doc_folders").fetchall()]
+            used = [r["folder"] for r in c.execute("SELECT DISTINCT folder FROM docs WHERE folder<>''").fetchall()]
+            counts = {r["folder"]: int(r["n"]) for r in c.execute(
+                "SELECT folder, COUNT(*) AS n FROM docs WHERE folder<>'' GROUP BY folder").fetchall()}
+        paths: set[str] = set()
+        for p in [*named, *used]:
+            norm = folder_path(p)
+            for anc in ancestors(norm):
+                paths.add(anc)
+        out = []
+        for path in sorted(paths, key=lambda p: [seg.lower() for seg in p.split("/")]):
+            prefix = path + "/"
+            out.append({
+                "path": path,
+                "name": path.rsplit("/", 1)[-1],
+                "parent": path.rsplit("/", 1)[0] if "/" in path else "",
+                "docs": counts.get(path, 0),
+                # What the badge shows on a collapsed folder: everything filed anywhere beneath it.
+                "docs_deep": sum(n for f, n in counts.items() if f == path or f.startswith(prefix)),
+            })
+        return out
+
+    def create_folder(self, path: str) -> list[dict[str, Any]]:
+        norm = folder_path(path)
+        if not norm:
+            raise ValueError("A folder needs a name")
+        t = now()
+        with self.db.tx() as c:
+            for anc in ancestors(norm):
+                c.execute("INSERT OR IGNORE INTO doc_folders(path, created_at) VALUES(?,?)", (anc, t))
+        return self.folders()
+
+    def rename_folder(self, path: str, new_path: str) -> list[dict[str, Any]]:
+        """Rename or move a folder, taking its subtree and every doc filed under it along."""
+        src, dst = folder_path(path), folder_path(new_path)
+        if not src:
+            raise ValueError("A folder needs a name")
+        if not dst:
+            raise ValueError("A folder needs a name")
+        if src == dst:
+            return self.folders()
+        # Moving a folder inside itself would orphan the subtree it is carrying.
+        if dst.startswith(src + "/"):
+            raise ValueError("A folder cannot be moved inside itself")
+        with self.db.tx() as c:
+            if c.execute("SELECT 1 FROM doc_folders WHERE path=?", (dst,)).fetchone():
+                raise ValueError(f'"{dst}" already exists')
+            rows = c.execute("SELECT path FROM doc_folders WHERE path=? OR path LIKE ?", (src, src + "/%")).fetchall()
+            t = now()
+            for anc in ancestors(dst):
+                c.execute("INSERT OR IGNORE INTO doc_folders(path, created_at) VALUES(?,?)", (anc, t))
+            for r in rows:
+                moved = dst + r["path"][len(src):]
+                c.execute("DELETE FROM doc_folders WHERE path=?", (r["path"],))
+                c.execute("INSERT OR IGNORE INTO doc_folders(path, created_at) VALUES(?,?)", (moved, t))
+            c.execute("UPDATE docs SET folder=? WHERE folder=?", (dst, src))
+            c.execute("UPDATE docs SET folder=? || substr(folder, ?) WHERE folder LIKE ?",
+                      (dst, len(src) + 1, src + "/%"))
+        return self.folders()
+
+    def delete_folder(self, path: str, delete_docs: bool = False) -> list[dict[str, Any]]:
+        """Remove a folder and its subfolders. Its docs move up to the parent unless asked otherwise:
+        losing a folder must not silently lose what was written in it."""
+        src = folder_path(path)
+        if not src:
+            raise ValueError("A folder needs a name")
+        parent = src.rsplit("/", 1)[0] if "/" in src else ""
+        with self.db.tx() as c:
+            if delete_docs:
+                ids = [r["id"] for r in c.execute("SELECT id FROM docs WHERE folder=? OR folder LIKE ?",
+                                                  (src, src + "/%")).fetchall()]
+                for did in ids:
+                    c.execute("DELETE FROM docs WHERE id=?", (did,))
+                    c.execute("DELETE FROM docs_fts WHERE doc_id=?", (did,))
+            else:
+                c.execute("UPDATE docs SET folder=? WHERE folder=? OR folder LIKE ?", (parent, src, src + "/%"))
+            c.execute("DELETE FROM doc_folders WHERE path=? OR path LIKE ?", (src, src + "/%"))
+        return self.folders()
 
     # ---- revisions ----
     def _rev_view(self, r: dict[str, Any], current: str | None = None) -> dict[str, Any]:

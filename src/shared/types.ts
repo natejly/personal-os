@@ -562,6 +562,20 @@ export interface Doc {
   pending?: number | DocRevision[]
 }
 
+/**
+ * A folder in the Docs tree. `path` is the whole path ('Work/Research'); folders are rows of their
+ * own so an empty one survives a reload, and so a rename can carry a subtree.
+ */
+export interface DocFolder {
+  path: string
+  name: string
+  parent: string
+  /** Docs filed directly in it. */
+  docs: number
+  /** Docs anywhere beneath it, itself included — what a collapsed row shows. */
+  docs_deep: number
+}
+
 /** A doc with its body loaded — what GET /docs/{id} returns. */
 export interface FullDoc extends Doc {
   content: string

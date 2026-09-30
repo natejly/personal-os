@@ -1,15 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  FileText, NotebookPen, Plus, Trash2, Star, Search, PanelLeftOpen, X, History, Columns2, Eye, Pencil,
-  Sparkles, Save, Link2, Link2Off, ChevronRight, ChevronDown, Folder
+  FileText, NotebookPen, Plus, PanelLeftOpen, X, History, Columns2, Eye, Pencil,
+  Sparkles, Save, Link2, Link2Off, ChevronDown, Folder
 } from 'lucide-react'
 import { useStore, type Scope } from '../store'
 import type { Doc } from '@shared/types'
 import MarkdownEditor from './MarkdownEditor'
 import MarkdownPreview from './MarkdownPreview'
 import DiffView from './DiffView'
-import ProjectChip from './ProjectChip'
 import ScopeSelect from './ScopeSelect'
+import DocTree from './DocTree'
 import '../styles/docs.css'
 
 const fmtWhen = (ts: number): string => {
@@ -21,75 +21,9 @@ const fmtWhen = (ts: number): string => {
     : d.toLocaleDateString([], { month: 'short', day: 'numeric' })
 }
 
-/** The doc list: folders first, then loose docs, starred pinned to the top within each group. */
-function DocList({ docs, activeId, query, onQuery, onOpen, onDelete, onStar, showScope }: {
-  docs: Doc[]
-  activeId: string | null
-  query: string
-  onQuery: (q: string) => void
-  onOpen: (id: string) => void
-  onDelete: (id: string) => void
-  onStar: (id: string, v: boolean) => void
-  showScope: boolean
-}): JSX.Element {
-  const groups = useMemo(() => {
-    const m = new Map<string, Doc[]>()
-    for (const d of docs) {
-      const k = d.folder || ''
-      const arr = m.get(k)
-      if (arr) arr.push(d)
-      else m.set(k, [d])
-    }
-    return [...m.entries()].sort((a, b) => (a[0] === '' ? 1 : b[0] === '' ? -1 : a[0].localeCompare(b[0])))
-  }, [docs])
-  const [shut, setShut] = useState<Record<string, boolean>>({})
-
-  return (
-    <div className="doc-tree">
-      <label className="search mini"><Search size={12} /><input placeholder="Search docs" value={query} onChange={(e) => onQuery(e.target.value)} /></label>
-      {docs.length === 0 && <p className="empty-hint">{query ? 'No matches.' : 'No docs yet.'}</p>}
-      {groups.map(([folder, items]) => (
-        <section key={folder || '_loose'}>
-          {folder && (
-            <button className="doc-folder" onClick={() => setShut((x) => ({ ...x, [folder]: !x[folder] }))}>
-              <ChevronRight size={11} className={shut[folder] ? undefined : 'rot90'} />{folder}<span className="count">{items.length}</span>
-            </button>
-          )}
-          {!shut[folder] && items.map((d) => (
-            <div key={d.id} className={`doc-row ${d.id === activeId ? 'active' : ''}`} onClick={() => onOpen(d.id)} role="button" tabIndex={0}>
-              <FileText size={13} className="doc-row-icon" />
-              <span className="doc-row-main">
-                <span className="doc-row-title">
-                  {d.title || 'Untitled'}
-                  {typeof d.pending === 'number' && d.pending > 0 && (
-                    <span className="doc-pending" title={`${d.pending} assistant edit${d.pending === 1 ? '' : 's'} awaiting review`}>
-                      <Sparkles size={9} />{d.pending}
-                    </span>
-                  )}
-                </span>
-                <span className="doc-row-meta">
-                  {showScope && <ProjectChip projectId={d.project_id} showPersonal />}
-                  {d.words} words · {fmtWhen(d.updated_at)}
-                </span>
-              </span>
-              <button className={`icon-btn ghost xs ${d.starred ? 'starred' : ''}`} title={d.starred ? 'Unstar' : 'Star'}
-                onClick={(e) => { e.stopPropagation(); onStar(d.id, !d.starred) }}>
-                <Star size={12} fill={d.starred ? 'currentColor' : 'none'} />
-              </button>
-              <button className="icon-btn ghost xs danger" title="Delete"
-                onClick={(e) => { e.stopPropagation(); if (confirm(`Delete “${d.title}”? Its revision history goes too.`)) onDelete(d.id) }}>
-                <Trash2 size={12} />
-              </button>
-            </div>
-          ))}
-        </section>
-      ))}
-    </div>
-  )
-}
-
 export default function DocsView(): JSX.Element {
   const docs = useStore((s) => s.docs)
+  const docFolders = useStore((s) => s.docFolders)
   const activeDoc = useStore((s) => s.activeDoc)
   const docDraft = useStore((s) => s.docDraft)
   const docTabs = useStore((s) => s.docTabs)
@@ -123,12 +57,13 @@ export default function DocsView(): JSX.Element {
     () => docTabs.map((id) => docs.find((d) => d.id === id) ?? (activeDoc?.id === id ? activeDoc : null)).filter(Boolean) as Doc[],
     [docTabs, docs, activeDoc]
   )
-  // Folders are just values on docs; the open doc's is unioned in because the list may be filtered.
+  // Every folder that exists, plus the open doc's own: the list may be filtered, and an empty folder
+  // is a real destination the docs themselves cannot vouch for.
   const folders = useMemo(() => {
-    const s = new Set(docs.map((d) => d.folder).filter(Boolean))
-    if (activeDoc?.folder) s.add(activeDoc.folder)
-    return [...s].sort((a, b) => a.localeCompare(b))
-  }, [docs, activeDoc])
+    const set = new Set([...docFolders.map((f) => f.path), ...docs.map((d) => d.folder).filter(Boolean)])
+    if (activeDoc?.folder) set.add(activeDoc.folder)
+    return [...set].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+  }, [docFolders, docs, activeDoc])
 
   // Linked scrolling: the preview follows the editor's fraction of the way down.
   useEffect(() => {
@@ -155,10 +90,9 @@ export default function DocsView(): JSX.Element {
 
       <div className="docs-body">
         <aside className="docs-side">
-          <DocList
+          <DocTree
             docs={docs} activeId={activeDoc?.id ?? null} query={query} onQuery={setQuery}
-            onOpen={(id) => void openDoc(id)} onDelete={(id) => void deleteDoc(id)}
-            onStar={(id, v) => void setDocStar(id, v)} showScope={scope === 'all'}
+            showScope={scope === 'all'} projectId={scope === 'all' || scope === 'personal' ? null : scope}
           />
         </aside>
 

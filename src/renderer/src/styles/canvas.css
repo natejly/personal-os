@@ -239,6 +239,15 @@
 .win.resizing {
   will-change: transform, width, height;
   transition: none;
+  /* These two must live on .dragging, not on .canvas.interacting. The dragging class is toggled
+     straight onto the node, so it lands in the same frame as the pointerdown, while .interacting goes
+     through React and lands a render later. In that gap the window has will-change (so it is promoted
+     to its own compositor layer) but still has backdrop-filter and a 72% alpha background -- and a
+     composited layer with a backdrop-filter over a transparent native window renders see-through.
+     Whether the render beat the compositor decided whether you saw it, which is why it was
+     intermittent. Making the drag state itself opaque closes the race. */
+  background: var(--material-opaque);
+  backdrop-filter: none;
 }
 .win:not(.dragging):not(.resizing) {
   transition: border-color var(--dur-hover) ease, box-shadow var(--dur-hover) ease, transform var(--dur-snap) var(--spring);

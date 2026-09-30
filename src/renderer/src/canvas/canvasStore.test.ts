@@ -35,9 +35,9 @@ const win = (over: Partial<CanvasWindow> = {}): CanvasWindow => ({
   pinned: 0, config: {}, created_at: 0, updated_at: 0, ...over
 })
 
-const canvas = (id: string, windows: CanvasWindow[]): Canvas => ({
+const canvas = (id: string, windows: CanvasWindow[], over: Partial<Canvas> = {}): Canvas => ({
   id, name: id, project_id: null, position: 0, snap_mode: 'both', grid_size: 16,
-  zoom: 1, pan_x: 0, pan_y: 0, wallpaper: '', created_at: 0, updated_at: 0, windows
+  zoom: 1, pan_x: 0, pan_y: 0, wallpaper: '', locked: 0, created_at: 0, updated_at: 0, windows, ...over
 })
 
 const seed = (...cs: Canvas[]): void => {
@@ -205,6 +205,55 @@ test('the unload flush writes nothing when no geometry is dirty', () => {
   seed(canvas('c1', [win({ id: 'w1' })]))
   flushLayoutOnUnload(useCanvas.getState())
   assert.deepEqual(calls, [])
+})
+
+// ---- a locked space is frozen: geometry in, and nothing out ------------------------
+
+test('a locked space refuses every geometry change', async () => {
+  seed(canvas('c1', [win({ id: 'w1', x: 100, y: 120 })], { locked: 1 }))
+  const st = useCanvas.getState()
+
+  st.setViewport('c1', { zoom: 2, pan_x: -300 })
+  assert.equal(useCanvas.getState().canvases['c1'].zoom, 1)
+
+  // A rect that somehow moved is not written back either: there is nothing to persist.
+  st.patchWindow('w1', { x: 999 })
+  st.markLayoutDirty(['w1'])
+  await st.flushLayout()
+  assert.deepEqual(layoutPuts(), [])
+
+  await st.setWindowState('w1', 'minimized')
+  assert.equal(rowOf('c1', 'w1').state, 'normal')
+
+  assert.equal(await st.openWindow('note'), null)
+  await st.closeWindow('w1')
+  assert.equal(useCanvas.getState().canvases['c1'].windows.length, 1)
+
+  st.tidyUp()
+  await st.deleteSpace('c1')
+  assert.ok(useCanvas.getState().canvases['c1'], 'a locked space cannot be deleted either')
+  // Every refusal was local: nothing above reached the backend at all.
+  assert.deepEqual(calls, [])
+})
+
+test('unlocking gives the space back', async () => {
+  seed(canvas('c1', [win({ id: 'w1' })], { locked: 1 }))
+  const st = useCanvas.getState()
+  st.toggleLock()
+  assert.equal(useCanvas.getState().canvases['c1'].locked, 0)
+  assert.equal(calls.at(-1)?.url, '/canvases/c1')
+
+  await useCanvas.getState().setWindowState('w1', 'minimized')
+  assert.equal(rowOf('c1', 'w1').state, 'minimized')
+})
+
+test('a locked space still takes focus, titles and config: only geometry is frozen', async () => {
+  seed(canvas('c1', [win({ id: 'w1' })], { locked: 1 }))
+  const st = useCanvas.getState()
+  st.focusWindow('w1')
+  assert.equal(useCanvas.getState().focusedWindowId, 'w1')
+  await st.setWindowConfig('w1', { url: 'https://example.com' })
+  assert.deepEqual(rowOf('c1', 'w1').config, { url: 'https://example.com' })
 })
 
 // ---- why the marquee selection has to be filtered to the active space --------------

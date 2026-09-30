@@ -43,6 +43,13 @@ export interface CanvasState {
   toggleOverview: () => void
   bindSpace: (canvasId: string, projectId: string | null) => Promise<void>
   setSnap: (canvasId: string, patch: { snap_mode?: SnapMode; grid_size?: number }) => Promise<void>
+  /**
+   * Freeze or release the space. A locked space keeps its pan, its zoom and every window's geometry:
+   * widgets stay fully interactive, but nothing on it can be moved, resized, added or closed.
+   */
+  setLocked: (canvasId: string, locked: boolean) => Promise<void>
+  /** ⌃⌘L and the bar's padlock: flips the active space's lock. */
+  toggleLock: () => void
   /** Local + 600 ms debounced PUT /canvases/{id}. */
   setViewport: (canvasId: string, v: { zoom?: number; pan_x?: number; pan_y?: number }) => void
 
@@ -183,6 +190,25 @@ const findWin = (s: CanvasState, id: string): CanvasWindow | undefined => {
 }
 
 const fail = (e: unknown): void => useStore.getState().toast((e as Error).message, 'error')
+
+/**
+ * The one gate every geometry change goes through. A locked space refuses moves, resizes, window
+ * state changes, additions and closes; `quiet` is for the paths a user did not click (a debounced
+ * layout flush), which drop the write without a toast.
+ */
+const blocked = (canvasId: string | null | undefined, quiet = false): boolean => {
+  const c = canvasId ? useCanvas.getState().canvases[canvasId] : undefined
+  if (!c?.locked) return false
+  if (!quiet) useStore.getState().toast(`“${c.name}” is locked`, 'info')
+  return true
+}
+
+/** Is this space frozen? `canvasId` defaults to the active one. Safe before the store has loaded. */
+export const spaceLocked = (canvasId?: string | null): boolean => {
+  const s = useCanvas.getState()
+  const id = canvasId ?? s.activeCanvasId
+  return !!(id ? s.canvases[id]?.locked : 0)
+}
 
 /**
  * The dirty ids as `PUT /canvases/{id}/layout` bodies, one per canvas. Drains ids whose window is gone
@@ -340,6 +366,7 @@ export const useCanvas = create<CanvasState>((set, get) => {
     else if (action === 'canvas:prev-space') s.prevSpace()
     else if (action === 'canvas:overview') s.toggleOverview()
     else if (action === 'canvas:tidy') s.tidyUp()
+    else if (action === 'canvas:lock') s.toggleLock()
     else if (action === 'canvas:popout') void s.popOutFocused()
     else if (action === 'canvas:unpopout') {
       if (s.focusedWindowId) void s.returnToCanvas(s.focusedWindowId)
@@ -438,6 +465,8 @@ export const useCanvas = create<CanvasState>((set, get) => {
       await api.canvases.update(canvasId, { name }).catch(fail)
     },
     deleteSpace: async (canvasId) => {
+      // A lock that let the whole space be thrown away would not be much of a lock.
+      if (blocked(canvasId)) return
       await api.canvases.delete(canvasId).catch(fail)
       set((s) => {
         const canvases = { ...s.canvases }
@@ -484,7 +513,21 @@ export const useCanvas = create<CanvasState>((set, get) => {
       patchCanvas(canvasId, patch)
       await api.canvases.update(canvasId, patch).catch(fail)
     },
+    setLocked: async (canvasId, locked) => {
+      if (!get().canvases[canvasId]) return
+      // Lock the pan/zoom the user is looking at, not the one the debounce has yet to write.
+      if (locked) await flushViewport(canvasId)
+      patchCanvas(canvasId, { locked: locked ? 1 : 0 })
+      await api.canvases.update(canvasId, { locked }).catch(fail)
+    },
+    toggleLock: () => {
+      const s = get()
+      const c = s.activeCanvasId ? s.canvases[s.activeCanvasId] : undefined
+      if (c) void s.setLocked(c.id, !c.locked)
+    },
     setViewport: (canvasId, v) => {
+      // Belt and braces: Canvas.tsx already swallows the gesture, so this only catches a stray caller.
+      if (blocked(canvasId, true)) return
       patchCanvas(canvasId, v)
       const t = viewportTimers.get(canvasId)
       if (t) clearTimeout(t)
@@ -499,6 +542,7 @@ export const useCanvas = create<CanvasState>((set, get) => {
       const canvasId = target ?? s.activeCanvasId
       const canvas = canvasId ? s.canvases[canvasId] : undefined
       if (!canvasId || !canvas) return null
+      if (blocked(canvasId)) return null
       const isActive = canvasId === s.activeCanvasId
       const pos = at ?? spawnAt(canvas.windows, sizeOf?.(kind), isActive ? viewport() : viewportOf(canvas))
       try {
@@ -554,7 +598,7 @@ export const useCanvas = create<CanvasState>((set, get) => {
     },
     closeWindow: async (windowId) => {
       const w = findWin(get(), windowId)
-      if (!w) return
+      if (!w || blocked(w.canvas_id)) return
       dirty.delete(windowId)
       if (w.state === 'popped') void window.os.popout.close(windowId)
       putWindows(w.canvas_id, (ws) => ws.filter((x) => x.id !== windowId))
@@ -597,7 +641,7 @@ export const useCanvas = create<CanvasState>((set, get) => {
     setWindowState: async (windowId, state) => {
       const s = get()
       const w = findWin(s, windowId)
-      if (!w || w.state === state) return
+      if (!w || w.state === state || blocked(w.canvas_id)) return
       if (state === 'maximized') {
         const r = zoneRect('top', viewport(), { w: w.w, h: w.h })
         const box = { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.w), h: Math.round(r.h) }
@@ -642,6 +686,7 @@ export const useCanvas = create<CanvasState>((set, get) => {
     moveWindowToCanvas: async (windowId, canvasId) => {
       const w = findWin(get(), windowId)
       if (!w || w.canvas_id === canvasId) return
+      if (blocked(w.canvas_id) || blocked(canvasId)) return
       putWindows(w.canvas_id, (ws) => ws.filter((x) => x.id !== windowId))
       try {
         putWindow(await api.windows.update(windowId, { canvas_id: canvasId }))
@@ -651,7 +696,12 @@ export const useCanvas = create<CanvasState>((set, get) => {
       }
     },
     markLayoutDirty: (windowIds) => {
-      for (const id of windowIds) dirty.add(id)
+      const s = get()
+      for (const id of windowIds) {
+        // A window on a locked space has nothing to write: its rect never left where it was.
+        if (blocked(findWin(s, id)?.canvas_id, true)) continue
+        dirty.add(id)
+      }
       if (!dirty.size) return
       if (layoutTimer) clearTimeout(layoutTimer)
       layoutTimer = setTimeout(() => {
@@ -681,7 +731,7 @@ export const useCanvas = create<CanvasState>((set, get) => {
     tidyUp: () => {
       const s = get()
       const c = s.activeCanvasId ? s.canvases[s.activeCanvasId] : undefined
-      if (!c) return
+      if (!c || blocked(c.id)) return
       const movable = c.windows.filter((w) => w.state === 'normal')
       if (!movable.length) return
       const laid = tidyLayout(movable.map((w) => ({ id: w.id, x: w.x, y: w.y, w: w.w, h: w.h })), viewport(), c.grid_size)
@@ -699,7 +749,7 @@ export const useCanvas = create<CanvasState>((set, get) => {
     popOut: async (windowId) => {
       const s = get()
       const w = findWin(s, windowId)
-      if (!w || w.state === 'popped') return
+      if (!w || w.state === 'popped' || blocked(w.canvas_id)) return
       s.patchWindow(windowId, { state: 'popped' })
       const ok = await window.os.popout.open(windowId, {
         bounds: w.popout_bounds ?? { width: Math.round(w.w), height: Math.round(w.h) },
@@ -747,3 +797,5 @@ export const useActiveCanvas = (): Canvas | null => useCanvas((s) => (s.activeCa
 export const useWindows = (): CanvasWindow[] => useCanvas((s) => (s.activeCanvasId ? s.canvases[s.activeCanvasId]?.windows ?? EMPTY : EMPTY))
 export const useWindow = (windowId: string): CanvasWindow | undefined => useCanvas((s) => findWin(s, windowId))
 export const useIsFocused = (windowId: string): boolean => useCanvas((s) => s.focusedWindowId === windowId)
+/** The active space's lock, as a boolean: what the plane, the frames and the bar all render from. */
+export const useSpaceLocked = (): boolean => useCanvas((s) => !!(s.activeCanvasId ? s.canvases[s.activeCanvasId]?.locked : 0))

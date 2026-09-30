@@ -1948,6 +1948,7 @@ class CanvasPatch(BaseModel):
     pan_x: Finite | None = None
     pan_y: Finite | None = None
     wallpaper: str | None = None
+    locked: bool | None = None
     clear_project: bool = False
 
 

@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS canvases (
   pan_x REAL NOT NULL DEFAULT 0,
   pan_y REAL NOT NULL DEFAULT 0,
   wallpaper TEXT NOT NULL DEFAULT '',       -- '' | tint token
+  locked INTEGER NOT NULL DEFAULT 0,        -- 1 = the view is frozen: no pan/zoom, no window geometry
   created_at REAL NOT NULL,
   updated_at REAL NOT NULL
 );
@@ -67,14 +68,19 @@ class Canvases:
         self.db = db
         with db.tx() as c:
             c.executescript(SCHEMA)
+            # Post-release columns; CREATE TABLE IF NOT EXISTS won't add them to an existing db.
+            have = {r["name"] for r in c.execute("PRAGMA table_info(canvases)").fetchall()}
+            for col, ddl in {"locked": "INTEGER NOT NULL DEFAULT 0"}.items():
+                if col not in have:
+                    c.execute(f"ALTER TABLE canvases ADD COLUMN {col} {ddl}")
 
     @staticmethod
     def _seed(c: sqlite3.Connection) -> None:
         """Guarded insert, so two clients racing on GET /canvases at launch cannot make two spaces."""
         t = now()
         c.execute(
-            "INSERT INTO canvases(id,name,project_id,position,snap_mode,grid_size,zoom,pan_x,pan_y,wallpaper,created_at,updated_at)"
-            " SELECT ?,?,NULL,0,'both',16,1.0,0,0,'',?,? WHERE NOT EXISTS(SELECT 1 FROM canvases)",
+            "INSERT INTO canvases(id,name,project_id,position,snap_mode,grid_size,zoom,pan_x,pan_y,wallpaper,locked,created_at,updated_at)"
+            " SELECT ?,?,NULL,0,'both',16,1.0,0,0,'',0,?,? WHERE NOT EXISTS(SELECT 1 FROM canvases)",
             (new_id(), DEFAULT_NAME, t, t),
         )
 
@@ -106,11 +112,12 @@ class Canvases:
         with self.db.tx() as c:
             pos = c.execute("SELECT COALESCE(MAX(position),-1)+1 FROM canvases").fetchone()[0]
             c.execute(
-                "INSERT INTO canvases(id,name,project_id,position,snap_mode,grid_size,zoom,pan_x,pan_y,wallpaper,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO canvases(id,name,project_id,position,snap_mode,grid_size,zoom,pan_x,pan_y,wallpaper,locked,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (cid, name.strip() or "Desk", project_id, pos,
                  src["snap_mode"] if src else "both", src["grid_size"] if src else 16,
                  src["zoom"] if src else 1.0, src["pan_x"] if src else 0.0, src["pan_y"] if src else 0.0,
-                 src["wallpaper"] if src else "", t, t),
+                 # A copy starts unlocked: the lock guards the space you are looking at, not the template.
+                 src["wallpaper"] if src else "", 0, t, t),
             )
             for w in (src or {}).get("windows", []):
                 c.execute(_INSERT_WINDOW, (
@@ -122,11 +129,13 @@ class Canvases:
         return self.get(cid)
 
     def update(self, id: str, patch: dict[str, Any]) -> dict[str, Any] | None:
-        fields = {k: v for k, v in patch.items() if k in {"name", "project_id", "position", "snap_mode", "grid_size", "zoom", "pan_x", "pan_y", "wallpaper"}}
+        fields = {k: v for k, v in patch.items() if k in {"name", "project_id", "position", "snap_mode", "grid_size", "zoom", "pan_x", "pan_y", "wallpaper", "locked"}}
         if not fields:
             return self.get(id)
         if "name" in fields:
             fields["name"] = str(fields["name"]).strip() or "Desk"
+        if "locked" in fields:
+            fields["locked"] = 1 if fields["locked"] else 0
         fields["updated_at"] = now()
         sets = ", ".join(f"{k}=?" for k in fields)
         with self.db.tx() as c:

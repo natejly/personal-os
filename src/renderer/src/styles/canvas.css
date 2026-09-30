@@ -100,6 +100,12 @@
 /* A drag that crosses an iframe must not hand the pointer stream to another document. */
 .canvas.interacting iframe { pointer-events: none; }
 
+/* Locked: the plane takes no gestures, so it offers no grab cursor and no grip hint. The windows
+   themselves stay live -- only their chrome goes quiet. */
+.canvas.locked { cursor: default; }
+.canvas.locked .win-move { cursor: default; }
+.canvas.locked .win-grip-dots { opacity: 0.35; }
+
 .canvas-plane {
   position: absolute;
   top: 0;
@@ -560,6 +566,7 @@
 }
 .space-dot { width: 6px; height: 6px; border-radius: 50%; flex: 0 0 6px; }
 .space-count { font-size: 10px; color: var(--text-faint); }
+.space-lock { flex: 0 0 11px; color: var(--accent); }
 
 /* ---------- overview ---------- */
 

@@ -182,7 +182,10 @@ export interface CanvasWindow {
 export interface Canvas {
   id: string; name: string; project_id: string | null; position: number
   snap_mode: SnapMode; grid_size: number; zoom: number; pan_x: number; pan_y: number
-  wallpaper: string; created_at: number; updated_at: number
+  wallpaper: string
+  /** 0 | 1 — SQLite has no boolean. 1 freezes the view: no pan, no zoom, no window geometry. */
+  locked: number
+  created_at: number; updated_at: number
   windows: CanvasWindow[]
 }
 
@@ -306,8 +309,8 @@ Plus, elsewhere in the same file: `TodayDashboard` (was the second `Dashboard`),
 |---|---|---|
 | `GET /canvases` | — | `Canvas[]`, ordered by `(position, created_at)`, each with `windows` ordered by `(z, created_at)`. Seeds `"Desk 1"` when the table is empty and returns it, so the client never handles an empty list. 2 queries, not N+1. |
 | `GET /canvases/{id}` | — | `Canvas` \| 404 |
-| `POST /canvases` | `{ name?: string = "Desk", project_id?: string \| null, copy_from?: string \| null }` | `Canvas`. `position = COALESCE(MAX(position),-1)+1`. `copy_from` copies `snap_mode/grid_size/zoom/pan_x/pan_y/wallpaper` and duplicates every window (fresh ids, same geometry and `z`, `config` copied, `state` forced `'normal'`, `popout_bounds` dropped). 404 on unknown `copy_from`. |
-| `PUT /canvases/{id}` | `{ name?, project_id?, position?, snap_mode?, grid_size?, zoom?, pan_x?, pan_y?, wallpaper?, clear_project?: boolean }` | `Canvas` \| 404. 400 if `snap_mode ∉ SNAP_MODES`. `clear_project: true` unbinds (the `todos.py` `clear_*` convention; a bare `project_id: null` is dropped by `exclude_none`). |
+| `POST /canvases` | `{ name?: string = "Desk", project_id?: string \| null, copy_from?: string \| null }` | `Canvas`. `position = COALESCE(MAX(position),-1)+1`. `copy_from` copies `snap_mode/grid_size/zoom/pan_x/pan_y/wallpaper` (never `locked`: a copy starts unlocked) and duplicates every window (fresh ids, same geometry and `z`, `config` copied, `state` forced `'normal'`, `popout_bounds` dropped). 404 on unknown `copy_from`. |
+| `PUT /canvases/{id}` | `{ name?, project_id?, position?, snap_mode?, grid_size?, zoom?, pan_x?, pan_y?, wallpaper?, locked?: boolean, clear_project?: boolean }` | `Canvas` \| 404. 400 if `snap_mode ∉ SNAP_MODES`. `clear_project: true` unbinds (the `todos.py` `clear_*` convention; a bare `project_id: null` is dropped by `exclude_none`). |
 | `DELETE /canvases/{id}` | — | `{ ok: true }`, always 200. `canvas_windows` go via `ON DELETE CASCADE`. |
 | `POST /canvases/{id}/windows` | `{ kind: WidgetKind, ref_id?: string \| null, project_id?: string \| null, title?: string = "", x?: number = 0, y?: number = 0, w?: number = 520, h?: number = 640, config?: object = {} }` | `CanvasWindow`. 404 unknown canvas, 400 `kind ∉ WIDGET_KINDS`. `z = COALESCE(MAX(z),-1)+1` within that canvas. |
 | `PUT /canvases/{id}/layout` | `{ windows: WindowLayout[] }` | `{ ok: true, updated: number }` |
@@ -451,6 +454,16 @@ export interface CanvasState {
   toggleOverview: () => void
   bindSpace: (canvasId: string, projectId: string | null) => Promise<void>
   setSnap: (canvasId: string, patch: { snap_mode?: SnapMode; grid_size?: number }) => Promise<void>
+  /**
+   * Freeze or release the space. A locked space keeps its pan, its zoom and every window's geometry;
+   * widgets stay interactive, but nothing on it can be moved, resized, added, closed or deleted. The
+   * store is where that is enforced — `openWindow`, `closeWindow`, `setWindowState`,
+   * `moveWindowToCanvas`, `popOut`, `markLayoutDirty`, `setViewport`, `tidyUp` and `deleteSpace` all
+   * refuse — and the UI only mirrors it (no grab cursor, no resize handles, no drop ghost).
+   */
+  setLocked: (canvasId: string, locked: boolean) => Promise<void>
+  /** ⌃⌘L and the bar's padlock: flips the active space's lock. */
+  toggleLock: () => void
   /** Local + 600 ms debounced PUT /canvases/{id}. */
   setViewport: (canvasId: string, v: { zoom?: number; pan_x?: number; pan_y?: number }) => void
 

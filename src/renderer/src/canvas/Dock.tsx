@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { WIDGETS } from './registry'
 import StatusRing from './StatusRing'
-import { useCanvas, useWindows } from './store'
+import { useCanvas, useSpaceLocked, useWindows } from './store'
 import { KIND_ICON, KIND_LABEL } from './WindowHost'
 
 /** 1.35 under the pointer, 1.175 for its neighbour, 1.0 beyond — the Dock falloff. */
@@ -12,6 +12,8 @@ export default function Dock(): JSX.Element | null {
   const focusedId = useCanvas((s) => s.focusedWindowId)
   const setWindowState = useCanvas((s) => s.setWindowState)
   const focusWindow = useCanvas((s) => s.focusWindow)
+  // Restoring a tile puts a window back on the plane, which a locked space does not allow.
+  const locked = useSpaceLocked()
   const [hover, setHover] = useState(-1)
 
   const tiles = windows.filter((w) => w.state === 'minimized')
@@ -24,6 +26,8 @@ export default function Dock(): JSX.Element | null {
           key={w.id}
           className={focusedId === w.id ? 'dock-tile focused' : 'dock-tile'}
           style={{ transform: `scale(${magnify(i, hover)})` }}
+          disabled={locked}
+          title={locked ? 'Space locked' : undefined}
           onPointerEnter={() => setHover(i)}
           onClick={() => {
             void setWindowState(w.id, 'normal')

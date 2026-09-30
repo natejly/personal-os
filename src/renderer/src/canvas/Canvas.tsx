@@ -15,7 +15,7 @@ import WindowFrame from './WindowFrame'
 import { hasDrag, hasFiles, hasLink, readDrag, readLink } from './dnd'
 import { WIDGETS } from './registry'
 import { canvasFromScreen, screenFromCanvas, snapValue, visibleRect, type Point, type Viewport } from './snapping'
-import { setLiveViewport, setViewportEl, useActiveCanvas, useCanvas, useWindows, viewport, viewportPoint } from './store'
+import { setLiveViewport, setViewportEl, spaceLocked, useActiveCanvas, useCanvas, useWindows, viewport, viewportPoint } from './store'
 import { getDragOverlay, schedule, subscribeDragOverlay } from './useDrag'
 import '../styles/canvas.css'
 
@@ -152,6 +152,9 @@ export default function Canvas(): JSX.Element {
   const [menu, setMenu] = useState<{ screen: Point; at: Point } | null>(null)
   const idle = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // A locked space keeps the pan, the zoom and every rect it had: the plane stops taking gestures,
+  // while the widgets on it stay as interactive as ever.
+  const locked = !!canvas?.locked
   const zoom = canvas?.zoom ?? 1
   const panX = canvas?.pan_x ?? 0
   const panY = canvas?.pan_y ?? 0
@@ -253,6 +256,12 @@ export default function Canvas(): JSX.Element {
     const onWheel = (e: WheelEvent): void => {
       const id = useCanvas.getState().activeCanvasId
       if (!id) return
+      if (spaceLocked(id)) {
+        // Swallow a pinch so the renderer itself does not zoom instead; a plain scroll is left to
+        // whatever is under the pointer, which is how a widget keeps scrolling on a frozen space.
+        if (e.ctrlKey || e.metaKey) e.preventDefault()
+        return
+      }
       const v = viewport()
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault()
@@ -287,7 +296,7 @@ export default function Canvas(): JSX.Element {
         setSelected([])
         return
       }
-      if ((e.key === 'Backspace' || e.key === 'Delete') && selected.length) {
+      if ((e.key === 'Backspace' || e.key === 'Delete') && selected.length && !spaceLocked()) {
         e.preventDefault()
         const here = new Set((st.activeCanvasId ? st.canvases[st.activeCanvasId]?.windows ?? [] : []).map((w) => w.id))
         for (const id of selected) if (here.has(id)) void st.closeWindow(id)
@@ -309,6 +318,9 @@ export default function Canvas(): JSX.Element {
     const id = st.activeCanvasId
     if (!id) return
     useCanvas.setState({ focusedWindowId: null })
+    // Neither gesture the plane owns survives a lock: panning moves the view, a marquee only leads
+    // to moving or deleting what it caught.
+    if (spaceLocked(id)) return setSelected([])
     // A plain drag pans (so do middle button and ⌥); ⇧ drags marquee-select, adding to the selection.
     const additive = e.shiftKey
     const pan = !additive
@@ -359,6 +371,7 @@ export default function Canvas(): JSX.Element {
 
   const onDragOver = (e: ReactDragEvent<HTMLDivElement>): void => {
     const dt = e.dataTransfer
+    if (locked) return
     if (!hasDrag(dt) && !hasFiles(dt) && !hasLink(dt)) return
     e.preventDefault()
     dt.dropEffect = 'copy'
@@ -375,6 +388,7 @@ export default function Canvas(): JSX.Element {
 
   const onDrop = async (e: ReactDragEvent<HTMLDivElement>): Promise<void> => {
     const dt = e.dataTransfer
+    if (locked) return
     if (!hasDrag(dt) && !dt.files.length && !hasLink(dt)) return
     e.preventDefault()
     setGhost(null)
@@ -402,8 +416,13 @@ export default function Canvas(): JSX.Element {
   const closeMenu = useCallback(() => setMenu(null), [])
   const canvasId = canvas?.id
   const menuItems = useMemo<MenuEntry[]>(
-    () => (menu && canvasId ? [{ kind: 'header', label: 'Add widget' }, ...addWidgetEntries({ canvasId, at: menu.at })] : []),
-    [menu, canvasId]
+    () => {
+      if (!menu || !canvasId) return []
+      // Nothing can be added to a frozen space, so the menu offers the one thing that can be done.
+      if (locked) return [{ label: 'Unlock space', accel: '⌃⌘L', run: () => useCanvas.getState().toggleLock() }]
+      return [{ kind: 'header', label: 'Add widget' }, ...addWidgetEntries({ canvasId, at: menu.at })]
+    },
+    [menu, canvasId, locked]
   )
 
   const pitch = grid * zoom
@@ -416,7 +435,7 @@ export default function Canvas(): JSX.Element {
       <SpacesBar />
       <div
         ref={mount}
-        className={interacting ? 'canvas interacting' : 'canvas'}
+        className={['canvas', interacting && 'interacting', locked && 'locked'].filter(Boolean).join(' ')}
         onPointerDown={onPointerDown}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
@@ -450,7 +469,7 @@ export default function Canvas(): JSX.Element {
         {loaded && !shown.length && (
           <div className="canvas-empty">
             <strong>Empty space</strong>
-            <span>Drag anything from the sidebar, or right-click to add a widget.</span>
+            <span>{locked ? 'This space is locked. Unlock it (⌃⌘L) to add widgets.' : 'Drag anything from the sidebar, or right-click to add a widget.'}</span>
           </div>
         )}
         <Dock />

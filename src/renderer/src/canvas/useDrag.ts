@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
 import type { CanvasWindow, Rect } from '@shared/types'
-import { useCanvas, viewport, viewportPoint } from './store'
+import { spaceLocked, useCanvas, viewport, viewportPoint } from './store'
 import {
   EDGE_HOLD_MS, clampSize, constrain, edgeZone, guideLines, resizeRect, snapMove, snapResize, zoneRect,
   type AppliedGuide, type GapPill, type Handle, type Point, type Size, type SnapContext, type WindowRect, type Zone
@@ -230,6 +230,8 @@ const onKey = (e: KeyboardEvent): void => {
 
 const begin = (e: ReactPointerEvent, win: CanvasWindow, o: DragOptions, handle: Handle | null): void => {
   if (live || e.button !== 0 || win.state !== 'normal') return
+  // The single gate for every route into a drag: the grip, a resize handle and the ⌘-drag shortcut.
+  if (spaceLocked(win.canvas_id)) return
   const node = o.node.current
   if (!node) return
   e.preventDefault()

@@ -1,4 +1,4 @@
-"""Google Workspace integration: OAuth (desktop loopback flow), Calendar, Gmail, Tasks.
+"""Google Workspace integration: OAuth (desktop loopback flow), Calendar, Gmail, Tasks, Drive.
 
 The user just clicks "Sign in with Google". The OAuth client the app signs in with comes
 from GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET in the environment (.env), so it is set up once
@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import datetime as dt
 import email.mime.text
+import functools
 import json
 import logging
 import os
@@ -41,11 +42,75 @@ SCOPES = [
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/tasks",
+    "https://www.googleapis.com/auth/drive.readonly",
 ]
 
 
 class GoogleNotConnected(Exception):
     pass
+
+
+class GoogleAPIError(Exception):
+    """A Google API call failed for a reason the user can act on; str(e) says what to do."""
+
+
+_SERVICE_LABELS = {
+    "calendar-json.googleapis.com": "the Google Calendar API",
+    "gmail.googleapis.com": "the Gmail API",
+    "tasks.googleapis.com": "the Google Tasks API",
+    "drive.googleapis.com": "the Google Drive API",
+}
+
+
+def _friendly_api_error(e: Exception) -> str | None:
+    """Turn googleapiclient's paragraph-long HttpError into one actionable sentence."""
+    try:
+        from googleapiclient.errors import HttpError
+    except ImportError:
+        return None
+    if not isinstance(e, HttpError):
+        return None
+    status = getattr(getattr(e, "resp", None), "status", 0)
+    try:
+        msg = e._get_reason().strip()  # noqa: SLF001 - the only place the human-readable message lives
+    except Exception:  # noqa: BLE001
+        msg = str(e)
+    details = [d for d in (getattr(e, "error_details", None) or []) if isinstance(d, dict)]
+    info = next((d for d in details if d.get("reason")), {})
+    reason, meta = info.get("reason", ""), info.get("metadata") or {}
+    if reason == "SERVICE_DISABLED" or "has not been used in project" in msg or "accessNotConfigured" in msg:
+        m = re.search(r"https://console\.developers\.google\.com/\S+?(?=[\s\"']|$)", msg)
+        url = meta.get("activationUrl") or (m.group(0) if m else "https://console.cloud.google.com/apis/library")
+        service = meta.get("service", "")
+        if not service:  # older error payloads only carry the service inside the activation URL
+            m2 = re.search(r"/apis/api/([\w.-]+)/", url)
+            service = m2.group(1) if m2 else ""
+        api = _SERVICE_LABELS.get(service, "this Google API")
+        return (f"{api[0].upper()}{api[1:]} is disabled in the Google Cloud project your OAuth client belongs to. "
+                f"Enable it at {url} , wait a minute, then retry.")
+    if reason == "ACCESS_TOKEN_SCOPE_INSUFFICIENT" or ("insufficient" in msg.lower() and ("scope" in msg.lower() or "permission" in msg.lower())):
+        return "The Google sign-in is missing a permission this action needs. Open Settings → Integrations and click Reconnect."
+    if status == 401:
+        return "Google rejected the saved sign-in. Open Settings → Integrations and sign in again."
+    if status == 429 or reason in ("RATE_LIMIT_EXCEEDED", "USER_RATE_LIMIT_EXCEEDED"):
+        return "Google is rate-limiting requests right now; wait a moment and retry."
+    return None
+
+
+def _api(fn):  # type: ignore[no-untyped-def]
+    """Wrap a public API method so raw HttpErrors surface as one readable sentence."""
+    @functools.wraps(fn)
+    def wrap(self, *a, **kw):  # type: ignore[no-untyped-def]
+        try:
+            return fn(self, *a, **kw)
+        except (GoogleNotConnected, GoogleAPIError):
+            raise
+        except Exception as e:  # noqa: BLE001
+            hint = _friendly_api_error(e)
+            if hint:
+                raise GoogleAPIError(hint) from e
+            raise
+    return wrap
 
 
 class Google:
@@ -221,6 +286,7 @@ class Google:
         return build(name, version, credentials=self._creds(), cache_discovery=False)
 
     # ---------- Calendar ----------
+    @_api
     def calendar_events(self, days: int = 2, calendar_id: str = "primary", max_results: int = 30, start: str | None = None) -> list[dict[str, Any]]:
         now = dt.datetime.fromisoformat(start) if start else dt.datetime.now(dt.timezone.utc)
         if now.tzinfo is None:
@@ -242,6 +308,7 @@ class Google:
             })
         return out
 
+    @_api
     def calendar_create(self, summary: str, start: str, end: str | None = None, description: str = "", location: str = "", attendees: list[str] | None = None, calendar_id: str = "primary") -> dict[str, Any]:
         all_day = len(start) == 10
         if not end:
@@ -260,6 +327,7 @@ class Google:
         return {"id": e.get("id"), "link": e.get("htmlLink"), "summary": e.get("summary")}
 
     # ---------- Gmail ----------
+    @_api
     def gmail_search(self, query: str = "is:unread", max_results: int = 15) -> list[dict[str, Any]]:
         svc = self._svc("gmail", "v1")
         res = svc.users().messages().list(userId="me", q=query, maxResults=max(1, min(int(max_results), 50))).execute()
@@ -271,6 +339,7 @@ class Google:
                         "snippet": msg.get("snippet"), "unread": "UNREAD" in msg.get("labelIds", []), "labels": msg.get("labelIds", [])})
         return out
 
+    @_api
     def gmail_get(self, message_id: str, max_chars: int = 8000) -> dict[str, Any]:
         svc = self._svc("gmail", "v1")
         msg = svc.users().messages().get(userId="me", id=message_id, format="full").execute()
@@ -278,6 +347,7 @@ class Google:
         body = _extract_body(msg.get("payload", {}))
         return {"id": message_id, "thread_id": msg.get("threadId"), "from": h.get("from"), "to": h.get("to"), "subject": h.get("subject"), "date": h.get("date"), "body": body[:max_chars]}
 
+    @_api
     def gmail_draft(self, to: str, subject: str, body: str, reply_to_message_id: str | None = None) -> dict[str, Any]:
         svc = self._svc("gmail", "v1")
         raw = _raw_message(to, subject, body)
@@ -287,11 +357,13 @@ class Google:
         d = svc.users().drafts().create(userId="me", body=payload).execute()
         return {"draft_id": d.get("id"), "to": to, "subject": subject, "note": "Draft saved in Gmail; not sent."}
 
+    @_api
     def gmail_send(self, to: str, subject: str, body: str) -> dict[str, Any]:
         svc = self._svc("gmail", "v1")
         m = svc.users().messages().send(userId="me", body={"raw": _raw_message(to, subject, body)}).execute()
         return {"sent": m.get("id"), "to": to, "subject": subject}
 
+    @_api
     def gmail_modify(self, message_id: str, mark_read: bool | None = None, archive: bool = False, star: bool | None = None) -> dict[str, Any]:
         add, rem = [], []
         if mark_read is True:
@@ -308,14 +380,17 @@ class Google:
         return {"ok": True, "added": add, "removed": rem}
 
     # ---------- Tasks ----------
+    @_api
     def tasks_lists(self) -> list[dict[str, Any]]:
         res = self._svc("tasks", "v1").tasklists().list(maxResults=50).execute()
         return [{"id": t["id"], "title": t["title"]} for t in res.get("items", [])]
 
+    @_api
     def tasks_list(self, tasklist: str = "@default", show_completed: bool = False, max_results: int = 50) -> list[dict[str, Any]]:
         res = self._svc("tasks", "v1").tasks().list(tasklist=tasklist, showCompleted=show_completed, showHidden=show_completed, maxResults=max_results).execute()
         return [{"id": t["id"], "title": t.get("title"), "notes": t.get("notes"), "due": t.get("due"), "status": t.get("status")} for t in res.get("items", [])]
 
+    @_api
     def tasks_add(self, title: str, notes: str = "", due: str | None = None, tasklist: str = "@default") -> dict[str, Any]:
         body: dict[str, Any] = {"title": title, "notes": notes}
         if due:
@@ -323,9 +398,90 @@ class Google:
         t = self._svc("tasks", "v1").tasks().insert(tasklist=tasklist, body=body).execute()
         return {"id": t["id"], "title": t.get("title"), "due": t.get("due")}
 
+    @_api
     def tasks_complete(self, task_id: str, tasklist: str = "@default") -> dict[str, Any]:
         t = self._svc("tasks", "v1").tasks().patch(tasklist=tasklist, task=task_id, body={"status": "completed"}).execute()
         return {"id": t["id"], "status": t.get("status")}
+
+
+    # ---------- Drive (Docs, Sheets, Slides, uploaded files) ----------
+    # Google-native files have no bytes to download; they are exported to a text format instead.
+    _EXPORT_MIME = {
+        "application/vnd.google-apps.document": "text/plain",
+        "application/vnd.google-apps.spreadsheet": "text/csv",
+        "application/vnd.google-apps.presentation": "text/plain",
+    }
+    _DRIVE_KINDS = {
+        "application/vnd.google-apps.document": "doc",
+        "application/vnd.google-apps.spreadsheet": "sheet",
+        "application/vnd.google-apps.presentation": "slides",
+        "application/vnd.google-apps.folder": "folder",
+        "application/vnd.google-apps.shortcut": "shortcut",
+        "application/pdf": "pdf",
+    }
+    _DRIVE_FIELDS = "id,name,mimeType,modifiedTime,size,webViewLink,owners(displayName,emailAddress),shortcutDetails"
+
+    def _drive_row(self, f: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": f.get("id"), "name": f.get("name"),
+            "kind": self._DRIVE_KINDS.get(f.get("mimeType", ""), f.get("mimeType")),
+            "modified": f.get("modifiedTime"), "size": f.get("size"),
+            "link": f.get("webViewLink"),
+            "owner": next((o.get("emailAddress") or o.get("displayName") for o in f.get("owners", [])), None),
+        }
+
+    @_api
+    def drive_search(self, query: str = "", max_results: int = 20, mime_type: str | None = None) -> list[dict[str, Any]]:
+        """Search the whole Drive (own + shared with me). Empty query lists the most recently modified files."""
+        terms = ["trashed = false"]
+        if query:
+            q = query.replace("\\", "\\\\").replace("'", "\\'")
+            terms.append(f"(name contains '{q}' or fullText contains '{q}')")
+        if mime_type:
+            terms.append(f"mimeType = '{mime_type}'")
+        res = self._svc("drive", "v3").files().list(
+            q=" and ".join(terms),
+            # Drive rejects orderBy on fullText queries; relevance ordering applies there anyway.
+            orderBy=None if query else "modifiedTime desc",
+            pageSize=max(1, min(int(max_results), 50)),
+            fields=f"files({self._DRIVE_FIELDS})",
+            supportsAllDrives=True, includeItemsFromAllDrives=True,
+        ).execute()
+        return [self._drive_row(f) for f in res.get("files", [])]
+
+    @_api
+    def drive_read(self, file_id: str, max_chars: int = 20000) -> dict[str, Any]:
+        """Read a Drive file as text: Docs/Sheets/Slides are exported, other files downloaded and extracted."""
+        svc = self._svc("drive", "v3")
+        meta = svc.files().get(fileId=file_id, fields=self._DRIVE_FIELDS, supportsAllDrives=True).execute()
+        target = (meta.get("shortcutDetails") or {}).get("targetId")
+        if target:
+            meta = svc.files().get(fileId=target, fields=self._DRIVE_FIELDS, supportsAllDrives=True).execute()
+        mime, out = meta.get("mimeType", ""), self._drive_row(meta)
+        if mime == "application/vnd.google-apps.folder":
+            res = svc.files().list(q=f"'{meta['id']}' in parents and trashed = false", orderBy="folder,name",
+                                   pageSize=100, fields=f"files({self._DRIVE_FIELDS})", supportsAllDrives=True,
+                                   includeItemsFromAllDrives=True).execute()
+            return {**out, "children": [self._drive_row(f) for f in res.get("files", [])]}
+        if mime in self._EXPORT_MIME:
+            data = svc.files().export(fileId=meta["id"], mimeType=self._EXPORT_MIME[mime]).execute()
+            text = data.decode("utf-8", "replace") if isinstance(data, bytes) else str(data)
+            if mime == "application/vnd.google-apps.spreadsheet":
+                out["note"] = "CSV export covers the first sheet only."
+        elif mime.startswith("application/vnd.google-apps."):
+            raise GoogleAPIError(f"'{meta.get('name')}' is a {mime.rsplit('.', 1)[-1]} file, which has no text export.")
+        else:
+            if int(meta.get("size") or 0) > 20_000_000:
+                raise GoogleAPIError(f"'{meta.get('name')}' is too large to read here ({meta.get('size')} bytes).")
+            data = svc.files().get_media(fileId=meta["id"]).execute()
+            from .extract_text import extract_text
+
+            try:
+                text = extract_text(meta.get("name", ""), data, mime)
+            except ValueError as e:
+                raise GoogleAPIError(str(e)) from e
+        text = text.strip()
+        return {**out, "content": text[:max_chars], "truncated": len(text) > max_chars}
 
 
 def _token_error_hint(e: Exception) -> str:

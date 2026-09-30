@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { MessageSquarePlus, Search, Settings, Trash2, PanelLeftClose, Sparkles, Brain, FileText, Plus, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard } from 'lucide-react'
+import { MessageSquarePlus, Search, Settings, Trash2, PanelLeftClose, Sparkles, Brain, FileText, Plus, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare } from 'lucide-react'
 import { useStore, type View } from '../store'
 import type { Conversation } from '@shared/types'
 
@@ -19,8 +19,7 @@ const NAV: { view: View; label: string; icon: JSX.Element }[] = [
   { view: 'home', label: 'Today', icon: <Home size={15} /> },
   { view: 'todos', label: 'Todos', icon: <CheckSquare size={15} /> },
   { view: 'calendar', label: 'Calendar', icon: <Calendar size={15} /> },
-  { view: 'boards', label: 'Boards', icon: <KanbanSquare size={15} /> },
-  { view: 'dashboards', label: 'Dashboards', icon: <LayoutDashboard size={15} /> },
+  { view: 'boards', label: 'Kanban', icon: <KanbanSquare size={15} /> },
   { view: 'memory', label: 'Memory', icon: <Brain size={15} /> },
   { view: 'documents', label: 'Documents', icon: <FileText size={15} /> }
 ]
@@ -60,7 +59,7 @@ export default function Sidebar(): JSX.Element {
 
   const todoStats = useStore((s) => s.dashboard?.todo_stats)
   const libCount = (v: View): number | null => {
-    if (v === 'home' || v === 'calendar' || v === 'boards' || v === 'dashboards') return null
+    if (v === 'home' || v === 'calendar' || v === 'boards') return null
     if (v === 'todos') return todoStats?.open ?? null
     const total = (key: 'memories' | 'nodes' | 'documents'): number =>
       (personalStats?.[key] ?? 0) + projects.reduce((n, p) => n + (p.stats?.[key] ?? 0), 0)

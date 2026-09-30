@@ -9,7 +9,6 @@ import HomeView from './components/HomeView'
 import TodosView from './components/TodosView'
 import BoardsView from './components/BoardsView'
 import CalendarView from './components/CalendarView'
-import DashboardsView from './components/DashboardsView'
 import SettingsModal from './components/SettingsModal'
 import ProjectModal from './components/ProjectModal'
 import { AlertTriangle } from 'lucide-react'
@@ -62,7 +61,6 @@ export default function App(): JSX.Element {
       {view === 'todos' && <TodosView />}
       {view === 'calendar' && <CalendarView />}
       {view === 'boards' && <BoardsView />}
-      {view === 'dashboards' && <DashboardsView />}
       {view === 'memory' && <MemoryPanel />}
       {view === 'documents' && <DocumentsView />}
       {view === 'project' && <ProjectView />}

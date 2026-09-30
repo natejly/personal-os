@@ -327,14 +327,8 @@ export interface BoardCard {
 }
 export interface Board { id: string; project_id: string | null; name: string; created_at: number; card_count?: number; columns: BoardColumn[]; cards: BoardCard[] }
 
-export interface DataSource {
-  id: string; name: string; kind: 'http' | 'rss' | 'internal' | string; config: Record<string, unknown>; description: string
-  has_secret: boolean; last_status: string | null; last_fetched_at: number | null; created_at: number
+export interface DriveFile {
+  id: string; name: string; kind: string; modified: string | null; size: string | null; link: string | null; owner: string | null
+  children?: DriveFile[]; content?: string; truncated?: boolean; note?: string
 }
-export interface Widget {
-  id: string; dashboard_id: string; title: string; kind: 'html' | 'summary' | 'markdown' | string; prompt: string; source_ids: string[]
-  code: string; output: string; refresh_minutes: number; refreshed_at: number | null; position: number; width: number; height: number
-  created_at: number; updated_at: number
-}
-export interface Dashboard { id: string; name: string; description: string; created_at: number; widget_count?: number; widgets: Widget[] }
 export interface Recap { day: string; content: string; created_at: number; cached?: boolean }

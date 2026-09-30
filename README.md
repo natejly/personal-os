@@ -62,19 +62,14 @@ their own instructions, knowledge files, memories and graph.
   cost. Settings shows spend, tokens, calls and frequency charts over 7/30/90
   days, broken down by model, kind and project. Prices come from your LiteLLM
   proxy and can be overridden per model.
-- **Today, todos, calendar, boards.** A Today screen with a generated daily
+- **Today, todos, calendar, kanban.** A Today screen with a generated daily
   recap, calendar, unread inbox, todos, projects and recently learned memories,
   plus a one-click brief. A native todo list, a week calendar (Google events
   plus due todos, double-click to add), and kanban boards with drag and drop.
   The assistant can drive all of them through tools.
-- **Dashboards you describe.** Register data sources (an HTTP API with an API
-  key, an RSS feed, or your own todos/calendar/mail), then describe a widget in
-  plain English. The model writes a self-contained HTML widget that runs in a
-  sandboxed iframe and fetches data through the backend (keys never reach the
-  widget). "AI summary" widgets turn any source into a short briefing. Revise a
-  widget by telling it what to change.
-- **Google Workspace.** Sign in once with your own OAuth client; calendar,
-  Gmail and Tasks become dashboard widgets and assistant tools.
+- **Google Workspace.** Sign in once with your own OAuth client; Calendar,
+  Gmail, Tasks and the whole Drive suite (Docs, Sheets, Slides, uploads)
+  become Today-screen data and assistant tools.
 
 ## Architecture
 
@@ -155,8 +150,8 @@ next calendar or mail call with an opaque error.
 | Shortcut | Action |
 |---|---|
 | ⌘N | New chat |
-| ⌘0 … ⌘6, ⌘8 | Today / Chats / Todos / Calendar / Boards / Dashboards / Memory / Documents |
-| ⌘7 | Memory, opened on the knowledge graph |
+| ⌘0 … ⌘5, ⌘7 | Today / Chats / Todos / Calendar / Kanban / Memory / Documents |
+| ⌘6 | Memory, opened on the knowledge graph |
 | ⌘B | Toggle sidebar |
 | ⌘I | Toggle context panel |
 | ⌘U | Upload document |
@@ -241,7 +236,7 @@ src/renderer/       React UI (store.ts holds all state; lib/api.ts is the client
 src/shared/         Types shared between processes
 backend/personal_os app.py routes · repos.py storage · context.py · learn.py
                     tools.py · sandbox.py · google.py · todos.py · boards.py
-                    dashboards.py · usage.py · trace.py · llm.py
+                    recap.py · usage.py · trace.py · llm.py
 scripts/dev.sh      LiteLLM + backend + Electron
 scripts/litellm.sh  LiteLLM proxy alone
 litellm.yaml        Model routing (Fireworks by default)

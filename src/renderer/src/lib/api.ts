@@ -1,5 +1,5 @@
 import type {
-  ChatEvent, ToolInfo, Todo, GoogleStatus, Dashboard as DashboardData, CalendarEvent, GmailMessage, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Recap, Conversation, ConversationSettings, ContextUsed, Document, GraphData, GraphEdge, GraphNode,
+  ChatEvent, ToolInfo, Todo, GoogleStatus, Dashboard as DashboardData, CalendarEvent, GmailMessage, DriveFile, Board, BoardCard, BoardColumn, Recap, Conversation, ConversationSettings, ContextUsed, Document, GraphData, GraphEdge, GraphNode,
   Memory, ModelInfo, ModelPrice, Settings, Project, UsageReport
 } from '@shared/types'
 
@@ -74,26 +74,6 @@ export const api = {
     moveCard: (cid: string, column_id: string, before_card_id: string | null = null) => req<BoardCard>(`/boards/cards/${cid}/move`, { method: 'POST', body: json({ column_id, before_card_id }) }),
     deleteCard: (cid: string) => req(`/boards/cards/${cid}`, { method: 'DELETE' })
   },
-  sources: {
-    list: () => req<{ sources: DataSource[]; internal: string[] }>('/sources'),
-    create: (s: { name: string; kind: string; config: Record<string, unknown>; secret?: string; description?: string }) => req<DataSource>('/sources', { method: 'POST', body: json(s) }),
-    update: (id: string, patch: Record<string, unknown>) => req<DataSource>(`/sources/${id}`, { method: 'PUT', body: json(patch) }),
-    delete: (id: string) => req(`/sources/${id}`, { method: 'DELETE' }),
-    fetch: (id: string) => req<unknown>(`/sources/${id}/fetch`)
-  },
-  dashboards: {
-    list: () => req<Dashboard[]>('/dashboards'),
-    get: (id: string) => req<Dashboard>(`/dashboards/${id}`),
-    create: (d: { name: string; description?: string }) => req<Dashboard>('/dashboards', { method: 'POST', body: json(d) }),
-    delete: (id: string) => req(`/dashboards/${id}`, { method: 'DELETE' }),
-    addWidget: (id: string, w: { kind: string; title?: string; prompt?: string; source_ids?: string[]; code?: string; output?: string; width?: number; height?: number }) => req<Widget>(`/dashboards/${id}/widgets`, { method: 'POST', body: json(w) })
-  },
-  widgets: {
-    update: (id: string, patch: Record<string, unknown>) => req<Widget>(`/widgets/${id}`, { method: 'PUT', body: json(patch) }),
-    refresh: (id: string, regenerate = false) => req<Widget>(`/widgets/${id}/refresh?regenerate=${regenerate}`, { method: 'POST' }),
-    revise: (id: string, instruction: string) => req<Widget>(`/widgets/${id}/revise`, { method: 'POST', body: json({ instruction }) }),
-    delete: (id: string) => req(`/widgets/${id}`, { method: 'DELETE' })
-  },
   todos: {
     list: (s: Scope = 'all', includeDone = false, q = '') => req<Todo[]>(`/todos?project_id=${encodeURIComponent(s)}&include_done=${includeDone}&q=${encodeURIComponent(q)}`),
     create: (t: { title: string; project_id?: string | null; notes?: string; due?: string | null; priority?: number }) => req<Todo>('/todos', { method: 'POST', body: json(t) }),
@@ -108,7 +88,9 @@ export const api = {
     calendar: (days = 2) => req<CalendarEvent[]>(`/integrations/google/calendar?days=${days}`),
     calendarRange: (startIso: string, days = 7) => req<CalendarEvent[]>(`/integrations/google/calendar?days=${days}&start=${encodeURIComponent(startIso)}`),
     createEvent: (e: { summary: string; start: string; end?: string; description?: string; location?: string }) => req(`/integrations/google/calendar`, { method: 'POST', body: json(e) }),
-    gmail: (q = 'is:unread newer_than:3d') => req<GmailMessage[]>(`/integrations/google/gmail?q=${encodeURIComponent(q)}`)
+    gmail: (q = 'is:unread newer_than:3d') => req<GmailMessage[]>(`/integrations/google/gmail?q=${encodeURIComponent(q)}`),
+    drive: (q = '', maxResults = 20) => req<DriveFile[]>(`/integrations/google/drive?q=${encodeURIComponent(q)}&max_results=${maxResults}`),
+    driveFile: (id: string) => req<DriveFile>(`/integrations/google/drive/${id}`)
   },
   projects: {
     list: () => req<Project[]>('/projects'),

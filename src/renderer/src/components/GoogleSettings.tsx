@@ -24,7 +24,7 @@ export default function GoogleSettings({ clientId, clientSecret, onChange, onSav
         <span className="g-logo">G</span>
         <div>
           <b>Google Workspace</b>
-          <small>{google?.connected ? <><Check size={11} /> Signed in as {google.email}</> : 'Calendar, Gmail and Tasks for the dashboard and as tools for the assistant.'}</small>
+          <small>{google?.connected ? <><Check size={11} /> Signed in as {google.email}</> : 'Calendar, Gmail, Tasks and Drive (Docs, Sheets, Slides) for Today and as tools for the assistant.'}</small>
         </div>
         {google?.connected ? (
           <>
@@ -51,13 +51,13 @@ export default function GoogleSettings({ clientId, clientSecret, onChange, onSav
             <p className="muted small">Sign-in uses the OAuth client from the app's <code>.env</code>. Paste your own below to override it; clear both fields to go back.</p>
           )}
           <ol className="muted small">
-            <li>In <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer">Google Cloud Console</a>, create a project and enable the <b>Google Calendar API</b>, <b>Gmail API</b> and <b>Tasks API</b>.</li>
+            <li>In <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer">Google Cloud Console</a>, create a project and enable the <b>Google Calendar API</b>, <b>Gmail API</b>, <b>Tasks API</b> and <b>Google Drive API</b> (APIs &amp; Services → Library).</li>
             <li>Configure the OAuth consent screen (External, add yourself as a test user).</li>
             <li>Create credentials → OAuth client ID → application type <b>Desktop app</b>.</li>
           </ol>
           <label><span>Client ID</span><input value={clientId} onChange={(e) => onChange({ googleClientId: e.target.value })} placeholder="…apps.googleusercontent.com" spellCheck={false} /></label>
           <label><span>Client secret</span><input type="password" value={clientSecret} onChange={(e) => onChange({ googleClientSecret: e.target.value })} placeholder="GOCSPX-…" spellCheck={false} /></label>
-          <p className="muted small">Scopes requested: calendar, gmail.modify, tasks, email. Tokens stay in the local database. Sending email is a separate tool you can keep off.</p>
+          <p className="muted small">Scopes requested: calendar, gmail.modify, tasks, drive.readonly, email. Tokens stay in the local database. Sending email is a separate tool you can keep off.</p>
         </details>
       )}
     </div>

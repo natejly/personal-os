@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import hmac
 import html
 import json
 import logging
@@ -26,8 +25,8 @@ from .extract_text import extract_text
 from .learn import learn_from_exchange
 from .repos import ALL, Conversations, Documents, Graph, Memories, Projects
 from .boards import Boards
-from .dashboards import Dashboards, generate_recap, generate_summary, generate_widget_code
-from .google import Google, GoogleNotConnected, json_safe
+from .google import Google, GoogleAPIError, GoogleNotConnected, json_safe
+from .recap import Recaps, generate_recap
 from .todos import Todos
 from .tools import Toolbox, summarize_result
 from .trace import Tracer, now_ms
@@ -72,44 +71,17 @@ def _token_eq(sent: str, expected: str) -> bool:
         return False
 
 
-WIDGET_TOKEN_TTL = 12 * 3600
-# A widget iframe is a separate browsing context: it inherits none of the renderer's CSP, so the generated code gets
-# its own. connect-src 'self' keeps a widget's data inside the sidecar - it cannot POST anywhere else on the internet.
-WIDGET_CSP = ("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; "
-              "font-src data:; connect-src 'self'; base-uri 'none'; form-action 'none'")
-
-
-def _widget_fetch_token(wid: str, exp: int) -> str:
-    """Capability handed to one widget's iframe: scoped to that widget's sources, and expiring, because it rides in the URL."""
-    return hmac.new(AUTH_TOKEN.encode(), f"widget:{wid}:{exp}".encode(), "sha256").hexdigest()[:32]
-
-
-def _widget_fetch_ok(source_id: str, wid: str, wt: str, we: str) -> bool:
-    try:
-        exp = int(we)
-    except ValueError:
-        return False
-    if not (wid and wt) or exp < time.time() or not _token_eq(wt, _widget_fetch_token(wid, exp)):
-        return False
-    w = dashboards.widget(wid)
-    return bool(w and source_id in (w.get("source_ids") or []))
-
-
 app = FastAPI(title="Personal OS", version="0.1.0")
 
 
 @app.middleware("http")
 async def _require_token(request: Request, call_next):  # type: ignore[no-untyped-def]
     p = request.url.path
-    if request.method == "OPTIONS" or p in PUBLIC_PATHS or (p.startswith("/widgets/") and p.endswith("/render")):
+    if request.method == "OPTIONS" or p in PUBLIC_PATHS:
         return await call_next(request)
     auth = request.headers.get("authorization", "")
     sent = request.headers.get("x-personal-os-token") or (auth[7:].strip() if auth[:7].lower() == "bearer " else "")
     if _token_eq(sent, AUTH_TOKEN):
-        return await call_next(request)
-    if p.startswith("/sources/") and p.endswith("/fetch") and _widget_fetch_ok(
-            p.split("/")[2], request.query_params.get("w") or "", request.query_params.get("wt") or "",
-            request.query_params.get("we") or ""):
         return await call_next(request)
     return JSONResponse({"detail": "Unauthorized"}, status_code=401)
 
@@ -152,7 +124,7 @@ def settings() -> dict[str, Any]:
 
 todos = Todos(db)
 boards = Boards(db)
-dashboards = Dashboards(db)
+recaps = Recaps(db)
 google = Google(settings, db.set_settings)
 usage = Usage(db)
 pricing = Pricing()
@@ -1030,6 +1002,8 @@ def _gcall(fn, *args):  # type: ignore[no-untyped-def]
         return json_safe(fn(*args))
     except GoogleNotConnected as e:
         raise HTTPException(409, str(e)) from e
+    except GoogleAPIError as e:
+        raise HTTPException(502, str(e)) from e
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, f"Google API error: {e}") from e
 
@@ -1065,6 +1039,16 @@ def google_gmail_message(message_id: str) -> Any:
 @app.get("/integrations/google/tasks")
 def google_tasks(show_completed: bool = False) -> Any:
     return _gcall(google.tasks_list, "@default", show_completed)
+
+
+@app.get("/integrations/google/drive")
+def google_drive(q: str = "", max_results: int = 20) -> Any:
+    return _gcall(google.drive_search, q, max_results)
+
+
+@app.get("/integrations/google/drive/{file_id}")
+def google_drive_file(file_id: str, max_chars: int = 20000) -> Any:
+    return _gcall(google.drive_read, file_id, max_chars)
 
 
 # ---------------- dashboard ----------------
@@ -1222,64 +1206,11 @@ def delete_card(cid: str) -> dict[str, bool]:
     return {"ok": True}
 
 
-# ---------------- dashboards, data sources, widgets, recap ----------------
-class SourceIn(BaseModel):
-    name: str
-    kind: str = "http"
-    config: dict[str, Any] = {}
-    secret: str = ""
-    description: str = ""
-
-
-class SourcePatch(BaseModel):
-    name: str | None = None
-    kind: str | None = None
-    config: dict[str, Any] | None = None
-    secret: str | None = None
-    description: str | None = None
-    clear_secret: bool = False
-
-
-class DashboardIn(BaseModel):
-    name: str
-    description: str = ""
-
-
-class WidgetIn(BaseModel):
-    title: str = ""
-    kind: str = "html"           # html | summary | markdown
-    prompt: str = ""
-    source_ids: list[str] = []
-    code: str = ""
-    output: str = ""
-    width: int = 1
-    height: int = 280
-    refresh_minutes: int = 60
-
-
-class WidgetPatch(BaseModel):
-    title: str | None = None
-    prompt: str | None = None
-    source_ids: list[str] | None = None
-    code: str | None = None
-    output: str | None = None
-    width: int | None = None
-    height: int | None = None
-    position: int | None = None
-    refresh_minutes: int | None = None
-
-
-async def _internal_data() -> dict[str, Any]:
-    """Data for 'internal' sources (and for summaries/recaps)."""
-    st = google.status()
-    out: dict[str, Any] = {
-        "todos": todos.list("__all__", include_done=False),
-        "memories": memories.list(ALL)[:40],
-        "projects": [{**p, "stats": projects.stats(p["id"])} for p in projects.list()],
-        "boards": [{**b, **{"cards": (boards.get(b["id"]) or {}).get("cards", [])}} for b in boards.list()],
-        "calendar": [], "gmail": [],
-    }
-    if st["connected"]:
+# ---------------- daily recap ----------------
+async def _recap_google_facts() -> dict[str, Any]:
+    """Calendar + unread mail for the recap; errors become notes, never failures."""
+    out: dict[str, Any] = {"calendar": [], "gmail": []}
+    if google.status()["connected"]:
         try:
             out["calendar"] = json_safe(await asyncio.to_thread(google.calendar_events, 3))
         except Exception as e:  # noqa: BLE001
@@ -1291,181 +1222,11 @@ async def _internal_data() -> dict[str, Any]:
     return out
 
 
-@app.get("/sources")
-def list_sources() -> dict[str, Any]:
-    return {"sources": dashboards.sources(), "internal": ["todos", "calendar", "gmail", "memories", "projects", "boards"]}
-
-
-@app.post("/sources")
-def create_source(body: SourceIn) -> dict[str, Any]:
-    if body.kind in ("http", "rss") and not body.config.get("url"):
-        raise HTTPException(400, "URL required")
-    return dashboards.create_source(body.name, body.kind, body.config, body.secret, body.description)
-
-
-@app.put("/sources/{id}")
-def update_source(id: str, body: SourcePatch) -> dict[str, Any]:
-    s_ = dashboards.update_source(id, body.model_dump(exclude_none=True))
-    if not s_:
-        raise HTTPException(404)
-    return s_
-
-
-@app.delete("/sources/{id}")
-def delete_source(id: str) -> dict[str, bool]:
-    dashboards.delete_source(id)
-    return {"ok": True}
-
-
-@app.get("/sources/{id}/fetch")
-async def fetch_source(id: str) -> Any:
-    try:
-        internal = await _internal_data() if (dashboards.source(id) or {}).get("kind") == "internal" else None
-        return await dashboards.fetch_source(id, internal)
-    except ValueError as e:
-        raise HTTPException(404, str(e)) from e
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, str(e)) from e
-
-
-@app.get("/dashboards")
-def list_dashboards() -> list[dict[str, Any]]:
-    return dashboards.list()
-
-
-@app.post("/dashboards")
-def create_dashboard(body: DashboardIn) -> dict[str, Any]:
-    return dashboards.create(body.name, body.description)
-
-
-@app.get("/dashboards/{id}")
-def get_dashboard(id: str) -> dict[str, Any]:
-    d = dashboards.get(id)
-    if not d:
-        raise HTTPException(404)
-    return d
-
-
-@app.put("/dashboards/{id}")
-def update_dashboard(id: str, body: DashboardIn) -> dict[str, Any]:
-    d = dashboards.update(id, body.model_dump())
-    if not d:
-        raise HTTPException(404)
-    return d
-
-
-@app.delete("/dashboards/{id}")
-def delete_dashboard(id: str) -> dict[str, bool]:
-    dashboards.delete(id)
-    return {"ok": True}
-
-
-async def _samples(source_ids: list[str]) -> dict[str, Any]:
-    out: dict[str, Any] = {}
-    internal = None
-    for sid_ in source_ids:
-        try:
-            src = dashboards.source(sid_)
-            if src and src["kind"] == "internal" and internal is None:
-                internal = await _internal_data()
-            out[sid_] = await dashboards.fetch_source(sid_, internal)
-        except Exception as e:  # noqa: BLE001
-            out[sid_] = {"error": str(e)}
-    return out
-
-
-async def _run_widget(w: dict[str, Any], request: Request, regenerate_code: bool = False) -> dict[str, Any]:
-    cfg = settings()
-    model = cfg.get("extractionModel") or cfg["defaultModel"]
-    srcs = [s_ for s_ in (dashboards.source(i) for i in w["source_ids"]) if s_]
-    if w["kind"] == "html":
-        if regenerate_code or not w["code"]:
-            samples = await _samples(w["source_ids"])
-            code = await generate_widget_code(cfg, cfg["defaultModel"], w["prompt"] or w["title"], srcs, str(request.base_url).rstrip("/"), w["width"], w["height"], samples)
-            w = dashboards.update_widget(w["id"], {"code": code, "refreshed_at": time.time()}) or w
-    elif w["kind"] == "summary":
-        data = await _samples(w["source_ids"])
-        text = await generate_summary(cfg, model, w["prompt"], data)
-        w = dashboards.update_widget(w["id"], {"output": text, "refreshed_at": time.time()}) or w
-    return w
-
-
-@app.post("/dashboards/{id}/widgets")
-async def create_widget(id: str, body: WidgetIn, request: Request) -> dict[str, Any]:
-    if not dashboards.get(id):
-        raise HTTPException(404)
-    title = body.title.strip() or (body.prompt.strip()[:40] or "Widget")
-    w = dashboards.create_widget(id, title, body.kind, body.prompt, body.source_ids, body.code, body.output, body.width, body.height, body.refresh_minutes)
-    if body.kind in ("html", "summary"):
-        try:
-            w = await _run_widget(w, request, regenerate_code=(body.kind == "html" and not body.code))
-        except Exception as e:  # noqa: BLE001
-            w = dashboards.update_widget(w["id"], {"output": f"Generation failed: {e}"}) or w
-    return w
-
-
-@app.put("/widgets/{wid}")
-def update_widget(wid: str, body: WidgetPatch) -> dict[str, Any]:
-    w = dashboards.update_widget(wid, body.model_dump(exclude_none=True))
-    if not w:
-        raise HTTPException(404)
-    return w
-
-
-@app.post("/widgets/{wid}/refresh")
-async def refresh_widget(wid: str, request: Request, regenerate: bool = False) -> dict[str, Any]:
-    w = dashboards.widget(wid)
-    if not w:
-        raise HTTPException(404)
-    try:
-        return await _run_widget(w, request, regenerate_code=regenerate)
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, str(e)) from e
-
-
-@app.post("/widgets/{wid}/revise")
-async def revise_widget(wid: str, body: dict[str, str], request: Request) -> dict[str, Any]:
-    """Vibe-code iteration: apply a natural-language change request to an html widget."""
-    w = dashboards.widget(wid)
-    if not w:
-        raise HTTPException(404)
-    cfg = settings()
-    instruction = (body.get("instruction") or "").strip()
-    if not instruction:
-        raise HTTPException(400, "instruction required")
-    new_prompt = f"{w['prompt']}\n\nRevision: {instruction}"
-    w = dashboards.update_widget(wid, {"prompt": new_prompt}) or w
-    try:
-        return await _run_widget(w, request, regenerate_code=True)
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, str(e)) from e
-
-
-@app.delete("/widgets/{wid}")
-def delete_widget(wid: str) -> dict[str, bool]:
-    dashboards.delete_widget(wid)
-    return {"ok": True}
-
-
-@app.get("/widgets/{wid}/render")
-def render_widget(wid: str) -> HTMLResponse:
-    w = dashboards.widget(wid)
-    if not w:
-        raise HTTPException(404)
-    code = w["code"] or "<!doctype html><html><body style='font-family:system-ui;color:#9c9a94;padding:12px'>No code yet.</body></html>"
-    # The iframe is unauthenticated, so give it a short-lived per-widget capability for its own sources, not the app token.
-    exp = int(time.time()) + WIDGET_TOKEN_TTL
-    wt = _widget_fetch_token(wid, exp)
-    body = re.sub(r"(/sources/[0-9a-f]+/fetch)(\?)?",
-                  lambda m: f"{m.group(1)}?wt={wt}&w={wid}&we={exp}" + ("&" if m.group(2) else ""), code)
-    return HTMLResponse(body, headers={"Content-Security-Policy": WIDGET_CSP, "X-Content-Type-Options": "nosniff"})
-
-
 @app.get("/recap")
 async def recap(force: bool = False) -> dict[str, Any]:
     day = time.strftime("%Y-%m-%d")
     if not force:
-        cached = dashboards.get_recap(day)
+        cached = recaps.get(day)
         if cached:
             return {**cached, "cached": True}
     cfg = settings()
@@ -1480,11 +1241,11 @@ async def recap(force: bool = False) -> dict[str, Any]:
         "todo_stats": todos.stats(),
         "projects": [{"name": p["name"], **projects.stats(p["id"])} for p in projects.list()],
     }
-    internal = await _internal_data()
+    internal = await _recap_google_facts()
     facts["calendar_next_3_days"] = internal.get("calendar")
     facts["unread_mail"] = [{"from": m["from"], "subject": m["subject"]} for m in (internal.get("gmail") or [])][:10]
     try:
         content = await generate_recap(cfg, cfg.get("extractionModel") or cfg["defaultModel"], facts)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, str(e)) from e
-    return {**dashboards.save_recap(day, content), "cached": False}
+    return {**recaps.save(day, content), "cached": False}

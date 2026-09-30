@@ -659,6 +659,20 @@ def _register_google(self: Toolbox) -> None:
     R("google_tasks_complete", ToolSpec("google_tasks_complete", "Mark a Google Task complete.",
         _obj({"task_id": {"type": "string"}}, ["task_id"]), gtasks_complete, "google", "external", examples=[{"task_id": "MTIzNDU2Nzg5"}]))
 
+    async def drive_search(ctx: dict[str, Any], query: str = "", max_results: int = 20, mime_type: str | None = None, offset: int = 0) -> Any:
+        off, n = max(0, int(offset)), max(1, min(int(max_results), 50))
+        rows = await run(g.drive_search, query, off + n, mime_type)
+        return page(rows, offset=off, limit=n, key="files")
+    R("drive_search", ToolSpec("drive_search", "Search the user's entire Google Drive (Docs, Sheets, Slides, folders, uploads; own and shared). Empty query lists the most recently modified files. Optional mime_type filter, e.g. 'application/vnd.google-apps.document'.",
+        _obj({"query": {"type": "string", "default": ""}, "max_results": {"type": "integer", "default": 20}, "mime_type": {"type": "string"}, "offset": {"type": "integer", "default": 0}}, []), drive_search, "google",
+        examples=[{}, {"query": "quarterly plan"}, {"query": "budget", "mime_type": "application/vnd.google-apps.spreadsheet"}], taints=True))
+
+    async def drive_read(ctx: dict[str, Any], file_id: str, max_chars: int = 20000) -> Any:
+        return await run(g.drive_read, file_id, max_chars)
+    R("drive_read", ToolSpec("drive_read", "Read a Google Drive file as text by id (from drive_search): Docs/Slides export as plain text, Sheets as CSV (first sheet), folders list their contents, and PDFs/Office/text files are extracted.",
+        _obj({"file_id": {"type": "string"}, "max_chars": {"type": "integer", "default": 20000}}, ["file_id"]), drive_read, "google",
+        examples=[{"file_id": "1aBcD3fGhIjKlMnOpQrStUvWxYz"}], taints=True))
+
 
 def _register_boards(self: Toolbox) -> None:
     R = self.specs.__setitem__

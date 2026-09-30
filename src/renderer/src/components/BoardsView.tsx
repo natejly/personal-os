@@ -149,7 +149,7 @@ export default function BoardsView(): JSX.Element {
     <main className="page board-page">
       <header className="page-header drag">
         {!sidebarOpen && <button className="icon-btn no-drag" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
-        <h2><KanbanSquare size={16} /> Boards</h2>
+        <h2><KanbanSquare size={16} /> Kanban</h2>
         <div className="no-drag header-right">
           {boards.length > 0 && (
             <label className="model-picker">

@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import type { Conversation, ConversationSettings, Document, GraphData, Memory, Message, ModelInfo, Settings, Project, ToolInfo, Todo, GoogleStatus, Dashboard, Recap } from '@shared/types'
 import { api, chatStream, setBase, type Scope } from './lib/api'
 
-export type View = 'home' | 'chat' | 'todos' | 'calendar' | 'boards' | 'dashboards' | 'memory' | 'documents' | 'project'
+export type View = 'home' | 'chat' | 'todos' | 'calendar' | 'boards' | 'memory' | 'documents' | 'project'
 /** How the Memory panel lays out its two halves: the memory list and the knowledge graph. */
 export type MemoryMode = 'split' | 'list' | 'graph'
 export type ContextTab = 'last' | 'preview' | 'trace'

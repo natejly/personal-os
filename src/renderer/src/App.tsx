@@ -75,7 +75,7 @@ export default function App(): JSX.Element {
         <div className="backend-error drag">
           <AlertTriangle size={28} />
           <h2>Backend not running</h2>
-          <p>Personal OS could not start its Python backend.</p>
+          <p>Grain could not start its Python backend.</p>
           <pre>{backendError}</pre>
           <p className="muted">
             Set it up once with <code>cd backend && uv venv && uv pip install -e .</code>, then relaunch.

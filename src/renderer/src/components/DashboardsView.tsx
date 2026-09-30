@@ -7,7 +7,7 @@ import { useStore } from '../store'
 import { api, getBase } from '../lib/api'
 import type { Dashboard, DataSource, Widget } from '@shared/types'
 
-const KIND_LABEL: Record<string, string> = { http: 'HTTP API', rss: 'RSS / Atom', internal: 'Personal OS data' }
+const KIND_LABEL: Record<string, string> = { http: 'HTTP API', rss: 'RSS / Atom', internal: 'Grain data' }
 
 function SourcesPanel({ sources, internal, onChange, onClose }: { sources: DataSource[]; internal: string[]; onChange: () => void; onClose: () => void }): JSX.Element {
   const [kind, setKind] = useState<'http' | 'rss' | 'internal'>('http')
@@ -70,7 +70,7 @@ function SourcesPanel({ sources, internal, onChange, onClose }: { sources: DataS
         <section>
           <h3>Add a source</h3>
           <div className="row3">
-            <label><span>Type</span><select value={kind} onChange={(e) => setKind(e.target.value as typeof kind)}><option value="http">HTTP API (JSON)</option><option value="rss">RSS / Atom feed</option><option value="internal">Personal OS data</option></select></label>
+            <label><span>Type</span><select value={kind} onChange={(e) => setKind(e.target.value as typeof kind)}><option value="http">HTTP API (JSON)</option><option value="rss">RSS / Atom feed</option><option value="internal">Grain data</option></select></label>
             <label><span>Name</span><input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. GitHub notifications" /></label>
             {kind === 'internal' ? (
               <label><span>Dataset</span><select value={internalKey} onChange={(e) => setInternalKey(e.target.value)}>{internal.map((k) => <option key={k}>{k}</option>)}</select></label>

@@ -1,4 +1,4 @@
-"""Personal OS backend API."""
+"""Grain backend API. (The package keeps the personal_os name for compatibility.)"""
 from __future__ import annotations
 
 import asyncio
@@ -107,7 +107,7 @@ def _widget_fetch_ok(source_id: str, wid: str, wt: str, we: str) -> bool:
 
 
 # `docs_url` is moved off /docs: that prefix belongs to the user's own documents (see docs.py).
-app = FastAPI(title="Personal OS", version="0.1.0", docs_url="/api-docs", redoc_url=None,
+app = FastAPI(title="Grain", version="0.1.0", docs_url="/api-docs", redoc_url=None,
               swagger_ui_oauth2_redirect_url=None)  # its default sits under /docs too
 
 
@@ -1202,7 +1202,7 @@ def google_callback(state: str = "", code: str = "", error: str = "", error_desc
         return _oauth_page("Could not complete sign-in", html.escape(str(e)))
     return _oauth_page(
         f"Connected {st.get('email') or 'Google account'} ✓",
-        "You can close this tab and return to Personal OS.",
+        "You can close this tab and return to Grain.",
         ok=True,
     )
 

@@ -1,4 +1,5 @@
 import { app, BrowserWindow, ipcMain, Menu } from 'electron'
+import { existsSync } from 'fs'
 import { join } from 'path'
 import { backendStatus, backendToken, backendUrl, startBackend, stopBackend } from './backend'
 import { registerBus } from './bus'
@@ -10,6 +11,17 @@ import { createTray } from './tray'
 let win: BrowserWindow | null = null
 const isMac = process.platform === 'darwin'
 
+// The app was renamed from "Personal OS" to "Grain", which moves the userData directory Electron
+// derives from the app name. Existing installs keep their data: if the new location has none but a
+// legacy one does, keep using the legacy directory. Must run before anything touches userData.
+for (const legacy of ['personal-os', 'Personal OS']) {
+  const legacyDir = join(app.getPath('appData'), legacy)
+  if (!existsSync(join(app.getPath('userData'), 'data')) && existsSync(join(legacyDir, 'data'))) {
+    app.setPath('userData', legacyDir)
+    break
+  }
+}
+
 function createWindow(): void {
   win = new BrowserWindow({
     width: 1280,
@@ -17,7 +29,7 @@ function createWindow(): void {
     minWidth: 820,
     minHeight: 520,
     show: false,
-    title: 'Personal OS',
+    title: 'Grain',
     titleBarStyle: isMac ? 'hiddenInset' : 'default',
     trafficLightPosition: { x: 16, y: 16 },
     vibrancy: isMac ? 'sidebar' : undefined,

@@ -1,7 +1,7 @@
 {
-  "name": "personal-os",
+  "name": "grain",
   "version": "0.1.0",
-  "description": "A personal AI operating system. Provider-agnostic chat via LiteLLM.",
+  "description": "Grain: a personal AI operating system. Provider-agnostic chat via LiteLLM.",
   "main": "./out/main/index.js",
   "author": "natejly",
   "license": "MIT",
@@ -43,8 +43,8 @@
     "vite": "^5.4.10"
   },
   "build": {
-    "appId": "com.natejly.personalos",
-    "productName": "Personal OS",
+    "appId": "com.natejly.grain",
+    "productName": "Grain",
     "files": [
       "out/**/*",
       "package.json"

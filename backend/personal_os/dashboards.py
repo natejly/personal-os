@@ -10,6 +10,7 @@ import httpx
 
 from . import llm
 from .db import Database, new_id, now, row_to_dict
+from .tools import UrlBlocked, guarded_request
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS data_sources (
@@ -121,8 +122,8 @@ class Dashboards:
                 if data is None:
                     raise ValueError(f"Internal source '{key}' unavailable")
             elif src["kind"] == "rss":
-                async with httpx.AsyncClient(timeout=20, follow_redirects=True) as c:
-                    r = await c.get(cfg["url"])
+                async with httpx.AsyncClient(timeout=20, follow_redirects=False) as c:
+                    r = await guarded_request(c, "GET", cfg.get("url") or "")
                     r.raise_for_status()
                 data = _parse_rss(r.text)
             else:
@@ -134,9 +135,9 @@ class Dashboards:
                         params[cfg.get("auth_param", "api_key")] = src["secret"]
                     else:
                         headers[cfg.get("auth_header", "Authorization")] = f"{cfg.get('auth_prefix', 'Bearer ')}{src['secret']}"
-                async with httpx.AsyncClient(timeout=25, follow_redirects=True) as c:
-                    r = await c.request(cfg.get("method", "GET"), cfg["url"], headers=headers, params=params,
-                                        content=cfg.get("body") if cfg.get("body") else None)
+                async with httpx.AsyncClient(timeout=25, follow_redirects=False) as c:
+                    r = await guarded_request(c, cfg.get("method", "GET"), cfg.get("url") or "", headers=headers,
+                                             params=params, content=cfg.get("body") if cfg.get("body") else None)
                     r.raise_for_status()
                 try:
                     data = r.json()

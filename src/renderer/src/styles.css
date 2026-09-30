@@ -958,3 +958,30 @@ textarea.instructions:focus { border-color: var(--accent); }
 .usage-prices input { width: 92px; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 6px; padding: 3px 6px; font-size: 12px; outline: 0; font-variant-numeric: tabular-nums; }
 .usage-price-src { font-size: 10px; color: var(--text-faint); text-align: right; }
 .usage-prices .test-row { padding: 8px 10px; border-top: 1px solid var(--border); }
+
+/* The root boundary must paint an opaque surface: the BrowserWindow is transparent, so a bare error
+   screen would still look like the app had vanished. */
+.root-error {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  overflow: auto;
+  padding: 40px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+}
+.root-error h2 { margin: 0 0 6px; font-size: 16px; }
+.root-error pre {
+  margin: 12px 0 0;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  font: 11px/1.5 var(--mono);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-width: 80ch;
+}
+.root-error-stack { color: var(--text-faint); max-height: 240px; }
+.root-error-actions { display: flex; gap: 8px; margin-top: 16px; }

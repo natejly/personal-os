@@ -31,6 +31,17 @@ function createWindow(): void {
   })
 
   win.once('ready-to-show', () => win?.show())
+
+  // When the renderer dies there is no React error and no macOS crash report -- the window simply goes
+  // blank, and because it is transparent that looks like the app vanishing. These say why.
+  win.webContents.on('render-process-gone', (_e, details) => {
+    console.error(`[renderer] gone: reason=${details.reason} exitCode=${details.exitCode}`)
+  })
+  win.webContents.on('unresponsive', () => console.error('[renderer] unresponsive (main thread blocked)'))
+  win.webContents.on('responsive', () => console.error('[renderer] responsive again'))
+  win.webContents.on('console-message', (_e, level, message, line, source) => {
+    if (level >= 2) console.error(`[renderer console] ${message}  (${source}:${line})`)
+  })
   win.webContents.setWindowOpenHandler(({ url }) => {
     void shell.openExternal(url)
     return { action: 'deny' }
@@ -65,15 +76,32 @@ async function storedGather(): Promise<string | undefined> {
   }
 }
 
-const sendMenu = (action: string): void => win?.webContents.send('menu', action)
+/**
+ * A menu click must never throw in the main process: an unhandled throw here takes the whole app down
+ * with no renderer crash report and no React error, which is indistinguishable from "it just vanished".
+ * `isDestroyed()` on the BrowserWindow is not enough -- the render frame can be disposed while the
+ * window object is alive ("Render frame was disposed before WebFrameMain could be accessed"), and it
+ * can be disposed between the check and the send, so the try/catch is load-bearing, not belt-and-braces.
+ */
+const deliver = (target: BrowserWindow | null, action: string): void => {
+  if (!target || target.isDestroyed()) return
+  const wc = target.webContents
+  if (!wc || wc.isDestroyed()) return
+  try {
+    wc.send('menu', action)
+  } catch (e) {
+    console.warn(`[menu] could not deliver "${action}":`, (e as Error).message)
+  }
+}
+
+const sendMenu = (action: string): void => deliver(win, action)
 
 /**
  * Window-scoped actions go to whoever has focus, not to the main window: a pop-out must answer ⌘W and
  * its own pin itself. App-wide actions keep using `sendMenu`, which the canvas only ever hosts.
  */
 const sendWindowMenu = (action: string): void => {
-  const target = BrowserWindow.getFocusedWindow() ?? win
-  if (target && !target.isDestroyed()) target.webContents.send('menu', action)
+  deliver(BrowserWindow.getFocusedWindow() ?? win, action)
 }
 
 const SPACES: Electron.MenuItemConstructorOptions[] = Array.from({ length: 9 }, (_, i) => ({
@@ -177,6 +205,13 @@ function buildMenu(): void {
   ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }
+
+// A throw anywhere in the main process kills the app with no crash report and no React error. Log it
+// and keep running: losing one menu action is recoverable, losing the window is not.
+process.on('uncaughtException', (e) => console.error('[main] uncaught:', e))
+process.on('unhandledRejection', (e) => console.error('[main] unhandled rejection:', e))
+
+app.on('child-process-gone', (_e, d) => console.error(`[child] ${d.type} gone: ${d.reason}`))
 
 app.whenReady().then(async () => {
   ipcMain.handle('backend:url', () => backendUrl())

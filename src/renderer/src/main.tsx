@@ -3,6 +3,7 @@ import ReactDOM from 'react-dom/client'
 import App from './App'
 import PopoutSurface from './PopoutSurface'
 import { useCanvas } from './canvas/store'
+import RootBoundary from './RootBoundary'
 import './styles.css'
 import 'highlight.js/styles/github-dark-dimmed.css'
 
@@ -34,5 +35,7 @@ if (!windowId) {
 }
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>{windowId ? <PopoutSurface windowId={windowId} /> : <App />}</React.StrictMode>
+  <React.StrictMode>
+    <RootBoundary>{windowId ? <PopoutSurface windowId={windowId} /> : <App />}</RootBoundary>
+  </React.StrictMode>
 )

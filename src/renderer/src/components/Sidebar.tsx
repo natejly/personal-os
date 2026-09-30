@@ -69,11 +69,10 @@ export default function Sidebar(): JSX.Element {
   const setView = useStore((s) => s.setView)
   const openProject = useStore((s) => s.openProject)
   const setProjectModal = useStore((s) => s.setProjectModal)
-  // In the canvas view a chat lives in a window, not the router: clicking one focuses or opens its window.
-  const openConversation = (id: string): void => {
-    if (useStore.getState().view === 'canvas') void useCanvas.getState().openChat(id)
-    else void selectChat(id)
-  }
+  // Picking an item in the sidebar is a navigation gesture: from the canvas it leaves the space and
+  // routes to the classic view, rather than opening the chat as one more window in the space. Adding
+  // to a space stays the drag gesture (and ⌘N / the dock for a new chat window).
+  const openConversation = (id: string): void => void selectChat(id)
   const [query, setQuery] = useState('')
   const [projectsOpen, setProjectsOpen] = useState(true)
   const [knowledgeOpen, setKnowledgeOpen] = useState(true)
@@ -166,7 +165,7 @@ export default function Sidebar(): JSX.Element {
             const isOpen = expanded[p.id] ?? (view === 'project' && projectViewId === p.id) ?? false
             return (
               <div key={p.id} className="project-group">
-                <div className={`project-item ${view === 'project' && projectViewId === p.id ? 'active' : ''}`} onClick={() => { const sp = inCanvas ? useCanvas.getState().spaceForProject(p.id) : null; if (sp) void useCanvas.getState().enterSpace(sp); else openProject(p.id) }} role="button" tabIndex={0}
+                <div className={`project-item ${view === 'project' && projectViewId === p.id ? 'active' : ''}`} onClick={() => openProject(p.id)} role="button" tabIndex={0}
                   {...dragProps({ kind: 'project', id: p.id, label: p.name })}>
                   <button className="icon-btn ghost xs" aria-label={isOpen ? `Collapse ${p.name}` : `Expand chats in ${p.name}`} aria-expanded={isOpen} title={isOpen ? 'Collapse' : 'Expand chats'} onClick={(e) => { e.stopPropagation(); setExpanded((x) => ({ ...x, [p.id]: !isOpen })) }}><ChevronRight size={12} className={isOpen ? 'rot90' : ''} /></button>
                   <span className="project-dot" style={{ background: p.color }} />

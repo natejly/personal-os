@@ -45,6 +45,7 @@ export default function TodoItem({ todo, showProject = true, compact = false }: 
         {!compact && todo.notes && <span className="todo-notes">{todo.notes}</span>}
       </div>
       <div className="todo-meta">
+        {todo.external_id && <span className="g-logo g-logo-sm" title="Synced with Google Tasks">G</span>}
         {showProject && todo.project_id && <ProjectChip projectId={todo.project_id} />}
         <label className={`todo-due ${due.cls}`} title="Due date">
           <Calendar size={11} />

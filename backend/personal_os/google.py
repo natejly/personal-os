@@ -357,6 +357,29 @@ class Google:
         t = self._svc("tasks", "v1").tasks().patch(tasklist=tasklist, task=task_id, body={"status": "completed"}).execute()
         return {"id": t["id"], "status": t.get("status")}
 
+    def tasks_all(self, tasklist: str = "@default") -> list[dict[str, Any]]:
+        """Every task in a list, completed and hidden included, with `updated` timestamps (for sync)."""
+        svc = self._svc("tasks", "v1").tasks()
+        out: list[dict[str, Any]] = []
+        token = None
+        while True:
+            res = svc.list(tasklist=tasklist, showCompleted=True, showHidden=True, maxResults=100, pageToken=token).execute()
+            out += [_task_row(t) for t in res.get("items", [])]
+            token = res.get("nextPageToken")
+            if not token:
+                return out
+
+    def tasks_insert(self, body: dict[str, Any], tasklist: str = "@default") -> dict[str, Any]:
+        t = self._svc("tasks", "v1").tasks().insert(tasklist=tasklist, body=_task_body(body)).execute()
+        return _task_row(t)
+
+    def tasks_update(self, task_id: str, patch: dict[str, Any], tasklist: str = "@default") -> dict[str, Any]:
+        t = self._svc("tasks", "v1").tasks().patch(tasklist=tasklist, task=task_id, body=_task_body(patch)).execute()
+        return _task_row(t)
+
+    def tasks_delete(self, task_id: str, tasklist: str = "@default") -> None:
+        self._svc("tasks", "v1").tasks().delete(tasklist=tasklist, task=task_id).execute()
+
     # ---------- Drive ----------
     def drive_files(self, query: str = "", max_results: int = 20) -> list[dict[str, Any]]:
         """Search Drive by name/content; with no query, list recently modified files."""
@@ -395,24 +418,6 @@ class Google:
         text = data.decode("utf-8", "replace") if isinstance(data, (bytes, bytearray)) else str(data)
         return {"id": file_id, "name": meta.get("name"), "mime_type": mime, "link": meta.get("webViewLink"),
                 "content": text[:max_chars], "truncated": len(text) > max_chars}
-
-
-# Google-native formats can't be downloaded raw; export to the closest text form.
-_DRIVE_EXPORTS = {
-    "application/vnd.google-apps.document": "text/plain",
-    "application/vnd.google-apps.spreadsheet": "text/csv",
-    "application/vnd.google-apps.presentation": "text/plain",
-}
-
-
-def _drive_query(query: str) -> str:
-    """Build a Drive v3 `q` expression; user text is embedded in single quotes, so escape it."""
-    base = "trashed = false"
-    q = (query or "").strip()
-    if not q:
-        return base
-    esc = q.replace("\\", "\\\\").replace("'", "\\'")
-    return f"{base} and (name contains '{esc}' or fullText contains '{esc}')"
 
     # ---------- Docs / Sheets ----------
     _MIME = {"doc": "application/vnd.google-apps.document", "sheet": "application/vnd.google-apps.spreadsheet"}
@@ -487,6 +492,40 @@ def _drive_query(query: str) -> str:
             svc.values().update(spreadsheetId=sid, range="A1", valueInputOption="USER_ENTERED",
                                 body={"values": values}).execute()
         return {"id": sid, "title": title, "link": ss.get("spreadsheetUrl")}
+
+
+# Google-native formats can't be downloaded raw; export to the closest text form.
+_DRIVE_EXPORTS = {
+    "application/vnd.google-apps.document": "text/plain",
+    "application/vnd.google-apps.spreadsheet": "text/csv",
+    "application/vnd.google-apps.presentation": "text/plain",
+}
+
+
+def _drive_query(query: str) -> str:
+    """Build a Drive v3 `q` expression; user text is embedded in single quotes, so escape it."""
+    base = "trashed = false"
+    q = (query or "").strip()
+    if not q:
+        return base
+    esc = q.replace("\\", "\\\\").replace("'", "\\'")
+    return f"{base} and (name contains '{esc}' or fullText contains '{esc}')"
+
+
+def _task_row(t: dict[str, Any]) -> dict[str, Any]:
+    return {"id": t["id"], "title": t.get("title", ""), "notes": t.get("notes", ""), "due": t.get("due"),
+            "status": t.get("status"), "updated": t.get("updated"), "deleted": bool(t.get("deleted"))}
+
+
+def _task_body(fields: dict[str, Any]) -> dict[str, Any]:
+    body = dict(fields)
+    due = body.get("due")
+    if isinstance(due, str) and due and "T" not in due:
+        body["due"] = f"{due}T00:00:00.000Z"
+    if body.get("status") == "needsAction":
+        # Reopening a task: the API keeps `completed` unless it is explicitly nulled.
+        body["completed"] = None
+    return body
 
 
 def _token_error_hint(e: Exception) -> str:

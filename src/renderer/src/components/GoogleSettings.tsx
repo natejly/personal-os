@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Unplug, Check, AlertTriangle, RefreshCw, ExternalLink, Upload } from 'lucide-react'
 import { useStore } from '../store'
+import { api } from '../lib/api'
+import type { GoogleTaskList } from '@shared/types'
 
 /** Console pages, in the order the setup walks through them. */
 const CONSOLE = {
@@ -22,11 +24,18 @@ const openExternal = (url: string): void => void window.open(url, '_blank')
 
 export default function GoogleSettings({ clientId, clientSecret, onChange, onSaveCreds }: { clientId: string; clientSecret: string; onChange: (p: { googleClientId?: string; googleClientSecret?: string }) => void; onSaveCreds: () => Promise<void> }): JSX.Element {
   const google = useStore((s) => s.google)
-  const { refreshGoogle, connectGoogle, disconnectGoogle, toast } = useStore()
+  const tasksSync = useStore((s) => s.tasksSync)
+  const { refreshGoogle, connectGoogle, disconnectGoogle, setTasksSync, runTasksSync, toast } = useStore()
   const [setupOpen, setSetupOpen] = useState(false)
+  const [taskLists, setTaskLists] = useState<GoogleTaskList[]>([])
   const idRef = useRef<HTMLInputElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   useEffect(() => { void refreshGoogle() }, [refreshGoogle])
+  // The list picker only matters once sync is on; fetch lazily so a plain settings open costs nothing.
+  const syncEnabled = !!tasksSync?.config.enabled
+  useEffect(() => {
+    if (google?.connected && syncEnabled) void api.google.tasklists().then(setTaskLists).catch(() => undefined)
+  }, [google?.connected, syncEnabled])
 
   // Google only runs a sign-in flow on behalf of a registered app, so there has to be an
   // OAuth client before the button can do anything: from .env, or pasted here.
@@ -101,6 +110,33 @@ export default function GoogleSettings({ clientId, clientSecret, onChange, onSav
 
       {needsReauth && (
         <p className="integration-warn"><AlertTriangle size={13} /> {google?.reauth_reason ?? 'This connection needs to be renewed.'} Click Reconnect to sign in again.</p>
+      )}
+
+      {google?.connected && (
+        <div className="tasks-sync">
+          <label className="check">
+            <input type="checkbox" checked={syncEnabled} onChange={(e) => void setTasksSync({ enabled: e.target.checked })} />
+            Sync Todos with Google Tasks (two-way)
+          </label>
+          {syncEnabled && tasksSync && (
+            <div className="tasks-sync-row">
+              <select aria-label="Google Tasks list to sync with" value={tasksSync.config.tasklist} onChange={(e) => void setTasksSync({ tasklist: e.target.value })} title="Which Google Tasks list to sync with">
+                <option value="@default">Default list</option>
+                {taskLists.map((l) => <option key={l.id} value={l.id}>{l.title}</option>)}
+              </select>
+              <button className="ghost-btn" onClick={() => void runTasksSync()} disabled={tasksSync.syncing}>
+                <RefreshCw size={13} className={tasksSync.syncing ? 'spin' : ''} /> {tasksSync.syncing ? 'Syncing…' : 'Sync now'}
+              </button>
+              <small className="muted">
+                {tasksSync.last_error
+                  ? `Last sync failed: ${tasksSync.last_error}`
+                  : tasksSync.last_sync
+                    ? `Synced ${new Date(tasksSync.last_sync * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+                    : 'Not synced yet — press Sync now'}
+              </small>
+            </div>
+          )}
+        </div>
       )}
 
       {!google?.connected && (

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, CheckSquare, PanelLeftOpen } from 'lucide-react'
+import { Plus, CheckSquare, PanelLeftOpen, RefreshCw } from 'lucide-react'
 import { useStore, type Scope } from '../store'
 import TodoItem from './TodoItem'
 import ScopeSelect from './ScopeSelect'
@@ -7,7 +7,8 @@ import ScopeSelect from './ScopeSelect'
 export default function TodosView(): JSX.Element {
   const todos = useStore((s) => s.todos)
   const sidebarOpen = useStore((s) => s.sidebarOpen)
-  const { refreshTodos, addTodo, toggleSidebar } = useStore()
+  const tasksSync = useStore((s) => s.tasksSync)
+  const { refreshTodos, addTodo, toggleSidebar, refreshTasksSync, runTasksSync } = useStore()
   const [scope, setScope] = useState<Scope>('all')
   const [showDone, setShowDone] = useState(false)
   const [title, setTitle] = useState('')
@@ -15,6 +16,7 @@ export default function TodosView(): JSX.Element {
   const [priority, setPriority] = useState(2)
 
   useEffect(() => { void refreshTodos(scope, showDone) }, [scope, showDone, refreshTodos])
+  useEffect(() => { void refreshTasksSync() }, [refreshTasksSync])
 
   const add = async (): Promise<void> => {
     if (!title.trim()) return
@@ -44,6 +46,12 @@ export default function TodosView(): JSX.Element {
         {!sidebarOpen && <button className="icon-btn no-drag" aria-label="Show sidebar" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
         <h2><CheckSquare size={16} /> Todos</h2>
         <div className="no-drag header-right">
+          {tasksSync?.config.enabled && (
+            <button className="icon-btn" onClick={() => void runTasksSync()} disabled={tasksSync.syncing}
+              title={tasksSync.last_error ? `Google Tasks sync failed: ${tasksSync.last_error}` : 'Sync with Google Tasks now'}>
+              <RefreshCw size={14} className={tasksSync.syncing ? 'spin' : ''} />
+            </button>
+          )}
           <label className="check"><input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} /> show done</label>
           <ScopeSelect value={scope} onChange={setScope} />
         </div>

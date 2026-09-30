@@ -111,6 +111,10 @@
 .doc-title-input:focus { border-color: var(--border-strong); background: var(--bg-input); outline: none; }
 .doc-save-state { color: var(--text-faint); font-size: 11px; }
 
+/* .model-picker pins every svg to the right; this picker leads with a folder icon on the left. */
+.doc-folder-pick svg:first-child { right: auto; left: 8px; }
+.doc-folder-pick select { padding-left: 26px; font-size: 12px; max-width: 180px; }
+
 /* `.seg` and `.icon-btn.on` come from styles.css — this view just uses them. */
 .dot-badge {
   position: absolute; top: -2px; right: -2px;

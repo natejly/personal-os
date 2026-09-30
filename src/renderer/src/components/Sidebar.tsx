@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { MessageSquarePlus, Search, Settings, Trash2, PanelLeftClose, Brain, FileText, NotebookPen, Plus, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid, Mail, MonitorDot } from 'lucide-react'
+import { MessageSquarePlus, Search, Settings, Trash2, PanelLeftClose, Brain, FileText, NotebookPen, Plus, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid, Mail, MonitorDot, BookOpen } from 'lucide-react'
 import GrainLogo from './GrainLogo'
 import { useStore, type View } from '../store'
 import { ActivityIndicator } from './ActivityView'
@@ -26,17 +26,23 @@ function groupLabel(ts: number): string {
  * `kind` makes the row a canvas drag source (contract §7, payload kind 'nav'). Boards and Dashboards
  * have none: their widgets need a `ref_id`, so a bare drag would open a window with nothing in it.
  */
-const NAV: { view: View; label: string; icon: JSX.Element; kind?: WidgetKind }[] = [
+type NavEntry = { view: View; label: string; icon: JSX.Element; kind?: WidgetKind }
+
+const NAV: NavEntry[] = [
   { view: 'home', label: 'Today', icon: <Home size={15} />, kind: 'recap' },
   { view: 'todos', label: 'Todos', icon: <CheckSquare size={15} />, kind: 'todos' },
   { view: 'calendar', label: 'Calendar', icon: <Calendar size={15} />, kind: 'calendar' },
   { view: 'mail', label: 'Mail', icon: <Mail size={15} /> },
   { view: 'boards', label: 'Boards', icon: <KanbanSquare size={15} /> },
   { view: 'dashboards', label: 'Dashboards', icon: <LayoutDashboard size={15} /> },
-  { view: 'memory', label: 'Memory', icon: <Brain size={15} />, kind: 'memory' },
-  { view: 'documents', label: 'Documents', icon: <FileText size={15} />, kind: 'documents' },
   { view: 'docs', label: 'Docs', icon: <NotebookPen size={15} /> },
   { view: 'activity', label: 'Activity', icon: <MonitorDot size={15} />, kind: 'activity' }
+]
+
+// What the assistant knows: memories and uploaded documents, grouped under their own section.
+const KNOWLEDGE: NavEntry[] = [
+  { view: 'memory', label: 'Memory', icon: <Brain size={15} />, kind: 'memory' },
+  { view: 'documents', label: 'Documents', icon: <FileText size={15} />, kind: 'documents' }
 ]
 
 export default function Sidebar(): JSX.Element {
@@ -67,6 +73,7 @@ export default function Sidebar(): JSX.Element {
   }
   const [query, setQuery] = useState('')
   const [projectsOpen, setProjectsOpen] = useState(true)
+  const [knowledgeOpen, setKnowledgeOpen] = useState(true)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const chatsByProject = useMemo(() => {
     const m: Record<string, Conversation[]> = {}
@@ -100,6 +107,18 @@ export default function Sidebar(): JSX.Element {
     return v === 'memory' ? total('memories') + total('nodes') : total('documents')
   }
 
+  const navItem = (n: NavEntry): JSX.Element => (
+    <button key={n.view} className={`nav-item ${view === n.view ? 'active' : ''}`} onClick={() => setView(n.view)}
+      {...(n.kind ? dragProps({ kind: 'nav', id: n.kind, label: n.label }) : {})}>
+      {n.icon}<span>{n.label}</span>
+      {n.view === 'docs' && docsPending > 0 && (
+        <span className="count pending" title={`${docsPending} assistant edit${docsPending === 1 ? '' : 's'} awaiting review`}>{docsPending}</span>
+      )}
+      {libCount(n.view) !== null && <span className="count">{libCount(n.view)}</span>}
+    </button>
+  )
+  const knowledgeItems = KNOWLEDGE.filter((n) => !viewHidden(settings, n.view))
+
   return (
     <aside className="sidebar">
       <div className="sidebar-top drag">
@@ -113,18 +132,19 @@ export default function Sidebar(): JSX.Element {
       </button>
 
       <nav className="nav">
-        {NAV.filter((n) => n.view === 'home' || !viewHidden(settings, n.view)).map((n) => (
-          <button key={n.view} className={`nav-item ${view === n.view ? 'active' : ''}`} onClick={() => setView(n.view)}
-            {...(n.kind ? dragProps({ kind: 'nav', id: n.kind, label: n.label }) : {})}>
-            {n.icon}<span>{n.label}</span>
-            {n.view === 'docs' && docsPending > 0 && (
-              <span className="count pending" title={`${docsPending} assistant edit${docsPending === 1 ? '' : 's'} awaiting review`}>{docsPending}</span>
-            )}
-            {libCount(n.view) !== null && <span className="count">{libCount(n.view)}</span>}
-          </button>
-        ))}
+        {NAV.filter((n) => n.view === 'home' || !viewHidden(settings, n.view)).map(navItem)}
       </nav>
 
+      {knowledgeItems.length > 0 && (
+        <>
+          <div className="section-row">
+            <button className="section-toggle" onClick={() => setKnowledgeOpen((o) => !o)}>
+              <ChevronRight size={12} className={knowledgeOpen ? 'rot90' : ''} /><BookOpen size={13} /> Knowledge Base
+            </button>
+          </div>
+          {knowledgeOpen && <nav className="nav">{knowledgeItems.map(navItem)}</nav>}
+        </>
+      )}
       <SidebarSpaces />
 
       <div className="section-row">

@@ -421,7 +421,7 @@ export interface Recap { day: string; content: string; created_at: number; cache
 /** Every widget a canvas window can host. Source of truth for `WIDGET_KINDS` in backend/personal_os/canvas.py. */
 export type WidgetKind =
   | 'chat' | 'todos' | 'calendar' | 'board' | 'note' | 'dashboard-widget'
-  | 'memory' | 'graph' | 'documents' | 'recap' | 'project' | 'usage' | 'activity'
+  | 'memory' | 'graph' | 'documents' | 'recap' | 'project' | 'usage' | 'activity' | 'web'
 
 export type WindowState = 'normal' | 'minimized' | 'maximized' | 'popped'
 export type SnapMode = 'off' | 'grid' | 'guides' | 'both'

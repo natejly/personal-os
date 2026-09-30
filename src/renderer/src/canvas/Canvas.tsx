@@ -7,7 +7,7 @@ import Overview from './Overview'
 import SpacesBar from './SpacesBar'
 import StatusRing from './StatusRing'
 import WindowFrame from './WindowFrame'
-import { hasDrag, hasFiles, readDrag } from './dnd'
+import { hasDrag, hasFiles, hasLink, readDrag, readLink } from './dnd'
 import { WIDGETS } from './registry'
 import { canvasFromScreen, screenFromCanvas, snapValue, visibleRect, type Point, type Viewport } from './snapping'
 import { setLiveViewport, setViewportEl, useActiveCanvas, useCanvas, useWindows, viewport, viewportPoint } from './store'
@@ -310,7 +310,7 @@ export default function Canvas(): JSX.Element {
 
   const onDragOver = (e: ReactDragEvent<HTMLDivElement>): void => {
     const dt = e.dataTransfer
-    if (!hasDrag(dt) && !hasFiles(dt)) return
+    if (!hasDrag(dt) && !hasFiles(dt) && !hasLink(dt)) return
     e.preventDefault()
     dt.dropEffect = 'copy'
     // dragover fires continuously; only a changed landing cell is worth a render.
@@ -326,7 +326,7 @@ export default function Canvas(): JSX.Element {
 
   const onDrop = async (e: ReactDragEvent<HTMLDivElement>): Promise<void> => {
     const dt = e.dataTransfer
-    if (!hasDrag(dt) && !dt.files.length) return
+    if (!hasDrag(dt) && !dt.files.length && !hasLink(dt)) return
     e.preventDefault()
     setGhost(null)
     const at = landing(e)
@@ -335,6 +335,12 @@ export default function Canvas(): JSX.Element {
     const projectId = canvas?.project_id ?? null
     const p = readDrag(dt)
     if (!p) {
+      // A link from a browser opens as a web window; a link that is also a file drop stays a file.
+      const link = dt.files.length ? '' : readLink(dt)
+      if (link) {
+        await st.openWindow('web', null, at, { url: link })
+        return
+      }
       if (!dt.files.length) return
       await app.uploadDocuments(dt.files, projectId)
       await st.openWindow('documents', null, at)

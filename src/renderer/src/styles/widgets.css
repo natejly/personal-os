@@ -168,6 +168,13 @@
 }
 .widget-input:focus { border-color: var(--accent); outline: none; }
 
+/* The web widget: a 28px strip fits the address field; the guest below takes everything else. */
+.web-bar { flex-basis: 28px; gap: 4px; }
+.web-bar .widget-chip { padding: 0 5px; display: inline-flex; align-items: center; }
+.web-bar .widget-chip:disabled { opacity: 0.4; }
+.web-address { flex: 1; height: 20px; border-radius: 999px; }
+.web-empty { color: var(--text-muted); justify-items: center; }
+
 .widget-empty,
 .widget-error {
   display: grid;

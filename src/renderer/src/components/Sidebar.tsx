@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { MessageSquarePlus, Search, Settings, Trash2, PanelLeftClose, Brain, FileText, NotebookPen, Plus, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid, Mail, MonitorDot } from 'lucide-react'
+import { MessageSquarePlus, Search, Settings, Trash2, PanelLeftClose, Brain, FileText, NotebookPen, Plus, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid, Mail, MonitorDot, Globe } from 'lucide-react'
 import GrainLogo from './GrainLogo'
 import { useStore, type View } from '../store'
 import { ActivityIndicator } from './ActivityView'
@@ -24,8 +24,10 @@ function groupLabel(ts: number): string {
 /**
  * `kind` makes the row a canvas drag source (contract §7, payload kind 'nav'). Boards and Dashboards
  * have none: their widgets need a `ref_id`, so a bare drag would open a window with nothing in it.
+ * A row without a `view` (Web) exists only as a widget, so it only shows in canvas mode and a click
+ * opens its window directly.
  */
-const NAV: { view: View; label: string; icon: JSX.Element; kind?: WidgetKind }[] = [
+const NAV: { view?: View; label: string; icon: JSX.Element; kind?: WidgetKind }[] = [
   { view: 'home', label: 'Today', icon: <Home size={15} />, kind: 'recap' },
   { view: 'todos', label: 'Todos', icon: <CheckSquare size={15} />, kind: 'todos' },
   { view: 'calendar', label: 'Calendar', icon: <Calendar size={15} />, kind: 'calendar' },
@@ -35,7 +37,8 @@ const NAV: { view: View; label: string; icon: JSX.Element; kind?: WidgetKind }[]
   { view: 'memory', label: 'Memory', icon: <Brain size={15} />, kind: 'memory' },
   { view: 'documents', label: 'Documents', icon: <FileText size={15} />, kind: 'documents' },
   { view: 'docs', label: 'Docs', icon: <NotebookPen size={15} /> },
-  { view: 'activity', label: 'Activity', icon: <MonitorDot size={15} />, kind: 'activity' }
+  { view: 'activity', label: 'Activity', icon: <MonitorDot size={15} />, kind: 'activity' },
+  { label: 'Web', icon: <Globe size={15} />, kind: 'web' }
 ]
 
 export default function Sidebar(): JSX.Element {
@@ -113,14 +116,15 @@ export default function Sidebar(): JSX.Element {
       </button>
 
       <nav className="nav">
-        {NAV.filter((n) => n.view === 'home' || !viewHidden(settings, n.view)).map((n) => (
-          <button key={n.view} className={`nav-item ${view === n.view ? 'active' : ''}`} onClick={() => setView(n.view)}
+        {NAV.filter((n) => (n.view ? n.view === 'home' || !viewHidden(settings, n.view) : mode === 'canvas')).map((n) => (
+          <button key={n.label} className={`nav-item ${n.view && view === n.view ? 'active' : ''}`}
+            onClick={() => (n.view ? setView(n.view) : void useCanvas.getState().openWindow(n.kind as WidgetKind))}
             {...(n.kind ? dragProps({ kind: 'nav', id: n.kind, label: n.label }) : {})}>
             {n.icon}<span>{n.label}</span>
             {n.view === 'docs' && docsPending > 0 && (
               <span className="count pending" title={`${docsPending} assistant edit${docsPending === 1 ? '' : 's'} awaiting review`}>{docsPending}</span>
             )}
-            {libCount(n.view) !== null && <span className="count">{libCount(n.view)}</span>}
+            {n.view != null && libCount(n.view) !== null && <span className="count">{libCount(n.view)}</span>}
           </button>
         ))}
       </nav>

@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react'
-import { Check, MessageSquare, Pencil, RefreshCw } from 'lucide-react'
-import type { DragKind, DragPayload, Effort } from '@shared/types'
+import { Check, MessageSquare, MessagesSquare, Pencil, RefreshCw } from 'lucide-react'
+import type { CanvasWindow, DragKind, DragPayload, Effort } from '@shared/types'
 import MessageView from '../../components/Message'
 import Composer from '../../components/Composer'
+import { api } from '../../lib/api'
 import { retainSession, useConversation, useIsStreaming, useStore, useStreamingMessageId } from '../../store'
 import { useDropTarget } from '../dnd'
 import type { WidgetDef, WidgetProps } from '../registry'
+import { useCanvas } from '../store'
 import { useRingStatus } from '../useRingStatus'
 
 const ACCEPTS: DragKind[] = ['todo', 'document', 'memory', 'file']
@@ -53,8 +55,44 @@ const ChatControls = ({ convId }: { convId: string }): JSX.Element => {
   )
 }
 
+/** Create a fresh conversation in the window's project and point the window at it. */
+const newChatFor = async (win: CanvasWindow): Promise<string | null> => {
+  const app = useStore.getState()
+  try {
+    const c = await api.conversations.create(win.project_id ?? null, app.settings.defaultModel)
+    void app.refreshConversations()
+    await useCanvas.getState().setWindowRef(win.id, c.id)
+    return c.id
+  } catch (e) {
+    app.toast((e as Error).message, 'error')
+    return null
+  }
+}
+
+/** Re-point this window at any conversation (every project — a window is cross-scope), or a new one. */
+const ChatSwitcher = ({ win, convId }: { win: CanvasWindow; convId: string }): JSX.Element => {
+  const conversations = useStore((s) => s.conversations)
+  const refreshConversations = useStore((s) => s.refreshConversations)
+  const setWindowRef = useCanvas((s) => s.setWindowRef)
+  const onPick = async (v: string): Promise<void> => {
+    if (v === '__new__') await newChatFor(win)
+    else if (v !== convId) await setWindowRef(win.id, v)
+  }
+  return (
+    // The list may be stale (chats made in other windows); refresh as the menu opens.
+    <label className="icon-btn ghost xs chat-switch" title="Switch chat" onMouseDown={() => void refreshConversations()}>
+      <MessagesSquare size={11} />
+      <select aria-label="Switch chat" value={convId} onChange={(e) => void onPick(e.target.value)}>
+        <option value="__new__">+ New chat</option>
+        {!conversations.some((c) => c.id === convId) && <option value={convId} disabled>(current chat)</option>}
+        {conversations.map((c) => <option key={c.id} value={c.id}>{c.title || 'Untitled chat'}</option>)}
+      </select>
+    </label>
+  )
+}
+
 /** The window has no title bar, so the chat names itself. Double-click or the pencil renames it. */
-const ChatTitle = ({ convId, title }: { convId: string; title: string }): JSX.Element => {
+const ChatTitle = ({ convId, title, switcher }: { convId: string; title: string; switcher?: JSX.Element }): JSX.Element => {
   const renameChat = useStore((s) => s.renameChat)
   const [editing, setEditing] = useState<string | null>(null)
   const commit = (): void => {
@@ -77,6 +115,7 @@ const ChatTitle = ({ convId, title }: { convId: string; title: string }): JSX.El
     <div className="chat-head">
       <span className="chat-title" title={title} onDoubleClick={() => setEditing(title)}>{title || 'Untitled chat'}</span>
       <button className="icon-btn ghost xs chat-rename" title="Rename chat" onClick={() => setEditing(title)}><Pencil size={11} /></button>
+      {switcher}
     </div>
   )
 }
@@ -88,6 +127,8 @@ function ChatWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
   const titled = useRef(win.title)
   const [stick, setStick] = useState(true)
   const [gone, setGone] = useState(false)
+  const [draft, setDraft] = useState('')
+  const conversations = useStore((s) => s.conversations)
   const convo = useConversation(convId)
   const loaded = useStore((s) => !!s.sessions[convId])
   const streaming = useIsStreaming(convId)
@@ -157,7 +198,43 @@ function ChatWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
   const drop = useDropTarget(ACCEPTS, (p, e) => void onDrop(p, e))
 
   if (!convId) return <div className="widget-empty">A chat window needs a conversation.</div>
-  if (gone) return <div className="widget-error">That conversation is gone.</div>
+  if (gone) {
+    // The conversation was deleted from another surface; the window lives on, so give it a future:
+    // type to start a fresh chat in place, or re-point the window at an existing one.
+    const sendNew = async (): Promise<void> => {
+      const id = await newChatFor(win)
+      if (!id) return
+      const text = draft.trim()
+      setDraft('')
+      if (text) void useStore.getState().send(text, id)
+    }
+    const others = conversations.filter((c) => c.id !== convId)
+    return (
+      <div className="widget chat-gone">
+        <MessageSquare size={18} />
+        <p className="widget-sub">This chat was deleted.</p>
+        <div className="chat-gone-send">
+          <input autoFocus aria-label="Message for a new chat" placeholder="Send a message to start a new chat…"
+            value={draft} onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') void sendNew() }} />
+          <button className="primary-btn" onClick={() => void sendNew()}>{draft.trim() ? 'Send' : 'New chat'}</button>
+        </div>
+        {others.length > 0 && (
+          <>
+            <p className="widget-sub">or pick up an existing chat:</p>
+            <div className="chat-gone-list">
+              {others.slice(0, 6).map((c) => (
+                <button key={c.id} className="ghost-btn" title={c.title || 'Untitled chat'}
+                  onClick={() => void useCanvas.getState().setWindowRef(win.id, c.id)}>
+                  <MessageSquare size={12} /> {c.title || 'Untitled chat'}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
+    )
+  }
 
   // Off-screen, minimized or zoomed out: the message list unmounts, so streamed tokens stop
   // re-rendering it, while the ring stays mounted and the session keeps running.
@@ -178,7 +255,7 @@ function ChatWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
   }
   return (
     <div ref={root} className={drop.over ? 'widget drop-over' : 'widget'} {...drop.handlers}>
-      <ChatTitle convId={convId} title={convo?.title ?? ''} />
+      <ChatTitle convId={convId} title={convo?.title ?? ''} switcher={<ChatSwitcher win={win} convId={convId} />} />
       <div className="messages" ref={scroll} onScroll={onScroll}>
         <div className="messages-inner">
           {msgs.map((m) => <MessageView key={m.id} message={m} streaming={streaming && streamingId === m.id} />)}

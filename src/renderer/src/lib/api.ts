@@ -234,7 +234,7 @@ export const api = {
   windows: {
     get: (id: string) => req<CanvasWindow>(`/windows/${id}`),
     /** `config` merges server-side, so one key is safe to send on its own. */
-    update: (id: string, patch: { title?: string; config?: Record<string, unknown>; state?: WindowState; pinned?: boolean; x?: number; y?: number; w?: number; h?: number; z?: number; canvas_id?: string; restore_bounds?: Rect; popout_bounds?: PopoutBounds; clear_restore_bounds?: boolean; clear_popout_bounds?: boolean }) =>
+    update: (id: string, patch: { title?: string; ref_id?: string; config?: Record<string, unknown>; state?: WindowState; pinned?: boolean; x?: number; y?: number; w?: number; h?: number; z?: number; canvas_id?: string; restore_bounds?: Rect; popout_bounds?: PopoutBounds; clear_restore_bounds?: boolean; clear_popout_bounds?: boolean }) =>
       req<CanvasWindow>(`/windows/${id}`, { method: 'PUT', body: json(patch) }),
     raise: (id: string) => req<CanvasWindow>(`/windows/${id}/raise`, { method: 'POST' }),
     delete: (id: string) => req(`/windows/${id}`, { method: 'DELETE' })

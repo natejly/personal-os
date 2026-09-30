@@ -244,6 +244,27 @@
   padding: 0 10px;
   border-bottom: 1px solid var(--border);
 }
+/* An invisible native select stretched over the icon, the TodoItem due-date trick. */
+.chat-switch { position: relative; flex: none; }
+.chat-switch select { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; }
+
+/* The bound conversation was deleted: offer a fresh start or a re-bind in place. */
+.chat-gone {
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 20px;
+  text-align: center;
+  color: var(--text-faint);
+}
+.chat-gone .widget-sub { white-space: normal; }
+.chat-gone-send { display: flex; gap: 6px; width: 100%; max-width: 360px; }
+.chat-gone-send input { flex: 1; min-width: 0; }
+.chat-gone-send .primary-btn { white-space: nowrap; }
+.chat-gone-list { display: flex; flex-direction: column; gap: 4px; width: 100%; max-width: 360px; min-height: 0; overflow: auto; }
+.chat-gone-list .ghost-btn { justify-content: flex-start; max-width: 100%; }
+.chat-gone-list .ghost-btn svg { flex: none; }
+
 .chat-title {
   flex: 1;
   min-width: 0;

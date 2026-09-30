@@ -48,6 +48,8 @@ export interface CanvasState {
   patchWindow: (windowId: string, patch: Partial<CanvasWindow>) => void
   setWindowState: (windowId: string, state: WindowState) => Promise<void>
   setWindowTitle: (windowId: string, title: string) => Promise<void>
+  /** Re-point a window at another referent (chat switching conversations). Clears the title so it re-adopts the referent's. */
+  setWindowRef: (windowId: string, refId: string) => Promise<void>
   /** Merges server-side; safe to call with one key. */
   setWindowConfig: (windowId: string, patch: Record<string, unknown>) => Promise<void>
   setWindowPinned: (windowId: string, pinned: boolean) => Promise<void>
@@ -495,6 +497,10 @@ export const useCanvas = create<CanvasState>((set, get) => {
     setWindowTitle: async (windowId, title) => {
       get().patchWindow(windowId, { title })
       await api.windows.update(windowId, { title }).catch(fail)
+    },
+    setWindowRef: async (windowId, refId) => {
+      get().patchWindow(windowId, { ref_id: refId, title: '' })
+      await api.windows.update(windowId, { ref_id: refId, title: '' }).catch(fail)
     },
     setWindowConfig: async (windowId, patch) => {
       const w = findWin(get(), windowId)

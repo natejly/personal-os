@@ -1877,6 +1877,8 @@ class WindowIn(BaseModel):
 
 class WindowPatch(BaseModel):
     title: str | None = None
+    # Re-point the window at another referent (a chat window switching conversations).
+    ref_id: str | None = None
     config: dict[str, Any] | None = None
     state: str | None = None
     pinned: bool | None = None

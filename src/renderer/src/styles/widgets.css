@@ -197,3 +197,37 @@
     transition: none !important;
   }
 }
+
+/* A widget that threw during render (WidgetBoundary). Overrides the centred .widget-error empty state
+   above, because a stack trace needs to be readable and scrollable, not centred. Without a boundary the
+   whole React tree unmounts, and since the BrowserWindow is transparent that reads as the app vanishing
+   rather than as one widget failing. */
+.widget-error:has(.widget-error-head) {
+  display: flex;
+  flex-direction: column;
+  place-content: initial;
+  text-align: left;
+  gap: 8px;
+  padding: 12px;
+  overflow: auto;
+  color: var(--text);
+}
+.widget-error-head { display: flex; align-items: center; gap: 8px; color: var(--danger); font-size: 12px; }
+.widget-error-head .ghost-btn { margin-left: auto; font-size: 11px; }
+.widget-error-body {
+  margin: 0;
+  font: 11px/1.5 var(--mono);
+  background: var(--hover);
+  border-radius: 6px;
+  padding: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.widget-error-stack {
+  margin: 0;
+  font: 10px/1.45 var(--mono);
+  color: var(--text-faint);
+  white-space: pre-wrap;
+  max-height: 140px;
+  overflow: auto;
+}

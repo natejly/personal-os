@@ -6,6 +6,7 @@ import {
 import type { CanvasWindow, WidgetKind } from '@shared/types'
 import { WIDGETS, type WidgetProps } from './registry'
 import { useCanvas } from './store'
+import WidgetBoundary from './WidgetBoundary'
 
 /** Placeholder catalog. Wave 3 reads `WIDGETS[kind].label` / `.icon` instead. */
 export const KIND_LABEL: Record<WidgetKind, string> = {
@@ -58,5 +59,9 @@ export default function WindowHost({ win, focused, live }: { win: CanvasWindow; 
   const onTitle = useCallback((t: string) => void setWindowTitle(win.id, t), [setWindowTitle, win.id])
   const Body = resolveWidget(win.kind)
   // The ring lives in the title bar's `.win-status`, filled by Canvas: a body may never render chrome.
-  return <Body window={win} focused={focused} live={live} onConfig={onConfig} onTitle={onTitle} />
+  return (
+    <WidgetBoundary label={win.title || KIND_LABEL[win.kind] || win.kind}>
+      <Body window={win} focused={focused} live={live} onConfig={onConfig} onTitle={onTitle} />
+    </WidgetBoundary>
+  )
 }

@@ -1,5 +1,5 @@
 import type {
-  ChatEvent, ToolInfo, Todo, GoogleStatus, TodayDashboard, CalendarEvent, GmailMessage, GoogleTask, DriveFile, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Recap, Conversation, ConversationSettings, ContextUsed, Document, GraphData, GraphEdge, GraphNode, Message,
+  ChatEvent, ToolInfo, Todo, GoogleStatus, TodayDashboard, CalendarEvent, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, DriveFile, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Recap, Conversation, ConversationSettings, ContextUsed, Document, GraphData, GraphEdge, GraphNode, Message,
   Memory, ModelInfo, ModelPrice, Settings, Project, UsageReport, ChatRunStarted, RunInfo,
   Canvas, CanvasWindow, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState
 } from '@shared/types'
@@ -116,9 +116,23 @@ export const api = {
     calendar: (days = 2) => req<CalendarEvent[]>(`/integrations/google/calendar?days=${days}`),
     calendarRange: (startIso: string, days = 7) => req<CalendarEvent[]>(`/integrations/google/calendar?days=${days}&start=${encodeURIComponent(startIso)}`),
     createEvent: (e: { summary: string; start: string; end?: string; description?: string; location?: string }) => req(`/integrations/google/calendar`, { method: 'POST', body: json(e) }),
-    gmail: (q = 'is:unread newer_than:3d') => req<GmailMessage[]>(`/integrations/google/gmail?q=${encodeURIComponent(q)}`),
+    gmail: (q = 'is:unread newer_than:3d', maxResults = 12) => req<GmailMessage[]>(`/integrations/google/gmail?q=${encodeURIComponent(q)}&max_results=${maxResults}`),
     tasks: (showCompleted = false) => req<GoogleTask[]>(`/integrations/google/tasks?show_completed=${showCompleted}`),
-    drive: (q = '', maxResults = 20) => req<DriveFile[]>(`/integrations/google/drive?q=${encodeURIComponent(q)}&max_results=${maxResults}`)
+    drive: (q = '', maxResults = 20) => req<DriveFile[]>(`/integrations/google/drive?q=${encodeURIComponent(q)}&max_results=${maxResults}`),
+    gmailGet: (id: string) => req<GmailFullMessage>(`/integrations/google/gmail/${id}`),
+    gmailLabels: () => req<GmailLabel[]>('/integrations/google/gmail/labels'),
+    gmailModify: (id: string, patch: { mark_read?: boolean; archive?: boolean; star?: boolean }) =>
+      req<{ ok: boolean }>(`/integrations/google/gmail/${id}/modify`, { method: 'POST', body: json(patch) }),
+    gmailDraft: (m: { to: string; subject: string; body: string; reply_to_message_id?: string | null }) =>
+      req<{ draft_id: string }>('/integrations/google/gmail/draft', { method: 'POST', body: json(m) }),
+    gmailSend: (m: { to: string; subject: string; body: string; reply_to_message_id?: string | null }) =>
+      req<{ sent: string }>('/integrations/google/gmail/send', { method: 'POST', body: json(m) })
+  },
+  assist: {
+    complete: (p: { kind: string; before: string; after?: string; context?: string }) =>
+      req<{ completion: string }>('/assist/complete', { method: 'POST', body: json(p) }),
+    mailReview: (p: { to?: string; subject?: string; body: string; reply_context?: string }) =>
+      req<{ feedback: string[]; revised: string }>('/assist/mail-review', { method: 'POST', body: json(p) })
   },
   projects: {
     list: () => req<Project[]>('/projects'),

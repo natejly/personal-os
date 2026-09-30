@@ -27,6 +27,7 @@ export const HOME_MODULES: HomeModule[] = [
 export const OPTIONAL_VIEWS: { view: View; label: string }[] = [
   { view: 'todos', label: 'Todos' },
   { view: 'calendar', label: 'Calendar' },
+  { view: 'mail', label: 'Mail' },
   { view: 'boards', label: 'Boards' },
   { view: 'dashboards', label: 'Dashboards' },
   { view: 'memory', label: 'Memory' },

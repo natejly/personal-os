@@ -282,19 +282,38 @@ class Google:
         body = _extract_body(msg.get("payload", {}))
         return {"id": message_id, "thread_id": msg.get("threadId"), "from": h.get("from"), "to": h.get("to"), "subject": h.get("subject"), "date": h.get("date"), "body": body[:max_chars]}
 
+    def _reply_headers(self, reply_to_message_id: str) -> tuple[str | None, dict[str, str]]:
+        """Thread id plus In-Reply-To/References headers so mail clients thread the reply."""
+        svc = self._svc("gmail", "v1")
+        orig = svc.users().messages().get(userId="me", id=reply_to_message_id, format="metadata", metadataHeaders=["Message-ID", "References"]).execute()
+        h = {x["name"].lower(): x["value"] for x in orig.get("payload", {}).get("headers", [])}
+        mid = h.get("message-id")
+        headers = {"in_reply_to": mid, "references": f"{h.get('references', '')} {mid}".strip()} if mid else {}
+        return orig.get("threadId"), headers
+
     def gmail_draft(self, to: str, subject: str, body: str, reply_to_message_id: str | None = None) -> dict[str, Any]:
         svc = self._svc("gmail", "v1")
-        raw = _raw_message(to, subject, body)
-        payload: dict[str, Any] = {"message": {"raw": raw}}
+        message: dict[str, Any] = {}
+        headers: dict[str, str] = {}
         if reply_to_message_id:
-            payload["message"]["threadId"] = svc.users().messages().get(userId="me", id=reply_to_message_id, format="minimal").execute().get("threadId")
-        d = svc.users().drafts().create(userId="me", body=payload).execute()
+            tid, headers = self._reply_headers(reply_to_message_id)
+            if tid:
+                message["threadId"] = tid
+        message["raw"] = _raw_message(to, subject, body, **headers)
+        d = svc.users().drafts().create(userId="me", body={"message": message}).execute()
         return {"draft_id": d.get("id"), "to": to, "subject": subject, "note": "Draft saved in Gmail; not sent."}
 
-    def gmail_send(self, to: str, subject: str, body: str) -> dict[str, Any]:
+    def gmail_send(self, to: str, subject: str, body: str, reply_to_message_id: str | None = None) -> dict[str, Any]:
         svc = self._svc("gmail", "v1")
-        m = svc.users().messages().send(userId="me", body={"raw": _raw_message(to, subject, body)}).execute()
-        return {"sent": m.get("id"), "to": to, "subject": subject}
+        message: dict[str, Any] = {}
+        headers: dict[str, str] = {}
+        if reply_to_message_id:
+            tid, headers = self._reply_headers(reply_to_message_id)
+            if tid:
+                message["threadId"] = tid
+        message["raw"] = _raw_message(to, subject, body, **headers)
+        m = svc.users().messages().send(userId="me", body=message).execute()
+        return {"sent": m.get("id"), "to": to, "subject": subject, "thread_id": m.get("threadId")}
 
     def gmail_modify(self, message_id: str, mark_read: bool | None = None, archive: bool = False, star: bool | None = None) -> dict[str, Any]:
         add, rem = [], []
@@ -310,6 +329,11 @@ class Google:
             rem.append("STARRED")
         self._svc("gmail", "v1").users().messages().modify(userId="me", id=message_id, body={"addLabelIds": add, "removeLabelIds": rem}).execute()
         return {"ok": True, "added": add, "removed": rem}
+
+    def gmail_labels(self) -> list[dict[str, Any]]:
+        res = self._svc("gmail", "v1").users().labels().list(userId="me").execute()
+        labels = [{"id": l["id"], "name": l.get("name", l["id"]), "type": l.get("type", "user")} for l in res.get("labels", [])]
+        return sorted(labels, key=lambda x: (x["type"] != "system", x["name"].lower()))
 
     # ---------- Tasks ----------
     def tasks_lists(self) -> list[dict[str, Any]]:
@@ -421,9 +445,13 @@ def _local_tz() -> str:
     return "UTC"
 
 
-def _raw_message(to: str, subject: str, body: str) -> str:
+def _raw_message(to: str, subject: str, body: str, in_reply_to: str | None = None, references: str | None = None) -> str:
     msg = email.mime.text.MIMEText(body)
     msg["to"], msg["subject"] = to, subject
+    if in_reply_to:
+        msg["In-Reply-To"] = in_reply_to
+    if references:
+        msg["References"] = references
     return base64.urlsafe_b64encode(msg.as_bytes()).decode()
 
 

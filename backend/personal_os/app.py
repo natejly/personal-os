@@ -20,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from . import llm, tools
+from . import assist, llm, tools
 from .context import build_context, estimate_tokens
 from .db import Database, data_dir_from_env, new_id
 from .extract_text import extract_text
@@ -1186,9 +1186,74 @@ def google_gmail(q: str = "is:unread newer_than:3d", max_results: int = 12) -> A
     return _gcall(google.gmail_search, q, max_results)
 
 
+# Registered before the {message_id} route so "labels" is not read as a message id.
+@app.get("/integrations/google/gmail/labels")
+def google_gmail_labels() -> Any:
+    return _gcall(google.gmail_labels)
+
+
 @app.get("/integrations/google/gmail/{message_id}")
 def google_gmail_message(message_id: str) -> Any:
     return _gcall(google.gmail_get, message_id)
+
+
+class GmailModifyIn(BaseModel):
+    mark_read: bool | None = None
+    archive: bool = False
+    star: bool | None = None
+
+
+@app.post("/integrations/google/gmail/{message_id}/modify")
+def google_gmail_modify(message_id: str, body: GmailModifyIn) -> Any:
+    return _gcall(google.gmail_modify, message_id, body.mark_read, body.archive, body.star)
+
+
+class GmailComposeIn(BaseModel):
+    to: str
+    subject: str = ""
+    body: str = ""
+    reply_to_message_id: str | None = None
+
+
+@app.post("/integrations/google/gmail/draft")
+def google_gmail_draft(body: GmailComposeIn) -> Any:
+    return _gcall(google.gmail_draft, body.to, body.subject, body.body, body.reply_to_message_id)
+
+
+@app.post("/integrations/google/gmail/send")
+def google_gmail_send(body: GmailComposeIn) -> Any:
+    return _gcall(google.gmail_send, body.to, body.subject, body.body, body.reply_to_message_id)
+
+
+# ---------------- assist (inline completion + draft review) ----------------
+class CompleteIn(BaseModel):
+    kind: str = "text"
+    before: str
+    after: str = ""
+    context: str = ""
+
+
+@app.post("/assist/complete")
+async def assist_complete(body: CompleteIn) -> dict[str, str]:
+    try:
+        return {"completion": await assist.complete_text(settings(), body.kind, body.before, body.after, body.context)}
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"Completion failed: {e}") from e
+
+
+class MailReviewIn(BaseModel):
+    to: str = ""
+    subject: str = ""
+    body: str
+    reply_context: str = ""
+
+
+@app.post("/assist/mail-review")
+async def assist_mail_review(body: MailReviewIn) -> dict[str, Any]:
+    try:
+        return await assist.review_email(settings(), body.to, body.subject, body.body, body.reply_context)
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"Review failed: {e}") from e
 
 
 @app.get("/integrations/google/tasks")

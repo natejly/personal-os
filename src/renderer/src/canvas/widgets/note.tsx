@@ -6,6 +6,7 @@ import type { Note } from '@shared/types'
 import { api } from '../../lib/api'
 import type { WidgetDef, WidgetProps } from '../registry'
 import { SAFE_MD } from '../../components/Message'
+import SmartTextarea from '../../components/SmartTextarea'
 
 /** Paper, not chrome: a sticky note keeps its colour in either theme, with ink dark enough to read. */
 const COLORS: Record<string, { bg: string; ink: string }> = {
@@ -110,16 +111,16 @@ function NoteWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
       </div>
 
       {editing ? (
-        <textarea
+        <SmartTextarea
           autoFocus
           value={body}
-          onChange={(e) => edit(e.target.value)}
+          onChange={edit}
           onBlur={() => setEditing(false)}
           onKeyDown={(e) => { if (e.key === 'Escape') (e.target as HTMLTextAreaElement).blur() }}
-          style={{
-            flex: 1, minHeight: 0, width: '100%', padding: 'var(--widget-pad)', border: 0, outline: 'none',
-            background: 'transparent', color: 'inherit', font: 'inherit', lineHeight: 1.5, resize: 'none'
-          }}
+          kind="note"
+          context={win.title}
+          variant="bare"
+          sharedStyle={{ padding: 'var(--widget-pad)', lineHeight: 1.5 }}
         />
       ) : (
         <div className="widget-scroll markdown" style={{ cursor: 'text' }} onClick={() => setEditing(true)}>

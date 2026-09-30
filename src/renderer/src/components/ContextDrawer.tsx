@@ -50,7 +50,7 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
       )}
       {ctx.chunks.length > 0 && (
         <section>
-          <h5><FileText size={12} /> Documents ({ctx.chunks.length} excerpts) <button className="link" onClick={() => setView('documents')}>manage</button></h5>
+          <h5><FileText size={12} /> Documents ({ctx.chunks.length} excerpts) <button className="link" onClick={() => setView('knowledge')}>manage</button></h5>
           <ul>{ctx.chunks.map((c) => <li key={c.chunk_id}><b>{c.name}</b> · chunk {c.idx + 1}<div className="chunk-preview">{c.text}</div></li>)}</ul>
         </section>
       )}

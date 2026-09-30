@@ -1,12 +1,41 @@
 import { useMemo, useState } from 'react'
+import type { CSSProperties } from 'react'
 import { Plus } from 'lucide-react'
 import type { CalendarEvent, Todo } from '@shared/types'
+
+/** The event's Google color as a CSS var the cal-event/cal-chip rules pick up. */
+export const evTint = (e: CalendarEvent): CSSProperties | undefined => (e.color ? ({ '--ev': e.color } as CSSProperties) : undefined)
 
 export const HOUR_PX = 44
 export const startOfWeek = (d: Date): Date => { const x = new Date(d); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x }
 export const addDays = (d: Date, n: number): Date => { const x = new Date(d); x.setDate(x.getDate() + n); return x }
 export const dayKey = (d: Date): string => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 export const fmtTime = (d: Date): string => d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+
+interface Placed { e: CalendarEvent; top: number; height: number; col: number; cols: number }
+
+/** Greedy column assignment so overlapping events sit side by side (clusters share the width). */
+const layoutDay = (evs: CalendarEvent[]): Placed[] => {
+  const items: Placed[] = evs
+    .map((e) => {
+      const s = new Date(e.start), en = new Date(e.end)
+      const top = (s.getHours() + s.getMinutes() / 60) * HOUR_PX
+      return { e, top, height: Math.max(22, ((en.getTime() - s.getTime()) / 3_600_000) * HOUR_PX - 2), col: 0, cols: 1 }
+    })
+    .sort((a, b) => a.top - b.top || b.height - a.height)
+  let cluster: Placed[] = []
+  let clusterEnd = -1
+  const close = (): void => { const n = Math.max(...cluster.map((q) => q.col)) + 1; for (const q of cluster) q.cols = n }
+  for (const p of items) {
+    if (cluster.length && p.top >= clusterEnd) { close(); cluster = []; clusterEnd = -1 }
+    const taken = new Set(cluster.filter((q) => q.top + q.height > p.top).map((q) => q.col))
+    while (taken.has(p.col)) p.col++
+    cluster.push(p)
+    clusterEnd = Math.max(clusterEnd, p.top + p.height)
+  }
+  if (cluster.length) close()
+  return items
+}
 
 export interface CalendarWeekProps {
   /** One column per day, in order: seven for a week, one for a single day. */
@@ -62,7 +91,7 @@ export default function CalendarWeek({ days, events, todos, canCreate = false, o
       <div className="cal-allday-label">all day</div>
       {days.map((d) => (
         <div key={'ad' + dayKey(d)} className="cal-allday">
-          {(eventsByDay[dayKey(d)] ?? []).filter((e) => e.all_day).map((e) => <div key={e.id} className="cal-chip" onClick={() => onOpen(e)}>{e.summary}</div>)}
+          {(eventsByDay[dayKey(d)] ?? []).filter((e) => e.all_day).map((e) => <div key={`${e.calendar_id}:${e.id}`} className="cal-chip" style={evTint(e)} title={e.calendar ? `${e.summary} · ${e.calendar}` : e.summary} onClick={() => onOpen(e)}>{e.summary}</div>)}
           {(todosByDay[dayKey(d)] ?? []).map((t) => <div key={t.id} className={`cal-chip todo p${t.priority}`} title="Todo due">○ {t.title}</div>)}
         </div>
       ))}
@@ -77,16 +106,14 @@ export default function CalendarWeek({ days, events, todos, canCreate = false, o
             onDoubleClick={(e) => { if (!canCreate) return; const rect = e.currentTarget.getBoundingClientRect(); setCreating({ day: dk, hour: Math.floor((e.clientY - rect.top) / HOUR_PX) }) }}>
             {Array.from({ length: 24 }, (_, h) => <div key={h} className="cal-line" style={{ top: h * HOUR_PX }} />)}
             {dk === todayKey && <div className="cal-now" style={{ top: nowTop }} />}
-            {(eventsByDay[dk] ?? []).filter((e) => !e.all_day).map((e) => {
-              const s = new Date(e.start), en = new Date(e.end)
-              const top = (s.getHours() + s.getMinutes() / 60) * HOUR_PX
-              const h = Math.max(22, ((en.getTime() - s.getTime()) / 3_600_000) * HOUR_PX - 2)
-              return (
-                <div key={e.id} className="cal-event" style={{ top, height: h }} onClick={() => onOpen(e)} title={e.summary}>
-                  <b>{e.summary}</b><span>{fmtTime(s)}</span>
-                </div>
-              )
-            })}
+            {layoutDay((eventsByDay[dk] ?? []).filter((e) => !e.all_day)).map(({ e, top, height, col, cols }) => (
+              // The same event id can appear on several merged calendars, so the key needs both.
+              <div key={`${e.calendar_id}:${e.id}`} className="cal-event"
+                style={{ top, height, left: `calc(${(col / cols) * 100}% + 3px)`, width: `calc(${100 / cols}% - 6px)`, ...evTint(e) }}
+                onClick={() => onOpen(e)} title={e.calendar ? `${e.summary} · ${e.calendar}` : e.summary}>
+                <b>{e.summary}</b><span>{fmtTime(new Date(e.start))}</span>
+              </div>
+            ))}
             {creating?.day === dk && (
               <div className="cal-create" style={{ top: creating.hour * HOUR_PX }}>
                 <input autoFocus placeholder={`New event at ${creating.hour}:00`} value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void create(); if (e.key === 'Escape') { setCreating(null); setTitle('') } }} />

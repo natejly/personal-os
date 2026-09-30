@@ -29,6 +29,7 @@ from .repos import ALL, Conversations, Documents, Graph, Memories, Projects
 from .boards import Boards
 from .canvas import SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
 from .dashboards import Dashboards, generate_recap, generate_summary, generate_widget_code
+from .docs import Docs
 from .google import Google, GoogleNotConnected, json_safe
 from .notes import Notes
 from .runs import Run, RunBus
@@ -45,6 +46,7 @@ convos = Conversations(db)
 memories = Memories(db)
 graph = Graph(db)
 documents = Documents(db)
+docs = Docs(db)  # authored docs (the editor's), not the uploaded RAG `documents`
 
 
 def _resolve_auth_token() -> str:
@@ -99,7 +101,8 @@ def _widget_fetch_ok(source_id: str, wid: str, wt: str, we: str) -> bool:
     return bool(w and source_id in (w.get("source_ids") or []))
 
 
-app = FastAPI(title="Personal OS", version="0.1.0")
+# Swagger moves off its default /docs: that path is the authored-documents API (src/renderer/src/lib/api.ts docs.*).
+app = FastAPI(title="Personal OS", version="0.1.0", docs_url="/api-docs")
 
 
 @app.exception_handler(sqlite3.IntegrityError)
@@ -1163,9 +1166,14 @@ def _gcall(fn, *args):  # type: ignore[no-untyped-def]
         raise HTTPException(502, f"Google API error: {e}") from e
 
 
+@app.get("/integrations/google/calendars")
+def google_calendars() -> Any:
+    return _gcall(google.calendar_list)
+
+
 @app.get("/integrations/google/calendar")
-def google_calendar(days: int = 2, start: str | None = None) -> Any:
-    return _gcall(google.calendar_events, days, "primary", 60, start)
+def google_calendar(days: int = 2, start: str | None = None, calendar_id: str = "all", max_results: int = 60) -> Any:
+    return _gcall(google.calendar_events, days, calendar_id, max_results, start)
 
 
 class EventIn(BaseModel):
@@ -1212,7 +1220,7 @@ async def dashboard() -> dict[str, Any]:
     if st["connected"]:
         async def cal() -> None:
             try:
-                out["calendar"] = json_safe(await asyncio.to_thread(google.calendar_events, 2))
+                out["calendar"] = json_safe(await asyncio.to_thread(google.calendar_events, 2, "all"))
             except Exception as e:  # noqa: BLE001
                 out["errors"]["calendar"] = str(e)
 
@@ -1410,7 +1418,7 @@ async def _internal_data() -> dict[str, Any]:
     }
     if st["connected"]:
         try:
-            out["calendar"] = json_safe(await asyncio.to_thread(google.calendar_events, 3))
+            out["calendar"] = json_safe(await asyncio.to_thread(google.calendar_events, 3, "all"))
         except Exception as e:  # noqa: BLE001
             out["calendar_error"] = str(e)
         try:
@@ -1834,3 +1842,121 @@ def delete_note(id: str) -> dict[str, bool]:
     notes.delete(id)
     canvases.delete_windows_for("note", id)
     return {"ok": True}
+
+
+# ---------------- authored docs (the editor's) ----------------
+
+
+class DocIn(BaseModel):
+    title: str = ""
+    body: str = ""
+    format: str = "md"
+    project_id: str | None = None
+
+
+class DocPatch(BaseModel):
+    title: str | None = None
+    body: str | None = None
+    format: str | None = None
+    project_id: str | None = None
+    source: str | None = None
+
+
+class DocRestore(BaseModel):
+    version: int
+
+
+@app.get("/docs")
+def list_docs(project_id: str | None = "all", q: str = "") -> list[dict[str, Any]]:
+    scope = "__all__" if project_id in (None, "all") else sid(project_id)
+    return docs.list(scope, q)
+
+
+@app.post("/docs")
+def create_doc(body: DocIn) -> dict[str, Any]:
+    try:
+        return docs.create(body.title, body.body, body.format, wsid(body.project_id))
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.get("/docs/{id}")
+def get_doc(id: str) -> dict[str, Any]:
+    d = docs.get(id)
+    if not d:
+        raise HTTPException(404)
+    return d
+
+
+@app.put("/docs/{id}")
+def update_doc(id: str, body: DocPatch) -> dict[str, Any]:
+    patch = body.model_dump(exclude_unset=True)  # exclude_unset, not exclude_none: project_id null means personal scope
+    if "project_id" in patch:
+        patch["project_id"] = wsid(patch["project_id"])
+    if patch.get("source") is None:
+        patch.pop("source", None)
+    try:
+        d = docs.update(id, patch)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    if not d:
+        raise HTTPException(404)
+    return d
+
+
+@app.delete("/docs/{id}")
+def delete_doc(id: str) -> dict[str, bool]:
+    docs.delete(id)
+    return {"ok": True}
+
+
+@app.get("/docs/{id}/versions")
+def doc_versions(id: str) -> list[dict[str, Any]]:
+    if not docs.get(id):
+        raise HTTPException(404)
+    return docs.versions(id)
+
+
+@app.get("/docs/{id}/versions/{n}")
+def doc_version(id: str, n: int) -> dict[str, Any]:
+    v = docs.version(id, n)
+    if not v:
+        raise HTTPException(404)
+    return v
+
+
+@app.post("/docs/{id}/restore")
+def restore_doc(id: str, body: DocRestore) -> dict[str, Any]:
+    d = docs.restore(id, body.version)
+    if not d:
+        raise HTTPException(404, "No such document or version")
+    return d
+
+
+@app.get("/docs/{id}/diff")
+def doc_diff(id: str, frm: int, to: int) -> dict[str, Any]:
+    d = docs.diff(id, frm, to)
+    if not d:
+        raise HTTPException(404, "No such document or version")
+    return d
+
+
+@app.post("/docs/{id}/backup")
+def backup_doc(id: str) -> dict[str, Any]:
+    d = docs.get(id)
+    if not d:
+        raise HTTPException(404)
+
+    def push() -> str:
+        if d["drive_file_id"]:
+            try:
+                google.docs_replace(d["drive_file_id"], d["body"], d["title"])
+                return d["drive_file_id"]  # type: ignore[no-any-return]
+            except GoogleNotConnected:
+                raise
+            except Exception as e:  # noqa: BLE001 -- the Drive file was deleted or lost; recreate it
+                log.warning("Doc backup replace of %s failed, recreating: %s", d["drive_file_id"], e)
+        return google.docs_create(d["title"], d["body"])["id"]  # type: ignore[no-any-return]
+
+    fid = _gcall(push)
+    return docs.mark_backed_up(id, fid)  # type: ignore[return-value]

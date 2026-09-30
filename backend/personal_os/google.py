@@ -57,6 +57,7 @@ class Google:
         self.get_settings = get_settings
         self.set_settings = set_settings
         self._pending: dict[str, Any] = {}  # state -> flow
+        self._event_palette: dict[str, Any] | None = None  # colors().get() event palette, fetched once per process
 
     # ---------- status / auth ----------
     def _client(self) -> tuple[str | None, str | None, str | None]:
@@ -225,26 +226,71 @@ class Google:
         return build(name, version, credentials=self._creds(), cache_discovery=False)
 
     # ---------- Calendar ----------
+    def calendar_list(self) -> list[dict[str, Any]]:
+        res = self._svc("calendar", "v3").calendarList().list(maxResults=100).execute()
+        return [{
+            "id": c.get("id"), "name": c.get("summary"),
+            "primary": bool(c.get("primary")),
+            "color": c.get("backgroundColor"),
+            # The API omits `selected` for calendars unchecked in Google's UI (documented default: false).
+            "selected": bool(c.get("selected")),
+            "access_role": c.get("accessRole"),
+        } for c in res.get("items", [])]
+
+    def _event_colors(self) -> dict[str, Any]:
+        if self._event_palette is None:
+            self._event_palette = self._svc("calendar", "v3").colors().get().execute().get("event", {})
+        return self._event_palette
+
     def calendar_events(self, days: int = 2, calendar_id: str = "primary", max_results: int = 30, start: str | None = None) -> list[dict[str, Any]]:
-        now = dt.datetime.fromisoformat(start) if start else dt.datetime.now(dt.timezone.utc)
+        # JS toISOString sends a 'Z' suffix, which fromisoformat only accepts from Python 3.11.
+        now = dt.datetime.fromisoformat(start.replace("Z", "+00:00")) if start else dt.datetime.now(dt.timezone.utc)
         if now.tzinfo is None:
             now = now.replace(tzinfo=dt.timezone.utc)
         end = now + dt.timedelta(days=max(1, min(int(days), 60)))
-        res = self._svc("calendar", "v3").events().list(
-            calendarId=calendar_id, timeMin=now.isoformat(), timeMax=end.isoformat(), singleEvents=True, orderBy="startTime", maxResults=max_results
-        ).execute()
-        out = []
-        for e in res.get("items", []):
-            st, en = e.get("start", {}), e.get("end", {})
-            out.append({
-                "id": e.get("id"), "summary": e.get("summary", "(no title)"),
-                "start": st.get("dateTime") or st.get("date"), "end": en.get("dateTime") or en.get("date"),
-                "all_day": "date" in st, "location": e.get("location"), "link": e.get("htmlLink"),
-                "attendees": [a.get("email") for a in e.get("attendees", [])][:10],
-                "description": (e.get("description") or "")[:400],
-                "meet": (e.get("hangoutLink") or ""),
-            })
-        return out
+        svc = self._svc("calendar", "v3")
+        try:
+            palette = self._event_colors()
+        except Exception as e:  # noqa: BLE001
+            log.warning("Google color palette fetch failed: %s", e)
+            palette = {}
+        # The calendar list supplies names and fallback colors; for 'all' it is also the fan-out set.
+        cals: list[dict[str, Any]] = []
+        try:
+            cals = self.calendar_list()
+        except Exception as e:  # noqa: BLE001
+            log.warning("Google calendar list fetch failed: %s", e)
+        if calendar_id == "all":
+            targets = [c for c in cals if c.get("selected")] or [{"id": "primary"}]
+        else:
+            info = next((c for c in cals if c.get("id") == calendar_id or (calendar_id == "primary" and c.get("primary"))), {})
+            targets = [{**info, "id": calendar_id}]
+        out: list[dict[str, Any]] = []
+        for cal in targets:
+            try:
+                res = svc.events().list(
+                    calendarId=cal["id"], timeMin=now.isoformat(), timeMax=end.isoformat(), singleEvents=True, orderBy="startTime", maxResults=max_results
+                ).execute()
+            except Exception as e:  # noqa: BLE001
+                # One broken shared calendar must not kill the merge.
+                log.warning("Google calendar %s fetch failed: %s", cal["id"], e)
+                continue
+            for ev in res.get("items", []):
+                st, en = ev.get("start", {}), ev.get("end", {})
+                color = (palette.get(ev.get("colorId") or "") or {}).get("background") or cal.get("color")
+                out.append({
+                    "id": ev.get("id"), "summary": ev.get("summary", "(no title)"),
+                    "start": st.get("dateTime") or st.get("date"), "end": en.get("dateTime") or en.get("date"),
+                    "all_day": "date" in st, "location": ev.get("location"), "link": ev.get("htmlLink"),
+                    "attendees": [a.get("email") for a in ev.get("attendees", [])][:10],
+                    "description": (ev.get("description") or "")[:400],
+                    "meet": (ev.get("hangoutLink") or ""),
+                    "calendar_id": cal["id"], "calendar": cal.get("name"), "color": color,
+                })
+        out.sort(key=lambda r: _start_ts(r.get("start")))
+        # Each calendar's fetch is already capped at max_results; slicing the merge too
+        # would silently drop the latest events in the range, so only a lone fetch slices.
+        return out[:max_results] if len(targets) == 1 else out
 
     def calendar_create(self, summary: str, start: str, end: str | None = None, description: str = "", location: str = "", attendees: list[str] | None = None, calendar_id: str = "primary") -> dict[str, Any]:
         all_day = len(start) == 10
@@ -374,6 +420,21 @@ class Google:
             {"insertText": {"location": {"index": max(1, end - 1)}, "text": "\n" + content}}]}).execute()
         return {"id": document_id, "title": doc.get("title"), "appended_chars": len(content)}
 
+    def docs_replace(self, document_id: str, content: str, title: str | None = None) -> dict[str, Any]:
+        """Overwrite the document's whole body (doc backups re-push the same file, never append)."""
+        svc = self._svc("docs", "v1")
+        doc = svc.documents().get(documentId=document_id, fields="title,body(content(endIndex))").execute()
+        end = (doc.get("body", {}).get("content") or [{}])[-1].get("endIndex", 2)
+        requests: list[dict[str, Any]] = []
+        if end > 2:  # deleteContentRange refuses an empty range, and an empty doc has only its final newline
+            requests.append({"deleteContentRange": {"range": {"startIndex": 1, "endIndex": end - 1}}})
+        if content:
+            requests.append({"insertText": {"location": {"index": 1}, "text": content}})
+        if requests:
+            svc.documents().batchUpdate(documentId=document_id, body={"requests": requests}).execute()
+        return {"id": document_id, "title": title or doc.get("title"),
+                "link": f"https://docs.google.com/document/d/{document_id}/edit"}
+
     def sheets_read(self, spreadsheet_id: str, cell_range: str | None = None, max_rows: int = 200) -> dict[str, Any]:
         svc = self._svc("sheets", "v4").spreadsheets()
         meta = svc.get(spreadsheetId=spreadsheet_id, fields="properties(title),sheets(properties(title))").execute()
@@ -421,6 +482,17 @@ def _token_error_hint(e: Exception) -> str:
     if "access_denied" in msg:
         return "Sign-in was cancelled, or this Google account is not a test user on the OAuth consent screen."
     return f"Google rejected the sign-in: {msg}"
+
+
+def _start_ts(value: str | None) -> float:
+    """Epoch sort key: raw ISO strings carry per-calendar UTC offsets, so string order is not time order."""
+    try:
+        d = dt.datetime.fromisoformat((value or "").replace("Z", "+00:00"))
+    except ValueError:
+        return float("inf")
+    if d.tzinfo is None:  # all-day dates parse as naive midnight
+        d = d.replace(tzinfo=dt.timezone.utc)
+    return d.timestamp()
 
 
 def _local_tz() -> str:

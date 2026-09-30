@@ -107,6 +107,8 @@ export interface ConversationSettings {
   useDocuments: boolean
   autoLearn: boolean
   useTools: boolean
+  /** Doc this conversation edits as its agent (the editor's agent bar). */
+  document_id?: string | null
   tools: Record<string, ToolOverride>
   /** Sticky: a reply read untrusted content, so external tools keep asking and fetch_url stays restricted. */
   tainted?: boolean
@@ -172,6 +174,33 @@ export interface Document {
   text?: string
 }
 
+/** An authored document (the editor's), as list rows carry it. Not `Document`, which is an uploaded RAG source. */
+export interface DocMeta {
+  id: string
+  project_id: string | null
+  title: string
+  format: 'md' | 'txt' | 'tex'
+  preview: string
+  chars: number
+  version: number
+  /** Conversation acting as this doc's editing agent. */
+  agent_conv_id: string | null
+  drive_file_id: string | null
+  drive_synced_at: number | null
+  created_at: number
+  updated_at: number
+}
+
+export type Doc = DocMeta & { body: string }
+
+export interface DocVersion {
+  version: number
+  /** Who wrote it: 'user', 'agent', a restore, … */
+  source: string
+  created_at: number
+  chars: number
+}
+
 export interface Todo {
   id: string
   project_id: string | null
@@ -214,6 +243,21 @@ export interface CalendarEvent {
   attendees: string[]
   description: string
   meet: string
+  calendar_id?: string
+  /** Calendar display name; missing on single-calendar fetches. */
+  calendar?: string | null
+  /** Event color (falls back to the calendar's) as a CSS hex, when Google supplies one. */
+  color?: string | null
+}
+
+export interface GoogleCalendar {
+  id: string
+  name: string
+  primary: boolean
+  color: string | null
+  /** Whether the user shows this calendar in Google's own UI. */
+  selected: boolean
+  access_role: string | null
 }
 
 export interface GmailMessage {

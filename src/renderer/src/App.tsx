@@ -2,8 +2,8 @@ import { useEffect, useRef } from 'react'
 import { useStore } from './store'
 import Sidebar from './components/Sidebar'
 import ChatView from './components/ChatView'
-import MemoryPanel from './components/MemoryPanel'
-import DocumentsView from './components/DocumentsView'
+import KnowledgeView from './components/KnowledgeView'
+import EditorView from './components/EditorView'
 import ProjectView from './components/ProjectView'
 import HomeView from './components/HomeView'
 import TodosView from './components/TodosView'
@@ -96,8 +96,8 @@ export default function App(): JSX.Element {
           {view === 'calendar' && <CalendarView />}
           {view === 'boards' && <BoardsView />}
           {view === 'dashboards' && <DashboardsView />}
-          {view === 'memory' && <MemoryPanel />}
-          {view === 'documents' && <DocumentsView />}
+          {view === 'editor' && <EditorView />}
+          {view === 'knowledge' && <KnowledgeView />}
           {view === 'project' && <ProjectView />}
         </>
       )}

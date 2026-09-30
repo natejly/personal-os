@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { MessageSquarePlus, Search, Settings, Trash2, PanelLeftClose, Sparkles, Brain, FileText, Plus, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid } from 'lucide-react'
+import { MessageSquarePlus, Search, Settings, Trash2, PanelLeftClose, Sparkles, BookOpen, PenLine, Plus, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid } from 'lucide-react'
 import { useStore, type View } from '../store'
 import ChatPulse from './ChatPulse'
 import { viewHidden } from '../modules'
@@ -29,8 +29,8 @@ const NAV: { view: View; label: string; icon: JSX.Element; kind?: WidgetKind }[]
   { view: 'calendar', label: 'Calendar', icon: <Calendar size={15} />, kind: 'calendar' },
   { view: 'boards', label: 'Boards', icon: <KanbanSquare size={15} /> },
   { view: 'dashboards', label: 'Dashboards', icon: <LayoutDashboard size={15} /> },
-  { view: 'memory', label: 'Memory', icon: <Brain size={15} />, kind: 'memory' },
-  { view: 'documents', label: 'Documents', icon: <FileText size={15} />, kind: 'documents' }
+  { view: 'editor', label: 'Docs', icon: <PenLine size={15} /> },
+  { view: 'knowledge', label: 'Knowledge', icon: <BookOpen size={15} /> }
 ]
 
 export default function Sidebar(): JSX.Element {
@@ -83,13 +83,16 @@ export default function Sidebar(): JSX.Element {
   }, [conversations, query])
 
   const todoStats = useStore((s) => s.dashboard?.todo_stats)
+  const docsCount = useStore((s) => s.docs.length)
   const libCount = (v: View): number | null => {
-    if (v === 'home' || v === 'calendar' || v === 'boards' || v === 'dashboards') return null
     if (v === 'todos') return todoStats?.open ?? null
+    // 0 while the docs list has not been fetched yet; no badge beats a wrong one.
+    if (v === 'editor') return docsCount || null
+    if (v !== 'knowledge') return null
     const total = (key: 'memories' | 'nodes' | 'documents'): number =>
       (personalStats?.[key] ?? 0) + projects.reduce((n, p) => n + (p.stats?.[key] ?? 0), 0)
-    // Memory is one panel now: memories and graph entities counted together.
-    return v === 'memory' ? total('memories') + total('nodes') : total('documents')
+    // Knowledge is one panel: uploaded documents, memories and graph entities counted together.
+    return total('memories') + total('nodes') + total('documents')
   }
 
   return (

@@ -20,7 +20,7 @@ export default function HomeView(): JSX.Element {
   const d = useStore((s) => s.dashboard)
   const google = useStore((s) => s.google)
   const sidebarOpen = useStore((s) => s.sidebarOpen)
-  const { toggleSidebar, refreshDashboard, setView, newChat, send, openProject, selectChat, addTodo, setSettingsOpen, refreshRecap } = useStore()
+  const { toggleSidebar, refreshDashboard, setView, openMemory, newChat, send, openProject, selectChat, addTodo, setSettingsOpen, refreshRecap } = useStore()
   const recap = useStore((s) => s.recap)
   const recapLoading = useStore((s) => s.recapLoading)
   const settings = useStore((s) => s.settings)
@@ -114,11 +114,11 @@ export default function HomeView(): JSX.Element {
             ) : d?.errors.calendar ? <p className="msg-error">{d.errors.calendar}</p> : events.length === 0 ? <p className="muted">Nothing scheduled.</p> : (
               <ul className="events">
                 {todayEvents.map((e) => (
-                  <li key={e.id}><span className="ev-time">{fmtTime(e.start, e.all_day)}</span><span className="ev-title">{e.summary}</span>{e.link && <a href={e.link} target="_blank" rel="noreferrer" className="icon-btn ghost sm"><ExternalLink size={11} /></a>}</li>
+                  <li key={e.id}><span className="cal-dot" style={e.color ? { background: e.color } : undefined} /><span className="ev-time">{fmtTime(e.start, e.all_day)}</span><span className="ev-title">{e.summary}</span>{e.link && <a href={e.link} target="_blank" rel="noreferrer" className="icon-btn ghost sm"><ExternalLink size={11} /></a>}</li>
                 ))}
                 {laterEvents.length > 0 && <li className="ev-sep">Tomorrow</li>}
                 {laterEvents.map((e) => (
-                  <li key={e.id}><span className="ev-time">{fmtTime(e.start, e.all_day)}</span><span className="ev-title">{e.summary}</span></li>
+                  <li key={e.id}><span className="cal-dot" style={e.color ? { background: e.color } : undefined} /><span className="ev-time">{fmtTime(e.start, e.all_day)}</span><span className="ev-title">{e.summary}</span></li>
                 ))}
               </ul>
             )}
@@ -159,7 +159,7 @@ export default function HomeView(): JSX.Element {
           </section>}
 
           {on('memories') && <section className="widget">
-            <header><Brain size={14} /> Recently learned <button className="link small" onClick={() => setView('memory')}>all</button></header>
+            <header><Brain size={14} /> Recently learned <button className="link small" onClick={() => openMemory('list')}>all</button></header>
             {(d?.recent_memories.length ?? 0) === 0 ? <p className="muted">Nothing yet. Chat with auto-learn on.</p> : (
               <ul className="mem-list">{d!.recent_memories.map((m) => <li key={m.id}>{m.content} <ProjectChip projectId={m.project_id} clickable={false} /></li>)}</ul>
             )}

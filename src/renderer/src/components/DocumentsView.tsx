@@ -14,18 +14,21 @@ export default function DocumentsView({ projectId, embedded = false }: { project
   const libraryScope = useStore((s) => s.libraryScope)
   const sidebarOpen = useStore((s) => s.sidebarOpen)
   const { uploadDocuments, deleteDocument, toggleSidebar, setLibraryScope, loadScope } = useStore()
-  const scope: Scope = embedded ? projectId! : libraryScope
+  // Embedded with a project = ProjectView's knowledge tab; embedded without one = the Knowledge
+  // panel's library section, which follows the library scope and loads it itself.
+  const scope: Scope = embedded && projectId ? projectId : libraryScope
+  const hostOwnsScope = embedded && !projectId
   const fileRef = useRef<HTMLInputElement>(null)
   const [drag, setDrag] = useState(false)
   const [open, setOpen] = useState<Document | null>(null)
 
-  useEffect(() => { void loadScope(scope) }, [scope, loadScope])
+  useEffect(() => { if (!hostOwnsScope) void loadScope(scope) }, [scope, loadScope, hostOwnsScope])
   const targetProject = scope === 'all' || scope === 'personal' ? null : scope
   const view = async (d: Document): Promise<void> => setOpen(await api.documents.get(d.id))
 
   const uploadBtn = (
     <>
-      <input id={embedded ? 'doc-upload-input-project' : 'doc-upload-input'} ref={fileRef} type="file" multiple hidden accept={ACCEPT}
+      <input id={embedded && projectId ? 'doc-upload-input-project' : 'doc-upload-input'} ref={fileRef} type="file" multiple hidden accept={ACCEPT}
         onChange={(e) => { if (e.target.files?.length) void uploadDocuments(e.target.files, targetProject); e.target.value = '' }} />
       <button className="primary-btn" onClick={() => fileRef.current?.click()}><Upload size={14} /> Upload{targetProject ? ' to project' : ''}</button>
     </>

@@ -1,9 +1,9 @@
 import { create } from 'zustand'
-import type { ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Document, GraphData, Memory, Message, ModelInfo, Settings, Project, RunConflict, SessionStatus, ToolInfo, Todo, GoogleStatus, TodayDashboard, Recap } from '@shared/types'
+import type { ChatEvent, ChatRunStarted, Conversation, ConversationSettings, DocMeta, Document, GraphData, Memory, Message, ModelInfo, Settings, Project, RunConflict, SessionStatus, ToolInfo, Todo, GoogleStatus, TodayDashboard, Recap } from '@shared/types'
 import { api, chatStream, setBase, type Scope } from './lib/api'
 import { finishStatus, mergeConversation, pickEvictions, reduceStatus, settleApprovals } from './sessionStatus'
 
-export type View = 'home' | 'chat' | 'todos' | 'calendar' | 'boards' | 'dashboards' | 'memory' | 'documents' | 'project'
+export type View = 'home' | 'chat' | 'todos' | 'calendar' | 'boards' | 'dashboards' | 'editor' | 'knowledge' | 'project'
 /** How the Memory panel lays out its two halves: the memory list and the knowledge graph. */
 export type MemoryMode = 'split' | 'list' | 'graph'
 export type ContextTab = 'last' | 'preview' | 'trace'
@@ -86,6 +86,12 @@ export interface State {
   memories: Memory[]
   graph: GraphData
   documents: Document[]
+  /** Authored docs (the editor's), not the uploaded `documents`. */
+  docs: DocMeta[]
+  /** Doc open in the editor view. */
+  editorDocId: string | null
+  /** The editor's agent chat bar (its view's counterpart to the context drawer). */
+  agentBarOpen: boolean
 
   init: () => Promise<void>
   loadModels: () => Promise<void>
@@ -151,6 +157,10 @@ export interface State {
   deleteTodo: (id: string) => Promise<void>
   uploadDocuments: (files: FileList | File[], projectId: string | null) => Promise<void>
   deleteDocument: (id: string) => Promise<void>
+
+  refreshDocs: (scope?: Scope) => Promise<void>
+  openDoc: (id: string) => void
+  toggleAgentBar: () => void
 }
 
 let toastSeq = 0
@@ -413,6 +423,9 @@ export const useStore = create<State>((set, get) => {
     memories: [],
     graph: { nodes: [], edges: [] },
     documents: [],
+    docs: [],
+    editorDocId: null,
+    agentBarOpen: false,
 
     init: async () => {
       const status = await window.os.backendStatus()
@@ -433,17 +446,20 @@ export const useStore = create<State>((set, get) => {
       void get().refreshDashboard()
       void get().refreshTodos()
       void get().refreshRecap()
+      void get().refreshDocs().catch(() => undefined)
       window.os.onMenu((action) => {
         const s = get()
         if (action === 'new-chat') s.newChat(s.view === 'project' ? s.projectViewId : selectActive(s)?.project_id ?? null)
         else if (action === 'toggle-mode') s.toggleMode()
         else if (action === 'settings') s.setSettingsOpen(true)
         else if (action === 'toggle-sidebar') s.toggleSidebar()
-        else if (action === 'toggle-context') s.toggleContext()
-        else if (action === 'view:graph') s.openMemory('graph')
+        // In the editor the ⌘I panel is the agent bar, not the chat context drawer.
+        else if (action === 'toggle-context') (s.view === 'editor' ? s.toggleAgentBar() : s.toggleContext())
+        // Retired views (old menus, saved canvas nav drags) all land on the Knowledge panel.
+        else if (action === 'view:memory' || action === 'view:documents' || action === 'view:graph') s.setView('knowledge')
         else if (action.startsWith('view:')) s.setView(action.slice(5) as View)
         else if (action === 'upload') {
-          s.setView('documents')
+          s.setView('knowledge')
           setTimeout(() => document.getElementById('doc-upload-input')?.click(), 100)
         }
       })
@@ -472,7 +488,7 @@ export const useStore = create<State>((set, get) => {
       if (view === 'todos') void get().refreshTodos()
     },
     setMemoryMode: (memoryMode) => set({ memoryMode }),
-    openMemory: (memoryMode) => set(memoryMode ? { view: 'memory', memoryMode } : { view: 'memory' }),
+    openMemory: (memoryMode) => set(memoryMode ? { view: 'knowledge', memoryMode } : { view: 'knowledge' }),
     toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
     toggleContext: () => set((s) => ({ contextOpen: !s.contextOpen })),
     setContextTab: (contextTab) => set({ contextTab }),
@@ -760,7 +776,11 @@ export const useStore = create<State>((set, get) => {
     deleteTodo: async (id) => {
       await api.todos.delete(id)
       set((s) => ({ todos: s.todos.filter((x) => x.id !== id), dashboard: s.dashboard && { ...s.dashboard, todos: s.dashboard.todos.filter((x) => x.id !== id) } }))
-    }
+    },
+
+    refreshDocs: async (scope = 'all') => set({ docs: await api.docs.list(scope) }),
+    openDoc: (id) => set({ view: 'editor', editorDocId: id, settingsOpen: false }),
+    toggleAgentBar: () => set((s) => ({ agentBarOpen: !s.agentBarOpen }))
   }
 })
 

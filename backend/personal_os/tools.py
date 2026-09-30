@@ -592,17 +592,17 @@ def _register_google(self: Toolbox) -> None:
     g = self.google
     run = asyncio.to_thread
 
-    async def calendar_events(ctx: dict[str, Any], days: int = 2, start: str | None = None, offset: int = 0) -> Any:
-        rows = await run(g.calendar_events, days, "primary", 30, start)
+    async def calendar_events(ctx: dict[str, Any], days: int = 2, start: str | None = None, offset: int = 0, calendar_id: str = "all") -> Any:
+        rows = await run(g.calendar_events, days, calendar_id, 30, start)
         return page(rows, offset=offset, limit=30, key="events")
-    R("calendar_events", ToolSpec("calendar_events", "List upcoming Google Calendar events (default: next 2 days). `start` is an ISO datetime to look from.",
-        _obj({"days": {"type": "integer", "default": 2}, "start": {"type": "string"}, "offset": {"type": "integer", "default": 0}}, []), calendar_events, "google",
-        examples=[{}, {"days": 7}, {"days": 1, "start": "2026-10-02T09:00"}]))
+    R("calendar_events", ToolSpec("calendar_events", "List upcoming Google Calendar events across all the user's calendars (default: next 2 days). Each event carries its calendar name and color. `start` is an ISO datetime to look from; `calendar_id` restricts to one calendar.",
+        _obj({"days": {"type": "integer", "default": 2}, "start": {"type": "string"}, "offset": {"type": "integer", "default": 0}, "calendar_id": {"type": "string", "default": "all"}}, []), calendar_events, "google",
+        examples=[{}, {"days": 7}, {"days": 1, "start": "2026-10-02T09:00"}, {"calendar_id": "primary"}]))
 
-    async def calendar_create(ctx: dict[str, Any], summary: str, start: str, end: str | None = None, description: str = "", location: str = "", attendees: list[str] | None = None) -> Any:
-        return await run(g.calendar_create, summary, start, end, description, location, attendees)
+    async def calendar_create(ctx: dict[str, Any], summary: str, start: str, end: str | None = None, description: str = "", location: str = "", attendees: list[str] | None = None, calendar_id: str = "primary") -> Any:
+        return await run(g.calendar_create, summary, start, end, description, location, attendees, calendar_id)
     R("calendar_create", ToolSpec("calendar_create", "Create a Google Calendar event. Use ISO datetimes (YYYY-MM-DDTHH:MM) in the user's local time, or YYYY-MM-DD for all-day.",
-        _obj({"summary": {"type": "string"}, "start": {"type": "string"}, "end": {"type": "string"}, "description": {"type": "string"}, "location": {"type": "string"}, "attendees": {"type": "array", "items": {"type": "string"}}}, ["summary", "start"]), calendar_create, "google", "external",
+        _obj({"summary": {"type": "string"}, "start": {"type": "string"}, "end": {"type": "string"}, "description": {"type": "string"}, "location": {"type": "string"}, "attendees": {"type": "array", "items": {"type": "string"}}, "calendar_id": {"type": "string", "default": "primary"}}, ["summary", "start"]), calendar_create, "google", "external",
         examples=[{"summary": "Dentist", "start": "2026-10-07T15:00", "end": "2026-10-07T16:00"},
                   {"summary": "Sprint review", "start": "2026-10-08T10:00", "attendees": ["mira@example.com"], "location": "Room 2"},
                   {"summary": "Holiday", "start": "2026-12-24"}]))

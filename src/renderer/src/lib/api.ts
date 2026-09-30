@@ -1,5 +1,5 @@
 import type {
-  ChatEvent, ToolInfo, Todo, GoogleStatus, TodayDashboard, CalendarEvent, GmailMessage, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Recap, Conversation, ConversationSettings, ContextUsed, Document, GraphData, GraphEdge, GraphNode, Message,
+  ChatEvent, ToolInfo, Todo, GoogleStatus, GoogleCalendar, TodayDashboard, CalendarEvent, GmailMessage, Board, BoardCard, BoardColumn, DataSource, Dashboard, Doc, DocMeta, DocVersion, Widget, Recap, Conversation, ConversationSettings, ContextUsed, Document, GraphData, GraphEdge, GraphNode, Message,
   Memory, ModelInfo, ModelPrice, Settings, Project, UsageReport, ChatRunStarted, RunInfo,
   Canvas, CanvasWindow, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState
 } from '@shared/types'
@@ -113,8 +113,9 @@ export const api = {
     status: () => req<GoogleStatus>('/integrations/google/status'),
     start: () => req<{ url: string }>('/integrations/google/auth/start', { method: 'POST' }),
     disconnect: () => req<GoogleStatus>('/integrations/google/disconnect', { method: 'POST' }),
-    calendar: (days = 2) => req<CalendarEvent[]>(`/integrations/google/calendar?days=${days}`),
-    calendarRange: (startIso: string, days = 7) => req<CalendarEvent[]>(`/integrations/google/calendar?days=${days}&start=${encodeURIComponent(startIso)}`),
+    calendars: () => req<GoogleCalendar[]>('/integrations/google/calendars'),
+    calendar: (days = 2, calendarId?: string) => req<CalendarEvent[]>(`/integrations/google/calendar?days=${days}${calendarId ? `&calendar_id=${encodeURIComponent(calendarId)}` : ''}`),
+    calendarRange: (startIso: string, days = 7, calendarId?: string, maxResults?: number) => req<CalendarEvent[]>(`/integrations/google/calendar?days=${days}&start=${encodeURIComponent(startIso)}${calendarId ? `&calendar_id=${encodeURIComponent(calendarId)}` : ''}${maxResults ? `&max_results=${maxResults}` : ''}`),
     createEvent: (e: { summary: string; start: string; end?: string; description?: string; location?: string }) => req(`/integrations/google/calendar`, { method: 'POST', body: json(e) }),
     gmail: (q = 'is:unread newer_than:3d') => req<GmailMessage[]>(`/integrations/google/gmail?q=${encodeURIComponent(q)}`)
   },
@@ -197,6 +198,20 @@ export const api = {
       req<CanvasWindow>(`/windows/${id}`, { method: 'PUT', body: json(patch) }),
     raise: (id: string) => req<CanvasWindow>(`/windows/${id}/raise`, { method: 'POST' }),
     delete: (id: string) => req(`/windows/${id}`, { method: 'DELETE' })
+  },
+  /** Authored documents (the editor's `/docs`). Not `api.documents`, which is an uploaded RAG source. */
+  docs: {
+    list: (s: Scope = 'all', q = '') => req<DocMeta[]>(`/docs?project_id=${encodeURIComponent(s)}&q=${encodeURIComponent(q)}`),
+    get: (id: string) => req<Doc>(`/docs/${id}`),
+    create: (d: { title?: string; body?: string; format?: DocMeta['format']; project_id?: string | null }) => req<Doc>('/docs', { method: 'POST', body: json(d) }),
+    update: (id: string, patch: { title?: string; body?: string; format?: DocMeta['format']; project_id?: string | null; source?: string }) => req<Doc>(`/docs/${id}`, { method: 'PUT', body: json(patch) }),
+    delete: (id: string) => req(`/docs/${id}`, { method: 'DELETE' }),
+    versions: (id: string) => req<DocVersion[]>(`/docs/${id}/versions`),
+    version: (id: string, n: number) => req<DocVersion & { body: string }>(`/docs/${id}/versions/${n}`),
+    restore: (id: string, n: number) => req<Doc>(`/docs/${id}/restore`, { method: 'POST', body: json({ version: n }) }),
+    diff: (id: string, frm: number, to: number) => req<{ frm: number; to: number; diff: string }>(`/docs/${id}/diff?frm=${frm}&to=${to}`),
+    /** Push the current body to Google Drive; returns the doc with its drive_* fields updated. */
+    backup: (id: string) => req<DocMeta>(`/docs/${id}/backup`, { method: 'POST' })
   },
   notes: {
     list: (s: Scope = 'all', q = '') => req<Note[]>(`/notes?project_id=${encodeURIComponent(s)}&q=${encodeURIComponent(q)}`),

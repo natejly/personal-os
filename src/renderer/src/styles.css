@@ -749,6 +749,11 @@ textarea.instructions:focus { border-color: var(--accent); }
 .setup { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }
 .setup summary { cursor: pointer; font-size: 13px; color: var(--text-muted); margin-bottom: 8px; }
 .setup ol { padding-left: 18px; line-height: 1.6; margin: 0 0 8px; }
+.setup-steps li { margin-bottom: 6px; }
+.link-btn { background: none; border: none; padding: 0 0 0 6px; color: var(--accent); font: inherit; font-size: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px; vertical-align: baseline; }
+.link-btn:hover { text-decoration: underline; }
+.setup-drop { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px; margin: 4px 0 10px; border: 1px dashed var(--border); border-radius: 8px; }
+
 
 /* ---------- Charts & diagrams (rendered from ```chart / ```mermaid blocks) ---------- */
 :root {

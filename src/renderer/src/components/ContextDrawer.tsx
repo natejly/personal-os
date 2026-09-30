@@ -71,7 +71,7 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
   const [query, setQuery] = useState('')
   const [preview, setPreview] = useState<ContextUsed | null>(null)
 
-  const cs: ConversationSettings = convo?.settings ?? { useMemory: true, useGraph: true, useDocuments: true, autoLearn: true, useTools: true, tools: {} }
+  const cs: ConversationSettings = convo?.settings ?? { effort: 'default', useMemory: true, useGraph: true, useDocuments: true, autoLearn: true, useTools: true, tools: {} }
   const [toolsOpen, setToolsOpen] = useState(false)
   const allTools = useStore((s) => s.tools)
   const norm = (v: unknown, fb: 'on' | 'ask' | 'off'): 'on' | 'ask' | 'off' => (v === true ? 'on' : v === false ? 'off' : v === 'on' || v === 'ask' || v === 'off' ? v : fb)

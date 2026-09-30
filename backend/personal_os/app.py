@@ -341,7 +341,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event) -> Async
             lspan = tracer.start("llm", model, {"round": _round + 1, "messages": len(messages), "tools": len(tool_schemas)})
             yield "span", {"message_id": am["id"], "span": lspan}
             first_token: int | None = None
-            async for ev in llm.stream_chat(cfg, model, messages, tool_schemas or None):
+            async for ev in llm.stream_chat(cfg, model, messages, tool_schemas or None, effort=str(conv["settings"].get("effort") or "default")):
                 if stop.is_set():
                     break
                 if ev["type"] == "delta":
@@ -1316,7 +1316,7 @@ async def recap(force: bool = False) -> dict[str, Any]:
 # ---------------- canvas mode: spaces, windows, notes ----------------
 canvases = Canvases(db)
 notes = Notes(db)
-canvases.reset_popped()
+# 'popped' rows are NOT reset here: import runs before the main process can restore them (it clears the ones it declines).
 
 
 class CanvasIn(BaseModel):

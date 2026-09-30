@@ -83,7 +83,11 @@ export interface Message {
   created_at: number
 }
 
+export type Effort = 'default' | 'low' | 'medium' | 'high'
+
 export interface ConversationSettings {
+  /** Reasoning effort passed through as `reasoning_effort`; 'default' sends nothing. */
+  effort: Effort
   useMemory: boolean
   useGraph: boolean
   useDocuments: boolean

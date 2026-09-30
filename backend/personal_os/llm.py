@@ -84,7 +84,7 @@ async def list_models(settings: dict[str, Any]) -> list[dict[str, str]]:
 
 
 async def stream_chat(
-    settings: dict[str, Any], model: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None, kind: str = "chat"
+    settings: dict[str, Any], model: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None, kind: str = "chat", effort: str = "default"
 ) -> AsyncIterator[dict[str, Any]]:
     """Stream a chat completion.
 
@@ -92,6 +92,9 @@ async def stream_chat(
     {"type": "end", "finish_reason": str|None, "tool_calls": [{"id","name","arguments"}], "usage": {...}|None}.
     """
     body: dict[str, Any] = {"model": model, "messages": messages, "stream": True, "stream_options": {"include_usage": True}}
+    # Only sent when asked for: a model that does not support it rejects the whole request.
+    if effort and effort != "default":
+        body["reasoning_effort"] = effort
     if tools:
         body["tools"] = tools
         body["tool_choice"] = "auto"

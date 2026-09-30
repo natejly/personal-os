@@ -231,3 +231,71 @@
   max-height: 140px;
   overflow: auto;
 }
+
+/* ---------- chat widget ---------- */
+/* The canvas window has no title bar, so the chat names itself. Everything here is tuned for a panel
+   ~360-520px wide: the page-sized 24px gutters and the 808px centring read as dead space at that size. */
+.chat-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  height: 30px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border);
+}
+.chat-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+  cursor: text;
+}
+.chat-title-input {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  padding: 0 6px;
+  font: 600 12px var(--font);
+  color: var(--text);
+  background: var(--bg-input);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  outline: 0;
+}
+.chat-rename { opacity: 0; transition: opacity var(--dur-hover) ease; }
+.chat-head:hover .chat-rename { opacity: 1; }
+
+/* Model and effort sit under the text box, quiet until you go looking for them. */
+.composer-footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 2px 0;
+  min-width: 0;
+}
+.chat-control {
+  max-width: 48%;
+  height: 22px;
+  padding: 0 4px;
+  font: 11px var(--font);
+  color: var(--text-faint);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  outline: 0;
+  cursor: pointer;
+  text-overflow: ellipsis;
+  transition: color var(--dur-hover) ease, background var(--dur-hover) ease, border-color var(--dur-hover) ease;
+}
+.chat-control:hover { color: var(--text); background: var(--hover); border-color: var(--border); }
+
+/* A widget is not a page: drop the 808px centring and the page gutters that leave a chat panel mostly
+   margin, and lose the disclaimer line that costs a whole row of vertical space. */
+.widget .composer-wrap.compact { padding: 8px 10px 10px; max-width: none; }
+.widget .composer-wrap.compact .composer { border-radius: 12px; padding: 7px 7px 7px 11px; }
+.widget .messages-inner { max-width: none; padding: 12px 12px 8px; }

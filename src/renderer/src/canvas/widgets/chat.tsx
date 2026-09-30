@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react'
-import { MessageSquare, RefreshCw } from 'lucide-react'
-import type { DragKind, DragPayload } from '@shared/types'
+import { Check, MessageSquare, Pencil, RefreshCw } from 'lucide-react'
+import type { DragKind, DragPayload, Effort } from '@shared/types'
 import MessageView from '../../components/Message'
 import Composer from '../../components/Composer'
-import { useConversation, useIsStreaming, useStore, useStreamingMessageId } from '../../store'
+import { retainSession, useConversation, useIsStreaming, useStore, useStreamingMessageId } from '../../store'
 import { useDropTarget } from '../dnd'
 import type { WidgetDef, WidgetProps } from '../registry'
 import { useRingStatus } from '../useRingStatus'
@@ -29,16 +29,55 @@ const appendDraft = (root: HTMLElement | null, text: string): boolean => {
 const names = (files: FileList): string => [...files].map((f) => f.name).join(', ')
 
 /** Contract §6 keeps this one survivor of the chat header: without it a window cannot be re-modelled. */
-const ModelPicker = ({ convId }: { convId: string }): JSX.Element => {
+const EFFORTS: Effort[] = ['default', 'low', 'medium', 'high']
+
+/** Model and reasoning effort, sitting under the text box rather than above the transcript. */
+const ChatControls = ({ convId }: { convId: string }): JSX.Element => {
   const models = useStore((s) => s.models)
   const model = useStore((s) => s.sessions[convId]?.conversation.model ?? s.settings.defaultModel)
+  const effort = useStore((s) => s.sessions[convId]?.conversation.settings.effort ?? 'default')
   const setChatModel = useStore((s) => s.setChatModel)
+  const setChatSettings = useStore((s) => s.setChatSettings)
   const options = models.some((m) => m.id === model) ? models : [{ id: model }, ...models]
   return (
-    <select className="widget-input" style={{ width: 'auto', maxWidth: 220 }} value={model} title="Model"
-      onChange={(e) => void setChatModel(e.target.value, convId)}>
-      {options.map((m) => <option key={m.id} value={m.id}>{m.id}</option>)}
-    </select>
+    <>
+      <select className="chat-control" value={model} title="Model"
+        onChange={(e) => void setChatModel(e.target.value, convId)}>
+        {options.map((m) => <option key={m.id} value={m.id}>{m.id}</option>)}
+      </select>
+      <select className="chat-control" value={effort} title="Reasoning effort"
+        onChange={(e) => void setChatSettings({ effort: e.target.value as Effort }, convId)}>
+        {EFFORTS.map((x) => <option key={x} value={x}>{x === 'default' ? 'effort: default' : `effort: ${x}`}</option>)}
+      </select>
+    </>
+  )
+}
+
+/** The window has no title bar, so the chat names itself. Double-click or the pencil renames it. */
+const ChatTitle = ({ convId, title }: { convId: string; title: string }): JSX.Element => {
+  const renameChat = useStore((s) => s.renameChat)
+  const [editing, setEditing] = useState<string | null>(null)
+  const commit = (): void => {
+    const next = (editing ?? '').trim()
+    setEditing(null)
+    if (next && next !== title) void renameChat(convId, next)
+  }
+  if (editing !== null) {
+    return (
+      <div className="chat-head">
+        <input autoFocus className="chat-title-input" value={editing}
+          onChange={(e) => setEditing(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEditing(null) }} />
+        <button className="icon-btn ghost xs" title="Save" onMouseDown={(e) => e.preventDefault()} onClick={commit}><Check size={12} /></button>
+      </div>
+    )
+  }
+  return (
+    <div className="chat-head">
+      <span className="chat-title" title={title} onDoubleClick={() => setEditing(title)}>{title || 'Untitled chat'}</span>
+      <button className="icon-btn ghost xs chat-rename" title="Rename chat" onClick={() => setEditing(title)}><Pencil size={11} /></button>
+    </div>
   )
 }
 
@@ -50,20 +89,27 @@ function ChatWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
   const [stick, setStick] = useState(true)
   const [gone, setGone] = useState(false)
   const convo = useConversation(convId)
+  const loaded = useStore((s) => !!s.sessions[convId])
   const streaming = useIsStreaming(convId)
   const streamingId = useStreamingMessageId(convId)
   const { status } = useRingStatus(convId)
   const regenerate = useStore((s) => s.regenerate)
 
+  // An on-screen window is not an LRU victim for as long as it is mounted.
+  useEffect(() => (convId ? retainSession(convId) : undefined), [convId])
+
   // `attachSession`, not `openSession`: a window opened over a reply already in flight adopts that run
-  // from its own seq, so it paints amber at once instead of waiting for the next one.
+  // from its own seq, so it paints amber at once instead of waiting for the next one. Keyed on
+  // `loaded` as well as the ref, so a session that disappears anyway — closed from another surface,
+  // its project deleted — is refetched instead of leaving the window on the empty state forever.
   useEffect(() => {
     if (!convId) return
-    let alive = true
     setGone(false)
+    if (loaded) return
+    let alive = true
     void useStore.getState().attachSession(convId).catch(() => { if (alive) setGone(true) })
     return () => { alive = false }
-  }, [convId])
+  }, [convId, loaded])
 
   // The window keeps the conversation's name for as long as nobody renamed the window by hand.
   useEffect(() => {
@@ -131,10 +177,7 @@ function ChatWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
   }
   return (
     <div ref={root} className={drop.over ? 'widget drop-over' : 'widget'} {...drop.handlers}>
-      {/* §6: this bar holds ModelPicker and nothing else — the status ring is the title bar's. */}
-      <div className="widget-bar">
-        <ModelPicker convId={convId} />
-      </div>
+      <ChatTitle convId={convId} title={convo?.title ?? ''} />
       <div className="messages" ref={scroll} onScroll={onScroll}>
         <div className="messages-inner">
           {msgs.map((m) => <MessageView key={m.id} message={m} streaming={streaming && streamingId === m.id} />)}
@@ -146,7 +189,7 @@ function ChatWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
           {!msgs.length && <p className="widget-sub">Nothing here yet. Say something.</p>}
         </div>
       </div>
-      <Composer conversationId={convId} />
+      <Composer conversationId={convId} compact footer={<ChatControls convId={convId} />} />
     </div>
   )
 }

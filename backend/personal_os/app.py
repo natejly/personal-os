@@ -1970,6 +1970,7 @@ class WindowPatch(BaseModel):
     config: dict[str, Any] | None = None
     state: str | None = None
     pinned: bool | None = None
+    opacity: Finite | None = None   # window alpha while popped; the store clamps it to [0.2, 1.0]
     x: Finite | None = None
     y: Finite | None = None
     w: Finite | None = None

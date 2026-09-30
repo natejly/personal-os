@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { Canvas, CanvasWindow, SnapMode, WidgetKind, WindowLayout, WindowState } from '@shared/types'
 import { api, getBase, getToken } from '../lib/api'
 import { useStore } from '../store'
+import { clampOpacity, nextOpacity } from './opacity'
 import { tidyLayout, visibleRect, zoneRect, type Point, type Size, type Viewport } from './snapping'
 
 /**
@@ -72,6 +73,8 @@ export interface CanvasState {
   /** Merges server-side; safe to call with one key. */
   setWindowConfig: (windowId: string, patch: Record<string, unknown>) => Promise<void>
   setWindowPinned: (windowId: string, pinned: boolean) => Promise<void>
+  /** Clamped to [0.2, 1]. Only a popped-out window shows it; a canvas window just remembers the level. */
+  setWindowOpacity: (windowId: string, opacity: number) => Promise<void>
   moveWindowToCanvas: (windowId: string, canvasId: string) => Promise<void>
   /** Mark dirty; the 400 ms debounce flushes through PUT /canvases/{id}/layout. Call on pointerup, never mid-drag. */
   markLayoutDirty: (windowIds: string[]) => void
@@ -83,6 +86,9 @@ export interface CanvasState {
   returnToCanvas: (windowId: string) => Promise<void>
   popOutFocused: () => Promise<void>
   togglePinFocused: () => Promise<void>
+  /** `step` walks OPACITY_LEVELS: +1 is more transparent, -1 less. */
+  stepOpacityFocused: (step: 1 | -1) => Promise<void>
+  setOpacityFocused: (opacity: number) => Promise<void>
   closeFocused: () => Promise<void>
   minimizeFocused: () => Promise<void>
 }
@@ -344,6 +350,12 @@ export const useCanvas = create<CanvasState>((set, get) => {
     else if (action === 'canvas:unpopout') {
       if (s.focusedWindowId) void s.returnToCanvas(s.focusedWindowId)
     } else if (action === 'canvas:pin') void s.togglePinFocused()
+    else if (action === 'canvas:opacity:down') void s.stepOpacityFocused(1)
+    else if (action === 'canvas:opacity:up') void s.stepOpacityFocused(-1)
+    else if (action.startsWith('canvas:opacity:')) {
+      const pct = Number(action.slice('canvas:opacity:'.length))
+      if (Number.isFinite(pct)) void s.setOpacityFocused(pct / 100)
+    }
   }
 
   /** Optimistic hints from other renderers. The backend stays authoritative; a hint never creates state. */
@@ -639,6 +651,13 @@ export const useCanvas = create<CanvasState>((set, get) => {
       void window.os.popout.setPinned(windowId, pinned)
       await api.windows.update(windowId, { pinned }).catch(fail)
     },
+    setWindowOpacity: async (windowId, opacity) => {
+      const o = clampOpacity(opacity)
+      get().patchWindow(windowId, { opacity: o })
+      // No-op unless the window is popped out; main answers false and the level is still stored.
+      void window.os.popout.setOpacity(windowId, o)
+      await api.windows.update(windowId, { opacity: o }).catch(fail)
+    },
     moveWindowToCanvas: async (windowId, canvasId) => {
       const w = findWin(get(), windowId)
       if (!w || w.canvas_id === canvasId) return
@@ -704,7 +723,8 @@ export const useCanvas = create<CanvasState>((set, get) => {
       const ok = await window.os.popout.open(windowId, {
         bounds: w.popout_bounds ?? { width: Math.round(w.w), height: Math.round(w.h) },
         title: w.title || undefined,
-        pinned: !!w.pinned
+        pinned: !!w.pinned,
+        opacity: w.opacity
       })
       if (!ok) {
         s.patchWindow(windowId, { state: w.state })
@@ -729,6 +749,16 @@ export const useCanvas = create<CanvasState>((set, get) => {
       const s = get()
       const w = s.focusedWindowId ? findWin(s, s.focusedWindowId) : undefined
       if (w) await s.setWindowPinned(w.id, !w.pinned)
+    },
+    stepOpacityFocused: async (step) => {
+      const s = get()
+      const w = s.focusedWindowId ? findWin(s, s.focusedWindowId) : undefined
+      if (w) await s.setWindowOpacity(w.id, nextOpacity(w.opacity, step))
+    },
+    setOpacityFocused: async (opacity) => {
+      const s = get()
+      const w = s.focusedWindowId ? findWin(s, s.focusedWindowId) : undefined
+      if (w) await s.setWindowOpacity(w.id, opacity)
     },
     closeFocused: async () => {
       const id = get().focusedWindowId

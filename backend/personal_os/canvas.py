@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS canvas_windows (
   restore_bounds TEXT,                      -- Rect, for un-maximizing
   popout_bounds TEXT,                       -- PopoutBounds {x,y,width,height,display}
   pinned INTEGER NOT NULL DEFAULT 0,        -- always-on-top while popped
+  opacity REAL NOT NULL DEFAULT 1.0,        -- window alpha while popped; 1.0 = opaque
   config TEXT NOT NULL DEFAULT '{}',        -- per-widget options
   created_at REAL NOT NULL,
   updated_at REAL NOT NULL
@@ -57,9 +58,28 @@ CREATE INDEX IF NOT EXISTS idx_cw_canvas ON canvas_windows(canvas_id, z);
 """
 
 _INSERT_WINDOW = (
-    "INSERT INTO canvas_windows(id,canvas_id,kind,ref_id,project_id,title,x,y,w,h,z,state,restore_bounds,popout_bounds,pinned,config,created_at,updated_at)"
-    " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+    "INSERT INTO canvas_windows(id,canvas_id,kind,ref_id,project_id,title,x,y,w,h,z,state,restore_bounds,popout_bounds,pinned,opacity,config,created_at,updated_at)"
+    " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
 )
+
+
+# Columns added after the tables shipped; CREATE TABLE IF NOT EXISTS will not add them.
+_ADDED_COLUMNS = {
+    "canvas_windows": {"opacity": "REAL NOT NULL DEFAULT 1.0"},
+}
+
+MIN_OPACITY = 0.2
+
+
+def clamp_opacity(value: Any) -> float:
+    """A pop-out below MIN_OPACITY is invisible and unclickable, so the floor is not negotiable."""
+    try:
+        o = float(value)
+    except (TypeError, ValueError):
+        return 1.0
+    if o != o:  # NaN
+        return 1.0
+    return round(min(1.0, max(MIN_OPACITY, o)), 3)
 
 
 class Canvases:
@@ -67,6 +87,11 @@ class Canvases:
         self.db = db
         with db.tx() as c:
             c.executescript(SCHEMA)
+            for table, cols in _ADDED_COLUMNS.items():
+                have = {r["name"] for r in c.execute(f"PRAGMA table_info({table})")}
+                for col, ddl in cols.items():
+                    if col not in have:
+                        c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
 
     @staticmethod
     def _seed(c: sqlite3.Connection) -> None:
@@ -117,7 +142,7 @@ class Canvases:
                     new_id(), cid, w["kind"], w["ref_id"], w["project_id"], w["title"],
                     w["x"], w["y"], w["w"], w["h"], w["z"], "normal",
                     json.dumps(w["restore_bounds"]) if w["restore_bounds"] else None, None,
-                    w["pinned"], json.dumps(w["config"]), t, t,
+                    w["pinned"], w["opacity"], json.dumps(w["config"]), t, t,
                 ))
         return self.get(cid)
 
@@ -170,19 +195,21 @@ class Canvases:
                 return None
             z = c.execute("SELECT COALESCE(MAX(z),-1)+1 FROM canvas_windows WHERE canvas_id=?", (canvas_id,)).fetchone()[0]
             c.execute(_INSERT_WINDOW, (wid, canvas_id, kind, ref_id, project_id, title, x, y, w, h, z, "normal",
-                                      None, None, 0, json.dumps(config or {}), t, t))
+                                      None, None, 0, 1.0, json.dumps(config or {}), t, t))
             c.execute("UPDATE canvases SET updated_at=? WHERE id=?", (t, canvas_id))
         return self.window(wid)
 
     def update_window(self, id: str, patch: dict[str, Any]) -> dict[str, Any] | None:
         """`config` merges into the stored object; a `canvas_id` move re-bases z on top of the destination."""
-        fields = {k: v for k, v in patch.items() if k in {"title", "ref_id", "state", "pinned", "x", "y", "w", "h", "z", "canvas_id", "restore_bounds", "popout_bounds"}}
+        fields = {k: v for k, v in patch.items() if k in {"title", "ref_id", "state", "pinned", "opacity", "x", "y", "w", "h", "z", "canvas_id", "restore_bounds", "popout_bounds"}}
         with self.db.tx() as c:
             row = c.execute("SELECT canvas_id, config FROM canvas_windows WHERE id=?", (id,)).fetchone()
             if not row:
                 return None
             if "pinned" in fields:
                 fields["pinned"] = int(bool(fields["pinned"]))
+            if "opacity" in fields:
+                fields["opacity"] = clamp_opacity(fields["opacity"])
             for k in ("restore_bounds", "popout_bounds"):
                 if k in fields:
                     fields[k] = json.dumps(fields[k]) if fields[k] is not None else None

@@ -671,6 +671,10 @@
   box-shadow: 0 0 18px -9px var(--win-signal);
 }
 
+/* A faded window loses its shadow to the alpha, so its own hairline keeps the edges findable.
+   A status ring still owns the border when there is one. */
+.popout.translucent:not(:has(.ring)) .popout-body { border-color: var(--border); }
+
 /* Nothing but the status marker is visible until the pointer is over the window. */
 .popout-actions {
   position: absolute;
@@ -691,7 +695,44 @@
   transition: opacity var(--dur-hover) ease;
 }
 .popout:hover .popout-actions .icon-btn,
+.popout.tuning .popout-actions .icon-btn,
 .popout-actions .icon-btn:focus-visible { opacity: 1; }
+.popout-actions .icon-btn.on { color: var(--accent); }
+
+/* The transparency slider, hung under its button. No-drag, or aiming the thumb would move the window. */
+.popout-opacity {
+  position: absolute;
+  top: calc(var(--popout-frame) + 29px);
+  right: calc(var(--popout-frame) + 3px);
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--material-thick);
+  backdrop-filter: var(--material-blur);
+  box-shadow: var(--shadow-float);
+  -webkit-app-region: no-drag;
+}
+.popout-opacity input[type='range'] {
+  width: 96px;
+  accent-color: var(--accent);
+}
+.popout-opacity-reset {
+  min-width: 34px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  cursor: pointer;
+}
+.popout-opacity-reset:disabled { cursor: default; }
+.popout-opacity-reset:not(:disabled):hover { color: var(--text); }
 .popout-error {
   display: grid;
   place-content: center;

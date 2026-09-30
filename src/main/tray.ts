@@ -6,7 +6,7 @@
  * — that macOS tints for light, dark and highlighted bars.
  */
 import { app, Menu, nativeImage, Tray } from 'electron'
-import { gather, gatherState, listPopouts, popoutsInFront, scatter, syncPopoutPinned, toggleFront } from './popouts'
+import { gather, gatherState, listPopouts, OPACITY_LEVELS, popoutsInFront, scatter, syncPopoutOpacity, syncPopoutPinned, toggleFront } from './popouts'
 import { gatherShortcut } from './shortcuts'
 
 const ICON_1X =
@@ -38,6 +38,19 @@ const menu = (open: () => void): Menu => {
       checked: popoutsInFront(),
       accelerator: 'Alt+Command+F',
       click: (item) => { item.checked = toggleFront() }
+    },
+    {
+      label: 'Transparency',
+      enabled: popped.length > 0,
+      submenu: OPACITY_LEVELS.map((o) => ({
+        label: o === 1 ? 'Opaque' : `${Math.round(o * 100)}%`,
+        type: 'checkbox' as const,
+        // Only when every pop-out already sits on this step, so the marks describe a mixed set honestly.
+        checked: popped.length > 0 && popped.every((p) => Math.abs(p.opacity - o) < 0.001),
+        click: () => {
+          for (const p of popped) syncPopoutOpacity(p.windowId, o)
+        }
+      }))
     },
     {
       label: 'Pin all on top',

@@ -175,6 +175,8 @@ export interface CanvasWindow {
   popout_bounds: PopoutBounds | null
   /** 0 | 1 — SQLite has no boolean. Always-on-top while popped. */
   pinned: number
+  /** Window alpha while popped out, 0.2..1. 1 is opaque; the canvas ignores it. */
+  opacity: number
   config: Record<string, unknown>
   created_at: number; updated_at: number
 }
@@ -226,9 +228,9 @@ export interface RunInfo {
 export interface RunConflict { message: string; run_id: string; seq: number }
 
 /** One detached widget window as the main process sees it. */
-export interface PopoutInfo { windowId: string; bounds: PopoutBounds; pinned: boolean }
+export interface PopoutInfo { windowId: string; bounds: PopoutBounds; pinned: boolean; opacity: number }
 
-export interface PopoutOpenRequest { bounds?: Partial<PopoutBounds>; minWidth?: number; minHeight?: number; title?: string; pinned?: boolean }
+export interface PopoutOpenRequest { bounds?: Partial<PopoutBounds>; minWidth?: number; minHeight?: number; title?: string; pinned?: boolean; opacity?: number }
 
 export interface PopoutChange { windowId: string; event: 'opened' | 'closed'; bounds: PopoutBounds | null }
 
@@ -258,6 +260,7 @@ export interface PersonalOSApi {
     close: (windowId: string) => Promise<boolean>
     focus: (windowId: string) => Promise<boolean>
     setPinned: (windowId: string, pinned: boolean) => Promise<boolean>
+    setOpacity: (windowId: string, opacity: number) => Promise<boolean>
     setMinSize: (windowId: string, minWidth: number, minHeight: number) => Promise<boolean>
     list: () => Promise<PopoutInfo[]>
     gather: () => Promise<GatherState>
@@ -312,7 +315,7 @@ Plus, elsewhere in the same file: `TodayDashboard` (was the second `Dashboard`),
 | `POST /canvases/{id}/windows` | `{ kind: WidgetKind, ref_id?: string \| null, project_id?: string \| null, title?: string = "", x?: number = 0, y?: number = 0, w?: number = 520, h?: number = 640, config?: object = {} }` | `CanvasWindow`. 404 unknown canvas, 400 `kind ∉ WIDGET_KINDS`. `z = COALESCE(MAX(z),-1)+1` within that canvas. |
 | `PUT /canvases/{id}/layout` | `{ windows: WindowLayout[] }` | `{ ok: true, updated: number }` |
 | `GET /windows/{wid}` | — | `CanvasWindow` \| 404 |
-| `PUT /windows/{wid}` | `{ title?, config?, state?, pinned?, x?, y?, w?, h?, z?, canvas_id?, restore_bounds?, popout_bounds?, clear_restore_bounds?, clear_popout_bounds? }` | `CanvasWindow` \| 404. **`config` is MERGED** into the stored object (the `Conversations.update` settings pattern) so `onConfig(patch)` never wipes sibling keys; send `{}` to no-op and use the `clear_*` flags to null the bounds. 400 if `state ∉ WINDOW_STATES`. `canvas_id` moves the window between spaces and re-bases `z` to `MAX(z)+1` in the destination. |
+| `PUT /windows/{wid}` | `{ title?, config?, state?, pinned?, opacity?, x?, y?, w?, h?, z?, canvas_id?, restore_bounds?, popout_bounds?, clear_restore_bounds?, clear_popout_bounds? }` | `CanvasWindow` \| 404. **`config` is MERGED** into the stored object (the `Conversations.update` settings pattern) so `onConfig(patch)` never wipes sibling keys; send `{}` to no-op and use the `clear_*` flags to null the bounds. 400 if `state ∉ WINDOW_STATES`. `canvas_id` moves the window between spaces and re-bases `z` to `MAX(z)+1` in the destination. |
 | `POST /windows/{wid}/raise` | — | `CanvasWindow` \| 404. `z = MAX(z)+1` within the window's canvas, no-op when already topmost. |
 | `DELETE /windows/{wid}` | — | `{ ok: true }` |
 
@@ -384,6 +387,7 @@ All renderer-facing access goes through `window.os`; nobody imports `ipcRenderer
 | `popout:close` | invoke | `(windowId: string)` | `boolean` |
 | `popout:focus` | invoke | `(windowId: string)` | `boolean` |
 | `popout:set-pinned` | invoke | `(windowId: string, pinned: boolean)` | `boolean` |
+| `popout:set-opacity` | invoke | `(windowId: string, opacity: number)` | `boolean` — clamped to `[0.2, 1]`; `false` when that window is not popped out |
 | `popout:set-min-size` | invoke | `(windowId: string, minWidth: number, minHeight: number)` | `boolean` |
 | `popout:list` | invoke | `()` | `PopoutInfo[]` |
 | `popout:gather` | invoke | `()` | `GatherState` |
@@ -465,6 +469,7 @@ export interface CanvasState {
   /** Merges server-side; safe to call with one key. */
   setWindowConfig: (windowId: string, patch: Record<string, unknown>) => Promise<void>
   setWindowPinned: (windowId: string, pinned: boolean) => Promise<void>
+  setWindowOpacity: (windowId: string, opacity: number) => Promise<void>
   moveWindowToCanvas: (windowId: string, canvasId: string) => Promise<void>
   /** Mark dirty; the 400 ms debounce flushes through PUT /canvases/{id}/layout. Call on pointerup, never mid-drag. */
   markLayoutDirty: (windowIds: string[]) => void
@@ -720,7 +725,7 @@ Classes:
 - dock — `.dock` `.dock-tile` `.dock-tile.focused`
 - spaces — `.spaces-bar` `.space-tab` `.space-tab.active` `.space-tab.drop-target`
 - overview — `.overview` `.overview-space` `.overview-proxy` `.proxy-card`
-- pop-out — `.popout` `.popout.focused` `.popout-bar` `.popout-title` `.popout-actions` `.popout-body`
+- pop-out — `.popout` `.popout.focused` `.popout.tuning` `.popout.translucent` `.popout-bar` `.popout-title` `.popout-actions` `.popout-opacity` `.popout-body`
   `.popout-error`
 
 **Every animation this slice adds gets a prefixed name** — `ring-breathe`, `ring-pulse`, `win-open`,

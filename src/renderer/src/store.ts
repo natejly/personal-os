@@ -217,7 +217,9 @@ const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean): ChatSessio
     withMsgs(msgs.map((m) => (m.id === mid ? fn(m) : m)))
   switch (ev.event) {
     case 'user_message':
-      return withMsgs([...msgs, ev.data])
+      // Merge by id: a steer is persisted and published by its endpoint, so an attach replay plus the
+      // live stream (or a refetch) can both carry it.
+      return msgs.some((m) => m.id === ev.data.id) ? s : withMsgs([...msgs, ev.data])
     case 'assistant_message': {
       // Merge by id: attaching to a run replays this event into a conversation row that may already
       // hold the message, and appending it twice is the duplicate the ring used to paint. An empty
@@ -228,6 +230,8 @@ const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean): ChatSessio
           ? mapMsg(ev.data.id, (m) => ({ ...ev.data, content: ev.data.content || m.content }))
           : withMsgs([...msgs, ev.data])),
         streaming: s.streaming && { ...s.streaming, messageId: ev.data.id },
+        // A steered run opens a new segment after a `done`; the green hold belongs to the real end.
+        finishedAt: null,
         unread: focused || held ? s.unread : s.unread + 1
       }
     }
@@ -357,10 +361,17 @@ export const useStore = create<State>((set, get) => {
         patchSession(convId, (s) => ({ ...s, status: 'error', finishedAt: Date.now() }))
         return false
       }
-      // Another window is already mid-reply, so this message was dropped, not queued. Adopt that run
-      // from its tail so the window paints, and tell the caller to hand the text back to the user.
-      get().toast(conflict.message || 'That chat is already replying — your message was not sent.', 'error')
+      // Another window is already mid-reply. Adopt that run from its tail so the window paints, and
+      // steer the message into it instead of dropping it.
       void watchRun(convId, { run_id: conflict.run_id, seq: conflict.seq }, { messageId: null, approvals: 0, attached: true })
+      if (body.content) {
+        try {
+          await api.steer(convId, body.content)
+          return true
+        } catch {
+          get().toast('That chat is already replying — your message was not sent.', 'error')
+        }
+      }
       return false
     }
     // Synchronous up to its first await, so `streaming` is set before this returns.
@@ -588,11 +599,15 @@ export const useStore = create<State>((set, get) => {
       if (!text.trim()) return false
       const id = conversationId ?? get().focusedConversationId
       if (id) {
-        // Mid-reply sends are refused, not queued: by the time the run ends the answer may have made
-        // the message moot, so the user keeps their text and decides. See Composer.
+        // Mid-reply sends steer the live run: the message lands in the conversation now and the
+        // model folds it in at its next round boundary.
         if (get().sessions[id]?.streaming) {
-          get().toast('That chat is still replying — your message was not sent.', 'error')
-          return false
+          try {
+            await api.steer(id, text)
+            return true
+          } catch {
+            // The run ended in the gap; fall through to a normal send.
+          }
         }
         if (!get().sessions[id]) await get().openSession(id)
         return runStream(id, { content: text })

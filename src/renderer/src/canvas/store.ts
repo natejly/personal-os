@@ -36,6 +36,8 @@ export interface CanvasState {
   setViewport: (canvasId: string, v: { zoom?: number; pan_x?: number; pan_y?: number }) => void
 
   openWindow: (kind: WidgetKind, refId?: string | null, at?: { x: number; y: number }, config?: Record<string, unknown>) => Promise<CanvasWindow | null>
+  /** Focus the chat window holding this conversation — restoring or crossing spaces if needed — or open one. */
+  openChat: (conversationId: string) => Promise<void>
   closeWindow: (windowId: string) => Promise<void>
   /** Local focus + POST /windows/{id}/raise so z stays authoritative across renderers. */
   focusWindow: (windowId: string) => void
@@ -398,13 +400,26 @@ export const useCanvas = create<CanvasState>((set, get) => {
         })
         putWindow(w)
         set({ focusedWindowId: w.id })
-        // Loads the session without focusing it: the canvas owns focus, not the chat router.
-        if (w.kind === 'chat' && w.ref_id) void useStore.getState().openSession(w.ref_id)
+        // Attach rather than load: a chat opened over a reply already in flight adopts that run even
+        // when this resolves before the widget's own effect sees an unloaded session.
+        if (w.kind === 'chat' && w.ref_id) void useStore.getState().attachSession(w.ref_id)
         return w
       } catch (e) {
         fail(e)
         return null
       }
+    },
+    openChat: async (conversationId) => {
+      const s = get()
+      for (const cid of s.order) {
+        const w = s.canvases[cid]?.windows.find((x) => x.kind === 'chat' && x.ref_id === conversationId)
+        if (!w) continue
+        if (cid !== s.activeCanvasId) s.setActiveCanvas(cid)
+        if (w.state === 'minimized') await get().setWindowState(w.id, 'normal')
+        get().focusWindow(w.id)
+        return
+      }
+      await get().openWindow('chat', conversationId)
     },
     closeWindow: async (windowId) => {
       const w = findWin(get(), windowId)

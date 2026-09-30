@@ -19,6 +19,12 @@ export const reduceStatus = (prev: SessionStatus, ev: ChatEvent, pendingApproval
     case 'tool_call':
     case 'tool_result':
       return settleApprovals(prev === 'idle' ? 'working' : prev, pendingApprovals)
+    // A steered run closes one reply segment (`done`) and streams the next; these events mean it is
+    // alive again, so the green verdict yields back to amber.
+    case 'user_message':
+    case 'assistant_message':
+    case 'delta':
+      return prev === 'idle' || prev === 'done' ? 'working' : prev
     // Auto-learn spans and their toasts arrive *after* `done`; reacting would resurrect `working`.
     case 'span':
     case 'learned':

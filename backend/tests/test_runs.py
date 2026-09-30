@@ -258,6 +258,29 @@ def test_stop_ends_the_run() -> None:
     drain(cid)
 
 
+def test_steer_folds_into_the_live_run() -> None:
+    full = script(40, 0.05)
+    cid = new_conv()
+    j("POST", f"/conversations/{cid}/chat", {"content": "hi"})
+    wait_until(lambda: run_info(cid).get("seq", 0) >= 5, "a few deltas to be produced")
+    steered = j("POST", f"/conversations/{cid}/steer", {"content": "also do this"})
+    check(steered["ok"] is True and steered["message"]["role"] == "user", "steer persists and returns a user message")
+    drain(cid)
+    evs = events(read_streams([f"/conversations/{cid}/stream?since=0"])[0])
+    names = [e for e, _ in evs]
+    check(names.count("done") == 2, f"the steer closes one segment and a second one answers, got {names}")
+    check(names.count("assistant_message") == 2, "a fresh assistant message opens after the steer")
+    check(all(d["error"] is None for e, d in evs if e == "done"), "both segments end clean")
+    msgs = j("GET", f"/conversations/{cid}")["messages"]
+    roles = [m["role"] for m in msgs]
+    check(roles == ["user", "assistant", "user", "assistant"], f"transcript holds both turns in order, got {roles}")
+    check(msgs[2]["content"] == "also do this", "the steered message is the second user turn")
+    check(msgs[1]["content"] == full and msgs[3]["content"] == full, "both segments persisted their whole reply")
+    r = client.post(f"/conversations/{cid}/steer", json={"content": "late"})
+    check(r.status_code == 409, f"steering with no live run 409s, got {r.status_code}")
+    j("POST", "/conversations/nope/steer", {"content": "x"}, expect=404)
+
+
 async def _detach_mid_run() -> tuple[str, str, str]:
     """Attach two clients, drop both mid-reply, and let the run finish alone."""
     full = script(30, 0.03)
@@ -333,6 +356,7 @@ def test_an_overflowed_subscriber_reconnects_without_a_gap() -> None:
 
 TESTS = [test_post_starts_a_background_run, test_second_post_conflicts, test_two_clients_see_the_same_events,
          test_late_client_replays_from_the_ring, test_event_names_are_the_chatevent_union, test_stop_ends_the_run,
+         test_steer_folds_into_the_live_run,
          test_run_survives_every_subscriber_leaving, test_an_overflowed_subscriber_reconnects_without_a_gap,
          test_shutdown_cancels_a_live_run_and_keeps_its_text]
 

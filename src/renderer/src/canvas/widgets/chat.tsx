@@ -99,13 +99,14 @@ function ChatWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
   useEffect(() => (convId ? retainSession(convId) : undefined), [convId])
 
   // `attachSession`, not `openSession`: a window opened over a reply already in flight adopts that run
-  // from its own seq, so it paints amber at once instead of waiting for the next one. Keyed on
-  // `loaded` as well as the ref, so a session that disappears anyway — closed from another surface,
-  // its project deleted — is refetched instead of leaving the window on the empty state forever.
+  // from its own seq, so it paints amber at once instead of waiting for the next one. Runs even when
+  // the session is already loaded — attaching is idempotent (shared fetch, run dedupe) and a loaded
+  // session can still be missing a run someone else started. Keyed on `loaded` as well as the ref, so
+  // a session that disappears anyway — closed from another surface, its project deleted — is
+  // refetched instead of leaving the window on the empty state forever.
   useEffect(() => {
     if (!convId) return
     setGone(false)
-    if (loaded) return
     let alive = true
     void useStore.getState().attachSession(convId).catch(() => { if (alive) setGone(true) })
     return () => { alive = false }

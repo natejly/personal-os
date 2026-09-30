@@ -53,6 +53,8 @@ class Run:
         self.seq = 0
         # Cooperative stop, also registered as _active[message_id] so /messages/{mid}/stop still works.
         self.stop = asyncio.Event()
+        # Steered user messages (already persisted) waiting for the run to fold them into its context.
+        self.steers: list[dict[str, Any]] = []
         self.task: asyncio.Task[None] | None = None
         self._ring: deque[RunEvent] = deque(maxlen=RING)
         self._subs: set[_Sub] = set()

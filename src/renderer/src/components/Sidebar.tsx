@@ -4,6 +4,7 @@ import { useStore, type View } from '../store'
 import ChatPulse from './ChatPulse'
 import { viewHidden } from '../modules'
 import { dragProps } from '../canvas/dnd'
+import { useCanvas } from '../canvas/store'
 import type { Conversation, WidgetKind } from '@shared/types'
 
 const DAY = 86_400_000
@@ -52,6 +53,11 @@ export default function Sidebar(): JSX.Element {
   const setView = useStore((s) => s.setView)
   const openProject = useStore((s) => s.openProject)
   const setProjectModal = useStore((s) => s.setProjectModal)
+  // In canvas mode a chat lives in a window, not the router: clicking one focuses or opens its window.
+  const openConversation = (id: string): void => {
+    if (useStore.getState().mode === 'canvas') void useCanvas.getState().openChat(id)
+    else void selectChat(id)
+  }
   const [query, setQuery] = useState('')
   const [projectsOpen, setProjectsOpen] = useState(true)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
@@ -132,7 +138,7 @@ export default function Sidebar(): JSX.Element {
                   <div className="project-chats">
                     {chats.length === 0 && <button className="convo-item sub muted" onClick={() => newChat(p.id)}><MessageSquarePlus size={12} /> New chat in project</button>}
                     {chats.slice(0, 12).map((c) => (
-                      <div key={c.id} className={`convo-item sub ${c.id === focusedId && view === 'chat' ? 'active' : ''}`} onClick={() => void selectChat(c.id)} role="button" tabIndex={0}
+                      <div key={c.id} className={`convo-item sub ${c.id === focusedId && view === 'chat' ? 'active' : ''}`} onClick={() => openConversation(c.id)} role="button" tabIndex={0}
                         {...dragProps({ kind: 'conversation', id: c.id, label: c.title, projectId: p.id })}>
                         <span className="convo-title"><ChatPulse conversationId={c.id} />{c.title}</span>
                         <button className="icon-btn ghost" title="Delete" onClick={(e) => { e.stopPropagation(); void deleteChat(c.id) }}><Trash2 size={13} /></button>
@@ -160,7 +166,7 @@ export default function Sidebar(): JSX.Element {
           <section key={g.label}>
             <h4>{g.label}</h4>
             {g.items.map((c) => (
-              <div key={c.id} className={`convo-item ${c.id === focusedId && view === 'chat' ? 'active' : ''}`} onClick={() => void selectChat(c.id)} role="button" tabIndex={0}
+              <div key={c.id} className={`convo-item ${c.id === focusedId && view === 'chat' ? 'active' : ''}`} onClick={() => openConversation(c.id)} role="button" tabIndex={0}
                 {...dragProps({ kind: 'conversation', id: c.id, label: c.title, projectId: c.project_id })}>
                 <span className="convo-title">
                   <ChatPulse conversationId={c.id} />

@@ -419,7 +419,7 @@ def _title_from(text: str) -> str:
     return (t[:48].rstrip() + "…") if len(t) > 48 else (t or "New chat")
 
 
-async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event) -> AsyncIterator[tuple[str, Any]]:
+async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: list[dict[str, Any]] | None = None) -> AsyncIterator[tuple[str, Any]]:
     """Yield (event, payload) pairs. The run bus formats them and fans them out; see runs.sse."""
     conv = convos.get(conv_id)
     if not conv:
@@ -525,6 +525,28 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event) -> Async
         while True:
             if stop.is_set():
                 break
+            # Steered messages fold in at a round boundary: tool results are already appended, so the
+            # user turn lands after them and the assistant/tool message ordering stays legal. The
+            # current reply segment closes with its own `done`, and a fresh assistant message answers.
+            if steers:
+                steered, steers[:] = list(steers), []
+                # A segment that already streamed or ran tools closes cleanly; an untouched one is reused.
+                if buf or tool_events:
+                    convos.finish_message(am["id"], "".join(buf).strip(), None, used, tool_events, tracer.spans)
+                    _active.pop(am["id"], None)
+                    yield "done", {"id": am["id"], "error": None, "context_used": used, "tool_events": tool_events,
+                                   "trace": tracer.spans, "stopped": False, "partial": partial,
+                                   "tainted": tool_ctx["tainted"], "taint_sources": tool_ctx["taint_sources"]}
+                    am = convos.add_message(conv_id, "assistant", "", model=model)
+                    _active[am["id"]] = stop
+                    buf = []
+                    tool_events = []
+                    tracer = Tracer()
+                    yield "assistant_message", {**am, "context_used": used}
+                for um in steered:
+                    messages.append({"role": "user", "content": um["content"]})
+                    user_text = um["content"]
+                    tool_ctx["allowed_urls"] |= _urls(um["content"])
             _round += 1
             budget.rounds = _round - 1  # rounds already completed: the Nth round's tool calls must still be allowed to run
             round_start = len(buf)
@@ -551,7 +573,15 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event) -> Async
                                "output_chars": len("".join(buf[round_start:])), "tool_calls": [c["name"] for c in calls]},
                        error="Stopped by user" if stop.is_set() else None)
             yield "span", {"message_id": am["id"], "span": lspan}
-            if stop.is_set() or not calls:
+            if stop.is_set():
+                break
+            if not calls:
+                # A steer that arrived while this answer streamed: keep the model's own turn in its
+                # context, then loop back so the top of the loop closes this segment and a new one
+                # replies to it.
+                if steers:
+                    messages.append({"role": "assistant", "content": "".join(buf[round_start:]).strip() or ""})
+                    continue
                 break
             turn = {"role": "assistant", "content": "".join(buf[round_start:]).strip() or None,
                     "tool_calls": [{"id": c["id"], "type": "function", "function": {"name": c["name"], "arguments": c["arguments"] or "{}"}} for c in calls]}
@@ -720,7 +750,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event) -> Async
 
 
 async def _run_chat(run: Run, body: ChatIn) -> None:
-    async for event, data in _chat_stream(run.conversation_id, body, run.stop):
+    async for event, data in _chat_stream(run.conversation_id, body, run.stop, run.steers):
         if event == "assistant_message":
             run.message_id = data.get("id")
         run.publish(event, data)
@@ -737,6 +767,28 @@ async def chat(id: str, body: ChatIn) -> dict[str, Any]:
                                  "run_id": running.run_id, "seq": running.seq})
     run = bus.start(id, lambda r: _run_chat(r, body))
     return {"run_id": run.run_id, "seq": run.seq}
+
+
+class SteerIn(BaseModel):
+    content: str
+
+
+@app.post("/conversations/{id}/steer")
+async def steer_run(id: str, body: SteerIn) -> dict[str, Any]:
+    """Inject a user message into the live run. The message is persisted and published here, so it
+    survives even if the run ends before folding it in; the run answers it in a fresh segment."""
+    if not convos.get(id):
+        raise HTTPException(404, "Conversation not found")
+    text = (body.content or "").strip()
+    if not text:
+        raise HTTPException(400, "Empty message")
+    run = bus.live(id)
+    if not run:
+        raise HTTPException(409, {"message": "No running reply to steer"})
+    um = convos.add_message(id, "user", text)
+    run.publish("user_message", um)
+    run.steers.append(um)
+    return {"ok": True, "run_id": run.run_id, "message": um}
 
 
 @app.get("/conversations/{id}/stream")

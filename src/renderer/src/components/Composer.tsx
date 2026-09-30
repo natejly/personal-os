@@ -33,12 +33,12 @@ export default function Composer({ conversationId, footer, compact = false }: Co
   useEffect(() => { ref.current?.focus() }, [activeId])
 
   /**
-   * The draft is cleared optimistically and handed back if `send` refuses it — another window can
-   * have a reply in flight for this conversation, which the backend answers with a 409 and nothing
-   * persisted. Typed text is never dropped: a draft written since goes after the returned one.
+   * The draft is cleared optimistically and handed back if `send` refuses it. Typed text is never
+   * dropped: a draft written since goes after the returned one. Mid-reply, `send` steers the live
+   * run instead of refusing, so the composer stays open while the assistant works.
    */
   const submit = async (): Promise<void> => {
-    if (streaming || !text.trim()) return
+    if (!text.trim()) return
     const t = text
     setText('')
     const ok = await send(t, conversationId).catch(() => false)
@@ -53,13 +53,13 @@ export default function Composer({ conversationId, footer, compact = false }: Co
       <div className="composer">
         <input ref={fileRef} type="file" multiple hidden onChange={(e) => { if (e.target.files?.length) void uploadDocuments(e.target.files, uploadTarget); e.target.value = '' }} />
         <button className="icon-btn" title={uploadTarget ? "Add a document to this project" : "Add a personal document"} onClick={() => fileRef.current?.click()}><Paperclip size={16} /></button>
-        <textarea ref={ref} rows={1} value={text} placeholder="Message…"
+        <textarea ref={ref} rows={1} value={text} placeholder={streaming ? 'Steer the reply…' : 'Message…'}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void submit() } }} />
-        {streaming ? (
+        {streaming && !text.trim() ? (
           <button className="send stop" title="Stop" onClick={() => void stop(conversationId)}><Square size={14} /></button>
         ) : (
-          <button className="send" title="Send" disabled={!text.trim()} onClick={() => void submit()}><ArrowUp size={16} /></button>
+          <button className="send" title={streaming ? 'Steer the reply' : 'Send'} disabled={!text.trim()} onClick={() => void submit()}><ArrowUp size={16} /></button>
         )}
       </div>
       {footer && <div className="composer-footer">{footer}</div>}

@@ -260,15 +260,17 @@ export default function Canvas(): JSX.Element {
     const id = st.activeCanvasId
     if (!id) return
     useCanvas.setState({ focusedWindowId: null })
-    // Middle button or ⌥ pans; plain drags marquee-select and ⇧ adds to the selection.
-    const pan = e.button === 1 || e.altKey
+    // A plain drag pans (so do middle button and ⌥); ⇧ drags marquee-select, adding to the selection.
     const additive = e.shiftKey
+    const pan = !additive
     const from = { x: e.clientX, y: e.clientY }
     const v0 = viewport()
     const origin = canvasPointFromEvent(e)
-    e.currentTarget.setPointerCapture(e.pointerId)
+    const node = e.currentTarget
+    node.setPointerCapture(e.pointerId)
+    if (pan) node.style.cursor = 'grabbing'
     bump()
-    if (!pan && !additive) setSelected([])
+    if (!additive) setSelected([])
 
     const move = (ev: PointerEvent): void => {
       if (pan) {
@@ -281,6 +283,7 @@ export default function Canvas(): JSX.Element {
     const up = (ev: PointerEvent): void => {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
+      node.style.cursor = ''
       if (idle.current) {
         clearTimeout(idle.current)
         idle.current = null

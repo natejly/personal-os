@@ -79,6 +79,13 @@ kbd {
 .app {
   display: grid;
   grid-template-columns: var(--sidebar-w) 1fr;
+  /* Without an explicit row the single implicit row is `auto`, so it sizes to the tallest column's
+     content instead of to the window. A view taller than the viewport (Today, with recap + widgets)
+     then stretched the row past 100%, and because the sidebar stretches with it, the Settings button
+     at its foot was pushed off the bottom of the screen -- while .page-body's overflow-y never
+     engaged, because .page's height:100% had no definite row to resolve against. minmax(0, 1fr)
+     pins the row to the window and lets each view scroll inside itself. */
+  grid-template-rows: minmax(0, 1fr);
   height: 100%;
   transition: grid-template-columns 0.18s ease;
   /* The BrowserWindow is a vibrancy window with backgroundColor '#00000000', so anything that does not

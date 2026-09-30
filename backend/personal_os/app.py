@@ -1861,6 +1861,7 @@ class DocPatch(BaseModel):
     format: str | None = None
     project_id: str | None = None
     source: str | None = None
+    agent_conv_id: str | None = None
 
 
 class DocRestore(BaseModel):

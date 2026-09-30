@@ -656,13 +656,13 @@ def _register_google(self: Toolbox) -> None:
                   {"summary": "Sprint review", "start": "2026-10-08T10:00", "attendees": ["mira@example.com"], "location": "Room 2"},
                   {"summary": "Holiday", "start": "2026-12-24"}]))
 
-    async def gmail_search(ctx: dict[str, Any], query: str = "is:unread newer_than:2d", max_results: int = 15, offset: int = 0) -> Any:
+    async def gmail_search(ctx: dict[str, Any], query: str = "is:unread in:inbox newer_than:14d", max_results: int = 15, offset: int = 0) -> Any:
         off, n = max(0, int(offset)), max(1, min(int(max_results), 100))
         rows = await run(g.gmail_search, query, off + n)
         return page(rows, offset=off, limit=n, key="messages")
-    R("gmail_search", ToolSpec("gmail_search", "Search Gmail with Gmail query syntax (e.g. 'is:unread', 'from:alice newer_than:7d', 'subject:invoice'). Returns headers and snippets.",
-        _obj({"query": {"type": "string", "default": "is:unread newer_than:2d"}, "max_results": {"type": "integer", "default": 15}, "offset": {"type": "integer", "default": 0}}, []), gmail_search, "google",
-        examples=[{"query": "is:unread newer_than:2d"}, {"query": "from:mira@example.com subject:invoice", "max_results": 5},
+    R("gmail_search", ToolSpec("gmail_search", "Search Gmail with Gmail query syntax (e.g. 'is:unread in:inbox', 'from:alice newer_than:7d', 'subject:invoice'). Returns headers and snippets.",
+        _obj({"query": {"type": "string", "default": "is:unread in:inbox newer_than:14d"}, "max_results": {"type": "integer", "default": 15}, "offset": {"type": "integer", "default": 0}}, []), gmail_search, "google",
+        examples=[{"query": "is:unread in:inbox newer_than:14d"}, {"query": "from:mira@example.com subject:invoice", "max_results": 5},
                   {"query": "has:attachment newer_than:30d", "max_results": 15, "offset": 15}], taints=True))
 
     async def gmail_read(ctx: dict[str, Any], message_id: str) -> Any:

@@ -2,12 +2,21 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { CheckSquare, Plus } from 'lucide-react'
 import type { DragKind, DragPayload, Todo } from '@shared/types'
 import TodoItem from '../../components/TodoItem'
+import SmartTextarea from '../../components/SmartTextarea'
+import { localDay } from '../../components/CalendarWeek'
 import { useStore } from '../../store'
 import type { Scope } from '../../lib/api'
 import { useDropTarget } from '../dnd'
 import type { WidgetDef, WidgetProps } from '../registry'
 
 const ACCEPTS: DragKind[] = ['todo', 'board-card']
+
+const midnight = (): number => {
+  const d = new Date()
+  d.setHours(0, 0, 0, 0)
+  return d.getTime()
+}
+const dueAt = (t: Todo): number => (t.due ? new Date(`${t.due}T00:00:00`).getTime() : Infinity)
 
 interface Cfg { scope: Scope; includeDone: boolean; q: string }
 
@@ -17,10 +26,6 @@ const cfg = (c: Record<string, unknown>): Cfg => ({
   includeDone: c.includeDone === true,
   q: typeof c.q === 'string' ? c.q : ''
 })
-
-const midnight = (): number => new Date(new Date().toDateString()).getTime()
-const dueAt = (t: Todo): number => (t.due ? new Date(`${t.due}T00:00:00`).getTime() : Infinity)
-const today = (): string => new Date().toISOString().slice(0, 10)
 
 function TodosWidget({ window: win, live, onConfig }: WidgetProps): JSX.Element {
   const c = cfg(win.config)
@@ -57,7 +62,7 @@ function TodosWidget({ window: win, live, onConfig }: WidgetProps): JSX.Element 
 
   const open = rows.filter((t) => !t.done)
   const cut = midnight()
-  const day = today()
+  const day = localDay()
   const overdue = open.filter((t) => t.due && dueAt(t) < cut)
   const dueToday = open.filter((t) => t.due === day)
   const upcoming = open.filter((t) => t.due && dueAt(t) > cut && t.due !== day)
@@ -135,9 +140,17 @@ function TodosWidget({ window: win, live, onConfig }: WidgetProps): JSX.Element 
       </div>
 
       <div className="widget-bar">
-        <input className="widget-input" placeholder="Add a todo…" value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') void add() }} />
+        <SmartTextarea
+          kind="todo"
+          className="smart-ta-line"
+          variant="bare"
+          rows={1}
+          minChars={6}
+          value={draft}
+          onChange={setDraft}
+          placeholder="Add a todo… Tab accepts"
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void add() } }}
+        />
         <button className="icon-btn sm" title="Add" disabled={!draft.trim()} onClick={() => void add()}><Plus size={14} /></button>
       </div>
     </div>

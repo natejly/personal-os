@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ArrowUp, Square, Paperclip } from 'lucide-react'
 import { useStore, useIsStreaming } from '../store'
+import SmartTextarea from './SmartTextarea'
 
 interface ComposerProps {
   conversationId?: string
@@ -12,7 +13,7 @@ interface ComposerProps {
 
 export default function Composer({ conversationId, footer, compact = false }: ComposerProps): JSX.Element {
   const [text, setText] = useState('')
-  const ref = useRef<HTMLTextAreaElement>(null)
+  const box = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const streaming = useIsStreaming(conversationId)
   const activeId = useStore((s) => conversationId ?? s.focusedConversationId)
@@ -24,13 +25,7 @@ export default function Composer({ conversationId, footer, compact = false }: Co
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
   const uploadDocuments = useStore((s) => s.uploadDocuments)
 
-  useEffect(() => {
-    const el = ref.current
-    if (!el) return
-    el.style.height = 'auto'
-    el.style.height = `${Math.min(el.scrollHeight, 240)}px`
-  }, [text])
-  useEffect(() => { ref.current?.focus() }, [activeId])
+  useEffect(() => { box.current?.querySelector('textarea')?.focus() }, [activeId])
 
   /**
    * The draft is cleared optimistically and handed back if `send` refuses it. Typed text is never
@@ -50,12 +45,21 @@ export default function Composer({ conversationId, footer, compact = false }: Co
       {!hasKey && (
         <div className="notice">No LiteLLM key set. <button className="link" onClick={() => setSettingsOpen(true)}>Open settings</button></div>
       )}
-      <div className="composer">
+      <div className="composer" ref={box}>
         <input ref={fileRef} type="file" multiple hidden onChange={(e) => { if (e.target.files?.length) void uploadDocuments(e.target.files, uploadTarget); e.target.value = '' }} />
         <button className="icon-btn" title={uploadTarget ? "Add a document to this project" : "Add a personal document"} onClick={() => fileRef.current?.click()}><Paperclip size={16} /></button>
-        <textarea ref={ref} rows={1} value={text} placeholder={streaming ? 'Steer the reply…' : 'Message…'}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void submit() } }} />
+        <SmartTextarea
+          kind="chat"
+          variant="bare"
+          rows={1}
+          autoGrow
+          maxHeight={240}
+          minChars={8}
+          value={text}
+          onChange={setText}
+          placeholder={streaming ? 'Steer the reply…' : 'Message… Tab accepts a suggestion'}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void submit() } }}
+        />
         {streaming && !text.trim() ? (
           <button className="send stop" title="Stop" onClick={() => void stop(conversationId)}><Square size={14} /></button>
         ) : (

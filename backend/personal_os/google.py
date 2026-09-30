@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import datetime as dt
 import email.mime.text
+from email.utils import parsedate_to_datetime
 import json
 import logging
 import os
@@ -251,7 +252,10 @@ class Google:
     def calendar_create(self, summary: str, start: str, end: str | None = None, description: str = "", location: str = "", attendees: list[str] | None = None, calendar_id: str = "primary") -> dict[str, Any]:
         all_day = len(start) == 10
         if not end:
-            end = start if all_day else (_parse_iso(start) + dt.timedelta(hours=1)).isoformat()
+            # All-day end is exclusive, so a same-day due needs start+1.
+            end = (dt.date.fromisoformat(start) + dt.timedelta(days=1)).isoformat() if all_day else (_parse_iso(start) + dt.timedelta(hours=1)).isoformat()
+        elif all_day and end == start:
+            end = (dt.date.fromisoformat(start) + dt.timedelta(days=1)).isoformat()
         body: dict[str, Any] = {"summary": summary, "description": description, "location": location}
         if all_day:
             body["start"], body["end"] = {"date": start}, {"date": end}
@@ -266,23 +270,35 @@ class Google:
         return {"id": e.get("id"), "link": e.get("htmlLink"), "summary": e.get("summary")}
 
     # ---------- Gmail ----------
-    def gmail_search(self, query: str = "is:unread", max_results: int = 15) -> list[dict[str, Any]]:
+    def gmail_search(self, query: str = "is:unread in:inbox newer_than:14d", max_results: int = 15) -> list[dict[str, Any]]:
         svc = self._svc("gmail", "v1")
         res = svc.users().messages().list(userId="me", q=query, maxResults=max(1, min(int(max_results), 50))).execute()
-        out = []
-        for m in res.get("messages", []):
-            msg = svc.users().messages().get(userId="me", id=m["id"], format="metadata", metadataHeaders=["From", "Subject", "Date"]).execute()
-            h = {x["name"].lower(): x["value"] for x in msg.get("payload", {}).get("headers", [])}
-            out.append({"id": m["id"], "thread_id": msg.get("threadId"), "from": h.get("from"), "subject": h.get("subject"), "date": h.get("date"),
-                        "snippet": msg.get("snippet"), "unread": "UNREAD" in msg.get("labelIds", []), "labels": msg.get("labelIds", [])})
-        return out
+        ids = [m["id"] for m in res.get("messages") or []]
+        if not ids:
+            return []
+        by_id: dict[str, dict[str, Any]] = {}
+
+        def _cb(_request_id: str, response: Any, exception: Exception | None) -> None:
+            if exception or not isinstance(response, dict):
+                if exception:
+                    log.warning("gmail batch get failed: %s", exception)
+                return
+            mid = response.get("id")
+            if mid:
+                by_id[mid] = _gmail_meta(response)
+
+        batch = svc.new_batch_http_request(callback=_cb)
+        for mid in ids:
+            batch.add(svc.users().messages().get(userId="me", id=mid, format="metadata", metadataHeaders=["From", "Subject", "Date"]))
+        batch.execute()
+        return [by_id[i] for i in ids if i in by_id]
 
     def gmail_get(self, message_id: str, max_chars: int = 8000) -> dict[str, Any]:
         svc = self._svc("gmail", "v1")
         msg = svc.users().messages().get(userId="me", id=message_id, format="full").execute()
         h = {x["name"].lower(): x["value"] for x in msg.get("payload", {}).get("headers", [])}
         body = _extract_body(msg.get("payload", {}))
-        return {"id": message_id, "thread_id": msg.get("threadId"), "from": h.get("from"), "to": h.get("to"), "subject": h.get("subject"), "date": h.get("date"), "body": body[:max_chars]}
+        return {"id": message_id, "thread_id": msg.get("threadId"), "from": h.get("from"), "to": h.get("to"), "subject": h.get("subject"), "date": _rfc2822_iso(h.get("date")), "body": body[:max_chars]}
 
     def _reply_headers(self, reply_to_message_id: str) -> tuple[str | None, dict[str, str]]:
         """Thread id plus In-Reply-To/References headers so mail clients thread the reply."""
@@ -516,6 +532,29 @@ def _parse_iso(value: str) -> dt.datetime:
     if s.endswith(("Z", "z")):
         s = s[:-1] + "+00:00"
     return dt.datetime.fromisoformat(s)
+
+
+def _rfc2822_iso(value: str | None) -> str | None:
+    """Gmail Date headers are RFC 2822; the UI's Date() parser is happier with ISO."""
+    if not value:
+        return None
+    try:
+        d = parsedate_to_datetime(value)
+    except (TypeError, ValueError, OverflowError, IndexError):
+        return value
+    if d.tzinfo is None:
+        d = d.replace(tzinfo=dt.timezone.utc)
+    return d.isoformat()
+
+
+def _gmail_meta(msg: dict[str, Any]) -> dict[str, Any]:
+    h = {x["name"].lower(): x["value"] for x in msg.get("payload", {}).get("headers", [])}
+    return {
+        "id": msg.get("id"), "thread_id": msg.get("threadId"),
+        "from": h.get("from"), "subject": h.get("subject"), "date": _rfc2822_iso(h.get("date")),
+        "snippet": msg.get("snippet"), "unread": "UNREAD" in (msg.get("labelIds") or []),
+        "labels": msg.get("labelIds") or [],
+    }
 
 
 def _local_tz() -> str:

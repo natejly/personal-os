@@ -17,6 +17,13 @@ Rules:
 - If nothing sensible can be added, return an empty string.
 """
 
+KIND_HINTS = {
+    "todo": "This is a todo title. Continue it in a few words. Do not add a trailing period unless the user started with one.",
+    "chat": "This is a message the user is typing to an assistant. Continue their thought; do not answer as the assistant.",
+    "mail": "This is an email body.",
+    "note": "This is a personal note.",
+}
+
 REVIEW_PROMPT = """You review email drafts before they are sent.
 
 Return ONLY a JSON object with this shape:
@@ -42,6 +49,9 @@ def _parse_json(text: str) -> dict[str, Any]:
 async def complete_text(settings: dict[str, Any], kind: str, before: str, after: str = "", context: str = "") -> str:
     model = settings.get("extractionModel") or settings["defaultModel"]
     user = f"Kind of text: {kind}\n"
+    hint = KIND_HINTS.get(kind)
+    if hint:
+        user += f"{hint}\n"
     if context.strip():
         user += f"Context:\n{context[:2000]}\n\n"
     user += f"Text before the cursor:\n---\n{before[-4000:]}\n---"

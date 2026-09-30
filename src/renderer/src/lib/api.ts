@@ -107,7 +107,7 @@ export const api = {
   todos: {
     list: (s: Scope = 'all', includeDone = false, q = '') => req<Todo[]>(`/todos?project_id=${encodeURIComponent(s)}&include_done=${includeDone}&q=${encodeURIComponent(q)}`),
     create: (t: { title: string; project_id?: string | null; notes?: string; due?: string | null; priority?: number }) => req<Todo>('/todos', { method: 'POST', body: json(t) }),
-    update: (id: string, patch: { title?: string; notes?: string; due?: string | null; priority?: number; done?: boolean; project_id?: string | null; clear_due?: boolean; clear_project?: boolean }) =>
+    update: (id: string, patch: { title?: string; notes?: string; due?: string | null; priority?: number; done?: boolean; project_id?: string | null; clear_due?: boolean; clear_project?: boolean; calendar_event_id?: string | null; calendar_link?: string | null }) =>
       req<Todo>(`/todos/${id}`, { method: 'PUT', body: json(patch) }),
     delete: (id: string) => req(`/todos/${id}`, { method: 'DELETE' })
   },
@@ -117,8 +117,9 @@ export const api = {
     disconnect: () => req<GoogleStatus>('/integrations/google/disconnect', { method: 'POST' }),
     calendar: (days = 2) => req<CalendarEvent[]>(`/integrations/google/calendar?days=${days}`),
     calendarRange: (startIso: string, days = 7) => req<CalendarEvent[]>(`/integrations/google/calendar?days=${days}&start=${encodeURIComponent(startIso)}`),
-    createEvent: (e: { summary: string; start: string; end?: string; description?: string; location?: string }) => req(`/integrations/google/calendar`, { method: 'POST', body: json(e) }),
-    gmail: (q = 'is:unread newer_than:3d', maxResults = 12) => req<GmailMessage[]>(`/integrations/google/gmail?q=${encodeURIComponent(q)}&max_results=${maxResults}`),
+    createEvent: (e: { summary: string; start: string; end?: string; description?: string; location?: string }) =>
+      req<{ id: string; link: string; summary: string }>('/integrations/google/calendar', { method: 'POST', body: json(e) }),
+    gmail: (q = 'is:unread in:inbox newer_than:14d', maxResults = 12) => req<GmailMessage[]>(`/integrations/google/gmail?q=${encodeURIComponent(q)}&max_results=${maxResults}`),
     tasks: (showCompleted = false) => req<GoogleTask[]>(`/integrations/google/tasks?show_completed=${showCompleted}`),
     drive: (q = '', maxResults = 20) => req<DriveFile[]>(`/integrations/google/drive?q=${encodeURIComponent(q)}&max_results=${maxResults}`),
     gmailGet: (id: string) => req<GmailFullMessage>(`/integrations/google/gmail/${id}`),

@@ -7,7 +7,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from personal_os.google import _parse_iso  # noqa: E402
+from personal_os.google import _parse_iso, _rfc2822_iso  # noqa: E402
 
 
 def test_js_toisostring_with_millis_and_z() -> None:
@@ -25,8 +25,24 @@ def test_offset_and_naive() -> None:
     assert _parse_iso("2026-09-28T10:00:00") == dt.datetime(2026, 9, 28, 10, 0, 0)
 
 
+def test_rfc2822_gmail_date_to_iso() -> None:
+    got = _rfc2822_iso("Mon, 29 Sep 2026 10:15:00 -0400")
+    assert got is not None
+    parsed = dt.datetime.fromisoformat(got)
+    assert parsed.year == 2026 and parsed.month == 9 and parsed.day == 29
+    assert parsed.hour == 10 and parsed.minute == 15
+
+
+def test_rfc2822_empty_and_passthrough() -> None:
+    assert _rfc2822_iso(None) is None
+    assert _rfc2822_iso("") is None
+    assert _rfc2822_iso("not a date") == "not a date"
+
+
 if __name__ == "__main__":
     test_js_toisostring_with_millis_and_z()
     test_z_without_millis()
     test_offset_and_naive()
+    test_rfc2822_gmail_date_to_iso()
+    test_rfc2822_empty_and_passthrough()
     print("ok")

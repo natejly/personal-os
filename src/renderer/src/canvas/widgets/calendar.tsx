@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type DragEvent } from 'react'
 import { Calendar as CalIcon, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react'
-import type { CalendarEvent } from '@shared/types'
+import type { CalendarEvent, DragKind, Todo } from '@shared/types'
 import { useStore } from '../../store'
 import { api } from '../../lib/api'
-import CalendarWeek, { addDays, dayKey, fmtTime, startOfWeek } from '../../components/CalendarWeek'
+import CalendarWeek, { addDays, dayKey, fmtTime, localDay, startOfWeek } from '../../components/CalendarWeek'
+import { scheduleTodo } from '../../components/TodoItem'
+import { hasDrag, readDrag, useDropTarget } from '../dnd'
 import type { WidgetDef, WidgetProps } from '../registry'
 
 type Mode = 'agenda' | 'day' | 'week'
@@ -11,6 +13,7 @@ type Mode = 'agenda' | 'day' | 'week'
 const MODES: Mode[] = ['agenda', 'day', 'week']
 const DAY_CHOICES = [1, 3, 7, 14]
 const POLL_MS = 120_000
+const ACCEPTS: DragKind[] = ['todo']
 const readMode = (v: unknown): Mode => (MODES.includes(v as Mode) ? (v as Mode) : 'agenda')
 
 const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Element => {
@@ -18,6 +21,8 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
   const todos = useStore((s) => s.todos)
   const toast = useStore((s) => s.toast)
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
+  const setView = useStore((s) => s.setView)
+  const updateTodo = useStore((s) => s.updateTodo)
   const mode = readMode(win.config.mode)
   const days = typeof win.config.days === 'number' ? win.config.days : 7
   const [shift, setShift] = useState(0)
@@ -30,8 +35,12 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
   const columns = useMemo(() => (mode === 'agenda' ? [] : Array.from({ length: span }, (_, i) => addDays(anchor, i))), [mode, span, anchor])
   const startIso = anchor.toISOString()
 
-  // The whole point of `live`: a window that is off-screen, minimized or zoomed out stops its poller,
-  // and the interval is never created in the first place.
+  useEffect(() => {
+    if (!live) return
+    void useStore.getState().refreshTodos('all', false)
+  }, [live])
+
+  // Off-screen, minimized or zoomed out: stop the poller so a hidden window does not hit Google.
   useEffect(() => {
     if (!live || !connected) return
     let alive = true
@@ -48,6 +57,24 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
     return () => { alive = false; clearInterval(t) }
   }, [live, connected, mode, span, startIso])
 
+  const dropTodo = async (todoId: string, day: string, hour: number | null): Promise<void> => {
+    const todo = useStore.getState().todos.find((t) => t.id === todoId)
+    if (!todo) return
+    try {
+      await updateTodo(todoId, { due: day })
+      if (connected) {
+        const start = hour === null ? day : `${day}T${String(hour).padStart(2, '0')}:00:00`
+        await scheduleTodo({ ...todo, due: day }, start)
+        if (hour !== null) {
+          setEvents(mode === 'agenda' ? await api.google.calendar(span) : await api.google.calendarRange(startIso, span))
+        }
+      }
+      toast(hour === null ? `Due ${day}` : `Scheduled ${hour}:00`)
+    } catch (e) {
+      toast((e as Error).message, 'error')
+    }
+  }
+
   const create = async (day: string, hour: number, title: string): Promise<boolean> => {
     try {
       await api.google.createEvent({ summary: title, start: `${day}T${String(hour).padStart(2, '0')}:00:00` })
@@ -60,17 +87,29 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
     }
   }
 
+  const drop = useDropTarget(ACCEPTS, (p) => {
+    if (p?.kind === 'todo') void dropTodo(p.id, localDay(), null)
+  })
+
+  const agendaDrop = (e: DragEvent<HTMLDivElement>, day: string): void => {
+    const p = readDrag(e.dataTransfer)
+    if (p?.kind !== 'todo') return
+    e.preventDefault()
+    e.stopPropagation()
+    void dropTodo(p.id, day, null)
+  }
+
   const agenda = useMemo(() => {
     if (mode !== 'agenda') return []
-    const m = new Map<string, { events: CalendarEvent[]; todos: string[] }>()
-    const slot = (k: string): { events: CalendarEvent[]; todos: string[] } => {
+    const m = new Map<string, { events: CalendarEvent[]; todos: Todo[] }>()
+    const slot = (k: string): { events: CalendarEvent[]; todos: Todo[] } => {
       const cur = m.get(k) ?? { events: [], todos: [] }
       m.set(k, cur)
       return cur
     }
     for (const e of events) slot(e.all_day ? e.start : dayKey(new Date(e.start))).events.push(e)
     const last = dayKey(addDays(new Date(), span - 1))
-    for (const t of todos) if (t.due && !t.done && t.due <= last && t.due >= dayKey(new Date())) slot(t.due).todos.push(t.title)
+    for (const t of todos) if (t.due && !t.done && t.due <= last && t.due >= localDay()) slot(t.due).todos.push(t)
     return [...m.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1))
   }, [mode, events, todos, span])
 
@@ -85,7 +124,7 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
   }
 
   return (
-    <div className="widget">
+    <div className={drop.over ? 'widget drop-over' : 'widget'} {...drop.handlers}>
       <div className="widget-bar">
         {MODES.map((m) => (
           <button key={m} className={`widget-chip ${m === mode ? 'on' : ''}`} onClick={() => { setShift(0); onConfig({ mode: m }) }}>{m}</button>
@@ -102,20 +141,18 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
           </>
         )}
         <span className="spacer" />
+        {!connected && <button className="widget-chip" onClick={() => setSettingsOpen(true)}>Connect Google</button>}
         {error && <span className="widget-meta" title={error}>offline</span>}
       </div>
 
-      {!connected ? (
-        <div className="widget-empty">
-          <span>No calendar connected.</span>
-          <button className="widget-chip" onClick={() => setSettingsOpen(true)}>Connect Google</button>
-        </div>
-      ) : mode === 'agenda' ? (
+      {mode === 'agenda' ? (
         <div className="widget-scroll">
           {agenda.length === 0 && <div className="widget-empty"><span>Nothing in the next {span} days.</span></div>}
           <div className="widget-list">
             {agenda.map(([k, g]) => (
-              <div key={k}>
+              <div key={k} className="agenda-day"
+                onDragOver={(e) => { if (!hasDrag(e.dataTransfer)) return; e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'copy' }}
+                onDrop={(e) => agendaDrop(e, k)}>
                 <div className="widget-meta">{new Date(`${k}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}</div>
                 {g.events.map((e) => (
                   <button key={e.id} className="widget-row" onClick={() => setOpen(e)}>
@@ -124,10 +161,10 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
                   </button>
                 ))}
                 {g.todos.map((t) => (
-                  <div key={t} className="widget-row">
+                  <button key={t.id} className="widget-row" onClick={() => setView('todos')}>
                     <span className="widget-meta">todo</span>
-                    <span className="grow widget-sub">○ {t}</span>
-                  </div>
+                    <span className="grow widget-sub">○ {t.title}</span>
+                  </button>
                 ))}
               </div>
             ))}
@@ -135,7 +172,8 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
         </div>
       ) : (
         <div className="cal-scroll">
-          <CalendarWeek days={columns} events={events} todos={todos} canCreate onOpen={setOpen} onCreate={create} />
+          <CalendarWeek days={columns} events={events} todos={todos} canCreate={connected}
+            onOpen={setOpen} onTodo={() => setView('todos')} onTodoDrop={(id, day, hour) => void dropTodo(id, day, hour)} onCreate={create} />
         </div>
       )}
 
@@ -159,6 +197,7 @@ export const def: WidgetDef = {
   chrome: 'full',
   heavy: true,
   defaultConfig: { mode: 'agenda', days: 7 },
+  accepts: ACCEPTS,
   Component: CalendarWidget
 }
 

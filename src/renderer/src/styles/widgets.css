@@ -187,6 +187,7 @@
   box-shadow: var(--shadow-focused), 0 0 0 1px var(--accent);
 }
 .widget.drop-over { background: var(--zone-fill); }
+.agenda-day.drop-over, .agenda-day:has(.drop-over) { background: var(--zone-fill); border-radius: 8px; }
 
 @media (prefers-reduced-motion: reduce) {
   .status-glyph.working svg,

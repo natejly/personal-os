@@ -187,6 +187,8 @@ export interface Todo {
   done: number
   source: string
   external_id: string | null
+  calendar_event_id: string | null
+  calendar_link: string | null
   created_at: number
   updated_at: number
   completed_at: number | null

@@ -3,6 +3,7 @@ import { Plus, Trash2, PanelLeftOpen, LayoutDashboard, RefreshCw, Wand2, Databas
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { useStore } from '../store'
+import { SAFE_MD } from './Message'
 import { api, getBase } from '../lib/api'
 import type { Dashboard, DataSource, Widget } from '@shared/types'
 
@@ -49,7 +50,7 @@ function SourcesPanel({ sources, internal, onChange, onClose }: { sources: DataS
       <div className="modal wide" onMouseDown={(e) => e.stopPropagation()}>
         <header><h2><Database size={16} /> Data sources</h2><button className="icon-btn" onClick={onClose}><X size={16} /></button></header>
         <section>
-          <p className="muted">Sources feed widgets. API keys are stored locally and injected server-side; the generated widget code never sees them.</p>
+          <p className="muted">API keys are stored locally and injected server-side; the generated widget code never sees them.</p>
           {sources.length === 0 && <p className="empty-hint">No sources yet.</p>}
           <div className="src-list">
             {sources.map((s) => (
@@ -119,17 +120,17 @@ function WidgetCard({ w, sources, onChange }: { w: Widget; sources: DataSource[]
       </header>
       {revising && (
         <div className="dw-revise">
-          <input autoFocus placeholder="e.g. make it a bar chart, sort by score, add a dark red highlight for overdue…" value={instruction} onChange={(e) => setInstruction(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void revise()} />
+          <input autoFocus placeholder="How should it change?…" value={instruction} onChange={(e) => setInstruction(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void revise()} />
           <button className="primary-btn" disabled={!instruction.trim() || busy} onClick={() => void revise()}>{busy ? 'Working…' : 'Apply'}</button>
         </div>
       )}
       {w.kind === 'html' && !showCode && (
         w.code ? <iframe key={w.refreshed_at ?? 0} title={w.title} sandbox="allow-scripts" src={`${getBase()}/widgets/${w.id}/render`} style={{ height: w.height }} />
-          : <div className="dw-empty">{busy ? 'Generating…' : w.output || 'No code generated yet. Click refresh.'}</div>
+          : <div className="dw-empty">{busy ? 'Generating…' : w.output || 'No code generated yet.'}</div>
       )}
       {w.kind === 'html' && showCode && <pre className="dw-code">{w.code}</pre>}
-      {w.kind === 'summary' && <div className="dw-md markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{w.output || (busy ? 'Summarizing…' : 'No summary yet.')}</ReactMarkdown></div>}
-      {w.kind === 'markdown' && <div className="dw-md markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{w.output}</ReactMarkdown></div>}
+      {w.kind === 'summary' && <div className="dw-md markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={SAFE_MD}>{w.output || (busy ? 'Summarizing…' : 'No summary yet.')}</ReactMarkdown></div>}
+      {w.kind === 'markdown' && <div className="dw-md markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={SAFE_MD}>{w.output}</ReactMarkdown></div>}
     </div>
   )
 }
@@ -202,7 +203,7 @@ export default function DashboardsView(): JSX.Element {
             <label className="model-picker"><select value={kind} onChange={(e) => setKind(e.target.value as 'html' | 'summary')}><option value="html">Interactive widget (AI-coded)</option><option value="summary">AI summary</option></select><ChevronDown size={14} /></label>
             <label className="model-picker"><select value={width} onChange={(e) => setWidth(Number(e.target.value))}><option value={1}>1 column</option><option value={2}>2 columns</option><option value={3}>full width</option></select><ChevronDown size={14} /></label>
             <div className="src-picker">
-              {sources.length === 0 && <span className="muted small">No sources yet: <button className="link" onClick={() => setShowSources(true)}>add one</button> or build a static widget.</span>}
+              {sources.length === 0 && <span className="muted small">No sources yet: <button className="link" onClick={() => setShowSources(true)}>add one</button></span>}
               {sources.map((s) => (
                 <label key={s.id} className={`chip-check ${picked.includes(s.id) ? 'on' : ''}`}><input type="checkbox" checked={picked.includes(s.id)} onChange={(e) => setPicked(e.target.checked ? [...picked, s.id] : picked.filter((x) => x !== s.id))} />{s.name}</label>
               ))}
@@ -210,7 +211,7 @@ export default function DashboardsView(): JSX.Element {
           </div>
           <div className="row">
             <textarea rows={2} autoFocus value={prompt} onChange={(e) => setPrompt(e.target.value)}
-              placeholder={kind === 'html' ? 'Describe the widget: “a table of my open todos grouped by project with overdue ones in red”, “a line chart of the last 30 values from this API”, “countdown to Oct 3”…' : 'What should the summary focus on? “what needs my attention today”, “trend vs last week”…'}
+              placeholder={kind === 'html' ? 'Describe the widget…' : 'What should the summary focus on?…'}
               onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void generate() }} />
             <button className="primary-btn" disabled={!prompt.trim() || generating} onClick={() => void generate()}>{generating ? 'Building…' : kind === 'html' ? 'Build' : 'Summarize'}</button>
           </div>
@@ -218,10 +219,10 @@ export default function DashboardsView(): JSX.Element {
       )}
 
       {!dash ? (
-        <div className="page-body"><p className="empty-hint big">No dashboards yet. Create one, add a data source (an API URL and key, an RSS feed, or your own todos/calendar), then describe the widget you want.</p></div>
+        <div className="page-body"><p className="empty-hint big">No dashboards yet.</p></div>
       ) : (
         <div className="page-body wide">
-          {dash.widgets.length === 0 && <p className="empty-hint big">Empty dashboard. Click <b>Add widget</b> and describe what you want to see.</p>}
+          {dash.widgets.length === 0 && <p className="empty-hint big">Empty dashboard.</p>}
           <div className="dgrid">{dash.widgets.map((w) => <WidgetCard key={w.id} w={w} sources={sources} onChange={() => void loadDash()} />)}</div>
         </div>
       )}

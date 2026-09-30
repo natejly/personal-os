@@ -5,6 +5,7 @@ import { Notebook } from 'lucide-react'
 import type { Note } from '@shared/types'
 import { api } from '../../lib/api'
 import type { WidgetDef, WidgetProps } from '../registry'
+import { SAFE_MD } from '../../components/Message'
 
 /** Paper, not chrome: a sticky note keeps its colour in either theme, with ink dark enough to read. */
 const COLORS: Record<string, { bg: string; ink: string }> = {
@@ -123,7 +124,7 @@ function NoteWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
       ) : (
         <div className="widget-scroll markdown" style={{ cursor: 'text' }} onClick={() => setEditing(true)}>
           {body.trim()
-            ? <ReactMarkdown remarkPlugins={[remarkGfm]}>{body}</ReactMarkdown>
+            ? <ReactMarkdown remarkPlugins={[remarkGfm]} components={SAFE_MD}>{body}</ReactMarkdown>
             : <span style={{ opacity: 0.5 }}>Click to write…</span>}
         </div>
       )}

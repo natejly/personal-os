@@ -186,7 +186,7 @@ function ChatWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
               <button className="ghost-btn" onClick={() => void regenerate(convId)}><RefreshCw size={13} /> Regenerate</button>
             </div>
           )}
-          {!msgs.length && <p className="widget-sub">Nothing here yet. Say something.</p>}
+          {!msgs.length && <p className="widget-sub">No messages yet.</p>}
         </div>
       </div>
       <Composer conversationId={convId} compact footer={<ChatControls convId={convId} />} />

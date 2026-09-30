@@ -6,7 +6,7 @@ interface ComposerProps {
   conversationId?: string
   /** Rendered directly under the text box: where the model and effort controls live in a chat window. */
   footer?: ReactNode
-  /** Drops the disclaimer line and tightens the padding, for a widget where vertical space is scarce. */
+  /** Tightens the padding, for a widget where vertical space is scarce. */
   compact?: boolean
 }
 
@@ -49,7 +49,7 @@ export default function Composer({ conversationId, footer, compact = false }: Co
       <div className="composer">
         <input ref={fileRef} type="file" multiple hidden onChange={(e) => { if (e.target.files?.length) void uploadDocuments(e.target.files, uploadTarget); e.target.value = '' }} />
         <button className="icon-btn" title={uploadTarget ? "Add a document to this project" : "Add a personal document"} onClick={() => fileRef.current?.click()}><Paperclip size={16} /></button>
-        <textarea ref={ref} rows={1} value={text} placeholder="Message… (Enter to send, Shift+Enter for newline)"
+        <textarea ref={ref} rows={1} value={text} placeholder="Message…"
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void submit() } }} />
         {streaming ? (
@@ -59,7 +59,6 @@ export default function Composer({ conversationId, footer, compact = false }: Co
         )}
       </div>
       {footer && <div className="composer-footer">{footer}</div>}
-      {!compact && <p className="composer-hint">Models can make mistakes. Routed through LiteLLM.</p>}
     </div>
   )
 }

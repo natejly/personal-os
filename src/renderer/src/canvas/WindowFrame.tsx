@@ -1,5 +1,5 @@
 import {
-  useEffect, useLayoutEffect, useRef, useState,
+  isValidElement, memo, useEffect, useLayoutEffect, useRef, useState,
   type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode
 } from 'react'
 import { createPortal } from 'react-dom'
@@ -99,13 +99,35 @@ export interface WindowFrameProps {
   status?: ReactNode
 }
 
+const shallow = (a: object, b: object): boolean => {
+  if (a === b) return true
+  const x = a as Record<string, unknown>
+  const y = b as Record<string, unknown>
+  const keys = Object.keys(x)
+  return keys.length === Object.keys(y).length && keys.every((k) => Object.is(x[k], y[k]))
+}
+
+/** Canvas rebuilds the status element on every render of the plane, so identity alone defeats the memo. */
+const sameNode = (a: ReactNode, b: ReactNode): boolean =>
+  Object.is(a, b) ||
+  (isValidElement(a) && isValidElement(b) && a.type === b.type && a.key === b.key && shallow(a.props, b.props))
+
+/**
+ * The memo gate. `win` is compared field by field rather than by identity because a reload rebuilds
+ * every row, and the status node by element shape because Canvas builds a fresh one each render.
+ */
+export const sameFrameProps = (a: WindowFrameProps, b: WindowFrameProps): boolean =>
+  a.live === b.live && !!a.selected === !!b.selected && shallow(a.win, b.win) && sameNode(a.status, b.status)
+
 /**
  * A chromeless panel: no title bar, no traffic lights, content flush to the border. Geometry goes
  * through `rectStyle` only, so React and the imperative drag write the same three properties, and the
  * `.dragging` / `.resizing` classes are toggled straight on the node — a `useSyncExternalStore` here
  * would re-render every window on every guide change.
+ *
+ * Memoized: a Canvas re-render must not cascade into twenty widget bodies.
  */
-export default function WindowFrame({ win, live, selected = false, status = null }: WindowFrameProps): JSX.Element {
+function WindowFrame({ win, live, selected = false, status = null }: WindowFrameProps): JSX.Element {
   const node = useRef<HTMLDivElement | null>(null)
   const focused = useIsFocused(win.id)
   const focusWindow = useCanvas((s) => s.focusWindow)
@@ -203,3 +225,5 @@ export default function WindowFrame({ win, live, selected = false, status = null
     </div>
   )
 }
+
+export default memo(WindowFrame, sameFrameProps)

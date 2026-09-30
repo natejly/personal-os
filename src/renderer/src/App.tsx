@@ -28,7 +28,15 @@ function Toasts(): JSX.Element {
 }
 
 export default function App(): JSX.Element {
-  const { ready, backendError, init, sidebarOpen, settingsOpen, projectModal, view } = useStore()
+  // One selector per field: destructuring the store subscribes the root of the tree to every set(),
+  // and a stream calls patchSession once per token.
+  const ready = useStore((s) => s.ready)
+  const backendError = useStore((s) => s.backendError)
+  const init = useStore((s) => s.init)
+  const sidebarOpen = useStore((s) => s.sidebarOpen)
+  const settingsOpen = useStore((s) => s.settingsOpen)
+  const projectModal = useStore((s) => s.projectModal)
+  const view = useStore((s) => s.view)
   const theme = useStore((s) => s.settings.theme)
   const mode = useStore((s) => s.mode)
 
@@ -42,7 +50,12 @@ export default function App(): JSX.Element {
   // widget filters client-side, so canvas mode loads each shared dataset once at the widest scope.
   const entered = useRef(false)
   useEffect(() => {
-    if (mode !== 'canvas' || entered.current) return
+    if (mode !== 'canvas') {
+      // Leaving canvas mode unmounts the plane, so the 400 ms layout debounce would never fire.
+      if (entered.current) void useCanvas.getState().flushLayout()
+      return
+    }
+    if (entered.current) return
     entered.current = true
     const s = useStore.getState()
     void useCanvas.getState().load()

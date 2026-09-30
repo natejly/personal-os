@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm'
 import { RefreshCw, Sparkles } from 'lucide-react'
 import { useStore } from '../../store'
 import type { WidgetDef, WidgetProps } from '../registry'
+import { SAFE_MD } from '../../components/Message'
 
 function RecapWidget({ live }: WidgetProps): JSX.Element {
   const content = useStore((s) => s.recap?.content ?? '')
@@ -45,7 +46,7 @@ function RecapWidget({ live }: WidgetProps): JSX.Element {
       </div>
       <div className="widget-scroll">
         {content
-          ? <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown></div>
+          ? <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={SAFE_MD}>{content}</ReactMarkdown></div>
           : <p className="widget-sub">{loading ? 'Writing your recap…' : 'Nothing recapped yet.'}</p>}
       </div>
     </div>

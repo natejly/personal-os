@@ -103,7 +103,7 @@ export default function Sidebar(): JSX.Element {
       </div>
       {projectsOpen && (
         <div className="project-list">
-          {projects.length === 0 && <p className="empty-hint">Group chats with shared instructions, files and memory.</p>}
+          {projects.length === 0 && <p className="empty-hint">No projects yet.</p>}
           {projects.map((p) => {
             const chats = chatsByProject[p.id] ?? []
             const isOpen = expanded[p.id] ?? (view === 'project' && projectViewId === p.id) ?? false

@@ -33,10 +33,11 @@ export default function DocumentsView({ projectId, embedded = false }: { project
 
   const body = (
     <div className={`page-body ${drag ? 'dragging' : ''}`} onDragOver={(e) => { e.preventDefault(); setDrag(true) }} onDragLeave={() => setDrag(false)}
+      title="Drop files to upload"
       onDrop={(e) => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files.length) void uploadDocuments(e.dataTransfer.files, targetProject) }}>
-      {embedded && <div className="add-row">{uploadBtn}<span className="muted small">Knowledge for this project: .txt, .md, .pdf, .docx and code files. Drop files anywhere here.</span></div>}
-      {!embedded && <p className="muted small">Supports .txt, .md, .pdf, .docx and common code/text files. Documents are chunked and full-text indexed; the best matching excerpts are pulled into chats automatically. Personal documents are available everywhere; project documents only inside that project. Drop files anywhere here.</p>}
-      {documents.length === 0 && <p className="empty-hint big">No documents here yet.</p>}
+      {embedded && <div className="add-row">{uploadBtn}<span className="muted small">.txt, .md, .pdf, .docx and code files.</span></div>}
+      {!embedded && <p className="muted small">.txt, .md, .pdf, .docx and common code/text files. Matching excerpts are pulled into chats automatically: personal documents everywhere, project documents only inside that project.</p>}
+      {documents.length === 0 && <p className="empty-hint big">No documents yet.</p>}
       <div className="doc-grid">
         {documents.map((d) => (
           <div key={d.id} className="doc-card" onClick={() => void view(d)}>

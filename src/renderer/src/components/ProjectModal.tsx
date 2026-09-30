@@ -36,9 +36,8 @@ export default function ProjectModal(): JSX.Element {
       <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
         <header><h2>{existing ? 'Edit project' : 'New project'}</h2><button className="icon-btn" onClick={() => setProjectModal(null)}><X size={16} /></button></header>
         <section>
-          <p className="muted">A project groups chats that share instructions, knowledge files, memories and a knowledge graph, on top of your personal ones.</p>
-          <label><span>Name</span><input autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Work, Thesis, Side project" onKeyDown={(e) => e.key === 'Enter' && void save()} /></label>
-          <label><span>Description</span><input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="One line about what this project is for (shown to the model)" /></label>
+          <label><span>Name</span><input autoFocus value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void save()} /></label>
+          <label><span>Description</span><input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Shown to the model" /></label>
           <label><span>Instructions</span><textarea rows={4} value={prompt} onChange={(e) => setPrompt(e.target.value)} placeholder="Extra system prompt for chats in this project…" /></label>
           <label><span>Color</span>
             <div className="color-row">{COLORS.map((c) => <button key={c} className={`swatch ${c === color ? 'on' : ''}`} style={{ background: c }} onClick={() => setColor(c)} />)}</div>
@@ -46,7 +45,7 @@ export default function ProjectModal(): JSX.Element {
         </section>
         <section>
           <h3>Tools</h3>
-          <p className="muted">Override which tools chats in this project may use. "Inherit" follows your global settings.</p>
+          <p className="muted">"Inherit" follows your global settings.</p>
           <ToolOverrides value={tools} onChange={setTools} effectiveBase={globalTools} compact />
         </section>
         <footer>

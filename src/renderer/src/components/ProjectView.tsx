@@ -43,7 +43,7 @@ export default function ProjectView(): JSX.Element {
       </header>
 
       <div className="project-hero">
-        {project.description ? <p>{project.description}</p> : <p className="muted">No description. Chats here get this project's instructions, knowledge, memories and graph on top of your personal ones.</p>}
+        {project.description ? <p>{project.description}</p> : <p className="muted">No description.</p>}
         <div className="tabs">
           {TABS.map((t) => (
             <button key={t.key} className={tab === t.key ? 'active' : ''} onClick={() => setTab(t.key)}>
@@ -57,7 +57,7 @@ export default function ProjectView(): JSX.Element {
         <div className="page-body">
           {chats.length === 0 && (
             <div className="empty-hint big">
-              <p>No chats in this project yet.</p>
+              <p>No chats yet.</p>
               <button className="primary-btn" onClick={() => newChat(id)}><MessageSquarePlus size={14} /> Start one</button>
             </div>
           )}
@@ -77,7 +77,7 @@ export default function ProjectView(): JSX.Element {
       {tab === 'instructions' && (
         <div className="page-body">
           <p className="muted small">Added to the system prompt for every chat in this project, after your global system prompt.</p>
-          <textarea className="instructions" rows={12} value={prompt} placeholder="e.g. You are helping me write my thesis on distributed consensus. Prefer academic sources, cite them, and keep a formal tone."
+          <textarea className="instructions" rows={12} value={prompt}
             onChange={(e) => setPrompt(e.target.value)} onBlur={() => prompt !== project.system_prompt && void updateProject(id, { system_prompt: prompt })} />
           <p className="muted small">Saved when you click away.</p>
         </div>

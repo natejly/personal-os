@@ -72,9 +72,9 @@ export default function MemoryView({ projectId, query = '' }: { projectId?: stri
       <p className="muted small">
         {projectId
           ? 'Project memories are injected into chats in this project, on top of your personal memories.'
-          : 'Personal memories go into every chat; project memories only into that project’s chats. Pinned ones are always included; the rest are chosen by recency and relevance. Click a memory to edit it.'}
+          : 'Personal memories go into every chat; project memories only into that project’s chats. Pinned ones are always included; the rest are chosen by recency and relevance.'}
       </p>
-      {memories.length === 0 && <p className="empty-hint big">{query ? 'No memories match.' : 'No memories here yet. Chat with auto-learn on, or add one above.'}</p>}
+      {memories.length === 0 && <p className="empty-hint big">{query ? 'No memories match.' : 'No memories yet.'}</p>}
       {memories.map((m) => <MemoryRow key={m.id} m={m} showProject={scope === 'all'} />)}
     </div>
   )

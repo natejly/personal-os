@@ -24,7 +24,7 @@ export default function GoogleSettings({ clientId, clientSecret, onChange, onSav
         <span className="g-logo">G</span>
         <div>
           <b>Google Workspace</b>
-          <small>{google?.connected ? <><Check size={11} /> Signed in as {google.email}</> : 'Calendar, Gmail and Tasks for the dashboard and as tools for the assistant.'}</small>
+          <small>{google?.connected ? <><Check size={11} /> Signed in as {google.email}</> : 'Calendar, Gmail and Tasks.'}</small>
         </div>
         {google?.connected ? (
           <>
@@ -40,7 +40,7 @@ export default function GoogleSettings({ clientId, clientSecret, onChange, onSav
         )}
       </div>
       {google?.connected && google.needs_reauth && (
-        <p className="integration-warn"><AlertTriangle size={13} /> {google.reauth_reason ?? 'This connection needs to be renewed.'} Click Reconnect to sign in again.</p>
+        <p className="integration-warn"><AlertTriangle size={13} /> {google.reauth_reason ?? 'This connection needs to be renewed.'}</p>
       )}
       {!google?.connected && (
         <details className="setup" open={needsClient}>

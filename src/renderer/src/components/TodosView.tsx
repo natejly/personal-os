@@ -50,12 +50,12 @@ export default function TodosView(): JSX.Element {
       </header>
       <div className="page-body">
         <div className="add-row">
-          <input placeholder="Add a todo… (or just tell the assistant in chat)" value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void add()} />
+          <input placeholder="Add a todo…" value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void add()} />
           <input type="date" value={due} onChange={(e) => setDue(e.target.value)} className="date-input" />
           <select value={priority} onChange={(e) => setPriority(Number(e.target.value))}><option value={1}>P1</option><option value={2}>P2</option><option value={3}>P3</option></select>
           <button className="primary-btn" onClick={() => void add()} disabled={!title.trim()}><Plus size={14} /> Add</button>
         </div>
-        {todos.length === 0 && <p className="empty-hint big">Nothing here. Add a todo above, or ask the assistant: “remind me to renew my passport next week”.</p>}
+        {todos.length === 0 && <p className="empty-hint big">No todos yet.</p>}
         <Section label="Overdue" items={overdue} />
         <Section label="Today" items={today} />
         <Section label="Upcoming" items={upcoming} />

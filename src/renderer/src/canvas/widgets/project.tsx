@@ -65,7 +65,7 @@ const ProjectWidget = ({ window: win, live, onConfig, onTitle }: WidgetProps): J
       {tab === 'chats' && (
         <div className="widget-scroll">
           {chats.length === 0 ? (
-            <div className="widget-empty"><span>No chats in this project. Drag one here from the sidebar to open it on the canvas.</span></div>
+            <div className="widget-empty"><span>No chats yet.</span></div>
           ) : (
             <div className="widget-list">
               {chats.map((c) => (
@@ -94,7 +94,7 @@ const ProjectWidget = ({ window: win, live, onConfig, onTitle }: WidgetProps): J
       {tab === 'files' && (
         <div className="widget-scroll">
           {files.length === 0 ? (
-            <div className="widget-empty"><span>No documents. Drop files on a documents window to add some.</span></div>
+            <div className="widget-empty"><span>No documents.</span></div>
           ) : (
             <div className="widget-list">
               {files.map((d) => (

@@ -54,7 +54,7 @@ export default function MemoryWidget({ window: win, live, onConfig }: WidgetProp
         <span>{rows.length}</span>
       </div>
       {rows.length === 0 ? (
-        <div className="widget-empty">No memories in this scope. Chat with auto-learn on, or add one in the Memory page.</div>
+        <div className="widget-empty">No memories in this scope.</div>
       ) : (
         <div className="widget-scroll"><div className="widget-list">{rows.map((m) => <Row key={m.id} m={m} />)}</div></div>
       )}

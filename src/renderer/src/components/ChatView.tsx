@@ -87,7 +87,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
             {!convo ? (
               <div className="empty-state">
                 <h1>{greeting()}</h1>
-                <p>{project ? `New chat in ${project.name}. ` : ''}What are we working on?</p>
+                {project && <p>New chat in {project.name}</p>}
               </div>
             ) : (
               <div className="messages-inner">

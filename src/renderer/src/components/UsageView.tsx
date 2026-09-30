@@ -142,7 +142,7 @@ export default function UsageView(): JSX.Element {
       </div>
 
       {empty ? (
-        <p className="muted small">No model calls recorded in this range. Usage is logged from the first reply after this build.</p>
+        <p className="muted small">No model calls in this range. Usage is logged from the first reply after this build.</p>
       ) : (
         <>
           <div className="usage-tiles">
@@ -166,7 +166,7 @@ export default function UsageView(): JSX.Element {
       )}
 
       <h4 className="usage-sub">Prices</h4>
-      <p className="muted small">Read from your LiteLLM proxy. Override any model here; saving re-prices the whole history.</p>
+      <p className="muted small">Read from your LiteLLM proxy. Saving re-prices the whole history.</p>
       <PriceEditor report={report} onSaved={(prices) => setReport((r) => (r ? { ...r, prices } : r))} />
     </div>
   )

@@ -65,7 +65,7 @@ export default function DocumentsWidget({ window: win, live, onConfig }: WidgetP
         <span>{rows.length}</span>
       </div>
       {rows.length === 0 ? (
-        <div className="widget-empty">No documents in this scope. Drop files here to add them.</div>
+        <div className="widget-empty">No documents in this scope.</div>
       ) : (
         <div className="widget-scroll"><div className="widget-list">{rows.map((d) => <Row key={d.id} d={d} />)}</div></div>
       )}

@@ -1,5 +1,5 @@
 import { memo, useState } from 'react'
-import ReactMarkdown from 'react-markdown'
+import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 import { Copy, Check, AlertCircle, User, Sparkles, Brain, Share2, FileText, Activity } from 'lucide-react'
@@ -18,6 +18,27 @@ function CopyButton({ text }: { text: string }): JSX.Element {
     </button>
   )
 }
+
+/**
+ * Model and fetched content may contain links and images. A link must never navigate the app's own webContents
+ * (it carries the preload), and a remote <img> is an exfiltration channel, so it is downgraded to a link.
+ */
+function ExternalLink({ href, children, ...rest }: React.AnchorHTMLAttributes<HTMLAnchorElement>): JSX.Element {
+  const ok = !!href && /^https?:\/\//i.test(href)
+  return (
+    <a {...rest} href={ok ? href : undefined} title={href} rel="noreferrer noopener"
+      onClick={(e) => { e.preventDefault(); if (ok) window.open(href, '_blank', 'noopener') }}>{children}</a>
+  )
+}
+
+function SafeImage({ src, alt }: React.ImgHTMLAttributes<HTMLImageElement>): JSX.Element {
+  const s = typeof src === 'string' ? src : ''
+  if (s.startsWith('data:image/')) return <img src={s} alt={alt ?? ''} />
+  return <ExternalLink href={s}>{alt || s || 'image'}</ExternalLink>
+}
+
+/** Renderers every markdown surface that shows model, fetched or user content must use. */
+export const SAFE_MD: Components = { a: ExternalLink, img: SafeImage }
 
 function Pre({ streaming, ...props }: React.HTMLAttributes<HTMLPreElement> & { streaming?: boolean }): JSX.Element {
   const child = props.children as React.ReactElement<{ className?: string; children?: string }> | undefined
@@ -50,7 +71,7 @@ const MessageView = memo(function MessageView({ message, streaming }: { message:
           <div className="markdown">
             {message.tool_events && message.tool_events.length > 0 && <ToolEvents events={message.tool_events} conversationId={message.conversation_id} />}
             {message.content ? (
-              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={{ pre: (p) => <Pre {...p} streaming={streaming} /> }}>{message.content}</ReactMarkdown>
+              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={{ ...SAFE_MD, pre: (p) => <Pre {...p} streaming={streaming} /> }}>{message.content}</ReactMarkdown>
             ) : streaming && !message.tool_events?.some((t) => t.pending) ? (
               <span className="thinking"><span /><span /><span /></span>
             ) : null}

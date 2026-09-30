@@ -5,6 +5,7 @@ import TodoItem from './TodoItem'
 import ProjectChip from './ProjectChip'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { SAFE_MD } from './Message'
 
 function greeting(): string {
   const h = new Date().getHours()
@@ -58,7 +59,7 @@ export default function HomeView(): JSX.Element {
           <h1>{greeting()}.</h1>
           <div className="quick-ask">
             <MessageSquare size={16} />
-            <input placeholder="Ask anything, or type a todo and press ⌘↵…" value={quick} onChange={(e) => setQuick(e.target.value)}
+            <input placeholder="Ask anything…" value={quick} onChange={(e) => setQuick(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void quickAdd() }
                 else if (e.key === 'Enter' && quick.trim()) { e.preventDefault(); const q = quick; setQuick(''); newChat(null); void send(q) }
@@ -74,7 +75,7 @@ export default function HomeView(): JSX.Element {
               <button className="icon-btn sm" title="Regenerate" onClick={() => void refreshRecap(true)}><RefreshCw size={13} className={recapLoading ? 'spin' : ''} /></button>
               <button className="icon-btn sm" title="Hide" onClick={() => setRecapOpen(false)}>×</button>
             </header>
-            {recapLoading && !recap?.content ? <p className="muted">Writing your recap…</p> : <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{recap?.content ?? ''}</ReactMarkdown></div>}
+            {recapLoading && !recap?.content ? <p className="muted">Writing your recap…</p> : <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={SAFE_MD}>{recap?.content ?? ''}</ReactMarkdown></div>}
           </section>
         )}
         <div className="widgets">
@@ -82,7 +83,6 @@ export default function HomeView(): JSX.Element {
             <header><Calendar size={14} /> Calendar {google?.connected && <span className="muted small">next 48h</span>}</header>
             {!google?.connected ? (
               <div className="widget-empty">
-                <p>Connect Google to see your calendar, triage email, and let the assistant schedule things.</p>
                 <button className="primary-btn" onClick={() => setSettingsOpen(true)}>Connect Google</button>
               </div>
             ) : d?.errors.calendar ? <p className="msg-error">{d.errors.calendar}</p> : events.length === 0 ? <p className="muted">Nothing scheduled.</p> : (
@@ -100,12 +100,12 @@ export default function HomeView(): JSX.Element {
 
           <section className="widget">
             <header><CheckSquare size={14} /> Todos <span className="muted small">{d?.todo_stats.open ?? 0} open{d?.todo_stats.overdue ? ` · ${d.todo_stats.overdue} overdue` : ''}</span><button className="link small" onClick={() => setView('todos')}>all</button></header>
-            {(d?.todos.length ?? 0) === 0 ? <p className="muted">All clear. Add one above.</p> : d!.todos.slice(0, 8).map((t) => <TodoItem key={t.id} todo={t} compact />)}
+            {(d?.todos.length ?? 0) === 0 ? <p className="muted">All clear.</p> : d!.todos.slice(0, 8).map((t) => <TodoItem key={t.id} todo={t} compact />)}
           </section>
 
           <section className="widget">
             <header><Mail size={14} /> Inbox {google?.connected && <span className="muted small">unread, 3 days</span>}</header>
-            {!google?.connected ? <p className="muted">Connect Google to see unread mail here.</p> : d?.errors.gmail ? <p className="msg-error">{d.errors.gmail}</p> : (d?.gmail?.length ?? 0) === 0 ? <p className="muted">Inbox zero.</p> : (
+            {!google?.connected ? <p className="muted">Connect Google.</p> : d?.errors.gmail ? <p className="msg-error">{d.errors.gmail}</p> : (d?.gmail?.length ?? 0) === 0 ? <p className="muted">Inbox zero.</p> : (
               <ul className="mails">
                 {d!.gmail!.slice(0, 8).map((m) => (
                   <li key={m.id} onClick={() => { newChat(null); void send(`Summarize this email and suggest a reply if one is needed. Gmail message id: ${m.id} (subject: ${m.subject})`) }} title="Ask the assistant about this email">

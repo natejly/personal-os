@@ -5,6 +5,7 @@ import remarkGfm from 'remark-gfm'
 import type { Widget } from '@shared/types'
 import { api, getBase } from '../../lib/api'
 import type { WidgetDef, WidgetProps } from '../registry'
+import { SAFE_MD } from '../../components/Message'
 
 const time = (t: number): string => new Date(t * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
 
@@ -68,11 +69,11 @@ export default function DashboardWidget({ window: win, live, onTitle }: WidgetPr
           <iframe key={widget.refreshed_at ?? 0} title={widget.title} sandbox="allow-scripts" src={`${getBase()}/widgets/${widget.id}/render`}
             style={{ flex: 1, width: '100%', border: 0, background: 'transparent', display: 'block' }} />
         ) : (
-          <div className="widget-empty">{busy ? 'Generating…' : widget.output || 'No code generated yet. Refresh to build it.'}</div>
+          <div className="widget-empty">{busy ? 'Generating…' : widget.output || 'No code generated yet.'}</div>
         )
       ) : (
         <div className="widget-scroll markdown">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{widget.output || (busy ? 'Summarizing…' : 'Nothing yet.')}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm]} components={SAFE_MD}>{widget.output || (busy ? 'Summarizing…' : 'Nothing yet.')}</ReactMarkdown>
         </div>
       )}
     </div>

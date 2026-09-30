@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Document, GraphData, Memory, Message, ModelInfo, Settings, Project, RunConflict, SessionStatus, ToolInfo, Todo, GoogleStatus, TodayDashboard, Recap } from '@shared/types'
 import { api, chatStream, setBase, type Scope } from './lib/api'
-import { finishStatus, reduceStatus, settleApprovals } from './sessionStatus'
+import { finishStatus, mergeConversation, pickEvictions, reduceStatus, settleApprovals } from './sessionStatus'
 
 export type View = 'home' | 'chat' | 'todos' | 'calendar' | 'boards' | 'dashboards' | 'memory' | 'documents' | 'project'
 /** How the Memory panel lays out its two halves: the memory list and the knowledge graph. */
@@ -115,9 +115,9 @@ export interface State {
   refreshConversations: () => Promise<void>
   newChat: (projectId?: string | null) => void
   selectChat: (id: string | null) => Promise<void>
-  /** Load a conversation into `sessions` without focusing it: one canvas chat window per call. */
+  /** Load a conversation into `sessions` without focusing it. Concurrent calls share one fetch. */
   openSession: (conversationId: string) => Promise<void>
-  /** `openSession`, plus attach to a reply already in flight elsewhere so the window paints amber. */
+  /** `openSession`, plus attach to a reply already in flight elsewhere so the window paints amber. Idempotent. */
   attachSession: (conversationId: string) => Promise<void>
   /** Drop a session and abort whatever it was streaming. */
   closeSession: (conversationId: string) => void
@@ -127,7 +127,8 @@ export interface State {
   renameChat: (id: string, title: string) => Promise<void>
   setChatModel: (model: string, conversationId?: string) => Promise<void>
   setChatSettings: (patch: Partial<ConversationSettings>, conversationId?: string) => Promise<void>
-  send: (text: string, conversationId?: string) => Promise<void>
+  /** `false` when the text was refused, so the caller must keep it. Never rejects. */
+  send: (text: string, conversationId?: string) => Promise<boolean>
   regenerate: (conversationId?: string) => Promise<void>
   stop: (conversationId?: string) => Promise<void>
 
@@ -174,14 +175,18 @@ const runConflict = (e: unknown): RunConflict | null => {
   }
 }
 
-/** LRU by `touchedAt`, never evicting the focused session, a live run, or unread replies. */
+/**
+ * Conversations with a mounted chat surface, refcounted. Canvas mode never sets
+ * `focusedConversationId`, so without this the LRU would pick a victim by mount order alone and an
+ * on-screen window would be a legal one.
+ */
+const retained = new Map<string, number>()
+
+/** LRU by `touchedAt`, never evicting a retained, focused, streaming or unread session. */
 const evict = (sessions: Record<string, ChatSession>, keepId: string | null): Record<string, ChatSession> => {
-  const ids = Object.keys(sessions)
-  if (ids.length <= MAX_SESSIONS) return sessions
-  const victims = ids
-    .filter((id) => id !== keepId && !sessions[id].streaming && !sessions[id].unread)
-    .sort((a, b) => sessions[a].touchedAt - sessions[b].touchedAt)
-    .slice(0, ids.length - MAX_SESSIONS)
+  const keep = new Set(retained.keys())
+  if (keepId) keep.add(keepId)
+  const victims = pickEvictions(sessions, keep, MAX_SESSIONS)
   if (!victims.length) return sessions
   const out = { ...sessions }
   for (const id of victims) {
@@ -190,6 +195,18 @@ const evict = (sessions: Record<string, ChatSession>, keepId: string | null): Re
   }
   return out
 }
+
+/** One in-flight promise per key, so N concurrent callers share one fetch instead of racing. */
+const share = (map: Map<string, Promise<void>>, key: string, fn: () => Promise<void>): Promise<void> => {
+  const live = map.get(key)
+  if (live) return live
+  const p = fn().finally(() => { if (map.get(key) === p) map.delete(key) })
+  map.set(key, p)
+  return p
+}
+
+const loads = new Map<string, Promise<void>>()
+const attaches = new Map<string, Promise<void>>()
 
 /** Every conversation mutation a stream event makes, as one new session. No side effects. */
 const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean): ChatSession => {
@@ -248,7 +265,12 @@ export const useStore = create<State>((set, get) => {
   const putSession = (conversation: Conversation): void =>
     set((st) => {
       const cur = st.sessions[conversation.id]
-      const sessions = { ...st.sessions, [conversation.id]: cur ? { ...cur, conversation } : newSession(conversation) }
+      // A fetch that lands among the deltas must not clobber what the stream already applied: the
+      // in-flight assistant message is not persisted yet, so an overwrite blanks the visible reply.
+      const next = cur
+        ? { ...cur, conversation: mergeConversation(cur.conversation, conversation, !!cur.streaming), touchedAt: Date.now() }
+        : newSession(conversation)
+      const sessions = { ...st.sessions, [conversation.id]: next }
       return { sessions: evict(sessions, st.focusedConversationId) }
     })
   const patchConversation = (convId: string, fn: (c: Conversation) => Conversation): void =>
@@ -269,6 +291,12 @@ export const useStore = create<State>((set, get) => {
 
   /** Consume one run's events into a session. `attached` means the run was started by someone else. */
   const watchRun = async (convId: string, run: ChatRunStarted, from: { messageId: string | null; approvals: number; attached: boolean }): Promise<void> => {
+    // One subscription per conversation. A second subscription to the same run would apply every
+    // delta twice, since `applyEvent` appends. A different run supersedes this one, so its viewer is
+    // detached first: the old loop's `finally` is abort-identity guarded and will not undo us.
+    const prev = get().sessions[convId]?.streaming
+    if (prev?.runId === run.run_id) return
+    prev?.abort.abort()
     const abort = new AbortController()
     const attached = from.attached
     clearHold(convId)
@@ -314,9 +342,12 @@ export const useStore = create<State>((set, get) => {
     }
   }
 
-  const runStream = async (convId: string, body: { content?: string; model?: string }): Promise<void> => {
+  /**
+   * `false` means the backend never accepted `body`, so the caller still owns the text it sent.
+   * Resolves on that verdict, not at the end of the run: a composer is holding a draft on it.
+   */
+  const runStream = async (convId: string, body: { content?: string; model?: string }): Promise<boolean> => {
     let run: ChatRunStarted
-    let attached = false
     try {
       run = await api.chat(convId, body)
     } catch (e) {
@@ -324,13 +355,17 @@ export const useStore = create<State>((set, get) => {
       if (!conflict) {
         get().toast((e as Error).message, 'error')
         patchSession(convId, (s) => ({ ...s, status: 'error', finishedAt: Date.now() }))
-        return
+        return false
       }
-      // Another window already started this reply: watch it from its tail rather than erroring.
-      run = { run_id: conflict.run_id, seq: conflict.seq }
-      attached = true
+      // Another window is already mid-reply, so this message was dropped, not queued. Adopt that run
+      // from its tail so the window paints, and tell the caller to hand the text back to the user.
+      get().toast(conflict.message || 'That chat is already replying — your message was not sent.', 'error')
+      void watchRun(convId, { run_id: conflict.run_id, seq: conflict.seq }, { messageId: null, approvals: 0, attached: true })
+      return false
     }
-    await watchRun(convId, run, { messageId: null, approvals: 0, attached })
+    // Synchronous up to its first await, so `streaming` is set before this returns.
+    void watchRun(convId, run, { messageId: null, approvals: 0, attached: false })
+    return true
   }
 
   return {
@@ -492,21 +527,22 @@ export const useStore = create<State>((set, get) => {
       putSession(c)
       set({ draftProjectId: c.project_id })
     },
-    openSession: async (conversationId) => {
-      if (get().sessions[conversationId]?.streaming) return
-      putSession(await api.conversations.get(conversationId))
-    },
-    attachSession: async (conversationId) => {
-      if (get().sessions[conversationId]?.streaming) return
-      // A run started before this window existed: `GET /runs` is the only way it can know.
-      const runs = await api.runs().catch(() => null)
-      const run = runs?.find((r) => r.conversation_id === conversationId && r.live)
-      await get().openSession(conversationId)
-      const s = get().sessions[conversationId]
-      if (!run || !s || s.streaming) return
-      // From the run's own seq, so the tail streams live and no past delta is applied twice.
-      await watchRun(conversationId, { run_id: run.run_id, seq: run.seq }, { messageId: run.message_id, approvals: countApprovals(s.conversation), attached: true })
-    },
+    openSession: async (conversationId) =>
+      share(loads, conversationId, async () => {
+        putSession(await api.conversations.get(conversationId))
+      }),
+    attachSession: async (conversationId) =>
+      share(attaches, conversationId, async () => {
+        // A run started before this window existed: `GET /runs` is the only way it can know.
+        const runs = await api.runs().catch(() => null)
+        const run = runs?.find((r) => r.conversation_id === conversationId && r.live)
+        await get().openSession(conversationId)
+        const s = get().sessions[conversationId]
+        if (!run || !s) return
+        // From the run's own seq, so the tail streams live and no past delta is applied twice. Not
+        // awaited: `watchRun` only resolves when the run ends, and this promise gates the dedupe.
+        void watchRun(conversationId, { run_id: run.run_id, seq: run.seq }, { messageId: run.message_id, approvals: countApprovals(s.conversation), attached: true })
+      }),
     closeSession: (conversationId) => {
       clearHold(conversationId)
       get().sessions[conversationId]?.streaming?.abort.abort()
@@ -549,19 +585,31 @@ export const useStore = create<State>((set, get) => {
     },
 
     send: async (text, conversationId) => {
-      if (!text.trim()) return
+      if (!text.trim()) return false
       const id = conversationId ?? get().focusedConversationId
       if (id) {
-        if (get().sessions[id]?.streaming) return
+        // Mid-reply sends are refused, not queued: by the time the run ends the answer may have made
+        // the message moot, so the user keeps their text and decides. See Composer.
+        if (get().sessions[id]?.streaming) {
+          get().toast('That chat is still replying — your message was not sent.', 'error')
+          return false
+        }
         if (!get().sessions[id]) await get().openSession(id)
         return runStream(id, { content: text })
       }
-      const c = await api.conversations.create(get().draftProjectId, get().settings.defaultModel)
+      let c: Conversation
+      try {
+        c = await api.conversations.create(get().draftProjectId, get().settings.defaultModel)
+      } catch (e) {
+        // `send` never rejects: a caller holding the user's draft needs a verdict, not an exception.
+        get().toast((e as Error).message, 'error')
+        return false
+      }
       c.messages = []
       putSession(c)
       set({ focusedConversationId: c.id, view: 'chat' })
       void get().refreshProjects()
-      await runStream(c.id, { content: text })
+      return runStream(c.id, { content: text })
     },
     regenerate: async (conversationId) => {
       const id = conversationId ?? get().focusedConversationId
@@ -700,6 +748,22 @@ export const useStore = create<State>((set, get) => {
     }
   }
 })
+
+/**
+ * Pin a session for as long as a surface is showing it, and release it on unmount. A retained
+ * session is never an LRU victim, which is the only protection a canvas window has: canvas mode
+ * does not focus conversations, and a widget's loader effect only re-runs when its `ref_id` changes.
+ */
+export const retainSession = (conversationId: string): (() => void) => {
+  retained.set(conversationId, (retained.get(conversationId) ?? 0) + 1)
+  return () => {
+    const n = (retained.get(conversationId) ?? 0) - 1
+    if (n > 0) return void retained.set(conversationId, n)
+    retained.delete(conversationId)
+    // A window that was open until now is the most recently touched, not the stalest.
+    useStore.setState((s) => (s.sessions[conversationId] ? { sessions: { ...s.sessions, [conversationId]: { ...s.sessions[conversationId], touchedAt: Date.now() } } } : {}))
+  }
+}
 
 export const useProject = (id: string | null | undefined): Project | undefined =>
   useStore((s) => (id ? s.projects.find((p) => p.id === id) : undefined))

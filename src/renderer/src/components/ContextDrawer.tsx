@@ -140,16 +140,16 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
       </div>
 
       {tab === 'last' ? (
-        lastCtx ? <ContextUsedView ctx={lastCtx} /> : <p className="muted ctx-empty">Send a message to see what context was injected.</p>
+        lastCtx ? <ContextUsedView ctx={lastCtx} /> : <p className="muted ctx-empty">Send a message to see its context.</p>
       ) : tab === 'trace' ? (
         traceMsg ? (
           <TraceView spans={traceMsg.trace ?? []} live={streamingMessageId === traceMsg.id} model={traceMsg.model} />
         ) : (
-          <p className="muted ctx-empty">Send a message to see its execution trace: context assembly, each model call, tool calls and auto-learn, with timings and token counts.</p>
+          <p className="muted ctx-empty">Send a message to see its trace.</p>
         )
       ) : (
         <div className="ctx-preview">
-          <input placeholder="Type a draft message to preview what would be retrieved…" value={query} onChange={(e) => setQuery(e.target.value)} />
+          <input placeholder="Draft a message…" value={query} onChange={(e) => setQuery(e.target.value)} />
           {preview && <ContextUsedView ctx={preview} />}
         </div>
       )}

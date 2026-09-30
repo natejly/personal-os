@@ -174,7 +174,7 @@ export default function BoardsView(): JSX.Element {
         </div>
       </header>
       {!board ? (
-        <div className="page-body"><p className="empty-hint big">No boards yet. Create one, or ask the assistant: “make a board for my apartment move”.</p></div>
+        <div className="page-body"><p className="empty-hint big">No boards yet.</p></div>
       ) : (
         <div className="kanban">
           {board.columns.map((col) => <Column key={col.id} col={col} cards={byCol[col.id] ?? []} board={board} onChange={() => void loadBoard()} onOpen={setOpen} />)}

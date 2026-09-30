@@ -73,6 +73,7 @@ export default function CalendarWeek({ days, events, todos, canCreate = false, o
         const dk = dayKey(d)
         return (
           <div key={'col' + dk} className={`cal-col ${dk === todayKey ? 'today' : ''}`} style={{ height: 24 * HOUR_PX }}
+            title={canCreate ? 'Double-click to add an event' : undefined}
             onDoubleClick={(e) => { if (!canCreate) return; const rect = e.currentTarget.getBoundingClientRect(); setCreating({ day: dk, hour: Math.floor((e.clientY - rect.top) / HOUR_PX) }) }}>
             {Array.from({ length: 24 }, (_, h) => <div key={h} className="cal-line" style={{ top: h * HOUR_PX }} />)}
             {dk === todayKey && <div className="cal-now" style={{ top: nowTop }} />}

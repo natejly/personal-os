@@ -52,7 +52,7 @@ export default function SettingsModal(): JSX.Element {
 
         <section>
           <h3>Provider</h3>
-          <p className="muted">Personal OS talks to a <a href="https://docs.litellm.ai/" target="_blank" rel="noreferrer">LiteLLM</a> proxy, so any model LiteLLM can route to works here. Point it at your proxy and paste a virtual key.</p>
+          <p className="muted">Any model your <a href="https://docs.litellm.ai/" target="_blank" rel="noreferrer">LiteLLM</a> proxy can route to works here.</p>
           <label><span>LiteLLM base URL</span><input value={draft.baseUrl} onChange={(e) => patch({ baseUrl: e.target.value })} placeholder="http://localhost:4000" spellCheck={false} /></label>
           <label><span>API key</span>
             <div className="input-row">
@@ -73,10 +73,10 @@ export default function SettingsModal(): JSX.Element {
         <section>
           <h3>Memory &amp; learning</h3>
           <label className="toggle-row plain">
-            <span className="toggle-text"><b>Auto-learn</b><small>After each reply, extract memories and knowledge-graph relations. Can be overridden per chat.</small></span>
+            <span className="toggle-text"><b>Auto-learn</b><small>After each reply, extract memories and knowledge-graph relations.</small></span>
             <input type="checkbox" checked={draft.autoLearn} onChange={(e) => patch({ autoLearn: e.target.checked })} /><span className="switch" />
           </label>
-          <label><span>Extraction model <small className="muted">(blank = same as chat model; a cheap fast model works well)</small></span>
+          <label><span>Extraction model <small className="muted">(blank = same as chat model)</small></span>
             <input list="model-options" value={draft.extractionModel} onChange={(e) => patch({ extractionModel: e.target.value })} placeholder="e.g. gpt-4o-mini" spellCheck={false} />
           </label>
         </section>
@@ -89,7 +89,7 @@ export default function SettingsModal(): JSX.Element {
 
         <section>
           <h3>Tools</h3>
-          <p className="muted"><b>on</b> runs automatically, <b>ask</b> pauses the reply for your approval, <b>off</b> hides the tool. Anything that acts outside the app (email, calendar, Google Tasks) asks by default. Projects and chats can override.</p>
+          <p className="muted"><b>on</b> runs automatically, <b>ask</b> pauses the reply for your approval, <b>off</b> hides the tool. Anything that acts outside the app (email, calendar, Google Tasks) asks by default.</p>
           <ToolGlobalToggles value={draft.tools ?? {}} onChange={(tools) => patch({ tools })} />
           <label><span>Max tool rounds per reply</span><input type="number" min={0} max={30} value={draft.maxToolRounds} onChange={(e) => patch({ maxToolRounds: Number(e.target.value) })} /></label>
           <label><span>Brave Search API key <small className="muted">(optional; without a key web search uses DuckDuckGo)</small></span><input type="password" value={draft.braveApiKey} onChange={(e) => patch({ braveApiKey: e.target.value })} placeholder="BSA…" spellCheck={false} /></label>

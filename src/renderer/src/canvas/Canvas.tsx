@@ -403,7 +403,7 @@ export default function Canvas(): JSX.Element {
         {loaded && !shown.length && (
           <div className="canvas-empty">
             <strong>Empty space</strong>
-            <span>Drag a chat, todo or nav item from the sidebar to open a window.</span>
+            <span>Drag anything from the sidebar.</span>
           </div>
         )}
         <Dock />

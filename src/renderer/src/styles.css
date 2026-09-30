@@ -355,7 +355,6 @@ kbd {
 .send:hover:not(:disabled) { background: var(--accent-hover); }
 .send:disabled { opacity: 0.35; cursor: default; }
 .send.stop { background: var(--text); color: var(--bg); }
-.composer-hint { text-align: center; font-size: 11px; color: var(--text-faint); margin: 8px 0 0; }
 
 /* ---------- Buttons ---------- */
 .icon-btn {

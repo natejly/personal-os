@@ -59,7 +59,7 @@ export default function CalendarView(): JSX.Element {
       </header>
 
       {!google?.connected && (
-        <div className="notice-bar">Showing todos only. <button className="link" onClick={() => setSettingsOpen(true)}>Connect Google</button> to see and create calendar events.</div>
+        <div className="notice-bar">Showing todos only. <button className="link" onClick={() => setSettingsOpen(true)}>Connect Google</button></div>
       )}
       {error && <div className="notice-bar error">{error}</div>}
 
@@ -67,7 +67,6 @@ export default function CalendarView(): JSX.Element {
         <CalendarWeek days={days} events={events} todos={todos} canCreate={!!google?.connected} onOpen={setOpen} onCreate={create} />
       </div>
       {loading && <div className="cal-loading">Loading…</div>}
-      {google?.connected && <p className="composer-hint">Double-click a time slot to add an event.</p>}
 
       {open && (
         <div className="modal-backdrop" onMouseDown={() => setOpen(null)}>

@@ -79,15 +79,24 @@ export const setViewportEl = (el: HTMLElement | null): void => {
   viewportEl = el
 }
 
+let liveView: { zoom: number; pan_x: number; pan_y: number } | null = null
+/**
+ * Canvas.tsx drives a pan or a zoom straight to the plane node and only commits on settle, so for the
+ * length of the gesture this — not the store row — is what `viewport()` reports. `null` releases it.
+ */
+export const setLiveViewport = (v: { zoom: number; pan_x: number; pan_y: number } | null): void => {
+  liveView = v
+}
+
 /** The active canvas as the screen sees it. Falls back to the whole window before Canvas mounts. */
 export const viewport = (): Viewport => {
   const s = useCanvas.getState()
   const c = s.activeCanvasId ? s.canvases[s.activeCanvasId] : undefined
   const r = viewportEl?.getBoundingClientRect()
   return {
-    zoom: c?.zoom ?? 1,
-    panX: c?.pan_x ?? 0,
-    panY: c?.pan_y ?? 0,
+    zoom: liveView?.zoom ?? c?.zoom ?? 1,
+    panX: liveView?.pan_x ?? c?.pan_x ?? 0,
+    panY: liveView?.pan_y ?? c?.pan_y ?? 0,
     width: r?.width ?? window.innerWidth,
     height: r?.height ?? window.innerHeight
   }
@@ -207,6 +216,8 @@ export const useCanvas = create<CanvasState>((set, get) => {
   const listen = (): void => {
     if (listening) return
     listening = true
+    // Last chance for a move made inside the 400 ms debounce; the PUT is fire-and-forget by then.
+    window.addEventListener('beforeunload', () => void get().flushLayout())
     window.os.onMenu(onMenu)
     window.os.bus.on(onBus)
     window.os.popout.onChanged((c) => {
@@ -268,6 +279,8 @@ export const useCanvas = create<CanvasState>((set, get) => {
     },
     setActiveCanvas: (canvasId) => {
       if (!get().canvases[canvasId]) return
+      // Synchronous up to its first await, so the rows are grouped while findWin still resolves them.
+      void get().flushLayout()
       transition()
       set({ activeCanvasId: canvasId, focusedWindowId: null, overview: false })
     },
@@ -369,12 +382,16 @@ export const useCanvas = create<CanvasState>((set, get) => {
       if (state === 'maximized') {
         const r = zoneRect('top', viewport(), { w: w.w, h: w.h })
         const box = { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.w), h: Math.round(r.h) }
-        const restore_bounds = { x: w.x, y: w.y, w: w.w, h: w.h }
+        // Never overwrite bounds still owed back: maximizing a minimized-while-maximized window
+        // would otherwise persist the full-viewport box as its "original" geometry.
+        const restore_bounds = w.restore_bounds ?? { x: w.x, y: w.y, w: w.w, h: w.h }
         s.patchWindow(windowId, { state, restore_bounds, ...box })
         await api.windows.update(windowId, { state, restore_bounds, ...box }).catch(fail)
         return
       }
-      if (w.state === 'maximized' && state === 'normal' && w.restore_bounds) {
+      // Any return to 'normal' pays the bounds back, not just maximized -> normal: a minimize in
+      // between leaves the window full-viewport-sized and stranded otherwise.
+      if (state === 'normal' && w.restore_bounds) {
         const r = w.restore_bounds
         s.patchWindow(windowId, { state, x: r.x, y: r.y, w: r.w, h: r.h, restore_bounds: null })
         await api.windows.update(windowId, { state, x: r.x, y: r.y, w: r.w, h: r.h, clear_restore_bounds: true }).catch(fail)
@@ -425,18 +442,30 @@ export const useCanvas = create<CanvasState>((set, get) => {
         layoutTimer = null
       }
       if (!dirty.size) return
-      const ids = [...dirty]
-      dirty.clear()
       const s = get()
       const groups = new Map<string, WindowLayout[]>()
-      for (const id of ids) {
+      for (const id of [...dirty]) {
         const w = findWin(s, id)
-        if (!w) continue
+        // Gone from every canvas: nothing left to write, so stop carrying it.
+        if (!w) {
+          dirty.delete(id)
+          continue
+        }
         const rows = groups.get(w.canvas_id) ?? []
         rows.push({ id: w.id, x: w.x, y: w.y, w: w.w, h: w.h, z: w.z, state: w.state })
         groups.set(w.canvas_id, rows)
       }
-      await Promise.all([...groups].map(([cid, rows]) => api.canvases.layout(cid, rows).catch(fail)))
+      // Clear per group, after it lands: a failed PUT must leave its ids dirty for the next flush.
+      await Promise.all(
+        [...groups].map(([cid, rows]) =>
+          api.canvases
+            .layout(cid, rows)
+            .then(() => {
+              for (const r of rows) dirty.delete(r.id)
+            })
+            .catch(fail)
+        )
+      )
     },
     tidyUp: () => {
       const s = get()

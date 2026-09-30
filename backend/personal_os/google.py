@@ -198,7 +198,7 @@ class Google:
         )
         if tok.get("expiry"):
             try:
-                creds.expiry = dt.datetime.fromisoformat(tok["expiry"]).replace(tzinfo=None)
+                creds.expiry = _parse_iso(tok["expiry"]).replace(tzinfo=None)
             except ValueError:
                 pass
         if not creds.valid:
@@ -222,7 +222,7 @@ class Google:
 
     # ---------- Calendar ----------
     def calendar_events(self, days: int = 2, calendar_id: str = "primary", max_results: int = 30, start: str | None = None) -> list[dict[str, Any]]:
-        now = dt.datetime.fromisoformat(start) if start else dt.datetime.now(dt.timezone.utc)
+        now = _parse_iso(start) if start else dt.datetime.now(dt.timezone.utc)
         if now.tzinfo is None:
             now = now.replace(tzinfo=dt.timezone.utc)
         end = now + dt.timedelta(days=max(1, min(int(days), 60)))
@@ -245,7 +245,7 @@ class Google:
     def calendar_create(self, summary: str, start: str, end: str | None = None, description: str = "", location: str = "", attendees: list[str] | None = None, calendar_id: str = "primary") -> dict[str, Any]:
         all_day = len(start) == 10
         if not end:
-            end = start if all_day else (dt.datetime.fromisoformat(start) + dt.timedelta(hours=1)).isoformat()
+            end = start if all_day else (_parse_iso(start) + dt.timedelta(hours=1)).isoformat()
         body: dict[str, Any] = {"summary": summary, "description": description, "location": location}
         if all_day:
             body["start"], body["end"] = {"date": start}, {"date": end}
@@ -343,6 +343,18 @@ def _token_error_hint(e: Exception) -> str:
     if "access_denied" in msg:
         return "Sign-in was cancelled, or this Google account is not a test user on the OAuth consent screen."
     return f"Google rejected the sign-in: {msg}"
+
+
+def _parse_iso(value: str) -> dt.datetime:
+    """Parse RFC3339 / JS Date.toISOString() values.
+
+    Python 3.10's fromisoformat rejects a trailing Z (the form the calendar UI
+    sends as `start`), which then surfaced as "Google API error: Invalid isoformat string".
+    """
+    s = value.strip()
+    if s.endswith(("Z", "z")):
+        s = s[:-1] + "+00:00"
+    return dt.datetime.fromisoformat(s)
 
 
 def _local_tz() -> str:

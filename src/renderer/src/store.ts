@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ActivityConfig, ActivityContextFile, ActivityEvent, ActivitySignal, ActivityStatus, ActivitySummary, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocRevision, Document, FullDoc, GraphData, Memory, Message, ModelInfo, Settings, Project, RunConflict, SessionStatus, ToolInfo, Todo, GoogleStatus, TodayDashboard, Recap } from '@shared/types'
+import type { ActivityConfig, ActivityContextFile, ActivityEvent, ActivitySignal, ActivityStatus, ActivitySummary, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocRevision, Document, FullDoc, GraphData, Memory, Message, ModelInfo, Settings, Project, RunConflict, SessionStatus, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap } from '@shared/types'
 import { api, chatStream, setBase, type Scope } from './lib/api'
 import { finishStatus, mergeConversation, pickEvictions, reduceStatus, settleApprovals } from './sessionStatus'
 
@@ -51,6 +51,7 @@ export interface State {
   modelsError: string | null
   tools: ToolInfo[]
   google: GoogleStatus | null
+  tasksSync: TasksSyncStatus | null
   dashboard: TodayDashboard | null
   todos: Todo[]
   recap: Recap | null
@@ -182,6 +183,9 @@ export interface State {
   refreshGoogle: () => Promise<void>
   connectGoogle: () => Promise<void>
   disconnectGoogle: () => Promise<void>
+  refreshTasksSync: () => Promise<void>
+  setTasksSync: (patch: { enabled?: boolean; tasklist?: string; intervalMinutes?: number }) => Promise<void>
+  runTasksSync: () => Promise<void>
   refreshTodos: (scope?: Scope, includeDone?: boolean) => Promise<void>
   addTodo: (t: { title: string; project_id?: string | null; due?: string | null; priority?: number; notes?: string }) => Promise<void>
   updateTodo: (id: string, patch: Parameters<typeof api.todos.update>[1]) => Promise<void>
@@ -473,6 +477,7 @@ export const useStore = create<State>((set, get) => {
     modelsError: null,
     tools: [],
     google: null,
+    tasksSync: null,
     dashboard: null,
     todos: [],
     recap: null,
@@ -1031,7 +1036,31 @@ export const useStore = create<State>((set, get) => {
       try {
         set({ google: await api.google.status() })
         void api.tools().then((t) => set({ tools: t.tools })).catch(() => undefined)
+        void get().refreshTasksSync()
       } catch { /* ignore */ }
+    },
+    refreshTasksSync: async () => {
+      try {
+        set({ tasksSync: await api.google.tasksSync() })
+      } catch { /* ignore */ }
+    },
+    setTasksSync: async (patch) => {
+      try {
+        set({ tasksSync: await api.google.tasksSyncConfig(patch) })
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    runTasksSync: async () => {
+      set((s) => ({ tasksSync: s.tasksSync && { ...s.tasksSync, syncing: true } }))
+      try {
+        set({ tasksSync: await api.google.tasksSyncRun() })
+        await get().refreshTodos()
+        void get().refreshDashboard()
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+        void get().refreshTasksSync()
+      }
     },
     connectGoogle: async () => {
       try {

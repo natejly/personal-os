@@ -242,6 +242,21 @@ export interface GoogleTask {
   status: string | null
 }
 
+export interface GoogleTaskList {
+  id: string
+  title: string
+}
+
+/** Two-way todos <-> Google Tasks sync (`/integrations/google/tasks-sync`). */
+export interface TasksSyncStatus {
+  config: { enabled: boolean; tasklist: string; intervalMinutes: number }
+  /** Unix seconds of the last successful pass. */
+  last_sync: number | null
+  last_error: string | null
+  last_result: Record<string, number> | null
+  syncing: boolean
+}
+
 export interface DriveFile {
   id: string
   name: string

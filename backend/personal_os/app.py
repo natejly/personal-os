@@ -37,6 +37,7 @@ from .docs import Docs, unified_diff
 from .google import Google, GoogleNotConnected, json_safe
 from .microvm import Sandboxes
 from .notes import Notes
+from .gtasks import TasksSync
 from .runs import Run, RunBus
 from .todos import Todos
 from .tools import Toolbox, summarize_result
@@ -213,6 +214,9 @@ todos = Todos(db)
 boards = Boards(db)
 dashboards = Dashboards(db)
 google = Google(settings, db.set_settings)
+tasks_sync = TasksSync(todos, google, settings, db.set_settings)
+# Any todo write (routes here or assistant tools) nudges the sync loop.
+todos.on_change = tasks_sync.poke
 usage = Usage(db)
 pricing = Pricing()
 
@@ -271,7 +275,7 @@ def health() -> dict[str, Any]:
 PRIVATE_SETTINGS = {"googleToken", "googleAuthPending"}
 # Readable through /settings, but only writable through its own route: a plain PUT would replace the
 # whole nested dict and silently drop the signal switches and exclusion lists.
-SETTINGS_READ_ONLY = {"activity"}
+SETTINGS_READ_ONLY = {"activity", "googleTasksSync"}
 
 
 @app.get("/settings")
@@ -1322,6 +1326,54 @@ def google_tasks(show_completed: bool = False) -> Any:
     return _gcall(google.tasks_list, "@default", show_completed)
 
 
+# ---------------- Google Tasks <-> todos sync ----------------
+@app.get("/integrations/google/tasklists")
+def google_tasklists() -> Any:
+    return _gcall(google.tasks_lists)
+
+
+class TasksSyncIn(BaseModel):
+    enabled: bool | None = None
+    tasklist: str | None = None
+    intervalMinutes: int | None = None
+
+
+@app.get("/integrations/google/tasks-sync")
+def google_tasks_sync_status() -> dict[str, Any]:
+    return tasks_sync.status()
+
+
+@app.put("/integrations/google/tasks-sync")
+def google_tasks_sync_config(body: TasksSyncIn) -> dict[str, Any]:
+    tasks_sync.set_config(body.model_dump(exclude_none=True))
+    return tasks_sync.status()
+
+
+@app.post("/integrations/google/tasks-sync/run")
+async def google_tasks_sync_run() -> dict[str, Any]:
+    try:
+        await asyncio.to_thread(tasks_sync.sync_once)
+    except GoogleNotConnected as e:
+        raise HTTPException(409, str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"Google Tasks sync failed: {e}") from e
+    return tasks_sync.status()
+
+
+@app.on_event("startup")
+async def _tasks_sync_startup() -> None:
+    app.state.gtasks_task = asyncio.create_task(tasks_sync.loop())
+
+
+@app.on_event("shutdown")
+async def _tasks_sync_shutdown() -> None:
+    task = getattr(app.state, "gtasks_task", None)
+    if task:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
+
+
 @app.get("/integrations/google/drive")
 def google_drive(q: str = "", max_results: int = 20) -> Any:
     return _gcall(google.drive_files, q, max_results)
@@ -1827,6 +1879,8 @@ class WindowIn(BaseModel):
 
 class WindowPatch(BaseModel):
     title: str | None = None
+    # Re-point the window at another referent (a chat window switching conversations).
+    ref_id: str | None = None
     config: dict[str, Any] | None = None
     state: str | None = None
     pinned: bool | None = None

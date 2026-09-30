@@ -855,6 +855,10 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .integration-head > div { flex: 1; display: flex; flex-direction: column; gap: 2px; }
 .integration-head small { color: var(--text-muted); display: inline-flex; align-items: center; gap: 4px; }
 .integration-warn { display: flex; align-items: center; gap: 6px; margin: 10px 0 0; font-size: 12px; color: var(--danger); }
+.tasks-sync { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+.tasks-sync-row { display: flex; align-items: center; gap: 8px; }
+.tasks-sync-row select { max-width: 180px; }
+.tasks-sync-row small { margin-left: auto; }
 .g-logo { width: 32px; height: 32px; border-radius: 8px; background: #fff; color: #4285f4; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; font-size: 18px; }
 .g-logo-sm { width: 18px; height: 18px; border-radius: 4px; font-size: 12px; margin-right: 2px; }
 .setup { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 8px; }

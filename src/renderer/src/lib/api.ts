@@ -1,5 +1,5 @@
 import type {
-  ChatEvent, ToolInfo, Todo, GoogleStatus, TodayDashboard, CalendarEvent, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, DriveFile, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Recap, Conversation, ConversationSettings, ContextUsed, Document, GraphData, GraphEdge, GraphNode, Message,
+  ChatEvent, ToolInfo, Todo, GoogleStatus, TodayDashboard, CalendarEvent, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, DriveFile, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Recap, Conversation, ConversationSettings, ContextUsed, Document, GraphData, GraphEdge, GraphNode, Message,
   Memory, ModelInfo, ModelPrice, Settings, Project, UsageReport, ChatRunStarted, RunInfo,
   Canvas, CanvasWindow, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
   Doc, FullDoc, DocRevision,
@@ -121,6 +121,11 @@ export const api = {
       req<{ id: string; link: string; summary: string }>('/integrations/google/calendar', { method: 'POST', body: json(e) }),
     gmail: (q = 'is:unread in:inbox newer_than:14d', maxResults = 12) => req<GmailMessage[]>(`/integrations/google/gmail?q=${encodeURIComponent(q)}&max_results=${maxResults}`),
     tasks: (showCompleted = false) => req<GoogleTask[]>(`/integrations/google/tasks?show_completed=${showCompleted}`),
+    tasklists: () => req<GoogleTaskList[]>('/integrations/google/tasklists'),
+    tasksSync: () => req<TasksSyncStatus>('/integrations/google/tasks-sync'),
+    tasksSyncConfig: (patch: { enabled?: boolean; tasklist?: string; intervalMinutes?: number }) =>
+      req<TasksSyncStatus>('/integrations/google/tasks-sync', { method: 'PUT', body: json(patch) }),
+    tasksSyncRun: () => req<TasksSyncStatus>('/integrations/google/tasks-sync/run', { method: 'POST' }),
     drive: (q = '', maxResults = 20) => req<DriveFile[]>(`/integrations/google/drive?q=${encodeURIComponent(q)}&max_results=${maxResults}`),
     gmailGet: (id: string) => req<GmailFullMessage>(`/integrations/google/gmail/${id}`),
     gmailLabels: () => req<GmailLabel[]>('/integrations/google/gmail/labels'),
@@ -230,7 +235,7 @@ export const api = {
   windows: {
     get: (id: string) => req<CanvasWindow>(`/windows/${id}`),
     /** `config` merges server-side, so one key is safe to send on its own. */
-    update: (id: string, patch: { title?: string; config?: Record<string, unknown>; state?: WindowState; pinned?: boolean; x?: number; y?: number; w?: number; h?: number; z?: number; canvas_id?: string; restore_bounds?: Rect; popout_bounds?: PopoutBounds; clear_restore_bounds?: boolean; clear_popout_bounds?: boolean }) =>
+    update: (id: string, patch: { title?: string; ref_id?: string; config?: Record<string, unknown>; state?: WindowState; pinned?: boolean; x?: number; y?: number; w?: number; h?: number; z?: number; canvas_id?: string; restore_bounds?: Rect; popout_bounds?: PopoutBounds; clear_restore_bounds?: boolean; clear_popout_bounds?: boolean }) =>
       req<CanvasWindow>(`/windows/${id}`, { method: 'PUT', body: json(patch) }),
     raise: (id: string) => req<CanvasWindow>(`/windows/${id}/raise`, { method: 'POST' }),
     delete: (id: string) => req(`/windows/${id}`, { method: 'DELETE' })

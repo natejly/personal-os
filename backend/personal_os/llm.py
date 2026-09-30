@@ -68,6 +68,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Activity monitor. Shape and defaults live in activity.DEFAULT_CONFIG; patched through
     # /activity/config rather than /settings so the merge is a deep one.
     "activity": {"enabled": False},
+    # Google Tasks <-> todos sync. Shape and defaults live in gtasks.DEFAULT_CONFIG; patched
+    # through /integrations/google/tasks-sync rather than /settings for the same reason.
+    "googleTasksSync": {"enabled": False},
 }
 
 

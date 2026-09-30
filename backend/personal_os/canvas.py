@@ -176,7 +176,7 @@ class Canvases:
 
     def update_window(self, id: str, patch: dict[str, Any]) -> dict[str, Any] | None:
         """`config` merges into the stored object; a `canvas_id` move re-bases z on top of the destination."""
-        fields = {k: v for k, v in patch.items() if k in {"title", "state", "pinned", "x", "y", "w", "h", "z", "canvas_id", "restore_bounds", "popout_bounds"}}
+        fields = {k: v for k, v in patch.items() if k in {"title", "ref_id", "state", "pinned", "x", "y", "w", "h", "z", "canvas_id", "restore_bounds", "popout_bounds"}}
         with self.db.tx() as c:
             row = c.execute("SELECT canvas_id, config FROM canvas_windows WHERE id=?", (id,)).fetchone()
             if not row:

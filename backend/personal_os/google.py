@@ -1,4 +1,4 @@
-"""Google Workspace integration: OAuth (desktop loopback flow), Calendar, Gmail, Tasks.
+"""Google Workspace integration: OAuth (desktop loopback flow), Calendar, Gmail, Tasks, Docs, Sheets.
 
 The user just clicks "Sign in with Google". The OAuth client the app signs in with comes
 from GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET in the environment (.env), so it is set up once
@@ -41,6 +41,10 @@ SCOPES = [
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/tasks",
+    # Docs/Sheets content; drive.readonly only to find files by name (no Drive write access).
+    "https://www.googleapis.com/auth/documents",
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive.readonly",
 ]
 
 
@@ -327,6 +331,80 @@ class Google:
         t = self._svc("tasks", "v1").tasks().patch(tasklist=tasklist, task=task_id, body={"status": "completed"}).execute()
         return {"id": t["id"], "status": t.get("status")}
 
+    # ---------- Docs / Sheets ----------
+    _MIME = {"doc": "application/vnd.google-apps.document", "sheet": "application/vnd.google-apps.spreadsheet"}
+
+    def drive_find(self, query: str = "", kind: str | None = None, max_results: int = 20) -> list[dict[str, Any]]:
+        q = ["trashed = false"]
+        if query:
+            q.append("name contains '%s'" % query.replace("\\", "\\\\").replace("'", "\\'"))
+        mimes = [self._MIME[kind]] if kind in self._MIME else list(self._MIME.values())
+        q.append("(" + " or ".join(f"mimeType = '{m}'" for m in mimes) + ")")
+        res = self._svc("drive", "v3").files().list(
+            q=" and ".join(q), pageSize=max(1, min(int(max_results), 50)), orderBy="modifiedTime desc",
+            fields="files(id,name,mimeType,modifiedTime,webViewLink)",
+        ).execute()
+        return [{"id": f["id"], "name": f.get("name"),
+                 "kind": "sheet" if f.get("mimeType") == self._MIME["sheet"] else "doc",
+                 "modified": f.get("modifiedTime"), "link": f.get("webViewLink")} for f in res.get("files", [])]
+
+    def docs_get(self, document_id: str, max_chars: int = 20000) -> dict[str, Any]:
+        doc = self._svc("docs", "v1").documents().get(documentId=document_id).execute()
+        text = _doc_text(doc)
+        return {"id": document_id, "title": doc.get("title"), "text": text[:max_chars],
+                "truncated": len(text) > max_chars,
+                "link": f"https://docs.google.com/document/d/{document_id}/edit"}
+
+    def docs_create(self, title: str, content: str = "") -> dict[str, Any]:
+        svc = self._svc("docs", "v1")
+        doc = svc.documents().create(body={"title": title}).execute()
+        did = doc["documentId"]
+        if content:
+            svc.documents().batchUpdate(documentId=did, body={"requests": [
+                {"insertText": {"location": {"index": 1}, "text": content}}]}).execute()
+        return {"id": did, "title": title, "link": f"https://docs.google.com/document/d/{did}/edit"}
+
+    def docs_append(self, document_id: str, content: str) -> dict[str, Any]:
+        svc = self._svc("docs", "v1")
+        doc = svc.documents().get(documentId=document_id, fields="title,body(content(endIndex))").execute()
+        # The document body always ends with a newline the API will not let us write past,
+        # hence endIndex - 1.
+        end = (doc.get("body", {}).get("content") or [{}])[-1].get("endIndex", 2)
+        svc.documents().batchUpdate(documentId=document_id, body={"requests": [
+            {"insertText": {"location": {"index": max(1, end - 1)}, "text": "\n" + content}}]}).execute()
+        return {"id": document_id, "title": doc.get("title"), "appended_chars": len(content)}
+
+    def sheets_read(self, spreadsheet_id: str, cell_range: str | None = None, max_rows: int = 200) -> dict[str, Any]:
+        svc = self._svc("sheets", "v4").spreadsheets()
+        meta = svc.get(spreadsheetId=spreadsheet_id, fields="properties(title),sheets(properties(title))").execute()
+        tabs = [s["properties"]["title"] for s in meta.get("sheets", [])]
+        rng = cell_range or (f"'{tabs[0]}'" if tabs else "A1:Z200")
+        res = svc.values().get(spreadsheetId=spreadsheet_id, range=rng).execute()
+        values = res.get("values", [])
+        return {"id": spreadsheet_id, "title": meta.get("properties", {}).get("title"), "tabs": tabs,
+                "range": res.get("range"), "values": values[:max_rows], "truncated": len(values) > max_rows,
+                "link": f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit"}
+
+    def sheets_write(self, spreadsheet_id: str, cell_range: str, values: list[list[Any]], append: bool = False) -> dict[str, Any]:
+        vals = self._svc("sheets", "v4").spreadsheets().values()
+        if append:
+            r = vals.append(spreadsheetId=spreadsheet_id, range=cell_range, valueInputOption="USER_ENTERED",
+                            insertDataOption="INSERT_ROWS", body={"values": values}).execute()
+            u = r.get("updates", {})
+            return {"id": spreadsheet_id, "range": u.get("updatedRange"), "cells": u.get("updatedCells")}
+        r = vals.update(spreadsheetId=spreadsheet_id, range=cell_range, valueInputOption="USER_ENTERED",
+                        body={"values": values}).execute()
+        return {"id": spreadsheet_id, "range": r.get("updatedRange"), "cells": r.get("updatedCells")}
+
+    def sheets_create(self, title: str, values: list[list[Any]] | None = None) -> dict[str, Any]:
+        svc = self._svc("sheets", "v4").spreadsheets()
+        ss = svc.create(body={"properties": {"title": title}}, fields="spreadsheetId,spreadsheetUrl").execute()
+        sid = ss["spreadsheetId"]
+        if values:
+            svc.values().update(spreadsheetId=sid, range="A1", valueInputOption="USER_ENTERED",
+                                body={"values": values}).execute()
+        return {"id": sid, "title": title, "link": ss.get("spreadsheetUrl")}
+
 
 def _token_error_hint(e: Exception) -> str:
     """Google\'s token endpoint errors are terse; say what actually needs fixing."""
@@ -364,6 +442,33 @@ def _raw_message(to: str, subject: str, body: str) -> str:
     msg = email.mime.text.MIMEText(body)
     msg["to"], msg["subject"] = to, subject
     return base64.urlsafe_b64encode(msg.as_bytes()).decode()
+
+
+def _doc_text(doc: dict[str, Any]) -> str:
+    """Flatten a Docs API document to plain text (paragraphs, tables, TOC)."""
+    out: list[str] = []
+
+    def walk(elements: list[dict[str, Any]] | None) -> None:
+        for el in elements or []:
+            if "paragraph" in el:
+                for pe in el["paragraph"].get("elements", []):
+                    t = pe.get("textRun", {}).get("content")
+                    if t:
+                        out.append(t)
+            elif "table" in el:
+                for row in el["table"].get("tableRows", []):
+                    cells = []
+                    for cell in row.get("tableCells", []):
+                        mark = len(out)
+                        walk(cell.get("content"))
+                        cells.append("".join(out[mark:]).strip())
+                        del out[mark:]
+                    out.append(" | ".join(cells) + "\n")
+            elif "tableOfContents" in el:
+                walk(el["tableOfContents"].get("content"))
+
+    walk(doc.get("body", {}).get("content"))
+    return "".join(out)
 
 
 def _extract_body(payload: dict[str, Any]) -> str:

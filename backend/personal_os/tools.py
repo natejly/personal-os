@@ -659,6 +659,50 @@ def _register_google(self: Toolbox) -> None:
     R("google_tasks_complete", ToolSpec("google_tasks_complete", "Mark a Google Task complete.",
         _obj({"task_id": {"type": "string"}}, ["task_id"]), gtasks_complete, "google", "external", examples=[{"task_id": "MTIzNDU2Nzg5"}]))
 
+    async def gdocs_search(ctx: dict[str, Any], query: str = "", kind: str | None = None, offset: int = 0) -> Any:
+        rows = await run(g.drive_find, query, kind, 50)
+        return page(rows, offset=offset, limit=20, key="files")
+    R("google_docs_search", ToolSpec("google_docs_search", "Find Google Docs and Sheets in the user's Drive by name (newest first). kind: 'doc' or 'sheet' to filter.",
+        _obj({"query": {"type": "string"}, "kind": {"type": "string", "enum": ["doc", "sheet"]}, "offset": {"type": "integer", "default": 0}}, []), gdocs_search, "google",
+        examples=[{}, {"query": "budget", "kind": "sheet"}, {"query": "notes"}], taints=True))
+
+    async def gdocs_read(ctx: dict[str, Any], document_id: str) -> Any:
+        return await run(g.docs_get, document_id)
+    R("google_docs_read", ToolSpec("google_docs_read", "Read a Google Doc's text by id (from google_docs_search).",
+        _obj({"document_id": {"type": "string"}}, ["document_id"]), gdocs_read, "google",
+        examples=[{"document_id": "1aBcD_efGhIJ"}], taints=True))
+
+    async def gdocs_create(ctx: dict[str, Any], title: str, content: str = "") -> Any:
+        return await run(g.docs_create, title, content)
+    R("google_docs_create", ToolSpec("google_docs_create", "Create a Google Doc in the user's Drive, optionally with initial text.",
+        _obj({"title": {"type": "string"}, "content": {"type": "string"}}, ["title"]), gdocs_create, "google", "external",
+        examples=[{"title": "Meeting notes 2026-10-01", "content": "Attendees:\n"}]))
+
+    async def gdocs_append(ctx: dict[str, Any], document_id: str, content: str) -> Any:
+        return await run(g.docs_append, document_id, content)
+    R("google_docs_append", ToolSpec("google_docs_append", "Append text to the end of a Google Doc.",
+        _obj({"document_id": {"type": "string"}, "content": {"type": "string"}}, ["document_id", "content"]), gdocs_append, "google", "external",
+        examples=[{"document_id": "1aBcD_efGhIJ", "content": "Follow-ups:\n- book the room"}]))
+
+    async def gsheets_read(ctx: dict[str, Any], spreadsheet_id: str, range: str | None = None) -> Any:
+        return await run(g.sheets_read, spreadsheet_id, range)
+    R("google_sheets_read", ToolSpec("google_sheets_read", "Read a Google Sheet by id (from google_docs_search). Default: the first tab; range as A1 notation like 'Sheet1!A1:D50'.",
+        _obj({"spreadsheet_id": {"type": "string"}, "range": {"type": "string"}}, ["spreadsheet_id"]), gsheets_read, "google",
+        examples=[{"spreadsheet_id": "1aBcD_efGhIJ"}, {"spreadsheet_id": "1aBcD_efGhIJ", "range": "Budget!A1:D50"}], taints=True))
+
+    async def gsheets_write(ctx: dict[str, Any], spreadsheet_id: str, range: str, values: list[list[Any]], append: bool = False) -> Any:
+        return await run(g.sheets_write, spreadsheet_id, range, values, append)
+    R("google_sheets_write", ToolSpec("google_sheets_write", "Write rows to a Google Sheet range (A1 notation). append=true adds rows after the range's data instead of overwriting.",
+        _obj({"spreadsheet_id": {"type": "string"}, "range": {"type": "string"}, "values": {"type": "array", "items": {"type": "array"}}, "append": {"type": "boolean", "default": False}}, ["spreadsheet_id", "range", "values"]), gsheets_write, "google", "external",
+        examples=[{"spreadsheet_id": "1aBcD_efGhIJ", "range": "Sheet1!A2", "values": [["2026-10-01", "Rent", 1400]]},
+                  {"spreadsheet_id": "1aBcD_efGhIJ", "range": "Sheet1!A1", "values": [["2026-10-02", "Groceries", 62]], "append": True}]))
+
+    async def gsheets_create(ctx: dict[str, Any], title: str, values: list[list[Any]] | None = None) -> Any:
+        return await run(g.sheets_create, title, values)
+    R("google_sheets_create", ToolSpec("google_sheets_create", "Create a Google Sheet in the user's Drive, optionally with initial rows (first row as headers).",
+        _obj({"title": {"type": "string"}, "values": {"type": "array", "items": {"type": "array"}}}, ["title"]), gsheets_create, "google", "external",
+        examples=[{"title": "Job applications", "values": [["Company", "Role", "Status"]]}]))
+
 
 def _register_boards(self: Toolbox) -> None:
     R = self.specs.__setitem__

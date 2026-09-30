@@ -1060,6 +1060,9 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .cal-chip { font-size: 11px; padding: 2px 6px; border-radius: 4px; background: rgba(59,158,219,0.25); color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; min-width: 0; max-width: 100%; }
 .cal-chip.todo { background: var(--hover); color: var(--text-muted); }
 .cal-chip.todo.p1 { color: var(--danger); }
+.cal-corner { display: flex; align-items: flex-end; justify-content: center; padding-bottom: 4px; }
+.cal-hours-toggle { font-size: 9.5px; letter-spacing: 0.03em; color: var(--text-faint); background: none; border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; cursor: pointer; }
+.cal-hours-toggle:hover { color: var(--text); background: var(--hover); }
 .cal-hours { position: relative; }
 .cal-hour { font-size: 10px; color: var(--text-faint); text-align: right; padding-right: 6px; transform: translateY(-6px); }
 .cal-col { position: relative; border-left: 1px solid var(--border); min-width: 0; }

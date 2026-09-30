@@ -8,12 +8,46 @@ const colorStyle = (hex: string | null | undefined): CSSProperties | undefined =
   hex ? { background: `${hex}38`, borderLeftColor: hex } : undefined
 
 export const HOUR_PX = 44
+/** Nothing scheduled: show a plain working day rather than a wall of empty night hours. */
+const DEFAULT_WINDOW = { start: 8, end: 20 }
+/** Never crop below this, so one short meeting does not leave a sliver of a grid. */
+const MIN_HOURS = 6
+const FULL_DAY = { start: 0, end: 24 }
+
 export const startOfWeek = (d: Date): Date => { const x = new Date(d); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x }
 export const addDays = (d: Date, n: number): Date => { const x = new Date(d); x.setDate(x.getDate() + n); return x }
 export const dayKey = (d: Date): string => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 /** Local calendar date (not UTC). `toISOString().slice(0,10)` is wrong near midnight. */
 export const localDay = (d: Date = new Date()): string => dayKey(d)
 export const fmtTime = (d: Date): string => d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+
+/**
+ * The narrowest whole-hour band that still holds every timed event on the days shown, padded by an
+ * hour on each side. Days with only all-day events (or none at all) fall back to working hours.
+ */
+export function hourWindow(events: CalendarEvent[], days: Date[]): { start: number; end: number } {
+  const shown = new Set(days.map(dayKey))
+  let min = 24
+  let max = 0
+  for (const e of events) {
+    if (e.all_day) continue
+    const s = new Date(e.start)
+    if (!shown.has(dayKey(s))) continue
+    const en = new Date(e.end)
+    // An event running past midnight pins the window to the end of its own day.
+    const endHour = dayKey(en) === dayKey(s) ? en.getHours() + (en.getMinutes() > 0 ? 1 : 0) : 24
+    min = Math.min(min, s.getHours())
+    max = Math.max(max, endHour, s.getHours() + 1)
+  }
+  if (min >= max) return DEFAULT_WINDOW
+  let start = Math.max(0, min - 1)
+  let end = Math.min(24, max + 1)
+  while (end - start < MIN_HOURS && (start > 0 || end < 24)) {
+    if (start > 0) start -= 1
+    if (end - start < MIN_HOURS && end < 24) end += 1
+  }
+  return { start, end }
+}
 
 export interface CalendarWeekProps {
   /** One column per day, in order: seven for a week, one for a single day. */
@@ -42,6 +76,16 @@ export default function CalendarWeek({ days, events, todos, canCreate = false, o
   const [creating, setCreating] = useState<{ day: string; hour: number } | null>(null)
   const [title, setTitle] = useState('')
   const [over, setOver] = useState<string | null>(null)
+  const [showAll, setShowAll] = useState(false)
+
+  const fitted = useMemo(() => hourWindow(events, days), [events, days])
+  const { start: startHour, end: endHour } = showAll ? FULL_DAY : fitted
+  const hours = endHour - startHour
+  const gridPx = hours * HOUR_PX
+  /** Hours are cropped, so an offset inside a column is not the hour of the day. */
+  const hourAt = (clientY: number, rect: DOMRect): number =>
+    Math.min(endHour - 1, Math.max(startHour, startHour + Math.floor((clientY - rect.top) / HOUR_PX)))
+  const topOf = (hour: number): number => (hour - startHour) * HOUR_PX
 
   const eventsByDay = useMemo(() => {
     const m: Record<string, CalendarEvent[]> = {}
@@ -80,11 +124,18 @@ export default function CalendarWeek({ days, events, todos, canCreate = false, o
   }
 
   const todayKey = localDay()
-  const nowTop = (new Date().getHours() + new Date().getMinutes() / 60) * HOUR_PX
+  const now = new Date()
+  const nowHour = now.getHours() + now.getMinutes() / 60
+  const nowVisible = nowHour >= startHour && nowHour <= endHour
 
   return (
     <div className="cal-grid" style={{ gridTemplateColumns: `56px repeat(${days.length}, 1fr)`, minWidth: days.length > 1 ? 760 : 200 }}>
-      <div className="cal-corner" />
+      <div className="cal-corner">
+        {(showAll || hours < 24) && (
+          <button className="cal-hours-toggle" title={showAll ? 'Crop to the hours with events' : 'Show all 24 hours'}
+            onClick={() => setShowAll(!showAll)}>{showAll ? 'fit' : '24h'}</button>
+        )}
+      </div>
       {days.map((d) => (
         <div key={dayKey(d)} className={`cal-dayhead ${dayKey(d) === todayKey ? 'today' : ''}`}>
           <span className="dow">{d.toLocaleDateString(undefined, { weekday: 'short' })}</span>
@@ -111,38 +162,36 @@ export default function CalendarWeek({ days, events, todos, canCreate = false, o
         )
       })}
       <div className="cal-hours">
-        {Array.from({ length: 24 }, (_, h) => <div key={h} className="cal-hour" style={{ height: HOUR_PX }}>{h === 0 ? '' : `${h % 12 || 12}${h < 12 ? 'am' : 'pm'}`}</div>)}
+        {Array.from({ length: hours }, (_, i) => startHour + i).map((h) => (
+          <div key={h} className="cal-hour" style={{ height: HOUR_PX }}>{h === 0 ? '' : `${h % 12 || 12}${h < 12 ? 'am' : 'pm'}`}</div>
+        ))}
       </div>
       {days.map((d) => {
         const dk = dayKey(d)
         return (
-          <div key={'col' + dk} className={`cal-col ${dk === todayKey ? 'today' : ''} ${over?.startsWith(dk + ':') ? 'drop-over' : ''}`} style={{ height: 24 * HOUR_PX }}
+          <div key={'col' + dk} className={`cal-col ${dk === todayKey ? 'today' : ''} ${over?.startsWith(dk + ':') ? 'drop-over' : ''}`} style={{ height: gridPx }}
             title={canCreate ? 'Double-click to add an event' : onTodoDrop ? 'Drop a todo to schedule it' : undefined}
-            onDoubleClick={(e) => { if (!canCreate) return; const rect = e.currentTarget.getBoundingClientRect(); setCreating({ day: dk, hour: Math.floor((e.clientY - rect.top) / HOUR_PX) }) }}
+            onDoubleClick={(e) => { if (!canCreate) return; setCreating({ day: dk, hour: hourAt(e.clientY, e.currentTarget.getBoundingClientRect()) }) }}
             onDragOver={(e) => {
               if (!onTodoDrop || !hasDrag(e.dataTransfer)) return
-              const rect = e.currentTarget.getBoundingClientRect()
-              dragOver(e, `${dk}:${Math.floor((e.clientY - rect.top) / HOUR_PX)}`)
+              dragOver(e, `${dk}:${hourAt(e.clientY, e.currentTarget.getBoundingClientRect())}`)
             }}
             onDragLeave={() => setOver(null)}
-            onDrop={(e) => {
-              const rect = e.currentTarget.getBoundingClientRect()
-              dropTodo(e, dk, Math.floor((e.clientY - rect.top) / HOUR_PX))
-            }}>
-            {Array.from({ length: 24 }, (_, h) => <div key={h} className="cal-line" style={{ top: h * HOUR_PX }} />)}
-            {dk === todayKey && <div className="cal-now" style={{ top: nowTop }} />}
+            onDrop={(e) => dropTodo(e, dk, hourAt(e.clientY, e.currentTarget.getBoundingClientRect()))}>
+            {Array.from({ length: hours }, (_, i) => <div key={i} className="cal-line" style={{ top: i * HOUR_PX }} />)}
+            {dk === todayKey && nowVisible && <div className="cal-now" style={{ top: topOf(nowHour) }} />}
             {(eventsByDay[dk] ?? []).filter((e) => !e.all_day).map((e) => {
               const s = new Date(e.start), en = new Date(e.end)
-              const top = (s.getHours() + s.getMinutes() / 60) * HOUR_PX
+              const top = topOf(s.getHours() + s.getMinutes() / 60)
               const h = Math.max(22, ((en.getTime() - s.getTime()) / 3_600_000) * HOUR_PX - 2)
               return (
-                <div key={e.id} className="cal-event" style={{ top, height: h, ...colorStyle(colorOf?.(e)) }} onClick={() => onOpen(e)} title={e.summary}>
+                <div key={e.id} className="cal-event" style={{ top, height: Math.min(h, gridPx - top), ...colorStyle(colorOf?.(e)) }} onClick={() => onOpen(e)} title={e.summary}>
                   <b>{e.summary}</b><span>{fmtTime(s)}</span>
                 </div>
               )
             })}
             {creating?.day === dk && (
-              <div className="cal-create" style={{ top: creating.hour * HOUR_PX }}>
+              <div className="cal-create" style={{ top: topOf(creating.hour) }}>
                 <input autoFocus placeholder={`New event at ${creating.hour}:00`} value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void create(); if (e.key === 'Escape') { setCreating(null); setTitle('') } }} />
                 {onCreateFull && (
                   <button className="icon-btn" title="More options" onClick={() => { onCreateFull(creating.day, creating.hour, title.trim()); setCreating(null); setTitle('') }}>

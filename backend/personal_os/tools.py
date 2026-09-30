@@ -242,6 +242,39 @@ def _allow_url(ctx: dict[str, Any], url: str | None) -> None:
         add(url)
 
 
+CREDENTIAL_HEADERS = ("authorization", "proxy-authorization", "cookie", "x-api-key")
+
+
+async def guarded_request(client: httpx.AsyncClient, method: str, url: str, *, headers: dict[str, str] | None = None,
+                          params: dict[str, Any] | None = None, content: Any = None, max_hops: int = 5) -> httpx.Response:
+    """Issue a request with the SSRF guard applied to *every* hop.
+
+    httpx's own follow_redirects only validates the URL it was handed, so a public host may redirect the connection
+    into loopback or the cloud metadata range. Redirects are followed by hand instead: each destination goes through
+    _check_url/_resolve before it is connected, and a hop that leaves the original host loses the credential headers
+    so a source's secret cannot be bounced to somebody else's server. The client must be follow_redirects=False.
+    """
+    cur, hops, origin = url, 0, None
+    hdrs = dict(headers or {})
+    while True:
+        cur, host = _check_url(cur, {}, {}, redirect=hops > 0)
+        await _resolve(host)
+        if origin is None:
+            origin = host
+        elif host != origin:
+            hdrs = {k: v for k, v in hdrs.items() if k.lower() not in CREDENTIAL_HEADERS}
+        r = await client.request(method, cur, headers=hdrs, params=params, content=content)
+        if r.status_code not in (301, 302, 303, 307, 308) or not r.headers.get("location"):
+            return r
+        hops += 1
+        if hops > max_hops:
+            raise UrlBlocked(f"too many redirects ({max_hops}) starting at {url}")
+        cur = urllib.parse.urljoin(str(r.url), r.headers["location"])
+        params = None  # already folded into the URL we were sent to
+        if r.status_code == 303 and method.upper() not in ("GET", "HEAD"):
+            method, content = "GET", None
+
+
 class Toolbox:
     def __init__(self, memories: Memories, graph: Graph, documents: Documents, settings_fn: Callable[[], dict[str, Any]], todos: Any = None, google: Any = None, boards: Any = None):
         self.memories, self.graph, self.documents, self.settings = memories, graph, documents, settings_fn

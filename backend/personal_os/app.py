@@ -10,6 +10,7 @@ import os
 import re
 import secrets
 import shutil
+import sqlite3
 import time
 from pathlib import Path
 from typing import Any, AsyncIterator
@@ -98,6 +99,17 @@ def _widget_fetch_ok(source_id: str, wid: str, wt: str, we: str) -> bool:
 app = FastAPI(title="Personal OS", version="0.1.0")
 
 
+@app.exception_handler(sqlite3.IntegrityError)
+async def _integrity_error(request: Request, exc: Exception) -> JSONResponse:  # type: ignore[override]
+    """Safety net for the writers wsid() cannot cover (a card whose column is gone, a widget whose dashboard is gone).
+    A stale id from a window that has not refreshed is the client's problem to retry, not a server fault, so it gets a
+    409 and a usable message rather than a bare 500."""
+    detail = ("Something this refers to no longer exists - reload and try again."
+              if "FOREIGN KEY" in str(exc).upper() else f"That change conflicts with what is already stored ({exc})")
+    log.info("integrity error on %s %s: %s", request.method, request.url.path, exc)
+    return JSONResponse({"detail": detail}, status_code=409)
+
+
 @app.middleware("http")
 async def _require_token(request: Request, call_next):  # type: ignore[no-untyped-def]
     p = request.url.path
@@ -182,6 +194,18 @@ def sid(project_id: str | None) -> str | None:
     if project_id == "all":
         return ALL
     return project_id
+
+
+def wsid(project_id: str | None) -> str | None:
+    """sid() for a writer. A project id nothing matches means the client is holding a stale id (the project was
+    deleted in another window), which would otherwise surface as a foreign-key 500; 'all' is a filter, not a scope
+    a row can live in."""
+    s = sid(project_id)
+    if s is ALL:
+        raise HTTPException(400, "'all' is a filter, not a scope you can save into")
+    if s is not None and not projects.get(s):
+        raise HTTPException(404, "No such project")
+    return s
 
 
 def sse(event: str, data: Any) -> str:
@@ -290,7 +314,7 @@ def list_conversations(project_id: str | None = None) -> list[dict[str, Any]]:
 
 @app.post("/conversations")
 def create_conversation(body: ConvIn) -> dict[str, Any]:
-    return convos.create(sid(body.project_id), body.title, body.model or settings()["defaultModel"])
+    return convos.create(wsid(body.project_id), body.title, body.model or settings()["defaultModel"])
 
 
 @app.get("/conversations/{id}")
@@ -772,7 +796,7 @@ def list_memories(project_id: str | None = None, q: str = "", include_global: bo
 def create_memory(body: MemoryIn) -> dict[str, Any]:
     if not body.content.strip():
         raise HTTPException(400, "Empty memory")
-    return memories.create(sid(body.project_id), body.content, body.kind, "user", body.pinned)
+    return memories.create(wsid(body.project_id), body.content, body.kind, "user", body.pinned)
 
 
 @app.put("/memories/{id}")
@@ -781,7 +805,7 @@ def update_memory(id: str, body: MemoryPatch) -> dict[str, Any]:
     if body.move_to_global:
         patch["project_id"] = None
     elif "project_id" in patch:
-        patch["project_id"] = sid(patch["project_id"])
+        patch["project_id"] = wsid(patch["project_id"])
     m = memories.update(id, patch)
     if not m:
         raise HTTPException(404)
@@ -830,7 +854,7 @@ def get_graph(project_id: str | None = None, include_global: bool = True) -> dic
 def create_node(body: NodeIn) -> dict[str, Any]:
     if not body.label.strip():
         raise HTTPException(400, "Empty label")
-    return graph.upsert_node(sid(body.project_id), body.label, body.type, body.properties)
+    return graph.upsert_node(wsid(body.project_id), body.label, body.type, body.properties)
 
 
 @app.put("/graph/nodes/{id}")
@@ -853,7 +877,7 @@ def create_edge(body: EdgeIn) -> dict[str, Any]:
         raise HTTPException(400, "Self-loops not allowed")
     if not (graph.get_node(body.source_id) and graph.get_node(body.target_id)):
         raise HTTPException(404, "Node not found")
-    return graph.upsert_edge(sid(body.project_id), body.source_id, body.target_id, body.relation, body.properties)
+    return graph.upsert_edge(wsid(body.project_id), body.source_id, body.target_id, body.relation, body.properties)
 
 
 @app.put("/graph/edges/{id}")
@@ -894,7 +918,7 @@ async def upload_document(file: UploadFile = File(...), project_id: str | None =
         raise HTTPException(400, str(e)) from e
     dest = db.data_dir / "uploads" / f"{new_id()}-{Path(name).name}"
     dest.write_bytes(data)
-    return documents.create(sid(project_id), name, file.content_type or "", len(data), str(dest), text)
+    return documents.create(wsid(project_id), name, file.content_type or "", len(data), str(dest), text)
 
 
 @app.delete("/documents/{id}")
@@ -951,7 +975,7 @@ def list_todos(project_id: str | None = "all", include_done: bool = False, q: st
 def create_todo(body: TodoIn) -> dict[str, Any]:
     if not body.title.strip():
         raise HTTPException(400, "Empty title")
-    return todos.create(body.title, sid(body.project_id), body.notes, body.due, body.priority)
+    return todos.create(body.title, wsid(body.project_id), body.notes, body.due, body.priority)
 
 
 @app.put("/todos/{id}")
@@ -962,7 +986,7 @@ def update_todo(id: str, body: TodoPatch) -> dict[str, Any]:
     if body.clear_project:
         patch["project_id"] = None
     elif "project_id" in patch:
-        patch["project_id"] = sid(patch["project_id"])
+        patch["project_id"] = wsid(patch["project_id"])
     t = todos.update(id, patch)
     if not t:
         raise HTTPException(404)
@@ -1148,7 +1172,7 @@ def list_boards() -> list[dict[str, Any]]:
 
 @app.post("/boards")
 def create_board(body: BoardIn) -> dict[str, Any]:
-    return boards.create(body.name, sid(body.project_id), body.columns)
+    return boards.create(body.name, wsid(body.project_id), body.columns)
 
 
 @app.get("/boards/{id}")
@@ -1324,6 +1348,8 @@ async def fetch_source(id: str) -> Any:
         return await dashboards.fetch_source(id, internal)
     except ValueError as e:
         raise HTTPException(404, str(e)) from e
+    except tools.UrlBlocked as e:  # the source's own URL, or something it redirected to, is not a public address
+        raise HTTPException(400, f"That source's URL was refused: {e}") from e
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, str(e)) from e
 

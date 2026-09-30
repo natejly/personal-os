@@ -6,6 +6,7 @@ import hmac
 import html
 import json
 import logging
+import math
 import os
 import re
 import secrets
@@ -13,12 +14,14 @@ import shutil
 import sqlite3
 import time
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Annotated, Any, AsyncIterator
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.encoders import jsonable_encoder
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
-from pydantic import BaseModel
+from pydantic import AfterValidator, BaseModel, Field
 
 from . import assist, llm, tools
 from .context import build_context, estimate_tokens
@@ -101,6 +104,25 @@ def _widget_fetch_ok(source_id: str, wid: str, wt: str, we: str) -> bool:
 
 
 app = FastAPI(title="Personal OS", version="0.1.0")
+
+
+def _json_safe(v: Any) -> Any:
+    """Strip what json.dumps(allow_nan=False) would refuse, recursively."""
+    if isinstance(v, float) and not math.isfinite(v):
+        return str(v)
+    if isinstance(v, dict):
+        return {k: _json_safe(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_json_safe(x) for x in v]
+    return v
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_error(request: Request, exc: Exception) -> JSONResponse:  # type: ignore[override]
+    """422s echo the rejected input back, and Starlette's JSONResponse sets allow_nan=False, so a body carrying inf
+    or NaN could not serialise its own rejection -- the 422 became a 500. Scrub the echo instead."""
+    errors = jsonable_encoder(exc.errors()) if isinstance(exc, RequestValidationError) else []
+    return JSONResponse({"detail": _json_safe(errors)}, status_code=422)
 
 
 @app.exception_handler(sqlite3.IntegrityError)
@@ -1716,6 +1738,24 @@ notes = Notes(db)
 # 'popped' rows are NOT reset here: import runs before the main process can restore them (it clears the ones it declines).
 
 
+def _finite(v: float) -> float:
+    """A coordinate that is not a real number is not a position.
+
+    SQLite stores inf happily and pydantic then serialises it back as JSON null, so one Infinity -- a drag divided by
+    a zero zoom, say -- left a window with x/y/w/h of null that the canvas could no longer place, and the damage
+    persisted across reloads. Reject it at the edge instead.
+    """
+    if not math.isfinite(v):
+        raise ValueError("must be a finite number")
+    return v
+
+
+Finite = Annotated[float, AfterValidator(_finite)]
+# Zoom divides drag deltas, so zero or negative is both meaningless and the thing that mints the infinities above.
+# The renderer clamps the range it actually uses (Canvas.tsx MIN_ZOOM/MAX_ZOOM); this only rules out the impossible.
+PositiveFinite = Annotated[float, AfterValidator(_finite), Field(gt=0)]
+
+
 class CanvasIn(BaseModel):
     name: str = "Desk"
     project_id: str | None = None
@@ -1727,10 +1767,10 @@ class CanvasPatch(BaseModel):
     project_id: str | None = None
     position: int | None = None
     snap_mode: str | None = None
-    grid_size: int | None = None
-    zoom: float | None = None
-    pan_x: float | None = None
-    pan_y: float | None = None
+    grid_size: Annotated[int, Field(ge=1)] | None = None
+    zoom: PositiveFinite | None = None
+    pan_x: Finite | None = None
+    pan_y: Finite | None = None
     wallpaper: str | None = None
     clear_project: bool = False
 
@@ -1740,10 +1780,10 @@ class WindowIn(BaseModel):
     ref_id: str | None = None
     project_id: str | None = None
     title: str = ""
-    x: float = 0
-    y: float = 0
-    w: float = 520
-    h: float = 640
+    x: Finite = 0
+    y: Finite = 0
+    w: Finite = 520
+    h: Finite = 640
     config: dict[str, Any] = {}
 
 
@@ -1752,10 +1792,10 @@ class WindowPatch(BaseModel):
     config: dict[str, Any] | None = None
     state: str | None = None
     pinned: bool | None = None
-    x: float | None = None
-    y: float | None = None
-    w: float | None = None
-    h: float | None = None
+    x: Finite | None = None
+    y: Finite | None = None
+    w: Finite | None = None
+    h: Finite | None = None
     z: int | None = None
     canvas_id: str | None = None
     restore_bounds: dict[str, Any] | None = None
@@ -1766,10 +1806,10 @@ class WindowPatch(BaseModel):
 
 class WindowLayoutIn(BaseModel):
     id: str
-    x: float | None = None
-    y: float | None = None
-    w: float | None = None
-    h: float | None = None
+    x: Finite | None = None
+    y: Finite | None = None
+    w: Finite | None = None
+    h: Finite | None = None
     z: int | None = None
     state: str | None = None
 

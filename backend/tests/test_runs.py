@@ -23,21 +23,33 @@ import httpx  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from personal_os import llm  # noqa: E402
-from personal_os.app import app, bus  # noqa: E402
+from personal_os.app import AUTH_TOKEN, app, bus  # noqa: E402
 from personal_os.runs import QUEUE_MAX, RING, Run  # noqa: E402
 
 # The ChatEvent union in src/shared/types.ts. Nothing may leave the bus that is not one of these.
 CHAT_EVENTS = {"user_message", "assistant_message", "removed_message", "title", "delta", "tool_call",
-               "tool_result", "span", "done", "learned", "learn_error", "error"}
+               "tool_result", "span", "done", "learned", "learn_error", "error", "taint"}
 
-client = TestClient(app)
+client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
+
+try:
+    import pytest
+except ImportError:  # standalone `python tests/test_runs.py` run
+    pytest = None
+else:
+    @pytest.fixture(scope="module", autouse=True)
+    def _portal():  # type: ignore[no-untyped-def]
+        """One portal for the whole module, so every request shares the event loop the run tasks live on."""
+        with client:
+            client.put("/settings", json={"autoLearn": False, "baseUrl": ""})
+            yield
 passed = 0
 SCRIPT: dict[str, Any] = {"chunks": ["Hello", " ", "world"], "delay": 0.0}
 
 
 async def _scripted_stream(settings: dict[str, Any], model: str, messages: list[dict[str, Any]],
                            tools: list[dict[str, Any]] | None = None, kind: str = "chat",
-                           effort: str = "default") -> Any:
+                           effort: str = "default", tool_choice: str = "auto") -> Any:
     for chunk in SCRIPT["chunks"]:
         if SCRIPT["delay"]:
             await asyncio.sleep(SCRIPT["delay"])
@@ -217,7 +229,8 @@ def test_event_names_are_the_chatevent_union() -> None:
     check(by["user_message"]["role"] == "user" and by["user_message"]["content"] == "hi", "user_message shape")
     check(by["assistant_message"]["id"] and "context_used" in by["assistant_message"], "assistant_message shape")
     check(set(by["delta"]) == {"id", "text"}, f"delta shape is {{id, text}}, got {set(by['delta'])}")
-    check(set(by["done"]) == {"id", "error", "context_used", "tool_events", "trace", "stopped"}, f"done shape, got {set(by['done'])}")
+    check(set(by["done"]) == {"id", "error", "context_used", "tool_events", "trace", "stopped",
+                              "partial", "tainted", "taint_sources"}, f"done shape, got {set(by['done'])}")
     check(by["done"]["stopped"] is False, "an uninterrupted run reports stopped false")
     check(set(by["span"]) == {"message_id", "span"}, "span shape")
 
@@ -248,7 +261,7 @@ def test_stop_ends_the_run() -> None:
 async def _detach_mid_run() -> tuple[str, str, str]:
     """Attach two clients, drop both mid-reply, and let the run finish alone."""
     full = script(30, 0.03)
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as ac:
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test", headers={"X-Personal-OS-Token": AUTH_TOKEN}) as ac:
         cid = (await ac.post("/conversations", json={})).json()["id"]
         await ac.post(f"/conversations/{cid}/chat", json={"content": "hi"})
         watchers = [asyncio.create_task(ac.get(f"/conversations/{cid}/stream")) for _ in range(2)]
@@ -278,7 +291,7 @@ def test_run_survives_every_subscriber_leaving() -> None:
 async def _shutdown_mid_run() -> tuple[str, str, int]:
     """What the shutdown hook does before the tmp-dir rmtree: cancel live runs and wait for them."""
     full = script(60, 0.03)
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as ac:
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test", headers={"X-Personal-OS-Token": AUTH_TOKEN}) as ac:
         cid = (await ac.post("/conversations", json={})).json()["id"]
         await ac.post(f"/conversations/{cid}/chat", json={"content": "hi"})
         while bus.get(cid) is None or bus.get(cid).seq < 7:

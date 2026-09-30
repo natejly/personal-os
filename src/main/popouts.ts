@@ -151,7 +151,8 @@ export const openPopout = (windowId: string, req: PopoutOpenRequest = {}): boole
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false
+      sandbox: false,
+      webviewTag: true // a popped web widget still needs its <webview>
     }
   })
 

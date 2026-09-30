@@ -10,7 +10,7 @@ from .db import Database, new_id, now, row_to_dict
 # Mirrors the WidgetKind union in src/shared/types.ts, which is the source of truth.
 WIDGET_KINDS = (
     "chat", "todos", "calendar", "board", "note", "dashboard-widget",
-    "memory", "graph", "documents", "recap", "project", "usage", "activity",
+    "memory", "graph", "documents", "recap", "project", "usage", "activity", "web",
 )
 WINDOW_STATES = ("normal", "minimized", "maximized", "popped")
 SNAP_MODES = ("off", "grid", "guides", "both")

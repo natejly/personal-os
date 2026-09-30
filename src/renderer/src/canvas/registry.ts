@@ -14,6 +14,7 @@ import { def as project } from './widgets/project'
 import { def as recap } from './widgets/recap'
 import { def as todos } from './widgets/todos'
 import { def as usage } from './widgets/usage'
+import { def as web } from './widgets/web'
 import '../styles/widgets.css'
 
 /** One entry of the catalog: everything the canvas needs to open, size, chrome and drop onto a kind. */
@@ -64,7 +65,8 @@ export const WIDGETS: Record<WidgetKind, WidgetDef> = {
   recap,
   project,
   usage,
-  activity
+  activity,
+  web
 }
 
 // The canvas store may not import the registry (its own note), so the catalog comes to it instead.

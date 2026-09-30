@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { MessageSquarePlus, Search, Settings, Trash2, PanelLeftClose, Brain, FileText, NotebookPen, Plus, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid, Mail, MonitorDot, BookOpen } from 'lucide-react'
+import { MessageSquarePlus, Search, Settings, Trash2, PanelLeftClose, Brain, FileText, NotebookPen, Plus, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid, Mail, MonitorDot, BookOpen, Globe } from 'lucide-react'
 import GrainLogo from './GrainLogo'
 import { useStore, type View } from '../store'
 import { ActivityIndicator } from './ActivityView'
@@ -25,8 +25,10 @@ function groupLabel(ts: number): string {
 /**
  * `kind` makes the row a canvas drag source (contract §7, payload kind 'nav'). Boards and Dashboards
  * have none: their widgets need a `ref_id`, so a bare drag would open a window with nothing in it.
+ * A row without a `view` (Web) exists only as a widget, so it only shows in canvas mode and a click
+ * opens its window directly.
  */
-type NavEntry = { view: View; label: string; icon: JSX.Element; kind?: WidgetKind }
+type NavEntry = { view?: View; label: string; icon: JSX.Element; kind?: WidgetKind }
 
 const NAV: NavEntry[] = [
   { view: 'home', label: 'Today', icon: <Home size={15} />, kind: 'recap' },
@@ -36,7 +38,8 @@ const NAV: NavEntry[] = [
   { view: 'boards', label: 'Boards', icon: <KanbanSquare size={15} /> },
   { view: 'dashboards', label: 'Dashboards', icon: <LayoutDashboard size={15} /> },
   { view: 'docs', label: 'Docs', icon: <NotebookPen size={15} /> },
-  { view: 'activity', label: 'Activity', icon: <MonitorDot size={15} />, kind: 'activity' }
+  { view: 'activity', label: 'Activity', icon: <MonitorDot size={15} />, kind: 'activity' },
+  { label: 'Web', icon: <Globe size={15} />, kind: 'web' }
 ]
 
 // What the assistant knows: memories and uploaded documents, grouped under their own section.
@@ -107,17 +110,19 @@ export default function Sidebar(): JSX.Element {
     return v === 'memory' ? total('memories') + total('nodes') : total('documents')
   }
 
+  // A row without a `view` (Web) exists only as a canvas widget: a click opens its window directly.
   const navItem = (n: NavEntry): JSX.Element => (
-    <button key={n.view} className={`nav-item ${view === n.view ? 'active' : ''}`} onClick={() => setView(n.view)}
+    <button key={n.label} className={`nav-item ${n.view && view === n.view ? 'active' : ''}`}
+      onClick={() => (n.view ? setView(n.view) : void useCanvas.getState().openWindow(n.kind as WidgetKind))}
       {...(n.kind ? dragProps({ kind: 'nav', id: n.kind, label: n.label }) : {})}>
       {n.icon}<span>{n.label}</span>
       {n.view === 'docs' && docsPending > 0 && (
         <span className="count pending" title={`${docsPending} assistant edit${docsPending === 1 ? '' : 's'} awaiting review`}>{docsPending}</span>
       )}
-      {libCount(n.view) !== null && <span className="count">{libCount(n.view)}</span>}
+      {n.view != null && libCount(n.view) !== null && <span className="count">{libCount(n.view)}</span>}
     </button>
   )
-  const knowledgeItems = KNOWLEDGE.filter((n) => !viewHidden(settings, n.view))
+  const knowledgeItems = KNOWLEDGE.filter((n) => n.view && !viewHidden(settings, n.view))
 
   return (
     <aside className="sidebar">
@@ -132,7 +137,7 @@ export default function Sidebar(): JSX.Element {
       </button>
 
       <nav className="nav">
-        {NAV.filter((n) => n.view === 'home' || !viewHidden(settings, n.view)).map(navItem)}
+        {NAV.filter((n) => (n.view ? n.view === 'home' || !viewHidden(settings, n.view) : inCanvas)).map(navItem)}
       </nav>
 
       {knowledgeItems.length > 0 && (

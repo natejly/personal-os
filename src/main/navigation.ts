@@ -33,4 +33,26 @@ export function guardNavigation(contents: Electron.WebContents): void {
     openExternal(url)
     return { action: 'deny' }
   })
+  guardWebviews(contents)
+}
+
+/**
+ * The web widget's <webview> guests are full Chromium pages the user pointed at the open web. They may
+ * never gain the preload (that is the backend token) or node, whatever attributes the tag claims, and
+ * they only ever host http(s). window.open from a page stays inside its own guest: a browser widget
+ * that bounced every popup-based login to Safari would not be much of a browser.
+ */
+function guardWebviews(contents: Electron.WebContents): void {
+  contents.on('will-attach-webview', (e, webPreferences, params) => {
+    delete webPreferences.preload
+    webPreferences.nodeIntegration = false
+    webPreferences.contextIsolation = true
+    if (!/^https?:\/\//i.test(params.src ?? '')) e.preventDefault()
+  })
+  contents.on('did-attach-webview', (_e, guest) => {
+    guest.setWindowOpenHandler(({ url }) => {
+      if (/^https?:\/\//i.test(url)) void guest.loadURL(url)
+      return { action: 'deny' }
+    })
+  })
 }

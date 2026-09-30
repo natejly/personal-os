@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
-import { MessageSquarePlus, Search, Settings, Trash2, PanelLeftClose, Sparkles, Brain, FileText, Plus, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid } from 'lucide-react'
+import { MessageSquarePlus, Search, Settings, Trash2, PanelLeftClose, Sparkles, Brain, FileText, Plus, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid, MonitorDot } from 'lucide-react'
 import { useStore, type View } from '../store'
+import { ActivityIndicator } from './ActivityView'
 import ChatPulse from './ChatPulse'
 import { dragProps } from '../canvas/dnd'
 import type { Conversation, WidgetKind } from '@shared/types'
@@ -28,7 +29,8 @@ const NAV: { view: View; label: string; icon: JSX.Element; kind?: WidgetKind }[]
   { view: 'boards', label: 'Boards', icon: <KanbanSquare size={15} /> },
   { view: 'dashboards', label: 'Dashboards', icon: <LayoutDashboard size={15} /> },
   { view: 'memory', label: 'Memory', icon: <Brain size={15} />, kind: 'memory' },
-  { view: 'documents', label: 'Documents', icon: <FileText size={15} />, kind: 'documents' }
+  { view: 'documents', label: 'Documents', icon: <FileText size={15} />, kind: 'documents' },
+  { view: 'activity', label: 'Activity', icon: <MonitorDot size={15} />, kind: 'activity' }
 ]
 
 export default function Sidebar(): JSX.Element {
@@ -66,7 +68,7 @@ export default function Sidebar(): JSX.Element {
 
   const todoStats = useStore((s) => s.dashboard?.todo_stats)
   const libCount = (v: View): number | null => {
-    if (v === 'home' || v === 'calendar' || v === 'boards' || v === 'dashboards') return null
+    if (v === 'home' || v === 'calendar' || v === 'boards' || v === 'dashboards' || v === 'activity') return null
     if (v === 'todos') return todoStats?.open ?? null
     const total = (key: 'memories' | 'nodes' | 'documents'): number =>
       (personalStats?.[key] ?? 0) + projects.reduce((n, p) => n + (p.stats?.[key] ?? 0), 0)
@@ -160,6 +162,7 @@ export default function Sidebar(): JSX.Element {
       </div>
 
       <div className="sidebar-bottom">
+        <ActivityIndicator />
         <button className="settings-btn" onClick={() => setSettingsOpen(true)}><Settings size={16} /><span>Settings</span><kbd>⌘,</kbd></button>
       </div>
     </aside>

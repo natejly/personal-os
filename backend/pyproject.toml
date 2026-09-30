@@ -19,6 +19,15 @@ dependencies = [
   "google-auth-httplib2>=0.2",
 ]
 
+[project.optional-dependencies]
+# Activity monitor (macOS). Without these the monitor still runs, but app tracking falls back to
+# `lsappinfo` (app name only) and the keystroke/click tap is unavailable.
+activity = [
+  "pyobjc-framework-Cocoa>=10.3; sys_platform == 'darwin'",
+  "pyobjc-framework-Quartz>=10.3; sys_platform == 'darwin'",
+  "pyobjc-framework-ApplicationServices>=10.3; sys_platform == 'darwin'",
+]
+
 [project.scripts]
 personal-os-backend = "personal_os.__main__:main"
 

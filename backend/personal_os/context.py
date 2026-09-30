@@ -21,10 +21,11 @@ def build_context(
     settings: dict[str, Any],
     conv_settings: dict[str, Any],
     global_system_prompt: str,
+    activity: Any = None,
 ) -> tuple[str, dict[str, Any]]:
     """Returns (system_prompt, context_used)."""
     parts: list[str] = [global_system_prompt.strip()] if global_system_prompt.strip() else []
-    used: dict[str, Any] = {"memories": [], "nodes": [], "edges": [], "chunks": [], "project": None}
+    used: dict[str, Any] = {"memories": [], "nodes": [], "edges": [], "chunks": [], "project": None, "activity": None}
 
     if project:
         used["project"] = {"id": project["id"], "name": project["name"]}
@@ -55,6 +56,14 @@ def build_context(
             blocks = [f"### {h['name']} (chunk {h['idx'] + 1})\n{h['text']}" for h in hits]
             parts.append("## Relevant document excerpts\n" + "\n\n".join(blocks))
             used["chunks"] = [{"chunk_id": h["chunk_id"], "document_id": h["document_id"], "name": h["name"], "idx": h["idx"], "text": h["text"][:400]} for h in hits]
+
+    # Observed computer activity. Off unless the user turned the monitor on, and skippable per chat
+    # like every other context source.
+    if activity is not None and conv_settings.get("useActivity", True):
+        block = activity.context_block()
+        if block:
+            parts.append(block)
+            used["activity"] = block
 
     system = "\n\n".join(parts)
     used["system_prompt"] = system

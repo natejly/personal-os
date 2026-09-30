@@ -17,6 +17,8 @@ export interface ContextUsed {
   nodes: { id: string; label: string; type: string }[]
   edges: { id: string; relation: string; source_id: string; target_id: string }[]
   chunks: { chunk_id: string; document_id: string; name: string; idx: number; text: string }[]
+  /** The activity-monitor block, verbatim; null when the monitor is off or the chat opted out. */
+  activity: string | null
   system_prompt: string
   tokens_estimate: number
 }
@@ -87,6 +89,9 @@ export interface ConversationSettings {
   useMemory: boolean
   useGraph: boolean
   useDocuments: boolean
+  /** Inject what the activity monitor observed. Defaults on, but only ever has an effect while the
+   *  monitor is running and its own `injectContext` is left on. */
+  useActivity: boolean
   autoLearn: boolean
   useTools: boolean
   tools: Record<string, ToolOverride>
@@ -346,7 +351,7 @@ export interface Recap { day: string; content: string; created_at: number; cache
 /** Every widget a canvas window can host. Source of truth for `WIDGET_KINDS` in backend/personal_os/canvas.py. */
 export type WidgetKind =
   | 'chat' | 'todos' | 'calendar' | 'board' | 'note' | 'dashboard-widget'
-  | 'memory' | 'graph' | 'documents' | 'recap' | 'project' | 'usage'
+  | 'memory' | 'graph' | 'documents' | 'recap' | 'project' | 'usage' | 'activity'
 
 export type WindowState = 'normal' | 'minimized' | 'maximized' | 'popped'
 export type SnapMode = 'off' | 'grid' | 'guides' | 'both'
@@ -437,3 +442,119 @@ export type BusKind = 'window-bounds' | 'window-state' | 'window-config' | 'chat
  * The backend stays authoritative; a bus message never creates state.
  */
 export interface BusMessage { kind: BusKind; windowId?: string; canvasId?: string; refId?: string; data?: Record<string, unknown> }
+
+/** ---- activity monitor ---------------------------------------------------
+ *  Observed computer activity, summarized locally and fed back as chat context.
+ *  Every signal is opt-in and off until switched on. */
+
+/** The signals that can be collected, most benign first. */
+export type ActivitySignal = 'apps' | 'browserUrls' | 'input' | 'text' | 'micAudio' | 'outputAudio'
+
+export interface ActivityAudioConfig {
+  /** ffmpeg avfoundation device index, as a string. Empty means "not chosen yet". */
+  micDevice: string
+  /** A loopback device (BlackHole/Loopback) - macOS cannot record its own output without one. */
+  outputDevice: string
+  chunkSeconds: number
+  /** Speech-to-text model on the configured LLM base URL. */
+  model: string
+  /** Transcripts shorter than this are dropped as noise. */
+  minChars: number
+}
+
+export interface ActivityConfig {
+  enabled: boolean
+  signals: Record<ActivitySignal, boolean>
+  sampleSeconds: number
+  /** No input for this long counts as away from the machine. */
+  idleSeconds: number
+  rollupMinutes: number
+  /** How long raw samples live before they are deleted. */
+  retentionHours: number
+  summaryRetentionDays: number
+  /** Days of detail kept in activity.md. */
+  contextDays: number
+  /** Feed the summaries into chats at all. */
+  injectContext: boolean
+  /** Scrub credential- and PII-shaped strings before anything is stored. */
+  redact: boolean
+  /** Apps never recorded, not even by name. */
+  excludeApps: string[]
+  /** Window titles / URLs containing any of these are skipped. */
+  excludeTitlePatterns: string[]
+  audio: ActivityAudioConfig
+  /** Blank falls back to the extraction model, then the default model. */
+  summaryModel: string
+  profileEveryHours: number
+}
+
+/** One row of the capability checklist: what this machine can do, and how to fix what it can't. */
+export interface ActivityCapability {
+  id: string
+  label: string
+  ok: boolean
+  detail: string
+  /** Empty when `ok`. */
+  fix: string
+}
+
+export interface ActivityStatus {
+  running: boolean
+  paused: boolean
+  /** Unix seconds the pause lifts itself. */
+  pause_until: number | null
+  platform_supported: boolean
+  config: ActivityConfig
+  capabilities: ActivityCapability[]
+  collectors: { id: string; alive: boolean; error: string }[]
+  counts: { events: number; pending: number; summaries: number }
+  /** One live sentence about the current window, computed without the LLM. */
+  now: string
+  last_rollup: number | null
+  last_error: string
+  profile_updated_at: number | null
+  /** Where activity.md lives on disk. */
+  md_path: string
+  audio_devices: { index: string; name: string }[]
+  /** True while macOS reports a password field focused; keystrokes are dropped meanwhile. */
+  secure_input: boolean
+}
+
+export type ActivityEventKind = 'focus' | 'input' | 'idle' | 'audio' | 'note'
+
+export interface ActivityEvent {
+  id: string
+  ts: number
+  kind: ActivityEventKind
+  app: string
+  bundle: string
+  title: string
+  url: string
+  /** Redacted typed text or transcript; empty for count-only rows. */
+  text: string
+  meta: Record<string, unknown>
+  duration_ms: number
+  rolled_up: number
+  expires_at: number
+}
+
+export interface ActivitySummary {
+  id: string
+  /** Local YYYY-MM-DD. */
+  day: string
+  period_start: number
+  period_end: number
+  headline: string
+  body: string
+  apps: string[]
+  event_count: number
+  created_at: number
+}
+
+export interface ActivityContextFile {
+  path: string
+  /** The whole activity.md. */
+  markdown: string
+  /** The trimmed block chats actually receive. */
+  injected: string
+}

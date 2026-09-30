@@ -56,6 +56,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "googleClientId": "",
     "googleClientSecret": "",
     "googleToken": {},
+    # Activity monitor. Shape and defaults live in activity.DEFAULT_CONFIG; patched through
+    # /activity/config rather than /settings so the merge is a deep one.
+    "activity": {"enabled": False},
 }
 
 

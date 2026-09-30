@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import html
 import json
 import logging
@@ -16,7 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
-from . import llm
+from . import activity, llm
 from .context import build_context, estimate_tokens
 from .db import Database, data_dir_from_env, new_id
 from .extract_text import extract_text
@@ -98,7 +99,8 @@ def _record_usage(ev: dict[str, Any]) -> None:
 
 if not any(getattr(f, "__name__", "") == "_record_usage" for f in llm._usage_listeners):
     llm.on_usage(_record_usage)
-toolbox = Toolbox(memories, graph, documents, settings, todos=todos, google=google, boards=boards)
+monitor = activity.Monitor(db, settings, llm.complete)
+toolbox = Toolbox(memories, graph, documents, settings, todos=todos, google=google, boards=boards, activity=monitor)
 
 
 def sid(project_id: str | None) -> str | None:
@@ -118,6 +120,9 @@ def health() -> dict[str, Any]:
 
 # Google OAuth material lives in settings but never leaves the backend.
 PRIVATE_SETTINGS = {"googleToken", "googleAuthPending"}
+# Readable through /settings, but only writable through its own route: a plain PUT would replace the
+# whole nested dict and silently drop the signal switches and exclusion lists.
+SETTINGS_READ_ONLY = {"activity"}
 
 
 @app.get("/settings")
@@ -127,7 +132,8 @@ def get_settings() -> dict[str, Any]:
 
 @app.put("/settings")
 def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
-    db.set_settings({k: v for k, v in patch.items() if k in llm.DEFAULT_SETTINGS and k not in PRIVATE_SETTINGS})
+    db.set_settings({k: v for k, v in patch.items()
+                     if k in llm.DEFAULT_SETTINGS and k not in PRIVATE_SETTINGS and k not in SETTINGS_READ_ONLY})
     return {k: v for k, v in settings().items() if k not in PRIVATE_SETTINGS}
 
 
@@ -311,6 +317,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event) -> Async
         memories=memories, graph=graph, documents=documents,
         project=project, project_id=conv["project_id"], query=user_text,
         settings=cfg, conv_settings=conv["settings"], global_system_prompt=cfg["systemPrompt"],
+        activity=monitor,
     )
     tracer.end(cspan, {"memories": len(used["memories"]), "entities": len(used["nodes"]), "excerpts": len(used["chunks"]),
                        "history_messages": len(history)})
@@ -564,8 +571,9 @@ def context_preview(body: ContextPreviewIn) -> dict[str, Any]:
     project = projects.get(body.project_id) if sid(body.project_id) else None
     _, used = build_context(
         memories=memories, graph=graph, documents=documents, project=project, project_id=sid(body.project_id),
-        query=body.query, settings=cfg, conv_settings={"useMemory": True, "useGraph": True, "useDocuments": True, **body.conv_settings},
-        global_system_prompt=cfg["systemPrompt"],
+        query=body.query, settings=cfg,
+        conv_settings={"useMemory": True, "useGraph": True, "useDocuments": True, "useActivity": True, **body.conv_settings},
+        global_system_prompt=cfg["systemPrompt"], activity=monitor,
     )
     return used
 
@@ -1523,3 +1531,150 @@ def delete_note(id: str) -> dict[str, bool]:
     notes.delete(id)
     canvases.delete_windows_for("note", id)
     return {"ok": True}
+
+
+# ---------------- activity monitor ----------------
+#
+# Everything here is inert until the user turns it on. The renderer drives it from the Activity
+# panel; the summaries it produces land in <data_dir>/context/activity.md and, when the user
+# leaves injection on, in each chat's context block.
+
+
+class ActivityConfigIn(BaseModel):
+    """A partial patch, deep-merged over the stored config."""
+
+    enabled: bool | None = None
+    signals: dict[str, bool] | None = None
+    sampleSeconds: int | None = None
+    idleSeconds: int | None = None
+    rollupMinutes: int | None = None
+    retentionHours: float | None = None
+    summaryRetentionDays: float | None = None
+    contextDays: int | None = None
+    injectContext: bool | None = None
+    redact: bool | None = None
+    excludeApps: list[str] | None = None
+    excludeTitlePatterns: list[str] | None = None
+    audio: dict[str, Any] | None = None
+    summaryModel: str | None = None
+    profileEveryHours: float | None = None
+
+
+class PauseIn(BaseModel):
+    minutes: float = 30.0
+
+
+class PurgeIn(BaseModel):
+    scope: str = "expired"  # expired | events | summaries | all
+
+
+@app.get("/activity/status")
+def activity_status() -> dict[str, Any]:
+    return monitor.status()
+
+
+@app.put("/activity/config")
+def activity_config(body: ActivityConfigIn) -> dict[str, Any]:
+    monitor.set_config(body.model_dump(exclude_none=True))
+    return monitor.status()
+
+
+@app.post("/activity/start")
+def activity_start() -> dict[str, Any]:
+    if not activity.IS_MAC:
+        raise HTTPException(400, "The activity collectors are macOS-only.")
+    return monitor.start()
+
+
+@app.post("/activity/stop")
+def activity_stop() -> dict[str, Any]:
+    return monitor.stop()
+
+
+@app.post("/activity/pause")
+def activity_pause(body: PauseIn) -> dict[str, Any]:
+    return monitor.pause(body.minutes)
+
+
+@app.post("/activity/resume")
+def activity_resume() -> dict[str, Any]:
+    return monitor.resume()
+
+
+@app.get("/activity/events")
+def activity_events(limit: int = 200, hours: float = 24.0, kind: str = "") -> list[dict[str, Any]]:
+    """The raw log, newest first - so the user can see exactly what was recorded about them."""
+    kinds = [k for k in kind.split(",") if k] or None
+    return monitor.store.recent(limit=min(int(limit), 2000), since=time.time() - max(0.1, hours) * 3600, kinds=kinds)
+
+
+@app.delete("/activity/events/{eid}")
+def activity_delete_event(eid: str) -> dict[str, bool]:
+    monitor.store.delete_event(eid)
+    return {"ok": True}
+
+
+@app.get("/activity/summaries")
+def activity_summaries(day: str | None = None, days: float = 7.0, limit: int = 200) -> list[dict[str, Any]]:
+    since = None if day else time.time() - max(0.1, days) * 86400
+    return monitor.store.summaries(day=day, since=since, limit=min(int(limit), 500))
+
+
+@app.delete("/activity/summaries/{sid_}")
+def activity_delete_summary(sid_: str) -> dict[str, bool]:
+    monitor.store.delete_summary(sid_)
+    monitor.write_markdown()
+    return {"ok": True}
+
+
+@app.post("/activity/rollup")
+async def activity_rollup() -> dict[str, Any]:
+    """Summarize whatever is pending right now instead of waiting for the interval."""
+    s = await monitor.rollup_once(force=True)
+    return {"summary": s, "status": monitor.status()}
+
+
+@app.post("/activity/profile")
+async def activity_profile() -> dict[str, Any]:
+    return {"profile": await monitor.refresh_profile()}
+
+
+@app.get("/activity/context")
+def activity_context() -> dict[str, Any]:
+    """The markdown file plus the trimmed block chats actually see."""
+    monitor.write_markdown()
+    return {"path": str(monitor.md_path), "markdown": monitor.read_markdown(), "injected": monitor.context_block()}
+
+
+@app.get("/activity/devices")
+def activity_devices() -> list[dict[str, str]]:
+    return activity.audio_devices()
+
+
+@app.post("/activity/purge")
+def activity_purge(body: PurgeIn) -> dict[str, Any]:
+    cfg = monitor.config()
+    out = monitor.store.purge(body.scope, float(cfg["retentionHours"]), float(cfg["summaryRetentionDays"]))
+    monitor.write_markdown()
+    return {"deleted": out, "status": monitor.status()}
+
+
+@app.on_event("startup")
+async def _activity_startup() -> None:
+    """Resume the monitor if it was on when the app last quit, and run the rollup loop."""
+    if monitor.config().get("enabled") and activity.IS_MAC:
+        try:
+            monitor.start()
+        except Exception as e:  # noqa: BLE001 - a failing probe must not stop the backend booting
+            log.warning("activity: could not resume: %s", e)
+    app.state.activity_task = asyncio.create_task(monitor.loop())
+
+
+@app.on_event("shutdown")
+async def _activity_shutdown() -> None:
+    task = getattr(app.state, "activity_task", None)
+    if task:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
+    monitor.stop(persist=False)  # keep `enabled` so the next launch resumes

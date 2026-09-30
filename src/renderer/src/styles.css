@@ -81,6 +81,12 @@ kbd {
   grid-template-columns: var(--sidebar-w) 1fr;
   height: 100%;
   transition: grid-template-columns 0.18s ease;
+  /* The BrowserWindow is a vibrancy window with backgroundColor '#00000000', so anything that does not
+     paint shows the desktop through the app. Painting the shell makes that impossible for every view,
+     present and future, instead of relying on each one to remember. The sidebar's translucent
+     --sidebar-bg now composites over this rather than over the desktop; drop this line (and keep
+     .canvas's own background) to get the frosted-desktop look back. */
+  background: var(--bg);
 }
 .app.sidebar-collapsed { grid-template-columns: 0 1fr; }
 .app.loading { background: var(--bg); }

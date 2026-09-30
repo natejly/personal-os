@@ -228,46 +228,168 @@ class Google:
         return build(name, version, credentials=self._creds(), cache_discovery=False)
 
     # ---------- Calendar ----------
-    def calendar_events(self, days: int = 2, calendar_id: str = "primary", max_results: int = 30, start: str | None = None) -> list[dict[str, Any]]:
+    def calendars(self) -> list[dict[str, Any]]:
+        """The user's calendar list: primary first, then the ones they can write to."""
+        res = self._svc("calendar", "v3").calendarList().list(maxResults=100).execute()
+        out = []
+        for c in res.get("items", []):
+            if c.get("deleted"):
+                continue
+            out.append({
+                "id": c["id"],
+                "summary": c.get("summaryOverride") or c.get("summary") or c["id"],
+                "primary": bool(c.get("primary")),
+                "access_role": c.get("accessRole"),
+                "color": c.get("backgroundColor"),
+                "time_zone": c.get("timeZone"),
+                "hidden": bool(c.get("hidden")),
+                "selected": c.get("selected", False),
+            })
+        return sorted(out, key=lambda c: (not c["primary"], c["access_role"] not in ("owner", "writer"), c["summary"].lower()))
+
+    def calendar_colors(self) -> dict[str, Any]:
+        """Google's fixed palettes, id -> hex; events reference these by colorId."""
+        res = self._svc("calendar", "v3").colors().get().execute()
+        return {
+            "event": {k: v.get("background") for k, v in (res.get("event") or {}).items()},
+            "calendar": {k: v.get("background") for k, v in (res.get("calendar") or {}).items()},
+        }
+
+    def calendar_events(self, days: int = 2, calendar_id: str = "primary", max_results: int = 30, start: str | None = None, calendar_ids: list[str] | None = None) -> list[dict[str, Any]]:
         now = _parse_iso(start) if start else dt.datetime.now(dt.timezone.utc)
         if now.tzinfo is None:
             now = now.replace(tzinfo=dt.timezone.utc)
         end = now + dt.timedelta(days=max(1, min(int(days), 60)))
-        res = self._svc("calendar", "v3").events().list(
-            calendarId=calendar_id, timeMin=now.isoformat(), timeMax=end.isoformat(), singleEvents=True, orderBy="startTime", maxResults=max_results
-        ).execute()
-        out = []
-        for e in res.get("items", []):
-            st, en = e.get("start", {}), e.get("end", {})
-            out.append({
-                "id": e.get("id"), "summary": e.get("summary", "(no title)"),
-                "start": st.get("dateTime") or st.get("date"), "end": en.get("dateTime") or en.get("date"),
-                "all_day": "date" in st, "location": e.get("location"), "link": e.get("htmlLink"),
-                "attendees": [a.get("email") for a in e.get("attendees", [])][:10],
-                "description": (e.get("description") or "")[:400],
-                "meet": (e.get("hangoutLink") or ""),
-            })
-        return out
+        ids = calendar_ids or [calendar_id]
+        if ids == ["all"]:
+            ids = [c["id"] for c in self.calendars() if not c["hidden"]][:15]
+        svc = self._svc("calendar", "v3")
+        out: list[dict[str, Any]] = []
+        for cid in ids:
+            try:
+                res = svc.events().list(
+                    calendarId=cid, timeMin=now.isoformat(), timeMax=end.isoformat(), singleEvents=True, orderBy="startTime", maxResults=max_results
+                ).execute()
+            except Exception as e:  # noqa: BLE001  # one broken subscription should not empty the whole grid
+                if len(ids) == 1:
+                    raise
+                log.warning("calendar %s skipped: %s", cid, e)
+                continue
+            out.extend(_event_out(e, cid) for e in res.get("items", []) if e.get("status") != "cancelled")
+        out.sort(key=lambda e: e["start"] or "")
+        return out[: max_results if len(ids) == 1 else max_results * 2]
 
-    def calendar_create(self, summary: str, start: str, end: str | None = None, description: str = "", location: str = "", attendees: list[str] | None = None, calendar_id: str = "primary") -> dict[str, Any]:
-        all_day = len(start) == 10
-        if not end:
-            # All-day end is exclusive, so a same-day due needs start+1.
-            end = (dt.date.fromisoformat(start) + dt.timedelta(days=1)).isoformat() if all_day else (_parse_iso(start) + dt.timedelta(hours=1)).isoformat()
-        elif all_day and end == start:
-            end = (dt.date.fromisoformat(start) + dt.timedelta(days=1)).isoformat()
-        body: dict[str, Any] = {"summary": summary, "description": description, "location": location}
-        if all_day:
-            body["start"], body["end"] = {"date": start}, {"date": end}
+    def calendar_get(self, event_id: str, calendar_id: str = "primary") -> dict[str, Any]:
+        e = self._svc("calendar", "v3").events().get(calendarId=calendar_id, eventId=event_id).execute()
+        return _event_out(e, calendar_id, full=True)
+
+    def calendar_create(self, event: dict[str, Any], calendar_id: str = "primary", send_updates: str = "none") -> dict[str, Any]:
+        body = self._event_body(event)
+        kwargs: dict[str, Any] = {"calendarId": calendar_id, "body": body, "sendUpdates": _send_updates(send_updates)}
+        if event.get("create_meet"):
+            body["conferenceData"] = {"createRequest": {"requestId": secrets.token_hex(16), "conferenceSolutionKey": {"type": "hangoutsMeet"}}}
+            kwargs["conferenceDataVersion"] = 1
+        e = self._svc("calendar", "v3").events().insert(**kwargs).execute()
+        return _event_out(e, calendar_id, full=True)
+
+    def calendar_update(self, event_id: str, event: dict[str, Any], calendar_id: str = "primary", send_updates: str = "none") -> dict[str, Any]:
+        """Patch an event; only the keys present in `event` change.
+
+        To edit one instance of a recurring event pass the instance id (from the list);
+        to edit the whole series pass its recurring_event_id.
+        """
+        svc = self._svc("calendar", "v3").events()
+        updates = _send_updates(send_updates)
+        dest = event.get("move_to_calendar_id")
+        if dest and dest != calendar_id:
+            svc.move(calendarId=calendar_id, eventId=event_id, destination=dest, sendUpdates=updates).execute()
+            calendar_id = dest
+        body = self._event_body(event, patch=True)
+        kwargs: dict[str, Any] = {"calendarId": calendar_id, "eventId": event_id, "body": body, "sendUpdates": updates}
+        if event.get("create_meet"):
+            body["conferenceData"] = {"createRequest": {"requestId": secrets.token_hex(16), "conferenceSolutionKey": {"type": "hangoutsMeet"}}}
+            kwargs["conferenceDataVersion"] = 1
+        elif event.get("clear_meet"):
+            body["conferenceData"] = None
+            kwargs["conferenceDataVersion"] = 1
+        if body:
+            e = svc.patch(**kwargs).execute()
         else:
-            body["start"], body["end"] = {"dateTime": start}, {"dateTime": end}
-            tz = dt.datetime.now().astimezone().tzname()
-            if "T" in start and not re.search(r"[+-]\d\d:\d\d$|Z$", start):
-                body["start"]["timeZone"] = body["end"]["timeZone"] = _local_tz()
-        if attendees:
-            body["attendees"] = [{"email": a} for a in attendees]
-        e = self._svc("calendar", "v3").events().insert(calendarId=calendar_id, body=body).execute()
-        return {"id": e.get("id"), "link": e.get("htmlLink"), "summary": e.get("summary")}
+            e = svc.get(calendarId=calendar_id, eventId=event_id).execute()
+        return _event_out(e, calendar_id, full=True)
+
+    def calendar_delete(self, event_id: str, calendar_id: str = "primary", send_updates: str = "none") -> dict[str, Any]:
+        self._svc("calendar", "v3").events().delete(calendarId=calendar_id, eventId=event_id, sendUpdates=_send_updates(send_updates)).execute()
+        return {"deleted": event_id, "calendar_id": calendar_id}
+
+    def calendar_respond(self, event_id: str, response: str, calendar_id: str = "primary", send_updates: str = "none") -> dict[str, Any]:
+        """RSVP to an invitation: accepted, declined, tentative or needsAction."""
+        if response not in ("accepted", "declined", "tentative", "needsAction"):
+            raise ValueError("response must be accepted, declined, tentative or needsAction")
+        svc = self._svc("calendar", "v3").events()
+        e = svc.get(calendarId=calendar_id, eventId=event_id).execute()
+        attendees = e.get("attendees") or []
+        me = next((a for a in attendees if a.get("self")), None)
+        if not me:
+            raise ValueError("You are not an attendee of this event, so there is nothing to respond to.")
+        me["responseStatus"] = response
+        e = svc.patch(calendarId=calendar_id, eventId=event_id, body={"attendees": attendees}, sendUpdates=_send_updates(send_updates)).execute()
+        return _event_out(e, calendar_id, full=True)
+
+    def _event_body(self, f: dict[str, Any], patch: bool = False) -> dict[str, Any]:
+        """Translate our flat event fields into a Calendar API body (insert or patch)."""
+        body: dict[str, Any] = {}
+        for src, dst in (("summary", "summary"), ("description", "description"), ("location", "location"),
+                         ("visibility", "visibility"), ("transparency", "transparency"),
+                         ("guests_can_invite_others", "guestsCanInviteOthers"), ("guests_can_modify", "guestsCanModify"),
+                         ("guests_can_see_other_guests", "guestsCanSeeOtherGuests")):
+            if f.get(src) is not None:
+                body[dst] = f[src]
+        if f.get("color_id") is not None:
+            body["colorId"] = f["color_id"] or None  # '' clears back to the calendar's color
+        if f.get("recurrence") is not None:
+            # [] clears the recurrence (a series becomes a single event).
+            body["recurrence"] = [r for r in f["recurrence"] if r and r.strip()]
+        if f.get("start"):
+            start, end = str(f["start"]), f.get("end")
+            all_day = len(start) == 10
+            if not end:
+                # All-day end is exclusive, so a one-day event needs start+1.
+                end = (dt.date.fromisoformat(start) + dt.timedelta(days=1)).isoformat() if all_day else (_parse_iso(start) + dt.timedelta(hours=1)).isoformat()
+            elif all_day and end == start:
+                end = (dt.date.fromisoformat(start) + dt.timedelta(days=1)).isoformat()
+            if all_day:
+                body["start"], body["end"] = {"date": start}, {"date": end}
+                if patch:  # a patch keeps the old dateTime unless it is cleared explicitly
+                    body["start"].update({"dateTime": None, "timeZone": None})
+                    body["end"].update({"dateTime": None, "timeZone": None})
+            else:
+                body["start"], body["end"] = {"dateTime": start}, {"dateTime": str(end)}
+                naive = "T" in start and not re.search(r"[+-]\d\d:\d\d$|Z$", start)
+                tz = f.get("time_zone") or (_local_tz() if naive else None)
+                if tz:
+                    body["start"]["timeZone"] = body["end"]["timeZone"] = tz
+                if patch:
+                    body["start"]["date"] = body["end"]["date"] = None
+        if f.get("attendees") is not None:
+            body["attendees"] = [
+                {"email": a["email"].strip(),
+                 **({"optional": True} if a.get("optional") else {}),
+                 # A replaced attendee list resets RSVPs unless each responseStatus is resent.
+                 **({"responseStatus": a["response"]} if a.get("response") else {})}
+                for a in ({"email": a} if isinstance(a, str) else a for a in f["attendees"])
+                if (a.get("email") or "").strip()
+            ]
+        if f.get("reminders") is not None:
+            r = f["reminders"]
+            use_default = bool(r.get("use_default", r.get("useDefault", False)))
+            body["reminders"] = {"useDefault": use_default}
+            if not use_default:
+                body["reminders"]["overrides"] = [
+                    {"method": o.get("method") if o.get("method") in ("popup", "email") else "popup", "minutes": max(0, min(int(o.get("minutes", 10)), 40320))}
+                    for o in (r.get("overrides") or [])
+                ][:5]
+        return body
 
     # ---------- Gmail ----------
     def gmail_search(self, query: str = "is:unread in:inbox newer_than:14d", max_results: int = 15) -> list[dict[str, Any]]:
@@ -542,6 +664,48 @@ def _task_body(fields: dict[str, Any]) -> dict[str, Any]:
         # Reopening a task: the API keeps `completed` unless it is explicitly nulled.
         body["completed"] = None
     return body
+
+
+def _send_updates(v: str | None) -> str:
+    """Whether Google emails guests about the change; anything unrecognized means don't."""
+    return v if v in ("all", "externalOnly") else "none"
+
+
+def _event_out(e: dict[str, Any], calendar_id: str | None = None, full: bool = False) -> dict[str, Any]:
+    """Flatten a Calendar API event. `full` adds the editor-grade fields and the whole description."""
+    st, en = e.get("start", {}), e.get("end", {})
+    desc = e.get("description") or ""
+    out = {
+        "id": e.get("id"), "calendar_id": calendar_id,
+        "summary": e.get("summary", "(no title)"),
+        "start": st.get("dateTime") or st.get("date"), "end": en.get("dateTime") or en.get("date"),
+        "all_day": "date" in st,
+        "location": e.get("location"), "link": e.get("htmlLink"),
+        "attendees": [a.get("email") for a in e.get("attendees", [])][:10],
+        "description": desc if full else desc[:400],
+        "meet": e.get("hangoutLink") or "",
+        "color_id": e.get("colorId"),
+        "recurring_event_id": e.get("recurringEventId"),
+        "transparency": e.get("transparency") or "opaque",
+        "status": e.get("status"),
+    }
+    if full:
+        out.update({
+            "time_zone": st.get("timeZone"),
+            "recurrence": e.get("recurrence"),
+            "visibility": e.get("visibility") or "default",
+            "reminders": e.get("reminders"),
+            "organizer": (e.get("organizer") or {}).get("email"),
+            "attendee_details": [
+                {"email": a.get("email"), "optional": bool(a.get("optional")), "response": a.get("responseStatus"),
+                 "organizer": bool(a.get("organizer")), "self": bool(a.get("self"))}
+                for a in e.get("attendees", [])
+            ][:60],
+            "guests_can_invite_others": e.get("guestsCanInviteOthers", True),
+            "guests_can_modify": e.get("guestsCanModify", False),
+            "guests_can_see_other_guests": e.get("guestsCanSeeOtherGuests", True),
+        })
+    return out
 
 
 def _token_error_hint(e: Exception) -> str:

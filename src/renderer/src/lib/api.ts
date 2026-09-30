@@ -1,5 +1,5 @@
 import type {
-  ChatEvent, ToolInfo, Todo, GoogleStatus, TodayDashboard, CalendarEvent, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, DriveFile, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Recap, Conversation, ConversationSettings, ContextUsed, Document, GraphData, GraphEdge, GraphNode, Message,
+  ChatEvent, ToolInfo, Todo, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, DriveFile, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Recap, Conversation, ConversationSettings, ContextUsed, Document, GraphData, GraphEdge, GraphNode, Message,
   Memory, ModelInfo, ModelPrice, Settings, Project, UsageReport, ChatRunStarted, RunInfo,
   Canvas, CanvasWindow, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
   Doc, FullDoc, DocRevision,
@@ -115,10 +115,20 @@ export const api = {
     status: () => req<GoogleStatus>('/integrations/google/status'),
     start: () => req<{ url: string }>('/integrations/google/auth/start', { method: 'POST' }),
     disconnect: () => req<GoogleStatus>('/integrations/google/disconnect', { method: 'POST' }),
-    calendar: (days = 2) => req<CalendarEvent[]>(`/integrations/google/calendar?days=${days}`),
-    calendarRange: (startIso: string, days = 7) => req<CalendarEvent[]>(`/integrations/google/calendar?days=${days}&start=${encodeURIComponent(startIso)}`),
-    createEvent: (e: { summary: string; start: string; end?: string; description?: string; location?: string }) =>
-      req<{ id: string; link: string; summary: string }>('/integrations/google/calendar', { method: 'POST', body: json(e) }),
+    calendar: (days = 2, calendars = 'primary') => req<CalendarEvent[]>(`/integrations/google/calendar?days=${days}&calendars=${encodeURIComponent(calendars)}`),
+    calendarRange: (startIso: string, days = 7, calendars = 'primary') =>
+      req<CalendarEvent[]>(`/integrations/google/calendar?days=${days}&start=${encodeURIComponent(startIso)}&calendars=${encodeURIComponent(calendars)}`),
+    calendars: () => req<GoogleCalendar[]>('/integrations/google/calendars'),
+    calendarColors: () => req<CalendarColors>('/integrations/google/calendar/colors'),
+    getEvent: (id: string, calendarId = 'primary') => req<CalendarEvent>(`/integrations/google/calendar/${encodeURIComponent(id)}?calendar_id=${encodeURIComponent(calendarId)}`),
+    createEvent: (e: EventPayload & { summary: string; start: string }) =>
+      req<CalendarEvent>('/integrations/google/calendar', { method: 'POST', body: json(e) }),
+    updateEvent: (id: string, patch: EventPayload) =>
+      req<CalendarEvent>(`/integrations/google/calendar/${encodeURIComponent(id)}`, { method: 'PATCH', body: json(patch) }),
+    deleteEvent: (id: string, calendarId = 'primary', sendUpdates: 'none' | 'all' | 'externalOnly' = 'none') =>
+      req<{ deleted: string }>(`/integrations/google/calendar/${encodeURIComponent(id)}?calendar_id=${encodeURIComponent(calendarId)}&send_updates=${sendUpdates}`, { method: 'DELETE' }),
+    respondEvent: (id: string, response: 'accepted' | 'declined' | 'tentative', calendarId = 'primary') =>
+      req<CalendarEvent>(`/integrations/google/calendar/${encodeURIComponent(id)}/respond`, { method: 'POST', body: json({ response, calendar_id: calendarId }) }),
     gmail: (q = 'is:unread in:inbox newer_than:14d', maxResults = 12) => req<GmailMessage[]>(`/integrations/google/gmail?q=${encodeURIComponent(q)}&max_results=${maxResults}`),
     tasks: (showCompleted = false) => req<GoogleTask[]>(`/integrations/google/tasks?show_completed=${showCompleted}`),
     tasklists: () => req<GoogleTaskList[]>('/integrations/google/tasklists'),

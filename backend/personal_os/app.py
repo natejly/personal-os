@@ -1224,26 +1224,110 @@ def _gcall(fn, *args):  # type: ignore[no-untyped-def]
         return json_safe(fn(*args))
     except GoogleNotConnected as e:
         raise HTTPException(409, str(e)) from e
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, f"Google API error: {e}") from e
 
 
+@app.get("/integrations/google/calendars")
+def google_calendars() -> Any:
+    return _gcall(google.calendars)
+
+
 @app.get("/integrations/google/calendar")
-def google_calendar(days: int = 2, start: str | None = None) -> Any:
-    return _gcall(google.calendar_events, days, "primary", 60, start)
+def google_calendar(days: int = 2, start: str | None = None, calendars: str = "primary") -> Any:
+    ids = None if calendars in ("", "primary") else [c.strip() for c in calendars.split(",") if c.strip()]
+    return _gcall(google.calendar_events, days, "primary", 60, start, ids)
+
+
+class AttendeeIn(BaseModel):
+    email: str
+    optional: bool = False
+    # Carried through so a patched guest list does not reset everyone's RSVP.
+    response: str | None = None
+
+
+class ReminderIn(BaseModel):
+    method: str = "popup"  # popup | email
+    minutes: int = 10
+
+
+class RemindersIn(BaseModel):
+    use_default: bool = False
+    overrides: list[ReminderIn] = []
 
 
 class EventIn(BaseModel):
-    summary: str
-    start: str
+    """Create/patch body; on PATCH only the fields sent change."""
+    summary: str | None = None
+    start: str | None = None  # YYYY-MM-DD (all-day) or ISO datetime
     end: str | None = None
-    description: str = ""
-    location: str = ""
+    time_zone: str | None = None
+    description: str | None = None
+    location: str | None = None
+    attendees: list[AttendeeIn] | None = None
+    recurrence: list[str] | None = None  # RRULE lines; [] clears
+    reminders: RemindersIn | None = None
+    color_id: str | None = None
+    visibility: str | None = None  # default | public | private
+    transparency: str | None = None  # opaque (busy) | transparent (free)
+    guests_can_invite_others: bool | None = None
+    guests_can_modify: bool | None = None
+    guests_can_see_other_guests: bool | None = None
+    create_meet: bool = False
+    clear_meet: bool = False
+    calendar_id: str = "primary"
+    move_to_calendar_id: str | None = None
+    send_updates: str = "none"  # none | all | externalOnly
+
+
+def _event_fields(body: EventIn) -> dict[str, Any]:
+    f = body.model_dump(exclude_none=True, exclude={"calendar_id", "send_updates"})
+    # False is meaningless on a patch (nothing to undo) and harmless on create.
+    for k in ("create_meet", "clear_meet"):
+        if not f.get(k):
+            f.pop(k, None)
+    return f
 
 
 @app.post("/integrations/google/calendar")
 def google_calendar_create(body: EventIn) -> Any:
-    return _gcall(google.calendar_create, body.summary, body.start, body.end, body.description, body.location)
+    if not (body.summary or "").strip() or not body.start:
+        raise HTTPException(400, "An event needs at least a summary and a start.")
+    return _gcall(google.calendar_create, _event_fields(body), body.calendar_id, body.send_updates)
+
+
+# Registered before the {event_id} routes so "colors" is not read as an event id.
+@app.get("/integrations/google/calendar/colors")
+def google_calendar_colors() -> Any:
+    return _gcall(google.calendar_colors)
+
+
+@app.get("/integrations/google/calendar/{event_id}")
+def google_calendar_get(event_id: str, calendar_id: str = "primary") -> Any:
+    return _gcall(google.calendar_get, event_id, calendar_id)
+
+
+@app.patch("/integrations/google/calendar/{event_id}")
+def google_calendar_update(event_id: str, body: EventIn) -> Any:
+    return _gcall(google.calendar_update, event_id, _event_fields(body), body.calendar_id, body.send_updates)
+
+
+@app.delete("/integrations/google/calendar/{event_id}")
+def google_calendar_delete(event_id: str, calendar_id: str = "primary", send_updates: str = "none") -> Any:
+    return _gcall(google.calendar_delete, event_id, calendar_id, send_updates)
+
+
+class RespondIn(BaseModel):
+    response: str  # accepted | declined | tentative | needsAction
+    calendar_id: str = "primary"
+    send_updates: str = "all"
+
+
+@app.post("/integrations/google/calendar/{event_id}/respond")
+def google_calendar_respond(event_id: str, body: RespondIn) -> Any:
+    return _gcall(google.calendar_respond, event_id, body.response, body.calendar_id, body.send_updates)
 
 
 @app.get("/integrations/google/gmail")

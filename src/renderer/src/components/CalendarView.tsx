@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronLeft, ChevronRight, PanelLeftOpen, Calendar as CalIcon, ExternalLink, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, PanelLeftOpen, Calendar as CalIcon, ExternalLink, Pencil, Plus, Repeat, Video, X } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import CalendarWeek, { addDays, fmtTime, startOfWeek } from './CalendarWeek'
+import EventEditor, { eventColor, primeCalendarMeta, type EventDraft } from './EventEditor'
 import { scheduleTodo } from './TodoItem'
 import type { CalendarEvent } from '@shared/types'
 
@@ -16,6 +17,9 @@ export default function CalendarView(): JSX.Element {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [open, setOpen] = useState<CalendarEvent | null>(null)
+  const [editing, setEditing] = useState<{ event: CalendarEvent | null; draft?: EventDraft } | null>(null)
+  // Bumped when the calendar/color cache resolves, so the grid picks up event colors.
+  const [, setMetaTick] = useState(0)
 
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(week, i)), [week])
 
@@ -23,7 +27,7 @@ export default function CalendarView(): JSX.Element {
     if (!google?.connected) return
     setLoading(true); setError(null)
     try {
-      setEvents(await api.google.calendarRange(week.toISOString(), 7))
+      setEvents(await api.google.calendarRange(week.toISOString(), 7, 'all'))
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -32,6 +36,9 @@ export default function CalendarView(): JSX.Element {
   }
   useEffect(() => { void load() }, [week, google?.connected])
   useEffect(() => { void refreshTodos('all', false) }, [refreshTodos])
+  useEffect(() => {
+    if (google?.connected) void primeCalendarMeta().then(() => setMetaTick((t) => t + 1))
+  }, [google?.connected])
 
   const create = async (day: string, hour: number, title: string): Promise<boolean> => {
     const start = `${day}T${String(hour).padStart(2, '0')}:00:00`
@@ -68,6 +75,7 @@ export default function CalendarView(): JSX.Element {
         {!sidebarOpen && <button className="icon-btn no-drag" aria-label="Show sidebar" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
         <h2><CalIcon size={16} /> Calendar <span className="muted">· {days[0].toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – {days[6].toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span></h2>
         <div className="no-drag header-right">
+          {google?.connected && <button className="ghost-btn" onClick={() => setEditing({ event: null, draft: {} })}><Plus size={13} /> New event</button>}
           <button className="ghost-btn" onClick={() => setWeek(startOfWeek(new Date()))}>Today</button>
           <button className="icon-btn" aria-label="Previous week" onClick={() => setWeek(addDays(week, -7))}><ChevronLeft size={16} /></button>
           <button className="icon-btn" aria-label="Next week" onClick={() => setWeek(addDays(week, 7))}><ChevronRight size={16} /></button>
@@ -82,7 +90,9 @@ export default function CalendarView(): JSX.Element {
 
       <div className="cal-scroll">
         <CalendarWeek days={days} events={events} todos={todos} canCreate={!!google?.connected}
-          onOpen={setOpen} onTodo={() => setView('todos')} onTodoDrop={(id, day, hour) => void dropTodo(id, day, hour)} onCreate={create} />
+          onOpen={setOpen} onTodo={() => setView('todos')} onTodoDrop={(id, day, hour) => void dropTodo(id, day, hour)} onCreate={create}
+          onCreateFull={(day, hour, title) => setEditing({ event: null, draft: { day, hour, title } })}
+          colorOf={eventColor} />
       </div>
       {loading && <div className="cal-loading">Loading…</div>}
 
@@ -91,18 +101,28 @@ export default function CalendarView(): JSX.Element {
           <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
             <header><h2>{open.summary}</h2><button className="icon-btn" aria-label="Close event details" onClick={() => setOpen(null)}><X size={16} /></button></header>
             <section>
-              <p>{open.all_day ? 'All day' : `${new Date(open.start).toLocaleString()} – ${fmtTime(new Date(open.end))}`}</p>
+              <p>
+                {open.all_day ? 'All day' : `${new Date(open.start).toLocaleString()} – ${fmtTime(new Date(open.end))}`}
+                {open.recurring_event_id && <span className="muted"> · <Repeat size={11} style={{ verticalAlign: -1 }} /> repeats</span>}
+                {open.transparency === 'transparent' && <span className="muted"> · free</span>}
+              </p>
               {open.location && <p className="muted">{open.location}</p>}
+              {open.meet && <p className="muted small"><Video size={12} style={{ verticalAlign: -2 }} /> <a href={open.meet} target="_blank" rel="noreferrer">{open.meet.replace('https://', '')}</a></p>}
               {open.attendees.length > 0 && <p className="muted small">With {open.attendees.join(', ')}</p>}
               {open.description && <p className="muted small" style={{ whiteSpace: 'pre-wrap' }}>{open.description}</p>}
             </section>
             <footer>
               {open.link && <a className="ghost-btn" href={open.link} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Open in Google Calendar</a>}
+              <button className="ghost-btn" onClick={() => { setEditing({ event: open }); setOpen(null) }}><Pencil size={13} /> Edit</button>
               <span style={{ flex: 1 }} />
               <button className="primary-btn" onClick={() => { setOpen(null); newChat(null); void send(`Prep me for "${open.summary}" (${new Date(open.start).toLocaleString()}). Check my memory, documents and recent email for context on the attendees and topic, then give me a one-page brief.`) }}>Prep me</button>
             </footer>
           </div>
         </div>
+      )}
+
+      {editing && (
+        <EventEditor event={editing.event} draft={editing.draft} onClose={() => setEditing(null)} onSaved={() => void load()} />
       )}
     </main>
   )

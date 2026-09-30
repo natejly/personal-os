@@ -66,6 +66,10 @@ ALTERNATIVE = {
     "gmail_read": "gmail_search, whose snippets often carry the answer",
     "calendar_create": "calendar_events to show the free slot, and let the user create it",
     "calendar_events": "ask the user what is on their calendar",
+    "calendar_get": "calendar_events, whose rows carry the basics",
+    "calendar_update": "calendar_get, then tell the user what you would change",
+    "calendar_delete": "tell the user which event to remove in Google Calendar",
+    "calendar_respond": "tell the user how to RSVP in Google Calendar",
     "google_tasks_add": "todo_add, the in-app todo list",
     "google_tasks_complete": "todo_update(done=true) on the in-app todo",
     "google_tasks_list": "todo_list",
@@ -641,20 +645,85 @@ def _register_google(self: Toolbox) -> None:
     g = self.google
     run = asyncio.to_thread
 
-    async def calendar_events(ctx: dict[str, Any], days: int = 2, start: str | None = None, offset: int = 0) -> Any:
-        rows = await run(g.calendar_events, days, "primary", 30, start)
-        return page(rows, offset=offset, limit=30, key="events")
-    R("calendar_events", ToolSpec("calendar_events", "List upcoming Google Calendar events (default: next 2 days). `start` is an ISO datetime to look from.",
-        _obj({"days": {"type": "integer", "default": 2}, "start": {"type": "string"}, "offset": {"type": "integer", "default": 0}}, []), calendar_events, "google",
-        examples=[{}, {"days": 7}, {"days": 1, "start": "2026-10-02T09:00"}]))
+    def _event_fields(kw: dict[str, Any]) -> dict[str, Any]:
+        """Shared flat-args -> event dict for calendar_create/calendar_update."""
+        f = {k: v for k, v in kw.items() if v is not None}
+        if "attendees" in f:
+            f["attendees"] = [{"email": a} for a in f["attendees"]]
+        if "reminder_minutes" in f:
+            mins = f.pop("reminder_minutes")
+            f["reminders"] = {"use_default": False, "overrides": [{"method": "popup", "minutes": int(m)} for m in mins]}
+        if "busy" in f:
+            f["transparency"] = "opaque" if f.pop("busy") else "transparent"
+        return f
 
-    async def calendar_create(ctx: dict[str, Any], summary: str, start: str, end: str | None = None, description: str = "", location: str = "", attendees: list[str] | None = None) -> Any:
-        return await run(g.calendar_create, summary, start, end, description, location, attendees)
-    R("calendar_create", ToolSpec("calendar_create", "Create a Google Calendar event. Use ISO datetimes (YYYY-MM-DDTHH:MM) in the user's local time, or YYYY-MM-DD for all-day.",
-        _obj({"summary": {"type": "string"}, "start": {"type": "string"}, "end": {"type": "string"}, "description": {"type": "string"}, "location": {"type": "string"}, "attendees": {"type": "array", "items": {"type": "string"}}}, ["summary", "start"]), calendar_create, "google", "external",
-        examples=[{"summary": "Dentist", "start": "2026-10-07T15:00", "end": "2026-10-07T16:00"},
-                  {"summary": "Sprint review", "start": "2026-10-08T10:00", "attendees": ["mira@example.com"], "location": "Room 2"},
-                  {"summary": "Holiday", "start": "2026-12-24"}]))
+    _EVENT_PROPS = {
+        "summary": {"type": "string"}, "start": {"type": "string"}, "end": {"type": "string"},
+        "description": {"type": "string"}, "location": {"type": "string"},
+        "attendees": {"type": "array", "items": {"type": "string"}, "description": "guest emails"},
+        "recurrence": {"type": "array", "items": {"type": "string"}, "description": "RRULE lines, e.g. 'RRULE:FREQ=WEEKLY;BYDAY=MO'; [] removes the recurrence"},
+        "reminder_minutes": {"type": "array", "items": {"type": "integer"}, "description": "popup reminders, minutes before start"},
+        "color_id": {"type": "string", "description": "Google event color id 1-11"},
+        "visibility": {"type": "string", "enum": ["default", "public", "private"]},
+        "busy": {"type": "boolean", "description": "false shows the slot as Free"},
+        "create_meet": {"type": "boolean", "description": "attach a Google Meet link"},
+        "calendar_id": {"type": "string", "default": "primary"},
+        "send_updates": {"type": "string", "enum": ["none", "all", "externalOnly"], "description": "email the guests about this change"},
+    }
+
+    async def calendar_events(ctx: dict[str, Any], days: int = 2, start: str | None = None, offset: int = 0, all_calendars: bool = False) -> Any:
+        rows = await run(g.calendar_events, days, "primary", 30, start, ["all"] if all_calendars else None)
+        return page(rows, offset=offset, limit=30, key="events")
+    R("calendar_events", ToolSpec("calendar_events", "List upcoming Google Calendar events (default: next 2 days on the primary calendar). `start` is an ISO datetime to look from; all_calendars includes every calendar.",
+        _obj({"days": {"type": "integer", "default": 2}, "start": {"type": "string"}, "offset": {"type": "integer", "default": 0}, "all_calendars": {"type": "boolean", "default": False}}, []), calendar_events, "google",
+        examples=[{}, {"days": 7, "all_calendars": True}, {"days": 1, "start": "2026-10-02T09:00"}]))
+
+    async def calendar_get(ctx: dict[str, Any], event_id: str, calendar_id: str = "primary") -> Any:
+        return await run(g.calendar_get, event_id, calendar_id)
+    R("calendar_get", ToolSpec("calendar_get", "Full details of one event by id (from calendar_events): recurrence, reminders, guests and their RSVPs, color, visibility.",
+        _obj({"event_id": {"type": "string"}, "calendar_id": {"type": "string", "default": "primary"}}, ["event_id"]), calendar_get, "google",
+        examples=[{"event_id": "7abc123def"}]))
+
+    async def calendar_create(ctx: dict[str, Any], summary: str, start: str, end: str | None = None, description: str | None = None, location: str | None = None,
+                              attendees: list[str] | None = None, recurrence: list[str] | None = None, reminder_minutes: list[int] | None = None,
+                              color_id: str | None = None, visibility: str | None = None, busy: bool | None = None, create_meet: bool | None = None,
+                              calendar_id: str = "primary", send_updates: str = "none") -> Any:
+        f = _event_fields({"summary": summary, "start": start, "end": end, "description": description, "location": location, "attendees": attendees,
+                           "recurrence": recurrence, "reminder_minutes": reminder_minutes, "color_id": color_id, "visibility": visibility,
+                           "busy": busy, "create_meet": create_meet})
+        return await run(g.calendar_create, f, calendar_id, send_updates)
+    R("calendar_create", ToolSpec("calendar_create", "Create a Google Calendar event. ISO datetimes (YYYY-MM-DDTHH:MM) in the user's local time, or YYYY-MM-DD for all-day. Supports recurrence (RRULE), reminders, guests, Meet links, color and busy/free. send_updates='all' emails the guests their invites.",
+        _obj(dict(_EVENT_PROPS), ["summary", "start"]), calendar_create, "google", "external",
+        examples=[{"summary": "Dentist", "start": "2026-10-07T15:00", "end": "2026-10-07T16:00", "reminder_minutes": [30]},
+                  {"summary": "Sprint review", "start": "2026-10-08T10:00", "attendees": ["mira@example.com"], "location": "Room 2", "create_meet": True, "send_updates": "all"},
+                  {"summary": "Standup", "start": "2026-10-05T09:30", "end": "2026-10-05T09:45", "recurrence": ["RRULE:FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR"]}]))
+
+    async def calendar_update(ctx: dict[str, Any], event_id: str, summary: str | None = None, start: str | None = None, end: str | None = None,
+                              description: str | None = None, location: str | None = None, attendees: list[str] | None = None,
+                              recurrence: list[str] | None = None, reminder_minutes: list[int] | None = None, color_id: str | None = None,
+                              visibility: str | None = None, busy: bool | None = None, create_meet: bool | None = None, clear_meet: bool | None = None,
+                              calendar_id: str = "primary", send_updates: str = "none") -> Any:
+        f = _event_fields({"summary": summary, "start": start, "end": end, "description": description, "location": location, "attendees": attendees,
+                           "recurrence": recurrence, "reminder_minutes": reminder_minutes, "color_id": color_id, "visibility": visibility,
+                           "busy": busy, "create_meet": create_meet, "clear_meet": clear_meet})
+        return await run(g.calendar_update, event_id, f, calendar_id, send_updates)
+    R("calendar_update", ToolSpec("calendar_update", "Edit a Google Calendar event by id; only the fields you pass change. `attendees` replaces the whole guest list. For a recurring event, the instance id edits that occurrence and its recurring_event_id (from calendar_get) edits the series.",
+        _obj({"event_id": {"type": "string"}, "clear_meet": {"type": "boolean", "description": "remove the Meet link"}, **_EVENT_PROPS}, ["event_id"]), calendar_update, "google", "external",
+        examples=[{"event_id": "7abc123def", "start": "2026-10-07T16:00", "end": "2026-10-07T17:00"},
+                  {"event_id": "7abc123def", "summary": "Sprint review (moved)", "send_updates": "all"},
+                  {"event_id": "7abc123def", "recurrence": []}]))
+
+    async def calendar_delete(ctx: dict[str, Any], event_id: str, calendar_id: str = "primary", send_updates: str = "none") -> Any:
+        return await run(g.calendar_delete, event_id, calendar_id, send_updates)
+    R("calendar_delete", ToolSpec("calendar_delete", "Delete a Google Calendar event by id. For a recurring event, the instance id removes that occurrence and its recurring_event_id removes the whole series. Only when the user asked to delete it.",
+        _obj({"event_id": {"type": "string"}, "calendar_id": {"type": "string", "default": "primary"}, "send_updates": {"type": "string", "enum": ["none", "all", "externalOnly"]}}, ["event_id"]), calendar_delete, "google", "external",
+        examples=[{"event_id": "7abc123def"}, {"event_id": "7abc123def", "send_updates": "all"}]))
+
+    async def calendar_respond(ctx: dict[str, Any], event_id: str, response: str, calendar_id: str = "primary") -> Any:
+        return await run(g.calendar_respond, event_id, response, calendar_id, "all")
+    R("calendar_respond", ToolSpec("calendar_respond", "RSVP to an event the user was invited to: accepted, declined or tentative.",
+        _obj({"event_id": {"type": "string"}, "response": {"type": "string", "enum": ["accepted", "declined", "tentative"]}, "calendar_id": {"type": "string", "default": "primary"}}, ["event_id", "response"]), calendar_respond, "google", "external",
+        examples=[{"event_id": "7abc123def", "response": "accepted"}]))
 
     async def gmail_search(ctx: dict[str, Any], query: str = "is:unread in:inbox newer_than:14d", max_results: int = 15, offset: int = 0) -> Any:
         off, n = max(0, int(offset)), max(1, min(int(max_results), 100))

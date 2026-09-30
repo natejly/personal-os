@@ -1061,6 +1061,51 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .cal-event:hover { background: rgba(59,158,219,0.4); }
 .cal-create { position: absolute; left: 3px; right: 3px; display: flex; gap: 4px; z-index: 3; background: var(--bg-elev); border: 1px solid var(--accent); border-radius: 6px; padding: 4px; }
 .cal-create input { flex: 1; background: none; border: 0; outline: 0; font-size: 12px; }
+
+/* ---------- Event editor ---------- */
+.event-editor { width: 620px; }
+.event-editor .ev-title { font-size: 16px; font-weight: 600; }
+.ev-row { display: flex; gap: 10px; align-items: flex-end; }
+.ev-row > label { flex: 1; min-width: 0; }
+.ev-row .icon-btn { margin-bottom: 12px; flex: 0 0 auto; }
+.event-editor label.inline, .ev-perms label.inline {
+  flex-direction: row; align-items: center; gap: 7px; margin-bottom: 8px; cursor: pointer;
+}
+.event-editor label.inline input[type=checkbox] { width: auto; }
+.ev-perms { display: flex; flex-wrap: wrap; gap: 2px 16px; margin: 2px 0 10px; }
+.ev-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: -4px 0 12px; }
+.ev-chip {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 12px;
+  background: var(--hover); border: 1px solid var(--border); border-radius: 999px; padding: 3px 6px 3px 10px;
+}
+.ev-chip.optional { opacity: 0.7; }
+.ev-chip button { display: inline-flex; align-items: center; font-size: 10px; color: var(--text-faint); border-radius: 999px; padding: 1px 5px; }
+.ev-chip button:hover { background: var(--active); color: var(--text); }
+.ev-meet { display: flex; align-items: center; gap: 8px; margin: 2px 0 12px; font-size: 13px; color: var(--text-muted); }
+.ev-meet a { color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.ev-reminders { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 12px; }
+.ev-reminders .ev-row { align-items: center; }
+.ev-reminders input[type=number] { width: 76px; flex: 0 0 auto; }
+.ev-reminders select { width: auto; }
+.ev-reminders .icon-btn { margin-bottom: 0; }
+.ev-reminders .ghost-btn { align-self: flex-start; }
+.ev-colors { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0; }
+.ev-swatch {
+  width: 22px; height: 22px; border-radius: 50%; border: 2px solid transparent;
+  display: inline-flex; align-items: center; justify-content: center; color: #fff; flex: 0 0 auto;
+}
+.ev-swatch.on { border-color: var(--text); }
+.ev-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
+.ev-scope, .ev-rsvp { display: flex; align-items: center; gap: 10px; }
+.ev-scope .muted.small, .ev-rsvp .muted.small { margin: 0; }
+.ev-seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; }
+.ev-seg button { padding: 5px 12px; font-size: 12px; color: var(--text-muted); }
+.ev-seg button + button { border-left: 1px solid var(--border-strong); }
+.ev-seg button.on { background: var(--active); color: var(--text); }
+.ev-notify { width: auto !important; font-size: 12px; }
+.modal footer .ev-notify {
+  background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 7px 8px; outline: 0;
+}
 .cal-loading { position: absolute; top: 60px; right: 20px; font-size: 12px; color: var(--text-faint); }
 
 /* ---------- Dashboards ---------- */

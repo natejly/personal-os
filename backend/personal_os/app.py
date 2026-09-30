@@ -159,6 +159,17 @@ async def _integrity_error(request: Request, exc: Exception) -> JSONResponse:  #
     return JSONResponse({"detail": detail}, status_code=409)
 
 
+@app.exception_handler(sqlite3.IntegrityError)
+async def _integrity_error(request: Request, exc: Exception) -> JSONResponse:  # type: ignore[override]
+    """Safety net for the writers wsid() cannot cover (a card whose column is gone, a widget whose dashboard is gone).
+    A stale id from a window that has not refreshed is the client's problem to retry, not a server fault, so it gets a
+    409 and a usable message rather than a bare 500."""
+    detail = ("Something this refers to no longer exists - reload and try again."
+              if "FOREIGN KEY" in str(exc).upper() else f"That change conflicts with what is already stored ({exc})")
+    log.info("integrity error on %s %s: %s", request.method, request.url.path, exc)
+    return JSONResponse({"detail": detail}, status_code=409)
+
+
 @app.middleware("http")
 async def _require_token(request: Request, call_next):  # type: ignore[no-untyped-def]
     p = request.url.path

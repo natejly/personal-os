@@ -39,6 +39,20 @@ const GHOST = { w: 420, h: 360 }
 const IDLE_MS = 180
 
 const clamp = (n: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, n))
+/**
+ * The order the frames MOUNT in, which is deliberately not the order the store keeps them in. The
+ * store sorts `windows` by z (`byZ`) and a click raises the window it hit, so rendering in store
+ * order made the clicked window the last keyed child -- and React moves a reordered child by
+ * re-inserting its DOM node. Re-insertion restarts the `win-open` animation and reloads every iframe
+ * and `<webview>` inside the window, which is why clicking a widget looked like it reloaded it.
+ * Creation order never changes, so a raise now rewrites nothing but `zIndex` -- and stacking has
+ * always come from that, never from DOM order.
+ */
+export const renderOrder = (windows: CanvasWindow[]): CanvasWindow[] =>
+  windows
+    .filter((w) => w.state !== 'minimized')
+    .sort((a, b) => a.created_at - b.created_at || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
+
 const hits = (a: Rect, b: Rect): boolean => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
 
 /** Can this element itself consume the wheel delta, i.e. it scrolls and is not already at the end? */
@@ -409,7 +423,7 @@ export default function Canvas(): JSX.Element {
   const pitch = grid * zoom
   // Mounted for the whole space, hidden below the threshold, so an imperative zoom can reveal it.
   const gridOn = canvas?.snap_mode === 'grid' || canvas?.snap_mode === 'both'
-  const shown = windows.filter((w) => w.state !== 'minimized')
+  const shown = useMemo(() => renderOrder(windows), [windows])
 
   return (
     <div className="canvas-root">

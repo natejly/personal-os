@@ -9,14 +9,15 @@ from pathlib import Path
 from typing import Any
 
 os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="docstest-"))
+os.environ.setdefault("PERSONAL_OS_AUTH_TOKEN", "test-token")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from personal_os.app import app, docs, toolbox  # noqa: E402
+from personal_os.app import AUTH_TOKEN, app, docs, toolbox  # noqa: E402
 from personal_os.docs import diff_stat, unified_diff, word_count  # noqa: E402
 
-client = TestClient(app)
+client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
 passed = 0
 
 

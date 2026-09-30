@@ -11,13 +11,14 @@ from pathlib import Path
 from typing import Any
 
 os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="finitetest-"))
+os.environ.setdefault("PERSONAL_OS_AUTH_TOKEN", "test-token")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from personal_os.app import app  # noqa: E402
+from personal_os.app import AUTH_TOKEN, app  # noqa: E402
 
-client = TestClient(app)
+client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
 
 
 def check(cond: Any, label: str) -> None:

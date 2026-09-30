@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState, type DragEvent } from 'react'
-import { Calendar as CalIcon, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react'
+import { Calendar as CalIcon, ChevronLeft, ChevronRight, ExternalLink, Pencil, Plus } from 'lucide-react'
 import type { CalendarEvent, DragKind, Todo } from '@shared/types'
 import { useStore } from '../../store'
 import { api } from '../../lib/api'
 import CalendarWeek, { addDays, dayKey, fmtTime, localDay, startOfWeek } from '../../components/CalendarWeek'
+import EventEditor, { eventColor, primeCalendarMeta, type EventDraft } from '../../components/EventEditor'
 import { scheduleTodo } from '../../components/TodoItem'
 import { hasDrag, readDrag, useDropTarget } from '../dnd'
 import type { WidgetDef, WidgetProps } from '../registry'
@@ -29,6 +30,8 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [error, setError] = useState<string | null>(null)
   const [open, setOpen] = useState<CalendarEvent | null>(null)
+  const [editing, setEditing] = useState<{ event: CalendarEvent | null; draft?: EventDraft } | null>(null)
+  const [, setMetaTick] = useState(0)
 
   const anchor = useMemo(() => (mode === 'week' ? addDays(startOfWeek(new Date()), shift * 7) : addDays(new Date(), shift)), [mode, shift])
   const span = mode === 'week' ? 7 : mode === 'day' ? 1 : days
@@ -46,16 +49,21 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
     let alive = true
     const pull = async (): Promise<void> => {
       try {
-        const list = mode === 'agenda' ? await api.google.calendar(span) : await api.google.calendarRange(startIso, span)
+        const list = mode === 'agenda' ? await api.google.calendar(span, 'all') : await api.google.calendarRange(startIso, span, 'all')
         if (alive) { setEvents(list); setError(null) }
       } catch (e) {
         if (alive) setError((e as Error).message)
       }
     }
     void pull()
+    void primeCalendarMeta().then(() => { if (alive) setMetaTick((t) => t + 1) })
     const t = setInterval(() => void pull(), POLL_MS)
     return () => { alive = false; clearInterval(t) }
   }, [live, connected, mode, span, startIso])
+
+  const reload = async (): Promise<void> => {
+    setEvents(mode === 'agenda' ? await api.google.calendar(span, 'all') : await api.google.calendarRange(startIso, span, 'all'))
+  }
 
   const dropTodo = async (todoId: string, day: string, hour: number | null): Promise<void> => {
     const todo = useStore.getState().todos.find((t) => t.id === todoId)
@@ -65,9 +73,7 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
       if (connected) {
         const start = hour === null ? day : `${day}T${String(hour).padStart(2, '0')}:00:00`
         await scheduleTodo({ ...todo, due: day }, start)
-        if (hour !== null) {
-          setEvents(mode === 'agenda' ? await api.google.calendar(span) : await api.google.calendarRange(startIso, span))
-        }
+        if (hour !== null) await reload()
       }
       toast(hour === null ? `Due ${day}` : `Scheduled ${hour}:00`)
     } catch (e) {
@@ -79,7 +85,7 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
     try {
       await api.google.createEvent({ summary: title, start: `${day}T${String(hour).padStart(2, '0')}:00:00` })
       toast(`Added "${title}"`)
-      setEvents(mode === 'agenda' ? await api.google.calendar(span) : await api.google.calendarRange(startIso, span))
+      await reload()
       return true
     } catch (e) {
       toast((e as Error).message, 'error')
@@ -141,6 +147,7 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
           </>
         )}
         <span className="spacer" />
+        {connected && <button className="widget-chip" title="New event" onClick={() => setEditing({ event: null, draft: {} })}><Plus size={11} /></button>}
         {!connected && <button className="widget-chip" onClick={() => setSettingsOpen(true)}>Connect Google</button>}
         {error && <span className="widget-meta" title={error}>offline</span>}
       </div>
@@ -173,16 +180,23 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
       ) : (
         <div className="cal-scroll">
           <CalendarWeek days={columns} events={events} todos={todos} canCreate={connected}
-            onOpen={setOpen} onTodo={() => setView('todos')} onTodoDrop={(id, day, hour) => void dropTodo(id, day, hour)} onCreate={create} />
+            onOpen={setOpen} onTodo={() => setView('todos')} onTodoDrop={(id, day, hour) => void dropTodo(id, day, hour)} onCreate={create}
+            onCreateFull={(day, hour, title) => setEditing({ event: null, draft: { day, hour, title } })}
+            colorOf={eventColor} />
         </div>
       )}
 
       {open && (
         <div className="widget-bar">
           <span className="grow widget-sub" title={open.description || open.summary}>{open.summary} · {open.all_day ? 'all day' : fmtTime(new Date(open.start))}{open.location ? ` · ${open.location}` : ''}</span>
+          <button className="widget-chip" title="Edit event" onClick={() => { setEditing({ event: open }); setOpen(null) }}><Pencil size={11} /></button>
           {open.link && <a className="widget-chip" href={open.link} target="_blank" rel="noreferrer"><ExternalLink size={11} /></a>}
           <button className="widget-chip" onClick={() => setOpen(null)}>close</button>
         </div>
+      )}
+
+      {editing && (
+        <EventEditor event={editing.event} draft={editing.draft} onClose={() => setEditing(null)} onSaved={() => void reload().catch(() => undefined)} />
       )}
     </div>
   )

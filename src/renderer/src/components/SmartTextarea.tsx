@@ -41,7 +41,7 @@ export default function SmartTextarea({
   rows = 2, className = '', minChars = MIN_CHARS, autoGrow = false, maxHeight = 240, inputRef
 }: Props): JSX.Element {
   const [ghost, setGhost] = useState('')
-  const taRef = useRef<HTMLTextAreaElement>(null)
+  const taRef = useRef<HTMLTextAreaElement | null>(null)
   const mirrorRef = useRef<HTMLDivElement>(null)
   const seq = useRef(0)
 

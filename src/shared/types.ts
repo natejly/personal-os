@@ -212,6 +212,7 @@ export interface GoogleStatus {
 
 export interface CalendarEvent {
   id: string
+  calendar_id: string | null
   summary: string
   start: string
   end: string
@@ -221,6 +222,70 @@ export interface CalendarEvent {
   attendees: string[]
   description: string
   meet: string
+  color_id: string | null
+  /** Set on instances of a recurring series; edit/delete via this id to touch the whole series. */
+  recurring_event_id: string | null
+  /** 'opaque' = busy, 'transparent' = free. */
+  transparency: string
+  status: string | null
+  /** Editor-grade fields, present when fetched via getEvent / returned from create/update. */
+  time_zone?: string | null
+  recurrence?: string[] | null
+  visibility?: string
+  reminders?: { useDefault: boolean; overrides?: { method: string; minutes: number }[] } | null
+  organizer?: string | null
+  attendee_details?: EventAttendee[]
+  guests_can_invite_others?: boolean
+  guests_can_modify?: boolean
+  guests_can_see_other_guests?: boolean
+}
+
+export interface EventAttendee {
+  email: string
+  optional: boolean
+  /** accepted | declined | tentative | needsAction */
+  response: string | null
+  organizer: boolean
+  self: boolean
+}
+
+export interface GoogleCalendar {
+  id: string
+  summary: string
+  primary: boolean
+  /** owner | writer | reader | freeBusyReader — only the first two can hold new events. */
+  access_role: string
+  color: string | null
+  time_zone: string | null
+  hidden: boolean
+  selected: boolean
+}
+
+/** Google's fixed palettes, id -> hex. Events reference `event` ids via color_id. */
+export interface CalendarColors { event: Record<string, string>; calendar: Record<string, string> }
+
+/** Create/patch body for a calendar event; on update only the fields sent change. */
+export interface EventPayload {
+  summary?: string
+  start?: string
+  end?: string
+  time_zone?: string
+  description?: string
+  location?: string
+  attendees?: { email: string; optional?: boolean; response?: string }[]
+  recurrence?: string[]
+  reminders?: { use_default: boolean; overrides?: { method: string; minutes: number }[] }
+  color_id?: string
+  visibility?: string
+  transparency?: string
+  guests_can_invite_others?: boolean
+  guests_can_modify?: boolean
+  guests_can_see_other_guests?: boolean
+  create_meet?: boolean
+  clear_meet?: boolean
+  calendar_id?: string
+  move_to_calendar_id?: string
+  send_updates?: 'none' | 'all' | 'externalOnly'
 }
 
 export interface GmailMessage {

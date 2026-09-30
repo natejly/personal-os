@@ -1,7 +1,11 @@
-import { useMemo, useState, type DragEvent } from 'react'
-import { Plus } from 'lucide-react'
+import { useMemo, useState, type CSSProperties, type DragEvent } from 'react'
+import { Plus, SlidersHorizontal } from 'lucide-react'
 import type { CalendarEvent, Todo } from '@shared/types'
 import { hasDrag, readDrag } from '../canvas/dnd'
+
+/** Tint an event block with its Google color (falls back to the stylesheet blue). */
+const colorStyle = (hex: string | null | undefined): CSSProperties | undefined =>
+  hex ? { background: `${hex}38`, borderLeftColor: hex } : undefined
 
 export const HOUR_PX = 44
 export const startOfWeek = (d: Date): Date => { const x = new Date(d); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() - ((x.getDay() + 6) % 7)); return x }
@@ -24,13 +28,17 @@ export interface CalendarWeekProps {
   onTodoDrop?: (todoId: string, day: string, hour: number | null) => void
   /** Resolves true when the event was created, which is when the inline input clears. */
   onCreate?: (day: string, hour: number, title: string) => Promise<boolean>
+  /** Open the full event editor instead of the quick inline create. */
+  onCreateFull?: (day: string, hour: number, title: string) => void
+  /** Per-event display color (Google event color or its calendar's). */
+  colorOf?: (e: CalendarEvent) => string | null
 }
 
 /**
  * The day-column grid, shared by the Calendar page and the calendar widget so the two render the same
  * thing. The column count is inline because `.cal-grid` hard-codes seven.
  */
-export default function CalendarWeek({ days, events, todos, canCreate = false, onOpen, onTodo, onTodoDrop, onCreate }: CalendarWeekProps): JSX.Element {
+export default function CalendarWeek({ days, events, todos, canCreate = false, onOpen, onTodo, onTodoDrop, onCreate, onCreateFull, colorOf }: CalendarWeekProps): JSX.Element {
   const [creating, setCreating] = useState<{ day: string; hour: number } | null>(null)
   const [title, setTitle] = useState('')
   const [over, setOver] = useState<string | null>(null)
@@ -92,7 +100,9 @@ export default function CalendarWeek({ days, events, todos, canCreate = false, o
             onDragOver={(e) => dragOver(e, `ad:${dk}`)}
             onDragLeave={() => setOver(null)}
             onDrop={(e) => dropTodo(e, dk, null)}>
-            {(eventsByDay[dk] ?? []).filter((e) => e.all_day).map((e) => <div key={e.id} className="cal-chip" onClick={() => onOpen(e)}>{e.summary}</div>)}
+            {(eventsByDay[dk] ?? []).filter((e) => e.all_day).map((e) => (
+              <div key={e.id} className="cal-chip" style={colorOf?.(e) ? { background: `${colorOf(e)}38` } : undefined} onClick={() => onOpen(e)}>{e.summary}</div>
+            ))}
             {(todosByDay[dk] ?? []).map((t) => (
               <div key={t.id} className={`cal-chip todo p${t.priority}`} title={onTodo ? 'Open todo' : 'Todo due'}
                 onClick={() => onTodo?.(t)}>○ {t.title}</div>
@@ -126,7 +136,7 @@ export default function CalendarWeek({ days, events, todos, canCreate = false, o
               const top = (s.getHours() + s.getMinutes() / 60) * HOUR_PX
               const h = Math.max(22, ((en.getTime() - s.getTime()) / 3_600_000) * HOUR_PX - 2)
               return (
-                <div key={e.id} className="cal-event" style={{ top, height: h }} onClick={() => onOpen(e)} title={e.summary}>
+                <div key={e.id} className="cal-event" style={{ top, height: h, ...colorStyle(colorOf?.(e)) }} onClick={() => onOpen(e)} title={e.summary}>
                   <b>{e.summary}</b><span>{fmtTime(s)}</span>
                 </div>
               )
@@ -134,7 +144,12 @@ export default function CalendarWeek({ days, events, todos, canCreate = false, o
             {creating?.day === dk && (
               <div className="cal-create" style={{ top: creating.hour * HOUR_PX }}>
                 <input autoFocus placeholder={`New event at ${creating.hour}:00`} value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void create(); if (e.key === 'Escape') { setCreating(null); setTitle('') } }} />
-                <button className="icon-btn" onClick={() => void create()}><Plus size={13} /></button>
+                {onCreateFull && (
+                  <button className="icon-btn" title="More options" onClick={() => { onCreateFull(creating.day, creating.hour, title.trim()); setCreating(null); setTitle('') }}>
+                    <SlidersHorizontal size={13} />
+                  </button>
+                )}
+                <button className="icon-btn" title="Add" onClick={() => void create()}><Plus size={13} /></button>
               </div>
             )}
           </div>

@@ -183,7 +183,9 @@ function WindowFrame({ win, live, selected = false, status = null }: WindowFrame
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>): void => {
     // `begin` cancels the pointerdown, and that is what suppresses the click on the control beneath.
     if (e.metaKey && e.button === 0) return onDragPointerDown(e)
-    focusWindow(win.id)
+    // `deferRaise`: this pointerdown may be the browser anchoring a text selection in a transcript, and
+    // restacking the window underneath it in the same event crashes the renderer. See focusWindow.
+    focusWindow(win.id, { deferRaise: true })
   }
 
   const onContextMenu = (e: ReactMouseEvent<HTMLDivElement>): void => {

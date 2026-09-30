@@ -39,8 +39,11 @@ export interface CanvasState {
   /** Focus the chat window holding this conversation — restoring or crossing spaces if needed — or open one. */
   openChat: (conversationId: string) => Promise<void>
   closeWindow: (windowId: string) => Promise<void>
-  /** Local focus + POST /windows/{id}/raise so z stays authoritative across renderers. */
-  focusWindow: (windowId: string) => void
+  /**
+   * Local focus + POST /windows/{id}/raise so z stays authoritative across renderers. `deferRaise`
+   * holds the z-index write until the current pointer gesture ends; see the note on the implementation.
+   */
+  focusWindow: (windowId: string, opts?: { deferRaise?: boolean }) => void
   /** Local optimistic merge into one window row. Never writes to the backend. */
   patchWindow: (windowId: string, patch: Partial<CanvasWindow>) => void
   setWindowState: (windowId: string, state: WindowState) => Promise<void>
@@ -430,18 +433,33 @@ export const useCanvas = create<CanvasState>((set, get) => {
       set((s) => (s.focusedWindowId === windowId ? { focusedWindowId: null } : {}))
       await api.windows.delete(windowId).catch(fail)
     },
-    focusWindow: (windowId) => {
+    focusWindow: (windowId, opts) => {
       const s = get()
       const w = findWin(s, windowId)
       if (!w) return
       const top = topZ(s.canvases[w.canvas_id]?.windows ?? EMPTY)
       if (s.focusedWindowId !== windowId) set({ focusedWindowId: windowId })
       if (w.z >= top) return
-      s.patchWindow(windowId, { z: top + 1 })
-      void api.windows
-        .raise(windowId)
-        .then((row) => get().patchWindow(windowId, { z: row.z }))
-        .catch(() => undefined)
+      const raise = (): void => {
+        // Deferred by a frame or a gesture, so re-read: the window may be closed, on another space, or
+        // already on top by now.
+        const cur = findWin(get(), windowId)
+        if (!cur) return
+        const now = topZ(get().canvases[cur.canvas_id]?.windows ?? EMPTY)
+        if (cur.z < now) get().patchWindow(windowId, { z: now + 1 })
+        void api.windows
+          .raise(windowId)
+          .then((row) => get().patchWindow(windowId, { z: row.z }))
+          .catch(() => undefined)
+      }
+      // Raising rewrites this window's z-index, and doing that synchronously inside a pointerdown --
+      // while the browser is anchoring a text selection in the window's own text -- kills the renderer
+      // outright: reason=crashed, exitCode=5, no JS error and no crash report. Reordering the stacking
+      // context under a selection that is mid-anchor is the whole trigger, so the click that focuses a
+      // window below another one has to let the gesture finish first. Nothing visible is lost: the
+      // focus ring lands immediately above, and a click's pointerup is milliseconds away.
+      if (opts?.deferRaise) window.addEventListener('pointerup', raise, { once: true, capture: true })
+      else raise()
     },
     patchWindow: (windowId, patch) => {
       const w = findWin(get(), windowId)

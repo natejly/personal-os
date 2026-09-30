@@ -11,12 +11,12 @@ their own instructions, knowledge files, memories and graph.
 │ + New chat   │  Today · Monday, September 29        │  Context     │
 │ Today        │  ┌ Calendar ─────┐ ┌ Todos ────────┐ │  ☑ Memory    │
 │ Todos      3 │  │ 10:00 Standup │ │ ○ Ship v0.1   │ │  ☑ Graph     │
-│ Memory     9 │  │ 14:00 1:1     │ │ ○ USB-C hub   │ │  ☑ Documents │
-│ Graph     10 │  └───────────────┘ └───────────────┘ │  ☑ Auto-learn│
-│ Documents  1 │  ┌ Inbox ────────┐ ┌ Projects ─────┐ │  ☑ Tools  ▾  │
-│ PROJECTS   + │  │ Alice: Q4 …   │ │ ■ Personal OS │ │   web search │
-│ ■ Personal OS│  └───────────────┘ └───────────────┘ │   run python │
-│ RECENTS      │                                      │   gmail send │
+│ Memory    19 │  │ 14:00 1:1     │ │ ○ USB-C hub   │ │  ☑ Documents │
+│ Documents  1 │  └───────────────┘ └───────────────┘ │  ☑ Auto-learn│
+│ PROJECTS   + │  ┌ Inbox ────────┐ ┌ Projects ─────┐ │  ☑ Tools  ▾  │
+│ ■ Personal OS│  │ Alice: Q4 …   │ │ ■ Personal OS │ │   web search │
+│ RECENTS      │  └───────────────┘ └───────────────┘ │   run python │
+│ · …          │                                      │   gmail send │
 │ · …          │  [Brief me]                          │  Last reply… │
 └──────────────┴──────────────────────────────────────┴──────────────┘
 ```
@@ -37,11 +37,14 @@ their own instructions, knowledge files, memories and graph.
   timing, and every reply carries an execution trace.
 - **Projects.** Groups of chats with instructions, knowledge files, project
   memories and a project graph, layered on top of your personal ones.
-- **Memory.** Facts, preferences and goals, auto-extracted after each reply or
-  added by hand or by the assistant. Edit, pin, move between personal and
-  project scope, forget.
-- **Knowledge graph.** Entities and relations, auto-extracted and hand-editable
-  in a force-directed view. Relevant subgraphs are injected into chats.
+- **Memory.** One panel holding both halves of what the app remembers, over a
+  shared scope filter and search box, as a split view or either half alone:
+  - *Memories* — facts, preferences and goals, auto-extracted after each reply
+    or added by hand or by the assistant. Edit, pin, move between personal and
+    project scope, forget.
+  - *Knowledge graph* — entities and relations, auto-extracted and
+    hand-editable in a force-directed view. Relevant subgraphs are injected
+    into chats.
 - **Documents.** Upload `.txt/.md/.pdf/.docx` and code files. Chunked,
   full-text indexed, best excerpts pulled into replies.
 - **Context management.** Per-chat toggles for memory, graph, documents,
@@ -152,7 +155,8 @@ next calendar or mail call with an opaque error.
 | Shortcut | Action |
 |---|---|
 | ⌘N | New chat |
-| ⌘0 … ⌘8 | Today / Chats / Todos / Calendar / Boards / Dashboards / Memory / Graph / Documents |
+| ⌘0 … ⌘6, ⌘8 | Today / Chats / Todos / Calendar / Boards / Dashboards / Memory / Documents |
+| ⌘7 | Memory, opened on the knowledge graph |
 | ⌘B | Toggle sidebar |
 | ⌘I | Toggle context panel |
 | ⌘U | Upload document |
@@ -247,7 +251,17 @@ docs/research.md    Feature research and roadmap
 ## Roadmap
 
 See [docs/research.md](docs/research.md) for the researched roadmap across
-memory, retrieval, app features and life-OS features. Near-term: action
-approval queue and undo journal, scheduled morning brief and heartbeat,
-hybrid retrieval with reranking, conversation branching, MCP client,
-quick-capture hotkey, packaging with a bundled Python.
+memory, retrieval, app features, life-OS features and agentic capabilities,
+with the per-track source reports under [docs/research/](docs/research/).
+
+**Read Track 5 first.** It documents four live security defects in the current
+tool defaults — the stock permission modes let an injected web page or email
+read the Fireworks key and the whole database and exfiltrate them without ever
+showing an approval card — and it establishes that durable runs (an agent run
+that survives its HTTP connection) are the shared prerequisite for the
+approval queue, the scheduled brief, scheduled tasks and the session tape.
+
+Near-term after those: budgets replacing the fixed tool-round cap, taint
+tracking and an undo journal, tool-use examples and result pagination, skills,
+an agent inbox on Today, and scheduled jobs. Later: MCP client, code mode and
+file/browser reach — after an eval harness exists.

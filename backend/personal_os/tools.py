@@ -19,6 +19,7 @@ from typing import Any, Awaitable, Callable
 import httpx
 
 from .learn import SELF_LABELS
+from .microvm import Sandboxes
 from .repos import Documents, Graph, Memories
 from .sandbox import run_python
 
@@ -73,6 +74,12 @@ ALTERNATIVE = {
     "search_documents": "list_documents to see what exists, or ask the user to paste the text",
     "read_document": "search_documents for the relevant excerpt",
     "run_python": "do the arithmetic or the reasoning directly in your reply",
+    "sandbox_exec": "run_python for a one-shot sandboxed script",
+    "sandbox_write_file": "include the file contents in your reply so the user can save them",
+    "sandbox_read_file": "ask the user to paste the file contents",
+    "sandbox_list_files": "ask the user what the sandbox should contain",
+    "sandbox_put_document": "read_document, then sandbox_write_file the excerpt you need",
+    "sandbox_reset": "continue with the sandbox as it is",
     "save_memory": "state the fact in your reply so the user can keep it",
     "graph_add": "save_memory, or just state the relation in your reply",
     "todo_add": "list the items in your reply so the user can add them",
@@ -243,9 +250,10 @@ def _allow_url(ctx: dict[str, Any], url: str | None) -> None:
 
 
 class Toolbox:
-    def __init__(self, memories: Memories, graph: Graph, documents: Documents, settings_fn: Callable[[], dict[str, Any]], todos: Any = None, google: Any = None, boards: Any = None):
+    def __init__(self, memories: Memories, graph: Graph, documents: Documents, settings_fn: Callable[[], dict[str, Any]], todos: Any = None, google: Any = None, boards: Any = None,
+                 sandboxes: Sandboxes | None = None):
         self.memories, self.graph, self.documents, self.settings = memories, graph, documents, settings_fn
-        self.todos, self.google, self.boards = todos, google, boards
+        self.todos, self.google, self.boards, self.sandboxes = todos, google, boards, sandboxes
         self.specs: dict[str, ToolSpec] = {}
         self._register()
         if todos is not None:
@@ -254,6 +262,8 @@ class Toolbox:
             self._register_boards()
         if google is not None:
             self._register_google()
+        if sandboxes is not None:
+            self._register_sandbox()
 
     def _google_ok(self) -> bool:
         return bool(self.google and self.google.status()["connected"])
@@ -263,6 +273,8 @@ class Toolbox:
         spec = self.specs.get(name)
         if spec and spec.group == "google":
             return self._google_ok() if google_ok is None else google_ok
+        if spec and spec.group == "sandbox":  # needs a container runtime; the check is TTL-cached
+            return self.sandboxes is not None and self.sandboxes.available()
         return spec is not None
 
     # ---- permission model: mode per tool = on | ask | off ----
@@ -719,6 +731,69 @@ def _register_boards(self: Toolbox) -> None:
         examples=[{"name": "Home renovation"}, {"name": "Q4 launch", "columns": ["Ideas", "Doing", "Shipped"]}]))
 
 
+def _register_sandbox(self: Toolbox) -> None:
+    """Persistent microVM sandbox per conversation (see microvm.py for the isolation story)."""
+    R = self.specs.__setitem__
+    sb = self.sandboxes
+    run = asyncio.to_thread
+
+    def _mark(ctx: dict[str, Any], out: Any, name: str) -> Any:
+        # A networked sandbox can read the internet, so anything it returns is untrusted,
+        # exactly like fetch_url output. The flag is set here rather than via ToolSpec.taints
+        # because the same tool is clean when the sandbox was created without network.
+        if isinstance(out, dict) and out.get("network"):
+            ctx["tainted"] = True
+            ctx.setdefault("taint_sources", []).append(name)
+        return out
+
+    async def sandbox_exec(ctx: dict[str, Any], command: str, timeout: int = 60) -> Any:
+        return _mark(ctx, await run(sb.exec, ctx["conversation_id"], command, timeout), "sandbox_exec")
+    R("sandbox_exec", ToolSpec("sandbox_exec", "Run a shell command in this chat's persistent Linux sandbox (a VM-isolated container; the host machine is unreachable). State persists between calls: files you write, packages you install with apt/pip (only if network is enabled in Settings; it is off by default). Working directory is /workspace. Returns stdout/stderr/exit_code; output is capped, so pipe long output through head/tail/grep.",
+        _obj({"command": {"type": "string"}, "timeout": {"type": "integer", "default": 60, "description": "seconds, max 600"}}, ["command"]), sandbox_exec, "sandbox", "executes",
+        examples=[{"command": "python3 - <<'EOF'\nprint(2**100)\nEOF"}, {"command": "ls -la && wc -l notes.md"},
+                  {"command": "python3 analyze.py 2>&1 | tail -40", "timeout": 120}]))
+
+    async def sandbox_write_file(ctx: dict[str, Any], path: str, content: str, append: bool = False) -> Any:
+        return _mark(ctx, await run(sb.write_file, ctx["conversation_id"], path, content, append), "sandbox_write_file")
+    R("sandbox_write_file", ToolSpec("sandbox_write_file", "Write (or append to) a text file in the sandbox. Relative paths land in /workspace; parent directories are created. Use this for code and documents you then run or edit with sandbox_exec.",
+        _obj({"path": {"type": "string"}, "content": {"type": "string"}, "append": {"type": "boolean", "default": False}}, ["path", "content"]), sandbox_write_file, "sandbox", "executes",
+        examples=[{"path": "analyze.py", "content": "import json\nprint('hi')"}, {"path": "notes/draft.md", "content": "## Plan\n", "append": True}]))
+
+    async def sandbox_read_file(ctx: dict[str, Any], path: str, offset: int = 0, length: int = 6000) -> Any:
+        return _mark(ctx, await run(sb.read_file, ctx["conversation_id"], path, offset, length), "sandbox_read_file")
+    R("sandbox_read_file", ToolSpec("sandbox_read_file", "Read a file from the sandbox. Text comes back as a byte window (page with offset/length); images (.png, .jpg…) are shown to the user inline, so plots a script saved can be displayed this way.",
+        _obj({"path": {"type": "string"}, "offset": {"type": "integer", "default": 0}, "length": {"type": "integer", "default": 6000}}, ["path"]), sandbox_read_file, "sandbox", "executes",
+        examples=[{"path": "out.csv"}, {"path": "out.csv", "offset": 6000}, {"path": "plot.png"}]))
+
+    async def sandbox_list_files(ctx: dict[str, Any], path: str | None = None, offset: int = 0) -> Any:
+        out = _mark(ctx, await run(sb.list_files, ctx["conversation_id"], path), "sandbox_list_files")
+        if isinstance(out, dict) and "entries" in out:
+            return page(out["entries"], offset=offset, limit=50, key="entries", path=out["path"])
+        return out
+    R("sandbox_list_files", ToolSpec("sandbox_list_files", "List files in the sandbox (default /workspace, up to 3 levels deep).",
+        _obj({"path": {"type": "string"}, "offset": {"type": "integer", "default": 0}}, []), sandbox_list_files, "sandbox", "executes",
+        examples=[{}, {"path": "notes"}, {"offset": 50}]))
+
+    async def sandbox_put_document(ctx: dict[str, Any], document_id: str, path: str | None = None) -> Any:
+        d = self.documents.get(document_id)
+        if not d:
+            return tool_error(f"No document with id '{document_id}'.", field="document_id",
+                              expected="an id from search_documents or list_documents",
+                              example={"document_id": "doc_3f2a91"}, alternative=ALTERNATIVE["sandbox_put_document"])
+        dest = path or (d["name"] + ("" if d["name"].lower().endswith((".txt", ".md", ".csv", ".json")) else ".txt"))
+        out = await run(sb.write_file, ctx["conversation_id"], dest, d["text"])
+        return {**out, "document": d["name"]}
+    R("sandbox_put_document", ToolSpec("sandbox_put_document", "Copy an uploaded document's extracted text into the sandbox as a file, so you can edit, transform or analyse it with sandbox_exec.",
+        _obj({"document_id": {"type": "string"}, "path": {"type": "string", "description": "destination path; defaults to the document's name"}}, ["document_id"]), sandbox_put_document, "sandbox", "executes",
+        examples=[{"document_id": "doc_3f2a91"}, {"document_id": "doc_3f2a91", "path": "input/report.txt"}]))
+
+    async def sandbox_reset(ctx: dict[str, Any]) -> Any:
+        return await run(sb.reset, ctx["conversation_id"])
+    R("sandbox_reset", ToolSpec("sandbox_reset", "Destroy this chat's sandbox and start the next call from a fresh container. Use when the environment is wedged; all sandbox files are lost.",
+        _obj({}, []), sandbox_reset, "sandbox", "executes", examples=[{}]))
+
+
 Toolbox._register_todos = _register_todos  # type: ignore[attr-defined]
 Toolbox._register_boards = _register_boards  # type: ignore[attr-defined]
 Toolbox._register_google = _register_google  # type: ignore[attr-defined]
+Toolbox._register_sandbox = _register_sandbox  # type: ignore[attr-defined]

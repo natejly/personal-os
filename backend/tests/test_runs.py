@@ -6,6 +6,7 @@ The whole point of the slice is that a run outlives its viewers, so that is test
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import os
 import sys
@@ -35,13 +36,19 @@ SCRIPT: dict[str, Any] = {"chunks": ["Hello", " ", "world"], "delay": 0.0}
 
 
 async def _scripted_stream(settings: dict[str, Any], model: str, messages: list[dict[str, Any]],
-                           tools: list[dict[str, Any]] | None = None, kind: str = "chat") -> Any:
+                           tools: list[dict[str, Any]] | None = None, kind: str = "chat",
+                           effort: str = "default") -> Any:
     for chunk in SCRIPT["chunks"]:
         if SCRIPT["delay"]:
             await asyncio.sleep(SCRIPT["delay"])
         yield {"type": "delta", "text": chunk}
     yield {"type": "end", "finish_reason": "stop", "tool_calls": [], "usage": None}
 
+
+# app.py calls stream_chat with keywords, so a parameter added there must land on the stub too or every
+# run dies before its first delta.
+_missing = set(inspect.signature(llm.stream_chat).parameters) - set(inspect.signature(_scripted_stream).parameters)
+assert not _missing, f"_scripted_stream is missing {sorted(_missing)} from llm.stream_chat"
 
 llm.stream_chat = _scripted_stream
 

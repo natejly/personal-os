@@ -5,7 +5,7 @@
  * alpha-only template PNG — a 2x2 widget grid — that macOS tints for light, dark and highlighted bars.
  */
 import { app, Menu, nativeImage, Tray } from 'electron'
-import { gather, gatherState, listPopouts, scatter, setPopoutPinned } from './popouts'
+import { gather, gatherState, listPopouts, popoutsInFront, scatter, syncPopoutPinned, toggleFront } from './popouts'
 import { gatherShortcut } from './shortcuts'
 
 const ICON_1X =
@@ -32,12 +32,19 @@ const menu = (open: () => void): Menu => {
     { label: 'Gather Widgets', accelerator: shortcut.ok ? shortcut.accelerator : undefined, click: () => void gather() },
     { label: 'Scatter', enabled: gatherState().gathered, click: () => void scatter() },
     {
+      label: 'Bring Pop-outs to Front',
+      type: 'checkbox',
+      checked: popoutsInFront(),
+      accelerator: 'Alt+Command+F',
+      click: (item) => { item.checked = toggleFront() }
+    },
+    {
       label: 'Pin all on top',
       type: 'checkbox',
       checked: pinned,
       enabled: popped.length > 0,
       click: () => {
-        for (const p of popped) setPopoutPinned(p.windowId, !pinned)
+        for (const p of popped) syncPopoutPinned(p.windowId, !pinned)
       }
     },
     ...(shortcut.ok ? [] : [{ label: shortcut.message ?? 'The gather shortcut is unavailable.', enabled: false }]),

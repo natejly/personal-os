@@ -18,7 +18,11 @@ export default function Composer({ conversationId, footer, compact = false }: Co
   const activeId = useStore((s) => conversationId ?? s.focusedConversationId)
   const uploadTarget = useStore((s) => s.sessions[conversationId ?? s.focusedConversationId ?? '']?.conversation.project_id ?? s.draftProjectId)
   const hasKey = useStore((s) => !!s.settings.apiKey)
-  const { send, stop, setSettingsOpen, uploadDocuments } = useStore()
+  // One selector per action: a bare useStore() subscribes this textarea to every streamed token.
+  const send = useStore((s) => s.send)
+  const stop = useStore((s) => s.stop)
+  const setSettingsOpen = useStore((s) => s.setSettingsOpen)
+  const uploadDocuments = useStore((s) => s.uploadDocuments)
 
   useEffect(() => {
     const el = ref.current

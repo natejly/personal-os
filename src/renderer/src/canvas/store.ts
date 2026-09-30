@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { Canvas, CanvasWindow, SnapMode, WidgetKind, WindowLayout, WindowState } from '@shared/types'
-import { api } from '../lib/api'
+import { api, getBase } from '../lib/api'
 import { useStore } from '../store'
 import { tidyLayout, visibleRect, zoneRect, type Point, type Size, type Viewport } from './snapping'
 
@@ -136,6 +136,43 @@ const findWin = (s: CanvasState, id: string): CanvasWindow | undefined => {
 
 const fail = (e: unknown): void => useStore.getState().toast((e as Error).message, 'error')
 
+/**
+ * The dirty ids as `PUT /canvases/{id}/layout` bodies, one per canvas. Drains ids whose window is gone
+ * from every canvas: there is nothing left to write for them.
+ */
+const layoutGroups = (s: CanvasState): Map<string, WindowLayout[]> => {
+  const groups = new Map<string, WindowLayout[]>()
+  for (const id of [...dirty]) {
+    const w = findWin(s, id)
+    if (!w) {
+      dirty.delete(id)
+      continue
+    }
+    const rows = groups.get(w.canvas_id) ?? []
+    rows.push({ id: w.id, x: w.x, y: w.y, w: w.w, h: w.h, z: w.z, state: w.state })
+    groups.set(w.canvas_id, rows)
+  }
+  return groups
+}
+
+/**
+ * The same write as `flushLayout`, but `keepalive` so the teardown cannot outrun it: an ordinary fetch
+ * issued from `beforeunload` is dropped with the document, which loses the move the handler exists for.
+ * Fire-and-forget by definition — there is no page left to retry on, so nothing is left dirty either.
+ */
+export const flushLayoutOnUnload = (s: CanvasState): void => {
+  if (!dirty.size) return
+  for (const [cid, windows] of layoutGroups(s)) {
+    void fetch(`${getBase()}/canvases/${cid}/layout`, {
+      method: 'PUT',
+      keepalive: true,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ windows })
+    }).catch(() => undefined)
+    for (const w of windows) dirty.delete(w.id)
+  }
+}
+
 /** Cascade new windows off the visible top-left so two opened in a row do not stack exactly. */
 const spawnAt = (n: number): Point => {
   const v = visibleRect(viewport())
@@ -217,7 +254,7 @@ export const useCanvas = create<CanvasState>((set, get) => {
     if (listening) return
     listening = true
     // Last chance for a move made inside the 400 ms debounce; the PUT is fire-and-forget by then.
-    window.addEventListener('beforeunload', () => void get().flushLayout())
+    window.addEventListener('beforeunload', () => flushLayoutOnUnload(get()))
     window.os.onMenu(onMenu)
     window.os.bus.on(onBus)
     window.os.popout.onChanged((c) => {
@@ -442,19 +479,7 @@ export const useCanvas = create<CanvasState>((set, get) => {
         layoutTimer = null
       }
       if (!dirty.size) return
-      const s = get()
-      const groups = new Map<string, WindowLayout[]>()
-      for (const id of [...dirty]) {
-        const w = findWin(s, id)
-        // Gone from every canvas: nothing left to write, so stop carrying it.
-        if (!w) {
-          dirty.delete(id)
-          continue
-        }
-        const rows = groups.get(w.canvas_id) ?? []
-        rows.push({ id: w.id, x: w.x, y: w.y, w: w.w, h: w.h, z: w.z, state: w.state })
-        groups.set(w.canvas_id, rows)
-      }
+      const groups = layoutGroups(get())
       // Clear per group, after it lands: a failed PUT must leave its ids dirty for the next flush.
       await Promise.all(
         [...groups].map(([cid, rows]) =>

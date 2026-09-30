@@ -53,6 +53,8 @@ export default function App(): JSX.Element {
     if (mode !== 'canvas') {
       // Leaving canvas mode unmounts the plane, so the 400 ms layout debounce would never fire.
       if (entered.current) void useCanvas.getState().flushLayout()
+      // Cleared so re-entering re-syncs: another window or surface can have moved things since.
+      entered.current = false
       return
     }
     if (entered.current) return

@@ -130,8 +130,11 @@ async def _require_token(request: Request, call_next):  # type: ignore[no-untype
 
 
 # CORS is added last so it is outermost: a preflight must be answered before auth can 401 it.
+# Vite's dev server hops to 5174+ when 5173 is taken, so the default covers a small range; auth is
+# the token header either way — CORS here only decides which local origins may even ask.
 ALLOWED_ORIGINS = [o for o in (os.environ.get("PERSONAL_OS_ALLOWED_ORIGINS") or "").split(",") if o] or [
-    "null", "file://", "http://localhost:5173", "http://127.0.0.1:5173"]
+    "null", "file://",
+    *(f"http://{h}:{p}" for h in ("localhost", "127.0.0.1") for p in range(5173, 5181))]
 app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_credentials=False,
                    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
                    allow_headers=["Content-Type", "X-Personal-OS-Token", "Authorization"])

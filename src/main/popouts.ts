@@ -260,9 +260,10 @@ const raiseMain = (): void => {
 /**
  * Toggle every pop-out in place. On: show and raise, bounds unchanged. Off: hide.
  * Nothing popped out raises the main window and leaves the command unchecked.
+ * Pinned pop-outs are already kept on top, so the toggle neither raises nor hides them.
  */
 export const toggleFront = (): boolean => {
-  const live = livePopouts()
+  const live = livePopouts().filter(([, e]) => !e.pinned)
   if (!live.length) {
     setFronted(false)
     raiseMain()
@@ -289,9 +290,13 @@ const place = (windowId: string, e: Entry, target: Electron.Rectangle): void => 
   e.win.setAlwaysOnTop(true, 'floating')
 }
 
-/** Centre every pop-out in a grid on the display under the cursor. Nothing popped out: raise the app. */
+/**
+ * Centre every pop-out in a grid on the display under the cursor. Nothing popped out: raise the app.
+ * A pinned pop-out is where the user deliberately put it, so gather leaves it alone; only unpinning
+ * hands it back to the grid.
+ */
 export const gather = (): GatherState => {
-  const live = [...popouts.entries()].filter(([, e]) => !e.win.isDestroyed())
+  const live = [...popouts.entries()].filter(([, e]) => !e.win.isDestroyed() && !e.pinned)
   if (!live.length) {
     const m = getMain()
     if (m && !m.isDestroyed()) {
@@ -351,6 +356,8 @@ export const gather = (): GatherState => {
 export const scatter = (): GatherState => {
   for (const [id, e] of popouts) {
     if (e.win.isDestroyed()) continue
+    // A pinned pop-out that gather never moved has nothing to put back; one pinned mid-gather still returns.
+    if (e.pinned && !e.previousBounds) continue
     quiet(id, e)
     e.win.setVisibleOnAllWorkspaces(false)
     const b = e.previousBounds

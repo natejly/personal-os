@@ -15,7 +15,7 @@ const MODES: CalMode[] = ['agenda', 'day', 'week']
 const DAY_CHOICES = [1, 3, 7, 14]
 const POLL_MS = 120_000
 const ACCEPTS: DragKind[] = ['todo']
-const readMode = (v: unknown): Mode => (MODES.includes(v as Mode) ? (v as Mode) : 'agenda')
+const readMode = (v: unknown): CalMode => (MODES.includes(v as CalMode) ? (v as CalMode) : 'agenda')
 
 const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Element => {
   const connected = useStore((s) => s.google?.connected ?? false)

@@ -10,8 +10,8 @@ import WindowFrame from './WindowFrame'
 import { hasDrag, hasFiles, readDrag } from './dnd'
 import { WIDGETS } from './registry'
 import { canvasFromScreen, screenFromCanvas, snapValue, visibleRect, type Point, type Viewport } from './snapping'
-import { setViewportEl, useActiveCanvas, useCanvas, useWindows, viewport, viewportPoint } from './store'
-import { getDragOverlay, subscribeDragOverlay } from './useDrag'
+import { setLiveViewport, setViewportEl, useActiveCanvas, useCanvas, useWindows, viewport, viewportPoint } from './store'
+import { getDragOverlay, schedule, subscribeDragOverlay } from './useDrag'
 import '../styles/canvas.css'
 
 const MIN_ZOOM = 0.5
@@ -20,8 +20,15 @@ const MAX_ZOOM = 2
 const LIVE_ZOOM = 0.6
 /** Dots are noise below this; the pitch is `grid * zoom` so what you see is what you snap to. */
 const GRID_ZOOM = 0.75
-/** Concurrently live iframe / d3 / poller widgets (plan §13). Mirrors `heavy` in contract §6. */
-const HEAVY: ReadonlySet<WidgetKind> = new Set(['calendar', 'dashboard-widget', 'graph', 'usage'])
+/** Concurrently live iframe / d3 / poller widgets (plan §13); which kinds count is `heavy` in the registry. */
+/**
+ * Render every window on the space up front instead of mounting one when it scrolls into view, becomes
+ * focused or is zoomed past 60%. Lazy mounting meant a click could be the moment a widget first
+ * rendered, so a failure inside that widget looked like clicking caused a crash. Eager rendering costs
+ * more with many heavy widgets (iframes, the d3 graph, Recharts) -- flip this to false to restore the
+ * viewport/zoom/heavy-cap gating below, which is kept intact for exactly that reason.
+ */
+const EAGER = true
 const HEAVY_CAP = 6
 const GHOST = { w: 420, h: 360 }
 const IDLE_MS = 180
@@ -36,6 +43,13 @@ const hits = (a: Rect, b: Rect): boolean => a.x < b.x + b.w && b.x < a.x + a.w &
  */
 export const liveWindows = (windows: CanvasWindow[], view: Viewport, overview: boolean): Set<string> => {
   const out = new Set<string>()
+  if (EAGER) {
+    // Everything on the space renders up front. Scrolling a window into view, zooming in or focusing it
+    // then mounts nothing, so there is no work at the moment of a click -- which is when failures were
+    // being seen. A minimized or popped window still has no body to render.
+    for (const w of windows) if (w.state !== 'minimized' && w.state !== 'popped') out.add(w.id)
+    return out
+  }
   if (overview || view.zoom < LIVE_ZOOM || !view.width) return out
   const vis = visibleRect(view)
   let heavy = 0
@@ -43,7 +57,7 @@ export const liveWindows = (windows: CanvasWindow[], view: Viewport, overview: b
     const w = windows[i]
     if (w.state === 'minimized' || w.state === 'popped') continue
     if (!hits(vis, w)) continue
-    if (HEAVY.has(w.kind)) {
+    if (WIDGETS[w.kind]?.heavy) {
       if (heavy >= HEAVY_CAP) continue
       heavy++
     }
@@ -92,6 +106,8 @@ function Guides({ view }: { view: Viewport }): JSX.Element | null {
 
 export default function Canvas(): JSX.Element {
   const el = useRef<HTMLDivElement | null>(null)
+  const plane = useRef<HTMLDivElement | null>(null)
+  const dots = useRef<HTMLDivElement | null>(null)
   const canvas = useActiveCanvas()
   const windows = useWindows()
   const overview = useCanvas((s) => s.overview)
@@ -110,15 +126,72 @@ export default function Canvas(): JSX.Element {
   const grid = canvas?.grid_size ?? 16
   const view = useMemo<Viewport>(() => ({ zoom, panX, panY, width: size.w, height: size.h }), [zoom, panX, panY, size.w, size.h])
 
+  /**
+   * Pan and zoom are driven like a window drag: straight to the plane node on one rAF, with the store
+   * and its debounced PUT hearing the gesture once, when it settles. A wheel tick through the store
+   * would re-render the plane and every window instead.
+   */
+  const gesture = useRef<{ canvasId: string; zoom: number; panX: number; panY: number } | null>(null)
+  const pitchRef = useRef(grid)
+  pitchRef.current = grid
+
+  const paint = useCallback((): void => {
+    const v = gesture.current ?? viewport()
+    if (plane.current) plane.current.style.transform = `translate(${v.panX}px, ${v.panY}px) scale(${v.zoom})`
+    const g = dots.current
+    if (!g) return
+    const pitch = pitchRef.current * v.zoom
+    g.style.backgroundSize = `${pitch}px ${pitch}px`
+    g.style.backgroundPosition = `${v.panX}px ${v.panY}px`
+    g.style.display = v.zoom >= GRID_ZOOM ? '' : 'none'
+  }, [])
+
+  const settle = useCallback((): void => {
+    const g = gesture.current
+    gesture.current = null
+    setLiveViewport(null)
+    const st = useCanvas.getState()
+    st.setInteracting(false)
+    if (g) st.setViewport(g.canvasId, { zoom: g.zoom, pan_x: g.panX, pan_y: g.panY })
+  }, [])
+
   /** `setInteracting(true)` has no natural release for a wheel or a pinch, so tail it off. */
-  const interact = useCallback((): void => {
+  const bump = useCallback((): void => {
     useCanvas.getState().setInteracting(true)
     if (idle.current) clearTimeout(idle.current)
     idle.current = setTimeout(() => {
       idle.current = null
-      useCanvas.getState().setInteracting(false)
+      settle()
     }, IDLE_MS)
-  }, [])
+  }, [settle])
+
+  const nudge = useCallback(
+    (canvasId: string, v: { zoom: number; panX: number; panY: number }): void => {
+      gesture.current = { canvasId, ...v }
+      setLiveViewport({ zoom: v.zoom, pan_x: v.panX, pan_y: v.panY })
+      schedule(paint)
+      bump()
+    },
+    [bump, paint]
+  )
+
+  useEffect(
+    () => () => {
+      if (idle.current) clearTimeout(idle.current)
+      gesture.current = null
+      setLiveViewport(null)
+    },
+    []
+  )
+
+  // A marquee selection belongs to the space it was made in — `findWin` resolves ids across every
+  // canvas, so a stale one deletes windows nobody can see. An uncommitted gesture is stale too.
+  useEffect(() => {
+    setSelected([])
+    gesture.current = null
+    setLiveViewport(null)
+    paint()
+  }, [canvas?.id, paint])
 
   const mount = useCallback((node: HTMLDivElement | null): void => {
     el.current = node
@@ -141,25 +214,22 @@ export default function Canvas(): JSX.Element {
     const node = el.current
     if (!node) return
     const onWheel = (e: WheelEvent): void => {
-      const st = useCanvas.getState()
-      const id = st.activeCanvasId
-      const c = id ? st.canvases[id] : undefined
-      if (!id || !c) return
+      const id = useCanvas.getState().activeCanvasId
+      if (!id) return
       e.preventDefault()
-      interact()
+      const v = viewport()
       if (e.ctrlKey || e.metaKey) {
-        const v = viewport()
         const p = viewportPoint(e)
         const before = canvasFromScreen(p, v)
-        const next = clamp(v.zoom * Math.exp(-e.deltaY / 240), MIN_ZOOM, MAX_ZOOM)
-        st.setViewport(id, { zoom: next, pan_x: p.x - before.x * next, pan_y: p.y - before.y * next })
+        const zoom = clamp(v.zoom * Math.exp(-e.deltaY / 240), MIN_ZOOM, MAX_ZOOM)
+        nudge(id, { zoom, panX: p.x - before.x * zoom, panY: p.y - before.y * zoom })
       } else {
-        st.setViewport(id, { pan_x: c.pan_x - e.deltaX, pan_y: c.pan_y - e.deltaY })
+        nudge(id, { zoom: v.zoom, panX: v.panX - e.deltaX, panY: v.panY - e.deltaY })
       }
     }
     node.addEventListener('wheel', onWheel, { passive: false })
     return () => node.removeEventListener('wheel', onWheel)
-  }, [interact])
+  }, [nudge])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
@@ -173,7 +243,8 @@ export default function Canvas(): JSX.Element {
       }
       if ((e.key === 'Backspace' || e.key === 'Delete') && selected.length) {
         e.preventDefault()
-        for (const id of selected) void st.closeWindow(id)
+        const here = new Set((st.activeCanvasId ? st.canvases[st.activeCanvasId]?.windows ?? [] : []).map((w) => w.id))
+        for (const id of selected) if (here.has(id)) void st.closeWindow(id)
         setSelected([])
       }
     }
@@ -193,16 +264,15 @@ export default function Canvas(): JSX.Element {
     const pan = e.button === 1 || e.altKey
     const additive = e.shiftKey
     const from = { x: e.clientX, y: e.clientY }
-    const base = { x: panX, y: panY }
+    const v0 = viewport()
     const origin = canvasPointFromEvent(e)
     e.currentTarget.setPointerCapture(e.pointerId)
-    interact()
+    bump()
     if (!pan && !additive) setSelected([])
 
     const move = (ev: PointerEvent): void => {
       if (pan) {
-        useCanvas.getState().setViewport(id, { pan_x: base.x + (ev.clientX - from.x), pan_y: base.y + (ev.clientY - from.y) })
-        interact()
+        nudge(id, { zoom: v0.zoom, panX: v0.panX + (ev.clientX - from.x), panY: v0.panY + (ev.clientY - from.y) })
         return
       }
       const p = canvasPointFromEvent(ev)
@@ -211,7 +281,11 @@ export default function Canvas(): JSX.Element {
     const up = (ev: PointerEvent): void => {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
-      useCanvas.getState().setInteracting(false)
+      if (idle.current) {
+        clearTimeout(idle.current)
+        idle.current = null
+      }
+      settle()
       if (pan) return
       const p = canvasPointFromEvent(ev)
       const box = { x: Math.min(origin.x, p.x), y: Math.min(origin.y, p.y), w: Math.abs(p.x - origin.x), h: Math.abs(p.y - origin.y) }
@@ -287,7 +361,8 @@ export default function Canvas(): JSX.Element {
   }
 
   const pitch = grid * zoom
-  const showGrid = zoom >= GRID_ZOOM && (canvas?.snap_mode === 'grid' || canvas?.snap_mode === 'both')
+  // Mounted for the whole space, hidden below the threshold, so an imperative zoom can reveal it.
+  const gridOn = canvas?.snap_mode === 'grid' || canvas?.snap_mode === 'both'
   const shown = windows.filter((w) => w.state !== 'minimized')
 
   return (
@@ -302,8 +377,14 @@ export default function Canvas(): JSX.Element {
         onDrop={(e) => void onDrop(e)}
       >
         {!sidebarOpen && <div className="canvas-drag-strip drag" />}
-        {showGrid && <div className="canvas-grid" style={{ backgroundSize: `${pitch}px ${pitch}px`, backgroundPosition: `${panX}px ${panY}px` }} />}
-        <div className="canvas-plane" style={{ transform: `translate(${panX}px, ${panY}px) scale(${zoom})` }}>
+        {gridOn && (
+          <div
+            ref={dots}
+            className="canvas-grid"
+            style={{ backgroundSize: `${pitch}px ${pitch}px`, backgroundPosition: `${panX}px ${panY}px`, display: zoom >= GRID_ZOOM ? undefined : 'none' }}
+          />
+        )}
+        <div ref={plane} className="canvas-plane" style={{ transform: `translate(${panX}px, ${panY}px) scale(${zoom})` }}>
           {shown.map((w) => (
             <WindowFrame
               key={w.id}

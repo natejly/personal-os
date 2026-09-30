@@ -52,6 +52,7 @@ RESERVED_TOOL_NAMES = frozenset({
     "sandbox_exec", "sandbox_write_file", "sandbox_read_file", "sandbox_list_files",
     "sandbox_put_document", "sandbox_reset",
     "doc_list", "doc_search", "doc_read", "doc_create", "doc_edit",
+    "activity_recent", "activity_pause",
 })
 
 SCHEMA = """

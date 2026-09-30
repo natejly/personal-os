@@ -8,7 +8,10 @@ const CONSOLE = {
   apis: [
     ['Calendar API', 'https://console.cloud.google.com/apis/library/calendar-json.googleapis.com'],
     ['Gmail API', 'https://console.cloud.google.com/apis/library/gmail.googleapis.com'],
-    ['Tasks API', 'https://console.cloud.google.com/apis/library/tasks.googleapis.com']
+    ['Tasks API', 'https://console.cloud.google.com/apis/library/tasks.googleapis.com'],
+    ['Drive API', 'https://console.cloud.google.com/apis/library/drive.googleapis.com'],
+    ['Docs API', 'https://console.cloud.google.com/apis/library/docs.googleapis.com'],
+    ['Sheets API', 'https://console.cloud.google.com/apis/library/sheets.googleapis.com']
   ],
   consent: 'https://console.cloud.google.com/apis/credentials/consent',
   client: 'https://console.cloud.google.com/apis/credentials'
@@ -80,7 +83,7 @@ export default function GoogleSettings({ clientId, clientSecret, onChange, onSav
             {google?.connected
               ? <><Check size={11} /> Signed in as {google.email}</>
               : hasClient
-                ? 'Sign in to let Personal OS read your Calendar, Gmail and Tasks.'
+                ? 'Sign in to let the app read your Calendar, Gmail, Tasks, Drive, Docs and Sheets.'
                 : 'Needs a one-time OAuth client (about two minutes) before the first sign-in.'}
           </small>
         </div>
@@ -117,7 +120,7 @@ export default function GoogleSettings({ clientId, clientSecret, onChange, onSav
               <button className="link-btn" onClick={() => openExternal(CONSOLE.project)}><ExternalLink size={11} /> New project</button>
             </li>
             <li>
-              Enable the three APIs Personal OS calls:
+              Enable the APIs the app calls:
               {CONSOLE.apis.map(([label, url]) => (
                 <button key={url} className="link-btn" onClick={() => openExternal(url)}><ExternalLink size={11} /> {label}</button>
               ))}
@@ -158,7 +161,7 @@ export default function GoogleSettings({ clientId, clientSecret, onChange, onSav
               ? <>Sign-in uses the client from the app&apos;s <code>.env</code>. Paste your own above to override it; clear both fields to go back.</>
               : <>Saved in this app&apos;s local database. The same pair can live in <code>.env</code> as <code>GOOGLE_CLIENT_ID</code> / <code>GOOGLE_CLIENT_SECRET</code> instead.</>}
           </p>
-          <p className="muted small">Scopes requested: calendar, gmail.modify, tasks, email. Tokens stay in the local database. Sending email is a separate tool you can keep off.</p>
+          <p className="muted small">Scopes requested: calendar, gmail.modify, tasks, drive.readonly, drive.file, documents, spreadsheets, email. Tokens stay in the local database. Sending email is a separate tool you can keep off.</p>
         </details>
       )}
     </div>

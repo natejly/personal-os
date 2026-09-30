@@ -5,6 +5,7 @@ import ProjectChip from './ProjectChip'
 import MessageView from './Message'
 import Composer from './Composer'
 import ContextDrawer from './ContextDrawer'
+import SendToSpace from './SendToSpace'
 
 function ModelPicker({ value, onChange }: { value: string; onChange: (m: string) => void }): JSX.Element {
   const models = useStore((s) => s.models)
@@ -75,6 +76,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
           )}
         </div>
         <div className="no-drag header-right">
+          <SendToSpace items={[{ kind: 'chat', refId: convo?.id }]} disabled={!convo?.id} />
           <ProjectChip projectId={convo?.project_id ?? draftProjectId} />
           <ModelPicker value={model} onChange={(m) => void setChatModel(m, conversationId)} />
           <button className={`icon-btn ${contextOpen ? 'on' : ''}`} title="Context panel (⌘I)" aria-label="Toggle context panel" aria-pressed={contextOpen} onClick={toggleContext}><SlidersHorizontal size={16} /></button>

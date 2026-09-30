@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, PanelLeftOpen, Calendar as CalIcon, ExternalLink, Pencil, Plus, Repeat, Video, X } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
+import SendToSpace from './SendToSpace'
 import CalendarWeek, { addDays, fmtTime, startOfWeek } from './CalendarWeek'
 import EventEditor, { eventColor, primeCalendarMeta, type EventDraft } from './EventEditor'
 import { scheduleTodo } from './TodoItem'
@@ -76,6 +77,7 @@ export default function CalendarView(): JSX.Element {
         <h2><CalIcon size={16} /> Calendar <span className="muted">· {days[0].toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – {days[6].toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span></h2>
         <div className="no-drag header-right">
           {google?.connected && <button className="ghost-btn" onClick={() => setEditing({ event: null, draft: {} })}><Plus size={13} /> New event</button>}
+          <SendToSpace items={[{ kind: 'calendar' }]} />
           <button className="ghost-btn" onClick={() => setWeek(startOfWeek(new Date()))}>Today</button>
           <button className="icon-btn" aria-label="Previous week" onClick={() => setWeek(addDays(week, -7))}><ChevronLeft size={16} /></button>
           <button className="icon-btn" aria-label="Next week" onClick={() => setWeek(addDays(week, 7))}><ChevronRight size={16} /></button>

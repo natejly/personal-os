@@ -41,7 +41,7 @@ export default function App(): JSX.Element {
   const projectModal = useStore((s) => s.projectModal)
   const view = useStore((s) => s.view)
   const theme = useStore((s) => s.settings.theme)
-  const mode = useStore((s) => s.mode)
+  const inCanvas = useStore((s) => s.view === 'canvas')
 
   useEffect(() => {
     void init()
@@ -49,12 +49,16 @@ export default function App(): JSX.Element {
   useEffect(() => {
     document.documentElement.dataset.theme = theme
   }, [theme])
-  // `load()` is also what registers the canvas store's menu, bus and pop-out listeners. Every
-  // widget filters client-side, so canvas mode loads each shared dataset once at the widest scope.
+  // Spaces are listed in the sidebar, so the canvas store loads with the app, not on first entry.
+  // `load()` is also what registers the canvas store's menu, bus and pop-out listeners; each of their
+  // canvas-only actions is guarded on the canvas view.
+  useEffect(() => { if (ready && !backendError) void useCanvas.getState().load().catch(() => undefined) }, [ready, backendError])
+  // Every widget filters client-side, so entering the canvas view loads each shared dataset once at
+  // the widest scope, and re-syncs the spaces.
   const entered = useRef(false)
   useEffect(() => {
-    if (mode !== 'canvas') {
-      // Leaving canvas mode unmounts the plane, so the 400 ms layout debounce would never fire.
+    if (!inCanvas) {
+      // Leaving the canvas view unmounts the plane, so the 400 ms layout debounce would never fire.
       if (entered.current) void useCanvas.getState().flushLayout()
       // Cleared so re-entering re-syncs: another window or surface can have moved things since.
       entered.current = false
@@ -66,7 +70,7 @@ export default function App(): JSX.Element {
     void useCanvas.getState().load()
     void s.loadScope('all')
     void s.refreshTodos('all', true)
-  }, [mode])
+  }, [inCanvas])
 
   if (!ready) return <div className="app loading" />
   if (backendError) {
@@ -89,7 +93,7 @@ export default function App(): JSX.Element {
   return (
     <div className={`app ${sidebarOpen ? '' : 'sidebar-collapsed'}`}>
       <Sidebar />
-      {mode === 'canvas' ? (
+      {inCanvas ? (
         <Canvas />
       ) : (
         <>

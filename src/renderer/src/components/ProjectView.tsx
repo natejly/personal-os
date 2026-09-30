@@ -5,6 +5,7 @@ import { dragProps } from '../canvas/dnd'
 import ChatPulse from './ChatPulse'
 import MemoryPanel from './MemoryPanel'
 import DocumentsView from './DocumentsView'
+import SendToSpace from './SendToSpace'
 
 type Tab = 'chats' | 'instructions' | 'knowledge' | 'memory'
 
@@ -37,6 +38,7 @@ export default function ProjectView(): JSX.Element {
         {!sidebarOpen && <button className="icon-btn no-drag" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
         <h2><span className="project-dot" style={{ background: project.color }} />{project.name}</h2>
         <div className="no-drag header-right">
+          <SendToSpace items={[{ kind: 'project', refId: project.id }]} />
           <button className="ghost-btn" onClick={() => setProjectModal({ mode: 'edit', project })}><Pencil size={13} /> Edit</button>
           <button className="primary-btn" onClick={() => newChat(id)}><MessageSquarePlus size={14} /> New chat</button>
         </div>

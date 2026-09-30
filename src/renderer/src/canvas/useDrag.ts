@@ -101,7 +101,7 @@ const publish = (next: DragOverlay): void => {
 
 interface Session {
   windowId: string
-  mode: 'move' | 'resize'
+  op: 'move' | 'resize'
   /** null for a move; the dragged corner or edge for a resize */
   handle: Handle | null
   node: HTMLElement
@@ -149,12 +149,12 @@ const frame = (): void => {
     guides = out.guides
     gaps = out.gaps
   }
-  const armed = s.mode === 'move' && !s.mods.meta && s.zone && Date.now() - s.zoneAt >= EDGE_HOLD_MS ? s.zone : null
+  const armed = s.op === 'move' && !s.mods.meta && s.zone && Date.now() - s.zoneAt >= EDGE_HOLD_MS ? s.zone : null
   s.preview = armed ? zoneRect(armed, s.ctx.view, s.natural) : null
   applyRect(s.node, s.rect)
   publish({
     windowId: s.windowId,
-    mode: s.mode,
+    mode: s.op,
     guides: s.preview ? [] : guides,
     gaps: s.preview ? [] : gaps,
     zone: armed,
@@ -194,7 +194,7 @@ const onMove = (e: PointerEvent): void => {
   if (!s || e.pointerId !== s.pointerId) return
   s.pointer = { x: e.clientX, y: e.clientY }
   s.mods = modsOf(e)
-  if (s.mode === 'move') {
+  if (s.op === 'move') {
     const z = edgeZone(viewportPoint(e), s.ctx.view)
     if (z !== s.zone) {
       s.zone = z
@@ -247,7 +247,7 @@ const begin = (e: ReactPointerEvent, win: CanvasWindow, o: DragOptions, handle: 
 
   live = {
     windowId: win.id,
-    mode: handle ? 'resize' : 'move',
+    op: handle ? 'resize' : 'move',
     handle,
     node,
     start,

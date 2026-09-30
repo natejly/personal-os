@@ -2,15 +2,28 @@ import { create } from 'zustand'
 import type { ActivityConfig, ActivityContextFile, ActivityEvent, ActivitySignal, ActivityStatus, ActivitySummary, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocRevision, Document, FullDoc, GraphData, Memory, Message, ModelInfo, Settings, Project, RunConflict, SessionStatus, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap } from '@shared/types'
 import { api, chatStream, setBase, type Scope } from './lib/api'
 import { finishStatus, mergeConversation, pickEvictions, reduceStatus, settleApprovals } from './sessionStatus'
+import { viewHidden } from './modules'
 
-export type View = 'home' | 'chat' | 'todos' | 'calendar' | 'mail' | 'boards' | 'dashboards' | 'memory' | 'documents' | 'docs' | 'activity' | 'project'
+/**
+ * Settings as the renderer holds them: without the legacy `mode`, which only init() reads. Kept out
+ * of the store so no Settings draft (the first-run modal, ⌘,) can PUT a stale `mode: 'canvas'` back
+ * over the one-shot migration.
+ */
+const withoutLegacyMode = (s: Settings): Settings => {
+  const out = { ...s }
+  delete out.mode
+  return out
+}
+
+/** `'canvas'` is the spaces desktop: one destination among the views, not a separate shell. */
+export type View = 'home' | 'chat' | 'todos' | 'calendar' | 'mail' | 'boards' | 'dashboards' | 'memory' | 'documents' | 'docs' | 'activity' | 'project' | 'canvas'
+/** Every view but the canvas: what ⌘⇧C and the sidebar's LayoutGrid button return to. */
+export type ClassicView = Exclude<View, 'canvas'>
 /** How the Docs editor splits its panes. */
 export type DocMode = 'edit' | 'split' | 'preview'
 /** How the Memory panel lays out its two halves: the memory list and the knowledge graph. */
 export type MemoryMode = 'split' | 'list' | 'graph'
 export type ContextTab = 'last' | 'preview' | 'trace'
-/** Classic is the single-pane router; canvas is the floating-window desktop. */
-export type Mode = 'classic' | 'canvas'
 export type { Scope, SessionStatus }
 
 /** `abort` only detaches this window from the run's SSE; ending the run itself is `api.stopRun(runId)`. */
@@ -60,8 +73,9 @@ export interface State {
   projects: Project[]
   personalStats: Project['stats']
 
-  mode: Mode
   view: View
+  /** The classic view the canvas was entered from; `leaveCanvas` (⌘⇧C) returns to it. */
+  lastClassicView: ClassicView
   /** Layout of the Memory panel (list + graph live in one panel). */
   memoryMode: MemoryMode
   projectViewId: string | null
@@ -112,8 +126,9 @@ export interface State {
   init: () => Promise<void>
   loadModels: () => Promise<void>
   saveSettings: (patch: Partial<Settings>) => Promise<void>
-  toggleMode: () => void
   setView: (v: View) => void
+  /** Back to `lastClassicView`. */
+  leaveCanvas: () => void
   setMemoryMode: (m: MemoryMode) => void
   /** Open the Memory panel, optionally focused on one half. */
   openMemory: (m?: MemoryMode) => void
@@ -136,6 +151,8 @@ export interface State {
 
   refreshConversations: () => Promise<void>
   newChat: (projectId?: string | null) => void
+  /** Create a conversation without navigating to it, so a canvas can open a chat window on it. Toasts and resolves null on failure. */
+  createConversation: (projectId: string | null) => Promise<Conversation | null>
   selectChat: (id: string | null) => Promise<void>
   /** Load a conversation into `sessions` without focusing it. Concurrent calls share one fetch. */
   openSession: (conversationId: string) => Promise<void>
@@ -217,6 +234,15 @@ let toastSeq = 0
 const SAVE_DEBOUNCE_MS = 1200
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 
+/**
+ * A pop-out renderer (`?surface=widget`). Same lookup as main.tsx: dev serves the query off
+ * `location.search`, and the href fallback covers one that arrived behind a hash.
+ */
+const isPopout = (): boolean => {
+  const q = window.location.search || (window.location.href.includes('?') ? window.location.href.slice(window.location.href.indexOf('?')) : '')
+  return new URLSearchParams(q).get('surface') !== null
+}
+
 /** Pending `done` → `idle` timers, keyed by conversation id. A new run cancels its own. */
 const holds = new Map<string, ReturnType<typeof setTimeout>>()
 const clearHold = (convId: string): void => {
@@ -238,7 +264,7 @@ const runConflict = (e: unknown): RunConflict | null => {
 }
 
 /**
- * Conversations with a mounted chat surface, refcounted. Canvas mode never sets
+ * Conversations with a mounted chat surface, refcounted. The canvas view never sets
  * `focusedConversationId`, so without this the LRU would pick a victim by mount order alone and an
  * on-screen window would be a legal one.
  */
@@ -335,9 +361,10 @@ export const useStore = create<State>((set, get) => {
     menuWired = true
     window.os.onMenu((action) => {
       const s = get()
-      if (action === 'new-chat') s.newChat(s.view === 'project' ? s.projectViewId : selectActive(s)?.project_id ?? null)
-      else if (action === 'toggle-mode') s.toggleMode()
-      else if (action === 'settings') s.setSettingsOpen(true)
+      // In the canvas view ⌘N opens a chat window instead; canvas/store.ts handles it there.
+      if (action === 'new-chat') {
+        if (s.view !== 'canvas') s.newChat(s.view === 'project' ? s.projectViewId : selectActive(s)?.project_id ?? null)
+      } else if (action === 'settings') s.setSettingsOpen(true)
       else if (action === 'toggle-sidebar') s.toggleSidebar()
       else if (action === 'toggle-context') s.toggleContext()
       else if (action === 'view:graph') s.openMemory('graph')
@@ -472,7 +499,7 @@ export const useStore = create<State>((set, get) => {
   return {
     ready: false,
     backendError: null,
-    settings: { baseUrl: '', apiKey: '', defaultModel: '', systemPrompt: '', extractionModel: '', autoLearn: true, theme: 'dark', mode: 'classic', gatherShortcut: '', tools: {}, maxToolRounds: 8, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {} },
+    settings: { baseUrl: '', apiKey: '', defaultModel: '', systemPrompt: '', extractionModel: '', autoLearn: true, theme: 'dark', gatherShortcut: '', tools: {}, maxToolRounds: 8, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {} },
     models: [],
     modelsError: null,
     tools: [],
@@ -484,8 +511,8 @@ export const useStore = create<State>((set, get) => {
     recapLoading: false,
     projects: [],
     personalStats: undefined,
-    mode: 'classic',
     view: 'home',
+    lastClassicView: 'home',
     memoryMode: 'split',
     projectViewId: null,
     draftProjectId: null,
@@ -536,7 +563,13 @@ export const useStore = create<State>((set, get) => {
       const [settings, projects, personalStats, conversations] = await Promise.all([
         api.settings.get(), api.projects.list(), api.projects.globalStats(), api.conversations.list('all')
       ])
-      set({ settings, mode: settings.mode === 'canvas' ? 'canvas' : 'classic', projects, personalStats, conversations, ready: true, settingsOpen: !settings.apiKey && conversations.length === 0 })
+      // One-shot migration of the pre-spaces global mode: a user who left the app in canvas mode lands
+      // in the canvas once, and the setting is reset so later launches open on Today. Only the main
+      // window writes it back; a pop-out (`?surface=widget`) never renders App and must not touch settings.
+      const { mode: legacyMode } = settings
+      const legacyCanvas = legacyMode === 'canvas'
+      set({ settings: withoutLegacyMode(settings), view: legacyCanvas ? 'canvas' : 'home', projects, personalStats, conversations, ready: true, settingsOpen: !settings.apiKey && conversations.length === 0 })
+      if (legacyCanvas && !isPopout()) void get().saveSettings({ mode: 'classic' }).catch(() => undefined)
       void get().loadModels()
       void get().loadScope('all')
       void api.tools().then((t) => set({ tools: t.tools })).catch(() => undefined)
@@ -555,19 +588,16 @@ export const useStore = create<State>((set, get) => {
       }
     },
     saveSettings: async (patch) => {
-      set({ settings: await api.settings.set(patch) })
+      set({ settings: withoutLegacyMode(await api.settings.set(patch)) })
       if ('baseUrl' in patch || 'apiKey' in patch) void get().loadModels()
       if ('googleClientId' in patch || 'googleClientSecret' in patch) void get().refreshGoogle()
     },
-    toggleMode: () => {
-      const mode = get().mode === 'canvas' ? 'classic' : 'canvas'
-      set({ mode })
-      void get().saveSettings({ mode })
-    },
     setView: (view) => {
+      const cur = get().view
       // Leaving the editor must not drop what is still in the buffer.
-      if (get().view === 'docs' && view !== 'docs') void get().flushDoc()
-      set({ view })
+      if (cur === 'docs' && view !== 'docs') void get().flushDoc()
+      if (view === 'canvas' && cur !== 'canvas') set({ view, lastClassicView: cur })
+      else set({ view })
       if (view === 'docs') {
         void get().refreshDocs()
         void get().refreshDocsPending()
@@ -575,6 +605,13 @@ export const useStore = create<State>((set, get) => {
       if (view === 'home') void get().refreshDashboard()
       if (view === 'todos') void get().refreshTodos()
       if (view === 'activity') void get().loadActivity()
+    },
+    leaveCanvas: () => {
+      const s = get()
+      const v = s.lastClassicView
+      // The target can have gone while in the canvas: its project deleted, or the view hidden in Settings.
+      const gone = v === 'project' ? !s.projectViewId || !s.projects.some((p) => p.id === s.projectViewId) : viewHidden(s.settings, v)
+      s.setView(gone ? 'home' : v)
     },
     setMemoryMode: (memoryMode) => set({ memoryMode }),
     openMemory: (memoryMode) => set(memoryMode ? { view: 'memory', memoryMode } : { view: 'memory' }),
@@ -611,6 +648,8 @@ export const useStore = create<State>((set, get) => {
         const fid = s.focusedConversationId
         return {
           view: s.view === 'project' && s.projectViewId === id ? 'chat' : s.view,
+          // Deleted from the sidebar while in the canvas: ⌘⇧C must not return to its page.
+          lastClassicView: s.lastClassicView === 'project' && s.projectViewId === id ? 'chat' : s.lastClassicView,
           projectViewId: s.projectViewId === id ? null : s.projectViewId,
           draftProjectId: s.draftProjectId === id ? null : s.draftProjectId,
           sessions,
@@ -631,6 +670,19 @@ export const useStore = create<State>((set, get) => {
 
     refreshConversations: async () => set({ conversations: await api.conversations.list('all') }),
     newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, view: 'chat', settingsOpen: false }),
+    createConversation: async (projectId) => {
+      try {
+        const c = await api.conversations.create(projectId, get().settings.defaultModel)
+        c.messages = []
+        putSession(c)
+        set((s) => ({ conversations: [c, ...s.conversations.filter((x) => x.id !== c.id)] }))
+        void get().refreshProjects()
+        return c
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+        return null
+      }
+    },
     selectChat: async (id) => {
       set({ view: 'chat', settingsOpen: false, traceMessageId: null })
       if (!id) return set({ focusedConversationId: null })
@@ -1112,7 +1164,7 @@ export const useStore = create<State>((set, get) => {
 
 /**
  * Pin a session for as long as a surface is showing it, and release it on unmount. A retained
- * session is never an LRU victim, which is the only protection a canvas window has: canvas mode
+ * session is never an LRU victim, which is the only protection a canvas window has: the canvas view
  * does not focus conversations, and a widget's loader effect only re-runs when its `ref_id` changes.
  */
 export const retainSession = (conversationId: string): (() => void) => {

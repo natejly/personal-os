@@ -65,7 +65,7 @@ const APP: Sel[] = [
   (s) => s.projectModal,
   (s) => s.view,
   (s) => s.settings.theme,
-  (s) => s.mode
+  (s) => s.view === 'canvas'
 ]
 const SIDEBAR: Sel[] = [
   (s) => s.conversations,
@@ -74,9 +74,8 @@ const SIDEBAR: Sel[] = [
   (s) => s.view,
   (s) => s.projectViewId,
   (s) => s.personalStats,
-  (s) => s.mode,
+  (s) => s.view === 'canvas',
   (s) => s.newChat,
-  (s) => s.toggleMode,
   (s) => s.selectChat,
   (s) => s.deleteChat,
   (s) => s.setSettingsOpen,

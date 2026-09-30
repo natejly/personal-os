@@ -4,6 +4,7 @@ import { useStore, type MemoryMode, type Scope } from '../store'
 import MemoryView from './MemoryView'
 import GraphView from './GraphView'
 import ScopeSelect from './ScopeSelect'
+import SendToSpace from './SendToSpace'
 
 const MODES: { key: MemoryMode; label: string; icon: JSX.Element; title: string }[] = [
   { key: 'split', label: 'Split', icon: <Columns2 size={13} />, title: 'Memories and graph side by side' },
@@ -74,6 +75,7 @@ export default function MemoryPanel({ projectId, embedded = false }: { projectId
         {!sidebarOpen && <button className="icon-btn no-drag" aria-label="Show sidebar" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
         <h2><Brain size={16} /> Memory <span className="muted">· {memories.length} memor{memories.length === 1 ? 'y' : 'ies'}, {graph.nodes.length} entit{graph.nodes.length === 1 ? 'y' : 'ies'}</span></h2>
         <div className="no-drag header-right">
+          <SendToSpace items={[{ kind: mode === 'graph' ? 'graph' : 'memory' }]} />
           <ScopeSelect value={libraryScope} onChange={(s) => void setLibraryScope(s)} />
           {search}
           {modeToggle}

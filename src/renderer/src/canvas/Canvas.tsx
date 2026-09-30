@@ -1,8 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type DragEvent as ReactDragEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import type { CanvasWindow, Rect, WidgetKind } from '@shared/types'
-import { api } from '../lib/api'
+import {
+  useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore,
+  type DragEvent as ReactDragEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent
+} from 'react'
+import type { CanvasWindow, Rect } from '@shared/types'
 import { useStore } from '../store'
+import { addWidgetEntries } from './AddWidgetMenu'
 import Dock from './Dock'
+import { openPayload } from './drops'
+import ContextMenu, { type MenuEntry } from './Menu'
 import Overview from './Overview'
 import SpacesBar from './SpacesBar'
 import StatusRing from './StatusRing'
@@ -118,6 +123,7 @@ export default function Canvas(): JSX.Element {
   const [marquee, setMarquee] = useState<Rect | null>(null)
   const [selected, setSelected] = useState<string[]>([])
   const [ghost, setGhost] = useState<Rect | null>(null)
+  const [menu, setMenu] = useState<{ screen: Point; at: Point } | null>(null)
   const idle = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const zoom = canvas?.zoom ?? 1
@@ -188,6 +194,7 @@ export default function Canvas(): JSX.Element {
   // canvas, so a stale one deletes windows nobody can see. An uncommitted gesture is stale too.
   useEffect(() => {
     setSelected([])
+    setMenu(null)
     gesture.current = null
     setLiveViewport(null)
     paint()
@@ -256,6 +263,9 @@ export default function Canvas(): JSX.Element {
 
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>): void => {
     if (e.target !== e.currentTarget) return
+    // Right-click (and ⌃-click, macOS's secondary click) opens the add-widget menu via onContextMenu;
+    // it must not also start a marquee that clears the selection and holds pointer capture under it.
+    if (e.button === 2 || (e.button === 0 && e.ctrlKey)) return
     const st = useCanvas.getState()
     const id = st.activeCanvasId
     if (!id) return
@@ -329,39 +339,23 @@ export default function Canvas(): JSX.Element {
     if (!hasDrag(dt) && !dt.files.length) return
     e.preventDefault()
     setGhost(null)
-    const at = landing(e)
-    const st = useCanvas.getState()
-    const app = useStore.getState()
-    const projectId = canvas?.project_id ?? null
-    const p = readDrag(dt)
-    if (!p) {
-      if (!dt.files.length) return
-      await app.uploadDocuments(dt.files, projectId)
-      await st.openWindow('documents', null, at)
-      return
-    }
-    switch (p.kind) {
-      case 'conversation': await st.openWindow('chat', p.id, at); break
-      case 'nav': await st.openWindow(p.id as WidgetKind, null, at); break
-      case 'todo': await st.openWindow('todos', null, at); break
-      case 'document': await st.openWindow('documents', null, at); break
-      case 'memory': await st.openWindow('memory', null, at); break
-      case 'project': await st.openWindow('project', p.id, at); break
-      case 'note': await st.openWindow('note', p.id, at); break
-      case 'widget': await st.openWindow('dashboard-widget', p.id, at, { dashboard_id: p.dashboardId }); break
-      case 'board-card': {
-        const note = await api.notes.create({ body: p.label, project_id: projectId }).catch(() => null)
-        if (note) await st.openWindow('note', note.id, at)
-        break
-      }
-      case 'file': {
-        if (!dt.files.length) break
-        await app.uploadDocuments(dt.files, projectId)
-        await st.openWindow('documents', null, at)
-        break
-      }
-    }
+    await openPayload(readDrag(dt), { at: landing(e), files: dt.files })
   }
+
+  /** Right-click on the bare plane: the add-widget menu, landing at the clicked grid cell. */
+  const onContextMenu = (e: ReactMouseEvent<HTMLDivElement>): void => {
+    // The same own-target rule as onPointerDown: a window's own menu never double-opens this one.
+    if (e.target !== e.currentTarget || e.defaultPrevented || overview) return
+    e.preventDefault()
+    const p = canvasPointFromEvent(e)
+    setMenu({ screen: { x: e.clientX, y: e.clientY }, at: { x: snapValue(p.x, grid), y: snapValue(p.y, grid) } })
+  }
+  const closeMenu = useCallback(() => setMenu(null), [])
+  const canvasId = canvas?.id
+  const menuItems = useMemo<MenuEntry[]>(
+    () => (menu && canvasId ? [{ kind: 'header', label: 'Add widget' }, ...addWidgetEntries({ canvasId, at: menu.at })] : []),
+    [menu, canvasId]
+  )
 
   const pitch = grid * zoom
   // Mounted for the whole space, hidden below the threshold, so an imperative zoom can reveal it.
@@ -378,6 +372,7 @@ export default function Canvas(): JSX.Element {
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={(e) => void onDrop(e)}
+        onContextMenu={onContextMenu}
       >
         {!sidebarOpen && <div className="canvas-drag-strip drag" />}
         {gridOn && (
@@ -406,12 +401,13 @@ export default function Canvas(): JSX.Element {
         {loaded && !shown.length && (
           <div className="canvas-empty">
             <strong>Empty space</strong>
-            <span>Drag anything from the sidebar.</span>
+            <span>Drag anything from the sidebar, or right-click to add a widget.</span>
           </div>
         )}
         <Dock />
       </div>
       {overview && <Overview />}
+      {menu && canvas && <ContextMenu at={menu.screen} items={menuItems} onClose={closeMenu} />}
     </div>
   )
 }

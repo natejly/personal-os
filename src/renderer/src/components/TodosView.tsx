@@ -5,6 +5,7 @@ import TodoItem from './TodoItem'
 import ScopeSelect from './ScopeSelect'
 import SmartTextarea from './SmartTextarea'
 import { localDay } from './CalendarWeek'
+import SendToSpace from './SendToSpace'
 
 export default function TodosView(): JSX.Element {
   const todos = useStore((s) => s.todos)
@@ -55,6 +56,7 @@ export default function TodosView(): JSX.Element {
               <RefreshCw size={14} className={tasksSync.syncing ? 'spin' : ''} />
             </button>
           )}
+          <SendToSpace items={[{ kind: 'todos' }]} />
           <label className="check"><input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} /> show done</label>
           <ScopeSelect value={scope} onChange={setScope} />
         </div>

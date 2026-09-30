@@ -1,10 +1,11 @@
 import {
-  isValidElement, memo, useEffect, useLayoutEffect, useRef, useState,
+  isValidElement, memo, useEffect, useRef, useState,
   type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode
 } from 'react'
-import { createPortal } from 'react-dom'
 import { GripVertical } from 'lucide-react'
 import type { CanvasWindow } from '@shared/types'
+import { canExpand, expandWindow } from './expand'
+import ContextMenu, { type MenuEntry } from './Menu'
 import { WIDGETS } from './registry'
 import { useCanvas, useIsFocused } from './store'
 import { getDragOverlay, rectStyle, subscribeDragOverlay, useWindowDrag, type DragOverlay } from './useDrag'
@@ -18,74 +19,6 @@ const CORNERS: Handle[] = ['nw', 'ne', 'sw', 'se']
 const MIN = { w: 200, h: 140 }
 /** Right-click belongs to these, not to the window: a caret and a link carry their own menu. */
 const OWN_MENU = 'input, textarea, select, [contenteditable="true"], a[href]'
-const MENU_GAP = 8
-
-interface MenuItem {
-  label: string
-  /** rendered as-is beside the label; must match the accelerator in main's Window menu */
-  accel?: string
-  danger?: boolean
-  run: () => void
-}
-
-/**
- * The window menu, in a body portal because `.win` clips its overflow and the plane is scaled.
- * Renderer UI, not an `Electron.Menu`: it has to sit in the same material as everything else.
- */
-function WindowMenu({ at, items, onClose }: { at: Point; items: MenuItem[]; onClose: () => void }): JSX.Element {
-  const box = useRef<HTMLDivElement | null>(null)
-  const [pos, setPos] = useState(at)
-
-  useLayoutEffect(() => {
-    const el = box.current
-    if (!el) return
-    const { width, height } = el.getBoundingClientRect()
-    setPos({
-      x: Math.max(MENU_GAP, Math.min(at.x, window.innerWidth - width - MENU_GAP)),
-      y: Math.max(MENU_GAP, Math.min(at.y, window.innerHeight - height - MENU_GAP))
-    })
-  }, [at.x, at.y])
-
-  useEffect(() => {
-    // Capture phase: Canvas also listens for Escape on window, and it would clear the selection too.
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key !== 'Escape') return
-      e.stopPropagation()
-      onClose()
-    }
-    window.addEventListener('keydown', onKey, true)
-    window.addEventListener('wheel', onClose, { capture: true, passive: true })
-    window.addEventListener('resize', onClose)
-    return () => {
-      window.removeEventListener('keydown', onKey, true)
-      window.removeEventListener('wheel', onClose, true)
-      window.removeEventListener('resize', onClose)
-    }
-  }, [onClose])
-
-  return createPortal(
-    <>
-      <div className="win-menu-backdrop" onPointerDown={onClose} onContextMenu={(e) => { e.preventDefault(); onClose() }} />
-      <div ref={box} className="win-menu" role="menu" style={{ left: pos.x, top: pos.y }}>
-        {items.map((it) => (
-          <button
-            key={it.label}
-            role="menuitem"
-            className={it.danger ? 'win-menu-item danger' : 'win-menu-item'}
-            onClick={() => {
-              onClose()
-              it.run()
-            }}
-          >
-            <span>{it.label}</span>
-            {it.accel && <kbd>{it.accel}</kbd>}
-          </button>
-        ))}
-      </div>
-    </>,
-    document.body
-  )
-}
 
 export interface WindowFrameProps {
   win: CanvasWindow
@@ -165,7 +98,7 @@ function WindowFrame({ win, live, selected = false, status = null }: WindowFrame
   /** §6 'minimal': a note never offered zoom or minimize, and still does not. */
   const minimal = def?.chrome === 'minimal'
   const zoomed = win.state === 'maximized'
-  const items: MenuItem[] = [
+  const items: MenuEntry[] = [
     { label: 'Bring to front', run: () => focusWindow(win.id) },
     ...(minimal
       ? []
@@ -176,6 +109,7 @@ function WindowFrame({ win, live, selected = false, status = null }: WindowFrame
     win.state === 'popped'
       ? { label: 'Return to canvas', accel: '⌃⌘⇧O', run: () => void returnToCanvas(win.id) }
       : { label: 'Pop out', accel: '⌃⌘O', run: () => void popOut(win.id) },
+    ...(canExpand(win) ? [{ label: 'Expand', run: () => expandWindow(win) }] : []),
     { label: 'Close', accel: '⌘W', danger: true, run: () => void closeWindow(win.id) }
   ]
 
@@ -234,7 +168,7 @@ function WindowFrame({ win, live, selected = false, status = null }: WindowFrame
         </>
       )}
 
-      {menu && <WindowMenu at={menu} items={items} onClose={() => setMenu(null)} />}
+      {menu && <ContextMenu at={menu} items={items} onClose={() => setMenu(null)} />}
     </div>
   )
 }

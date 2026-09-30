@@ -5,6 +5,7 @@ import { api } from '../lib/api'
 import type { Document } from '@shared/types'
 import ProjectChip from './ProjectChip'
 import ScopeSelect from './ScopeSelect'
+import SendToSpace from './SendToSpace'
 
 const fmtSize = (n: number): string => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`)
 const ACCEPT = '.txt,.md,.markdown,.pdf,.docx,.csv,.json,.yaml,.yml,.py,.ts,.tsx,.js,.html,.css,.log,.rst,.toml'
@@ -69,6 +70,7 @@ export default function DocumentsView({ projectId, embedded = false }: { project
         {!sidebarOpen && <button className="icon-btn no-drag" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
         <h2><FileText size={16} /> Documents</h2>
         <div className="no-drag header-right">
+          <SendToSpace items={[{ kind: 'documents' }]} />
           <ScopeSelect value={libraryScope} onChange={(s) => void setLibraryScope(s)} />
           {uploadBtn}
         </div>

@@ -3,6 +3,7 @@ import { Plus, CheckSquare, PanelLeftOpen } from 'lucide-react'
 import { useStore, type Scope } from '../store'
 import TodoItem from './TodoItem'
 import ScopeSelect from './ScopeSelect'
+import SendToSpace from './SendToSpace'
 
 export default function TodosView(): JSX.Element {
   const todos = useStore((s) => s.todos)
@@ -44,6 +45,7 @@ export default function TodosView(): JSX.Element {
         {!sidebarOpen && <button className="icon-btn no-drag" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
         <h2><CheckSquare size={16} /> Todos</h2>
         <div className="no-drag header-right">
+          <SendToSpace items={[{ kind: 'todos' }]} />
           <label className="check"><input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} /> show done</label>
           <ScopeSelect value={scope} onChange={setScope} />
         </div>

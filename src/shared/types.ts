@@ -247,8 +247,8 @@ export interface Settings {
   extractionModel: string
   autoLearn: boolean
   theme: 'dark' | 'light' | 'system'
-  /** Which shell the app opens in: the single-pane router, or the window canvas. */
-  mode: 'classic' | 'canvas'
+  /** Legacy, pre-spaces global mode. Read once by init() (→ initial view 'canvas') and reset to 'classic'; nothing else reads it. */
+  mode?: 'classic' | 'canvas'
   /** Electron accelerator for the global Gather/Scatter shortcut. */
   gatherShortcut: string
   /** Today-screen cards, keyed by module (see modules.ts); a missing key means shown. */
@@ -417,6 +417,33 @@ export interface Canvas {
 export interface WindowLayout { id: string; x?: number; y?: number; w?: number; h?: number; z?: number; state?: WindowState }
 
 export interface Note { id: string; project_id: string | null; body: string; color: string; created_at: number; updated_at: number }
+
+/** One window captured in a space preset: content + geometry, no live state (state/popout are not kept). */
+export interface PresetWindow {
+  kind: WidgetKind
+  ref_id: string | null
+  project_id: string | null
+  title: string
+  x: number; y: number; w: number; h: number
+  z: number
+  pinned: number /** 0 | 1 */
+  config: Record<string, unknown>
+}
+/** A named, user-saved template of a space. Instantiating it creates a new Canvas. */
+export interface CanvasPreset {
+  id: string
+  name: string
+  project_id: string | null
+  snap_mode: SnapMode
+  grid_size: number
+  zoom: number; pan_x: number; pan_y: number
+  wallpaper: string
+  windows: PresetWindow[]
+  created_at: number
+  updated_at: number
+}
+/** POST /canvas-presets/{id}/instantiate: the new canvas plus how many preset windows were dropped (dangling refs). */
+export type InstantiatedCanvas = Canvas & { skipped: number }
 
 export type DragKind = 'conversation' | 'todo' | 'document' | 'memory' | 'board-card' | 'project' | 'widget' | 'note' | 'file' | 'nav'
 

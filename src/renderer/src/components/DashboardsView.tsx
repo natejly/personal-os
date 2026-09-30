@@ -5,6 +5,8 @@ import remarkGfm from 'remark-gfm'
 import { SAFE_MD } from './Message'
 import { useStore } from '../store'
 import { api, getBase } from '../lib/api'
+import { clearHandoff, peekHandoff } from '../lib/handoff'
+import SendToSpace from './SendToSpace'
 import type { Dashboard, DataSource, Widget } from '@shared/types'
 
 const KIND_LABEL: Record<string, string> = { http: 'HTTP API', rss: 'RSS / Atom', internal: 'Personal OS data' }
@@ -139,7 +141,8 @@ export default function DashboardsView(): JSX.Element {
   const sidebarOpen = useStore((s) => s.sidebarOpen)
   const { toggleSidebar, toast } = useStore()
   const [list, setList] = useState<Dashboard[]>([])
-  const [activeId, setActiveId] = useState<string | null>(null)
+  // A canvas widget window's Expand hands its dashboard over; a stale id falls back to the first one.
+  const [activeId, setActiveId] = useState<string | null>(() => peekHandoff('dashboard'))
   const [dash, setDash] = useState<Dashboard | null>(null)
   const [sources, setSources] = useState<DataSource[]>([])
   const [internal, setInternal] = useState<string[]>([])
@@ -153,9 +156,10 @@ export default function DashboardsView(): JSX.Element {
   const [width, setWidth] = useState(1)
   const [generating, setGenerating] = useState(false)
 
-  const loadList = async (): Promise<void> => { const l = await api.dashboards.list(); setList(l); if (!activeId && l.length) setActiveId(l[0].id) }
+  const loadList = async (): Promise<void> => { const l = await api.dashboards.list(); setList(l); if (l.length && (!activeId || !l.some((d) => d.id === activeId))) setActiveId(l[0].id) }
   const loadDash = async (): Promise<void> => { if (activeId) setDash(await api.dashboards.get(activeId)) }
   const loadSources = async (): Promise<void> => { const r = await api.sources.list(); setSources(r.sources); setInternal(r.internal) }
+  useEffect(() => { clearHandoff('dashboard') }, [])
   useEffect(() => { void loadList(); void loadSources() }, [])
   useEffect(() => { void loadDash() }, [activeId])
 
@@ -183,6 +187,10 @@ export default function DashboardsView(): JSX.Element {
         {!sidebarOpen && <button className="icon-btn no-drag" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
         <h2><LayoutDashboard size={16} /> Dashboards</h2>
         <div className="no-drag header-right">
+          <SendToSpace
+            items={dash ? dash.widgets.map((w) => ({ kind: 'dashboard-widget' as const, refId: w.id, config: { dashboard_id: dash.id } })) : []}
+            title="Send widgets to space"
+          />
           {list.length > 0 && (
             <label className="model-picker"><select value={activeId ?? ''} onChange={(e) => setActiveId(e.target.value)}>{list.map((d) => <option key={d.id} value={d.id}>{d.name} ({d.widget_count})</option>)}</select><ChevronDown size={14} /></label>
           )}

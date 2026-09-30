@@ -1,0 +1,70 @@
+/*
+ * Classic-side spaces popovers: presets (SpacesBar, sidebar Spaces header, space row menu) and
+ * Send to Space (classic view headers). Tokens only from styles.css, so both themes follow.
+ * z 200/201 puts them over the canvas chrome as well as the classic shell.
+ */
+
+.preset-pop-backdrop { position: fixed; inset: 0; z-index: 200; }
+.preset-pop {
+  position: fixed;
+  z-index: 201;
+  min-width: 220px;
+  max-width: 300px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  padding: 6px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+/* Same as `.home-customize h4`, with room between sections. */
+.preset-pop h4 { margin: 0 0 6px; padding: 4px 4px 0; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-faint); }
+.preset-pop h4 ~ h4 { margin-top: 10px; }
+.preset-pop .empty-hint { padding: 4px 4px 6px; font-size: 12px; margin: 0; }
+
+/* Rows: the `.project-item` metrics, with the actions revealed on hover. */
+.preset-row, .send-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  text-align: left;
+  color: var(--text);
+  cursor: pointer;
+}
+.preset-row:hover, .send-row:hover { background: var(--hover); }
+.preset-row .count, .send-row .count { font-size: 11px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.preset-row .ghost { opacity: 0; }
+.preset-row:hover .ghost, .preset-row:focus-within .ghost { opacity: 1; }
+.preset-row .icon-btn.xs { margin-left: 0; flex-shrink: 0; }
+.preset-row .preset-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; font: inherit; color: inherit; }
+.preset-row input { flex: 1; min-width: 0; font: inherit; color: var(--text); background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 4px; padding: 0 4px; outline: none; }
+.send-row-icon { color: var(--text-faint); flex-shrink: 0; }
+.send-row.new { color: var(--text-muted); border-top: 1px solid var(--border); border-radius: 0 0 6px 6px; margin-top: 4px; padding-top: 8px; }
+.send-row.new:only-of-type { border-top: 0; margin-top: 0; }
+
+/* Save form: a small modal-style input + Save. */
+.preset-form { display: flex; gap: 6px; padding: 0 2px 2px; }
+.preset-form input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-input);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 13px;
+  color: var(--text);
+  outline: 0;
+}
+.preset-form input:focus { border-color: var(--accent); }
+.preset-form .primary-btn { padding: 4px 10px; font-size: 12px; }
+.preset-form .primary-btn:disabled { opacity: 0.6; cursor: default; }
+/* The sidebar row menu swaps its items for the form. */
+.space-menu .preset-form { width: 240px; padding: 2px; }
+
+.send-btn:disabled { opacity: 0.4; cursor: default; }
+.send-btn:disabled:hover { background: none; color: var(--text-muted); }

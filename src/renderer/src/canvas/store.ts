@@ -19,10 +19,21 @@ export interface CanvasState {
   /** true during any drag, resize, zoom or space switch: drops backdrop-filter */
   interacting: boolean
   loaded: boolean
+  /** The last `load()` threw and nothing has loaded yet: the sidebar offers a retry instead of a blank list. */
+  loadFailed: boolean
 
   load: () => Promise<void>
 
+  /** Creates a space, activates it and navigates into the canvas view. */
   newSpace: (name?: string, copyFrom?: string | null) => Promise<void>
+  /** Activate `canvasId` (stale or omitted: the active space, then the first) and navigate to the canvas view. Creates a space when there are none. */
+  enterSpace: (canvasId?: string) => Promise<void>
+  /** ⌘⇧C: into the canvas from a classic view, back to `lastClassicView` from the canvas. */
+  toggleCanvas: () => Promise<void>
+  /** Put a canvas the caller already created into the store; `navigate` (default) also enters it. */
+  adoptSpace: (c: Canvas, navigate?: boolean) => void
+  /** The first space (in `order`) bound to this project, or null. */
+  spaceForProject: (projectId: string) => string | null
   renameSpace: (canvasId: string, name: string) => Promise<void>
   deleteSpace: (canvasId: string) => Promise<void>
   setActiveCanvas: (canvasId: string) => void
@@ -35,7 +46,15 @@ export interface CanvasState {
   /** Local + 600 ms debounced PUT /canvases/{id}. */
   setViewport: (canvasId: string, v: { zoom?: number; pan_x?: number; pan_y?: number }) => void
 
-  openWindow: (kind: WidgetKind, refId?: string | null, at?: { x: number; y: number }, config?: Record<string, unknown>) => Promise<CanvasWindow | null>
+  /**
+   * `canvasId` defaults to the active space. A window opened in another space does not take focus,
+   * and nothing navigates.
+   */
+  openWindow: (kind: WidgetKind, refId?: string | null, at?: { x: number; y: number }, config?: Record<string, unknown>, canvasId?: string) => Promise<CanvasWindow | null>
+  /** A new conversation (project: `projectId`, or the active space's binding when undefined) in a chat window in the active space. */
+  newChatWindow: (projectId?: string | null, at?: { x: number; y: number }) => Promise<CanvasWindow | null>
+  /** Surface the window of `kind` on `refId` in `canvasId` — restoring it if minimized — or open one. Never navigates. */
+  ensureWindow: (canvasId: string, kind: WidgetKind, refId?: string | null, config?: Record<string, unknown>, at?: { x: number; y: number }) => Promise<{ win: CanvasWindow | null; existed: boolean }>
   /** Focus the chat window holding this conversation — restoring or crossing spaces if needed — or open one. */
   openChat: (conversationId: string) => Promise<void>
   closeWindow: (windowId: string) => Promise<void>
@@ -90,17 +109,39 @@ export const setLiveViewport = (v: { zoom: number; pan_x: number; pan_y: number 
   liveView = v
 }
 
-/** The active canvas as the screen sees it. Falls back to the whole window before Canvas mounts. */
+/** SpacesBar's height (`.spaces-bar { flex: 0 0 34px }`): the plane sits under it. */
+const SPACES_BAR_H = 34
+
+/**
+ * The plane's screen size. While Canvas is unmounted (Send to Space or a sidebar drop from a classic
+ * view) there is no element to measure, so it is derived from the shell instead: the `.app` grid's
+ * content column (the window minus the sidebar) and its height minus the SpacesBar. The whole window
+ * is only the last resort, when there is no shell to measure.
+ */
+const planeSize = (): { width: number; height: number } => {
+  const r = viewportEl?.getBoundingClientRect()
+  if (r) return { width: r.width, height: r.height }
+  const app = typeof document === 'undefined' ? null : document.querySelector<HTMLElement>('.app')
+  if (app) {
+    const cols = getComputedStyle(app).gridTemplateColumns.split(' ').map(parseFloat).filter(Number.isFinite)
+    const width = cols.length ? cols[cols.length - 1] : app.clientWidth
+    const height = app.clientHeight - SPACES_BAR_H
+    if (width > 0 && height > 0) return { width, height }
+  }
+  return { width: window.innerWidth, height: window.innerHeight }
+}
+
+/** The active canvas as the screen sees it. Measures the shell for the plane size while Canvas is unmounted. */
 export const viewport = (): Viewport => {
   const s = useCanvas.getState()
   const c = s.activeCanvasId ? s.canvases[s.activeCanvasId] : undefined
-  const r = viewportEl?.getBoundingClientRect()
+  const { width, height } = planeSize()
   return {
     zoom: liveView?.zoom ?? c?.zoom ?? 1,
     panX: liveView?.pan_x ?? c?.pan_x ?? 0,
     panY: liveView?.pan_y ?? c?.pan_y ?? 0,
-    width: r?.width ?? window.innerWidth,
-    height: r?.height ?? window.innerHeight
+    width,
+    height
   }
 }
 
@@ -176,13 +217,32 @@ export const flushLayoutOnUnload = (s: CanvasState): void => {
 }
 
 /**
+ * Writes `canvasId`'s pending pan/zoom now instead of at the end of `setViewport`'s debounce. A no-op
+ * when nothing is pending. Anything that snapshots the server row (Save as preset) awaits it first.
+ */
+export const flushViewport = async (canvasId: string): Promise<void> => {
+  const t = viewportTimers.get(canvasId)
+  if (!t) return
+  clearTimeout(t)
+  viewportTimers.delete(canvasId)
+  const c = useCanvas.getState().canvases[canvasId]
+  if (c) await api.canvases.update(canvasId, { zoom: c.zoom, pan_x: c.pan_x, pan_y: c.pan_y }).catch(() => undefined)
+}
+
+/** A non-active canvas as it would appear if shown now: its stored pan/zoom, the current plane size. */
+const viewportOf = (c: Canvas): Viewport => {
+  const v = viewport()
+  return { ...v, zoom: c.zoom, panX: c.pan_x, panY: c.pan_y }
+}
+
+/**
  * Where a new window lands: the first spot in the visible viewport where its rect covers no existing
  * window (scanned in reading order on a coarse grid), so opening several widgets in a row tiles them
  * instead of stacking them. Only when the viewport is genuinely full does it fall back to the old
  * cascade off the top-left.
  */
-const spawnAt = (windows: CanvasWindow[], size?: Size): Point => {
-  const v = visibleRect(viewport())
+const spawnAt = (windows: CanvasWindow[], size?: Size, vp: Viewport = viewport()): Point => {
+  const v = visibleRect(vp)
   const w = size?.w ?? 420
   const h = size?.h ?? 340
   const pad = 14
@@ -242,16 +302,37 @@ export const useCanvas = create<CanvasState>((set, get) => {
     get().setActiveCanvas(id)
   }
 
+  /**
+   * Registered at app start (the sidebar lists spaces), so everything here that is not meant to work
+   * from a classic view is guarded on `view === 'canvas'`: ⌘W/⌘M must still close/minimize the app
+   * window there, and the canvas-only actions must do nothing.
+   */
   const onMenu = (action: string): void => {
     const s = get()
-    const canvas = useStore.getState().mode === 'canvas'
-    if (action === 'close-window') return canvas && s.focusedWindowId ? void s.closeFocused() : window.os.closeSelf()
-    if (action === 'minimize-window') return canvas && s.focusedWindowId ? void s.minimizeFocused() : window.os.minimizeSelf()
-    if (!canvas || !action.startsWith('canvas:')) return
-    if (action === 'canvas:new-space') void s.newSpace()
-    else if (action === 'canvas:next-space') s.nextSpace()
+    const inCanvas = useStore.getState().view === 'canvas'
+    if (action === 'close-window') return inCanvas && s.focusedWindowId ? void s.closeFocused() : window.os.closeSelf()
+    if (action === 'minimize-window') return inCanvas && s.focusedWindowId ? void s.minimizeFocused() : window.os.minimizeSelf()
+    // These three work from anywhere: they navigate into the canvas.
+    if (action === 'canvas:toggle') return void s.toggleCanvas()
+    if (action === 'canvas:new-space') return void s.newSpace()
+    if (action.startsWith('canvas:space:')) {
+      const n = Number(action.slice('canvas:space:'.length))
+      // A failed app-start load leaves `order` empty: retry it (as enterSpace does) before resolving ⌃N.
+      void (async () => {
+        if (!get().loaded) await get().load().catch(fail)
+        const id = get().order[n - 1]
+        if (id) await get().enterSpace(id)
+      })()
+      return
+    }
+    // The app store leaves ⌘N to us in the canvas view.
+    if (action === 'new-chat') {
+      if (inCanvas) void s.newChatWindow()
+      return
+    }
+    if (!inCanvas || !action.startsWith('canvas:')) return
+    if (action === 'canvas:next-space') s.nextSpace()
     else if (action === 'canvas:prev-space') s.prevSpace()
-    else if (action.startsWith('canvas:space:')) s.gotoSpace(Number(action.slice('canvas:space:'.length)))
     else if (action === 'canvas:overview') s.toggleOverview()
     else if (action === 'canvas:tidy') s.tidyUp()
     else if (action === 'canvas:popout') void s.popOutFocused()
@@ -293,10 +374,17 @@ export const useCanvas = create<CanvasState>((set, get) => {
     overview: false,
     interacting: false,
     loaded: false,
+    loadFailed: false,
 
     load: async () => {
       listen()
-      const list = await api.canvases.list()
+      let list: Canvas[]
+      try {
+        list = await api.canvases.list()
+      } catch (e) {
+        set({ loadFailed: true })
+        throw e
+      }
       const canvases: Record<string, Canvas> = {}
       for (const c of list) canvases[c.id] = { ...c, windows: [...c.windows].sort(byZ) }
       const order = list.map((c) => c.id)
@@ -304,7 +392,8 @@ export const useCanvas = create<CanvasState>((set, get) => {
         canvases,
         order,
         activeCanvasId: s.activeCanvasId && canvases[s.activeCanvasId] ? s.activeCanvasId : order[0] ?? null,
-        loaded: true
+        loaded: true,
+        loadFailed: false
       }))
     },
 
@@ -313,10 +402,32 @@ export const useCanvas = create<CanvasState>((set, get) => {
         const c = await api.canvases.create({ name, copy_from: copyFrom })
         putCanvas(c)
         set({ activeCanvasId: c.id, focusedWindowId: null, overview: false })
+        useStore.getState().setView('canvas')
       } catch (e) {
         fail(e)
       }
     },
+    enterSpace: async (canvasId) => {
+      if (!get().loaded) await get().load().catch(fail)
+      const s = get()
+      const id = canvasId && s.canvases[canvasId] ? canvasId : s.activeCanvasId ?? s.order[0]
+      // Zero spaces: create one (newSpace navigates).
+      if (!id) return void (await get().newSpace())
+      if (id !== s.activeCanvasId) s.setActiveCanvas(id)
+      useStore.getState().setView('canvas')
+    },
+    toggleCanvas: async () => {
+      const app = useStore.getState()
+      if (app.view === 'canvas') app.leaveCanvas()
+      else await get().enterSpace()
+    },
+    adoptSpace: (c, navigate = true) => {
+      putCanvas(c)
+      if (!navigate) return
+      get().setActiveCanvas(c.id)
+      useStore.getState().setView('canvas')
+    },
+    spaceForProject: (projectId) => get().order.find((id) => get().canvases[id]?.project_id === projectId) ?? null,
     renameSpace: async (canvasId, name) => {
       patchCanvas(canvasId, { name })
       await api.canvases.update(canvasId, { name }).catch(fail)
@@ -374,20 +485,17 @@ export const useCanvas = create<CanvasState>((set, get) => {
       if (t) clearTimeout(t)
       viewportTimers.set(
         canvasId,
-        setTimeout(() => {
-          viewportTimers.delete(canvasId)
-          const c = get().canvases[canvasId]
-          if (c) void api.canvases.update(canvasId, { zoom: c.zoom, pan_x: c.pan_x, pan_y: c.pan_y }).catch(() => undefined)
-        }, VIEWPORT_MS)
+        setTimeout(() => void flushViewport(canvasId), VIEWPORT_MS)
       )
     },
 
-    openWindow: async (kind, refId = null, at, config) => {
+    openWindow: async (kind, refId = null, at, config, target) => {
       const s = get()
-      const canvasId = s.activeCanvasId
+      const canvasId = target ?? s.activeCanvasId
       const canvas = canvasId ? s.canvases[canvasId] : undefined
       if (!canvasId || !canvas) return null
-      const pos = at ?? spawnAt(canvas.windows, sizeOf?.(kind))
+      const isActive = canvasId === s.activeCanvasId
+      const pos = at ?? spawnAt(canvas.windows, sizeOf?.(kind), isActive ? viewport() : viewportOf(canvas))
       try {
         const w = await api.canvases.addWindow(canvasId, {
           kind,
@@ -399,7 +507,8 @@ export const useCanvas = create<CanvasState>((set, get) => {
           config: { ...(configOf?.(kind) ?? {}), ...(config ?? {}) }
         })
         putWindow(w)
-        set({ focusedWindowId: w.id })
+        // A window sent to another space lands there quietly: focus is per the active space.
+        if (isActive) set({ focusedWindowId: w.id })
         // Attach rather than load: a chat opened over a reply already in flight adopts that run even
         // when this resolves before the widget's own effect sees an unloaded session.
         if (w.kind === 'chat' && w.ref_id) void useStore.getState().attachSession(w.ref_id)
@@ -420,6 +529,23 @@ export const useCanvas = create<CanvasState>((set, get) => {
         return
       }
       await get().openWindow('chat', conversationId)
+    },
+    newChatWindow: async (projectId, at) => {
+      const s = get()
+      const canvas = s.activeCanvasId ? s.canvases[s.activeCanvasId] : undefined
+      if (!canvas) return null
+      const c = await useStore.getState().createConversation(projectId !== undefined ? projectId : canvas.project_id)
+      return c ? get().openWindow('chat', c.id, at) : null
+    },
+    ensureWindow: async (canvasId, kind, refId = null, config, at) => {
+      const canvas = get().canvases[canvasId]
+      if (!canvas) return { win: null, existed: false }
+      const hit = canvas.windows.find((w) => w.kind === kind && (w.ref_id ?? null) === (refId ?? null))
+      if (!hit) return { win: await get().openWindow(kind, refId, at, config, canvasId), existed: false }
+      if (hit.state === 'minimized') await get().setWindowState(hit.id, 'normal')
+      else if (hit.state === 'popped') void window.os.popout.focus(hit.id)
+      if (canvasId === get().activeCanvasId) get().focusWindow(hit.id)
+      return { win: hit, existed: true }
     },
     closeWindow: async (windowId) => {
       const w = findWin(get(), windowId)

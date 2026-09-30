@@ -154,7 +154,7 @@ function buildMenu(): void {
         { label: 'Memory: Knowledge Graph', accelerator: 'CmdOrCtrl+7', click: () => sendMenu('view:graph') },
         { label: 'Documents', accelerator: 'CmdOrCtrl+8', click: () => sendMenu('view:documents') },
         { type: 'separator' },
-        { label: 'Canvas Mode', accelerator: 'CmdOrCtrl+Shift+C', click: () => sendMenu('toggle-mode') },
+        { label: 'Toggle Spaces', accelerator: 'CmdOrCtrl+Shift+C', click: () => sendMenu('canvas:toggle') },
         { label: 'Toggle Sidebar', accelerator: 'CmdOrCtrl+B', click: () => sendMenu('toggle-sidebar') },
         { label: 'Toggle Context Panel', accelerator: 'CmdOrCtrl+I', click: () => sendMenu('toggle-context') },
         { type: 'separator' },

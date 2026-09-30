@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { MessageSquarePlus, Search, Settings, Trash2, PanelLeftClose, Sparkles, Brain, FileText, Plus, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid } from 'lucide-react'
 import { useStore, type View } from '../store'
 import ChatPulse from './ChatPulse'
+import SidebarSpaces from './SidebarSpaces'
 import { viewHidden } from '../modules'
 import { dragProps } from '../canvas/dnd'
 import { useCanvas } from '../canvas/store'
@@ -41,11 +42,10 @@ export default function Sidebar(): JSX.Element {
   const projectViewId = useStore((s) => s.projectViewId)
   const personalStats = useStore((s) => s.personalStats)
   const settings = useStore((s) => s.settings)
-  const mode = useStore((s) => s.mode)
-  // One selector per action. Sidebar is mounted in both modes, so a bare useStore() here is what made
-  // App's whole subtree commit once per streamed token.
+  const inCanvas = useStore((s) => s.view === 'canvas')
+  // One selector per action. Sidebar is mounted in every view, the canvas included, so a bare
+  // useStore() here is what made App's whole subtree commit once per streamed token.
   const newChat = useStore((s) => s.newChat)
-  const toggleMode = useStore((s) => s.toggleMode)
   const selectChat = useStore((s) => s.selectChat)
   const deleteChat = useStore((s) => s.deleteChat)
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
@@ -53,9 +53,9 @@ export default function Sidebar(): JSX.Element {
   const setView = useStore((s) => s.setView)
   const openProject = useStore((s) => s.openProject)
   const setProjectModal = useStore((s) => s.setProjectModal)
-  // In canvas mode a chat lives in a window, not the router: clicking one focuses or opens its window.
+  // In the canvas view a chat lives in a window, not the router: clicking one focuses or opens its window.
   const openConversation = (id: string): void => {
-    if (useStore.getState().mode === 'canvas') void useCanvas.getState().openChat(id)
+    if (useStore.getState().view === 'canvas') void useCanvas.getState().openChat(id)
     else void selectChat(id)
   }
   const [query, setQuery] = useState('')
@@ -96,11 +96,11 @@ export default function Sidebar(): JSX.Element {
     <aside className="sidebar">
       <div className="sidebar-top drag">
         <button className="brand no-drag" onClick={() => setView('home')}><Sparkles size={15} /><span>Personal OS</span></button>
-        <button className={`icon-btn no-drag ${mode === 'canvas' ? 'on' : ''}`} title={mode === 'canvas' ? 'Leave Canvas (⌘⇧C)' : 'Canvas Mode (⌘⇧C)'} onClick={toggleMode}><LayoutGrid size={16} /></button>
+        <button className={`icon-btn no-drag ${inCanvas ? 'on' : ''}`} title={inCanvas ? 'Back (⌘⇧C)' : 'Go to space (⌘⇧C)'} onClick={() => void useCanvas.getState().toggleCanvas()}><LayoutGrid size={16} /></button>
         <button className="icon-btn no-drag" title="Hide sidebar (⌘B)" onClick={toggleSidebar}><PanelLeftClose size={16} /></button>
       </div>
 
-      <button className="new-chat" onClick={() => newChat(null)}>
+      <button className="new-chat" onClick={() => (inCanvas ? void useCanvas.getState().newChatWindow() : newChat(null))}>
         <MessageSquarePlus size={16} /><span>New chat</span><kbd>⌘N</kbd>
       </button>
 
@@ -112,6 +112,8 @@ export default function Sidebar(): JSX.Element {
           </button>
         ))}
       </nav>
+
+      <SidebarSpaces />
 
       <div className="section-row">
         <button className="section-toggle" onClick={() => setProjectsOpen((o) => !o)}>
@@ -127,7 +129,7 @@ export default function Sidebar(): JSX.Element {
             const isOpen = expanded[p.id] ?? (view === 'project' && projectViewId === p.id) ?? false
             return (
               <div key={p.id} className="project-group">
-                <div className={`project-item ${view === 'project' && projectViewId === p.id ? 'active' : ''}`} onClick={() => openProject(p.id)} role="button" tabIndex={0}
+                <div className={`project-item ${view === 'project' && projectViewId === p.id ? 'active' : ''}`} onClick={() => { const sp = inCanvas ? useCanvas.getState().spaceForProject(p.id) : null; if (sp) void useCanvas.getState().enterSpace(sp); else openProject(p.id) }} role="button" tabIndex={0}
                   {...dragProps({ kind: 'project', id: p.id, label: p.name })}>
                   <button className="icon-btn ghost xs" title={isOpen ? 'Collapse' : 'Expand chats'} onClick={(e) => { e.stopPropagation(); setExpanded((x) => ({ ...x, [p.id]: !isOpen })) }}><ChevronRight size={12} className={isOpen ? 'rot90' : ''} /></button>
                   <span className="project-dot" style={{ background: p.color }} />
@@ -136,7 +138,7 @@ export default function Sidebar(): JSX.Element {
                 </div>
                 {isOpen && (
                   <div className="project-chats">
-                    {chats.length === 0 && <button className="convo-item sub muted" onClick={() => newChat(p.id)}><MessageSquarePlus size={12} /> New chat in project</button>}
+                    {chats.length === 0 && <button className="convo-item sub muted" onClick={() => (inCanvas ? void useCanvas.getState().newChatWindow(p.id) : newChat(p.id))}><MessageSquarePlus size={12} /> New chat in project</button>}
                     {chats.slice(0, 12).map((c) => (
                       <div key={c.id} className={`convo-item sub ${c.id === focusedId && view === 'chat' ? 'active' : ''}`} onClick={() => openConversation(c.id)} role="button" tabIndex={0}
                         {...dragProps({ kind: 'conversation', id: c.id, label: c.title, projectId: p.id })}>

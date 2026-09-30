@@ -4,6 +4,8 @@ import { useStore } from '../store'
 import { api } from '../lib/api'
 import type { Board, BoardCard, BoardColumn } from '@shared/types'
 import ProjectChip from './ProjectChip'
+import SendToSpace from './SendToSpace'
+import { clearHandoff, peekHandoff } from '../lib/handoff'
 
 const PRIO = ['', 'P1', 'P2', 'P3']
 
@@ -117,7 +119,8 @@ export default function BoardsView(): JSX.Element {
   const projects = useStore((s) => s.projects)
   const { toggleSidebar, toast } = useStore()
   const [boards, setBoards] = useState<Board[]>([])
-  const [activeId, setActiveId] = useState<string | null>(null)
+  // A canvas board window's Expand hands its board over; a stale id falls back to the first board.
+  const [activeId, setActiveId] = useState<string | null>(() => peekHandoff('board'))
   const [board, setBoard] = useState<Board | null>(null)
   const [open, setOpen] = useState<BoardCard | null>(null)
   const [newName, setNewName] = useState('')
@@ -127,9 +130,10 @@ export default function BoardsView(): JSX.Element {
   const loadList = async (): Promise<void> => {
     const list = await api.boards.list()
     setBoards(list)
-    if (!activeId && list.length) setActiveId(list[0].id)
+    if (list.length && (!activeId || !list.some((b) => b.id === activeId))) setActiveId(list[0].id)
   }
   const loadBoard = async (): Promise<void> => { if (activeId) setBoard(await api.boards.get(activeId)) }
+  useEffect(() => { clearHandoff('board') }, [])
   useEffect(() => { void loadList() }, [])
   useEffect(() => { void loadBoard() }, [activeId])
 
@@ -151,6 +155,7 @@ export default function BoardsView(): JSX.Element {
         {!sidebarOpen && <button className="icon-btn no-drag" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
         <h2><KanbanSquare size={16} /> Boards</h2>
         <div className="no-drag header-right">
+          <SendToSpace items={[{ kind: 'board', refId: activeId }]} disabled={!activeId} />
           {boards.length > 0 && (
             <label className="model-picker">
               <select value={activeId ?? ''} onChange={(e) => setActiveId(e.target.value)}>{boards.map((b) => <option key={b.id} value={b.id}>{b.name} ({b.card_count})</option>)}</select>

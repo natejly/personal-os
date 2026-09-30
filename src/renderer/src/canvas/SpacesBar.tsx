@@ -3,6 +3,8 @@ import { AlignJustify, LayoutGrid, Plus, Trash2 } from 'lucide-react'
 import type { DragPayload, SnapMode } from '@shared/types'
 import { api } from '../lib/api'
 import { useProject, useStore } from '../store'
+import { AddWidgetButton } from './AddWidgetMenu'
+import { PresetsButton } from './PresetsMenu'
 import { hasDrag, readDrag } from './dnd'
 import { GRID_SIZES } from './snapping'
 import { useCanvas } from './store'
@@ -122,7 +124,10 @@ export default function SpacesBar(): JSX.Element {
       {!sidebarOpen && <span className="spaces-inset drag" />}
       {order.map((id, i) => <Tab key={id} canvasId={id} index={i} />)}
       <button className="icon-btn ghost sm" title="New space (⌃⌘N)" onClick={() => void useCanvas.getState().newSpace()}><Plus size={14} /></button>
+      <PresetsButton canvasId={activeId} />
       <span className="spacer" />
+      {/* Deliberately apart from the new-space + beside the tabs: this one adds to the space. */}
+      <AddWidgetButton />
       {activeId && (
         <>
           <select

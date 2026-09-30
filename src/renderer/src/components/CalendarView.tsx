@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, PanelLeftOpen, Calendar as CalIcon, ExternalLink, X } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
+import SendToSpace from './SendToSpace'
 import CalendarWeek, { addDays, fmtTime, startOfWeek } from './CalendarWeek'
 import type { CalendarEvent } from '@shared/types'
 
@@ -51,6 +52,7 @@ export default function CalendarView(): JSX.Element {
         {!sidebarOpen && <button className="icon-btn no-drag" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
         <h2><CalIcon size={16} /> Calendar <span className="muted">· {days[0].toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – {days[6].toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span></h2>
         <div className="no-drag header-right">
+          <SendToSpace items={[{ kind: 'calendar' }]} />
           <button className="ghost-btn" onClick={() => setWeek(startOfWeek(new Date()))}>Today</button>
           <button className="icon-btn" onClick={() => setWeek(addDays(week, -7))}><ChevronLeft size={16} /></button>
           <button className="icon-btn" onClick={() => setWeek(addDays(week, 7))}><ChevronRight size={16} /></button>

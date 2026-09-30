@@ -40,6 +40,7 @@ from .notes import Notes
 from .gtasks import TasksSync
 from .presets import CanvasPresets
 from .runs import Run, RunBus
+from .todocal import TodoCalendarMirror
 from .todos import Todos
 from .tools import Toolbox, summarize_result
 from .trace import Tracer, now_ms
@@ -216,8 +217,16 @@ boards = Boards(db)
 dashboards = Dashboards(db)
 google = Google(settings, db.set_settings)
 tasks_sync = TasksSync(todos, google, settings, db.set_settings)
-# Any todo write (routes here or assistant tools) nudges the sync loop.
-todos.on_change = tasks_sync.poke
+todo_calendar = TodoCalendarMirror(todos, google, settings, db.set_settings)
+
+
+def _todos_changed() -> None:
+    """Any todo write (routes here or assistant tools) nudges both Google sync loops."""
+    tasks_sync.poke()
+    todo_calendar.poke()
+
+
+todos.on_change = _todos_changed
 usage = Usage(db)
 pricing = Pricing()
 
@@ -276,7 +285,7 @@ def health() -> dict[str, Any]:
 PRIVATE_SETTINGS = {"googleToken", "googleAuthPending"}
 # Readable through /settings, but only writable through its own route: a plain PUT would replace the
 # whole nested dict and silently drop the signal switches and exclusion lists.
-SETTINGS_READ_ONLY = {"activity", "googleTasksSync"}
+SETTINGS_READ_ONLY = {"activity", "googleTasksSync", "googleTodoCalendar"}
 
 
 @app.get("/settings")
@@ -1134,6 +1143,7 @@ class TodoPatch(BaseModel):
     clear_project: bool = False
     calendar_event_id: str | None = None
     calendar_link: str | None = None
+    calendar_id: str | None = None
 
 
 @app.get("/todos")
@@ -1445,18 +1455,51 @@ async def google_tasks_sync_run() -> dict[str, Any]:
     return tasks_sync.status()
 
 
+# ---------------- todos -> Google Calendar mirror ----------------
+class TodoCalendarIn(BaseModel):
+    enabled: bool | None = None
+    calendarId: str | None = None
+    calendarName: str | None = None
+    intervalMinutes: int | None = None
+    keepCompleted: bool | None = None
+
+
+@app.get("/integrations/google/todo-calendar")
+def google_todo_calendar_status() -> dict[str, Any]:
+    return todo_calendar.status()
+
+
+@app.put("/integrations/google/todo-calendar")
+def google_todo_calendar_config(body: TodoCalendarIn) -> dict[str, Any]:
+    todo_calendar.set_config(body.model_dump(exclude_none=True))
+    return todo_calendar.status()
+
+
+@app.post("/integrations/google/todo-calendar/run")
+async def google_todo_calendar_run() -> dict[str, Any]:
+    try:
+        await asyncio.to_thread(todo_calendar.sync_once)
+    except GoogleNotConnected as e:
+        raise HTTPException(409, str(e)) from e
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"Todo calendar sync failed: {e}") from e
+    return todo_calendar.status()
+
+
 @app.on_event("startup")
 async def _tasks_sync_startup() -> None:
     app.state.gtasks_task = asyncio.create_task(tasks_sync.loop())
+    app.state.todocal_task = asyncio.create_task(todo_calendar.loop())
 
 
 @app.on_event("shutdown")
 async def _tasks_sync_shutdown() -> None:
-    task = getattr(app.state, "gtasks_task", None)
-    if task:
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError, Exception):
-            await task
+    for attr in ("gtasks_task", "todocal_task"):
+        task = getattr(app.state, attr, None)
+        if task:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
 
 
 @app.get("/integrations/google/drive")

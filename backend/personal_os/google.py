@@ -12,6 +12,7 @@ Tokens are stored in the app database (settings.googleToken).
 from __future__ import annotations
 
 import base64
+import contextlib
 import datetime as dt
 import email.mime.text
 from email.utils import parsedate_to_datetime
@@ -246,6 +247,23 @@ class Google:
                 "selected": c.get("selected", False),
             })
         return sorted(out, key=lambda c: (not c["primary"], c["access_role"] not in ("owner", "writer"), c["summary"].lower()))
+
+    def calendar_ensure(self, summary: str) -> dict[str, Any]:
+        """Find, or create, a secondary calendar of this name that we can write to.
+
+        Used for the todo mirror: its own calendar keeps generated events out of the
+        primary one and lets the user hide them all with one checkbox in Google Calendar.
+        """
+        want = summary.strip().lower()
+        for c in self.calendars():
+            if c["summary"].strip().lower() == want and c["access_role"] in ("owner", "writer"):
+                return {"id": c["id"], "summary": c["summary"], "created": False}
+        svc = self._svc("calendar", "v3")
+        cal = svc.calendars().insert(body={"summary": summary, "timeZone": _local_tz()}).execute()
+        # A brand new calendar is not necessarily shown in the UI; make sure it is.
+        with contextlib.suppress(Exception):
+            svc.calendarList().patch(calendarId=cal["id"], body={"selected": True}).execute()
+        return {"id": cal["id"], "summary": cal.get("summary") or summary, "created": True}
 
     def calendar_colors(self) -> dict[str, Any]:
         """Google's fixed palettes, id -> hex; events reference these by colorId."""

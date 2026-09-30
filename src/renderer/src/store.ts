@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ActivityConfig, ActivityContextFile, ActivityEvent, ActivitySignal, ActivityStatus, ActivitySummary, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocRevision, Document, FullDoc, GraphData, Memory, Message, ModelInfo, Settings, Project, RunConflict, SessionStatus, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap } from '@shared/types'
+import type { ActivityConfig, ActivityContextFile, ActivityEvent, ActivitySignal, ActivityStatus, ActivitySummary, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocRevision, Document, FullDoc, GraphData, Memory, Message, ModelInfo, Settings, Project, RunConflict, SessionStatus, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodoCalendarStatus, TodayDashboard, Recap } from '@shared/types'
 import { api, chatStream, setBase, type Scope } from './lib/api'
 import { finishStatus, mergeConversation, pickEvictions, reduceStatus, settleApprovals } from './sessionStatus'
 import { viewHidden } from './modules'
@@ -65,6 +65,7 @@ export interface State {
   tools: ToolInfo[]
   google: GoogleStatus | null
   tasksSync: TasksSyncStatus | null
+  todoCalendar: TodoCalendarStatus | null
   dashboard: TodayDashboard | null
   todos: Todo[]
   recap: Recap | null
@@ -201,6 +202,9 @@ export interface State {
   connectGoogle: () => Promise<void>
   disconnectGoogle: () => Promise<void>
   refreshTasksSync: () => Promise<void>
+  refreshTodoCalendar: () => Promise<void>
+  setTodoCalendar: (patch: { enabled?: boolean; calendarId?: string; keepCompleted?: boolean }) => Promise<void>
+  runTodoCalendar: () => Promise<void>
   setTasksSync: (patch: { enabled?: boolean; tasklist?: string; intervalMinutes?: number }) => Promise<void>
   runTasksSync: () => Promise<void>
   refreshTodos: (scope?: Scope, includeDone?: boolean) => Promise<void>
@@ -507,6 +511,7 @@ export const useStore = create<State>((set, get) => {
     tools: [],
     google: null,
     tasksSync: null,
+    todoCalendar: null,
     dashboard: null,
     todos: [],
     recap: null,
@@ -1100,12 +1105,37 @@ export const useStore = create<State>((set, get) => {
         set({ google: await api.google.status() })
         void api.tools().then((t) => set({ tools: t.tools })).catch(() => undefined)
         void get().refreshTasksSync()
+        void get().refreshTodoCalendar()
       } catch { /* ignore */ }
     },
     refreshTasksSync: async () => {
       try {
         set({ tasksSync: await api.google.tasksSync() })
       } catch { /* ignore */ }
+    },
+    refreshTodoCalendar: async () => {
+      try {
+        set({ todoCalendar: await api.google.todoCalendar() })
+      } catch { /* ignore */ }
+    },
+    setTodoCalendar: async (patch) => {
+      try {
+        set({ todoCalendar: await api.google.todoCalendarConfig(patch) })
+        // Turning it on mirrors in the background; show the result as soon as it lands.
+        if (patch.enabled) void get().runTodoCalendar()
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    runTodoCalendar: async () => {
+      set((s) => ({ todoCalendar: s.todoCalendar && { ...s.todoCalendar, syncing: true } }))
+      try {
+        set({ todoCalendar: await api.google.todoCalendarRun() })
+        await get().refreshTodos()
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+        void get().refreshTodoCalendar()
+      }
     },
     setTasksSync: async (patch) => {
       try {

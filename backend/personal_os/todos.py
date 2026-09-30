@@ -5,8 +5,13 @@ Sync bookkeeping lives here so every writer behaves the same:
   stamp at last sync; `synced_at` mirrors `updated_at` at last sync, so
   `updated_at > synced_at` means "locally edited since".
 - Deleting a synced todo leaves a tombstone so the sync can delete the remote task too.
-- `on_change` (set by the app) is fired after any user-visible mutation; the sync service
-  uses it to schedule a near-immediate sync. Sync's own writes pass notify=False.
+- `on_change` (set by the app) is fired after any user-visible mutation; the sync services
+  use it to schedule a near-immediate sync. Sync's own writes pass notify=False.
+
+The Google Calendar mirror (todocal.py) reuses the same shape one level over:
+`calendar_event_id`/`calendar_id` point at the mirrored event and `calendar_sig` records the
+todo fields as last mirrored, so a pass can tell what actually changed. Deleting a todo that
+had an event leaves an event tombstone so the mirror can delete the event too.
 """
 from __future__ import annotations
 
@@ -27,6 +32,8 @@ CREATE TABLE IF NOT EXISTS todos (
   external_id TEXT,
   calendar_event_id TEXT,
   calendar_link TEXT,
+  calendar_id TEXT,
+  calendar_sig TEXT,
   created_at REAL NOT NULL,
   updated_at REAL NOT NULL,
   completed_at REAL
@@ -35,6 +42,12 @@ CREATE INDEX IF NOT EXISTS idx_todos_open ON todos(done, due);
 
 CREATE TABLE IF NOT EXISTS todo_tombstones (
   external_id TEXT PRIMARY KEY,
+  deleted_at REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS todo_event_tombstones (
+  event_id TEXT PRIMARY KEY,
+  calendar_id TEXT,
   deleted_at REAL NOT NULL
 );
 """
@@ -48,7 +61,8 @@ class Todos:
             c.executescript(SCHEMA)
             # Columns arrived after the first release; CREATE TABLE IF NOT EXISTS won't add them.
             have = {r["name"] for r in c.execute("PRAGMA table_info(todos)").fetchall()}
-            for col, ddl in {"calendar_event_id": "TEXT", "calendar_link": "TEXT", "synced_at": "REAL", "remote_updated": "TEXT"}.items():
+            for col, ddl in {"calendar_event_id": "TEXT", "calendar_link": "TEXT", "synced_at": "REAL",
+                             "remote_updated": "TEXT", "calendar_id": "TEXT", "calendar_sig": "TEXT"}.items():
                 if col not in have:
                     c.execute(f"ALTER TABLE todos ADD COLUMN {col} {ddl}")
 
@@ -93,7 +107,7 @@ class Todos:
         return self.get(tid)  # type: ignore[return-value]
 
     def update(self, id: str, patch: dict[str, Any], notify: bool = True) -> dict[str, Any] | None:
-        fields = {k: v for k, v in patch.items() if k in {"title", "notes", "due", "priority", "done", "project_id", "calendar_event_id", "calendar_link"}}
+        fields = {k: v for k, v in patch.items() if k in {"title", "notes", "due", "priority", "done", "project_id", "calendar_event_id", "calendar_link", "calendar_id"}}
         if not fields:
             return self.get(id)
         if "done" in fields:
@@ -112,6 +126,9 @@ class Todos:
         with self.db.tx() as c:
             if tombstone and t and t.get("external_id"):
                 c.execute("INSERT OR REPLACE INTO todo_tombstones(external_id, deleted_at) VALUES(?,?)", (t["external_id"], now()))
+            if tombstone and t and t.get("calendar_event_id"):
+                c.execute("INSERT OR REPLACE INTO todo_event_tombstones(event_id, calendar_id, deleted_at) VALUES(?,?,?)",
+                          (t["calendar_event_id"], t.get("calendar_id"), now()))
             c.execute("DELETE FROM todos WHERE id=?", (id,))
         if notify:
             self._changed()
@@ -134,6 +151,21 @@ class Todos:
     def clear_tombstone(self, external_id: str) -> None:
         with self.db.tx() as c:
             c.execute("DELETE FROM todo_tombstones WHERE external_id=?", (external_id,))
+
+    # ---- calendar mirror support ----
+    def set_calendar_state(self, id: str, event_id: str | None, link: str | None, calendar_id: str | None, sig: str | None) -> None:
+        """Record where a todo stands against its mirrored calendar event; never bumps updated_at."""
+        with self.db.tx() as c:
+            c.execute("UPDATE todos SET calendar_event_id=?, calendar_link=?, calendar_id=?, calendar_sig=? WHERE id=?",
+                      (event_id, link, calendar_id, sig, id))
+
+    def event_tombstones(self) -> list[dict[str, Any]]:
+        with self.db.tx() as c:
+            return [row_to_dict(r) for r in c.execute("SELECT * FROM todo_event_tombstones").fetchall()]  # type: ignore[misc]
+
+    def clear_event_tombstone(self, event_id: str) -> None:
+        with self.db.tx() as c:
+            c.execute("DELETE FROM todo_event_tombstones WHERE event_id=?", (event_id,))
 
     def stats(self) -> dict[str, int]:
         with self.db.tx() as c:

@@ -38,6 +38,18 @@ export interface CalendarWeekProps {
  * The day-column grid, shared by the Calendar page and the calendar widget so the two render the same
  * thing. The column count is inline because `.cal-grid` hard-codes seven.
  */
+/** Drop the events that are only a todo's own all-day mirror (see backend todocal.py).
+ *
+ * Both grids already draw a due todo as its own chip, so leaving the mirrored event in would
+ * show every dated todo twice. A todo given a time keeps its block: that time is the point of
+ * dragging it onto an hour, and the chip and the block say different things.
+ */
+export function withoutTodoEvents(events: CalendarEvent[], todos: Todo[]): CalendarEvent[] {
+  const mirrored = new Set(todos.map((t) => t.calendar_event_id).filter((id): id is string => !!id))
+  if (mirrored.size === 0) return events
+  return events.filter((e) => !(e.all_day && e.id && mirrored.has(e.id)))
+}
+
 export default function CalendarWeek({ days, events, todos, canCreate = false, onOpen, onTodo, onTodoDrop, onCreate, onCreateFull, colorOf }: CalendarWeekProps): JSX.Element {
   const [creating, setCreating] = useState<{ day: string; hour: number } | null>(null)
   const [title, setTitle] = useState('')

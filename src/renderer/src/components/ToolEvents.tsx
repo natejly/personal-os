@@ -8,12 +8,14 @@ const ICONS: Record<string, JSX.Element> = {
   search_documents: <FileSearch size={13} />, read_document: <FileSearch size={13} />, list_documents: <FileSearch size={13} />,
   search_memory: <Brain size={13} />, save_memory: <Brain size={13} />,
   graph_search: <Share2 size={13} />, graph_traverse: <Share2 size={13} />, graph_add: <Share2 size={13} />,
-  run_python: <Terminal size={13} />, current_time: <Clock size={13} />
+  run_python: <Terminal size={13} />, current_time: <Clock size={13} />,
+  sandbox_exec: <Terminal size={13} />, sandbox_write_file: <Terminal size={13} />, sandbox_read_file: <Terminal size={13} />,
+  sandbox_list_files: <Terminal size={13} />, sandbox_put_document: <Terminal size={13} />, sandbox_reset: <Terminal size={13} />
 }
 
 function summary(t: ToolEvent): string {
   const a = t.arguments ?? {}
-  const first = a.query ?? a.url ?? a.entity ?? a.content ?? a.document_id ?? (a.code ? String(a.code).split('\n')[0] : '') ?? ''
+  const first = a.query ?? a.url ?? a.command ?? a.path ?? a.entity ?? a.content ?? a.document_id ?? (a.code ? String(a.code).split('\n')[0] : '') ?? ''
   const s = String(first ?? '')
   return s.length > 90 ? s.slice(0, 90) + '…' : s
 }

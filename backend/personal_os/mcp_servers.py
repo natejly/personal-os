@@ -49,6 +49,8 @@ RESERVED_TOOL_NAMES = frozenset({
     "google_tasks_list", "google_tasks_add", "google_tasks_complete",
     "google_drive_search", "google_drive_read",
     "board_list", "board_add_card", "board_move_card", "board_create",
+    "sandbox_exec", "sandbox_write_file", "sandbox_read_file", "sandbox_list_files",
+    "sandbox_put_document", "sandbox_reset",
 })
 
 SCHEMA = """

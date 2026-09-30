@@ -30,6 +30,7 @@ from .boards import Boards
 from .canvas import SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
 from .dashboards import Dashboards, generate_recap, generate_summary, generate_widget_code
 from .google import Google, GoogleNotConnected, json_safe
+from .microvm import Sandboxes
 from .notes import Notes
 from .runs import Run, RunBus
 from .todos import Todos
@@ -192,7 +193,8 @@ def _record_usage(ev: dict[str, Any]) -> None:
 
 if not any(getattr(f, "__name__", "") == "_record_usage" for f in llm._usage_listeners):
     llm.on_usage(_record_usage)
-toolbox = Toolbox(memories, graph, documents, settings, todos=todos, google=google, boards=boards)
+sandboxes = Sandboxes(settings)
+toolbox = Toolbox(memories, graph, documents, settings, todos=todos, google=google, boards=boards, sandboxes=sandboxes)
 
 
 def sid(project_id: str | None) -> str | None:
@@ -1048,6 +1050,7 @@ def search_documents(id: str, q: str) -> list[dict[str, Any]]:  # convenience fo
 async def _shutdown() -> None:
     await bus.shutdown()  # before the rmtree: a live run's sandboxed run_python writes in there
     shutil.rmtree(db.data_dir / "tmp", ignore_errors=True)
+    await asyncio.to_thread(sandboxes.shutdown)  # after the runs: a live sandbox_exec would just see its container vanish
 
 
 # ---------------- todos ----------------

@@ -88,12 +88,15 @@ export default function PopoutSurface({ windowId }: { windowId: string }): JSX.E
 
   // A pop-out has no canvas store, so it answers the window-scoped menu actions itself — otherwise ⌘W
   // would be dead here. Closing is what "return to canvas" means: main persists `state: 'normal'`.
+  // While pinned, only the pin toggle answers: the buttons still work, but no shortcut may close,
+  // minimize, or return a widget the user deliberately kept on top.
   useEffect(
     () =>
       window.os.onMenu((action) => {
+        if (action === 'canvas:pin') return setPinned(!pinned)
+        if (pinned) return
         if (action === 'close-window' || action === 'canvas:unpopout') window.os.closeSelf()
         else if (action === 'minimize-window') window.os.minimizeSelf()
-        else if (action === 'canvas:pin') setPinned(!pinned)
       }),
     [pinned, setPinned]
   )

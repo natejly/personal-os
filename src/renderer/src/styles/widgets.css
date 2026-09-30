@@ -296,6 +296,17 @@
 
 /* A widget is not a page: drop the 808px centring and the page gutters that leave a chat panel mostly
    margin, and lose the disclaimer line that costs a whole row of vertical space. */
-.widget .composer-wrap.compact { padding: 8px 10px 10px; max-width: none; }
-.widget .composer-wrap.compact .composer { border-radius: 12px; padding: 7px 7px 7px 11px; }
-.widget .messages-inner { max-width: none; padding: 12px 12px 8px; }
+.widget .composer-wrap.compact { padding: 5px 7px 7px; max-width: none; }
+.widget .composer-wrap.compact .composer { border-radius: 12px; padding: 6px 6px 6px 10px; }
+.widget .messages-inner { max-width: none; padding: 8px 9px 4px; }
+
+/* Vertical rhythm, tightened for a panel: at ~440px wide the page's 22px message gap and 26px avatar
+   gutter spend most of the window on whitespace, so a window shows two turns instead of four. */
+.widget .messages-inner .msg { gap: 8px; margin-bottom: 12px; }
+.widget .messages-inner .avatar { width: 20px; height: 20px; margin-top: 1px; }
+.widget .messages-inner .avatar svg { width: 11px; height: 11px; }
+.widget .messages-inner .msg.user .bubble { padding: 6px 10px; }
+.widget .messages-inner .msg-actions { margin-top: 2px; }
+.widget .messages-inner .markdown > :first-child { margin-top: 0; }
+.widget .messages-inner .markdown > :last-child { margin-bottom: 0; }
+.widget .chat-head { height: 26px; padding: 0 8px; }

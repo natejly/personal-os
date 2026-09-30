@@ -13,3 +13,4 @@ data/
 # build info
 *.tsbuildinfo
 graphify-out/
+__pycache__/

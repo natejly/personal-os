@@ -3,7 +3,8 @@
 Defense in depth, best effort for a single-user desktop app:
   * fresh temp working directory per run, deleted afterwards
   * `python -I` (isolated mode: no user site, no env vars like PYTHONPATH)
-  * wall-clock timeout, CPU + memory rlimits
+  * wall-clock timeout, plus CPU / process-count / file-size rlimits (and memory where the OS allows it:
+    macOS refuses RLIMIT_AS, so there the timeout is the only thing bounding a runaway allocation)
   * on macOS, wrapped in `sandbox-exec` with a profile that denies network and
     restricts writes to the work directory (when available)
 """
@@ -55,13 +56,30 @@ def _collect_images(work: str, files: list[str]) -> list[dict[str, Any]]:
     return out
 
 
+RLIMITS = (("RLIMIT_CPU", 20), ("RLIMIT_AS", 1_500_000_000), ("RLIMIT_DATA", 1_500_000_000),
+           ("RLIMIT_NPROC", 64), ("RLIMIT_FSIZE", 512_000_000), ("RLIMIT_CORE", 0))
+
+
 def _limits() -> None:
-    try:
-        resource.setrlimit(resource.RLIMIT_CPU, (20, 20))
-        resource.setrlimit(resource.RLIMIT_AS, (1_500_000_000, 1_500_000_000))
-        resource.setrlimit(resource.RLIMIT_NPROC, (64, 64))
-    except (ValueError, OSError):
-        pass
+    """Best-effort rlimits for one run, each applied on its own.
+
+    They used to share a try block, which quietly cost us every limit after the first unsupported one: macOS refuses
+    RLIMIT_AS with "current limit exceeds maximum limit", so RLIMIT_NPROC was never reached and a script could fork
+    freely. Address space still cannot be capped on macOS (RLIMIT_DATA is refused too) - there the wall-clock timeout
+    is what ends a runaway allocation - but both are still attempted because they do work on Linux.
+
+    RLIMIT_NPROC counts processes per *user*, not per script, so on a desktop already running far more than 64 the
+    effect is that the script cannot fork at all. That matches what run_python promises ("no subprocesses"), and it
+    matters because subprocess.run's timeout kills only the direct child: forks it left behind would outlive the run.
+    """
+    for name, soft in RLIMITS:
+        limit = getattr(resource, name, None)
+        if limit is None:
+            continue
+        try:
+            resource.setrlimit(limit, (soft, soft))
+        except (ValueError, OSError):
+            pass
 
 
 def run_python(code: str, timeout: int = 30, python: str | None = None) -> dict[str, Any]:

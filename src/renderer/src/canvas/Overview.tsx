@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { Canvas, CanvasWindow, Rect } from '@shared/types'
 import { useProject } from '../store'
 import { useCanvas } from './store'
+import { KIND_LABEL } from './WindowHost'
 
 /** Which window is being dragged between thumbnails. Not a shared `DragKind`: it never leaves here. */
 const WINDOW_MIME = 'application/x-personal-os-window'
@@ -68,7 +69,10 @@ function Thumb({ canvas }: { canvas: Canvas }): JSX.Element {
               e.dataTransfer.setData(WINDOW_MIME, w.id)
               e.dataTransfer.effectAllowed = 'move'
             }}
-          />
+          >
+            {/* The frame is chromeless now, so the proxy is where a window's title still reads. */}
+            <span className="overview-proxy-label">{w.title || KIND_LABEL[w.kind]}</span>
+          </div>
         ))}
       </div>
       <div className="overview-label">

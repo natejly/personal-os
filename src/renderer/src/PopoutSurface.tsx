@@ -120,6 +120,11 @@ export default function PopoutSurface({ windowId }: { windowId: string }): JSX.E
   const label = win?.title || def?.label || 'Personal OS'
   const Body = def?.Component
 
+  // The surface no longer draws a title, so the only place left for it is the OS window title.
+  useEffect(() => {
+    document.title = label
+  }, [label])
+
   const body = (): JSX.Element => {
     if (error) {
       // A 404 is the deleted window, and its bare detail adds nothing to the sentence above it.
@@ -143,17 +148,16 @@ export default function PopoutSurface({ windowId }: { windowId: string }): JSX.E
     return <Body window={win} focused={focused} live onConfig={onConfig} onTitle={onTitle} />
   }
 
+  // No title bar: the surface itself is the OS drag region and `.popout-body` is inset out of it, so
+  // the window still moves by anything within 8 px of an edge. The title lives in the OS window title.
   return (
     <div className={focused ? 'popout focused' : 'popout'}>
-      <div className="popout-bar">
-        <span className="popout-title" title={label}>{label}</span>
+      <div className="popout-actions">
         {def?.statusful && <StatusRing conversationId={win?.ref_id} />}
-        <div className="popout-actions">
-          <button className="icon-btn" title={pinned ? 'Stop keeping on top (⌃⌘P)' : 'Keep on top (⌃⌘P)'} onClick={() => setPinned(!pinned)}>
-            {pinned ? <PinOff size={14} /> : <Pin size={14} />}
-          </button>
-          <button className="icon-btn" title="Close (⌘W)" onClick={() => window.os.closeSelf()}><X size={14} /></button>
-        </div>
+        <button className="icon-btn" title={pinned ? 'Stop keeping on top (⌃⌘P)' : 'Keep on top (⌃⌘P)'} onClick={() => setPinned(!pinned)}>
+          {pinned ? <PinOff size={13} /> : <Pin size={13} />}
+        </button>
+        <button className="icon-btn" title="Close (⌘W)" onClick={() => window.os.closeSelf()}><X size={13} /></button>
       </div>
       <div className="popout-body">{body()}</div>
     </div>

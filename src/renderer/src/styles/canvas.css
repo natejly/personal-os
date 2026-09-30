@@ -79,6 +79,12 @@
   min-height: 0;
   overflow: hidden;
   touch-action: none;
+  /* The BrowserWindow is deliberately transparent (backgroundColor '#00000000' + vibrancy), and
+     html/body/.app all paint nothing, so every view has to paint its own background -- .chat and
+     .page both do. Without this the plane falls through to the vibrancy layer, and a window
+     (72% alpha) composites over the desktop instead of the app: raising a window on click changes
+     its backdrop root, the blur stops contributing, and it visibly goes transparent. */
+  background: var(--bg);
 }
 .canvas.interacting {
   --material-thick: var(--material-opaque);
@@ -206,10 +212,13 @@
   border-radius: var(--win-radius);
   background: var(--material-thick);
   backdrop-filter: var(--material-blur);
-  box-shadow: var(--shadow-window);
+  box-shadow: var(--win-glow), var(--shadow-window);
   pointer-events: auto;
   animation: win-open var(--dur-window) var(--spring);
-  transition: box-shadow var(--dur-hover) ease, opacity var(--dur-hover) ease;
+  transition: border-color var(--dur-hover) ease, box-shadow var(--dur-hover) ease, opacity var(--dur-hover) ease;
+  /* §8 status, carried on the border instead of a bar marker; the glyph stays in the grip. */
+  --win-signal: transparent;
+  --win-glow: 0 0 0 0 transparent;
 }
 .win::after {
   content: '';
@@ -221,13 +230,19 @@
   background: var(--win-highlight);
   pointer-events: none;
 }
-.win.focused { box-shadow: var(--shadow-focused); }
+/* The focus signal, now that the lights are gone: a firmer border and the deeper shadow. */
+.win.focused {
+  border-color: var(--border-strong);
+  box-shadow: var(--win-glow), var(--shadow-focused);
+}
 .win.dragging,
 .win.resizing {
   will-change: transform, width, height;
   transition: none;
 }
-.win:not(.dragging):not(.resizing) { transition: box-shadow var(--dur-hover) ease, transform var(--dur-snap) var(--spring); }
+.win:not(.dragging):not(.resizing) {
+  transition: border-color var(--dur-hover) ease, box-shadow var(--dur-hover) ease, transform var(--dur-snap) var(--spring);
+}
 .win.minimized { display: none; }
 .win.maximized { border-radius: var(--win-radius-sm); }
 .win.popped { opacity: 0.55; }
@@ -237,67 +252,96 @@
   box-shadow: var(--shadow-focused), 0 0 0 1px var(--accent);
 }
 
-.win-bar {
-  position: relative;
-  flex: 0 0 30px;
-  height: 30px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 8px;
-  border-bottom: 1px solid var(--border);
-  cursor: default;
-  user-select: none;
+/*
+ * Status on the border. `--win-signal` is set by whichever `.ring` the frame renders into its grip,
+ * so widgets.css stays the owner of the status state and this is only its colour. After `.focused` on
+ * purpose: a focused window that is generating still reads amber.
+ */
+.win:has(.ring.working) { --win-signal: var(--tl-yellow); }
+.win:has(.ring.done) { --win-signal: var(--tl-green); }
+.win:has(.ring.error) { --win-signal: var(--tl-red); }
+.win:has(.ring.needs-approval) { --win-signal: var(--accent); }
+.win:has(.ring) {
+  border-color: var(--win-signal);
+  --win-glow: 0 0 18px -9px var(--win-signal);
 }
 
-.win-lights { display: flex; align-items: center; gap: 8px; }
-.win-light {
-  width: 12px;
-  height: 12px;
-  padding: 0;
-  border-radius: 50%;
+/*
+ * The one pointer route for moving a window, and the anchor of its menu. Dragging the body is
+ * deliberately not a gesture: widget bodies are full of checkboxes and fields a stolen click ruins.
+ * ⌘-drag anywhere is the escape hatch, handled in WindowFrame.
+ */
+/* The move target: the whole top edge, inset past the two top corners so a corner grab still
+   resizes. Invisible -- the grip inside it is the only visible hint. */
+.win-move {
+  position: absolute;
+  top: 0;
+  left: 14px;
+  right: 14px;
+  height: 22px;
+  z-index: 4;
+  cursor: grab;
+}
+.win-move:active { cursor: grabbing; }
+/* The grip is now a child of the strip, so rebase it onto the strip's box. */
+.win-move .win-grip { top: 2px; left: 0; }
+
+.win-grip {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 4;
+  width: 18px;
+  height: 18px;
   display: grid;
   place-items: center;
-  background: var(--tl-off);
-  color: rgba(0, 0, 0, 0.6);
-  transition: background var(--dur-hover) ease;
+  border-radius: 6px;
+  color: var(--text-muted);
+  opacity: 0.32;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  transition: opacity var(--dur-hover) ease, background var(--dur-hover) ease;
 }
-.win.focused .win-light.close { background: var(--tl-red); }
-.win.focused .win-light.min { background: var(--tl-yellow); }
-.win.focused .win-light.max { background: var(--tl-green); }
-.win-light svg { opacity: 0; transition: opacity var(--dur-hover) ease; }
-.win-lights:hover .win-light svg { opacity: 1; }
+.win:hover .win-grip,
+.win.focused .win-grip,
+.win-grip:focus-visible { opacity: 1; }
+.win-grip:hover { background: var(--hover); }
+.win.dragging .win-grip { cursor: grabbing; }
+/* A status glyph takes the dots' place, so the signal is never colour alone (contract §8). */
+.win-grip:has(.ring) { opacity: 1; }
+.win-grip:has(.ring) .win-grip-dots { display: none; }
+.win-grip .ring-badge { display: none; }
+.win-grip-dots { display: grid; place-items: center; }
 
-.win-title {
-  position: absolute;
-  left: 68px;
-  right: 68px;
-  text-align: center;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
-  mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+/* ---------- window menu ---------- */
+
+.win-menu-backdrop { position: fixed; inset: 0; z-index: 200; }
+.win-menu {
+  position: fixed;
+  z-index: 201;
+  min-width: 196px;
+  padding: 4px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--win-radius-sm);
+  background: var(--material-thick);
+  backdrop-filter: var(--material-blur);
+  box-shadow: var(--shadow-focused);
+  animation: zone-in var(--dur-hover) var(--spring);
 }
-.win:not(.focused) .win-title { color: var(--text-muted); }
-.win-title input {
+.win-menu-item {
   width: 100%;
-  text-align: center;
-  font: inherit;
-  background: none;
-  border: 0;
-  outline: none;
-}
-
-.win-status {
-  margin-left: auto;
   display: flex;
   align-items: center;
-  min-width: 14px;
-  height: 14px;
+  gap: 16px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text);
+  text-align: left;
 }
+.win-menu-item:hover { background: var(--hover); }
+.win-menu-item.danger:hover { color: var(--danger); }
 
 .win-body {
   flex: 1;
@@ -320,15 +364,21 @@
   font-size: 12px;
 }
 
-.win-resize { position: absolute; z-index: 2; }
-.win-resize.n { top: -3px; left: 8px; right: 8px; height: 7px; cursor: ns-resize; }
-.win-resize.s { bottom: -3px; left: 8px; right: 8px; height: 7px; cursor: ns-resize; }
-.win-resize.e { right: -3px; top: 8px; bottom: 8px; width: 7px; cursor: ew-resize; }
-.win-resize.w { left: -3px; top: 8px; bottom: 8px; width: 7px; cursor: ew-resize; }
-.win-resize.ne { top: -3px; right: -3px; width: 12px; height: 12px; cursor: nesw-resize; }
-.win-resize.nw { top: -3px; left: -3px; width: 12px; height: 12px; cursor: nwse-resize; }
-.win-resize.se { bottom: -3px; right: -3px; width: 12px; height: 12px; cursor: nwse-resize; }
-.win-resize.sw { bottom: -3px; left: -3px; width: 12px; height: 12px; cursor: nesw-resize; }
+/*
+ * Corners are the primary affordance and get a 15 px target against the edges' 6 px; they also sit
+ * above both the edges and the grip, so a grab inside a corner box can never resolve to something
+ * else — the grip is inset past the corner so only the tip of its first dot is shadowed.
+ */
+.win-resize { position: absolute; z-index: 2; touch-action: none; }
+.win-resize.n { top: -3px; left: 15px; right: 15px; height: 6px; cursor: ns-resize; }
+.win-resize.s { bottom: -3px; left: 15px; right: 15px; height: 6px; cursor: ns-resize; }
+.win-resize.e { right: -3px; top: 15px; bottom: 15px; width: 6px; cursor: ew-resize; }
+.win-resize.w { left: -3px; top: 15px; bottom: 15px; width: 6px; cursor: ew-resize; }
+.win-resize.corner { z-index: 5; width: 15px; height: 15px; }
+.win-resize.ne { top: -3px; right: -3px; cursor: nesw-resize; }
+.win-resize.nw { top: -3px; left: -3px; cursor: nwse-resize; }
+.win-resize.se { bottom: -3px; right: -3px; cursor: nwse-resize; }
+.win-resize.sw { bottom: -3px; left: -3px; cursor: nesw-resize; }
 
 /* Placeholder widget body, replaced by widgets' registry in Wave 3. */
 .win-stub {
@@ -513,7 +563,28 @@
   background: var(--material-opaque);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
 }
-.overview-proxy-win:hover { border-color: var(--accent); }
+.overview-proxy-win:hover { border-color: var(--accent); z-index: 1; }
+/* The frame no longer shows a title, so the proxy is one of the two places it still reads (§8). */
+.overview-proxy-label {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  max-width: 150px;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--material-opaque);
+  font-size: 10px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-hover) ease;
+}
+.overview-proxy-win:hover .overview-proxy-label { opacity: 1; }
 .overview-label {
   display: flex;
   align-items: center;
@@ -526,39 +597,60 @@
 
 /* ---------- pop-out surface ---------- */
 
+/*
+ * No title bar here either. A frameless BrowserWindow has no OS drag region, so the whole surface is
+ * one, and the content is inset by `--popout-frame` and marked no-drag: an invisible frame you can
+ * grab anywhere near the window's edge.
+ */
 .popout {
-  display: flex;
-  flex-direction: column;
+  --popout-frame: 8px;
+  --win-signal: transparent;
+  position: relative;
   height: 100%;
   background: var(--material-opaque);
   color: var(--text);
-}
-.popout.focused .popout-bar { border-bottom-color: var(--border-strong); }
-.popout-bar {
-  flex: 0 0 30px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 0 10px 0 84px;
-  border-bottom: 1px solid var(--border);
   -webkit-app-region: drag;
 }
-.popout-title {
-  flex: 1;
-  min-width: 0;
-  font-size: 13px;
-  font-weight: 600;
-  white-space: nowrap;
+.popout-body {
+  position: absolute;
+  inset: var(--popout-frame);
   overflow: hidden;
-  text-overflow: ellipsis;
-}
-.popout-actions {
-  display: flex;
-  align-items: center;
-  gap: 4px;
+  contain: layout paint style;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  transition: border-color var(--dur-hover) ease, box-shadow var(--dur-hover) ease;
   -webkit-app-region: no-drag;
 }
-.popout-body { flex: 1; min-height: 0; overflow: hidden; contain: layout paint style; }
+.popout:has(.ring.working) { --win-signal: var(--tl-yellow); }
+.popout:has(.ring.done) { --win-signal: var(--tl-green); }
+.popout:has(.ring.error) { --win-signal: var(--tl-red); }
+.popout:has(.ring.needs-approval) { --win-signal: var(--accent); }
+.popout:has(.ring) .popout-body {
+  border-color: var(--win-signal);
+  box-shadow: 0 0 18px -9px var(--win-signal);
+}
+
+/* Nothing but the status marker is visible until the pointer is over the window. */
+.popout-actions {
+  position: absolute;
+  top: calc(var(--popout-frame) + 3px);
+  right: calc(var(--popout-frame) + 3px);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  -webkit-app-region: no-drag;
+}
+.popout-actions .icon-btn {
+  width: 22px;
+  height: 22px;
+  opacity: 0;
+  background: var(--material-thick);
+  backdrop-filter: var(--material-blur);
+  transition: opacity var(--dur-hover) ease;
+}
+.popout:hover .popout-actions .icon-btn,
+.popout-actions .icon-btn:focus-visible { opacity: 1; }
 .popout-error {
   display: grid;
   place-content: center;
@@ -582,7 +674,11 @@
 
 @media (prefers-reduced-motion: reduce) {
   .win,
-  .win-light,
+  .win-grip,
+  .win-menu,
+  .popout-body,
+  .popout-actions .icon-btn,
+  .overview-proxy-label,
   .dock-tile,
   .overview,
   .overview-proxy,

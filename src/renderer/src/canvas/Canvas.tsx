@@ -41,6 +41,32 @@ const IDLE_MS = 180
 const clamp = (n: number, lo: number, hi: number): number => Math.min(hi, Math.max(lo, n))
 const hits = (a: Rect, b: Rect): boolean => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
 
+/** Can this element itself consume the wheel delta, i.e. it scrolls and is not already at the end? */
+const scrolls = (el: HTMLElement, dx: number, dy: number): boolean => {
+  const cs = getComputedStyle(el)
+  if (dy && /auto|scroll|overlay/.test(cs.overflowY) && el.scrollHeight > el.clientHeight + 1) {
+    if (dy < 0 ? el.scrollTop > 0 : el.scrollTop + el.clientHeight < el.scrollHeight - 1) return true
+  }
+  if (dx && /auto|scroll|overlay/.test(cs.overflowX) && el.scrollWidth > el.clientWidth + 1) {
+    if (dx < 0 ? el.scrollLeft > 0 : el.scrollLeft + el.clientWidth < el.scrollWidth - 1) return true
+  }
+  return false
+}
+
+/**
+ * What a two-finger scroll lands on: 'scroll' when something between the target and its window frame
+ * can consume it (the wheel is the widget's, left to scroll natively), 'win' when it is over a window
+ * with nothing left to scroll, null over bare canvas. Walks the DOM because widget bodies are
+ * arbitrary; anything scrollable inside `.win` counts.
+ */
+const wheelHit = (e: WheelEvent): 'scroll' | 'win' | null => {
+  for (let el = e.target instanceof HTMLElement ? e.target : null; el; el = el.parentElement) {
+    if (el.classList.contains('win')) return 'win'
+    if (scrolls(el, e.deltaX, e.deltaY)) return 'scroll'
+  }
+  return null
+}
+
 /**
  * Which windows may keep polling, mount iframes and run a simulation. Pure so it is testable: this
  * is the whole reason twenty windows stay cheap, and the cap goes to the topmost ones because those
@@ -220,19 +246,32 @@ export default function Canvas(): JSX.Element {
   useEffect(() => {
     const node = el.current
     if (!node) return
+    // A momentum tail keeps delivering wheel events after a widget's content hits its end; without
+    // the latch those spill into a canvas pan mid-fling. Over-window events inside the window stay
+    // swallowed until the gesture pauses.
+    let latchUntil = 0
     const onWheel = (e: WheelEvent): void => {
       const id = useCanvas.getState().activeCanvasId
       if (!id) return
-      e.preventDefault()
       const v = viewport()
       if (e.ctrlKey || e.metaKey) {
+        e.preventDefault()
         const p = viewportPoint(e)
         const before = canvasFromScreen(p, v)
         const zoom = clamp(v.zoom * Math.exp(-e.deltaY / 240), MIN_ZOOM, MAX_ZOOM)
         nudge(id, { zoom, panX: p.x - before.x * zoom, panY: p.y - before.y * zoom })
-      } else {
-        nudge(id, { zoom: v.zoom, panX: v.panX - e.deltaX, panY: v.panY - e.deltaY })
+        return
       }
+      // A two-finger scroll over a window belongs to that window's content while it has room to
+      // move; the canvas only pans from bare canvas or a window with nothing left to scroll.
+      const hit = wheelHit(e)
+      if (hit === 'scroll') {
+        latchUntil = e.timeStamp + 250
+        return
+      }
+      if (hit === 'win' && e.timeStamp < latchUntil) return
+      e.preventDefault()
+      nudge(id, { zoom: v.zoom, panX: v.panX - e.deltaX, panY: v.panY - e.deltaY })
     }
     node.addEventListener('wheel', onWheel, { passive: false })
     return () => node.removeEventListener('wheel', onWheel)

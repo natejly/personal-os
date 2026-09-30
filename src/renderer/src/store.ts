@@ -259,6 +259,34 @@ const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean): ChatSessio
 }
 
 export const useStore = create<State>((set, get) => {
+  /**
+   * App's init effect runs twice under React.StrictMode, so both of these are latched. A second
+   * `window.os.onMenu` subscription would run every menu action twice, which silently kills the
+   * toggles: ⌘B/⌘I/⌘⇧C flip and flip straight back, and ⌘N opens two chats. The canvas store
+   * latches its own menu/bus listeners the same way.
+   */
+  let menuWired = false
+  let inited = false
+
+  const wireMenu = (): void => {
+    if (menuWired) return
+    menuWired = true
+    window.os.onMenu((action) => {
+      const s = get()
+      if (action === 'new-chat') s.newChat(s.view === 'project' ? s.projectViewId : selectActive(s)?.project_id ?? null)
+      else if (action === 'toggle-mode') s.toggleMode()
+      else if (action === 'settings') s.setSettingsOpen(true)
+      else if (action === 'toggle-sidebar') s.toggleSidebar()
+      else if (action === 'toggle-context') s.toggleContext()
+      else if (action === 'view:graph') s.openMemory('graph')
+      else if (action.startsWith('view:')) s.setView(action.slice(5) as View)
+      else if (action === 'upload') {
+        s.setView('documents')
+        setTimeout(() => document.getElementById('doc-upload-input')?.click(), 100)
+      }
+    })
+  }
+
   const patchSession = (convId: string, fn: (s: ChatSession) => ChatSession): void =>
     set((st) => {
       const cur = st.sessions[convId]
@@ -415,6 +443,11 @@ export const useStore = create<State>((set, get) => {
     documents: [],
 
     init: async () => {
+      // Before the backend check and before the guard: a dead backend must still leave the menu
+      // shortcuts wired, and StrictMode's second mount must not add a second listener.
+      wireMenu()
+      if (inited) return
+      inited = true
       const status = await window.os.backendStatus()
       if (!status.url) return set({ ready: true, backendError: status.error ?? 'Backend not running' })
       setBase(status.url)
@@ -433,20 +466,6 @@ export const useStore = create<State>((set, get) => {
       void get().refreshDashboard()
       void get().refreshTodos()
       void get().refreshRecap()
-      window.os.onMenu((action) => {
-        const s = get()
-        if (action === 'new-chat') s.newChat(s.view === 'project' ? s.projectViewId : selectActive(s)?.project_id ?? null)
-        else if (action === 'toggle-mode') s.toggleMode()
-        else if (action === 'settings') s.setSettingsOpen(true)
-        else if (action === 'toggle-sidebar') s.toggleSidebar()
-        else if (action === 'toggle-context') s.toggleContext()
-        else if (action === 'view:graph') s.openMemory('graph')
-        else if (action.startsWith('view:')) s.setView(action.slice(5) as View)
-        else if (action === 'upload') {
-          s.setView('documents')
-          setTimeout(() => document.getElementById('doc-upload-input')?.click(), 100)
-        }
-      })
     },
 
     loadModels: async () => {

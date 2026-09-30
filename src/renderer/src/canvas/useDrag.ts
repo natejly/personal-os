@@ -41,8 +41,11 @@ export interface DragOverlay {
 const MIN: Size = { w: 200, h: 140 }
 const IDLE: DragOverlay = { windowId: null, mode: null, guides: [], gaps: [], zone: null, preview: null }
 
-export const rectStyle = (r: Rect): { transform: string; width: string; height: string } => ({
-  transform: `translate3d(${r.x}px, ${r.y}px, 0)`,
+// The standalone `translate` property, not `transform`: the win-open/close animations keyframe
+// `transform`, and an animation on `transform` would replace an inline translate for its whole
+// duration — every new window played its opening at the plane origin, then slid home.
+export const rectStyle = (r: Rect): { translate: string; width: string; height: string } => ({
+  translate: `${r.x}px ${r.y}px`,
   width: `${r.w}px`,
   height: `${r.h}px`
 })
@@ -50,7 +53,7 @@ export const rectStyle = (r: Rect): { transform: string; width: string; height: 
 /** The one way a window's geometry reaches the DOM, so the drag and React agree on the convention. */
 export const applyRect = (el: HTMLElement, r: Rect): void => {
   const s = rectStyle(r)
-  el.style.transform = s.transform
+  el.style.translate = s.translate
   el.style.width = s.width
   el.style.height = s.height
 }

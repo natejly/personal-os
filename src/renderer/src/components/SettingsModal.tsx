@@ -78,7 +78,7 @@ export default function SettingsModal(): JSX.Element {
           <h3>Tools</h3>
           <p className="muted"><b>on</b> runs automatically, <b>ask</b> pauses the reply for your approval, <b>off</b> hides the tool. Anything that acts outside the app (email, calendar, Google Tasks) asks by default. Projects and chats can override.</p>
           <ToolGlobalToggles value={draft.tools ?? {}} onChange={(tools) => patch({ tools })} />
-          <label><span>Max tool rounds per reply</span><input type="number" min={0} max={30} value={draft.maxToolRounds} onChange={(e) => patch({ maxToolRounds: Number(e.target.value) })} /></label>
+          <label><span>Max tool rounds per reply</span><input type="number" min={1} max={60} value={draft.maxToolRounds} onChange={(e) => patch({ maxToolRounds: Number(e.target.value) })} /></label>
           <label><span>Brave Search API key <small className="muted">(optional; without a key web search uses DuckDuckGo)</small></span><input type="password" value={draft.braveApiKey} onChange={(e) => patch({ braveApiKey: e.target.value })} placeholder="BSA…" spellCheck={false} /></label>
           <label><span>Tavily API key <small className="muted">(optional alternative)</small></span><input type="password" value={draft.tavilyApiKey} onChange={(e) => patch({ tavilyApiKey: e.target.value })} placeholder="tvly-…" spellCheck={false} /></label>
         </section>

@@ -127,8 +127,11 @@ export default function Sidebar(): JSX.Element {
 
       <div className="section-row">
         <span className="section-toggle static">Recents</span>
-        <label className="search mini"><Search size={12} /><input placeholder="Search" value={query} onChange={(e) => setQuery(e.target.value)} /></label>
       </div>
+      <label className="search">
+        <Search size={14} />
+        <input placeholder="Search" value={query} onChange={(e) => setQuery(e.target.value)} />
+      </label>
       <div className="convo-list">
         {groups.length === 0 && <p className="empty-hint">{query ? 'No matches.' : 'No personal chats yet.'}</p>}
         {groups.map((g) => (

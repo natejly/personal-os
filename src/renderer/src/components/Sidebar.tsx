@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { MessageSquarePlus, Search, Settings, Trash2, PanelLeftClose, Brain, FileText, NotebookPen, Plus, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid, Mail, MonitorDot, BookOpen, Globe } from 'lucide-react'
+import { MessageSquarePlus, Search, Settings, Sparkles, Trash2, PanelLeftClose, Brain, FileText, NotebookPen, Plus, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid, Mail, MonitorDot, BookOpen, Globe } from 'lucide-react'
 import GrainLogo from './GrainLogo'
 import { useStore, type View } from '../store'
 import { ActivityIndicator } from './ActivityView'
@@ -65,6 +65,8 @@ export default function Sidebar(): JSX.Element {
   const selectChat = useStore((s) => s.selectChat)
   const deleteChat = useStore((s) => s.deleteChat)
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
+  const pageAgentOpen = useStore((s) => s.pageAgentOpen)
+  const togglePageAgent = useStore((s) => s.togglePageAgent)
   const toggleSidebar = useStore((s) => s.toggleSidebar)
   const setView = useStore((s) => s.setView)
   const openProject = useStore((s) => s.openProject)
@@ -221,6 +223,9 @@ export default function Sidebar(): JSX.Element {
 
       <div className="sidebar-bottom">
         <ActivityIndicator />
+        <button className={`settings-btn ${pageAgentOpen ? 'on' : ''}`} aria-pressed={pageAgentOpen} onClick={togglePageAgent}>
+          <Sparkles size={16} /><span>Ask about this page</span><kbd>⌘I</kbd>
+        </button>
         <button className="settings-btn" onClick={() => setSettingsOpen(true)}><Settings size={16} /><span>Settings</span><kbd>⌘,</kbd></button>
       </div>
     </aside>

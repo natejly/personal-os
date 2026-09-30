@@ -19,8 +19,30 @@ export interface ContextUsed {
   chunks: { chunk_id: string; document_id: string; name: string; idx: number; text: string }[]
   /** The activity-monitor block, verbatim; null when the monitor is off or the chat opted out. */
   activity: string | null
+  /** What the user was looking at when they asked, when the turn came from the page agent (⌘I). */
+  page: PageContext | null
   system_prompt: string
   tokens_estimate: number
+}
+
+/**
+ * A snapshot of the screen the user is on, published by the active view and sent with a page-agent
+ * turn. It is a description of what is visible, not a fetch: `refs` name the rows so the model can
+ * read or change them with the ordinary tools.
+ */
+export interface PageContext {
+  /** The view that published it — 'docs', 'calendar', ... Matches the renderer's View union. */
+  view: string
+  /** One line for the panel's chip and the system prompt's heading, e.g. `Doc “Weekly notes”`. */
+  label: string
+  /** What is on screen, as markdown the model reads: the open doc's text, the visible events, ... */
+  detail?: string
+  /** The user's current selection, when the view has one. */
+  selection?: string
+  /** Rows the page is about, so the model can act on them by id rather than searching. */
+  refs?: { kind: string; id: string; name?: string }[]
+  /** Starter prompts offered in an empty panel. Three at most; the view knows its own verbs. */
+  hints?: string[]
 }
 
 export type ToolMode = 'on' | 'ask' | 'off'

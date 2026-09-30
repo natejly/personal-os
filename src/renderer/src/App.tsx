@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useStore } from './store'
+import { watchSelection } from './lib/pageContext'
 import Sidebar from './components/Sidebar'
 import ChatView from './components/ChatView'
 import MemoryPanel from './components/MemoryPanel'
@@ -13,6 +14,7 @@ import BoardsView from './components/BoardsView'
 import CalendarView from './components/CalendarView'
 import MailView from './components/MailView'
 import DashboardsView from './components/DashboardsView'
+import PageAgentPanel from './components/PageAgentPanel'
 import SettingsModal from './components/SettingsModal'
 import ProjectModal from './components/ProjectModal'
 import Canvas from './canvas/Canvas'
@@ -42,6 +44,7 @@ export default function App(): JSX.Element {
   const view = useStore((s) => s.view)
   const theme = useStore((s) => s.settings.theme)
   const inCanvas = useStore((s) => s.view === 'canvas')
+  const pageAgentOpen = useStore((s) => s.pageAgentOpen)
 
   useEffect(() => {
     void init()
@@ -49,6 +52,8 @@ export default function App(): JSX.Element {
   useEffect(() => {
     document.documentElement.dataset.theme = theme
   }, [theme])
+  // What the user has highlighted rides along with the next ⌘I question, whatever view they are in.
+  useEffect(() => watchSelection(), [])
   // Spaces are listed in the sidebar, so the canvas store loads with the app, not on first entry.
   // `load()` is also what registers the canvas store's menu, bus and pop-out listeners; each of their
   // canvas-only actions is guarded on the canvas view.
@@ -91,7 +96,7 @@ export default function App(): JSX.Element {
   }
 
   return (
-    <div className={`app ${sidebarOpen ? '' : 'sidebar-collapsed'}`}>
+    <div className={`app ${sidebarOpen ? '' : 'sidebar-collapsed'} ${pageAgentOpen ? 'page-agent-open' : ''}`}>
       <Sidebar />
       {inCanvas ? (
         <Canvas />
@@ -111,6 +116,7 @@ export default function App(): JSX.Element {
           {view === 'project' && <ProjectView />}
         </>
       )}
+      {pageAgentOpen && <PageAgentPanel />}
       {settingsOpen && <SettingsModal />}
       {projectModal && <ProjectModal />}
       <Toasts />

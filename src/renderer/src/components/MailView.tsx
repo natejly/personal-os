@@ -4,6 +4,7 @@ import { useStore } from '../store'
 import { api } from '../lib/api'
 import SmartTextarea from './SmartTextarea'
 import type { GmailFullMessage, GmailLabel, GmailMessage } from '@shared/types'
+import { lines, usePageContext } from '../lib/pageContext'
 
 const fromName = (s: string | null): string => (s ?? '').replace(/<.*>/, '').replace(/"/g, '').trim() || (s ?? '')
 const fmtDate = (s: string | null): string => {
@@ -189,6 +190,16 @@ export default function MailView(): JSX.Element {
   }
 
   const isStarred = (m: GmailMessage): boolean => m.labels.includes('STARRED')
+
+  usePageContext(() => ({
+    view: 'mail',
+    label: open ? `Email “${open.subject || '(no subject)'}”` : `Mail · ${folder}`,
+    detail: open
+      ? `The user has this message open — Gmail id \`${open.id}\`, thread \`${open.thread_id}\`.\nFrom: ${open.from}\nSubject: ${open.subject}\nDate: ${open.date}\n\n${(full?.body ?? open.snippet).slice(0, 4000)}`
+      : `The ${folder} list is on screen${q ? ` filtered by “${q}”` : ''}:\n${lines(messages, (m) => `${m.unread ? '[unread] ' : ''}${m.from} — ${m.subject} (\`${m.id}\`)`, 25)}`,
+    refs: open ? [{ kind: 'email', id: open.id, name: open.subject ?? '' }] : messages.slice(0, 25).map((m) => ({ kind: 'email', id: m.id, name: m.subject ?? '' })),
+    hints: open ? ['Draft a reply', 'What is being asked of me here?'] : ['What needs a reply today?', 'Summarise this inbox']
+  }), [open, full, messages, folder, q])
 
   return (
     <main className="page mail-page">

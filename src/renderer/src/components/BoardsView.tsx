@@ -6,6 +6,7 @@ import type { Board, BoardCard, BoardColumn } from '@shared/types'
 import ProjectChip from './ProjectChip'
 import SendToSpace from './SendToSpace'
 import { clearHandoff, peekHandoff } from '../lib/handoff'
+import { lines, usePageContext } from '../lib/pageContext'
 
 const PRIO = ['', 'P1', 'P2', 'P3']
 
@@ -149,6 +150,29 @@ export default function BoardsView(): JSX.Element {
     for (const c of board?.cards ?? []) (m[c.column_id] ??= []).push(c)
     return m
   }, [board])
+
+  usePageContext(() => (board
+    ? {
+        view: 'boards',
+        label: `Board “${board.name}”`,
+        detail: [
+          `Board \`${board.id}\` is open.`,
+          ...board.columns.map((col) => {
+            const cards = byCol[col.id] ?? []
+            return `### ${col.name} (${cards.length})\n${cards.length ? lines(cards, (c) => `${c.title} (\`${c.id}\`)${c.due ? `, due ${c.due}` : ''}${c.labels.length ? `, labels: ${c.labels.join(', ')}` : ''}`, 20) : '- (empty)'}`
+          }),
+          open ? `The user has this card open: “${open.title}” (\`${open.id}\`)\n${open.description}` : ''
+        ].filter(Boolean).join('\n\n'),
+        refs: [{ kind: 'board', id: board.id, name: board.name }, ...(open ? [{ kind: 'card', id: open.id, name: open.title }] : [])],
+        hints: ['What is stuck in this board?', 'Add cards for the next steps', 'Summarise progress for a standup']
+      }
+    : {
+        view: 'boards',
+        label: 'Boards',
+        detail: boards.length ? `Boards:\n${lines(boards, (b) => `${b.name} (\`${b.id}\`, ${b.card_count ?? 0} cards)`)}` : 'No boards yet.',
+        refs: boards.slice(0, 40).map((b) => ({ kind: 'board', id: b.id, name: b.name })),
+        hints: ['Make a board for this project']
+      }), [board, boards, byCol, open])
 
   return (
     <main className="page board-page">

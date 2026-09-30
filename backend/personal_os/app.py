@@ -403,9 +403,20 @@ def delete_message(id: str, mid: str) -> dict[str, bool]:
     return {"ok": True}
 
 
+class PageContextIn(BaseModel):
+    """What the user had on screen when they asked, sent by the page agent (⌘I). See context.page_block."""
+    view: str = ""
+    label: str = ""
+    detail: str | None = None
+    selection: str | None = None
+    refs: list[dict[str, Any]] = []
+    hints: list[str] = []
+
+
 class ChatIn(BaseModel):
     content: str | None = None  # None = regenerate from existing history
     model: str | None = None
+    page_context: PageContextIn | None = None
 
 
 RENDER_HINT = """## Rendering
@@ -524,7 +535,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         memories=memories, graph=graph, documents=documents,
         project=project, project_id=conv["project_id"], query=user_text,
         settings=cfg, conv_settings=conv["settings"], global_system_prompt=cfg["systemPrompt"],
-        activity=monitor,
+        activity=monitor, page=body.page_context.model_dump() if body.page_context else None,
     )
     tracer.end(cspan, {"memories": len(used["memories"]), "entities": len(used["nodes"]), "excerpts": len(used["chunks"]),
                        "history_messages": len(history)})

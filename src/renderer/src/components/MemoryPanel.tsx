@@ -5,6 +5,7 @@ import MemoryView from './MemoryView'
 import GraphView from './GraphView'
 import ScopeSelect from './ScopeSelect'
 import SendToSpace from './SendToSpace'
+import { lines, usePageContext } from '../lib/pageContext'
 
 const MODES: { key: MemoryMode; label: string; icon: JSX.Element; title: string }[] = [
   { key: 'split', label: 'Split', icon: <Columns2 size={13} />, title: 'Memories and graph side by side' },
@@ -56,6 +57,17 @@ export default function MemoryPanel({ projectId, embedded = false }: { projectId
       )}
     </div>
   )
+
+  usePageContext(() => (embedded ? undefined : {
+    view: 'memory',
+    label: 'Memory',
+    detail: [
+      memories.length ? `What you remember about the user:\n${lines(memories, (m) => `${m.content} (\`${m.id}\`)`, 30)}` : 'No memories stored.',
+      graph.nodes.length ? `Knowledge graph — ${graph.nodes.length} entities, ${graph.edges.length} relations:\n${lines(graph.nodes, (n) => `${n.label} (${n.type})`, 30)}` : ''
+    ].filter(Boolean).join('\n\n'),
+    refs: memories.slice(0, 30).map((m) => ({ kind: 'memory', id: m.id, name: m.content.slice(0, 60) })),
+    hints: ['What do you know about me?', 'Clean up the duplicates', 'What is missing here?']
+  }), [memories, graph, embedded])
 
   if (embedded) {
     return (

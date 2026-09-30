@@ -7,6 +7,7 @@ import CalendarWeek, { addDays, fmtTime, startOfWeek } from './CalendarWeek'
 import EventEditor, { eventColor, primeCalendarMeta, type EventDraft } from './EventEditor'
 import { scheduleTodo } from './TodoItem'
 import type { CalendarEvent } from '@shared/types'
+import { lines, usePageContext } from '../lib/pageContext'
 
 export default function CalendarView(): JSX.Element {
   const sidebarOpen = useStore((s) => s.sidebarOpen)
@@ -69,6 +70,22 @@ export default function CalendarView(): JSX.Element {
       toast((e as Error).message, 'error')
     }
   }
+
+  const fmtEvent = (e: CalendarEvent): string =>
+    `${e.all_day ? e.start : new Date(e.start).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })} — ${e.summary || '(no title)'} (\`${e.id}\`)${e.location ? ` at ${e.location}` : ''}`
+  const span = `${days[0].toDateString()} – ${days[6].toDateString()}`
+  usePageContext(() => ({
+    view: 'calendar',
+    label: open ? `Event “${open.summary || 'untitled'}”` : `Calendar · ${span}`,
+    detail: [
+      `The week of ${span} is on screen.`,
+      open ? `The user has this event open: ${fmtEvent(open)}${open.description ? `\n\n${open.description}` : ''}` : '',
+      events.length ? `Events that week:\n${lines(events, fmtEvent)}` : 'No events that week.',
+      todos.some((t) => !t.done && t.due) ? `Todos with dates:\n${lines(todos.filter((t) => !t.done && t.due), (t) => `${t.due} — ${t.title} (\`${t.id}\`)`)}` : ''
+    ].filter(Boolean).join('\n\n'),
+    refs: (open ? [{ kind: 'event', id: open.id, name: open.summary }] : events.slice(0, 40).map((e) => ({ kind: 'event', id: e.id, name: e.summary }))),
+    hints: open ? ['Move this an hour later', 'Draft a note to the guests'] : ['Where is my free time this week?', 'Schedule my overdue todos into the gaps']
+  }), [events, open, todos, span])
 
   return (
     <main className="page cal-page">

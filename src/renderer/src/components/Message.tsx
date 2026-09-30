@@ -1,59 +1,11 @@
-import { memo, useState } from 'react'
-import ReactMarkdown, { type Components } from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import rehypeHighlight from 'rehype-highlight'
-import { Copy, Check, AlertCircle, User, Sparkles, Brain, Share2, FileText, Activity } from 'lucide-react'
+import { memo } from 'react'
+import { AlertCircle, User, Sparkles, Brain, Share2, FileText, Activity } from 'lucide-react'
 import type { Message } from '@shared/types'
 import { useStore } from '../store'
 import ToolEvents from './ToolEvents'
-import ChartBlock from './ChartBlock'
-import MermaidBlock from './MermaidBlock'
+import MarkdownPreview, { CopyButton } from './MarkdownPreview'
+export { SAFE_MD } from './MarkdownPreview'
 import { traceSummary, fmtMs } from './TraceView'
-
-function CopyButton({ text }: { text: string }): JSX.Element {
-  const [ok, setOk] = useState(false)
-  return (
-    <button className="icon-btn ghost" title="Copy" onClick={() => { void navigator.clipboard.writeText(text); setOk(true); setTimeout(() => setOk(false), 1200) }}>
-      {ok ? <Check size={13} /> : <Copy size={13} />}
-    </button>
-  )
-}
-
-/**
- * Model and fetched content may contain links and images. A link must never navigate the app's own webContents
- * (it carries the preload), and a remote <img> is an exfiltration channel, so it is downgraded to a link.
- */
-function ExternalLink({ href, children, ...rest }: React.AnchorHTMLAttributes<HTMLAnchorElement>): JSX.Element {
-  const ok = !!href && /^https?:\/\//i.test(href)
-  return (
-    <a {...rest} href={ok ? href : undefined} title={href} rel="noreferrer noopener"
-      onClick={(e) => { e.preventDefault(); if (ok) window.open(href, '_blank', 'noopener') }}>{children}</a>
-  )
-}
-
-function SafeImage({ src, alt }: React.ImgHTMLAttributes<HTMLImageElement>): JSX.Element {
-  const s = typeof src === 'string' ? src : ''
-  if (s.startsWith('data:image/')) return <img src={s} alt={alt ?? ''} />
-  return <ExternalLink href={s}>{alt || s || 'image'}</ExternalLink>
-}
-
-/** Renderers every markdown surface that shows model, fetched or user content must use. */
-export const SAFE_MD: Components = { a: ExternalLink, img: SafeImage }
-
-function Pre({ streaming, ...props }: React.HTMLAttributes<HTMLPreElement> & { streaming?: boolean }): JSX.Element {
-  const child = props.children as React.ReactElement<{ className?: string; children?: string }> | undefined
-  const lang = child?.props?.className?.replace('hljs language-', '').replace('language-', '') ?? ''
-  const code = String(child?.props?.children ?? '')
-  // Blocks the model can use to render rich content instead of code (see RENDER_HINT in the backend).
-  if (lang === 'chart') return <ChartBlock source={code} streaming={!!streaming} />
-  if (lang === 'mermaid') return <MermaidBlock source={code} streaming={!!streaming} />
-  return (
-    <div className="code-block">
-      <div className="code-head"><span>{lang || 'text'}</span><CopyButton text={code} /></div>
-      <pre {...props} />
-    </div>
-  )
-}
 
 // The store is read imperatively inside the handlers: any subscription here defeats the memo, and a
 // streamed token would re-render every message in every mounted transcript.
@@ -72,7 +24,7 @@ const MessageView = memo(function MessageView({ message, streaming }: { message:
           <div className="markdown">
             {message.tool_events && message.tool_events.length > 0 && <ToolEvents events={message.tool_events} conversationId={message.conversation_id} />}
             {message.content ? (
-              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={{ ...SAFE_MD, pre: (p) => <Pre {...p} streaming={streaming} /> }}>{message.content}</ReactMarkdown>
+              <MarkdownPreview source={message.content} streaming={streaming} />
             ) : streaming && !message.tool_events?.some((t) => t.pending) ? (
               <span className="thinking"><span /><span /><span /></span>
             ) : null}

@@ -1071,3 +1071,10 @@ textarea.instructions:focus { border-color: var(--accent); }
 .mail-review h4 { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; font-size: 12px; color: var(--accent); }
 .mail-review ul { margin: 0 0 10px; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
 .mail-review .doc-text { padding: 10px 12px; background: var(--bg-input); border-radius: 8px; max-height: 220px; overflow: auto; margin-bottom: 10px; }
+
+/* Nav badge for assistant doc edits awaiting review (Docs). */
+.nav-item .count.pending {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}

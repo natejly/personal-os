@@ -455,6 +455,56 @@ export interface WindowLayout { id: string; x?: number; y?: number; w?: number; 
 
 export interface Note { id: string; project_id: string | null; body: string; color: string; created_at: number; updated_at: number }
 
+/**
+ * A doc: long-form markdown the user writes in the Docs editor. Distinct from `Document` (a file they
+ * uploaded, for retrieval) and from `Note` (canvas mode's sticky note).
+ */
+export interface Doc {
+  id: string
+  project_id: string | null
+  title: string
+  folder: string
+  starred: number
+  created_at: number
+  updated_at: number
+  words: number
+  /** List rows carry a preview and a pending count; a fetched doc carries the body and the pending revisions. */
+  preview?: string
+  size?: number
+  content?: string
+  pending?: number | DocRevision[]
+}
+
+/** A doc with its body loaded — what GET /docs/{id} returns. */
+export interface FullDoc extends Doc {
+  content: string
+  pending: DocRevision[]
+}
+
+export type DocRevisionStatus = 'applied' | 'pending' | 'rejected'
+
+/** One entry in a doc's history. An assistant edit stays `pending` until the user accepts it. */
+export interface DocRevision {
+  id: string
+  doc_id: string
+  before: string
+  after: string
+  title_before: string | null
+  title_after: string | null
+  summary: string
+  author: 'user' | 'assistant'
+  tool: string | null
+  status: DocRevisionStatus
+  created_at: number
+  resolved_at: number | null
+  stat: { added: number; removed: number }
+  /** Pending only: the doc moved since this was proposed, so it is reviewed against the current body. */
+  stale?: boolean
+  stat_vs_current?: { added: number; removed: number } | null
+  /** GET /docs/revisions/{id} only: a unified diff, for copying out. */
+  patch?: string
+}
+
 export type DragKind = 'conversation' | 'todo' | 'document' | 'memory' | 'board-card' | 'project' | 'widget' | 'note' | 'file' | 'nav'
 
 export interface DragPayload {

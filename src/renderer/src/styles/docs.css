@@ -1,0 +1,289 @@
+/*
+ * The Docs editor: doc tree, tab strip, editor/preview panes, and the diff cards.
+ * Tokens come from styles.css, so both themes follow without a second palette here.
+ */
+
+.docs-page { display: flex; flex-direction: column; min-height: 0; }
+.docs-body {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+}
+.docs-body:has(.docs-history) { grid-template-columns: 240px minmax(0, 1fr) 380px; }
+/* Two editor panes plus the history panel is three columns too many: stack the panes instead of
+   squeezing prose into ~30 characters a line. */
+.docs-body:has(.docs-history) .doc-panes.split {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+}
+.docs-body:has(.docs-history) .doc-panes.split .docs-render {
+  border-left: 0;
+  border-top: 1px solid var(--border);
+}
+
+/* ---- doc tree ---- */
+.docs-side {
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  padding: 8px;
+  min-height: 0;
+}
+.doc-tree > .search.mini { width: 100%; margin-bottom: 8px; }
+.doc-tree section { margin-bottom: 4px; }
+.doc-folder {
+  display: flex; align-items: center; gap: 4px;
+  width: 100%; padding: 4px 6px;
+  background: none; border: 0; cursor: pointer;
+  color: var(--text-faint); font: inherit; font-size: 11px;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.doc-folder .rot90 { transform: rotate(90deg); }
+.doc-folder .count { margin-left: auto; }
+
+.doc-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 6px; border-radius: 7px; cursor: pointer;
+  color: var(--text-muted);
+}
+.doc-row:hover { background: var(--hover); color: var(--text); }
+.doc-row.active { background: var(--active); color: var(--text); }
+.doc-row-icon { flex: none; opacity: 0.6; }
+.doc-row-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 1px; }
+.doc-row-title {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.doc-row-meta {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 10.5px; color: var(--text-faint);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.doc-row .icon-btn.xs { opacity: 0; flex: none; }
+.doc-row:hover .icon-btn.xs, .doc-row .icon-btn.xs.starred { opacity: 1; }
+.doc-row .icon-btn.starred { color: var(--warn); }
+
+/* An assistant edit waiting on this doc. */
+.doc-pending {
+  display: inline-flex; align-items: center; gap: 2px;
+  padding: 0 4px; border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent); font-size: 9.5px; font-weight: 600;
+}
+
+/* ---- main pane ---- */
+.docs-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.docs-empty {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; padding: 40px; text-align: center; color: var(--text-faint);
+}
+.docs-empty h2 { margin: 4px 0 0; color: var(--text); }
+.docs-empty p { max-width: 46ch; margin: 0; }
+.docs-empty .primary-btn { margin-top: 10px; }
+
+.doc-tabs {
+  display: flex; gap: 2px; padding: 4px 6px 0;
+  border-bottom: 1px solid var(--border); overflow-x: auto;
+}
+.doc-tab {
+  display: flex; align-items: center; gap: 5px;
+  padding: 5px 8px; border: 0; border-radius: 7px 7px 0 0;
+  background: none; color: var(--text-faint); cursor: pointer;
+  font: inherit; font-size: 12px; white-space: nowrap;
+}
+.doc-tab:hover { background: var(--hover); color: var(--text); }
+.doc-tab.active { background: var(--bg-elev); color: var(--text); }
+.doc-tab .tab-x { display: inline-flex; opacity: 0.5; border-radius: 4px; }
+.doc-tab .tab-x:hover { opacity: 1; background: var(--hover); }
+
+.doc-toolbar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 6px 10px; border-bottom: 1px solid var(--border);
+}
+.doc-title-input {
+  flex: 0 1 auto; min-width: 8ch; max-width: 46ch;
+  padding: 3px 6px; border: 1px solid transparent; border-radius: 6px;
+  background: none; color: var(--text);
+  font: inherit; font-size: 14px; font-weight: 600;
+}
+.doc-title-input:hover { border-color: var(--border); }
+.doc-title-input:focus { border-color: var(--border-strong); background: var(--bg-input); outline: none; }
+.doc-save-state { color: var(--text-faint); font-size: 11px; }
+
+/* `.seg` and `.icon-btn.on` come from styles.css — this view just uses them. */
+.dot-badge {
+  position: absolute; top: -2px; right: -2px;
+  min-width: 13px; padding: 0 3px; border-radius: 7px;
+  background: var(--accent); color: #fff;
+  font-size: 9px; line-height: 13px; text-align: center;
+}
+.doc-toolbar .icon-btn { position: relative; }
+
+/* ---- panes ---- */
+.doc-panes { flex: 1 1 0; min-height: 220px; display: grid; overflow: hidden; }
+.doc-panes.edit, .doc-panes.preview { grid-template-columns: minmax(0, 1fr); }
+.doc-panes.split { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.doc-panes.split .docs-render { border-left: 1px solid var(--border); }
+.docs-render { overflow-y: auto; padding: 18px 22px; min-height: 0; }
+.docs-render > .muted { color: var(--text-faint); }
+
+/* ---- editor: textarea over a highlighted mirror ---- */
+.md-editor {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-height: 0; overflow: hidden;
+
+  /* The two layers must agree exactly or the highlight slides off the text. */
+  --ed-font: var(--mono);
+  --ed-size: 13px;
+  --ed-line: 1.65;
+  --ed-pad: 14px;
+}
+.md-gutter {
+  grid-row: 1; grid-column: 1;
+  overflow: hidden; padding: var(--ed-pad) 8px var(--ed-pad) 12px;
+  border-right: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elev) 50%, transparent);
+  color: var(--text-faint);
+  font-family: var(--ed-font); font-size: var(--ed-size); line-height: var(--ed-line);
+  text-align: right; user-select: none;
+}
+.md-gutter .cur { color: var(--text); }
+.md-surface { grid-row: 1; grid-column: 2; position: relative; min-height: 0; overflow: hidden; }
+
+.md-mirror, .md-input {
+  position: absolute; inset: 0;
+  margin: 0; padding: var(--ed-pad);
+  border: 0; overflow: auto;
+  font-family: var(--ed-font); font-size: var(--ed-size); line-height: var(--ed-line);
+  white-space: pre-wrap; overflow-wrap: break-word; tab-size: 2;
+}
+.md-editor.nowrap .md-mirror, .md-editor.nowrap .md-input { white-space: pre; overflow-wrap: normal; }
+.md-mirror { pointer-events: none; color: var(--text); }
+.md-input {
+  /* Transparent text over the mirror; the caret is painted back with `caret-color`. */
+  background: transparent; color: transparent; caret-color: var(--text);
+  resize: none; outline: none;
+}
+.md-input::selection { background: color-mix(in srgb, var(--accent) 34%, transparent); }
+.md-input::placeholder { color: var(--text-faint); }
+
+.md-status {
+  grid-row: 2; grid-column: 1 / -1;
+  display: flex; gap: 12px; align-items: center;
+  padding: 4px 12px; border-top: 1px solid var(--border);
+  color: var(--text-faint); font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+.md-hints { margin-left: auto; opacity: 0.75; }
+
+/* markdown tokens in the mirror */
+.tk-head { color: var(--accent); font-weight: 600; }
+.tk-bullet, .tk-punct { color: var(--accent); }
+.tk-quote { color: var(--text-muted); font-style: italic; }
+.tk-code, .tk-fence { color: #7fb8a8; }
+.tk-math { color: #c39ae0; }
+.tk-link { color: #74a8e8; }
+.tk-strong { font-weight: 700; }
+.tk-em { font-style: italic; }
+.tk-strike { text-decoration: line-through; opacity: 0.7; }
+.tk-table { color: var(--text-muted); }
+
+/* ---- review + history ---- */
+/* The review queue never grows past a third of the pane: the document has to stay visible, since
+   the whole point is judging an edit against what is already written. */
+.doc-review {
+  flex: 0 1 auto;
+  max-height: 34vh;
+  overflow-y: auto;
+  border-bottom: 1px solid var(--border);
+  padding: 10px 12px;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+}
+.doc-review .diff-body { max-height: none; }
+.doc-review h3 { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; font-size: 12px; color: var(--accent); }
+
+.docs-history {
+  border-left: 1px solid var(--border);
+  overflow-y: auto; min-height: 0; padding: 8px;
+}
+.docs-history > header { display: flex; align-items: center; padding: 2px 4px 8px; }
+.docs-history h3 { margin: 0; font-size: 13px; flex: 1; }
+.docs-history .pad { padding: 0 4px 8px; }
+
+/* ---- diff card ---- */
+.diff-card {
+  border: 1px solid var(--border); border-radius: 9px;
+  background: var(--bg-elev); margin-bottom: 10px; overflow: hidden;
+}
+.diff-card.pending { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+.diff-card > header, .diff-card > footer {
+  display: flex; align-items: center; gap: 7px;
+  padding: 6px 8px; font-size: 11px;
+}
+.diff-card > header { border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+.diff-card > footer { border-top: 1px solid var(--border); }
+.diff-card .spacer { flex: 1; }
+.diff-who { display: inline-flex; align-items: center; gap: 3px; font-weight: 600; }
+.diff-who.assistant { color: var(--accent); }
+.diff-who.user { color: var(--text-muted); }
+.diff-summary {
+  flex: 1 1 8ch; min-width: 0; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.diff-stat { display: inline-flex; gap: 5px; font-variant-numeric: tabular-nums; }
+.diff-stat .plus { color: var(--ok); }
+.diff-stat .minus { color: var(--danger); }
+.diff-stale {
+  display: flex; align-items: flex-start; gap: 5px;
+  margin: 0; padding: 6px 9px;
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+  color: var(--text); font-size: 11px;
+}
+.diff-retitle { margin: 0; padding: 5px 9px; font-size: 11px; color: var(--text-muted); border-bottom: 1px solid var(--border); }
+
+.diff-body {
+  max-height: 46vh; overflow: auto;
+  font-family: var(--mono); font-size: 11.5px; line-height: 1.55;
+}
+.diff-body .pad { padding: 8px; }
+.diff-hunk + .diff-hunk { border-top: 1px dashed var(--border); }
+.diff-hunk-head { padding: 2px 8px; color: var(--text-faint); background: var(--hover); font-size: 10.5px; }
+
+.diff-row { display: grid; grid-template-columns: 3.2em 3.2em 1.1em minmax(0, 1fr); }
+.diff-row.add { background: color-mix(in srgb, var(--ok) 13%, transparent); }
+.diff-row.del { background: color-mix(in srgb, var(--danger) 13%, transparent); }
+.diff-no {
+  padding: 0 5px; text-align: right;
+  color: var(--text-faint); user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+.diff-sign { text-align: center; color: var(--text-faint); user-select: none; }
+.diff-text { padding-right: 8px; white-space: pre-wrap; overflow-wrap: break-word; }
+
+.diff-split-row { display: grid; grid-template-columns: 3.2em minmax(0, 1fr) 3.2em minmax(0, 1fr); }
+.diff-split-row .diff-text.add { background: color-mix(in srgb, var(--ok) 13%, transparent); }
+.diff-split-row .diff-text.del { background: color-mix(in srgb, var(--danger) 13%, transparent); }
+.diff-split-row .diff-text.void { background: var(--hover); }
+.diff-split-row .diff-text:nth-of-type(1) { border-right: 1px solid var(--border); }
+
+/* the words that actually moved inside a reworded line */
+.diff-text mark {
+  padding: 0 1px; border-radius: 3px;
+  background: none; color: inherit; font-weight: 600;
+}
+.diff-text mark.w-add { background: color-mix(in srgb, var(--ok) 38%, transparent); }
+.diff-text mark.w-del { background: color-mix(in srgb, var(--danger) 34%, transparent); }
+
+/* KaTeX inherits the app's text colour rather than its own near-black default. */
+.markdown .katex { color: var(--text); font-size: 1.04em; }
+.markdown .katex-display { overflow-x: auto; overflow-y: hidden; padding: 2px 0; }
+
+@media (max-width: 1100px) {
+  .docs-body, .docs-body:has(.docs-history) { grid-template-columns: 200px minmax(0, 1fr); }
+  .docs-history { display: none; }
+  .doc-panes.split { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
+  .doc-panes.split .docs-render { border-left: 0; border-top: 1px solid var(--border); }
+}

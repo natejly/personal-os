@@ -25,7 +25,8 @@ their own instructions, knowledge files, memories and graph.
 
 - **Provider-agnostic chat.** Streaming replies from any model LiteLLM routes to,
   one key. Per-chat model picker. Markdown, code copy, regenerate, stop.
-- **Tools with permissions.** The assistant can search your documents, search
+- **Tools with permissions.** The assistant can search your documents, read and
+  revise your docs, search
   and save memory, traverse and extend the knowledge graph, search the web and
   read pages, run Python in a sandbox, manage todos and kanban boards, and (once
   connected) read your Google Calendar, triage Gmail, draft or send email, and
@@ -47,6 +48,12 @@ their own instructions, knowledge files, memories and graph.
     into chats.
 - **Documents.** Upload `.txt/.md/.pdf/.docx` and code files. Chunked,
   full-text indexed, best excerpts pulled into replies.
+- **Docs.** Writing of your own, in an editor rather than an upload box:
+  markdown and LaTeX, a line-numbered editor beside a live preview, and full
+  revision history. The assistant can read and revise a doc — but its edits are
+  *proposed*, never written straight in. Each one arrives as a diff you accept
+  or reject, so you can point a model at prose you care about. See
+  [docs/docs-editor.md](docs/docs-editor.md).
 - **Context management.** Per-chat toggles for memory, graph, documents,
   auto-learn and tools; an inspector showing exactly what was injected into
   each reply; a live preview for a draft message.
@@ -258,11 +265,12 @@ src/renderer/       React UI (store.ts holds all state; lib/api.ts is the client
 src/shared/         Types shared between processes
 backend/personal_os app.py routes · repos.py storage · context.py · learn.py
                     tools.py · sandbox.py · google.py · todos.py · boards.py
-                    dashboards.py · usage.py · trace.py · llm.py
+                    docs.py · dashboards.py · usage.py · trace.py · llm.py
 scripts/dev.sh      LiteLLM + backend + Electron
 scripts/litellm.sh  LiteLLM proxy alone
 litellm.yaml        Model routing (Fireworks by default)
 docs/research.md    Feature research and roadmap
+docs/docs-editor.md The Docs editor: revisions, diffs and the doc_* tools
 ```
 
 ## Roadmap

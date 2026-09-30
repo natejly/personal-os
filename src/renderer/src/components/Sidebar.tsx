@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { MessageSquarePlus, Search, Settings, Trash2, PanelLeftClose, Sparkles, Brain, FileText, Plus, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid, Mail } from 'lucide-react'
+import { MessageSquarePlus, Search, Settings, Trash2, PanelLeftClose, Sparkles, Brain, FileText, NotebookPen, Plus, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid, Mail } from 'lucide-react'
 import { useStore, type View } from '../store'
 import ChatPulse from './ChatPulse'
 import { viewHidden } from '../modules'
@@ -31,7 +31,8 @@ const NAV: { view: View; label: string; icon: JSX.Element; kind?: WidgetKind }[]
   { view: 'boards', label: 'Boards', icon: <KanbanSquare size={15} /> },
   { view: 'dashboards', label: 'Dashboards', icon: <LayoutDashboard size={15} /> },
   { view: 'memory', label: 'Memory', icon: <Brain size={15} />, kind: 'memory' },
-  { view: 'documents', label: 'Documents', icon: <FileText size={15} />, kind: 'documents' }
+  { view: 'documents', label: 'Documents', icon: <FileText size={15} />, kind: 'documents' },
+  { view: 'docs', label: 'Docs', icon: <NotebookPen size={15} /> }
 ]
 
 export default function Sidebar(): JSX.Element {
@@ -42,6 +43,8 @@ export default function Sidebar(): JSX.Element {
   const projectViewId = useStore((s) => s.projectViewId)
   const personalStats = useStore((s) => s.personalStats)
   const settings = useStore((s) => s.settings)
+  const docCount = useStore((s) => s.docs.length)
+  const docsPending = useStore((s) => s.docsPending)
   const mode = useStore((s) => s.mode)
   // One selector per action. Sidebar is mounted in both modes, so a bare useStore() here is what made
   // App's whole subtree commit once per streamed token.
@@ -87,6 +90,7 @@ export default function Sidebar(): JSX.Element {
   const libCount = (v: View): number | null => {
     if (v === 'home' || v === 'calendar' || v === 'mail' || v === 'boards' || v === 'dashboards') return null
     if (v === 'todos') return todoStats?.open ?? null
+    if (v === 'docs') return docCount
     const total = (key: 'memories' | 'nodes' | 'documents'): number =>
       (personalStats?.[key] ?? 0) + projects.reduce((n, p) => n + (p.stats?.[key] ?? 0), 0)
     // Memory is one panel now: memories and graph entities counted together.
@@ -109,7 +113,11 @@ export default function Sidebar(): JSX.Element {
         {NAV.filter((n) => n.view === 'home' || !viewHidden(settings, n.view)).map((n) => (
           <button key={n.view} className={`nav-item ${view === n.view ? 'active' : ''}`} onClick={() => setView(n.view)}
             {...(n.kind ? dragProps({ kind: 'nav', id: n.kind, label: n.label }) : {})}>
-            {n.icon}<span>{n.label}</span>{libCount(n.view) !== null && <span className="count">{libCount(n.view)}</span>}
+            {n.icon}<span>{n.label}</span>
+            {n.view === 'docs' && docsPending > 0 && (
+              <span className="count pending" title={`${docsPending} assistant edit${docsPending === 1 ? '' : 's'} awaiting review`}>{docsPending}</span>
+            )}
+            {libCount(n.view) !== null && <span className="count">{libCount(n.view)}</span>}
           </button>
         ))}
       </nav>

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Mail as MailIcon, PanelLeftOpen, RefreshCw, Search, Star, Archive, MailOpen, Mail, ExternalLink, MessageSquare, Paperclip } from 'lucide-react'
+import { Mail as MailIcon, PanelLeftOpen, RefreshCw, Search, Star, Archive, MailOpen, Mail, ExternalLink, MessageSquare, Paperclip, SquarePen, Reply, Sparkles, Send } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
+import SmartTextarea from './SmartTextarea'
 import type { GmailFullMessage, GmailLabel, GmailMessage } from '@shared/types'
 
 const fromName = (s: string | null): string => (s ?? '').replace(/<.*>/, '').replace(/"/g, '').trim() || (s ?? '')
@@ -18,6 +19,19 @@ const fmtDate = (s: string | null): string => {
 const labelQ = (name: string): string => `label:${name.replace(/\s+/g, '-')}`
 
 type ReadFilter = 'all' | 'unread'
+
+interface Compose {
+  to: string
+  subject: string
+  body: string
+  replyTo: GmailMessage | null
+  /** Body of the message being replied to; context for the AI review and ghost text. */
+  replyBody: string
+}
+interface Review {
+  feedback: string[]
+  revised: string
+}
 const RANGES = [
   { value: '', label: 'Any time' },
   { value: '1d', label: 'Past day' },
@@ -43,6 +57,9 @@ export default function MailView(): JSX.Element {
   const [q, setQ] = useState('')
   const [open, setOpen] = useState<GmailMessage | null>(null)
   const [full, setFull] = useState<GmailFullMessage | null>(null)
+  const [compose, setCompose] = useState<Compose | null>(null)
+  const [review, setReview] = useState<Review | null>(null)
+  const [busy, setBusy] = useState<'send' | 'draft' | 'review' | null>(null)
   const seq = useRef(0)
 
   const query = useMemo(() => {
@@ -109,6 +126,62 @@ export default function MailView(): JSX.Element {
     if (m.unread) void modify(m, { mark_read: true })
   }
 
+  const startCompose = (): void => {
+    setReview(null)
+    setCompose({ to: '', subject: '', body: '', replyTo: null, replyBody: '' })
+  }
+  const startReply = (m: GmailMessage): void => {
+    const addr = m.from?.match(/<(.*)>/)?.[1] ?? m.from ?? ''
+    const subject = /^re:/i.test(m.subject ?? '') ? (m.subject ?? '') : `Re: ${m.subject ?? ''}`
+    const orig = full?.id === m.id ? full.body : ''
+    const quote = orig
+      ? `\n\nOn ${m.date ? new Date(m.date).toLocaleString() : ''}, ${fromName(m.from)} wrote:\n${orig.split('\n').slice(0, 40).map((l) => `> ${l}`).join('\n')}`
+      : ''
+    setReview(null)
+    setOpen(null)
+    setCompose({ to: addr, subject, body: quote, replyTo: m, replyBody: orig || m.snippet })
+  }
+  const composeValid = compose !== null && /\S+@\S+/.test(compose.to) && (compose.subject.trim() !== '' || compose.body.trim() !== '')
+  const doSend = async (): Promise<void> => {
+    if (!compose) return
+    setBusy('send')
+    try {
+      await api.google.gmailSend({ to: compose.to, subject: compose.subject, body: compose.body, reply_to_message_id: compose.replyTo?.id ?? null })
+      toast('Email sent.')
+      setCompose(null)
+      setReview(null)
+    } catch (e) {
+      toast((e as Error).message, 'error')
+    } finally {
+      setBusy(null)
+    }
+  }
+  const doDraft = async (): Promise<void> => {
+    if (!compose) return
+    setBusy('draft')
+    try {
+      await api.google.gmailDraft({ to: compose.to, subject: compose.subject, body: compose.body, reply_to_message_id: compose.replyTo?.id ?? null })
+      toast('Draft saved in Gmail.')
+      setCompose(null)
+      setReview(null)
+    } catch (e) {
+      toast((e as Error).message, 'error')
+    } finally {
+      setBusy(null)
+    }
+  }
+  const doReview = async (): Promise<void> => {
+    if (!compose) return
+    setBusy('review')
+    try {
+      setReview(await api.assist.mailReview({ to: compose.to, subject: compose.subject, body: compose.body, reply_context: compose.replyBody }))
+    } catch (e) {
+      toast((e as Error).message, 'error')
+    } finally {
+      setBusy(null)
+    }
+  }
+
   const askAssistant = (m: GmailMessage): void => {
     setOpen(null)
     newChat(null)
@@ -123,6 +196,7 @@ export default function MailView(): JSX.Element {
         {!sidebarOpen && <button className="icon-btn no-drag" title="Show sidebar (⌘B)" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
         <h2><MailIcon size={16} /> Mail {google?.email && <span className="muted">· {google.email}</span>}</h2>
         <div className="no-drag header-right">
+          <button className="ghost-btn" disabled={!google?.connected} onClick={startCompose}><SquarePen size={14} /> Compose</button>
           <label className="search">
             <Search size={14} />
             <input placeholder="Search mail (from:, subject:, …)" value={search} onChange={(e) => setSearch(e.target.value)} />
@@ -205,6 +279,7 @@ export default function MailView(): JSX.Element {
               {full ? <pre className="doc-text">{full.body || '(no text content)'}</pre> : <p className="muted">Loading…</p>}
             </section>
             <footer>
+              <button className="ghost-btn" onClick={() => startReply(open)}><Reply size={14} /> Reply</button>
               <button className="ghost-btn" onClick={() => void modify(open, { star: !isStarred(open) })}>
                 <Star size={14} fill={isStarred(open) ? 'currentColor' : 'none'} /> {isStarred(open) ? 'Unstar' : 'Star'}
               </button>
@@ -212,6 +287,56 @@ export default function MailView(): JSX.Element {
               <button className="ghost-btn" onClick={() => { void modify(open, { mark_read: false }); setOpen(null) }}><Mail size={14} /> Mark unread</button>
               <a className="ghost-btn" href={`https://mail.google.com/mail/u/0/#all/${open.thread_id}`} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Gmail</a>
               <button className="primary-btn" onClick={() => askAssistant(open)}><MessageSquare size={14} /> Ask assistant</button>
+            </footer>
+          </div>
+        </div>
+      )}
+
+      {compose && (
+        // No backdrop-click close: a half-written email should only leave via Discard, draft or send.
+        <div className="modal-backdrop">
+          <div className="modal wide mail-compose" onMouseDown={(e) => e.stopPropagation()}>
+            <header>
+              <h3>{compose.replyTo ? `Reply: ${compose.replyTo.subject || '(no subject)'}` : 'New message'}</h3>
+            </header>
+            <section>
+              <input placeholder="To" value={compose.to} onChange={(e) => setCompose((c) => c && { ...c, to: e.target.value })} autoFocus={!compose.replyTo} />
+              <input placeholder="Subject" value={compose.subject} onChange={(e) => setCompose((c) => c && { ...c, subject: e.target.value })} />
+              <SmartTextarea
+                kind="mail"
+                value={compose.body}
+                onChange={(body) => setCompose((c) => c && { ...c, body })}
+                context={`Email subject: ${compose.subject}${compose.replyBody ? `\nIt replies to:\n${compose.replyBody.slice(0, 1500)}` : ''}`}
+                placeholder="Write your email — pause for a suggestion, Tab to accept"
+                sharedStyle={{ minHeight: 220 }}
+                autoFocus={!!compose.replyTo}
+              />
+              {review && (
+                <div className="mail-review">
+                  <h4><Sparkles size={13} /> AI review</h4>
+                  <ul>{review.feedback.map((f, i) => <li key={i}>{f}</li>)}</ul>
+                  {review.revised && (
+                    <>
+                      <pre className="doc-text">{review.revised}</pre>
+                      <button className="ghost-btn" onClick={() => { setCompose((c) => c && { ...c, body: review.revised }); setReview(null) }}>
+                        Use revised draft
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </section>
+            <footer>
+              <button className="ghost-btn" onClick={() => { setCompose(null); setReview(null) }}>Discard</button>
+              <button className="ghost-btn" disabled={busy !== null || !compose.body.trim()} onClick={() => void doReview()}>
+                <Sparkles size={14} /> {busy === 'review' ? 'Reviewing…' : 'AI review'}
+              </button>
+              <button className="ghost-btn" disabled={busy !== null || !composeValid} onClick={() => void doDraft()}>
+                {busy === 'draft' ? 'Saving…' : 'Save draft'}
+              </button>
+              <button className="primary-btn" disabled={busy !== null || !composeValid} onClick={() => void doSend()}>
+                <Send size={14} /> {busy === 'send' ? 'Sending…' : 'Send'}
+              </button>
             </footer>
           </div>
         </div>

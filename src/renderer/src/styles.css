@@ -1043,3 +1043,26 @@ textarea.instructions:focus { border-color: var(--accent); }
 .mail-row .star.on { color: var(--accent); }
 .mail-meta { margin: 0 0 12px; font-size: 13px; line-height: 1.6; }
 .modal footer a.ghost-btn { text-decoration: none; }
+
+/* ---------- Smart textarea (AI ghost-text completion) ---------- */
+.smart-ta { position: relative; flex: 1; min-height: 0; display: flex; width: 100%; }
+.smart-ta textarea { flex: 1; width: 100%; min-height: 0; resize: none; outline: 0; font: inherit; line-height: 1.5; background: transparent; }
+/* The mirror paints the ghost: invisible copy of the text, then the faint continuation. */
+.smart-ta-mirror { position: absolute; inset: 0; overflow: hidden; pointer-events: none; white-space: pre-wrap; word-break: break-word; font: inherit; line-height: 1.5; z-index: 2; }
+.smart-ta-mirror .t { visibility: hidden; }
+.smart-ta-mirror .g { opacity: 0.45; color: inherit; }
+.smart-ta textarea { position: relative; z-index: 1; }
+.smart-ta.field textarea { background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 10px; padding: 12px; }
+.smart-ta.field textarea:focus { border-color: var(--accent); }
+.smart-ta.field .smart-ta-mirror { border: 1px solid transparent; border-radius: 10px; padding: 12px; }
+.smart-ta.bare textarea { border: 0; color: inherit; }
+.smart-ta.bare .smart-ta-mirror { color: inherit; }
+.smart-ta-hint { position: absolute; right: 10px; bottom: 8px; z-index: 3; font-size: 10px; color: var(--text-faint); background: var(--bg-elev); border: 1px solid var(--border); border-radius: 5px; padding: 1px 6px; pointer-events: none; }
+
+/* ---------- Mail compose ---------- */
+.mail-compose section { display: flex; flex-direction: column; gap: 10px; }
+.mail-compose .smart-ta { flex: 0 1 auto; }
+.mail-review { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: var(--bg-elev); font-size: 13px; }
+.mail-review h4 { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; font-size: 12px; color: var(--accent); }
+.mail-review ul { margin: 0 0 10px; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+.mail-review .doc-text { padding: 10px 12px; background: var(--bg-input); border-radius: 8px; max-height: 220px; overflow: auto; margin-bottom: 10px; }

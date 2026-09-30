@@ -120,7 +120,17 @@ export const api = {
     gmailGet: (id: string) => req<GmailFullMessage>(`/integrations/google/gmail/${id}`),
     gmailLabels: () => req<GmailLabel[]>('/integrations/google/gmail/labels'),
     gmailModify: (id: string, patch: { mark_read?: boolean; archive?: boolean; star?: boolean }) =>
-      req<{ ok: boolean }>(`/integrations/google/gmail/${id}/modify`, { method: 'POST', body: json(patch) })
+      req<{ ok: boolean }>(`/integrations/google/gmail/${id}/modify`, { method: 'POST', body: json(patch) }),
+    gmailDraft: (m: { to: string; subject: string; body: string; reply_to_message_id?: string | null }) =>
+      req<{ draft_id: string }>('/integrations/google/gmail/draft', { method: 'POST', body: json(m) }),
+    gmailSend: (m: { to: string; subject: string; body: string; reply_to_message_id?: string | null }) =>
+      req<{ sent: string }>('/integrations/google/gmail/send', { method: 'POST', body: json(m) })
+  },
+  assist: {
+    complete: (p: { kind: string; before: string; after?: string; context?: string }) =>
+      req<{ completion: string }>('/assist/complete', { method: 'POST', body: json(p) }),
+    mailReview: (p: { to?: string; subject?: string; body: string; reply_context?: string }) =>
+      req<{ feedback: string[]; revised: string }>('/assist/mail-review', { method: 'POST', body: json(p) })
   },
   projects: {
     list: () => req<Project[]>('/projects'),

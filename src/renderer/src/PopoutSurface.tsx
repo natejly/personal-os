@@ -117,7 +117,7 @@ export default function PopoutSurface({ windowId }: { windowId: string }): JSX.E
   )
 
   const def = kind ? WIDGETS[kind] : undefined
-  const label = win?.title || def?.label || 'Personal OS'
+  const label = win?.title || def?.label || 'Grain'
   const Body = def?.Component
 
   // The surface no longer draws a title, so the only place left for it is the OS window title.

@@ -1,4 +1,4 @@
-"""Personal OS backend API."""
+"""Grain backend API. (The package keeps the personal_os name for compatibility.)"""
 from __future__ import annotations
 
 import asyncio
@@ -99,7 +99,7 @@ def _widget_fetch_ok(source_id: str, wid: str, wt: str, we: str) -> bool:
     return bool(w and source_id in (w.get("source_ids") or []))
 
 
-app = FastAPI(title="Personal OS", version="0.1.0")
+app = FastAPI(title="Grain", version="0.1.0")
 
 
 @app.exception_handler(sqlite3.IntegrityError)
@@ -1143,7 +1143,7 @@ def google_callback(state: str = "", code: str = "", error: str = "", error_desc
         return _oauth_page("Could not complete sign-in", html.escape(str(e)))
     return _oauth_page(
         f"Connected {st.get('email') or 'Google account'} ✓",
-        "You can close this tab and return to Personal OS.",
+        "You can close this tab and return to Grain.",
         ok=True,
     )
 

@@ -25,7 +25,7 @@ def load_dotenv() -> None:
 
 def main() -> None:
     load_dotenv()
-    p = argparse.ArgumentParser(description="Personal OS backend")
+    p = argparse.ArgumentParser(description="Grain backend")
     p.add_argument("--port", type=int, default=int(os.environ.get("PERSONAL_OS_PORT", "8765")))
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--data-dir", default=os.environ.get("PERSONAL_OS_DATA_DIR", "./data"))

@@ -1,7 +1,7 @@
 [project]
-name = "personal-os-backend"
+name = "grain-backend"
 version = "0.1.0"
-description = "Python backend for Personal OS: memory, knowledge graph, documents, spaces, LiteLLM chat."
+description = "Python backend for Grain: memory, knowledge graph, documents, spaces, LiteLLM chat."
 requires-python = ">=3.10"
 dependencies = [
   "fastapi>=0.115",
@@ -21,7 +21,7 @@ dependencies = [
 ]
 
 [project.scripts]
-personal-os-backend = "personal_os.__main__:main"
+grain-backend = "personal_os.__main__:main"
 
 [build-system]
 requires = ["hatchling"]

@@ -431,7 +431,7 @@ class Toolbox:
         R("graph_add", ToolSpec("graph_add", "Add a relation (and the entities if new) to the knowledge graph.",
             _obj({"source": {"type": "string"}, "relation": {"type": "string"}, "target": {"type": "string"}, "source_type": {"type": "string", "default": "entity"}, "target_type": {"type": "string", "default": "entity"}}, ["source", "relation", "target"]), graph_add, "graph", "writes",
             examples=[{"source": "Mira", "relation": "works at", "target": "Acme", "source_type": "person", "target_type": "company"},
-                      {"source": "Personal OS", "relation": "uses", "target": "SQLite", "source_type": "project", "target_type": "tool"},
+                      {"source": "Grain", "relation": "uses", "target": "SQLite", "source_type": "project", "target_type": "tool"},
                       {"source": "Acme", "relation": "acquired", "target": "Globex"}]))
 
         async def web_search(ctx: dict[str, Any], query: str, max_results: int = 6, offset: int = 0) -> Any:
@@ -471,7 +471,7 @@ class Toolbox:
             cur, hops = url, 0
             try:
                 async with httpx.AsyncClient(timeout=25, follow_redirects=False, transport=httpx.AsyncHTTPTransport(retries=0),
-                                             headers={"User-Agent": "PersonalOS/0.1 (+desktop assistant)"}) as c:
+                                             headers={"User-Agent": "Grain/0.1 (+desktop assistant)"}) as c:
                     while True:
                         cur, host = _check_url(cur, ctx, self.settings(), redirect=hops > 0)
                         await _resolve(host)  # validated, then reconnected by name: a DNS rebind in that window is accepted

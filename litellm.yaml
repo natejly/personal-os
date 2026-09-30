@@ -1,4 +1,4 @@
-# LiteLLM proxy config for Personal OS, routing to Fireworks AI.
+# LiteLLM proxy config for Grain, routing to Fireworks AI.
 # Start with:  ./scripts/litellm.sh   (reads .env)
 # The model_name on the left is what you pick inside the app. Add any other provider
 # here (openai/, anthropic/, gemini/, ollama/ ...) and it shows up automatically.

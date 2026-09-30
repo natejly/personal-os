@@ -324,7 +324,7 @@ export type ChatEvent =
   | { event: 'learn_error'; data: { message: string } }
   | { event: 'error'; data: { message: string } }
 
-export interface PersonalOSApi {
+export interface GrainApi {
   backendUrl: () => Promise<string>
   backendStatus: () => Promise<{ running: boolean; url: string; error: string | null }>
   backendToken: () => Promise<string>

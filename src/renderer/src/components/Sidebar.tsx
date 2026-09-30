@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
-import { MessageSquarePlus, Search, Settings, Trash2, PanelLeftClose, Sparkles, Brain, FileText, Plus, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid } from 'lucide-react'
+import { MessageSquarePlus, Search, Settings, Trash2, PanelLeftClose, Brain, FileText, Plus, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid } from 'lucide-react'
+import GrainLogo from './GrainLogo'
 import { useStore, type View } from '../store'
 import ChatPulse from './ChatPulse'
 import { viewHidden } from '../modules'
@@ -95,7 +96,7 @@ export default function Sidebar(): JSX.Element {
   return (
     <aside className="sidebar">
       <div className="sidebar-top drag">
-        <button className="brand no-drag" onClick={() => setView('home')}><Sparkles size={15} /><span>Personal OS</span></button>
+        <button className="brand no-drag" onClick={() => setView('home')}><GrainLogo size={15} /><span>Grain</span></button>
         <button className={`icon-btn no-drag ${mode === 'canvas' ? 'on' : ''}`} title={mode === 'canvas' ? 'Leave Canvas (⌘⇧C)' : 'Canvas Mode (⌘⇧C)'} onClick={toggleMode}><LayoutGrid size={16} /></button>
         <button className="icon-btn no-drag" title="Hide sidebar (⌘B)" onClick={toggleSidebar}><PanelLeftClose size={16} /></button>
       </div>

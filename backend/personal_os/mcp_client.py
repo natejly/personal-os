@@ -39,7 +39,7 @@ from mcp import ClientSession, Implementation, StdioServerParameters, stdio_clie
 
 from .mcp_servers import DEFAULT_DANGER, McpServers
 
-CLIENT_INFO = Implementation(name="personal-os", version="0.1.0")
+CLIENT_INFO = Implementation(name="grain", version="0.1.0")
 
 CONNECT_TIMEOUT = 20.0     # spawn + initialize + first tools/list
 CALL_TIMEOUT = 45.0        # one tools/call, unless the caller asks for less

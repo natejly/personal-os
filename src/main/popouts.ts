@@ -139,7 +139,7 @@ export const openPopout = (windowId: string, req: PopoutOpenRequest = {}): boole
     minWidth,
     minHeight,
     show: false,
-    title: req.title || 'Personal OS',
+    title: req.title || 'Grain',
     frame: false,
     roundedCorners: true,
     hasShadow: true,

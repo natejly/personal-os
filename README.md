@@ -1,6 +1,8 @@
-# Personal OS
+# Grain
 
-A personal AI operating system for your desktop. Chat with any model through
+<img src="build/grain.svg" alt="Grain logo" width="72" align="right" />
+
+Grain is a personal AI operating system for your desktop. Chat with any model through
 [LiteLLM](https://docs.litellm.ai/) (Fireworks AI out of the box), give the
 assistant tools, and let it build memory and a knowledge graph about you as you
 go. Organise work into **projects** the way Claude does: groups of chats with
@@ -14,7 +16,7 @@ their own instructions, knowledge files, memories and graph.
 │ Memory    19 │  │ 14:00 1:1     │ │ ○ USB-C hub   │ │  ☑ Documents │
 │ Documents  1 │  └───────────────┘ └───────────────┘ │  ☑ Auto-learn│
 │ PROJECTS   + │  ┌ Inbox ────────┐ ┌ Projects ─────┐ │  ☑ Tools  ▾  │
-│ ■ Personal OS│  │ Alice: Q4 …   │ │ ■ Personal OS │ │   web search │
+│ ■ Grain      │  │ Alice: Q4 …   │ │ ■ Grain       │ │   web search │
 │ RECENTS      │  └───────────────┘ └───────────────┘ │   run python │
 │ · …          │                                      │   gmail send │
 │ · …          │  [Brief me]                          │  Last reply… │

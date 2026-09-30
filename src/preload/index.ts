@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { BusMessage, PersonalOSApi, PopoutChange, PopoutOpenRequest, ShortcutState } from '../shared/types'
+import type { BusMessage, GrainApi, PopoutChange, PopoutOpenRequest, ShortcutState } from '../shared/types'
 
 /** Subscribe to a main->renderer channel, returning an unsubscribe function. */
 function listen<T>(channel: string, cb: (payload: T) => void): () => void {
@@ -8,7 +8,7 @@ function listen<T>(channel: string, cb: (payload: T) => void): () => void {
   return () => ipcRenderer.removeListener(channel, handler)
 }
 
-const api: PersonalOSApi = {
+const api: GrainApi = {
   backendUrl: () => ipcRenderer.invoke('backend:url'),
   backendStatus: () => ipcRenderer.invoke('backend:status'),
   backendToken: () => ipcRenderer.invoke('backend:token'),

@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import html
 import json
 import logging
 import os
+import re
+import secrets
 import shutil
 import sqlite3
 import time
@@ -17,7 +20,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from . import llm
+from . import llm, tools
 from .context import build_context, estimate_tokens
 from .db import Database, data_dir_from_env, new_id
 from .extract_text import extract_text
@@ -43,6 +46,59 @@ memories = Memories(db)
 graph = Graph(db)
 documents = Documents(db)
 
+
+def _resolve_auth_token() -> str:
+    """Env wins (Electron passes it in); otherwise reuse/mint <data_dir>/.auth_token (0600)."""
+    path = db.data_dir / ".auth_token"
+    tok = (os.environ.get("PERSONAL_OS_AUTH_TOKEN") or "").strip()
+    if not tok:
+        try:  # --reload re-imports this module in a child: minting again would invalidate the renderer's token
+            tok = path.read_text().strip()
+        except OSError:
+            tok = ""
+    if not tok:
+        tok = secrets.token_urlsafe(32)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)  # no try/except: unwritable must crash, not run open
+    with os.fdopen(fd, "w") as f:
+        f.write(tok)
+    os.chmod(path, 0o600)
+    return tok
+
+
+AUTH_TOKEN = _resolve_auth_token()
+PUBLIC_PATHS = ("/health", "/integrations/google/callback")
+
+
+def _token_eq(sent: str, expected: str) -> bool:
+    try:
+        return secrets.compare_digest(sent, expected)
+    except TypeError:  # non-ascii header value
+        return False
+
+
+WIDGET_TOKEN_TTL = 12 * 3600
+# A widget iframe is a separate browsing context: it inherits none of the renderer's CSP, so the generated code gets
+# its own. connect-src 'self' keeps a widget's data inside the sidecar - it cannot POST anywhere else on the internet.
+WIDGET_CSP = ("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; "
+              "font-src data:; connect-src 'self'; base-uri 'none'; form-action 'none'")
+
+
+def _widget_fetch_token(wid: str, exp: int) -> str:
+    """Capability handed to one widget's iframe: scoped to that widget's sources, and expiring, because it rides in the URL."""
+    return hmac.new(AUTH_TOKEN.encode(), f"widget:{wid}:{exp}".encode(), "sha256").hexdigest()[:32]
+
+
+def _widget_fetch_ok(source_id: str, wid: str, wt: str, we: str) -> bool:
+    try:
+        exp = int(we)
+    except ValueError:
+        return False
+    if not (wid and wt) or exp < time.time() or not _token_eq(wt, _widget_fetch_token(wid, exp)):
+        return False
+    w = dashboards.widget(wid)
+    return bool(w and source_id in (w.get("source_ids") or []))
+
+
 app = FastAPI(title="Personal OS", version="0.1.0")
 
 
@@ -55,7 +111,30 @@ async def _integrity_error(request: Request, exc: Exception) -> JSONResponse:  #
               if "FOREIGN KEY" in str(exc).upper() else f"That change conflicts with what is already stored ({exc})")
     log.info("integrity error on %s %s: %s", request.method, request.url.path, exc)
     return JSONResponse({"detail": detail}, status_code=409)
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+
+@app.middleware("http")
+async def _require_token(request: Request, call_next):  # type: ignore[no-untyped-def]
+    p = request.url.path
+    if request.method == "OPTIONS" or p in PUBLIC_PATHS or (p.startswith("/widgets/") and p.endswith("/render")):
+        return await call_next(request)
+    auth = request.headers.get("authorization", "")
+    sent = request.headers.get("x-personal-os-token") or (auth[7:].strip() if auth[:7].lower() == "bearer " else "")
+    if _token_eq(sent, AUTH_TOKEN):
+        return await call_next(request)
+    if p.startswith("/sources/") and p.endswith("/fetch") and _widget_fetch_ok(
+            p.split("/")[2], request.query_params.get("w") or "", request.query_params.get("wt") or "",
+            request.query_params.get("we") or ""):
+        return await call_next(request)
+    return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+
+
+# CORS is added last so it is outermost: a preflight must be answered before auth can 401 it.
+ALLOWED_ORIGINS = [o for o in (os.environ.get("PERSONAL_OS_ALLOWED_ORIGINS") or "").split(",") if o] or [
+    "null", "file://", "http://localhost:5173", "http://127.0.0.1:5173"]
+app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_credentials=False,
+                   allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+                   allow_headers=["Content-Type", "X-Personal-OS-Token", "Authorization"])
 
 # Live runs, one per conversation, each owning its own task. Any number of clients may watch one.
 bus = RunBus()
@@ -137,7 +216,7 @@ def wsid(project_id: str | None) -> str | None:
 # ---------------- health / settings / models ----------------
 @app.get("/health")
 def health() -> dict[str, Any]:
-    return {"ok": True, "data_dir": str(db.data_dir)}
+    return {"ok": True}
 
 
 # Google OAuth material lives in settings but never leaves the backend.
@@ -281,6 +360,52 @@ Only chart real values you have or computed; never invent data for decoration. T
 TOOLS_HINT = "You have tools. Use them when they would make the answer more accurate or current; otherwise answer directly. After using tools, write the final answer for the user."
 
 
+BUDGET_STOP = ("Out of budget ({axis}): this tool call was not executed and no further tool calls will run. "
+               "Write the best final answer you can from what you already have, and say in one line what is still missing.")
+SOFT_NUDGE = ("Budget check: about {pct}% of this reply's budget is used. "
+              "Make at most one or two more tool calls, then write the final answer.")
+LOOP_STOP = ("{name} has been called with identical arguments {n} times in a row, so this reply is stopping tool use. "
+             "Answer with what you already have, and say in one line what you could not finish.")
+REPEAT_LIMIT = 5
+TOOL_ERROR_LIMIT = 3
+
+
+class Budget:
+    """Rounds / tokens / wall-clock / USD for one reply. 0 on any axis means unlimited; approval waits do not count."""
+
+    def __init__(self, cfg: dict[str, Any]):
+        self.max_rounds = int(cfg.get("maxToolRounds") or 0)
+        self.max_tokens = int(cfg.get("maxRunTokens") or 0)
+        self.max_seconds = float(cfg.get("maxRunSeconds") or 0)
+        self.max_cost = float(cfg.get("maxRunCost") or 0)
+        self.t0, self.paused = time.monotonic(), 0.0
+        self.rounds = self.tokens = 0
+        self.cost = 0.0
+        self.nudged = False
+
+    def add(self, pt: int, ct: int, cost: float | None) -> None:
+        self.tokens += pt + ct
+        self.cost += cost or 0.0  # an unpriced model simply does not use the cost axis
+
+    def elapsed(self) -> float:
+        return time.monotonic() - self.t0 - self.paused
+
+    def _ratios(self) -> dict[str, float]:
+        return {k: v / lim for k, v, lim in (("rounds", self.rounds, self.max_rounds), ("tokens", self.tokens, self.max_tokens),
+                                             ("time", self.elapsed(), self.max_seconds), ("cost", self.cost, self.max_cost)) if lim > 0}
+
+    def fraction(self) -> float:
+        return max(self._ratios().values(), default=0.0)
+
+    def exceeded(self) -> str | None:
+        return next((k for k, r in self._ratios().items() if r >= 1.0), None)
+
+
+def _urls(text: str) -> set[str]:
+    """URLs the user typed this turn: still fetchable, whole, once the reply has read untrusted content."""
+    return {u for u in (m.rstrip(".,;:!?") for m in re.findall(r"https?://[^\s<>\"')]+", text or "")) if u}
+
+
 def _short(args: dict[str, Any], limit: int = 300) -> dict[str, Any]:
     """Tool arguments for the trace: long strings (code, content) truncated."""
     return {k: (v[:limit] + "…" if isinstance(v, str) and len(v) > limit else v) for k, v in args.items()}
@@ -345,7 +470,13 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event) -> Async
     buf: list[str] = []
     error: str | None = None
     tool_events: list[dict[str, Any]] = []
-    tool_ctx: dict[str, Any] = {"project_id": conv["project_id"], "conversation_id": conv_id}
+    tool_ctx: dict[str, Any] = {
+        "project_id": conv["project_id"], "conversation_id": conv_id,
+        # Taint is sticky for the whole conversation: the injected instructions live on in the replayed history, so
+        # waiting one turn must not re-arm a standing 'always' grant. Only the user clears it (Context -> this chat).
+        "tainted": bool(conv["settings"].get("tainted")), "taint_sources": list(conv["settings"].get("taint_sources") or []),
+        "allowed_urls": _urls(user_text), "settings": cfg,
+    }
     modes = toolbox.effective(cfg.get("tools") or {}, (project or {}).get("tools"), conv["settings"].get("tools")) if conv["settings"].get("useTools", True) else {}
     tool_schemas = toolbox.schemas(modes)
     system = "\n\n".join(p for p in (system, RENDER_HINT, TOOLS_HINT if tool_schemas else "") if p)
@@ -355,14 +486,47 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event) -> Async
     yield "assistant_message", {**am, "context_used": used}
     yield "span", {"message_id": am["id"], "span": cspan}
 
-    max_rounds = int(cfg.get("maxToolRounds") or 8)
-    try:
-        for _round in range(max_rounds + 1):
+    budget = Budget(cfg)
+    partial: str | None = None
+    last_sig: str | None = None
+    repeats = 0
+    tool_errors: dict[str, int] = {}
+    blocked: set[str] = set()
+    _round = 0
+
+    async def _final_round() -> AsyncIterator[tuple[str, Any]]:
+        """Closing answer after a budget or breaker stop: one tool-free call, itself exempt from the budget."""
+        if buf and buf[-1] and not buf[-1].endswith("\n"):
+            buf.append("\n\n")
+            yield "delta", {"id": am["id"], "text": "\n\n"}
+        span = tracer.start("llm", model, {"round": _round, "final": True, "messages": len(messages), "tools": len(tool_schemas)})
+        yield "span", {"message_id": am["id"], "span": span}
+        start, fin = len(buf), {}
+        # tools are still declared, with tool_choice "none": the history holds tool_calls, and some OpenAI-compatible
+        # backends reject that when no tool list is sent. "none" is the portable way to say "answer, do not call".
+        async for ev in llm.stream_chat(cfg, model, messages, tool_schemas or None,
+                                        effort=str(conv["settings"].get("effort") or "default"), tool_choice="none"):
             if stop.is_set():
                 break
+            if ev["type"] == "delta":
+                buf.append(ev["text"])
+                yield "delta", {"id": am["id"], "text": ev["text"]}
+            else:
+                fin = ev
+        tracer.end(span, {"finish_reason": fin.get("finish_reason"), "usage": fin.get("usage"),
+                          "output_chars": len("".join(buf[start:]))},
+                   error="Stopped by user" if stop.is_set() else None)
+        yield "span", {"message_id": am["id"], "span": span}
+
+    try:
+        while True:
+            if stop.is_set():
+                break
+            _round += 1
+            budget.rounds = _round - 1  # rounds already completed: the Nth round's tool calls must still be allowed to run
             round_start = len(buf)
             end: dict[str, Any] = {}
-            lspan = tracer.start("llm", model, {"round": _round + 1, "messages": len(messages), "tools": len(tool_schemas)})
+            lspan = tracer.start("llm", model, {"round": _round, "messages": len(messages), "tools": len(tool_schemas)})
             yield "span", {"message_id": am["id"], "span": lspan}
             first_token: int | None = None
             async for ev in llm.stream_chat(cfg, model, messages, tool_schemas or None, effort=str(conv["settings"].get("effort") or "default")):
@@ -376,16 +540,30 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event) -> Async
                 else:
                     end = ev
             calls = end.get("tool_calls") or []
+            u = end.get("usage") or end.get("usage_est") or {}
+            pt, ct = int(u.get("prompt_tokens") or 0), int(u.get("completion_tokens") or 0)
+            budget.add(pt, ct, pricing.cost(cfg, model, pt, ct))
             tracer.end(lspan, {"finish_reason": end.get("finish_reason"), "usage": end.get("usage"),
                                "ttft_ms": (first_token - lspan["start"]) if first_token else None,
                                "output_chars": len("".join(buf[round_start:])), "tool_calls": [c["name"] for c in calls]},
                        error="Stopped by user" if stop.is_set() else None)
             yield "span", {"message_id": am["id"], "span": lspan}
-            if stop.is_set() or not calls or _round == max_rounds:
+            if stop.is_set() or not calls:
+                break
+            turn = {"role": "assistant", "content": "".join(buf[round_start:]).strip() or None,
+                    "tool_calls": [{"id": c["id"], "type": "function", "function": {"name": c["name"], "arguments": c["arguments"] or "{}"}} for c in calls]}
+            over = budget.exceeded()
+            if over:
+                # Out of budget: never drop the pending calls silently — answer each one, then let the model close out.
+                partial = over
+                messages.append(turn)
+                for c in calls:
+                    messages.append({"role": "tool", "tool_call_id": c["id"], "content": BUDGET_STOP.format(axis=over)})
+                async for chunk in _final_round():
+                    yield chunk
                 break
             # execute tool calls, then continue the loop with their results
-            messages.append({"role": "assistant", "content": "".join(buf[round_start:]).strip() or None,
-                             "tool_calls": [{"id": c["id"], "type": "function", "function": {"name": c["name"], "arguments": c["arguments"] or "{}"}} for c in calls]})
+            messages.append(turn)
             if buf and buf[-1] and not buf[-1].endswith("\n"):
                 buf.append("\n\n")
                 yield "delta", {"id": am["id"], "text": "\n\n"}
@@ -396,19 +574,31 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event) -> Async
                         args = {}
                 except ValueError:
                     args = {"_raw": c["arguments"]}
-                mode = modes.get(c["name"], "off")
+                sig = tools.call_key(c["name"], args)
+                repeats = repeats + 1 if sig == last_sig else 1
+                last_sig = sig
+                if repeats >= REPEAT_LIMIT:  # before the approval gate: denying the same call forever is still a loop
+                    partial = "loop"
+                if partial == "loop":  # every pending call still needs a tool message, executed or not
+                    messages.append({"role": "tool", "tool_call_id": c["id"], "content": LOOP_STOP.format(name=c["name"], n=REPEAT_LIMIT)})
+                    continue
+                raw_mode = modes.get(c["name"], "off")
+                mode = toolbox.gate(c["name"], raw_mode, tool_ctx)
+                forced = mode != raw_mode  # untrusted content in this reply upgraded on -> ask
                 # The provider's call id is only unique within one request -- llm.stream_chat falls back
                 # to "call_<idx>" when the provider omits one -- so two conversations streaming at once
                 # both produce "call_0". Key anything cross-conversation by the message id too, or one
                 # chat's approval resolves another chat's call. The model still sees c["id"].
                 uid = f"{am['id']}:{c['id']}"
-                yield "tool_call", {"message_id": am["id"], "id": uid, "name": c["name"], "arguments": args, "needs_approval": mode == "ask"}
-                tspan = tracer.start("tool", c["name"], {"round": _round + 1, "arguments": _short(args), "mode": mode})
+                yield "tool_call", {"message_id": am["id"], "id": uid, "name": c["name"], "arguments": args,
+                                    "needs_approval": mode == "ask", "forced": forced}
+                tspan = tracer.start("tool", c["name"], {"round": _round, "arguments": _short(args), "mode": mode, "forced": forced})
                 yield "span", {"message_id": am["id"], "span": tspan}
                 t0 = time.time()
                 decision = "allow"
                 if mode == "ask":
                     # Pause the reply until the user approves or denies this call (POST /approvals/{call_id}).
+                    approval_t0 = time.time()
                     fut: asyncio.Future = asyncio.get_event_loop().create_future()
                     _approvals[uid] = fut
                     try:
@@ -427,8 +617,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event) -> Async
                         decision = fut.result()
                     finally:
                         _approvals.pop(uid, None)
+                    budget.paused += time.time() - approval_t0  # a slow approval must not blow the wall clock
                     t0 = time.time()  # don't count waiting time as tool time
-                    if decision == "always_chat":
+                    granted = decision in ("always_chat", "always_global")
+                    if forced and granted:
+                        decision = "allow"  # one-shot: a tainted reply cannot buy a standing grant
+                    elif decision == "always_chat":
                         convos.update(conv_id, {"settings": {"tools": {**(conv["settings"].get("tools") or {}), c["name"]: "on"}}})
                         conv["settings"].setdefault("tools", {})[c["name"]] = "on"
                         modes[c["name"]] = "on"
@@ -437,10 +631,15 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event) -> Async
                         db.set_settings({"tools": {**(cfg.get("tools") or {}), c["name"]: "on"}})
                         modes[c["name"]] = "on"
                         decision = "allow"
-                if mode == "off":
-                    result: Any = {"error": f"Tool {c['name']} is disabled for this chat"}
+                    if granted and not forced:
+                        tool_schemas = toolbox.schemas(modes)  # the grant changed modes; keep the schemas in step
+                was_tainted, was_blocked = tool_ctx["tainted"], c["name"] in blocked
+                if was_blocked:
+                    result: Any = tools.denied(c["name"], f"failing {TOOL_ERROR_LIMIT} times in a row and disabled for the rest of this reply")
+                elif mode == "off":
+                    result = tools.denied(c["name"], "turned off for this chat")
                 elif decision != "allow":
-                    result = {"error": f"The user declined to run {c['name']}. Do not retry it; continue without it or ask what they'd like instead."}
+                    result = tools.denied(c["name"], "just declined by the user")
                 else:
                     result = await toolbox.call(c["name"], args, tool_ctx)
                 ms = int((time.time() - t0) * 1000)
@@ -448,18 +647,34 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event) -> Async
                 images = result.pop("images", None) if isinstance(result, dict) else None
                 preview = summarize_result(result)
                 err = result.get("error") if isinstance(result, dict) else None
+                tool_errors[c["name"]] = tool_errors.get(c["name"], 0) + 1 if err else 0  # reset on success = consecutive
+                if tool_errors[c["name"]] >= TOOL_ERROR_LIMIT:
+                    blocked.add(c["name"])
+                tainted = decision == "allow" and not err and toolbox.taints(c["name"])
+                if tainted:
+                    if not was_tainted:
+                        yield "taint", {"message_id": am["id"], "source": c["name"]}
+                    tool_ctx["taint_sources"].append(c["name"])
                 event = {"id": uid, "name": c["name"], "arguments": args, "result_preview": preview, "duration_ms": ms,
-                         "error": err, "images": images or None, "approval": (decision if mode == "ask" else None)}
+                         "error": err, "images": images or None, "approval": (decision if mode == "ask" else None),
+                         "forced": forced, "tainted": tainted, "blocked": c["name"] if was_blocked else None, "breaker": partial}
                 tracer.end(tspan, {"result_chars": len(preview), "images": len(images or [])}, error=err)
                 tool_events.append(event)
                 yield "tool_result", {"message_id": am["id"], **event}
                 yield "span", {"message_id": am["id"], "span": tspan}
                 for_model = {**result, "images_shown_to_user": [i["name"] for i in images]} if images and isinstance(result, dict) else result
                 messages.append({"role": "tool", "tool_call_id": c["id"], "content": summarize_result(for_model, 24000)})
+            if partial == "loop":
+                async for chunk in _final_round():
+                    yield chunk
+                break
+            if not budget.nudged and budget.fraction() >= 0.6:
+                budget.nudged = True
+                messages.append({"role": "system", "content": SOFT_NUDGE.format(pct=int(budget.fraction() * 100))})
     except asyncio.CancelledError:
         # Shutdown or a dropped task, not a user Stop: persist what was written and re-raise.
-        partial = "".join(buf).strip()
-        convos.finish_message(am["id"], partial, None if partial else "Cancelled", used, tool_events, tracer.spans)
+        text = "".join(buf).strip()
+        convos.finish_message(am["id"], text, None if text else "Cancelled", used, tool_events, tracer.spans)
         convos.touch(conv_id)
         raise
     except Exception as e:  # noqa: BLE001
@@ -472,7 +687,13 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event) -> Async
     text = "".join(buf).strip()
     convos.finish_message(am["id"], text, error, used, tool_events, tracer.spans)
     convos.touch(conv_id)
-    yield "done", {"id": am["id"], "error": error, "context_used": used, "tool_events": tool_events, "trace": tracer.spans, "stopped": stop.is_set()}
+    if tool_ctx["tainted"]:
+        srcs = sorted(set(tool_ctx["taint_sources"]))
+        if not conv["settings"].get("tainted") or srcs != sorted(set(conv["settings"].get("taint_sources") or [])):
+            convos.update(conv_id, {"settings": {"tainted": True, "taint_sources": srcs}})
+    yield "done", {"id": am["id"], "error": error, "context_used": used, "tool_events": tool_events,
+                   "trace": tracer.spans, "stopped": stop.is_set(), "partial": partial,
+                   "tainted": tool_ctx["tainted"], "taint_sources": tool_ctx["taint_sources"]}
     if tool_ctx.get("learned"):
         yield "learned", tool_ctx["learned"]
 
@@ -1300,12 +1521,18 @@ def delete_widget(wid: str) -> dict[str, bool]:
     return {"ok": True}
 
 
-@app.get("/widgets/{wid}/render", response_class=HTMLResponse)
-def render_widget(wid: str) -> str:
+@app.get("/widgets/{wid}/render")
+def render_widget(wid: str) -> HTMLResponse:
     w = dashboards.widget(wid)
     if not w:
         raise HTTPException(404)
-    return w["code"] or "<!doctype html><html><body style='font-family:system-ui;color:#9c9a94;padding:12px'>No code yet.</body></html>"
+    code = w["code"] or "<!doctype html><html><body style='font-family:system-ui;color:#9c9a94;padding:12px'>No code yet.</body></html>"
+    # The iframe is unauthenticated, so give it a short-lived per-widget capability for its own sources, not the app token.
+    exp = int(time.time()) + WIDGET_TOKEN_TTL
+    wt = _widget_fetch_token(wid, exp)
+    body = re.sub(r"(/sources/[0-9a-f]+/fetch)(\?)?",
+                  lambda m: f"{m.group(1)}?wt={wt}&w={wid}&we={exp}" + ("&" if m.group(2) else ""), code)
+    return HTMLResponse(body, headers={"Content-Security-Policy": WIDGET_CSP, "X-Content-Type-Options": "nosniff"})
 
 
 @app.get("/recap")

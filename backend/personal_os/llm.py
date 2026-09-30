@@ -48,7 +48,13 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "gatherShortcut": "Control+Alt+Command+Space",
     # tools: {tool_name: bool}; missing = on
     "tools": {},
-    "maxToolRounds": 8,
+    "maxToolRounds": 25,
+    # Per-reply budgets; 0 = unlimited. A run that hits one still writes a final answer, marked partial.
+    "maxRunTokens": 200_000,
+    "maxRunSeconds": 300,
+    "maxRunCost": 0.50,
+    # Hosts fetch_url may still read once a reply has touched untrusted content (registrable-suffix match).
+    "fetchAllowlist": [],
     "braveApiKey": "",
     "tavilyApiKey": "",
     # {model: {"input": $/M tokens, "output": $/M tokens}} overrides for cost accounting (proxy prices are used otherwise)
@@ -84,12 +90,14 @@ async def list_models(settings: dict[str, Any]) -> list[dict[str, str]]:
 
 
 async def stream_chat(
-    settings: dict[str, Any], model: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None, kind: str = "chat", effort: str = "default"
+    settings: dict[str, Any], model: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None, kind: str = "chat",
+    effort: str = "default", tool_choice: str = "auto",
 ) -> AsyncIterator[dict[str, Any]]:
     """Stream a chat completion.
 
     Yields {"type": "delta", "text": str} for content, and finally
-    {"type": "end", "finish_reason": str|None, "tool_calls": [{"id","name","arguments"}], "usage": {...}|None}.
+    {"type": "end", "finish_reason": str|None, "tool_calls": [{"id","name","arguments"}], "usage": {...}|None,
+     "usage_est": {"prompt_tokens": int, "completion_tokens": int}}.
     """
     body: dict[str, Any] = {"model": model, "messages": messages, "stream": True, "stream_options": {"include_usage": True}}
     # Only sent when asked for: a model that does not support it rejects the whole request.
@@ -97,7 +105,7 @@ async def stream_chat(
         body["reasoning_effort"] = effort
     if tools:
         body["tools"] = tools
-        body["tool_choice"] = "auto"
+        body["tool_choice"] = tool_choice
     calls: dict[int, dict[str, Any]] = {}
     finish: str | None = None
     usage: dict[str, Any] | None = None
@@ -146,8 +154,11 @@ async def stream_chat(
                         cur["arguments"] += fn["arguments"]
                 if choice.get("finish_reason"):
                     finish = choice["finish_reason"]
-    _emit_usage(model, kind, usage, int((time.time() - t0) * 1000), len(json.dumps(messages)), out_chars + sum(len(c["arguments"]) for c in calls.values()))
-    yield {"type": "end", "finish_reason": finish, "tool_calls": [calls[i] for i in sorted(calls)], "usage": usage}
+    p_chars, c_chars = len(json.dumps(messages)), out_chars + sum(len(c["arguments"]) for c in calls.values())
+    _emit_usage(model, kind, usage, int((time.time() - t0) * 1000), p_chars, c_chars)
+    # usage_est is always present: this route often omits `usage` on streamed replies, and a budget cannot run on None.
+    yield {"type": "end", "finish_reason": finish, "tool_calls": [calls[i] for i in sorted(calls)], "usage": usage,
+           "usage_est": {"prompt_tokens": p_chars // 4, "completion_tokens": c_chars // 4}}
 
 
 async def complete(settings: dict[str, Any], model: str, messages: list[dict[str, str]], kind: str = "learn") -> str:

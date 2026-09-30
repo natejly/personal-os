@@ -5,15 +5,32 @@ import type {
 } from '@shared/types'
 
 let base = ''
+let token = ''
+let tokenP: Promise<void> | null = null
+
 export const setBase = (url: string): void => {
   base = url.replace(/\/+$/, '')
+  tokenP = window.os
+    .backendToken()
+    .then((t) => {
+      token = t
+    })
+    .catch(() => {
+      token = ''
+    })
 }
 export const getBase = (): string => base
+
+/** Sidecar shared secret. Resolved once per setBase(); every backend request carries it. */
+const auth = async (): Promise<Record<string, string>> => {
+  if (!token && tokenP) await tokenP
+  return token ? { 'X-Personal-OS-Token': token } : {}
+}
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(`${base}${path}`, {
     ...init,
-    headers: { ...(init?.body && !(init.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}), ...(init?.headers ?? {}) }
+    headers: { ...(init?.body && !(init.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}), ...(init?.headers ?? {}), ...(await auth()) }
   })
   if (!r.ok) {
     let msg = `${r.status} ${r.statusText}`

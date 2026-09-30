@@ -22,8 +22,12 @@ def _scope_clause(project_id: str | None, include_global: bool = True) -> tuple[
     return "project_id = ?", [project_id]
 
 
-def fts_query(text: str, max_terms: int = 12) -> str:
-    """Turn free text into a forgiving FTS5 OR-query."""
+def fts_query(text: str, max_terms: int = 12, prefix: bool = False) -> str:
+    """Turn free text into a forgiving FTS5 OR-query.
+
+    With prefix=True each term also matches longer words that start with it, so
+    a search box filters as you type ("lite" finds "LiteLLM").
+    """
     terms = re.findall(r"[A-Za-z0-9_][A-Za-z0-9_'-]{2,}", text)
     seen: list[str] = []
     for t in terms:
@@ -31,7 +35,8 @@ def fts_query(text: str, max_terms: int = 12) -> str:
         if t and t not in seen:
             seen.append(t)
     seen = seen[:max_terms]
-    return " OR ".join(f'"{t}"' for t in seen)
+    star = "*" if prefix else ""
+    return " OR ".join(f'"{t}"{star}' for t in seen)
 
 
 # ---------------- Projects ----------------
@@ -184,7 +189,7 @@ class Memories:
         where, args = _scope_clause(project_id, include_global)
         with self.db.tx() as c:
             if q.strip():
-                fq = fts_query(q)
+                fq = fts_query(q, prefix=True)
                 if not fq:
                     return []
                 rows = c.execute(

@@ -1,6 +1,6 @@
 import { app, BrowserWindow, ipcMain, Menu } from 'electron'
 import { join } from 'path'
-import { backendStatus, backendUrl, startBackend, stopBackend } from './backend'
+import { backendStatus, backendToken, backendUrl, startBackend, stopBackend } from './backend'
 import { registerBus } from './bus'
 import { guardNavigation } from './navigation'
 import { gather, registerPopouts, restorePopouts, setFrontListener, toggleFront } from './popouts'
@@ -221,6 +221,7 @@ app.on('child-process-gone', (_e, d) => console.error(`[child] ${d.type} gone: $
 app.whenReady().then(async () => {
   ipcMain.handle('backend:url', () => backendUrl())
   ipcMain.handle('backend:status', () => backendStatus())
+  ipcMain.handle('backend:token', () => backendToken())
   ipcMain.on('window:close-self', (e) => BrowserWindow.fromWebContents(e.sender)?.close())
   ipcMain.on('window:minimize-self', (e) => BrowserWindow.fromWebContents(e.sender)?.minimize())
   registerPopouts(() => win)

@@ -11,6 +11,7 @@ function listen<T>(channel: string, cb: (payload: T) => void): () => void {
 const api: PersonalOSApi = {
   backendUrl: () => ipcRenderer.invoke('backend:url'),
   backendStatus: () => ipcRenderer.invoke('backend:status'),
+  backendToken: () => ipcRenderer.invoke('backend:token'),
   platform: process.platform,
   onMenu: (cb) => listen<string>('menu', cb),
   popout: {

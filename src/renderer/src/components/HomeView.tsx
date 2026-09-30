@@ -132,7 +132,7 @@ export default function HomeView(): JSX.Element {
           </section>}
 
           {on('inbox') && <section className="widget">
-            <header><Mail size={14} /> Inbox {google?.connected && <span className="muted small">unread, 3 days</span>}</header>
+            <header><Mail size={14} /> Inbox {google?.connected && <span className="muted small">unread, 14 days</span>}<button className="link small" onClick={() => setView('mail')}>all</button></header>
             {!google?.connected ? <p className="muted">Connect Google.</p> : d?.errors.gmail ? <p className="msg-error">{d.errors.gmail}</p> : (d?.gmail?.length ?? 0) === 0 ? <p className="muted">Inbox zero.</p> : (
               <ul className="mails">
                 {d!.gmail!.slice(0, 8).map((m) => (

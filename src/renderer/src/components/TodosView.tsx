@@ -3,6 +3,8 @@ import { Plus, CheckSquare, PanelLeftOpen } from 'lucide-react'
 import { useStore, type Scope } from '../store'
 import TodoItem from './TodoItem'
 import ScopeSelect from './ScopeSelect'
+import SmartTextarea from './SmartTextarea'
+import { localDay } from './CalendarWeek'
 
 export default function TodosView(): JSX.Element {
   const todos = useStore((s) => s.todos)
@@ -24,8 +26,9 @@ export default function TodosView(): JSX.Element {
   }
 
   const open = todos.filter((t) => !t.done)
+  const todayKey = localDay()
   const overdue = open.filter((t) => t.due && new Date(t.due + 'T00:00:00') < new Date(new Date().toDateString()))
-  const today = open.filter((t) => t.due === new Date().toISOString().slice(0, 10))
+  const today = open.filter((t) => t.due === todayKey)
   const upcoming = open.filter((t) => t.due && !overdue.includes(t) && !today.includes(t))
   const someday = open.filter((t) => !t.due)
   const done = todos.filter((t) => t.done)
@@ -50,7 +53,16 @@ export default function TodosView(): JSX.Element {
       </header>
       <div className="page-body">
         <div className="add-row">
-          <input aria-label="Todo title" placeholder="Add a todo… (or just tell the assistant in chat)" value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void add()} />
+          <SmartTextarea
+            kind="todo"
+            className="smart-ta-line"
+            minChars={6}
+            rows={1}
+            value={title}
+            onChange={setTitle}
+            placeholder="Add a todo… Tab accepts a suggestion"
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void add() } }}
+          />
           <input type="date" aria-label="Due date (optional)" value={due} onChange={(e) => setDue(e.target.value)} className="date-input" />
           <select aria-label="Priority" value={priority} onChange={(e) => setPriority(Number(e.target.value))}><option value={1}>P1</option><option value={2}>P2</option><option value={3}>P3</option></select>
           <button className="primary-btn" onClick={() => void add()} disabled={!title.trim()}><Plus size={14} /> Add</button>

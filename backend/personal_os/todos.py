@@ -16,6 +16,8 @@ CREATE TABLE IF NOT EXISTS todos (
   done INTEGER NOT NULL DEFAULT 0,
   source TEXT NOT NULL DEFAULT 'local',
   external_id TEXT,
+  calendar_event_id TEXT,
+  calendar_link TEXT,
   created_at REAL NOT NULL,
   updated_at REAL NOT NULL,
   completed_at REAL
@@ -29,6 +31,11 @@ class Todos:
         self.db = db
         with db.tx() as c:
             c.executescript(SCHEMA)
+            have = {r["name"] for r in c.execute("PRAGMA table_info(todos)").fetchall()}
+            if "calendar_event_id" not in have:
+                c.execute("ALTER TABLE todos ADD COLUMN calendar_event_id TEXT")
+            if "calendar_link" not in have:
+                c.execute("ALTER TABLE todos ADD COLUMN calendar_link TEXT")
 
     def list(self, project_id: str | None = "__all__", include_done: bool = False, q: str = "") -> list[dict[str, Any]]:
         where, args = [], []
@@ -62,7 +69,7 @@ class Todos:
         return self.get(tid)  # type: ignore[return-value]
 
     def update(self, id: str, patch: dict[str, Any]) -> dict[str, Any] | None:
-        fields = {k: v for k, v in patch.items() if k in {"title", "notes", "due", "priority", "done", "project_id"}}
+        fields = {k: v for k, v in patch.items() if k in {"title", "notes", "due", "priority", "done", "project_id", "calendar_event_id", "calendar_link"}}
         if not fields:
             return self.get(id)
         if "done" in fields:

@@ -3,13 +3,14 @@ import { ChevronLeft, ChevronRight, PanelLeftOpen, Calendar as CalIcon, External
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import CalendarWeek, { addDays, fmtTime, startOfWeek } from './CalendarWeek'
+import { scheduleTodo } from './TodoItem'
 import type { CalendarEvent } from '@shared/types'
 
 export default function CalendarView(): JSX.Element {
   const sidebarOpen = useStore((s) => s.sidebarOpen)
   const google = useStore((s) => s.google)
   const todos = useStore((s) => s.todos)
-  const { toggleSidebar, refreshTodos, setSettingsOpen, toast, newChat, send } = useStore()
+  const { toggleSidebar, refreshTodos, setSettingsOpen, toast, newChat, send, updateTodo, setView } = useStore()
   const [week, setWeek] = useState(() => startOfWeek(new Date()))
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [loading, setLoading] = useState(false)
@@ -45,6 +46,22 @@ export default function CalendarView(): JSX.Element {
     }
   }
 
+  const dropTodo = async (todoId: string, day: string, hour: number | null): Promise<void> => {
+    const todo = useStore.getState().todos.find((t) => t.id === todoId)
+    if (!todo) return
+    try {
+      await updateTodo(todoId, { due: day })
+      if (google?.connected) {
+        const start = hour === null ? day : `${day}T${String(hour).padStart(2, '0')}:00:00`
+        await scheduleTodo({ ...todo, due: day }, start)
+        if (hour !== null) await load()
+      }
+      toast(hour === null ? `Due ${day}` : `Scheduled ${hour}:00`)
+    } catch (e) {
+      toast((e as Error).message, 'error')
+    }
+  }
+
   return (
     <main className="page cal-page">
       <header className="page-header drag">
@@ -64,7 +81,8 @@ export default function CalendarView(): JSX.Element {
       {error && <div className="notice-bar error">{error}</div>}
 
       <div className="cal-scroll">
-        <CalendarWeek days={days} events={events} todos={todos} canCreate={!!google?.connected} onOpen={setOpen} onCreate={create} />
+        <CalendarWeek days={days} events={events} todos={todos} canCreate={!!google?.connected}
+          onOpen={setOpen} onTodo={() => setView('todos')} onTodoDrop={(id, day, hour) => void dropTodo(id, day, hour)} onCreate={create} />
       </div>
       {loading && <div className="cal-loading">Loading…</div>}
 

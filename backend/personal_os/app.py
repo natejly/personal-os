@@ -1127,6 +1127,8 @@ class TodoPatch(BaseModel):
     project_id: str | None = None
     clear_due: bool = False
     clear_project: bool = False
+    calendar_event_id: str | None = None
+    calendar_link: str | None = None
 
 
 @app.get("/todos")
@@ -1241,7 +1243,7 @@ def google_calendar_create(body: EventIn) -> Any:
 
 
 @app.get("/integrations/google/gmail")
-def google_gmail(q: str = "is:unread newer_than:3d", max_results: int = 12) -> Any:
+def google_gmail(q: str = "is:unread in:inbox newer_than:14d", max_results: int = 12) -> Any:
     return _gcall(google.gmail_search, q, max_results)
 
 
@@ -1352,7 +1354,7 @@ async def dashboard() -> dict[str, Any]:
 
         jobs = [
             fetch("calendar", google.calendar_events, 2),
-            fetch("gmail", google.gmail_search, "is:unread newer_than:3d", 10),
+            fetch("gmail", google.gmail_search, "is:unread in:inbox newer_than:14d", 10),
             fetch("tasks", google.tasks_list, "@default", False),
         ]
         # Drive is a newer scope; before the user reconnects, skip the call instead of
@@ -1552,7 +1554,7 @@ async def _internal_data() -> dict[str, Any]:
         except Exception as e:  # noqa: BLE001
             out["calendar_error"] = str(e)
         try:
-            out["gmail"] = json_safe(await asyncio.to_thread(google.gmail_search, "is:unread newer_than:2d", 15))
+            out["gmail"] = json_safe(await asyncio.to_thread(google.gmail_search, "is:unread in:inbox newer_than:14d", 15))
         except Exception as e:  # noqa: BLE001
             out["gmail_error"] = str(e)
         try:

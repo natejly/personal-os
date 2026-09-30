@@ -21,6 +21,14 @@ interface Props {
   sharedStyle?: React.CSSProperties
   placeholder?: string
   autoFocus?: boolean
+  rows?: number
+  className?: string
+  /** Skip the request until the draft is at least this long. Todos fire earlier than mail. */
+  minChars?: number
+  /** Grow with the text, capped at `maxHeight`. Used by the chat composer. */
+  autoGrow?: boolean
+  maxHeight?: number
+  inputRef?: React.Ref<HTMLTextAreaElement>
   onBlur?: () => void
   onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void
 }
@@ -28,16 +36,26 @@ interface Props {
 const DEBOUNCE_MS = 600
 const MIN_CHARS = 15
 
-export default function SmartTextarea({ value, onChange, kind, context = '', variant = 'field', sharedStyle, placeholder, autoFocus, onBlur, onKeyDown }: Props): JSX.Element {
+export default function SmartTextarea({
+  value, onChange, kind, context = '', variant = 'field', sharedStyle, placeholder, autoFocus, onBlur, onKeyDown,
+  rows = 2, className = '', minChars = MIN_CHARS, autoGrow = false, maxHeight = 240, inputRef
+}: Props): JSX.Element {
   const [ghost, setGhost] = useState('')
   const taRef = useRef<HTMLTextAreaElement>(null)
   const mirrorRef = useRef<HTMLDivElement>(null)
   const seq = useRef(0)
 
+  const setRefs = (el: HTMLTextAreaElement | null): void => {
+    taRef.current = el
+    if (!inputRef) return
+    if (typeof inputRef === 'function') inputRef(el)
+    else (inputRef as { current: HTMLTextAreaElement | null }).current = el
+  }
+
   useEffect(() => {
     setGhost('')
     const mine = ++seq.current
-    if (value.trim().length < MIN_CHARS) return
+    if (value.trim().length < minChars) return
     const t = setTimeout(() => {
       const ta = taRef.current
       if (!ta || document.activeElement !== ta || ta.selectionStart !== value.length || ta.selectionEnd !== value.length) return
@@ -47,7 +65,15 @@ export default function SmartTextarea({ value, onChange, kind, context = '', var
         .catch(() => undefined) // ghost text is a nicety; never surface its errors
     }, DEBOUNCE_MS)
     return (): void => clearTimeout(t)
-  }, [value, kind, context])
+  }, [value, kind, context, minChars])
+
+  useEffect(() => {
+    if (!autoGrow) return
+    const el = taRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`
+  }, [value, ghost, autoGrow, maxHeight])
 
   // The mirror must track the textarea's scroll or the ghost drifts on long texts.
   const syncScroll = (): void => {
@@ -71,13 +97,14 @@ export default function SmartTextarea({ value, onChange, kind, context = '', var
   }
 
   return (
-    <div className={`smart-ta ${variant}`}>
+    <div className={`smart-ta ${variant}${className ? ` ${className}` : ''}`}>
       <div ref={mirrorRef} className="smart-ta-mirror" style={sharedStyle} aria-hidden>
         <span className="t">{value}</span>
         <span className="g">{ghost}</span>
       </div>
       <textarea
-        ref={taRef}
+        ref={setRefs}
+        rows={rows}
         value={value}
         placeholder={placeholder}
         autoFocus={autoFocus}

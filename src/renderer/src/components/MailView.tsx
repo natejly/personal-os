@@ -74,7 +74,7 @@ export default function MailView(): JSX.Element {
     return parts.join(' ') || 'in:inbox'
   }, [folder, read, starred, attachments, range, q])
 
-  // Each fetch is N+1 Gmail calls on the backend, so typing is debounced into `q`.
+  // Typing is debounced into `q` so a keystroke does not fire a Gmail search.
   useEffect(() => {
     const t = setTimeout(() => setQ(search), 400)
     return (): void => clearTimeout(t)

@@ -1,9 +1,11 @@
 import { useState } from 'react'
-import { Check, Trash2, Calendar } from 'lucide-react'
+import { Check, Trash2, Calendar, CalendarPlus, ExternalLink } from 'lucide-react'
 import { useStore } from '../store'
+import { api } from '../lib/api'
 import type { Todo } from '@shared/types'
 import { dragProps } from '../canvas/dnd'
 import ProjectChip from './ProjectChip'
+import { localDay } from './CalendarWeek'
 
 export const dueLabel = (due: string | null): { text: string; cls: string } => {
   if (!due) return { text: '', cls: '' }
@@ -17,9 +19,26 @@ export const dueLabel = (due: string | null): { text: string; cls: string } => {
   return { text: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }), cls: '' }
 }
 
+/** Put a todo on Google Calendar. `start` is YYYY-MM-DD (all-day) or a local datetime. */
+export async function scheduleTodo(todo: Todo, start?: string): Promise<Todo> {
+  const when = start || todo.due || localDay()
+  const app = useStore.getState()
+  if (!todo.due && when.length === 10) await app.updateTodo(todo.id, { due: when })
+  else if (when.length === 10 && todo.due !== when) await app.updateTodo(todo.id, { due: when })
+  const ev = await api.google.createEvent({
+    summary: todo.title,
+    start: when,
+    description: todo.notes || undefined
+  })
+  await app.updateTodo(todo.id, { calendar_event_id: ev.id, calendar_link: ev.link })
+  return { ...todo, due: when.length === 10 ? when : todo.due, calendar_event_id: ev.id, calendar_link: ev.link }
+}
+
 export default function TodoItem({ todo, showProject = true, compact = false }: { todo: Todo; showProject?: boolean; compact?: boolean }): JSX.Element {
   const updateTodo = useStore((s) => s.updateTodo)
   const deleteTodo = useStore((s) => s.deleteTodo)
+  const toast = useStore((s) => s.toast)
+  const google = useStore((s) => s.google)
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(todo.title)
   const due = dueLabel(todo.due)
@@ -27,6 +46,14 @@ export default function TodoItem({ todo, showProject = true, compact = false }: 
     setEditing(false)
     if (title.trim() && title !== todo.title) void updateTodo(todo.id, { title: title.trim() })
     else setTitle(todo.title)
+  }
+  const toCalendar = async (): Promise<void> => {
+    try {
+      await scheduleTodo(todo)
+      toast(`“${todo.title}” added to calendar`)
+    } catch (e) {
+      toast((e as Error).message, 'error')
+    }
   }
   // A drag source for every canvas drop target that takes a todo; while the title is being edited the
   // attribute would eat the caret, so it comes off.
@@ -55,6 +82,16 @@ export default function TodoItem({ todo, showProject = true, compact = false }: 
           <select className="todo-prio" value={todo.priority} onChange={(e) => void updateTodo(todo.id, { priority: Number(e.target.value) })} title="Priority">
             <option value={1}>P1</option><option value={2}>P2</option><option value={3}>P3</option>
           </select>
+        )}
+        {google?.connected && !todo.calendar_event_id && !todo.done && (
+          <button className="icon-btn ghost" title="Add to Google Calendar" aria-label={`Add ${todo.title} to calendar`} onClick={() => void toCalendar()}>
+            <CalendarPlus size={13} />
+          </button>
+        )}
+        {todo.calendar_link && (
+          <a className="icon-btn ghost" href={todo.calendar_link} target="_blank" rel="noreferrer" title="Open in Google Calendar" aria-label={`Open ${todo.title} in Google Calendar`}>
+            <ExternalLink size={13} />
+          </a>
         )}
         <button className="icon-btn ghost danger" aria-label={`Delete todo: ${todo.title}`} onClick={() => void deleteTodo(todo.id)}><Trash2 size={13} /></button>
       </div>

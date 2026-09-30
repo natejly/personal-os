@@ -200,6 +200,8 @@ export interface State {
   flushDoc: () => Promise<void>
   renameDoc: (id: string, title: string) => Promise<void>
   setDocStar: (id: string, starred: boolean) => Promise<void>
+  /** Move a doc into a folder; '' takes it out of any folder. */
+  setDocFolder: (id: string, folder: string) => Promise<void>
   deleteDoc: (id: string) => Promise<void>
   setDocMode: (m: DocMode) => void
   refreshDocRevisions: (id?: string) => Promise<void>
@@ -826,6 +828,15 @@ export const useStore = create<State>((set, get) => {
     setDocStar: async (id, starred) => {
       await api.docs.patch(id, { starred })
       await get().refreshDocs()
+    },
+    setDocFolder: async (id, folder) => {
+      try {
+        const d = await api.docs.patch(id, { folder: folder.trim() })
+        set((st) => ({ activeDoc: st.activeDoc?.id === id ? { ...st.activeDoc, folder: d.folder } : st.activeDoc }))
+        await get().refreshDocs()
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
     },
     deleteDoc: async (id) => {
       await api.docs.delete(id)

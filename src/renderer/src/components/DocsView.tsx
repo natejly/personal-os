@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   FileText, NotebookPen, Plus, Trash2, Star, Search, PanelLeftOpen, X, History, Columns2, Eye, Pencil,
-  Sparkles, Save, Link2, Link2Off, ChevronRight
+  Sparkles, Save, Link2, Link2Off, ChevronRight, ChevronDown, Folder
 } from 'lucide-react'
 import { useStore, type Scope } from '../store'
 import type { Doc } from '@shared/types'
@@ -99,8 +99,8 @@ export default function DocsView(): JSX.Element {
   const libraryScope = useStore((s) => s.libraryScope)
   const sidebarOpen = useStore((s) => s.sidebarOpen)
   const {
-    refreshDocs, openDoc, closeDocTab, createDoc, editDoc, flushDoc, renameDoc, setDocStar, deleteDoc,
-    setDocMode, acceptRevision, rejectRevision, restoreRevision, toggleSidebar, setLibraryScope
+    refreshDocs, openDoc, closeDocTab, createDoc, editDoc, flushDoc, renameDoc, setDocStar, setDocFolder,
+    deleteDoc, setDocMode, acceptRevision, rejectRevision, restoreRevision, toggleSidebar, setLibraryScope
   } = useStore()
 
   const [query, setQuery] = useState('')
@@ -123,6 +123,12 @@ export default function DocsView(): JSX.Element {
     () => docTabs.map((id) => docs.find((d) => d.id === id) ?? (activeDoc?.id === id ? activeDoc : null)).filter(Boolean) as Doc[],
     [docTabs, docs, activeDoc]
   )
+  // Folders are just values on docs; the open doc's is unioned in because the list may be filtered.
+  const folders = useMemo(() => {
+    const s = new Set(docs.map((d) => d.folder).filter(Boolean))
+    if (activeDoc?.folder) s.add(activeDoc.folder)
+    return [...s].sort((a, b) => a.localeCompare(b))
+  }, [docs, activeDoc])
 
   // Linked scrolling: the preview follows the editor's fraction of the way down.
   useEffect(() => {
@@ -188,6 +194,24 @@ export default function DocsView(): JSX.Element {
                 onBlur={() => { if (titleDraft !== null && titleDraft !== activeDoc.title) void renameDoc(activeDoc.id, titleDraft); setTitleDraft(null) }}
                 onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setTitleDraft(null) }}
               />
+              <label className="model-picker doc-folder-pick" title="Folder">
+                <Folder size={13} />
+                <select
+                  value={activeDoc.folder || ''}
+                  onChange={(e) => {
+                    const v = e.target.value
+                    if (v === '__new__') {
+                      const name = prompt('New folder name')?.trim()
+                      if (name) void setDocFolder(activeDoc.id, name)
+                    } else void setDocFolder(activeDoc.id, v)
+                  }}
+                >
+                  <option value="">No folder</option>
+                  {folders.map((f) => <option key={f} value={f}>{f}</option>)}
+                  <option value="__new__">New folder…</option>
+                </select>
+                <ChevronDown size={12} />
+              </label>
               <span className="doc-save-state">
                 {docSaving ? 'Saving…' : dirty ? 'Unsaved' : 'Saved'}
               </span>

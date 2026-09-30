@@ -244,7 +244,7 @@
 }
 .win.dragging,
 .win.resizing {
-  will-change: transform, width, height;
+  will-change: translate, width, height;
   transition: none;
   /* These two must live on .dragging, not on .canvas.interacting. The dragging class is toggled
      straight onto the node, so it lands in the same frame as the pointerdown, while .interacting goes
@@ -264,8 +264,10 @@
   background: var(--material-opaque);
   backdrop-filter: none;
 }
+/* `translate`, not `transform`: geometry lives on the standalone property (see rectStyle) so the
+   win-open transform animation cannot yank a new window to the plane origin. */
 .win:not(.dragging):not(.resizing) {
-  transition: border-color var(--dur-hover) ease, box-shadow var(--dur-hover) ease, transform var(--dur-snap) var(--spring);
+  transition: border-color var(--dur-hover) ease, box-shadow var(--dur-hover) ease, translate var(--dur-snap) var(--spring);
 }
 .win.minimized { display: none; }
 .win.maximized { border-radius: var(--win-radius-sm); }

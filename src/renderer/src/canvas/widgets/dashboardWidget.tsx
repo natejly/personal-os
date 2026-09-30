@@ -66,8 +66,10 @@ export default function DashboardWidget({ window: win, live, onTitle }: WidgetPr
       </div>
       {widget.kind === 'html' ? (
         widget.code ? (
+          // Opaque: a transparent iframe over the vibrancy window reads as a hole to the desktop while
+          // the document (re)loads. #232220 matches the dark surface generated widgets style themselves for.
           <iframe key={widget.refreshed_at ?? 0} title={widget.title} sandbox="allow-scripts" src={`${getBase()}/widgets/${widget.id}/render`}
-            style={{ flex: 1, width: '100%', border: 0, background: 'transparent', display: 'block' }} />
+            style={{ flex: 1, width: '100%', border: 0, background: '#232220', display: 'block' }} />
         ) : (
           <div className="widget-empty">{busy ? 'Generating…' : widget.output || 'No code generated yet.'}</div>
         )

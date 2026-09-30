@@ -92,6 +92,8 @@
 }
 .canvas.interacting .win,
 .canvas.interacting .dock { backdrop-filter: none; }
+/* A drag that crosses an iframe must not hand the pointer stream to another document. */
+.canvas.interacting iframe { pointer-events: none; }
 
 .canvas-plane {
   position: absolute;
@@ -246,6 +248,14 @@
      composited layer with a backdrop-filter over a transparent native window renders see-through.
      Whether the render beat the compositor decided whether you saw it, which is why it was
      intermittent. Making the drag state itself opaque closes the race. */
+  background: var(--material-opaque);
+  backdrop-filter: none;
+}
+/* The same compositor race fires wherever a .win can be layer-promoted while blurred: during its
+   open animation, and permanently for windows whose body holds an iframe (the iframe forces its
+   host into a composited layer whenever it repaints, e.g. the remount a widget refresh causes). */
+.win.opening,
+.win.heavy {
   background: var(--material-opaque);
   backdrop-filter: none;
 }

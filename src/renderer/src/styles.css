@@ -945,7 +945,9 @@ textarea.instructions:focus { border-color: var(--accent); }
 .dwidget > header { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--border); font-size: 13px; }
 .dw-title { font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
 .dw-width { font-size: 11px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; padding: 2px 4px; }
-.dwidget iframe { border: 0; width: 100%; background: transparent; display: block; }
+/* Opaque and always dark: generated widgets style themselves for a dark surface, and a transparent
+   iframe over the vibrancy window can read as a hole to the desktop while it (re)loads. */
+.dwidget iframe { border: 0; width: 100%; background: #232220; display: block; }
 .dw-empty { padding: 16px; color: var(--text-muted); font-size: 13px; }
 .dw-md { padding: 10px 14px; font-size: 13px; overflow: auto; }
 .dw-code { margin: 0; padding: 10px; font-size: 11px; overflow: auto; max-height: 400px; white-space: pre-wrap; }

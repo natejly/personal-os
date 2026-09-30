@@ -173,11 +173,32 @@ export const flushLayoutOnUnload = (s: CanvasState): void => {
   }
 }
 
-/** Cascade new windows off the visible top-left so two opened in a row do not stack exactly. */
-const spawnAt = (n: number): Point => {
+/**
+ * Where a new window lands: the first spot in the visible viewport where its rect covers no existing
+ * window (scanned in reading order on a coarse grid), so opening several widgets in a row tiles them
+ * instead of stacking them. Only when the viewport is genuinely full does it fall back to the old
+ * cascade off the top-left.
+ */
+const spawnAt = (windows: CanvasWindow[], size?: Size): Point => {
   const v = visibleRect(viewport())
-  const k = n % 6
-  return { x: Math.round(v.x + 48 + k * 32), y: Math.round(v.y + 48 + k * 32) }
+  const w = size?.w ?? 420
+  const h = size?.h ?? 340
+  const pad = 14
+  const others = windows.filter((x) => x.state === 'normal' || x.state === 'maximized')
+  const free = (x: number, y: number): boolean =>
+    others.every((o) => x + w + pad <= o.x || o.x + o.w + pad <= x || y + h + pad <= o.y || o.y + o.h + pad <= y)
+  const step = 48
+  const x0 = v.x + 48
+  const y0 = v.y + 48
+  const maxX = Math.max(x0, v.x + v.w - w - 24)
+  const maxY = Math.max(y0, v.y + v.h - h - 24)
+  for (let y = y0; y <= maxY; y += step) {
+    for (let x = x0; x <= maxX; x += step) {
+      if (free(x, y)) return { x: Math.round(x), y: Math.round(y) }
+    }
+  }
+  const k = windows.length % 6
+  return { x: Math.round(x0 + k * 32), y: Math.round(y0 + k * 32) }
 }
 
 export const useCanvas = create<CanvasState>((set, get) => {
@@ -364,7 +385,7 @@ export const useCanvas = create<CanvasState>((set, get) => {
       const canvasId = s.activeCanvasId
       const canvas = canvasId ? s.canvases[canvasId] : undefined
       if (!canvasId || !canvas) return null
-      const pos = at ?? spawnAt(canvas.windows.length)
+      const pos = at ?? spawnAt(canvas.windows, sizeOf?.(kind))
       try {
         const w = await api.canvases.addWindow(canvasId, {
           kind,

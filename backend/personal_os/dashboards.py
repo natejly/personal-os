@@ -258,7 +258,7 @@ Rules:
 - Output ONLY the HTML (starting with <!doctype html>), no markdown fences, no explanation.
 - The widget runs in a sandboxed iframe with `allow-scripts` only. No external scripts or CSS; inline everything. No frameworks.
 - Data: each source is available at the absolute URL given below via `fetch(url)`; responses are JSON (or {"text": ...}). Credentials are injected server-side; never ask for keys.
-- Style: dark theme; body background transparent; font-family system-ui; text color #ecebe8; muted #9c9a94; accent #d97757; compact 13px text; no page margins beyond 12px; content must fit the given size with internal scrolling if needed.
+- Style: dark theme; body background #232220 (opaque — never transparent, the app composites badly with transparent documents); font-family system-ui; text color #ecebe8; muted #9c9a94; accent #d97757; compact 13px text; no page margins beyond 12px; content must fit the given size with internal scrolling if needed.
 - Show a small "loading…" state, handle errors visibly, and render the requested information clearly (tables, lists, big numbers, simple inline SVG charts are all fine).
 - Refresh data when the document loads. Optionally add a refresh button.
 """

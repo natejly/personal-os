@@ -140,6 +140,16 @@ function WindowFrame({ win, live, selected = false, status = null }: WindowFrame
   const { onDragPointerDown, onResizePointerDown } = useWindowDrag(win, { node, min: def?.minSize ?? MIN, natural: def?.defaultSize })
   const [menu, setMenu] = useState<Point | null>(null)
 
+  // The open animation promotes the window to its own compositor layer, and a promoted layer with a
+  // backdrop-filter over a transparent native window renders see-through (same race the .dragging
+  // rule closes). Stay opaque until the animation is over; a timer, not onAnimationEnd, so
+  // prefers-reduced-motion (which skips the animation) cannot leave the window opaque forever.
+  const [settled, setSettled] = useState(false)
+  useEffect(() => {
+    const t = setTimeout(() => setSettled(true), 380)
+    return () => clearTimeout(t)
+  }, [])
+
   useEffect(() => {
     const el = node.current
     if (!el) return
@@ -187,7 +197,8 @@ function WindowFrame({ win, live, selected = false, status = null }: WindowFrame
   return (
     <div
       ref={node}
-      className={['win', focused && 'focused', selected && 'selected', win.state !== 'normal' && win.state].filter(Boolean).join(' ')}
+      className={['win', focused && 'focused', selected && 'selected', win.state !== 'normal' && win.state,
+        def?.heavy && 'heavy', !settled && 'opening'].filter(Boolean).join(' ')}
       data-window-id={win.id}
       data-kind={win.kind}
       style={{ ...rectStyle(win), zIndex: win.z + 1 }}

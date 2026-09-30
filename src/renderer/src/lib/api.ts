@@ -2,7 +2,8 @@ import type {
   ChatEvent, ToolInfo, Todo, GoogleStatus, TodayDashboard, CalendarEvent, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, DriveFile, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Recap, Conversation, ConversationSettings, ContextUsed, Document, GraphData, GraphEdge, GraphNode, Message,
   Memory, ModelInfo, ModelPrice, Settings, Project, UsageReport, ChatRunStarted, RunInfo,
   Canvas, CanvasWindow, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
-  Doc, FullDoc, DocRevision
+  Doc, FullDoc, DocRevision,
+  ActivityConfig, ActivityContextFile, ActivityEvent, ActivityStatus, ActivitySummary
 } from '@shared/types'
 
 let base = ''
@@ -193,6 +194,24 @@ export const api = {
       return req<Document>('/documents', { method: 'POST', body: fd })
     },
     delete: (id: string) => req(`/documents/${id}`, { method: 'DELETE' })
+  },
+  activity: {
+    status: () => req<ActivityStatus>('/activity/status'),
+    config: (patch: Partial<ActivityConfig>) => req<ActivityStatus>('/activity/config', { method: 'PUT', body: json(patch) }),
+    start: () => req<ActivityStatus>('/activity/start', { method: 'POST' }),
+    stop: () => req<ActivityStatus>('/activity/stop', { method: 'POST' }),
+    pause: (minutes = 30) => req<ActivityStatus>('/activity/pause', { method: 'POST', body: json({ minutes }) }),
+    resume: () => req<ActivityStatus>('/activity/resume', { method: 'POST' }),
+    events: (hours = 24, limit = 200, kind = '') => req<ActivityEvent[]>(`/activity/events?hours=${hours}&limit=${limit}&kind=${encodeURIComponent(kind)}`),
+    deleteEvent: (id: string) => req(`/activity/events/${id}`, { method: 'DELETE' }),
+    summaries: (days = 7) => req<ActivitySummary[]>(`/activity/summaries?days=${days}`),
+    deleteSummary: (id: string) => req(`/activity/summaries/${id}`, { method: 'DELETE' }),
+    /** Summarize what is pending now instead of waiting for the interval. */
+    rollup: () => req<{ summary: ActivitySummary | null; status: ActivityStatus }>('/activity/rollup', { method: 'POST' }),
+    refreshProfile: () => req<{ profile: string }>('/activity/profile', { method: 'POST' }),
+    context: () => req<ActivityContextFile>('/activity/context'),
+    devices: () => req<{ index: string; name: string }[]>('/activity/devices'),
+    purge: (scope: 'expired' | 'events' | 'summaries' | 'all') => req<{ deleted: { events: number; summaries: number }; status: ActivityStatus }>('/activity/purge', { method: 'POST', body: json({ scope }) })
   },
   canvases: {
     list: () => req<Canvas[]>('/canvases'),

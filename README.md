@@ -54,7 +54,16 @@ their own instructions, knowledge files, memories and graph.
   *proposed*, never written straight in. Each one arrives as a diff you accept
   or reject, so you can point a model at prose you care about. See
   [docs/docs-editor.md](docs/docs-editor.md).
-- **Context management.** Per-chat toggles for memory, graph, documents,
+- **Activity monitor** (macOS, opt-in, off by default). Watches what you actually
+  do — frontmost app and window, browser URLs, typing and click rhythm, the text
+  you type, microphone and system audio — summarizes it every few minutes, and
+  writes the result to `context/activity.md`, which is fed back into chats so the
+  assistant knows what you were working on. Every signal is a separate switch;
+  password managers and sign-in windows are never recorded; macOS secure input
+  stops keystroke capture dead; credentials and PII are redacted before anything
+  is stored; raw samples expire after 48h. The raw log is browsable row by row
+  and deletable. See [docs/activity-monitor.md](docs/activity-monitor.md).
+- **Context management.** Per-chat toggles for memory, graph, documents, activity,
   auto-learn and tools; an inspector showing exactly what was injected into
   each reply; a live preview for a draft message.
 - **Charts and diagrams.** Replies can include a ```` ```chart ```` block (a small
@@ -164,6 +173,7 @@ next calendar or mail call with an opaque error.
 | ⌘N | New chat |
 | ⌘0 … ⌘6, ⌘8 | Today / Chats / Todos / Calendar / Boards / Dashboards / Memory / Documents |
 | ⌘7 | Memory, opened on the knowledge graph |
+| ⌘9 | Activity |
 | ⌘B | Toggle sidebar |
 | ⌘I | Toggle context panel |
 | ⌘U | Upload document |
@@ -249,6 +259,24 @@ proxy does not price can be set by hand in Settings, which re-prices the whole
 history. When a provider does not return a usage block, tokens are estimated
 from character counts and the row is flagged `estimated`.
 
+## Activity monitor
+
+Off by default. Turn it on in the **Activity** panel (⌘9), where each signal is a
+separate switch with a plain description of what it records, and a capability
+checklist prints the exact fix for any missing permission. Optional extras:
+
+```bash
+cd backend && uv pip install -e '.[activity]'   # window titles + keystroke tap
+brew install ffmpeg                             # either audio signal
+brew install blackhole-2ch                      # system audio only
+```
+
+Then System Settings → Privacy & Security → Accessibility, enable the app, and
+restart it. In development the grant goes to **Electron**, not Personal OS.
+
+Full design, privacy model, API and limits:
+[docs/activity-monitor.md](docs/activity-monitor.md).
+
 ## Sandbox
 
 `run_python` executes scripts with `python -I` in a throwaway directory, with
@@ -266,11 +294,13 @@ src/shared/         Types shared between processes
 backend/personal_os app.py routes · repos.py storage · context.py · learn.py
                     tools.py · sandbox.py · google.py · todos.py · boards.py
                     docs.py · dashboards.py · usage.py · trace.py · llm.py
+                    activity.py collectors, privacy gate, rollup, activity.md
 scripts/dev.sh      LiteLLM + backend + Electron
 scripts/litellm.sh  LiteLLM proxy alone
 litellm.yaml        Model routing (Fireworks by default)
 docs/research.md    Feature research and roadmap
 docs/docs-editor.md The Docs editor: revisions, diffs and the doc_* tools
+docs/activity-monitor.md  Activity monitor: signals, privacy model, API
 ```
 
 ## Roadmap

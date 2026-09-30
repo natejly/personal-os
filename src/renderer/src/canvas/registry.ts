@@ -1,6 +1,7 @@
 import type { FC } from 'react'
 import type { CanvasWindow, DragKind, WidgetKind } from '@shared/types'
 import { setDefaultConfigs, setDefaultSizes } from './store'
+import { def as activity } from './widgets/activity'
 import { def as board } from './widgets/board'
 import { def as calendar } from './widgets/calendar'
 import { def as chat } from './widgets/chat'
@@ -62,7 +63,8 @@ export const WIDGETS: Record<WidgetKind, WidgetDef> = {
   documents,
   recap,
   project,
-  usage
+  usage,
+  activity
 }
 
 // The canvas store may not import the registry (its own note), so the catalog comes to it instead.

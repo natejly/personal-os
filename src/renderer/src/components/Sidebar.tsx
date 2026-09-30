@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
-import { MessageSquarePlus, Search, Settings, Trash2, PanelLeftClose, Sparkles, Brain, FileText, NotebookPen, Plus, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid, Mail } from 'lucide-react'
+import { MessageSquarePlus, Search, Settings, Trash2, PanelLeftClose, Sparkles, Brain, FileText, NotebookPen, Plus, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid, Mail, MonitorDot } from 'lucide-react'
 import { useStore, type View } from '../store'
+import { ActivityIndicator } from './ActivityView'
 import ChatPulse from './ChatPulse'
 import { viewHidden } from '../modules'
 import { dragProps } from '../canvas/dnd'
@@ -32,7 +33,8 @@ const NAV: { view: View; label: string; icon: JSX.Element; kind?: WidgetKind }[]
   { view: 'dashboards', label: 'Dashboards', icon: <LayoutDashboard size={15} /> },
   { view: 'memory', label: 'Memory', icon: <Brain size={15} />, kind: 'memory' },
   { view: 'documents', label: 'Documents', icon: <FileText size={15} />, kind: 'documents' },
-  { view: 'docs', label: 'Docs', icon: <NotebookPen size={15} /> }
+  { view: 'docs', label: 'Docs', icon: <NotebookPen size={15} /> },
+  { view: 'activity', label: 'Activity', icon: <MonitorDot size={15} />, kind: 'activity' }
 ]
 
 export default function Sidebar(): JSX.Element {
@@ -88,7 +90,7 @@ export default function Sidebar(): JSX.Element {
 
   const todoStats = useStore((s) => s.dashboard?.todo_stats)
   const libCount = (v: View): number | null => {
-    if (v === 'home' || v === 'calendar' || v === 'mail' || v === 'boards' || v === 'dashboards') return null
+    if (v === 'home' || v === 'calendar' || v === 'mail' || v === 'boards' || v === 'dashboards' || v === 'activity') return null
     if (v === 'todos') return todoStats?.open ?? null
     if (v === 'docs') return docCount
     const total = (key: 'memories' | 'nodes' | 'documents'): number =>
@@ -190,6 +192,7 @@ export default function Sidebar(): JSX.Element {
       </div>
 
       <div className="sidebar-bottom">
+        <ActivityIndicator />
         <button className="settings-btn" onClick={() => setSettingsOpen(true)}><Settings size={16} /><span>Settings</span><kbd>⌘,</kbd></button>
       </div>
     </aside>

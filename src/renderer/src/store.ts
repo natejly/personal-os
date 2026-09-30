@@ -1,9 +1,9 @@
 import { create } from 'zustand'
-import type { ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocRevision, Document, FullDoc, GraphData, Memory, Message, ModelInfo, Settings, Project, RunConflict, SessionStatus, ToolInfo, Todo, GoogleStatus, TodayDashboard, Recap } from '@shared/types'
+import type { ActivityConfig, ActivityContextFile, ActivityEvent, ActivitySignal, ActivityStatus, ActivitySummary, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocRevision, Document, FullDoc, GraphData, Memory, Message, ModelInfo, Settings, Project, RunConflict, SessionStatus, ToolInfo, Todo, GoogleStatus, TodayDashboard, Recap } from '@shared/types'
 import { api, chatStream, setBase, type Scope } from './lib/api'
 import { finishStatus, mergeConversation, pickEvictions, reduceStatus, settleApprovals } from './sessionStatus'
 
-export type View = 'home' | 'chat' | 'todos' | 'calendar' | 'mail' | 'boards' | 'dashboards' | 'memory' | 'documents' | 'docs' | 'project'
+export type View = 'home' | 'chat' | 'todos' | 'calendar' | 'mail' | 'boards' | 'dashboards' | 'memory' | 'documents' | 'docs' | 'activity' | 'project'
 /** How the Docs editor splits its panes. */
 export type DocMode = 'edit' | 'split' | 'preview'
 /** How the Memory panel lays out its two halves: the memory list and the knowledge graph. */
@@ -101,6 +101,12 @@ export interface State {
   /** Editor buffer for the open doc: what the user has typed but autosave has not yet flushed. */
   docDraft: string | null
   docSaving: boolean
+  /** Activity monitor. `null` until the first status poll lands. */
+  activity: ActivityStatus | null
+  activityEvents: ActivityEvent[]
+  activitySummaries: ActivitySummary[]
+  activityContext: ActivityContextFile | null
+  activityBusy: boolean
 
   init: () => Promise<void>
   loadModels: () => Promise<void>
@@ -154,6 +160,22 @@ export interface State {
 
   refreshGraph: () => Promise<void>
   refreshDocuments: () => Promise<void>
+
+  /** Status only - cheap enough to poll while the Activity panel is open. */
+  refreshActivity: () => Promise<void>
+  /** Status plus the event log, summaries and activity.md. */
+  loadActivity: () => Promise<void>
+  setActivityConfig: (patch: Partial<ActivityConfig>) => Promise<void>
+  toggleActivitySignal: (signal: ActivitySignal) => Promise<void>
+  startActivity: () => Promise<void>
+  stopActivity: () => Promise<void>
+  pauseActivity: (minutes?: number) => Promise<void>
+  resumeActivity: () => Promise<void>
+  rollupActivity: () => Promise<void>
+  refreshActivityProfile: () => Promise<void>
+  deleteActivityEvent: (id: string) => Promise<void>
+  deleteActivitySummary: (id: string) => Promise<void>
+  purgeActivity: (scope: 'expired' | 'events' | 'summaries' | 'all') => Promise<void>
   refreshDashboard: () => Promise<void>
   refreshRecap: (force?: boolean) => Promise<void>
   approveTool: (callId: string, decision: 'allow' | 'deny' | 'always_chat' | 'always_global', conversationId?: string) => Promise<void>
@@ -486,6 +508,12 @@ export const useStore = create<State>((set, get) => {
     graph: { nodes: [], edges: [] },
     documents: [],
 
+    activity: null,
+    activityEvents: [],
+    activitySummaries: [],
+    activityContext: null,
+    activityBusy: false,
+
     init: async () => {
       // Before the backend check and before the guard: a dead backend must still leave the menu
       // shortcuts wired, and StrictMode's second mount must not add a second listener.
@@ -511,6 +539,7 @@ export const useStore = create<State>((set, get) => {
       void get().refreshTodos()
       void get().refreshRecap()
       void get().refreshDocsPending()
+      void get().refreshActivity()
     },
 
     loadModels: async () => {
@@ -540,6 +569,7 @@ export const useStore = create<State>((set, get) => {
       }
       if (view === 'home') void get().refreshDashboard()
       if (view === 'todos') void get().refreshTodos()
+      if (view === 'activity') void get().loadActivity()
     },
     setMemoryMode: (memoryMode) => set({ memoryMode }),
     openMemory: (memoryMode) => set(memoryMode ? { view: 'memory', memoryMode } : { view: 'memory' }),
@@ -862,6 +892,90 @@ export const useStore = create<State>((set, get) => {
 
     refreshGraph: async () => set({ graph: await api.graph.get(get().dataScope) }),
     refreshDocuments: async () => set({ documents: await api.documents.list(get().dataScope) }),
+
+    // ---- activity monitor ----
+    refreshActivity: async () => {
+      try {
+        set({ activity: await api.activity.status() })
+      } catch {
+        /* the panel shows whatever it last had; a failed poll is not worth a toast */
+      }
+    },
+    loadActivity: async () => {
+      await get().refreshActivity()
+      const [events, summaries, context] = await Promise.all([
+        api.activity.events(24, 300).catch(() => []),
+        api.activity.summaries(7).catch(() => []),
+        api.activity.context().catch(() => null)
+      ])
+      set({ activityEvents: events, activitySummaries: summaries, activityContext: context })
+    },
+    setActivityConfig: async (patch) => {
+      try {
+        set({ activity: await api.activity.config(patch) })
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    toggleActivitySignal: async (signal) => {
+      const cur = get().activity?.config.signals
+      if (!cur) return
+      await get().setActivityConfig({ signals: { ...cur, [signal]: !cur[signal] } })
+    },
+    startActivity: async () => {
+      try {
+        set({ activity: await api.activity.start() })
+        get().toast('Activity monitor on')
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    stopActivity: async () => {
+      set({ activity: await api.activity.stop() })
+      get().toast('Activity monitor off')
+    },
+    pauseActivity: async (minutes = 30) => set({ activity: await api.activity.pause(minutes) }),
+    resumeActivity: async () => set({ activity: await api.activity.resume() }),
+    rollupActivity: async () => {
+      set({ activityBusy: true })
+      try {
+        const { summary, status } = await api.activity.rollup()
+        set({ activity: status })
+        get().toast(summary ? `Summarized: ${summary.headline}` : 'Nothing new to summarize')
+        await get().loadActivity()
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      } finally {
+        set({ activityBusy: false })
+      }
+    },
+    refreshActivityProfile: async () => {
+      set({ activityBusy: true })
+      try {
+        await api.activity.refreshProfile()
+        get().toast('Rebuilt the work profile')
+        await get().loadActivity()
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      } finally {
+        set({ activityBusy: false })
+      }
+    },
+    deleteActivityEvent: async (id) => {
+      await api.activity.deleteEvent(id)
+      set((s) => ({ activityEvents: s.activityEvents.filter((e) => e.id !== id) }))
+    },
+    deleteActivitySummary: async (id) => {
+      await api.activity.deleteSummary(id)
+      set((s) => ({ activitySummaries: s.activitySummaries.filter((x) => x.id !== id) }))
+      set({ activityContext: await api.activity.context().catch(() => get().activityContext) })
+    },
+    purgeActivity: async (scope) => {
+      const { deleted, status } = await api.activity.purge(scope)
+      set({ activity: status })
+      get().toast(`Deleted ${deleted.events} samples and ${deleted.summaries} summaries`)
+      await get().loadActivity()
+    },
     uploadDocuments: async (files, projectId) => {
       for (const f of Array.from(files)) {
         try {

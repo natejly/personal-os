@@ -251,9 +251,9 @@ def _allow_url(ctx: dict[str, Any], url: str | None) -> None:
 
 class Toolbox:
     def __init__(self, memories: Memories, graph: Graph, documents: Documents, settings_fn: Callable[[], dict[str, Any]], todos: Any = None, google: Any = None, boards: Any = None,
-                 sandboxes: Sandboxes | None = None, docs: Any = None):
+                 sandboxes: Sandboxes | None = None, docs: Any = None, activity: Any = None):
         self.memories, self.graph, self.documents, self.settings = memories, graph, documents, settings_fn
-        self.todos, self.google, self.boards, self.sandboxes, self.docs = todos, google, boards, sandboxes, docs
+        self.todos, self.google, self.boards, self.sandboxes, self.docs, self.activity = todos, google, boards, sandboxes, docs, activity
         self.specs: dict[str, ToolSpec] = {}
         self._register()
         if todos is not None:
@@ -266,6 +266,8 @@ class Toolbox:
             self._register_google()
         if sandboxes is not None:
             self._register_sandbox()
+        if activity is not None:
+            self._register_activity()
 
     def _google_ok(self) -> bool:
         return bool(self.google and self.google.status()["connected"])
@@ -809,6 +811,28 @@ def _register_sandbox(self: Toolbox) -> None:
         _obj({}, []), sandbox_reset, "sandbox", "executes", examples=[{}]))
 
 
+def _register_activity(self: Toolbox) -> None:
+    R = self.specs.__setitem__
+
+    async def activity_recent(ctx: dict[str, Any], hours: float = 8.0) -> Any:
+        m = self.activity
+        summaries = m.store.summaries(since=time.time() - max(0.25, float(hours)) * 3600, limit=40)
+        return {
+            "monitoring": m.running and not m.paused,
+            "right_now": m.now_line(),
+            "how_they_work": m.store.profile()["content"],
+            "periods": [{"day": s["day"], "from": s["period_start"], "to": s["period_end"],
+                         "headline": s["headline"], "summary": s["body"], "apps": s["apps"]} for s in summaries],
+        }
+    R("activity_recent", ToolSpec("activity_recent", "What the user has actually been doing on their computer recently, from the local activity monitor: a live line about the current window, the durable profile of how they work, and the summarized periods. Empty when the monitor is off. Use it when the user asks what they were doing, where their time went, or to ground advice in their real workflow.",
+        _obj({"hours": {"type": "number", "default": 8}}, []), activity_recent, "activity"))
+
+    async def activity_pause(ctx: dict[str, Any], minutes: float = 30.0) -> Any:
+        return {"paused_until": self.activity.pause(minutes)["pause_until"]}
+    R("activity_pause", ToolSpec("activity_pause", "Pause the activity monitor for a while, so nothing about the user's screen, typing or audio is recorded. Use it whenever the user asks you to stop watching.",
+        _obj({"minutes": {"type": "number", "default": 30}}, []), activity_pause, "activity", "writes"))
+
+
 Toolbox._register_todos = _register_todos  # type: ignore[attr-defined]
 Toolbox._register_boards = _register_boards  # type: ignore[attr-defined]
 Toolbox._register_google = _register_google  # type: ignore[attr-defined]
@@ -921,3 +945,4 @@ def _register_docs(self: Toolbox) -> None:
 
 
 Toolbox._register_docs = _register_docs  # type: ignore[attr-defined]
+Toolbox._register_activity = _register_activity  # type: ignore[attr-defined]

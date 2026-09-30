@@ -55,9 +55,10 @@ function Pre({ streaming, ...props }: React.HTMLAttributes<HTMLPreElement> & { s
   )
 }
 
+// The store is read imperatively inside the handlers: any subscription here defeats the memo, and a
+// streamed token would re-render every message in every mounted transcript.
 const MessageView = memo(function MessageView({ message, streaming }: { message: Message; streaming: boolean }): JSX.Element {
   const isUser = message.role === 'user'
-  const { toggleContext, contextOpen, openTrace } = useStore()
   const ctx = message.context_used
   const ctxCount = ctx ? ctx.memories.length + ctx.nodes.length + ctx.chunks.length : 0
   const trace = message.trace && message.trace.length > 0 ? traceSummary(message.trace) : null
@@ -83,14 +84,14 @@ const MessageView = memo(function MessageView({ message, streaming }: { message:
           <div className="msg-actions">
             {message.model && <span className="model-tag">{message.model}</span>}
             {ctx && ctxCount > 0 && (
-              <button className="ctx-chip" title="Context used for this reply" onClick={() => !contextOpen && toggleContext()}>
+              <button className="ctx-chip" title="Context used for this reply" onClick={() => { const s = useStore.getState(); if (!s.contextOpen) s.toggleContext() }}>
                 {ctx.memories.length > 0 && <span><Brain size={11} />{ctx.memories.length}</span>}
                 {ctx.nodes.length > 0 && <span><Share2 size={11} />{ctx.nodes.length}</span>}
                 {ctx.chunks.length > 0 && <span><FileText size={11} />{ctx.chunks.length}</span>}
               </button>
             )}
             {trace && (
-              <button className="ctx-chip" title="Execution trace: LLM rounds, tool calls, timings and tokens" onClick={() => openTrace(message.id)}>
+              <button className="ctx-chip" title="Execution trace: LLM rounds, tool calls, timings and tokens" onClick={() => useStore.getState().openTrace(message.id)}>
                 <span><Activity size={11} />{trace.steps} step{trace.steps === 1 ? '' : 's'} · {fmtMs(trace.total_ms)}{trace.tokens ? ` · ${trace.tokens.toLocaleString()} tok` : ''}</span>
               </button>
             )}

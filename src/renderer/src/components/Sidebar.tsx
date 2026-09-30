@@ -39,7 +39,17 @@ export default function Sidebar(): JSX.Element {
   const projectViewId = useStore((s) => s.projectViewId)
   const personalStats = useStore((s) => s.personalStats)
   const mode = useStore((s) => s.mode)
-  const { newChat, toggleMode, selectChat, deleteChat, setSettingsOpen, toggleSidebar, setView, openProject, setProjectModal } = useStore()
+  // One selector per action. Sidebar is mounted in both modes, so a bare useStore() here is what made
+  // App's whole subtree commit once per streamed token.
+  const newChat = useStore((s) => s.newChat)
+  const toggleMode = useStore((s) => s.toggleMode)
+  const selectChat = useStore((s) => s.selectChat)
+  const deleteChat = useStore((s) => s.deleteChat)
+  const setSettingsOpen = useStore((s) => s.setSettingsOpen)
+  const toggleSidebar = useStore((s) => s.toggleSidebar)
+  const setView = useStore((s) => s.setView)
+  const openProject = useStore((s) => s.openProject)
+  const setProjectModal = useStore((s) => s.setProjectModal)
   const [query, setQuery] = useState('')
   const [projectsOpen, setProjectsOpen] = useState(true)
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})

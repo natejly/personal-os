@@ -1,8 +1,9 @@
-import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu } from 'electron'
 import { join } from 'path'
 import { backendStatus, backendUrl, startBackend, stopBackend } from './backend'
 import { registerBus } from './bus'
-import { gather, registerPopouts, restorePopouts } from './popouts'
+import { guardNavigation } from './navigation'
+import { gather, registerPopouts, restorePopouts, setFrontListener, toggleFront } from './popouts'
 import { registerShortcuts } from './shortcuts'
 import { createTray } from './tray'
 
@@ -42,10 +43,7 @@ function createWindow(): void {
   win.webContents.on('console-message', (_e, level, message, line, source) => {
     if (level >= 2) console.error(`[renderer console] ${message}  (${source}:${line})`)
   })
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    void shell.openExternal(url)
-    return { action: 'deny' }
-  })
+  guardNavigation(win.webContents)
 
   if (process.env.ELECTRON_RENDERER_URL) {
     void win.loadURL(process.env.ELECTRON_RENDERER_URL)
@@ -199,7 +197,14 @@ function buildMenu(): void {
         { label: 'Return to Canvas', accelerator: 'Control+Command+Shift+O', click: () => sendWindowMenu('canvas:unpopout') },
         { label: 'Pin on Top', accelerator: 'Control+Command+P', click: () => sendWindowMenu('canvas:pin') },
         { type: 'separator' },
-        { label: 'Gather Widgets', accelerator: 'Alt+Command+G', click: () => void gather() }
+        { label: 'Gather Widgets', accelerator: 'Alt+Command+G', click: () => void gather() },
+        {
+          id: 'popouts-front',
+          label: 'Bring Pop-outs to Front',
+          type: 'checkbox',
+          accelerator: 'Alt+Command+F',
+          click: (item) => { item.checked = toggleFront() }
+        }
       ]
     }
   ]
@@ -221,6 +226,10 @@ app.whenReady().then(async () => {
   registerPopouts(() => win)
   registerBus()
   buildMenu()
+  setFrontListener((on) => {
+    const item = Menu.getApplicationMenu()?.getMenuItemById('popouts-front')
+    if (item) item.checked = on
+  })
   createTray(showMain)
   try {
     await startBackend()

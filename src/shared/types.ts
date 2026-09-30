@@ -251,6 +251,10 @@ export interface Settings {
   mode: 'classic' | 'canvas'
   /** Electron accelerator for the global Gather/Scatter shortcut. */
   gatherShortcut: string
+  /** Today-screen cards, keyed by module (see modules.ts); a missing key means shown. */
+  homeWidgets?: Record<string, boolean>
+  /** Sidebar views the user removed. */
+  hiddenViews?: string[]
   tools: Record<string, ToolMode | boolean>
   maxToolRounds: number
   /** Per-reply budgets; 0 means unlimited. */

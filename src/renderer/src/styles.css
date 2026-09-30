@@ -704,6 +704,20 @@ textarea.instructions:focus { border-color: var(--accent); }
 
 /* ---------- Home / dashboard ---------- */
 .page-body.wide { max-width: 1180px; }
+/* ---------- shell modularity (Today customize popover + Settings module grid) ---------- */
+.home-customize-wrap { position: relative; display: inline-flex; }
+.home-customize {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 31;
+  min-width: 190px; padding: 10px 12px; border-radius: 10px;
+  background: var(--bg-elev); border: 1px solid var(--border-strong);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+.home-customize h4 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-faint); }
+.chip-check-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; cursor: pointer; color: var(--text); }
+.chip-check-row input { accent-color: var(--accent); }
+.module-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 24px; }
+.module-head { margin: 0 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-faint); }
+
 .home-hero { padding: 8px 0 18px; }
 .home-hero h1 { font-size: 28px; font-weight: 500; margin: 0 0 14px; letter-spacing: -0.01em; }
 .quick-ask { display: flex; align-items: center; gap: 10px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 14px; padding: 8px 8px 8px 14px; color: var(--text-muted); transition: box-shadow 0.15s, border-color 0.15s; }

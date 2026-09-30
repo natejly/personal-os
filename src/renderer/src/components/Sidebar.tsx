@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { MessageSquarePlus, Search, Settings, Trash2, PanelLeftClose, Sparkles, Brain, FileText, Plus, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid } from 'lucide-react'
 import { useStore, type View } from '../store'
 import ChatPulse from './ChatPulse'
+import { viewHidden } from '../modules'
 import { dragProps } from '../canvas/dnd'
 import type { Conversation, WidgetKind } from '@shared/types'
 
@@ -38,6 +39,7 @@ export default function Sidebar(): JSX.Element {
   const view = useStore((s) => s.view)
   const projectViewId = useStore((s) => s.projectViewId)
   const personalStats = useStore((s) => s.personalStats)
+  const settings = useStore((s) => s.settings)
   const mode = useStore((s) => s.mode)
   // One selector per action. Sidebar is mounted in both modes, so a bare useStore() here is what made
   // App's whole subtree commit once per streamed token.
@@ -97,7 +99,7 @@ export default function Sidebar(): JSX.Element {
       </button>
 
       <nav className="nav">
-        {NAV.map((n) => (
+        {NAV.filter((n) => n.view === 'home' || !viewHidden(settings, n.view)).map((n) => (
           <button key={n.view} className={`nav-item ${view === n.view ? 'active' : ''}`} onClick={() => setView(n.view)}
             {...(n.kind ? dragProps({ kind: 'nav', id: n.kind, label: n.label }) : {})}>
             {n.icon}<span>{n.label}</span>{libCount(n.view) !== null && <span className="count">{libCount(n.view)}</span>}

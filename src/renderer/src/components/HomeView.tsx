@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Calendar, Mail, CheckSquare, Brain, FolderKanban, Sparkles, RefreshCw, PanelLeftOpen, ExternalLink, Plus, MessageSquare, X } from 'lucide-react'
+import { Calendar, Mail, CheckSquare, Brain, FolderKanban, Sparkles, RefreshCw, PanelLeftOpen, ExternalLink, Plus, MessageSquare, SlidersHorizontal, X } from 'lucide-react'
 import { useStore } from '../store'
+import { HOME_MODULES, homeModuleOn } from '../modules'
 import TodoItem from './TodoItem'
 import ProjectChip from './ProjectChip'
 import ReactMarkdown from 'react-markdown'
@@ -22,9 +23,17 @@ export default function HomeView(): JSX.Element {
   const { toggleSidebar, refreshDashboard, setView, newChat, send, openProject, selectChat, addTodo, setSettingsOpen, refreshRecap } = useStore()
   const recap = useStore((s) => s.recap)
   const recapLoading = useStore((s) => s.recapLoading)
+  const settings = useStore((s) => s.settings)
+  const saveSettings = useStore((s) => s.saveSettings)
   const [recapOpen, setRecapOpen] = useState(true)
   const [quick, setQuick] = useState('')
   const [busy, setBusy] = useState(false)
+  const [customizing, setCustomizing] = useState(false)
+
+  const on = (key: string): boolean => homeModuleOn(settings, key)
+  const toggleModule = (key: string): void => {
+    void saveSettings({ homeWidgets: { ...(settings.homeWidgets ?? {}), [key]: !on(key) } })
+  }
 
   useEffect(() => { void refreshDashboard() }, [refreshDashboard])
 
@@ -51,6 +60,23 @@ export default function HomeView(): JSX.Element {
         <h2>Today <span className="muted">{new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</span></h2>
         <div className="no-drag header-right">
           <button className="icon-btn" title="Refresh" onClick={() => void refresh()}><RefreshCw size={15} className={busy ? 'spin' : ''} /></button>
+          <div className="home-customize-wrap">
+            <button className={`icon-btn ${customizing ? 'on' : ''}`} title="Choose what shows here" onClick={() => setCustomizing((v) => !v)}><SlidersHorizontal size={15} /></button>
+            {customizing && (
+              <>
+                <div className="popover-backdrop" onMouseDown={() => setCustomizing(false)} />
+                <div className="home-customize">
+                  <h4>Show on Today</h4>
+                  {HOME_MODULES.map((m) => (
+                    <label key={m.key} className="chip-check-row">
+                      <input type="checkbox" checked={on(m.key)} onChange={() => toggleModule(m.key)} />
+                      <span>{m.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
           <button className="primary-btn" onClick={() => void brief()}><Sparkles size={14} /> Brief me</button>
         </div>
       </header>
@@ -68,7 +94,7 @@ export default function HomeView(): JSX.Element {
           </div>
         </div>
 
-        {(recap?.content || recapLoading) && recapOpen && (
+        {on('recap') && (recap?.content || recapLoading) && recapOpen && (
           <section className="recap">
             <header>Daily recap <span className="muted small">{recap?.cached ? 'generated earlier today' : 'fresh'}</span>
               <span style={{ flex: 1 }} />
@@ -79,7 +105,7 @@ export default function HomeView(): JSX.Element {
           </section>
         )}
         <div className="widgets">
-          <section className="widget">
+          {on('calendar') && <section className="widget">
             <header><Calendar size={14} /> Calendar {google?.connected && <span className="muted small">next 48h</span>}</header>
             {!google?.connected ? (
               <div className="widget-empty">
@@ -96,14 +122,14 @@ export default function HomeView(): JSX.Element {
                 ))}
               </ul>
             )}
-          </section>
+          </section>}
 
-          <section className="widget">
+          {on('todos') && <section className="widget">
             <header><CheckSquare size={14} /> Todos <span className="muted small">{d?.todo_stats.open ?? 0} open{d?.todo_stats.overdue ? ` · ${d.todo_stats.overdue} overdue` : ''}</span><button className="link small" onClick={() => setView('todos')}>all</button></header>
             {(d?.todos.length ?? 0) === 0 ? <p className="muted">All clear.</p> : d!.todos.slice(0, 8).map((t) => <TodoItem key={t.id} todo={t} compact />)}
-          </section>
+          </section>}
 
-          <section className="widget">
+          {on('inbox') && <section className="widget">
             <header><Mail size={14} /> Inbox {google?.connected && <span className="muted small">unread, 3 days</span>}</header>
             {!google?.connected ? <p className="muted">Connect Google.</p> : d?.errors.gmail ? <p className="msg-error">{d.errors.gmail}</p> : (d?.gmail?.length ?? 0) === 0 ? <p className="muted">Inbox zero.</p> : (
               <ul className="mails">
@@ -116,9 +142,9 @@ export default function HomeView(): JSX.Element {
                 ))}
               </ul>
             )}
-          </section>
+          </section>}
 
-          <section className="widget">
+          {on('projects') && <section className="widget">
             <header><FolderKanban size={14} /> Projects</header>
             {(d?.projects.length ?? 0) === 0 ? <p className="muted">No projects yet.</p> : (
               <ul className="proj-list">
@@ -130,21 +156,21 @@ export default function HomeView(): JSX.Element {
                 ))}
               </ul>
             )}
-          </section>
+          </section>}
 
-          <section className="widget">
+          {on('memories') && <section className="widget">
             <header><Brain size={14} /> Recently learned <button className="link small" onClick={() => setView('memory')}>all</button></header>
             {(d?.recent_memories.length ?? 0) === 0 ? <p className="muted">Nothing yet. Chat with auto-learn on.</p> : (
               <ul className="mem-list">{d!.recent_memories.map((m) => <li key={m.id}>{m.content} <ProjectChip projectId={m.project_id} clickable={false} /></li>)}</ul>
             )}
-          </section>
+          </section>}
 
-          <section className="widget">
+          {on('chats') && <section className="widget">
             <header><MessageSquare size={14} /> Recent chats</header>
             {(d?.recent_conversations.length ?? 0) === 0 ? <p className="muted">No chats yet.</p> : (
               <ul className="proj-list">{d!.recent_conversations.map((c) => <li key={c.id} onClick={() => void selectChat(c.id)}><span className="ev-title">{c.title}</span><ProjectChip projectId={c.project_id} clickable={false} /></li>)}</ul>
             )}
-          </section>
+          </section>}
         </div>
       </div>
     </main>

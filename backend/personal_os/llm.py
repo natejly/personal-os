@@ -46,6 +46,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "theme": "dark",
     "mode": "classic",
     "gatherShortcut": "Control+Alt+Command+Space",
+    # Shell modularity: Today-screen cards ({key: bool}, missing = shown) and sidebar views the user removed.
+    "homeWidgets": {},
+    "hiddenViews": [],
     # tools: {tool_name: bool}; missing = on
     "tools": {},
     "maxToolRounds": 25,

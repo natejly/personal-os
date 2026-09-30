@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { X, Eye, EyeOff, Plug } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
+import { HOME_MODULES, OPTIONAL_VIEWS } from '../modules'
 import type { Settings, ShortcutState } from '@shared/types'
 import { ToolGlobalToggles } from './ToolPermissions'
 import GoogleSettings from './GoogleSettings'
@@ -10,7 +11,8 @@ import UsageView from './UsageView'
 export default function SettingsModal(): JSX.Element {
   const settings = useStore((s) => s.settings)
   const models = useStore((s) => s.models)
-  const { saveSettings, setSettingsOpen } = useStore()
+  const view = useStore((s) => s.view)
+  const { saveSettings, setSettingsOpen, setView } = useStore()
   const [draft, setDraft] = useState<Settings>(settings)
   const [showKey, setShowKey] = useState(false)
   const [test, setTest] = useState<{ state: 'idle' | 'testing' | 'ok' | 'fail'; msg?: string }>({ state: 'idle' })
@@ -41,9 +43,18 @@ export default function SettingsModal(): JSX.Element {
     const applied = accel === settings.gatherShortcut.trim() ? null : await window.os.shortcuts.setGather(accel)
     if (applied) setShortcut(applied)
     await saveSettings({ ...draft, gatherShortcut: applied?.accelerator ?? draft.gatherShortcut })
+    // The active view can be removed from the sidebar; don't leave the app parked on an unreachable one.
+    if ((draft.hiddenViews ?? []).includes(view)) setView('home')
     if (applied && !applied.ok) return
     setSettingsOpen(false)
   }
+
+  const hidden = draft.hiddenViews ?? []
+  const toggleView = (v: string): void =>
+    patch({ hiddenViews: hidden.includes(v) ? hidden.filter((x) => x !== v) : [...hidden, v] })
+  const homeOn = (k: string): boolean => draft.homeWidgets?.[k] !== false
+  const toggleHome = (k: string): void =>
+    patch({ homeWidgets: { ...(draft.homeWidgets ?? {}), [k]: !homeOn(k) } })
 
   return (
     <div className="modal-backdrop" onMouseDown={() => setSettingsOpen(false)}>
@@ -100,6 +111,31 @@ export default function SettingsModal(): JSX.Element {
           <h3>Usage &amp; cost</h3>
           <p className="muted">Every model call is logged locally with its token counts and cost.</p>
           <UsageView />
+        </section>
+
+        <section>
+          <h3>Modules</h3>
+          <p className="muted">Pick which views the sidebar offers and which cards the Today screen shows. Everything can be turned back on here later.</p>
+          <div className="module-grid">
+            <div>
+              <h4 className="module-head">Sidebar views</h4>
+              {OPTIONAL_VIEWS.map((v) => (
+                <label key={v.view} className="chip-check-row">
+                  <input type="checkbox" checked={!hidden.includes(v.view)} onChange={() => toggleView(v.view)} />
+                  <span>{v.label}</span>
+                </label>
+              ))}
+            </div>
+            <div>
+              <h4 className="module-head">Today screen</h4>
+              {HOME_MODULES.map((m) => (
+                <label key={m.key} className="chip-check-row">
+                  <input type="checkbox" checked={homeOn(m.key)} onChange={() => toggleHome(m.key)} />
+                  <span>{m.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
         </section>
 
         <section>

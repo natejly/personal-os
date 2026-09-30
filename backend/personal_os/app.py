@@ -373,7 +373,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event) -> Async
                 except ValueError:
                     args = {"_raw": c["arguments"]}
                 mode = modes.get(c["name"], "off")
-                yield "tool_call", {"message_id": am["id"], "id": c["id"], "name": c["name"], "arguments": args, "needs_approval": mode == "ask"}
+                # The provider's call id is only unique within one request -- llm.stream_chat falls back
+                # to "call_<idx>" when the provider omits one -- so two conversations streaming at once
+                # both produce "call_0". Key anything cross-conversation by the message id too, or one
+                # chat's approval resolves another chat's call. The model still sees c["id"].
+                uid = f"{am['id']}:{c['id']}"
+                yield "tool_call", {"message_id": am["id"], "id": uid, "name": c["name"], "arguments": args, "needs_approval": mode == "ask"}
                 tspan = tracer.start("tool", c["name"], {"round": _round + 1, "arguments": _short(args), "mode": mode})
                 yield "span", {"message_id": am["id"], "span": tspan}
                 t0 = time.time()
@@ -381,7 +386,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event) -> Async
                 if mode == "ask":
                     # Pause the reply until the user approves or denies this call (POST /approvals/{call_id}).
                     fut: asyncio.Future = asyncio.get_event_loop().create_future()
-                    _approvals[c["id"]] = fut
+                    _approvals[uid] = fut
                     try:
                         waited = 0.0
                         while not fut.done():
@@ -397,7 +402,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event) -> Async
                                     fut.set_result("deny")
                         decision = fut.result()
                     finally:
-                        _approvals.pop(c["id"], None)
+                        _approvals.pop(uid, None)
                     t0 = time.time()  # don't count waiting time as tool time
                     if decision == "always_chat":
                         convos.update(conv_id, {"settings": {"tools": {**(conv["settings"].get("tools") or {}), c["name"]: "on"}}})
@@ -419,7 +424,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event) -> Async
                 images = result.pop("images", None) if isinstance(result, dict) else None
                 preview = summarize_result(result)
                 err = result.get("error") if isinstance(result, dict) else None
-                event = {"id": c["id"], "name": c["name"], "arguments": args, "result_preview": preview, "duration_ms": ms,
+                event = {"id": uid, "name": c["name"], "arguments": args, "result_preview": preview, "duration_ms": ms,
                          "error": err, "images": images or None, "approval": (decision if mode == "ask" else None)}
                 tracer.end(tspan, {"result_chars": len(preview), "images": len(images or [])}, error=err)
                 tool_events.append(event)

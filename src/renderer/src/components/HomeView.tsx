@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Calendar, Mail, CheckSquare, Brain, FolderKanban, Sparkles, RefreshCw, PanelLeftOpen, ExternalLink, Plus, MessageSquare } from 'lucide-react'
+import { Calendar, Mail, CheckSquare, Brain, FolderKanban, Sparkles, RefreshCw, PanelLeftOpen, ExternalLink, Plus, MessageSquare, X } from 'lucide-react'
 import { useStore } from '../store'
 import TodoItem from './TodoItem'
 import ProjectChip from './ProjectChip'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { SAFE_MD } from './Message'
 
 function greeting(): string {
   const h = new Date().getHours()
@@ -47,7 +48,7 @@ export default function HomeView(): JSX.Element {
     <main className="page home">
       <header className="page-header drag">
         {!sidebarOpen && <button className="icon-btn no-drag" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
-        <h2><Sparkles size={16} /> Today <span className="muted">· {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</span></h2>
+        <h2>Today <span className="muted">{new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</span></h2>
         <div className="no-drag header-right">
           <button className="icon-btn" title="Refresh" onClick={() => void refresh()}><RefreshCw size={15} className={busy ? 'spin' : ''} /></button>
           <button className="primary-btn" onClick={() => void brief()}><Sparkles size={14} /> Brief me</button>
@@ -69,12 +70,12 @@ export default function HomeView(): JSX.Element {
 
         {(recap?.content || recapLoading) && recapOpen && (
           <section className="recap">
-            <header><Sparkles size={14} /> Daily recap <span className="muted small">{recap?.cached ? 'generated earlier today' : 'fresh'}</span>
+            <header>Daily recap <span className="muted small">{recap?.cached ? 'generated earlier today' : 'fresh'}</span>
               <span style={{ flex: 1 }} />
               <button className="icon-btn sm" title="Regenerate" onClick={() => void refreshRecap(true)}><RefreshCw size={13} className={recapLoading ? 'spin' : ''} /></button>
-              <button className="icon-btn sm" title="Hide" onClick={() => setRecapOpen(false)}>×</button>
+              <button className="icon-btn sm" title="Hide" onClick={() => setRecapOpen(false)}><X size={13} /></button>
             </header>
-            {recapLoading && !recap?.content ? <p className="muted">Writing your recap…</p> : <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]}>{recap?.content ?? ''}</ReactMarkdown></div>}
+            {recapLoading && !recap?.content ? <p className="muted">Writing your recap…</p> : <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={SAFE_MD}>{recap?.content ?? ''}</ReactMarkdown></div>}
           </section>
         )}
         <div className="widgets">

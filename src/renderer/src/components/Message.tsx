@@ -1,38 +1,10 @@
-import { memo, useState } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import rehypeHighlight from 'rehype-highlight'
-import { Copy, Check, AlertCircle, User, Sparkles, Brain, Share2, FileText, Activity } from 'lucide-react'
+import { memo } from 'react'
+import { AlertCircle, User, Sparkles, Brain, Share2, FileText, Activity } from 'lucide-react'
 import type { Message } from '@shared/types'
 import { useStore } from '../store'
 import ToolEvents from './ToolEvents'
-import ChartBlock from './ChartBlock'
-import MermaidBlock from './MermaidBlock'
+import MarkdownPreview, { CopyButton } from './MarkdownPreview'
 import { traceSummary, fmtMs } from './TraceView'
-
-function CopyButton({ text }: { text: string }): JSX.Element {
-  const [ok, setOk] = useState(false)
-  return (
-    <button className="icon-btn ghost" title="Copy" onClick={() => { void navigator.clipboard.writeText(text); setOk(true); setTimeout(() => setOk(false), 1200) }}>
-      {ok ? <Check size={13} /> : <Copy size={13} />}
-    </button>
-  )
-}
-
-function Pre({ streaming, ...props }: React.HTMLAttributes<HTMLPreElement> & { streaming?: boolean }): JSX.Element {
-  const child = props.children as React.ReactElement<{ className?: string; children?: string }> | undefined
-  const lang = child?.props?.className?.replace('hljs language-', '').replace('language-', '') ?? ''
-  const code = String(child?.props?.children ?? '')
-  // Blocks the model can use to render rich content instead of code (see RENDER_HINT in the backend).
-  if (lang === 'chart') return <ChartBlock source={code} streaming={!!streaming} />
-  if (lang === 'mermaid') return <MermaidBlock source={code} streaming={!!streaming} />
-  return (
-    <div className="code-block">
-      <div className="code-head"><span>{lang || 'text'}</span><CopyButton text={code} /></div>
-      <pre {...props} />
-    </div>
-  )
-}
 
 const MessageView = memo(function MessageView({ message, streaming }: { message: Message; streaming: boolean }): JSX.Element {
   const isUser = message.role === 'user'
@@ -50,7 +22,7 @@ const MessageView = memo(function MessageView({ message, streaming }: { message:
           <div className="markdown">
             {message.tool_events && message.tool_events.length > 0 && <ToolEvents events={message.tool_events} conversationId={message.conversation_id} />}
             {message.content ? (
-              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]} components={{ pre: (p) => <Pre {...p} streaming={streaming} /> }}>{message.content}</ReactMarkdown>
+              <MarkdownPreview source={message.content} streaming={streaming} />
             ) : streaming && !message.tool_events?.some((t) => t.pending) ? (
               <span className="thinking"><span /><span /><span /></span>
             ) : null}

@@ -952,3 +952,10 @@ textarea.instructions:focus { border-color: var(--accent); }
 .usage-prices input { width: 92px; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 6px; padding: 3px 6px; font-size: 12px; outline: 0; font-variant-numeric: tabular-nums; }
 .usage-price-src { font-size: 10px; color: var(--text-faint); text-align: right; }
 .usage-prices .test-row { padding: 8px 10px; border-top: 1px solid var(--border); }
+
+/* Nav badge for assistant doc edits awaiting review (Docs). */
+.nav-item .count.pending {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}

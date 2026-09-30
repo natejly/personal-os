@@ -4,6 +4,7 @@ import Sidebar from './components/Sidebar'
 import ChatView from './components/ChatView'
 import MemoryPanel from './components/MemoryPanel'
 import DocumentsView from './components/DocumentsView'
+import DocsView from './components/DocsView'
 import ProjectView from './components/ProjectView'
 import HomeView from './components/HomeView'
 import TodosView from './components/TodosView'
@@ -83,6 +84,7 @@ export default function App(): JSX.Element {
           {view === 'dashboards' && <DashboardsView />}
           {view === 'memory' && <MemoryPanel />}
           {view === 'documents' && <DocumentsView />}
+          {view === 'docs' && <DocsView />}
           {view === 'project' && <ProjectView />}
         </>
       )}

@@ -46,15 +46,17 @@ def _obj(props: dict[str, Any], required: list[str]) -> dict[str, Any]:
 
 
 class Toolbox:
-    def __init__(self, memories: Memories, graph: Graph, documents: Documents, settings_fn: Callable[[], dict[str, Any]], todos: Any = None, google: Any = None, boards: Any = None):
+    def __init__(self, memories: Memories, graph: Graph, documents: Documents, settings_fn: Callable[[], dict[str, Any]], todos: Any = None, google: Any = None, boards: Any = None, docs: Any = None):
         self.memories, self.graph, self.documents, self.settings = memories, graph, documents, settings_fn
-        self.todos, self.google, self.boards = todos, google, boards
+        self.todos, self.google, self.boards, self.docs = todos, google, boards, docs
         self.specs: dict[str, ToolSpec] = {}
         self._register()
         if todos is not None:
             self._register_todos()
         if boards is not None:
             self._register_boards()
+        if docs is not None:
+            self._register_docs()
         if google is not None:
             self._register_google()
 
@@ -374,3 +376,111 @@ def _register_boards(self: Toolbox) -> None:
 Toolbox._register_todos = _register_todos  # type: ignore[attr-defined]
 Toolbox._register_boards = _register_boards  # type: ignore[attr-defined]
 Toolbox._register_google = _register_google  # type: ignore[attr-defined]
+
+
+def _register_docs(self: Toolbox) -> None:
+    """Tools over the docs the user writes. Every edit is a proposal — see `doc_edit`."""
+    R = self.specs.__setitem__
+
+    def _numbered(text: str, start: int = 1, end: int | None = None) -> str:
+        lines = text.splitlines()
+        hi = len(lines) if end is None else min(int(end), len(lines))
+        lo = max(1, int(start))
+        return "\n".join(f"{i:>4}| {lines[i - 1]}" for i in range(lo, hi + 1))
+
+    def _missing(key: str) -> dict[str, Any]:
+        return {"error": f"No doc matching '{key}'", "docs": [d["title"] for d in self.docs.list()][:10],
+                "hint": "pass a doc id or exact title from doc_list, or use doc_create to start one"}
+
+    async def doc_list(ctx: dict[str, Any], query: str = "") -> Any:
+        return [{"doc_id": d["id"], "title": d["title"], "words": d["words"],
+                 "scope": "project" if d["project_id"] else "personal",
+                 "pending_edits": d["pending"], "folder": d["folder"] or None}
+                for d in self.docs.list(q=query)]
+    R("doc_list", ToolSpec("doc_list", "List the docs the user writes in the Docs editor — their markdown notes, drafts and documents. (Files they uploaded are a different thing: use search_documents for those.) Start here when they mention 'my notes', 'my essay' or 'the doc' and you need its id.",
+        _obj({"query": {"type": "string", "description": "Optional filter on title or body"}}, []), doc_list, "docs"))
+
+    async def doc_search(ctx: dict[str, Any], query: str, limit: int = 8) -> Any:
+        hits = self.docs.search(query, limit=max(1, min(int(limit), 20)))
+        return {"results": hits, "count": len(hits)}
+    R("doc_search", ToolSpec("doc_search", "Full-text search across the bodies of the user's docs, returning a snippet per hit. Use it to find where something is written before reading or revising it.",
+        _obj({"query": {"type": "string"}, "limit": {"type": "integer", "default": 8}}, ["query"]), doc_search, "docs"))
+
+    async def doc_read(ctx: dict[str, Any], doc: str, from_line: int = 1, to_line: int | None = None) -> Any:
+        d = self.docs.find(doc)
+        if not d:
+            return _missing(doc)
+        total = len(d["content"].splitlines())
+        return {"doc_id": d["id"], "title": d["title"], "total_lines": total, "words": d["words"],
+                "pending_edits": len(d["pending"]),
+                "text": _numbered(d["content"], from_line, total if to_line is None else int(to_line))}
+    R("doc_read", ToolSpec("doc_read", "Read a doc's markdown with line numbers (LaTeX written as $…$ or $$…$$ is part of the text). Read before editing: doc_edit matches on exact text, so you need the real wording. Page through a long doc with from_line/to_line.",
+        _obj({"doc": {"type": "string", "description": "Doc id or title"}, "from_line": {"type": "integer", "default": 1}, "to_line": {"type": "integer"}}, ["doc"]), doc_read, "docs"))
+
+    async def doc_create(ctx: dict[str, Any], title: str, content: str = "") -> Any:
+        d = self.docs.create(title, content, ctx.get("project_id"), author="assistant")
+        return {"created": d["title"], "doc_id": d["id"], "words": d["words"],
+                "note": "Created in Docs. The user can undo it from the doc's revision history."}
+    R("doc_create", ToolSpec("doc_create", "Create a new doc for the user, optionally with a starting markdown body. Use it when they ask you to draft, write up or outline something they will keep and edit. Markdown and LaTeX ($x^2$, $$\\int f\\,dx$$) both render in the editor.",
+        _obj({"title": {"type": "string"}, "content": {"type": "string", "description": "Markdown body"}}, ["title"]), doc_create, "docs", "writes"))
+
+    async def doc_edit(ctx: dict[str, Any], doc: str, edits: list[dict[str, Any]] | None = None,
+                       content: str | None = None, append: str | None = None,
+                       title: str | None = None, summary: str = "") -> Any:
+        d = self.docs.find(doc)
+        if not d:
+            return _missing(doc)
+        body = d["content"]
+        if content is not None:
+            new = content
+        elif append is not None:
+            new = body + ("\n" if body and not body.endswith("\n") else "") + append
+        elif edits:
+            new = body
+            for i, e in enumerate(edits):
+                if not isinstance(e, dict) or "find" not in e or "replace" not in e:
+                    return {"error": f"edits[{i}] needs both 'find' and 'replace'",
+                            "example": {"doc": d["title"], "edits": [{"find": "old wording", "replace": "new wording"}]}}
+                find, repl = str(e["find"]), str(e["replace"])
+                if not find:
+                    return {"error": f"edits[{i}].find is empty", "hint": "to add text use 'append'; to rewrite the body use 'content'"}
+                hits = new.count(find)
+                if hits != 1:
+                    return {"error": f"edits[{i}]: 'find' matched {hits} times, need exactly 1",
+                            "hint": ("copy the text verbatim from doc_read, including punctuation and capitalisation"
+                                     if hits == 0 else "include a surrounding line so the match is unique"),
+                            "doc_id": d["id"]}
+                new = new.replace(find, repl, 1)
+        elif title is None:
+            return {"error": "Nothing to change", "hint": "pass one of 'edits', 'append', 'content' or 'title'",
+                    "example": {"doc": d["title"], "edits": [{"find": "teh", "replace": "the"}], "summary": "Fix typo"}}
+        else:
+            new = body
+        retitle = title if title and title != d["title"] else None
+        if new == body and not retitle:
+            return {"doc_id": d["id"], "unchanged": True, "note": "The edit produced no change, so nothing was proposed."}
+        rev = self.docs.propose(d["id"], new, summary or "Assistant edit", tool="doc_edit", title_after=retitle)
+        if not rev:
+            return _missing(doc)
+        return {"doc_id": d["id"], "title": d["title"], "revision_id": rev["id"], "status": "pending_review",
+                "lines_added": rev["stat"]["added"], "lines_removed": rev["stat"]["removed"],
+                "note": "Proposed, not applied. The user reviews the diff in Docs and accepts or rejects it. "
+                        "Tell them what you changed and that it is waiting for their review."}
+    R("doc_edit", ToolSpec("doc_edit", (
+        "Revise one of the user's docs. The change is *proposed*, never written straight in: it becomes a pending "
+        "revision that the user reviews as a diff and then accepts or rejects, so you can edit their writing freely.\n"
+        "Pick one form. 'edits' — targeted find/replace, preferred: each 'find' must be copied exactly from doc_read "
+        "and must occur exactly once. 'append' — add markdown at the end. 'content' — replace the whole body (use "
+        "sparingly; it makes a large diff). 'title' — rename. Always pass a short 'summary' naming what you changed: "
+        "the user reads it next to the diff."),
+        _obj({"doc": {"type": "string", "description": "Doc id or title"},
+              "edits": {"type": "array", "description": "Targeted replacements, applied in order",
+                        "items": _obj({"find": {"type": "string"}, "replace": {"type": "string"}}, ["find", "replace"])},
+              "append": {"type": "string", "description": "Markdown to add at the end"},
+              "content": {"type": "string", "description": "Replacement for the entire body"},
+              "title": {"type": "string"},
+              "summary": {"type": "string", "description": "Short description of the change, shown to the user"}}, ["doc"]),
+        doc_edit, "docs", "writes"))
+
+
+Toolbox._register_docs = _register_docs  # type: ignore[attr-defined]

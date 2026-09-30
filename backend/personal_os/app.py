@@ -25,6 +25,7 @@ from .repos import ALL, Conversations, Documents, Graph, Memories, Projects
 from .boards import Boards
 from .canvas import SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
 from .dashboards import Dashboards, generate_recap, generate_summary, generate_widget_code
+from .docs import Docs, unified_diff
 from .google import Google, GoogleNotConnected, json_safe
 from .notes import Notes
 from .runs import Run, RunBus
@@ -41,8 +42,11 @@ convos = Conversations(db)
 memories = Memories(db)
 graph = Graph(db)
 documents = Documents(db)
+docs = Docs(db)
 
-app = FastAPI(title="Personal OS", version="0.1.0")
+# `docs_url` is moved off /docs: that prefix belongs to the user's own documents (see docs.py).
+app = FastAPI(title="Personal OS", version="0.1.0", docs_url="/api-docs", redoc_url=None,
+              swagger_ui_oauth2_redirect_url=None)  # its default sits under /docs too
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 # Live runs, one per conversation, each owning its own task. Any number of clients may watch one.
@@ -98,7 +102,7 @@ def _record_usage(ev: dict[str, Any]) -> None:
 
 if not any(getattr(f, "__name__", "") == "_record_usage" for f in llm._usage_listeners):
     llm.on_usage(_record_usage)
-toolbox = Toolbox(memories, graph, documents, settings, todos=todos, google=google, boards=boards)
+toolbox = Toolbox(memories, graph, documents, settings, todos=todos, google=google, boards=boards, docs=docs)
 
 
 def sid(project_id: str | None) -> str | None:
@@ -1523,3 +1527,119 @@ def delete_note(id: str) -> dict[str, bool]:
     notes.delete(id)
     canvases.delete_windows_for("note", id)
     return {"ok": True}
+
+
+# ---------------- docs: long-form markdown notes with reviewable revisions ----------------
+
+
+class DocIn(BaseModel):
+    title: str = "Untitled"
+    content: str = ""
+    folder: str = ""
+    project_id: str | None = None
+
+
+class DocSave(BaseModel):
+    """The editor's autosave. `content` and `title` are both optional so either can be saved alone."""
+    content: str | None = None
+    title: str | None = None
+    summary: str = ""
+
+
+class DocMetaPatch(BaseModel):
+    title: str | None = None
+    folder: str | None = None
+    starred: bool | None = None
+    project_id: str | None = None
+    clear_project: bool = False
+
+
+@app.get("/docs")
+def list_docs(project_id: str | None = "all", q: str = "") -> list[dict[str, Any]]:
+    scope = "__all__" if project_id in (None, "all") else sid(project_id)
+    return docs.list(scope, q)
+
+
+@app.get("/docs/pending")
+def docs_pending() -> dict[str, int]:
+    """Badge count for the sidebar: assistant edits waiting to be reviewed."""
+    return {"pending": docs.pending_count()}
+
+
+@app.post("/docs")
+def create_doc(body: DocIn) -> dict[str, Any]:
+    return docs.create(body.title, body.content, sid(body.project_id), body.folder)
+
+
+@app.get("/docs/{id}")
+def get_doc(id: str) -> dict[str, Any]:
+    d = docs.get(id)
+    if not d:
+        raise HTTPException(404)
+    return d
+
+
+@app.put("/docs/{id}")
+def save_doc(id: str, body: DocSave) -> dict[str, Any]:
+    d = docs.save(id, body.content, body.title, body.summary)
+    if not d:
+        raise HTTPException(404)
+    return d
+
+
+@app.patch("/docs/{id}")
+def patch_doc(id: str, body: DocMetaPatch) -> dict[str, Any]:
+    patch = body.model_dump(exclude_none=True, exclude={"clear_project"})
+    if body.clear_project:
+        patch["project_id"] = None
+    elif "project_id" in patch:
+        patch["project_id"] = sid(patch["project_id"])
+    d = docs.update_meta(id, patch)
+    if not d:
+        raise HTTPException(404)
+    return d
+
+
+@app.delete("/docs/{id}")
+def delete_doc(id: str) -> dict[str, bool]:
+    docs.delete(id)
+    return {"ok": True}
+
+
+@app.get("/docs/{id}/revisions")
+def doc_revisions(id: str, limit: int = 100) -> list[dict[str, Any]]:
+    if not docs.get(id):
+        raise HTTPException(404)
+    return docs.revisions(id, limit)
+
+
+@app.get("/docs/revisions/{rev_id}")
+def doc_revision(rev_id: str) -> dict[str, Any]:
+    r = docs.revision(rev_id)
+    if not r:
+        raise HTTPException(404)
+    return {**r, "patch": unified_diff(r["before"], r["after"])}
+
+
+@app.post("/docs/revisions/{rev_id}/accept")
+def accept_revision(rev_id: str) -> dict[str, Any]:
+    d = docs.accept(rev_id)
+    if not d:
+        raise HTTPException(404, "No pending revision with that id")
+    return d
+
+
+@app.post("/docs/revisions/{rev_id}/reject")
+def reject_revision(rev_id: str) -> dict[str, Any]:
+    d = docs.reject(rev_id)
+    if not d:
+        raise HTTPException(404, "No pending revision with that id")
+    return d
+
+
+@app.post("/docs/revisions/{rev_id}/restore")
+def restore_revision(rev_id: str) -> dict[str, Any]:
+    d = docs.restore(rev_id)
+    if not d:
+        raise HTTPException(404)
+    return d

@@ -1,7 +1,8 @@
 import type {
   ChatEvent, ToolInfo, Todo, GoogleStatus, TodayDashboard, CalendarEvent, GmailMessage, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Recap, Conversation, ConversationSettings, ContextUsed, Document, GraphData, GraphEdge, GraphNode,
   Memory, ModelInfo, ModelPrice, Settings, Project, UsageReport, ChatRunStarted, RunInfo,
-  Canvas, CanvasWindow, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState
+  Canvas, CanvasWindow, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
+  Doc, FullDoc, DocRevision
 } from '@shared/types'
 
 let base = ''
@@ -172,6 +173,23 @@ export const api = {
       req<CanvasWindow>(`/windows/${id}`, { method: 'PUT', body: json(patch) }),
     raise: (id: string) => req<CanvasWindow>(`/windows/${id}/raise`, { method: 'POST' }),
     delete: (id: string) => req(`/windows/${id}`, { method: 'DELETE' })
+  },
+  docs: {
+    list: (s: Scope = 'all', q = '') => req<Doc[]>(`/docs?project_id=${encodeURIComponent(s)}&q=${encodeURIComponent(q)}`),
+    get: (id: string) => req<FullDoc>(`/docs/${id}`),
+    create: (d: { title?: string; content?: string; folder?: string; project_id?: string | null }) => req<FullDoc>('/docs', { method: 'POST', body: json(d) }),
+    /** Autosave. Records a revision, folding a burst of keystrokes into one history entry. */
+    save: (id: string, patch: { content?: string; title?: string; summary?: string }) => req<FullDoc>(`/docs/${id}`, { method: 'PUT', body: json(patch) }),
+    /** Title, folder, star and project moves — metadata, so it stays out of the history. */
+    patch: (id: string, patch: { title?: string; folder?: string; starred?: boolean; project_id?: string | null; clear_project?: boolean }) =>
+      req<FullDoc>(`/docs/${id}`, { method: 'PATCH', body: json(patch) }),
+    delete: (id: string) => req(`/docs/${id}`, { method: 'DELETE' }),
+    pending: () => req<{ pending: number }>('/docs/pending'),
+    revisions: (id: string, limit = 100) => req<DocRevision[]>(`/docs/${id}/revisions?limit=${limit}`),
+    revision: (revId: string) => req<DocRevision>(`/docs/revisions/${revId}`),
+    accept: (revId: string) => req<FullDoc>(`/docs/revisions/${revId}/accept`, { method: 'POST' }),
+    reject: (revId: string) => req<FullDoc>(`/docs/revisions/${revId}/reject`, { method: 'POST' }),
+    restore: (revId: string) => req<FullDoc>(`/docs/revisions/${revId}/restore`, { method: 'POST' })
   },
   notes: {
     list: (s: Scope = 'all', q = '') => req<Note[]>(`/notes?project_id=${encodeURIComponent(s)}&q=${encodeURIComponent(q)}`),

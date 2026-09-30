@@ -1,9 +1,11 @@
 import { create } from 'zustand'
-import type { ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Document, GraphData, Memory, Message, ModelInfo, Settings, Project, RunConflict, SessionStatus, ToolInfo, Todo, GoogleStatus, TodayDashboard, Recap } from '@shared/types'
+import type { ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocRevision, Document, FullDoc, GraphData, Memory, Message, ModelInfo, Settings, Project, RunConflict, SessionStatus, ToolInfo, Todo, GoogleStatus, TodayDashboard, Recap } from '@shared/types'
 import { api, chatStream, setBase, type Scope } from './lib/api'
 import { finishStatus, reduceStatus, settleApprovals } from './sessionStatus'
 
-export type View = 'home' | 'chat' | 'todos' | 'calendar' | 'boards' | 'dashboards' | 'memory' | 'documents' | 'project'
+export type View = 'home' | 'chat' | 'todos' | 'calendar' | 'boards' | 'dashboards' | 'memory' | 'documents' | 'docs' | 'project'
+/** How the Docs editor splits its panes. */
+export type DocMode = 'edit' | 'split' | 'preview'
 /** How the Memory panel lays out its two halves: the memory list and the knowledge graph. */
 export type MemoryMode = 'split' | 'list' | 'graph'
 export type ContextTab = 'last' | 'preview' | 'trace'
@@ -87,6 +89,19 @@ export interface State {
   graph: GraphData
   documents: Document[]
 
+  /** Docs: the markdown the user writes. List rows, plus the one open in the editor. */
+  docs: Doc[]
+  activeDoc: FullDoc | null
+  /** Ids of the docs open as tabs, most recent last. */
+  docTabs: string[]
+  docRevisions: DocRevision[]
+  /** Assistant edits awaiting review, across every doc — the sidebar badge. */
+  docsPending: number
+  docMode: DocMode
+  /** Editor buffer for the open doc: what the user has typed but autosave has not yet flushed. */
+  docDraft: string | null
+  docSaving: boolean
+
   init: () => Promise<void>
   loadModels: () => Promise<void>
   saveSettings: (patch: Partial<Settings>) => Promise<void>
@@ -150,9 +165,30 @@ export interface State {
   deleteTodo: (id: string) => Promise<void>
   uploadDocuments: (files: FileList | File[], projectId: string | null) => Promise<void>
   deleteDocument: (id: string) => Promise<void>
+
+  refreshDocs: (q?: string) => Promise<void>
+  refreshDocsPending: () => Promise<void>
+  openDoc: (id: string) => Promise<void>
+  closeDocTab: (id: string) => void
+  createDoc: (d?: { title?: string; content?: string; project_id?: string | null }) => Promise<void>
+  /** Type into the open doc. Buffers locally and flushes to the backend on a debounce. */
+  editDoc: (content: string) => void
+  /** Flush the buffer now (⌘S, switching docs, leaving the view). */
+  flushDoc: () => Promise<void>
+  renameDoc: (id: string, title: string) => Promise<void>
+  setDocStar: (id: string, starred: boolean) => Promise<void>
+  deleteDoc: (id: string) => Promise<void>
+  setDocMode: (m: DocMode) => void
+  refreshDocRevisions: (id?: string) => Promise<void>
+  acceptRevision: (revId: string) => Promise<void>
+  rejectRevision: (revId: string) => Promise<void>
+  restoreRevision: (revId: string) => Promise<void>
 }
 
 let toastSeq = 0
+/** Autosave debounce for the doc editor: long enough to be one history entry, short enough to trust. */
+const SAVE_DEBOUNCE_MS = 1200
+let saveTimer: ReturnType<typeof setTimeout> | null = null
 
 /** Pending `done` → `idle` timers, keyed by conversation id. A new run cancels its own. */
 const holds = new Map<string, ReturnType<typeof setTimeout>>()
@@ -354,6 +390,14 @@ export const useStore = create<State>((set, get) => {
     draftProjectId: null,
     libraryScope: 'all',
     dataScope: 'all',
+    docs: [],
+    activeDoc: null,
+    docTabs: [],
+    docRevisions: [],
+    docsPending: 0,
+    docMode: 'split',
+    docDraft: null,
+    docSaving: false,
     sidebarOpen: true,
     contextOpen: false,
     contextTab: 'last',
@@ -387,6 +431,7 @@ export const useStore = create<State>((set, get) => {
       void get().refreshDashboard()
       void get().refreshTodos()
       void get().refreshRecap()
+      void get().refreshDocsPending()
       window.os.onMenu((action) => {
         const s = get()
         if (action === 'new-chat') s.newChat(s.view === 'project' ? s.projectViewId : selectActive(s)?.project_id ?? null)
@@ -421,7 +466,13 @@ export const useStore = create<State>((set, get) => {
       void get().saveSettings({ mode })
     },
     setView: (view) => {
+      // Leaving the editor must not drop what is still in the buffer.
+      if (get().view === 'docs' && view !== 'docs') void get().flushDoc()
       set({ view })
+      if (view === 'docs') {
+        void get().refreshDocs()
+        void get().refreshDocsPending()
+      }
       if (view === 'home') void get().refreshDashboard()
       if (view === 'todos') void get().refreshTodos()
     },
@@ -475,7 +526,7 @@ export const useStore = create<State>((set, get) => {
     },
     loadScope: async (dataScope) => {
       set({ dataScope })
-      await Promise.all([get().refreshMemories(), get().refreshGraph(), get().refreshDocuments()])
+      await Promise.all([get().refreshMemories(), get().refreshGraph(), get().refreshDocuments(), get().refreshDocs()])
     },
 
     refreshConversations: async () => set({ conversations: await api.conversations.list('all') }),
@@ -576,6 +627,139 @@ export const useStore = create<State>((set, get) => {
       // Aborting the fetch would only detach this window, so a stop is always a request to the run.
       if (st.messageId) await api.stop(st.messageId).catch(() => undefined)
       else await api.stopRun(id, st.runId).catch(() => undefined)
+    },
+
+    refreshDocs: async (q = '') => set({ docs: await api.docs.list(get().dataScope, q) }),
+    refreshDocsPending: async () => {
+      try {
+        set({ docsPending: (await api.docs.pending()).pending })
+      } catch { /* a badge is not worth a toast */ }
+    },
+    openDoc: async (id) => {
+      if (get().activeDoc?.id !== id) await get().flushDoc()
+      set((st) => ({ view: 'docs', docTabs: st.docTabs.includes(id) ? st.docTabs : [...st.docTabs, id] }))
+      try {
+        const doc = await api.docs.get(id)
+        // A slower fetch must not clobber a doc the user has since switched away from.
+        if (get().docTabs.includes(id)) set({ activeDoc: doc, docDraft: null })
+        void get().refreshDocRevisions(id)
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    closeDocTab: (id) => {
+      const st = get()
+      if (st.activeDoc?.id === id) void st.flushDoc()
+      const tabs = st.docTabs.filter((t) => t !== id)
+      set({ docTabs: tabs })
+      if (st.activeDoc?.id === id) {
+        const next = tabs[tabs.length - 1]
+        if (next) void get().openDoc(next)
+        else set({ activeDoc: null, docDraft: null, docRevisions: [] })
+      }
+    },
+    createDoc: async (d = {}) => {
+      try {
+        const doc = await api.docs.create({ title: d.title ?? 'Untitled', content: d.content ?? '', project_id: d.project_id ?? null })
+        await get().refreshDocs()
+        set((st) => ({ view: 'docs', docTabs: [...st.docTabs, doc.id], activeDoc: doc, docDraft: null }))
+        void get().refreshDocRevisions(doc.id)
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    editDoc: (content) => {
+      if (!get().activeDoc) return
+      set({ docDraft: content })
+      if (saveTimer) clearTimeout(saveTimer)
+      saveTimer = setTimeout(() => { void get().flushDoc() }, SAVE_DEBOUNCE_MS)
+    },
+    flushDoc: async () => {
+      if (saveTimer) {
+        clearTimeout(saveTimer)
+        saveTimer = null
+      }
+      const { activeDoc: doc, docDraft } = get()
+      if (!doc || docDraft === null || docDraft === doc.content) return set({ docDraft: null })
+      set({ docSaving: true })
+      try {
+        const saved = await api.docs.save(doc.id, { content: docDraft })
+        // Keep whatever was typed while the request was in flight; adopt only the server's metadata.
+        set((st) => {
+          if (st.activeDoc?.id !== doc.id) return { docSaving: false }
+          const newer = st.docDraft !== null && st.docDraft !== docDraft
+          return {
+            activeDoc: newer ? { ...saved, content: st.docDraft as string } : saved,
+            docDraft: newer ? st.docDraft : null,
+            docSaving: false
+          }
+        })
+        void get().refreshDocs()
+        void get().refreshDocRevisions(doc.id)
+      } catch (e) {
+        set({ docSaving: false })
+        get().toast(`Could not save: ${(e as Error).message}`, 'error')
+      }
+    },
+    renameDoc: async (id, title) => {
+      if (!title.trim()) return
+      try {
+        const d = await api.docs.patch(id, { title: title.trim() })
+        set((st) => ({ activeDoc: st.activeDoc?.id === id ? { ...st.activeDoc, title: d.title } : st.activeDoc }))
+        await get().refreshDocs()
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    setDocStar: async (id, starred) => {
+      await api.docs.patch(id, { starred })
+      await get().refreshDocs()
+    },
+    deleteDoc: async (id) => {
+      await api.docs.delete(id)
+      get().closeDocTab(id)
+      await Promise.all([get().refreshDocs(), get().refreshDocsPending()])
+    },
+    setDocMode: (docMode) => set({ docMode }),
+    refreshDocRevisions: async (id) => {
+      const docId = id ?? get().activeDoc?.id
+      if (!docId) return
+      try {
+        const revs = await api.docs.revisions(docId)
+        if (get().activeDoc?.id === docId) set({ docRevisions: revs })
+      } catch { /* history is supplementary */ }
+    },
+    acceptRevision: async (revId) => {
+      try {
+        // Buffered typing is saved first, so accepting lands on top of it instead of losing it.
+        await get().flushDoc()
+        const doc = await api.docs.accept(revId)
+        set({ activeDoc: doc, docDraft: null })
+        get().toast('Revision applied')
+        await Promise.all([get().refreshDocRevisions(doc.id), get().refreshDocs(), get().refreshDocsPending()])
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    rejectRevision: async (revId) => {
+      try {
+        const doc = await api.docs.reject(revId)
+        set({ activeDoc: doc })
+        await Promise.all([get().refreshDocRevisions(doc.id), get().refreshDocs(), get().refreshDocsPending()])
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    restoreRevision: async (revId) => {
+      try {
+        await get().flushDoc()
+        const doc = await api.docs.restore(revId)
+        set({ activeDoc: doc, docDraft: null })
+        get().toast('Document restored')
+        await Promise.all([get().refreshDocRevisions(doc.id), get().refreshDocs()])
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
     },
 
     refreshMemories: async (q = '') => set({ memories: await api.memories.list(get().dataScope, q) }),

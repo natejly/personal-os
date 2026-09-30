@@ -20,6 +20,8 @@ export const setBase = (url: string): void => {
     })
 }
 export const getBase = (): string => base
+/** The resolved token, for callers that cannot await (keepalive writes on unload). '' until setBase() resolves it. */
+export const getToken = (): string => token
 
 /** Sidecar shared secret. Resolved once per setBase(); every backend request carries it. */
 const auth = async (): Promise<Record<string, string>> => {
@@ -28,9 +30,13 @@ const auth = async (): Promise<Record<string, string>> => {
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
+  // The token wait only suspends while setBase() is still resolving it. Once it is (or when there is no
+  // sidecar at all, as in tests), a req() runs synchronously up to its fetch — the canvas store's
+  // flush-before-space-switch depends on that.
+  if (!token && tokenP) await tokenP
   const r = await fetch(`${base}${path}`, {
     ...init,
-    headers: { ...(init?.body && !(init.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}), ...(init?.headers ?? {}), ...(await auth()) }
+    headers: { ...(init?.body && !(init.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}), ...(init?.headers ?? {}), ...(token ? { 'X-Personal-OS-Token': token } : {}) }
   })
   if (!r.ok) {
     let msg = `${r.status} ${r.statusText}`
@@ -201,7 +207,7 @@ export const api = {
 
 /** Attach to a conversation's run and iterate its server-sent events from `since`. Any number of clients may. */
 export async function* chatStream(convId: string, since = 0, signal?: AbortSignal): AsyncGenerator<ChatEvent> {
-  const r = await fetch(`${base}/conversations/${convId}/stream?since=${since}`, { signal })
+  const r = await fetch(`${base}/conversations/${convId}/stream?since=${since}`, { signal, headers: await auth() })
   if (!r.ok || !r.body) throw new Error(`${r.status} ${r.statusText}`)
   const reader = r.body.getReader()
   const dec = new TextDecoder()

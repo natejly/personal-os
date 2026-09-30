@@ -4,7 +4,6 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { SAFE_MD } from './Message'
 import { useStore } from '../store'
-import { SAFE_MD } from './Message'
 import { api, getBase } from '../lib/api'
 import type { Dashboard, DataSource, Widget } from '@shared/types'
 

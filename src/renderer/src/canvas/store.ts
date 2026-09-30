@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { Canvas, CanvasWindow, SnapMode, WidgetKind, WindowLayout, WindowState } from '@shared/types'
-import { api, getBase } from '../lib/api'
+import { api, getBase, getToken } from '../lib/api'
 import { useStore } from '../store'
 import { tidyLayout, visibleRect, zoneRect, type Point, type Size, type Viewport } from './snapping'
 
@@ -166,7 +166,7 @@ export const flushLayoutOnUnload = (s: CanvasState): void => {
     void fetch(`${getBase()}/canvases/${cid}/layout`, {
       method: 'PUT',
       keepalive: true,
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...(getToken() ? { 'X-Personal-OS-Token': getToken() } : {}) },
       body: JSON.stringify({ windows })
     }).catch(() => undefined)
     for (const w of windows) dirty.delete(w.id)

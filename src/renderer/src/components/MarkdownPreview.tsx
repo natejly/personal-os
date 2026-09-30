@@ -7,6 +7,7 @@ import rehypeHighlight from 'rehype-highlight'
 import { Copy, Check } from 'lucide-react'
 import { normalizeMathBlocks } from '../lib/mathBlocks'
 import ChartBlock from './ChartBlock'
+import InteractiveBlock from './InteractiveBlock'
 import MermaidBlock from './MermaidBlock'
 import 'katex/dist/katex.min.css'
 
@@ -56,6 +57,7 @@ function Pre({ streaming, ...props }: React.HTMLAttributes<HTMLPreElement> & { s
   const code = String(child?.props?.children ?? '')
   // Blocks the model can use to render rich content instead of code (see RENDER_HINT in the backend).
   if (lang === 'chart') return <ChartBlock source={code} streaming={!!streaming} />
+  if (lang === 'interactive') return <InteractiveBlock source={code} streaming={!!streaming} />
   if (lang === 'mermaid') return <MermaidBlock source={code} streaming={!!streaming} />
   return (
     <div className="code-block">

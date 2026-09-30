@@ -16,6 +16,8 @@ export const HOME_MODULES: HomeModule[] = [
   { key: 'calendar', label: 'Calendar' },
   { key: 'todos', label: 'Todos' },
   { key: 'inbox', label: 'Inbox' },
+  { key: 'gtasks', label: 'Google Tasks' },
+  { key: 'drive', label: 'Drive files' },
   { key: 'projects', label: 'Projects' },
   { key: 'memories', label: 'Recently learned' },
   { key: 'chats', label: 'Recent chats' }

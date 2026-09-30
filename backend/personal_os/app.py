@@ -1196,6 +1196,16 @@ def google_tasks(show_completed: bool = False) -> Any:
     return _gcall(google.tasks_list, "@default", show_completed)
 
 
+@app.get("/integrations/google/drive")
+def google_drive(q: str = "", max_results: int = 20) -> Any:
+    return _gcall(google.drive_files, q, max_results)
+
+
+def _google_has(status: dict[str, Any], scope_tail: str) -> bool:
+    """Whether the connected token was granted a scope (endswith, so 'tasks' or 'drive.readonly')."""
+    return any(s.endswith(scope_tail) for s in status.get("scopes") or [])
+
+
 # ---------------- dashboard ----------------
 @app.get("/dashboard")
 async def dashboard() -> dict[str, Any]:
@@ -1207,21 +1217,25 @@ async def dashboard() -> dict[str, Any]:
         "projects": [{**p, "stats": projects.stats(p["id"])} for p in projects.list()],
         "recent_memories": memories.list(ALL)[:6],
         "recent_conversations": convos.list(ALL)[:6],
-        "calendar": None, "gmail": None, "errors": {},
+        "calendar": None, "gmail": None, "tasks": None, "drive": None, "errors": {},
     }
     if st["connected"]:
-        async def cal() -> None:
+        async def fetch(key: str, fn, *args) -> None:  # type: ignore[no-untyped-def]
             try:
-                out["calendar"] = json_safe(await asyncio.to_thread(google.calendar_events, 2))
+                out[key] = json_safe(await asyncio.to_thread(fn, *args))
             except Exception as e:  # noqa: BLE001
-                out["errors"]["calendar"] = str(e)
+                out["errors"][key] = str(e)
 
-        async def mail() -> None:
-            try:
-                out["gmail"] = json_safe(await asyncio.to_thread(google.gmail_search, "is:unread newer_than:3d", 10))
-            except Exception as e:  # noqa: BLE001
-                out["errors"]["gmail"] = str(e)
-        await asyncio.gather(cal(), mail())
+        jobs = [
+            fetch("calendar", google.calendar_events, 2),
+            fetch("gmail", google.gmail_search, "is:unread newer_than:3d", 10),
+            fetch("tasks", google.tasks_list, "@default", False),
+        ]
+        # Drive is a newer scope; before the user reconnects, skip the call instead of
+        # surfacing a 403 — the card reads missing_scopes and offers Reconnect.
+        if _google_has(st, "drive.readonly"):
+            jobs.append(fetch("drive", google.drive_files, "", 10))
+        await asyncio.gather(*jobs)
     return out
 
 
@@ -1406,7 +1420,7 @@ async def _internal_data() -> dict[str, Any]:
         "memories": memories.list(ALL)[:40],
         "projects": [{**p, "stats": projects.stats(p["id"])} for p in projects.list()],
         "boards": [{**b, **{"cards": (boards.get(b["id"]) or {}).get("cards", [])}} for b in boards.list()],
-        "calendar": [], "gmail": [],
+        "calendar": [], "gmail": [], "tasks": [], "drive": [],
     }
     if st["connected"]:
         try:
@@ -1417,12 +1431,21 @@ async def _internal_data() -> dict[str, Any]:
             out["gmail"] = json_safe(await asyncio.to_thread(google.gmail_search, "is:unread newer_than:2d", 15))
         except Exception as e:  # noqa: BLE001
             out["gmail_error"] = str(e)
+        try:
+            out["tasks"] = json_safe(await asyncio.to_thread(google.tasks_list, "@default", False))
+        except Exception as e:  # noqa: BLE001
+            out["tasks_error"] = str(e)
+        if _google_has(st, "drive.readonly"):
+            try:
+                out["drive"] = json_safe(await asyncio.to_thread(google.drive_files, "", 15))
+            except Exception as e:  # noqa: BLE001
+                out["drive_error"] = str(e)
     return out
 
 
 @app.get("/sources")
 def list_sources() -> dict[str, Any]:
-    return {"sources": dashboards.sources(), "internal": ["todos", "calendar", "gmail", "memories", "projects", "boards"]}
+    return {"sources": dashboards.sources(), "internal": ["todos", "calendar", "gmail", "tasks", "drive", "memories", "projects", "boards"]}
 
 
 @app.post("/sources")

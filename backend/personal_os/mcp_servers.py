@@ -47,6 +47,7 @@ RESERVED_TOOL_NAMES = frozenset({
     "calendar_events", "calendar_create",
     "gmail_search", "gmail_read", "gmail_draft", "gmail_send", "gmail_modify",
     "google_tasks_list", "google_tasks_add", "google_tasks_complete",
+    "google_drive_search", "google_drive_read",
     "board_list", "board_add_card", "board_move_card", "board_create",
 })
 

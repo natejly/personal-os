@@ -1,4 +1,4 @@
-"""Google Workspace integration: OAuth (desktop loopback flow), Calendar, Gmail, Tasks.
+"""Google Workspace integration: OAuth (desktop loopback flow), Calendar, Gmail, Tasks, Drive.
 
 The user just clicks "Sign in with Google". The OAuth client the app signs in with comes
 from GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET in the environment (.env), so it is set up once
@@ -41,6 +41,10 @@ SCOPES = [
     "https://www.googleapis.com/auth/calendar",
     "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/tasks",
+    # Read-only for browsing/searching, drive.file for anything the app itself creates.
+    # Same pair the docs/sheets branch requests, so one Reconnect covers both.
+    "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/drive.file",
 ]
 
 
@@ -326,6 +330,63 @@ class Google:
     def tasks_complete(self, task_id: str, tasklist: str = "@default") -> dict[str, Any]:
         t = self._svc("tasks", "v1").tasks().patch(tasklist=tasklist, task=task_id, body={"status": "completed"}).execute()
         return {"id": t["id"], "status": t.get("status")}
+
+    # ---------- Drive ----------
+    def drive_files(self, query: str = "", max_results: int = 20) -> list[dict[str, Any]]:
+        """Search Drive by name/content; with no query, list recently modified files."""
+        params: dict[str, Any] = {
+            "q": _drive_query(query),
+            "pageSize": max(1, min(int(max_results), 50)),
+            "fields": "files(id,name,mimeType,modifiedTime,webViewLink,size,owners(displayName,me))",
+        }
+        if not (query or "").strip():
+            # Drive rejects orderBy on fullText queries; relevance order is fine there.
+            params["orderBy"] = "modifiedTime desc"
+        res = self._svc("drive", "v3").files().list(**params).execute()
+        out = []
+        for f in res.get("files", []):
+            owners = f.get("owners") or []
+            out.append({
+                "id": f.get("id"), "name": f.get("name"), "mime_type": f.get("mimeType"),
+                "modified": f.get("modifiedTime"), "link": f.get("webViewLink"),
+                "size": int(f["size"]) if f.get("size") else None,
+                "owner": "me" if any(o.get("me") for o in owners) else (owners[0].get("displayName") if owners else None),
+            })
+        return out
+
+    def drive_read(self, file_id: str, max_chars: int = 8000) -> dict[str, Any]:
+        svc = self._svc("drive", "v3")
+        meta = svc.files().get(fileId=file_id, fields="id,name,mimeType,webViewLink,size").execute()
+        mime = meta.get("mimeType", "")
+        export = _DRIVE_EXPORTS.get(mime)
+        if export:
+            data = svc.files().export(fileId=file_id, mimeType=export).execute()
+        elif mime.startswith("text/") or mime in ("application/json", "application/xml", "application/rtf"):
+            data = svc.files().get_media(fileId=file_id).execute()
+        else:
+            return {"id": file_id, "name": meta.get("name"), "mime_type": mime, "link": meta.get("webViewLink"),
+                    "content": None, "note": "Binary file; no text to extract. Open it in Drive via the link."}
+        text = data.decode("utf-8", "replace") if isinstance(data, (bytes, bytearray)) else str(data)
+        return {"id": file_id, "name": meta.get("name"), "mime_type": mime, "link": meta.get("webViewLink"),
+                "content": text[:max_chars], "truncated": len(text) > max_chars}
+
+
+# Google-native formats can't be downloaded raw; export to the closest text form.
+_DRIVE_EXPORTS = {
+    "application/vnd.google-apps.document": "text/plain",
+    "application/vnd.google-apps.spreadsheet": "text/csv",
+    "application/vnd.google-apps.presentation": "text/plain",
+}
+
+
+def _drive_query(query: str) -> str:
+    """Build a Drive v3 `q` expression; user text is embedded in single quotes, so escape it."""
+    base = "trashed = false"
+    q = (query or "").strip()
+    if not q:
+        return base
+    esc = q.replace("\\", "\\\\").replace("'", "\\'")
+    return f"{base} and (name contains '{esc}' or fullText contains '{esc}')"
 
 
 def _token_error_hint(e: Exception) -> str:

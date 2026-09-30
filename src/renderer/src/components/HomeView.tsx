@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Calendar, Mail, CheckSquare, Brain, FolderKanban, Sparkles, RefreshCw, PanelLeftOpen, ExternalLink, Plus, MessageSquare, SlidersHorizontal, X } from 'lucide-react'
+import { Calendar, Mail, CheckSquare, Brain, FolderKanban, Sparkles, RefreshCw, PanelLeftOpen, ExternalLink, Plus, MessageSquare, SlidersHorizontal, X, ListChecks, HardDrive } from 'lucide-react'
 import { useStore } from '../store'
 import { HOME_MODULES, homeModuleOn } from '../modules'
 import TodoItem from './TodoItem'
@@ -15,6 +15,8 @@ function greeting(): string {
 const fmtTime = (iso: string, allDay: boolean): string => (allDay ? 'All day' : new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }))
 const dayKey = (iso: string): string => new Date(iso.length === 10 ? iso + 'T00:00:00' : iso).toDateString()
 const fromName = (s: string | null): string => (s ?? '').replace(/<.*>/, '').replace(/"/g, '').trim() || (s ?? '')
+// Google Tasks dues are midnight UTC; take the date part so it doesn't shift a day locally.
+const fmtDue = (iso: string): string => new Date(iso.slice(0, 10) + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 
 export default function HomeView(): JSX.Element {
   const d = useStore((s) => s.dashboard)
@@ -142,6 +144,38 @@ export default function HomeView(): JSX.Element {
                 ))}
               </ul>
             )}
+          </section>}
+
+          {on('gtasks') && <section className="widget">
+            <header><ListChecks size={14} /> Google Tasks</header>
+            {!google?.connected ? <p className="muted">Connect Google.</p> : d?.errors.tasks ? <p className="msg-error">{d.errors.tasks}</p> : (d?.tasks?.length ?? 0) === 0 ? <p className="muted">No open tasks.</p> : (
+              <ul className="events">
+                {d!.tasks!.slice(0, 8).map((t) => (
+                  <li key={t.id}><span className="ev-title">{t.title || '(untitled)'}</span>{t.due && <span className="muted small">{fmtDue(t.due)}</span>}</li>
+                ))}
+              </ul>
+            )}
+          </section>}
+
+          {on('drive') && <section className="widget">
+            <header><HardDrive size={14} /> Drive {google?.connected && d?.drive && <span className="muted small">recently modified</span>}</header>
+            {!google?.connected ? <p className="muted">Connect Google.</p>
+              : google.missing_scopes.some((s) => s.includes('drive')) ? (
+                <div className="widget-empty">
+                  <p className="muted">Drive needs a fresh sign-in.</p>
+                  <button className="primary-btn" onClick={() => setSettingsOpen(true)}>Reconnect Google</button>
+                </div>
+              ) : d?.errors.drive ? <p className="msg-error">{d.errors.drive}</p> : (d?.drive?.length ?? 0) === 0 ? <p className="muted">No recent files.</p> : (
+                <ul className="events">
+                  {d!.drive!.slice(0, 8).map((f) => (
+                    <li key={f.id}>
+                      <span className="ev-title">{f.name}</span>
+                      {f.modified && <span className="muted small">{new Date(f.modified).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>}
+                      {f.link && <a href={f.link} target="_blank" rel="noreferrer" className="icon-btn ghost sm"><ExternalLink size={11} /></a>}
+                    </li>
+                  ))}
+                </ul>
+              )}
           </section>}
 
           {on('projects') && <section className="widget">

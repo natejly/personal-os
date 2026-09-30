@@ -227,6 +227,24 @@ export interface GmailMessage {
   labels: string[]
 }
 
+export interface GoogleTask {
+  id: string
+  title: string | null
+  notes: string | null
+  due: string | null
+  status: string | null
+}
+
+export interface DriveFile {
+  id: string
+  name: string
+  mime_type: string
+  modified: string | null
+  link: string | null
+  size: number | null
+  owner: string | null
+}
+
 export interface TodayDashboard {
   google: GoogleStatus
   todos: Todo[]
@@ -236,6 +254,9 @@ export interface TodayDashboard {
   recent_conversations: Conversation[]
   calendar: CalendarEvent[] | null
   gmail: GmailMessage[] | null
+  tasks: GoogleTask[] | null
+  /** null until the token has the Drive scope (older sign-ins need a Reconnect). */
+  drive: DriveFile[] | null
   errors: Record<string, string>
 }
 

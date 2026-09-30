@@ -255,13 +255,10 @@ def wsid(project_id: str | None) -> str | None:
     if s is not None and not projects.get(s):
         raise HTTPException(404, "No such project")
     return s
-<<<<<<< HEAD
-=======
 
 
 def sse(event: str, data: Any) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
->>>>>>> b4c6d5e (Guard data-source fetches, and stop a stale project id 500ing)
 
 
 # ---------------- health / settings / models ----------------

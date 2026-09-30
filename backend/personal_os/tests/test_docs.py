@@ -6,6 +6,7 @@ aside (docs_url) or every editor list request would get an HTML page instead of 
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import tempfile
 import unittest
@@ -149,6 +150,100 @@ class TestVersions(DocsCase):
         self.assertIn("-b", out["diff"])
         self.assertIn("+B", out["diff"])
         self.assertIsNone(self.d.diff(doc["id"], 1, 9))
+
+
+class TestDocTools(DocsCase):
+    """The doc_* chat tools: spec.fn(ctx, **args), exactly as Toolbox.call invokes them."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        from personal_os.tools import Toolbox
+
+        self.tb = Toolbox(None, None, None, lambda: {}, docs=self.d)  # type: ignore[arg-type]
+
+    def call(self, name: str, ctx: dict | None = None, **args):
+        return asyncio.run(self.tb.specs[name].fn(ctx or {"project_id": None}, **args))
+
+    def test_edit_replaces_unique_text_and_bumps_version(self) -> None:
+        doc = self.d.create("Essay", "intro\nteh middle\nend")
+        out = self.call("doc_edit", id=doc["id"], old_text="teh middle", new_text="the middle")
+        self.assertEqual((out["id"], out["version"]), (doc["id"], 2))
+        self.assertIn("-teh middle", out["diff"])
+        self.assertIn("+the middle", out["diff"])
+        got = self.d.get(doc["id"])
+        assert got is not None
+        self.assertEqual(got["body"], "intro\nthe middle\nend")
+        self.assertEqual(len(self.d.versions(doc["id"])), 2)
+        self.assertEqual(self.d.versions(doc["id"])[0]["source"], "agent")
+
+    def test_edit_rejects_missing_and_ambiguous_old_text(self) -> None:
+        doc = self.d.create("Essay", "alpha\nbeta\nalpha")
+        out = self.call("doc_edit", id=doc["id"], old_text="gamma", new_text="delta")
+        self.assertIn("not found", out["error"])
+        self.assertIn("doc_read", out["try_instead"])
+        out = self.call("doc_edit", id=doc["id"], old_text="alpha", new_text="omega")
+        self.assertIn("2 times", out["error"])
+        self.assertIn("enlarge old_text", out["try_instead"])
+        out = self.call("doc_edit", id=doc["id"], old_text="", new_text="x")
+        self.assertIn("error", out)  # empty old_text is never a match, not a full-body replace
+        got = self.d.get(doc["id"])
+        assert got is not None
+        self.assertEqual((got["version"], got["body"]), (1, "alpha\nbeta\nalpha"))  # no version burned by any failure
+
+    def test_id_falls_back_to_the_open_document(self) -> None:
+        doc = self.d.create("Open", "hello")
+        ctx = {"project_id": None, "document_id": doc["id"]}
+        read = self.call("doc_read", ctx=ctx)
+        self.assertEqual((read["id"], read["body"]), (doc["id"], "hello"))
+        out = self.call("doc_edit", ctx=ctx, old_text="hello", new_text="goodbye")
+        self.assertEqual(out["version"], 2)
+        self.assertIn("error", self.call("doc_read"))  # no id and nothing open
+        self.assertIn("error", self.call("doc_read", id="nope"))
+
+    def test_append_create_and_list(self) -> None:
+        pid = self.project()
+        made = self.call("doc_create", ctx={"project_id": pid}, title="Notes", body="one")
+        self.assertEqual(made["version"], 1)
+        got = self.d.get(made["id"])
+        assert got is not None
+        self.assertEqual((got["project_id"], self.d.versions(made["id"])[0]["source"]), (pid, "agent"))
+        out = self.call("doc_append", id=made["id"], content="two")
+        self.assertEqual(out["version"], 2)
+        self.assertIn("+two", out["diff"])
+        got = self.d.get(made["id"])
+        assert got is not None
+        self.assertEqual(got["body"], "one\ntwo")
+        blank = self.call("doc_create", title="Blank")  # append to an empty doc still diffs, from v0
+        out = self.call("doc_append", id=blank["id"], content="first line")
+        self.assertEqual(out["version"], 1)
+        self.assertIn("+first line", out["diff"])
+        rows = self.call("doc_list", query="Notes")
+        self.assertEqual([r["id"] for r in rows["docs"]], [made["id"]])
+        self.assertNotIn("body", rows["docs"][0])
+        self.assertIn("error", self.call("doc_create", title="Bad", format="docx"))
+
+    def test_build_context_injects_the_open_doc(self) -> None:
+        from personal_os.context import build_context
+
+        doc = self.d.create("Plan", "step one\nstep two")
+        off = {"useMemory": False, "useGraph": False, "useDocuments": False}
+        system, used = build_context(
+            memories=None, graph=None, documents=None, docs=self.d,  # type: ignore[arg-type]
+            project=None, project_id=None, query="q", settings={},
+            conv_settings={**off, "document_id": doc["id"]}, global_system_prompt="Be brief.",
+        )
+        self.assertIn('document "Plan"', system)
+        self.assertIn(doc["id"], system)
+        self.assertIn("step one\nstep two", system)
+        self.assertLess(system.index("Be brief."), system.index("Plan"))
+        self.assertEqual(used["document"]["id"], doc["id"])
+        system, used = build_context(
+            memories=None, graph=None, documents=None, docs=self.d,  # type: ignore[arg-type]
+            project=None, project_id=None, query="q", settings={},
+            conv_settings={**off, "document_id": "gone"}, global_system_prompt="",
+        )
+        self.assertNotIn("Open document", system)
+        self.assertNotIn("document", used)
 
 
 class TestRoutes(unittest.TestCase):

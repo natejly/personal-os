@@ -44,6 +44,7 @@ RESERVED_TOOL_NAMES = frozenset({
     "web_search", "fetch_url",
     "run_python", "current_time",
     "todo_list", "todo_add", "todo_update", "todo_delete",
+    "doc_list", "doc_read", "doc_create", "doc_edit", "doc_append",
     "calendar_events", "calendar_create",
     "gmail_search", "gmail_read", "gmail_draft", "gmail_send", "gmail_modify",
     "google_tasks_list", "google_tasks_add", "google_tasks_complete",

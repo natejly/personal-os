@@ -21,6 +21,7 @@ def build_context(
     settings: dict[str, Any],
     conv_settings: dict[str, Any],
     global_system_prompt: str,
+    docs: Any = None,
 ) -> tuple[str, dict[str, Any]]:
     """Returns (system_prompt, context_used)."""
     parts: list[str] = [global_system_prompt.strip()] if global_system_prompt.strip() else []
@@ -31,6 +32,13 @@ def build_context(
         parts.append(f"You are currently working in the project \"{project['name']}\"." + (f" {project['description']}" if project.get("description") else ""))
         if project.get("system_prompt", "").strip():
             parts.append(project["system_prompt"].strip())
+
+    doc = docs.get(conv_settings["document_id"]) if docs is not None and conv_settings.get("document_id") else None
+    if doc:
+        body = doc["body"][:15000]
+        parts.append(f"## Open document\nThe user has the document \"{doc['title']}\" (id {doc['id']}, format {doc['format']}) "
+                     "open in the editor. Use the doc_* tools to change it; its current body is:\n\n" + body)
+        used["document"] = {"id": doc["id"], "title": doc["title"], "format": doc["format"], "version": doc["version"]}
 
     if conv_settings.get("useMemory", True):
         mems = memories.for_context(project_id, query)

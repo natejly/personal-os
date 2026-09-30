@@ -204,7 +204,7 @@ export const api = {
     list: (s: Scope = 'all', q = '') => req<DocMeta[]>(`/docs?project_id=${encodeURIComponent(s)}&q=${encodeURIComponent(q)}`),
     get: (id: string) => req<Doc>(`/docs/${id}`),
     create: (d: { title?: string; body?: string; format?: DocMeta['format']; project_id?: string | null }) => req<Doc>('/docs', { method: 'POST', body: json(d) }),
-    update: (id: string, patch: { title?: string; body?: string; format?: DocMeta['format']; project_id?: string | null; source?: string }) => req<Doc>(`/docs/${id}`, { method: 'PUT', body: json(patch) }),
+    update: (id: string, patch: { title?: string; body?: string; format?: DocMeta['format']; project_id?: string | null; agent_conv_id?: string | null; source?: string }) => req<Doc>(`/docs/${id}`, { method: 'PUT', body: json(patch) }),
     delete: (id: string) => req(`/docs/${id}`, { method: 'DELETE' }),
     versions: (id: string) => req<DocVersion[]>(`/docs/${id}/versions`),
     version: (id: string, n: number) => req<DocVersion & { body: string }>(`/docs/${id}/versions/${n}`),

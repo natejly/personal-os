@@ -195,7 +195,7 @@ def _record_usage(ev: dict[str, Any]) -> None:
 
 if not any(getattr(f, "__name__", "") == "_record_usage" for f in llm._usage_listeners):
     llm.on_usage(_record_usage)
-toolbox = Toolbox(memories, graph, documents, settings, todos=todos, google=google, boards=boards)
+toolbox = Toolbox(memories, graph, documents, settings, todos=todos, google=google, boards=boards, docs=docs)
 
 
 def sid(project_id: str | None) -> str | None:
@@ -463,7 +463,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     project = projects.get(conv["project_id"]) if conv["project_id"] else None
     cspan = tracer.start("context", "Assemble context", {"model": model})
     system, used = build_context(
-        memories=memories, graph=graph, documents=documents,
+        memories=memories, graph=graph, documents=documents, docs=docs,
         project=project, project_id=conv["project_id"], query=user_text,
         settings=cfg, conv_settings=conv["settings"], global_system_prompt=cfg["systemPrompt"],
     )
@@ -478,6 +478,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     tool_events: list[dict[str, Any]] = []
     tool_ctx: dict[str, Any] = {
         "project_id": conv["project_id"], "conversation_id": conv_id,
+        "document_id": conv["settings"].get("document_id"),  # the doc open in the editor: doc_read/edit/append default to it
         # Taint is sticky for the whole conversation: the injected instructions live on in the replayed history, so
         # waiting one turn must not re-arm a standing 'always' grant. Only the user clears it (Context -> this chat).
         "tainted": bool(conv["settings"].get("tainted")), "taint_sources": list(conv["settings"].get("taint_sources") or []),

@@ -6,6 +6,7 @@ Permission resolution for a tool in a chat:
 from __future__ import annotations
 
 import asyncio
+import difflib
 import html
 import ipaddress
 import json
@@ -18,6 +19,7 @@ from typing import Any, Awaitable, Callable
 
 import httpx
 
+from .docs import FORMATS as DOC_FORMATS
 from .learn import SELF_LABELS
 from .repos import Documents, Graph, Memories
 from .sandbox import run_python
@@ -78,6 +80,9 @@ ALTERNATIVE = {
     "todo_add": "list the items in your reply so the user can add them",
     "todo_delete": "todo_update(done=true)",
     "board_add_card": "todo_add",
+    "doc_create": "write the document text in your reply so the user can paste it into the editor",
+    "doc_edit": "doc_read to see the current body, then retry quoting the exact text",
+    "doc_append": "doc_read, then doc_edit with the exact insertion point",
 }
 
 
@@ -243,13 +248,15 @@ def _allow_url(ctx: dict[str, Any], url: str | None) -> None:
 
 
 class Toolbox:
-    def __init__(self, memories: Memories, graph: Graph, documents: Documents, settings_fn: Callable[[], dict[str, Any]], todos: Any = None, google: Any = None, boards: Any = None):
+    def __init__(self, memories: Memories, graph: Graph, documents: Documents, settings_fn: Callable[[], dict[str, Any]], todos: Any = None, google: Any = None, boards: Any = None, docs: Any = None):
         self.memories, self.graph, self.documents, self.settings = memories, graph, documents, settings_fn
-        self.todos, self.google, self.boards = todos, google, boards
+        self.todos, self.google, self.boards, self.docs = todos, google, boards, docs
         self.specs: dict[str, ToolSpec] = {}
         self._register()
         if todos is not None:
             self._register_todos()
+        if docs is not None:
+            self._register_docs()
         if boards is not None:
             self._register_boards()
         if google is not None:
@@ -587,6 +594,95 @@ def _register_todos(self: Toolbox) -> None:
         _obj({"id": {"type": "string"}}, ["id"]), todo_delete, "todos", "writes", examples=[{"id": "td_8c41a2"}]))
 
 
+def _register_docs(self: Toolbox) -> None:
+    """Authored docs (the editor's): every write goes through the repo's version history, so the user can undo it."""
+    R = self.specs.__setitem__
+    READ_CAP, DIFF_CAP = 30_000, 1_500
+
+    def _missing(id: Any) -> dict[str, Any]:
+        if not id:
+            return tool_error("No document id given and no document is open in the editor.", field="id",
+                              expected="an id from doc_list, or omit id while the user has a document open",
+                              example={"id": "dc_3f2a91"}, alternative="doc_list to see the documents, or doc_create to start one")
+        return tool_error(f"No document with id '{id}'.", field="id", expected="an id from doc_list",
+                          example={"id": "dc_3f2a91"}, alternative="doc_list to get the current ids")
+
+    def _saved(prev: dict[str, Any], d: dict[str, Any]) -> dict[str, Any]:
+        """doc_edit/doc_append result: the new version plus a capped unified diff against the previous one."""
+        diff = ""
+        if d["version"] > prev["version"]:
+            if prev["version"] >= 1:
+                out = self.docs.diff(d["id"], prev["version"], d["version"])
+                diff = (out or {}).get("diff", "")
+            else:  # the doc was empty: version 0 is not stored, so diff from nothing
+                diff = "".join(difflib.unified_diff([], d["body"].splitlines(keepends=True), fromfile="v0", tofile=f"v{d['version']}"))
+        return {"id": d["id"], "title": d["title"], "version": d["version"], "diff": diff[:DIFF_CAP]}
+
+    async def doc_list(ctx: dict[str, Any], query: str = "", offset: int = 0) -> Any:
+        rows = [{"id": d["id"], "title": d["title"], "format": d["format"], "version": d["version"], "chars": d["chars"],
+                 "preview": d["preview"], "scope": "project" if d["project_id"] else "personal"} for d in self.docs.list("__all__", query)]
+        return page(rows, offset=offset, limit=50, key="docs")
+    R("doc_list", ToolSpec("doc_list", "List the user's authored documents (the text editor's docs), newest first, optionally filtered by a title/body search.",
+        _obj({"query": {"type": "string", "default": ""}, "offset": {"type": "integer", "default": 0}}, []), doc_list, "docs",
+        examples=[{}, {"query": "essay"}, {"offset": 50}]))
+
+    async def doc_read(ctx: dict[str, Any], id: str | None = None) -> Any:
+        did = id or ctx.get("document_id")
+        d = self.docs.get(did) if did else None
+        if not d:
+            return _missing(did)
+        return {"id": d["id"], "title": d["title"], "format": d["format"], "version": d["version"], "body": d["body"][:READ_CAP]}
+    R("doc_read", ToolSpec("doc_read", "Read an authored document's current body. Omit id to read the document the user has open in the editor.",
+        _obj({"id": {"type": "string"}}, []), doc_read, "docs",
+        examples=[{}, {"id": "dc_3f2a91"}]))
+
+    async def doc_create(ctx: dict[str, Any], title: str, body: str = "", format: str = "md") -> Any:
+        if format not in DOC_FORMATS:
+            return tool_error(f"Unknown doc format '{format}'.", field="format", expected="one of: " + ", ".join(DOC_FORMATS),
+                              example={"title": title, "format": "md"})
+        d = self.docs.create(title, body, format, project_id=ctx.get("project_id"), source="agent")
+        return {"id": d["id"], "title": d["title"], "version": d["version"]}
+    R("doc_create", ToolSpec("doc_create", "Create a new authored document in the editor (format: md, txt or tex), optionally with initial content.",
+        _obj({"title": {"type": "string"}, "body": {"type": "string", "default": ""}, "format": {"type": "string", "enum": list(DOC_FORMATS), "default": "md"}}, ["title"]), doc_create, "docs", "writes",
+        examples=[{"title": "Trip packing list"}, {"title": "Cover letter", "body": "Dear hiring team,\n", "format": "md"},
+                  {"title": "Thesis notes", "format": "tex"}]))
+
+    async def doc_edit(ctx: dict[str, Any], old_text: str, new_text: str, id: str | None = None) -> Any:
+        did = id or ctx.get("document_id")
+        prev = self.docs.get(did) if did else None
+        if not prev:
+            return _missing(did)
+        n = prev["body"].count(old_text) if old_text else 0
+        if n == 0:
+            return tool_error(f"old_text was not found in \"{prev['title']}\".", field="old_text",
+                              expected="a non-empty snippet copied exactly from the current body, including whitespace",
+                              example={"old_text": "the exact current text", "new_text": new_text[:60]},
+                              alternative="doc_read to see the current body, then quote the exact text")
+        if n > 1:
+            return tool_error(f"old_text occurs {n} times in \"{prev['title']}\"; the edit must be unambiguous.", field="old_text",
+                              expected="a snippet that appears exactly once",
+                              example={"old_text": "a longer snippet with surrounding lines", "new_text": new_text[:60]},
+                              alternative="enlarge old_text with the surrounding lines until it is unique")
+        d = self.docs.update(did, {"body": prev["body"].replace(old_text, new_text, 1), "source": "agent"})
+        return _saved(prev, d)
+    R("doc_edit", ToolSpec("doc_edit", "Replace one exact occurrence of old_text with new_text in an authored document. Omit id to edit the document open in the editor. old_text must match the current body exactly and exactly once (doc_read first). Returns the new version and a unified diff.",
+        _obj({"old_text": {"type": "string"}, "new_text": {"type": "string"}, "id": {"type": "string"}}, ["old_text", "new_text"]), doc_edit, "docs", "writes",
+        examples=[{"old_text": "teh proposal", "new_text": "the proposal"},
+                  {"id": "dc_3f2a91", "old_text": "## Draft\n", "new_text": "## Final\n"},
+                  {"old_text": "TODO: intro", "new_text": "This report covers the Q3 launch."}]))
+
+    async def doc_append(ctx: dict[str, Any], content: str, id: str | None = None) -> Any:
+        did = id or ctx.get("document_id")
+        prev = self.docs.get(did) if did else None
+        if not prev:
+            return _missing(did)
+        d = self.docs.update(did, {"body": (prev["body"] + "\n" + content) if prev["body"] else content, "source": "agent"})
+        return _saved(prev, d)
+    R("doc_append", ToolSpec("doc_append", "Append content to the end of an authored document (a newline is added before it when the document is not empty). Omit id for the document open in the editor. Returns the new version and a unified diff.",
+        _obj({"content": {"type": "string"}, "id": {"type": "string"}}, ["content"]), doc_append, "docs", "writes",
+        examples=[{"content": "## Next steps\n- book the venue"}, {"id": "dc_3f2a91", "content": "Reviewed on 2026-10-01."}]))
+
+
 def _register_google(self: Toolbox) -> None:
     R = self.specs.__setitem__
     g = self.google
@@ -764,5 +860,6 @@ def _register_boards(self: Toolbox) -> None:
 
 
 Toolbox._register_todos = _register_todos  # type: ignore[attr-defined]
+Toolbox._register_docs = _register_docs  # type: ignore[attr-defined]
 Toolbox._register_boards = _register_boards  # type: ignore[attr-defined]
 Toolbox._register_google = _register_google  # type: ignore[attr-defined]

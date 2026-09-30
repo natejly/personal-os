@@ -75,6 +75,17 @@ their own instructions, knowledge files, memories and graph.
   widget by telling it what to change.
 - **Google Workspace.** Sign in once with your own OAuth client; calendar,
   Gmail and Tasks become dashboard widgets and assistant tools.
+- **Sign in with ChatGPT.** *(Planned — not shipped yet.)* Connect an OpenAI
+  account the way Google connects today: an OAuth flow that opens in the browser
+  and returns to the app on a loopback URL, the token stored in the local
+  database, and model calls signed with it so usage draws on the signed-in
+  user's own OpenAI credits instead of the app's shared key. That account's
+  models join the picker, usage rows are attributed to it, and the LiteLLM key
+  in Settings stays the fallback for anyone who does not connect one. One
+  constraint to design around: OpenAI's ChatGPT sign-in bills API usage to the
+  connected OpenAI account — a Plus or Pro subscription is not itself a pool of
+  API credits — so the flow has to name the account being charged before the
+  first call.
 
 ## Architecture
 

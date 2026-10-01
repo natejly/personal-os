@@ -460,6 +460,18 @@ export interface Memory {
   source_message_id?: string | null
 }
 
+/** A pending tidy-up the user can apply or dismiss (backend consolidate.py). Nothing applies by itself. */
+export interface MemoryProposal {
+  id: string
+  project_id: string | null
+  kind: 'merge_memories' | 'rewrite_memory' | 'merge_entities'
+  payload: { ids: string[]; text?: string; label?: string; snapshot: Record<string, string> }
+  rationale: string
+  status: 'pending' | 'applied' | 'dismissed' | 'stale'
+  created_at: number
+  decided_at: number | null
+}
+
 /** How the user writes, learned from samples of their own writing. One per scope. See backend style.py. */
 export interface StyleProfile {
   id: string

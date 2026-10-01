@@ -1,7 +1,7 @@
 import type {
   BackgroundEvent, ChatEvent, ToolInfo, Todo, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, DriveFile, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Recap, Conversation, ConversationSettings, ContextUsed, Document, GraphData, GraphEdge, GraphNode, Message,
   ApprovalDecision, PlanEdit,
-  Memory, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo,
+  Memory, MemoryProposal, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo,
   Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
   Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
   Desk, DeskAutonomy, DeskBudget, DeskDiff, DeskEvent, DeskFilePreview, DeskFileTree, DeskOutput,
@@ -309,7 +309,11 @@ export const api = {
     delete: (id: string) => req(`/memories/${id}`, { method: 'DELETE' }),
     /** Every row including superseded / forgotten ones. */
     listWithHistory: (s: Scope) => req<Memory[]>(`/memories?${scope(s)}&include_invalid=true`),
-    restore: (id: string) => req<Memory>(`/memories/${id}/restore`, { method: 'POST' })
+    restore: (id: string) => req<Memory>(`/memories/${id}/restore`, { method: 'POST' }),
+    consolidate: (projectId: string | null) => req<MemoryProposal[]>('/memories/consolidate', { method: 'POST', body: json({ project_id: projectId }) }),
+    proposals: (s: Scope) => req<MemoryProposal[]>(`/memories/proposals?status=pending&${scope(s)}`),
+    applyProposal: (id: string) => req<MemoryProposal>(`/memories/proposals/${id}/apply`, { method: 'POST' }),
+    dismissProposal: (id: string) => req<MemoryProposal>(`/memories/proposals/${id}/dismiss`, { method: 'POST' })
   },
   style: {
     get: (s: Scope) => req<StyleState>(`/style?project_id=${encodeURIComponent(s === 'all' ? 'personal' : s)}`),

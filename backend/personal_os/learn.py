@@ -382,7 +382,10 @@ class LearnWorker:
         set_trace: Callable[[str, list[dict[str, Any]]], None],
         publish: Callable[[str, Any], None],
         depth: int = 32,
+        consolidator: Any = None,
     ) -> None:
+        self._consolidator = consolidator  # consolidate.Consolidator: only ever asked to *propose*
+        self._since_tidy = 0
         self._memories = memories
         self._graph = graph
         self._set_trace = set_trace
@@ -424,6 +427,23 @@ class LearnWorker:
             finally:
                 self._q.task_done()
 
+    async def _maybe_consolidate(self, job: LearnJob, added: int) -> None:
+        """Every N new auto memories, queue tidy-up *proposals*. Creating them changes nothing; the user applies them."""
+        every = int(job.settings.get("consolidateEvery") or 0)
+        if not self._consolidator or every <= 0 or not added:
+            return
+        self._since_tidy += added
+        if self._since_tidy < every:
+            return
+        self._since_tidy = 0
+        try:
+            made = await self._consolidator.propose(job.settings, job.project_id, job.model)
+        except Exception:  # noqa: BLE001 - housekeeping must never fail a learn job
+            log.exception("auto consolidation failed")
+            return
+        if made:
+            self._publish("proposals", {"count": len(made)})
+
     async def _run(self, job: LearnJob) -> None:
         tracer = Tracer(job.spans)
         span = tracer.start("learn", job.settings.get("extractionModel") or job.model)
@@ -439,6 +459,7 @@ class LearnWorker:
             if learned["memories"] or learned["nodes"] or learned["edges"] or learned["superseded"] or learned["invalidated"] or learned["ended"]:
                 self._publish("learned", {"conversation_id": job.conversation_id,
                                           "message_id": job.message_id, **learned})
+            await self._maybe_consolidate(job, len(learned["memories"]))
         except asyncio.CancelledError:
             tracer.end(span, error="Cancelled")  # shutdown: keep the trace honest about the gap
             self._set_trace(job.message_id, tracer.spans)

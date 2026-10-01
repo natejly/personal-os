@@ -44,6 +44,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "excerpts as context; use them when relevant and don't mention them unless asked."
     ),
     "extractionModel": "",
+    "consolidateEvery": 25,  # propose a memory tidy-up after this many new auto memories; 0 = manual only
     "autoLearn": True,
     # Bank long messages the user writes as style samples and keep their voice profile current (style.py).
     # Independent of autoLearn: wanting the app to learn facts is not the same as wanting it to copy your voice.

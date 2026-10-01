@@ -29,6 +29,7 @@ from . import activity, assist, llm, mac, mcp_eval, tools
 from .context import build_context, estimate_tokens
 from .db import Database, data_dir_from_env, new_id
 from .extract_text import extract_text
+from .consolidate import Consolidator
 from .learn import MAX_INJECTED_SKILLS, LearnJob, LearnWorker, Skills, induce_skill, skill_block
 from .repos import ALL, Conversations, Documents, Graph, Memories, Projects
 from .boards import Boards
@@ -227,7 +228,8 @@ _active: dict[str, asyncio.Event | Run] = {}
 _approvals: dict[str, asyncio.Future] = {}
 # Background work that outlives the run that queued it, and the topic it reports on.
 events = Topic()
-learner = LearnWorker(memories=memories, graph=graph, set_trace=convos.set_trace, publish=events.publish)
+consolidator = Consolidator(db, memories, graph)
+learner = LearnWorker(memories=memories, graph=graph, set_trace=convos.set_trace, publish=events.publish, consolidator=consolidator)
 
 
 ENV_SEED = {
@@ -2365,6 +2367,39 @@ class MemoryPatch(BaseModel):
 @app.get("/memories")
 def list_memories(project_id: str | None = None, q: str = "", include_global: bool = True, include_invalid: bool = False) -> list[dict[str, Any]]:
     return memories.list(sid(project_id), q, include_global, include_invalid)
+
+
+class ConsolidateIn(BaseModel):
+    project_id: str | None = None
+    model: str | None = None
+
+
+@app.post("/memories/consolidate")
+async def consolidate_memories(body: ConsolidateIn) -> list[dict[str, Any]]:
+    """Manual 'Tidy up': proposes only. Nothing changes until a proposal is applied by hand."""
+    cfg = settings()
+    return await consolidator.propose(cfg, sid(body.project_id), body.model or cfg["defaultModel"])
+
+
+@app.get("/memories/proposals")
+def list_memory_proposals(status: str = "pending", project_id: str | None = "all") -> list[dict[str, Any]]:
+    return consolidator.list(status or None, sid(project_id))
+
+
+@app.post("/memories/proposals/{id}/apply")
+def apply_memory_proposal(id: str) -> dict[str, Any]:
+    p = consolidator.apply(id)
+    if not p:
+        raise HTTPException(404)
+    return p
+
+
+@app.post("/memories/proposals/{id}/dismiss")
+def dismiss_memory_proposal(id: str) -> dict[str, Any]:
+    p = consolidator.dismiss(id)
+    if not p:
+        raise HTTPException(404)
+    return p
 
 
 @app.post("/memories/{id}/restore")

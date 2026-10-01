@@ -6,6 +6,7 @@ import ScopeSelect from './ScopeSelect'
 import DeskRail, { railOrder } from './DeskRail'
 import DeskDetail from './DeskDetail'
 import '../styles/cowork.css'
+import AppSwitcher from './AppSwitcher'
 
 const AUTONOMY: { value: DeskAutonomy; label: string; hint: string }[] = [
   { value: 'plan', label: 'Plan first', hint: 'Drafts a plan and waits for you before it touches anything.' },
@@ -126,6 +127,7 @@ export default function CoworkView(): JSX.Element {
           <ScopeSelect value={scope} onChange={(s) => void setLibraryScope(s)} />
           <button className="primary-btn" onClick={() => setCreating(true)}><Plus size={14} /> New desk</button>
         </div>
+        <AppSwitcher />
       </header>
 
       <div className="cowork-body">

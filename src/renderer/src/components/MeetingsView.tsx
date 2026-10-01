@@ -15,6 +15,7 @@ import MeetingSettings from './MeetingSettings'
 import MeetingConsentModal from './MeetingConsentModal'
 import { formatOffset, mergeSegments, recorderState, speakerLabel, type RecorderState } from '../lib/transcript'
 import '../styles/meetings.css'
+import AppSwitcher from './AppSwitcher'
 
 /**
  * Meetings: the notepad you type in during a call, the transcript beside it, and the enhanced
@@ -198,6 +199,7 @@ export default function MeetingsView(): JSX.Element {
             <Mic size={14} /> Record
           </button>
         </div>
+        <AppSwitcher />
       </header>
 
       <div className="mtg-body">

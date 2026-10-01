@@ -5,6 +5,7 @@ import { api } from '../lib/api'
 import type { Board, Dashboard } from '@shared/types'
 import SkillsPanel from './SkillsPanel'
 import McpSettings from './McpSettings'
+import AppSwitcher from './AppSwitcher'
 
 const TABS: { key: LibraryTab; label: string; icon: JSX.Element; blurb: string }[] = [
   { key: 'skills', label: 'Skills', icon: <Sparkles size={14} />, blurb: 'Procedures the assistant may follow again' },
@@ -110,6 +111,7 @@ export default function LibraryView(): JSX.Element {
             ))}
           </div>
         </div>
+        <AppSwitcher />
       </header>
       <div className="page-body">
         {tab === 'skills' && <SkillsPanel />}

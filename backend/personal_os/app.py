@@ -3774,6 +3774,9 @@ class ActivityConfigIn(BaseModel):
     redact: bool | None = None
     excludeApps: list[str] | None = None
     excludeTitlePatterns: list[str] | None = None
+    redactAllow: list[str] | None = None
+    redactDeny: list[str] | None = None
+    redactThreshold: float | None = None
     audio: dict[str, Any] | None = None
     summaryModel: str | None = None
     profileEveryHours: float | None = None
@@ -3805,6 +3808,16 @@ def activity_config(body: ActivityConfigIn) -> dict[str, Any]:
     if palantir is not None and bool(palantir) != bool(monitor.config().get("palantir")):
         monitor.set_palantir(bool(palantir))
     return monitor.status()
+
+
+class RedactTestIn(BaseModel):
+    text: str = ""
+
+
+@app.post("/activity/redact/test")
+def activity_redact_test(body: RedactTestIn) -> dict[str, Any]:
+    """Run a string through the current redaction config. In memory only: not stored, not logged."""
+    return activity.redact_preview(monitor.config(), body.text)
 
 
 class PalantirIn(BaseModel):

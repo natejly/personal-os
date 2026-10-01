@@ -53,7 +53,17 @@ unlinks the wav.
 - **Secure input** — macOS sets a system-wide flag whenever a password field is
   focused. Keystroke capture stops entirely while it is set, and the count of
   skipped keys is reported rather than hidden.
-- **Redaction** — emails, phone numbers, card numbers, SSNs, API keys, AWS keys,
+- **Redaction v2** (`redact.analyze` / `scrub_v2`) — each regex hit becomes a scored
+  span. Cards must pass Luhn, phones and SSNs must be plausible, long runs need
+  Shannon entropy >= 3.5 and a hex hash after "commit"/"sha" is left alone. A failed
+  validator is still kept (score 0.5) when a context word ("card", "ssn"...) sits
+  within 40 characters before it; spans under `redactThreshold` are dropped.
+  `redactAllow` / `redactDeny` take strings or `/regex/`. Page URLs go through
+  `sanitize_url`: no userinfo or fragment, sensitive query values become `~`.
+  Per-entity counts show in `/activity/status` (`redactions`, never the text) and
+  `POST /activity/redact/test` previews a string without storing it. Palantir mode
+  turns all of this off with `redact`.
+- **Redaction (v1 rules)** — emails, phone numbers, card numbers, SSNs, API keys, AWS keys,
   JWTs, private key blocks and long high-entropy strings become placeholders. On
   top of that, a word that announces a secret (`password`, `passphrase`,
   `api key`, `cvv`, `seed phrase`…) takes whatever follows it with it, since that

@@ -7,6 +7,7 @@ import {
   Repeat, Send, Shield, Speaker, Sparkles, Trash2, TrendingUp, X, Zap
 } from 'lucide-react'
 import { useStore } from '../store'
+import { api } from '../lib/api'
 import type {
   ActivityCapability, ActivityEvent, ActivityHabit, ActivityInsights, ActivityPattern,
   ActivitySignal, ActivityStatus, ActivitySuggestion, InsightKind
@@ -258,6 +259,56 @@ function ListEditor({ label, hint, items, placeholder, onChange }: {
         <button className="ghost-btn" onClick={add} disabled={!draft.trim()}>Add</button>
       </div>
     </div>
+  )
+}
+
+/** Redaction v2 controls: allow/deny lists, threshold, today's counts and a live test box. */
+function RedactionPanel({ cfg, counts, setActivityConfig }: {
+  cfg: ActivityStatus['config']; counts: Record<string, number>; setActivityConfig: (p: Record<string, unknown>) => Promise<void> | void
+}): JSX.Element {
+  const [text, setText] = useState('')
+  const [res, setRes] = useState<string>('')
+  useEffect(() => {
+    if (!text.trim()) { setRes(''); return }
+    let live = true
+    const t = setTimeout(() => {
+      api.activity.redactTest(text).then((r) => { if (live) setRes(r.redacted) }).catch(() => { if (live) setRes('') })
+    }, 300)
+    return () => { live = false; clearTimeout(t) }
+  }, [text, cfg.redactAllow, cfg.redactDeny, cfg.redactThreshold, cfg.redact])
+  const entries = Object.entries(counts)
+  return (
+    <>
+      <h4 className="act-h">Redaction rules</h4>
+      <p className="muted small">
+        A match is scrubbed only when it scores high enough: card numbers must pass the Luhn check, phone numbers and SSNs must be
+        plausible, and words like “card” or “ssn” nearby raise the score. Page addresses lose their query values and fragments.
+      </p>
+      <ListEditor
+        label="Never redact" items={cfg.redactAllow ?? []} placeholder="Exact text or /regex/"
+        hint="Exact strings (case-insensitive) or /regex/ that are left alone, such as a known order number."
+        onChange={(redactAllow) => void setActivityConfig({ redactAllow })}
+      />
+      <ListEditor
+        label="Always redact" items={cfg.redactDeny ?? []} placeholder="Text or /regex/, e.g. Project Falcon"
+        hint="Anything matching is replaced with [redacted], whatever else the rules think."
+        onChange={(redactDeny) => void setActivityConfig({ redactDeny })}
+      />
+      <label className="num-field">
+        <span><b>Threshold</b><small>Lower scrubs more, higher scrubs only the surest matches ({(cfg.redactThreshold ?? 0.4).toFixed(2)})</small></span>
+        <input type="range" min={0.2} max={0.9} step={0.05} value={cfg.redactThreshold ?? 0.4}
+          onChange={(e) => void setActivityConfig({ redactThreshold: Number(e.target.value) })} />
+      </label>
+      <div className="act-tags" title="Counts only; the matched text is never kept">
+        {entries.length === 0
+          ? <span className="muted small">Nothing redacted today.</span>
+          : entries.map(([k, v]) => <span key={k} className="act-tag">{k} {v}</span>)}
+      </div>
+      <b>Test redaction</b>
+      <textarea className="act-test" rows={3} value={text} placeholder="Paste a string to see what would be stored"
+        onChange={(e) => setText(e.target.value)} />
+      {res && <pre className="act-test-out">{res}</pre>}
+    </>
   )
 }
 
@@ -873,6 +924,8 @@ export default function ActivityView(): JSX.Element {
             hint="Case-insensitive substring match against the window title and the URL. A match skips that window entirely."
             onChange={(excludeTitlePatterns) => void setActivityConfig({ excludeTitlePatterns })}
           />
+
+          <RedactionPanel cfg={cfg} counts={st.redactions ?? {}} setActivityConfig={setActivityConfig} />
 
           <h4 className="act-h">Delete</h4>
           <p className="muted small">Deleting is immediate and cannot be undone.</p>

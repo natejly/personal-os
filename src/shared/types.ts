@@ -1485,6 +1485,12 @@ export interface ActivityConfig {
   excludeApps: string[]
   /** Window titles / URLs containing any of these are skipped. */
   excludeTitlePatterns: string[]
+  /** Strings or /regex/ that are never scrubbed. */
+  redactAllow: string[]
+  /** Strings or /regex/ that are always scrubbed. */
+  redactDeny: string[]
+  /** Score a candidate needs before it is scrubbed (0.2-0.9). */
+  redactThreshold: number
   audio: ActivityAudioConfig
   /** Blank falls back to the extraction model, then the default model. */
   summaryModel: string
@@ -1656,6 +1662,14 @@ export interface ActivityStatus {
   secure_input: boolean
   /** Palantir mode is on: every signal recording and the gate's filters down. */
   palantir: boolean
+  /** Redactions so far today, by entity. Counts only. */
+  redactions?: Record<string, number>
+}
+
+export interface ActivityRedactTest {
+  redacted: string
+  active: boolean
+  spans: { entity: string; score: number; start: number; end: number }[]
 }
 
 export type ActivityEventKind = 'focus' | 'input' | 'idle' | 'audio' | 'note'

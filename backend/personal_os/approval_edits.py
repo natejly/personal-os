@@ -34,7 +34,8 @@ EDITABLE_TOOLS: set[str] = {
     "google_tasks_add", "write_local_file",
 }
 
-Validator = Callable[[dict[str, Any]], "str | None"]
+# A validator returns an error string (rejected), None (fine as is), or a dict: the same arguments normalised.
+Validator = Callable[[dict[str, Any]], "str | dict[str, Any] | None"]
 _validators: dict[str, list[Validator]] = {}
 
 
@@ -43,7 +44,7 @@ class EditError(ValueError):
 
 
 def register_validator(tool: str, fn: Validator) -> None:
-    """Add a per-tool check: fn(edited_args) returns an error string, or None when the edit is fine."""
+    """Add a per-tool check: fn(edited_args) returns an error string, None when the edit is fine, or the cleaned dict."""
     _validators.setdefault(tool, []).append(fn)
 
 
@@ -107,8 +108,11 @@ def validate(tool: str, args: Any, parameters: dict[str, Any] | None) -> dict[st
         raise EditError(e)
     clean = {k: v for k, v in args.items() if v is not None}
     for fn in _validators.get(tool, []):
-        if (e := fn(clean)):
-            raise EditError(e)
+        r = fn(clean)
+        if isinstance(r, dict):
+            clean = r
+        elif r:
+            raise EditError(r)
     return clean
 
 

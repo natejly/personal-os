@@ -1,19 +1,16 @@
 import { useState } from 'react'
 import { AlignJustify, LayoutGrid, Lock, LockOpen, Plus, Trash2 } from 'lucide-react'
-import type { DragPayload, SnapMode } from '@shared/types'
+import type { DragPayload } from '@shared/types'
 import { api } from '../lib/api'
 import { useProject, useStore } from '../store'
 import { AddWidgetButton } from './AddWidgetMenu'
 import { PresetsButton } from './PresetsMenu'
 import AppSwitcher from '../components/AppSwitcher'
 import { hasDrag, readDrag } from './dnd'
-import { GRID_SIZES } from './snapping'
 import { useCanvas, useSpaceLocked } from './store'
 
 /** Reorder payload, local to the bar: a space tab is not one of the shared `DragKind`s. */
 const SPACE_MIME = 'application/x-personal-os-space'
-
-const SNAP_LABEL: Record<SnapMode, string> = { off: 'No snap', grid: 'Grid', guides: 'Guides', both: 'Grid + guides' }
 
 /** §7: a project dropped on a tab binds the space; every other payload belongs to the plane. */
 const projectDrag = (dt: DataTransfer): DragPayload | null => {
@@ -118,8 +115,6 @@ export default function SpacesBar(): JSX.Element {
   const order = useCanvas((s) => s.order)
   const overview = useCanvas((s) => s.overview)
   const activeId = useCanvas((s) => s.activeCanvasId)
-  const snapMode = useCanvas((s) => (s.activeCanvasId ? s.canvases[s.activeCanvasId]?.snap_mode : undefined))
-  const gridSize = useCanvas((s) => (s.activeCanvasId ? s.canvases[s.activeCanvasId]?.grid_size : undefined))
   const locked = useSpaceLocked()
   const sidebarOpen = useStore((s) => s.sidebarOpen)
 
@@ -133,26 +128,6 @@ export default function SpacesBar(): JSX.Element {
       <span className="spacer" />
       {/* Deliberately apart from the new-space + beside the tabs: this one adds to the space. */}
       <AddWidgetButton />
-      {activeId && (
-        <>
-          <select
-            className="space-snap"
-            title="Snapping"
-            value={snapMode ?? 'both'}
-            onChange={(e) => void useCanvas.getState().setSnap(activeId, { snap_mode: e.target.value as SnapMode })}
-          >
-            {(Object.keys(SNAP_LABEL) as SnapMode[]).map((m) => <option key={m} value={m}>{SNAP_LABEL[m]}</option>)}
-          </select>
-          <select
-            className="space-snap"
-            title="Grid pitch"
-            value={gridSize ?? 16}
-            onChange={(e) => void useCanvas.getState().setSnap(activeId, { grid_size: Number(e.target.value) })}
-          >
-            {GRID_SIZES.map((g) => <option key={g} value={g}>{g} pt</option>)}
-          </select>
-        </>
-      )}
       <button className="icon-btn ghost sm" title="Tidy up (⌃⌘T)" disabled={locked} onClick={() => useCanvas.getState().tidyUp()}><AlignJustify size={14} /></button>
       <button
         className={`icon-btn ghost sm${locked ? ' on' : ''}`}

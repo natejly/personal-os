@@ -100,6 +100,8 @@ export interface CalendarWeekProps {
   onCreateFull?: (slot: Slot, title: string) => void
   /** Dragging an event block moved or resized it; both ends are local wall-clock ISO strings. */
   onMove?: (e: CalendarEvent, startIso: string, endIso: string) => void
+  /** Click an empty all-day cell. */
+  onCreateAllDay?: (day: string) => void
   /** Per-event display color (Google event color or its calendar's). */
   colorOf?: (e: CalendarEvent) => string | null
 }
@@ -149,7 +151,7 @@ export function withoutTodoEvents(events: CalendarEvent[], todos: Todo[]): Calen
   return events.filter((e) => !(e.all_day && e.id && mirrored.has(e.id)))
 }
 
-export default function CalendarWeek({ days, events, todos, canCreate = false, onOpen, onTodo, onTodoDrop, onCreate, onCreateFull, onMove, colorOf }: CalendarWeekProps): JSX.Element {
+export default function CalendarWeek({ days, events, todos, canCreate = false, onOpen, onTodo, onTodoDrop, onCreate, onCreateFull, onMove, onCreateAllDay, colorOf }: CalendarWeekProps): JSX.Element {
   const [creating, setCreating] = useState<Slot | null>(null)
   const [title, setTitle] = useState('')
   const [over, setOver] = useState<string | null>(null)
@@ -303,17 +305,22 @@ export default function CalendarWeek({ days, events, todos, canCreate = false, o
       {days.map((d) => {
         const dk = dayKey(d)
         return (
-          <div key={'ad' + dk} className={`cal-allday ${over === `ad:${dk}` ? 'drop-over' : ''}`}
-            title={onTodoDrop ? 'Drop a todo to due this day' : undefined}
+          <div key={'ad' + dk} className={`cal-allday ${over === `ad:${dk}` ? 'drop-over' : ''} ${canCreate && onCreateAllDay ? 'can-create' : ''}`}
+            title={[canCreate && onCreateAllDay ? 'Click to add an all-day event' : '', onTodoDrop ? 'Drop a todo to due this day' : ''].filter(Boolean).join(' · ') || undefined}
+            onClick={(e) => {
+              if (!canCreate || !onCreateAllDay) return
+              if ((e.target as HTMLElement).closest('.cal-chip')) return
+              onCreateAllDay(dk)
+            }}
             onDragOver={(e) => dragOver(e, `ad:${dk}`)}
             onDragLeave={() => setOver(null)}
             onDrop={(e) => dropTodo(e, dk, null)}>
             {(eventsByDay[dk] ?? []).filter((e) => e.all_day).map((e) => (
-              <div key={e.id} className="cal-chip" style={colorOf?.(e) ? { background: `${colorOf(e)}38` } : undefined} onClick={() => onOpen(e)}>{e.summary}</div>
+              <div key={e.id} className="cal-chip" style={colorOf?.(e) ? { background: `${colorOf(e)}38` } : undefined} onClick={(ev) => { ev.stopPropagation(); onOpen(e) }}>{e.summary}</div>
             ))}
             {(todosByDay[dk] ?? []).map((t) => (
               <div key={t.id} className={`cal-chip todo p${t.priority}`} title={onTodo ? 'Open todo' : 'Todo due'}
-                onClick={() => onTodo?.(t)}>○ {t.title}</div>
+                onClick={(ev) => { ev.stopPropagation(); onTodo?.(t) }}>○ {t.title}</div>
             ))}
           </div>
         )

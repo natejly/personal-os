@@ -392,6 +392,8 @@ export interface Message {
   context_used: ContextUsed | null
   tool_events: ToolEvent[] | null
   trace: Span[] | null
+  /** A reasoning model's chain-of-thought. Never sent back to the model as history. */
+  reasoning?: string | null
   created_at: number
   /** Set when the reply ran out of budget or hit a breaker; not persisted. */
   partial?: PartialReason | null
@@ -402,6 +404,8 @@ export type Effort = 'default' | 'low' | 'medium' | 'high'
 export interface ConversationSettings {
   /** Reasoning effort passed through as `reasoning_effort`; 'default' sends nothing. */
   effort: Effort
+  /** Priority processing (`service_tier: priority`). Off sends nothing, so a model that rejects it is unaffected. */
+  fast?: boolean
   useMemory: boolean
   useGraph: boolean
   useDocuments: boolean
@@ -798,6 +802,8 @@ export interface Settings {
   /** Bank long messages and saved docs as writing samples, and keep the voice profile current. */
   learnStyle: boolean
   theme: 'dark' | 'light' | 'system'
+  /** Pastel highlight colour. Missing on older settings rows means sage. */
+  accent?: 'sage' | 'lilac' | 'sky' | 'rose' | 'mint' | 'fog'
   /** Legacy, pre-spaces global mode. Read once by init() (→ initial view 'canvas') and reset to 'classic'; nothing else reads it. */
   mode?: 'classic' | 'canvas'
   /** Electron accelerator for the global Gather/Scatter shortcut. */
@@ -807,6 +813,8 @@ export interface Settings {
   /** Sidebar views the user removed. */
   hiddenViews?: string[]
   tools: Record<string, ToolMode | boolean>
+  /** How assistant edits to docs land. Missing means review: show the diff and wait. */
+  docEditMode?: 'review' | 'apply'
   maxToolRounds: number
   /** Per-reply budgets; 0 means unlimited. */
   maxRunTokens?: number
@@ -886,10 +894,11 @@ export type ChatEvent =
   | { event: 'removed_message'; data: { id: string } }
   | { event: 'title'; data: { id: string; title: string } }
   | { event: 'delta'; data: { id: string; text: string } }
+  | { event: 'reasoning'; data: { id: string; text: string } }
   | { event: 'tool_call'; data: { message_id: string; id: string; name: string; arguments: Record<string, unknown>; needs_approval?: boolean; forced?: boolean; plan?: PlanStepRef | null } }
   | { event: 'tool_result'; data: ToolEvent & { message_id: string } }
   | { event: 'span'; data: { message_id: string; span: Span } }
-  | { event: 'done'; data: { id: string; error: string | null; context_used: ContextUsed; tool_events: ToolEvent[]; trace: Span[]; stopped: boolean; partial?: PartialReason | null; segment?: boolean; tainted?: boolean; taint_sources?: string[] } }
+  | { event: 'done'; data: { id: string; error: string | null; context_used: ContextUsed; tool_events: ToolEvent[]; trace: Span[]; stopped: boolean; partial?: PartialReason | null; segment?: boolean; tainted?: boolean; taint_sources?: string[]; reasoning?: string | null } }
   | { event: 'taint'; data: { message_id: string; source: string } }
   | { event: 'plan'; data: { conversation_id: string; steps: PlanStep[] } }
   /** propose_plan opened a card. `plan` above is the todo_write checklist — a different thing. */

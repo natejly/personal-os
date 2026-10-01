@@ -95,8 +95,6 @@ export default function Sidebar(): JSX.Element {
   const selectChat = useStore((s) => s.selectChat)
   const deleteChat = useStore((s) => s.deleteChat)
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
-  const pageAgentOpen = useStore((s) => s.pageAgentOpen)
-  const togglePageAgent = useStore((s) => s.togglePageAgent)
   const toggleSidebar = useStore((s) => s.toggleSidebar)
   const setView = useStore((s) => s.setView)
   const openProject = useStore((s) => s.openProject)
@@ -178,7 +176,6 @@ export default function Sidebar(): JSX.Element {
       <ResizeHandle id="sidebar-w" defaultSize={260} min={190} max={480} grows="right" onCollapse={toggleSidebar} label="Sidebar width" className="at-right" />
       <div className="sidebar-top drag">
         <button className="brand no-drag" onClick={() => setView('home')}><GrainLogo size={15} /><span>Grain</span></button>
-        <button className={`icon-btn no-drag ${inCanvas ? 'on' : ''}`} title={inCanvas ? 'Back (⌘⇧C)' : 'Go to space (⌘⇧C)'} onClick={() => void useCanvas.getState().toggleCanvas()}><LayoutGrid size={16} /></button>
         <button className="icon-btn no-drag" aria-label="Hide sidebar" title="Hide sidebar (⌘B)" onClick={toggleSidebar}><PanelLeftClose size={16} /></button>
       </div>
 
@@ -271,9 +268,6 @@ export default function Sidebar(): JSX.Element {
         {/* Both are mounted in every view: a capture running somewhere must never be invisible. */}
         <MeetingIndicator />
         <ActivityIndicator />
-        <button className={`settings-btn ${pageAgentOpen ? 'on' : ''}`} aria-pressed={pageAgentOpen} onClick={togglePageAgent}>
-          <Sparkles size={16} /><span>Ask about this page</span><kbd>⌘I</kbd>
-        </button>
         <button className="settings-btn" onClick={() => setSettingsOpen(true)}><Settings size={16} /><span>Settings</span><kbd>⌘,</kbd></button>
       </div>
     </aside>

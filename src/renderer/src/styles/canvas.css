@@ -38,8 +38,8 @@
   --dur-hover: 120ms;
   --grid-dot: rgba(255, 255, 255, 0.22);
   --guide: var(--accent);
-  --zone-fill: rgba(217, 119, 87, 0.12);
-  --zone-border: rgba(217, 119, 87, 0.55);
+  --zone-fill: color-mix(in srgb, var(--accent) 12%, transparent);
+  --zone-border: color-mix(in srgb, var(--accent) 55%, transparent);
   --dock-tile: rgba(30, 29, 27, 0.72);
   --ring-width: 2px;
 }
@@ -549,15 +549,6 @@
 .spaces-inset { flex: 0 0 76px; align-self: stretch; }
 .spaces-bar .icon-btn.on { color: var(--accent); }
 .spaces-bar .app-switch { width: 24px; height: 24px; }
-.space-snap {
-  height: 22px;
-  padding: 0 4px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-input);
-  font-size: 11px;
-  color: var(--text-muted);
-}
 
 .space-tab {
   display: flex;

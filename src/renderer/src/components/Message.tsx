@@ -1,11 +1,32 @@
-import { memo } from 'react'
-import { AlertCircle, User, Sparkles, Brain, Share2, FileText, Activity } from 'lucide-react'
+import { memo, useEffect, useRef, useState } from 'react'
+import { AlertCircle, User, Sparkles, Brain, Share2, FileText, Activity, ChevronRight, Lightbulb } from 'lucide-react'
 import type { Message } from '@shared/types'
 import { useStore } from '../store'
 import ToolEvents from './ToolEvents'
 import MarkdownPreview, { CopyButton } from './MarkdownPreview'
 export { SAFE_MD } from './MarkdownPreview'
 import { traceSummary, fmtMs } from './TraceView'
+
+/** Chain-of-thought from a reasoning model. Open while it is the only thing happening, collapsed once the answer starts. */
+function Reasoning({ text, live }: { text: string; live: boolean }): JSX.Element {
+  const [manual, setManual] = useState<boolean | null>(null)
+  const open = manual ?? live
+  const body = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (open && live && body.current) body.current.scrollTop = body.current.scrollHeight
+  }, [text, open, live])
+  return (
+    <div className={`reasoning ${live ? 'live' : ''}`}>
+      <button className="reasoning-head" onClick={() => setManual(!open)} aria-expanded={open}>
+        <ChevronRight size={12} className={open ? 'rot90' : ''} />
+        <Lightbulb size={13} />
+        <span className="reasoning-label">{live ? 'Thinking' : 'Thought process'}</span>
+        {live && <span className="thinking mini"><span /><span /><span /></span>}
+      </button>
+      {open && <div className="reasoning-body" ref={body}>{text}</div>}
+    </div>
+  )
+}
 
 // The store is read imperatively inside the handlers: any subscription here defeats the memo, and a
 // streamed token would re-render every message in every mounted transcript.
@@ -22,10 +43,11 @@ const MessageView = memo(function MessageView({ message, streaming }: { message:
           <div className="user-bubble"><div className="user-text">{message.content}</div></div>
         ) : (
           <div className="markdown">
+            {message.reasoning && <Reasoning text={message.reasoning} live={streaming && !message.content} />}
             {message.tool_events && message.tool_events.length > 0 && <ToolEvents events={message.tool_events} conversationId={message.conversation_id} />}
             {message.content ? (
               <MarkdownPreview source={message.content} streaming={streaming} />
-            ) : streaming && !message.tool_events?.some((t) => t.pending) ? (
+            ) : streaming && !message.reasoning && !message.tool_events?.some((t) => t.pending) ? (
               <span className="thinking"><span /><span /><span /></span>
             ) : null}
             {streaming && message.content && <span className="cursor" />}

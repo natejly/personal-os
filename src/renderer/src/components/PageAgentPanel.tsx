@@ -4,6 +4,7 @@ import { useConversation, useIsStreaming, useStore, useStreamingMessageId } from
 import Composer from './Composer'
 import ResizeHandle from './ResizeHandle'
 import MessageView from './Message'
+import ModelMenu from './ModelMenu'
 
 /** `pick()` falls back to the focused chat on an undefined id, so an empty panel needs a dead key. */
 const NO_THREAD = '\u0000page-agent'
@@ -19,9 +20,15 @@ export default function PageAgentPanel({ popout = false }: { popout?: boolean })
   const convo = useConversation(threadId ?? NO_THREAD)
   const streaming = useIsStreaming(threadId ?? NO_THREAD)
   const streamingMessageId = useStreamingMessageId(threadId ?? NO_THREAD)
+  const settings = useStore((s) => s.settings)
+  const pageAgentModel = useStore((s) => s.pageAgentModel)
+  const pageAgentEffort = useStore((s) => s.pageAgentEffort)
+  const pageAgentFast = useStore((s) => s.pageAgentFast)
   const sendToPageAgent = useStore((s) => s.sendToPageAgent)
   const closePageAgent = useStore((s) => s.closePageAgent)
   const resetPageAgent = useStore((s) => s.resetPageAgent)
+  const setPageAgentModel = useStore((s) => s.setPageAgentModel)
+  const setPageAgentParams = useStore((s) => s.setPageAgentParams)
   const selectChat = useStore((s) => s.selectChat)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [stick, setStick] = useState(true)
@@ -77,6 +84,17 @@ export default function PageAgentPanel({ popout = false }: { popout?: boolean })
         compact
         onSend={sendToPageAgent}
         placeholder={ctx ? `Ask about ${ctx.label}…` : 'Ask…'}
+        footer={
+          <ModelMenu
+            model={convo?.model ?? pageAgentModel ?? settings.defaultModel}
+            effort={convo?.settings?.effort ?? pageAgentEffort}
+            fast={convo?.settings?.fast ?? pageAgentFast}
+            placement="up"
+            onModel={(m) => void setPageAgentModel(m)}
+            onEffort={(e) => void setPageAgentParams({ effort: e })}
+            onFast={(f) => void setPageAgentParams({ fast: f })}
+          />
+        }
       />
     </aside>
   )

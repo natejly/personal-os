@@ -24,6 +24,7 @@ export const reduceStatus = (prev: SessionStatus, ev: ChatEvent, pendingApproval
     case 'user_message':
     case 'assistant_message':
     case 'delta':
+    case 'reasoning':
       return prev === 'idle' || prev === 'done' ? 'working' : prev
     // A `remember` tool's toast can land beside `done`, and a trailing span after it; reacting to
     // either would resurrect `working`. (Auto-learn itself reports on `/events`, not here.)
@@ -59,11 +60,15 @@ export const pickEvictions = (sessions: Record<string, EvictCandidate>, keep: Re
 }
 
 /** Server row wins per field, except where the live stream holds more than the server has persisted. */
+const longerText = (remote?: string | null, local?: string | null): string | null =>
+  (remote?.length ?? 0) >= (local?.length ?? 0) ? (remote ?? null) : (local ?? null)
+
 const mergeMessage = (local: Message, remote: Message): Message => ({
   ...remote,
   content: remote.content.length >= local.content.length ? remote.content : local.content,
   tool_events: remote.tool_events?.length ? remote.tool_events : local.tool_events,
-  trace: remote.trace?.length ? remote.trace : local.trace
+  trace: remote.trace?.length ? remote.trace : local.trace,
+  reasoning: longerText(remote.reasoning, local.reasoning)
 })
 
 /**

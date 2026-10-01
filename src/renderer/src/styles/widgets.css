@@ -49,8 +49,8 @@
   height: 13px;
   padding: 0 3px;
   border-radius: 7px;
-  background: var(--accent);
-  color: #fff;
+  background: var(--accent-solid);
+  color: var(--on-accent);
   font-size: 9px;
   font-weight: 700;
   line-height: 13px;

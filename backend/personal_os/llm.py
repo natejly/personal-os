@@ -1,6 +1,8 @@
 """Provider-agnostic LLM access through a LiteLLM proxy (OpenAI-compatible API)."""
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import time
 from contextvars import ContextVar
@@ -47,6 +49,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Independent of autoLearn: wanting the app to learn facts is not the same as wanting it to copy your voice.
     "learnStyle": True,
     "theme": "dark",
+    "accent": "sage",
     "mode": "classic",
     "gatherShortcut": "Control+Alt+Command+Space",
     # Shell modularity: Today-screen cards ({key: bool}, missing = shown) and sidebar views the user removed.
@@ -54,6 +57,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "hiddenViews": [],
     # tools: {tool_name: bool}; missing = on
     "tools": {},
+    # How doc_edit lands. "review" proposes a diff; "apply" writes it. Missing means review.
+    "docEditMode": "review",
     "maxToolRounds": 25,
     # Per-reply budgets; 0 = unlimited. A run that hits one still writes a final answer, marked partial.
     "maxRunTokens": 200_000,
@@ -125,20 +130,56 @@ async def list_models(settings: dict[str, Any]) -> list[dict[str, str]]:
     return sorted(({"id": m["id"]} for m in data if "id" in m), key=lambda m: m["id"])
 
 
+def _reason_text(delta: dict[str, Any]) -> str:
+    """Chain-of-thought from a reasoning model. It arrives beside `content`, not inside it.
+
+    kimi, glm and deepseek send `reasoning_content`. Others send `reasoning`, sometimes as a list of
+    chunks. A missing field is an empty string, so a normal model changes nothing.
+    """
+    raw = delta.get("reasoning_content")
+    if raw is None:
+        raw = delta.get("reasoning")
+    if isinstance(raw, str):
+        return raw
+    if isinstance(raw, dict):
+        return str(raw.get("text") or raw.get("content") or "")
+    if isinstance(raw, list):
+        parts: list[str] = []
+        for item in raw:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                parts.append(str(item.get("text") or item.get("content") or ""))
+        return "".join(parts)
+    return ""
+
+
+async def _close_when(cancel: asyncio.Event, response: httpx.Response) -> None:
+    """Drop the provider socket when stop or steer fires, so the read is not stuck until the next token."""
+    await cancel.wait()
+    await response.aclose()
+
+
 async def stream_chat(
     settings: dict[str, Any], model: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None, kind: str = "chat",
-    effort: str = "default", tool_choice: str = "auto",
+    effort: str = "default", tool_choice: str = "auto", fast: bool = False, cancel: asyncio.Event | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """Stream a chat completion.
 
-    Yields {"type": "delta", "text": str} for content, and finally
+    Yields {"type": "delta", "text": str} for content, {"type": "reasoning", "text": str} for a
+    reasoning model's chain-of-thought, and finally
     {"type": "end", "finish_reason": str|None, "tool_calls": [{"id","name","arguments"}], "usage": {...}|None,
      "usage_est": {"prompt_tokens": int, "completion_tokens": int}}.
+
+    `cancel`, once set, closes the HTTP stream immediately. The final event then has finish_reason
+    "cancelled" and no tool calls, including any arguments that had only partly arrived.
     """
     body: dict[str, Any] = {"model": model, "messages": messages, "stream": True, "stream_options": {"include_usage": True}}
     # Only sent when asked for: a model that does not support it rejects the whole request.
     if effort and effort != "default":
         body["reasoning_effort"] = effort
+    if fast:
+        body["service_tier"] = "priority"
     if tools:
         body["tools"] = tools
         body["tool_choice"] = tool_choice
@@ -147,6 +188,8 @@ async def stream_chat(
     usage: dict[str, Any] | None = None
     t0 = time.time()
     out_chars = 0
+    reason_chars = 0
+    cancelled = False
     async with httpx.AsyncClient(timeout=httpx.Timeout(10, read=None)) as client:
         async with client.stream(
             "POST",
@@ -155,42 +198,68 @@ async def stream_chat(
             json=body,
         ) as r:
             if r.status_code >= 400:
-                body = (await r.aread()).decode("utf-8", "replace")
-                raise LLMError(f"{r.status_code} {r.reason_phrase}: {body[:500]}")
-            async for line in r.aiter_lines():
-                line = line.strip()
-                if not line.startswith("data:"):
-                    continue
-                data = line[5:].strip()
-                if data == "[DONE]":
-                    break
-                try:
-                    obj = json.loads(data)
-                except ValueError:
-                    continue
-                if obj.get("error"):
-                    err = obj["error"]
-                    raise LLMError(err.get("message") if isinstance(err, dict) else str(err))
-                if isinstance(obj.get("usage"), dict):
-                    usage = {k: obj["usage"].get(k) for k in ("prompt_tokens", "completion_tokens", "total_tokens") if obj["usage"].get(k) is not None}
-                choice = (obj.get("choices") or [{}])[0]
-                delta = choice.get("delta") or {}
-                if delta.get("content"):
-                    out_chars += len(delta["content"])
-                    yield {"type": "delta", "text": delta["content"]}
-                for tc in delta.get("tool_calls") or []:
-                    idx = tc.get("index", 0)
-                    cur = calls.setdefault(idx, {"id": tc.get("id") or f"call_{idx}", "name": "", "arguments": ""})
-                    if tc.get("id"):
-                        cur["id"] = tc["id"]
-                    fn = tc.get("function") or {}
-                    if fn.get("name"):
-                        cur["name"] += fn["name"]
-                    if fn.get("arguments"):
-                        cur["arguments"] += fn["arguments"]
-                if choice.get("finish_reason"):
-                    finish = choice["finish_reason"]
-    p_chars, c_chars = len(json.dumps(messages)), out_chars + sum(len(c["arguments"]) for c in calls.values())
+                err_body = (await r.aread()).decode("utf-8", "replace")
+                raise LLMError(f"{r.status_code} {r.reason_phrase}: {err_body[:500]}")
+            # Closes the socket from a second task so a read blocked on the next token returns at once.
+            abort = asyncio.create_task(_close_when(cancel, r)) if cancel is not None else None
+            try:
+                async for line in r.aiter_lines():
+                    if cancel is not None and cancel.is_set():
+                        cancelled = True
+                        break
+                    line = line.strip()
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        break
+                    try:
+                        obj = json.loads(data)
+                    except ValueError:
+                        continue
+                    if obj.get("error"):
+                        err = obj["error"]
+                        raise LLMError(err.get("message") if isinstance(err, dict) else str(err))
+                    if isinstance(obj.get("usage"), dict):
+                        usage = {k: obj["usage"].get(k) for k in ("prompt_tokens", "completion_tokens", "total_tokens") if obj["usage"].get(k) is not None}
+                    choice = (obj.get("choices") or [{}])[0]
+                    delta = choice.get("delta") or {}
+                    reason = _reason_text(delta)
+                    if reason:
+                        reason_chars += len(reason)
+                        yield {"type": "reasoning", "text": reason}
+                    if delta.get("content"):
+                        out_chars += len(delta["content"])
+                        yield {"type": "delta", "text": delta["content"]}
+                    for tc in delta.get("tool_calls") or []:
+                        idx = tc.get("index", 0)
+                        cur = calls.setdefault(idx, {"id": tc.get("id") or f"call_{idx}", "name": "", "arguments": ""})
+                        if tc.get("id"):
+                            cur["id"] = tc["id"]
+                        fn = tc.get("function") or {}
+                        if fn.get("name"):
+                            cur["name"] += fn["name"]
+                        if fn.get("arguments"):
+                            cur["arguments"] += fn["arguments"]
+                    if choice.get("finish_reason"):
+                        finish = choice["finish_reason"]
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                if cancel is None or not cancel.is_set():
+                    raise
+                cancelled = True
+            finally:
+                if abort is not None:
+                    abort.cancel()
+                    with contextlib.suppress(asyncio.CancelledError, Exception):
+                        await abort
+    if cancelled or (cancel is not None and cancel.is_set()):
+        # A half-parsed tool call must not run. The caller keeps whatever text already streamed.
+        calls = {}
+        finish = "cancelled"
+    # Reasoning is billed as completion tokens, so it counts toward cost and the run budget.
+    p_chars, c_chars = len(json.dumps(messages)), out_chars + reason_chars + sum(len(c["arguments"]) for c in calls.values())
     _emit_usage(model, kind, usage, int((time.time() - t0) * 1000), p_chars, c_chars)
     # usage_est is always present: this route often omits `usage` on streamed replies, and a budget cannot run on None.
     yield {"type": "end", "finish_reason": finish, "tool_calls": [calls[i] for i in sorted(calls)], "usage": usage,

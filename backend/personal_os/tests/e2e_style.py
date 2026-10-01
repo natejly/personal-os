@@ -47,7 +47,7 @@ async def fake_complete(settings, model, messages, kind="learn"):
     return '{"memories": [], "entities": [], "relations": []}'
 
 
-async def fake_stream(settings, model, messages, tools=None, kind="chat", effort="default", tool_choice="auto"):
+async def fake_stream(settings, model, messages, tools=None, kind="chat", effort="default", tool_choice="auto", fast=False, cancel=None):
     yield {"type": "delta", "text": "Noted."}
     yield {"type": "end", "finish_reason": "stop", "tool_calls": [], "usage": None,
            "usage_est": {"prompt_tokens": 10, "completion_tokens": 2}}

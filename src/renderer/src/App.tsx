@@ -23,6 +23,7 @@ import { moduleForView } from './shell/registry'
 import Canvas from './canvas/Canvas'
 import { useCanvas } from './canvas/store'
 import { AlertTriangle } from 'lucide-react'
+import { accentId } from './lib/accents'
 
 /** The transitions worth interrupting for: the desk has stopped and cannot go on without the user. */
 const NOTIFY_ON: DeskStatus[] = ['review', 'blocked', 'failed']
@@ -99,6 +100,7 @@ export default function App(): JSX.Element {
   const view = useStore((s) => s.view)
   const ModView = moduleForView(view)?.view?.Component
   const theme = useStore((s) => s.settings.theme)
+  const accent = useStore((s) => s.settings.accent)
   const inCanvas = useStore((s) => s.view === 'canvas')
   /* Over a document the agent floats rather than taking a third column: see .page-agent.popout. */
   const agentPopout = useStore((s) => s.view === 'docs')
@@ -109,7 +111,8 @@ export default function App(): JSX.Element {
   }, [init])
   useEffect(() => {
     document.documentElement.dataset.theme = theme
-  }, [theme])
+    document.documentElement.dataset.accent = accentId(accent)
+  }, [theme, accent])
   // What the user has highlighted rides along with the next ⌘I question, whatever view they are in.
   useEffect(() => watchSelection(), [])
   // Spaces are listed in the sidebar, so the canvas store loads with the app, not on first entry.

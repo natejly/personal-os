@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
-import { X, Eye, EyeOff, Plug, Cpu, Brain, Mail, Mic, Wrench, Gauge, LayoutGrid, SlidersHorizontal, BookOpen, FileText, type LucideIcon } from 'lucide-react'
+import { X, Eye, EyeOff, Plug, Cpu, Brain, Mail, Mic, Wrench, Gauge, LayoutGrid, Magnet, SlidersHorizontal, BookOpen, FileText, type LucideIcon } from 'lucide-react'
 import { useStore, type SettingsTab } from '../store'
 import { api } from '../lib/api'
 import { HOME_MODULES, OPTIONAL_VIEWS } from '../modules'
 import { useModal } from '../lib/useModal'
-import type { Settings, ShortcutState } from '@shared/types'
+import { ACCENTS, accentId } from '../lib/accents'
+import type { Settings, ShortcutState, SnapMode } from '@shared/types'
+import { GRID_SIZES } from '../canvas/snapping'
+import { useCanvas } from '../canvas/store'
 import { ToolGlobalToggles } from './ToolPermissions'
 import GoogleSettings from './GoogleSettings'
 import MeetingSettings from './MeetingSettings'
@@ -23,9 +26,12 @@ const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
   { id: 'meetings', label: 'Meetings', icon: Mic },
   { id: 'tools', label: 'Tools', icon: Wrench },
   { id: 'usage', label: 'Usage & cost', icon: Gauge },
+  { id: 'spaces', label: 'Spaces', icon: Magnet },
   { id: 'modules', label: 'Modules', icon: LayoutGrid },
   { id: 'behavior', label: 'Behavior', icon: SlidersHorizontal }
 ]
+
+const SNAP_LABEL: Record<SnapMode, string> = { off: 'No snap', grid: 'Grid', guides: 'Guides', both: 'Grid + guides' }
 
 export default function SettingsModal(): JSX.Element {
   const settings = useStore((s) => s.settings)
@@ -43,6 +49,13 @@ export default function SettingsModal(): JSX.Element {
   const tabRefs = useRef<Partial<Record<Tab, HTMLButtonElement | null>>>({})
   const patch = (p: Partial<Settings>): void => setDraft((d) => ({ ...d, ...p }))
   const hold = draft.gmailSendHold ?? { enabled: true, seconds: 90 }
+  const activeSpaceId = useCanvas((s) => s.activeCanvasId)
+  const spaceName = useCanvas((s) => (s.activeCanvasId ? s.canvases[s.activeCanvasId]?.name : undefined))
+  const [snap, setSnap] = useState<{ mode: SnapMode; grid: number }>(() => {
+    const c = useCanvas.getState()
+    const space = c.activeCanvasId ? c.canvases[c.activeCanvasId] : undefined
+    return { mode: space?.snap_mode ?? 'both', grid: space?.grid_size ?? 16 }
+  })
   // Closing discards `draft` — Escape and the backdrop are exactly the Cancel button.
   const { titleId, backdrop, modal } = useModal(() => setSettingsOpen(false))
 
@@ -55,6 +68,17 @@ export default function SettingsModal(): JSX.Element {
 
   // In a narrow window the tabs are a horizontal strip; keep the selected one on screen.
   useEffect(() => { tabRefs.current[tab]?.scrollIntoView({ block: 'nearest', inline: 'nearest' }) }, [tab])
+  // Preview theme/accent on the page while the modal is open; discard restores saved values.
+  useEffect(() => {
+    const root = document.documentElement
+    root.dataset.theme = draft.theme
+    root.dataset.accent = accentId(draft.accent)
+  }, [draft.theme, draft.accent])
+  useEffect(() => () => {
+    const saved = useStore.getState().settings
+    document.documentElement.dataset.theme = saved.theme
+    document.documentElement.dataset.accent = accentId(saved.accent)
+  }, [])
 
   const testConnection = async (): Promise<void> => {
     setTest({ state: 'testing' })
@@ -80,6 +104,12 @@ export default function SettingsModal(): JSX.Element {
     } catch (e) {
       // The dialog stays open with the draft intact, so nothing typed is lost.
       return toast((e as Error).message, 'error')
+    }
+    if (activeSpaceId) {
+      const space = useCanvas.getState().canvases[activeSpaceId]
+      if (space && (space.snap_mode !== snap.mode || space.grid_size !== snap.grid)) {
+        await useCanvas.getState().setSnap(activeSpaceId, { snap_mode: snap.mode, grid_size: snap.grid })
+      }
     }
     // The active view can be removed from the sidebar; don't leave the app parked on an unreachable one.
     if ((draft.hiddenViews ?? []).includes(view)) setView('home')
@@ -207,6 +237,14 @@ export default function SettingsModal(): JSX.Element {
             {tab === 'tools' && <section>
               <h3>Tools</h3>
               <p className="muted"><b>on</b> runs automatically, <b>ask</b> pauses the reply for your approval, <b>off</b> hides the tool. Anything that acts outside the app (email, calendar, Google Tasks) asks by default.</p>
+              <div className="send-hold">
+                <span className="toggle-text"><b>Document edits</b><small>Every change the assistant makes to a doc shows as a diff in the chat.</small></span>
+                <div className="seg" role="group" aria-label="Document edits">
+                  <button type="button" className={(draft.docEditMode ?? 'review') === 'review' ? 'on' : ''} onClick={() => patch({ docEditMode: 'review' })}>Ask</button>
+                  <button type="button" className={draft.docEditMode === 'apply' ? 'on' : ''} onClick={() => patch({ docEditMode: 'apply' })}>Accept all</button>
+                </div>
+                <p className="muted small">Ask waits for you to accept or reject each diff. Accept all writes the change and still shows the diff. You can undo either one from the doc's history.</p>
+              </div>
               <ToolGlobalToggles value={draft.tools ?? {}} onChange={(tools) => patch({ tools })} />
               <label><span>Max tool rounds per reply</span><input type="number" min={1} max={60} value={draft.maxToolRounds} onChange={(e) => patch({ maxToolRounds: Number(e.target.value) })} /></label>
               <label><span>Brave Search API key <small className="muted">(optional; without a key web search uses Exa, then DuckDuckGo)</small></span><input type="password" value={draft.braveApiKey} onChange={(e) => patch({ braveApiKey: e.target.value })} placeholder="BSA…" spellCheck={false} /></label>
@@ -250,6 +288,23 @@ export default function SettingsModal(): JSX.Element {
               </div>
             </section>}
 
+            {tab === 'spaces' && <section>
+              <h3>Spaces</h3>
+              <p className="muted">
+                {spaceName ? <>Snapping for <b>{spaceName}</b>. New spaces start on grid and guides.</> : 'New spaces start on grid and guides.'}
+              </p>
+              <label><span>Snapping</span>
+                <select value={snap.mode} disabled={!activeSpaceId} onChange={(e) => setSnap((s) => ({ ...s, mode: e.target.value as SnapMode }))}>
+                  {(Object.keys(SNAP_LABEL) as SnapMode[]).map((m) => <option key={m} value={m}>{SNAP_LABEL[m]}</option>)}
+                </select>
+              </label>
+              <label><span>Grid size</span>
+                <select value={snap.grid} disabled={!activeSpaceId} onChange={(e) => setSnap((s) => ({ ...s, grid: Number(e.target.value) }))}>
+                  {GRID_SIZES.map((g) => <option key={g} value={g}>{g} pt</option>)}
+                </select>
+              </label>
+            </section>}
+
             {tab === 'behavior' && <section>
               <h3>Behavior</h3>
               <label><span>Global system prompt</span><textarea rows={4} value={draft.systemPrompt} onChange={(e) => patch({ systemPrompt: e.target.value })} /></label>
@@ -257,6 +312,27 @@ export default function SettingsModal(): JSX.Element {
                 <select value={draft.theme} onChange={(e) => patch({ theme: e.target.value as Settings['theme'] })}>
                   <option value="dark">Dark</option><option value="light">Light</option><option value="system">System</option>
                 </select>
+              </label>
+              <label><span>Accent</span>
+                <div className="accent-picks" role="radiogroup" aria-label="Accent color">
+                  {ACCENTS.map((a) => {
+                    const on = accentId(draft.accent) === a.id
+                    return (
+                      <button
+                        key={a.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={on}
+                        aria-label={a.label}
+                        title={a.label}
+                        className={`accent-swatch${on ? ' on' : ''}`}
+                        style={{ background: a.swatch }}
+                        onClick={() => patch({ accent: a.id })}
+                      />
+                    )
+                  })}
+                </div>
+                <span className="accent-name">{ACCENTS.find((a) => a.id === accentId(draft.accent))?.label}</span>
               </label>
               <label><span>Gather widgets shortcut <small className="muted">(global; brings every detached widget to the front and back again)</small></span>
                 <input value={draft.gatherShortcut} onChange={(e) => patch({ gatherShortcut: e.target.value })}

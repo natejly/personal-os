@@ -47,7 +47,7 @@ else:
 
 async def _scripted_stream(settings: dict[str, Any], model: str, messages: list[dict[str, Any]],
                            tools: list[dict[str, Any]] | None = None, kind: str = "chat",
-                           effort: str = "default", tool_choice: str = "auto") -> Any:
+                           effort: str = "default", tool_choice: str = "auto", fast: bool = False, cancel: asyncio.Event | None = None) -> Any:
     yield {"type": "delta", "text": "hello"}
     yield {"type": "end", "finish_reason": "stop", "tool_calls": [], "usage": None}
 

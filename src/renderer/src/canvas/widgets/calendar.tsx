@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState, type DragEvent } from 'react'
-import { Calendar as CalIcon, ChevronLeft, ChevronRight, ExternalLink, Pencil, Plus } from 'lucide-react'
+import { Calendar as CalIcon, ChevronLeft, ChevronRight, Plus } from 'lucide-react'
 import type { CalendarEvent, DragKind, Todo } from '@shared/types'
 import { useStore } from '../../store'
 import { api } from '../../lib/api'
 import CalendarWeek, { addDays, dayKey, fmtTime, localDay, slotIso, startOfWeek, withoutTodoEvents, type Slot } from '../../components/CalendarWeek'
 import EventEditor, { eventColor, primeCalendarMeta, type EventDraft } from '../../components/EventEditor'
+import { useVisibleCalendars } from '../../components/useVisibleCalendars'
 import { scheduleTodo } from '../../components/TodoItem'
 import { hasDrag, readDrag, useDropTarget } from '../dnd'
 import type { WidgetDef, WidgetProps } from '../registry'
@@ -29,8 +30,8 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
   const [shift, setShift] = useState(0)
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [error, setError] = useState<string | null>(null)
-  const [open, setOpen] = useState<CalendarEvent | null>(null)
   const [editing, setEditing] = useState<{ event: CalendarEvent | null; draft?: EventDraft } | null>(null)
+  const { query, visibleIds, ready, calendars } = useVisibleCalendars()
   const [, setMetaTick] = useState(0)
 
   const anchor = useMemo(() => (mode === 'week' ? addDays(startOfWeek(new Date()), shift * 7) : addDays(new Date(), shift)), [mode, shift])
@@ -45,11 +46,12 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
 
   // Off-screen, minimized or zoomed out: stop the poller so a hidden window does not hit Google.
   useEffect(() => {
-    if (!live || !connected) return
+    if (!live || !connected || query == null) return
+    if (!query) { setEvents([]); return }
     let alive = true
     const pull = async (): Promise<void> => {
       try {
-        const list = mode === 'agenda' ? await api.google.calendar(span, 'all') : await api.google.calendarRange(startIso, span, 'all')
+        const list = mode === 'agenda' ? await api.google.calendar(span, query) : await api.google.calendarRange(startIso, span, query)
         if (alive) { setEvents(list); setError(null) }
       } catch (e) {
         if (alive) setError((e as Error).message)
@@ -59,10 +61,11 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
     void primeCalendarMeta().then(() => { if (alive) setMetaTick((t) => t + 1) })
     const t = setInterval(() => void pull(), POLL_MS)
     return () => { alive = false; clearInterval(t) }
-  }, [live, connected, mode, span, startIso])
+  }, [live, connected, mode, span, startIso, query])
 
   const reload = async (): Promise<void> => {
-    setEvents(mode === 'agenda' ? await api.google.calendar(span, 'all') : await api.google.calendarRange(startIso, span, 'all'))
+    if (!query) { setEvents([]); return }
+    setEvents(mode === 'agenda' ? await api.google.calendar(span, query) : await api.google.calendarRange(startIso, span, query))
   }
 
   const dropTodo = async (todoId: string, day: string, hour: number | null): Promise<void> => {
@@ -121,7 +124,12 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
     void dropTodo(p.id, day, null)
   }
 
-  const shown = useMemo(() => withoutTodoEvents(events, todos), [events, todos])
+  const shown = useMemo(() => {
+    const base = withoutTodoEvents(events, todos)
+    if (!ready || calendars.length === 0) return base
+    const ids = new Set(visibleIds)
+    return base.filter((e) => !e.calendar_id || ids.has(e.calendar_id))
+  }, [events, todos, ready, calendars.length, visibleIds])
 
   const agenda = useMemo(() => {
     if (mode !== 'agenda') return []
@@ -180,7 +188,7 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
                 onDrop={(e) => agendaDrop(e, k)}>
                 <div className="widget-meta">{new Date(`${k}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}</div>
                 {g.events.map((e) => (
-                  <button key={e.id} className="widget-row" onClick={() => setOpen(e)}>
+                  <button key={e.id} className="widget-row" onClick={() => setEditing({ event: e })}>
                     <span className="widget-meta">{e.all_day ? 'all day' : fmtTime(new Date(e.start))}</span>
                     <span className="grow widget-title">{e.summary}</span>
                   </button>
@@ -198,24 +206,17 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
       ) : (
         <div className="cal-scroll">
           <CalendarWeek days={columns} events={shown} todos={todos} canCreate={connected}
-            onOpen={setOpen} onTodo={() => setView('todos')} onTodoDrop={(id, day, hour) => void dropTodo(id, day, hour)} onCreate={create}
+            onOpen={(e) => setEditing({ event: e })} onTodo={() => setView('todos')} onTodoDrop={(id, day, hour) => void dropTodo(id, day, hour)} onCreate={create}
             onCreateFull={(slot, title) => setEditing({ event: null, draft: { day: slot.day, title, start: slotIso(slot.day, slot.startMin), end: slotIso(slot.day, slot.endMin) } })}
+            onCreateAllDay={(day) => setEditing({ event: null, draft: { day, allDay: true } })}
             onMove={connected ? (e, start, end) => void move(e, start, end) : undefined}
             colorOf={eventColor} />
         </div>
       )}
 
-      {open && (
-        <div className="widget-bar">
-          <span className="grow widget-sub" title={open.description || open.summary}>{open.summary} · {open.all_day ? 'all day' : fmtTime(new Date(open.start))}{open.location ? ` · ${open.location}` : ''}</span>
-          <button className="widget-chip" title="Edit event" onClick={() => { setEditing({ event: open }); setOpen(null) }}><Pencil size={11} /></button>
-          {open.link && <a className="widget-chip" href={open.link} target="_blank" rel="noreferrer"><ExternalLink size={11} /></a>}
-          <button className="widget-chip" onClick={() => setOpen(null)}>close</button>
-        </div>
-      )}
-
       {editing && (
-        <EventEditor event={editing.event} draft={editing.draft} onClose={() => setEditing(null)} onSaved={() => void reload().catch(() => undefined)} />
+        <EventEditor key={editing.event?.id ?? `new:${editing.draft?.day ?? ''}:${editing.draft?.hour ?? ''}:${editing.draft?.start ?? ''}:${editing.draft?.end ?? ''}:${editing.draft?.allDay ? 'day' : ''}`}
+          event={editing.event} draft={editing.draft} onClose={() => setEditing(null)} onSaved={() => void reload().catch(() => undefined)} />
       )}
     </div>
   )

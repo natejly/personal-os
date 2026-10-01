@@ -32,7 +32,7 @@ export type DocMode = 'edit' | 'split' | 'preview'
 export type MemoryMode = 'split' | 'list' | 'graph' | 'style'
 export type ContextTab = 'last' | 'preview' | 'trace'
 /** Settings sections. 'knowledge' holds what used to be the sidebar's Knowledge Base: memory and documents. */
-export type SettingsTab = 'provider' | 'knowledge' | 'memory' | 'integrations' | 'meetings' | 'tools' | 'usage' | 'modules' | 'behavior'
+export type SettingsTab = 'provider' | 'knowledge' | 'memory' | 'integrations' | 'meetings' | 'tools' | 'usage' | 'spaces' | 'modules' | 'behavior'
 export type KnowledgeTab = 'memory' | 'documents'
 export type { Scope, SessionStatus }
 
@@ -128,12 +128,13 @@ export interface State {
   /** Project the next new chat will be created in (null = personal). */
   draftProjectId: string | null
   /**
-   * Reasoning effort the next new chat will be created with. A draft chat has no row to PATCH, so the
-   * header's effort picker parks its choice here and `send` applies it once the conversation exists.
+   * Reasoning effort and fast mode the next new chat will be created with. A draft chat has no row to
+   * PATCH, so the picker parks its choice here and `send` applies it once the conversation exists.
    */
   draftEffort: Effort
   /** A model picked on a draft chat. Null follows `settings.defaultModel`; picking one must not rewrite that default. */
   draftModel: string | null
+  draftFast: boolean
   /** Scope filter used by the Memory / Graph / Documents library views. */
   libraryScope: Scope
   /** Scope the memories/graph/documents arrays are currently loaded for. */
@@ -148,6 +149,10 @@ export interface State {
    */
   pageAgentOpen: boolean
   pageAgentId: string | null
+  /** Model, effort, and fast mode for the next ⌘I thread, and the live thread once it exists. */
+  pageAgentModel: string | null
+  pageAgentEffort: Effort
+  pageAgentFast: boolean
   pageContext: PageContext | null
   /** Message whose execution trace the Trace tab shows (null = latest assistant reply). */
   traceMessageId: string | null
@@ -258,6 +263,9 @@ export interface State {
   closePageAgent: () => void
   /** Drop the current thread and start a fresh one against the page on screen. */
   resetPageAgent: () => void
+  /** Model for the ⌘I thread. Before the first send this is only a draft; it does not change the app default. */
+  setPageAgentModel: (model: string) => Promise<void>
+  setPageAgentParams: (patch: { effort?: Effort; fast?: boolean }) => Promise<void>
   /** Called by the active view. Passing null means "this view has nothing to say". */
   setPageContext: (ctx: PageContext | null) => void
   setContextTab: (t: ContextTab) => void
@@ -647,6 +655,8 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean): Cha
       return withMsgs(msgs.filter((m) => m.id !== ev.data.id))
     case 'delta':
       return mapMsg(ev.data.id, (m) => ({ ...m, content: m.content + ev.data.text }))
+    case 'reasoning':
+      return mapMsg(ev.data.id, (m) => ({ ...m, reasoning: (m.reasoning ?? '') + ev.data.text }))
     case 'tool_call':
       return mapMsg(ev.data.message_id, (m) => ({ ...m, tool_events: [...(m.tool_events ?? []), { id: ev.data.id, name: ev.data.name, arguments: ev.data.arguments, result_preview: '', duration_ms: 0, error: null, pending: true, needs_approval: !!ev.data.needs_approval, forced: !!ev.data.forced, plan: ev.data.plan ?? null }] }))
     case 'tool_result':
@@ -658,7 +668,7 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean): Cha
         return { ...m, trace: i >= 0 ? trace.map((sp, j) => (j === i ? ev.data.span : sp)) : [...trace, ev.data.span] }
       })
     case 'done': {
-      const done = mapMsg(ev.data.id, (m) => ({ ...m, error: ev.data.error, context_used: ev.data.context_used, tool_events: ev.data.tool_events?.length ? ev.data.tool_events : m.tool_events, trace: ev.data.trace?.length ? ev.data.trace : m.trace }))
+      const done = mapMsg(ev.data.id, (m) => ({ ...m, error: ev.data.error, context_used: ev.data.context_used, tool_events: ev.data.tool_events?.length ? ev.data.tool_events : m.tool_events, trace: ev.data.trace?.length ? ev.data.trace : m.trace, reasoning: ev.data.reasoning ?? m.reasoning }))
       // The reply is whole and persisted here. The stream stays open for the auto-learn tail, so the
       // subscription is left alone and only `answering` drops.
       return { ...done, streaming: done.streaming && { ...done.streaming, answering: false }, finishedAt: Date.now() }
@@ -1009,7 +1019,7 @@ export const useStore = create<State>((set, get) => {
   return {
     ready: false,
     backendError: null,
-    settings: { baseUrl: '', apiKey: '', defaultModel: '', systemPrompt: '', extractionModel: '', autoLearn: true, learnStyle: true, theme: 'dark', gatherShortcut: '', tools: {}, maxToolRounds: 8, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {} },
+    settings: { baseUrl: '', apiKey: '', defaultModel: '', systemPrompt: '', extractionModel: '', autoLearn: true, learnStyle: true, theme: 'dark', accent: 'sage', gatherShortcut: '', tools: {}, maxToolRounds: 8, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {} },
     models: [],
     modelsError: null,
     tools: [],
@@ -1031,6 +1041,7 @@ export const useStore = create<State>((set, get) => {
     draftProjectId: null,
     draftEffort: 'default',
     draftModel: null,
+    draftFast: false,
     libraryScope: 'all',
     dataScope: 'all',
     docs: [],
@@ -1069,6 +1080,9 @@ export const useStore = create<State>((set, get) => {
     deskBusy: false,
     pageAgentOpen: false,
     pageAgentId: null,
+    pageAgentModel: null,
+    pageAgentEffort: 'default',
+    pageAgentFast: false,
     pageContext: null,
     traceMessageId: null,
     settingsOpen: false,
@@ -1186,9 +1200,34 @@ export const useStore = create<State>((set, get) => {
     closePageAgent: () => set({ pageAgentOpen: false }),
     resetPageAgent: () => {
       const id = get().pageAgentId
+      const convo = id ? get().sessions[id]?.conversation : undefined
       // The thread stays in the chat list — the panel is a way in, not a scratchpad that eats history.
       if (id) get().closeSession(id)
-      set({ pageAgentId: null })
+      set({
+        pageAgentId: null,
+        ...(convo ? {
+          pageAgentModel: convo.model,
+          pageAgentEffort: convo.settings.effort,
+          pageAgentFast: !!convo.settings.fast
+        } : {})
+      })
+    },
+    setPageAgentModel: async (model) => {
+      set({ pageAgentModel: model })
+      const id = get().pageAgentId
+      if (!id) return
+      await api.conversations.patch(id, { model })
+      patchConversation(id, (c) => ({ ...c, model }))
+    },
+    setPageAgentParams: async (patch) => {
+      set((s) => ({
+        pageAgentEffort: patch.effort ?? s.pageAgentEffort,
+        pageAgentFast: patch.fast ?? s.pageAgentFast
+      }))
+      const id = get().pageAgentId
+      if (!id) return
+      const c = await api.conversations.patch(id, { settings: patch })
+      patchConversation(id, (cur) => ({ ...cur, settings: c.settings }))
     },
     setPageContext: (pageContext) => set((s) => (s.pageContext === pageContext ? {} : { pageContext })),
     setContextTab: (contextTab) => set({ contextTab }),
@@ -1249,7 +1288,7 @@ export const useStore = create<State>((set, get) => {
     },
 
     refreshConversations: async () => set({ conversations: await api.conversations.list('all') }),
-    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, draftEffort: 'default', draftModel: null, view: 'chat', settingsOpen: false }),
+    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, draftEffort: 'default', draftModel: null, draftFast: false, view: 'chat', settingsOpen: false }),
     createConversation: async (projectId) => {
       try {
         const c = await api.conversations.create(projectId, get().settings.defaultModel)
@@ -1332,9 +1371,12 @@ export const useStore = create<State>((set, get) => {
     setChatSettings: async (patch, conversationId) => {
       const id = conversationId ?? get().focusedConversationId
       if (!id) {
-        // No conversation to PATCH yet. Effort is the one setting a draft can still carry, so park it
-        // and let `send` apply it to the conversation it is about to create.
-        if (patch.effort !== undefined) set({ draftEffort: patch.effort })
+        // No conversation to PATCH yet. Effort and fast mode are the settings a draft can still carry,
+        // so park them and let `send` apply them to the conversation it is about to create.
+        set((s) => ({
+          draftEffort: patch.effort ?? s.draftEffort,
+          draftFast: patch.fast ?? s.draftFast
+        }))
         return
       }
       const c = await api.conversations.patch(id, { settings: patch })
@@ -1346,9 +1388,9 @@ export const useStore = create<State>((set, get) => {
       const id = conversationId ?? get().focusedConversationId
       if (id) {
         // Mid-reply sends steer the run: the message lands in the conversation now and the model
-        // folds it in at its next round boundary. Only a run that is still *answering* has a round
-        // boundary left — in its auto-learn tail the loop is over, and a steer accepted there would
-        // be stored and never replied to — so that tail takes an ordinary send instead.
+        // drops the completion it was writing and answers the steer. Only a run that is still
+        // *answering* can take one — in its auto-learn tail the loop is over, and a steer accepted
+        // there would be stored and never replied to — so that tail takes an ordinary send instead.
         if (get().sessions[id]?.streaming?.answering) {
           try {
             await api.steer(id, text)
@@ -1379,15 +1421,18 @@ export const useStore = create<State>((set, get) => {
         get().toast((e as Error).message, 'error')
         return false
       }
-      // An effort chosen on the draft lands before the first run, so it applies to this very reply.
-      const effort = get().draftEffort
-      if (effort !== 'default') c = await api.conversations.patch(c.id, { settings: { effort } }).catch(() => c)
+      // Effort and fast mode chosen on the draft land before the first run, so they apply to this reply.
+      const { draftEffort: effort, draftFast: fast } = get()
+      const settings: { effort?: Effort; fast?: boolean } = {}
+      if (effort !== 'default') settings.effort = effort
+      if (fast) settings.fast = true
+      if (effort !== 'default' || fast) c = await api.conversations.patch(c.id, { settings }).catch(() => c)
       c.messages = []
       putSession(c)
       // Listed now, not when the reply ends: the sidebar should show the chat you are in while it streams.
       const { messages: _m, ...row } = c
       set((s) => ({
-        focusedConversationId: c.id, view: 'chat', draftEffort: 'default', draftModel: null,
+        focusedConversationId: c.id, view: 'chat', draftEffort: 'default', draftModel: null, draftFast: false,
         conversations: [row as Conversation, ...s.conversations.filter((x) => x.id !== c.id)]
       }))
       void get().refreshProjects()
@@ -1406,8 +1451,9 @@ export const useStore = create<State>((set, get) => {
       const page = ctx ? { ...ctx, selection: selection || undefined } : undefined
       let id = get().pageAgentId
       if (id) {
-        // Mid-reply the panel steers, exactly as the composer does in a chat.
-        if (get().sessions[id]?.streaming) {
+        // Mid-reply the panel steers, exactly as the composer does in a chat. The auto-learn tail
+        // is still `streaming` but no longer answering, and a steer there 409s.
+        if (get().sessions[id]?.streaming?.answering) {
           try {
             await api.steer(id, text)
             return true
@@ -1419,10 +1465,14 @@ export const useStore = create<State>((set, get) => {
       if (!id) {
         let c: Conversation
         try {
-          c = await api.conversations.create(get().draftProjectId, get().settings.defaultModel)
+          c = await api.conversations.create(get().draftProjectId, get().pageAgentModel || get().settings.defaultModel)
         } catch (e) {
           get().toast((e as Error).message, 'error')
           return false
+        }
+        const { pageAgentEffort, pageAgentFast } = get()
+        if (pageAgentEffort !== 'default' || pageAgentFast) {
+          c = await api.conversations.patch(c.id, { settings: { effort: pageAgentEffort, fast: pageAgentFast } }).catch(() => c)
         }
         c.messages = []
         putSession(c)

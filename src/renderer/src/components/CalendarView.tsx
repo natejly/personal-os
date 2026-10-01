@@ -1,14 +1,53 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronLeft, ChevronRight, PanelLeftOpen, Calendar as CalIcon, ExternalLink, Pencil, Plus, RefreshCw, Repeat, Video, X } from 'lucide-react'
+import { Check, ChevronLeft, ChevronRight, PanelLeftOpen, Calendar as CalIcon, Plus, RefreshCw } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import SendToSpace from './SendToSpace'
 import CalendarWeek, { addDays, fmtTime, slotIso, startOfWeek, withoutTodoEvents, type Slot } from './CalendarWeek'
 import EventEditor, { eventColor, primeCalendarMeta, type EventDraft } from './EventEditor'
+import { useVisibleCalendars } from './useVisibleCalendars'
 import { scheduleTodo } from './TodoItem'
-import type { CalendarEvent } from '@shared/types'
+import type { CalendarEvent, GoogleCalendar } from '@shared/types'
 import { lines, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
+
+function CalToggle({ c, on, onToggle }: { c: GoogleCalendar; on: boolean; onToggle: () => void }): JSX.Element {
+  const color = c.color ?? 'var(--accent-solid)'
+  return (
+    <button type="button" className={on ? 'cal-cal on' : 'cal-cal'} aria-pressed={on}
+      title={on ? `Hide ${c.summary}` : `Show ${c.summary}`} onClick={onToggle}>
+      <span className="cal-cal-box" style={{ borderColor: color, background: on ? color : 'transparent' }}>
+        {on && <Check size={11} strokeWidth={3} />}
+      </span>
+      <span className="cal-cal-name">{c.summary}</span>
+    </button>
+  )
+}
+
+function CalendarRail({ calendars, ready, shown, toggle }: {
+  calendars: GoogleCalendar[]
+  ready: boolean
+  shown: (c: GoogleCalendar) => boolean
+  toggle: (c: GoogleCalendar) => void
+}): JSX.Element {
+  const mine = calendars.filter((c) => c.primary || c.access_role === 'owner' || c.access_role === 'writer')
+  const mineIds = new Set(mine.map((c) => c.id))
+  const other = calendars.filter((c) => !mineIds.has(c.id))
+  const group = (title: string, list: GoogleCalendar[]): JSX.Element | null => list.length === 0 ? null : (
+    <>
+      <h3>{title}</h3>
+      {list.map((c) => <CalToggle key={c.id} c={c} on={shown(c)} onToggle={() => toggle(c)} />)}
+    </>
+  )
+  return (
+    <aside className="cal-cals" aria-label="Calendars">
+      {!ready && <p className="muted small">Loading calendars…</p>}
+      {ready && calendars.length === 0 && <p className="muted small">No calendars yet.</p>}
+      {group('My calendars', mine)}
+      {group('Other calendars', other)}
+    </aside>
+  )
+}
 
 export default function CalendarView(): JSX.Element {
   const sidebarOpen = useStore((s) => s.sidebarOpen)
@@ -19,28 +58,44 @@ export default function CalendarView(): JSX.Element {
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [open, setOpen] = useState<CalendarEvent | null>(null)
   const [editing, setEditing] = useState<{ event: CalendarEvent | null; draft?: EventDraft } | null>(null)
   // Bumped when the calendar/color cache resolves, so the grid picks up event colors.
   const [, setMetaTick] = useState(0)
+  const { calendars, visibleIds, query, ready, shown: calendarOn, toggle } = useVisibleCalendars()
 
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(week, i)), [week])
-  const shown = useMemo(() => withoutTodoEvents(events, todos), [events, todos])
+  const shown = useMemo(() => {
+    const base = withoutTodoEvents(events, todos)
+    if (!ready || calendars.length === 0) return base
+    const ids = new Set(visibleIds)
+    return base.filter((e) => !e.calendar_id || ids.has(e.calendar_id))
+  }, [events, todos, ready, calendars.length, visibleIds])
 
   // Stepping between weeks is served from the backend's read cache; `refresh` is the
   // Refresh button, for picking up an edit made in Google Calendar itself.
   const load = async (refresh = false): Promise<void> => {
-    if (!google?.connected) return
+    if (!google?.connected || query == null) return
+    if (!query) { setEvents([]); return }
     setLoading(true); setError(null)
     try {
-      setEvents(await api.google.calendarRange(week.toISOString(), 7, 'all', refresh))
+      setEvents(await api.google.calendarRange(week.toISOString(), 7, query, refresh))
     } catch (e) {
       setError((e as Error).message)
     } finally {
       setLoading(false)
     }
   }
-  useEffect(() => { void load() }, [week, google?.connected])
+  useEffect(() => {
+    if (!google?.connected || query == null) return
+    if (!query) { setEvents([]); return }
+    let alive = true
+    setLoading(true); setError(null)
+    api.google.calendarRange(week.toISOString(), 7, query)
+      .then((list) => { if (alive) setEvents(list) })
+      .catch((e) => { if (alive) setError((e as Error).message) })
+      .finally(() => { if (alive) setLoading(false) })
+    return () => { alive = false }
+  }, [week, google?.connected, query])
   useEffect(() => { void refreshTodos('all', false) }, [refreshTodos])
   useEffect(() => {
     if (google?.connected) void primeCalendarMeta().then(() => setMetaTick((t) => t + 1))
@@ -91,21 +146,22 @@ export default function CalendarView(): JSX.Element {
     }
   }
 
+  const focus = editing?.event ?? null
   const fmtEvent = (e: CalendarEvent): string =>
     `${e.all_day ? e.start : new Date(e.start).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })} — ${e.summary || '(no title)'} (\`${e.id}\`)${e.location ? ` at ${e.location}` : ''}`
   const span = `${days[0].toDateString()} – ${days[6].toDateString()}`
   usePageContext(() => ({
     view: 'calendar',
-    label: open ? `Event “${open.summary || 'untitled'}”` : `Calendar · ${span}`,
+    label: focus ? `Event “${focus.summary || 'untitled'}”` : `Calendar · ${span}`,
     detail: [
       `The week of ${span} is on screen.`,
-      open ? `The user has this event open: ${fmtEvent(open)}${open.description ? `\n\n${open.description}` : ''}` : '',
+      focus ? `The user is editing this event: ${fmtEvent(focus)}${focus.description ? `\n\n${focus.description}` : ''}` : '',
       events.length ? `Events that week:\n${lines(events, fmtEvent)}` : 'No events that week.',
       todos.some((t) => !t.done && t.due) ? `Todos with dates:\n${lines(todos.filter((t) => !t.done && t.due), (t) => `${t.due} — ${t.title} (\`${t.id}\`)`)}` : ''
     ].filter(Boolean).join('\n\n'),
-    refs: (open ? [{ kind: 'event', id: open.id, name: open.summary }] : events.slice(0, 40).map((e) => ({ kind: 'event', id: e.id, name: e.summary }))),
-    hints: open ? ['Move this an hour later', 'Draft a note to the guests'] : ['Where is my free time this week?', 'Schedule my overdue todos into the gaps']
-  }), [events, open, todos, span])
+    refs: (focus ? [{ kind: 'event', id: focus.id, name: focus.summary }] : events.slice(0, 40).map((e) => ({ kind: 'event', id: e.id, name: e.summary }))),
+    hints: focus ? ['Move this an hour later', 'Draft a note to the guests'] : ['Where is my free time this week?', 'Schedule my overdue todos into the gaps']
+  }), [events, focus, todos, span])
 
   return (
     <main className="page cal-page">
@@ -129,42 +185,22 @@ export default function CalendarView(): JSX.Element {
       )}
       {error && <div className="notice-bar error">{error}</div>}
 
-      <div className="cal-scroll">
-        <CalendarWeek days={days} events={shown} todos={todos} canCreate={!!google?.connected}
-          onOpen={setOpen} onTodo={() => setView('todos')} onTodoDrop={(id, day, hour) => void dropTodo(id, day, hour)} onCreate={create}
-          onCreateFull={(slot, title) => setEditing({ event: null, draft: { day: slot.day, title, start: slotIso(slot.day, slot.startMin), end: slotIso(slot.day, slot.endMin) } })}
-          onMove={google?.connected ? (e, start, end) => void move(e, start, end) : undefined}
-          colorOf={eventColor} />
+      <div className="cal-body">
+        {google?.connected && <CalendarRail calendars={calendars} ready={ready} shown={calendarOn} toggle={toggle} />}
+        <div className="cal-scroll">
+          <CalendarWeek days={days} events={shown} todos={todos} canCreate={!!google?.connected}
+            onOpen={(e) => setEditing({ event: e })} onTodo={() => setView('todos')} onTodoDrop={(id, day, hour) => void dropTodo(id, day, hour)} onCreate={create}
+            onCreateFull={(slot, title) => setEditing({ event: null, draft: { day: slot.day, title, start: slotIso(slot.day, slot.startMin), end: slotIso(slot.day, slot.endMin) } })}
+            onCreateAllDay={(day) => setEditing({ event: null, draft: { day, allDay: true } })}
+            onMove={google?.connected ? (e, start, end) => void move(e, start, end) : undefined}
+            colorOf={eventColor} />
+        </div>
       </div>
       {loading && <div className="cal-loading">Loading…</div>}
 
-      {open && (
-        <div className="modal-backdrop" onMouseDown={() => setOpen(null)}>
-          <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
-            <header><h2>{open.summary}</h2><button className="icon-btn" aria-label="Close event details" onClick={() => setOpen(null)}><X size={16} /></button></header>
-            <section>
-              <p>
-                {open.all_day ? 'All day' : `${new Date(open.start).toLocaleString()} – ${fmtTime(new Date(open.end))}`}
-                {open.recurring_event_id && <span className="muted"> · <Repeat size={11} style={{ verticalAlign: -1 }} /> repeats</span>}
-                {open.transparency === 'transparent' && <span className="muted"> · free</span>}
-              </p>
-              {open.location && <p className="muted">{open.location}</p>}
-              {open.meet && <p className="muted small"><Video size={12} style={{ verticalAlign: -2 }} /> <a href={open.meet} target="_blank" rel="noreferrer">{open.meet.replace('https://', '')}</a></p>}
-              {open.attendees.length > 0 && <p className="muted small">With {open.attendees.join(', ')}</p>}
-              {open.description && <p className="muted small" style={{ whiteSpace: 'pre-wrap' }}>{open.description}</p>}
-            </section>
-            <footer>
-              {open.link && <a className="ghost-btn" href={open.link} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Open in Google Calendar</a>}
-              <button className="ghost-btn" onClick={() => { setEditing({ event: open }); setOpen(null) }}><Pencil size={13} /> Edit</button>
-              <span style={{ flex: 1 }} />
-              <button className="primary-btn" onClick={() => { setOpen(null); newChat(null); void send(`Prep me for "${open.summary}" (${new Date(open.start).toLocaleString()}). Check my memory, documents and recent email for context on the attendees and topic, then give me a one-page brief.`) }}>Prep me</button>
-            </footer>
-          </div>
-        </div>
-      )}
-
       {editing && (
-        <EventEditor event={editing.event} draft={editing.draft} onClose={() => setEditing(null)} onSaved={() => void load()} />
+        <EventEditor key={editing.event?.id ?? `new:${editing.draft?.day ?? ''}:${editing.draft?.hour ?? ''}:${editing.draft?.start ?? ''}:${editing.draft?.end ?? ''}:${editing.draft?.allDay ? 'day' : ''}`}
+          event={editing.event} draft={editing.draft} onClose={() => setEditing(null)} onSaved={() => void load()} />
       )}
     </main>
   )

@@ -376,6 +376,10 @@ class Run:
         self.budget: dict[str, Any] | None = None
         # Cooperative stop, also registered as _active[message_id] so /messages/{mid}/stop still works.
         self.stop = asyncio.Event()
+        # Set by stop and steer. stream_chat waits on it so a blocked provider read ends now, not at
+        # the next token. wake_gen catches a poke that lands in the window where the flag is cleared.
+        self.wake = asyncio.Event()
+        self.wake_gen = 0
         # Steered user messages (already persisted) waiting for the run to fold them into its context.
         self.steers: list[dict[str, Any]] = []
         self.task: asyncio.Task[None] | None = None
@@ -407,6 +411,11 @@ class Run:
         there would be persisted, published and never answered.
         """
         return self.live and not self.replied
+
+    def poke(self) -> None:
+        """Wake a provider read blocked in stream_chat. Stop and steer both call this."""
+        self.wake_gen += 1
+        self.wake.set()
 
     def info(self) -> dict[str, Any]:
         return {"run_id": self.run_id, "conversation_id": self.conversation_id, "message_id": self.message_id,
@@ -611,6 +620,7 @@ class RunBus:
         if not run or (run_id and run_id != run.run_id):
             return False
         run.stop.set()
+        run.poke()
         return True
 
     async def shutdown(self) -> None:
@@ -618,6 +628,7 @@ class RunBus:
         every = [*self._runs.values(), *self._retired]
         for run in every:
             run.stop.set()
+            run.poke()
         tasks = [r.task for r in every if r.task and not r.task.done()]
         for t in tasks:
             t.cancel()

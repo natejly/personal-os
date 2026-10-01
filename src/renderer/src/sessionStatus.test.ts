@@ -60,6 +60,7 @@ test('a steered run resurrects working after a segment done', () => {
   assert.equal(reduceStatus('done', ev('user_message', { id: 'u2' }), 0), 'working')
   assert.equal(reduceStatus('done', ev('assistant_message', { id: 'm2' }), 0), 'working')
   assert.equal(reduceStatus('done', ev('delta', { id: 'm2', text: 'hi' }), 0), 'working')
+  assert.equal(reduceStatus('done', ev('reasoning', { id: 'm2', text: '…' }), 0), 'working')
   // But an errored run stays red and a pending approval stays blocked.
   assert.equal(reduceStatus('error', ev('delta', { id: 'm2', text: 'hi' }), 0), 'error')
   assert.equal(reduceStatus('needs-approval', ev('user_message', { id: 'u2' }), 1), 'needs-approval')

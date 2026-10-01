@@ -64,11 +64,14 @@ export default function Composer({ conversationId, footer, compact = false, onSe
           placeholder={streaming ? 'Steer the reply…' : placeholder}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void submit() } }}
         />
-        {streaming && !text.trim() ? (
-          <button className="send stop" title="Stop" onClick={() => void stop(conversationId)}><Square size={14} /></button>
-        ) : (
-          <button className="send" title={streaming ? 'Steer the reply' : 'Send'} disabled={!text.trim()} onClick={() => void submit()}><ArrowUp size={16} /></button>
-        )}
+        <div className="composer-actions">
+          {streaming && (
+            <button className="send stop" title="Stop" aria-label="Stop" onClick={() => void stop(conversationId)}><Square size={14} /></button>
+          )}
+          {(!streaming || text.trim()) && (
+            <button className="send" title={streaming ? 'Steer the reply' : 'Send'} aria-label={streaming ? 'Steer the reply' : 'Send'} disabled={!text.trim()} onClick={() => void submit()}><ArrowUp size={16} /></button>
+          )}
+        </div>
       </div>
       {/* Always rendered: the plan-mode toggle belongs to every composer, and it binds ⌘⇧P itself —
           only for the focused conversation, so several mounted chat widgets do not all cycle at once. */}

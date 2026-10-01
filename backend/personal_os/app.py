@@ -39,7 +39,7 @@ from . import cache as google_cache
 from .google import Google, GoogleNotConnected, json_safe
 from .jobs import (KINDS, PROPOSAL_STATUSES, Jobs, Proposals, Scheduler, local_tz_name, spent, valid_cron,
                    valid_tz)
-from . import skillbuild
+from . import skillbuild, skillmd
 from .mcp_client import McpClient, McpError
 from .mcp_servers import MODES as MCP_MODES, RESERVED_PREFIX as MCP_PREFIX, SCOPES as MCP_SCOPES, McpServers
 from .meeting_recorder import RecorderBusy
@@ -4655,6 +4655,28 @@ def _known_tools() -> set[str]:
 def _lint_skill(name: str, description: str, procedure: str, skill_id: str | None = None) -> list[dict[str, Any]]:
     return skillbuild.lint_skill(name, description, procedure, known_tools=_known_tools(),
                                  existing=skills.list(), skill_id=skill_id)
+
+
+class SkillImportIn(BaseModel):
+    text: str
+    project_id: str | None = None
+
+
+@app.post("/skills/import")
+def import_skill_md(body: SkillImportIn) -> dict[str, Any]:
+    """Paste a SKILL.md. It becomes a candidate, never an approved skill: approval stays the PATCH above."""
+    try:
+        return skillmd.import_text(skills, _lint_skill, body.text, project_id=None if sid(body.project_id) == ALL else sid(body.project_id))
+    except skillmd.ImportError_ as e:
+        raise HTTPException(422, "; ".join(e.errors))
+
+
+@app.get("/skills/{skill_id}/export")
+def export_skill_md(skill_id: str) -> dict[str, str]:
+    s = skills.get(skill_id)
+    if not s:
+        raise HTTPException(404, "No such skill")
+    return {"filename": f"{skillmd.slug(s['name'])}/SKILL.md", "text": skillmd.render(s)}
 
 
 @app.post("/skills/lint")

@@ -105,10 +105,20 @@ def build_context(
     if skills is not None and conv_settings.get("useSkills", True):
         approved = [s for s in skills.list(status="approved", project_id=project_id) if (s["procedure"] or "").strip()]
         if approved:
-            from .learn import MAX_INJECTED_SKILLS, skill_block
+            from .learn import MAX_INJECTED_SKILLS, MAX_MANIFEST_SKILLS, skill_block, skill_manifest
 
-            parts.append(skill_block(approved))
-            used["skills"] = [{"id": s["id"], "name": s["name"], "description": s["description"]} for s in approved[:MAX_INJECTED_SKILLS]]
+            # Progressive disclosure: past a size budget (or when the chat asks) the prompt carries an
+            # index and the model reads a body with skill_view. Same invariant either way: approved rows only.
+            block = skill_block(approved)
+            mode = conv_settings.get("skillsDisclosure") or "auto"
+            budget = int(settings.get("skillsInlineBudget", 6000) or 0)
+            if mode == "manifest" or (mode == "auto" and len(block) > budget):
+                parts.append(skill_manifest(approved))
+                used["skills"] = [{"id": s["id"], "name": s["name"], "description": s["description"], "disclosure": "manifest"}
+                                  for s in approved[:MAX_MANIFEST_SKILLS]]
+            else:
+                parts.append(block)
+                used["skills"] = [{"id": s["id"], "name": s["name"], "description": s["description"]} for s in approved[:MAX_INJECTED_SKILLS]]
 
     # The user's own voice, for drafting on their behalf (see style.py). One profile per chat — the
     # project's when it has one — and the block itself tells the model not to *reply* in that voice.

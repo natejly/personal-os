@@ -62,6 +62,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "maxToolRounds": 25,
     # Offer MCP tools through mcp_tool_search once more than this many are ready (0 = always send every schema).
     "mcpDeferAbove": 12,
+    # Approved skills are inlined in the system prompt up to this many characters; past it, an index + skill_view.
+    "skillsInlineBudget": 6000,
     # Per-reply budgets; 0 = unlimited. A run that hits one still writes a final answer, marked partial.
     "maxRunTokens": 200_000,
     "maxRunSeconds": 300,

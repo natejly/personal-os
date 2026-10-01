@@ -284,7 +284,11 @@ export const api = {
     draft: (intent: string, conversationId?: string | null) =>
       req<SkillDraftResult>('/skills/draft', { method: 'POST', body: json({ intent, conversation_id: conversationId ?? null }) }),
     /** What a chat in this scope is actually shown. 'all' is not a scope any one chat sees. */
-    preview: (scope: Scope = 'personal') => req<SkillPreview>(`/skills/preview?project_id=${encodeURIComponent(scope)}`)
+    preview: (scope: Scope = 'personal') => req<SkillPreview>(`/skills/preview?project_id=${encodeURIComponent(scope)}`),
+    /** Paste a SKILL.md. Always lands as a candidate; `findings` are the lint results, `warnings` what was ignored. */
+    importMd: (text: string) =>
+      req<{ skill: Skill; findings: SkillFinding[]; warnings: string[] }>('/skills/import', { method: 'POST', body: json({ text }) }),
+    exportMd: (id: string) => req<{ filename: string; text: string }>(`/skills/${id}/export`)
   },
   stop: (mid: string) => req(`/messages/${mid}/stop`, { method: 'POST' }),
   /** Starts the reply as a background task and returns at once; watch it with `chatStream(convId, seq)`. Throws a 409 carrying a `RunConflict` when that conversation already has a live run. */

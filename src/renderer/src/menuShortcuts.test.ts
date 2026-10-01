@@ -73,3 +73,8 @@ test('a view action routes, and view:graph opens memory on the graph', () => {
   assert.equal(useStore.getState().view, 'memory')
   assert.equal(useStore.getState().memoryMode, 'graph')
 })
+
+test('view:cowork routes with no view-specific wiring (⌘⇧K)', () => {
+  fire('view:cowork')
+  assert.equal(useStore.getState().view, 'cowork')
+})

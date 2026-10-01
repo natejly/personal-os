@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { MessageSquarePlus, Search, Settings, Sparkles, Trash2, PanelLeftClose, Brain, FileText, NotebookPen, Plus, Folder, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid, Library, Mail, Mic, MonitorDot, BookOpen, Globe } from 'lucide-react'
+import { MessageSquarePlus, Search, Settings, Sparkles, Trash2, PanelLeftClose, Brain, FileText, NotebookPen, Plus, Folder, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid, Library, Mail, Mic, Users, MonitorDot, BookOpen, Globe } from 'lucide-react'
 import GrainLogo from './GrainLogo'
 import { useStore, type View } from '../store'
 import { ActivityIndicator } from './ActivityView'
@@ -50,6 +50,9 @@ const NAV: NavEntry[] = [
   // No `kind`: no `meeting` widget kind ships in this slice, and a kind outside the WidgetKind
   // union would not typecheck — so the row is not a canvas drag source.
   { view: 'meetings', label: 'Meetings', icon: <Mic size={15} /> },
+  // Deliberately no `kind`: a desk is a place you go to, not something to pin on a canvas, and a
+  // kind outside the WidgetKind union would not typecheck anyway.
+  { view: 'cowork', label: 'Cowork', icon: <Users size={15} /> },
   { view: 'activity', label: 'Activity', icon: <MonitorDot size={15} />, kind: 'activity' },
   { label: 'Web', icon: <Globe size={15} />, kind: 'web' }
 ]
@@ -72,6 +75,9 @@ export default function Sidebar(): JSX.Element {
   const settings = useStore((s) => s.settings)
   const docCount = useStore((s) => s.docs.length)
   const docsPending = useStore((s) => s.docsPending)
+  const skillCandidates = useStore((s) => s.skills.filter((x) => x.status === 'candidate').length)
+  /** Desks with something unseen that needs you: the one badge worth interrupting for. */
+  const needsYou = useStore((s) => new Set(s.deskInbox.map((e) => e.desk_id)).size)
   const meetingsPending = useStore((s) => s.meetingsPending)
   const inCanvas = useStore((s) => s.view === 'canvas')
   // One selector per action. Sidebar is mounted in every view, the canvas included, so a bare
@@ -131,6 +137,10 @@ export default function Sidebar(): JSX.Element {
   const todoStats = useStore((s) => s.dashboard?.todo_stats)
   const libCount = (v: View): number | null => {
     if (v === 'home' || v === 'calendar' || v === 'mail' || v === 'boards' || v === 'dashboards' || v === 'activity') return null
+    // Counted off the inbox rather than `desks`, which is only loaded once Cowork has been opened:
+    // the badge has to be right before you have been there.
+    if (v === 'cowork') return needsYou || null
+    if (v === 'library') return skillCandidates || null
     if (v === 'todos') return todoStats?.open ?? null
     if (v === 'docs') return docCount
     // Load-bearing, not cosmetic: there is no default branch below, so without this a Meetings row

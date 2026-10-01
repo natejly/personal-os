@@ -61,6 +61,8 @@ RESERVED_TOOL_NAMES = frozenset({
     "schedule_task", "scheduled_tasks", "cancel_scheduled_task",
     "writing_style", "save_writing_sample",
     "meeting_list", "meeting_search", "meeting_read",
+    "desk_list_files", "desk_read_file", "desk_write_file", "desk_trash_file",
+    "desk_deliver", "desk_ask", "desk_done", "desk_import_sandbox",
 })
 
 SCHEMA = """

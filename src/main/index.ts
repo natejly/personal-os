@@ -170,6 +170,7 @@ function buildMenu(): void {
         { label: 'Activity', accelerator: 'CmdOrCtrl+9', click: () => sendMenu('view:activity') },
         // ⌘0..⌘9 are all taken above and ⌘M is Minimize in the Window menu, so Meetings takes ⌘⇧M.
         { label: 'Meetings', accelerator: 'CmdOrCtrl+Shift+M', click: () => sendMenu('view:meetings') },
+        { label: 'Cowork', accelerator: 'CmdOrCtrl+Shift+K', click: () => sendMenu('view:cowork') },
         { type: 'separator' },
         { label: 'Toggle Spaces', accelerator: 'CmdOrCtrl+Shift+C', click: () => sendMenu('canvas:toggle') },
         { label: 'Toggle Sidebar', accelerator: 'CmdOrCtrl+B', click: () => sendMenu('toggle-sidebar') },

@@ -160,6 +160,56 @@ export interface ProposedPlan {
   steps: ProposedStep[]
 }
 
+export type ToolDanger = 'safe' | 'network' | 'writes' | 'executes' | 'external' | 'plan' | 'schedules'
+
+export type PlanStepStatus = 'proposed' | 'approved' | 'consumed' | 'done' | 'failed' | 'dropped' | 'rejected'
+
+/** One step of a stored plan: what the card shows, and what became of it. */
+export interface PlanRecordStep {
+  step_id: string
+  plan_id: string
+  idx: number
+  title: string
+  tool: string
+  /** The column is `args`; the wire key is `arguments`. Approving binds `args_digest` of exactly this. */
+  arguments: Record<string, unknown>
+  args_digest: string
+  why: string
+  danger: ToolDanger
+  status: PlanStepStatus
+  /** The user rewrote the arguments, so the agent is bound to theirs rather than its own. */
+  edited: boolean
+  call_id: string | null
+  consumed_at: number | null
+  result_error: string | null
+}
+
+/**
+ * A stored `propose_plan` row: the approval artifact. Not `Plan`, which is the todo_write checklist,
+ * and not `ProposedPlan`, which is only the tool's arguments before any of this was written down.
+ */
+export interface PlanRecord {
+  plan_id: string
+  /** The approvals row this plan is decided through. */
+  call_id: string
+  run_id: string | null
+  conversation_id: string | null
+  message_id: string | null
+  desk_id: string | null
+  title: string
+  intent: string
+  status: 'pending' | 'approved' | 'rejected'
+  /** The reply had already read untrusted content when this plan was proposed. */
+  tainted: boolean
+  /** Tools in this plan that taint, so a later external step is not re-gated by the plan's own research. */
+  expected_taint: string[]
+  note: string | null
+  decided_by: string | null
+  created_at: number
+  decided_at: number | null
+  steps: PlanRecordStep[]
+}
+
 /** The approved plan step a call was matched against, instead of asking again. */
 export interface PlanStepRef {
   plan_id: string
@@ -360,6 +410,8 @@ export interface ConversationSettings {
   useActivity: boolean
   /** Inject the writing-style profile, so drafts sound like the user. */
   useStyle: boolean
+  /** Per-chat plan mode. Absent reads as the global default; a desk writes it when it is created. */
+  planMode?: 'off' | 'auto' | 'always'
   /** Inject the recent-meetings block. Optional because stored conversations predate the key; a
    *  missing value reads as on, the way the backend's `.get(..., True)` does. */
   useMeetings?: boolean
@@ -766,6 +818,16 @@ export interface Settings {
   tavilyApiKey: string
   /** Per-model cost overrides, $ per million tokens. Proxy prices are used for models not listed. */
   modelPrices: Record<string, ModelPrice>
+  /** Cowork desk budgets. 0 on either axis means unlimited; a desk may tighten them, never loosen. */
+  deskMaxTurns?: number
+  deskMaxCost?: number
+  deskMaxLive?: number
+  /** How long a desk waits on a card nobody is watching before the run lets go. 0 = wait forever. */
+  parkAfterSeconds?: number
+  /** A native notification when a desk stops and cannot go on without you. Missing reads as on. */
+  deskNotify?: boolean
+  /** Default plan mode for a new chat: off, auto (the first mutating call arms it), or always. */
+  planMode?: 'off' | 'auto' | 'always'
   googleClientId: string
   googleClientSecret: string
   /** Undo window on outgoing mail. `seconds` is clamped to 60-120 by the backend. */
@@ -821,9 +883,19 @@ export type ChatEvent =
   | { event: 'tool_call'; data: { message_id: string; id: string; name: string; arguments: Record<string, unknown>; needs_approval?: boolean; forced?: boolean; plan?: PlanStepRef | null } }
   | { event: 'tool_result'; data: ToolEvent & { message_id: string } }
   | { event: 'span'; data: { message_id: string; span: Span } }
-  | { event: 'done'; data: { id: string; error: string | null; context_used: ContextUsed; tool_events: ToolEvent[]; trace: Span[]; stopped: boolean; partial?: PartialReason | null; tainted?: boolean; taint_sources?: string[] } }
+  | { event: 'done'; data: { id: string; error: string | null; context_used: ContextUsed; tool_events: ToolEvent[]; trace: Span[]; stopped: boolean; partial?: PartialReason | null; segment?: boolean; tainted?: boolean; taint_sources?: string[] } }
   | { event: 'taint'; data: { message_id: string; source: string } }
   | { event: 'plan'; data: { conversation_id: string; steps: PlanStep[] } }
+  /** propose_plan opened a card. `plan` above is the todo_write checklist — a different thing. */
+  | { event: 'plan_card'; data: { message_id: string; call_id: string; plan: PlanRecord } }
+  /** How it was answered, so a window that was watching sees a decision made somewhere else. */
+  | { event: 'plan_decision'; data: { message_id: string; call_id: string; plan: PlanRecord } }
+  /** The reply let go of a card nobody was watching. The row stays pending and decidable. */
+  | { event: 'parked'; data: { message_id: string; call_id: string; name: string } }
+  /** A desk's row changed: the rail's label, its status, its counters. */
+  | { event: 'desk_status'; data: Desk }
+  /** This turn is handing over to another one, announced before `done` so the UI can re-attach. */
+  | { event: 'desk_handoff'; data: { desk_id: string; conversation_id: string; turn: number } }
   | { event: 'learned'; data: Learned }
   | { event: 'style_learned'; data: { project_id: string | null; profile: StyleProfile | null; sample_id: string } }
   | { event: 'learn_error'; data: { message: string } }
@@ -899,6 +971,163 @@ export interface Widget {
 }
 export interface Dashboard { id: string; name: string; description: string; created_at: number; widget_count?: number; widgets: Widget[] }
 export interface Recap { day: string; content: string; created_at: number; cached?: boolean }
+
+// ---------------- Cowork desks ----------------
+/**
+ * Named `Desk*` throughout, never a bare `Plan` / `PlanStep`: `Plan`/`PlanStep` is the todo_write
+ * checklist and `ProposedPlan`/`ProposedStep` is propose_plan's approval record, which is the one a
+ * desk carries. The CSS mirrors are `.cowork-` and `.desk-`.
+ */
+
+export type DeskStatus = 'draft' | 'planning' | 'awaiting_plan' | 'working' | 'needs_approval' | 'blocked'
+  | 'paused' | 'interrupted' | 'review' | 'done' | 'failed' | 'stopped'
+
+/** Mirrors `cowork.NEEDS_YOU`: the statuses that put a desk in the rail's "Needs you" section. */
+export const NEEDS_YOU: DeskStatus[] = ['awaiting_plan', 'needs_approval', 'blocked', 'interrupted', 'review']
+/** Mirrors `cowork.LIVE`: something is driving the desk right now. Also what `Desk.live` is computed from. */
+export const DESK_LIVE: DeskStatus[] = ['planning', 'working', 'needs_approval']
+
+export type DeskAutonomy = 'plan' | 'ask' | 'propose'
+export type PlanDecision = 'approve' | 'edit' | 'reject'
+
+/** One entry of POST /cowork/plans/{id}'s `steps`. `idx` is 1-based, exactly as the card numbers it. */
+export interface PlanEdit { idx: number; arguments?: Record<string, unknown>; drop?: boolean }
+
+
+
+export interface DeskBudget { maxTurns?: number; maxCost?: number }
+
+export interface Desk {
+  id: string
+  conversation_id: string
+  project_id: string | null
+  title: string
+  brief: string
+  status: DeskStatus
+  status_reason: string
+  /** The rail's live "now" line, debounced server-side; never written per delta. */
+  headline: string
+  /** Written by `desk_ask`, cleared by the steer that answers it. */
+  question: string
+  autonomy: DeskAutonomy
+  plan_id: string | null
+  run_id: string | null
+  /** "cowork/<id>", RELATIVE to the backend data dir. Never an absolute path. */
+  workspace: string
+  turn: number
+  cost: number
+  budget: DeskBudget
+  last_error: string | null
+  archived: boolean
+  /** Derived: the status is in DESK_LIVE. */
+  live: boolean
+  /** Derived: unseen `needs_you` events on this desk. */
+  unseen: number
+  created_at: number
+  updated_at: number
+  ended_at: number | null
+}
+
+/** GET /cowork/desks/{id}: the desk plus everything the detail pane opens with. */
+export interface FullDesk extends Desk {
+  /** The plan the user approved for this desk: propose_plan's record, not the todo checklist. */
+  plan: PlanRecord | null
+  outputs: DeskOutput[]
+  events: DeskEvent[]
+  runs: RunInfo[]
+}
+
+export type DeskOutputStatus = 'proposed' | 'stale' | 'accepted' | 'promoted' | 'promote_failed' | 'rejected'
+export type PromotionKind = 'doc' | 'doc_append' | 'document' | 'download'
+
+export interface DeskOutput {
+  id: string
+  desk_id: string
+  /** Workspace-relative, always under `outputs/`. */
+  path: string
+  title: string
+  summary: string
+  /** The digest recorded at delivery; `stale` means the file has moved on since. */
+  sha256: string
+  bytes: number
+  run_id: string | null
+  status: DeskOutputStatus
+  promoted_kind: PromotionKind | string | null
+  promoted_id: string | null
+  /** The promoted copy was read back and matched. Read from the response, never assumed. */
+  verified: boolean
+  created_at: number
+  updated_at: number
+  decided_at: number | null
+  /** Set by GET .../outputs when the file could not be re-hashed at all. */
+  error?: string
+}
+
+export type DeskFileState = 'new' | 'modified' | 'unchanged'
+
+export interface DeskFile {
+  path: string
+  bytes: number
+  modified: number
+  is_dir: boolean
+  is_text: boolean
+  state: DeskFileState
+}
+
+/** GET /cowork/desks/{id}/files */
+export interface DeskFileTree { files: DeskFile[]; usage: { files: number; bytes: number } }
+
+/** GET /cowork/desks/{id}/file — a character window, or a named-and-sized stub for a binary. */
+export interface DeskFilePreview {
+  path: string
+  text: string
+  bytes: number
+  truncated: boolean
+  binary: boolean
+  state: DeskFileState
+  /** Absent on the binary stub, which has no window. */
+  offset?: number
+  chars?: number
+  /** Present only when truncated: where the next page starts. */
+  next_offset?: number
+}
+
+/** GET /cowork/desks/{id}/diff — the unified diff against the pre-desk baseline. */
+export interface DeskDiff {
+  path: string
+  state: DeskFileState
+  diff: string
+  truncated: boolean
+  added: number
+  removed: number
+  /** False for a file the desk created: it diffs as all additions against empty. */
+  has_baseline: boolean
+}
+
+export interface DeskEvent {
+  id: string
+  desk_id: string
+  run_id: string | null
+  /** status|plan|step|output|question|blocked|review|failed|promoted|interrupted|note */
+  kind: string
+  body: string
+  data: Record<string, unknown>
+  needs_you: boolean
+  seen: boolean
+  created_at: number
+  /** GET /cowork/inbox only, so the Today card can name the desk without a second fetch. */
+  desk_title?: string
+}
+
+/** One row of POST /cowork/desks/{id}/accept's response. */
+export interface PromotionResult {
+  output_id: string
+  ok: boolean
+  verified: boolean
+  kind: string
+  ref: string | null
+  error?: string
+}
 
 // ---------------- Canvas Mode ----------------
 

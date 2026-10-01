@@ -18,11 +18,63 @@ import DashboardsView from './components/DashboardsView'
 import PendingSends from './components/PendingSends'
 import PageAgentPanel from './components/PageAgentPanel'
 import LibraryView from './components/LibraryView'
+import CoworkView from './components/CoworkView'
+import type { DeskStatus } from '@shared/types'
 import SettingsModal from './components/SettingsModal'
 import ProjectModal from './components/ProjectModal'
 import Canvas from './canvas/Canvas'
 import { useCanvas } from './canvas/store'
 import { AlertTriangle } from 'lucide-react'
+
+/** The transitions worth interrupting for: the desk has stopped and cannot go on without the user. */
+const NOTIFY_ON: DeskStatus[] = ['review', 'blocked', 'failed']
+
+/**
+ * One native notification per desk per terminal transition — the last gap in "hand it a task and go
+ * away". It rides an event already flowing (`desk_status`), so there is no poller.
+ *
+ * The de-duplication lives here rather than in the store: `desk_status` republishes the same row on
+ * every DeskRuntime flush and again with the settled row at the end of a turn, and the store keeps
+ * `putDesk` idempotent rather than dropping repeats. A repeated row is free; a repeated banner is not.
+ * The first pass only seeds the map — a desk already in `review` when the app launches is history.
+ */
+function DeskNotifier(): null {
+  const desks = useStore((s) => s.desks)
+  // Missing means on, like every other module flag.
+  const enabled = useStore((s) => s.settings.deskNotify !== false)
+  const seen = useRef<Map<string, DeskStatus> | null>(null)
+  useEffect(() => {
+    const seeding = seen.current === null
+    const last = (seen.current ??= new Map())
+    for (const d of desks) {
+      if (last.get(d.id) === d.status) continue
+      last.set(d.id, d.status)
+      if (seeding || !enabled || !NOTIFY_ON.includes(d.status)) continue
+      const body =
+        d.status === 'review' ? `${d.title} has output waiting for review.`
+          : d.status === 'blocked' ? d.question || `${d.title} needs an answer.`
+            : d.last_error || `${d.title} failed.`
+      notifyDesk(body)
+    }
+  }, [desks, enabled])
+  return null
+}
+
+/**
+ * Main owns the Notification, because a notification raised there survives the window being hidden and
+ * needs no permission dance. `GrainApi` does not declare the bridge yet (preload belongs to no work
+ * package — see the handoff), so this feature-detects it and falls back to the renderer's own
+ * Notification, which Electron also routes to the OS notification centre.
+ */
+function notifyDesk(body: string): void {
+  const bridge = (window.os as unknown as { deskNotify?: (body: string) => void }).deskNotify
+  if (bridge) return bridge(body)
+  try {
+    if (typeof Notification === 'function' && Notification.permission !== 'denied') new Notification('Cowork', { body })
+  } catch {
+    // A notification is never worth a render crash.
+  }
+}
 
 function Toasts(): JSX.Element {
   const toasts = useStore((s) => s.toasts)
@@ -122,12 +174,14 @@ export default function App(): JSX.Element {
           {view === 'meetings' && <MeetingsView />}
           {view === 'activity' && <ActivityView />}
           {view === 'library' && <LibraryView />}
+          {view === 'cowork' && <CoworkView />}
           {view === 'project' && <ProjectView />}
         </>
       )}
       {pageAgentOpen && <PageAgentPanel popout={agentPopout} />}
       {settingsOpen && <SettingsModal />}
       {projectModal && <ProjectModal />}
+      <DeskNotifier />
       <Toasts />
     </div>
   )

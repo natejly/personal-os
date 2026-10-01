@@ -22,6 +22,7 @@ Editing a step re-derives its digest from the edited arguments, so what the user
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from typing import Any
 
 from .db import Database, new_id, now, row_to_dict
@@ -33,6 +34,18 @@ MAX_TITLE = 120
 MAX_WHY = 200
 
 PLAN_TOOL = "propose_plan"
+# What may still run while a plan is being drafted: reading and thinking, never acting. 'plan' is
+# propose_plan's own tier, so the plan call itself is never blocked by the planning state it opens.
+PLAN_SAFE_DANGER = ("safe", "network", "plan")
+# The tiers a plan is *about*. A plan that listed only reads would authorise nothing.
+MUTATING = ("writes", "executes", "external")
+# Step statuses that mean the step was actually used, as opposed to merely approved.
+_CLAIMED = ("consumed", "done", "failed")
+
+PLAN_BLOCKED = ("not available while planning; put it in a plan step with these exact arguments "
+                "and propose the plan")
+PROPOSE_ONLY = "this desk may only propose external actions"
+STEP_REJECTED = "the user rejected this exact step"
 
 PLAN_DESCRIPTION = (
     "Ask the user to approve several consequential actions at once, instead of one approval modal per call. "
@@ -81,7 +94,8 @@ DROPPED_NOTE = "The user removed these steps from the plan; they are not authori
 EDITED_NOTE = "The user edited these arguments. Use the arguments below, not the ones you proposed."
 
 
-def normalize_plan(args: dict[str, Any], modes: dict[str, str] | None = None) -> tuple[dict[str, Any], dict[str, Any] | None]:
+def normalize_plan(args: dict[str, Any], modes: dict[str, str] | None = None,
+                   specs: dict[str, str] | None = None, taints: set[str] | None = None) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """Canonical (title, steps) for a propose_plan call, or (args, error) when it cannot be shown to a user.
 
     Validation happens before the card: a plan naming a tool that does not exist, or that is off in this chat,
@@ -119,8 +133,18 @@ def normalize_plan(args: dict[str, Any], modes: dict[str, str] | None = None) ->
             if modes[tool] == "off":
                 return args, tool_error(f"Step {i + 1}: {tool} is turned off for this chat, so it cannot be approved.",
                                         field="steps", alternative="leave that step out and tell the user it is off")
-        steps.append({"tool": tool, "arguments": a, "why": str(s.get("why") or "")[:MAX_WHY]})
-    return {"title": str(args.get("title") or "")[:MAX_TITLE], "steps": steps}, None
+        steps.append({"tool": tool, "arguments": a, "why": str(s.get("why") or "")[:MAX_WHY],
+                      # What the card shows for this step. The title is the model's own one-liner,
+                      # falling back to the tool name; the tier is resolved now, because the card is
+                      # read later and a spec can change in between.
+                      "title": str(s.get("title") or "")[:MAX_TITLE] or tool,
+                      "danger": (specs.get(tool) if specs else None) or "safe"})
+    # Which of these steps read untrusted content. Recorded before approval, because the point is
+    # that the user saw it: a later external step is then not re-gated by the plan's own research.
+    expected = sorted({x["tool"] for x in steps if taints and x["tool"] in taints})
+    return {"title": str(args.get("title") or "")[:MAX_TITLE],
+            "intent": str(args.get("intent") or "")[:MAX_TITLE],
+            "expected_taint": expected, "steps": steps}, None
 
 
 def parse_plan_edits(raw: Any) -> dict[int, dict[str, Any] | None] | None:
@@ -144,6 +168,23 @@ def parse_plan_edits(raw: Any) -> dict[int, dict[str, Any] | None] | None:
     return out
 
 
+def taint_expected(plan: dict[str, Any] | None, sources: Iterable[str]) -> bool:
+    """Is every taint source in this reply one the approved plan predicted?
+
+    Either the tool is on the plan's expected_taint list - the card said so before the user approved
+    - or it is a tool that actually claimed a step of this plan, which is the same promise kept. An
+    off-plan fetch makes this False, and every external call goes back to asking.
+    """
+    srcs = [s for s in sources if s]
+    if not srcs:
+        return True
+    if not plan:
+        return False
+    ok = set(plan.get("expected_taint") or [])
+    ok.update(s["tool"] for s in plan.get("steps") or [] if s.get("tool") and s.get("status") in _CLAIMED)
+    return all(s in ok for s in srcs)
+
+
 class Plans:
     """action_plans + plan_steps. One plan per propose_plan call; its approval row decides it."""
 
@@ -155,6 +196,8 @@ class Plans:
     def _step(r: Any) -> dict[str, Any]:
         d = row_to_dict(r, ("args",)) or {}
         d["edited"] = bool(d.get("edited"))
+        # The column is `args`; the wire key is `arguments`, which is what the tool call itself uses.
+        d["arguments"] = d.pop("args", {})
         return d
 
     def _steps(self, c: Any, plan_id: str) -> list[dict[str, Any]]:
@@ -165,6 +208,7 @@ class Plans:
         if d is None:
             return None
         d["tainted"] = bool(d["tainted"])
+        d["expected_taint"] = json.loads(d.get("expected_taint") or "[]")
         d["steps"] = self._steps(c, d["plan_id"])
         return d
 
@@ -190,7 +234,7 @@ class Plans:
 
     # ---- writes ----
     def open(self, call_id: str, args: dict[str, Any], *, run_id: str | None = None, conversation_id: str | None = None,
-             message_id: str | None = None, tainted: bool = False) -> dict[str, Any]:
+             message_id: str | None = None, tainted: bool = False, desk_id: str | None = None) -> dict[str, Any]:
         """Record a proposed plan (pending) before its card is shown. `args` must already be normalize_plan()ed."""
         existing = self.by_call(call_id)
         if existing:  # a replayed round: the card and its digests stay as first proposed
@@ -198,13 +242,17 @@ class Plans:
         plan_id = new_id()
         t = now()
         with self.db.tx() as c:
-            c.execute("INSERT INTO action_plans(plan_id, call_id, run_id, conversation_id, message_id, title, status, tainted, created_at) "
-                      "VALUES(?,?,?,?,?,?,'pending',?,?)",
-                      (plan_id, call_id, run_id, conversation_id, message_id, args.get("title") or "", int(tainted), t))
+            c.execute("INSERT INTO action_plans(plan_id, call_id, run_id, conversation_id, message_id, desk_id, title, intent, "
+                      "expected_taint, status, tainted, created_at) VALUES(?,?,?,?,?,?,?,?,?,'pending',?,?)",
+                      (plan_id, call_id, run_id, conversation_id, message_id, desk_id, args.get("title") or "",
+                       args.get("intent") or "", json.dumps(args.get("expected_taint") or [], ensure_ascii=False),
+                       int(tainted), t))
             for i, s in enumerate(args["steps"]):
-                c.execute("INSERT INTO plan_steps(step_id, plan_id, idx, tool, args, args_digest, why, status) VALUES(?,?,?,?,?,?,?,'proposed')",
+                c.execute("INSERT INTO plan_steps(step_id, plan_id, idx, tool, args, args_digest, why, title, danger, status) "
+                          "VALUES(?,?,?,?,?,?,?,?,?,'proposed')",
                           (new_id(), plan_id, i, s["tool"], json.dumps(s["arguments"], ensure_ascii=False, default=str),
-                           args_digest(s["arguments"]), s.get("why") or ""))
+                           args_digest(s["arguments"]), s.get("why") or "", s.get("title") or s["tool"],
+                           s.get("danger") or "safe"))
         return self.get(plan_id) or {}
 
     def decide(self, call_id: str, decision: str, *, edits: dict[int, dict[str, Any] | None] | None = None,
@@ -243,19 +291,27 @@ class Plans:
             return self._plan(c, c.execute("SELECT * FROM action_plans WHERE plan_id=?", (plan_id,)).fetchone())
 
     # ---- the gate ----
-    def claim(self, run_id: str | None, tool: str, args: dict[str, Any], call_id: str) -> dict[str, Any] | None:
+    def claim(self, run_id: str | None, tool: str, args: dict[str, Any], call_id: str,
+              desk_id: str | None = None) -> dict[str, Any] | None:
         """Consume one approved step matching this call's arguments exactly, or None.
 
         Single use, and scoped to the run the plan was approved in: the UPDATE's `status='approved'` guard is what
         makes the claim atomic, so two calls with the same digest cannot both ride one approval.
+
+        `desk_id` widens the scope from the run to the desk, and only that far. A desk is one
+        approved plan carried out over several bounded turns, each its own run, so run-scoping would
+        make every step after the first unclaimable. It is not a loosening: the plan still had to be
+        approved for *this* desk, each step is still single-use, and a chat run (desk_id None) is
+        still confined to the run it was approved in.
         """
-        if not run_id:
+        if not run_id and not desk_id:
             return None
         digest = args_digest(args)
+        scope, key = ("p.desk_id=?", desk_id) if desk_id else ("p.run_id=?", run_id)
         with self.db.tx() as c:
             r = c.execute("SELECT s.step_id FROM plan_steps s JOIN action_plans p ON p.plan_id=s.plan_id "
-                          "WHERE p.run_id=? AND p.status='approved' AND s.status='approved' AND s.tool=? AND s.args_digest=? "
-                          "ORDER BY s.idx LIMIT 1", (run_id, tool, digest)).fetchone()
+                          f"WHERE {scope} AND p.status='approved' AND s.status='approved' AND s.tool=? AND s.args_digest=? "
+                          "ORDER BY s.idx LIMIT 1", (key, tool, digest)).fetchone()
             if r is None:
                 return None
             if not c.execute("UPDATE plan_steps SET status='consumed', call_id=?, consumed_at=? WHERE step_id=? AND status='approved'",
@@ -264,6 +320,49 @@ class Plans:
             step = self._step(c.execute("SELECT * FROM plan_steps WHERE step_id=?", (r["step_id"],)).fetchone())
             p = c.execute("SELECT plan_id, title FROM action_plans WHERE plan_id=?", (step["plan_id"],)).fetchone()
         return {**step, "title": p["title"] if p else ""}
+
+    def remaining(self, plan_id: str) -> list[dict[str, Any]]:
+        """The approved steps of this plan that nothing has claimed yet.
+
+        A desk chains another turn only while this is non-empty: a plan with every step consumed is
+        finished work, and continuing past it would be the model inventing its own next move.
+        """
+        if not plan_id:
+            return []
+        with self.db.tx() as c:
+            rows = c.execute("SELECT * FROM plan_steps WHERE plan_id=? AND status='approved' ORDER BY idx",
+                             (plan_id,)).fetchall()
+        return [self._step(r) for r in rows]
+
+    def for_conversation(self, conversation_id: str, limit: int = 20) -> list[dict[str, Any]]:
+        """This chat's plans, newest first, so a reloaded chat still shows the card it was on."""
+        if not conversation_id:
+            return []
+        with self.db.tx() as c:
+            rows = c.execute("SELECT * FROM action_plans WHERE conversation_id=? ORDER BY created_at DESC LIMIT ?",
+                             (conversation_id, max(1, min(int(limit), 100)))).fetchall()
+            return [p for p in (self._plan(c, r) for r in rows) if p]
+
+    def for_desk(self, desk_id: str) -> dict[str, Any] | None:
+        """The desk's current approved plan, newest first. One desk carries one plan at a time."""
+        if not desk_id:
+            return None
+        with self.db.tx() as c:
+            r = c.execute("SELECT * FROM action_plans WHERE desk_id=? AND status='approved' "
+                          "ORDER BY created_at DESC LIMIT 1", (desk_id,)).fetchone()
+            return self._plan(c, r) if r is not None else None
+
+    def finish(self, call_id: str, ok: bool, error: str | None = None) -> None:
+        """Record what became of a claimed step.
+
+        `claim` says a step was authorised and spent; this says whether the call it authorised
+        actually worked. Without it a plan can only show what the user approved, never what it got -
+        and a desk's plan panel is mostly read after the fact. Guarded on 'consumed' so a replayed
+        call cannot rewrite a step that already finished.
+        """
+        with self.db.tx() as c:
+            c.execute("UPDATE plan_steps SET status=?, result_error=? WHERE call_id=? AND status='consumed'",
+                      ("done" if ok else "failed", None if ok else (error or "failed"), call_id))
 
     def rejected(self, conversation_id: str | None, tool: str, args: dict[str, Any]) -> dict[str, Any] | None:
         """A step of a plan the user rejected, matched by digest: the model does not get to run it anyway.
@@ -295,7 +394,7 @@ class Plans:
         dropped = [s for s in plan.get("steps") or [] if s["status"] == "dropped"]
         out: dict[str, Any] = {
             "plan_id": plan["plan_id"], "status": plan.get("status") or "pending", "approved": len(ok),
-            "steps": [{"idx": s["idx"], "tool": s["tool"], "arguments": s["args"], "edited": s["edited"]} for s in ok],
+            "steps": [{"idx": s["idx"], "tool": s["tool"], "arguments": s["arguments"], "edited": s["edited"]} for s in ok],
             "note": APPROVED_NOTE,
         }
         if any(s["edited"] for s in ok):

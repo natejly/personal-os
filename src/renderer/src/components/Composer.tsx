@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ArrowUp, Square, Paperclip } from 'lucide-react'
+import PlanModeToggle from './PlanModeToggle'
 import { useStore, useIsStreaming } from '../store'
 import SmartTextarea from './SmartTextarea'
 
@@ -69,7 +70,12 @@ export default function Composer({ conversationId, footer, compact = false, onSe
           <button className="send" title={streaming ? 'Steer the reply' : 'Send'} disabled={!text.trim()} onClick={() => void submit()}><ArrowUp size={16} /></button>
         )}
       </div>
-      {footer && <div className="composer-footer">{footer}</div>}
+      {/* Always rendered: the plan-mode toggle belongs to every composer, and it binds ⌘⇧P itself —
+          only for the focused conversation, so several mounted chat widgets do not all cycle at once. */}
+      <div className="composer-footer">
+        <PlanModeToggle conversationId={conversationId} />
+        {footer}
+      </div>
     </div>
   )
 }

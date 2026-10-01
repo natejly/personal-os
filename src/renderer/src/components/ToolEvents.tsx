@@ -1,11 +1,17 @@
 import { useState } from 'react'
-import { ChevronRight, Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, AlertCircle, Laptop, Zap, ListChecks, ShieldAlert, ShieldCheck } from 'lucide-react'
+import { ChevronRight, Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, AlertCircle, Laptop, Zap, ListChecks, ShieldAlert, ShieldCheck,
+  FolderOpen, FileText, FilePen, Trash2, PackageCheck, CircleHelp, CircleCheck } from 'lucide-react'
 import type { ToolEvent, Verification } from '@shared/types'
 import { useStore } from '../store'
 import PlanApproval from './PlanApproval'
+// The ask card mounts inline in a chat bubble, so it needs the sheet the desk panes use.
+import '../styles/cowork.css'
 
 const ICONS: Record<string, JSX.Element> = {
   propose_plan: <ListChecks size={13} />,
+  desk_list_files: <FolderOpen size={13} />, desk_read_file: <FileText size={13} />, desk_write_file: <FilePen size={13} />,
+  desk_trash_file: <Trash2 size={13} />, desk_deliver: <PackageCheck size={13} />, desk_ask: <CircleHelp size={13} />,
+  desk_done: <CircleCheck size={13} />, desk_import_sandbox: <FolderOpen size={13} />,
   web_search: <Globe size={13} />, fetch_url: <Globe size={13} />, open_page: <Globe size={13} />,
   find_files: <Laptop size={13} />, read_local_file: <Laptop size={13} />,
   write_local_file: <Laptop size={13} />, move_local_file: <Laptop size={13} />, trash_local_file: <Laptop size={13} />, list_shortcuts: <Zap size={13} />, run_shortcut: <Zap size={13} />,
@@ -62,6 +68,59 @@ function pretty(v: unknown): string {
   return JSON.stringify(v, null, 2)
 }
 
+/**
+ * `desk_ask`: the agent stopped and wants an answer. The call is gated as a card (plans.decide_call
+ * rule 2), so the tool body — the thing that writes `desks.question` and moves the desk to Needs you
+ * — has not run yet, and the run is sitting on this approval. The answer therefore has to be the
+ * DECISION, not a message: it rides back as the approval's note, which the backend hands to the call
+ * as `user_note` (app.py). Posting it as a chat message instead left the approval unanswered and the
+ * run waiting here forever, because a run with a viewer attached never parks.
+ *
+ * The store is read imperatively in the handler, never subscribed to: this mounts inside a streaming
+ * message, where any broader subscription re-renders every message on every token (Message.tsx:10).
+ */
+function AskAnswer({ callId, question, context, conversationId }: {
+  callId: string
+  question: string
+  context?: string
+  conversationId: string
+}): JSX.Element {
+  const [text, setText] = useState('')
+  const [sending, setSending] = useState(false)
+
+  const submit = async (): Promise<void> => {
+    if (!text.trim() || sending) return
+    setSending(true)
+    try {
+      // 'allow' only: a question is never a standing grant, so no always_chat/always_global here.
+      await useStore.getState().approveTool(callId, 'allow', conversationId, { note: text.trim() })
+    } finally {
+      setSending(false)
+    }
+  }
+
+  return (
+    <div className="aplan ask">
+      <header className="aplan-head"><CircleHelp size={14} /><b>The agent has a question</b></header>
+      <p className="aplan-intent">{question}</p>
+      {context && <p className="muted small">{context}</p>}
+      <div className="aplan-foot">
+        <textarea
+          className="aplan-answer"
+          rows={2}
+          placeholder="Answer… (⌘↵ to send)"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void submit() } }}
+        />
+        <div className="aplan-actions">
+          <button className="primary-btn" disabled={!text.trim() || sending} onClick={() => void submit()}>Answer</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function ToolEvents({ events, conversationId }: { events: ToolEvent[]; conversationId: string }): JSX.Element {
   const [open, setOpen] = useState<Record<string, boolean>>({})
   const approveTool = useStore((s) => s.approveTool)
@@ -91,7 +150,13 @@ export default function ToolEvents({ events, conversationId }: { events: ToolEve
             </div>
           )}
           {t.pending && t.needs_approval && t.name === 'propose_plan' && <PlanApproval event={t} conversationId={conversationId} />}
-          {t.pending && t.needs_approval && t.name !== 'propose_plan' && (
+          {/* A question is answered, not permitted, so desk_ask gets a text box instead of Allow/Deny. */}
+          {t.pending && t.needs_approval && t.name === 'desk_ask' && (
+            <AskAnswer callId={t.id} conversationId={conversationId}
+              question={String((t.arguments as { question?: unknown }).question ?? '')}
+              context={String((t.arguments as { context?: unknown }).context ?? '') || undefined} />
+          )}
+          {t.pending && t.needs_approval && t.name !== 'propose_plan' && t.name !== 'desk_ask' && (
             <div className="approval">
               <div className="approval-text"><b>{t.name.replace(/_/g, ' ')}</b> wants to run. This acts outside the app.</div>
               <pre className="approval-args">{pretty(t.arguments)}</pre>

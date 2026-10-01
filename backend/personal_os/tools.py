@@ -20,6 +20,8 @@ import httpx
 
 from . import mac
 from . import skillbuild
+from .cowork import UNDECIDED_OUTPUTS
+from .workspace import WorkspaceError
 from . import plans
 from . import outbox as outbox_mod
 from . import verify
@@ -360,7 +362,7 @@ class Toolbox:
     def __init__(self, memories: Memories, graph: Graph, documents: Documents, settings_fn: Callable[[], dict[str, Any]], todos: Any = None, google: Any = None, boards: Any = None,
                  sandboxes: Sandboxes | None = None, docs: Any = None, activity: Any = None, outbox: Any = None,
                  work_plans: Any = None, results: Any = None, skills: Any = None, jobs: Any = None,
-                 style: Any = None, meetings: Any = None):
+                 style: Any = None, meetings: Any = None, desks: Any = None, workspace: Any = None):
         self.memories, self.graph, self.documents, self.settings = memories, graph, documents, settings_fn
         self.todos, self.google, self.boards, self.sandboxes, self.docs, self.activity = todos, google, boards, sandboxes, docs, activity
         self.outbox = outbox  # delayed Gmail send; gmail_send queues through it when it is wired up
@@ -369,6 +371,10 @@ class Toolbox:
         self.jobs = jobs  # scheduled tasks; the schedule_* tools are only registered when it is wired up
         self.style = style  # the user's voice (style.py); same, for the style tools
         self.meetings = meetings
+        # A desk's workspace. Writing in here is `writes`, never `external`: the boundary of free
+        # autonomy is exactly the boundary of the workspace directory, and the root is derived from
+        # ctx["desk_id"] inside each handler so desk A cannot address desk B's files.
+        self.desks, self.workspace = desks, workspace
         self.specs: dict[str, ToolSpec] = {}
         self._meetings_avail: tuple[float, bool] | None = None
         self._register()
@@ -392,6 +398,8 @@ class Toolbox:
             self._register_style()
         if skills is not None:
             self._register_skills()
+        if desks is not None and workspace is not None:
+            self._register_cowork()
         if meetings is not None:
             self._register_meetings()
 
@@ -1911,4 +1919,214 @@ def _register_skills(self: Toolbox) -> None:
 
 
 Toolbox._register_skills = _register_skills  # type: ignore[attr-defined]
+
+
+def _register_cowork(self: Toolbox) -> None:
+    """A desk's own workspace, plus the two tools that end its turn.
+
+    Writing in here is `writes`, never `external`: the boundary of free autonomy is exactly the
+    boundary of the workspace directory, enforced by the danger level rather than by a prompt. The
+    root is derived from ctx["desk_id"] inside each handler and a tool never names one, so desk A
+    cannot address desk B's files. Every handler re-checks ctx["desk_id"] even though _schemas()
+    strips this whole group outside a desk conversation, because Toolbox.available() cannot see ctx
+    and the belt is cheaper than the consequence.
+    """
+    R = self.specs.__setitem__
+    ws, desks, sb = self.workspace, self.desks, self.sandboxes
+    NO_DESK = "This tool only works inside a cowork desk."
+
+    def _id(ctx: dict[str, Any], name: str) -> Any:
+        """The desk id, or the tool_error to return instead of it."""
+        desk_id = str(ctx.get("desk_id") or "")
+        return desk_id or tool_error(NO_DESK, alternative=ALTERNATIVE.get(name))
+
+    def _fail(name: str, e: WorkspaceError) -> dict[str, Any]:
+        """Workspace raises one clean line; the quota cases also carry the usage that tells a looping
+        agent to trash something rather than retry the same write. A zeroed usage means the failure
+        was not a quota, so it is left off rather than reported as an empty workspace."""
+        out = tool_error(str(e), alternative=ALTERNATIVE.get(name))
+        if e.usage.get("files") or e.usage.get("bytes"):
+            out["usage"] = e.usage
+        return out
+
+    async def desk_list_files(ctx: dict[str, Any], prefix: str = "", offset: int = 0, limit: int = 50) -> Any:
+        desk_id = _id(ctx, "desk_list_files")
+        if not isinstance(desk_id, str):
+            return desk_id
+        try:
+            entries = ws.tree(desk_id, prefix)
+        except WorkspaceError as e:
+            return _fail("desk_list_files", e)
+        return page(entries, offset=offset, limit=limit, key="files")
+    R("desk_list_files", ToolSpec("desk_list_files", "List the files in this desk's workspace: outputs/ (the only place a deliverable can live), work/ (your scratch space), and anything else you have written. Each entry carries its size and whether you have changed it since the desk started.",
+        _obj({"prefix": {"type": "string", "description": "Only list under this subdirectory, e.g. 'outputs'"},
+              "offset": {"type": "integer", "default": 0}, "limit": {"type": "integer", "default": 50}}, []),
+        desk_list_files, "desk", "safe", examples=[{}, {"prefix": "outputs"}, {"prefix": "work", "offset": 50}]))
+
+    async def desk_read_file(ctx: dict[str, Any], path: str, offset: int = 0, length: int = 6000) -> Any:
+        desk_id = _id(ctx, "desk_read_file")
+        if not isinstance(desk_id, str):
+            return desk_id
+        try:
+            return ws.read(desk_id, path, offset, length)
+        except WorkspaceError as e:
+            return _fail("desk_read_file", e)
+    # Deliberately not taints=True: the workspace holds what this agent itself wrote, and marking it
+    # untrusted would force every later external step of its own approved plan back to a card.
+    R("desk_read_file", ToolSpec("desk_read_file", "Read a text file from this desk's workspace. The window is snapped to a line boundary and returns next_offset when there is more, so page through a long file rather than asking for all of it at once.",
+        _obj({"path": {"type": "string", "description": "Relative to the workspace, e.g. 'work/notes.md'"},
+              "offset": {"type": "integer", "default": 0}, "length": {"type": "integer", "default": 6000}}, ["path"]),
+        desk_read_file, "desk", "safe",
+        examples=[{"path": "work/notes.md"}, {"path": "outputs/report.md", "offset": 6000}]))
+
+    async def desk_write_file(ctx: dict[str, Any], path: str, content: str, mode: str = "create") -> Any:
+        desk_id = _id(ctx, "desk_write_file")
+        if not isinstance(desk_id, str):
+            return desk_id
+        try:
+            return ws.write(desk_id, path, content, mode)
+        except WorkspaceError as e:
+            return _fail("desk_write_file", e)
+    R("desk_write_file", ToolSpec("desk_write_file", "Write a text file in this desk's workspace. Put finished work under outputs/ (that is what the user reviews) and everything else under work/. 'create' refuses to overwrite an existing file; pass mode='overwrite' or mode='append' deliberately.",
+        _obj({"path": {"type": "string", "description": "Relative to the workspace, e.g. 'outputs/summary.md'"},
+              "content": {"type": "string"},
+              "mode": {"type": "string", "enum": ["create", "overwrite", "append"], "default": "create"}}, ["path", "content"]),
+        desk_write_file, "desk", "writes",
+        examples=[{"path": "work/notes.md", "content": "## Sources\n"},
+                  {"path": "outputs/summary.md", "content": "# Summary\n", "mode": "overwrite"},
+                  {"path": "work/notes.md", "content": "- one more source\n", "mode": "append"}]))
+
+    async def desk_trash_file(ctx: dict[str, Any], path: str) -> Any:
+        desk_id = _id(ctx, "desk_trash_file")
+        if not isinstance(desk_id, str):
+            return desk_id
+        try:
+            return ws.trash(desk_id, path)
+        except WorkspaceError as e:
+            return _fail("desk_trash_file", e)
+    R("desk_trash_file", ToolSpec("desk_trash_file", "Move a file in this desk's workspace to .trash/. Nothing in a workspace is ever deleted, so the user can still find it - which also means trashing does not free quota.",
+        _obj({"path": {"type": "string"}}, ["path"]), desk_trash_file, "desk", "writes",
+        examples=[{"path": "work/scratch.txt"}, {"path": "outputs/old-draft.md"}]))
+
+    async def desk_deliver(ctx: dict[str, Any], path: str, title: str, summary: str = "") -> Any:
+        desk_id = _id(ctx, "desk_deliver")
+        if not isinstance(desk_id, str):
+            return desk_id
+        try:
+            root = ws.ensure(desk_id).resolve()
+            p = ws.resolve_in(desk_id, path)
+            rel = p.relative_to(root).as_posix() if p != root else ""
+            if rel.split("/", 1)[0] != "outputs":
+                return tool_error(f"{rel or path} is not under outputs/, and only files there can be delivered.",
+                                  field="path", expected="a path starting with 'outputs/'",
+                                  example={"path": "outputs/comparison.md", "title": "Pricing comparison"},
+                                  alternative="desk_write_file it into outputs/ first, then deliver that path")
+            if not p.is_file():
+                return tool_error(f"{rel} does not exist in this workspace.", field="path",
+                                  expected="a file you have already written",
+                                  alternative=ALTERNATIVE["desk_list_files"])
+            digest, size = ws.sha(desk_id, rel), p.stat().st_size
+        except WorkspaceError as e:
+            return _fail("desk_deliver", e)
+        row = desks.declare_output(desk_id, rel, title.strip() or rel, summary, digest, size, ctx.get("run_id"))
+        return {"status": "awaiting_review", "output_id": row["id"], "path": rel, "title": row["title"],
+                "bytes": size,
+                "note": "Nominated, not promoted: the user reviews it in the desk's Files tab and decides "
+                        "where it goes. You never promote anything yourself. Deliver each finished file once, "
+                        "then keep working or call desk_done."}
+    R("desk_deliver", ToolSpec("desk_deliver", "Nominate a file under outputs/ as a deliverable. It is queued for the user's review with its current contents recorded, and rewriting the file afterwards sends it back for review. This proposes, it does not promote: the user chooses whether it becomes a doc, a document or a download.",
+        _obj({"path": {"type": "string", "description": "A path under outputs/"},
+              "title": {"type": "string", "description": "What the user will see this called"},
+              "summary": {"type": "string", "description": "One or two lines: what it is and what you would do with it"}},
+             ["path", "title"]),
+        desk_deliver, "desk", "writes",
+        examples=[{"path": "outputs/comparison.md", "title": "Acme vs us - pricing",
+                   "summary": "Per-seat pricing for both, with the tiers I judged comparable."}]))
+
+    async def desk_ask(ctx: dict[str, Any], question: str, context: str = "") -> Any:
+        desk_id = _id(ctx, "desk_ask")
+        if not isinstance(desk_id, str):
+            return desk_id
+        q = question.strip()
+        if not q:
+            return tool_error("desk_ask needs a question.", field="question",
+                              expected="one specific question the user can answer in a sentence",
+                              example={"question": "Which of the two vendors should I price against?"})
+        # One question column, one answer box: `context` is folded into the question rather than
+        # dropped, because the user reads and answers the whole thing in one place.
+        if context.strip():
+            q = f"{q}\n\n{context.strip()}"
+        if desks.set_status(desk_id, "blocked", reason="question", question=q) is None:
+            return tool_error(f"No desk with id '{desk_id}'.")
+        return {"status": "waiting_for_user", "question": question.strip(),
+                "note": "Stop here and end your turn. The desk is in Needs you; the user's answer starts the next turn."}
+    R("desk_ask", ToolSpec("desk_ask", "Ask the user one question and stop. Use it when a decision is genuinely theirs and guessing would waste the rest of the work. The desk moves to Needs you, you end your turn, and their answer starts the next one - so ask the whole question, including whatever you already found that they need in order to decide.",
+        _obj({"question": {"type": "string", "description": "One specific question"},
+              "context": {"type": "string", "description": "What you found that makes the question necessary"}}, ["question"]),
+        desk_ask, "desk", "plan",
+        examples=[{"question": "Should the summary go to the whole team or just to Dana?"},
+                  {"question": "Which quarter should I compare against?",
+                   "context": "The file has Q1 and Q3 but no Q2, so a year-on-year read is not possible."}]))
+
+    async def desk_done(ctx: dict[str, Any], summary: str, next_steps: str = "") -> Any:
+        desk_id = _id(ctx, "desk_done")
+        if not isinstance(desk_id, str):
+            return desk_id
+        pending = [o for o in desks.outputs(desk_id) if o["status"] in UNDECIDED_OUTPUTS]
+        body = summary.strip()
+        if next_steps.strip():
+            body = f"{body}\n\nNext: {next_steps.strip()}".strip()
+        if body:  # the summary belongs on the timeline, not only in a reply the user may never open
+            desks.event(desk_id, "note", body, run_id=ctx.get("run_id"))
+        status = "review" if pending else "done"
+        if desks.set_status(desk_id, status, reason="done", headline="") is None:
+            return tool_error(f"No desk with id '{desk_id}'.")
+        return {"status": status, "outputs_awaiting_review": len(pending),
+                "note": ("Your delivered files are waiting for the user's review. End your turn."
+                         if pending else "The desk is finished. End your turn.")}
+    R("desk_done", ToolSpec("desk_done", "Declare this desk finished and say what you did. Call it exactly once, when the brief is actually met: if you delivered files the desk goes to Review, otherwise straight to Done. A desk never finishes on its own, so without this call it sits waiting for the user.",
+        _obj({"summary": {"type": "string", "description": "What you did, in the user's terms"},
+              "next_steps": {"type": "string", "description": "What you would do next, if anything"}}, ["summary"]),
+        desk_done, "desk", "safe",
+        examples=[{"summary": "Compared both pricing pages and left the table in outputs/comparison.md."},
+                  {"summary": "Drafted the reply but did not send it.", "next_steps": "Send it once you have checked the figure."}]))
+
+    async def desk_import_sandbox(ctx: dict[str, Any], sandbox_path: str, path: str) -> Any:
+        desk_id = _id(ctx, "desk_import_sandbox")
+        if not isinstance(desk_id, str):
+            return desk_id
+        if sb is None:
+            return tool_error("This desk has no sandbox, so there is nothing to import from.",
+                              alternative=ALTERNATIVE["desk_import_sandbox"])
+        out = await asyncio.to_thread(sb.read_file, ctx["conversation_id"], sandbox_path, 0, MAX_FILE_CHARS)
+        text = out.get("text") if isinstance(out, dict) else None
+        if text is None:
+            return tool_error(f"{sandbox_path} is not a text file, so it cannot be imported into the workspace.",
+                              field="sandbox_path", expected="a text file in the sandbox",
+                              alternative=ALTERNATIVE["desk_import_sandbox"])
+        # Conditional taint, the _mark() pattern from _register_sandbox: a networked sandbox may have
+        # fetched these bytes from the internet, so the import carries their taint. ToolSpec.taints is
+        # static and the same call is clean when the sandbox has no network, so it is set by hand.
+        if sb.networked(ctx["conversation_id"]):
+            ctx["tainted"] = True
+            ctx.setdefault("taint_sources", []).append("desk_import_sandbox")
+        try:
+            res = ws.write(desk_id, path, text, "overwrite")
+        except WorkspaceError as e:
+            return _fail("desk_import_sandbox", e)
+        res["from_sandbox"] = out.get("path", sandbox_path)
+        if out.get("truncated"):  # say so rather than hand over a prefix as if it were the file
+            res["truncated"] = True
+            res["note"] = ("Only the first part of the sandbox file fit in one read. Page the rest with "
+                           "sandbox_read_file and desk_write_file(mode='append') before you deliver it.")
+        return res
+    R("desk_import_sandbox", ToolSpec("desk_import_sandbox", "Copy a text file out of this chat's sandbox into the desk's workspace, overwriting the destination. The two deliberately share no directory, so this is how work done with sandbox_exec becomes something the user can review.",
+        _obj({"sandbox_path": {"type": "string", "description": "Path in the sandbox, relative to /workspace"},
+              "path": {"type": "string", "description": "Destination in the desk workspace, e.g. 'outputs/report.md'"}},
+             ["sandbox_path", "path"]),
+        desk_import_sandbox, "desk", "writes",
+        examples=[{"sandbox_path": "out.csv", "path": "outputs/results.csv"},
+                  {"sandbox_path": "report.md", "path": "work/draft.md"}]))
+
+Toolbox._register_cowork = _register_cowork  # type: ignore[attr-defined]
 Toolbox._register_meetings = _register_meetings  # type: ignore[attr-defined]

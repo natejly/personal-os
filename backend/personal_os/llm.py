@@ -59,6 +59,15 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "maxRunTokens": 200_000,
     "maxRunSeconds": 300,
     "maxRunCost": 0.50,
+    # Cowork desks. A desk runs bounded turns unattended, so both axes are caps on the whole
+    # desk rather than on one reply; 0 on either means unlimited. deskMaxLive bounds how many
+    # desks may be running at once, which is the cap the user actually feels.
+    # How long a desk waits on a card nobody is watching before letting the run go. The card stays
+    # pending and decidable; only the run lets go. 0 = wait forever, which is what a chat does.
+    "parkAfterSeconds": 180,
+    "deskMaxTurns": 12,
+    "deskMaxCost": 2.0,
+    "deskMaxLive": 4,
     # Hosts fetch_url may still read once a reply has touched untrusted content (registrable-suffix match).
     "fetchAllowlist": [],
     # Undo window on outgoing mail (outbox.py). `seconds` is clamped to 60-120 on read.

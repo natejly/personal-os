@@ -98,6 +98,19 @@ their own instructions, knowledge files, memories and graph.
   transcription can run entirely on-device through whisper.cpp. Meetings never
   expire, are unreachable from the activity monitor's purge, and never reach
   auto-learn. See [docs/meetings.md](docs/meetings.md).
+- **Cowork desks.** A desk is a task you hand over: its own conversation, its own
+  folder, and one plan you approve before it acts. Several run at once. Long
+  autonomy is bought by chaining bounded replies, never by a longer leash — each
+  turn is an ordinary reply with an ordinary budget, and the desk chains another
+  only while the approved plan still has steps left and the last turn actually
+  consumed one. Three modes: plan first (nothing consequential runs until you
+  approve a plan, and those tools are withheld rather than offered and refused),
+  ask as it goes (one card per change), and propose only (it may plan an external
+  action and never perform one). Nothing it writes reaches the app until you accept
+  it: it works in `cowork/<desk>/` and nominates files for review, and every
+  promotion is read back before it counts. A card nobody is watching parks after a
+  few minutes — the run lets go, the card stays pending and decidable, and answering
+  it wakes the desk. See [docs/cowork-design.md](docs/cowork-design.md).
 - **Library.** One place for what the assistant may follow and reach: **Skills**,
   the procedures it can be asked to repeat; **Connectors**, the MCP servers whose
   tools join the toolbox; and **Made**, every doc, dashboard and board built here.

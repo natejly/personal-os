@@ -191,7 +191,7 @@ def test_approval_row_lifecycle() -> None:
 
     j("POST", f"/approvals/{a['call_id']}", {"decision": "sideways"}, expect=400)
     res = j("POST", f"/approvals/{a['call_id']}", {"decision": "allow"})
-    assert res == {"ok": True, "live": True, "status": "approved"}
+    assert res == {"ok": True, "live": True, "resumed": False, "status": "approved"}
     row = drain(rid)
     assert row["status"] == "done"
     decided = store.approval(a["call_id"])
@@ -328,7 +328,8 @@ def test_startup_marks_orphaned_runs_interrupted_and_keeps_the_approval_answerab
     pend = [a for a in j("GET", "/approvals") if a["call_id"] == uid]
     assert pend and pend[0]["status"] == "pending" and pend[0]["live"] is False
     res = j("POST", f"/approvals/{uid}", {"decision": "allow"})
-    assert res == {"ok": True, "live": False, "status": "approved"}
+    # `resumed` is the desk half of the answer: a chat approval never resumes anything.
+    assert res == {"ok": True, "live": False, "resumed": False, "status": "approved"}
     assert store.approval(uid)["decision"] == "allow"
     card = [t for t in j("GET", f"/conversations/{cid}")["messages"][-1]["tool_events"] if t["id"] == uid][0]
     assert card["pending"] is False and card["needs_approval"] is False and card["approval"] == "allow"

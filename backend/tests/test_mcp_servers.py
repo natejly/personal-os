@@ -58,7 +58,8 @@ def full_toolbox(meetings: Any = None) -> Toolbox:
     return Toolbox(Stub(), Stub(), Stub(), lambda: {},  # type: ignore[arg-type]
                    todos=Stub(), google=Stub(), boards=Stub(), sandboxes=Stub(),  # type: ignore[arg-type]
                    docs=Stub(), activity=Stub(), outbox=Stub(), work_plans=Stub(), results=Stub(),
-                   skills=Stub(), jobs=Stub(), style=Stub(), meetings=meetings or Stub())
+                   skills=Stub(), jobs=Stub(), style=Stub(), meetings=meetings or Stub(),
+                   desks=Stub(), workspace=Stub())
 
 
 def test_reserved_list_matches_registered_tools() -> None:

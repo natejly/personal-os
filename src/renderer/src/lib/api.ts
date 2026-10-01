@@ -4,6 +4,8 @@ import type {
   Memory, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo,
   Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
   Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
+  Desk, DeskAutonomy, DeskBudget, DeskDiff, DeskEvent, DeskFilePreview, DeskFileTree, DeskOutput,
+  DeskStatus, FullDesk, PlanRecord, PromotionKind, PromotionResult,
   AgentInbox, AgentProposal, Job,
   Doc, DocFolder, FullDoc, DocRevision,
   McpEffective, McpReport, McpServer, McpServerDraft, McpTool, ToolMode,
@@ -369,6 +371,51 @@ export const api = {
     applyInsight: (id: string) => req<ActivityApplyResult>(`/activity/insights/${id}/apply`, { method: 'POST' }),
     deleteInsight: (id: string) => req<{ ok: boolean }>(`/activity/insights/${id}`, { method: 'DELETE' }),
     forgetHabit: (id: string) => req<{ ok: boolean }>(`/activity/habits/${id}`, { method: 'DELETE' })
+  },
+  cowork: {
+    desks: {
+      list: (s: Scope = 'all', status: DeskStatus | '' = '', archived = false) =>
+        req<Desk[]>(`/cowork/desks?project_id=${encodeURIComponent(s)}&status=${encodeURIComponent(status)}&archived=${archived}`),
+      get: (id: string) => req<FullDesk>(`/cowork/desks/${id}`),
+      /** `start: false` leaves the desk a draft. Throws a 409 carrying `{live, max}` over `deskMaxLive`. */
+      create: (d: { brief: string; title?: string; project_id?: string | null; autonomy?: DeskAutonomy; budget?: DeskBudget; start?: boolean }) =>
+        req<{ desk: Desk; conversation_id: string; run_id?: string; seq?: number }>('/cowork/desks', { method: 'POST', body: json(d) }),
+      patch: (id: string, patch: { title?: string; autonomy?: DeskAutonomy; project_id?: string | null; archived?: boolean; budget?: DeskBudget; clear_project?: boolean }) =>
+        req<Desk>(`/cowork/desks/${id}`, { method: 'PATCH', body: json(patch) }),
+      /** The workspace is kept unless `purge`: a deleted desk's files are the one thing the user cannot regenerate. */
+      delete: (id: string, purge = false) => req<{ ok: boolean }>(`/cowork/desks/${id}?purge=${purge}`, { method: 'DELETE' }),
+      start: (id: string) => req<{ run_id: string; seq: number; conversation_id: string }>(`/cowork/desks/${id}/start`, { method: 'POST' }),
+      resume: (id: string, reason?: string) => req<{ run_id: string; seq: number }>(`/cowork/desks/${id}/resume`, { method: 'POST', body: json({ reason }) }),
+      /** The same box awake or asleep: live it steers the running reply, otherwise it is the next turn's content. */
+      message: (id: string, content: string) => req<{ ok: boolean; steered: boolean; run_id?: string }>(`/cowork/desks/${id}/message`, { method: 'POST', body: json({ content }) }),
+      /** Marks every unseen needs-you event of ONE desk read — opening the desk is the acknowledgement. */
+      seen: (id: string) => req<Desk>(`/cowork/desks/${id}/seen`, { method: 'POST' }),
+      pause: (id: string) => req<Desk>(`/cowork/desks/${id}/pause`, { method: 'POST' }),
+      stop: (id: string) => req<Desk>(`/cowork/desks/${id}/stop`, { method: 'POST' }),
+      events: (id: string, limit = 200) => req<DeskEvent[]>(`/cowork/desks/${id}/events?limit=${limit}`),
+      files: (id: string, path = '') => req<DeskFileTree>(`/cowork/desks/${id}/files?path=${encodeURIComponent(path)}`),
+      file: (id: string, path: string, offset = 0, length = 6000) =>
+        req<DeskFilePreview>(`/cowork/desks/${id}/file?path=${encodeURIComponent(path)}&offset=${offset}&length=${length}`),
+      diff: (id: string, path: string) => req<DeskDiff>(`/cowork/desks/${id}/diff?path=${encodeURIComponent(path)}`),
+      /** Each sha re-checked against the disk, so a row the agent has since rewritten reads `stale`. */
+      outputs: (id: string) => req<DeskOutput[]>(`/cowork/desks/${id}/outputs`),
+      /** Exactly-once per output: a double-clicked Accept promotes once. `verified` is read, never assumed. */
+      accept: (id: string, outputs: { output_id: string; destination: PromotionKind; title?: string; doc_id?: string; project_id?: string | null }[]) =>
+        req<{ results: PromotionResult[] }>(`/cowork/desks/${id}/accept`, { method: 'POST', body: json({ outputs }) }),
+      /** No `output_ids` rejects every undecided output. */
+      reject: (id: string, output_ids?: string[], note?: string) =>
+        req<Desk>(`/cowork/desks/${id}/reject`, { method: 'POST', body: json({ output_ids, note }) })
+    },
+    /** Read only. A plan is decided through `api.approve(call_id, ...)` like every other card: one
+     *  decision path, so a plan cannot be approved by a route that skips the approval row, the
+     *  edited-digest re-derivation or the single-use claim. */
+    plans: {
+      get: (planId: string) => req<PlanRecord>(`/cowork/plans/${planId}`)
+    },
+    inbox: {
+      list: (limit = 40) => req<DeskEvent[]>(`/cowork/inbox?limit=${limit}`),
+      seen: (eventId: string) => req<{ ok: boolean }>(`/cowork/inbox/${eventId}/seen`, { method: 'POST' })
+    }
   },
   canvases: {
     list: () => req<Canvas[]>('/canvases'),

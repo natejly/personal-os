@@ -55,6 +55,12 @@ def _dumps(v: Any) -> str:
     return json.dumps(v, ensure_ascii=False, default=str)
 
 
+# The idempotency step number a promotion is taped under. Round numbers are round*1000 + index in
+# round, so negatives are free for the writes that happen outside the round loop. A promotion has to
+# be taped: accepting a deliverable twice would create the doc twice.
+PROMOTE_STEP = -2
+
+
 def args_digest(args: Any) -> str:
     """Canonical digest of a tool call's arguments: key order and whitespace do not matter."""
     canon = json.dumps(args, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str)
@@ -118,10 +124,12 @@ class RunStore:
         return r
 
     # ---- runs ----
-    def create(self, run_id: str, conversation_id: str | None, kind: str = "chat", input: dict[str, Any] | None = None) -> None:
+    def create(self, run_id: str, conversation_id: str | None, kind: str = "chat", input: dict[str, Any] | None = None,
+               desk_id: str | None = None, turn: int = 0) -> None:
         t = time.time()
-        self._exec("INSERT INTO agent_runs(run_id, conversation_id, kind, status, input, started_at, updated_at) VALUES(?,?,?,?,?,?,?)",
-                   (run_id, conversation_id, kind, "running", _dumps(input or {}), t, t))
+        self._exec("INSERT INTO agent_runs(run_id, conversation_id, kind, desk_id, turn, status, input, started_at, updated_at) "
+                   "VALUES(?,?,?,?,?,?,?,?,?)",
+                   (run_id, conversation_id, kind, desk_id, turn, "running", _dumps(input or {}), t, t))
 
     def update(self, run_id: str, **fields: Any) -> None:
         """Set any of status, message_id, budget, error, last_seq, ended_at. Never raises: the tape must not kill a run."""
@@ -142,7 +150,8 @@ class RunStore:
         return self._run_row(self._one("SELECT * FROM agent_runs WHERE conversation_id=? ORDER BY started_at DESC, rowid DESC LIMIT 1",
                                        (conversation_id,)))
 
-    def list(self, statuses: Iterable[str] | None = ACTIVE, conversation_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+    def list(self, statuses: Iterable[str] | None = ACTIVE, conversation_id: str | None = None, limit: int = 50,
+             desk_id: str | None = None) -> list[dict[str, Any]]:
         where, params = [], []
         if statuses is not None:
             st = list(statuses)
@@ -151,6 +160,9 @@ class RunStore:
         if conversation_id:
             where.append("conversation_id=?")
             params.append(conversation_id)
+        if desk_id:
+            where.append("desk_id=?")
+            params.append(desk_id)
         sql = "SELECT * FROM agent_runs" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY started_at DESC LIMIT ?"
         return [r for r in (self._run_row(x) for x in self._all(sql, (*params, max(1, min(int(limit), 500))))) if r]
 
@@ -192,10 +204,12 @@ class RunStore:
 
     # ---- approvals ----
     def open_approval(self, call_id: str, run_id: str | None, tool: str, args: dict[str, Any], *, conversation_id: str | None = None,
-                      message_id: str | None = None, forced: bool = False) -> dict[str, Any]:
-        self._exec("INSERT INTO approvals(call_id, run_id, conversation_id, message_id, tool, args, args_digest, forced, status, created_at) "
-                   "VALUES(?,?,?,?,?,?,?,?,'pending',?) ON CONFLICT(call_id) DO NOTHING",
-                   (call_id, run_id, conversation_id, message_id, tool, _dumps(args), args_digest(args), int(forced), time.time()))
+                      message_id: str | None = None, forced: bool = False, desk_id: str | None = None,
+                      danger: str = "external") -> dict[str, Any]:
+        self._exec("INSERT INTO approvals(call_id, run_id, conversation_id, message_id, tool, args, args_digest, forced, danger, desk_id, status, created_at) "
+                   "VALUES(?,?,?,?,?,?,?,?,?,?,'pending',?) ON CONFLICT(call_id) DO NOTHING",
+                   (call_id, run_id, conversation_id, message_id, tool, _dumps(args), args_digest(args), int(forced),
+                    danger, desk_id, time.time()))
         return self.approval(call_id) or {}
 
     def decide(self, call_id: str, decision: str, by: str = "user") -> dict[str, Any] | None:
@@ -212,7 +226,17 @@ class RunStore:
             r["forced"] = bool(r["forced"])
         return r
 
-    def approvals(self, status: str | None = "pending", run_id: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    def park(self, call_id: str) -> None:
+        """Leave the row pending but mark the waiting run as having let go of it.
+
+        The status stays 'pending' on purpose: the card must still be decidable tomorrow, from
+        another window, after a restart. `decided_by='park'` is how a reader tells that no run is
+        blocked on it any more, and a later decide() overwrites it with the real decider.
+        """
+        self._exec("UPDATE approvals SET decided_by='park' WHERE call_id=? AND status='pending'", (call_id,))
+
+    def approvals(self, status: str | None = "pending", run_id: str | None = None, limit: int = 100,
+                  desk_id: str | None = None) -> list[dict[str, Any]]:
         where, params = [], []
         if status:
             where.append("status=?")
@@ -220,6 +244,9 @@ class RunStore:
         if run_id:
             where.append("run_id=?")
             params.append(run_id)
+        if desk_id:
+            where.append("desk_id=?")
+            params.append(desk_id)
         sql = "SELECT call_id FROM approvals" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY created_at LIMIT ?"
         return [a for a in (self.approval(r["call_id"]) for r in self._all(sql, (*params, max(1, min(int(limit), 500))))) if a]
 
@@ -319,10 +346,21 @@ class _Sub:
 
 class Run:
     def __init__(self, conversation_id: str, store: RunStore | None = None, kind: str = "chat",
-                 input: dict[str, Any] | None = None) -> None:
+                 input: dict[str, Any] | None = None, desk_id: str | None = None, turn: int = 0) -> None:
         self.run_id = new_id()
         self.conversation_id = conversation_id
         self.kind = kind
+        # Which desk this run is a turn of, and which turn. Both are None/0 for an ordinary chat:
+        # a desk run is not a different kind of run, only one that something is supervising.
+        self.desk_id = desk_id
+        self.turn = turn
+        # What this reply ended up spending, written by _chat_stream onto the Run it was handed.
+        # The desk supervisor reads them to decide whether another bounded turn is worth starting;
+        # nothing else does, so they stay 0 on a chat run and cost nothing to carry.
+        self.partial: str | None = None
+        self.cost = 0.0
+        self.rounds = 0
+        self.steps_consumed = 0
         # What launched the run, as stored in agent_runs.input. A job fire record for kind='job'.
         self.input: dict[str, Any] = dict(input or {})
         self.message_id: str | None = None
@@ -346,10 +384,16 @@ class Run:
         self.store = store
         if store is not None:
             try:
-                store.create(self.run_id, conversation_id, kind, input)
+                store.create(self.run_id, conversation_id, kind, input, desk_id=desk_id, turn=turn)
             except sqlite3.Error:  # no row, no tape: the run still works from memory
                 log.warning("could not persist run %s", self.run_id, exc_info=True)
                 self.store = None
+
+    @property
+    def watchers(self) -> int:
+        """How many clients are attached right now. The park timer will not fire in front of
+        somebody who is reading the card."""
+        return len(self._subs)
 
     @property
     def live(self) -> bool:
@@ -367,7 +411,8 @@ class Run:
     def info(self) -> dict[str, Any]:
         return {"run_id": self.run_id, "conversation_id": self.conversation_id, "message_id": self.message_id,
                 "seq": self.seq, "started_at": self.started_at, "live": self.live, "answering": self.answering,
-                "status": self.status, "kind": self.kind, "ended_at": self.ended_at, "error": self.error}
+                "status": self.status, "kind": self.kind, "desk_id": self.desk_id, "turn": self.turn,
+                "ended_at": self.ended_at, "error": self.error}
 
     def set_status(self, status: str) -> None:
         if status == self.status:
@@ -531,13 +576,15 @@ class RunBus:
         run = self._runs.get(conversation_id)
         return run if run and run.answering else None
 
-    def list(self, statuses: Iterable[str] | None = ACTIVE, conversation_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+    def list(self, statuses: Iterable[str] | None = ACTIVE, conversation_id: str | None = None, limit: int = 50,
+             desk_id: str | None = None) -> list[dict[str, Any]]:
         """Runs from the table (active ones by default), with a live run's in-memory seq laid over its row."""
         if self.store is None:
-            return sorted((r.info() for r in self._runs.values() if r.live), key=lambda i: i["started_at"], reverse=True)
+            return sorted((r.info() for r in self._runs.values() if r.live and (not desk_id or r.desk_id == desk_id)),
+                          key=lambda i: i["started_at"], reverse=True)
         mem = {r.run_id: r for r in self._runs.values()}
         out = []
-        for row in self.store.list(statuses, conversation_id, limit):
+        for row in self.store.list(statuses, conversation_id, limit, desk_id):
             run = mem.get(row["run_id"])
             if run is not None:
                 out.append({**row, **run.info()})
@@ -546,7 +593,7 @@ class RunBus:
         return out
 
     def start(self, conversation_id: str, runner: Callable[[Run], Awaitable[None]], input: dict[str, Any] | None = None,
-              kind: str = "chat") -> Run:
+              kind: str = "chat", desk_id: str | None = None, turn: int = 0) -> Run:
         self._prune()
         # A conversation can start a new reply while the previous run is still auto-learning. That
         # run keeps writing to its own ring for whoever is attached; it is simply no longer the
@@ -554,7 +601,7 @@ class RunBus:
         displaced = self._runs.get(conversation_id)
         if displaced is not None and displaced.live:
             self._retired.add(displaced)
-        run = Run(conversation_id, self.store, kind=kind, input=input)
+        run = Run(conversation_id, self.store, kind=kind, input=input, desk_id=desk_id, turn=turn)
         self._runs[conversation_id] = run
         run.task = asyncio.create_task(self._drive(run, runner), name=f"run:{run.run_id}")
         return run

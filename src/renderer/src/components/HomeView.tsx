@@ -5,6 +5,7 @@ import { api } from '../lib/api'
 import { formatOffset, offerableCandidates } from '../lib/transcript'
 import { HOME_MODULES, homeModuleOn } from '../modules'
 import AgentInbox from './AgentInbox'
+import HomeCowork from './HomeCowork'
 import type { Meeting, MeetingCandidate } from '@shared/types'
 import TodoItem from './TodoItem'
 import ProjectChip from './ProjectChip'
@@ -240,6 +241,7 @@ export default function HomeView(): JSX.Element {
         </div>
 
         {on('agent') && <AgentInbox />}
+        {on('cowork') && <HomeCowork />}
 
         {on('recap') && (recap?.content || recapLoading) && recapOpen && (
           <section className="recap">

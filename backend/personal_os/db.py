@@ -130,6 +130,10 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   run_id TEXT PRIMARY KEY,
   conversation_id TEXT REFERENCES conversations(id) ON DELETE CASCADE,
   kind TEXT NOT NULL DEFAULT 'chat',
+  -- Which desk this run is a turn of, and which turn. A desk's work is many runs, so "what is this
+  -- desk doing?" has to be answerable from the table rather than only from the live bus.
+  desk_id TEXT,
+  turn INTEGER NOT NULL DEFAULT 0,
   status TEXT NOT NULL DEFAULT 'running',
   message_id TEXT,
   input TEXT NOT NULL DEFAULT '{}',
@@ -162,6 +166,13 @@ CREATE TABLE IF NOT EXISTS approvals (
   args TEXT NOT NULL DEFAULT '{}',
   args_digest TEXT NOT NULL,
   forced INTEGER NOT NULL DEFAULT 0,
+  -- The tool's danger tier, copied onto the row so a card can say what it is asking for without
+  -- having to resolve the tool spec (which may not even exist any more by the time it is read).
+  danger TEXT NOT NULL DEFAULT 'external',
+  -- Which desk is waiting on this card, when one is. A desk's card outlives the run that raised it
+  -- (the run ends, the desk stays blocked), so "is this desk still waiting on someone?" has to be
+  -- answerable without the run. NULL for an ordinary chat approval.
+  desk_id TEXT,
   status TEXT NOT NULL DEFAULT 'pending',
   decision TEXT,
   decided_by TEXT,
@@ -246,7 +257,16 @@ CREATE TABLE IF NOT EXISTS action_plans (
   run_id TEXT REFERENCES agent_runs(run_id) ON DELETE CASCADE,
   conversation_id TEXT,
   message_id TEXT,
+  -- Set when the plan was approved for a desk. A desk's work spans many runs, so its approved
+  -- steps have to outlive the run that proposed them; a chat plan leaves this NULL and stays
+  -- run-scoped. See Plans.claim.
+  desk_id TEXT,
   title TEXT NOT NULL DEFAULT '',
+  -- One line on what the plan is for, in the user's terms. The card leads with it.
+  intent TEXT NOT NULL DEFAULT '',
+  -- Tools in this plan that read untrusted content, as a JSON list. A later external step is then
+  -- not re-gated by the plan's own research: see plans.taint_expected.
+  expected_taint TEXT NOT NULL DEFAULT '[]',
   status TEXT NOT NULL DEFAULT 'pending',
   tainted INTEGER NOT NULL DEFAULT 0,  -- the chat had read untrusted content when the plan was proposed
   decided_by TEXT,                     -- user | stop; only the user's own rejection blocks its steps later
@@ -258,7 +278,7 @@ CREATE INDEX IF NOT EXISTS idx_plans_run ON action_plans(run_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_plans_conv ON action_plans(conversation_id, created_at);
 
 -- One proposed call. args_digest is runs.args_digest, the same canonicalisation the approvals table uses.
--- status: proposed | approved (claimable once) | consumed | dropped (edited out) | rejected
+-- status: proposed | approved (claimable once) | consumed -> done | failed | dropped (edited out) | rejected
 CREATE TABLE IF NOT EXISTS plan_steps (
   step_id TEXT PRIMARY KEY,
   plan_id TEXT NOT NULL REFERENCES action_plans(plan_id) ON DELETE CASCADE,
@@ -267,10 +287,16 @@ CREATE TABLE IF NOT EXISTS plan_steps (
   args TEXT NOT NULL DEFAULT '{}',
   args_digest TEXT NOT NULL,
   why TEXT NOT NULL DEFAULT '',
+  -- A short label for the card, so a step reads as a line rather than as a tool name plus JSON.
+  title TEXT NOT NULL DEFAULT '',
+  -- The tool's tier when the plan was proposed, so the card can sort consequential steps first
+  -- without resolving a spec that may have changed since.
+  danger TEXT NOT NULL DEFAULT 'safe',
   status TEXT NOT NULL DEFAULT 'proposed',
   edited INTEGER NOT NULL DEFAULT 0,
   call_id TEXT,                        -- the call that consumed this step
   consumed_at REAL,
+  result_error TEXT,                   -- set when the consumed call failed; NULL on a step that ran clean
   UNIQUE(plan_id, idx)
 );
 CREATE INDEX IF NOT EXISTS idx_plan_steps_claim ON plan_steps(tool, args_digest, status);
@@ -309,12 +335,23 @@ class Database:
             "projects": {"tools": "TEXT NOT NULL DEFAULT '{}'"},
             "messages": {"tool_events": "TEXT", "trace": "TEXT"},
             "jobs": {"kind": "TEXT NOT NULL DEFAULT 'cron'", "run_at": "REAL"},
+            "action_plans": {"desk_id": "TEXT", "intent": "TEXT NOT NULL DEFAULT ''",
+                             "expected_taint": "TEXT NOT NULL DEFAULT '[]'"},
+            "approvals": {"desk_id": "TEXT", "danger": "TEXT NOT NULL DEFAULT 'external'"},
+            "agent_runs": {"desk_id": "TEXT", "turn": "INTEGER NOT NULL DEFAULT 0"},
+            "plan_steps": {"result_error": "TEXT", "title": "TEXT NOT NULL DEFAULT ''",
+                           "danger": "TEXT NOT NULL DEFAULT 'safe'"},
         }
         for table, cols in wanted.items():
             have = {r["name"] for r in c.execute(f"PRAGMA table_info({table})")}
             for col, ddl in cols.items():
                 if col not in have:
                     c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
+        # These index columns the block above may have just added, so they cannot live in SCHEMA:
+        # executescript runs before the migration and would hit a column that is not there yet.
+        c.execute("CREATE INDEX IF NOT EXISTS idx_runs_desk ON agent_runs(desk_id, started_at DESC)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_approvals_desk ON approvals(desk_id, status)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_plans_desk ON action_plans(desk_id, created_at)")
         c.commit()
 
     def connect(self) -> sqlite3.Connection:

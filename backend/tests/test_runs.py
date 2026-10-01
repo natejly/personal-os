@@ -30,7 +30,8 @@ from personal_os.runs import QUEUE_MAX, RING, Run  # noqa: E402
 
 # The ChatEvent union in src/shared/types.ts. Nothing may leave the bus that is not one of these.
 CHAT_EVENTS = {"user_message", "assistant_message", "removed_message", "title", "delta", "tool_call",
-               "tool_result", "span", "done", "learned", "learn_error", "error", "taint", "plan"}
+               "tool_result", "span", "done", "learned", "learn_error", "error", "taint", "plan",
+                "plan_card", "plan_decision", "parked", "desk_status", "desk_handoff"}
 
 client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
 
@@ -232,7 +233,8 @@ def test_event_names_are_the_chatevent_union() -> None:
     check(by["assistant_message"]["id"] and "context_used" in by["assistant_message"], "assistant_message shape")
     check(set(by["delta"]) == {"id", "text"}, f"delta shape is {{id, text}}, got {set(by['delta'])}")
     check(set(by["done"]) == {"id", "error", "context_used", "tool_events", "trace", "stopped",
-                              "partial", "tainted", "taint_sources"}, f"done shape, got {set(by['done'])}")
+                              "partial", "segment", "tainted", "taint_sources"}, f"done shape, got {set(by['done'])}")
+    check(by["done"]["segment"] is False, "the last done ends the run; a steered segment's says True")
     check(by["done"]["stopped"] is False, "an uninterrupted run reports stopped false")
     check(set(by["span"]) == {"message_id", "span"}, "span shape")
 

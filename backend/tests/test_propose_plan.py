@@ -134,7 +134,7 @@ def test_a_plan_records_its_steps_with_the_approvals_digest() -> None:
     plan = plans.by_call(a["call_id"])
     assert plan and plan["status"] == "pending" and plan["conversation_id"] == cid and plan["title"] == "Do the things"
     step = plan["steps"][0]
-    assert step["tool"] == "todo_add" and step["args"] == args and step["why"] == "the user asked"
+    assert step["tool"] == "todo_add" and step["arguments"] == args and step["why"] == "the user asked"
     assert step["status"] == "proposed" and step["edited"] is False
     assert step["args_digest"] == args_digest(args), "the plan reuses runs.args_digest, not a second hashing scheme"
 
@@ -202,7 +202,8 @@ def test_an_approved_step_runs_without_a_second_approval() -> None:
     assert pending(rid, "todo_add") == [], "and it asked nothing"
     assert [a["tool"] for a in j("GET", f"/approvals?status=all&run_id={rid}")] == ["propose_plan"], "one card for the whole plan"
     step = plans.get(plan["plan_id"])["steps"][0]
-    assert step["status"] == "consumed" and step["call_id"] and step["consumed_at"]
+    # 'consumed' at the gate, then 'done' once the call it authorised came back clean (Plans.finish).
+    assert step["status"] == "done" and step["call_id"] and step["consumed_at"]
     ev = [r for r in results(rid) if r["name"] == "todo_add"][0]
     assert ev["approval"] == "plan" and ev["plan"]["plan_id"] == plan["plan_id"] and ev["plan"]["idx"] == 0
 
@@ -237,7 +238,7 @@ def test_an_approved_step_is_single_use() -> None:
     j("POST", f"/approvals/{a['call_id']}", {"decision": "allow"})
     assert drain(rid)["status"] == "done"
     assert len(todos_named(title)) == 2, "the repeat ran because the user allowed it, not because of the plan"
-    assert plans.get(plan["plan_id"])["steps"][0]["status"] == "consumed"
+    assert plans.get(plan["plan_id"])["steps"][0]["status"] == "done"
 
 
 def test_an_extra_step_the_plan_never_mentioned_still_asks() -> None:
@@ -325,7 +326,7 @@ def test_an_edit_authorises_the_edited_arguments_and_not_the_originals() -> None
     _cid, rid = start({"tools": {"todo_add": "ask"}})
     plan = answer_plan(rid, "allow", steps=[{"idx": 0, "arguments": {"title": edited}}])
     step, gone = plan["steps"][0], plan["steps"][1]
-    assert step["status"] == "approved" and step["edited"] is True and step["args"] == {"title": edited}
+    assert step["status"] == "approved" and step["edited"] is True and step["arguments"] == {"title": edited}
     assert step["args_digest"] == args_digest({"title": edited}), "the edit re-derived the digest"
     assert gone["status"] == "dropped", "a step the user removed is not authorised"
 
@@ -358,6 +359,7 @@ def test_a_claim_is_atomic_so_two_calls_cannot_share_one_approval() -> None:
     assert plans.get(plan["plan_id"])["steps"][0]["call_id"] == "c1"
     # Deciding twice does not reopen anything: the first answer stands.
     again = plans.decide("plan-claim:call", "deny")
+    # 'consumed', not 'done': this test claims the step directly, so no call ever reported back.
     assert again["status"] == "approved" and again["steps"][0]["status"] == "consumed"
 
 

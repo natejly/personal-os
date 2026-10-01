@@ -534,16 +534,23 @@ class Toolbox:
     def _register(self) -> None:
         R = self.specs.__setitem__
 
-        async def search_documents(ctx: dict[str, Any], query: str, limit: int = 8, offset: int = 0) -> Any:
+        async def search_documents(ctx: dict[str, Any], query: str, limit: int = 8, offset: int = 0, scope: str = "all") -> Any:
             off, lim = max(0, int(offset)), max(1, min(int(limit), 20))
+            if scope not in ("all", "files", "docs"):
+                return tool_error(f"Unknown scope '{scope}'.", field="scope", expected="'all', 'files' or 'docs'",
+                                  example={"query": query, "scope": "docs"})
             if self.retriever is not None:
-                hits = await self.retriever.search(ctx["project_id"], query, self.settings(), limit=off + lim)
+                srcs = ("files", "docs") if scope == "all" else (scope,)
+                hits = await self.retriever.search(ctx["project_id"], query, self.settings(), limit=off + lim, sources=srcs)
             else:
                 hits = self.documents.search(ctx["project_id"], query, limit=off + lim)
-            rows = [{"document_id": h["document_id"], "document": h["name"], "chunk": h["idx"], "section": h.get("heading") or None, "page": h.get("page"), "text": h["text"]} for h in hits]
+            rows = [{"source": h.get("source", "file"), "document_id": None if h.get("source") == "doc" else h["document_id"],
+                     "doc_id": h.get("doc_id"), "document": h["name"], "chunk": h["idx"], "section": h.get("heading") or None,
+                     "page": h.get("page"), "text": h["text"]} for h in hits]
             return page(rows, offset=off, limit=lim, key="results")
-        R("search_documents", ToolSpec("search_documents", "Search (keywords and meaning) over the user's uploaded documents (project knowledge + personal documents). Returns the best matching excerpts. Use it when the user asks about something that may be in their files.",
-            _obj({"query": {"type": "string", "description": "Search terms or a short question"}, "limit": {"type": "integer", "default": 8}, "offset": {"type": "integer", "default": 0}}, ["query"]), search_documents, "knowledge",
+        R("search_documents", ToolSpec("search_documents", "Search (keywords and meaning) over the user's uploaded files AND their own Docs-editor notes (project + personal). Returns the best matching excerpts, each marked source 'file' (read it with read_document) or 'doc' (read it with doc_read, using doc_id). Use it when the user asks about something that may be in their files or notes; scope narrows it to 'files' or 'docs'.",
+            _obj({"query": {"type": "string", "description": "Search terms or a short question"}, "limit": {"type": "integer", "default": 8}, "offset": {"type": "integer", "default": 0},
+                  "scope": {"type": "string", "enum": ["all", "files", "docs"], "default": "all"}}, ["query"]), search_documents, "knowledge",
             examples=[{"query": "notice period"}, {"query": "Q3 revenue forecast", "limit": 5}, {"query": "onboarding checklist", "limit": 8, "offset": 8}], taints=True))
 
         async def read_document(ctx: dict[str, Any], document_id: str, offset: int = 0, length: int = 6000) -> Any:

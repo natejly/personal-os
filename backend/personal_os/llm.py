@@ -110,6 +110,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "retrievalMinSimilarity": 0.25,
     "retrievalPerDocCap": 3,
     "retrievalCandidates": 20,
+    # Also retrieve from the user's own Docs (not just uploaded files) when a chat has useDocuments on.
+    "useDocsInContext": True,
 }
 
 

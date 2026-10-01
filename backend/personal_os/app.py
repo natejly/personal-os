@@ -318,6 +318,14 @@ toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=
 embedder = Embedder()
 retriever = Retriever(db, documents, embedder, docs=docs)
 documents.on_chunks = lambda did, _rows: retriever.schedule(settings, did)
+docs.on_chunks = lambda _did: retriever.schedule_docs(settings)
+
+
+@app.on_event("startup")
+async def _start_retrieval() -> None:
+    retriever.bind_loop(asyncio.get_running_loop())
+    retriever.schedule(settings)  # embed whatever is still waiting; silent when the route is down
+    retriever.schedule_docs(settings)
 toolbox.retriever = retriever
 # The insights pass proposes automations, so it is told which tools this install actually has - an
 # unwired integration must not turn into a suggestion that cannot be carried out.
@@ -2346,7 +2354,8 @@ async def _doc_hits(project_id: str | None, query: str, cfg: dict[str, Any], con
     if not conv_settings.get("useDocuments", True):
         return None
     try:
-        return await retriever.search(project_id, query, cfg)
+        srcs = ("files", "docs") if cfg.get("useDocsInContext", True) else ("files",)
+        return await retriever.search(project_id, query, cfg, sources=srcs)
     except Exception:  # noqa: BLE001 - retrieval must never break a reply
         log.exception("retrieval failed; falling back to keyword search")
         return None
@@ -2638,7 +2647,9 @@ def reindex_documents(body: ReindexIn | None = None) -> dict[str, Any]:
 
 @app.post("/documents/embed-backfill")
 async def embed_backfill() -> dict[str, Any]:
-    """Embed every chunk that has no vector for the current model. Idempotent."""
+    """Chunk any never-indexed Docs, then embed every chunk (files and Docs) that has no vector for the
+    current model. Idempotent."""
+    docs.backfill_chunks()
     return await retriever.embed_pending(settings())
 
 

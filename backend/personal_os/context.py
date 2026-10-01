@@ -25,6 +25,8 @@ def _clip(text: str, limit: int) -> str:
 def _excerpt_header(h: dict[str, Any]) -> str:
     """'name — section (p.N)', or 'name (chunk N)' for a chunk with neither."""
     heading, page = h.get("heading") or "", h.get("page")
+    if h.get("source") == "doc":
+        return f"{h['name']} (your doc)" + (f" \u2014 {heading}" if heading else "")
     if not heading and not page:
         return f"{h['name']} (chunk {h['idx'] + 1})"
     return h["name"] + (f" \u2014 {heading}" if heading else "") + (f" (p.{page})" if page else "")
@@ -105,10 +107,13 @@ def build_context(
     if conv_settings.get("useDocuments", True):
         # app.py precomputes hybrid hits (this function is sync); without them it is plain BM25.
         hits = doc_hits if doc_hits is not None else documents.search(project_id, query)
+        if not settings.get("useDocsInContext", True):
+            hits = [h for h in hits if h.get("source") != "doc"]
         if hits:
             blocks = [f"### {_excerpt_header(h)}\n{h['text']}" for h in hits]
             parts.append("## Relevant document excerpts\n" + "\n\n".join(blocks))
-            used["chunks"] = [{"chunk_id": h["chunk_id"], "document_id": h["document_id"], "name": h["name"], "idx": h["idx"], "heading": h.get("heading") or "", "page": h.get("page"), "text": h["text"][:400]} for h in hits]
+            used["chunks"] = [{"chunk_id": h["chunk_id"], "document_id": h["document_id"], "name": h["name"], "idx": h["idx"], "heading": h.get("heading") or "", "page": h.get("page"),
+                             "source": h.get("source", "file"), "doc_id": h.get("doc_id"), "text": h["text"][:400]} for h in hits]
 
     # Procedural memory. Only skills the user approved by hand are ever injected, and the block says so
     # inside the prompt: a model-written procedure is data, never a second set of instructions.

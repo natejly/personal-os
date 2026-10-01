@@ -5,6 +5,7 @@ import { useStore, type View } from '../store'
 import { ActivityIndicator } from './ActivityView'
 import ChatPulse from './ChatPulse'
 import SidebarSpaces from './SidebarSpaces'
+import ResizeHandle from './ResizeHandle'
 import { viewHidden } from '../modules'
 import { dragProps } from '../canvas/dnd'
 import { useCanvas } from '../canvas/store'
@@ -148,6 +149,7 @@ export default function Sidebar(): JSX.Element {
 
   return (
     <aside className="sidebar">
+      <ResizeHandle id="sidebar-w" defaultSize={260} min={190} max={480} grows="right" onCollapse={toggleSidebar} label="Sidebar width" className="at-right" />
       <div className="sidebar-top drag">
         <button className="brand no-drag" onClick={() => setView('home')}><GrainLogo size={15} /><span>Grain</span></button>
         <button className={`icon-btn no-drag ${inCanvas ? 'on' : ''}`} title={inCanvas ? 'Back (⌘⇧C)' : 'Go to space (⌘⇧C)'} onClick={() => void useCanvas.getState().toggleCanvas()}><LayoutGrid size={16} /></button>

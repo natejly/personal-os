@@ -200,3 +200,12 @@ class CompleteTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_effective_follows_edited_base_url():
+    from personal_os import providers
+    assert providers.effective({"provider": "openai", "baseUrl": "https://api.anthropic.com/v1/"}) == "anthropic"
+    assert providers.effective({"provider": "openai", "baseUrl": "https://api.openai.com/v1"}) == "openai"
+    assert providers.effective({"provider": "litellm", "baseUrl": "https://proxy.example.com"}) == "litellm"
+    assert providers.effective({"provider": "custom", "baseUrl": "https://api.openai.com/v1"}) == "custom"
+    assert providers.effective({"provider": None, "baseUrl": ""}) is None

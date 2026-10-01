@@ -68,7 +68,14 @@ def infer(base_url: str | None) -> str | None:
 
 
 def effective(settings: dict[str, Any]) -> str | None:
-    return settings.get("provider") or infer(settings.get("baseUrl"))
+    """The stored provider, unless the baseUrl was since edited (Settings saves it on its own) to another
+    vendor's host; then the URL wins, so provider-specific behaviour never follows a stale label."""
+    stored, inferred = settings.get("provider"), infer(settings.get("baseUrl"))
+    if not stored or not inferred:
+        return stored or inferred
+    if stored in ("litellm", "custom") or stored == inferred:
+        return stored
+    return inferred
 
 
 def endpoint(base_url: str, path: str) -> str:

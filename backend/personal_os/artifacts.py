@@ -325,3 +325,46 @@ def _clean_html(text: str) -> str:
     if "<html" not in code.lower():
         code = f"<!doctype html><html><head><meta charset=\"utf-8\"><title>Artifact</title></head><body style='margin:0;padding:16px;background:#262624;font-family:system-ui;color:#ecebe8'>{code}</body></html>"
     return code
+
+
+# ---------- lint and repair ----------
+REPAIR_ADVICE = {
+    "network": "Remove all network use (fetch, XMLHttpRequest, WebSocket, EventSource, sendBeacon, dynamic import); hard-code or compute the data instead.",
+    "remote-asset": "Remove every external script, stylesheet, iframe or embed; inline everything or use data: URIs.",
+    "storage": "Remove localStorage, sessionStorage and indexedDB; keep state in plain variables.",
+    "form": "Replace <form> elements with buttons and event handlers.",
+    "popup": "Remove window.open.",
+}
+
+
+def lint(code: str) -> dict[str, Any]:
+    """What the render CSP will break (`blocked`) and whether the document would paint nothing (`empty`)."""
+    code = code or ""
+    scripts = "".join(re.findall(r"<script\b[^>]*>(.*?)</script>", code, flags=re.I | re.S))
+    body = re.sub(r"<script\b[^>]*>.*?</script>|<style\b[^>]*>.*?</style>|<head\b[^>]*>.*?</head>|<[^>]+>", " ", code, flags=re.I | re.S)
+    empty = len(body.strip()) < 20 and len(scripts.strip()) < 20 and not re.search(r"<(?:svg|canvas|img)\b", code, re.I)
+    return {"blocked": blocked_capabilities(code), "empty": empty}
+
+
+async def repair_artifact_code(settings: dict[str, Any], model: str, code: str, issues: list[str], prompt: str = "") -> str:
+    """One whole-document repair pass that names what has to go. The caller decides there is only ever one."""
+    lines = [REPAIR_ADVICE.get(i, f"Fix: {i}") for i in issues]
+    return await revise_artifact_code(settings, model, code, "The document breaks the sandbox rules. " + " ".join(lines), prompt)
+
+
+async def checked_code(settings: dict[str, Any], model: str, code: str, prompt: str = "") -> tuple[str, dict[str, Any]]:
+    """Lint a model-written document and, if the CSP would break it, repair it ONCE. Returns (code, final lint).
+
+    A failed or no-better repair keeps the original: the lint still reports the problem to the user and the model.
+    """
+    report = lint(code)
+    if report["blocked"] and code.strip():
+        try:
+            fixed = await repair_artifact_code(settings, model, code, report["blocked"], prompt)
+        except ValueError:
+            return code, {**report, "repaired": False}
+        if fixed:
+            after = lint(fixed)
+            if len(after["blocked"]) < len(report["blocked"]):
+                return fixed, {**after, "repaired": True}
+    return code, {**report, "repaired": False}

@@ -31,6 +31,9 @@ from .db import Database, data_dir_from_env, new_id
 from .extract_text import extract_text
 from .learn import MAX_INJECTED_SKILLS, LearnJob, LearnWorker, Skills, induce_skill, skill_block
 from .repos import ALL, Conversations, Documents, Graph, Memories, Projects
+from .artifact_routes import is_render_path as _is_artifact_render, make_router as artifact_router
+from .artifact_tools import ARTIFACT_HINT
+from .artifacts import Artifacts
 from .boards import Boards
 from .canvas import SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
 from .dashboards import Dashboards, generate_recap, generate_summary, generate_widget_code
@@ -186,7 +189,7 @@ async def _integrity_error(request: Request, exc: Exception) -> JSONResponse:  #
 @app.middleware("http")
 async def _require_token(request: Request, call_next):  # type: ignore[no-untyped-def]
     p = request.url.path
-    if request.method == "OPTIONS" or p in PUBLIC_PATHS or (p.startswith("/widgets/") and p.endswith("/render")):
+    if request.method == "OPTIONS" or p in PUBLIC_PATHS or (p.startswith("/widgets/") and p.endswith("/render")) or _is_artifact_render(request.method, p):
         return await call_next(request)
     auth = request.headers.get("authorization", "")
     sent = request.headers.get("x-personal-os-token") or (auth[7:].strip() if auth[:7].lower() == "bearer " else "")
@@ -257,6 +260,7 @@ jobs = Jobs(db)
 proposals = Proposals(db)
 boards = Boards(db)
 dashboards = Dashboards(db)
+artifacts = Artifacts(db)
 google = Google(settings, db.set_settings)
 # sid/wsid are defined further down, so the module context looks them up late.
 modules: list[Module] = build_modules(ModuleContext(
@@ -310,7 +314,7 @@ meeting_store = Meetings(db)
 meeting_svc = MeetingService(db, settings, llm.complete, meeting_store, google=google, todos=todos)
 toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=google, boards=boards, sandboxes=sandboxes, docs=docs, activity=monitor,
                   outbox=outbox, work_plans=work_plans, results=tool_results, skills=skills, jobs=jobs,
-                  style=style, meetings=meeting_svc, desks=desks, workspace=workspace)
+                  style=style, meetings=meeting_svc, desks=desks, workspace=workspace, artifacts=artifacts)
 # The insights pass proposes automations, so it is told which tools this install actually has - an
 # unwired integration must not turn into a suggestion that cannot be carried out.
 monitor.insights.tools_fn = lambda: [t["name"] for t in toolbox.list() if t.get("available")]
@@ -1111,7 +1115,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
 
     tool_schemas = _schemas()
     tools_hint = (TOOLS_HINT + ("\n" + PLAN_HINT if any(s["function"]["name"] == "todo_write" for s in tool_schemas) else "")) if tool_schemas else ""
-    system = "\n\n".join(p for p in (system, RENDER_HINT, tools_hint,
+    artifact_hint = ARTIFACT_HINT if any(s["function"]["name"] == "create_artifact" for s in tool_schemas) else ""
+    system = "\n\n".join(p for p in (system, RENDER_HINT, artifact_hint, tools_hint,
                                      JOB_HINT if proposal_only(run) else "") if p)
     used["system_prompt"] = system
     used["tokens_estimate"] = estimate_tokens(system)
@@ -3344,6 +3349,7 @@ async def recap(force: bool = False) -> dict[str, Any]:
 
 # ---------------- canvas mode: spaces, windows, notes ----------------
 canvases = Canvases(db)
+app.include_router(artifact_router(artifacts, settings, on_delete=lambda aid: canvases.delete_windows_for("artifact", aid)))
 notes = Notes(db)
 presets = CanvasPresets(db, canvases)
 # 'popped' rows are NOT reset here: import runs before the main process can restore them (it clears the ones it declines).

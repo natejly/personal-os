@@ -1,4 +1,8 @@
-"""Reach into the rest of the Mac the boring way: Spotlight, Shortcuts, and an offscreen page loader.
+"""Reach into the rest of the Mac the boring way: Spotlight, the file system, Shortcuts, and an offscreen page loader.
+
+Every path, read or written, goes through `allowed_path`: inside the home folder, outside ~/Library and
+dot-folders, symlinks resolved first. Writes never clobber silently (`mode="create"` is the default) and
+nothing is deleted outright — `trash` moves items to ~/.Trash, where the user can put them back.
 
 Nothing here drives the screen. `mdfind` and `shortcuts` are plain subprocesses (argv, never a shell);
 the page loader is an offscreen Electron window the main process owns, reached over a loopback bridge
@@ -24,6 +28,10 @@ from .extract_text import extract_text
 DEFAULT_ROOTS = ("~/Desktop", "~/Documents")
 BLOCKED_UNDER_HOME = ("Library",)  # app data, mail, keychains, browser profiles
 MAX_READ_BYTES = 20 * 1024 * 1024
+MAX_WRITE_CHARS = 400_000
+# Suffixes macOS will run when the user double-clicks the file. The agent writes documents, not launchers.
+BLOCKED_WRITE_SUFFIXES = frozenset({".command", ".app", ".scpt", ".applescript", ".workflow", ".terminal", ".shortcut"})
+WRITE_MODES = ("create", "overwrite", "append")
 MAX_SHORTCUT_INPUT = 100_000
 MAX_SHORTCUT_OUTPUT = 20_000
 PAGE_MAX_CHARS = 60_000
@@ -143,6 +151,70 @@ def read_local(path: str, offset: int = 0, length: int = 8000) -> dict[str, Any]
     n = max(1, min(int(length), 30000))
     return {"path": str(p), "total_chars": len(text), "offset": off, "text": text[off: off + n],
             "has_more": off + n < len(text)}
+
+
+def _writable_path(raw: str) -> Path:
+    """`allowed_path` plus the rules that only matter when we are about to create or replace a file."""
+    p = allowed_path(raw)
+    if p.suffix.lower() in BLOCKED_WRITE_SUFFIXES:
+        raise LocalPathError(f"{p.suffix} files are off limits; write a document instead")
+    return p
+
+
+def write_local(path: str, content: str, mode: str = "create") -> dict[str, Any]:
+    """Write a text file under the home folder. 'create' refuses to replace a file that is already there."""
+    if mode not in WRITE_MODES:
+        raise ValueError(f"mode must be one of {', '.join(WRITE_MODES)}")
+    text = content if isinstance(content, str) else str(content)
+    if len(text) > MAX_WRITE_CHARS:
+        raise ValueError(f"content is {len(text)} characters; the limit is {MAX_WRITE_CHARS}")
+    p = _writable_path(path)
+    if p.is_dir():
+        raise LocalPathError(f"{p} is a folder")
+    existed = p.exists()
+    if existed and mode == "create":
+        raise LocalPathError(f"{p.name} already exists; pass mode='overwrite' to replace it or mode='append' to add to it")
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with open(p, "a" if mode == "append" else "w", encoding="utf-8") as f:
+        f.write(text)
+    return {"path": str(p), "mode": mode, "created": not existed, "chars_written": len(text), "size": p.stat().st_size}
+
+
+def move_local(path: str, to: str) -> dict[str, Any]:
+    """Move or rename a file or folder inside the home folder. Never replaces something that already exists."""
+    src = allowed_path(path)
+    if not src.exists():
+        raise LocalPathError(f"{src} does not exist")
+    dst = _writable_path(to)
+    if dst.is_dir():
+        dst = dst / src.name
+        if dst.suffix.lower() in BLOCKED_WRITE_SUFFIXES:
+            raise LocalPathError(f"{dst.suffix} files are off limits")
+    if dst == src:
+        raise LocalPathError("the source and the destination are the same path")
+    if dst.exists():
+        raise LocalPathError(f"{dst} already exists; pick another name")
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(src), str(dst))
+    return {"from": str(src), "path": str(dst), "kind": "folder" if dst.is_dir() else "file"}
+
+
+def trash_local(path: str) -> dict[str, Any]:
+    """Move a file or folder to ~/.Trash, so the user can get it back from the Finder. Nothing is erased here."""
+    p = allowed_path(path)
+    if not p.exists():
+        raise LocalPathError(f"{p} does not exist")
+    if p == home():
+        raise LocalPathError("the home folder itself cannot be trashed")
+    trash = home() / ".Trash"
+    trash.mkdir(exist_ok=True)
+    dst = trash / p.name
+    n = 2
+    while dst.exists():  # the Finder does the same thing: "notes.txt", "notes 2.txt", ...
+        dst = trash / f"{p.stem} {n}{p.suffix}"
+        n += 1
+    shutil.move(str(p), str(dst))
+    return {"path": str(p), "trashed_to": str(dst), "note": "in the Trash; the user can put it back from the Finder"}
 
 
 # ---- Shortcuts ----

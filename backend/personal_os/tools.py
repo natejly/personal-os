@@ -100,6 +100,9 @@ ALTERNATIVE = {
     "board_add_card": "todo_add",
     "find_files": "search_documents for files the user uploaded, or ask the user where the file is",
     "read_local_file": "ask the user to upload the file or paste the text",
+    "write_local_file": "put the text in your reply so the user can save it themselves",
+    "move_local_file": "tell the user which file to move and where",
+    "trash_local_file": "tell the user which file to drag to the Trash",
     "run_shortcut": "tell the user which Shortcut to run and with what input",
     "list_shortcuts": "ask the user for the exact Shortcut name",
     "open_page": "fetch_url, which reads the page without running its scripts",
@@ -1118,13 +1121,14 @@ Toolbox._register_activity = _register_activity  # type: ignore[attr-defined]
 
 
 # ---------------- the rest of the Mac: Spotlight, Shortcuts, offscreen pages ----------------
-MAC_TOOLS = ("find_files", "read_local_file", "list_shortcuts", "run_shortcut", "open_page")
+FILE_TOOLS = ("read_local_file", "write_local_file", "move_local_file", "trash_local_file")
+MAC_TOOLS = ("find_files", "list_shortcuts", "run_shortcut", "open_page", *FILE_TOOLS)
 
 
 def _mac_available(name: str) -> bool:
     if name == "open_page":  # the loader lives in the Electron main process; the backend alone cannot render a page
         return mac.page_bridge.connected
-    if name == "read_local_file":
+    if name in FILE_TOOLS:  # plain file system work: no Spotlight, no Shortcuts, no platform check
         return True
     if not mac.is_mac():
         return False
@@ -1146,7 +1150,7 @@ def _register_mac(self: Toolbox) -> None:
         _obj({"query": {"type": "string", "description": "Words to look for, or a Spotlight query such as kMDItemContentType == 'com.adobe.pdf'"},
               "name_only": {"type": "boolean", "default": False, "description": "Match file names only"},
               "folders": {"type": "array", "items": {"type": "string"}, "description": "Search these folders instead, e.g. ~/Downloads"},
-              "limit": {"type": "integer", "default": 20}}, ["query"]), find_files, "mac",
+              "limit": {"type": "integer", "default": 20}}, ["query"]), find_files, "files",
         examples=[{"query": "lease agreement"}, {"query": "resume", "name_only": True}, {"query": "boarding pass", "folders": ["~/Downloads"], "limit": 5}]))
 
     async def read_local_file(ctx: dict[str, Any], path: str, offset: int = 0, length: int = 8000) -> Any:
@@ -1160,8 +1164,53 @@ def _register_mac(self: Toolbox) -> None:
                               alternative=ALTERNATIVE["read_local_file"])
     R("read_local_file", ToolSpec("read_local_file", "Read the text of a file on this Mac (text, markdown, code, PDF or .docx), or list a folder. Home folder only; hidden folders and ~/Library are off limits. Page through long files with offset.",
         _obj({"path": {"type": "string", "description": "Absolute or ~/ path, usually from find_files"},
-              "offset": {"type": "integer", "default": 0}, "length": {"type": "integer", "default": 8000}}, ["path"]), read_local_file, "mac",
+              "offset": {"type": "integer", "default": 0}, "length": {"type": "integer", "default": 8000}}, ["path"]), read_local_file, "files",
         examples=[{"path": "~/Documents/Lease 2026.pdf"}, {"path": "~/Desktop/notes.md", "offset": 8000}], taints=True))
+
+    def _path_error(name: str, e: Exception, **extra: Any) -> Any:
+        return tool_error(f"{name}: {e}", field="path", expected="a path inside the home folder, outside ~/Library and hidden folders",
+                          alternative=ALTERNATIVE[name], **extra)
+
+    async def write_local_file(ctx: dict[str, Any], path: str, content: str, mode: str = "create") -> Any:
+        try:
+            return await asyncio.to_thread(mac.write_local, path, content, mode)
+        except mac.LocalPathError as e:
+            return _path_error("write_local_file", e, example={"path": "~/Desktop/summary.md", "content": "# Summary\n"})
+        except ValueError as e:
+            return tool_error(f"write_local_file: {e}", field="mode", expected="create, overwrite or append",
+                              example={"path": "~/Desktop/notes.md", "content": "one more line\n", "mode": "append"})
+        except OSError as e:
+            return tool_error(f"write_local_file: {_first_line(e)}", field="path", alternative=ALTERNATIVE["write_local_file"])
+    R("write_local_file", ToolSpec("write_local_file", "Write a text file on this Mac (notes, markdown, CSV, code). Home folder only; hidden folders and ~/Library are off limits. Default mode 'create' refuses to replace an existing file: pass 'overwrite' to replace it or 'append' to add to the end. Missing parent folders are created.",
+        _obj({"path": {"type": "string", "description": "Absolute or ~/ path, e.g. ~/Desktop/notes.md"},
+              "content": {"type": "string", "description": "The full text to write"},
+              "mode": {"type": "string", "enum": list(mac.WRITE_MODES), "default": "create"}}, ["path", "content"]), write_local_file, "files", "external",
+        examples=[{"path": "~/Desktop/packing list.md", "content": "- passport\n- charger\n"},
+                  {"path": "~/Documents/log.md", "content": "\n2026-09-30: shipped\n", "mode": "append"}]))
+
+    async def move_local_file(ctx: dict[str, Any], path: str, to: str) -> Any:
+        try:
+            return await asyncio.to_thread(mac.move_local, path, to)
+        except mac.LocalPathError as e:
+            return _path_error("move_local_file", e, example={"path": "~/Downloads/scan.pdf", "to": "~/Documents/Receipts/"})
+        except OSError as e:
+            return tool_error(f"move_local_file: {_first_line(e)}", field="to", alternative=ALTERNATIVE["move_local_file"])
+    R("move_local_file", ToolSpec("move_local_file", "Move or rename a file or folder on this Mac. Give a folder as `to` to move it there keeping its name, or a full path to rename it. Refuses to replace anything that already exists.",
+        _obj({"path": {"type": "string", "description": "What to move, usually from find_files"},
+              "to": {"type": "string", "description": "Destination folder, or the new full path"}}, ["path", "to"]), move_local_file, "files", "external",
+        examples=[{"path": "~/Downloads/scan.pdf", "to": "~/Documents/Receipts/"},
+                  {"path": "~/Desktop/untitled.md", "to": "~/Desktop/lease notes.md"}]))
+
+    async def trash_local_file(ctx: dict[str, Any], path: str) -> Any:
+        try:
+            return await asyncio.to_thread(mac.trash_local, path)
+        except mac.LocalPathError as e:
+            return _path_error("trash_local_file", e, example={"path": "~/Downloads/duplicate.pdf"})
+        except OSError as e:
+            return tool_error(f"trash_local_file: {_first_line(e)}", field="path", alternative=ALTERNATIVE["trash_local_file"])
+    R("trash_local_file", ToolSpec("trash_local_file", "Move a file or folder on this Mac to the Trash. Nothing is erased: the user can put it back from the Finder. There is no tool that deletes outright, so say what you are about to trash before you do.",
+        _obj({"path": {"type": "string", "description": "What to trash, usually from find_files"}}, ["path"]), trash_local_file, "files", "external",
+        examples=[{"path": "~/Downloads/duplicate.pdf"}]))
 
     async def list_shortcuts(ctx: dict[str, Any], folder: str | None = None) -> Any:
         names = await mac.list_shortcuts(folder)

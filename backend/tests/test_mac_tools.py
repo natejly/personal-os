@@ -1,4 +1,4 @@
-"""find_files / read_local_file / shortcuts / open_page plumbing. Subprocesses and the Electron bridge are faked:
+"""find_files / the local file tools / shortcuts / open_page plumbing. Subprocesses and the Electron bridge are faked:
 nothing here needs Spotlight, Shortcuts or a running app."""
 from __future__ import annotations
 
@@ -130,6 +130,99 @@ def test_read_local_pages_text_and_lists_folders(home: Path) -> None:
     (home / "Desktop" / ".DS_Store").write_text("")
     listing = mac.read_local("~/Desktop")
     assert listing["kind"] == "folder" and listing["entries"] == ["notes.md"]
+
+
+# ---- write_local_file / move_local_file / trash_local_file ----
+def test_write_local_creates_without_clobbering(home: Path) -> None:
+    out = mac.write_local("~/Desktop/Trips/packing.md", "- passport\n")
+    assert out["created"] and out["mode"] == "create"
+    assert (home / "Desktop" / "Trips" / "packing.md").read_text() == "- passport\n"  # parents created
+
+    with pytest.raises(mac.LocalPathError) as e:  # a second create refuses rather than replacing
+        mac.write_local("~/Desktop/Trips/packing.md", "gone")
+    assert "already exists" in str(e.value)
+
+    assert mac.write_local("~/Desktop/Trips/packing.md", "- charger\n", "append")["created"] is False
+    assert (home / "Desktop" / "Trips" / "packing.md").read_text() == "- passport\n- charger\n"
+    mac.write_local("~/Desktop/Trips/packing.md", "fresh", "overwrite")
+    assert (home / "Desktop" / "Trips" / "packing.md").read_text() == "fresh"
+
+
+def test_write_local_refuses_bad_paths_modes_and_launchers(home: Path) -> None:
+    for bad in ("/etc/hosts", "~/Library/x.txt", "~/.ssh/key", "~/Desktop/run.command", "~/Desktop/Thing.app"):
+        with pytest.raises(mac.LocalPathError):
+            mac.write_local(bad, "x")
+    (home / "Desktop" / "folder").mkdir()
+    with pytest.raises(mac.LocalPathError):
+        mac.write_local("~/Desktop/folder", "x")
+    with pytest.raises(ValueError):
+        mac.write_local("~/Desktop/a.txt", "x", "replace")
+    with pytest.raises(ValueError):
+        mac.write_local("~/Desktop/a.txt", "x" * (mac.MAX_WRITE_CHARS + 1))
+    assert not (home / "Desktop" / "a.txt").exists()
+
+
+def test_write_local_refuses_a_symlink_out_of_home(home: Path, tmp_path: Path) -> None:
+    outside = tmp_path / "outside.txt"
+    outside.write_text("original")
+    (home / "Desktop" / "link.txt").symlink_to(outside)
+    with pytest.raises(mac.LocalPathError):
+        mac.write_local("~/Desktop/link.txt", "overwritten", "overwrite")
+    assert outside.read_text() == "original"
+
+
+def test_move_local_renames_moves_and_never_replaces(home: Path) -> None:
+    (home / "Downloads" / "scan.pdf").write_text("pdf")
+    (home / "Documents" / "Receipts").mkdir()
+    out = mac.move_local("~/Downloads/scan.pdf", "~/Documents/Receipts/")  # folder destination keeps the name
+    assert out["path"] == str(home / "Documents" / "Receipts" / "scan.pdf")
+    assert not (home / "Downloads" / "scan.pdf").exists()
+
+    mac.move_local("~/Documents/Receipts/scan.pdf", "~/Documents/Receipts/lease.pdf")  # rename
+    assert (home / "Documents" / "Receipts" / "lease.pdf").read_text() == "pdf"
+
+    (home / "Downloads" / "lease.pdf").write_text("other")
+    for src, dst in (("~/Downloads/lease.pdf", "~/Documents/Receipts/"),       # the name is taken
+                     ("~/Downloads/lease.pdf", "~/Downloads/lease.pdf"),       # onto itself
+                     ("~/Downloads/missing.pdf", "~/Desktop/x.pdf"),           # no source
+                     ("~/Downloads/lease.pdf", "/tmp/out.pdf"),                # outside home
+                     ("~/Downloads/lease.pdf", "~/Desktop/open.command")):     # launcher
+        with pytest.raises(mac.LocalPathError):
+            mac.move_local(src, dst)
+    assert (home / "Downloads" / "lease.pdf").read_text() == "other"
+
+
+def test_trash_local_moves_to_the_trash_and_dedupes(home: Path) -> None:
+    (home / "Desktop" / "dupe.pdf").write_text("one")
+    first = mac.trash_local("~/Desktop/dupe.pdf")
+    assert first["trashed_to"] == str(home / ".Trash" / "dupe.pdf")
+    assert (home / ".Trash" / "dupe.pdf").read_text() == "one"
+
+    (home / "Desktop" / "dupe.pdf").write_text("two")
+    second = mac.trash_local("~/Desktop/dupe.pdf")
+    assert second["trashed_to"] == str(home / ".Trash" / "dupe 2.pdf")  # the Finder's naming
+    assert (home / ".Trash" / "dupe 2.pdf").read_text() == "two"
+
+    (home / "Documents" / "Folder").mkdir()
+    assert mac.trash_local("~/Documents/Folder")["trashed_to"] == str(home / ".Trash" / "Folder")
+    for bad in ("~", "/etc/hosts", "~/Desktop/missing.pdf"):
+        with pytest.raises(mac.LocalPathError):
+            mac.trash_local(bad)
+
+
+def test_file_writes_ask_first_and_errors_are_shaped(home: Path) -> None:
+    tb = make_toolbox()
+    modes = tb.effective({}, None, None)
+    for n in ("write_local_file", "move_local_file", "trash_local_file"):
+        assert modes[n] == "ask", n          # danger "external": never silent
+        assert tb.available(n), n            # plain file work, no Mac-only binary
+        assert tb.specs[n].group == "files"
+    out = asyncio.run(tb.call("write_local_file", {"path": "~/Library/x.txt", "content": "x"}, {}))
+    assert out["error"] and out["field"] == "path" and out["try_instead"]
+    out = asyncio.run(tb.call("move_local_file", {"path": "~/Desktop/nope.md", "to": "~/Desktop/b.md"}, {}))
+    assert out["error"] and out["field"] == "path"
+    out = asyncio.run(tb.call("write_local_file", {"path": "~/Desktop/ok.md", "content": "hi"}, {}))
+    assert out["created"] and (home / "Desktop" / "ok.md").read_text() == "hi"
 
 
 # ---- shortcuts ----

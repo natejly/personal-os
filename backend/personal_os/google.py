@@ -20,8 +20,11 @@ import logging
 import os
 import re
 import secrets
+import threading
 import time
 from typing import Any, Callable
+
+from .cache import TTLCache, cached, invalidates
 
 # Google lists the scopes it actually granted in the token response, and that set rarely
 # matches the request byte for byte (openid aliases, scopes granted to this client earlier).
@@ -50,6 +53,27 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
 ]
 
+# How long each kind of read may be served from cache. The numbers trade "the UI
+# feels instant" against "an edit made in Google's own web UI shows up here", so
+# anything the user stares at is seconds, and anything near-static is hours.
+# Our own writes invalidate their namespace outright, so these only bound how
+# stale a *third-party* change can be.
+TTL = {
+    "calendar_list": 10 * 60,   # calendars are added/removed rarely
+    "calendar_colors": 24 * 3600,  # Google's fixed palette
+    "calendar_events": 60,      # the week grid: refetched on every mount and week step
+    "calendar_event": 30,       # one event, opened in the editor
+    "gmail_list": 60,           # a thread list costs 1 + N batched gets
+    "gmail_message": 15 * 60,   # a fetched body never changes
+    "gmail_labels": 10 * 60,
+    "tasks_lists": 10 * 60,
+    "tasks": 30,
+    "drive_list": 2 * 60,
+    "drive_read": 10 * 60,
+    "docs_get": 60,
+    "sheets_read": 60,
+}
+
 
 class GoogleNotConnected(Exception):
     pass
@@ -60,6 +84,27 @@ class Google:
         self.get_settings = get_settings
         self.set_settings = set_settings
         self._pending: dict[str, Any] = {}  # state -> flow
+        self._cache = TTLCache()
+        # Built API clients and the Credentials they wrap, reused across calls; see _svc.
+        self._svc_lock = threading.Lock()
+        self._svcs: dict[tuple[str, str], tuple[Any, Any]] = {}
+        self._creds_obj: Any = None
+        self._creds_key: tuple[str, str] | None = None
+
+    def invalidate(self, *namespaces: str) -> int:
+        """Forget cached reads. No arguments forgets everything Google-related."""
+        return self._cache.invalidate(*namespaces)
+
+    def cache_stats(self) -> dict[str, Any]:
+        return self._cache.stats()
+
+    def _reset_clients(self) -> None:
+        """Drop cached credentials, API clients and reads - used when the account changes."""
+        with self._svc_lock:
+            self._svcs.clear()
+            self._creds_obj = None
+            self._creds_key = None
+        self._cache.clear()
 
     # ---------- status / auth ----------
     def _client(self) -> tuple[str | None, str | None, str | None]:
@@ -179,6 +224,7 @@ class Google:
             "connected_at": time.time(),
         }
         self.set_settings({"googleToken": token})
+        self._reset_clients()  # a new sign-in may be a different account
         return self.status()
 
     def disconnect(self) -> None:
@@ -191,6 +237,7 @@ class Google:
             except Exception:  # noqa: BLE001
                 pass
         self.set_settings({"googleToken": {}, PENDING_KEY: {}})
+        self._reset_clients()
 
     def _creds(self):  # type: ignore[no-untyped-def]
         from google.auth.transport.requests import Request
@@ -199,6 +246,15 @@ class Google:
         tok = self.get_settings().get("googleToken") or {}
         if not tok.get("refresh_token"):
             raise GoogleNotConnected("Google account not connected")
+        # One Credentials object per (account, client), reused across calls: building a
+        # fresh one every call threw away the live access token, so a long-lived backend
+        # re-checked expiry - and sometimes re-refreshed - on every single API call.
+        key = (tok["refresh_token"], tok.get("client_id") or "")
+        with self._svc_lock:
+            if self._creds_key == key and self._creds_obj is not None and self._creds_obj.valid:
+                return self._creds_obj
+            # A different account (or OAuth client) must not read the old one's cache.
+            changed_account = self._creds_key is not None and self._creds_key != key
         creds = Credentials(
             token=tok.get("token"), refresh_token=tok["refresh_token"], token_uri=tok["token_uri"],
             client_id=tok["client_id"], client_secret=tok["client_secret"], scopes=tok.get("scopes") or SCOPES,
@@ -220,14 +276,37 @@ class Google:
                     "Google sign-in expired or was revoked. Open Settings → Integrations and sign in again."
                 ) from e
             self.set_settings({"googleToken": {**tok, "token": creds.token, "expiry": creds.expiry.isoformat() if creds.expiry else None, "needs_reauth": False}})
+        with self._svc_lock:
+            self._creds_obj = creds
+            self._creds_key = key
+        if changed_account:
+            self._cache.clear()
         return creds
 
     def _svc(self, name: str, version: str):  # type: ignore[no-untyped-def]
+        """A built API client, reused per (api, version).
+
+        `build()` parses a discovery document and synthesises the whole resource tree,
+        which costs tens of milliseconds - noticeable when drawing one calendar week
+        does it fifteen times over. Each client is remembered alongside the exact
+        Credentials object it captured, so once `_creds` mints a new one (a token
+        refresh, or a different account) the stale client is rebuilt rather than reused.
+        """
         from googleapiclient.discovery import build
 
-        return build(name, version, credentials=self._creds(), cache_discovery=False)
+        creds = self._creds()
+        key = (name, version)
+        with self._svc_lock:
+            entry = self._svcs.get(key)
+            if entry is not None and entry[0] is creds:
+                return entry[1]
+        svc = build(name, version, credentials=creds, cache_discovery=False)
+        with self._svc_lock:
+            self._svcs[key] = (creds, svc)
+        return svc
 
     # ---------- Calendar ----------
+    @cached("calendar", TTL["calendar_list"])
     def calendars(self) -> list[dict[str, Any]]:
         """The user's calendar list: primary first, then the ones they can write to."""
         res = self._svc("calendar", "v3").calendarList().list(maxResults=100).execute()
@@ -247,6 +326,7 @@ class Google:
             })
         return sorted(out, key=lambda c: (not c["primary"], c["access_role"] not in ("owner", "writer"), c["summary"].lower()))
 
+    @cached("calendar", TTL["calendar_colors"])
     def calendar_colors(self) -> dict[str, Any]:
         """Google's fixed palettes, id -> hex; events reference these by colorId."""
         res = self._svc("calendar", "v3").colors().get().execute()
@@ -255,6 +335,7 @@ class Google:
             "calendar": {k: v.get("background") for k, v in (res.get("calendar") or {}).items()},
         }
 
+    @cached("calendar", TTL["calendar_events"])
     def calendar_events(self, days: int = 2, calendar_id: str = "primary", max_results: int = 30, start: str | None = None, calendar_ids: list[str] | None = None) -> list[dict[str, Any]]:
         now = _parse_iso(start) if start else dt.datetime.now(dt.timezone.utc)
         if now.tzinfo is None:
@@ -279,10 +360,12 @@ class Google:
         out.sort(key=lambda e: e["start"] or "")
         return out[: max_results if len(ids) == 1 else max_results * 2]
 
+    @cached("calendar", TTL["calendar_event"])
     def calendar_get(self, event_id: str, calendar_id: str = "primary") -> dict[str, Any]:
         e = self._svc("calendar", "v3").events().get(calendarId=calendar_id, eventId=event_id).execute()
         return _event_out(e, calendar_id, full=True)
 
+    @invalidates("calendar")
     def calendar_create(self, event: dict[str, Any], calendar_id: str = "primary", send_updates: str = "none") -> dict[str, Any]:
         body = self._event_body(event)
         kwargs: dict[str, Any] = {"calendarId": calendar_id, "body": body, "sendUpdates": _send_updates(send_updates)}
@@ -292,6 +375,7 @@ class Google:
         e = self._svc("calendar", "v3").events().insert(**kwargs).execute()
         return _event_out(e, calendar_id, full=True)
 
+    @invalidates("calendar")
     def calendar_update(self, event_id: str, event: dict[str, Any], calendar_id: str = "primary", send_updates: str = "none") -> dict[str, Any]:
         """Patch an event; only the keys present in `event` change.
 
@@ -318,10 +402,12 @@ class Google:
             e = svc.get(calendarId=calendar_id, eventId=event_id).execute()
         return _event_out(e, calendar_id, full=True)
 
+    @invalidates("calendar")
     def calendar_delete(self, event_id: str, calendar_id: str = "primary", send_updates: str = "none") -> dict[str, Any]:
         self._svc("calendar", "v3").events().delete(calendarId=calendar_id, eventId=event_id, sendUpdates=_send_updates(send_updates)).execute()
         return {"deleted": event_id, "calendar_id": calendar_id}
 
+    @invalidates("calendar")
     def calendar_respond(self, event_id: str, response: str, calendar_id: str = "primary", send_updates: str = "none") -> dict[str, Any]:
         """RSVP to an invitation: accepted, declined, tentative or needsAction."""
         if response not in ("accepted", "declined", "tentative", "needsAction"):
@@ -392,6 +478,7 @@ class Google:
         return body
 
     # ---------- Gmail ----------
+    @cached("gmail", TTL["gmail_list"])
     def gmail_search(self, query: str = "is:unread in:inbox newer_than:14d", max_results: int = 15) -> list[dict[str, Any]]:
         svc = self._svc("gmail", "v1")
         res = svc.users().messages().list(userId="me", q=query, maxResults=max(1, min(int(max_results), 50))).execute()
@@ -415,6 +502,7 @@ class Google:
         batch.execute()
         return [by_id[i] for i in ids if i in by_id]
 
+    @cached("gmail", TTL["gmail_message"])
     def gmail_get(self, message_id: str, max_chars: int = 8000) -> dict[str, Any]:
         svc = self._svc("gmail", "v1")
         msg = svc.users().messages().get(userId="me", id=message_id, format="full").execute()
@@ -431,6 +519,7 @@ class Google:
         headers = {"in_reply_to": mid, "references": f"{h.get('references', '')} {mid}".strip()} if mid else {}
         return orig.get("threadId"), headers
 
+    @invalidates("gmail")
     def gmail_draft(self, to: str, subject: str, body: str, reply_to_message_id: str | None = None) -> dict[str, Any]:
         svc = self._svc("gmail", "v1")
         message: dict[str, Any] = {}
@@ -443,6 +532,7 @@ class Google:
         d = svc.users().drafts().create(userId="me", body={"message": message}).execute()
         return {"draft_id": d.get("id"), "to": to, "subject": subject, "note": "Draft saved in Gmail; not sent."}
 
+    @invalidates("gmail")
     def gmail_send(self, to: str, subject: str, body: str, reply_to_message_id: str | None = None) -> dict[str, Any]:
         svc = self._svc("gmail", "v1")
         message: dict[str, Any] = {}
@@ -455,6 +545,7 @@ class Google:
         m = svc.users().messages().send(userId="me", body=message).execute()
         return {"sent": m.get("id"), "to": to, "subject": subject, "thread_id": m.get("threadId")}
 
+    @invalidates("gmail")
     def gmail_modify(self, message_id: str, mark_read: bool | None = None, archive: bool = False, star: bool | None = None) -> dict[str, Any]:
         add, rem = [], []
         if mark_read is True:
@@ -470,20 +561,24 @@ class Google:
         self._svc("gmail", "v1").users().messages().modify(userId="me", id=message_id, body={"addLabelIds": add, "removeLabelIds": rem}).execute()
         return {"ok": True, "added": add, "removed": rem}
 
+    @cached("gmail", TTL["gmail_labels"])
     def gmail_labels(self) -> list[dict[str, Any]]:
         res = self._svc("gmail", "v1").users().labels().list(userId="me").execute()
         labels = [{"id": l["id"], "name": l.get("name", l["id"]), "type": l.get("type", "user")} for l in res.get("labels", [])]
         return sorted(labels, key=lambda x: (x["type"] != "system", x["name"].lower()))
 
     # ---------- Tasks ----------
+    @cached("tasks", TTL["tasks_lists"])
     def tasks_lists(self) -> list[dict[str, Any]]:
         res = self._svc("tasks", "v1").tasklists().list(maxResults=50).execute()
         return [{"id": t["id"], "title": t["title"]} for t in res.get("items", [])]
 
+    @cached("tasks", TTL["tasks"])
     def tasks_list(self, tasklist: str = "@default", show_completed: bool = False, max_results: int = 50) -> list[dict[str, Any]]:
         res = self._svc("tasks", "v1").tasks().list(tasklist=tasklist, showCompleted=show_completed, showHidden=show_completed, maxResults=max_results).execute()
         return [{"id": t["id"], "title": t.get("title"), "notes": t.get("notes"), "due": t.get("due"), "status": t.get("status")} for t in res.get("items", [])]
 
+    @invalidates("tasks")
     def tasks_add(self, title: str, notes: str = "", due: str | None = None, tasklist: str = "@default") -> dict[str, Any]:
         body: dict[str, Any] = {"title": title, "notes": notes}
         if due:
@@ -491,12 +586,18 @@ class Google:
         t = self._svc("tasks", "v1").tasks().insert(tasklist=tasklist, body=body).execute()
         return {"id": t["id"], "title": t.get("title"), "due": t.get("due")}
 
+    @invalidates("tasks")
     def tasks_complete(self, task_id: str, tasklist: str = "@default") -> dict[str, Any]:
         t = self._svc("tasks", "v1").tasks().patch(tasklist=tasklist, task=task_id, body={"status": "completed"}).execute()
         return {"id": t["id"], "status": t.get("status")}
 
     def tasks_all(self, tasklist: str = "@default") -> list[dict[str, Any]]:
-        """Every task in a list, completed and hidden included, with `updated` timestamps (for sync)."""
+        """Every task in a list, completed and hidden included, with `updated` timestamps (for sync).
+
+        Deliberately uncached: this is the two-way sync's view of remote state, and it
+        resolves conflicts by comparing `updated` timestamps. A stale read here could
+        push over a newer remote edit, which no latency win is worth.
+        """
         svc = self._svc("tasks", "v1").tasks()
         out: list[dict[str, Any]] = []
         token = None
@@ -507,18 +608,22 @@ class Google:
             if not token:
                 return out
 
+    @invalidates("tasks")
     def tasks_insert(self, body: dict[str, Any], tasklist: str = "@default") -> dict[str, Any]:
         t = self._svc("tasks", "v1").tasks().insert(tasklist=tasklist, body=_task_body(body)).execute()
         return _task_row(t)
 
+    @invalidates("tasks")
     def tasks_update(self, task_id: str, patch: dict[str, Any], tasklist: str = "@default") -> dict[str, Any]:
         t = self._svc("tasks", "v1").tasks().patch(tasklist=tasklist, task=task_id, body=_task_body(patch)).execute()
         return _task_row(t)
 
+    @invalidates("tasks")
     def tasks_delete(self, task_id: str, tasklist: str = "@default") -> None:
         self._svc("tasks", "v1").tasks().delete(tasklist=tasklist, task=task_id).execute()
 
     # ---------- Drive ----------
+    @cached("drive", TTL["drive_list"])
     def drive_files(self, query: str = "", max_results: int = 20) -> list[dict[str, Any]]:
         """Search Drive by name/content; with no query, list recently modified files."""
         params: dict[str, Any] = {
@@ -541,6 +646,7 @@ class Google:
             })
         return out
 
+    @cached("drive", TTL["drive_read"])
     def drive_read(self, file_id: str, max_chars: int = 8000) -> dict[str, Any]:
         svc = self._svc("drive", "v3")
         meta = svc.files().get(fileId=file_id, fields="id,name,mimeType,webViewLink,size").execute()
@@ -560,6 +666,7 @@ class Google:
     # ---------- Docs / Sheets ----------
     _MIME = {"doc": "application/vnd.google-apps.document", "sheet": "application/vnd.google-apps.spreadsheet"}
 
+    @cached("drive", TTL["drive_list"])
     def drive_find(self, query: str = "", kind: str | None = None, max_results: int = 20) -> list[dict[str, Any]]:
         q = ["trashed = false"]
         if query:
@@ -574,6 +681,7 @@ class Google:
                  "kind": "sheet" if f.get("mimeType") == self._MIME["sheet"] else "doc",
                  "modified": f.get("modifiedTime"), "link": f.get("webViewLink")} for f in res.get("files", [])]
 
+    @cached("docs", TTL["docs_get"])
     def docs_get(self, document_id: str, max_chars: int = 20000) -> dict[str, Any]:
         doc = self._svc("docs", "v1").documents().get(documentId=document_id).execute()
         text = _doc_text(doc)
@@ -581,6 +689,7 @@ class Google:
                 "truncated": len(text) > max_chars,
                 "link": f"https://docs.google.com/document/d/{document_id}/edit"}
 
+    @invalidates("docs", "drive")
     def docs_create(self, title: str, content: str = "") -> dict[str, Any]:
         svc = self._svc("docs", "v1")
         doc = svc.documents().create(body={"title": title}).execute()
@@ -590,6 +699,7 @@ class Google:
                 {"insertText": {"location": {"index": 1}, "text": content}}]}).execute()
         return {"id": did, "title": title, "link": f"https://docs.google.com/document/d/{did}/edit"}
 
+    @invalidates("docs", "drive")
     def docs_append(self, document_id: str, content: str) -> dict[str, Any]:
         svc = self._svc("docs", "v1")
         doc = svc.documents().get(documentId=document_id, fields="title,body(content(endIndex))").execute()
@@ -600,6 +710,7 @@ class Google:
             {"insertText": {"location": {"index": max(1, end - 1)}, "text": "\n" + content}}]}).execute()
         return {"id": document_id, "title": doc.get("title"), "appended_chars": len(content)}
 
+    @cached("sheets", TTL["sheets_read"])
     def sheets_read(self, spreadsheet_id: str, cell_range: str | None = None, max_rows: int = 200) -> dict[str, Any]:
         svc = self._svc("sheets", "v4").spreadsheets()
         meta = svc.get(spreadsheetId=spreadsheet_id, fields="properties(title),sheets(properties(title))").execute()
@@ -611,6 +722,7 @@ class Google:
                 "range": res.get("range"), "values": values[:max_rows], "truncated": len(values) > max_rows,
                 "link": f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit"}
 
+    @invalidates("sheets", "drive")
     def sheets_write(self, spreadsheet_id: str, cell_range: str, values: list[list[Any]], append: bool = False) -> dict[str, Any]:
         vals = self._svc("sheets", "v4").spreadsheets().values()
         if append:
@@ -622,6 +734,7 @@ class Google:
                         body={"values": values}).execute()
         return {"id": spreadsheet_id, "range": r.get("updatedRange"), "cells": r.get("updatedCells")}
 
+    @invalidates("sheets", "drive")
     def sheets_create(self, title: str, values: list[list[Any]] | None = None) -> dict[str, Any]:
         svc = self._svc("sheets", "v4").spreadsheets()
         ss = svc.create(body={"properties": {"title": title}}, fields="spreadsheetId,spreadsheetUrl").execute()

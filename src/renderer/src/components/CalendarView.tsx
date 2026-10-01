@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronLeft, ChevronRight, PanelLeftOpen, Calendar as CalIcon, ExternalLink, Pencil, Plus, Repeat, Video, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, PanelLeftOpen, Calendar as CalIcon, ExternalLink, Pencil, Plus, RefreshCw, Repeat, Video, X } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import SendToSpace from './SendToSpace'
@@ -24,11 +24,13 @@ export default function CalendarView(): JSX.Element {
 
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(week, i)), [week])
 
-  const load = async (): Promise<void> => {
+  // Stepping between weeks is served from the backend's read cache; `refresh` is the
+  // Refresh button, for picking up an edit made in Google Calendar itself.
+  const load = async (refresh = false): Promise<void> => {
     if (!google?.connected) return
     setLoading(true); setError(null)
     try {
-      setEvents(await api.google.calendarRange(week.toISOString(), 7, 'all'))
+      setEvents(await api.google.calendarRange(week.toISOString(), 7, 'all', refresh))
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -79,6 +81,7 @@ export default function CalendarView(): JSX.Element {
           {google?.connected && <button className="ghost-btn" onClick={() => setEditing({ event: null, draft: {} })}><Plus size={13} /> New event</button>}
           <SendToSpace items={[{ kind: 'calendar' }]} />
           <button className="ghost-btn" onClick={() => setWeek(startOfWeek(new Date()))}>Today</button>
+          {google?.connected && <button className="icon-btn" title="Refresh" onClick={() => void load(true)} disabled={loading}><RefreshCw size={15} className={loading ? 'spin' : ''} /></button>}
           <button className="icon-btn" aria-label="Previous week" onClick={() => setWeek(addDays(week, -7))}><ChevronLeft size={16} /></button>
           <button className="icon-btn" aria-label="Next week" onClick={() => setWeek(addDays(week, 7))}><ChevronRight size={16} /></button>
           <button className="primary-btn" onClick={() => { newChat(null); void send('Help me plan this week. Look at my calendar for the next 7 days and my open todos, then propose a schedule.') }}>Plan my week</button>

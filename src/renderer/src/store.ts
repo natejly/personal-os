@@ -265,6 +265,11 @@ export interface State {
   deleteActivityEvent: (id: string) => Promise<void>
   deleteActivitySummary: (id: string) => Promise<void>
   purgeActivity: (scope: 'expired' | 'events' | 'summaries' | 'all') => Promise<void>
+  /** Ask macOS for one permission. Returns the note to show; '' when it went through silently. */
+  grantActivityPermission: (id: string, browser?: string) => Promise<void>
+  openActivitySettings: (id: string) => Promise<void>
+  /** Record everything, or put back the settings palantir mode replaced. */
+  setPalantirMode: (on: boolean) => Promise<void>
   refreshDashboard: () => Promise<void>
   refreshRecap: (force?: boolean) => Promise<void>
   refreshAgentInbox: () => Promise<void>
@@ -1249,6 +1254,32 @@ export const useStore = create<State>((set, get) => {
     stopActivity: async () => {
       set({ activity: await api.activity.stop() })
       get().toast('Activity monitor off')
+    },
+    grantActivityPermission: async (id, browser = '') => {
+      try {
+        const { result, status } = await api.activity.requestPermission(id, browser)
+        set({ activity: status })
+        // macOS shows each of these at most once per app, so the note matters more than the state:
+        // it is what tells the user to go to the pane by hand, or to restart the app.
+        if (result.note) get().toast(result.note, result.prompted ? 'info' : 'error')
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    openActivitySettings: async (id) => {
+      try {
+        await api.activity.openPermissionSettings(id)
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    setPalantirMode: async (on) => {
+      try {
+        set({ activity: await api.activity.palantir(on) })
+        get().toast(on ? 'Palantir mode on — recording everything' : 'Palantir mode off — previous settings restored')
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
     },
     pauseActivity: async (minutes = 30) => set({ activity: await api.activity.pause(minutes) }),
     resumeActivity: async () => set({ activity: await api.activity.resume() }),

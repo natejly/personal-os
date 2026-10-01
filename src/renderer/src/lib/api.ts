@@ -6,7 +6,7 @@ import type {
   Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
   AgentInbox, AgentProposal, Job,
   Doc, DocFolder, FullDoc, DocRevision,
-  ActivityConfig, ActivityContextFile, ActivityEvent, ActivityStatus, ActivitySummary,
+  ActivityCapability, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityGrantResult, ActivityStatus, ActivitySummary,
   PendingSend, SendHoldConfig, Verification, Verified
 } from '@shared/types'
 
@@ -304,6 +304,10 @@ export const api = {
     refreshProfile: () => req<{ profile: string }>('/activity/profile', { method: 'POST' }),
     context: () => req<ActivityContextFile>('/activity/context'),
     devices: () => req<{ index: string; name: string }[]>('/activity/devices'),
+    permissions: () => req<ActivityCapability[]>('/activity/permissions'),
+    requestPermission: (id: string, browser = '') => req<{ result: ActivityGrantResult; status: ActivityStatus }>('/activity/permissions/request', { method: 'POST', body: json({ id, browser }) }),
+    openPermissionSettings: (id: string) => req<{ ok: boolean }>('/activity/permissions/open', { method: 'POST', body: json({ id }) }),
+    palantir: (on: boolean) => req<ActivityStatus>('/activity/palantir', { method: 'POST', body: json({ on }) }),
     purge: (scope: 'expired' | 'events' | 'summaries' | 'all') => req<{ deleted: { events: number; summaries: number }; status: ActivityStatus }>('/activity/purge', { method: 'POST', body: json({ scope }) })
   },
   canvases: {

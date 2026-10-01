@@ -70,30 +70,132 @@ const ago = (ts: number | null): string => {
   return s < 60 ? 'just now' : s < 3600 ? `${Math.round(s / 60)}m ago` : `${Math.round(s / 3600)}h ago`
 }
 
-function Capabilities({ caps }: { caps: ActivityCapability[] }): JSX.Element {
+const STATE_LABEL: Record<string, string> = {
+  granted: 'granted', denied: 'denied', unasked: 'not asked yet', unknown: 'unknown', 'n/a': 'not needed here'
+}
+
+/** The checklist, with the two things that can actually fix a row: ask macOS, or open the pane.
+ *
+ *  Grant is the only button in the app that can make a system dialog appear, which is why it is a
+ *  button and not something the panel does on load. macOS shows most of these once per app ever,
+ *  so when it stays silent the row falls back to the pane and says to restart afterwards. */
+function Capabilities({ caps, onGrant, onOpen }: {
+  caps: ActivityCapability[]
+  onGrant: (id: string, browser?: string) => void
+  onOpen: (id: string) => void
+}): JSX.Element {
   const bad = caps.filter((c) => !c.ok)
+  const blocking = bad.filter((c) => !c.optional)
   const [open, setOpen] = useState(bad.length > 0)
+  const grantable = caps.filter((c) => c.requestable && c.state !== 'granted' && c.id !== 'automation')
   return (
     <section className="act-card">
       <button className="act-card-head" onClick={() => setOpen((o) => !o)}>
         <ChevronRight size={13} className={open ? 'rot90' : ''} />
-        <b>What this machine can do</b>
-        <span className={`act-pill ${bad.length ? 'warn' : 'ok'}`}>{bad.length ? `${bad.length} need attention` : 'all available'}</span>
+        <b>Access on this machine</b>
+        <span className={`act-pill ${blocking.length ? 'warn' : bad.length ? '' : 'ok'}`}>
+          {blocking.length ? `${blocking.length} blocking` : bad.length ? `${bad.length} optional missing` : 'full access'}
+        </span>
       </button>
       {open && (
-        <ul className="act-caps">
-          {caps.map((c) => (
-            <li key={c.id} className={c.ok ? 'ok' : 'bad'}>
-              {c.ok ? <Check size={13} /> : <AlertTriangle size={13} />}
-              <div>
-                <b>{c.label}</b>
-                <p>{c.detail}</p>
-                {!c.ok && c.fix && <p className="act-fix">{c.fix}</p>}
-              </div>
-            </li>
-          ))}
-        </ul>
+        <>
+          {grantable.length > 1 && (
+            <div className="act-grant-all">
+              <button className="primary-btn sm" onClick={() => grantable.forEach((c) => onGrant(c.id))}>
+                <Shield size={13} /> Ask for everything missing
+              </button>
+              <span className="muted small">
+                macOS asks one dialog at a time, and the grant lands on the app bundle — Personal OS, or Electron in
+                a dev build. Restart the app afterwards so the keystroke tap is created with the grants in place.
+              </span>
+            </div>
+          )}
+          <ul className="act-caps">
+            {caps.map((c) => (
+              <li key={c.id} className={c.ok ? 'ok' : c.optional ? 'warn' : 'bad'}>
+                {c.ok ? <Check size={13} /> : <AlertTriangle size={13} />}
+                <div>
+                  <b>{c.label}</b>
+                  {c.state && <span className={`act-state-pill ${c.state}`}>{STATE_LABEL[c.state] ?? c.state}</span>}
+                  {c.optional && !c.ok && <span className="act-state-pill opt">optional</span>}
+                  {c.signals.length > 0 && <span className="muted small"> gates {c.signals.join(', ')}</span>}
+                  <p>{c.detail}</p>
+                  {!c.ok && c.fix && <p className="act-fix">{c.fix}</p>}
+                  {(c.requestable || c.settings_url) && (
+                    <div className="act-cap-actions">
+                      {c.id === 'automation'
+                        ? c.extra.map((b) => (
+                            <button key={b.name} className="ghost-btn xs" disabled={b.state === 'granted'}
+                              onClick={() => onGrant('automation', b.name)}>
+                              {b.state === 'granted' ? <Check size={11} /> : <Shield size={11} />} {b.name}
+                            </button>
+                          ))
+                        : c.requestable && c.state !== 'granted' && (
+                            <button className="ghost-btn xs" onClick={() => onGrant(c.id)}><Shield size={11} /> Grant</button>
+                          )}
+                      {c.settings_url && (
+                        <button className="link xs" onClick={() => onOpen(c.id)}>Open System Settings</button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
+    </section>
+  )
+}
+
+/** Palantir mode: one switch for "record everything", and an honest account of what that costs.
+ *
+ *  It is gated behind a typed confirmation because it is the one control in the app that turns
+ *  protections off rather than on - and it says out loud which protection it cannot touch. */
+function PalantirCard({ on, missing, onSet }: { on: boolean; missing: string[]; onSet: (on: boolean) => void }): JSX.Element {
+  const [confirming, setConfirming] = useState(false)
+  return (
+    <section className={`act-card palantir ${on ? 'armed' : ''}`}>
+      <div className="act-card-head static">
+        <Eye size={14} />
+        <b>Palantir mode</b>
+        {on && <span className="act-pill warn">recording everything</span>}
+      </div>
+      <div className="act-palantir-body">
+        <p className="muted small">
+          One switch for everything: all six signals on — including the keylogger, the microphone and system audio —
+          redaction off, and both “never record” lists emptied, so password managers and sign-in pages get recorded
+          like any other window.
+        </p>
+        <p className="muted small">
+          The one protection it cannot turn off is secure input: while macOS reports a focused password field it
+          withholds keystrokes from every tap in the system, so those keys are never ours to record. The count of
+          dropped keys still shows up in the log.
+        </p>
+        <p className="muted small">
+          Turning it off restores the exclusion lists and signal choices you had before — they are snapshotted on
+          the way in, not reset to defaults.
+        </p>
+        {on && missing.length > 0 && (
+          <p className="act-warn"><AlertTriangle size={13} /> Recording everything it can, but macOS is still
+            withholding: {missing.join(', ')}. Grant those above, then restart the app.</p>
+        )}
+        {on
+          ? <button className="ghost-btn danger" onClick={() => onSet(false)}><EyeOff size={14} /> Turn Palantir mode off</button>
+          : confirming
+            ? (
+              <div className="act-palantir-confirm">
+                <p><b>Record everything, with the filters down?</b></p>
+                <div className="act-danger">
+                  <button className="ghost-btn danger" onClick={() => { setConfirming(false); onSet(true) }}>
+                    <Eye size={13} /> Yes, record everything
+                  </button>
+                  <button className="ghost-btn" onClick={() => setConfirming(false)}>Cancel</button>
+                </div>
+              </div>
+            )
+            : <button className="ghost-btn danger" onClick={() => setConfirming(true)}><Eye size={14} /> Turn Palantir mode on</button>}
+      </div>
     </section>
   )
 }
@@ -183,7 +285,8 @@ export default function ActivityView(): JSX.Element {
   const {
     toggleSidebar, loadActivity, refreshActivity, setActivityConfig, toggleActivitySignal,
     startActivity, stopActivity, pauseActivity, resumeActivity, rollupActivity,
-    refreshActivityProfile, deleteActivityEvent, deleteActivitySummary, purgeActivity
+    refreshActivityProfile, deleteActivityEvent, deleteActivitySummary, purgeActivity,
+    grantActivityPermission, openActivitySettings, setPalantirMode
   } = useStore()
   const [tab, setTab] = useState<Tab>('overview')
   const [confirmPurge, setConfirmPurge] = useState<'events' | 'summaries' | 'all' | null>(null)
@@ -256,6 +359,7 @@ export default function ActivityView(): JSX.Element {
           <span>{st.counts.summaries} summaries</span>
           <span>last rollup {ago(st.last_rollup)}</span>
           {st.secure_input && <span className="act-pill ok"><Shield size={11} /> password field focused — keystrokes dropped</span>}
+          {st.palantir && <span className="act-pill warn"><Eye size={11} /> Palantir mode</span>}
         </div>
         {!st.platform_supported && <p className="act-warn"><AlertTriangle size={13} /> The collectors are macOS-only. Everything else in the app works normally.</p>}
         {st.last_error && <p className="act-warn"><AlertTriangle size={13} /> {st.last_error}</p>}
@@ -281,7 +385,17 @@ export default function ActivityView(): JSX.Element {
             summarization request to the LLM endpoint you already configured.
           </p>
 
-          <Capabilities caps={st.capabilities} />
+          <Capabilities
+            caps={st.capabilities}
+            onGrant={(id, browser) => void grantActivityPermission(id, browser)}
+            onOpen={(id) => void openActivitySettings(id)}
+          />
+
+          <PalantirCard
+            on={st.palantir}
+            missing={st.capabilities.filter((c) => c.state && c.state !== 'granted' && c.state !== 'n/a').map((c) => c.label)}
+            onSet={(on) => void setPalantirMode(on)}
+          />
 
           <section className="act-card">
             <div className="act-card-head static">
@@ -320,6 +434,12 @@ export default function ActivityView(): JSX.Element {
             Each signal is separate and off until you switch it on. Read what a signal captures before enabling it —
             the heavier ones are marked, and they mean exactly what they say.
           </p>
+          {st.palantir && (
+            <p className="act-warn">
+              <AlertTriangle size={13} /> Palantir mode has every signal on. Turning one off here leaves the mode on;
+              turn the mode off on the Overview tab to restore the signals you had before.
+            </p>
+          )}
           <div className="act-signals">
             {(Object.keys(SIGNAL_INFO) as ActivitySignal[]).map((s) => {
               const info = SIGNAL_INFO[s]
@@ -382,6 +502,13 @@ export default function ActivityView(): JSX.Element {
 
       {tab === 'privacy' && (
         <div className="page-body">
+          {st.palantir && (
+            <p className="act-warn">
+              <AlertTriangle size={13} /> Palantir mode is on: redaction is off and both “never record” lists are
+              empty. Editing them here leaves the mode on — turn it off on the Overview tab to get your previous
+              settings back.
+            </p>
+          )}
           <label className="toggle-row plain">
             <span className="toggle-icon"><Shield size={15} /></span>
             <span className="toggle-text"><b>Redact before storing</b><small>Strips emails, phone numbers, card numbers, SSNs, API keys, JWTs and private keys out of typed text and transcripts, and throws away whatever follows a word like “password” or “seed phrase”. Leave this on.</small></span>

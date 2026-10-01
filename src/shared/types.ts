@@ -1015,7 +1015,12 @@ export interface ActivityConfig {
   /** Blank falls back to the extraction model, then the default model. */
   summaryModel: string
   profileEveryHours: number
+  /** Palantir mode: every signal on, redaction off, both exclusion lists emptied. */
+  palantir: boolean
 }
+
+/** What macOS currently thinks about one permission. `n/a` means nothing on this Mac needs it. */
+export type ActivityPermissionState = 'granted' | 'denied' | 'unasked' | 'unknown' | 'n/a' | ''
 
 /** One row of the capability checklist: what this machine can do, and how to fix what it can't. */
 export interface ActivityCapability {
@@ -1025,6 +1030,28 @@ export interface ActivityCapability {
   detail: string
   /** Empty when `ok`. */
   fix: string
+  /** Set only for the macOS permissions; `''` for rows that are just a yes/no about this machine. */
+  state: ActivityPermissionState
+  /** True when pressing Grant can make macOS ask for this one. */
+  requestable: boolean
+  /** Deep link into the matching Privacy & Security pane; `''` when there isn't one. */
+  settings_url: string
+  /** Which signals this row gates. */
+  signals: ActivitySignal[]
+  /** Missing this only costs one optional signal, never the monitor as a whole. */
+  optional: boolean
+  /** The grant only reaches a running process after a restart. */
+  restart: boolean
+  /** Per-browser Automation states on the `automation` row. */
+  extra: { name: string; state: ActivityPermissionState }[]
+}
+
+/** What came back from pressing Grant. `prompted` is false when macOS refuses to ask at all. */
+export interface ActivityGrantResult {
+  id: string
+  state: ActivityPermissionState
+  prompted: boolean
+  note: string
 }
 
 export interface ActivityStatus {
@@ -1047,6 +1074,8 @@ export interface ActivityStatus {
   audio_devices: { index: string; name: string }[]
   /** True while macOS reports a password field focused; keystrokes are dropped meanwhile. */
   secure_input: boolean
+  /** Palantir mode is on: every signal recording and the gate's filters down. */
+  palantir: boolean
 }
 
 export type ActivityEventKind = 'focus' | 'input' | 'idle' | 'audio' | 'note'

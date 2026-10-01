@@ -1149,6 +1149,24 @@ def _register_activity(self: Toolbox) -> None:
     R("activity_recent", ToolSpec("activity_recent", "What the user has actually been doing on their computer recently, from the local activity monitor: a live line about the current window, the durable profile of how they work, and the summarized periods. Empty when the monitor is off. Use it when the user asks what they were doing, where their time went, or to ground advice in their real workflow.",
         _obj({"hours": {"type": "number", "default": 8}}, []), activity_recent, "activity"))
 
+    async def activity_access(ctx: dict[str, Any]) -> Any:
+        """Read-only: which macOS permissions the monitor has, so the assistant can answer "why is
+        nothing being recorded?" without the user hunting through System Settings."""
+        from . import activity as act
+
+        rows = act.permissions()
+        return {
+            "signals_on": [k for k, v in (self.activity.config().get("signals") or {}).items() if v],
+            "palantir_mode": bool(self.activity.config().get("palantir")),
+            "permissions": [{"id": r["id"], "label": r["label"], "state": r["state"],
+                             "gates": r["signals"], "fix": r["fix"]} for r in rows],
+            "missing": [r["label"] for r in rows if not r["ok"]],
+            "note": "Grants live in the Activity panel; macOS attributes them to the app bundle, "
+                    "and the app has to be restarted after a grant for the keystroke tap to work.",
+        }
+    R("activity_access", ToolSpec("activity_access", "Which macOS permissions the activity monitor currently has (Accessibility, Input Monitoring, Screen Recording, browser Automation, Microphone, Full Disk Access), which signals each one gates, and what is missing. Use it when the user asks why the monitor is not recording something, or what access it has.",
+        _obj({}, []), activity_access, "activity"))
+
     async def activity_pause(ctx: dict[str, Any], minutes: float = 30.0) -> Any:
         return {"paused_until": self.activity.pause(minutes)["pause_until"]}
     R("activity_pause", ToolSpec("activity_pause", "Pause the activity monitor for a while, so nothing about the user's screen, typing or audio is recorded. Use it whenever the user asks you to stop watching.",

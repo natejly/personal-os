@@ -373,17 +373,23 @@ from character counts and the row is flagged `estimated`.
 ## Activity monitor
 
 Off by default. Turn it on in the **Activity** panel (⌘9), where each signal is a
-separate switch with a plain description of what it records, and a capability
-checklist prints the exact fix for any missing permission. Optional extras:
+separate switch with a plain description of what it records — or flip **Palantir
+mode** for one switch that records everything, with the redaction and
+“never record” filters down. Turning that mode off restores the settings it
+replaced rather than resetting to defaults.
+
+One script installs what can be installed and prints what is left to grant:
 
 ```bash
-cd backend && uv pip install -e '.[activity]'   # window titles + keystroke tap
-brew install ffmpeg                             # either audio signal
-brew install blackhole-2ch                      # system audio only
+./scripts/activity-setup.sh
 ```
 
-Then System Settings → Privacy & Security → Accessibility, enable the app, and
-restart it. In development the grant goes to **Electron**, not Personal OS.
+The panel's access checklist probes all six macOS permissions — Accessibility,
+Input Monitoring, Screen Recording, browser Automation, Microphone, Full Disk
+Access — says which signals each one gates, and offers a **Grant** button that
+asks macOS directly plus a deep link to the right Settings pane. Restart the app
+after granting: a keystroke tap created before the grant stays dead. In
+development the grants go to **Electron**, not Personal OS.
 
 Full design, privacy model, API and limits:
 [docs/activity-monitor.md](docs/activity-monitor.md).

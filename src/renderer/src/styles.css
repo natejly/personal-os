@@ -1413,6 +1413,29 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .act-fix { display: flex; align-items: flex-start; gap: 6px; margin: 4px 0 0 !important; padding: 5px 8px; border-radius: 6px; background: rgba(254,188,46,0.09); color: var(--warn) !important; font-size: 11px; }
 .act-fix svg { flex-shrink: 0; margin-top: 1px; }
 
+/* Access checklist: a missing optional row is amber, a blocking one is red, and every permission
+   row carries its macOS state so "denied" never hides behind a generic cross. */
+.act-caps li.warn > svg { color: var(--warn); opacity: 0.8; }
+.act-caps li.bad > svg { color: var(--danger); }
+.act-state-pill { margin-left: 6px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--border); font-size: 10px; color: var(--text-muted); vertical-align: 1px; }
+.act-state-pill.granted { color: var(--ok); border-color: rgba(70,167,88,0.4); }
+.act-state-pill.denied { color: var(--danger); border-color: rgba(229,72,77,0.4); }
+.act-state-pill.unasked, .act-state-pill.unknown { color: var(--warn); border-color: rgba(254,188,46,0.4); }
+.act-state-pill.opt { color: var(--text-faint); }
+.act-cap-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
+.ghost-btn.xs, .link.xs { font-size: 11px; padding: 2px 7px; }
+.primary-btn.sm { font-size: 12px; padding: 4px 9px; }
+.act-grant-all { display: flex; flex-direction: column; gap: 5px; padding: 0 12px 10px; }
+
+/* Palantir mode: the one control that turns protections off, so it looks like it. */
+.act-card.palantir { border-color: rgba(229,72,77,0.35); }
+.act-card.palantir.armed { border-color: var(--danger); background: rgba(229,72,77,0.05); }
+.act-card.palantir .act-card-head svg { color: var(--danger); }
+.act-palantir-body { display: flex; flex-direction: column; gap: 7px; padding: 0 12px 12px; }
+.act-palantir-body > button { align-self: flex-start; margin-top: 3px; }
+.act-palantir-confirm { padding: 9px 10px; border: 1px solid rgba(229,72,77,0.4); border-radius: 8px; background: rgba(229,72,77,0.07); font-size: 12px; }
+.act-palantir-confirm p { margin: 0 0 7px; }
+
 .act-profile { padding: 0 12px 10px; font-size: 13px; color: var(--text-muted); }
 .act-profile h3 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); margin: 10px 0 4px; }
 .act-profile ul { margin: 0; padding-left: 18px; }

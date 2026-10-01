@@ -39,7 +39,7 @@ from . import cache as google_cache
 from .google import Google, GoogleNotConnected, json_safe
 from .jobs import (KINDS, PROPOSAL_STATUSES, Jobs, Proposals, Scheduler, local_tz_name, spent, valid_cron,
                    valid_tz)
-from . import skillbuild
+from . import meeting_import, skillbuild
 from .mcp_client import McpClient, McpError
 from .mcp_servers import MODES as MCP_MODES, RESERVED_PREFIX as MCP_PREFIX, SCOPES as MCP_SCOPES, McpServers
 from .meeting_recorder import RecorderBusy
@@ -4094,6 +4094,7 @@ class MeetingConfigIn(BaseModel):
     vadMinSpeechRatio: float | None = None
     hallucinationFilter: bool | None = None
     whisperVadModelPath: str | None = None
+    maxImportSeconds: int | None = None
 
 
 class MeetingActionsIn(BaseModel):
@@ -4277,6 +4278,47 @@ async def stop_meeting(id: str) -> dict[str, Any]:
     if not m:
         raise HTTPException(404)
     return m
+
+
+@app.post("/meetings/{id}/import-audio", status_code=202)
+async def import_meeting_audio(id: str, file: UploadFile = File(...)) -> dict[str, Any]:
+    """Transcribe an existing recording into this meeting. 202: the work runs in the background and
+    the existing /meetings/{id}/segments poll carries progress."""
+    try:
+        meeting_import.check(meeting_svc, id)
+    except LookupError as e:
+        raise HTTPException(404) from e
+    except MeetingBlocked as e:
+        raise HTTPException(409, {"blockers": e.blockers}) from e
+    except meeting_import.ImportRefused as e:
+        raise HTTPException(409, str(e)) from e
+    tmp = db.data_dir / "tmp"
+    tmp.mkdir(parents=True, exist_ok=True)
+    dest = tmp / f"import-{new_id()}-{meeting_import.safe_name(file.filename or '')}"
+    size, cap = 0, 1 << 30
+    try:
+        with dest.open("wb") as out:
+            while chunk := await file.read(1 << 20):
+                size += len(chunk)
+                if size > cap:
+                    raise HTTPException(413, "That file is over the 1 GiB import limit.")
+                out.write(chunk)
+        await asyncio.to_thread(meeting_import.probe, dest, meeting_svc.config())
+    except ValueError as e:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(400, str(e)) from e
+    except BaseException:
+        dest.unlink(missing_ok=True)
+        raise
+
+    async def _go() -> None:
+        try:
+            await meeting_import.run(meeting_svc, id, dest, cleanup_src=True)
+        except Exception as e:  # noqa: BLE001 - the run already put the reason on the meeting
+            logging.getLogger("personal_os").warning("meeting import %s: %s", id, e)
+
+    asyncio.ensure_future(_go())
+    return meeting_store.get(id) or {}
 
 
 @app.post("/meetings/{id}/pause")

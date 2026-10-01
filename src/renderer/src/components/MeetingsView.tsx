@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   AlertTriangle, Columns2, Copy, GitCompare, ListChecks, Mic, PanelLeftOpen, RefreshCw,
-  Sparkles, Trash2, Search, Speaker, X
+  Sparkles, Trash2, Search, Speaker, Upload, X
 } from 'lucide-react'
 import { useStore, type Scope } from '../store'
+import { api } from '../lib/api'
 import type { Meeting } from '@shared/types'
 import MarkdownEditor from './MarkdownEditor'
 import MarkdownPreview from './MarkdownPreview'
@@ -165,6 +166,26 @@ export default function MeetingsView(): JSX.Element {
   const [reviewMode, setReviewMode] = useState<'compare' | 'diff'>('compare')
   const [dropped, setDropped] = useState<Record<string, boolean>>({})
 
+  const importRef = useRef<HTMLInputElement>(null)
+  const [importing, setImporting] = useState(false)
+  // Upload, then poll the meeting until the background import settles; the segments fill in as it goes.
+  const importAudio = async (id: string, file: File): Promise<void> => {
+    setImporting(true)
+    try {
+      await api.meetings.importAudio(id, file)
+      for (let i = 0; i < 1200; i++) {
+        await openMeeting(id)
+        if (useStore.getState().activeMeeting?.status !== 'transcribing') break
+        await new Promise((r) => setTimeout(r, 3000))
+      }
+      await refreshMeetings()
+    } catch (e) {
+      toast((e as Error).message, 'error')
+    } finally {
+      setImporting(false)
+    }
+  }
+
   const scope: Scope = libraryScope
   useEffect(() => { void refreshMeetings(query) }, [refreshMeetings, query, scope])
   // Anything still buffered belongs on disk before this view goes away.
@@ -239,6 +260,16 @@ export default function MeetingsView(): JSX.Element {
                   title={recorderOff ? OFF_TITLE : undefined} onClick={() => void startRecording(m.id)}>
                   <Mic size={13} /> Record
                 </button>
+              )}
+              {['scheduled', 'notes_only', 'ready'].includes(m.status) && liveId === '' && m.segment_count === 0 && (
+                <>
+                  <input ref={importRef} type="file" accept="audio/*,video/*" hidden
+                    onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) void importAudio(m.id, f) }} />
+                  <button className="ghost-btn" disabled={meetingBusy || importing} title="Transcribe an existing recording into this meeting"
+                    onClick={() => importRef.current?.click()}>
+                    <Upload size={13} /> {importing ? 'Importing…' : 'Import audio'}
+                  </button>
+                </>
               )}
               <button className={`icon-btn ghost ${transcriptOpen ? 'on' : ''}`} title={`Transcript (${m.segment_count} clip${m.segment_count === 1 ? '' : 's'})`}
                 onClick={() => setTranscriptOpen((t) => !t)}>

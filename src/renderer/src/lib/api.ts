@@ -511,7 +511,13 @@ export const api = {
       req<MeetingActionItem[]>(`/meetings/${id}/actions/add-todos`, { method: 'POST', body: json({ ids, project_id: projectId ?? null }) }),
     dismissAction: (id: string, actionId: string) => req<MeetingActionItem>(`/meetings/${id}/actions/${actionId}/dismiss`, { method: 'POST' }),
     retranscribe: (id: string, limit = 20) => req<{ settled: number; meeting: FullMeeting }>(`/meetings/${id}/retranscribe?limit=${limit}`, { method: 'POST' }),
-    deleteAudio: (id: string) => req<FullMeeting>(`/meetings/${id}/audio`, { method: 'DELETE' })
+    deleteAudio: (id: string) => req<FullMeeting>(`/meetings/${id}/audio`, { method: 'DELETE' }),
+    /** Transcribe an existing recording into this meeting. 202: progress arrives through the segments poll. */
+    importAudio: (id: string, file: File) => {
+      const fd = new FormData()
+      fd.append('file', file)
+      return req<FullMeeting>(`/meetings/${id}/import-audio`, { method: 'POST', body: fd })
+    }
   },
   notes: {
     list: (s: Scope = 'all', q = '') => req<Note[]>(`/notes?project_id=${encodeURIComponent(s)}&q=${encodeURIComponent(q)}`),

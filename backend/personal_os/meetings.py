@@ -196,6 +196,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "vadMinSpeechRatio": 0.03,
     "hallucinationFilter": True,
     "whisperVadModelPath": "",
+    "maxImportSeconds": 14400,  # longest audio file an import will accept
 }
 
 # `patch` is the user's door into a meeting. Everything the recorder owns - started_at,
@@ -595,6 +596,14 @@ class Meetings:
             c.execute("UPDATE meetings SET status='recording', started_at=?, audio_dir=?, sources=?, "
                       " ended_at=NULL, updated_at=? WHERE id=?",
                       (t, audio_dir, json.dumps([s for s in sources if s in SOURCES]), now(), id))
+        return self.get(id)
+
+    def mark_import(self, id: str, audio_dir: str, started_at: float) -> dict[str, Any] | None:
+        """The import twin of mark_started: the file's clock, source 'import', transcribing until done."""
+        with self.db.tx() as c:
+            c.execute("UPDATE meetings SET status='transcribing', started_at=?, audio_dir=?, sources=?, "
+                      " ended_at=NULL, updated_at=? WHERE id=?",
+                      (started_at, audio_dir, json.dumps(["import"]), now(), id))
         return self.get(id)
 
     def finalize(self, id: str, transcript: str, *, ended_at: float | None = None,

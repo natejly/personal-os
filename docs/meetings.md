@@ -332,11 +332,20 @@ literal sub-paths are all registered *above* `/meetings/{id}`, or
 `/meetings/status` would resolve as a meeting id and 404 — so a new route appended
 to the bottom of the group is a silent break, not a compile error.
 
-Two things deliberately absent: there is no `POST /meetings/adopt` (a repeat
+One thing deliberately absent: there is no `POST /meetings/adopt` (a repeat
 `POST /meetings` with the same `calendar_event_id` is find-or-create, which is the
-same thing), and no `POST /meetings/{id}/import-audio` — uploading a pre-recorded
-file is the right degradation path on a machine with no loopback device and the
-schema already carries the `import` channel, but it is a later slice.
+same thing).
+
+`POST /meetings/{id}/import-audio` (multipart `file`, 202) transcribes an existing
+recording into a meeting that has no segments yet, on any platform. The upload is
+streamed to `<data_dir>/tmp` (1 GiB cap), probed (`maxImportSeconds`, default 14400,
+else 400), cut by ffmpeg into the live 20 s wav scheme and drained by the same
+`TranscribeWorker` as `import`-channel segments on the file's own clock, then the
+transcript is rolled up, the meeting goes `ready` and enhance is queued when
+`enhanceOnStop` is on. It needs the same `consentedAt` as recording (409 with the
+consent blocker), and refuses a meeting that is recording or already has segments.
+Failures behave like live ones: the wav is kept and Retranscribe replays it.
+Logic lives in `meeting_import.py`; progress is the existing segments poll.
 
 In the UI: the **Meetings** view (⌘⇧M, or the sidebar row), an **Upcoming
 meetings** card on Today, and a live-recording indicator in the sidebar visible

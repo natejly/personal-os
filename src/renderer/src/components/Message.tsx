@@ -19,7 +19,7 @@ const MessageView = memo(function MessageView({ message, streaming }: { message:
       <div className="avatar">{isUser ? <User size={14} /> : <Sparkles size={14} />}</div>
       <div className="bubble">
         {isUser ? (
-          <div className="user-text">{message.content}</div>
+          <div className="user-bubble"><div className="user-text">{message.content}</div></div>
         ) : (
           <div className="markdown">
             {message.tool_events && message.tool_events.length > 0 && <ToolEvents events={message.tool_events} conversationId={message.conversation_id} />}

@@ -68,10 +68,13 @@ class ToolSpec:
                  examples: list[dict[str, Any]] | None = None, taints: bool = False):
         self.name, self.description, self.parameters, self.fn, self.group, self.danger = name, description, parameters, fn, group, danger
         self.examples, self.taints = examples or [], taints
+        self.default: str | None = None  # overrides the danger tier's default mode (shell_run is `executes` but asks)
+        # args -> True when this particular call must ask whatever the mode says (shell_run's escape from the sandbox)
+        self.force_ask: Callable[[dict[str, Any]], bool] | None = None
 
     @property
     def default_mode(self) -> str:
-        return DEFAULT_MODE.get(self.danger, "on")
+        return self.default or DEFAULT_MODE.get(self.danger, "on")
 
     def schema(self) -> dict[str, Any]:
         d = self.description
@@ -425,6 +428,8 @@ class Toolbox:
         if artifacts is not None:
             from . import artifact_tools
             artifact_tools.register(self, artifacts)
+        from . import shell
+        shell.register(self)
 
     def _google_ok(self) -> bool:
         return bool(self.google and self.google.status()["connected"])
@@ -510,10 +515,17 @@ class Toolbox:
         """True if a proposal-only run must record this call instead of making it."""
         return bool((s := self.specs.get(name)) and s.danger in PROPOSAL_ONLY_DANGER)
 
-    def gate(self, name: str, mode: str, ctx: dict[str, Any]) -> str:
+    def forces_ask(self, name: str, args: dict[str, Any]) -> bool:
+        """True when this call, with these arguments, may never run without a card (and no standing grant buys it off)."""
+        spec = self.specs.get(name)
+        return bool(spec and spec.force_ask and spec.force_ask(args))
+
+    def gate(self, name: str, mode: str, ctx: dict[str, Any], args: dict[str, Any] | None = None) -> str:
         """Effective mode for one call. Untrusted content in the run forces every external tool to ask."""
         spec = self.specs.get(name)
         if spec and spec.danger == "external" and mode == "on" and ctx.get("tainted"):
+            return "ask"
+        if mode == "on" and args is not None and self.forces_ask(name, args):
             return "ask"
         return mode
 
@@ -761,11 +773,17 @@ class Toolbox:
             examples=[{"url": "https://example.com/blog/post"}, {"url": "https://en.wikipedia.org/wiki/SQLite", "max_chars": 20000},
                       {"url": "https://example.com/pricing", "focus": "enterprise pricing"}, {"url": "https://example.com/report.pdf", "offset": 12000}], taints=True))
 
-        async def run_python_tool(ctx: dict[str, Any], code: str, timeout: int = 30) -> Any:
+        async def run_python_tool(ctx: dict[str, Any], code: str, timeout: int = 30, tools: list[str] | None = None) -> Any:
+            if tools:  # programmatic tool calling: the script drives app tools over a socket (toolbridge.py)
+                from . import toolbridge
+                return await toolbridge.run(self, ctx, code, timeout, list(tools), run_python)
             return await asyncio.to_thread(run_python, code, max(1, min(int(timeout), 120)))
         R("run_python", ToolSpec("run_python", "Run a Python 3 script in an isolated sandbox and return stdout/stderr. No network, no subprocesses, and writes only inside the temp working directory (CPU/memory/time limits apply). Use for calculations, data wrangling, quick prototypes. Print what you want to see. numpy and matplotlib are installed: any figure saved with plt.savefig('name.png') is shown to the user inline (prefer a ```chart block for simple bar/line/pie charts of small data; use matplotlib for anything it can't express).",
-            _obj({"code": {"type": "string"}, "timeout": {"type": "integer", "default": 30}}, ["code"]), run_python_tool, "code", "executes",
+            _obj({"code": {"type": "string"}, "timeout": {"type": "integer", "default": 30},
+                  "tools": {"type": "array", "items": {"type": "string"}, "description": "App tools the script may call as grain_tools.call(name, **args) (import grain_tools). Allowed: fs_glob, fs_grep, read_local_file, fs_edit, search_documents, web_search, fetch_url. Each call is gated like your own: off tools are refused, ask tools wait for the user. At most 50 calls and 300s; only what the script prints comes back."}},
+                 ["code"]), run_python_tool, "code", "executes",
             examples=[{"code": "print(sum(1 / n**2 for n in range(1, 10000)))"},
+                      {"code": "import grain_tools\nr = grain_tools.call('search_documents', query='TODO')\nprint(r)", "tools": ["search_documents"], "timeout": 120},
                       {"code": "import matplotlib\nmatplotlib.use('Agg')\nimport matplotlib.pyplot as plt\nplt.plot([1, 4, 9])\nplt.savefig('squares.png')", "timeout": 60}]))
 
         async def current_time(ctx: dict[str, Any]) -> Any:

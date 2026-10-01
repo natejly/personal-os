@@ -66,6 +66,7 @@ RESERVED_TOOL_NAMES = frozenset({
     "meeting_list", "meeting_search", "meeting_read",
     "desk_list_files", "desk_read_file", "desk_write_file", "desk_trash_file",
     "desk_deliver", "desk_ask", "desk_done", "desk_import_sandbox",
+    "shell_run", "shell_poll", "shell_kill",
 })
 
 SCHEMA = """

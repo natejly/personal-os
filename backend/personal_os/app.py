@@ -403,7 +403,7 @@ def _mcp_tooling(project_id: str | None, conversation_id: str | None) -> tuple[d
     return modes, schemas
 
 
-def _gate(name: str, mode: str, ctx: dict[str, Any]) -> str:
+def _gate(name: str, mode: str, ctx: dict[str, Any], args: dict[str, Any] | None = None) -> str:
     """Effective mode for one call. Untrusted content in the run forces every external tool to ask.
 
     Every MCP tool is `external` by construction (mcp_client.MCP_DANGER), so the taint rule the
@@ -411,7 +411,7 @@ def _gate(name: str, mode: str, ctx: dict[str, Any]) -> str:
     """
     if mcp_is(name):
         return "ask" if mode == "on" and ctx.get("tainted") else mode
-    return toolbox.gate(name, mode, ctx)
+    return toolbox.gate(name, mode, ctx, args)
 
 
 async def _mcp_call(slug: str, args: dict[str, Any]) -> dict[str, Any]:
@@ -1154,6 +1154,48 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     # slugs are in `modes`, so a call to an unloaded one is off -> denied, never run.
     mcp_defer = mcp_search.should_defer(len(mcp_schemas), int(cfg.get("mcpDeferAbove", 12) or 0))
     tool_ctx["mcp_loaded"] = set()
+    tool_ctx["modes"] = modes  # the live map: run_python's tool bridge resolves a script's calls against it
+    bridge_n = 0
+
+    async def _bridge_approve(name: str, args: dict[str, Any], forced: bool) -> bool:
+        """A card for one call a run_python script made through the tool bridge. The script waits; the reply does not
+        end. One-shot only: an 'always' answer is treated as 'allow' here, never as a standing grant."""
+        nonlocal bridge_n
+        if run is None or run.store is None:
+            return False
+        bridge_n += 1
+        uid = f"{am['id']}:bridge{bridge_n}"
+        fut: asyncio.Future = asyncio.get_event_loop().create_future()
+        _approvals[uid] = fut
+        spec = toolbox.specs.get(name)
+        run.store.open_approval(uid, run.run_id, name, args, conversation_id=conv_id, message_id=am["id"], forced=forced,
+                                desk_id=run.desk_id, danger=spec.danger if spec else "external")
+        run.publish("tool_call", {"message_id": am["id"], "id": uid, "name": name, "arguments": args,
+                                  "needs_approval": True, "forced": forced, "proposal": None, "plan": None})
+        decision = "deny"
+        try:
+            while not fut.done():
+                if stop.is_set():
+                    run.store.decide(uid, "deny", by="stop")
+                    fut.set_result("deny")
+                    break
+                try:
+                    await asyncio.wait_for(asyncio.shield(fut), timeout=2)
+                except asyncio.TimeoutError:
+                    row = run.store.approval(uid)
+                    if row and row["status"] != "pending" and not fut.done():
+                        fut.set_result(row["decision"])
+            decision = fut.result() if fut.done() else "deny"
+        finally:
+            _approvals.pop(uid, None)
+        allowed = decision in ("allow", "always_chat", "always_global")
+        run.publish("tool_result", {"message_id": am["id"], "id": uid, "name": name, "arguments": args,
+                                    "result_preview": "", "duration_ms": 0,
+                                    "error": None if allowed else "Declined by the user", "approval": "allow" if allowed else "deny",
+                                    "forced": forced})
+        return allowed
+
+    tool_ctx["bridge_approve"] = _bridge_approve
     if mcp_defer:
         _mcp_names = {s["id"]: s["name"] for s in mcp_store.servers()}
         tool_ctx["mcp_catalog"] = lambda: [{**t, "server": _mcp_names.get(t["server_id"], "MCP")}
@@ -1351,6 +1393,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 mspan = tracer.start("compact", "Clear old tool results", {"kind": "micro"}, parent=cspan)
                 tracer.end(mspan, {"cleared": n_cleared, "tokens_saved": n_saved})
                 yield "span", {"message_id": am["id"], "span": mspan}
+            for _note in toolbox.shell.drain_notes(conv_id):  # a background shell job finished since the last round
+                messages.append({"role": "system", "content": _note})
             _reinject_plan()  # last message in the context, after the previous round's tool results
             lspan = tracer.start("llm", model, {"round": _round, "messages": len(messages), "tools": len(tool_schemas)})
             round_span = lspan  # the tool calls below nest under it
@@ -1434,8 +1478,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 raw_mode = modes.get(c["name"], "off")
                 spec = toolbox.specs.get(c["name"])
                 danger = spec.danger if spec else "safe"
-                mode = _gate(c["name"], raw_mode, tool_ctx)
-                forced = mode != raw_mode  # untrusted content in this reply upgraded on -> ask
+                mode = _gate(c["name"], raw_mode, tool_ctx, args)
+                # untrusted content in this reply upgraded on -> ask; so does a call that may never run unasked
+                # (shell_run outside its sandbox), which no standing grant can then buy off
+                forced = mode != raw_mode or (mode == "ask" and toolbox.forces_ask(c["name"], args))
                 blocked_reason: str | None = None
                 # ---- plan mode, in priority order. Each rule can only ever make a call ask or stop;
                 # none of them can turn a card off, so this is a narrowing of the gate above.
@@ -1740,6 +1786,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             yield "span", {"message_id": am["id"], "span": s}
     finally:
         _active.pop(am["id"], None)
+        if not desk_id:  # a chat's background shell jobs end with its run; a desk's outlive a turn (they wake it)
+            await toolbox.shell.kill_conversation(conv_id)
 
     text = "".join(buf).strip()
     reasoning = "".join(rbuf).strip() or None
@@ -1960,6 +2008,19 @@ def _wake_desk(desk_id: str) -> Run | None:
     if not desk or desk["status"] not in RESUME_FROM:
         return None
     return _launch_desk(desk_id, DESK_RESUME if desk["status"] == "interrupted" else DESK_CONTINUE, RESUME_FROM)
+
+
+def _shell_wake(conversation_id: str | None) -> None:
+    """A background shell job finished in a desk that has no run going: wake it so it reads the result."""
+    desk = desks.by_conversation(conversation_id) if conversation_id else None
+    if not desk or bus.live(desk["conversation_id"]) or desk["status"] not in (*RESUME_FROM, "done"):
+        return
+    notes = toolbox.shell.drain_notes(conversation_id)
+    if notes:
+        _launch_desk(desk["id"], "\n\n".join(notes), (*RESUME_FROM, "done"))
+
+
+toolbox.shell.on_note = _shell_wake
 
 
 @app.post("/conversations/{id}/chat")
@@ -3005,6 +3066,7 @@ async def _shutdown() -> None:
     await meeting_bus.shutdown()
     shutil.rmtree(db.data_dir / "tmp", ignore_errors=True)
     await asyncio.to_thread(sandboxes.shutdown)  # after the runs: a live sandbox_exec would just see its container vanish
+    await toolbox.shell.shutdown()  # host shell jobs: SIGTERM then SIGKILL to each group
 
 
 # ---------------- Google integration ----------------

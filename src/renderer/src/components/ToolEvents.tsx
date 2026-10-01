@@ -7,6 +7,10 @@ import { api } from '../lib/api'
 import { useStore } from '../store'
 import DiffView from './DiffView'
 import PlanApproval from './PlanApproval'
+import { describeCall } from '../lib/toolDisplay'
+import { GenericApproval, GenericBody } from './toolcards/GenericCard'
+// Importing the index registers every dedicated card (TaskCard, FileCard, and whatever other workstreams add).
+import { TOOL_CARDS } from './toolcards'
 // The ask card mounts inline in a chat bubble, so it needs the sheet the desk panes use.
 import '../styles/cowork.css'
 import '../styles/docs.css'
@@ -29,22 +33,6 @@ const ICONS: Record<string, JSX.Element> = {
   run_python: <Terminal size={13} />, current_time: <Clock size={13} />,
   sandbox_exec: <Terminal size={13} />, sandbox_write_file: <Terminal size={13} />, sandbox_read_file: <Terminal size={13} />,
   sandbox_list_files: <Terminal size={13} />, sandbox_put_document: <Terminal size={13} />, sandbox_reset: <Terminal size={13} />
-}
-
-function summary(t: ToolEvent): string {
-  const a = t.arguments ?? {}
-  if (t.name === 'doc_edit') {
-    const s = String(a.summary || a.doc || '')
-    return s.length > 90 ? s.slice(0, 90) + '…' : s
-  }
-  if (t.name === 'propose_plan') {
-    const steps = Array.isArray(a.steps) ? a.steps : []
-    const title = typeof a.title === 'string' && a.title ? a.title : steps.map((s) => (s as { tool?: string })?.tool ?? '?').join(', ')
-    return `${steps.length} ${steps.length === 1 ? 'action' : 'actions'}${title ? ` · ${title}` : ''}`.slice(0, 90)
-  }
-  const first = a.query ?? a.url ?? a.command ?? a.path ?? a.name ?? a.entity ?? a.content ?? a.document_id ?? (a.code ? String(a.code).split('\n')[0] : '') ?? ''
-  const s = String(first ?? '')
-  return s.length > 90 ? s.slice(0, 90) + '…' : s
 }
 
 /** The read-back verdict the backend put on the result (verify.py). It rides in result_preview,
@@ -137,13 +125,6 @@ function DocEditDiff({ preview }: { preview: string }): JSX.Element | null {
   )
 }
 
-function pretty(v: unknown): string {
-  if (typeof v === 'string') {
-    try { return JSON.stringify(JSON.parse(v), null, 2) } catch { return v }
-  }
-  return JSON.stringify(v, null, 2)
-}
-
 /**
  * `desk_ask`: the agent stopped and wants an answer. The call is gated as a card (plans.decide_call
  * rule 2), so the tool body — the thing that writes `desks.question` and moves the desk to Needs you
@@ -200,15 +181,23 @@ function AskAnswer({ callId, question, context, conversationId }: {
 export default function ToolEvents({ events, conversationId }: { events: ToolEvent[]; conversationId: string }): JSX.Element {
   const [open, setOpen] = useState<Record<string, boolean>>({})
   const approveTool = useStore((s) => s.approveTool)
+  const decideFor = (t: ToolEvent) => async (approve: boolean, edited?: Record<string, unknown>): Promise<void> =>
+    approveTool(t.id, approve ? 'allow' : 'deny', conversationId, edited ? { arguments: edited } : undefined)
   return (
     <div className="tool-events">
-      {events.map((t) => (
+      {events.map((t) => {
+        // A dedicated card owns the whole call, pending and finished. It renders from the event alone, so a
+        // reload (events replayed from the persisted run) shows the same card. propose_plan / desk_ask stay special.
+        const Card = t.name !== 'propose_plan' && t.name !== 'desk_ask' ? TOOL_CARDS[t.name] : undefined
+        if (Card) return <Card key={t.id} event={t} pending={!!t.pending && !!t.needs_approval} decide={decideFor(t)} />
+        const d = describeCall(t.name, t.arguments)
+        return (
         <div key={t.id} className={`tool-event ${t.pending ? 'pending' : ''} ${t.error ? 'error' : ''}`}>
           <button className="tool-head" onClick={() => setOpen((o) => ({ ...o, [t.id]: !o[t.id] }))}>
             <ChevronRight size={12} className={open[t.id] ? 'rot90' : ''} />
             <span className="tool-icon">{ICONS[t.name] ?? <Wrench size={13} />}</span>
-            <span className="tool-name">{t.name.replace(/_/g, ' ')}</span>
-            <span className="tool-summary">{summary(t)}</span>
+            <span className="tool-name human">{d.verb}</span>
+            <span className="tool-summary">{d.subject}</span>
             <Verdict event={t} />
             {t.plan ? (
               <span className="tag plan" title={`Approved in the plan "${t.plan.title || 'untitled'}" (step ${t.plan.idx + 1})`}>in plan</span>
@@ -234,25 +223,12 @@ export default function ToolEvents({ events, conversationId }: { events: ToolEve
               context={String((t.arguments as { context?: unknown }).context ?? '') || undefined} />
           )}
           {t.pending && t.needs_approval && t.name !== 'propose_plan' && t.name !== 'desk_ask' && (
-            <div className="approval">
-              <div className="approval-text"><b>{t.name.replace(/_/g, ' ')}</b> wants to run. This acts outside the app.</div>
-              <pre className="approval-args">{pretty(t.arguments)}</pre>
-              <div className="approval-actions">
-                <button className="primary-btn" onClick={() => void approveTool(t.id, 'allow', conversationId)}>Allow once</button>
-                <button className="ghost-btn" onClick={() => void approveTool(t.id, 'always_chat', conversationId)}>Always in this chat</button>
-                <button className="ghost-btn" onClick={() => void approveTool(t.id, 'always_global', conversationId)}>Always</button>
-                <button className="ghost-btn danger" onClick={() => void approveTool(t.id, 'deny', conversationId)}>Deny</button>
-              </div>
-            </div>
+            <GenericApproval event={t} decide={async (ok) => decideFor(t)(ok)} grant={(g) => approveTool(t.id, g, conversationId)} />
           )}
-          {open[t.id] && (
-            <div className="tool-body">
-              <div className="tool-col"><h6>Arguments</h6><pre>{pretty(t.arguments)}</pre></div>
-              <div className="tool-col"><h6>{t.error ? 'Error' : 'Result'}</h6><pre>{t.pending ? 'Running…' : pretty(t.error ?? t.result_preview)}</pre></div>
-            </div>
-          )}
+          {open[t.id] && <GenericBody event={t} />}
         </div>
-      ))}
+        )
+      })}
     </div>
   )
 }

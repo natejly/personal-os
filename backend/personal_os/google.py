@@ -73,6 +73,7 @@ TTL = {
     "calendar_events": 60,      # the week grid: refetched on every mount and week step
     "calendar_event": 30,       # one event, opened in the editor
     "gmail_list": 60,           # a thread list costs 1 + N batched gets
+    "gmail_threads": 120,       # recent threads for the reply tracker: 1 + N batched gets
     "gmail_message": 15 * 60,   # a fetched body never changes
     "gmail_labels": 10 * 60,
     "tasks_lists": 10 * 60,
@@ -566,6 +567,34 @@ class Google:
         batch = svc.new_batch_http_request(callback=_cb)
         for mid in ids:
             batch.add(svc.users().messages().get(userId="me", id=mid, format="metadata", metadataHeaders=["From", "Subject", "Date"]))
+        batch.execute()
+        return [by_id[i] for i in ids if i in by_id]
+
+    def _me(self) -> str | None:
+        """The connected address, from the token settings already held (no API call)."""
+        return ((self.get_settings().get("googleToken") or {}).get("email") or None)
+
+    @cached("gmail", TTL["gmail_threads"])
+    def gmail_threads_recent(self, query: str = "newer_than:14d -category:promotions -category:social -in:spam", max_threads: int = 40) -> list[dict[str, Any]]:
+        """Recent threads as metadata only (headers plus snippet, never bodies), messages oldest to newest."""
+        svc = self._svc("gmail", "v1")
+        res = svc.users().threads().list(userId="me", q=query, maxResults=max(1, min(int(max_threads), 100))).execute()
+        ids = [t["id"] for t in res.get("threads") or []]
+        if not ids:
+            return []
+        by_id: dict[str, dict[str, Any]] = {}
+
+        def _cb(_request_id: str, response: Any, exception: Exception | None) -> None:
+            if exception or not isinstance(response, dict):
+                if exception:
+                    log.warning("gmail thread batch get failed: %s", exception)
+                return
+            if response.get("id"):
+                by_id[response["id"]] = _gmail_thread_meta(response)
+
+        batch = svc.new_batch_http_request(callback=_cb)
+        for tid in ids:
+            batch.add(svc.users().threads().get(userId="me", id=tid, format="metadata", metadataHeaders=_THREAD_HEADERS))
         batch.execute()
         return [by_id[i] for i in ids if i in by_id]
 
@@ -1138,6 +1167,27 @@ def _gmail_meta(msg: dict[str, Any]) -> dict[str, Any]:
         "snippet": msg.get("snippet"), "unread": "UNREAD" in (msg.get("labelIds") or []),
         "labels": msg.get("labelIds") or [],
     }
+
+
+_THREAD_HEADERS = ["From", "To", "Cc", "Subject", "Date", "List-Unsubscribe", "Auto-Submitted", "Precedence"]
+
+
+def _gmail_thread_meta(thread: dict[str, Any]) -> dict[str, Any]:
+    msgs: list[dict[str, Any]] = []
+    for m in thread.get("messages") or []:
+        h = {x["name"].lower(): x["value"] for x in m.get("payload", {}).get("headers", [])}
+        auto = (bool(h.get("list-unsubscribe")) or (h.get("precedence") or "").strip().lower() in ("bulk", "list", "junk")
+                or (h.get("auto-submitted") or "no").strip().lower() != "no")
+        date = _rfc2822_iso(h.get("date"))
+        if not date and m.get("internalDate"):
+            date = dt.datetime.fromtimestamp(int(m["internalDate"]) / 1000, dt.timezone.utc).isoformat()
+        msgs.append({"id": m.get("id"), "from": h.get("from"), "to": h.get("to"), "cc": h.get("cc"), "date": date,
+                     "labels": m.get("labelIds") or [], "snippet": m.get("snippet") or "", "auto": auto, "_subject": h.get("subject")})
+    msgs.sort(key=lambda m: m["date"] or "")
+    subject = next((m["_subject"] for m in msgs if m["_subject"]), "") or ""
+    for m in msgs:
+        m.pop("_subject", None)
+    return {"thread_id": thread.get("id"), "subject": subject, "messages": msgs}
 
 
 def _local_tz() -> str:

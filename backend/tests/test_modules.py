@@ -42,7 +42,8 @@ class ToolTests(unittest.TestCase):
         i = names.index("todo_list")
         self.assertEqual(names[i:i + 4], TODO_TOOLS)
         self.assertEqual(names[i - 1], "read_tool_result")  # last of the working-memory block
-        self.assertEqual(names[i + 4], "board_list")
+        # Later modules (mailwatch, ...) register their tools right after the todo ones.
+        self.assertEqual([n for n in names[i + 4:] if n not in ("mail_followups", "schedule_suggest")][0], "board_list")
 
     def test_tool_metadata_unchanged(self) -> None:
         for n in TODO_TOOLS:

@@ -1952,3 +1952,21 @@ export interface MeetingStreamEvent {
   event: 'segment' | 'status' | 'error' | 'revision' | 'end'
   data: unknown
 }
+
+/** Reply tracker row (`/mail/watch`): who owes whom an answer. */
+export interface MailWatchThread {
+  thread_id: string
+  subject: string
+  status: 'to_reply' | 'awaiting_reply' | 'fyi' | 'actioned'
+  reason: string
+  last_from: string
+  last_date: string | null
+  age_days: number
+  dismissed: number
+  followup_todo_id: string | null
+}
+export interface MailWatchList {
+  threads: MailWatchThread[]
+  counts: { to_reply: number; awaiting_reply_overdue: number }
+  followups: { thread_id: string; title: string; notes: string; due: string }[]
+}

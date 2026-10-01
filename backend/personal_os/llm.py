@@ -103,6 +103,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # todos -> Google Calendar mirror; defaults in todocal.DEFAULT_CONFIG, patched through
     # /integrations/google/todo-calendar.
     "googleTodoCalendar": {},
+    # Reply tracker (mailwatch.py); MailWatchModule.config() merges stored values over these defaults.
+    "mailWatch": {"enabled": True, "awaitingAfterDays": 3, "needsReplyAfterHours": 24, "useLLM": False,
+                  "query": "newer_than:14d -category:promotions -category:social", "proposeFollowups": True},
 }
 
 

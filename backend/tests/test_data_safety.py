@@ -9,6 +9,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
+import unittest.mock
 import zipfile
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -193,6 +194,14 @@ class BackupTests(unittest.TestCase):
         self.assertIsNone(backups.apply_pending_restore(self.d))
         self.assertIsNone(backups.pending_restore(self.d))
         Database(self.d)  # still opens
+
+    def test_failed_export_leaves_no_part_file_or_dest(self) -> None:
+        dest = self.d / "out.zip"
+        with unittest.mock.patch.object(backups, "human_export", side_effect=RuntimeError("boom")):
+            with self.assertRaises(RuntimeError):
+                backups.export_zip(self.d, dest)
+        self.assertFalse(dest.exists())
+        self.assertFalse((self.d / "out.zip.part").exists())
 
     def test_export_zip_contents(self) -> None:
         (self.d / "uploads" / "a.txt").write_text("uploaded")

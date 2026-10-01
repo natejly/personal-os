@@ -274,18 +274,25 @@ def export_zip(data_dir: Path, dest: Path) -> dict[str, Any]:
         snap = Path(td) / "grain.db"
         _vacuum_into(src, snap)
         part = dest.with_name(dest.name + ".part")
-        with zipfile.ZipFile(part, "w", zipfile.ZIP_DEFLATED) as z:
-            z.writestr("README.txt", _README)
-            z.write(snap, "grain.db")
-            for base, (md, js) in human_export(snap).items():
-                z.writestr(f"export/{base}.md", md)
-                z.writestr(f"export/{base}.json", json.dumps(js, indent=2, ensure_ascii=False))
-            up = data_dir / "uploads"
-            for f in sorted(up.rglob("*")) if up.exists() else []:
-                if f.is_file() and not f.is_symlink():
-                    z.write(f, f"uploads/{f.relative_to(up).as_posix()}")
-        os.replace(part, dest)
+        try:
+            _write_zip(part, snap, data_dir)
+            os.replace(part, dest)
+        finally:
+            part.unlink(missing_ok=True)  # only still there when the write failed
     return {"path": str(dest), "size": dest.stat().st_size}
+
+
+def _write_zip(part: Path, snap: Path, data_dir: Path) -> None:
+    with zipfile.ZipFile(part, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr("README.txt", _README)
+        z.write(snap, "grain.db")
+        for base, (md, js) in human_export(snap).items():
+            z.writestr(f"export/{base}.md", md)
+            z.writestr(f"export/{base}.json", json.dumps(js, indent=2, ensure_ascii=False))
+        up = data_dir / "uploads"
+        for f in sorted(up.rglob("*")) if up.exists() else []:
+            if f.is_file() and not f.is_symlink():
+                z.write(f, f"uploads/{f.relative_to(up).as_posix()}")
 
 
 # ---- scheduler + routes ----

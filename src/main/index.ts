@@ -1,5 +1,5 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron'
-import { existsSync } from 'fs'
+import { existsSync, statSync } from 'fs'
 import { join } from 'path'
 import { backendStatus, backendToken, backendUrl, startBackend, stopBackend } from './backend'
 import { registerBus } from './bus'
@@ -262,7 +262,12 @@ app.whenReady().then(async () => {
     const r = await dialog.showSaveDialog({ title: 'Export all data', defaultPath: join(app.getPath('documents'), `grain-export-${stamp}.zip`), filters: [{ name: 'Zip archive', extensions: ['zip'] }] })
     return r.canceled || !r.filePath ? null : r.filePath
   })
-  ipcMain.handle('data:reveal', async (_e, path: string) => !(await shell.openPath(String(path))))
+  // Folders only: openPath on a file or .app would run it.
+  ipcMain.handle('data:reveal', async (_e, path: string) => {
+    const p = String(path)
+    if (!existsSync(p) || !statSync(p).isDirectory()) return false
+    return !(await shell.openPath(p))
+  })
   // A staged restore is applied by the backend at its next start, so relaunching the whole app does it.
   ipcMain.handle('data:relaunch', () => { app.relaunch(); app.quit() })
   ipcMain.on('window:close-self', (e) => BrowserWindow.fromWebContents(e.sender)?.close())

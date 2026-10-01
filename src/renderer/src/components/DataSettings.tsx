@@ -13,10 +13,11 @@ import { KIND_LABEL, ago, formatBytes } from './dataFormat'
 export default function DataSettings(): JSX.Element {
   const toast = useStore((s) => s.toast)
   const [info, setInfo] = useState<DataOverview | null>(null)
+  const [loadError, setLoadError] = useState(false)
   const [busy, setBusy] = useState<'backup' | 'export' | null>(null)
 
   const refresh = useCallback(async (): Promise<void> => {
-    try { setInfo(await api.data.overview()) } catch (e) { toast((e as Error).message, 'error') }
+    try { setInfo(await api.data.overview()); setLoadError(false) } catch (e) { setLoadError(true); toast((e as Error).message, 'error') }
   }, [toast])
   useEffect(() => { void refresh() }, [refresh])
 
@@ -62,10 +63,10 @@ export default function DataSettings(): JSX.Element {
       <h3>Data</h3>
       <p className="muted">Everything Grain knows is one database plus your uploaded files, stored on this Mac. Grain snapshots it daily and before any update that changes its structure, and keeps the newest of each.</p>
 
-      <div className="send-hold">
+      <div className="data-row">
         <span className="toggle-text">
           <b>Last backup</b>
-          <small>{info ? (info.last_backup ? ago(info.last_backup) : 'No backup yet') : 'Loading…'}</small>
+          <small>{info ? (info.last_backup ? ago(info.last_backup) : 'No backup yet') : loadError ? 'Could not load' : 'Loading…'}</small>
         </span>
         <button className="ghost-btn" onClick={() => void backUp()} disabled={busy !== null}><History size={14} /> {busy === 'backup' ? 'Backing up…' : 'Back up now'}</button>
       </div>
@@ -78,11 +79,11 @@ export default function DataSettings(): JSX.Element {
       )}
 
       {info && info.backups.length > 0 && (
-        <ul className="plain-list" aria-label="Backups">
+        <ul className="data-list" aria-label="Backups">
           {info.backups.map((b) => {
             const when = new Date(b.created_at * 1000).toLocaleString()
             return (
-              <li key={b.name} className="toggle-row plain">
+              <li key={b.name} className="data-row">
                 <span className="toggle-text"><b>{when}</b><small>{KIND_LABEL[b.kind] ?? b.kind} · {formatBytes(b.size)}</small></span>
                 <button className="ghost-btn" onClick={() => void restore(b.name, when)}><RotateCcw size={14} /> Restore…</button>
               </li>
@@ -91,13 +92,13 @@ export default function DataSettings(): JSX.Element {
         </ul>
       )}
 
-      <div className="send-hold">
+      <div className="data-row">
         <span className="toggle-text"><b>Export all data</b><small>A zip with a full database copy, your uploads, and conversations, memories and documents as readable Markdown and JSON. It includes settings such as API keys, so keep it private.</small></span>
         <button className="ghost-btn" onClick={() => void exportAll()} disabled={busy !== null}><Download size={14} /> {busy === 'export' ? 'Exporting…' : 'Export all data…'}</button>
       </div>
 
       {info && (
-        <div className="send-hold">
+        <div className="data-row">
           <span className="toggle-text"><b>Data folder</b><small>{info.data_dir}</small></span>
           <button className="ghost-btn" onClick={() => void window.os.data.reveal(info.data_dir)}><FolderOpen size={14} /> Show in Finder</button>
         </div>

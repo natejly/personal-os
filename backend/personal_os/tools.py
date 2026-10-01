@@ -368,10 +368,11 @@ class Toolbox:
     def __init__(self, memories: Memories, graph: Graph, documents: Documents, settings_fn: Callable[[], dict[str, Any]], modules: list[Any] | None = None, google: Any = None, boards: Any = None,
                  sandboxes: Sandboxes | None = None, docs: Any = None, activity: Any = None, outbox: Any = None,
                  work_plans: Any = None, results: Any = None, skills: Any = None, jobs: Any = None,
-                 style: Any = None, meetings: Any = None, desks: Any = None, workspace: Any = None):
+                 style: Any = None, meetings: Any = None, desks: Any = None, workspace: Any = None, filesnap: Any = None):
         self.memories, self.graph, self.documents, self.settings = memories, graph, documents, settings_fn
         self.modules = modules or []  # feature modules (modules/); each registers its own tools
         self.google, self.boards, self.sandboxes, self.docs, self.activity = google, boards, sandboxes, docs, activity
+        self.filesnap = filesnap  # pre-image snapshots for local file writes (filesnap.py); None skips them
         self.outbox = outbox  # delayed Gmail send; gmail_send queues through it when it is wired up
         # The todo_write artifact (working.py), not the propose_plan approval record in the `plans` module.
         self.work_plans, self.results, self.skills = work_plans, results, skills
@@ -1717,15 +1718,37 @@ def _register_mac(self: Toolbox) -> None:
         return tool_error(f"{name}: {e}", field="path", expected="a path inside the home folder, outside ~/Library and hidden folders",
                           alternative=ALTERNATIVE[name], **extra)
 
+    async def _snapshot(op: str, path: str, ctx: dict[str, Any], to: str | None = None) -> dict[str, Any] | None:
+        return await asyncio.to_thread(self.filesnap.capture, op, path, ctx, to) if self.filesnap is not None else None
+
+    async def _with_undo(snap: dict[str, Any] | None, result: Any, path: str | None = None) -> Any:
+        """Attach the undo handle to a result that worked; forget the snapshot of one that did not."""
+        if snap is None or not isinstance(result, dict):
+            return result
+        sid = snap.get("snapshot_id")
+        if result.get("error"):
+            if sid:
+                await asyncio.to_thread(self.filesnap.discard, sid)
+            return result
+        if sid:
+            await asyncio.to_thread(self.filesnap.finalize, sid, path or result.get("path"))
+            return {**result, "undo": {"snapshot_id": sid}}
+        return {**result, "undo": {"snapshot_id": None, "reason": snap.get("reason")}}
+
     async def write_local_file(ctx: dict[str, Any], path: str, content: str, mode: str = "create") -> Any:
+        snap: dict[str, Any] | None = None
         try:
-            return await asyncio.to_thread(mac.write_local, path, content, mode)
+            snap = await _snapshot(mode, path, ctx)
+            return await _with_undo(snap, await asyncio.to_thread(mac.write_local, path, content, mode))
         except mac.LocalPathError as e:
+            await _with_undo(snap, {"error": "failed"})
             return _path_error("write_local_file", e, example={"path": "~/Desktop/summary.md", "content": "# Summary\n"})
         except ValueError as e:
+            await _with_undo(snap, {"error": "failed"})
             return tool_error(f"write_local_file: {e}", field="mode", expected="create, overwrite or append",
                               example={"path": "~/Desktop/notes.md", "content": "one more line\n", "mode": "append"})
         except OSError as e:
+            await _with_undo(snap, {"error": "failed"})
             return tool_error(f"write_local_file: {_first_line(e)}", field="path", alternative=ALTERNATIVE["write_local_file"])
     R("write_local_file", ToolSpec("write_local_file", "Write a text file on this Mac (notes, markdown, CSV, code). Home folder only; hidden folders and ~/Library are off limits. Default mode 'create' refuses to replace an existing file: pass 'overwrite' to replace it or 'append' to add to the end. Missing parent folders are created.",
         _obj({"path": {"type": "string", "description": "Absolute or ~/ path, e.g. ~/Desktop/notes.md"},
@@ -1735,11 +1758,15 @@ def _register_mac(self: Toolbox) -> None:
                   {"path": "~/Documents/log.md", "content": "\n2026-09-30: shipped\n", "mode": "append"}]))
 
     async def move_local_file(ctx: dict[str, Any], path: str, to: str) -> Any:
+        snap: dict[str, Any] | None = None
         try:
-            return await asyncio.to_thread(mac.move_local, path, to)
+            snap = await _snapshot("move", path, ctx, to)
+            return await _with_undo(snap, await asyncio.to_thread(mac.move_local, path, to))
         except mac.LocalPathError as e:
+            await _with_undo(snap, {"error": "failed"})
             return _path_error("move_local_file", e, example={"path": "~/Downloads/scan.pdf", "to": "~/Documents/Receipts/"})
         except OSError as e:
+            await _with_undo(snap, {"error": "failed"})
             return tool_error(f"move_local_file: {_first_line(e)}", field="to", alternative=ALTERNATIVE["move_local_file"])
     R("move_local_file", ToolSpec("move_local_file", "Move or rename a file or folder on this Mac. Give a folder as `to` to move it there keeping its name, or a full path to rename it. Refuses to replace anything that already exists.",
         _obj({"path": {"type": "string", "description": "What to move, usually from find_files"},

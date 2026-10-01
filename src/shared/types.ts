@@ -362,10 +362,12 @@ export interface ToolEvent {
   proposal?: string | null
   /** Set when this call's arguments matched an approved plan step, so it ran without its own card. */
   plan?: PlanStepRef | null
+  /** write_local_file / move_local_file: the pre-image kept so the user can undo it (id is null when too large to keep). */
+  undo?: { snapshot_id: string | null; reason?: string | null } | null
 }
 
 /** Why a reply stopped early: a budget axis, or the repetition breaker. */
-export type PartialReason = 'rounds' | 'tokens' | 'time' | 'cost' | 'loop'
+export type PartialReason = 'rounds' | 'tokens' | 'time' | 'cost' | 'loop' | 'stuck' | 'stuck_nudge'
 
 export type SpanKind = 'context' | 'llm' | 'tool' | 'learn'
 

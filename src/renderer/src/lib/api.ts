@@ -299,6 +299,8 @@ export const api = {
     const d = await req<{ run_id: string; resumable: boolean }>(`/runs/${rows[0].run_id}`)
     return { run_id: d.run_id, resumable: d.resumable }
   },
+  /** The user's Undo for a local file write or move. A 409 message is JSON `{reason, conflict}`; `force` overrides a conflict. */
+  restoreFileSnapshot: (id: string, force = false) => req<{ ok: boolean; path: string }>(`/file-snapshots/${id}/restore`, { method: 'POST', body: json({ force }) }),
   /** Starts a new run that continues an interrupted one. 409 with a reason when it cannot. */
   resumeRun: (runId: string) => req<ChatRunStarted>(`/runs/${runId}/resume`, { method: 'POST' }),
   /** Stops a run before its assistant message exists. Detaching the stream would only drop a viewer. */

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronRight, Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, AlertCircle, Laptop, Zap, ListChecks, PenLine, ShieldAlert, ShieldCheck,
   FolderOpen, FileText, FilePen, Trash2, PackageCheck, CircleHelp, CircleCheck,
-  Youtube, Github, Rss } from 'lucide-react'
+  Youtube, Github, Rss, Undo2 } from 'lucide-react'
 import type { DocRevision, ToolEvent, Verification } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore } from '../store'
@@ -197,6 +197,31 @@ function AskAnswer({ callId, question, context, conversationId }: {
   )
 }
 
+/** Undo for a file the agent wrote or moved. A changed file asks before it is overwritten; this is the user's action, never the model's. */
+function UndoButton({ snapshotId }: { snapshotId: string }): JSX.Element {
+  const [state, setState] = useState<'idle' | 'busy' | 'restored'>('idle')
+  const toast = useStore((s) => s.toast)
+  const go = async (force: boolean): Promise<void> => {
+    setState('busy')
+    try {
+      await api.restoreFileSnapshot(snapshotId, force)
+      setState('restored')
+    } catch (e) {
+      let info: { reason?: string; conflict?: boolean } = {}
+      try { info = JSON.parse((e as Error).message) } catch { /* plain message */ }
+      if (info.conflict && window.confirm('That file changed since the assistant wrote it. Restore the earlier version anyway?')) return go(true)
+      if (/restored/.test(info.reason ?? '')) setState('restored')
+      else {
+        setState('idle')
+        toast(info.reason ?? (e as Error).message, 'error')
+      }
+    }
+  }
+  return state === 'restored'
+    ? <span className="tag">Restored</span>
+    : <button className="ghost-btn" disabled={state === 'busy'} onClick={() => void go(false)}><Undo2 size={12} /> Undo</button>
+}
+
 export default function ToolEvents({ events, conversationId }: { events: ToolEvent[]; conversationId: string }): JSX.Element {
   const [open, setOpen] = useState<Record<string, boolean>>({})
   const approveTool = useStore((s) => s.approveTool)
@@ -225,6 +250,7 @@ export default function ToolEvents({ events, conversationId }: { events: ToolEve
               ))}
             </div>
           )}
+          {!t.pending && !t.error && t.undo?.snapshot_id && <UndoButton snapshotId={t.undo.snapshot_id} />}
           {t.name === 'doc_edit' && !t.pending && !t.error && t.result_preview && <DocEditDiff preview={t.result_preview} />}
           {t.pending && t.needs_approval && t.name === 'propose_plan' && <PlanApproval event={t} conversationId={conversationId} />}
           {/* A question is answered, not permitted, so desk_ask gets a text box instead of Allow/Deny. */}

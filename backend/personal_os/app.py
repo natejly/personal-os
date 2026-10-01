@@ -51,6 +51,7 @@ from .microvm import Sandboxes
 from .notes import Notes
 from .plans import (MUTATING, PLAN_BLOCKED, PLAN_SAFE_DANGER, PLAN_TOOL, PROPOSE_ONLY, Plans,
                     normalize_plan, parse_plan_edits, taint_expected)
+from .filesnap import FileSnapshots, router as filesnap_router
 from .outbox import Outbox, router as outbox_router
 from .presets import CanvasPresets
 from . import resume
@@ -300,6 +301,9 @@ monitor = activity.Monitor(db, settings, llm.complete)
 # Every Gmail send is held here first so it can be undone (outbox.py); its own routes are included below.
 outbox = Outbox(db, google, settings)
 app.include_router(outbox_router(outbox))
+# Pre-images of local files the agent overwrites or moves; the restore route is the user's, never a tool (filesnap.py).
+filesnap = FileSnapshots(db, db.data_dir / "snapshots", settings)
+app.include_router(filesnap_router(filesnap))
 # Working memory that is not the chat: the per-conversation plan, the full tool-result blobs behind
 # their handles (working.py), and procedural memory awaiting review (learn.Skills). `work_plans` is the
 # todo_write artifact and is a different thing from `plans`, the propose_plan approval record.
@@ -312,7 +316,7 @@ meeting_store = Meetings(db)
 meeting_svc = MeetingService(db, settings, llm.complete, meeting_store, google=google, todos=todos)
 toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=google, boards=boards, sandboxes=sandboxes, docs=docs, activity=monitor,
                   outbox=outbox, work_plans=work_plans, results=tool_results, skills=skills, jobs=jobs,
-                  style=style, meetings=meeting_svc, desks=desks, workspace=workspace)
+                  style=style, meetings=meeting_svc, desks=desks, workspace=workspace, filesnap=filesnap)
 # The insights pass proposes automations, so it is told which tools this install actually has - an
 # unwired integration must not turn into a suggestion that cannot be carried out.
 monitor.insights.tools_fn = lambda: [t["name"] for t in toolbox.list() if t.get("available")]
@@ -456,6 +460,9 @@ NUMERIC_SETTING_RANGES: dict[str, tuple[float, float]] = {
     "maxRunTokens": (0, 10_000_000),
     "maxRunSeconds": (0, 86_400),
     "maxRunCost": (0, 1_000),
+    "fileSnapshotMaxBytes": (0, 100_000_000),
+    "fileSnapshotRetainDays": (1, 365),
+    "fileSnapshotBudgetMB": (1, 20_000),
 }
 
 
@@ -1563,6 +1570,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     tool_ctx["taint_sources"].append(c["name"])
                 event = {"id": uid, "name": c["name"], "arguments": args, "result_preview": preview, "duration_ms": ms,
                          "error": err, "images": images or None,
+                         "undo": result.get("undo") if isinstance(result, dict) and isinstance(result.get("undo"), dict) else None,
                          "approval": (("plan" if claimed else decision) if mode == "ask" else None),
                          "plan": {"plan_id": claimed["plan_id"], "idx": claimed["idx"], "title": claimed["title"]} if claimed else None,
                          "forced": forced, "tainted": tainted, "blocked": c["name"] if was_blocked else None, "breaker": partial,
@@ -4554,6 +4562,8 @@ async def _outbox_startup() -> None:
     """Run the hold timer. The loop's first act is resume(), which decides what a restart does with
     sends that were still waiting — see the outbox.py docstring."""
     app.state.outbox_task = asyncio.create_task(outbox.loop())
+    with contextlib.suppress(Exception):
+        await asyncio.to_thread(filesnap.prune)  # snapshots past their age or byte budget
 
 
 @app.on_event("shutdown")

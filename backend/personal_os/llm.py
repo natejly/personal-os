@@ -45,6 +45,11 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     ),
     "extractionModel": "",
     "autoLearn": True,
+    # Pre-image copies of local files the agent overwrites or moves, so Undo works (filesnap.py).
+    "fileSnapshots": True,
+    "fileSnapshotMaxBytes": 5_000_000,
+    "fileSnapshotRetainDays": 14,
+    "fileSnapshotBudgetMB": 200,
     "stuckDetection": True,  # nudge, then stop, on ping-pong / same-result / error-cycle loops (stuck.py)
     # Bank long messages the user writes as style samples and keep their voice profile current (style.py).
     # Independent of autoLearn: wanting the app to learn facts is not the same as wanting it to copy your voice.

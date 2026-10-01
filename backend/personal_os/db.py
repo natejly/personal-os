@@ -199,6 +199,26 @@ CREATE TABLE IF NOT EXISTS executed_calls (
 );
 CREATE INDEX IF NOT EXISTS idx_exec_run ON executed_calls(run_id, step);
 
+-- Pre-images of local files the agent overwrote, appended to, created or moved (see filesnap.py).
+-- op: overwrite | append | create | move | restore. status: live | restored | expired.
+CREATE TABLE IF NOT EXISTS file_snapshots (
+  snapshot_id TEXT PRIMARY KEY,
+  conversation_id TEXT,
+  message_id TEXT,
+  call_id TEXT,
+  op TEXT NOT NULL,
+  path TEXT NOT NULL,
+  from_path TEXT,
+  before_path TEXT,
+  before_digest TEXT,
+  before_existed INTEGER NOT NULL DEFAULT 0,
+  after_digest TEXT,
+  status TEXT NOT NULL DEFAULT 'live',
+  created_at REAL NOT NULL,
+  restored_at REAL
+);
+CREATE INDEX IF NOT EXISTS idx_filesnap_conv ON file_snapshots(conversation_id, created_at);
+
 -- Scheduled background work (see jobs.Jobs / jobs.Scheduler). A job fires one run with kind='job'.
 -- next_due_at is the slot the scheduler is waiting for; last_due_at is the slot the last launch was *for*,
 -- so last_fired_at - last_due_at is how late that fire was (the machine was asleep, or the backend was down).

@@ -299,30 +299,6 @@
 .chat-rename { opacity: 0; transition: opacity var(--dur-hover) ease; }
 .chat-head:hover .chat-rename { opacity: 1; }
 
-/* Model and effort sit under the text box, quiet until you go looking for them. */
-.composer-footer {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 2px 0;
-  min-width: 0;
-}
-.chat-control {
-  max-width: 48%;
-  height: 22px;
-  padding: 0 4px;
-  font: 11px var(--font);
-  color: var(--text-faint);
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  outline: 0;
-  cursor: pointer;
-  text-overflow: ellipsis;
-  transition: color var(--dur-hover) ease, background var(--dur-hover) ease, border-color var(--dur-hover) ease;
-}
-.chat-control:hover { color: var(--text); background: var(--hover); border-color: var(--border); }
-
 /* A widget is not a page: drop the 808px centring and the page gutters that leave a chat panel mostly
    margin, and lose the disclaimer line that costs a whole row of vertical space. */
 .widget .composer-wrap.compact { padding: 5px 7px 7px; max-width: none; }

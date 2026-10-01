@@ -148,7 +148,7 @@ function TodosWidget({ window: win, live, onConfig }: WidgetProps): JSX.Element 
           minChars={6}
           value={draft}
           onChange={setDraft}
-          placeholder="Add a todo… Tab accepts"
+          placeholder="Add a todo…"
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void add() } }}
         />
         <button className="icon-btn sm" title="Add" disabled={!draft.trim()} onClick={() => void add()}><Plus size={14} /></button>

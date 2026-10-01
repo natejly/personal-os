@@ -87,7 +87,7 @@ export default function TodosView(): JSX.Element {
             rows={1}
             value={title}
             onChange={setTitle}
-            placeholder="Add a todo… Tab accepts a suggestion"
+            placeholder="Add a todo…"
             onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void add() } }}
           />
           <input type="date" aria-label="Due date (optional)" value={due} onChange={(e) => setDue(e.target.value)} className="date-input" />

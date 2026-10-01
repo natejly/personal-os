@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide, type Simulation, type SimulationNodeDatum, type SimulationLinkDatum } from 'd3-force'
+import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide, forceX, forceY, type Simulation, type SimulationNodeDatum, type SimulationLinkDatum } from 'd3-force'
 import { Plus, Trash2, Globe, X, Link2, Maximize2 } from 'lucide-react'
 import { useStore, type Scope } from '../store'
 import { api } from '../lib/api'
@@ -148,8 +148,12 @@ export default function GraphView({ projectId: scopedProjectId, query = '', paus
     simRef.current?.stop()
     simRef.current = forceSimulation<SimNode, SimLink>(nodes)
       .force('link', forceLink<SimNode, SimLink>(links).id((d) => d.id).distance(110).strength(0.6))
-      .force('charge', forceManyBody().strength(-320))
+      // Ranged charge plus x/y gravity: most entities have no edge, and an unbounded repulsion with only
+      // a weak centring force flung those loose nodes past the edges of the pane.
+      .force('charge', forceManyBody().strength(-320).distanceMax(320))
       .force('center', forceCenter(size.w / 2, size.h / 2).strength(0.05))
+      .force('x', forceX<SimNode>(size.w / 2).strength(0.07))
+      .force('y', forceY<SimNode>(size.h / 2).strength(0.07))
       .force('collide', forceCollide<SimNode>().radius((d) => 22 + d.degree * 2))
       .alpha(prev && Object.keys(prev).length ? 0.5 : 1)
       .on('tick', () => setTick((t) => t + 1))

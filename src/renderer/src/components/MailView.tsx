@@ -322,7 +322,7 @@ export default function MailView(): JSX.Element {
                 value={compose.body}
                 onChange={(body) => setCompose((c) => c && { ...c, body })}
                 context={`Email subject: ${compose.subject}${compose.replyBody ? `\nIt replies to:\n${compose.replyBody.slice(0, 1500)}` : ''}`}
-                placeholder="Write your email — pause for a suggestion, Tab to accept"
+                placeholder="Write your email…"
                 sharedStyle={{ minHeight: 220 }}
                 autoFocus={!!compose.replyTo}
               />

@@ -69,7 +69,23 @@ test('one page-agent action toggles the page agent once', () => {
 test('a view action routes, and view:graph opens memory on the graph', () => {
   fire('view:todos')
   assert.equal(useStore.getState().view, 'todos')
+  // Memory lives in Settings → Knowledge base now: the page underneath stays put.
   fire('view:graph')
-  assert.equal(useStore.getState().view, 'memory')
+  assert.equal(useStore.getState().view, 'todos')
+  assert.equal(useStore.getState().settingsOpen, true)
+  assert.equal(useStore.getState().settingsTab, 'knowledge')
+  assert.equal(useStore.getState().knowledgeTab, 'memory')
   assert.equal(useStore.getState().memoryMode, 'graph')
+  useStore.getState().setSettingsOpen(false)
+})
+
+test('view:documents and upload open Settings on the document library', () => {
+  fire('view:documents')
+  assert.equal(useStore.getState().settingsTab, 'knowledge')
+  assert.equal(useStore.getState().knowledgeTab, 'documents')
+  useStore.getState().setSettingsOpen(false)
+  // ⌘, after that still opens on Provider.
+  fire('settings')
+  assert.equal(useStore.getState().settingsTab, 'provider')
+  useStore.getState().setSettingsOpen(false)
 })

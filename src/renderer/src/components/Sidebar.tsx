@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { MessageSquarePlus, Search, Settings, Sparkles, Trash2, PanelLeftClose, Brain, FileText, NotebookPen, Plus, Folder, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid, Mail, MonitorDot, BookOpen, Globe } from 'lucide-react'
+import { MessageSquarePlus, Search, Settings, Sparkles, Trash2, PanelLeftClose, FileText, NotebookPen, Plus, Folder, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid, Mail, MonitorDot, Globe } from 'lucide-react'
 import GrainLogo from './GrainLogo'
 import { useStore, type View } from '../store'
 import { ActivityIndicator } from './ActivityView'
@@ -50,19 +50,12 @@ const NAV: NavEntry[] = [
   { label: 'Web', icon: <Globe size={15} />, kind: 'web' }
 ]
 
-// What the assistant knows: memories and uploaded documents, grouped under their own section.
-const KNOWLEDGE: NavEntry[] = [
-  { view: 'memory', label: 'Memory', icon: <Brain size={15} />, kind: 'memory' },
-  { view: 'documents', label: 'Documents', icon: <FileText size={15} />, kind: 'documents' }
-]
-
 export default function Sidebar(): JSX.Element {
   const conversations = useStore((s) => s.conversations)
   const projects = useStore((s) => s.projects)
   const focusedId = useStore((s) => s.focusedConversationId)
   const view = useStore((s) => s.view)
   const projectViewId = useStore((s) => s.projectViewId)
-  const personalStats = useStore((s) => s.personalStats)
   const settings = useStore((s) => s.settings)
   const docCount = useStore((s) => s.docs.length)
   const docsPending = useStore((s) => s.docsPending)
@@ -86,7 +79,6 @@ export default function Sidebar(): JSX.Element {
   const openConversation = (id: string): void => void selectChat(id)
   const [query, setQuery] = useState('')
   const [projectsOpen, setProjectsOpen] = useState(true)
-  const [knowledgeOpen, setKnowledgeOpen] = useState(true)
   // Project groups list docs beside chats, but `docs` in the store is the Docs view's result set:
   // narrowed by its scope picker and its search box. The sidebar keeps its own unfiltered copy so a
   // search over there cannot empty the groups over here. Debounced, because `docs` changes per keystroke.
@@ -126,10 +118,7 @@ export default function Sidebar(): JSX.Element {
     if (v === 'home' || v === 'calendar' || v === 'mail' || v === 'boards' || v === 'dashboards' || v === 'activity') return null
     if (v === 'todos') return todoStats?.open ?? null
     if (v === 'docs') return docCount
-    const total = (key: 'memories' | 'nodes' | 'documents'): number =>
-      (personalStats?.[key] ?? 0) + projects.reduce((n, p) => n + (p.stats?.[key] ?? 0), 0)
-    // Memory is one panel now: memories and graph entities counted together.
-    return v === 'memory' ? total('memories') + total('nodes') : total('documents')
+    return null
   }
 
   // A row without a `view` (Web) exists only as a canvas widget: a click opens its window directly.
@@ -144,7 +133,6 @@ export default function Sidebar(): JSX.Element {
       {n.view != null && libCount(n.view) !== null && <span className="count">{libCount(n.view)}</span>}
     </button>
   )
-  const knowledgeItems = KNOWLEDGE.filter((n) => n.view && !viewHidden(settings, n.view))
 
   return (
     <aside className="sidebar">
@@ -162,16 +150,6 @@ export default function Sidebar(): JSX.Element {
         {NAV.filter((n) => (n.view ? n.view === 'home' || !viewHidden(settings, n.view) : inCanvas)).map(navItem)}
       </nav>
 
-      {knowledgeItems.length > 0 && (
-        <>
-          <div className="section-row">
-            <button className="section-toggle" onClick={() => setKnowledgeOpen((o) => !o)}>
-              <ChevronRight size={12} className={knowledgeOpen ? 'rot90' : ''} /><BookOpen size={13} /> Knowledge Base
-            </button>
-          </div>
-          {knowledgeOpen && <nav className="nav">{knowledgeItems.map(navItem)}</nav>}
-        </>
-      )}
       <SidebarSpaces />
 
       <div className="section-row">

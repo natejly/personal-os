@@ -30,9 +30,7 @@ export const OPTIONAL_VIEWS: { view: View; label: string }[] = [
   { view: 'calendar', label: 'Calendar' },
   { view: 'mail', label: 'Mail' },
   { view: 'boards', label: 'Boards' },
-  { view: 'dashboards', label: 'Dashboards' },
-  { view: 'memory', label: 'Memory' },
-  { view: 'documents', label: 'Documents' }
+  { view: 'dashboards', label: 'Dashboards' }
 ]
 
 export const homeModuleOn = (s: Settings, key: string): boolean => s.homeWidgets?.[key] !== false

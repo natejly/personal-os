@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react'
 import { Check, MessageSquare, MessagesSquare, Pencil, RefreshCw } from 'lucide-react'
-import type { CanvasWindow, DragKind, DragPayload, Effort } from '@shared/types'
+import type { CanvasWindow, DragKind, DragPayload } from '@shared/types'
 import MessageView from '../../components/Message'
 import Composer from '../../components/Composer'
+import ChatControls from '../../components/ChatControls'
 import { api } from '../../lib/api'
 import { retainSession, useConversation, useIsStreaming, useStore, useStreamingMessageId } from '../../store'
 import { useDropTarget } from '../dnd'
@@ -29,31 +30,6 @@ const appendDraft = (root: HTMLElement | null, text: string): boolean => {
 }
 
 const names = (files: FileList): string => [...files].map((f) => f.name).join(', ')
-
-/** Contract §6 keeps this one survivor of the chat header: without it a window cannot be re-modelled. */
-const EFFORTS: Effort[] = ['default', 'low', 'medium', 'high']
-
-/** Model and reasoning effort, sitting under the text box rather than above the transcript. */
-const ChatControls = ({ convId }: { convId: string }): JSX.Element => {
-  const models = useStore((s) => s.models)
-  const model = useStore((s) => s.sessions[convId]?.conversation.model ?? s.settings.defaultModel)
-  const effort = useStore((s) => s.sessions[convId]?.conversation.settings.effort ?? 'default')
-  const setChatModel = useStore((s) => s.setChatModel)
-  const setChatSettings = useStore((s) => s.setChatSettings)
-  const options = models.some((m) => m.id === model) ? models : [{ id: model }, ...models]
-  return (
-    <>
-      <select className="chat-control" value={model} title="Model"
-        onChange={(e) => void setChatModel(e.target.value, convId)}>
-        {options.map((m) => <option key={m.id} value={m.id}>{m.id}</option>)}
-      </select>
-      <select className="chat-control" value={effort} title="Reasoning effort"
-        onChange={(e) => void setChatSettings({ effort: e.target.value as Effort }, convId)}>
-        {EFFORTS.map((x) => <option key={x} value={x}>{x === 'default' ? 'effort: default' : `effort: ${x}`}</option>)}
-      </select>
-    </>
-  )
-}
 
 /** Create a fresh conversation in the window's project and point the window at it. */
 const newChatFor = async (win: CanvasWindow): Promise<string | null> => {
@@ -267,7 +243,7 @@ function ChatWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
           {!msgs.length && <p className="widget-sub">No messages yet.</p>}
         </div>
       </div>
-      <Composer conversationId={convId} compact footer={<ChatControls convId={convId} />} />
+      <Composer conversationId={convId} compact footer={<ChatControls conversationId={convId} />} />
     </div>
   )
 }

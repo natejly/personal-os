@@ -17,7 +17,7 @@ const withoutLegacyMode = (s: Settings): Settings => {
 }
 
 /** `'canvas'` is the spaces desktop: one destination among the views, not a separate shell. */
-export type View = 'home' | 'chat' | 'todos' | 'calendar' | 'mail' | 'boards' | 'dashboards' | 'memory' | 'documents' | 'docs' | 'activity' | 'project' | 'canvas'
+export type View = 'home' | 'chat' | 'todos' | 'calendar' | 'mail' | 'boards' | 'dashboards' | 'docs' | 'activity' | 'project' | 'canvas'
 /** Every view but the canvas: what ⌘⇧C and the sidebar's LayoutGrid button return to. */
 export type ClassicView = Exclude<View, 'canvas'>
 /** How the Docs editor splits its panes. */
@@ -25,6 +25,9 @@ export type DocMode = 'edit' | 'split' | 'preview'
 /** How the Memory panel lays out its halves: the memory list, the knowledge graph, the voice profile. */
 export type MemoryMode = 'split' | 'list' | 'graph' | 'style'
 export type ContextTab = 'last' | 'preview' | 'trace'
+/** Settings sections. 'knowledge' holds what used to be the sidebar's Knowledge Base: memory and documents. */
+export type SettingsTab = 'provider' | 'knowledge' | 'memory' | 'skills' | 'integrations' | 'connectors' | 'tools' | 'usage' | 'modules' | 'behavior'
+export type KnowledgeTab = 'memory' | 'documents'
 export type { Scope, SessionStatus }
 
 /**
@@ -123,6 +126,8 @@ export interface State {
    * header's effort picker parks its choice here and `send` applies it once the conversation exists.
    */
   draftEffort: Effort
+  /** A model picked on a draft chat. Null follows `settings.defaultModel`; picking one must not rewrite that default. */
+  draftModel: string | null
   /** Scope filter used by the Memory / Graph / Documents library views. */
   libraryScope: Scope
   /** Scope the memories/graph/documents arrays are currently loaded for. */
@@ -141,6 +146,10 @@ export interface State {
   /** Message whose execution trace the Trace tab shows (null = latest assistant reply). */
   traceMessageId: string | null
   settingsOpen: boolean
+  /** The tab Settings opens on. Read once when the dialog mounts. */
+  settingsTab: SettingsTab
+  /** Which half of Settings → Knowledge base is showing. */
+  knowledgeTab: KnowledgeTab
   projectModal: { mode: 'create' } | { mode: 'edit'; project: Project } | null
   toasts: Toast[]
 
@@ -209,6 +218,9 @@ export interface State {
   setContextTab: (t: ContextTab) => void
   openTrace: (messageId: string) => void
   setSettingsOpen: (o: boolean) => void
+  /** Open Settings on one tab — how the rest of the app reaches memory and documents now. */
+  openSettings: (tab: SettingsTab, knowledge?: KnowledgeTab) => void
+  setKnowledgeTab: (t: KnowledgeTab) => void
   setProjectModal: (m: State['projectModal']) => void
   toast: (text: string, kind?: Toast['kind']) => void
 
@@ -504,9 +516,11 @@ export const useStore = create<State>((set, get) => {
       else if (action === 'toggle-context') s.toggleContext()
       else if (action === 'page-agent') s.togglePageAgent()
       else if (action === 'view:graph') s.openMemory('graph')
+      else if (action === 'view:memory') s.openMemory()
+      else if (action === 'view:documents') s.openSettings('knowledge', 'documents')
       else if (action.startsWith('view:')) s.setView(action.slice(5) as View)
       else if (action === 'upload') {
-        s.setView('documents')
+        s.openSettings('knowledge', 'documents')
         setTimeout(() => document.getElementById('doc-upload-input')?.click(), 100)
       }
     })
@@ -699,6 +713,7 @@ export const useStore = create<State>((set, get) => {
     projectViewId: null,
     draftProjectId: null,
     draftEffort: 'default',
+    draftModel: null,
     libraryScope: 'all',
     dataScope: 'all',
     docs: [],
@@ -719,6 +734,8 @@ export const useStore = create<State>((set, get) => {
     pageContext: null,
     traceMessageId: null,
     settingsOpen: false,
+    settingsTab: 'provider',
+    knowledgeTab: 'memory',
     projectModal: null,
     toasts: [],
     conversations: [],
@@ -811,7 +828,10 @@ export const useStore = create<State>((set, get) => {
       s.setView(gone ? 'home' : v)
     },
     setMemoryMode: (memoryMode) => set({ memoryMode }),
-    openMemory: (memoryMode) => set(memoryMode ? { view: 'memory', memoryMode } : { view: 'memory' }),
+    openMemory: (memoryMode) => {
+      if (memoryMode) set({ memoryMode })
+      get().openSettings('knowledge', 'memory')
+    },
     toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
     toggleContext: () => set((s) => ({ contextOpen: !s.contextOpen })),
     togglePageAgent: () => set((s) => ({ pageAgentOpen: !s.pageAgentOpen })),
@@ -825,7 +845,10 @@ export const useStore = create<State>((set, get) => {
     setPageContext: (pageContext) => set((s) => (s.pageContext === pageContext ? {} : { pageContext })),
     setContextTab: (contextTab) => set({ contextTab }),
     openTrace: (traceMessageId) => set({ traceMessageId, contextTab: 'trace', contextOpen: true }),
-    setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
+    // A plain open (⌘, or the sidebar button) starts on Provider, as it always has.
+    setSettingsOpen: (settingsOpen) => set(settingsOpen ? { settingsOpen, settingsTab: 'provider' } : { settingsOpen }),
+    openSettings: (settingsTab, knowledgeTab) => set(knowledgeTab ? { settingsOpen: true, settingsTab, knowledgeTab } : { settingsOpen: true, settingsTab }),
+    setKnowledgeTab: (knowledgeTab) => set({ knowledgeTab }),
     setProjectModal: (projectModal) => set({ projectModal }),
     toast: (text, kind = 'info') => {
       const id = ++toastSeq
@@ -876,7 +899,7 @@ export const useStore = create<State>((set, get) => {
     },
 
     refreshConversations: async () => set({ conversations: await api.conversations.list('all') }),
-    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, draftEffort: 'default', view: 'chat', settingsOpen: false }),
+    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, draftEffort: 'default', draftModel: null, view: 'chat', settingsOpen: false }),
     createConversation: async (projectId) => {
       try {
         const c = await api.conversations.create(projectId, get().settings.defaultModel)
@@ -951,7 +974,8 @@ export const useStore = create<State>((set, get) => {
     },
     setChatModel: async (model, conversationId) => {
       const id = conversationId ?? get().focusedConversationId
-      if (!id) return void (await get().saveSettings({ defaultModel: model }))
+      // A draft has no row yet: park the choice for `send`, as effort does, instead of changing the default.
+      if (!id) return void set({ draftModel: model })
       await api.conversations.patch(id, { model })
       patchConversation(id, (c) => ({ ...c, model }))
     },
@@ -988,7 +1012,7 @@ export const useStore = create<State>((set, get) => {
       }
       let c: Conversation
       try {
-        c = await api.conversations.create(get().draftProjectId, get().settings.defaultModel)
+        c = await api.conversations.create(get().draftProjectId, get().draftModel ?? get().settings.defaultModel)
       } catch (e) {
         // `send` never rejects: a caller holding the user's draft needs a verdict, not an exception.
         get().toast((e as Error).message, 'error')
@@ -999,7 +1023,7 @@ export const useStore = create<State>((set, get) => {
       if (effort !== 'default') c = await api.conversations.patch(c.id, { settings: { effort } }).catch(() => c)
       c.messages = []
       putSession(c)
-      set({ focusedConversationId: c.id, view: 'chat', draftEffort: 'default' })
+      set({ focusedConversationId: c.id, view: 'chat', draftEffort: 'default', draftModel: null })
       void get().refreshProjects()
       return runStream(c.id, { content: text })
     },

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
-import { X, Eye, EyeOff, Plug, Cpu, Brain, Sparkles, Mail, Cable, Wrench, Gauge, LayoutGrid, SlidersHorizontal, type LucideIcon } from 'lucide-react'
-import { useStore } from '../store'
+import { X, Eye, EyeOff, Plug, Cpu, Brain, Sparkles, Mail, Cable, Wrench, Gauge, LayoutGrid, SlidersHorizontal, BookOpen, FileText, type LucideIcon } from 'lucide-react'
+import { useStore, type SettingsTab } from '../store'
 import { api } from '../lib/api'
 import { HOME_MODULES, OPTIONAL_VIEWS } from '../modules'
 import { useModal } from '../lib/useModal'
@@ -10,11 +10,15 @@ import GoogleSettings from './GoogleSettings'
 import SkillsReview from './SkillsReview'
 import McpSettings from './McpSettings'
 import UsageView from './UsageView'
+import MemoryPanel from './MemoryPanel'
+import DocumentsView from './DocumentsView'
+import ScopeSelect from './ScopeSelect'
 
-type Tab = 'provider' | 'memory' | 'skills' | 'integrations' | 'connectors' | 'tools' | 'usage' | 'modules' | 'behavior'
+type Tab = SettingsTab
 
 const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
   { id: 'provider', label: 'Provider', icon: Cpu },
+  { id: 'knowledge', label: 'Knowledge base', icon: BookOpen },
   { id: 'memory', label: 'Memory & learning', icon: Brain },
   { id: 'skills', label: 'Skills', icon: Sparkles },
   { id: 'integrations', label: 'Integrations', icon: Mail },
@@ -34,7 +38,10 @@ export default function SettingsModal(): JSX.Element {
   const [showKey, setShowKey] = useState(false)
   const [test, setTest] = useState<{ state: 'idle' | 'testing' | 'ok' | 'fail'; msg?: string }>({ state: 'idle' })
   const [shortcut, setShortcut] = useState<ShortcutState | null>(null)
-  const [tab, setTab] = useState<Tab>('provider')
+  const [tab, setTab] = useState<Tab>(() => useStore.getState().settingsTab)
+  const knowledgeTab = useStore((s) => s.knowledgeTab)
+  const libraryScope = useStore((s) => s.libraryScope)
+  const { setKnowledgeTab, setLibraryScope } = useStore()
   const tabRefs = useRef<Partial<Record<Tab, HTMLButtonElement | null>>>({})
   const patch = (p: Partial<Settings>): void => setDraft((d) => ({ ...d, ...p }))
   const hold = draft.gmailSendHold ?? { enabled: true, seconds: 90 }
@@ -96,7 +103,7 @@ export default function SettingsModal(): JSX.Element {
 
   return (
     <div className="modal-backdrop" {...backdrop}>
-      <div className="modal settings-modal" {...modal}>
+      <div className={`modal settings-modal ${tab === 'knowledge' ? 'wide-pane' : ''}`} {...modal}>
         <header><h2 id={titleId}>Settings</h2><button className="icon-btn" aria-label="Close settings" title="Close" onClick={() => setSettingsOpen(false)}><X size={16} /></button></header>
 
         <div className="settings-body">
@@ -129,6 +136,23 @@ export default function SettingsModal(): JSX.Element {
               </label>
             </section>}
 
+            {tab === 'knowledge' && <section className="knowledge-section">
+              <div className="knowledge-head">
+                <h3>Knowledge base</h3>
+                <div className="knowledge-controls modal-free">
+                  <div className="seg" role="group" aria-label="Knowledge base section">
+                    <button className={knowledgeTab === 'memory' ? 'active' : ''} aria-pressed={knowledgeTab === 'memory'} onClick={() => setKnowledgeTab('memory')}><Brain size={13} /><span>Memory</span></button>
+                    <button className={knowledgeTab === 'documents' ? 'active' : ''} aria-pressed={knowledgeTab === 'documents'} onClick={() => setKnowledgeTab('documents')}><FileText size={13} /><span>Documents</span></button>
+                  </div>
+                  <ScopeSelect value={libraryScope} onChange={(s) => void setLibraryScope(s)} />
+                </div>
+              </div>
+              <p className="muted small">What the assistant knows: memories and graph relations learned from chats, and documents whose best excerpts are pulled into replies. Changes here apply immediately.</p>
+              <div className="knowledge-body modal-free">
+                {knowledgeTab === 'memory' ? <MemoryPanel embedded /> : <DocumentsView embedded />}
+              </div>
+            </section>}
+
             {tab === 'memory' && <section>
               <h3>Memory &amp; learning</h3>
               <label className="toggle-row plain">
@@ -136,7 +160,7 @@ export default function SettingsModal(): JSX.Element {
                 <input type="checkbox" checked={draft.autoLearn} onChange={(e) => patch({ autoLearn: e.target.checked })} /><span className="switch" />
               </label>
               <label className="toggle-row plain">
-                <span className="toggle-text"><b>Learn how you write</b><small>Bank long messages you write and docs you save as writing samples, and keep your voice profile current, so drafts sound like you. Review it under Memory → Voice.</small></span>
+                <span className="toggle-text"><b>Learn how you write</b><small>Bank long messages you write and docs you save as writing samples, and keep your voice profile current, so drafts sound like you. Review it under Knowledge base → Memory → Voice.</small></span>
                 <input type="checkbox" checked={draft.learnStyle !== false} onChange={(e) => patch({ learnStyle: e.target.checked })} /><span className="switch" />
               </label>
               <label><span>Extraction model <small className="muted">(blank = same as chat model)</small></span>

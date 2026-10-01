@@ -36,6 +36,11 @@ const api: GrainApi = {
     setGather: (accelerator: string) => ipcRenderer.invoke('shortcuts:set-gather', accelerator),
     onFailure: (cb) => listen<ShortcutState>('shortcuts:failed', cb)
   },
+  data: {
+    chooseExportPath: () => ipcRenderer.invoke('data:choose-export-path'),
+    reveal: (path: string) => ipcRenderer.invoke('data:reveal', path),
+    relaunch: () => ipcRenderer.invoke('data:relaunch')
+  },
   closeSelf: () => ipcRenderer.send('window:close-self'),
   minimizeSelf: () => ipcRenderer.send('window:minimize-self')
 }

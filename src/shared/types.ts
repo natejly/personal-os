@@ -943,6 +943,15 @@ export type BackgroundEvent =
   | { event: 'learned'; data: Learned }
   | { event: 'learn_error'; data: { conversation_id?: string; message_id?: string; message: string } }
 
+export interface BackupInfo {
+  name: string; kind: 'daily' | 'manual' | 'premigrate' | 'prerestore'; created_at: number; size: number
+  app_version: string | null; schema_version: number | null
+}
+export interface DataOverview {
+  data_dir: string; backups: BackupInfo[]; last_backup: number | null
+  pending_restore: { name: string } | null; schema_version: number; app_version: string
+}
+
 export interface GrainApi {
   backendUrl: () => Promise<string>
   backendStatus: () => Promise<{ running: boolean; url: string; error: string | null }>
@@ -969,6 +978,12 @@ export interface GrainApi {
     gather: () => Promise<ShortcutState>
     setGather: (accelerator: string) => Promise<ShortcutState>
     onFailure: (cb: (s: ShortcutState) => void) => () => void
+  }
+  /** Data folder helpers for Settings → Data (native dialog, Finder, restart to apply a restore). */
+  data: {
+    chooseExportPath: () => Promise<string | null>
+    reveal: (path: string) => Promise<boolean>
+    relaunch: () => Promise<void>
   }
   /** Closes the BrowserWindow this renderer lives in: the Cmd-W fall-through when no canvas window has focus. */
   closeSelf: () => void

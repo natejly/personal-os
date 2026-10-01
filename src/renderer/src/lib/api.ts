@@ -12,7 +12,8 @@ import type {
   ActivityApplyResult, ActivityCapability, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityGrantResult,
   ActivityInsights, ActivityStatus, ActivitySuggestion, ActivitySummary, InsightStatus,
   PendingSend, SendHoldConfig, Verification, Verified,
-  Meeting, FullMeeting, MeetingActionItem, MeetingCandidate, MeetingConfig, MeetingPreflight, MeetingRevision, MeetingSegment, MeetingStatusInfo, MeetingStreamEvent
+  Meeting, FullMeeting, MeetingActionItem, MeetingCandidate, MeetingConfig, MeetingPreflight, MeetingRevision, MeetingSegment, MeetingStatusInfo, MeetingStreamEvent,
+  BackupInfo, DataOverview
 } from '@shared/types'
 
 let base = ''
@@ -228,6 +229,14 @@ export const api = {
       req<PendingSend>('/integrations/google/gmail/send', { method: 'POST', body: json(m) }),
     clearCache: (namespace?: string) =>
       req<{ dropped: number }>(`/integrations/google/cache/clear${namespace ? `?namespace=${namespace}` : ''}`, { method: 'POST' })
+  },
+  /** Backups, restore and export (backend backups.py). */
+  data: {
+    overview: () => req<DataOverview>('/data'),
+    backUp: () => req<BackupInfo>('/data/backups', { method: 'POST' }),
+    restore: (name: string) => req<{ name: string; restart_required: boolean }>(`/data/backups/${encodeURIComponent(name)}/restore`, { method: 'POST' }),
+    cancelRestore: () => req<{ ok: boolean }>('/data/restore', { method: 'DELETE' }),
+    exportTo: (dest: string) => req<{ path: string; size: number }>('/data/export', { method: 'POST', body: json({ dest }) })
   },
   /** Emails waiting out their undo hold (backend outbox.py). */
   outbox: {

@@ -11,6 +11,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
+from . import backups, migrations
 from .secrets import SecretStore
 
 log = logging.getLogger("personal_os.db")
@@ -335,9 +336,15 @@ class Database:
         (self.data_dir / "uploads").mkdir(exist_ok=True)
         self.path = self.data_dir / "personal-os.db"
         self.secrets = SecretStore(self.data_dir)
+        existing = self.path.exists() and self.path.stat().st_size > 0
         with self.connect() as c:
+            # A database with content gets a snapshot before anything pending touches it (adopting the
+            # versioned system on a pre-existing file counts: the baseline re-runs _migrate).
+            if existing and migrations.pending(c):
+                backups.create(self.data_dir, "premigrate")
             c.executescript(SCHEMA)
             self._migrate(c)
+            migrations.run(c)
         self._migrate_secrets()
         self._lock_down()
 

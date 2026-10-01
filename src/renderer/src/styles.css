@@ -2247,3 +2247,10 @@ select:focus-visible {
 .app.sidebar-collapsed .page-agent.popout { width: min(var(--page-agent-w), calc(100% - 40px)); }
 /* The column draws its own left edge against the view; a floating card has a border all round. */
 .page-agent.popout > header { border-top-left-radius: 12px; border-top-right-radius: 12px; }
+
+/* Settings → Data */
+.data-row { margin-top: 10px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.data-row .toggle-text { display: flex; flex-direction: column; gap: 2px; font-size: 13px; min-width: 0; overflow-wrap: anywhere; }
+.data-row .toggle-text small { font-size: 12px; line-height: 1.45; color: var(--muted, inherit); }
+.data-row .ghost-btn { flex: none; white-space: nowrap; }
+.data-list { list-style: none; margin: 6px 0 0; padding: 0; max-height: 240px; overflow-y: auto; }

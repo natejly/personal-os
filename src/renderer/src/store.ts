@@ -32,7 +32,7 @@ export type DocMode = 'edit' | 'split' | 'preview'
 export type MemoryMode = 'split' | 'list' | 'graph' | 'style'
 export type ContextTab = 'last' | 'preview' | 'trace'
 /** Settings sections. 'knowledge' holds what used to be the sidebar's Knowledge Base: memory and documents. */
-export type SettingsTab = 'provider' | 'knowledge' | 'memory' | 'integrations' | 'meetings' | 'tools' | 'usage' | 'spaces' | 'modules' | 'behavior'
+export type SettingsTab = 'provider' | 'knowledge' | 'memory' | 'integrations' | 'meetings' | 'tools' | 'usage' | 'spaces' | 'modules' | 'behavior' | 'data'
 export type KnowledgeTab = 'memory' | 'documents'
 export type { Scope, SessionStatus }
 

@@ -1,5 +1,5 @@
-import { app, BrowserWindow, Menu } from 'electron'
-import { existsSync } from 'fs'
+import { app, BrowserWindow, dialog, Menu, shell } from 'electron'
+import { existsSync, statSync } from 'fs'
 import { join } from 'path'
 import { backendStatus, backendToken, backendUrl, startBackend, stopBackend } from './backend'
 import { registerBus } from './bus'
@@ -258,6 +258,19 @@ app.whenReady().then(async () => {
   handle('backend:url', () => backendUrl())
   handle('backend:status', () => backendStatus())
   handle('backend:token', () => backendToken())
+  handle('data:choose-export-path', async () => {
+    const stamp = new Date().toISOString().slice(0, 10)
+    const r = await dialog.showSaveDialog({ title: 'Export all data', defaultPath: join(app.getPath('documents'), `grain-export-${stamp}.zip`), filters: [{ name: 'Zip archive', extensions: ['zip'] }] })
+    return r.canceled || !r.filePath ? null : r.filePath
+  })
+  // Folders only: openPath on a file or .app would run it.
+  handle('data:reveal', async (_e, path: string) => {
+    const p = String(path)
+    if (!existsSync(p) || !statSync(p).isDirectory()) return false
+    return !(await shell.openPath(p))
+  })
+  // A staged restore is applied by the backend at its next start, so relaunching the whole app does it.
+  handle('data:relaunch', () => { app.relaunch(); app.quit() })
   on('window:close-self', (e) => BrowserWindow.fromWebContents(e.sender)?.close())
   on('window:minimize-self', (e) => BrowserWindow.fromWebContents(e.sender)?.minimize())
   registerPopouts(() => win)

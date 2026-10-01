@@ -52,6 +52,8 @@ from .notes import Notes
 from .plans import (MUTATING, PLAN_BLOCKED, PLAN_SAFE_DANGER, PLAN_TOOL, PROPOSE_ONLY, Plans,
                     normalize_plan, parse_plan_edits, taint_expected)
 from .outbox import Outbox, router as outbox_router
+from .reliability import router as reliability_router, secret_values
+from .retention import RetentionWorker
 from .presets import CanvasPresets
 from .runs import ACTIVE, PROMOTE_STEP, STATUSES, Run, RunBus, RunStore, Topic
 from .style import WritingStyle, learn_style_from_exchange, looks_like_prose
@@ -298,6 +300,22 @@ monitor = activity.Monitor(db, settings, llm.complete)
 # Every Gmail send is held here first so it can be undone (outbox.py); its own routes are included below.
 outbox = Outbox(db, google, settings)
 app.include_router(outbox_router(outbox))
+# Supportability: GET /diagnostics, POST /maintenance/sweep, and the daily retention sweep (retention.py).
+retention = RetentionWorker(db, settings)
+app.include_router(reliability_router(db, settings, retention, lambda: activity.permissions()))
+
+
+@app.on_event("startup")
+async def _reliability_startup() -> None:
+    from . import logs
+    for v in (AUTH_TOKEN, *secret_values(settings())):
+        logs.register_secret(v)
+    retention.start()
+
+
+@app.on_event("shutdown")
+async def _reliability_shutdown() -> None:
+    await retention.stop()
 # Working memory that is not the chat: the per-conversation plan, the full tool-result blobs behind
 # their handles (working.py), and procedural memory awaiting review (learn.Skills). `work_plans` is the
 # todo_write artifact and is a different thing from `plans`, the propose_plan approval record.
@@ -454,6 +472,12 @@ NUMERIC_SETTING_RANGES: dict[str, tuple[float, float]] = {
     "maxRunTokens": (0, 10_000_000),
     "maxRunSeconds": (0, 86_400),
     "maxRunCost": (0, 1_000),
+    "llmRetries": (0, 10),
+    "llmIdleSeconds": (10, 3_600),
+    "retainUsageDays": (7, 3_650),
+    "retainTraceDays": (1, 3_650),
+    "retainToolResultDays": (1, 3_650),
+    "retainApprovalDays": (1, 3_650),
 }
 
 
@@ -822,6 +846,10 @@ TOOL_ERROR_LIMIT = 3
 PROPOSAL_ONLY_KINDS = ("job",)
 # Caps for an unattended run, applied on top of the user's settings and only downward (see _caps). Tighter than
 # interactive on purpose: nobody is watching, and a longer leash makes the answer worse, not better.
+# A model call that is still open after this long while writing the closing answer is abandoned.
+FINAL_ROUND_SECONDS = 90.0
+# Hard ceiling on an unattended run end to end (model, tools, everything), a backstop for a hang the budget cannot see.
+JOB_HARD_SECONDS = 1800.0
 JOB_BUDGET = {"maxToolRounds": 8, "maxRunTokens": 60_000, "maxRunSeconds": 240, "maxRunCost": 0.20}
 JOB_HINT = ("## This is a scheduled background run\nNobody is watching it. Anything that reaches outside this app "
             "(sending or drafting mail, calendar writes, Google Docs/Sheets/Tasks) cannot be executed here: such a "
@@ -910,6 +938,14 @@ class Budget:
 
     def exceeded(self) -> str | None:
         return next((k for k, r in self._ratios().items() if r >= 1.0), None)
+
+    def arm_deadline(self, floor: float = 5.0, cap: float | None = None) -> None:
+        """Bound the next provider stream by what is left of the wall-clock budget (llm.stream_deadline), so a hung
+        provider cannot outlive maxRunSeconds. Unlimited (0) leaves it unbounded unless `cap` says otherwise."""
+        left = self.max_seconds - self.elapsed() if self.max_seconds > 0 else None
+        if cap is not None:
+            left = cap if left is None else min(left, cap)
+        llm.stream_deadline.set(None if left is None else time.monotonic() + max(left, floor))
 
     def snapshot(self) -> dict[str, Any]:
         """What agent_runs.budget stores: the limits and how much of each the run has used."""
@@ -1158,6 +1194,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         span = tracer.start("llm", model, {"round": _round, "final": True, "messages": len(messages), "tools": len(tool_schemas)})
         yield "span", {"message_id": am["id"], "span": span}
         start, fin = len(buf), {}
+        budget.arm_deadline(cap=FINAL_ROUND_SECONDS)  # the closing answer is exempt from the budget, not from a hang
         # tools are still declared, with tool_choice "none": the history holds tool_calls, and some OpenAI-compatible
         # backends reject that when no tool list is sent. "none" is the portable way to say "answer, do not call".
         async for ev in llm.stream_chat(cfg, model, messages, tool_schemas or None,
@@ -1223,6 +1260,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             lspan = tracer.start("llm", model, {"round": _round, "messages": len(messages), "tools": len(tool_schemas)})
             yield "span", {"message_id": am["id"], "span": lspan}
             first_token: int | None = None
+            budget.arm_deadline()
             async for ev in llm.stream_chat(cfg, model, messages, tool_schemas or None,
                                             effort=str(conv["settings"].get("effort") or "default"),
                                             fast=bool(conv["settings"].get("fast")),
@@ -1244,6 +1282,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 if steers:
                     break
             calls = [] if end.get("finish_reason") == "cancelled" else (end.get("tool_calls") or [])
+            if end.get("finish_reason") == "timeout":
+                # The provider outran maxRunSeconds mid-stream. Keep what arrived and mark the reply partial.
+                if not "".join(buf).strip():
+                    raise llm.LLMError(f"This reply hit its {int(budget.max_seconds)}s time limit before the model produced anything. Try again, or raise maxRunSeconds in Settings.")
+                partial = "time"
             u = end.get("usage") or end.get("usage_est") or {}
             pt, ct = int(u.get("prompt_tokens") or 0), int(u.get("completion_tokens") or 0)
             budget.add(pt, ct, pricing.cost(cfg, model, pt, ct))
@@ -1646,6 +1689,14 @@ async def _run_chat(run: Run, body: ChatIn) -> None:
         # already closed to steers. The task runs on to auto-learn; it is no longer replying.
         if event == "done":
             run.replied = True
+
+
+async def _run_job(run: Run, body: ChatIn) -> None:
+    """An unattended run is _run_chat under a hard ceiling, so a hung tool or provider cannot hold it open forever."""
+    try:
+        await asyncio.wait_for(_run_chat(run, body), JOB_HARD_SECONDS)
+    except asyncio.TimeoutError:
+        raise RuntimeError(f"This scheduled run was stopped after {int(JOB_HARD_SECONDS // 60)} minutes without finishing.") from None
 
 
 async def _run_desk(run: Run, desk_id: str, body: ChatIn) -> dict[str, Any]:
@@ -2059,7 +2110,7 @@ async def _launch_job(job: dict[str, Any], fire: dict[str, Any]) -> str | None:
     # job_id keeps this transcript out of the sidebar's chat list; the Agent Inbox links to it instead.
     convos.update(conv["id"], {"settings": {"useTools": True, "autoLearn": False, "job_id": job["id"]}})
     body = ChatIn(content=_job_prompt(job, fire))
-    run = bus.start(conv["id"], lambda r: _run_chat(r, body), input={**fire, "conversation_id": conv["id"]}, kind="job")
+    run = bus.start(conv["id"], lambda r: _run_job(r, body), input={**fire, "conversation_id": conv["id"]}, kind="job")
     log.info("job %s fired for %s as run %s", job["name"], _stamp(fire["due_at"]), run.run_id)
     return run.run_id
 

@@ -1,8 +1,9 @@
-import { app, BrowserWindow, ipcMain, Menu } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, shell } from 'electron'
 import { existsSync } from 'fs'
 import { join } from 'path'
-import { backendStatus, backendToken, backendUrl, startBackend, stopBackend } from './backend'
+import { backendInfo, backendStatus, backendToken, backendUrl, onBackendState, restartBackend, startBackend, stopBackend } from './backend'
 import { registerBus } from './bus'
+import { hookConsole, initLogs, logDir } from './logging'
 import { guardNavigation } from './navigation'
 import { startPageBridge, stopPageBridge } from './pagefetch'
 import { gather, OPACITY_LEVELS, registerPopouts, restorePopouts, setFrontListener, toggleFront } from './popouts'
@@ -22,6 +23,11 @@ for (const legacy of ['personal-os', 'Personal OS']) {
     break
   }
 }
+
+// Rotating logs for this process and the backend's raw output: ~/Library/Logs/Grain when packaged,
+// <userData>/logs in dev. The backend writes its own backend.log into the same folder (PERSONAL_OS_LOG_DIR).
+initLogs(app.isPackaged ? app.getPath('logs') : join(app.getPath('userData'), 'logs'))
+hookConsole()
 
 function createWindow(): void {
   win = new BrowserWindow({
@@ -257,6 +263,13 @@ app.whenReady().then(async () => {
   ipcMain.handle('backend:url', () => backendUrl())
   ipcMain.handle('backend:status', () => backendStatus())
   ipcMain.handle('backend:token', () => backendToken())
+  ipcMain.handle('backend:info', () => backendInfo())
+  ipcMain.handle('backend:restart', () => restartBackend())
+  ipcMain.handle('backend:open-logs', () => (logDir() ? shell.openPath(logDir()) : 'No log folder'))
+  // Every window hears the supervisor: the main window re-fetches, a pop-out re-points at a new port.
+  onBackendState((info) => {
+    for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed() && !w.webContents.isDestroyed()) w.webContents.send('backend:state', info)
+  })
   ipcMain.on('window:close-self', (e) => BrowserWindow.fromWebContents(e.sender)?.close())
   ipcMain.on('window:minimize-self', (e) => BrowserWindow.fromWebContents(e.sender)?.minimize())
   registerPopouts(() => win)

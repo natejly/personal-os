@@ -23,6 +23,7 @@ import { moduleForView } from './shell/registry'
 import Canvas from './canvas/Canvas'
 import { useCanvas } from './canvas/store'
 import { AlertTriangle } from 'lucide-react'
+import { BackendActions, BackendBanner } from './components/BackendStatus'
 import { accentId } from './lib/accents'
 
 /** The transitions worth interrupting for: the desk has stopped and cannot go on without the user. */
@@ -147,6 +148,7 @@ export default function App(): JSX.Element {
           <h2>Backend not running</h2>
           <p>Grain could not start its Python backend.</p>
           <pre>{backendError}</pre>
+          <BackendActions />
           <p className="muted">
             Set it up once with <code>cd backend && uv venv && uv pip install -e .</code>, then relaunch.
             Or run it yourself and set <code>PERSONAL_OS_BACKEND_URL</code>.
@@ -181,6 +183,7 @@ export default function App(): JSX.Element {
       {pageAgentOpen && <PageAgentPanel popout={agentPopout} />}
       {settingsOpen && <SettingsModal />}
       {projectModal && <ProjectModal />}
+      <BackendBanner />
       <DeskNotifier />
       <Toasts />
     </div>

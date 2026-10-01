@@ -776,6 +776,12 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .backend-error h2 { color: var(--text); margin: 12px 0 4px; }
 .backend-error pre { text-align: left; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px; padding: 12px; font-size: 12px; white-space: pre-wrap; color: var(--danger); }
 .backend-error code { font-family: var(--mono); font-size: 12px; background: var(--hover); padding: 1px 5px; border-radius: 4px; }
+.support-settings { margin-top: 24px; display: flex; flex-direction: column; gap: 10px; }
+.support-settings h4 { margin: 12px 0 0; font-size: 13px; color: var(--text); }
+.support-settings .button-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.support-settings .button-row button { display: inline-flex; align-items: center; gap: 6px; }
+.backend-actions { display: flex; gap: 8px; justify-content: center; -webkit-app-region: no-drag; }
+.backend-banner { position: fixed; top: 0; left: 50%; transform: translateX(-50%); z-index: 120; display: flex; align-items: center; gap: 8px; padding: 6px 14px; font-size: 12px; background: var(--bg-elev); border: 1px solid var(--border-strong); border-top: 0; border-radius: 0 0 10px 10px; color: var(--text-muted); box-shadow: 0 8px 24px rgba(0,0,0,0.3); -webkit-app-region: no-drag; }
 
 /* ---------- Toasts ---------- */
 .toasts { position: fixed; bottom: 16px; right: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 100; }

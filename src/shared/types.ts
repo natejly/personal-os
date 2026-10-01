@@ -820,6 +820,13 @@ export interface Settings {
   maxRunTokens?: number
   maxRunSeconds?: number
   maxRunCost?: number
+  /** Provider resilience and retention (backend llm.py / retention.py); missing means the shipped default. */
+  llmRetries?: number
+  llmIdleSeconds?: number
+  retainUsageDays?: number
+  retainTraceDays?: number
+  retainToolResultDays?: number
+  retainApprovalDays?: number
   /** Hosts fetch_url may still read once the reply has seen untrusted content. */
   fetchAllowlist?: string[]
   braveApiKey: string
@@ -936,10 +943,33 @@ export type BackgroundEvent =
   | { event: 'learned'; data: Learned }
   | { event: 'learn_error'; data: { conversation_id?: string; message_id?: string; message: string } }
 
+/** The sidecar's lifecycle, as the main process supervises it. */
+export type BackendState = 'starting' | 'ready' | 'restarting' | 'failed'
+export interface BackendRestart {
+  at: string
+  reason: string
+  outcome: 'restarted' | 'gave-up' | 'manual'
+}
+export interface BackendInfo {
+  state: BackendState
+  url: string
+  error: string | null
+  restarts: BackendRestart[]
+  logDir: string
+  appVersion: string
+  electron: string
+}
+
 export interface GrainApi {
   backendUrl: () => Promise<string>
   backendStatus: () => Promise<{ running: boolean; url: string; error: string | null }>
   backendToken: () => Promise<string>
+  /** Supervisor state and restart history; `restartBackend` also works from `failed`. */
+  backendInfo: () => Promise<BackendInfo>
+  restartBackend: () => Promise<BackendInfo>
+  onBackendState: (cb: (info: BackendInfo) => void) => () => void
+  /** Reveal the log folder in Finder. */
+  openLogs: () => Promise<string>
   platform: NodeJS.Platform
   onMenu: (cb: (action: string) => void) => () => void
   popout: {

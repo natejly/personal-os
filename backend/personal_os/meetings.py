@@ -231,6 +231,10 @@ CONFERENCE_RE = re.compile(
 )
 
 TICK_SECONDS = 45.0           # the calendar nudge / auto-stop / retranscribe tick
+# A drain that timed out leaves the worker still transcribing with the session already popped,
+# so `stop` watches the segment rows instead and re-rolls the transcript once they settle.
+DRAIN_WATCH_SECONDS = 900.0
+DRAIN_POLL_SECONDS = 2.0
 PREFLIGHT_TTL = 600.0         # a self-test records a wav and does a real round trip; cache it
 SUGGEST_TTL = 60.0
 RETRANSCRIBE_PER_TICK = 3     # slow on purpose: a failed segment is retried, not hammered
@@ -242,6 +246,10 @@ AUDIO_RETENTION_SECONDS = 7 * 86400
 # Which capability rows stop a recording from starting. `loopback` and `stt_local` are optional
 # upgrades: no loopback driver means mic-only, and no whisper.cpp means the proxy backend.
 BLOCKING_CAPABILITIES = ("platform", "ffmpeg", "mic", "stt")
+
+# The banners `stop` writes ABOUT THE TRANSCRIPT ITSELF, and the only ones a later settle is
+# allowed to clear. An enhance failure is still true after a segment replays, so it stays.
+TRANSCRIPT_BANNERS = ("could not be transcribed", "still transcribing")
 
 
 def _deep_merge(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
@@ -283,6 +291,27 @@ def _conference_link(event: dict[str, Any]) -> str:
         if m:
             return m.group(0)
     return ""
+
+
+def _scrub_detail(detail: Any, depth: int = 0) -> Any:
+    """Credential-scrub every string inside an STT detail payload.
+
+    `detail` is not metadata: the proxy backend returns verbose_json, so `detail["segments"][i]`
+    carries its own verbatim `text` - the SAME words as the `text` column (stt.py:243). Scrubbing
+    only the column would store a redacted and an unredacted copy of one utterance side by side,
+    and `GET /meetings/{id}/segments` hands `detail` straight back out (JSON_FIELDS includes it).
+    Keys are left alone; only values are rewritten, so a later diarization pass still finds its
+    timings where it left them.
+    """
+    if isinstance(detail, str):
+        return redact.scrub_secrets(detail)
+    if depth > 8:  # a pathological payload must not recurse the request thread to death
+        return detail
+    if isinstance(detail, list):
+        return [_scrub_detail(v, depth + 1) for v in detail]
+    if isinstance(detail, dict):
+        return {k: _scrub_detail(v, depth + 1) for k, v in detail.items()}
+    return detail
 
 
 def _attendee_rows(raw: Any) -> list[dict[str, Any]]:
@@ -438,8 +467,8 @@ class Meetings:
         """Rows claiming to be mid-flight. A crash or a quit leaves these behind; recover() finalizes them."""
         with self.db.tx() as c:
             rows = c.execute(
-                "SELECT id, status, started_at FROM meetings WHERE status IN ('recording','transcribing','enhancing') "
-                "ORDER BY created_at").fetchall()
+                "SELECT id, status, started_at, ended_at, duration_ms FROM meetings "
+                "WHERE status IN ('recording','transcribing','enhancing') ORDER BY created_at").fetchall()
         return [dict(r) for r in rows]
 
     def counts(self) -> dict[str, int]:
@@ -620,15 +649,20 @@ class Meetings:
                        *, attempts: int = 0) -> dict[str, Any] | None:
         """The UPDATE half: the transcription, scrubbed, plus where the wav ended up."""
         body = str(text or "")
-        if body and self.config().get("redactSecrets", True):
+        payload = detail if detail is not None else {}
+        if self.config().get("redactSecrets", True):
             # Credential rules ONLY, never activity.Gate.scrub: its identity rules replace every
             # address with [email] (activity.py:126) and every phone-shaped digit run with [phone]
             # (activity.py:132), which would erase attendee identity from inside the conversation.
-            body = redact.scrub_secrets(body)
+            if body:
+                body = redact.scrub_secrets(body)
+            # The same words arrive twice - once as `text`, once per utterance inside `detail` -
+            # so both copies go through the redactor or neither is redacted.
+            payload = _scrub_detail(payload)
         with self.db.tx() as c:
             c.execute("UPDATE meeting_segments SET text=?, detail=?, backend=?, error=?, state=?, "
                       " attempts=?, wav_path=?, wav_bytes=? WHERE id=?",
-                      (body, json.dumps(detail if detail is not None else {}), backend,
+                      (body, json.dumps(payload), backend,
                        str(error or "")[:1000], state, int(attempts), wav_path, int(wav_bytes), seg_id))
             return row_to_dict(c.execute("SELECT * FROM meeting_segments WHERE id=?", (seg_id,)).fetchone(),
                                JSON_FIELDS)
@@ -682,6 +716,20 @@ class Meetings:
         args.append(max(1, int(limit)))
         with self.db.tx() as c:
             return [row_to_dict(r, JSON_FIELDS) for r in c.execute(sql + " ORDER BY created_at LIMIT ?", args).fetchall()]  # type: ignore[misc]
+
+    def segments_end(self, meeting_id: str) -> float:
+        """Absolute epoch seconds of the last sample any segment of this meeting holds.
+
+        The RECORDING clock, not the wall clock: it is what `recover()` has to close a crashed
+        meeting out on, since the app may reopen a day after the audio stopped and `now()` would
+        record the downtime as the length of the call. 0.0 when nothing was captured.
+        """
+        with self.db.tx() as c:
+            r = c.execute(
+                "SELECT MAX(started_at + CASE WHEN duration_ms > 0 THEN duration_ms / 1000.0 "
+                "  WHEN t_end > t_start THEN t_end - t_start ELSE 0 END) AS e "
+                "FROM meeting_segments WHERE meeting_id=?", (meeting_id,)).fetchone()
+        return float(r["e"] or 0.0) if r and r["e"] is not None else 0.0
 
     def build_transcript(self, meeting_id: str) -> str:
         """Channels merged by offset, one line per run of consecutive segments on one channel.
@@ -815,21 +863,45 @@ class Meetings:
             return [dict(r) for r in c.execute(
                 "SELECT * FROM meeting_action_items WHERE meeting_id=? ORDER BY created_at", (meeting_id,)).fetchall()]
 
+    @staticmethod
+    def _item_key(text: str) -> str:
+        """How two proposals of the same action item are recognised as one: words, case-folded."""
+        return " ".join(str(text or "").split()).casefold()
+
     def add_action_items(self, meeting_id: str, revision_id: str | None,
                          items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Record this pass's action items, WITHOUT re-proposing ones the user already acted on.
+
+        A second enhance pass of the same meeting returns much the same list, so an unconditional
+        INSERT would re-propose an item the user dismissed - undoing the dismissal - and give an
+        already-promoted item a duplicate row with a NULL todo_id, which `promote_action_item`'s
+        per-row `todo_id` guard cannot see, so "Add to todos" would create the todo twice. An item
+        that is already on the meeting therefore keeps its row, its status and its todo_id, and
+        only has its `revision_id` re-pointed at the pass that proposed it again.
+        """
         t = now()
-        rows = []
-        for it in items or []:
-            text = str((it or {}).get("text") or "").strip()
-            if not text:
-                continue
-            rows.append((new_id(), meeting_id, revision_id, text[:500], str(it.get("owner") or "")[:200],
-                         str(it.get("due") or "")[:10], t))
-        if rows:
-            with self.db.tx() as c:
-                c.executemany(
+        with self.db.tx() as c:
+            seen = {self._item_key(r["text"]): r["id"] for r in c.execute(
+                "SELECT id, text FROM meeting_action_items WHERE meeting_id=? ORDER BY created_at",
+                (meeting_id,)).fetchall()}
+            for it in items or []:
+                # truncated FIRST, so the key matches the one the stored row will produce
+                text = str((it or {}).get("text") or "").strip()[:500]
+                if not text:
+                    continue
+                key = self._item_key(text)
+                existing = seen.get(key)
+                if existing:
+                    c.execute("UPDATE meeting_action_items SET revision_id=? WHERE id=?",
+                              (revision_id, existing))
+                    continue
+                rid = new_id()
+                c.execute(
                     "INSERT INTO meeting_action_items(id,meeting_id,revision_id,text,owner,due,created_at)"
-                    " VALUES(?,?,?,?,?,?,?)", rows)
+                    " VALUES(?,?,?,?,?,?,?)",
+                    (rid, meeting_id, revision_id, text, str(it.get("owner") or "")[:200],
+                     str(it.get("due") or "")[:10], t))
+                seen[key] = rid
         return self.action_items(meeting_id)
 
     def dismiss_action_item(self, item_id: str) -> dict[str, Any] | None:
@@ -843,6 +915,15 @@ class Meetings:
         Only `todos.create` is called. `todos.on_change = tasks_sync.poke` is already wired at
         app.py:218-220 and pushes the new task to Google within ~2s, so writing the remote side
         here too would create the task twice.
+
+        The todo is created UNLINKED. `todos.external_id` is the Google Task id and nothing else:
+        `TasksSync._merge` reads a non-empty `external_id` as "this todo mirrors a remote task",
+        and deletes the todo - no tombstone, no notification - when that id is not in the remote
+        list (gtasks.py:151-158). Putting the meeting id there made every promoted action item a
+        todo whose remote task had apparently vanished, so the sync destroyed it on its next pass
+        (and skipped it at gtasks.py:182-184, so it was never pushed either). With external_id
+        left alone the sync treats it as a new local todo and creates the Google task. The link
+        back to the meeting is `meeting_action_items.todo_id`, which is where it belongs.
         """
         with self.db.tx() as c:
             r = c.execute("SELECT * FROM meeting_action_items WHERE id=?", (item_id,)).fetchone()
@@ -856,7 +937,7 @@ class Meetings:
         todo = todos.create(
             title=item["text"], project_id=project_id if project_id is not None else (m["project_id"] if m else None),
             notes=f"From meeting: {title}", due=item["due"] or None, priority=2,
-            source="meeting", external_id=item["meeting_id"])
+            source="meeting")
         with self.db.tx() as c:
             c.execute("UPDATE meeting_action_items SET status='added', todo_id=? WHERE id=?", (todo["id"], item_id))
             return row_to_dict(c.execute("SELECT * FROM meeting_action_items WHERE id=?", (item_id,)).fetchone())
@@ -1041,6 +1122,16 @@ class MeetingService:
                 "detail": "Nobody has acknowledged that the people on the call will be told.",
                 "fix": "Open Meetings settings and accept the recording notice once.",
             })
+        if not cfg["enabled"]:
+            # The master switch has to block the START PATH, not just the 45s tick: its help text
+            # reads "Off means no capture at all", and a user who records once (stamping
+            # consentedAt) and then turns the recorder off has asked for exactly that. It goes
+            # first so the 409's message names the switch rather than a capability below it.
+            blockers.insert(0, {
+                "id": "enabled", "label": "Meeting recorder", "ok": False,
+                "detail": "The meeting recorder is switched off, so nothing is captured.",
+                "fix": "Turn Meeting recorder on in Meetings settings.",
+            })
         test = stt.selftest(settings=self.settings(), cfg=cfg, data_dir=self.data_dir)
         if not test["ok"]:
             blockers.append({
@@ -1059,6 +1150,18 @@ class MeetingService:
         m = self.meetings.get(meeting_id)
         if m is None:
             return None
+        # A meeting records once. Restarting a finished one would continue the segment numbering
+        # from the first run (meeting_recorder seeds `_next` off the wavs already on disk, so a new
+        # ffmpeg cannot reopen a stored row's file) while `mark_started` resets `started_at` - so
+        # `t_start = seq * segment_seconds` would sit a whole first run in the future and the rolled
+        # up duration would overstate by that much. The UI already only offers Record on a
+        # 'scheduled' meeting; this closes the raw route behind it.
+        if m["status"] not in ("scheduled", "notes_only"):
+            raise MeetingBlocked([{
+                "id": "already_recorded", "label": "Already recorded", "ok": False,
+                "detail": f"This meeting is {m['status']}, so it has recorded once already.",
+                "fix": "Start a new meeting instead - a second run would renumber this one's audio.",
+            }])
         cfg = self.config()
         pf = self.preflight()
         if not pf["ok"]:
@@ -1129,24 +1232,116 @@ class MeetingService:
         The drain blocks for as long as the transcription backlog takes (`drainSeconds`), so it
         runs in a thread; the enhance pass is a separate LLM round trip and must not hold the stop
         request open for it.
+
+        The drain can also GIVE UP: `RecorderPool.stop` reports `{"drained": bool, "pending": int,
+        "stats": {...}}`, and `drained` is false when the deadline passed or the worker thread was
+        still inside an STT call when it was abandoned. `transcript` has exactly one writer, so
+        rolling it up here would freeze a partial segment set - the last minutes of the meeting,
+        where the decisions are - out of the column, the FTS index and the enhance pass. When the
+        drain did not finish, the banner says so and a watcher re-rolls the transcript once the
+        abandoned worker settles, with enhance waiting for it rather than reading a hole.
         """
         m = self.meetings.get(meeting_id)
         if m is None:
             return None
         cfg = self.config()
+        drained, pending = True, 0
         if self.pool.get(meeting_id) is not None:
             self.meetings.patch(meeting_id, {"status": "transcribing"})
-            await asyncio.to_thread(self.pool.stop, meeting_id)
+            res = await asyncio.to_thread(self.pool.stop, meeting_id) or {}
+            # Absent keys mean a pool that predates the contract; the old behaviour was to assume
+            # the drain finished, so that is what a missing `drained` still means.
+            drained = bool(res.get("drained", True))
+            pending = max(0, int(res.get("pending") or 0))
+        # Re-read: the drain ran for up to `drainSeconds`, during which _on_result wrote segment
+        # text and possibly an error banner. `m` is a snapshot from before all of that.
+        m = self.meetings.get(meeting_id) or m
         transcript = self.meetings.build_transcript(meeting_id)
         failed = len(self.meetings.failed_segments(meeting_id))
-        error = m.get("error") or ""
+        # Whatever the recorder reported stays: the banner about the transcript is ADDED to it,
+        # not substituted for it, so a channel that died mid-call is still on the row.
+        notes = [n for n in [(m.get("error") or "").strip()] if n]
         if failed and not transcript:
-            error = (f"{failed} segment(s) could not be transcribed, so there is no transcript. "
-                     "The notes are untouched; fix the transcription route and retry.")
-        out = self.meetings.finalize(meeting_id, transcript, status="ready", error=error)
-        if cfg["enhanceOnStop"]:
+            notes.append(f"{failed} segment(s) could not be transcribed, so there is no transcript. "
+                         "The notes are untouched - fix the transcription route and retry.")
+        elif not drained:
+            notes.append(f"{pending or 'Some'} segment(s) were still transcribing when this meeting "
+                         "was closed, so the transcript is incomplete. It fills in as they finish.")
+        out = self.meetings.finalize(meeting_id, transcript, status="ready", error="; ".join(notes))
+        if not drained:
+            # Not fire-and-forget on purpose: enhance runs INSIDE the watcher, after the rebuild,
+            # so the pass is not fed the hole the abandoned worker left behind.
+            asyncio.ensure_future(self._settle_after_drain(meeting_id, bool(cfg["enhanceOnStop"])))
+        elif cfg["enhanceOnStop"]:
             asyncio.ensure_future(self._enhance_quietly(meeting_id))
         return out
+
+    async def _settle_after_drain(self, meeting_id: str, enhance: bool,
+                                  deadline_seconds: float = DRAIN_WATCH_SECONDS) -> None:
+        """Wait out the worker the drain abandoned, re-roll the transcript, then enhance.
+
+        The session is already popped from the pool by the time `stop` returns, so there is no
+        thread left to join: the segment rows are the only observable. A segment the worker
+        settles after the meeting closed lands `state='done'` with real text, which `retranscribe`
+        never revisits (it reads `state='failed'`), so without this the text exists in
+        meeting_segments and nowhere else.
+        """
+        try:
+            end = now() + max(0.0, float(deadline_seconds))
+            while now() < end and self.meetings.pending_segments(meeting_id):
+                await asyncio.sleep(DRAIN_POLL_SECONDS)
+            await asyncio.to_thread(self._settle_transcript, meeting_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 - a background watcher has nobody to raise to
+            self.last_error = f"{type(e).__name__}: {e}"
+            log.warning("meetings: late drain of %s: %s", meeting_id, e)
+        if enhance:
+            await self._enhance_quietly(meeting_id)
+
+    def _settle_transcript(self, meeting_id: str) -> dict[str, Any] | None:
+        """Re-roll a CLOSED meeting's transcript from whatever its segments now say.
+
+        `transcript` has exactly one writer, finalize(), so text that arrives after a meeting was
+        closed - a replayed failed segment, or one the drain gave up waiting for - only reaches the
+        rolled-up column and the FTS index by closing the meeting out again on its own clock.
+        `ended_at` and `status` are carried over so a rebuild cannot restate the length of the
+        meeting, and only the transcript's OWN banners are cleared: an enhance failure is still
+        true after a segment replays.
+        """
+        m = self.meetings.get(meeting_id)
+        if m is None or m["status"] in ("recording", "transcribing"):
+            return None
+        text = self.meetings.build_transcript(meeting_id)
+        unsettled = bool(self.meetings.failed_segments(meeting_id)) or \
+            bool(self.meetings.pending_segments(meeting_id))
+        error = m.get("error") or ""
+        if text and not unsettled:
+            # Only the transcript's own banners go, one "; "-joined clause at a time: a mic that
+            # died or an enhance pass that failed is still true now that a segment has settled.
+            error = "; ".join(p for p in error.split("; ")
+                              if not any(marker in p for marker in TRANSCRIPT_BANNERS))
+        if text == (m.get("transcript") or "") and error == (m.get("error") or ""):
+            return m  # nothing changed, so no rewrite and no reindex
+        return self.meetings.finalize(meeting_id, text, ended_at=self._closing_clock(m),
+                                      status=m["status"] or "ready", error=error)
+
+    def _closing_clock(self, m: dict[str, Any]) -> float | None:
+        """When a meeting ENDED, by the recording clock rather than the clock at this moment.
+
+        `finalize` defaults `ended_at` to `now()` and recomputes `duration_ms` from it, which is
+        right when a user presses Stop and wrong everywhere else: a rebuild hours later, or a
+        `recover()` the morning after a crash, would otherwise record the downtime as the length
+        of the call. An `ended_at` the row already has wins; failing that, the last sample any
+        segment holds; failing that, the start, i.e. a meeting that captured nothing.
+        """
+        if m.get("ended_at"):
+            return float(m["ended_at"])
+        start = float(m["started_at"] or 0.0)
+        end = self.meetings.segments_end(m["id"])
+        if end > 0:
+            return max(end, start)
+        return start or None
 
     async def _enhance_quietly(self, meeting_id: str) -> None:
         try:
@@ -1160,10 +1355,18 @@ class MeetingService:
                       template: str | None = None) -> dict[str, Any] | None:
         """Cache-or-generate, like /recap (app.py:1881-1907): an existing proposal is the answer.
 
-        AUTO-APPLY RULE: the revision is accepted for the user only when `enhanced` is empty, or
-        still byte-identical to the last applied revision's `after` - i.e. they have not hand-edited
-        it. That is what keeps Granola's "the notes just appear" feel without ever overwriting a
-        human edit; once they have touched it, the proposal waits for accept or reject.
+        AUTO-APPLY RULE: the revision is accepted for the user only when the pass SUCCEEDED and
+        `enhanced` is empty, or still byte-identical to the last applied revision's `after` - i.e.
+        they have not hand-edited it. That is what keeps Granola's "the notes just appear" feel
+        without ever overwriting a human edit; once they have touched it, the proposal waits for
+        accept or reject.
+
+        A DEGRADED pass is never auto-applied. Its markdown is `meeting_notes._mechanical`'s
+        fallback - the user's notes followed by the raw transcript - and `enhanced` is read by
+        `context_block`, so auto-accepting it would paste other people's verbatim speech into the
+        system prompt of every unrelated chat. A failed pass is something to show the user and
+        offer again, not something to apply on their behalf; the route already returns
+        `degraded: true` and the review screen already renders the warning (MeetingsView.tsx:288).
         """
         m = self.meetings.get(meeting_id)
         if m is None:
@@ -1213,7 +1416,7 @@ class MeetingService:
         self.meetings.patch(meeting_id, patch)
         last = self.meetings.last_applied(meeting_id)
         untouched = not m["enhanced"].strip() or (last is not None and m["enhanced"] == last["after"])
-        if untouched:
+        if untouched and not res["degraded"]:
             self.meetings.accept(rev["id"])
             return self.meetings.revision(rev["id"])
         return rev
@@ -1226,11 +1429,18 @@ class MeetingService:
         already burned RETRANSCRIBE_MAX_ATTEMPTS is left alone: with no transcription route at all
         every segment fails forever, and retrying them on every tick would be a busy loop against
         the proxy.
+
+        Every meeting it touched is then closed out again through `_settle_transcript`: replayed
+        text reaches `meetings.transcript` and the FTS index only through finalize(), and the 45s
+        tick is a caller with nobody to do that for it. Doing it here rather than in the HTTP route
+        also closes the hole where the tick repaired the segments, the manual retranscribe then
+        found nothing left to settle, and no code path was left that would ever rebuild the column.
         """
         cfg = self.config()
         if stt.resolve_backend(cfg, self.data_dir) == "off":
             return 0
         live = self.pool.live()
+        touched: set[str] = set()
         done = 0
         for seg in self.meetings.failed_segments(meeting_id, limit=limit * 10):
             if done >= max(1, int(limit)):
@@ -1248,6 +1458,7 @@ class MeetingService:
                     error=f"unusable segment: {note}", wav_path="" if note == "empty" else seg["wav_path"],
                     wav_bytes=0 if note == "empty" else int(seg["wav_bytes"] or 0),
                     attempts=int(seg["attempts"] or 0) + 1)
+                touched.add(seg["meeting_id"])
                 continue
             res = stt.transcribe(path, settings=self.settings(), cfg=cfg, data_dir=self.data_dir)
             text = str(res["text"] or "").strip()
@@ -1260,7 +1471,11 @@ class MeetingService:
                 state="done" if text and not res["error"] else ("failed" if res["error"] else "empty"),
                 wav_path=seg["wav_path"] if keep else "", wav_bytes=int(seg["wav_bytes"] or 0) if keep else 0,
                 attempts=int(seg["attempts"] or 0) + 1)
+            touched.add(seg["meeting_id"])
             done += 1
+        for mid in touched:
+            with contextlib.suppress(Exception):
+                self._settle_transcript(mid)
         return done
 
     # ---- calendar ----
@@ -1336,7 +1551,9 @@ class MeetingService:
         people's speech, and feeding it into every unrelated chat is how it ends up quoted back.
         """
         cfg = self.config()
-        if not cfg.get("injectContext", True):
+        # The master switch means the whole feature, not just capture: with the recorder off,
+        # meetings stop reaching the system prompt of every chat as well.
+        if not cfg["enabled"] or not cfg.get("injectContext", True):
             return ""
         recent = [m for m in self.meetings.list(limit=6) if m["status"] in ("ready", "stopped", "notes_only")]
         if not recent:
@@ -1349,6 +1566,13 @@ class MeetingService:
         for m in recent:
             full = self.meetings.get(m["id"]) or {}
             body = (full.get("enhanced") or full.get("notes") or "").strip()
+            # A DEGRADED pass's fallback markdown is the user's notes followed by the raw
+            # transcript (meeting_notes._mechanical), so if one of those was ever applied -
+            # by hand, since `enhance` no longer auto-accepts them - `enhanced` is partly other
+            # people's verbatim speech. Fall back to the user's own notes for the preview line.
+            last = self.meetings.last_applied(m["id"])
+            if last is not None and last["degraded"] and body == (last["after"] or "").strip():
+                body = (full.get("notes") or "").strip()
             first = next((ln.strip() for ln in body.splitlines() if ln.strip() and not ln.startswith("#")), "")
             head = m["summary"] or m["title"] or "(untitled)"
             parts.append(f"- {head}" + (f": {first[:200]}" if first else ""))
@@ -1359,7 +1583,11 @@ class MeetingService:
         """Finalize meetings a crash or a quit left mid-flight.
 
         A row that still says `recording` would otherwise be polled forever by a UI waiting for
-        segments no process is producing. It keeps whatever segments landed.
+        segments no process is producing. It keeps whatever segments landed - and its LENGTH: the
+        end comes from `_closing_clock`, never from the clock at boot. The app may reopen a day
+        after the crash, and `finalize`'s default would record that downtime as the duration of a
+        ten-minute call (and overwrite the correct duration of a meeting that merely had its
+        enhance pass interrupted, which already carries its own `ended_at`).
         """
         out: list[str] = []
         for m in self.meetings.unfinished():
@@ -1370,8 +1598,21 @@ class MeetingService:
                     "finished are kept.")
             with contextlib.suppress(Exception):
                 self.meetings.finalize(m["id"], self.meetings.build_transcript(m["id"]),
-                                       status="ready", error=note)
+                                       ended_at=self._closing_clock(m), status="ready", error=note)
                 out.append(m["id"])
+        # A meeting whose drain was abandoned carries the "still transcribing" banner and a
+        # watcher task that died with the process. Its segments may well have settled before the
+        # quit, so roll the transcript up now: `unfinished()` cannot see it (it is already
+        # `ready`) and `retranscribe` will not either (those segments are not `failed`).
+        for row in self.meetings.list(status="ready", limit=200):
+            if "still transcribing" not in (row.get("error") or ""):
+                continue
+            with contextlib.suppress(Exception):
+                before = self.meetings.get(row["id"]) or {}
+                after = self._settle_transcript(row["id"]) or {}
+                if (after.get("transcript"), after.get("error")) != \
+                        (before.get("transcript"), before.get("error")):
+                    out.append(row["id"])
         if out:
             log.info("meetings: recovered %d interrupted meeting(s)", len(out))
         return out

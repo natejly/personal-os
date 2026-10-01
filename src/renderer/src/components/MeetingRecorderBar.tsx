@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { AlertTriangle, Mic, Pause, Play, Speaker, Square } from 'lucide-react'
 import { useStore } from '../store'
-import { formatOffset } from '../lib/transcript'
+import { formatOffset, recorderState, type RecorderState } from '../lib/transcript'
 
 /**
  * The live bar above the notepad: how long it has been running, which channels are actually
@@ -12,6 +12,12 @@ import { formatOffset } from '../lib/transcript'
  * that no matter what the UI implies - a spinner here would be a lie with an animation. The bar
  * states the delay and the queue depth instead.
  */
+
+/** What the bar calls each recorder state. `stalled` is its own word on purpose: it is not a pause,
+ *  and Resume cannot fix it. */
+const STATE_LABEL: Record<RecorderState, string> = {
+  recording: 'Recording', paused: 'Paused', stalled: 'Capture stopped'
+}
 
 const CHANNEL_LABEL: Record<string, { label: string; icon: JSX.Element }> = {
   mic: { label: 'microphone', icon: <Mic size={12} /> },
@@ -38,22 +44,25 @@ export default function MeetingRecorderBar(): JSX.Element | null {
   useEffect(() => {
     if (!liveId) return
     const tail = setInterval(() => void pollMeetingLive(), 2000)
+    // No argument: `refreshMeetings` re-issues the rail's own search query, so this tick cannot
+    // replace a filtered list with the unfiltered one under a search box the user is still typing in.
     const rail = setInterval(() => void refreshMeetings(), 5000)
     return () => { clearInterval(tail); clearInterval(rail) }
   }, [liveId, pollMeetingLive, refreshMeetings])
 
   if (!active) return null
 
-  // `MeetingStatus` has no `paused` member - pausing closes the ffmpeg processes and leaves the row
-  // `recording` - so liveness is read off the channels, which is also what the dots show.
-  const capturing = active.channels.some((c) => c.alive)
+  // Read off the flag the recorder emits, never off the channels: pause deliberately leaves ffmpeg
+  // running and only discards the clips, so every channel stays `alive` through a pause. The dots
+  // below still show per-channel liveness, which is a different question.
+  const state = recorderState(active)
   const behind = meetingStatus?.config.segmentSeconds ?? 0
 
   return (
     <div className="mtg-bar">
-      <div className={`act-state ${capturing ? 'live' : 'paused'}`}>
+      <div className={`act-state ${state === 'recording' ? 'live' : 'paused'}`}>
         <span className="act-dot" />
-        {capturing ? 'Recording' : 'Paused'}
+        {STATE_LABEL[state]}
       </div>
       <span className="mtg-clock">{formatOffset(active.elapsed_ms / 1000)}</span>
 
@@ -77,15 +86,24 @@ export default function MeetingRecorderBar(): JSX.Element | null {
       {/* The clock and these counts advance with the 2s poll rather than a local timer, so they can
           never drift away from what the recorder actually holds. */}
       <span className="mtg-lag">
-        transcript ~{behind}s behind
-        {active.queued > 0 ? ` · ${active.queued} queued` : ''}
-        {active.segments_done > 0 ? ` · ${active.segments_done} transcribed` : ''}
+        {state === 'paused'
+          ? 'paused · audio is being discarded'
+          : <>
+              transcript ~{behind}s behind
+              {active.queued > 0 ? ` · ${active.queued} queued` : ''}
+              {active.segments_done > 0 ? ` · ${active.segments_done} transcribed` : ''}
+            </>}
       </span>
 
       <div className="mtg-bar-actions">
-        {capturing
-          ? <button className="ghost-btn" disabled={meetingBusy} onClick={() => void pauseMeeting()}><Pause size={13} /> Pause</button>
-          : <button className="ghost-btn" disabled={meetingBusy} onClick={() => void resumeMeeting()}><Play size={13} /> Resume</button>}
+        {/* No Resume when the captures are dead: resuming only clears the flag, and cannot respawn
+            an ffmpeg that exited, so the button would do nothing. Stop is the way out of that. */}
+        {state === 'recording' && (
+          <button className="ghost-btn" disabled={meetingBusy} onClick={() => void pauseMeeting()}><Pause size={13} /> Pause</button>
+        )}
+        {state === 'paused' && (
+          <button className="ghost-btn" disabled={meetingBusy} onClick={() => void resumeMeeting()}><Play size={13} /> Resume</button>
+        )}
         <button className="ghost-btn danger" disabled={meetingBusy} onClick={() => void stopRecording()}>
           <Square size={13} /> Stop
         </button>

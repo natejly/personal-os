@@ -545,11 +545,19 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     buf: list[str] = []
     error: str | None = None
     tool_events: list[dict[str, Any]] = []
+    # A meeting title is copied verbatim off a calendar invite by `adopt`, and the 45s nudge does
+    # that for any invite anyone can send the user - so the meetings block carries text an outsider
+    # chose, straight into the system prompt. Taint the turn when it is present: otherwise an
+    # external tool pinned to 'on' by a standing grant would run with no approval card in a chat
+    # that never called a meeting tool. The tool-shaped door is already gated by `taints` on the
+    # meeting_* specs; this is the context-shaped one beside it.
+    ctx_taints = [k for k in ("meetings",) if used.get(k)]
     tool_ctx: dict[str, Any] = {
         "project_id": conv["project_id"], "conversation_id": conv_id,
         # Taint is sticky for the whole conversation: the injected instructions live on in the replayed history, so
         # waiting one turn must not re-arm a standing 'always' grant. Only the user clears it (Context -> this chat).
-        "tainted": bool(conv["settings"].get("tainted")), "taint_sources": list(conv["settings"].get("taint_sources") or []),
+        "tainted": bool(conv["settings"].get("tainted")) or bool(ctx_taints),
+        "taint_sources": list(conv["settings"].get("taint_sources") or []) + [f"context:{k}" for k in ctx_taints],
         "allowed_urls": _urls(user_text), "settings": cfg,
     }
     modes = toolbox.effective(cfg.get("tools") or {}, (project or {}).get("tools"), conv["settings"].get("tools")) if conv["settings"].get("useTools", True) else {}
@@ -2796,17 +2804,12 @@ async def retranscribe_meeting(id: str, limit: int = 20) -> dict[str, Any]:
     runs in a thread; a segment past its attempt ceiling is left alone."""
     if not meeting_store.get(id):
         raise HTTPException(404)
+    # `retranscribe` settles every meeting it touched itself, rebuilding `transcript`, the FTS row
+    # and the error column clause by clause. This route used to redo that rebuild and compute
+    # `error = "" if text and not failed_segments(id)`, which cleared the WHOLE column - throwing
+    # away banners that are still true after a replay, like a dead loopback channel or a failed
+    # enhance pass. Let the service own it.
     settled = await asyncio.to_thread(meeting_svc.retranscribe, id, limit)
-    if settled:
-        # `transcript` has exactly one writer, finalize(), so replayed text only reaches the
-        # rolled-up column and the FTS index by closing the meeting out again on its own clock.
-        m = meeting_store.get(id) or {}
-        text = meeting_store.build_transcript(id)
-        # Clear the banner only when it can no longer be true: "N segment(s) could not be
-        # transcribed, so there is no transcript" must not outlive the retry that fixed it.
-        error = "" if text and not meeting_store.failed_segments(id) else (m.get("error") or "")
-        meeting_store.finalize(id, text, ended_at=m.get("ended_at"),
-                               status=m.get("status") or "ready", error=error)
     return {"settled": settled, "meeting": meeting_store.get(id)}
 
 

@@ -16,6 +16,7 @@ segment, where a kill leaves a 0-byte file that fails ffprobe outright.
 """
 from __future__ import annotations
 
+import collections
 import contextlib
 import logging
 import queue
@@ -39,6 +40,8 @@ RESTART_GAP = 2.0
 MAX_ATTEMPTS = 3            # transcription attempts per segment
 RETRY_BACKOFF = (2.0, 4.0, 8.0)
 TAIL_CHARS = 180            # of the previous transcript, sent as whisper's prompt
+STDERR_TAIL_LINES = 50      # ffmpeg stderr lines kept in memory while it runs
+WORKER_JOIN_SECONDS = 5.0   # how long stop() waits for the transcribe thread to exit
 
 DEFAULT_SEGMENT_SECONDS = 20
 # -t caps the whole run even under -f segment (verified), so a recorder whose supervisor dies
@@ -123,7 +126,12 @@ class ChannelCapture(_RecorderThread):
         self.session_start = 0.0
         self.stopping = False
         self.restarts = 0
-        self._next = 0  # the lowest seq not yet handed to on_segment
+        # The lowest seq not yet handed to on_segment, and never 0 over a directory that
+        # already holds wavs. A meeting that is stopped and started again reuses its audio_dir
+        # (meetings.mark_started keeps it) and a failed segment's wav is kept on purpose for
+        # retranscribe, so numbering from 0 would make _emit_ready report the PREVIOUS run's
+        # files as this run's first segments while the new ffmpeg overwrote them underneath.
+        self._next = _first_free_seq(out_dir, channel)
         self._emit_lock = threading.Lock()
         self._proc_lock = threading.Lock()
 
@@ -169,13 +177,23 @@ class ChannelCapture(_RecorderThread):
         argv = audiocap.segment_argv(ff, self.input_spec,
                                      str(self.out_dir / f"{self.channel}-%05d.wav"),
                                      self.segment_seconds, remaining)
-        if start:
-            # segment_argv has no start-number flag, and without one a restart would reopen
-            # channel-00000.wav and overwrite the beginning of the meeting.
-            argv[-1:-1] = ["-segment_start_number", str(start)]
+        # segment_argv has no start-number flag, and without one ffmpeg reopens
+        # channel-00000.wav - overwriting the beginning of the meeting after a restart, or the
+        # kept audio of an earlier run of the same meeting. Always passed, including the 0 that
+        # is already ffmpeg's default, so the numbering is never implicit.
+        argv[-1:-1] = ["-segment_start_number", str(start)]
         proc = subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
                                 stderr=subprocess.PIPE)
         self.proc = proc
+        # stderr has to be read WHILE ffmpeg runs. -loglevel error still prints a line per
+        # dropped input buffer, and once the ~64 KiB pipe buffer fills ffmpeg blocks in
+        # write(2) for good: it never exits, so poll() stays None, the capture looks alive with
+        # no error, and not one more segment is ever closed. The reader keeps only the tail,
+        # which is the only part _last_line ever wanted.
+        tail: collections.deque[bytes] = collections.deque(maxlen=STDERR_TAIL_LINES)
+        reader = threading.Thread(target=_pump_stderr, args=(proc, tail),
+                                  name=f"{self.name}-stderr", daemon=True)
+        reader.start()
         while True:
             rc = proc.poll()
             self._emit_ready(exited=rc is not None)
@@ -188,7 +206,10 @@ class ChannelCapture(_RecorderThread):
             # A hard halt with no stop() behind it still owes ffmpeg a chance to flush.
             self._shutdown_proc()
         rc = proc.poll()
-        return (rc if rc is not None else 0), self._drain_stderr(proc)
+        # Bounded: the pipe is at EOF once the process is down. Never a blocking read on a live
+        # process, which is what hung the capture thread when even `kill` timed out.
+        reader.join(timeout=2)
+        return (rc if rc is not None else 0), _last_line(b"".join(tail).decode("utf-8", "replace"))
 
     def _emit_ready(self, exited: bool) -> None:
         """Hand on_segment every segment that is finished and not yet reported.
@@ -236,33 +257,26 @@ class ChannelCapture(_RecorderThread):
                 except subprocess.TimeoutExpired:
                     continue
 
-    @staticmethod
-    def _drain_stderr(proc: subprocess.Popen[bytes]) -> str:
-        """ffmpeg's own complaint, which is the last thing it says before exiting."""
-        if proc.stderr is None:
-            return ""
-        try:
-            raw = proc.stderr.read() or b""
-        except Exception:  # noqa: BLE001
-            return ""
-        return _last_line(raw.decode("utf-8", "replace"))
-
 
 class TranscribeWorker(_RecorderThread):
-    """Drains (channel, seq, path) off a queue, transcribes each wav, reports the result.
+    """Drains (channel, seq, path, paused) off a queue, transcribes each wav, reports the result.
 
     Every outcome - silence, a broken file, three failed attempts - leaves through `on_result`.
     Nothing is dropped for being short: activity.py:860-861 throws away any transcript under
     `minChars`, which on a call silently deletes "yes, ship it".
+
+    `paused` travels WITH the work item because it is a fact about when the audio was recorded,
+    not a question to ask at dequeue time; and once `halt` is set the backlog is settled as
+    replayable failures rather than transcribed, because the meeting it belongs to is already
+    being finalized.
     """
 
-    def __init__(self, meeting_id: str, q: "queue.Queue[tuple[str, int, Path]]",
+    def __init__(self, meeting_id: str, q: "queue.Queue[tuple[str, int, Path, bool]]",
                  halt: threading.Event, *, out_dir: Path,
                  settings_fn: Callable[[], dict[str, Any]],
                  config_fn: Callable[[], dict[str, Any]],
                  data_dir: Path,
                  on_result: Callable[[str, int, Path, dict[str, Any]], None],
-                 is_paused: Callable[[], bool] = lambda: False,
                  keep_audio: bool = False,
                  max_attempts: int = MAX_ATTEMPTS,
                  max_audio_bytes: int = DEFAULT_MAX_AUDIO_BYTES,
@@ -275,7 +289,6 @@ class TranscribeWorker(_RecorderThread):
         self.config_fn = config_fn
         self.data_dir = data_dir
         self.on_result = on_result
-        self.is_paused = is_paused
         self.keep_audio = keep_audio
         self.max_attempts = max(1, int(max_attempts))
         self.max_audio_bytes = max(0, int(max_audio_bytes))
@@ -288,13 +301,16 @@ class TranscribeWorker(_RecorderThread):
     def work(self) -> None:
         while True:
             try:
-                channel, seq, path = self.q.get(timeout=POLL_SECONDS)
+                channel, seq, path, paused = self.q.get(timeout=POLL_SECONDS)
             except queue.Empty:
                 if self.halt.is_set():
                     return
                 continue
             try:
-                self._transcribe_one(channel, seq, path)
+                if self.halt.is_set():
+                    self._abandon(channel, seq, path)
+                else:
+                    self._transcribe_one(channel, seq, path, paused)
             except Exception as e:  # noqa: BLE001 - report the segment, then keep draining
                 self.error = f"{type(e).__name__}: {e}"
                 log.warning("meeting: %s could not settle %s/%s: %s",
@@ -307,10 +323,33 @@ class TranscribeWorker(_RecorderThread):
 
     # ------------------------------------------------------------ internals
 
-    def _transcribe_one(self, channel: str, seq: int, path: Path) -> None:
-        if self.is_paused():
-            # Pause does not kill ffmpeg - the seq numbering has to stay monotonic - so the
-            # segments recorded while paused arrive here and are thrown away on purpose.
+    def _abandon(self, channel: str, seq: int, path: Path) -> None:
+        """Settle a backlogged segment without a network call, keeping its audio.
+
+        Halt means the session is already stopping, and one attempt can block for two minutes
+        (stt.py:209 is httpx.Client(timeout=120)). Working through a backlog here would outlive
+        the meeting by hours and write text nobody ever sees - MeetingService.stop rolls the
+        transcript up and finalizes as soon as stop() returns - while the 45s tick re-queues the
+        same wavs for retranscribe underneath us. A kept wav and a failed row is the honest
+        outcome: it is exactly what retranscribe replays.
+        """
+        # No "; " in this message: MeetingService._settle_transcript splits `meetings.error` on
+        # that separator to clear spent clauses, so a semicolon here would survive as two
+        # unrecognised clauses forever. It also deliberately carries the "could not be
+        # transcribed" marker from TRANSCRIPT_BANNERS, because a replay makes it untrue.
+        self._report(channel, seq, path, self._result(
+            state="failed", keep=True,
+            error="this segment could not be transcribed before the recording stopped, so its "
+                  "audio is kept for a retranscribe"))
+
+    def _transcribe_one(self, channel: str, seq: int, path: Path, paused: bool) -> None:
+        if paused:
+            # `paused` is the state when the audio was RECORDED, handed over on the queue, not
+            # the live flag read now. Pause does not kill ffmpeg - the seq numbering has to stay
+            # monotonic - so paused segments arrive here and are thrown away on purpose; but the
+            # queue is normally a transcription round trip behind, so re-reading the flag here
+            # transcribed the aside the user paused for (they resumed before the worker caught
+            # up) and deleted audio recorded while live (they paused after it was captured).
             self._report(channel, seq, path, self._result(state="discarded", keep=False))
             return
         ok, note = audiocap.validate_wav(path)
@@ -431,9 +470,13 @@ class RecordingSession:
         self.drain_seconds = float(drain_seconds)
         self.on_segment = on_segment
         self.stop_event = threading.Event()
-        self.q: queue.Queue[tuple[str, int, Path]] = queue.Queue()
+        self.q: queue.Queue[tuple[str, int, Path, bool]] = queue.Queue()
         self.paused = False
         self.stopping = False
+        # True from construction until start() has the threads up. The pool registers a session
+        # before it can possibly be alive, and `alive` means "a thread is running", so without
+        # this a second concurrent start would find nothing recording and be admitted.
+        self.starting = True
         self.started_at = 0.0
         self.ended_at = 0.0
         self.captures: dict[str, ChannelCapture] = {}
@@ -442,7 +485,7 @@ class RecordingSession:
         self.worker = TranscribeWorker(
             meeting_id, self.q, self.stop_event, out_dir=out_dir, settings_fn=settings_fn,
             config_fn=config_fn, data_dir=data_dir, on_result=self._result,
-            is_paused=lambda: self.paused, keep_audio=keep_audio, max_attempts=max_attempts,
+            keep_audio=keep_audio, max_attempts=max_attempts,
             max_audio_bytes=max_audio_bytes, on_disk_check=on_disk_check)
         self._on_result = on_result
 
@@ -451,37 +494,65 @@ class RecordingSession:
     def start(self) -> None:
         self.out_dir.mkdir(parents=True, exist_ok=True)
         self.started_at = time.time()
-        self.worker.start()
-        for channel, spec in self.channels.items():
-            cap = ChannelCapture(channel, spec, self.out_dir, self.segment_seconds,
-                                 self.max_seconds, self.stop_event, self._segment)
-            self.captures[channel] = cap
-            cap.start()
+        try:
+            self.worker.start()
+            for channel, spec in self.channels.items():
+                cap = ChannelCapture(channel, spec, self.out_dir, self.segment_seconds,
+                                     self.max_seconds, self.stop_event, self._segment)
+                self.captures[channel] = cap
+                cap.start()
+        finally:
+            # Even a half-started session must stop claiming to be starting, or the pool would
+            # refuse every later start for the lifetime of the process.
+            self.starting = False
 
     def pause(self, paused: bool) -> None:
         """Stop keeping audio without stopping ffmpeg, so seq numbering stays monotonic."""
         self.paused = bool(paused)
 
-    def stop(self, drain_seconds: float | None = None) -> dict[str, Any]:
-        """Captures down first, then drain what is already recorded, then the worker."""
+    def stop(self, drain_seconds: float | None = None, *,
+             join_seconds: float = WORKER_JOIN_SECONDS) -> dict[str, Any]:
+        """Captures down first, then drain what is already recorded, then the worker.
+
+        Returns the stop contract - {"drained": bool, "pending": int, "stats": dict} - because
+        the caller rolls the transcript up and finalizes the meeting the moment this returns.
+        `drained` is True only when the worker really finished its backlog and exited inside the
+        deadline; on False, `pending` segments are still unsettled and the transcript the caller
+        is about to build is NOT the whole meeting.
+        """
         self.stopping = True
+        self.starting = False
         for cap in self.captures.values():
             with contextlib.suppress(Exception):
                 cap.stop()
         for cap in self.captures.values():
-            cap.join(timeout=5)
+            # RuntimeError: a capture that never got started (start() raised part way).
+            with contextlib.suppress(RuntimeError):
+                cap.join(timeout=5)
         deadline = time.time() + (self.drain_seconds if drain_seconds is None else float(drain_seconds))
         while time.time() < deadline and self.pending > 0:
             # halt.wait rather than sleep: a hard shutdown behind us cuts the drain short.
             self.stop_event.wait(0.2)
         self.stop_event.set()
-        self.worker.join(timeout=5)
+        if self.worker.ident is not None:
+            self.worker.join(timeout=max(0.1, float(join_seconds)))
+        pending = self.pending
+        drained = not self.worker.is_alive() and pending == 0 and self.q.qsize() == 0
+        if not drained and not self.worker.error:
+            # The one place that knows the transcript is short. errors() carries it into
+            # status(), and the caller gets it in the return value either way.
+            self.worker.error = (f"transcription was still running when the recording stopped; "
+                                 f"{pending} segment(s) are missing from the transcript - "
+                                 "retranscribe them once the route is healthy")
         self.ended_at = time.time()
-        return self.stats()
+        return {"drained": drained, "pending": pending, "stats": self.stats()}
 
     @property
     def alive(self) -> bool:
-        return any(c.is_alive() for c in self.captures.values()) or self.worker.is_alive()
+        # `starting` counts as alive: between the pool registering this session and its threads
+        # coming up there is no thread to see, but the microphone is already claimed.
+        return (self.starting or any(c.is_alive() for c in self.captures.values())
+                or self.worker.is_alive())
 
     @property
     def pending(self) -> int:
@@ -515,8 +586,11 @@ class RecordingSession:
         """A closed wav: record where it sits in the meeting, then queue it for transcription."""
         seconds = _wav_seconds(path)
         t_start = float(seq * self.segment_seconds)
+        # Read once, here, and handed to the worker on the queue: the row's state and the
+        # worker's keep-or-discard decision have to be the same decision.
+        paused = self.paused
         info = {
-            "state": "discarded" if self.paused else "recorded",
+            "state": "discarded" if paused else "recorded",
             "t_start": t_start,
             "t_end": t_start + seconds,
             # From the RECORDING clock, not from when transcription returned: that is the bug at
@@ -531,7 +605,7 @@ class RecordingSession:
             self._counts["emitted"] += 1
         with contextlib.suppress(Exception):
             self.on_segment(channel, seq, path, info)
-        self.q.put((channel, seq, path))
+        self.q.put((channel, seq, path, paused))
 
     def _result(self, channel: str, seq: int, path: Path, res: dict[str, Any]) -> None:
         state = str(res.get("state") or "")
@@ -574,6 +648,12 @@ class RecorderPool:
             live = self._live()
             if live is not None:
                 raise RecorderBusy(live.meeting_id)
+            if meeting_id in self.sessions:
+                # Overwriting the entry would ORPHAN the session already under this id: nothing
+                # could reach its stop_event again, so its worker would block on the queue for
+                # good and its ffmpeg would run to its own -t backstop four hours later, both
+                # of them writing the same mic-%05d.wav files as the new run.
+                raise RecorderBusy(meeting_id)
             session = RecordingSession(
                 meeting_id, recording_dir(self.data_dir, meeting_id), channels,
                 settings_fn=self.settings_fn, config_fn=self.config_fn, data_dir=self.data_dir,
@@ -582,7 +662,18 @@ class RecorderPool:
                 max_audio_bytes=max_audio_bytes, drain_seconds=drain_seconds,
                 on_disk_check=on_disk_check)
             self.sessions[meeting_id] = session
-        session.start()
+            # start() under the SAME lock as the busy check. It only spawns threads - ffmpeg is
+            # launched inside the capture thread - so the lock is held for microseconds, and
+            # releasing it first left a window where `alive` was still False (no thread had run
+            # yet) and a second concurrent start - a double-clicked button, or the 45s _nudge
+            # racing a manual start, both via asyncio.to_thread - was admitted as well.
+            try:
+                session.start()
+            except Exception:
+                self.sessions.pop(meeting_id, None)
+                with contextlib.suppress(Exception):
+                    session.stop(drain_seconds=0.0, join_seconds=0.5)
+                raise
         return session
 
     def get(self, meeting_id: str) -> RecordingSession | None:
@@ -595,12 +686,15 @@ class RecorderPool:
     def stop(self, meeting_id: str, drain_seconds: float | None = None) -> dict[str, Any]:
         session = self.sessions.get(meeting_id)
         if session is None:
-            return {}
+            # Nothing was recording, so nothing can be outstanding: the caller's transcript is
+            # as complete as this pool can make it. Same keys as a real stop, always.
+            return {"drained": True, "pending": 0, "stats": {}}
         try:
             return session.stop(drain_seconds)
         finally:
             with self._lock:
-                self.sessions.pop(meeting_id, None)
+                if self.sessions.get(meeting_id) is session:
+                    self.sessions.pop(meeting_id, None)
 
     def stop_all(self) -> None:
         """App shutdown: every live ffmpeg gets its q\\n, so no meeting loses its last segment."""
@@ -616,6 +710,40 @@ class RecorderPool:
 
 
 # ---------------------------------------------------------------- internals
+
+
+def _first_free_seq(out_dir: Path, channel: str) -> int:
+    """One past the highest `channel-%05d.wav` already on disk, so a second run of the same
+    meeting never re-emits - or overwrites - the first run's audio."""
+    highest = -1
+    try:
+        for path in out_dir.glob(f"{channel}-*.wav"):
+            stem = path.name[len(channel) + 1:-len(".wav")]
+            if stem.isdigit():
+                highest = max(highest, int(stem))
+    except OSError:
+        return 0
+    return highest + 1
+
+
+def _pump_stderr(proc: subprocess.Popen[bytes], tail: "collections.deque[bytes]") -> None:
+    """Keep ffmpeg's stderr pipe empty while it runs, holding on to the last lines only.
+
+    Nothing drained the pipe during the run before this, so a chatty capture - one line per
+    dropped input buffer is enough - filled the ~64 KiB buffer and ffmpeg blocked in write(2)
+    permanently: no exit, no further segments, and `alive: True` with an empty error in status.
+    """
+    stream = proc.stderr
+    if stream is None:
+        return
+    try:
+        for line in iter(stream.readline, b""):
+            tail.append(line)   # deque(maxlen=...): bounded, and append is atomic
+    except Exception:  # noqa: BLE001 - a dead pipe must not crash the reader
+        pass
+    finally:
+        with contextlib.suppress(Exception):
+            stream.close()
 
 
 def _size(path: Path) -> int:

@@ -996,6 +996,9 @@ export interface MeetingStatusInfo {
     segments_pending: number
     /** Waiting on the transcription queue, for the honest "~20s behind · N queued" line. */
     queued: number
+    /** Pause keeps ffmpeg running and throws the audio away, so `channels[].alive` stays true while
+     *  paused. This flag is the only honest source of pausedness; never infer it from the channels. */
+    paused: boolean
     channels: { channel: string; alive: boolean; error: string }[]
     error: string
   } | null

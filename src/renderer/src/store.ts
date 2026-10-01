@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import type { ActivityConfig, ActivityContextFile, ActivityEvent, ActivitySignal, ActivityStatus, ActivitySummary, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocRevision, Document, FullDoc, GraphData, Meeting, MeetingCandidate, MeetingCapability, MeetingConfig, MeetingPreflight, MeetingSegment, MeetingStatus, MeetingStatusInfo, MeetingStreamEvent, FullMeeting, Memory, Message, ModelInfo, Settings, Project, RunConflict, SessionStatus, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap } from '@shared/types'
 import { api, chatStream, meetingStream, setBase, type Scope } from './lib/api'
 import { finishStatus, mergeConversation, pickEvictions, reduceStatus, settleApprovals } from './sessionStatus'
-import { applyCursor } from './lib/transcript'
+import { applyCursor, fetchSegmentPages, needsSegmentReload } from './lib/transcript'
 import { viewHidden } from './modules'
 
 /**
@@ -130,6 +130,9 @@ export interface State {
   meetingPreflight: MeetingPreflight | null
   /** Enhance proposals awaiting review, across every meeting — the sidebar badge. */
   meetingsPending: number
+  /** The rail's search box, held here rather than in the view: `refreshMeetings` is called from the
+   *  recorder bar's 5s tick and from the autosave too, and those must not drop the user's filter. */
+  meetingQuery: string
   /** Notepad buffer for the open meeting: what the user has typed but autosave has not flushed. */
   meetingNotesDraft: string | null
   meetingSaving: boolean
@@ -251,7 +254,10 @@ export interface State {
   rejectRevision: (revId: string) => Promise<void>
   restoreRevision: (revId: string) => Promise<void>
 
+  /** No argument re-issues the filter the rail is currently showing, never the unfiltered list. */
   refreshMeetings: (query?: string) => Promise<void>
+  /** Type in the rail's search box. The view's effect does the fetch. */
+  setMeetingQuery: (query: string) => void
   /** Status only — cheap enough to poll, and it keeps its own 5s tick while a recording is live. */
   refreshMeetingStatus: () => Promise<void>
   refreshMeetingsPending: () => Promise<void>
@@ -299,6 +305,17 @@ let meetingSaveTimer: ReturnType<typeof setTimeout> | null = null
 /** While a recording is live the sidebar indicator is mounted in every view but only the Meetings
  *  view polls, so the status poll keeps its own tick. Cleared the moment `active` goes null. */
 let meetingLiveTimer: ReturnType<typeof setInterval> | null = null
+/**
+ * Epoch ms the post-stop watch window closes at.
+ *
+ * `POST /meetings/{id}/stop` answers with the row already finalized to `ready` and only THEN
+ * schedules the enhance pass, so the status poll right after a stop sees no live session and a
+ * settled status, and would tear the tick down a moment before the revision, the action items and
+ * the late transcriptions land. The window keeps it ticking across that gap; it is bounded so a
+ * stop can never leave a poll running for the rest of the session.
+ */
+let meetingSettleUntil = 0
+const MEETING_SETTLE_MS = 90_000
 
 /**
  * A pop-out renderer (`?surface=widget`). Same lookup as main.tsx: dev serves the query off
@@ -563,9 +580,27 @@ export const useStore = create<State>((set, get) => {
    * re-delivered incrementally. Opening a meeting and replaying one both have to reload.
    */
   const loadSegments = async (meetingId: string): Promise<void> => {
-    const rows = await api.meetings.segments(meetingId, 0).catch(() => [])
-    if (get().activeMeeting?.id !== meetingId) return
-    set({ meetingSegments: applyCursor([], rows), meetingCursor: lastCursor(rows) })
+    // Paged, because one request is capped: an hour on two channels at the default 20s clips is
+    // ~360 rows, and a single `?since=0` page would show the first half of the call and stop
+    // mid-sentence with nothing on screen saying so.
+    const page = await fetchSegmentPages((since, limit) => api.meetings.segments(meetingId, since, limit)).catch(() => null)
+    if (page === null || get().activeMeeting?.id !== meetingId) return
+    set({ meetingSegments: page.segments, meetingCursor: page.cursor })
+  }
+
+  /**
+   * Keystrokes aimed at the meeting being left behind.
+   *
+   * A switch is two round trips long and the notepad accepts input for the whole of it, so the
+   * flush at the top of `openMeeting`/`startRecording` is not the last word: without this second
+   * flush the unconditional `meetingNotesDraft: null` that follows eats everything typed since the
+   * click. Returns the saved row when it flushed one, so the caller can adopt its notes.
+   */
+  const flushOutgoing = async (outgoing: string | null): Promise<FullMeeting | null> => {
+    if (outgoing === null || get().activeMeeting?.id !== outgoing || get().meetingNotesDraft === null) return null
+    await get().flushMeetingNotes()
+    const after = get().activeMeeting
+    return after?.id === outgoing ? after : null
   }
 
   /**
@@ -576,12 +611,19 @@ export const useStore = create<State>((set, get) => {
   const liveTick = async (): Promise<void> => {
     await get().refreshMeetingStatus()
     const m = get().activeMeeting
-    if (!m || !SETTLING.includes(m.status)) return
+    // The post-stop window counts as settling: the row is already `ready` while the enhance pass
+    // and the last transcriptions are still landing on it.
+    if (!m || !(SETTLING.includes(m.status) || Date.now() < meetingSettleUntil)) return
     // Never mid-autosave: a read that lands between the PUT and its merge-back would put the
     // pre-save notes back on screen and the next keystroke would diff against them.
     if (get().meetingSaving) return
     const fresh = await api.meetings.get(m.id).catch(() => null)
-    if (fresh && get().activeMeeting?.id === fresh.id) set({ activeMeeting: fresh })
+    if (fresh && get().activeMeeting?.id === fresh.id) {
+      set({ activeMeeting: fresh })
+      // A clip that transcribed after Stop kept its rowid, so `meetingCursor` will never re-deliver
+      // it: the tail has to be reloaded whole or those words never appear.
+      if (needsSegmentReload(get().meetingSegments, fresh.segment_count)) await loadSegments(fresh.id)
+    }
     void get().refreshMeetingsPending()
   }
 
@@ -708,6 +750,7 @@ export const useStore = create<State>((set, get) => {
     meetingCursor: 0,
     meetingPreflight: null,
     meetingsPending: 0,
+    meetingQuery: '',
     meetingNotesDraft: null,
     meetingSaving: false,
     meetingBusy: false,
@@ -1137,17 +1180,29 @@ export const useStore = create<State>((set, get) => {
     },
 
     // ---- meetings ----
-    refreshMeetings: async (query = '') => {
+    refreshMeetings: async (query) => {
+      // Defaulting to the stored query rather than '' is the whole point: the recorder bar's 5s
+      // tick and the notes autosave both call this with no argument, and an unfiltered answer
+      // would replace the list under a search box that still reads "budget".
+      const q = query ?? get().meetingQuery
+      if (q !== get().meetingQuery) set({ meetingQuery: q })
       try {
-        set({ meetings: await api.meetings.list(get().dataScope, query) })
+        set({ meetings: await api.meetings.list(get().dataScope, q) })
       } catch { /* the recorder bar re-runs this every 5s; one flaky request must not toast */ }
     },
+    setMeetingQuery: (query) => set({ meetingQuery: query }),
     refreshMeetingStatus: async () => {
       try {
         const meetingStatus = await api.meetings.status()
         set({ meetingStatus })
         const m = get().activeMeeting
-        const settling = !!meetingStatus.active || (m !== null && SETTLING.includes(m.status))
+        // `counts.pending` covers the one path the 90s window cannot: when `stop` abandons the
+        // drain, the row is finalized 'ready' straight away and a background watcher waits up to
+        // 15 minutes for the segments to settle before re-rolling the transcript and enhancing.
+        // 'ready' is not in SETTLING, so without this the tick dies at 90s and neither the late
+        // transcript nor the enhanced-notes proposal ever reaches the open meeting.
+        const draining = meetingStatus.counts.pending > 0
+        const settling = !!meetingStatus.active || draining || (m !== null && SETTLING.includes(m.status)) || Date.now() < meetingSettleUntil
         if (settling && !meetingLiveTimer) meetingLiveTimer = setInterval(() => void liveTick(), 5000)
         if (!settling && meetingLiveTimer) {
           clearInterval(meetingLiveTimer)
@@ -1161,13 +1216,27 @@ export const useStore = create<State>((set, get) => {
       } catch { /* a badge is not worth a toast */ }
     },
     openMeeting: async (id) => {
-      if (get().activeMeeting?.id !== id) await get().flushMeetingNotes()
+      const outgoing = get().activeMeeting?.id ?? null
+      if (outgoing !== id) await get().flushMeetingNotes()
       openingMeeting = id
       set({ view: 'meetings' })
       try {
         const m = await api.meetings.get(id)
         if (openingMeeting !== id) return
-        set({ activeMeeting: m, meetingNotesDraft: null, meetingSegments: [], meetingCursor: 0 })
+        // Anything typed during the two round trips still belongs to the outgoing meeting, and the
+        // reset below is about to drop it.
+        const late = await flushOutgoing(outgoing)
+        if (openingMeeting !== id) return
+        // Reopening the row that is already open: the flush just saved newer notes than the GET
+        // above returned, and a draft that arrived during the PUT is still unsaved.
+        const same = late !== null && late.id === id
+        const draft = get().meetingNotesDraft
+        set({
+          activeMeeting: same ? { ...m, notes: late.notes } : m,
+          meetingNotesDraft: same ? draft : null,
+          meetingSegments: [],
+          meetingCursor: 0
+        })
         await loadSegments(id)
         // A meeting that is still recording or settling gets the tick and the stream; one that is
         // finished needs neither, and would otherwise poll a row nothing is writing to.
@@ -1189,13 +1258,24 @@ export const useStore = create<State>((set, get) => {
       set({ meetingBusy: true })
       try {
         // Whatever is buffered belongs to the meeting being left behind, so it goes first.
+        const outgoing = get().activeMeeting?.id ?? null
         await get().flushMeetingNotes()
         const id = meetingId ?? (await api.meetings.create({ title: newMeetingTitle() })).id
         const m = await api.meetings.start(id)
+        // Typing carried on through create+start; the reset below would otherwise discard it.
+        const late = await flushOutgoing(outgoing)
+        const same = late !== null && late.id === id
+        const draft = get().meetingNotesDraft
         // Claims the open slot: an `openMeeting` still in flight for another row must not land on
         // top of the one that just started recording.
         openingMeeting = id
-        set({ view: 'meetings', activeMeeting: m, meetingNotesDraft: null, meetingSegments: [], meetingCursor: 0 })
+        set({
+          view: 'meetings',
+          activeMeeting: same ? { ...m, notes: late.notes } : m,
+          meetingNotesDraft: same ? draft : null,
+          meetingSegments: [],
+          meetingCursor: 0
+        })
         void get().watchMeeting(id)
         await Promise.all([get().refreshMeetings(), get().refreshMeetingStatus()])
       } catch (e) {
@@ -1217,6 +1297,10 @@ export const useStore = create<State>((set, get) => {
         const m = await api.meetings.stop(id)
         set((st) => (st.activeMeeting?.id === id ? { activeMeeting: m } : {}))
         get().toast('Recording stopped. The transcript and the enhanced notes finish in the background.')
+        // /stop answers with the row already `ready` and schedules the enhance pass afterwards, so
+        // without this the status poll below would conclude nothing is settling and stop the tick
+        // seconds before the proposal, the action items and the last transcriptions arrive.
+        meetingSettleUntil = Date.now() + MEETING_SETTLE_MS
         await loadSegments(id)
         await Promise.all([get().refreshMeetings(), get().refreshMeetingStatus(), get().refreshMeetingsPending()])
       } catch (e) {
@@ -1407,6 +1491,10 @@ export const useStore = create<State>((set, get) => {
     },
     deleteMeeting: async (id) => {
       try {
+        // Stop first. DELETE only drops the row, and the recorder bar — the only Stop, Pause and
+        // Resume in the app — is mounted on the open meeting, so deleting the live row would leave
+        // ffmpeg capturing with no control anywhere that can reach it.
+        if (get().meetingStatus?.active?.meeting_id === id) await get().stopRecording()
         await api.meetings.del(id)
         if (get().activeMeeting?.id === id) {
           // The buffered notes belong to a row that no longer exists.

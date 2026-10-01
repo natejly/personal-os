@@ -33,9 +33,13 @@ class transcribes_as:
     asserting on a 120s timeout.
     """
 
-    def __init__(self, *results: dict):
+    def __init__(self, *results: dict, hold: threading.Event | None = None):
         self.results = list(results)
         self.calls: list[dict] = []
+        # Set to keep the FIRST call in flight: that is the only way to test what the worker
+        # does with a backlog, since the real bugs all live in the gap between enqueue and
+        # dequeue.
+        self.hold = hold
 
     def __enter__(self) -> transcribes_as:
         self.real = meeting_recorder.stt.transcribe
@@ -48,6 +52,8 @@ class transcribes_as:
     def _transcribe(self, path: Path, *, settings: dict, cfg: dict, data_dir: Path,
                     prompt: str = "") -> dict:
         self.calls.append({"path": path, "prompt": prompt, "model": cfg.get("sttModel")})
+        if self.hold is not None and len(self.calls) == 1:
+            self.hold.wait(20)
         i = min(len(self.calls) - 1, len(self.results) - 1)
         res = dict(self.results[i]) if self.results else {}
         res.setdefault("text", "")
@@ -94,8 +100,10 @@ class _Worker:
         self.halt.set()
         self.worker.join(timeout=10)
 
-    def feed(self, seq: int, path: Path) -> None:
-        self.q.put(("mic", seq, path))
+    def feed(self, seq: int, path: Path, paused: bool = False) -> None:
+        # (channel, seq, path, paused): `paused` is the state when the audio was RECORDED and
+        # travels with the item, because the worker must not re-derive it at dequeue time.
+        self.q.put(("mic", seq, path, paused))
 
     def wait(self, count: int, timeout: float = 30.0) -> None:
         end = time.time() + timeout
@@ -204,6 +212,71 @@ def test_channel_capture_without_ffmpeg_reports_the_fix() -> None:
         audiocap.ffmpeg_path = real  # type: ignore[assignment]
     assert "brew install ffmpeg" in cap.error
     assert cap.proc is None
+
+
+def test_a_second_run_never_reports_or_overwrites_the_first_runs_wavs() -> None:
+    """The regression: a meeting recorded, stopped and started again on the same id.
+
+    Its failed segments keep their wavs on purpose (retranscribe replays them) and
+    mark_started reuses audio_dir, so a capture that numbered from 0 emitted the previous run's
+    files as this run's first segments and then let ffmpeg overwrite them underneath the worker
+    - losing the old audio and the new meeting's first segments at once.
+    """
+    out = _tmp()
+    leftovers = [_wav(out / f"mic-{i:05d}.wav", seconds=0.3) for i in range(6)]
+    sizes = [p.stat().st_size for p in leftovers]
+    seen: list[int] = []
+    cap = meeting_recorder.ChannelCapture(
+        "mic", audiocap.synthetic_input(), out, 1, 3, threading.Event(),
+        lambda c, s, p: seen.append(s))
+    assert cap._next == 6, f"numbering restarted over 6 wavs already on disk: {cap._next}"
+    cap._emit_ready(exited=True)
+    assert seen == [], f"a previous run's wavs were reported as this run's segments: {seen}"
+
+    if not audiocap.ffmpeg_path():
+        print("  note  no ffmpeg on PATH, skipping the overwrite half")
+        return
+    cap.start()
+    cap.join(timeout=20)
+    assert seen and seen[0] == 6, seen
+    assert [p.stat().st_size for p in leftovers] == sizes, "the first run's audio was overwritten"
+    assert (out / "mic-00006.wav").exists()
+    assert cap.error == "", cap.error
+
+
+def test_a_chatty_capture_never_wedges_on_a_full_stderr_pipe() -> None:
+    """ffmpeg's stderr is read WHILE it runs, so it can never block in write(2).
+
+    Nothing drained the pipe during the run before: past ~64 KiB of complaints (one line per
+    dropped input buffer is enough over a four-hour ceiling) ffmpeg blocked forever, poll()
+    kept returning None, and the capture went on looking alive with no error and no segments.
+    Driven through a stand-in for ffmpeg that says 120 KiB worth before exiting 0.
+    """
+    noise = ("import sys\n"
+             "for i in range(3000):\n"
+             "    sys.stderr.write('[avfoundation @ 0x1] input buffer overrun %04d\\n' % i)\n"
+             "sys.stderr.write('[avfoundation @ 0x1] the last complaint\\n')\n"
+             "sys.stderr.flush()\n")
+    out = _tmp()
+    cap = meeting_recorder.ChannelCapture(
+        "mic", [], out, 1, 5, threading.Event(), lambda c, s, p: None)
+    got: list[tuple[int, str]] = []
+    real = meeting_recorder.audiocap.segment_argv
+    meeting_recorder.audiocap.segment_argv = (  # type: ignore[assignment]
+        lambda *a, **k: [sys.executable, "-c", noise, "OUT"])
+    try:
+        runner = threading.Thread(target=lambda: got.append(cap._run_once("ffmpeg")), daemon=True)
+        runner.start()
+        runner.join(timeout=20)
+        assert got, "_run_once never returned: the capture wedged on its unread stderr pipe"
+        rc, err = got[0]
+        assert rc == 0, rc
+        # The tail still reaches the caller - that is what the old post-exit read was for.
+        assert err == "[avfoundation @ 0x1] the last complaint", err
+    finally:
+        meeting_recorder.audiocap.segment_argv = real  # type: ignore[assignment]
+        cap.stopping = True
+        cap.halt.set()
 
 
 # ---------------------------------------------------------------- the worker
@@ -334,12 +407,69 @@ def test_keep_audio_keeps_a_transcribed_wav() -> None:
 def test_a_paused_segment_is_discarded_without_transcribing() -> None:
     out = _tmp()
     path = _wav(out / "mic-00000.wav")
-    with transcribes_as({"text": "private"}) as stub, _Worker(out, is_paused=lambda: True) as w:
-        w.feed(0, path)
+    with transcribes_as({"text": "private"}) as stub, _Worker(out) as w:
+        w.feed(0, path, paused=True)
         w.wait(1)
     assert w.results[0][2]["state"] == "discarded"
     assert stub.calls == [], "paused audio must not be sent anywhere"
     assert not path.exists()
+
+
+def test_the_pause_decision_is_the_one_made_when_the_audio_was_recorded() -> None:
+    """Both directions of the pause race, which a dequeue-time flag got wrong both ways.
+
+    seq 0 was recorded during a paused aside and dequeued after the user resumed: it must still
+    be thrown away. seq 1 was recorded while live and dequeued after the user paused: it must
+    still be transcribed, because `_report` DELETES the wav of a discarded segment.
+    """
+    out = _tmp()
+    aside = _wav(out / "mic-00000.wav")
+    wanted = _wav(out / "mic-00001.wav")
+    with transcribes_as({"text": "wanted"}) as stub, _Worker(out) as w:
+        w.feed(0, aside, paused=True)
+        w.feed(1, wanted, paused=False)
+        w.wait(2)
+    by_seq = {seq: res for _, seq, res in w.results}
+    assert by_seq[0]["state"] == "discarded" and by_seq[0]["text"] == "", by_seq[0]
+    assert by_seq[1]["state"] == "done" and by_seq[1]["text"] == "wanted", by_seq[1]
+    assert [c["path"] for c in stub.calls] == [wanted], "paused audio reached the stt route"
+    # One was discarded and one was transcribed, so neither wav is worth keeping - but the
+    # words of the wanted one survived in the row, which is the whole point.
+    assert not aside.exists() and not wanted.exists()
+
+
+def test_a_halted_worker_abandons_its_backlog_instead_of_transcribing_it() -> None:
+    """stop() must not leave a thread transcribing a meeting that is already finalized.
+
+    One attempt can block for two minutes (stt.py:209), so a six-segment backlog kept the
+    worker alive for hours past the 5s join - writing text into a transcript that was rolled up
+    when stop() returned, while retranscribe re-queued the same wavs from the other side.
+    """
+    out = _tmp()
+    hold = threading.Event()
+    paths = [_wav(out / f"mic-{i:05d}.wav") for i in range(6)]
+    with transcribes_as({"text": "ship it"}, hold=hold) as stub, _Worker(out) as w:
+        for i, path in enumerate(paths):
+            w.feed(i, path)
+        end = time.time() + 5
+        while time.time() < end and not stub.calls:
+            time.sleep(0.02)
+        assert stub.calls, "the worker never picked up the first segment"
+        w.halt.set()        # what RecordingSession.stop does
+        hold.set()          # the in-flight call finally comes back
+        w.wait(6, timeout=15)
+    assert not w.worker.is_alive(), "the worker outlived its halt"
+    assert len(stub.calls) == 1, [c["path"].name for c in stub.calls]
+    backlog = [res for _, seq, res in w.results if seq > 0]
+    assert len(backlog) == 5, w.results
+    assert all(r["state"] == "failed" for r in backlog), backlog
+    assert all("could not be transcribed before the recording stopped" in r["error"] for r in backlog)
+    # The message carries a TRANSCRIPT_BANNERS marker and no "; ", so MeetingService can clear it
+    # clause by clause once a replay makes it untrue.
+    assert all("could not be transcribed" in r["error"] and "; " not in r["error"] for r in backlog)
+    # Abandoned, not lost: the wav is kept, so retranscribe can still finish the job.
+    assert all(p.exists() for p in paths[1:])
+    assert all(r["wav_path"] == str(p) for r, p in zip(backlog, paths[1:]))
 
 
 # ---------------------------------------------------------------- session and pool
@@ -370,8 +500,13 @@ def test_a_session_records_transcribes_and_reports_stats() -> None:
         while time.time() < end and len(segments) < 3:
             time.sleep(0.1)
         time.sleep(0.6)   # see the capture-loop test: the open segment needs some samples in it
-        stats = pool.stop("mtg-1")
+        stopped = pool.stop("mtg-1")
 
+    # The stop contract: the caller finalizes the meeting the moment this returns, so it has to
+    # be told whether the worker really got through its backlog.
+    assert set(stopped) == {"drained", "pending", "stats"}, stopped
+    assert stopped["drained"] is True and stopped["pending"] == 0, stopped
+    stats = stopped["stats"]
     assert len(segments) >= 3, segments
     assert [s["seq"] for s in segments] == list(range(len(segments)))
     # t_start comes from the recording clock, so it is exact multiples of segment_seconds.
@@ -400,7 +535,9 @@ def test_recordings_never_live_under_tmp() -> None:
 def test_stop_all_is_safe_with_nothing_running() -> None:
     pool = meeting_recorder.RecorderPool(_tmp(), lambda: dict(SETTINGS), lambda: dict(CFG))
     assert pool.live() is None
-    assert pool.stop("nope") == {}
+    # Nothing was recording, so nothing is outstanding - but the keys are the same every time,
+    # because the caller reads them unconditionally.
+    assert pool.stop("nope") == {"drained": True, "pending": 0, "stats": {}}
     pool.stop_all()   # must never raise
 
 
@@ -412,6 +549,144 @@ def test_a_session_needs_a_channel() -> None:
         raise AssertionError("a recording with no channels was accepted")
     except ValueError as e:
         assert "channel" in str(e)
+
+
+def _nothing_session(pool: "meeting_recorder.RecorderPool", meeting_id: str,
+                     on: dict) -> None:
+    """Start a session through the pool with a stand-in start(), recording the outcome."""
+    try:
+        session = pool.start(meeting_id, {"mic": ["-f", "lavfi", "-i", "anullsrc"]},
+                             on_segment=lambda *a: None, on_result=lambda *a: None)
+        on.setdefault("started", []).append((meeting_id, session))
+    except meeting_recorder.RecorderBusy as e:
+        on.setdefault("busy", []).append((meeting_id, e.meeting_id))
+
+
+class _slow_claim:
+    """Replace RecordingSession.start with a 0.3s no-op, widening the claim window.
+
+    No thread, no ffmpeg: the point is exactly the state the pool used to be blind to - a
+    session that is registered but has nothing running yet.
+    """
+
+    @staticmethod
+    def _claim(session: object) -> None:
+        time.sleep(0.3)      # the window the pool used to leave open
+
+    def __enter__(self) -> None:
+        self.real = meeting_recorder.RecordingSession.start
+        meeting_recorder.RecordingSession.start = self._claim  # type: ignore[method-assign]
+
+    def __exit__(self, *exc: object) -> None:
+        meeting_recorder.RecordingSession.start = self.real  # type: ignore[method-assign]
+
+
+def _race(ids: list[str], pool: "meeting_recorder.RecorderPool") -> dict:
+    out: dict = {}
+    gate = threading.Barrier(len(ids))
+
+    def go(meeting_id: str) -> None:
+        gate.wait(5)
+        _nothing_session(pool, meeting_id, out)
+
+    threads = [threading.Thread(target=go, args=(i,)) for i in ids]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10)
+    assert not any(t.is_alive() for t in threads), "a start never returned"
+    return out
+
+
+def test_two_concurrent_starts_for_one_meeting_admit_exactly_one() -> None:
+    """A double-clicked Start, or the 45s nudge racing a manual one - both via asyncio.to_thread.
+
+    Registering the session and starting it used to happen on either side of the lock, so both
+    threads passed the busy check and the second one's dict entry ORPHANED the first: nothing
+    could reach its stop_event again, and its ffmpeg would have run to the four-hour backstop
+    writing the same mic-%05d.wav files as the winner.
+    """
+    pool = meeting_recorder.RecorderPool(_tmp(), lambda: dict(SETTINGS), lambda: dict(CFG))
+    with _slow_claim():
+        out = _race(["mtg-1", "mtg-1"], pool)
+    started = out.get("started", [])
+    busy = out.get("busy", [])
+    assert len(started) == 1, f"{len(started)} starts were admitted for one meeting"
+    assert len(busy) == 1 and busy[0][1] == "mtg-1", busy
+    assert list(pool.sessions) == ["mtg-1"]
+    assert pool.sessions["mtg-1"] is started[0][1], "the live session was orphaned from the pool"
+
+
+def test_a_registered_session_is_busy_before_its_threads_are_up() -> None:
+    """Two different meetings racing: `alive` cannot mean "a thread is running" alone.
+
+    Between the pool registering a session and its threads coming up there is nothing to see,
+    but the microphone is already claimed - so the second meeting has to be refused.
+    """
+    pool = meeting_recorder.RecorderPool(_tmp(), lambda: dict(SETTINGS), lambda: dict(CFG))
+    with _slow_claim():
+        out = _race(["mtg-a", "mtg-b"], pool)
+    assert len(out.get("started", [])) == 1, out
+    assert len(out.get("busy", [])) == 1, out
+    assert len(pool.sessions) == 1, list(pool.sessions)
+    claimed = out["started"][0][1]
+    assert claimed.alive and claimed.starting, "a registered session must count as live"
+    assert pool.live() is claimed
+
+
+def test_a_segment_carries_the_pause_state_it_was_recorded_with() -> None:
+    out = _tmp()
+    recorded: list[dict] = []
+    session = meeting_recorder.RecordingSession(
+        "m1", out, {"mic": audiocap.synthetic_input()}, settings_fn=lambda: dict(SETTINGS),
+        config_fn=lambda: dict(CFG), data_dir=out.parent,
+        on_segment=lambda c, s, p, i: recorded.append(dict(i)), on_result=lambda *a: None,
+        segment_seconds=1)
+    first = _wav(out / "mic-00000.wav")
+    second = _wav(out / "mic-00001.wav")
+    session.captures["mic"] = meeting_recorder.ChannelCapture(
+        "mic", [], out, 1, 4, session.stop_event, session._segment)
+    session.pause(True)
+    session._segment("mic", 0, first)
+    session.pause(False)
+    session._segment("mic", 1, second)
+
+    assert [r["state"] for r in recorded] == ["discarded", "recorded"], recorded
+    # The row's state and the worker's decision are the same decision, carried together.
+    assert session.q.get_nowait() == ("mic", 0, first, True)
+    assert session.q.get_nowait() == ("mic", 1, second, False)
+
+
+def test_stop_says_so_when_the_worker_does_not_finish_in_time() -> None:
+    """The other half of the stop contract: an undrained stop must not look like a clean one."""
+    data_dir = _tmp()
+    out = meeting_recorder.recording_dir(data_dir, "mtg-x")
+    out.mkdir(parents=True, exist_ok=True)
+    path = _wav(out / "mic-00000.wav")
+    session = meeting_recorder.RecordingSession(
+        "mtg-x", out, {"mic": audiocap.synthetic_input()}, settings_fn=lambda: dict(SETTINGS),
+        config_fn=lambda: dict(CFG), data_dir=data_dir,
+        on_segment=lambda *a: None, on_result=lambda *a: None, segment_seconds=1)
+    # A capture that is constructed but never started: stop() must not trip over it, and
+    # _emit_ready must not re-report the wav this test queues by hand.
+    session.captures["mic"] = meeting_recorder.ChannelCapture(
+        "mic", [], out, 1, 4, session.stop_event, session._segment)
+    hold = threading.Event()
+    with transcribes_as({"text": "too late"}, hold=hold) as stub:
+        session.worker.start()
+        session._segment("mic", 0, path)
+        end = time.time() + 5
+        while time.time() < end and not stub.calls:
+            time.sleep(0.02)
+        assert stub.calls, "the worker never picked up the segment"
+        stopped = session.stop(drain_seconds=0.2, join_seconds=0.3)
+        assert stopped["drained"] is False, stopped
+        assert stopped["pending"] == 1, stopped
+        assert stopped["stats"]["segments_pending"] == 1, stopped["stats"]
+        assert "still running" in session.errors().get("transcribe", ""), session.errors()
+        hold.set()
+    session.worker.join(timeout=15)
+    assert not session.worker.is_alive()
 
 
 if __name__ == "__main__":

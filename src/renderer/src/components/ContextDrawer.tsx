@@ -20,7 +20,7 @@ function Toggle({ label, hint, value, onChange, icon }: { label: string; hint: s
 function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
   const { setView, openMemory, memories } = useStore()
   const [showPrompt, setShowPrompt] = useState(false)
-  const has = ctx.memories.length + ctx.nodes.length + ctx.chunks.length > 0 || Boolean(ctx.activity)
+  const has = ctx.memories.length + ctx.nodes.length + ctx.chunks.length > 0 || Boolean(ctx.activity) || Boolean(ctx.meetings)
   return (
     <div className="ctx-used">
       <div className="ctx-meta">
@@ -33,6 +33,12 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
         <section>
           <h5><MonitorDot size={12} /> Activity <button className="link" onClick={() => setView('activity')}>manage</button></h5>
           <pre className="ctx-prompt">{ctx.activity}</pre>
+        </section>
+      )}
+      {ctx.meetings && (
+        <section>
+          <h5><Mic size={12} /> Meetings <button className="link" onClick={() => setView('meetings')}>manage</button></h5>
+          <pre className="ctx-prompt">{ctx.meetings}</pre>
         </section>
       )}
       {ctx.memories.length > 0 && (
@@ -107,7 +113,7 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
       void api.contextPreview(projectId, query, cs).then(setPreview).catch(() => setPreview(null))
     }, 300)
     return () => clearTimeout(t)
-  }, [tab, query, projectId, cs.useMemory, cs.useGraph, cs.useDocuments, cs.useActivity])
+  }, [tab, query, projectId, cs.useMemory, cs.useGraph, cs.useDocuments, cs.useActivity, cs.useMeetings])
 
   return (
     <aside className="context-drawer">

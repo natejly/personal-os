@@ -13,7 +13,7 @@ import ScopeSelect from './ScopeSelect'
 import MeetingRecorderBar from './MeetingRecorderBar'
 import MeetingSettings from './MeetingSettings'
 import MeetingConsentModal from './MeetingConsentModal'
-import { formatOffset, mergeSegments, speakerLabel } from '../lib/transcript'
+import { formatOffset, mergeSegments, recorderState, speakerLabel, type RecorderState } from '../lib/transcript'
 import '../styles/meetings.css'
 
 /**
@@ -50,6 +50,14 @@ const fmtDur = (ms: number): string => {
   return s < 60 ? `${s}s` : s < 3600 ? `${Math.round(s / 60)}m` : `${(s / 3600).toFixed(1)}h`
 }
 
+/** The sidebar indicator's tooltip. A pause and a dead capture read differently: only one of them
+ *  is still a recording the user can resume. */
+const INDICATOR_TITLE: Record<RecorderState, string> = {
+  recording: 'Recording a meeting',
+  paused: 'Meeting recording paused — audio is being discarded',
+  stalled: 'The meeting recording stopped capturing'
+}
+
 /** What the status says when there is no duration to show instead. */
 const STATUS_LABEL: Record<string, string> = {
   scheduled: 'scheduled', recording: 'recording', stopped: 'stopped',
@@ -57,9 +65,11 @@ const STATUS_LABEL: Record<string, string> = {
 }
 
 /** The meeting rail, grouped by day. Modelled on DocsView's DocList. */
-function MeetingList({ meetings, activeId, query, onQuery, onOpen, onDelete, showScope }: {
+function MeetingList({ meetings, activeId, liveId, query, onQuery, onOpen, onDelete, showScope }: {
   meetings: Meeting[]
   activeId: string | null
+  /** The meeting being recorded right now, if any. It is the one row that cannot be deleted. */
+  liveId: string
   query: string
   onQuery: (q: string) => void
   onOpen: (id: string) => void
@@ -98,7 +108,10 @@ function MeetingList({ meetings, activeId, query, onQuery, onOpen, onDelete, sho
                   {m.duration_ms > 0 ? fmtDur(m.duration_ms) : STATUS_LABEL[m.status] ?? m.status} · {fmtWhen(meetingWhen(m))}
                 </span>
               </span>
-              <button className="icon-btn ghost xs danger" title="Delete"
+              {/* The live row stays undeletable: deleting it drops the row the recorder bar — the
+                  only Stop in the app — is mounted on, leaving ffmpeg capturing with no control. */}
+              <button className="icon-btn ghost xs danger" disabled={m.id === liveId}
+                title={m.id === liveId ? 'Stop the recording before deleting this meeting' : 'Delete'}
                 onClick={(e) => { e.stopPropagation(); if (confirm(`Delete “${m.title || 'Untitled meeting'}”? Its transcript, audio and enhanced notes go too.`)) onDelete(m.id) }}>
                 <Trash2 size={12} />
               </button>
@@ -136,13 +149,16 @@ export default function MeetingsView(): JSX.Element {
   const meetingConsentOpen = useStore((s) => s.meetingConsentOpen)
   const libraryScope = useStore((s) => s.libraryScope)
   const sidebarOpen = useStore((s) => s.sidebarOpen)
+  // The search text lives in the store so the recorder bar's 5s rail refresh re-issues it instead
+  // of replacing the filtered list with everything.
+  const query = useStore((s) => s.meetingQuery)
+  const setQuery = useStore((s) => s.setMeetingQuery)
   const {
     refreshMeetings, openMeeting, deleteMeeting, startRecording, editMeetingNotes, flushMeetingNotes,
     enhanceMeeting, acceptMeetingRevision, rejectMeetingRevision, promoteActionItems, dismissActionItem,
     retranscribeMeeting, deleteMeetingAudio, toggleSidebar, setLibraryScope, toast
   } = useStore()
 
-  const [query, setQuery] = useState('')
   const [transcriptOpen, setTranscriptOpen] = useState(false)
   const [reviewOpen, setReviewOpen] = useState(true)
   const [reviewMode, setReviewMode] = useState<'compare' | 'diff'>('compare')
@@ -163,6 +179,10 @@ export default function MeetingsView(): JSX.Element {
   const chosen = proposed.filter((a) => !dropped[a.id]).map((a) => a.id)
   const canReview = m != null && m.status !== 'recording' && (pending != null || m.enhanced !== '' || m.actions.length > 0)
   const liveId = meetingStatus?.active?.meeting_id ?? ''
+  // The master switch blocks both ways: the backend refuses `start` with a blocker row, so every
+  // Record affordance says why rather than failing on the click.
+  const recorderOff = meetingStatus !== null && !meetingStatus.config.enabled
+  const OFF_TITLE = 'The meeting recorder is off. Turn it on in the Meetings panel.'
   const blockers = meetingPreflight?.blockers ?? []
   const copy = (text: string): void => { void navigator.clipboard.writeText(text); toast('Copied') }
 
@@ -173,7 +193,8 @@ export default function MeetingsView(): JSX.Element {
         <h2><Mic size={16} /> Meetings</h2>
         <div className="no-drag header-right">
           <ScopeSelect value={scope} onChange={(s) => void setLibraryScope(s)} />
-          <button className="primary-btn" disabled={meetingBusy || liveId !== ''} onClick={() => void startRecording()}>
+          <button className="primary-btn" disabled={meetingBusy || liveId !== '' || recorderOff}
+            title={recorderOff ? OFF_TITLE : undefined} onClick={() => void startRecording()}>
             <Mic size={14} /> Record
           </button>
         </div>
@@ -182,7 +203,7 @@ export default function MeetingsView(): JSX.Element {
       <div className="mtg-body">
         <aside className="mtg-side">
           <MeetingList
-            meetings={meetings} activeId={m?.id ?? null} query={query} onQuery={setQuery}
+            meetings={meetings} activeId={m?.id ?? null} liveId={liveId} query={query} onQuery={setQuery}
             onOpen={(id) => void openMeeting(id)} onDelete={(id) => void deleteMeeting(id)}
             showScope={scope === 'all'}
           />
@@ -190,6 +211,9 @@ export default function MeetingsView(): JSX.Element {
 
         {!m ? (
           <section className="mtg-empty">
+            {/* Also here, not only beside the notepad: a live recording must have a reachable Stop
+                whatever is open, including nothing. The bar renders null when nothing is live. */}
+            <MeetingRecorderBar />
             <MeetingSettings />
           </section>
         ) : (
@@ -209,7 +233,8 @@ export default function MeetingsView(): JSX.Element {
               <span className="mtg-save-state">{meetingSaving ? 'Saving…' : dirty ? 'Unsaved' : 'Saved'}</span>
               <span className="mtg-spacer" />
               {m.status === 'scheduled' && liveId === '' && (
-                <button className="ghost-btn" disabled={meetingBusy} onClick={() => void startRecording(m.id)}>
+                <button className="ghost-btn" disabled={meetingBusy || recorderOff}
+                  title={recorderOff ? OFF_TITLE : undefined} onClick={() => void startRecording(m.id)}>
                   <Mic size={13} /> Record
                 </button>
               )}
@@ -251,7 +276,14 @@ export default function MeetingsView(): JSX.Element {
               />
               {transcriptOpen && (
                 <aside className="mtg-transcript">
-                  <h4 className="mtg-transcript-head"><Speaker size={12} /> Transcript</h4>
+                  <h4 className="mtg-transcript-head">
+                    <Speaker size={12} /> Transcript
+                    {/* Never a silent cap: if what is held is short of the row's own count, the
+                        pane says so instead of ending mid-sentence. */}
+                    {meetingSegments.length < m.segment_count && (
+                      <span className="muted small"> {meetingSegments.length} of {m.segment_count} clips</span>
+                    )}
+                  </h4>
                   {lines.length === 0 && (
                     <p className="empty-hint">
                       {m.status === 'recording'
@@ -370,10 +402,12 @@ export function MeetingIndicator(): JSX.Element | null {
   const setView = useStore((s) => s.setView)
   const active = meetingStatus?.active ?? null
   if (!active) return null
-  const capturing = active.channels.some((c) => c.alive)
+  // Same rule as the recorder bar: pausedness comes from the flag, not from the channels, which
+  // stay alive through a pause.
+  const state = recorderState(active)
   return (
-    <button className={`act-indicator ${capturing ? 'live' : 'paused'}`} onClick={() => setView('meetings')}
-      title={capturing ? 'Recording a meeting' : 'Meeting recording paused'}>
+    <button className={`act-indicator ${state === 'recording' ? 'live' : 'paused'}`} onClick={() => setView('meetings')}
+      title={INDICATOR_TITLE[state]}>
       <span className="act-dot" />
       Meeting {formatOffset(active.elapsed_ms / 1000)}
     </button>

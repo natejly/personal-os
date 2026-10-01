@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react'
 import { Calendar, Mail, CheckSquare, Brain, FolderKanban, Sparkles, RefreshCw, PanelLeftOpen, ExternalLink, Plus, MessageSquare, Mic, SlidersHorizontal, X, ListChecks, HardDrive } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
-import { formatOffset } from '../lib/transcript'
+import { formatOffset, offerableCandidates } from '../lib/transcript'
 import { HOME_MODULES, homeModuleOn } from '../modules'
-import type { MeetingCandidate } from '@shared/types'
+import type { Meeting, MeetingCandidate } from '@shared/types'
 import TodoItem from './TodoItem'
 import ProjectChip from './ProjectChip'
 import ReactMarkdown from 'react-markdown'
@@ -36,18 +36,24 @@ const SUGGEST_MS = 60_000
  * path (`autoRecord`) is a setting the user has to turn on in the Meetings panel.
  */
 function MeetingsCard(): JSX.Element {
-  const meetings = useStore((s) => s.meetings)
+  // Today's list is deliberately NOT the store's `meetings` array: that one is the Meetings rail's
+  // search result, so a query still sitting in the rail's box would silently filter Today - with no
+  // search box on this page to explain the gap, and with a filtered-out meeting costing its
+  // candidate the "take notes" button. This card owns an unfiltered copy instead.
+  const [meetings, setMeetings] = useState<Meeting[]>([])
+  const dataScope = useStore((s) => s.dataScope)
   const meetingsPending = useStore((s) => s.meetingsPending)
   const meetingStatus = useStore((s) => s.meetingStatus)
   const meetingBusy = useStore((s) => s.meetingBusy)
-  const refreshMeetings = useStore((s) => s.refreshMeetings)
   const openMeeting = useStore((s) => s.openMeeting)
   const startRecording = useStore((s) => s.startRecording)
   const recordCandidate = useStore((s) => s.recordCandidate)
   const setView = useStore((s) => s.setView)
   const [candidates, setCandidates] = useState<MeetingCandidate[]>([])
 
-  useEffect(() => { void refreshMeetings() }, [refreshMeetings])
+  useEffect(() => {
+    void api.meetings.list(dataScope, '').then(setMeetings).catch(() => undefined)
+  }, [dataScope, meetingStatus?.active?.meeting_id, meetingsPending])
   useEffect(() => {
     // `/meetings/suggest` answers [] rather than erroring when Google is unconnected, so there is
     // nothing to guard on here and a failure just leaves the offer list empty.
@@ -63,8 +69,14 @@ function MeetingsCard(): JSX.Element {
     return at !== null && new Date(at * 1000).toDateString() === today
   })
   const active = meetingStatus?.active ?? null
-  // A candidate whose meeting is the one already recording is not an offer any more.
-  const offers = candidates.filter((c) => c.meeting_id === null || c.meeting_id !== active?.meeting_id)
+  // Filtered on the meeting's STATE, not merely on whether it is the live one: /meetings/suggest
+  // keeps offering an event for its whole window, so a call that was already recorded and stopped
+  // comes back with its meeting id, and starting that id again restarts the segment counter in the
+  // same directory and overwrites the beginning of the recording.
+  const offers = offerableCandidates(candidates, meetings, active?.meeting_id ?? null)
+  // The backend refuses `start` while the master switch is off, so the offer says why up front.
+  const recorderOff = meetingStatus !== null && !meetingStatus.config.enabled
+  const OFF_TITLE = 'The meeting recorder is off. Turn it on in the Meetings panel.'
 
   return (
     <section className="widget">
@@ -91,7 +103,8 @@ function MeetingsCard(): JSX.Element {
               <span className="ev-title">{c.title || '(untitled event)'}</span>
               {/* Navigate first: the consent modal is hosted by the Meetings view, so a first-ever
                   recording started from here would otherwise gate on a dialog with nowhere to render. */}
-              <button className="link small" disabled={meetingBusy || active !== null}
+              <button className="link small" disabled={meetingBusy || active !== null || recorderOff}
+                title={recorderOff ? OFF_TITLE : undefined}
                 onClick={() => { setView('meetings'); void recordCandidate(c) }}>
                 take notes
               </button>
@@ -121,7 +134,8 @@ function MeetingsCard(): JSX.Element {
       {!active && offers.length === 0 && todays.length === 0 && (
         <div className="widget-empty">
           <p className="muted">No meetings today.</p>
-          <button className="primary-btn" disabled={meetingBusy}
+          <button className="primary-btn" disabled={meetingBusy || recorderOff}
+            title={recorderOff ? OFF_TITLE : undefined}
             onClick={() => { setView('meetings'); void startRecording() }}>
             <Mic size={14} /> Record one
           </button>

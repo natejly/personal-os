@@ -1,7 +1,10 @@
-import type { MeetingAttendee, MeetingSegment } from '@shared/types'
+import type { Meeting, MeetingAttendee, MeetingCandidate, MeetingSegment, MeetingStatus } from '@shared/types'
 
 /**
- * Transcript assembly, with no React and no store import so it can be tested on its own.
+ * Transcript assembly plus the rest of the Meetings renderer's decidable logic — which recorder
+ * state the status block describes, whether the held transcript is still short of the row, how a
+ * `?since=` tail is paged, and which calendar candidates may still be offered. All of it with no
+ * React and no store import, so it can be tested on its own.
  *
  * The recorder writes one row per closed ffmpeg segment per channel and they do not arrive in
  * order: a `mic` segment transcribes in two seconds while the `output` segment beside it waits in
@@ -91,4 +94,110 @@ export function applyCursor(existing: MeetingSegment[], incoming: MeetingSegment
   // back on a poll is always the fresher copy of one already held.
   for (const s of incoming) held.set(s.id, s)
   return [...held.values()].sort(byTime)
+}
+
+// ---------------------------------------------------------------- the live recorder
+
+/**
+ * What the recorder is actually doing.
+ *
+ * `paused` is not inferable from the channels: pausing keeps ffmpeg running on purpose, so segment
+ * numbering stays monotonic, and only throws the clips away — a paused session still reports every
+ * channel `alive`. The mirror case matters too: a session whose captures have all died is neither
+ * recording nor paused, and offering Resume for it would be a dead control, because resuming only
+ * clears the flag and cannot respawn a dead ffmpeg.
+ */
+export type RecorderState = 'recording' | 'paused' | 'stalled'
+
+export function recorderState(active: { paused: boolean; channels: { alive: boolean }[] }): RecorderState {
+  if (active.paused) return 'paused'
+  return active.channels.some((c) => c.alive) ? 'recording' : 'stalled'
+}
+
+// ---------------------------------------------------------------- the segment tail
+
+/** One `?since=` page. Large enough that a four-hour meeting at the default 20s clips is one round
+ *  trip, small enough to stay a sane response. */
+export const SEGMENT_PAGE = 500
+/** A ceiling on the paging loop, so a server that keeps answering a full page cannot spin forever. */
+const SEGMENT_MAX_PAGES = 40
+
+export interface SegmentPage {
+  segments: MeetingSegment[]
+  /** The rowid cursor the next incremental poll resumes from. */
+  cursor: number
+  /** The ceiling was hit, so this is NOT the whole tail. */
+  truncated: boolean
+}
+
+/**
+ * The whole segment tail, paged. One request per `limit` rows until a short page arrives.
+ *
+ * `fetch` is passed in rather than imported so this stays testable: the store hands it
+ * `api.meetings.segments`. A page that fails to advance the cursor ends the loop — otherwise a
+ * server that ignored `since` would page forever.
+ */
+export async function fetchSegmentPages(
+  fetch: (since: number, limit: number) => Promise<MeetingSegment[]>,
+  limit: number = SEGMENT_PAGE
+): Promise<SegmentPage> {
+  const size = Math.max(1, Math.floor(limit))
+  let held: MeetingSegment[] = []
+  let cursor = 0
+  for (let page = 0; page < SEGMENT_MAX_PAGES; page++) {
+    const rows = await fetch(cursor, size)
+    held = applyCursor(held, rows)
+    const next = rows.reduce((n, r) => Math.max(n, r.cursor ?? 0), cursor)
+    // A short page is the end of the tail; a page that did not move the cursor cannot be followed.
+    if (rows.length < size || next <= cursor) return { segments: held, cursor: next, truncated: false }
+    cursor = next
+  }
+  return { segments: held, cursor, truncated: true }
+}
+
+/** States a segment can no longer move out of: there is nothing left to re-fetch for it. */
+const FINAL = new Set(['done', 'empty', 'discarded'])
+
+/**
+ * Whether the held tail is still behind the row.
+ *
+ * Two reasons it can be, and only a full reload fixes either: clips the cursor has not reached yet,
+ * and clips whose TEXT changed without their rowid moving — a transcription that lands after Stop
+ * updates in place, so an incremental `?since=` poll will never re-deliver it.
+ */
+export function needsSegmentReload(held: MeetingSegment[], segmentCount: number): boolean {
+  if (held.length < segmentCount) return true
+  return held.some((s) => !FINAL.has(s.state))
+}
+
+// ---------------------------------------------------------------- calendar candidates
+
+/** Statuses whose meeting can still be recorded into: nothing has been captured yet, so starting
+ *  one cannot overwrite audio or reset a duration. */
+const OFFERABLE: ReadonlySet<MeetingStatus> = new Set<MeetingStatus>(['scheduled', 'notes_only'])
+
+/**
+ * The candidates Today may still offer "take notes" on.
+ *
+ * `/meetings/suggest` keeps answering an event for its whole window and leaves de-duplication to
+ * the caller, so a meeting that was already recorded and stopped comes back with its `meeting_id`
+ * set. Starting that id again calls `mark_started` on a finished row: the segment counter restarts
+ * at 0 in the same directory and overwrites the beginning of the recording. So the offer is
+ * filtered on the meeting's STATE, not merely on whether it is the live one.
+ *
+ * A candidate whose meeting is not in `meetings` is not offered. Failing closed is the cheap side
+ * of this trade: the Meetings view still has a Record button for a scheduled row, whereas offering
+ * a restart destroys a recording.
+ */
+export function offerableCandidates(
+  candidates: MeetingCandidate[],
+  meetings: Meeting[],
+  liveMeetingId: string | null
+): MeetingCandidate[] {
+  return candidates.filter((c) => {
+    if (c.meeting_id === null) return true
+    if (c.meeting_id === liveMeetingId) return false
+    const m = meetings.find((x) => x.id === c.meeting_id)
+    return m !== undefined && OFFERABLE.has(m.status)
+  })
 }

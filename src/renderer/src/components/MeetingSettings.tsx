@@ -91,6 +91,9 @@ export default function MeetingSettings({ variant = 'page' }: { variant?: 'page'
     return <div className="mtg-settings"><p className="muted">Loading the meeting recorder…</p></div>
   }
 
+  // `start` is refused outright while the master switch is off (meetings.py inserts an `enabled`
+  // blocker at index 0), so the button says why instead of offering a click that 409s.
+  const recorderOff = !cfg.enabled
   const patch = (p: Partial<MeetingConfig>): void => void setMeetingConfig(p)
   const copy = (text: string): void => {
     void navigator.clipboard.writeText(text)
@@ -142,7 +145,9 @@ export default function MeetingSettings({ variant = 'page' }: { variant?: 'page'
             assistant can call is able to start, stop or pause it.
           </p>
           <div className="add-row">
-            <button className="primary-btn" disabled={meetingBusy} onClick={() => void startRecording()}>
+            <button className="primary-btn" disabled={meetingBusy || recorderOff}
+                    title={recorderOff ? 'The meeting recorder is off. Turn it on below.' : undefined}
+                    onClick={() => void startRecording()}>
               <Mic size={14} /> Record a meeting
             </button>
             {blockers.length > 0 && (

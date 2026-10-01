@@ -124,6 +124,13 @@ function loadDotEnv(): Record<string, string> {
   return out
 }
 
+/** Packaged: the python-build-standalone interpreter scripts/bundle-backend.sh laid under <Resources>/backend. */
+function bundledPython(): string | null {
+  if (!app.isPackaged) return null
+  const py = join(process.resourcesPath, 'backend', 'python', 'bin', 'python3')
+  return existsSync(py) ? py : null
+}
+
 function backendDir(): string {
   // dev: <repo>/backend ; packaged: <Resources>/backend
   const candidates = [
@@ -201,8 +208,11 @@ async function launch(reuse: boolean): Promise<void> {
 
 async function spawnAndWait(reuse: boolean): Promise<void> {
   port = reuse && port && (await canBind(port)) ? port : await freePort()
-  const dir = backendDir()
-  const py = pythonBin(dir)
+  // Packaged builds run the bundled interpreter, with personal_os installed in its site-packages, so
+  // no PYTHONPATH is needed and the cwd is just a stable directory. Dev uses backend/.venv.
+  const bundled = bundledPython()
+  const dir = bundled ? join(process.resourcesPath, 'backend') : backendDir()
+  const py = bundled ?? pythonBin(dir)
   const dataDir = join(app.getPath('userData'), 'data')
   url = `http://127.0.0.1:${port}`
   // A packaged app must not inherit the developer's .env: users onboard through Settings instead.
@@ -210,6 +220,7 @@ async function spawnAndWait(reuse: boolean): Promise<void> {
     ...(app.isPackaged ? {} : loadDotEnv()),
     ...process.env,
     PYTHONUNBUFFERED: '1',
+    ...(bundled ? { PYTHONDONTWRITEBYTECODE: '1', PYTHONNOUSERSITE: '1' } : {}),
     PERSONAL_OS_AUTH_TOKEN: token,
     PERSONAL_OS_APP_VERSION: app.getVersion(),
     ...(app.isPackaged ? { PERSONAL_OS_PACKAGED: '1' } : {}),

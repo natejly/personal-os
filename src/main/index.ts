@@ -10,6 +10,7 @@ import { startPageBridge, stopPageBridge } from './pagefetch'
 import { gather, OPACITY_LEVELS, registerPopouts, restorePopouts, setFrontListener, toggleFront } from './popouts'
 import { registerShortcuts } from './shortcuts'
 import { createTray } from './tray'
+import { startUpdater } from './updater'
 
 let win: BrowserWindow | null = null
 const isMac = process.platform === 'darwin'
@@ -17,7 +18,10 @@ const isMac = process.platform === 'darwin'
 // The app was renamed from "Personal OS" to "Grain", which moves the userData directory Electron
 // derives from the app name. Existing installs keep their data: if the new location has none but a
 // legacy one does, keep using the legacy directory. Must run before anything touches userData.
-for (const legacy of ['personal-os', 'Personal OS']) {
+// GRAIN_USER_DATA points the whole app at another directory (testing a packaged build without touching real data).
+const userDataOverride = process.env.GRAIN_USER_DATA
+if (userDataOverride) app.setPath('userData', userDataOverride)
+for (const legacy of userDataOverride ? [] : ['personal-os', 'Personal OS']) {
   const legacyDir = join(app.getPath('appData'), legacy)
   if (!existsSync(join(app.getPath('userData'), 'data')) && existsSync(join(legacyDir, 'data'))) {
     app.setPath('userData', legacyDir)
@@ -304,6 +308,7 @@ app.whenReady().then(async () => {
   registerShortcuts(() => win, await storedGather())
   createWindow()
   void restorePopouts()
+  startUpdater()
   app.on('activate', showMain)
 })
 

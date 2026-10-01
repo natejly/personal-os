@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ApprovalDecision, PlanEdit, ActivityConfig, ActivityContextFile, ActivityEvent, ActivitySignal, ActivityStatus, ActivitySummary, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocRevision, Document, FullDoc, GraphData, Memory, Message, ModelInfo, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap, Job } from '@shared/types'
+import type { ApprovalDecision, PlanEdit, ActivityConfig, ActivityContextFile, ActivityEvent, ActivitySignal, ActivityStatus, ActivitySummary, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, Document, FullDoc, GraphData, Memory, Message, ModelInfo, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap, Job } from '@shared/types'
 import { api, chatStream, setBase, type Scope } from './lib/api'
 import { finishStatus, mergeConversation, pickEvictions, reduceStatus, settleApprovals } from './sessionStatus'
 import { viewHidden } from './modules'
@@ -56,6 +56,28 @@ interface Toast { id: number; text: string; kind: 'info' | 'error' | 'learned' }
 /** Live sessions kept in memory at once. Beyond this the least recently touched are dropped. */
 const MAX_SESSIONS = 12
 const HOLD_MS = 6000
+
+/**
+ * Which folders are open in the Docs tree. localStorage rather than the backend: it is this window's
+ * view of the tree, not a fact about the docs, and it must survive a reload without a round trip.
+ */
+const EXPANDED_KEY = 'grain.docs.expandedFolders'
+
+const readExpanded = (): string[] => {
+  try {
+    const raw = JSON.parse(localStorage.getItem(EXPANDED_KEY) ?? '[]')
+    return Array.isArray(raw) ? raw.filter((p): p is string => typeof p === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+const writeExpanded = (paths: string[]): string[] => {
+  try {
+    localStorage.setItem(EXPANDED_KEY, JSON.stringify(paths))
+  } catch { /* a private window still gets a working tree, it just forgets */ }
+  return paths
+}
 
 const newSession = (conversation: Conversation): ChatSession =>
   ({ conversation, streaming: null, status: 'idle', finishedAt: null, pendingApprovals: 0, unread: 0, touchedAt: Date.now() })
@@ -125,6 +147,10 @@ export interface State {
   /** Ids of the docs open as tabs, most recent last. */
   docTabs: string[]
   docRevisions: DocRevision[]
+  /** Folders of the Docs tree, nested by path. Server-owned, so an empty folder survives a reload. */
+  docFolders: DocFolder[]
+  /** Paths whose children are showing. Kept in localStorage: a tree that forgets is a tree you refold every morning. */
+  expandedFolders: string[]
   /** Assistant edits awaiting review, across every doc — the sidebar badge. */
   docsPending: number
   docMode: DocMode
@@ -247,7 +273,7 @@ export interface State {
   refreshDocsPending: () => Promise<void>
   openDoc: (id: string) => Promise<void>
   closeDocTab: (id: string) => void
-  createDoc: (d?: { title?: string; content?: string; project_id?: string | null }) => Promise<void>
+  createDoc: (d?: { title?: string; content?: string; project_id?: string | null; folder?: string }) => Promise<void>
   /** Type into the open doc. Buffers locally and flushes to the backend on a debounce. */
   editDoc: (content: string) => void
   /** Flush the buffer now (⌘S, switching docs, leaving the view). */
@@ -256,6 +282,15 @@ export interface State {
   setDocStar: (id: string, starred: boolean) => Promise<void>
   /** Move a doc into a folder; '' takes it out of any folder. */
   setDocFolder: (id: string, folder: string) => Promise<void>
+  refreshDocFolders: () => Promise<void>
+  createDocFolder: (path: string) => Promise<void>
+  /** Rename or move: both rewrite a folder's path, and its subtree follows. */
+  renameDocFolder: (path: string, newPath: string) => Promise<void>
+  /** Without `deleteDocs` the folder's docs move up to its parent. */
+  deleteDocFolder: (path: string, deleteDocs?: boolean) => Promise<void>
+  toggleFolder: (path: string) => void
+  /** Open every folder on the way down to `path`, so a revealed doc is actually on screen. */
+  expandTo: (path: string) => void
   deleteDoc: (id: string) => Promise<void>
   setDocMode: (m: DocMode) => void
   refreshDocRevisions: (id?: string) => Promise<void>
@@ -570,6 +605,8 @@ export const useStore = create<State>((set, get) => {
     activeDoc: null,
     docTabs: [],
     docRevisions: [],
+    docFolders: [],
+    expandedFolders: readExpanded(),
     docsPending: 0,
     docMode: 'split',
     docDraft: null,
@@ -884,8 +921,9 @@ export const useStore = create<State>((set, get) => {
     },
     createDoc: async (d = {}) => {
       try {
-        const doc = await api.docs.create({ title: d.title ?? 'Untitled', content: d.content ?? '', project_id: d.project_id ?? null })
+        const doc = await api.docs.create({ title: d.title ?? 'Untitled', content: d.content ?? '', project_id: d.project_id ?? null, folder: d.folder ?? '' })
         await get().refreshDocs()
+        if (d.folder) get().expandTo(d.folder)
         set((st) => ({ view: 'docs', docTabs: [...st.docTabs, doc.id], activeDoc: doc, docDraft: null }))
         void get().refreshDocRevisions(doc.id)
       } catch (e) {
@@ -948,6 +986,53 @@ export const useStore = create<State>((set, get) => {
         get().toast((e as Error).message, 'error')
       }
     },
+    refreshDocFolders: async () => {
+      try {
+        set({ docFolders: await api.docs.folders() })
+      } catch { /* the tree still renders from the docs' own paths */ }
+    },
+    createDocFolder: async (path) => {
+      try {
+        set({ docFolders: await api.docs.createFolder(path) })
+        get().expandTo(path)
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    renameDocFolder: async (path, newPath) => {
+      try {
+        set({ docFolders: await api.docs.renameFolder(path, newPath) })
+        // Every doc under it moved with it, and the open one's own folder is now stale.
+        await get().refreshDocs()
+        const open = get().activeDoc
+        if (open) void get().openDoc(open.id)
+        get().expandTo(newPath)
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    deleteDocFolder: async (path, deleteDocs = false) => {
+      try {
+        set({ docFolders: await api.docs.deleteFolder(path, deleteDocs) })
+        await get().refreshDocs()
+        const open = get().activeDoc
+        if (open && deleteDocs && !get().docs.some((d) => d.id === open.id)) get().closeDocTab(open.id)
+        else if (open) void get().openDoc(open.id)
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    toggleFolder: (path) => set((st) => ({
+      expandedFolders: writeExpanded(st.expandedFolders.includes(path)
+        ? st.expandedFolders.filter((p) => p !== path)
+        : [...st.expandedFolders, path])
+    })),
+    expandTo: (path) => set((st) => {
+      const segs = path.split('/').filter(Boolean)
+      const chain = segs.map((_, i) => segs.slice(0, i + 1).join('/'))
+      const missing = chain.filter((p) => !st.expandedFolders.includes(p))
+      return missing.length ? { expandedFolders: writeExpanded([...st.expandedFolders, ...missing]) } : {}
+    }),
     deleteDoc: async (id) => {
       await api.docs.delete(id)
       get().closeDocTab(id)

@@ -5,7 +5,7 @@ import type {
   Plan, PlanStep, Skill, SkillStatus, ToolResultHandle,
   Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
   AgentInbox, AgentProposal, Job,
-  Doc, FullDoc, DocRevision,
+  Doc, DocFolder, FullDoc, DocRevision,
   ActivityConfig, ActivityContextFile, ActivityEvent, ActivityStatus, ActivitySummary,
   PendingSend, SendHoldConfig, Verification, Verified
 } from '@shared/types'
@@ -334,6 +334,13 @@ export const api = {
       req<FullDoc>(`/docs/${id}`, { method: 'PATCH', body: json(patch) }),
     delete: (id: string) => req(`/docs/${id}`, { method: 'DELETE' }),
     pending: () => req<{ pending: number }>('/docs/pending'),
+    folders: () => req<DocFolder[]>('/docs/folders'),
+    createFolder: (path: string) => req<DocFolder[]>('/docs/folders', { method: 'POST', body: json({ path }) }),
+    /** Rename and move are one call: both rewrite the path of a folder and everything under it. */
+    renameFolder: (path: string, newPath: string) => req<DocFolder[]>('/docs/folders', { method: 'PATCH', body: json({ path, new_path: newPath }) }),
+    /** Without `deleteDocs` the folder's docs move up to its parent rather than disappearing with it. */
+    deleteFolder: (path: string, deleteDocs = false) =>
+      req<DocFolder[]>(`/docs/folders?path=${encodeURIComponent(path)}&delete_docs=${deleteDocs}`, { method: 'DELETE' }),
     revisions: (id: string, limit = 100) => req<DocRevision[]>(`/docs/${id}/revisions?limit=${limit}`),
     revision: (revId: string) => req<DocRevision>(`/docs/revisions/${revId}`),
     accept: (revId: string) => req<FullDoc>(`/docs/revisions/${revId}/accept`, { method: 'POST' }),

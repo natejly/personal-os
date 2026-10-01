@@ -2750,6 +2750,46 @@ def docs_pending() -> dict[str, int]:
     return {"pending": docs.pending_count()}
 
 
+class FolderIn(BaseModel):
+    path: str
+
+
+class FolderRename(BaseModel):
+    path: str
+    new_path: str
+
+
+# Declared above /docs/{id}: FastAPI matches in order, and "folders" would otherwise be read as a doc id.
+@app.get("/docs/folders")
+def list_doc_folders() -> list[dict[str, Any]]:
+    return docs.folders()
+
+
+@app.post("/docs/folders")
+def create_doc_folder(body: FolderIn) -> list[dict[str, Any]]:
+    try:
+        return docs.create_folder(body.path)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.patch("/docs/folders")
+def rename_doc_folder(body: FolderRename) -> list[dict[str, Any]]:
+    """Rename and move are the same operation: both rewrite the path of a folder and its subtree."""
+    try:
+        return docs.rename_folder(body.path, body.new_path)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.delete("/docs/folders")
+def delete_doc_folder(path: str, delete_docs: bool = False) -> list[dict[str, Any]]:
+    try:
+        return docs.delete_folder(path, delete_docs)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
 @app.post("/docs")
 def create_doc(body: DocIn) -> dict[str, Any]:
     return docs.create(body.title, body.content, sid(body.project_id), body.folder)

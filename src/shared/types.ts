@@ -1349,6 +1349,14 @@ export interface Job {
   next_due_at: number | null
   created_at: number
   updated_at: number
+  /** Re-launches of a run that ended in an error, with backoff. 0 = never retry. */
+  max_retries: number
+  /** Fires in a row that ended in failure; at the streak limit the job is paused. */
+  consecutive_failures: number
+  /** Why the scheduler switched this job off by itself. null for a job the user turned off. */
+  paused_reason: string | null
+  last_skip_at: number | null
+  last_skip_reason: string | null
 }
 
 /** An outward-facing call a background run recorded instead of making. Accepting it is what runs it. */
@@ -1385,6 +1393,9 @@ export interface JobRunSummary {
   late_seconds: number
   missed_slots: number
   manual: boolean
+  /** 1 for the first launch of a slot; 2+ for a retry of the run `retry_of`. */
+  attempt: number
+  retry_of: string | null
   started_at: number
   ended_at: number | null
   error: string | null
@@ -1399,9 +1410,10 @@ export interface AgentInbox {
   needs_you: {
     approvals: (PendingApproval & { run_kind?: string | null; job?: string | null })[]
     proposals: AgentProposal[]
+    paused_jobs: { id: string; name: string; reason: string; paused_at: number; consecutive_failures: number }[]
   }
   while_you_were_away: JobRunSummary[]
-  counts: { needs_you: number; approvals: number; proposals: number; runs: number; late: number; failed: number }
+  counts: { needs_you: number; approvals: number; proposals: number; paused_jobs: number; runs: number; late: number; failed: number }
   scheduler: { last_tick: number | null; fires: number; next_due_at: number | null; timezone: string }
 }
 

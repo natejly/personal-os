@@ -73,6 +73,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "deskMaxTurns": 12,
     "deskMaxCost": 2.0,
     "deskMaxLive": 4,
+    # Scheduled-job run policy (jobs_policy.py): retry backoff base in seconds (doubles per attempt, capped at
+    # 30 min) and how many consecutive failed fires switch a job off.
+    "jobRetryBackoffS": 120,
+    "jobFailureStreakLimit": 3,
     # Hosts fetch_url may still read once a reply has touched untrusted content (registrable-suffix match).
     "fetchAllowlist": [],
     # Undo window on outgoing mail (outbox.py). `seconds` is clamped to 60-120 on read.

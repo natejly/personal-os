@@ -207,7 +207,7 @@ def next_due_for(job: dict[str, Any], after: float) -> float | None:
 class Jobs:
     """CRUD over the `jobs` table. Every writer keeps `next_due_at` in step with the schedule and `enabled`."""
 
-    FIELDS = ("name", "kind", "cron", "run_at", "timezone", "enabled", "prompt", "project_id")
+    FIELDS = ("name", "kind", "cron", "run_at", "timezone", "enabled", "prompt", "project_id", "max_retries")
     # Changing any of these re-arms the job: a new schedule must not inherit the old one's pending slot.
     RE_ARM = frozenset({"kind", "cron", "run_at", "timezone", "enabled"})
 
@@ -232,7 +232,7 @@ class Jobs:
 
     def create(self, name: str, cron: str, prompt: str, *, kind: str = "cron", run_at: float | None = None,
                timezone: str | None = None, enabled: bool = False, project_id: str | None = None,
-               at: float | None = None) -> dict[str, Any]:
+               at: float | None = None, max_retries: int = 1) -> dict[str, Any]:
         tz = timezone or local_tz_name()
         t = at if at is not None else now()
         jid = new_id()
@@ -242,8 +242,8 @@ class Jobs:
         nxt = next_due_for(fresh, t) if enabled else None
         with self.db.tx() as c:
             c.execute("INSERT INTO jobs(id, name, kind, cron, run_at, timezone, enabled, prompt, project_id, next_due_at, "
-                      "created_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-                      (jid, name, kind, cron, run_at, tz, int(enabled), prompt, project_id, nxt, t, t))
+                      "created_at, updated_at, max_retries) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                      (jid, name, kind, cron, run_at, tz, int(enabled), prompt, project_id, nxt, t, t, int(max_retries)))
         return self.get(jid)  # type: ignore[return-value]
 
     def update(self, id: str, patch: dict[str, Any], at: float | None = None) -> dict[str, Any] | None:
@@ -256,6 +256,11 @@ class Jobs:
             cols["enabled"] = int(bool(cols["enabled"]))
         if cols.get("kind") == "once":
             cols["cron"] = ""
+        if "enabled" in cols:
+            # Any explicit switch is the user acknowledging an auto-pause: the reason and the streak start over.
+            cols["paused_reason"] = None
+            if cols["enabled"]:
+                cols["consecutive_failures"] = 0
         merged = {**job, **cols}
         # Re-arm from now whenever the schedule or the switch changes: a job disabled across a slot has no
         # missed slot to catch up on, and a new cron expression must not inherit the old one's pending slot.
@@ -313,6 +318,27 @@ class Jobs:
             c.execute("UPDATE jobs SET last_fired_at=?, last_due_at=?, last_run_id=?, last_error=?, next_due_at=?, "
                       "updated_at=?" + (", enabled=0" if disable else "") + " WHERE id=?",
                       (fired_at, due_at, run_id, error, next_due_at, fired_at, id))
+
+    def record_outcome(self, id: str, ok: bool) -> int:
+        """One finished fire: a success clears the failure streak, a failure extends it. Returns the streak."""
+        with self.db.tx() as c:
+            if ok:
+                c.execute("UPDATE jobs SET consecutive_failures=0 WHERE id=?", (id,))
+            else:
+                c.execute("UPDATE jobs SET consecutive_failures=consecutive_failures+1 WHERE id=?", (id,))
+            r = c.execute("SELECT consecutive_failures AS n FROM jobs WHERE id=?", (id,)).fetchone()
+        return int(r["n"]) if r else 0
+
+    def record_skip(self, id: str, reason: str, at: float | None = None) -> None:
+        with self.db.tx() as c:
+            c.execute("UPDATE jobs SET last_skip_at=?, last_skip_reason=? WHERE id=?",
+                      (at if at is not None else now(), reason, id))
+
+    def pause(self, id: str, reason: str, at: float | None = None) -> None:
+        """Switch a job off and say why. Not `update`: that clears the reason, which is the user's acknowledgement."""
+        with self.db.tx() as c:
+            c.execute("UPDATE jobs SET enabled=0, next_due_at=NULL, paused_reason=?, updated_at=? WHERE id=?",
+                      (reason, at if at is not None else now(), id))
 
     def mark_launched(self, id: str, run_id: str | None, error: str | None = None) -> None:
         """The outcome of the launch itself, written after the clock bookkeeping is already safe."""
@@ -421,9 +447,11 @@ class Scheduler:
 
     def __init__(self, jobs: Jobs, launch: Callable[[dict[str, Any], dict[str, Any]], Awaitable[str | None]],
                  clock: Callable[[], float] = time.time,
-                 sleep: Callable[[float], Awaitable[None]] | None = None) -> None:
+                 sleep: Callable[[float], Awaitable[None]] | None = None, policy: Any = None) -> None:
         self.jobs = jobs
         self.launch = launch
+        # Optional run policy (jobs_policy.JobPolicy): the overlap guard before a launch, the watcher after it.
+        self.policy = policy
         self.clock = clock
         self._sleep = sleep
         self.last_tick: float | None = None
@@ -471,6 +499,13 @@ class Scheduler:
             # Advance the clock bookkeeping before launching: a launch that throws must not re-fire next pass.
             self.jobs.mark_fired(job["id"], fired_at=at, due_at=fire["due_at"], next_due_at=nxt, disable=once)
             run_id: str | None = None
+            if self.policy is not None:
+                ok, why = await self.policy.admit(job, fire)
+                if not ok:
+                    # The slot is consumed (mark_fired ran): a long run must not buy a catch-up when it ends.
+                    self.fires += 1
+                    fired.append({**fire, "run_id": None, "skipped": why})
+                    continue
             try:
                 run_id = await self.launch(job, fire)
             except Exception as e:  # noqa: BLE001 - one bad job must not stop the others
@@ -478,6 +513,8 @@ class Scheduler:
                 self.jobs.mark_launched(job["id"], None, str(e))
             else:
                 self.jobs.mark_launched(job["id"], run_id)
+                if self.policy is not None and run_id:
+                    self.policy.watch_soon(job, fire, run_id)
             self.fires += 1
             fired.append({**fire, "run_id": run_id})
         return fired

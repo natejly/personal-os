@@ -37,6 +37,7 @@ from .dashboards import Dashboards, generate_recap, generate_summary, generate_w
 from .docs import Docs, unified_diff
 from . import cache as google_cache
 from .google import Google, GoogleNotConnected, json_safe
+from .jobs_policy import JobPolicy
 from .jobs import (KINDS, PROPOSAL_STATUSES, Jobs, Proposals, Scheduler, local_tz_name, spent, valid_cron,
                    valid_tz)
 from . import skillbuild
@@ -2064,7 +2065,8 @@ async def _launch_job(job: dict[str, Any], fire: dict[str, Any]) -> str | None:
     return run.run_id
 
 
-scheduler = Scheduler(jobs, _launch_job)
+job_policy = JobPolicy(jobs, run_store, _launch_job, settings=settings)
+scheduler = Scheduler(jobs, _launch_job, policy=job_policy)
 
 
 class JobIn(BaseModel):
@@ -2078,6 +2080,7 @@ class JobIn(BaseModel):
     timezone: str | None = None
     enabled: bool = False
     project_id: str | None = None
+    max_retries: int = Field(default=1, ge=0, le=5)
 
 
 class JobPatch(BaseModel):
@@ -2089,6 +2092,7 @@ class JobPatch(BaseModel):
     timezone: str | None = None
     enabled: bool | None = None
     project_id: str | None = None
+    max_retries: int | None = Field(default=None, ge=0, le=5)
 
 
 # How far in the past a one-off may be set, on a write. The scheduler is happy to run a late task — that is the
@@ -2128,7 +2132,8 @@ def list_jobs() -> list[dict[str, Any]]:
 def create_job(body: JobIn) -> dict[str, Any]:
     _check_schedule(body.kind, body.cron, body.timezone, body.run_at, fresh_time=True)
     return jobs.create(body.name, body.cron, body.prompt, kind=body.kind, run_at=body.run_at,
-                       timezone=body.timezone, enabled=body.enabled, project_id=wsid(body.project_id))
+                       timezone=body.timezone, enabled=body.enabled, project_id=wsid(body.project_id),
+                       max_retries=body.max_retries)
 
 
 @app.patch("/jobs/{id}")
@@ -2170,6 +2175,9 @@ async def run_job_now(id: str) -> dict[str, Any]:
     t = time.time()
     fire = {"job_id": job["id"], "job": job["name"], "kind": job["kind"], "cron": job["cron"], "timezone": job["timezone"],
             "due_at": t, "fired_at": t, "late_seconds": 0.0, "missed_slots": 0, "late": False, "manual": True}
+    ok, why = await job_policy.admit(job, fire)
+    if not ok:
+        raise HTTPException(409, f"Not started: {why}")
     run_id = await _launch_job(job, fire)
     jobs.mark_launched(job["id"], run_id)
     row = run_store.get(run_id) if run_id else None
@@ -2256,14 +2264,19 @@ def agent_inbox(hours: float = 72.0, limit: int = 20) -> dict[str, Any]:
             "due_at": fire.get("due_at"), "fired_at": fire.get("fired_at") or r["started_at"],
             "late": bool(fire.get("late")), "late_seconds": fire.get("late_seconds") or 0.0,
             "missed_slots": fire.get("missed_slots") or 0, "manual": bool(fire.get("manual")),
+            "attempt": int(fire.get("attempt") or 1), "retry_of": fire.get("retry_of"),
             "started_at": r["started_at"], "ended_at": r["ended_at"], "error": r["error"],
             "tool_calls": ev.get("tool_result", 0), "proposals": sum(mine.values()),
             "pending_proposals": mine.get("pending", 0),
             "summary": text[:INBOX_SUMMARY_CHARS] + ("…" if len(text) > INBOX_SUMMARY_CHARS else ""),
         })
-    return {"needs_you": {"approvals": pending_approvals, "proposals": pending_proposals},
+    paused_jobs = [{"id": jb["id"], "name": jb["name"], "reason": jb["paused_reason"], "paused_at": jb["updated_at"],
+                    "consecutive_failures": jb["consecutive_failures"]}
+                   for jb in jobs.list() if not jb["enabled"] and jb.get("paused_reason")]
+    return {"needs_you": {"approvals": pending_approvals, "proposals": pending_proposals, "paused_jobs": paused_jobs},
             "while_you_were_away": away,
-            "counts": {"needs_you": len(pending_approvals) + len(pending_proposals),
+            "counts": {"needs_you": len(pending_approvals) + len(pending_proposals) + len(paused_jobs),
+                       "paused_jobs": len(paused_jobs),
                        "approvals": len(pending_approvals), "proposals": len(pending_proposals),
                        "runs": len(away), "late": sum(1 for a in away if a["late"]),
                        "failed": sum(1 for a in away if a["status"] in ("error", "interrupted"))},
@@ -2284,6 +2297,7 @@ async def _jobs_startup() -> None:
 
 @app.on_event("shutdown")
 async def _jobs_shutdown() -> None:
+    await job_policy.shutdown()
     task = getattr(app.state, "jobs_task", None)
     if task:
         task.cancel()

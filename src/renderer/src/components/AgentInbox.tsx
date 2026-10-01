@@ -90,6 +90,7 @@ function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
         </button>
         <span className="inbox-job">{r.job}</span>
         {r.manual && <span className="chip">by hand</span>}
+        {r.attempt > 1 && <span className="chip warn" title="Re-launched after the earlier run ended in an error">retry {r.attempt}</span>}
         {r.late && (
           <span className="chip warn" title={r.due_at ? `Due ${fmtWhen(r.due_at)}, ran ${fmtWhen(r.fired_at)}` : undefined}>
             <Clock size={11} /> {fmtLate(r.late_seconds)}{r.missed_slots > 0 ? ` · ${r.missed_slots} skipped` : ''}
@@ -140,6 +141,9 @@ function JobRow({ job }: { job: Job }): JSX.Element {
           ? `ran ${fmtWhen(job.last_fired_at as number)}`
           : job.enabled && job.next_due_at ? `next ${fmtWhen(job.next_due_at)}` : 'off'}
       </span>
+      {job.last_skip_reason && job.last_skip_at && (
+        <span className="muted small" title={`Slot at ${fmtWhen(job.last_skip_at)} was skipped`}>skipped: {job.last_skip_reason.replace('previous run still running', 'still running')}</span>
+      )}
       <button className="icon-btn sm" title="Run it now" aria-label={`Run ${job.name} now`} onClick={() => void runJobNow(job.id)}>
         <Play size={12} />
       </button>
@@ -201,12 +205,13 @@ function NewTask({ onDone }: { onDone: () => void }): JSX.Element {
 export default function AgentInbox(): JSX.Element | null {
   const box = useStore((s) => s.agentInbox)
   const jobs = useStore((s) => s.jobs)
-  const { approveTool, refreshJobs } = useStore()
+  const { approveTool, refreshJobs, setJobEnabled } = useStore()
   const [showJobs, setShowJobs] = useState(false)
   const [adding, setAdding] = useState(false)
 
   if (!box) return null
   const { approvals, proposals } = box.needs_you
+  const paused = box.needs_you.paused_jobs ?? []
   const away = box.while_you_were_away
   const quiet = box.counts.needs_you === 0 && away.length === 0
 
@@ -265,6 +270,16 @@ export default function AgentInbox(): JSX.Element | null {
                   </button>
                 </div>
                 <pre className="inbox-args">{argText(a.args)}</pre>
+              </li>
+            ))}
+            {paused.map((p) => (
+              <li className="inbox-item" key={p.id}>
+                <div className="inbox-item-head">
+                  <span className="inbox-job">{p.name}</span>
+                  <span className="chip bad"><AlertTriangle size={11} /> Paused: {p.reason}</span>
+                  <span style={{ flex: 1 }} />
+                  <button className="primary-btn sm" onClick={() => void setJobEnabled(p.id, true)}><Play size={13} /> Resume</button>
+                </div>
               </li>
             ))}
             {proposals.map((p) => <ProposalCard key={p.id} p={p} />)}

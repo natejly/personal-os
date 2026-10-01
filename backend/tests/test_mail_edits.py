@@ -77,10 +77,25 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(r.status_code, 400)
 
     def test_good_edit_is_recorded_for_the_run(self) -> None:
-        self._open("gmail_send", f"m3{self.u}:call_0", GOOD)
-        r = self.client.post(f"/approvals/m3{self.u}:call_0", headers=self.h, json={"decision": "allow", "arguments": GOOD})
+        import asyncio
+        cid = f"m3{self.u}:call_0"
+        self._open("gmail_send", cid, GOOD)
+        loop = asyncio.new_event_loop()
+        appmod._approvals[cid] = loop.create_future()  # a run waiting in this process
+        try:
+            r = self.client.post(f"/approvals/{cid}", headers=self.h, json={"decision": "allow", "arguments": GOOD})
+        finally:
+            appmod._approvals.pop(cid, None)
+            loop.close()
         self.assertEqual(r.status_code, 200)
-        self.assertEqual(appmod._edited_args.pop(f"m3{self.u}:call_0")["to"], "Mira <mira@example.com>, ana@example.com")
+        self.assertEqual(appmod._edited_args.pop(cid)["to"], "Mira <mira@example.com>, ana@example.com")
+
+    def test_edit_with_no_waiting_run_is_not_kept(self) -> None:
+        cid = f"m4{self.u}:call_0"
+        self._open("gmail_send", cid, GOOD)
+        r = self.client.post(f"/approvals/{cid}", headers=self.h, json={"decision": "allow", "arguments": GOOD})
+        self.assertEqual(r.status_code, 200)
+        self.assertNotIn(cid, appmod._edited_args)
 
 
 class ExecutionTests(unittest.TestCase):

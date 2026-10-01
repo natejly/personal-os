@@ -1561,6 +1561,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 yield "tool_result", {"message_id": am["id"], **event}
                 yield "span", {"message_id": am["id"], "span": tspan}
                 for_model = {**result, "images_shown_to_user": [i["name"] for i in images]} if images and isinstance(result, dict) else result
+                if edited_args is not None and isinstance(for_model, dict):
+                    # The assistant message still holds the model's own arguments; say what actually ran.
+                    for_model = {**for_model, "note": "The user edited the arguments before approving; this is what ran.",
+                                 "arguments_run": edited_args}
                 # Small results go in whole; a big one is stored and replaced by a handle the model can
                 # page with read_tool_result, so nothing is silently truncated away. See working.py.
                 messages.append({"role": "tool", "tool_call_id": c["id"],
@@ -1990,9 +1994,9 @@ async def approve_tool_call(call_id: str, body: ApprovalIn) -> dict[str, Any]:
             raise HTTPException(400, str(e)) from e
     fut = _approvals.get(call_id)
     row = run_store.decide(call_id, body.decision)
-    if edited is not None and row is not None:
-        _edited_args[call_id] = edited
     live = bool(fut and not fut.done())
+    if edited is not None and row is not None and live:  # only a waiting run picks it up; never leave one behind
+        _edited_args[call_id] = edited
     if row is None and not live:
         raise HTTPException(404, "No pending approval for that call")
     if row is not None and is_plan:

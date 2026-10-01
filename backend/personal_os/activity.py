@@ -75,6 +75,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "summaryModel": "",
     "profileEveryHours": 6,
+    # Palantir mode: every signal on and the gate's discretionary filters stood down. Never on by
+    # default, and it keeps what it replaced in palantirRestore so switching it off puts the old
+    # settings back instead of guessing at defaults.
+    "palantir": False,
+    "palantirRestore": {},
 }
 
 SCHEMA = """
@@ -279,19 +284,43 @@ def frontmost_app() -> tuple[str, str, int]:
 
 
 def focused_window_title(pid: int) -> str:
-    """Title of the frontmost window via the accessibility API. Empty without Accessibility."""
+    """Title of the frontmost window. The accessibility API first, since it knows which window is
+    actually focused; the window list second, for the apps that leave AXTitle empty."""
     p = _load_pyobjc()
     if not p or not pid:
         return ""
     try:
         el = p["AXCreate"](pid)
         err, win = p["AXCopy"](el, "AXFocusedWindow", None)
-        if err or win is None:
-            return ""
-        err, title = p["AXCopy"](win, "AXTitle", None)
-        return "" if err or title is None else str(title)
+        if not err and win is not None:
+            err, title = p["AXCopy"](win, "AXTitle", None)
+            if not err and title:
+                return str(title)
     except Exception:  # noqa: BLE001
+        pass
+    return window_list_title(pid)
+
+
+def window_list_title(pid: int) -> str:
+    """Frontmost on-screen window title for a pid, from the window server. Titles are the only
+    field read and nothing is ever captured as an image - but macOS still gates the name behind
+    Screen Recording, so this returns "" until that is granted."""
+    q = _load_pyobjc().get("Quartz")
+    if not q or not pid or screen_recording_status() != GRANTED:
         return ""
+    try:
+        opts = q.kCGWindowListOptionOnScreenOnly | q.kCGWindowListExcludeDesktopElements
+        for w in q.CGWindowListCopyWindowInfo(opts, q.kCGNullWindowID) or []:
+            if int(w.get("kCGWindowOwnerPID") or 0) != int(pid):
+                continue
+            if int(w.get("kCGWindowLayer") or 0) != 0:  # skip panels, menus and status items
+                continue
+            name = str(w.get("kCGWindowName") or "")
+            if name:
+                return name  # the list is front-to-back, so the first match is the front window
+    except Exception:  # noqa: BLE001
+        pass
+    return ""
 
 
 BROWSER_SCRIPTS = {
@@ -301,6 +330,18 @@ BROWSER_SCRIPTS = {
     "Microsoft Edge": 'tell application "Microsoft Edge" to return URL of active tab of front window',
     "Arc": 'tell application "Arc" to return URL of active tab of front window',
     "Vivaldi": 'tell application "Vivaldi" to return URL of active tab of front window',
+}
+
+
+# Bundle ids for the same browsers: Automation permission is stored per (this app, that bundle id),
+# so the panel needs the id to report whether the grant exists.
+BROWSER_BUNDLES = {
+    "Safari": "com.apple.Safari",
+    "Google Chrome": "com.google.Chrome",
+    "Brave Browser": "com.brave.Browser",
+    "Microsoft Edge": "com.microsoft.edgemac",
+    "Arc": "company.thebrowser.Browser",
+    "Vivaldi": "com.vivaldi.Vivaldi",
 }
 
 
@@ -320,11 +361,22 @@ def ffmpeg_path() -> str:
     return shutil.which("ffmpeg") or ""
 
 
-def audio_devices() -> list[dict[str, str]]:
-    """avfoundation audio inputs ffmpeg can see, as [{index, name}]."""
+_devices_cache: tuple[float, list[dict[str, str]]] = (0.0, [])
+
+
+def audio_devices(max_age: float = 20.0) -> list[dict[str, str]]:
+    """avfoundation audio inputs ffmpeg can see, as [{index, name}].
+
+    Cached for a few seconds: the status route is polled while the panel is open, and listing
+    devices means launching ffmpeg each time.
+    """
+    global _devices_cache
     ff = ffmpeg_path()
     if not ff or not IS_MAC:
         return []
+    age, cached = _devices_cache
+    if cached and (time.time() - age) < max_age:
+        return cached
     try:
         r = subprocess.run([ff, "-hide_banner", "-f", "avfoundation", "-list_devices", "true", "-i", ""],
                            capture_output=True, text=True, timeout=15)
@@ -342,6 +394,7 @@ def audio_devices() -> list[dict[str, str]]:
         m = re.search(r"\[(\d+)\]\s+(.+?)\s*$", line)
         if in_audio and m:
             out.append({"index": m.group(1), "name": m.group(2)})
+    _devices_cache = (time.time(), out)
     return out
 
 
@@ -355,59 +408,407 @@ def looks_like_loopback(name: str) -> bool:
     return any(h in n for h in LOOPBACK_HINTS)
 
 
+# ---------------------------------------------------------------- permissions
+#
+# Each signal sits behind a different macOS switch, and every grant lands on the *app bundle*
+# that started this process - "Personal OS" in a packaged build, "Electron" in development -
+# because the backend is a child of the Electron app. Three rules hold for everything below:
+#
+#   probing never prompts  - permissions() and capabilities() only read stored state, so opening
+#                            the Activity panel can never make a system dialog appear
+#   asking is explicit     - request_permission() is the single function that can prompt, and it
+#                            runs only from the button the user pressed
+#   nothing here is fatal  - a missing framework or a refused grant disables one signal and says
+#                            so; the monitor and the rest of the app keep working
+#
+# macOS hands some of these to a process only at launch, so a grant made while the app is running
+# can need a restart before it takes: rows say so in `restart` rather than silently under-reporting.
+
+GRANTED, DENIED, UNASKED, UNKNOWN, NA = "granted", "denied", "unasked", "unknown", "n/a"
+
+# Deep links straight into the right Privacy & Security pane, so the UI never says "go and find it".
+_PANE = "x-apple.systempreferences:com.apple.preference.security?Privacy_"
+SETTINGS_URLS = {
+    "accessibility": _PANE + "Accessibility",
+    "input_monitoring": _PANE + "ListenEvent",
+    "screen_recording": _PANE + "ScreenCapture",
+    "automation": _PANE + "Automation",
+    "microphone": _PANE + "Microphone",
+    "full_disk": _PANE + "AllFiles",
+}
+
+_iokit_lib: Any = None
+
+# kIOHIDRequestTypeListenEvent: "may I watch events I did not cause", which is exactly the tap.
+_HID_LISTEN = 1
+
+
+def _iokit() -> Any:
+    """IOKit via ctypes - pyobjc has no IOHID bindings. False once, then cached, if unavailable."""
+    global _iokit_lib
+    if _iokit_lib is None:
+        if not IS_MAC:
+            _iokit_lib = False
+        else:
+            try:
+                import ctypes
+
+                lib = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/IOKit.framework/IOKit")
+                lib.IOHIDCheckAccess.restype = ctypes.c_int
+                lib.IOHIDCheckAccess.argtypes = [ctypes.c_int]
+                lib.IOHIDRequestAccess.restype = ctypes.c_bool
+                lib.IOHIDRequestAccess.argtypes = [ctypes.c_int]
+                _iokit_lib = lib
+            except Exception as e:  # noqa: BLE001
+                log.info("activity: IOKit unavailable (%s)", e)
+                _iokit_lib = False
+    return _iokit_lib or None
+
+
+def input_monitoring_status() -> str:
+    """Input Monitoring, which is a different switch from Accessibility. Accessibility alone is
+    usually enough to create a listen-only tap; where this is explicitly denied the tap is refused."""
+    lib = _iokit()
+    if not lib:
+        return UNKNOWN
+    try:
+        v = int(lib.IOHIDCheckAccess(_HID_LISTEN))
+    except Exception:  # noqa: BLE001
+        return UNKNOWN
+    return {0: GRANTED, 1: DENIED, 2: UNASKED}.get(v, UNKNOWN)
+
+
+def screen_recording_status() -> str:
+    """Preflight only - it reads the stored answer and never prompts. Both "denied" and "never
+    asked" come back as False from the OS, so an unasked machine reports denied and the fix text
+    covers either case."""
+    q = _load_pyobjc().get("Quartz")
+    fn = getattr(q, "CGPreflightScreenCaptureAccess", None) if q else None
+    if not fn:
+        return UNKNOWN
+    try:
+        return GRANTED if bool(fn()) else DENIED
+    except Exception:  # noqa: BLE001
+        return UNKNOWN
+
+
+_AV_AUDIO = "soun"  # AVMediaTypeAudio
+
+
+def microphone_status() -> str:
+    """AVCaptureDevice's stored authorization, which distinguishes "never asked" from "refused"."""
+    if not IS_MAC:
+        return UNKNOWN
+    try:
+        import AVFoundation  # type: ignore[import-not-found]
+
+        st = int(AVFoundation.AVCaptureDevice.authorizationStatusForMediaType_(_AV_AUDIO))
+    except Exception:  # noqa: BLE001
+        return UNKNOWN
+    # 0 not determined, 1 restricted (MDM), 2 denied, 3 authorized
+    return {0: UNASKED, 1: DENIED, 2: DENIED, 3: GRANTED}.get(st, UNKNOWN)
+
+
+_AE_WILDCARD = 0x2A2A2A2A   # '****' typeWildCard - "may I talk to it at all", no specific event
+_AE_BUNDLE_ID = 0x62756E64  # 'bund' typeApplicationBundleID
+
+
+def automation_status(bundle_id: str) -> str:
+    """Whether we may send Apple events to one app, asked with askUserIfNeeded=False so it reports
+    the stored answer without putting a dialog on screen."""
+    if not IS_MAC or not bundle_id:
+        return UNKNOWN
+    try:
+        import ctypes
+
+        cs = ctypes.cdll.LoadLibrary("/System/Library/Frameworks/CoreServices.framework/CoreServices")
+
+        class _AEDesc(ctypes.Structure):
+            _fields_ = [("descriptorType", ctypes.c_uint32), ("dataHandle", ctypes.c_void_p)]
+
+        cs.AEDeterminePermissionToAutomateTarget.restype = ctypes.c_int
+        desc = _AEDesc()
+        raw = bundle_id.encode()
+        if int(cs.AECreateDesc(ctypes.c_uint32(_AE_BUNDLE_ID), raw, ctypes.c_long(len(raw)), ctypes.byref(desc))) != 0:
+            return UNKNOWN
+        try:
+            err = int(cs.AEDeterminePermissionToAutomateTarget(
+                ctypes.byref(desc), ctypes.c_uint32(_AE_WILDCARD), ctypes.c_uint32(_AE_WILDCARD), ctypes.c_bool(False),
+            ))
+        finally:
+            with contextlib.suppress(Exception):
+                cs.AEDisposeDesc(ctypes.byref(desc))
+    except Exception:  # noqa: BLE001
+        return UNKNOWN
+    # 0 granted; -1744 the user would have to be asked; -1743 refused; -600 that app is not running
+    return {0: GRANTED, -1744: UNASKED, -1743: DENIED, -600: UNASKED}.get(err, UNKNOWN)
+
+
+def full_disk_access() -> bool:
+    """Read one byte of a folder only Full Disk Access opens. No signal needs this today - it is
+    reported because it is what "full access" means on macOS, and because it is the one grant that
+    cannot be requested programmatically at all."""
+    for p in ("~/Library/Application Support/com.apple.TCC/TCC.db", "~/Library/Safari/Bookmarks.plist"):
+        try:
+            with open(Path(p).expanduser(), "rb") as fh:
+                fh.read(1)
+            return True
+        except Exception:  # noqa: BLE001
+            continue
+    return False
+
+
+def installed_browsers() -> list[str]:
+    """The browsers from BROWSER_SCRIPTS that actually exist on this Mac, so the panel asks for
+    Automation on those and stays quiet about the rest."""
+    if not IS_MAC:
+        return []
+    out: list[str] = []
+    ws = None
+    ak = _load_pyobjc().get("AppKit")
+    if ak:
+        with contextlib.suppress(Exception):
+            ws = ak.NSWorkspace.sharedWorkspace()
+    for name, bundle in BROWSER_BUNDLES.items():
+        found = False
+        if ws is not None:
+            with contextlib.suppress(Exception):
+                found = ws.URLForApplicationWithBundleIdentifier_(bundle) is not None
+        if not found:
+            found = any(Path(d, f"{name}.app").exists() for d in ("/Applications", Path.home() / "Applications"))
+        if found:
+            out.append(name)
+    return out
+
+
+def request_permission(pid_: str, browser: str = "") -> dict[str, Any]:
+    """Ask macOS for one permission. The only function in this module that can show a dialog, and
+    it is reached only from the Activity panel's Grant button.
+
+    Returns {id, state, prompted, note}. `prompted` is False when macOS will not ask - Screen
+    Recording and Full Disk Access have to be switched on by hand - and then `note` says so.
+    """
+    out: dict[str, Any] = {"id": pid_, "prompted": False, "note": "", "state": UNKNOWN}
+    if not IS_MAC:
+        out["note"] = "macOS only."
+        return out
+
+    if pid_ == "accessibility":
+        try:
+            from ApplicationServices import (  # type: ignore[import-not-found]
+                AXIsProcessTrustedWithOptions,
+                kAXTrustedCheckOptionPrompt,
+            )
+
+            AXIsProcessTrustedWithOptions({kAXTrustedCheckOptionPrompt: True})
+            out["prompted"] = True
+            out["note"] = ("macOS is showing the Accessibility request. Approving it adds the app to the list; "
+                           "restart the app afterwards so the keystroke tap is created with the grant in place.")
+        except Exception as e:  # noqa: BLE001
+            out["note"] = f"Could not ask: {e}. Open the pane and add the app by hand."
+
+    elif pid_ == "input_monitoring":
+        lib = _iokit()
+        if not lib:
+            out["note"] = "IOKit is not reachable from this build; use the Settings pane."
+        else:
+            try:
+                lib.IOHIDRequestAccess(_HID_LISTEN)
+                out["prompted"] = True
+                out["note"] = "macOS is showing the Input Monitoring request. Restart the app after approving."
+            except Exception as e:  # noqa: BLE001
+                out["note"] = f"Could not ask: {e}"
+
+    elif pid_ == "screen_recording":
+        q = _load_pyobjc().get("Quartz")
+        fn = getattr(q, "CGRequestScreenCaptureAccess", None) if q else None
+        if not fn:
+            out["note"] = "Not available in this build; use the Settings pane."
+        else:
+            try:
+                fn()
+                out["prompted"] = True
+                out["note"] = ("macOS shows this request once per app, ever. If no dialog appeared, switch the app "
+                               "on in the pane instead, then restart it.")
+            except Exception as e:  # noqa: BLE001
+                out["note"] = f"Could not ask: {e}"
+
+    elif pid_ == "microphone":
+        try:
+            import AVFoundation  # type: ignore[import-not-found]
+
+            AVFoundation.AVCaptureDevice.requestAccessForMediaType_completionHandler_(_AV_AUDIO, lambda ok: None)
+            out["prompted"] = True
+            out["note"] = "macOS is showing the Microphone request."
+        except Exception as e:  # noqa: BLE001
+            out["note"] = f"Could not ask: {e}. Install pyobjc-framework-AVFoundation or use the pane."
+
+    elif pid_ == "automation":
+        name = browser or ""
+        if name not in BROWSER_SCRIPTS:
+            out["note"] = f"Not a browser this monitor reads: {name or '(none given)'}"
+        else:
+            # Running the very script the collector runs is what makes macOS ask, and it asks for
+            # the pair (this app, that browser) - which is the grant the collector needs.
+            url = browser_url(name)
+            out["prompted"] = True
+            out["state"] = automation_status(BROWSER_BUNDLES.get(name, ""))
+            out["note"] = (f"Read a URL from {name}." if url else
+                           f"Asked {name}. If no dialog appeared it is probably not running - open it and try again.")
+            return out
+
+    elif pid_ == "full_disk":
+        out["note"] = ("Full Disk Access cannot be requested by a program. Open the pane, press +, and pick the app "
+                       "(Personal OS, or Electron in a dev build). No activity signal needs it.")
+
+    else:
+        out["note"] = f"Unknown permission: {pid_}"
+        return out
+
+    out["state"] = permission_state(pid_)
+    return out
+
+
+def permission_state(pid_: str) -> str:
+    """Current stored state of one permission, without prompting."""
+    if pid_ == "accessibility":
+        return GRANTED if accessibility_trusted() else DENIED
+    if pid_ == "input_monitoring":
+        return input_monitoring_status()
+    if pid_ == "screen_recording":
+        return screen_recording_status()
+    if pid_ == "microphone":
+        return microphone_status()
+    if pid_ == "full_disk":
+        return GRANTED if full_disk_access() else DENIED
+    if pid_ == "automation":
+        states = [automation_status(BROWSER_BUNDLES.get(b, "")) for b in installed_browsers()]
+        if not states:
+            return NA
+        if GRANTED in states:
+            return GRANTED
+        return DENIED if all(s == DENIED for s in states) else UNASKED
+    return UNKNOWN
+
+
+def open_settings(pid_: str) -> bool:
+    """Open the Privacy & Security pane for one permission. Opening a pane grants nothing."""
+    url = SETTINGS_URLS.get(pid_)
+    if not url or not IS_MAC:
+        return False
+    try:
+        subprocess.run(["open", url], capture_output=True, timeout=8)
+        return True
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def _cap(cid: str, label: str, ok: bool, detail: str, fix: str = "", *, state: str = "",
+         requestable: bool = False, signals: tuple[str, ...] = (), optional: bool = False,
+         restart: bool = False, extra: Any = None) -> dict[str, Any]:
+    """One checklist row. `state` is set only for the macOS permissions, which are the rows the UI
+    can offer a Grant button for; everything else is a plain yes/no about this machine."""
+    return {
+        "id": cid, "label": label, "ok": ok, "detail": detail, "fix": "" if ok else fix,
+        "state": state, "requestable": requestable, "settings_url": SETTINGS_URLS.get(cid, ""),
+        "signals": list(signals), "optional": optional, "restart": restart,
+        "extra": extra if extra is not None else [],
+    }
+
+
 def capabilities(cfg: dict[str, Any]) -> list[dict[str, Any]]:
     """What this machine can actually do right now, and how to fix what it can't.
 
-    Rendered as a checklist in the UI. Read-only: probing never asks for a permission.
+    Rendered as a checklist in the UI, one row per thing that can be missing: a framework, a
+    binary, a device, or one of the five macOS permissions. Read-only - probing never asks for a
+    permission, so opening the panel cannot make a dialog appear.
     """
     devices = audio_devices()
     loopbacks = [d for d in devices if looks_like_loopback(d["name"])]
     pyobjc_ok = bool(_load_pyobjc())
-    out = [
-        {
-            "id": "platform", "label": "Supported platform", "ok": IS_MAC,
-            "detail": f"Running on {sys.platform}.",
-            "fix": "" if IS_MAC else "The collectors are macOS-only; the rest of the app is unaffected.",
-        },
-        {
-            "id": "pyobjc", "label": "Native bridge (pyobjc)", "ok": pyobjc_ok,
-            "detail": "App names, window titles, idle time and keystroke taps come through pyobjc."
-                      if pyobjc_ok else f"pyobjc not importable: {_pyobjc_error or 'not installed'}.",
-            "fix": "" if pyobjc_ok else "pip install pyobjc-framework-Cocoa pyobjc-framework-Quartz "
-                                        "pyobjc-framework-ApplicationServices in the backend venv. "
-                                        "Without it, app tracking falls back to lsappinfo (name only).",
-        },
-        {
-            "id": "accessibility", "label": "Accessibility permission", "ok": accessibility_trusted(),
-            "detail": "Needed for window titles and for the keystroke/click tap.",
-            "fix": "System Settings -> Privacy & Security -> Accessibility, and enable Personal OS "
-                   "(in dev builds: Electron). Restart the app afterwards.",
-        },
-        {
-            "id": "ffmpeg", "label": "ffmpeg", "ok": bool(ffmpeg_path()),
-            "detail": f"Found at {ffmpeg_path()}." if ffmpeg_path() else "Not on PATH.",
-            "fix": "" if ffmpeg_path() else "brew install ffmpeg - needed for both audio signals.",
-        },
-        {
-            "id": "mic", "label": "Microphone input", "ok": bool(devices),
-            "detail": f"{len(devices)} audio input(s) visible to ffmpeg." if devices else "No audio inputs found.",
-            "fix": "" if devices else "Grant Microphone permission to the app, then reopen this panel.",
-        },
-        {
-            "id": "loopback", "label": "System audio capture", "ok": bool(loopbacks),
-            "detail": (f"Loopback device available: {loopbacks[0]['name']}." if loopbacks
-                       else "macOS cannot record its own output without a loopback driver."),
-            "fix": "" if loopbacks else "Install BlackHole (brew install blackhole-2ch) or Loopback, route "
-                                        "output through it, then pick it as the output device below.",
-        },
-        {
-            "id": "transcription", "label": "Transcription model", "ok": bool((cfg.get("audio") or {}).get("model")),
-            "detail": f"Audio is sent to {(cfg.get('audio') or {}).get('model') or '(unset)'} on your configured "
-                      "LLM base URL and the recording is deleted straight after.",
-            "fix": "" if (cfg.get("audio") or {}).get("model") else "Set a speech-to-text model your proxy exposes.",
-        },
+    ax = accessibility_trusted()
+    hid = input_monitoring_status()
+    screen = screen_recording_status()
+    mic_perm = microphone_status()
+    browsers = installed_browsers()
+    auto = [{"name": b, "state": automation_status(BROWSER_BUNDLES.get(b, ""))} for b in browsers]
+    auto_ok = any(a["state"] == GRANTED for a in auto)
+    model = (cfg.get("audio") or {}).get("model")
+
+    return [
+        _cap("platform", "Supported platform", IS_MAC, f"Running on {sys.platform}.",
+             "The collectors are macOS-only; the rest of the app is unaffected."),
+        _cap("pyobjc", "Native bridge (pyobjc)", pyobjc_ok,
+             "App names, window titles, idle time and keystroke taps come through pyobjc."
+             if pyobjc_ok else f"pyobjc not importable: {_pyobjc_error or 'not installed'}.",
+             "Run `cd backend && uv pip install -e '.[activity]'`, then restart the app. Without it, app "
+             "tracking falls back to lsappinfo (name only).",
+             signals=("apps", "input", "text")),
+        _cap("accessibility", "Accessibility", ax,
+             "Granted - window titles and the keystroke/click tap can both work." if ax
+             else "Not granted. Window titles come back empty and the event tap is refused.",
+             "Press Grant to have macOS ask, or open the pane and switch the app on. Restart the app "
+             "afterwards: a tap created before the grant stays dead.",
+             state=GRANTED if ax else DENIED, requestable=True, restart=True,
+             signals=("apps", "input", "text")),
+        _cap("input_monitoring", "Input Monitoring", hid in (GRANTED, UNKNOWN),
+             {GRANTED: "Granted - the listen-only tap can see keystrokes and clicks.",
+              DENIED: "Explicitly denied. macOS will refuse the event tap while it is off.",
+              UNASKED: "Never asked. Accessibility alone is usually enough; grant this too if the tap is refused.",
+              UNKNOWN: "Could not read the state; Accessibility is the switch that matters most."}[hid],
+             "Press Grant, or open the pane and switch the app on, then restart the app.",
+             state=hid, requestable=True, restart=True, signals=("input", "text")),
+        _cap("screen_recording", "Screen Recording", screen == GRANTED,
+             "Granted - window titles still resolve for apps that hide them from the accessibility API."
+             if screen == GRANTED else
+             "Not granted. Titles come from the accessibility API only, which a few apps leave empty.",
+             "Press Grant (macOS asks once per app, ever), or switch the app on in the pane and restart it. "
+             "Only window titles use this - no screenshot is ever taken.",
+             state=screen, requestable=True, restart=True, optional=True, signals=("apps",)),
+        _cap("automation", "Browser automation", auto_ok or not browsers,
+             (", ".join(f"{a['name']}: {a['state']}" for a in auto) if auto
+              else "None of the supported browsers are installed."),
+             "Press Grant next to a browser (it has to be running), or add the app under Automation in the pane. "
+             "Each browser is a separate grant.",
+             state=permission_state("automation"), requestable=bool(browsers), optional=True,
+             signals=("browserUrls",), extra=auto),
+        _cap("ffmpeg", "ffmpeg", bool(ffmpeg_path()),
+             f"Found at {ffmpeg_path()}." if ffmpeg_path() else "Not on PATH.",
+             "brew install ffmpeg - needed for both audio signals.",
+             signals=("micAudio", "outputAudio")),
+        _cap("microphone", "Microphone permission", mic_perm == GRANTED,
+             {GRANTED: "Granted - the microphone signal can record.",
+              DENIED: "Refused. Recording will produce silence until it is switched on.",
+              UNASKED: "Never asked. Press Grant, or just switch the microphone signal on.",
+              UNKNOWN: "Could not read the state (pyobjc-framework-AVFoundation missing)."}[mic_perm],
+             "Press Grant to have macOS ask, or switch the app on under Microphone in the pane.",
+             state=mic_perm, requestable=True, optional=True, signals=("micAudio",)),
+        _cap("mic", "Audio inputs", bool(devices),
+             f"{len(devices)} audio input(s) visible to ffmpeg." if devices else "No audio inputs found.",
+             "Grant Microphone permission to the app, then reopen this panel.",
+             optional=True, signals=("micAudio", "outputAudio")),
+        _cap("loopback", "System audio capture", bool(loopbacks),
+             f"Loopback device available: {loopbacks[0]['name']}." if loopbacks
+             else "macOS cannot record its own output without a loopback driver.",
+             "brew install --cask blackhole-2ch (it asks for your password), route output through it, then "
+             "pick it as the output device below.",
+             optional=True, signals=("outputAudio",)),
+        _cap("full_disk", "Full Disk Access", full_disk_access(),
+             "Granted." if full_disk_access() else "Not granted - and no activity signal needs it.",
+             "This is the one grant no program can request: open the pane, press +, and pick the app. "
+             "Listed only because it is what 'full access' means on macOS.",
+             state=permission_state("full_disk"), optional=True),
+        _cap("transcription", "Transcription model", bool(model),
+             f"Audio is sent to {model or '(unset)'} on your configured LLM base URL and the recording is "
+             "deleted straight after.",
+             "Set a speech-to-text model your proxy exposes.",
+             optional=True, signals=("micAudio", "outputAudio")),
     ]
-    return out
+
+
+def permissions() -> list[dict[str, Any]]:
+    """Just the macOS permission rows, for the Grant buttons and the `activity_access` tool."""
+    return [c for c in capabilities({}) if c["state"]]
 
 
 # ---------------------------------------------------------------- store
@@ -690,7 +1091,10 @@ class InputCollector(Collector):
             self.error = "pyobjc not installed - add pyobjc-framework-Quartz to capture input"
             return
         if not accessibility_trusted():
-            self.error = "Accessibility permission not granted - enable it in System Settings, then restart the app"
+            self.error = "Accessibility permission not granted - grant it from the Activity panel, then restart the app"
+            return
+        if input_monitoring_status() == DENIED:
+            self.error = "Input Monitoring is denied - macOS will refuse the tap until it is granted, then restart the app"
             return
 
         mask = 0
@@ -1008,6 +1412,50 @@ class Monitor:
             self.start()
         return cfg
 
+    def set_palantir(self, on: bool) -> dict[str, Any]:
+        """One switch for "record everything".
+
+        On: all six signals, redaction off, and both exclusion lists emptied - so the password
+        managers and the sign-in pages that are normally skipped get recorded like anything else.
+        It also turns the monitor on if it was off.
+
+        What it cannot switch off: secure input. macOS withholds keystrokes from every tap in the
+        system while a password field is focused, so that one is the OS's call, not ours. The
+        count of dropped keys is still reported rather than hidden.
+
+        Off: whatever the settings were before go back, from the snapshot taken on the way in - so
+        a carefully built exclusion list survives a stint in the mode. A second enable does not
+        overwrite that snapshot with the mode's own flattened values.
+        """
+        cfg = self.config()
+        if on:
+            restore = cfg.get("palantirRestore") or {}
+            if not cfg.get("palantir"):
+                restore = {
+                    "signals": dict(cfg.get("signals") or {}),
+                    "redact": bool(cfg.get("redact", True)),
+                    "excludeApps": list(cfg.get("excludeApps") or []),
+                    "excludeTitlePatterns": list(cfg.get("excludeTitlePatterns") or []),
+                }
+            new = {
+                **cfg, "palantir": True, "palantirRestore": restore, "enabled": True,
+                "signals": {s: True for s in SIGNALS},
+                "redact": False, "excludeApps": [], "excludeTitlePatterns": [],
+            }
+        else:
+            r = cfg.get("palantirRestore") or {}
+            new = {
+                **cfg, "palantir": False, "palantirRestore": {},
+                "signals": dict(r.get("signals") or DEFAULT_CONFIG["signals"]),
+                "redact": bool(r.get("redact", True)),
+                "excludeApps": list(r.get("excludeApps", DEFAULT_CONFIG["excludeApps"])),
+                "excludeTitlePatterns": list(r.get("excludeTitlePatterns", DEFAULT_CONFIG["excludeTitlePatterns"])),
+            }
+        self.db.set_settings({"activity": new})   # a full replace: the restore snapshot must clear
+        log.info("activity: palantir mode %s", "ON - recording everything" if on else "off - previous settings back")
+        self.set_config({})                       # re-reads the stored config and restarts collectors
+        return self.status()
+
     @property
     def md_path(self) -> Path:
         return self.data_dir / "context" / "activity.md"
@@ -1089,6 +1537,7 @@ class Monitor:
             "md_path": str(self.md_path),
             "audio_devices": audio_devices() if (cfg.get("signals") or {}).get("micAudio") or (cfg.get("signals") or {}).get("outputAudio") else [],
             "secure_input": secure_input_active(),
+            "palantir": bool(cfg.get("palantir")),
         }
 
     def now_line(self) -> str:

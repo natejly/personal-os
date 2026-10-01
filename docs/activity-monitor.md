@@ -4,7 +4,8 @@ A mode that watches what you do on this Mac, summarizes it every few minutes,
 and writes the result to a markdown file that gets fed back into your chats — so
 the assistant knows what you were actually working on without being told.
 
-It is off until you turn it on, and every signal is a separate switch.
+It is off until you turn it on, and every signal is a separate switch - or one switch, if you want
+it recording everything: see [Palantir mode](#palantir-mode).
 
 ---
 
@@ -15,10 +16,10 @@ captures before you can enable it.
 
 | Signal | What lands in the database | Needs |
 | --- | --- | --- |
-| **Apps and windows** | Frontmost app + focused window title, as stretches of attention with durations | pyobjc for titles; app names work without it |
-| **Browser URLs** | Active tab URL in Safari, Chrome, Arc, Brave, Edge, Vivaldi | Automation permission per browser |
-| **Typing and clicks** | Counts and rhythm: keystrokes, clicks, scrolls, words per minute. No characters | Accessibility |
-| **The text you type** | Every character typed, redacted. This is a keylogger | Accessibility |
+| **Apps and windows** | Frontmost app + focused window title, as stretches of attention with durations | pyobjc for titles; app names work without it. Screen Recording covers apps that hide their title from the accessibility API |
+| **Browser URLs** | Active tab URL in Safari, Chrome, Arc, Brave, Edge, Vivaldi | Automation permission, one grant per browser |
+| **Typing and clicks** | Counts and rhythm: keystrokes, clicks, scrolls, words per minute. No characters | Accessibility; Input Monitoring where it is explicitly denied |
+| **The text you type** | Every character typed, redacted. This is a keylogger | Accessibility; Input Monitoring where it is explicitly denied |
 | **Microphone** | Short recordings, transcribed, audio deleted. Text only | ffmpeg + Microphone permission |
 | **System audio** | Same, for whatever your speakers played | ffmpeg + a loopback device |
 
@@ -118,27 +119,71 @@ this feature is reasonable to run is if you can see exactly what it knows.
 
 ## Permissions
 
-macOS grants input and screen access per binary, and the backend is a child of
-the Electron app, so the grant lands on the app bundle — **Personal OS** in a
-packaged build, **Electron** in development. After granting, restart the app: a
-`CGEventTap` created before the grant stays dead.
+macOS gates each signal behind a different switch, and every grant lands on the **app bundle** that
+spawned the backend, because the Python process is a child of Electron: **Personal OS** in a
+packaged build, **Electron** in development.
 
-The Activity panel's capability checklist probes what is actually available and
-prints the exact fix for anything missing. Probing never triggers a permission
-prompt.
+| Permission | What it unlocks | Can it be requested? |
+| --- | --- | --- |
+| **Accessibility** | Window titles, and the keystroke/click tap | Yes |
+| **Input Monitoring** | The tap, on machines where this one is explicitly denied | Yes |
+| **Screen Recording** | Window titles for apps that leave `AXTitle` empty. Titles only - no screenshot is ever taken | Yes, once per app ever |
+| **Automation** | The active tab URL, one grant per browser | Yes, per browser, while it is running |
+| **Microphone** | The microphone signal | Yes |
+| **Full Disk Access** | Nothing here needs it. Listed because it is what "full access" means on macOS | No - no program can ask |
+
+The Activity panel's **Access on this machine** checklist probes all six and prints each one's state
+(`granted`, `denied`, `not asked yet`), which signals it gates, and what to do about it. Probing is
+read-only: opening the panel can never make a dialog appear.
+
+Each row has two buttons. **Grant** asks macOS directly - `AXIsProcessTrustedWithOptions`,
+`IOHIDRequestAccess`, `CGRequestScreenCaptureAccess`, `AVCaptureDevice.requestAccess`, or for
+Automation the very AppleScript the collector runs. **Open System Settings** deep-links the exact
+pane, which is the fallback that matters: macOS shows most of these at most once per app, so a
+second ask is silent and the pane is the only way back. **Ask for everything missing** walks the
+requestable rows in one go.
+
+After granting, **restart the app**: a `CGEventTap` created before the grant stays dead, and the
+rows that behave this way say so.
 
 ```bash
-# Window titles and the keystroke tap
-cd backend && uv pip install -e '.[activity]'
-
-# Both audio signals
-brew install ffmpeg
-
-# System audio only: macOS will not record its own output without a loopback device
-brew install blackhole-2ch
+./scripts/activity-setup.sh
 ```
 
-Then: System Settings → Privacy & Security → Accessibility, and enable the app.
+Installs the pyobjc bridge and ffmpeg, offers the loopback driver, then prints the checklist and
+what is left for you to grant. The loopback driver is a `.pkg`, so that step asks for your password
+and cannot run unattended:
+
+```bash
+cd backend && uv pip install -e '.[activity]'   # window titles, the keystroke tap, mic status
+brew install ffmpeg                             # both audio signals
+brew install --cask blackhole-2ch               # system audio only; asks for your password
+```
+
+## Palantir mode
+
+One switch, on the Overview tab, for *record everything*:
+
+- all six signals on, including the keylogger, the microphone and system audio
+- redaction off
+- both "never record" lists emptied, so password managers and sign-in pages are recorded like any
+  other window
+
+It is the only control in the app that turns protections off rather than on, so it sits behind a
+confirmation that says exactly that, the panel wears a **Palantir mode** pill while it is on, and
+the Signals and Privacy tabs say which of their switches the mode is currently sitting on.
+
+**What it cannot turn off:** secure input. While macOS reports a focused password field it withholds
+keystrokes from every tap in the system, so those keys were never ours to record. The count of
+dropped keys is still reported rather than hidden.
+
+**Turning it off restores what you had.** The signals, the redaction flag and both exclusion lists
+are snapshotted on the way in (`palantirRestore`) and put back on the way out, so a carefully built
+exclusion list survives a stint in the mode - and a second enable does not overwrite that snapshot
+with the mode's own flattened values.
+
+It needs the grants like anything else: with it on, the panel names any permission macOS is still
+withholding, instead of quietly recording less than it claims.
 
 ## Tools
 
@@ -149,6 +194,8 @@ The assistant gets two tools when the monitor exists:
   workflow.
 - `activity_pause(minutes)` — stops recording. Ask the assistant to stop watching
   and it can.
+- `activity_access()` — which permissions exist, which signals each one gates, and what is missing,
+  so "why isn't it recording my typing?" gets a real answer. Read-only: it cannot grant anything.
 
 ## API
 
@@ -167,13 +214,19 @@ The assistant gets two tools when the monitor exists:
 | `GET /activity/context` | activity.md plus the block chats receive |
 | `GET /activity/devices` | avfoundation audio inputs |
 | `POST /activity/purge` | `expired` \| `events` \| `summaries` \| `all` |
+| `GET /activity/permissions` | The six macOS permission rows on their own. Never prompts |
+| `POST /activity/permissions/request` | Ask macOS for one - the only route that can show a dialog |
+| `POST /activity/permissions/open` | Open that permission's Privacy & Security pane |
+| `POST /activity/palantir` | Record everything, or restore what the mode replaced |
 
 ## Limits
 
 - **macOS only.** The collectors need Quartz and the accessibility API. The rest
   of the app is unaffected on other platforms; `/activity/start` returns 400.
 - **Window titles need pyobjc and Accessibility.** Without them app tracking
-  falls back to `lsappinfo`, which gives the app name and nothing else.
+  falls back to `lsappinfo`, which gives the app name and nothing else. With Screen Recording
+  granted too, a title the accessibility API leaves empty is read from the window server instead -
+  the name field only, never an image.
 - **System audio needs a loopback driver.** There is no native way to capture
   macOS output.
 - **Transcription is not speaker-aware.** With the microphone on, people around
@@ -186,7 +239,8 @@ The assistant gets two tools when the monitor exists:
 
 `backend/tests/test_activity.py` covers the gate, config merging, retention and
 purge, the digest, rollup (including a dead LLM), the context block, the
-lifecycle and the markdown writer. The collectors themselves need a real session
+lifecycle, the markdown writer, the permission probes (which must never raise and never prompt)
+and Palantir mode's snapshot-and-restore. The collectors themselves need a real session
 with granted permissions, so they are exercised by hand rather than in tests.
 
 ```bash

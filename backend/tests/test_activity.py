@@ -342,11 +342,83 @@ def test_status_reports_capabilities_without_asking_for_permissions() -> None:
     st = m.status()
     ids = {c["id"] for c in st["capabilities"]}
     assert {"platform", "pyobjc", "accessibility", "ffmpeg", "loopback", "transcription"} <= ids
+    # every macOS gate the monitor depends on has its own row, not just Accessibility
+    assert {"input_monitoring", "screen_recording", "automation", "microphone", "full_disk"} <= ids
     for c in st["capabilities"]:
         assert isinstance(c["ok"], bool)
         assert c["fix"] or c["ok"]            # anything not ok explains how to fix it
+        assert set(c) >= {"state", "requestable", "settings_url", "signals", "optional", "restart", "extra"}
     assert st["running"] is False
     assert st["md_path"].endswith("context/activity.md")
+
+
+def test_permission_rows_carry_a_state_and_a_way_to_fix_it() -> None:
+    rows = {r["id"]: r for r in activity.permissions()}
+    assert set(rows) == {"accessibility", "input_monitoring", "screen_recording", "automation",
+                         "microphone", "full_disk"}
+    for pid, r in rows.items():
+        assert r["state"] in ("granted", "denied", "unasked", "unknown", "n/a"), (pid, r["state"])
+        assert activity.permission_state(pid) == r["state"] or pid == "automation"
+        # the panel can always act on a row: either macOS can be asked, or the pane can be opened
+        assert r["requestable"] or r["settings_url"], pid
+    # only the five that gate a signal block anything; Full Disk Access is informational
+    assert rows["full_disk"]["optional"] is True
+    assert rows["accessibility"]["signals"] == ["apps", "input", "text"]
+
+
+def test_probing_permissions_never_raises_and_never_prompts() -> None:
+    # None of these may put a dialog on screen or throw, whatever this machine has granted.
+    assert activity.input_monitoring_status() in ("granted", "denied", "unasked", "unknown")
+    assert activity.screen_recording_status() in ("granted", "denied", "unknown")
+    assert activity.microphone_status() in ("granted", "denied", "unasked", "unknown")
+    assert activity.automation_status("com.apple.Safari") in ("granted", "denied", "unasked", "unknown")
+    assert activity.automation_status("") == "unknown"
+    assert isinstance(activity.full_disk_access(), bool)
+    assert isinstance(activity.installed_browsers(), list)
+    assert isinstance(activity.window_list_title(0), str)   # no pid, no screen recording: just ""
+    assert activity.permission_state("nonsense") == "unknown"
+
+
+def test_requesting_an_unknown_permission_is_refused_without_prompting() -> None:
+    # Deliberately only the ids that cannot show a dialog - the rest are exercised by hand.
+    out = activity.request_permission("nonsense")
+    assert out["prompted"] is False and "Unknown permission" in out["note"]
+    fda = activity.request_permission("full_disk")
+    assert fda["prompted"] is False and "cannot be requested" in fda["note"]
+    assert activity.open_settings("nonsense") is False
+    assert activity.SETTINGS_URLS["accessibility"].endswith("Privacy_Accessibility")
+
+
+def test_palantir_mode_turns_everything_on_and_stands_the_gate_down() -> None:
+    m = _monitor(Path(tempfile.mkdtemp()))
+    m.set_config({"excludeApps": ["1Password", "Signal"], "signals": {"apps": True, "text": False}})
+    m.set_palantir(True)
+    cfg = m.config()
+    assert all(cfg["signals"][s] for s in activity.SIGNALS)   # every signal, including the heavy ones
+    assert cfg["redact"] is False
+    assert cfg["excludeApps"] == [] and cfg["excludeTitlePatterns"] == []
+    assert cfg["palantir"] is True
+    assert m.status()["palantir"] is True
+    # and the gate really does stop filtering
+    assert m.gate.excluded("1Password", "vault") is False
+    assert m.gate.scrub("my password is hunter2") == "my password is hunter2"
+
+
+def test_palantir_mode_puts_back_exactly_what_it_replaced() -> None:
+    m = _monitor(Path(tempfile.mkdtemp()))
+    m.set_config({"excludeApps": ["Signal"], "excludeTitlePatterns": ["payroll"],
+                  "signals": {"apps": True, "input": False, "text": False}})
+    before = m.config()
+    m.set_palantir(True)
+    m.set_palantir(True)          # a repeat enable must not snapshot the flattened values
+    m.set_palantir(False)
+    after = m.config()
+    for k in ("signals", "redact", "excludeApps", "excludeTitlePatterns"):
+        assert after[k] == before[k], k
+    assert after["palantir"] is False
+    assert after["palantirRestore"] == {}
+    assert m.gate.excluded("Signal") is True
+    assert "[secret]" in m.gate.scrub("my password is hunter2")
 
 
 def test_markdown_is_written_even_with_nothing_recorded() -> None:

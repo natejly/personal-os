@@ -1558,6 +1558,7 @@ class ActivityConfigIn(BaseModel):
     audio: dict[str, Any] | None = None
     summaryModel: str | None = None
     profileEveryHours: float | None = None
+    palantir: bool | None = None
 
 
 class PauseIn(BaseModel):
@@ -1575,8 +1576,53 @@ def activity_status() -> dict[str, Any]:
 
 @app.put("/activity/config")
 def activity_config(body: ActivityConfigIn) -> dict[str, Any]:
-    monitor.set_config(body.model_dump(exclude_none=True))
+    patch = body.model_dump(exclude_none=True)
+    # Palantir mode never travels as a plain field: it has to go through set_palantir, which
+    # snapshots the settings it is about to flatten so they can be put back.
+    palantir = patch.pop("palantir", None)
+    if patch:
+        monitor.set_config(patch)
+    if palantir is not None and bool(palantir) != bool(monitor.config().get("palantir")):
+        monitor.set_palantir(bool(palantir))
     return monitor.status()
+
+
+class PalantirIn(BaseModel):
+    on: bool = True
+
+
+@app.post("/activity/palantir")
+def activity_palantir(body: PalantirIn) -> dict[str, Any]:
+    """Record everything, or put back what was there before. The gate's discretionary filters go
+    down with it, so the panel spells out what it does before anyone presses it."""
+    if body.on and not activity.IS_MAC:
+        raise HTTPException(400, "The activity collectors are macOS-only.")
+    return monitor.set_palantir(bool(body.on))
+
+
+class PermissionIn(BaseModel):
+    id: str
+    browser: str = ""
+
+
+@app.get("/activity/permissions")
+def activity_permissions() -> list[dict[str, Any]]:
+    """The macOS permission rows on their own. Read-only: this never prompts."""
+    return activity.permissions()
+
+
+@app.post("/activity/permissions/request")
+def activity_permission_request(body: PermissionIn) -> dict[str, Any]:
+    """Ask macOS for one permission - the only route that can put a system dialog on screen, and
+    it exists because the user pressed Grant."""
+    out = activity.request_permission(body.id, body.browser)
+    return {"result": out, "status": monitor.status()}
+
+
+@app.post("/activity/permissions/open")
+def activity_permission_open(body: PermissionIn) -> dict[str, bool]:
+    """Open the Privacy & Security pane for one permission. Opening a pane grants nothing."""
+    return {"ok": activity.open_settings(body.id)}
 
 
 @app.post("/activity/start")

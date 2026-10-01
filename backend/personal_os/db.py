@@ -232,6 +232,44 @@ CREATE TABLE IF NOT EXISTS proposals (
 CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_proposals_run ON proposals(run_id);
 
+-- propose_plan (see plans.py): one approval artifact per batch of consequential calls. This is an
+-- approval record, not a progress checklist -- approving a plan pre-authorises exactly the argument
+-- values in plan_steps, one use per step. status: pending | approved | rejected
+CREATE TABLE IF NOT EXISTS action_plans (
+  plan_id TEXT PRIMARY KEY,
+  call_id TEXT UNIQUE,                 -- the propose_plan call whose approval decides this plan
+  run_id TEXT REFERENCES agent_runs(run_id) ON DELETE CASCADE,
+  conversation_id TEXT,
+  message_id TEXT,
+  title TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending',
+  tainted INTEGER NOT NULL DEFAULT 0,  -- the chat had read untrusted content when the plan was proposed
+  decided_by TEXT,                     -- user | stop; only the user's own rejection blocks its steps later
+  note TEXT,
+  created_at REAL NOT NULL,
+  decided_at REAL
+);
+CREATE INDEX IF NOT EXISTS idx_plans_run ON action_plans(run_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_plans_conv ON action_plans(conversation_id, created_at);
+
+-- One proposed call. args_digest is runs.args_digest, the same canonicalisation the approvals table uses.
+-- status: proposed | approved (claimable once) | consumed | dropped (edited out) | rejected
+CREATE TABLE IF NOT EXISTS plan_steps (
+  step_id TEXT PRIMARY KEY,
+  plan_id TEXT NOT NULL REFERENCES action_plans(plan_id) ON DELETE CASCADE,
+  idx INTEGER NOT NULL,
+  tool TEXT NOT NULL,
+  args TEXT NOT NULL DEFAULT '{}',
+  args_digest TEXT NOT NULL,
+  why TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'proposed',
+  edited INTEGER NOT NULL DEFAULT 0,
+  call_id TEXT,                        -- the call that consumed this step
+  consumed_at REAL,
+  UNIQUE(plan_id, idx)
+);
+CREATE INDEX IF NOT EXISTS idx_plan_steps_claim ON plan_steps(tool, args_digest, status);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
   text, chunk_id UNINDEXED, document_id UNINDEXED, tokenize='porter unicode61'
 );

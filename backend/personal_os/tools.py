@@ -19,6 +19,7 @@ from typing import Any, Awaitable, Callable
 import httpx
 
 from . import mac
+from . import plans
 from .learn import SELF_LABELS
 from .microvm import Sandboxes
 from .repos import Documents, Graph, Memories
@@ -30,7 +31,8 @@ log = logging.getLogger(__name__)
 
 # danger levels: safe (read-only, in-app) · writes (in-app write) · network (reads the internet)
 #                executes (sandboxed code) · external (writes to systems outside the app → asks by default)
-DEFAULT_MODE = {"safe": "on", "writes": "on", "network": "on", "executes": "on", "external": "ask"}
+#                plan (propose_plan: the call *is* an approval card, so it always asks)
+DEFAULT_MODE = {"safe": "on", "writes": "on", "network": "on", "executes": "on", "external": "ask", "plan": "ask"}
 
 # Danger levels a proposal-only run (a scheduled job: app.PROPOSAL_ONLY_KINDS) may not complete. Those calls are
 # recorded as proposals before they reach call() — this is the second gate, in the module that owns the tool
@@ -106,6 +108,7 @@ ALTERNATIVE = {
     "run_shortcut": "tell the user which Shortcut to run and with what input",
     "list_shortcuts": "ask the user for the exact Shortcut name",
     "open_page": "fetch_url, which reads the page without running its scripts",
+    "propose_plan": "make the calls one at a time; each consequential one asks the user on its own",
 }
 
 
@@ -592,6 +595,14 @@ class Toolbox:
         async def current_time(ctx: dict[str, Any]) -> Any:
             return {"iso": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "unix": int(time.time()), "timezone": time.strftime("%Z")}
         R("current_time", ToolSpec("current_time", "Get the current local date and time.", _obj({}, []), current_time, "utility", examples=[{}]))
+
+        async def propose_plan(ctx: dict[str, Any], steps: Any = None, title: str = "") -> Any:
+            """Unreachable from a chat: the plan *is* its approval card, so app.py records the plan at the approval
+            gate and answers the call from the user's decision. Only a direct toolbox.call lands here."""
+            return tool_error("propose_plan is answered by the approval gate, which is not running for this call.",
+                              alternative=ALTERNATIVE["propose_plan"])
+        R("propose_plan", ToolSpec("propose_plan", plans.PLAN_DESCRIPTION, plans.PLAN_PARAMETERS, propose_plan, "utility",
+                                   "plan", examples=plans.PLAN_EXAMPLES))
 
 
 def summarize_result(result: Any, limit: int = 1500) -> str:

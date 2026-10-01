@@ -21,7 +21,7 @@ from typing import Any, Iterable
 from .db import Database, new_id, now, row_to_dict
 
 # Mirrors DEFAULT_MODE / ToolSpec.danger in tools.py, which owns the built-in permission model.
-DANGER_LEVELS = ("safe", "writes", "network", "executes", "external")
+DANGER_LEVELS = ("safe", "writes", "network", "executes", "external")  # "plan" is built-in only: see plans.py
 MODES = ("on", "ask", "off")
 # Third-party code we did not write: it asks by default, whatever the server claims.
 DEFAULT_DANGER = "external"
@@ -42,7 +42,7 @@ RESERVED_TOOL_NAMES = frozenset({
     "search_memory", "save_memory",
     "graph_search", "graph_traverse", "graph_add",
     "web_search", "fetch_url",
-    "run_python", "current_time",
+    "run_python", "current_time", "propose_plan",
     "todo_list", "todo_add", "todo_update", "todo_delete",
     "calendar_events", "calendar_create", "calendar_get", "calendar_update", "calendar_delete", "calendar_respond",
     "gmail_search", "gmail_read", "gmail_draft", "gmail_send", "gmail_modify",

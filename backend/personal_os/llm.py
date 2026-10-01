@@ -80,8 +80,6 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Argument-pattern rules over the per-tool modes: {allow: [], ask: [], deny: []} of "Tool(pattern)" strings
     # (permrules.py). Deny beats ask beats allow; a forced approval is never lifted by one.
     "permissionRules": {"allow": [], "ask": [], "deny": []},
-    # Folders the file and shell tools may work in besides the active desk's workspace.
-    "workspaceRoots": [],
     # "deny": a job run that would have to ask is refused with a recorded reason instead of waiting for someone.
     "unattendedApprovals": "ask",
     "stuckDetection": True,  # nudge, then stop, on ping-pong / same-result / error-cycle loops (stuck.py)
@@ -154,6 +152,13 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "githubToken": "",
     # A stopped sandbox (containers are stopped, not removed, at app quit) is deleted after this many idle days.
     "sandboxKeepDays": 14,
+    # Folders (absolute paths inside the home folder) where fs_edit / fs_copy / fs_mkdir run without asking. A desk's
+    # own workspace is always granted; anywhere else those tools ask first.
+    "workspaceRoots": [],
+    # Mount the active desk's workspace read-write at /workspace/desk in that desk's sandbox container.
+    "sandboxMountDesk": True,
+    # fs_edit and an overwriting write_local_file refuse a file this conversation has not read (or that changed since).
+    "requireReadBeforeWrite": True,
     # {model: {"input": $/M tokens, "output": $/M tokens}} overrides for cost accounting (proxy prices are used otherwise)
     "modelPrices": {},
     "googleClientId": "",

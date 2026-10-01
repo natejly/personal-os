@@ -2296,3 +2296,8 @@ select:focus-visible {
 .perm-rule-group li { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 12px; }
 .perm-rule-add { display: flex; gap: 6px; align-items: center; }
 .perm-rule-test { display: flex; flex-direction: column; gap: 6px; }
+.workspace-roots { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+.workspace-roots .plain-list { list-style: none; margin: 0; padding: 0; }
+.workspace-roots .chip-check-row { justify-content: space-between; cursor: default; }
+.workspace-roots-add { display: flex; gap: 8px; }
+.workspace-roots-add input { flex: 1; min-width: 0; }

@@ -46,6 +46,7 @@ RESERVED_TOOL_NAMES = frozenset({
     "run_python", "current_time", "propose_plan",
     "todo_write", "read_tool_result", "skill_list", "skill_draft", "skill_revise", "skill_view",
     "mcp_tool_search",
+    "fs_glob", "fs_grep", "fs_edit", "fs_copy", "fs_mkdir",
     "todo_list", "todo_add", "todo_update", "todo_delete",
     "mail_followups", "schedule_suggest",
     "calendar_events", "calendar_create", "calendar_get", "calendar_update", "calendar_delete", "calendar_respond",

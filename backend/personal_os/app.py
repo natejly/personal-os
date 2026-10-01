@@ -323,6 +323,8 @@ desks = Desks(db, workspace)
 # the chain and leaves the running turn to settle cooperatively.
 _desk_tasks: dict[str, asyncio.Task[None]] = {}
 sandboxes = Sandboxes(settings)
+# A desk's container sees the desk's workspace at /workspace/desk (microvm.DESK_MOUNT); other chats mount nothing.
+sandboxes.desk_workspace = lambda conv_id: (str(workspace.ensure(d["id"])) if (d := desks.by_conversation(conv_id)) else None)
 monitor = activity.Monitor(db, settings, llm.complete)
 # Every Gmail send is held here first so it can be undone (outbox.py); its own routes are included below.
 outbox = Outbox(db, google, settings)
@@ -1474,6 +1476,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 spec = toolbox.specs.get(c["name"])
                 danger = spec.danger if spec else "safe"
                 mode = _gate(c["name"], raw_mode, tool_ctx)
+                # A file write outside the granted folders (or in one, once the reply read untrusted content) asks.
+                fs_ask = mode != "off" and toolbox.fs_needs_ask(c["name"], args, tool_ctx)
+                if fs_ask and mode == "on":
+                    mode = "ask"
                 forced = mode != raw_mode  # untrusted content in this reply upgraded on -> ask
                 blocked_reason: str | None = None
                 # ---- plan mode, in priority order. Each rule can only ever make a call ask or stop;
@@ -1732,7 +1738,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     result = await _mcp_call(c["name"], args)
                     ran = True
                 else:
-                    result = await _call_tool(run, _round, c["name"], args, tool_ctx, uid)
+                    tool_ctx["fs_outside_ok"] = fs_ask  # the user approved this write (or granted the folder)
+                    try:
+                        result = await _call_tool(run, _round, c["name"], args, tool_ctx, uid)
+                    finally:
+                        tool_ctx["fs_outside_ok"] = False
                     ran = True
                 hint = denials.note()
                 if hint and isinstance(result, dict):

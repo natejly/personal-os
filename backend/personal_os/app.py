@@ -28,7 +28,7 @@ from . import activity, assist, llm, tools
 from .context import build_context, estimate_tokens
 from .db import Database, data_dir_from_env, new_id
 from .extract_text import extract_text
-from .learn import learn_from_exchange
+from .learn import LearnJob, LearnWorker
 from .repos import ALL, Conversations, Documents, Graph, Memories, Projects
 from .boards import Boards
 from .canvas import SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
@@ -39,7 +39,7 @@ from .microvm import Sandboxes
 from .notes import Notes
 from .gtasks import TasksSync
 from .presets import CanvasPresets
-from .runs import Run, RunBus
+from .runs import Run, RunBus, Topic
 from .todos import Todos
 from .tools import Toolbox, summarize_result
 from .trace import Tracer, now_ms
@@ -186,6 +186,9 @@ bus = RunBus()
 _active: dict[str, asyncio.Event] = {}
 # Pending tool-call approvals: call_id -> Future[decision]
 _approvals: dict[str, asyncio.Future] = {}
+# Background work that outlives the run that queued it, and the topic it reports on.
+events = Topic()
+learner = LearnWorker(memories=memories, graph=graph, set_trace=convos.set_trace, publish=events.publish)
 
 
 ENV_SEED = {
@@ -792,23 +795,15 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     if tool_ctx.get("learned"):
         yield "learned", tool_ctx["learned"]
 
+    # Auto-learn is another LLM call, and the run owns the conversation for as long as this
+    # generator lives — a second message is a 409 until it returns. So the exchange is handed to the
+    # worker and the run ends here; what the worker learns arrives on the app topic (GET /events).
     if not error and text and cfg.get("autoLearn", True) and conv["settings"].get("autoLearn", True):
-        lspan = tracer.start("learn", cfg.get("extractionModel") or model)
-        yield "span", {"message_id": am["id"], "span": lspan}
-        try:
-            learned = await learn_from_exchange(
-                settings=cfg, memories=memories, graph=graph, project_id=conv["project_id"],
-                user_text=user_text, assistant_text=text, model=model,
-            )
-            tracer.end(lspan, {"memories": len(learned["memories"]), "entities": len(learned["nodes"]), "relations": len(learned["edges"])})
-            yield "span", {"message_id": am["id"], "span": lspan}
-            if learned["memories"] or learned["nodes"] or learned["edges"]:
-                yield "learned", learned
-        except Exception as e:  # noqa: BLE001
-            tracer.end(lspan, error=str(e))
-            yield "span", {"message_id": am["id"], "span": lspan}
-            yield "learn_error", {"message": str(e)}
-        convos.set_trace(am["id"], tracer.spans)
+        learner.submit(LearnJob(
+            conversation_id=conv_id, message_id=am["id"], project_id=conv["project_id"],
+            user_text=user_text, assistant_text=text, model=model, settings=cfg,
+            spans=list(tracer.spans),
+        ))
 
 
 async def _run_chat(run: Run, body: ChatIn) -> None:
@@ -858,6 +853,16 @@ async def stream_conversation(id: str, since: int = 0) -> StreamingResponse:
     """Any number of clients may attach; detaching one never touches the run."""
     run = bus.get(id)
     return StreamingResponse(run.subscribe(since) if run else iter(()), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.get("/events")
+async def stream_events(since: int = 0) -> StreamingResponse:
+    """App-wide background events (auto-learn, so far), for work no single run is waiting on.
+
+    Each event's SSE `id` is its seq; reconnect with `?since=<last id>` to replay what was missed.
+    """
+    return StreamingResponse(events.subscribe(since), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
@@ -1110,6 +1115,7 @@ def search_documents(id: str, q: str) -> list[dict[str, Any]]:  # convenience fo
 @app.on_event("shutdown")
 async def _shutdown() -> None:
     await bus.shutdown()  # before the rmtree: a live run's sandboxed run_python writes in there
+    await learner.stop()  # after the runs, so nothing is still queueing work at it
     shutil.rmtree(db.data_dir / "tmp", ignore_errors=True)
     await asyncio.to_thread(sandboxes.shutdown)  # after the runs: a live sandbox_exec would just see its container vanish
 

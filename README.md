@@ -213,7 +213,10 @@ next calendar or mail call with an opaque error.
    or deny it, in which case the model is told to continue without it.
 6. After the reply, if auto-learn is on, a second (cheaper) model call extracts
    new memories and graph relations. Facts must come from what you said, and
-   the user is never a graph entity.
+   the user is never a graph entity. It runs in a background worker, one job at
+   a time, *after* the run has ended — the chat is free for your next message
+   while it works — and reports what it learned on `GET /events`, the app-wide
+   event stream, since the reply's own stream is long closed by then.
 
 Everything used is stored on the assistant message (`context_used`,
 `tool_events`) and shown in the Context panel.

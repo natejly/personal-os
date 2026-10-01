@@ -1,5 +1,5 @@
 import type {
-  ChatEvent, ToolInfo, Todo, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, DriveFile, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Recap, Conversation, ConversationSettings, ContextUsed, Document, GraphData, GraphEdge, GraphNode, Message,
+  BackgroundEvent, ChatEvent, ToolInfo, Todo, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, DriveFile, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Recap, Conversation, ConversationSettings, ContextUsed, Document, GraphData, GraphEdge, GraphNode, Message,
   Memory, ModelInfo, ModelPrice, Settings, Project, UsageReport, ChatRunStarted, RunInfo,
   Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
   Doc, FullDoc, DocRevision,
@@ -287,9 +287,9 @@ export const api = {
   }
 }
 
-/** Attach to a conversation's run and iterate its server-sent events from `since`. Any number of clients may. */
-export async function* chatStream(convId: string, since = 0, signal?: AbortSignal): AsyncGenerator<ChatEvent> {
-  const r = await fetch(`${base}/conversations/${convId}/stream?since=${since}`, { signal, headers: await auth() })
+/** One SSE connection, parsed. `seq` is the event's `id:` line, which only the app topic sends. */
+async function* sseStream(path: string, signal?: AbortSignal): AsyncGenerator<{ event: string; data: unknown; seq: number | null }> {
+  const r = await fetch(`${base}${path}`, { signal, headers: await auth() })
   if (!r.ok || !r.body) throw new Error(`${r.status} ${r.statusText}`)
   const reader = r.body.getReader()
   const dec = new TextDecoder()
@@ -304,11 +304,31 @@ export async function* chatStream(convId: string, since = 0, signal?: AbortSigna
       buf = buf.slice(idx + 2)
       let event = 'message'
       let data = ''
+      let id = ''
       for (const line of block.split('\n')) {
         if (line.startsWith('event:')) event = line.slice(6).trim()
         else if (line.startsWith('data:')) data += line.slice(5).trim()
+        else if (line.startsWith('id:')) id = line.slice(3).trim()
       }
-      if (data) yield { event, data: JSON.parse(data) } as ChatEvent
+      if (data) yield { event, data: JSON.parse(data), seq: id ? Number(id) : null }
     }
+  }
+}
+
+/** Attach to a conversation's run and iterate its server-sent events from `since`. Any number of clients may. */
+export async function* chatStream(convId: string, since = 0, signal?: AbortSignal): AsyncGenerator<ChatEvent> {
+  for await (const { event, data } of sseStream(`/conversations/${convId}/stream?since=${since}`, signal)) {
+    yield { event, data } as ChatEvent
+  }
+}
+
+/**
+ * Follow the app topic: background work (auto-learn) that finishes after its run has ended. The
+ * stream never completes on its own, so the caller reconnects: each event carries the seq to
+ * resume from, and the server's ring replays whatever happened while the socket was down.
+ */
+export async function* backgroundStream(since = 0, signal?: AbortSignal): AsyncGenerator<BackgroundEvent & { seq: number | null }> {
+  for await (const { event, data, seq } of sseStream(`/events?since=${since}`, signal)) {
+    yield { event, data, seq } as BackgroundEvent & { seq: number | null }
   }
 }

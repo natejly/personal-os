@@ -25,12 +25,15 @@ QUEUE_MAX = 1000
 KEEPALIVE_S = 15.0
 # How long a finished run stays replayable, for a window that opens just after it ended.
 RETAIN_S = 300.0
+# The app topic carries whole events, not deltas, so its ring holds plenty of history in few slots.
+TOPIC_RING = 200
 
 RunEvent = tuple[int, str, Any]
 
 
-def sse(event: str, data: Any) -> str:
-    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+def sse(event: str, data: Any, seq: int | None = None) -> str:
+    head = f"id: {seq}\n" if seq is not None else ""
+    return f"{head}event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
 class _Sub:
@@ -113,6 +116,66 @@ class Run:
                 seq, event, data = item
                 if seq > last:
                     yield sse(event, data)
+                    last = seq
+        finally:
+            self._subs.discard(sub)
+            if getter is not None:
+                getter.cancel()
+
+
+class Topic:
+    """An app-lived event topic: the same fan-out a run has, minus the ending.
+
+    A `Run` closes its subscribers' streams as soon as its reply is persisted. Work that is
+    deliberately detached from the reply — auto-learn — finishes after that point and would have
+    nowhere to publish, so it publishes here. One topic serves the whole app; each event carries
+    its seq as the SSE `id`, so a window that reconnects (or opens late) resumes from the ring
+    instead of missing what happened while it was away.
+    """
+
+    def __init__(self) -> None:
+        self.seq = 0
+        self._ring: deque[RunEvent] = deque(maxlen=TOPIC_RING)
+        self._subs: set[_Sub] = set()
+
+    def publish(self, event: str, data: Any) -> None:
+        self.seq += 1
+        item = (self.seq, event, data)
+        self._ring.append(item)
+        for sub in self._subs:
+            if sub.overflow:
+                continue
+            try:
+                sub.q.put_nowait(item)
+            except asyncio.QueueFull:
+                sub.overflow = True
+
+    async def subscribe(self, since: int = 0) -> AsyncIterator[str]:
+        """Replay the ring past `since`, then follow forever — until the client goes away."""
+        sub = _Sub()
+        self._subs.add(sub)
+        getter: asyncio.Task[RunEvent | None] | None = None
+        try:
+            last = since
+            for seq, event, data in list(self._ring):
+                if seq > last:
+                    yield sse(event, data, seq)
+                    last = seq
+            while True:
+                if sub.overflow and sub.q.empty():
+                    return  # the client fell behind the queue; it reconnects and replays from `last`
+                if getter is None:
+                    getter = asyncio.ensure_future(sub.q.get())
+                done, _ = await asyncio.wait({getter}, timeout=KEEPALIVE_S)
+                if not done:
+                    yield ": keepalive\n\n"
+                    continue
+                item, getter = getter.result(), None
+                if item is None:
+                    return
+                seq, event, data = item
+                if seq > last:
+                    yield sse(event, data, seq)
                     last = seq
         finally:
             self._subs.discard(sub)

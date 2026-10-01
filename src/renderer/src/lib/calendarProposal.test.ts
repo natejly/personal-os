@@ -80,3 +80,10 @@ test('time text and aria labels', () => {
 test('legendKeys groups moved and keeps a fixed order', () => {
   assert.deepEqual(legendKeys([{ variant: 'existing' }, { variant: 'moved-to' }, { variant: 'moved-from' }, { variant: 'new' }]), ['new', 'moved', 'existing'])
 })
+
+test('buildOverlay draws a delete from its own times when the original was not fetched', () => {
+  const blocks = buildOverlay([{ op: 'delete', event_id: 'gone', summary: 'Old status sync', start: '2026-10-02T16:00', end: '2026-10-02T16:30' } as Change], [])
+  const d = blocks.find((b) => b.kind === 'delete')
+  assert.ok(d, 'delete block drawn')
+  assert.equal(d!.summary, 'Old status sync')
+})

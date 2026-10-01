@@ -329,7 +329,9 @@ export function buildOverlay(changes: Change[], existing: CalendarEvent[], opts:
     }
     const prior = byId(c.event_id)
     if (c.op === 'delete') {
+      // Unfetchable original (Google not connected, or no access): the proposal's own times still place it.
       if (prior) push(out, { key: `d:${i}`, kind: 'delete', summary: prior.summary, change: i }, prior.start, prior.end)
+      else if (c.start) push(out, { key: `d:${i}`, kind: 'delete', summary: c.summary || 'Event', change: i }, c.start, c.end)
       return
     }
     const pos = newPosition(c, prior)

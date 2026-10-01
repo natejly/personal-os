@@ -21,7 +21,7 @@ import httpx
 from . import mac
 from . import skillbuild
 from .cowork import UNDECIDED_OUTPUTS
-from .workspace import WorkspaceError
+from .workspace import MAX_FILE_CHARS, WorkspaceError
 from . import plans
 from . import reach
 from . import outbox as outbox_mod

@@ -2,7 +2,8 @@
  * The global gather shortcut. `globalShortcut.register` throws on a malformed accelerator and returns
  * false when another app already owns it, so both paths are handled and reported to the renderer.
  */
-import { app, BrowserWindow, globalShortcut, ipcMain } from 'electron'
+import { app, BrowserWindow, globalShortcut } from 'electron'
+import { handle } from './ipc'
 import { toggleGather } from './popouts'
 import type { ShortcutState } from '../shared/types'
 
@@ -39,8 +40,8 @@ export const gatherShortcut = (): ShortcutState => current
 
 export const registerShortcuts = (mainWindow: () => BrowserWindow | null, accelerator = DEFAULT_GATHER): void => {
   getMain = mainWindow
-  ipcMain.handle('shortcuts:gather', () => current)
-  ipcMain.handle('shortcuts:set-gather', (_e, accel: string) => apply(accel))
+  handle('shortcuts:gather', () => current)
+  handle('shortcuts:set-gather', (_e, accel: string) => apply(accel))
   app.on('will-quit', () => globalShortcut.unregisterAll())
   apply(accelerator)
 }

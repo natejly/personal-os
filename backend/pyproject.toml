@@ -2,7 +2,7 @@
 name = "grain-backend"
 version = "0.1.0"
 description = "Python backend for Grain: memory, knowledge graph, documents, spaces, LiteLLM chat."
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115",
   "uvicorn[standard]>=0.30",
@@ -44,3 +44,13 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["personal_os"]
+
+[tool.ruff]
+line-length = 140
+target-version = "py311"
+extend-exclude = [".venv"]
+
+[tool.ruff.lint]
+# Correctness-only: pyflakes + pycodestyle errors/warnings, nothing stylistic.
+select = ["E", "F", "W"]
+ignore = ["F401", "F841", "E501", "E402", "E701", "E702", "E731", "E741"]

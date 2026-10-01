@@ -152,29 +152,7 @@ async def _validation_error(request: Request, exc: Exception) -> JSONResponse:  
 
 @app.exception_handler(sqlite3.IntegrityError)
 async def _integrity_error(request: Request, exc: Exception) -> JSONResponse:  # type: ignore[override]
-    """Safety net for the writers wsid() cannot cover (a card whose column is gone, a window whose canvas is gone).
-    A stale id from a window that has not refreshed is the client's problem to retry, not a server fault, so it gets a
-    409 and a usable message rather than a bare 500."""
-    detail = ("Something this refers to no longer exists - reload and try again."
-              if "FOREIGN KEY" in str(exc).upper() else f"That change conflicts with what is already stored ({exc})")
-    log.info("integrity error on %s %s: %s", request.method, request.url.path, exc)
-    return JSONResponse({"detail": detail}, status_code=409)
-
-
-@app.exception_handler(sqlite3.IntegrityError)
-async def _integrity_error(request: Request, exc: Exception) -> JSONResponse:  # type: ignore[override]
-    """Safety net for the writers wsid() cannot cover (a card whose column is gone, a widget whose dashboard is gone).
-    A stale id from a window that has not refreshed is the client's problem to retry, not a server fault, so it gets a
-    409 and a usable message rather than a bare 500."""
-    detail = ("Something this refers to no longer exists - reload and try again."
-              if "FOREIGN KEY" in str(exc).upper() else f"That change conflicts with what is already stored ({exc})")
-    log.info("integrity error on %s %s: %s", request.method, request.url.path, exc)
-    return JSONResponse({"detail": detail}, status_code=409)
-
-
-@app.exception_handler(sqlite3.IntegrityError)
-async def _integrity_error(request: Request, exc: Exception) -> JSONResponse:  # type: ignore[override]
-    """Safety net for the writers wsid() cannot cover (a card whose column is gone, a widget whose dashboard is gone).
+    """Safety net for the writers wsid() cannot cover (a card whose column is gone, a window whose canvas is gone, a widget whose dashboard is gone).
     A stale id from a window that has not refreshed is the client's problem to retry, not a server fault, so it gets a
     409 and a usable message rather than a bare 500."""
     detail = ("Something this refers to no longer exists - reload and try again."
@@ -203,11 +181,22 @@ async def _require_token(request: Request, call_next):  # type: ignore[no-untype
 # Vite's dev server hops to 5174+ when 5173 is taken, so the default covers a small range; auth is
 # the token header either way — CORS here only decides which local origins may even ask.
 ALLOWED_ORIGINS = [o for o in (os.environ.get("PERSONAL_OS_ALLOWED_ORIGINS") or "").split(",") if o] or [
-    "null", "file://",
+    "file://",
     *(f"http://{h}:{p}" for h in ("localhost", "127.0.0.1") for p in range(5173, 5181))]
 app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_credentials=False,
                    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
                    allow_headers=["Content-Type", "X-Personal-OS-Token", "Authorization"])
+
+
+@app.middleware("http")
+async def _widget_null_origin(request: Request, call_next):  # type: ignore[no-untyped-def]
+    """Sandboxed widget iframes (no allow-same-origin) have the opaque "null" origin and read exactly one thing from the
+    backend: their data sources, authorised by the per-widget token in the query. Allow that origin on that path only."""
+    resp = await call_next(request)
+    p = request.url.path
+    if request.headers.get("origin") == "null" and request.method == "GET" and p.startswith("/sources/") and p.endswith("/fetch"):
+        resp.headers["Access-Control-Allow-Origin"] = "null"
+    return resp
 
 # Live runs, one per conversation, each owning its own task. Any number of clients may watch one.
 # Each run is also a row (agent_runs) with its event tape (run_events); the bus is the hot path over it.

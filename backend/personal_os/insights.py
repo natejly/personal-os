@@ -691,8 +691,8 @@ def fallback(pat: dict[str, Any], taken: set[str]) -> dict[str, Any]:
             out.append({
                 "key": "sug-protect-deep-work", "kind": "hygiene",
                 "title": f"Protect {b0:02d}:00-{(b1 + 1) % 24:02d}:00 on the calendar",
-                "detail": f"Your longest unbroken stretches start in that window. Block it as a recurring calendar "
-                          f"event so meetings land outside it, and pause the monitor there if you want it quiet.",
+                "detail": "Your longest unbroken stretches start in that window. Block it as a recurring calendar "
+                          "event so meetings land outside it, and pause the monitor there if you want it quiet.",
                 "why": f"{ev.get('stretches')} stretches of 15 minutes or more, clustered in that band.",
                 "impact": "keeps the one window that actually produces work",
                 "effort": "low", "confidence": p["confidence"], "evidence": [p["id"]],

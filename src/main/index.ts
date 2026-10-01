@@ -1,8 +1,9 @@
-import { app, BrowserWindow, ipcMain, Menu } from 'electron'
+import { app, BrowserWindow, Menu } from 'electron'
 import { existsSync } from 'fs'
 import { join } from 'path'
 import { backendStatus, backendToken, backendUrl, startBackend, stopBackend } from './backend'
 import { registerBus } from './bus'
+import { handle, on } from './ipc'
 import { guardNavigation } from './navigation'
 import { startPageBridge, stopPageBridge } from './pagefetch'
 import { gather, OPACITY_LEVELS, registerPopouts, restorePopouts, setFrontListener, toggleFront } from './popouts'
@@ -40,7 +41,7 @@ function createWindow(): void {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
       webviewTag: true // the web widget; guests are stripped in guardNavigation's will-attach-webview
     }
   })
@@ -254,11 +255,11 @@ process.on('unhandledRejection', (e) => console.error('[main] unhandled rejectio
 app.on('child-process-gone', (_e, d) => console.error(`[child] ${d.type} gone: ${d.reason}`))
 
 app.whenReady().then(async () => {
-  ipcMain.handle('backend:url', () => backendUrl())
-  ipcMain.handle('backend:status', () => backendStatus())
-  ipcMain.handle('backend:token', () => backendToken())
-  ipcMain.on('window:close-self', (e) => BrowserWindow.fromWebContents(e.sender)?.close())
-  ipcMain.on('window:minimize-self', (e) => BrowserWindow.fromWebContents(e.sender)?.minimize())
+  handle('backend:url', () => backendUrl())
+  handle('backend:status', () => backendStatus())
+  handle('backend:token', () => backendToken())
+  on('window:close-self', (e) => BrowserWindow.fromWebContents(e.sender)?.close())
+  on('window:minimize-self', (e) => BrowserWindow.fromWebContents(e.sender)?.minimize())
   registerPopouts(() => win)
   registerBus()
   buildMenu()

@@ -29,7 +29,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from . import compaction, llm
+from . import compaction, llm, permrules
 from .db import new_id, now
 from .tools import ALTERNATIVE, ToolSpec, _obj, call_key, denied, summarize_result, tool_error
 
@@ -347,6 +347,7 @@ class Subagents:
         self.approvals = approvals if approvals is not None else {}
         self.children: dict[str, Child] = {}
         self.locks = RootLocks()
+        self.snaps: Any = None  # folder snapshots (snapshots.py), set by app.py
         self.peak = 0
         self._watchdog: asyncio.Task[None] | None = None
         self._watch_loop: Any = None
@@ -745,8 +746,17 @@ class Subagents:
             result = tool_error(f"{name}: the arguments were not valid JSON.", alternative=ALTERNATIVE.get(name))
         else:
             mode = self.toolbox.gate(name, raw_mode, ch.ctx)
+            # The parent's gates, in the parent's order: a write outside the granted folders asks, then the
+            # argument-pattern rules (deny and the hardline list refuse, ask cards, allow lifts a plain ask).
+            # A child has no session of its own; the parent chat's session grants are the user's and still count.
+            fs_ask = self.toolbox.fs_needs_ask(name, args, ch.ctx)
+            if fs_ask and mode == "on":
+                mode = "ask"
             forced = mode != raw_mode
-            bad = self._confine(ch, name, args)
+            perm = permrules.resolve(name, args, mode, forced, rules=self.settings().get("permissionRules"),
+                                     roots=self._perm_roots(ch), conv=ch.conversation_id)
+            mode, forced = perm.mode, perm.forced
+            bad = perm.refusal or self._confine(ch, name, args)
             if bad:
                 result = denied(name, bad)
             elif mode == "ask":
@@ -755,9 +765,12 @@ class Subagents:
                     result = denied(name, "declined by the user")
             if result is None:
                 ch.touch(in_tool=True)
+                ch.ctx["fs_outside_ok"] = fs_ask  # approved above, or inside a granted folder
                 try:
+                    await self._snapshot_before(ch, name, args)
                     result = await self._call(ch, name, args, uid, spec)
                 finally:
+                    ch.ctx["fs_outside_ok"] = False
                     ch.touch(in_tool=False)
         err = result.get("error") if isinstance(result, dict) else None
         if isinstance(result, dict):
@@ -779,6 +792,18 @@ class Subagents:
                 res = {**res, "replayed": True}
             return res
         return await go()
+
+    def _perm_roots(self, ch: Child) -> list[str]:
+        roots = [r for r in (self.settings().get("workspaceRoots") or []) if isinstance(r, str) and r]
+        return list(dict.fromkeys([*roots, *(str(r) for r in ch.roots)]))
+
+    async def _snapshot_before(self, ch: Child, name: str, args: dict[str, Any]) -> None:
+        """A child's writes belong to the parent's reply, so they land in the parent run's folder snapshot and
+        the reply's Undo takes them back with everything else."""
+        run = ch.ctx.get("run")
+        if self.snaps is None or run is None or not self.snaps.wants(name, args, ch.desk_id):
+            return
+        await asyncio.to_thread(self.snaps.before, run.run_id, self.snaps.roots_for_call(name, args, ch.desk_id))
 
     def _confine(self, ch: Child, name: str, args: dict[str, Any]) -> str | None:
         """A writer's file tools stay inside its roots. The tools do their own scoping; this is the second lock."""

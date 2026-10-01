@@ -382,6 +382,7 @@ agent_defs = AgentDefs(db)
 subagent_mgr = Subagents(run_store, toolbox, settings, defs=agent_defs, results=tool_results, pricing=pricing, memories=memories,
                          projects=projects, workspace=workspace, approvals=_approvals)
 toolbox.subagents = subagent_mgr
+subagent_mgr.snaps = snaps
 # The insights pass proposes automations, so it is told which tools this install actually has - an
 # unwired integration must not turn into a suggestion that cannot be carried out.
 monitor.insights.tools_fn = lambda: [t["name"] for t in toolbox.list() if t.get("available")]

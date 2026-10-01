@@ -475,6 +475,37 @@ def test_child_approval_rides_the_parent_stream() -> None:
         check(out["state"] == "completed", f"{decision}: the child carried on")
 
 
+def test_child_calls_obey_permission_rules() -> None:
+    """A child's calls go through the same argument-pattern rules as the parent's: deny refuses before the tool
+    runs, and an allow rule lifts a plain ask without a card."""
+    for rules, mode, expect_ran, expect_card in (({"allow": [], "ask": [], "deny": ["fetch_url"]}, "on", False, False),
+                                                ({"allow": ["fetch_url"], "ask": [], "deny": []}, "ask", True, False)):
+        reset(permissionRules=rules)
+        spec = appmod.toolbox.specs["fetch_url"]
+        real, hits = spec.fn, []
+
+        async def fake(ctx: dict[str, Any], **kw: Any) -> Any:
+            hits.append(kw)
+            return {"url": kw.get("url"), "text": "page"}
+
+        spec.fn = fake
+        try:
+            SCRIPTS["browse"] = [{"text": "", "calls": [call("f1", "fetch_url", {"url": "https://example.com/a"})]}, {"text": "fetched"}]
+            fr = FakeRun()
+            modes = appmod.toolbox.effective({}, None, None)
+            modes["fetch_url"] = mode
+            ctx = mkctx(new_conv(), modes=modes, run=fr, message_id=None)
+            ctx["allowed_urls"] = {"https://example.com/a"}
+            out = run(appmod.toolbox.call("agent_spawn", {"task": "browse"}, ctx))
+        finally:
+            spec.fn = real
+            appmod.db.set_settings({"permissionRules": {"allow": [], "ask": [], "deny": []}})
+        cards = [d for e, d in fr.events if e == "tool_call" and d.get("needs_approval")]
+        check(bool(hits) is expect_ran, f"{rules}: the call {'ran' if expect_ran else 'was refused before running'}")
+        check(bool(cards) is expect_card, f"{rules}: {'a card' if expect_card else 'no card'} was raised")
+        check(out["state"] == "completed", f"{rules}: the child carried on")
+
+
 def test_tainted_parent_taints_child_externals() -> None:
     reset()
     ctx = mkctx(new_conv())

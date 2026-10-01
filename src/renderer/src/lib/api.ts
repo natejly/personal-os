@@ -2,6 +2,7 @@ import type {
   ChatEvent, ToolInfo, Todo, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, DriveFile, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Recap, Conversation, ConversationSettings, ContextUsed, Document, GraphData, GraphEdge, GraphNode, Message,
   Memory, ModelInfo, ModelPrice, Settings, Project, UsageReport, ChatRunStarted, RunInfo,
   Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
+  AgentInbox, AgentProposal, Job,
   Doc, FullDoc, DocRevision,
   ActivityConfig, ActivityContextFile, ActivityEvent, ActivityStatus, ActivitySummary
 } from '@shared/types'
@@ -69,6 +70,25 @@ export const api = {
   dashboard: () => req<TodayDashboard>('/dashboard'),
   recap: (force = false) => req<Recap>(`/recap?force=${force}`),
   approve: (callId: string, decision: 'allow' | 'deny' | 'always_chat' | 'always_global') => req(`/approvals/${callId}`, { method: 'POST', body: json({ decision }) }),
+  /** The Agent Inbox: pending approvals and proposals, plus what the scheduled jobs did. Built from journal rows. */
+  inbox: (hours = 72) => req<AgentInbox>(`/inbox?hours=${hours}`),
+  jobs: {
+    list: () => req<Job[]>('/jobs'),
+    create: (j: { name: string; cron: string; prompt: string; timezone?: string; enabled?: boolean; project_id?: string | null }) =>
+      req<Job>('/jobs', { method: 'POST', body: json(j) }),
+    update: (id: string, patch: Partial<Pick<Job, 'name' | 'cron' | 'prompt' | 'timezone' | 'enabled' | 'project_id'>>) =>
+      req<Job>(`/jobs/${id}`, { method: 'PATCH', body: json(patch) }),
+    delete: (id: string) => req(`/jobs/${id}`, { method: 'DELETE' }),
+    /** Fire it now by hand. Still proposal-only and on the job budget; the cron schedule is untouched. */
+    runNow: (id: string) => req<{ ok: boolean; run_id: string | null; conversation_id: string | null }>(`/jobs/${id}/run`, { method: 'POST' })
+  },
+  proposals: {
+    list: (status: 'pending' | 'accepted' | 'rejected' | 'all' = 'pending') => req<AgentProposal[]>(`/proposals?status=${status}`),
+    /** Executes it, as the user. `args` replaces the call's arguments first. Accepting twice is a 409, never a resend. */
+    accept: (id: string, args?: Record<string, unknown>) =>
+      req<{ ok: boolean; proposal: AgentProposal; replayed: boolean; result: string }>(`/proposals/${id}/accept`, { method: 'POST', body: json({ args: args ?? null }) }),
+    reject: (id: string) => req<{ ok: boolean; proposal: AgentProposal }>(`/proposals/${id}/reject`, { method: 'POST' })
+  },
   boards: {
     list: () => req<Board[]>('/boards'),
     get: (id: string) => req<Board>(`/boards/${id}`),

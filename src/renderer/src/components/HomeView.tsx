@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Calendar, Mail, CheckSquare, Brain, FolderKanban, Sparkles, RefreshCw, PanelLeftOpen, ExternalLink, Plus, MessageSquare, SlidersHorizontal, X, ListChecks, HardDrive } from 'lucide-react'
 import { useStore } from '../store'
 import { HOME_MODULES, homeModuleOn } from '../modules'
+import AgentInbox from './AgentInbox'
 import TodoItem from './TodoItem'
 import ProjectChip from './ProjectChip'
 import ReactMarkdown from 'react-markdown'
@@ -95,6 +96,8 @@ export default function HomeView(): JSX.Element {
             <button className="ghost-btn" onClick={() => void quickAdd()} disabled={!quick.trim()} title="Add as todo (⌘↵)"><Plus size={13} /> Todo</button>
           </div>
         </div>
+
+        {on('agent') && <AgentInbox />}
 
         {on('recap') && (recap?.content || recapLoading) && recapOpen && (
           <section className="recap">

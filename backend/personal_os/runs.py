@@ -151,6 +151,12 @@ class RunStore:
         sql = "SELECT * FROM agent_runs" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY started_at DESC LIMIT ?"
         return [r for r in (self._run_row(x) for x in self._all(sql, (*params, max(1, min(int(limit), 500))))) if r]
 
+    def of_kind(self, kind: str, since: float = 0.0, limit: int = 50) -> list[dict[str, Any]]:
+        """Runs of one kind (e.g. 'job'), newest first. What the Agent Inbox's history is built from."""
+        rows = self._all("SELECT * FROM agent_runs WHERE kind=? AND started_at>=? ORDER BY started_at DESC LIMIT ?",
+                         (kind, since, max(1, min(int(limit), 500))))
+        return [r for r in (self._run_row(x) for x in rows) if r]
+
     # ---- events ----
     def append(self, run_id: str, seq: int, event: str, data: Any) -> bool:
         try:
@@ -166,6 +172,11 @@ class RunStore:
             sql += " AND seq<?"
             params.append(until)
         return [(r["seq"], r["type"], json.loads(r["data"])) for r in self._all(sql + " ORDER BY seq", params)]
+
+    def event_counts(self, run_id: str) -> dict[str, int]:
+        """{event type: rows} for one run. The inbox counts tool calls and errors from this, never from prose."""
+        return {r["type"]: int(r["n"]) for r in
+                self._all("SELECT type, COUNT(*) AS n FROM run_events WHERE run_id=? GROUP BY type", (run_id,))}
 
     def last_seq(self, run_id: str) -> int:
         r = self._one("SELECT MAX(seq) AS s FROM run_events WHERE run_id=?", (run_id,))
@@ -309,6 +320,8 @@ class Run:
         self.run_id = new_id()
         self.conversation_id = conversation_id
         self.kind = kind
+        # What launched the run, as stored in agent_runs.input. A job fire record for kind='job'.
+        self.input: dict[str, Any] = dict(input or {})
         self.message_id: str | None = None
         self.started_at = time.time()
         self.ended_at: float | None = None
@@ -450,9 +463,10 @@ class RunBus:
                 out.append({**row, "seq": row["last_seq"], "live": False})
         return out
 
-    def start(self, conversation_id: str, runner: Callable[[Run], Awaitable[None]], input: dict[str, Any] | None = None) -> Run:
+    def start(self, conversation_id: str, runner: Callable[[Run], Awaitable[None]], input: dict[str, Any] | None = None,
+              kind: str = "chat") -> Run:
         self._prune()
-        run = Run(conversation_id, self.store, input=input)
+        run = Run(conversation_id, self.store, kind=kind, input=input)
         self._runs[conversation_id] = run
         run.task = asyncio.create_task(self._drive(run, runner), name=f"run:{run.run_id}")
         return run

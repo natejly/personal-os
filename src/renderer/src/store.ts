@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ActivityConfig, ActivityContextFile, ActivityEvent, ActivitySignal, ActivityStatus, ActivitySummary, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocRevision, Document, FullDoc, GraphData, Memory, Message, ModelInfo, Settings, Project, RunConflict, SessionStatus, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap } from '@shared/types'
+import type { ActivityConfig, ActivityContextFile, ActivityEvent, ActivitySignal, ActivityStatus, ActivitySummary, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocRevision, Document, FullDoc, GraphData, Memory, Message, ModelInfo, Settings, Project, RunConflict, SessionStatus, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap, Job } from '@shared/types'
 import { api, chatStream, setBase, type Scope } from './lib/api'
 import { finishStatus, mergeConversation, pickEvictions, reduceStatus, settleApprovals } from './sessionStatus'
 import { viewHidden } from './modules'
@@ -69,6 +69,9 @@ export interface State {
   todos: Todo[]
   recap: Recap | null
   recapLoading: boolean
+  /** The Agent Inbox on Today: what needs the user, and what the scheduled jobs did. */
+  agentInbox: AgentInbox | null
+  jobs: Job[]
 
   projects: Project[]
   personalStats: Project['stats']
@@ -196,6 +199,11 @@ export interface State {
   purgeActivity: (scope: 'expired' | 'events' | 'summaries' | 'all') => Promise<void>
   refreshDashboard: () => Promise<void>
   refreshRecap: (force?: boolean) => Promise<void>
+  refreshAgentInbox: () => Promise<void>
+  refreshJobs: () => Promise<void>
+  setJobEnabled: (id: string, enabled: boolean) => Promise<void>
+  runJobNow: (id: string) => Promise<void>
+  decideProposal: (id: string, accept: boolean, args?: Record<string, unknown>) => Promise<void>
   approveTool: (callId: string, decision: 'allow' | 'deny' | 'always_chat' | 'always_global', conversationId?: string) => Promise<void>
   refreshGoogle: () => Promise<void>
   connectGoogle: () => Promise<void>
@@ -511,6 +519,8 @@ export const useStore = create<State>((set, get) => {
     todos: [],
     recap: null,
     recapLoading: false,
+    agentInbox: null,
+    jobs: [],
     projects: [],
     personalStats: undefined,
     view: 'home',
@@ -1062,6 +1072,7 @@ export const useStore = create<State>((set, get) => {
     },
 
     refreshDashboard: async () => {
+      void get().refreshAgentInbox()
       try {
         const dashboard = await api.dashboard()
         set({ dashboard, google: dashboard.google })
@@ -1077,6 +1088,50 @@ export const useStore = create<State>((set, get) => {
         if (force) get().toast(`Recap: ${(e as Error).message}`, 'error')
       } finally {
         set({ recapLoading: false })
+      }
+    },
+    refreshAgentInbox: async () => {
+      try {
+        set({ agentInbox: await api.inbox() })
+      } catch (e) {
+        /* the inbox is a card on Today, not the shell: a failed read must not toast on every refresh */
+        void e
+      }
+    },
+    refreshJobs: async () => {
+      try {
+        set({ jobs: await api.jobs.list() })
+      } catch (e) {
+        get().toast(`Jobs: ${(e as Error).message}`, 'error')
+      }
+    },
+    setJobEnabled: async (id, enabled) => {
+      try {
+        const job = await api.jobs.update(id, { enabled })
+        set((s) => ({ jobs: s.jobs.map((x) => (x.id === id ? job : x)) }))
+        void get().refreshAgentInbox()
+      } catch (e) {
+        get().toast(`Jobs: ${(e as Error).message}`, 'error')
+      }
+    },
+    runJobNow: async (id) => {
+      try {
+        const { run_id } = await api.jobs.runNow(id)
+        get().toast(run_id ? 'Job started. It will show up under “While you were away”.' : 'Job did not start', run_id ? 'info' : 'error')
+        void get().refreshJobs()
+      } catch (e) {
+        get().toast(`Jobs: ${(e as Error).message}`, 'error')
+      }
+    },
+    decideProposal: async (id, accept, args) => {
+      try {
+        const res = accept ? await api.proposals.accept(id, args) : await api.proposals.reject(id)
+        if (accept && !res.ok) get().toast(`That did not go through: ${res.proposal.error ?? 'unknown error'}`, 'error')
+        else get().toast(accept ? 'Done — that one actually ran.' : 'Dropped.', 'info')
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      } finally {
+        void get().refreshAgentInbox()
       }
     },
     approveTool: async (callId, decision, conversationId) => {

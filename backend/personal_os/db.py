@@ -188,6 +188,50 @@ CREATE TABLE IF NOT EXISTS executed_calls (
 );
 CREATE INDEX IF NOT EXISTS idx_exec_run ON executed_calls(run_id, step);
 
+-- Scheduled background work (see jobs.Jobs / jobs.Scheduler). A job fires one run with kind='job'.
+-- next_due_at is the slot the scheduler is waiting for; last_due_at is the slot the last launch was *for*,
+-- so last_fired_at - last_due_at is how late that fire was (the machine was asleep, or the backend was down).
+CREATE TABLE IF NOT EXISTS jobs (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  cron TEXT NOT NULL,
+  timezone TEXT NOT NULL DEFAULT 'UTC',
+  enabled INTEGER NOT NULL DEFAULT 0,
+  prompt TEXT NOT NULL DEFAULT '',
+  project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+  last_fired_at REAL,
+  last_due_at REAL,
+  last_run_id TEXT,
+  last_error TEXT,
+  next_due_at REAL,
+  created_at REAL NOT NULL,
+  updated_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_jobs_due ON jobs(enabled, next_due_at);
+
+-- An outward-facing tool call a background run was not allowed to make: recorded here instead of executed
+-- (see app.PROPOSAL_ONLY_KINDS). Accepting one is a user action and is what actually runs it, exactly once.
+-- status: pending | accepted | rejected
+CREATE TABLE IF NOT EXISTS proposals (
+  id TEXT PRIMARY KEY,
+  run_id TEXT REFERENCES agent_runs(run_id) ON DELETE CASCADE,
+  job_id TEXT,
+  conversation_id TEXT,
+  message_id TEXT,
+  call_id TEXT,
+  tool TEXT NOT NULL,
+  args TEXT NOT NULL DEFAULT '{}',
+  args_digest TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  result TEXT,
+  error TEXT,
+  edited INTEGER NOT NULL DEFAULT 0,
+  created_at REAL NOT NULL,
+  decided_at REAL
+);
+CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_proposals_run ON proposals(run_id);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
   text, chunk_id UNINDEXED, document_id UNINDEXED, tokenize='porter unicode61'
 );

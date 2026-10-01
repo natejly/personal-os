@@ -1010,6 +1010,45 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .recap > header { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; margin-bottom: 6px; }
 .recap .markdown { font-size: 13.5px; }
 
+/* ---------- Agent inbox ---------- */
+.agent-inbox { border-radius: 12px; background: var(--bg-elev); padding: 14px 16px; margin-bottom: 16px; }
+.agent-inbox > header { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; margin-bottom: 8px; }
+.agent-inbox h5 { margin: 12px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); font-weight: 600; }
+.agent-inbox h5 .small { text-transform: none; letter-spacing: 0; font-weight: 400; margin-left: 6px; }
+.agent-inbox > p.muted { margin: 2px 0 0; font-size: 13px; }
+.inbox-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.inbox-item { border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; }
+.inbox-item-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+.inbox-tool { font-family: var(--mono, ui-monospace, monospace); font-size: 12px; color: var(--text); }
+.inbox-job { font-weight: 600; }
+.inbox-args {
+  margin: 6px 0 0; padding: 6px 8px; border-radius: 8px; background: var(--bg); border: 1px solid var(--border);
+  font-size: 12px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; max-height: 160px; overflow: auto; color: var(--text-muted);
+}
+.inbox-summary { font-size: 13px; margin-top: 6px; }
+.inbox-edit { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.inbox-edit label { display: flex; flex-direction: column; gap: 2px; }
+.inbox-edit textarea {
+  width: 100%; resize: vertical; padding: 6px 8px; border-radius: 8px; font: inherit; font-size: 12.5px;
+  background: var(--bg); border: 1px solid var(--border); color: var(--text);
+}
+.inbox-edit p { margin: 0; }
+.inbox-jobs { border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; margin-bottom: 4px; }
+.inbox-jobs h5 { margin-top: 2px; }
+.inbox-jobs ul { list-style: none; margin: 0; padding: 0; }
+.inbox-jobs li { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.inbox-jobs li .chip-check-row { flex: 1; min-width: 0; }
+.inbox-jobs li code { font-size: 11.5px; }
+.inbox-jobs > p { margin: 8px 0 0; line-height: 1.5; }
+.chip {
+  display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 10px;
+  border: 1px solid var(--border-strong); font-size: 11.5px; color: var(--text-muted); white-space: nowrap;
+}
+.chip.warn { color: var(--warn); border-color: rgba(254, 188, 46, 0.4); }
+.chip.bad { color: var(--danger); border-color: rgba(229, 72, 77, 0.4); }
+.primary-btn.sm, .ghost-btn.sm { padding: 3px 9px; font-size: 12px; gap: 4px; }
+.primary-btn.sm { display: inline-flex; align-items: center; }
+
 /* ---------- Kanban ---------- */
 /* Scroll stays inside the board area: the scrollbar sits above the window edge and
    a trailing spacer keeps the last column off the right edge. */

@@ -64,6 +64,8 @@ export interface ToolEvent {
   breaker?: PartialReason
   /** Approval was forced by taint even though the tool is set to 'on'. */
   forced?: boolean
+  /** Id of the proposal this call became: a background run may not complete an outward-facing call. */
+  proposal?: string | null
 }
 
 /** Why a reply stopped early: a budget axis, or the repetition breaker. */
@@ -116,6 +118,9 @@ export interface ConversationSettings {
   /** Sticky: a reply read untrusted content, so external tools keep asking and fetch_url stays restricted. */
   tainted?: boolean
   taint_sources?: string[]
+  /** Set when this conversation is a scheduled job's transcript. Such chats are indexed by the Agent
+   *  Inbox and left out of the sidebar list (GET /conversations?include_jobs=true includes them). */
+  job_id?: string
 }
 
 export interface Conversation {
@@ -651,6 +656,100 @@ export interface RunInfo {
   status?: 'running' | 'awaiting_approval' | 'done' | 'error' | 'interrupted'
   ended_at?: number | null
   error?: string | null
+}
+
+// ---------------- scheduled jobs + the Agent Inbox ----------------
+
+/** One scheduled job (`jobs` table). `cron` is read in `timezone`, so it follows the wall clock through DST. */
+export interface Job {
+  id: string
+  name: string
+  cron: string
+  timezone: string
+  enabled: boolean
+  prompt: string
+  project_id: string | null
+  /** When the last fire actually started, and the slot it was *for*: apart means it ran late. */
+  last_fired_at: number | null
+  last_due_at: number | null
+  last_run_id: string | null
+  last_error: string | null
+  /** The slot the scheduler is waiting for. null when the job is disabled. */
+  next_due_at: number | null
+  created_at: number
+  updated_at: number
+}
+
+/** An outward-facing call a background run recorded instead of making. Accepting it is what runs it. */
+export interface AgentProposal {
+  id: string
+  run_id: string | null
+  job_id: string | null
+  conversation_id: string | null
+  message_id: string | null
+  call_id: string | null
+  tool: string
+  args: Record<string, unknown>
+  args_digest: string
+  status: 'pending' | 'accepted' | 'rejected'
+  result: unknown
+  error: string | null
+  /** The user changed the arguments before accepting. */
+  edited: boolean
+  created_at: number
+  decided_at: number | null
+}
+
+/** One job run as "While you were away" shows it. Every field but `summary` comes from a row, not from prose. */
+export interface JobRunSummary {
+  run_id: string
+  conversation_id: string | null
+  status: 'running' | 'awaiting_approval' | 'done' | 'error' | 'interrupted'
+  job_id: string | null
+  job: string
+  due_at: number | null
+  fired_at: number
+  late: boolean
+  late_seconds: number
+  missed_slots: number
+  manual: boolean
+  started_at: number
+  ended_at: number | null
+  error: string | null
+  tool_calls: number
+  proposals: number
+  pending_proposals: number
+  /** The run's own report, from the event tape. Shown as the body; nothing is parsed out of it. */
+  summary: string
+}
+
+export interface AgentInbox {
+  needs_you: {
+    approvals: (PendingApproval & { run_kind?: string | null; job?: string | null })[]
+    proposals: AgentProposal[]
+  }
+  while_you_were_away: JobRunSummary[]
+  counts: { needs_you: number; approvals: number; proposals: number; runs: number; late: number; failed: number }
+  scheduler: { last_tick: number | null; fires: number; next_due_at: number | null; timezone: string }
+}
+
+/** A tool call waiting on the user (`approvals` table). */
+export interface PendingApproval {
+  call_id: string
+  run_id: string | null
+  conversation_id: string | null
+  message_id: string | null
+  tool: string
+  args: Record<string, unknown>
+  args_digest: string
+  forced: boolean
+  status: 'pending' | 'approved' | 'denied'
+  decision: string | null
+  decided_by: string | null
+  created_at: number
+  decided_at: number | null
+  /** A run in this process is waiting on it right now. */
+  live?: boolean
 }
 
 /** 409 detail of POST /conversations/{id}/chat when that conversation already has a live run. */

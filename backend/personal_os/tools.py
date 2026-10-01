@@ -31,6 +31,14 @@ log = logging.getLogger(__name__)
 #                executes (sandboxed code) · external (writes to systems outside the app → asks by default)
 DEFAULT_MODE = {"safe": "on", "writes": "on", "network": "on", "executes": "on", "external": "ask"}
 
+# Danger levels a proposal-only run (a scheduled job: app.PROPOSAL_ONLY_KINDS) may not complete. Those calls are
+# recorded as proposals before they reach call() — this is the second gate, in the module that owns the tool
+# functions, so a new call site cannot let a background run send mail by forgetting the first one.
+PROPOSAL_ONLY_DANGER = ("external",)
+PROPOSAL_ONLY_REFUSED = ("{name} does something outside the app, and this is an unattended background run, so it "
+                         "cannot be executed here. It is recorded as a proposal the user accepts, edits or rejects; "
+                         "there is no way around that. Describe what you proposed and move on.")
+
 
 class ToolSpec:
     def __init__(self, name: str, description: str, parameters: dict[str, Any], fn: ToolFn, group: str, danger: str = "safe",
@@ -349,6 +357,10 @@ class Toolbox:
         """True if this tool's result carries untrusted third-party content."""
         return bool((s := self.specs.get(name)) and s.taints)
 
+    def proposes(self, name: str) -> bool:
+        """True if a proposal-only run must record this call instead of making it."""
+        return bool((s := self.specs.get(name)) and s.danger in PROPOSAL_ONLY_DANGER)
+
     def gate(self, name: str, mode: str, ctx: dict[str, Any]) -> str:
         """Effective mode for one call. Untrusted content in the run forces every external tool to ask."""
         spec = self.specs.get(name)
@@ -360,6 +372,8 @@ class Toolbox:
         spec = self.specs.get(name)
         if not spec:
             return tool_error(f"Unknown tool {name}.", alternative="use one of the tools listed in this request")
+        if ctx.get("proposal_only") and spec.danger in PROPOSAL_ONLY_DANGER:
+            return tool_error(PROPOSAL_ONLY_REFUSED.format(name=name), alternative=ALTERNATIVE.get(name))
         try:
             out = await spec.fn(ctx, **args)
         except TypeError as e:  # backstop: signature mismatch, wrong types

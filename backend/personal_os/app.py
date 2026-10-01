@@ -35,6 +35,7 @@ from .canvas import SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
 from .dashboards import Dashboards, generate_recap, generate_summary, generate_widget_code
 from .docs import Docs, unified_diff
 from .google import Google, GoogleNotConnected, json_safe
+from .jobs import PROPOSAL_STATUSES, Jobs, Proposals, Scheduler, local_tz_name, valid_cron, valid_tz
 from .microvm import Sandboxes
 from .notes import Notes
 from .gtasks import TasksSync
@@ -215,6 +216,8 @@ def settings() -> dict[str, Any]:
 
 
 todos = Todos(db)
+jobs = Jobs(db)
+proposals = Proposals(db)
 boards = Boards(db)
 dashboards = Dashboards(db)
 google = Google(settings, db.set_settings)
@@ -369,8 +372,9 @@ class ConvPatch(BaseModel):
 
 
 @app.get("/conversations")
-def list_conversations(project_id: str | None = None) -> list[dict[str, Any]]:
-    return convos.list(sid(project_id))
+def list_conversations(project_id: str | None = None, include_jobs: bool = False) -> list[dict[str, Any]]:
+    """A scheduled job's own transcripts are left out unless asked for: the Agent Inbox is their index."""
+    return convos.list(sid(project_id), include_jobs)
 
 
 @app.post("/conversations")
@@ -437,6 +441,27 @@ REPEAT_LIMIT = 5
 TOOL_ERROR_LIMIT = 3
 
 
+# Run kinds that may not complete an outward-facing side effect. A scheduled job proposes; the user executes.
+PROPOSAL_ONLY_KINDS = ("job",)
+# Caps for an unattended run, applied on top of the user's settings and only downward (see _caps). Tighter than
+# interactive on purpose: nobody is watching, and a longer leash makes the answer worse, not better.
+JOB_BUDGET = {"maxToolRounds": 8, "maxRunTokens": 60_000, "maxRunSeconds": 240, "maxRunCost": 0.20}
+JOB_HINT = ("## This is a scheduled background run\nNobody is watching it. Anything that reaches outside this app "
+            "(sending or drafting mail, calendar writes, Google Docs/Sheets/Tasks) cannot be executed here: such a "
+            "call is recorded as a proposal for the user to accept, edit or reject, and that is enforced outside your "
+            "control. So propose freely, do not retry a refused call, and write a short report of what you found and "
+            "what you proposed. Reading, searching, todos, notes and memory work normally.")
+
+
+def _caps(cfg: dict[str, Any], caps: dict[str, Any]) -> dict[str, Any]:
+    """`cfg` with each cap applied downward: a stricter user setting wins, and 0 (unlimited) loses to the cap."""
+    return {**cfg, **{k: (cap if not (cur := cfg.get(k) or 0) else min(cur, cap)) for k, cap in caps.items()}}
+
+
+def proposal_only(run: Run | None) -> bool:
+    return run is not None and run.kind in PROPOSAL_ONLY_KINDS
+
+
 class Budget:
     """Rounds / tokens / wall-clock / USD for one reply. 0 on any axis means unlimited; approval waits do not count."""
 
@@ -478,10 +503,26 @@ class Budget:
 IDEMPOTENT_DANGER = ("writes", "external")
 
 
+def _propose(run: Run, name: str, args: dict[str, Any], call_id: str, ctx: dict[str, Any]) -> dict[str, Any]:
+    """Record an outward-facing call a background run made, instead of making it. The row is the whole effect."""
+    p = proposals.create(run_id=run.run_id, tool=name, args=args, job_id=run.input.get("job_id"),
+                         conversation_id=run.conversation_id, message_id=ctx.get("message_id"), call_id=call_id)
+    log.info("run %s proposed %s (proposal %s)", run.run_id, name, p["id"])
+    return {"proposed": True, "proposal_id": p["id"], "tool": name, "status": "pending",
+            "note": f"{name} was NOT executed. This is a background run, so it was recorded as a proposal in the "
+                    "user's Agent Inbox; they accept, edit or reject it there, and accepting is what runs it. "
+                    "Do not call it again — say in your report what you proposed."}
+
+
 async def _call_tool(run: Run | None, step: int, name: str, args: dict[str, Any], ctx: dict[str, Any], call_id: str) -> Any:
     """toolbox.call, through the executed_calls journal for side-effecting tools, so a retry or a replay of the same
-    step returns the recorded result instead of sending the email twice. Read-only tools run directly."""
+    step returns the recorded result instead of sending the email twice. Read-only tools run directly.
+
+    This is also where proposal-only runs are stopped: a job's outward-facing call becomes a proposals row and never
+    reaches toolbox.call at all. Enforced here, on the one path every tool call takes, and again in Toolbox.call."""
     spec = toolbox.specs.get(name)
+    if proposal_only(run) and toolbox.proposes(name):
+        return _propose(run, name, args, call_id, ctx)  # type: ignore[arg-type]
     if run is None or run.store is None or spec is None or spec.danger not in IDEMPOTENT_DANGER:
         return await toolbox.call(name, args, ctx)
     result, replayed = await run.store.call_once(run.run_id, step, name, args, lambda: toolbox.call(name, args, ctx), call_id=call_id)
@@ -571,17 +612,21 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         # waiting one turn must not re-arm a standing 'always' grant. Only the user clears it (Context -> this chat).
         "tainted": bool(conv["settings"].get("tainted")), "taint_sources": list(conv["settings"].get("taint_sources") or []),
         "allowed_urls": _urls(user_text), "settings": cfg,
+        # Set for a scheduled job: Toolbox.call refuses every outward-facing tool outright, and _call_tool has
+        # already turned the call into a proposals row before it got that far.
+        "proposal_only": proposal_only(run), "message_id": am["id"],
     }
     modes = toolbox.effective(cfg.get("tools") or {}, (project or {}).get("tools"), conv["settings"].get("tools")) if conv["settings"].get("useTools", True) else {}
     tool_schemas = toolbox.schemas(modes)
-    system = "\n\n".join(p for p in (system, RENDER_HINT, TOOLS_HINT if tool_schemas else "") if p)
+    system = "\n\n".join(p for p in (system, RENDER_HINT, TOOLS_HINT if tool_schemas else "",
+                                     JOB_HINT if proposal_only(run) else "") if p)
     used["system_prompt"] = system
     used["tokens_estimate"] = estimate_tokens(system)
     messages = [{"role": "system", "content": system}] + history
     yield "assistant_message", {**am, "context_used": used}
     yield "span", {"message_id": am["id"], "span": cspan}
 
-    budget = Budget(cfg)
+    budget = Budget(_caps(cfg, JOB_BUDGET) if proposal_only(run) else cfg)
     partial: str | None = None
     last_sig: str | None = None
     repeats = 0
@@ -632,6 +677,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                    "tainted": tool_ctx["tainted"], "taint_sources": tool_ctx["taint_sources"]}
                     am = convos.add_message(conv_id, "assistant", "", model=model)
                     _active[am["id"]] = stop
+                    tool_ctx["message_id"] = am["id"]
                     buf = []
                     tool_events = []
                     tracer = Tracer()
@@ -713,13 +759,18 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 raw_mode = modes.get(c["name"], "off")
                 mode = toolbox.gate(c["name"], raw_mode, tool_ctx)
                 forced = mode != raw_mode  # untrusted content in this reply upgraded on -> ask
+                # A background run never waits on an approval: there is nobody at the keyboard, and the call is not
+                # going to happen either way. It becomes a proposal in _call_tool and the run carries on.
+                proposing = proposal_only(run) and toolbox.proposes(c["name"]) and mode != "off"
+                if proposing:
+                    mode, forced = "on", False
                 # The provider's call id is only unique within one request -- llm.stream_chat falls back
                 # to "call_<idx>" when the provider omits one -- so two conversations streaming at once
                 # both produce "call_0". Key anything cross-conversation by the message id too, or one
                 # chat's approval resolves another chat's call. The model still sees c["id"].
                 uid = f"{am['id']}:{c['id']}"
                 yield "tool_call", {"message_id": am["id"], "id": uid, "name": c["name"], "arguments": args,
-                                    "needs_approval": mode == "ask", "forced": forced}
+                                    "needs_approval": mode == "ask", "forced": forced, "proposal": proposing or None}
                 tspan = tracer.start("tool", c["name"], {"round": _round, "arguments": _short(args), "mode": mode, "forced": forced})
                 yield "span", {"message_id": am["id"], "span": tspan}
                 t0 = time.time()
@@ -797,7 +848,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     tool_ctx["taint_sources"].append(c["name"])
                 event = {"id": uid, "name": c["name"], "arguments": args, "result_preview": preview, "duration_ms": ms,
                          "error": err, "images": images or None, "approval": (decision if mode == "ask" else None),
-                         "forced": forced, "tainted": tainted, "blocked": c["name"] if was_blocked else None, "breaker": partial}
+                         "forced": forced, "tainted": tainted, "blocked": c["name"] if was_blocked else None, "breaker": partial,
+                         "proposal": (result.get("proposal_id") if proposing and isinstance(result, dict) else None)}
                 tracer.end(tspan, {"result_chars": len(preview), "images": len(images or [])}, error=err)
                 tool_events.append(event)
                 yield "tool_result", {"message_id": am["id"], **event}
@@ -839,7 +891,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     if tool_ctx.get("learned"):
         yield "learned", tool_ctx["learned"]
 
-    if not error and text and cfg.get("autoLearn", True) and conv["settings"].get("autoLearn", True):
+    # A scheduled run never writes to long-term memory: it is one more model call nobody asked for, on text the
+    # user has not read yet. What it found belongs in its report and in the inbox.
+    if not error and text and not proposal_only(run) and cfg.get("autoLearn", True) and conv["settings"].get("autoLearn", True):
         lspan = tracer.start("learn", cfg.get("extractionModel") or model)
         yield "span", {"message_id": am["id"], "span": lspan}
         try:
@@ -1024,6 +1078,245 @@ async def _recover_runs() -> None:
             convos.finish_message(mid, text, r["error"], json.loads(cur["context_used"]) if cur["context_used"] else None, tool_events)
         except Exception:  # noqa: BLE001 - recovery must never stop the backend from starting
             log.warning("could not salvage the reply of run %s", r["run_id"], exc_info=True)
+
+
+# ---------------- scheduled jobs, proposals, agent inbox ----------------
+# A job fire is a chat run in its own conversation, with kind='job', so it gets the journal, the budget snapshot
+# and the idempotency journal for free — and proposal_only() for free with them.
+LATE_NOTICE = ("[This run was scheduled for {due}, and is only starting now, at {fired} — {late} late{skipped}. "
+               "Say so in one line at the top of your report, and re-check anything time-sensitive rather than "
+               "assuming it is still true.]")
+# The journal step a proposal's execution is booked under. No chat round uses a negative one.
+PROPOSAL_STEP = -1
+
+
+def _stamp(ts: float) -> str:
+    return time.strftime("%a %d %b %H:%M", time.localtime(ts))
+
+
+def _span(seconds: float) -> str:
+    m = int(seconds // 60)
+    return f"{int(seconds)}s" if m < 1 else (f"{m} min" if m < 120 else f"{m // 60}h{m % 60:02d}")
+
+
+def _job_prompt(job: dict[str, Any], fire: dict[str, Any]) -> str:
+    """The run's user turn: the job's own prompt, and the late notice in front of it when the fire is late."""
+    if not fire.get("late"):
+        return job["prompt"]
+    skipped = f", and {fire['missed_slots']} earlier run{'s' if fire['missed_slots'] > 1 else ''} were skipped while " \
+              "this machine was asleep or the app was closed" if fire.get("missed_slots") else ""
+    return LATE_NOTICE.format(due=_stamp(fire["due_at"]), fired=_stamp(fire["fired_at"]),
+                              late=_span(fire["late_seconds"]), skipped=skipped) + "\n\n" + job["prompt"]
+
+
+async def _launch_job(job: dict[str, Any], fire: dict[str, Any]) -> str | None:
+    """One fire: a fresh conversation, then the ordinary chat runner over the job's prompt.
+
+    Fresh each time on purpose. A morning brief that replayed its own back catalogue every day would get slower,
+    dearer and worse at the actual job; one fire, one transcript, one tight budget.
+    """
+    cfg = settings()
+    conv = convos.create(job["project_id"], f"{job['name']} · {_stamp(fire['due_at'])}", cfg.get("defaultModel") or "")
+    # job_id keeps this transcript out of the sidebar's chat list; the Agent Inbox links to it instead.
+    convos.update(conv["id"], {"settings": {"useTools": True, "autoLearn": False, "job_id": job["id"]}})
+    body = ChatIn(content=_job_prompt(job, fire))
+    run = bus.start(conv["id"], lambda r: _run_chat(r, body), input={**fire, "conversation_id": conv["id"]}, kind="job")
+    log.info("job %s fired for %s as run %s", job["name"], _stamp(fire["due_at"]), run.run_id)
+    return run.run_id
+
+
+scheduler = Scheduler(jobs, _launch_job)
+
+
+class JobIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    cron: str = Field(min_length=1, max_length=120)
+    prompt: str = Field(min_length=1, max_length=8000)
+    timezone: str | None = None
+    enabled: bool = False
+    project_id: str | None = None
+
+
+class JobPatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    cron: str | None = Field(default=None, min_length=1, max_length=120)
+    prompt: str | None = Field(default=None, min_length=1, max_length=8000)
+    timezone: str | None = None
+    enabled: bool | None = None
+    project_id: str | None = None
+
+
+def _check_schedule(expr: str | None, tz: str | None) -> None:
+    if expr is not None and not valid_cron(expr):
+        raise HTTPException(400, f"'{expr}' is not a cron expression I can read (five fields, e.g. '30 7 * * *')")
+    if tz and not valid_tz(tz):
+        raise HTTPException(400, f"'{tz}' is not a timezone name (e.g. 'Europe/Berlin')")
+
+
+@app.get("/jobs")
+def list_jobs() -> list[dict[str, Any]]:
+    """Every scheduled job, with the slot it is waiting for. `timezone` defaults to this machine's on create."""
+    return jobs.list()
+
+
+@app.post("/jobs")
+def create_job(body: JobIn) -> dict[str, Any]:
+    _check_schedule(body.cron, body.timezone)
+    return jobs.create(body.name, body.cron, body.prompt, timezone=body.timezone, enabled=body.enabled,
+                       project_id=wsid(body.project_id))
+
+
+@app.patch("/jobs/{id}")
+def update_job(id: str, body: JobPatch) -> dict[str, Any]:
+    patch = body.model_dump(exclude_unset=True)
+    if "project_id" in patch:
+        patch["project_id"] = wsid(patch["project_id"])
+    cur = jobs.get(id)
+    if not cur:
+        raise HTTPException(404, "No such job")
+    _check_schedule(patch.get("cron"), patch.get("timezone"))
+    job = jobs.update(id, patch)
+    if not job:
+        raise HTTPException(404, "No such job")
+    return job
+
+
+@app.delete("/jobs/{id}")
+def delete_job(id: str) -> dict[str, bool]:
+    if not jobs.delete(id):
+        raise HTTPException(404, "No such job")
+    return {"ok": True}
+
+
+@app.post("/jobs/{id}/run")
+async def run_job_now(id: str) -> dict[str, Any]:
+    """Fire a job by hand, disabled or not. It is still a job run: proposal-only, on the job budget. The schedule
+    is untouched, so the next cron slot still fires on its own."""
+    job = jobs.get(id)
+    if not job:
+        raise HTTPException(404, "No such job")
+    t = time.time()
+    fire = {"job_id": job["id"], "job": job["name"], "cron": job["cron"], "timezone": job["timezone"],
+            "due_at": t, "fired_at": t, "late_seconds": 0.0, "missed_slots": 0, "late": False, "manual": True}
+    run_id = await _launch_job(job, fire)
+    jobs.mark_launched(job["id"], run_id)
+    row = run_store.get(run_id) if run_id else None
+    return {"ok": bool(run_id), "run_id": run_id, "conversation_id": (row or {}).get("conversation_id")}
+
+
+class ProposalIn(BaseModel):
+    args: dict[str, Any] | None = None  # the user's edit, accept only
+
+
+@app.get("/proposals")
+def list_proposals(status: str | None = "pending", run_id: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    """Outward-facing calls a background run recorded instead of making. Pending by default."""
+    if status not in (None, "", "all", *PROPOSAL_STATUSES):
+        raise HTTPException(400, "status must be pending, accepted, rejected or all")
+    return proposals.list(None if status in (None, "", "all") else status, run_id, limit)
+
+
+@app.post("/proposals/{pid}/accept")
+async def accept_proposal(pid: str, body: ProposalIn | None = None) -> dict[str, Any]:
+    """Execute a proposal, as the user. The pending -> accepted flip is the claim: it happens once, so a second
+    accept (a double click, two windows) never reaches the tool. `args` replaces the call's arguments first."""
+    p = proposals.get(pid)
+    if not p:
+        raise HTTPException(404, "No such proposal")
+    if p["status"] != "pending":
+        raise HTTPException(409, f"That proposal was already {p['status']}")
+    args = (body.args if body and body.args is not None else None)
+    claimed = proposals.claim(pid, args)
+    if claimed is None:  # lost the race with another accept or a reject
+        raise HTTPException(409, "That proposal was just decided somewhere else")
+    conv = convos.get(claimed["conversation_id"], with_messages=False) if claimed["conversation_id"] else None
+    ctx: dict[str, Any] = {"project_id": (conv or {}).get("project_id"), "conversation_id": claimed["conversation_id"],
+                           "tainted": False, "taint_sources": [], "allowed_urls": set(), "settings": settings(),
+                           "proposal_only": False, "message_id": claimed["message_id"]}
+    result, replayed = await run_store.call_once(claimed["run_id"], PROPOSAL_STEP, claimed["tool"], claimed["args"],
+                                                 lambda: toolbox.call(claimed["tool"], claimed["args"], ctx), call_id=pid)
+    err = result.get("error") if isinstance(result, dict) else None
+    row = proposals.record(pid, result, err)
+    return {"ok": not err, "proposal": row, "replayed": replayed, "result": summarize_result(result, 2000)}
+
+
+@app.post("/proposals/{pid}/reject")
+def reject_proposal(pid: str) -> dict[str, Any]:
+    p = proposals.get(pid)
+    if not p:
+        raise HTTPException(404, "No such proposal")
+    row = proposals.reject(pid)
+    if row is None:
+        raise HTTPException(409, f"That proposal was already {p['status']}")
+    return {"ok": True, "proposal": row}
+
+
+INBOX_SUMMARY_CHARS = 1400
+
+
+@app.get("/inbox")
+def agent_inbox(hours: float = 72.0, limit: int = 20) -> dict[str, Any]:
+    """The Agent Inbox, built from rows only: agent_runs + run_events + approvals + proposals.
+
+    "Needs you" is the pending approvals and the pending proposals. "While you were away" is one entry per job run,
+    whose late-fire notice, failure and counts all come from the journal — the reply text is shown as the body, but
+    nothing about the entry is parsed out of it.
+    """
+    cutoff = time.time() - max(0.0, float(hours)) * 3600
+    pending_approvals = []
+    for a in run_store.approvals("pending", limit=100):
+        row = run_store.get(a["run_id"]) if a["run_id"] else None
+        pending_approvals.append({**a, "live": a["call_id"] in _approvals, "run_kind": (row or {}).get("kind"),
+                                  "job": ((row or {}).get("input") or {}).get("job")})
+    pending_proposals = proposals.list("pending", limit=100)
+
+    runs = run_store.of_kind("job", since=cutoff, limit=limit)
+    counts = proposals.counts([r["run_id"] for r in runs])
+    away = []
+    for r in runs:
+        fire = r["input"] if isinstance(r.get("input"), dict) else {}
+        ev = run_store.event_counts(r["run_id"])
+        text = run_store.transcript(r["run_id"], r["message_id"])[0] if r["message_id"] else ""
+        mine = counts.get(r["run_id"], {})
+        away.append({
+            "run_id": r["run_id"], "conversation_id": r["conversation_id"], "status": r["status"],
+            "job_id": fire.get("job_id"), "job": fire.get("job") or "Scheduled job",
+            "due_at": fire.get("due_at"), "fired_at": fire.get("fired_at") or r["started_at"],
+            "late": bool(fire.get("late")), "late_seconds": fire.get("late_seconds") or 0.0,
+            "missed_slots": fire.get("missed_slots") or 0, "manual": bool(fire.get("manual")),
+            "started_at": r["started_at"], "ended_at": r["ended_at"], "error": r["error"],
+            "tool_calls": ev.get("tool_result", 0), "proposals": sum(mine.values()),
+            "pending_proposals": mine.get("pending", 0),
+            "summary": text[:INBOX_SUMMARY_CHARS] + ("…" if len(text) > INBOX_SUMMARY_CHARS else ""),
+        })
+    return {"needs_you": {"approvals": pending_approvals, "proposals": pending_proposals},
+            "while_you_were_away": away,
+            "counts": {"needs_you": len(pending_approvals) + len(pending_proposals),
+                       "approvals": len(pending_approvals), "proposals": len(pending_proposals),
+                       "runs": len(away), "late": sum(1 for a in away if a["late"]),
+                       "failed": sum(1 for a in away if a["status"] in ("error", "interrupted"))},
+            "scheduler": {"last_tick": scheduler.last_tick, "fires": scheduler.fires,
+                          "next_due_at": jobs.earliest_due(), "timezone": local_tz_name()}}
+
+
+@app.on_event("startup")
+async def _jobs_startup() -> None:
+    """Seed the shipped jobs once (disabled), arm whatever has no slot, then start the one scheduler loop."""
+    try:
+        jobs.seed()
+        jobs.arm(time.time())
+    except Exception:  # noqa: BLE001 - a bad job row must not stop the backend from starting
+        log.warning("could not prepare scheduled jobs", exc_info=True)
+    app.state.jobs_task = asyncio.create_task(scheduler.loop(), name="job-scheduler")
+
+
+@app.on_event("shutdown")
+async def _jobs_shutdown() -> None:
+    task = getattr(app.state, "jobs_task", None)
+    if task:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
 
 
 # ---------------- usage / cost ----------------
@@ -1627,7 +1920,8 @@ async def dashboard() -> dict[str, Any]:
             except Exception as e:  # noqa: BLE001
                 out["errors"][key] = str(e)
 
-        jobs = [
+        # Not `jobs`: that name is the scheduled-job repo at module scope.
+        fetches = [
             fetch("calendar", google.calendar_events, 2),
             fetch("gmail", google.gmail_search, "is:unread in:inbox newer_than:14d", 10),
             fetch("tasks", google.tasks_list, "@default", False),
@@ -1635,8 +1929,8 @@ async def dashboard() -> dict[str, Any]:
         # Drive is a newer scope; before the user reconnects, skip the call instead of
         # surfacing a 403 — the card reads missing_scopes and offers Reconnect.
         if _google_has(st, "drive.readonly"):
-            jobs.append(fetch("drive", google.drive_files, "", 10))
-        await asyncio.gather(*jobs)
+            fetches.append(fetch("drive", google.drive_files, "", 10))
+        await asyncio.gather(*fetches)
     return out
 
 

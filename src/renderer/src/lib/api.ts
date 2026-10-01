@@ -292,6 +292,15 @@ export const api = {
   /** Injects a user message into a live run (steering). Throws a 409 when nothing is running. */
   steer: (convId: string, content: string) => req<{ ok: boolean; run_id: string; message: Message }>(`/conversations/${convId}/steer`, { method: 'POST', body: json({ content }) }),
   runs: () => req<RunInfo[]>('/runs'),
+  /** The newest interrupted run of a conversation, with whether it can still be resumed. */
+  interruptedRun: async (convId: string): Promise<{ run_id: string; resumable: boolean } | null> => {
+    const rows = await req<RunInfo[]>(`/runs?conversation_id=${encodeURIComponent(convId)}&status=interrupted&limit=1`)
+    if (!rows[0]) return null
+    const d = await req<{ run_id: string; resumable: boolean }>(`/runs/${rows[0].run_id}`)
+    return { run_id: d.run_id, resumable: d.resumable }
+  },
+  /** Starts a new run that continues an interrupted one. 409 with a reason when it cannot. */
+  resumeRun: (runId: string) => req<ChatRunStarted>(`/runs/${runId}/resume`, { method: 'POST' }),
   /** Stops a run before its assistant message exists. Detaching the stream would only drop a viewer. */
   stopRun: (convId: string, runId?: string) => req<{ ok: boolean }>(`/conversations/${convId}/stop${runId ? `?run_id=${encodeURIComponent(runId)}` : ''}`, { method: 'POST' }),
   usage: {

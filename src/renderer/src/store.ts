@@ -308,6 +308,8 @@ export interface State {
   /** Send from the ⌘I panel: same contract as `send`, plus the page snapshot and its own thread. */
   sendToPageAgent: (text: string) => Promise<boolean>
   regenerate: (conversationId?: string) => Promise<void>
+  /** Continue an interrupted reply in a new run (always the user's click). Rejects with the backend's reason when it cannot. */
+  resumeRun: (conversationId: string, runId: string) => Promise<void>
   stop: (conversationId?: string) => Promise<void>
 
   refreshMemories: (q?: string) => Promise<void>
@@ -1487,6 +1489,12 @@ export const useStore = create<State>((set, get) => {
       if (!id || get().sessions[id]?.streaming?.answering) return
       if (!get().sessions[id]) await get().openSession(id)
       await runStream(id, {})
+    },
+    resumeRun: async (conversationId, runId) => {
+      if (get().sessions[conversationId]?.streaming?.answering) return
+      if (!get().sessions[conversationId]) await get().openSession(conversationId)
+      const run = await api.resumeRun(runId)
+      void watchRun(conversationId, run, { messageId: null, approvals: 0, attached: false })
     },
     stop: async (conversationId) => {
       const id = conversationId ?? get().focusedConversationId

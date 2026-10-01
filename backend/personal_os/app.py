@@ -53,6 +53,7 @@ from .plans import (MUTATING, PLAN_BLOCKED, PLAN_SAFE_DANGER, PLAN_TOOL, PROPOSE
                     normalize_plan, parse_plan_edits, taint_expected)
 from .outbox import Outbox, router as outbox_router
 from .presets import CanvasPresets
+from . import resume
 from .runs import ACTIVE, PROMOTE_STEP, STATUSES, Run, RunBus, RunStore, Topic
 from .stuck import STUCK_NUDGE, STUCK_STOP, StuckDetector
 from .style import WritingStyle, learn_style_from_exchange, looks_like_prose
@@ -787,6 +788,7 @@ class ChatIn(BaseModel):
     content: str | None = None  # None = regenerate from existing history
     model: str | None = None
     page_context: PageContextIn | None = None
+    resume_of: str | None = None  # run_id of an interrupted run this reply continues (POST /runs/{id}/resume)
 
 
 RENDER_HINT = """## Rendering
@@ -945,7 +947,8 @@ async def _call_tool(run: Run | None, step: int, name: str, args: dict[str, Any]
         return _propose(run, name, args, call_id, ctx)  # type: ignore[arg-type]
     if run is None or run.store is None or spec is None or spec.danger not in IDEMPOTENT_DANGER:
         return await toolbox.call(name, args, ctx)
-    result, replayed = await run.store.call_once(run.run_id, step, name, args, lambda: toolbox.call(name, args, ctx), call_id=call_id)
+    result, replayed = await run.store.call_once(run.run_id, step, name, args, lambda: toolbox.call(name, args, ctx), call_id=call_id,
+                                                  inherit=(run.input or {}).get("resume_of"))
     if replayed:
         if isinstance(result, dict):
             result = {**result, "replayed": True}
@@ -1011,6 +1014,13 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             title = _title_from(user_text)
             convos.update(conv_id, {"title": title})
             yield "title", {"id": conv_id, "title": title}
+    elif body.resume_of:
+        # resume: the salvaged reply of the dead run stays visible as history; this reply continues after it
+        users = [m for m in conv["messages"] if m["role"] == "user"]
+        if not users:
+            yield "error", {"message": "Nothing to resume"}
+            return
+        user_text = users[-1]["content"]
     else:
         # regenerate: drop trailing assistant message
         msgs = conv["messages"]
@@ -1117,6 +1127,16 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     used["system_prompt"] = system
     used["tokens_estimate"] = estimate_tokens(system)
     messages = [{"role": "system", "content": system}] + history
+    if body.resume_of:
+        old = run_store.get(body.resume_of) or {}
+        old_events = run_store.events(body.resume_of)
+        messages.append({"role": "system", "content": resume.build_resume_note(
+            old, old_events, run_store.executed(body.resume_of), run_store.approvals(None, run_id=body.resume_of))})
+        # Taint is only ever added to: a resume cannot launder what the dead run read.
+        for src in resume.taint_from_tape(old_events):
+            tool_ctx["tainted"] = True
+            if src not in tool_ctx["taint_sources"]:
+                tool_ctx["taint_sources"].append(src)
     yield "assistant_message", {**am, "context_used": used}
     yield "span", {"message_id": am["id"], "span": cspan}
 
@@ -1919,7 +1939,28 @@ async def get_run(run_id: str) -> dict[str, Any]:
     mem = bus.get(row["conversation_id"]) if row["conversation_id"] else None
     over = mem.info() if mem is not None and mem.run_id == run_id else {"seq": row["last_seq"], "live": False}
     return {**row, **over, "approvals": run_store.approvals(None, run_id=run_id), "executed_calls": run_store.executed(run_id),
-            "plans": plans.for_run(run_id)}
+            "plans": plans.for_run(run_id), "resumable": _resumable(row)[0]}
+
+
+def _resumable(row: dict[str, Any]) -> tuple[bool, str]:
+    cid = row.get("conversation_id")
+    if not cid:
+        return False, "no conversation"
+    return resume.resumable(row, run_store.latest(cid), bool(bus.answering(cid)), bool(run_store.resumed_by(row["run_id"])))
+
+
+@app.post("/runs/{run_id}/resume")
+async def resume_run(run_id: str) -> dict[str, Any]:
+    """Continue an interrupted chat reply in a new run. Always the user's click: nothing calls this on a timer."""
+    row = run_store.get(run_id)
+    if not row:
+        raise HTTPException(404, "No such run")
+    ok, reason = _resumable(row)
+    if not ok:
+        raise HTTPException(409, {"reason": reason})
+    run = bus.start(row["conversation_id"], lambda r: _run_chat(r, ChatIn(resume_of=run_id)), input={"resume_of": run_id})
+    run_store.set_resumed_from(run.run_id, run_id)
+    return {"run_id": run.run_id, "seq": run.seq}
 
 
 # async, so the run's asyncio.Event is set on the loop that owns it rather than from a threadpool.

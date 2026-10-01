@@ -338,7 +338,7 @@ class Database:
             "action_plans": {"desk_id": "TEXT", "intent": "TEXT NOT NULL DEFAULT ''",
                              "expected_taint": "TEXT NOT NULL DEFAULT '[]'"},
             "approvals": {"desk_id": "TEXT", "danger": "TEXT NOT NULL DEFAULT 'external'"},
-            "agent_runs": {"desk_id": "TEXT", "turn": "INTEGER NOT NULL DEFAULT 0"},
+            "agent_runs": {"desk_id": "TEXT", "turn": "INTEGER NOT NULL DEFAULT 0", "resumed_from": "TEXT"},
             "plan_steps": {"result_error": "TEXT", "title": "TEXT NOT NULL DEFAULT ''",
                            "danger": "TEXT NOT NULL DEFAULT 'safe'"},
         }

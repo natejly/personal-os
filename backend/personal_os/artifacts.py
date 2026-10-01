@@ -149,9 +149,16 @@ class Artifacts:
         self.db = db
         with db.tx() as c:
             c.executescript(SCHEMA)
+            # Where it was made: the conversation, the durable run and the assistant message. Plain TEXT with no
+            # foreign keys, so deleting a chat or pruning a run's tape leaves the artifact (it is the user's now).
+            have = {r["name"] for r in c.execute("PRAGMA table_info(artifacts)")}
+            for col in ("conversation_id", "run_id", "message_id"):
+                if col not in have:
+                    c.execute(f"ALTER TABLE artifacts ADD COLUMN {col} TEXT")
+            c.execute("CREATE INDEX IF NOT EXISTS idx_artifacts_conv ON artifacts(conversation_id)")
 
     # ---------- artifacts ----------
-    def list(self, project_id: str | None = "__all__", q: str = "") -> list[dict[str, Any]]:
+    def list(self, project_id: str | None = "__all__", q: str = "", conversation_id: str | None = None) -> list[dict[str, Any]]:
         """Metadata only: `code` is left out so a long list stays cheap. Use get() to render one."""
         where, args = [], []
         if project_id != "__all__":
@@ -160,11 +167,14 @@ class Artifacts:
             else:
                 where.append("project_id = ?")
                 args.append(project_id)
+        if conversation_id:
+            where.append("conversation_id = ?")
+            args.append(conversation_id)
         if q.strip():
             where.append("(title LIKE ? OR prompt LIKE ?)")
             args += [f"%{q}%", f"%{q}%"]
         sql = (
-            "SELECT id,project_id,title,kind,prompt,version,created_at,updated_at,LENGTH(code) AS size,"
+            "SELECT id,project_id,title,kind,prompt,version,created_at,updated_at,conversation_id,run_id,message_id,LENGTH(code) AS size,"
             "(SELECT COUNT(*) FROM artifact_versions WHERE artifact_id=artifacts.id) AS version_count "
             "FROM artifacts" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY updated_at DESC"
         )
@@ -176,7 +186,8 @@ class Artifacts:
             return row_to_dict(c.execute("SELECT * FROM artifacts WHERE id=?", (id,)).fetchone())
 
     def create(self, title: str = "", code: str = "", prompt: str = "", kind: str = "html",
-               project_id: str | None = None, source: str = "llm") -> dict[str, Any]:
+               project_id: str | None = None, source: str = "llm", conversation_id: str | None = None,
+               run_id: str | None = None, message_id: str | None = None) -> dict[str, Any]:
         """Create an artifact. Non-empty code is stored as version 1, so history starts at the beginning."""
         if kind not in KINDS:
             raise ValueError(f"Unknown artifact kind '{kind}'")
@@ -185,8 +196,8 @@ class Artifacts:
         t = now()
         with self.db.tx() as c:
             c.execute(
-                "INSERT INTO artifacts(id,project_id,title,kind,prompt,code,version,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)",
-                (aid, project_id, title.strip()[:200], kind, prompt, "", 0, t, t),
+                "INSERT INTO artifacts(id,project_id,title,kind,prompt,code,version,created_at,updated_at,conversation_id,run_id,message_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                (aid, project_id, title.strip()[:200], kind, prompt, "", 0, t, t, conversation_id, run_id, message_id),
             )
         if code:
             return self.save_version(aid, code, prompt=prompt, source=source)  # type: ignore[return-value]

@@ -362,6 +362,52 @@ export interface ToolEvent {
   proposal?: string | null
   /** Set when this call's arguments matched an approved plan step, so it ran without its own card. */
   plan?: PlanStepRef | null
+  /** The artifact an artifact_create / artifact_update call made. Persisted with the event, so the card survives a reload. */
+  artifact?: ArtifactRef | null
+}
+
+/** Which artifact a tool call made, and what it did to it. */
+export interface ArtifactRef {
+  id: string
+  title: string
+  version: number | null
+  action: 'created' | 'updated'
+}
+
+/** An AI-generated, self-contained HTML document with version history (backend/personal_os/artifacts.py). */
+export interface Artifact {
+  id: string
+  project_id: string | null
+  title: string
+  kind: 'html'
+  prompt: string
+  version: number
+  created_at: number
+  updated_at: number
+  conversation_id: string | null
+  run_id: string | null
+  message_id: string | null
+  /** Signed, expiring path for the sandboxed iframe (the iframe cannot send the app token). */
+  render_path: string
+  /** Absent from list rows. */
+  code?: string
+  size?: number
+  version_count?: number
+  /** What the render CSP will silently break in this document: network, storage, form, ... */
+  blocked?: string[]
+}
+
+export interface ArtifactVersion {
+  id: string
+  artifact_id: string
+  version: number
+  prompt: string
+  instruction: string
+  source: 'llm' | 'user' | 'restore'
+  created_at: number
+  size?: number
+  code?: string
+  render_path?: string
 }
 
 /** Why a reply stopped early: a budget axis, or the repetition breaker. */
@@ -900,6 +946,8 @@ export type ChatEvent =
   | { event: 'span'; data: { message_id: string; span: Span } }
   | { event: 'done'; data: { id: string; error: string | null; context_used: ContextUsed; tool_events: ToolEvent[]; trace: Span[]; stopped: boolean; partial?: PartialReason | null; segment?: boolean; tainted?: boolean; taint_sources?: string[]; reasoning?: string | null } }
   | { event: 'taint'; data: { message_id: string; source: string } }
+  /** artifact_create / artifact_update landed. Also on the run tape, so a reload replays it. */
+  | { event: 'artifact'; data: ArtifactRef & { message_id: string; call_id: string; conversation_id: string } }
   | { event: 'plan'; data: { conversation_id: string; steps: PlanStep[] } }
   /** propose_plan opened a card. `plan` above is the todo_write checklist — a different thing. */
   | { event: 'plan_card'; data: { message_id: string; call_id: string; plan: PlanRecord } }

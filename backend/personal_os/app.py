@@ -33,6 +33,7 @@ from .learn import MAX_INJECTED_SKILLS, LearnJob, LearnWorker, Skills, induce_sk
 from .repos import ALL, Conversations, Documents, Graph, Memories, Projects
 from .boards import Boards
 from .canvas import SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
+from .artifacts import Artifacts, blocked_capabilities as artifact_blocked, render_headers as artifact_render_headers, EMPTY_HTML as ARTIFACT_EMPTY
 from .dashboards import Dashboards, generate_recap, generate_summary, generate_widget_code
 from .docs import Docs, unified_diff
 from . import cache as google_cache
@@ -108,6 +109,28 @@ WIDGET_TOKEN_TTL = 12 * 3600
 # its own. connect-src 'self' keeps a widget's data inside the sidecar - it cannot POST anywhere else on the internet.
 WIDGET_CSP = ("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data:; "
               "font-src data:; connect-src 'self'; base-uri 'none'; form-action 'none'")
+
+
+ARTIFACT_TOKEN_TTL = 24 * 3600
+
+
+def _artifact_render_token(aid: str, exp: int) -> str:
+    """Capability for one artifact's sandboxed iframe, which cannot send the app token. Binds id + expiry, signed
+    with the app secret, so a render URL cannot be edited to point at another artifact or outlive its TTL."""
+    return hmac.new(AUTH_TOKEN.encode(), f"artifact:{aid}:{exp}".encode(), "sha256").hexdigest()[:32]
+
+
+def _artifact_render_ok(aid: str, rt: str, re_: str) -> bool:
+    try:
+        exp = int(re_)
+    except (TypeError, ValueError):
+        return False
+    return bool(rt) and exp >= time.time() and _token_eq(rt, _artifact_render_token(aid, exp))
+
+
+def _artifact_render_path(aid: str) -> str:
+    exp = int(time.time()) + ARTIFACT_TOKEN_TTL
+    return f"/artifacts/{aid}/render?re={exp}&rt={_artifact_render_token(aid, exp)}"
 
 
 def _widget_fetch_token(wid: str, exp: int) -> str:
@@ -188,6 +211,10 @@ async def _require_token(request: Request, call_next):  # type: ignore[no-untype
     p = request.url.path
     if request.method == "OPTIONS" or p in PUBLIC_PATHS or (p.startswith("/widgets/") and p.endswith("/render")):
         return await call_next(request)
+    if p.startswith("/artifacts/") and p.endswith("/render"):
+        # Token-exempt like a widget's render, because a sandboxed iframe cannot carry the header; the route itself
+        # refuses anything without a valid signed, expiring, per-artifact token (_artifact_render_ok).
+        return await call_next(request)
     auth = request.headers.get("authorization", "")
     sent = request.headers.get("x-personal-os-token") or (auth[7:].strip() if auth[:7].lower() == "bearer " else "")
     if _token_eq(sent, AUTH_TOKEN):
@@ -257,6 +284,7 @@ jobs = Jobs(db)
 proposals = Proposals(db)
 boards = Boards(db)
 dashboards = Dashboards(db)
+artifacts = Artifacts(db)
 google = Google(settings, db.set_settings)
 # sid/wsid are defined further down, so the module context looks them up late.
 modules: list[Module] = build_modules(ModuleContext(
@@ -310,7 +338,7 @@ meeting_store = Meetings(db)
 meeting_svc = MeetingService(db, settings, llm.complete, meeting_store, google=google, todos=todos)
 toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=google, boards=boards, sandboxes=sandboxes, docs=docs, activity=monitor,
                   outbox=outbox, work_plans=work_plans, results=tool_results, skills=skills, jobs=jobs,
-                  style=style, meetings=meeting_svc, desks=desks, workspace=workspace)
+                  style=style, meetings=meeting_svc, desks=desks, workspace=workspace, artifacts=artifacts)
 # The insights pass proposes automations, so it is told which tools this install actually has - an
 # unwired integration must not turn into a suggestion that cannot be carried out.
 monitor.insights.tools_fn = lambda: [t["name"] for t in toolbox.list() if t.get("available")]
@@ -799,6 +827,8 @@ Besides normal markdown, the UI renders three fenced code blocks inline:
   - Formulas may use `+ - * / % ^`, comparisons, `&& || !`, `cond ? a : b`, `pi`, `e`, and only these functions: abs sqrt cbrt exp log ln log2 log10 sin cos tan asin acos atan sinh cosh tanh sign floor ceil trunc round(x[,digits]) sqr pow atan2 mod logb lerp clamp step min max hypot if(cond,a,b). There is nothing else — no assignment, no indexing, no other names.
   Reach for it when the interesting part of an answer is an assumption worth playing with (a rate, a price, a threshold, a growth curve); use ```chart for numbers that are already fixed.
 - ```mermaid — diagrams (flowchart, sequenceDiagram, gantt, mindmap, timeline, ...).
+- ```html — a self-contained HTML document or fragment (inline CSS/JS, no network, no external files). It is shown as a sandboxed live preview with a Code/Preview toggle and a "Save as artifact" button. Use it for a mock-up, a small interactive demo or a formatted layout. ```svg renders as an image.
+For anything larger or that the user will keep and revise (a calculator, a dashboard-like page, a game, a formatted report), call artifact_create with the full HTML instead, then artifact_update (full new HTML, not a diff) to change it; the chat shows it as a live card and keeps every version. Both run in a sandbox with no network, no external scripts/fonts/images (use data: URIs or inline SVG), no localStorage and no form submits.
 Only chart real values you have or computed; never invent data for decoration. Text before and after a block is shown as usual."""
 
 TOOLS_HINT = "You have tools. Use them when they would make the answer more accurate or current; otherwise answer directly. After using tools, write the final answer for the user."
@@ -1064,6 +1094,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         # Set for a scheduled job: Toolbox.call refuses every outward-facing tool outright, and _call_tool has
         # already turned the call into a proposals row before it got that far.
         "proposal_only": proposal_only(run), "message_id": am["id"],
+        # Where artifact_create files what it makes (artifacts.run_id), so it can be found again from the run.
+        "run_id": run.run_id if run else None,
     }
     use_tools = conv["settings"].get("useTools", True)
     modes = toolbox.effective(cfg.get("tools") or {}, (project or {}).get("tools"), conv["settings"].get("tools")) if use_tools else {}
@@ -1520,6 +1552,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 else:
                     result = await _call_tool(run, _round, c["name"], args, tool_ctx, uid)
                 ms = int((time.time() - t0) * 1000)
+                made = tool_ctx.pop("artifact", None) if decision == "allow" else None
+                if made is None and isinstance(result, dict) and result.get("artifact_id") and c["name"] in ("artifact_create", "artifact_update"):
+                    # A journal replay returns the recorded result without running the tool, so ctx carries no note.
+                    made = {"id": result["artifact_id"], "title": result.get("title", ""), "version": result.get("version"),
+                            "action": "created" if result.get("created") else "updated"}
                 # images (e.g. matplotlib figures from run_python) go to the UI, not to the model
                 images = result.pop("images", None) if isinstance(result, dict) else None
                 preview = summarize_result(result)
@@ -1540,7 +1577,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                          "plan": {"plan_id": claimed["plan_id"], "idx": claimed["idx"], "title": claimed["title"]} if claimed else None,
                          "forced": forced, "tainted": tainted, "blocked": c["name"] if was_blocked else None, "breaker": partial,
                          "blocked_by": "plan_mode" if blocked_reason == PLAN_BLOCKED else None,
-                         "proposal": (result.get("proposal_id") if proposing and isinstance(result, dict) else None)}
+                         "proposal": (result.get("proposal_id") if proposing and isinstance(result, dict) else None),
+                         # Persisted with the tool event, so the card finds its artifact again after a reload.
+                         "artifact": made}
                 tracer.end(tspan, {"result_chars": len(preview), "images": len(images or [])}, error=err)
                 if claimed is not None:
                     # The step was spent at the gate; this records whether the call it authorised
@@ -1548,6 +1587,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     plans.finish(uid, not err, err)
                 tool_events.append(event)
                 yield "tool_result", {"message_id": am["id"], **event}
+                if made and not err:
+                    yield "artifact", {"message_id": am["id"], "call_id": uid, "conversation_id": conv_id, **made}
                 yield "span", {"message_id": am["id"], "span": tspan}
                 for_model = {**result, "images_shown_to_user": [i["name"] for i in images]} if images and isinstance(result, dict) else result
                 # Small results go in whole; a big one is stored and replaced by a handle the model can
@@ -3311,6 +3352,122 @@ def render_widget(wid: str) -> HTMLResponse:
     body = re.sub(r"(/sources/[0-9a-f]+/fetch)(\?)?",
                   lambda m: f"{m.group(1)}?wt={wt}&w={wid}&we={exp}" + ("&" if m.group(2) else ""), code)
     return HTMLResponse(body, headers={"Content-Security-Policy": WIDGET_CSP, "X-Content-Type-Options": "nosniff"})
+
+
+# ---------------- artifacts ----------------
+class ArtifactIn(BaseModel):
+    title: str = ""
+    code: str = ""
+    prompt: str = ""
+    project_id: str | None = None
+    conversation_id: str | None = None
+    message_id: str | None = None
+
+
+class ArtifactPatch(BaseModel):
+    title: str | None = None
+    code: str | None = None
+    instruction: str = ""
+    project_id: str | None = None
+    clear_project: bool = False
+
+
+def _artifact_or_404(id: str) -> dict[str, Any]:
+    a = artifacts.get(id)
+    if not a:
+        raise HTTPException(404, "No such artifact")
+    return a
+
+
+def _artifact_out(a: dict[str, Any], code: bool = True) -> dict[str, Any]:
+    """The row plus a signed render path (the iframe cannot send the app token) and what the CSP will break."""
+    out = {**a, "render_path": _artifact_render_path(a["id"]), "blocked": artifact_blocked(a.get("code") or "")}
+    if not code:
+        out.pop("code", None)
+    return out
+
+
+@app.get("/artifacts")
+def list_artifacts(project_id: str | None = "all", q: str = "", conversation_id: str | None = None) -> list[dict[str, Any]]:
+    return [{**a, "render_path": _artifact_render_path(a["id"])}
+            for a in artifacts.list(sid(project_id), q, conversation_id=conversation_id)]
+
+
+@app.post("/artifacts")
+def create_artifact(body: ArtifactIn) -> dict[str, Any]:
+    try:
+        a = artifacts.create(title=body.title, code=body.code, prompt=body.prompt, project_id=wsid(body.project_id),
+                             source="user", conversation_id=body.conversation_id, message_id=body.message_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return _artifact_out(a)
+
+
+@app.get("/artifacts/{id}")
+def get_artifact(id: str) -> dict[str, Any]:
+    return _artifact_out(_artifact_or_404(id))
+
+
+@app.put("/artifacts/{id}")
+def update_artifact(id: str, body: ArtifactPatch) -> dict[str, Any]:
+    _artifact_or_404(id)
+    patch = body.model_dump(exclude={"code", "instruction"})
+    if patch.get("project_id") is not None:
+        patch["project_id"] = wsid(patch["project_id"])
+    artifacts.update(id, patch)
+    if body.code is not None:
+        try:
+            artifacts.save_version(id, body.code, instruction=body.instruction, source="user")
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+    return _artifact_out(_artifact_or_404(id))
+
+
+@app.delete("/artifacts/{id}")
+def delete_artifact(id: str) -> dict[str, bool]:
+    artifacts.delete(id)
+    return {"ok": True}
+
+
+@app.get("/artifacts/{id}/versions")
+def artifact_versions(id: str) -> list[dict[str, Any]]:
+    _artifact_or_404(id)
+    return artifacts.versions(id)
+
+
+@app.get("/artifacts/{id}/versions/{n}")
+def artifact_version(id: str, n: int) -> dict[str, Any]:
+    v = artifacts.version(id, n)
+    if not v:
+        raise HTTPException(404, "No such version")
+    return {**v, "render_path": _artifact_render_path(id) + f"&v={n}"}
+
+
+@app.post("/artifacts/{id}/restore/{n}")
+def restore_artifact(id: str, n: int) -> dict[str, Any]:
+    a = artifacts.restore(id, n)
+    if not a:
+        raise HTTPException(404, "No such artifact or version")
+    return _artifact_out(a)
+
+
+@app.get("/artifacts/{id}/render")
+def render_artifact(id: str, rt: str = "", re: str = "", v: int | None = None) -> HTMLResponse:
+    """Serves model-written HTML, so artifacts.RENDER_HEADERS (CSP sandbox, connect-src none) are the boundary.
+    Token-exempt in the middleware; the signed per-artifact token is checked here instead. Same 404 for a missing
+    artifact and a bad token's artifact id, so ids cannot be probed."""
+    if not _artifact_render_ok(id, rt, re):
+        raise HTTPException(401, "Unauthorized")
+    a = artifacts.get(id)
+    if not a:
+        raise HTTPException(404)
+    code = a["code"]
+    if v is not None:
+        ver = artifacts.version(id, v)
+        if not ver:
+            raise HTTPException(404)
+        code = ver["code"]
+    return HTMLResponse(code or ARTIFACT_EMPTY, headers=artifact_render_headers())
 
 
 @app.get("/recap")

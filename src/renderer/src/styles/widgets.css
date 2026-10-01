@@ -1,6 +1,6 @@
 /*
- * Widget bodies and the status ring. Contract §9 — canvas.css owns the window chrome, its tokens and
- * its `ring-breathe` / `ring-pulse` keyframes; nothing here redefines them.
+ * Widget bodies and the status ring. Contract §9 — canvas.css owns the window chrome and its tokens;
+ * nothing here redefines them.
  *
  * The 2 px ring is painted by the *container* of a `.ring`, through `:has()`, because a widget may not
  * touch `WindowFrame`: the marker a widget renders into the title bar is what lights up its window.
@@ -69,25 +69,18 @@
   pointer-events: none;
 }
 .win:has(.ring.working)::before,
-.dock-tile:has(.ring.working)::before {
-  border-color: var(--tl-yellow);
-  animation: ring-breathe 1.6s ease-in-out infinite;
-}
+.dock-tile:has(.ring.working)::before { border-color: var(--tl-yellow); }
 .win:has(.ring.done)::before,
 .dock-tile:has(.ring.done)::before { border-color: var(--tl-green); }
 .win:has(.ring.error)::before,
 .dock-tile:has(.ring.error)::before { border-color: var(--tl-red); }
 .win:has(.ring.needs-approval)::before,
-.dock-tile:has(.ring.needs-approval)::before {
-  border-color: var(--accent);
-  animation: ring-pulse-border 1s ease-in-out infinite;
-}
+.dock-tile:has(.ring.needs-approval)::before { border-color: var(--accent); }
 .dock-tile .ring { position: absolute; top: 2px; right: 2px; z-index: 4; }
 .dock-tile .ring-badge { display: none; }
 
+/* The ring states are a static colour: a window that is working must not pulse in the corner of the eye. */
 @keyframes ring-spin { to { transform: rotate(360deg); } }
-/* `ring-pulse` (canvas.css) scales, which would fight the drag transform on a window. */
-@keyframes ring-pulse-border { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 
 /* ---------- widget body ---------- */
 

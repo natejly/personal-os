@@ -211,7 +211,7 @@ async def _require_token(request: Request, call_next):  # type: ignore[no-untype
     p = request.url.path
     if request.method == "OPTIONS" or p in PUBLIC_PATHS or (p.startswith("/widgets/") and p.endswith("/render")):
         return await call_next(request)
-    if p.startswith("/artifacts/") and p.endswith("/render"):
+    if request.method == "GET" and re.fullmatch(r"/artifacts/[A-Za-z0-9_-]+/render", p):
         # Token-exempt like a widget's render, because a sandboxed iframe cannot carry the header; the route itself
         # refuses anything without a valid signed, expiring, per-artifact token (_artifact_render_ok).
         return await call_next(request)

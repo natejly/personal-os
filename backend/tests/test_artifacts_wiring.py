@@ -149,3 +149,12 @@ def test_artifact_tools_are_in_app_tier() -> None:
     for n in ("artifact_create", "artifact_update"):
         assert appmod.toolbox.specs[n].danger == "writes" and appmod.toolbox.specs[n].default_mode == "on"
     assert appmod.toolbox.specs["artifact_read"].danger == "safe"
+
+
+def test_render_exemption_is_only_get_on_the_exact_render_path() -> None:
+    a = mk()
+    # the middleware must not wave through look-alike paths or other methods
+    assert anon.delete(f"/artifacts/{a['id']}/render").status_code == 401
+    assert anon.get("/artifacts/render").status_code == 401
+    assert anon.get(f"/artifacts/{a['id']}/versions/1/render").status_code == 401
+    assert client.get(f"/artifacts/{a['id']}").status_code == 200

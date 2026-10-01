@@ -26,8 +26,15 @@ export type MemoryMode = 'split' | 'list' | 'graph'
 export type ContextTab = 'last' | 'preview' | 'trace'
 export type { Scope, SessionStatus }
 
-/** `abort` only detaches this window from the run's SSE; ending the run itself is `api.stopRun(runId)`. */
-export interface Streaming { messageId: string | null; runId: string; abort: AbortController }
+/**
+ * `abort` only detaches this window from the run's SSE; ending the run itself is `api.stopRun(runId)`.
+ *
+ * `answering` is the run still producing a reply, which is *not* the same as the SSE being open: the
+ * run goes on to auto-learn after its `done`, and that tail can outlast the reply it followed. Every
+ * busy affordance — the caret, Stop, the hidden message actions, the chart placeholders — reads
+ * `answering`, so a finished reply settles at `done` instead of at the end of the connection.
+ */
+export interface Streaming { messageId: string | null; runId: string; abort: AbortController; answering: boolean }
 
 /** One live conversation. Store-local: a running AbortController must never cross the IPC bus. */
 export interface ChatSession {
@@ -324,8 +331,8 @@ const share = (map: Map<string, Promise<void>>, key: string, fn: () => Promise<v
 const loads = new Map<string, Promise<void>>()
 const attaches = new Map<string, Promise<void>>()
 
-/** Every conversation mutation a stream event makes, as one new session. No side effects. */
-const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean): ChatSession => {
+/** Every conversation mutation a stream event makes, as one new session. No side effects — exported for store.test.ts. */
+export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean): ChatSession => {
   const c = s.conversation
   const msgs = c.messages ?? []
   const withMsgs = (messages: Message[]): ChatSession => ({ ...s, conversation: { ...c, messages } })
@@ -345,7 +352,7 @@ const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean): ChatSessio
         ...(held
           ? mapMsg(ev.data.id, (m) => ({ ...ev.data, content: ev.data.content || m.content }))
           : withMsgs([...msgs, ev.data])),
-        streaming: s.streaming && { ...s.streaming, messageId: ev.data.id },
+        streaming: s.streaming && { ...s.streaming, messageId: ev.data.id, answering: true },
         // A steered run opens a new segment after a `done`; the green hold belongs to the real end.
         finishedAt: null,
         unread: focused || held ? s.unread : s.unread + 1
@@ -367,8 +374,12 @@ const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean): ChatSessio
         const i = trace.findIndex((sp) => sp.id === ev.data.span.id)
         return { ...m, trace: i >= 0 ? trace.map((sp, j) => (j === i ? ev.data.span : sp)) : [...trace, ev.data.span] }
       })
-    case 'done':
-      return { ...mapMsg(ev.data.id, (m) => ({ ...m, error: ev.data.error, context_used: ev.data.context_used, tool_events: ev.data.tool_events?.length ? ev.data.tool_events : m.tool_events, trace: ev.data.trace?.length ? ev.data.trace : m.trace })), finishedAt: Date.now() }
+    case 'done': {
+      const done = mapMsg(ev.data.id, (m) => ({ ...m, error: ev.data.error, context_used: ev.data.context_used, tool_events: ev.data.tool_events?.length ? ev.data.tool_events : m.tool_events, trace: ev.data.trace?.length ? ev.data.trace : m.trace }))
+      // The reply is whole and persisted here. The stream stays open for the auto-learn tail, so the
+      // subscription is left alone and only `answering` drops.
+      return { ...done, streaming: done.streaming && { ...done.streaming, answering: false }, finishedAt: Date.now() }
+    }
     default:
       return s
   }
@@ -449,7 +460,7 @@ export const useStore = create<State>((set, get) => {
     const abort = new AbortController()
     const attached = from.attached
     clearHold(convId)
-    patchSession(convId, (s) => ({ ...s, streaming: { messageId: from.messageId, runId: run.run_id, abort }, status: settleApprovals('working', from.approvals), finishedAt: null, pendingApprovals: from.approvals, touchedAt: Date.now() }))
+    patchSession(convId, (s) => ({ ...s, streaming: { messageId: from.messageId, runId: run.run_id, abort, answering: true }, status: settleApprovals('working', from.approvals), finishedAt: null, pendingApprovals: from.approvals, touchedAt: Date.now() }))
     try {
       for await (const ev of chatStream(convId, run.seq, abort.signal, run.run_id)) {
         const focused = get().focusedConversationId === convId
@@ -742,7 +753,10 @@ export const useStore = create<State>((set, get) => {
       share(attaches, conversationId, async () => {
         // A run started before this window existed: `GET /runs` is the only way it can know.
         const runs = await api.runs().catch(() => null)
-        const run = runs?.find((r) => r.conversation_id === conversationId && r.live)
+        // `answering`, not `live`: a run in its auto-learn tail has nothing left to stream, and
+        // attaching to one would paint a caret and a Stop button over a reply `openSession` just
+        // fetched whole.
+        const run = runs?.find((r) => r.conversation_id === conversationId && r.answering)
         await get().openSession(conversationId)
         const s = get().sessions[conversationId]
         if (!run || !s) return
@@ -795,9 +809,11 @@ export const useStore = create<State>((set, get) => {
       if (!text.trim()) return false
       const id = conversationId ?? get().focusedConversationId
       if (id) {
-        // Mid-reply sends steer the live run: the message lands in the conversation now and the
-        // model folds it in at its next round boundary.
-        if (get().sessions[id]?.streaming) {
+        // Mid-reply sends steer the run: the message lands in the conversation now and the model
+        // folds it in at its next round boundary. Only a run that is still *answering* has a round
+        // boundary left — in its auto-learn tail the loop is over, and a steer accepted there would
+        // be stored and never replied to — so that tail takes an ordinary send instead.
+        if (get().sessions[id]?.streaming?.answering) {
           try {
             await api.steer(id, text)
             return true
@@ -824,7 +840,7 @@ export const useStore = create<State>((set, get) => {
     },
     regenerate: async (conversationId) => {
       const id = conversationId ?? get().focusedConversationId
-      if (!id || get().sessions[id]?.streaming) return
+      if (!id || get().sessions[id]?.streaming?.answering) return
       if (!get().sessions[id]) await get().openSession(id)
       await runStream(id, {})
     },
@@ -1322,6 +1338,10 @@ export const selectActive = (s: State): Conversation | null => pick(s)?.conversa
 export const useSession = (convId?: string): ChatSession | undefined => useStore((s) => pick(s, convId))
 export const useConversation = (convId?: string): Conversation | null => useStore((s) => pick(s, convId)?.conversation ?? null)
 export const useSessionStatus = (convId?: string): SessionStatus => useStore((s) => pick(s, convId)?.status ?? 'idle')
-export const useIsStreaming = (convId?: string): boolean => useStore((s) => !!pick(s, convId)?.streaming)
-export const useStreamingMessageId = (convId?: string): string | null => useStore((s) => pick(s, convId)?.streaming?.messageId ?? null)
+export const useIsStreaming = (convId?: string): boolean => useStore((s) => !!pick(s, convId)?.streaming?.answering)
+export const useStreamingMessageId = (convId?: string): string | null =>
+  useStore((s) => {
+    const st = pick(s, convId)?.streaming
+    return st?.answering ? st.messageId : null
+  })
 export const useUnread = (convId?: string): number => useStore((s) => pick(s, convId)?.unread ?? 0)

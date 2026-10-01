@@ -1019,7 +1019,13 @@ async def _run_chat(run: Run, body: ChatIn) -> None:
     async for event, data in _chat_stream(run.conversation_id, body, run.stop, run.steers, run=run):
         if event == "assistant_message":
             run.message_id = data.get("id")
+            # A steer opens a fresh segment, so the run is answering again.
+            run.replied = False
         run.publish(event, data)
+        # Published after the event, so a client that sees `done` and immediately posts finds the run
+        # already closed to steers. The task runs on to auto-learn; it is no longer replying.
+        if event == "done":
+            run.replied = True
 
 
 @app.post("/conversations/{id}/chat")
@@ -1027,7 +1033,9 @@ async def chat(id: str, body: ChatIn) -> dict[str, Any]:
     """Start the reply as a background task. Watch it on GET /conversations/{id}/stream?since=seq."""
     if not convos.get(id):
         raise HTTPException(404, "Conversation not found")
-    running = bus.live(id)
+    # `answering`, not `live`: a run still auto-learning has finished its reply, and a new message
+    # deserves a run of its own rather than a 409 the caller can only turn into a dropped steer.
+    running = bus.answering(id)
     if running:
         raise HTTPException(409, {"message": "That conversation already has a running reply",
                                  "run_id": running.run_id, "seq": running.seq})
@@ -1041,14 +1049,20 @@ class SteerIn(BaseModel):
 
 @app.post("/conversations/{id}/steer")
 async def steer_run(id: str, body: SteerIn) -> dict[str, Any]:
-    """Inject a user message into the live run. The message is persisted and published here, so it
-    survives even if the run ends before folding it in; the run answers it in a fresh segment."""
+    """Inject a user message into a run that is still answering; it replies in a fresh segment.
+
+    The message is persisted and published here, so a window sees it immediately. Nothing can slip
+    in after the round loop ends: `run.replied` is set in the same synchronous step that publishes
+    `done`, with no await between, so a handler that observes `answering` still has a round coming.
+    """
     if not convos.get(id):
         raise HTTPException(404, "Conversation not found")
     text = (body.content or "").strip()
     if not text:
         raise HTTPException(400, "Empty message")
-    run = bus.live(id)
+    # Only a run that is still answering can fold the message into a round; past its `done` the loop
+    # is over, so accepting one here would store a message nothing ever replies to.
+    run = bus.answering(id)
     if not run:
         raise HTTPException(409, {"message": "No running reply to steer"})
     um = convos.add_message(id, "user", text)

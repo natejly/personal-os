@@ -325,6 +325,9 @@ class Run:
         self.message_id: str | None = None
         self.started_at = time.time()
         self.ended_at: float | None = None
+        # Set when the reply's `done` goes out. The task lives on past that — auto-learn is the last
+        # thing it does — so `live` alone cannot tell a working run from one that is only tidying up.
+        self.replied = False
         self.seq = 0
         self.status = "running"
         self.error: str | None = None
@@ -349,10 +352,19 @@ class Run:
     def live(self) -> bool:
         return self.ended_at is None
 
+    @property
+    def answering(self) -> bool:
+        """Still producing a reply, so a steer can be folded in and a second run must not start.
+
+        False for the whole auto-learn tail, where the round loop is already over: a steer accepted
+        there would be persisted, published and never answered.
+        """
+        return self.live and not self.replied
+
     def info(self) -> dict[str, Any]:
         return {"run_id": self.run_id, "conversation_id": self.conversation_id, "message_id": self.message_id,
-                "seq": self.seq, "started_at": self.started_at, "live": self.live, "status": self.status,
-                "kind": self.kind, "ended_at": self.ended_at, "error": self.error}
+                "seq": self.seq, "started_at": self.started_at, "live": self.live, "answering": self.answering,
+                "status": self.status, "kind": self.kind, "ended_at": self.ended_at, "error": self.error}
 
     def set_status(self, status: str) -> None:
         if status == self.status:
@@ -438,6 +450,9 @@ class RunBus:
     def __init__(self, store: RunStore | None = None) -> None:
         self._runs: dict[str, Run] = {}
         self.store = store
+        # Runs displaced by a newer one while their auto-learn tail was still open. Only `shutdown`
+        # cares: nothing routes to them any more, and the task holds what keeps them alive.
+        self._retired: set[Run] = set()
 
     def get(self, conversation_id: str) -> Run | None:
         return self._runs.get(conversation_id)
@@ -448,6 +463,10 @@ class RunBus:
 
     def live_ids(self) -> set[str]:
         return {r.run_id for r in self._runs.values() if r.live}
+
+    def answering(self, conversation_id: str) -> Run | None:
+        run = self._runs.get(conversation_id)
+        return run if run and run.answering else None
 
     def list(self, statuses: Iterable[str] | None = ACTIVE, conversation_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
         """Runs from the table (active ones by default), with a live run's in-memory seq laid over its row."""
@@ -466,6 +485,12 @@ class RunBus:
     def start(self, conversation_id: str, runner: Callable[[Run], Awaitable[None]], input: dict[str, Any] | None = None,
               kind: str = "chat") -> Run:
         self._prune()
+        # A conversation can start a new reply while the previous run is still auto-learning. That
+        # run keeps writing to its own ring for whoever is attached; it is simply no longer the
+        # conversation's current run.
+        displaced = self._runs.get(conversation_id)
+        if displaced is not None and displaced.live:
+            self._retired.add(displaced)
         run = Run(conversation_id, self.store, kind=kind, input=input)
         self._runs[conversation_id] = run
         run.task = asyncio.create_task(self._drive(run, runner), name=f"run:{run.run_id}")
@@ -480,17 +505,19 @@ class RunBus:
 
     async def shutdown(self) -> None:
         """Cancel every live run and wait for it: a sandboxed run_python writes into data_dir/tmp."""
-        for run in self._runs.values():
+        every = [*self._runs.values(), *self._retired]
+        for run in every:
             run.stop.set()
-        tasks = [r.task for r in self._runs.values() if r.task and not r.task.done()]
+        tasks = [r.task for r in every if r.task and not r.task.done()]
         for t in tasks:
             t.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
-        for run in self._runs.values():
+        for run in every:
             if run.live:
                 run.end("interrupted")
         self._runs.clear()
+        self._retired.clear()
 
     async def _drive(self, run: Run, runner: Callable[[Run], Awaitable[None]]) -> None:
         status: str | None = None
@@ -506,6 +533,7 @@ class RunBus:
             run.publish("error", {"message": str(e)})
         finally:
             run.end(status)
+            self._retired.discard(run)
 
     def _prune(self) -> None:
         cutoff = time.time() - RETAIN_S

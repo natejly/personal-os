@@ -32,7 +32,7 @@ const mount = (selectors: Sel[]): (() => number) => {
 const msg = { id: 'm1', conversation_id: 'c1', role: 'assistant', content: '', model: null, error: null, context_used: null, tool_events: null, trace: null, created_at: 0 }
 const session = {
   conversation: { id: 'c1', title: 't', project_id: null, model: null, settings: {}, created_at: 0, updated_at: 0, messages: [msg] },
-  streaming: { messageId: 'm1', runId: 'r1', abort: new AbortController() },
+  streaming: { messageId: 'm1', runId: 'r1', abort: new AbortController(), answering: true },
   status: 'working',
   finishedAt: null,
   pendingApprovals: 0,

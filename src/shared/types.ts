@@ -538,7 +538,10 @@ export interface CanvasWindow {
 export interface Canvas {
   id: string; name: string; project_id: string | null; position: number
   snap_mode: SnapMode; grid_size: number; zoom: number; pan_x: number; pan_y: number
-  wallpaper: string; created_at: number; updated_at: number
+  wallpaper: string
+  /** 0 | 1 — SQLite has no boolean. 1 freezes the view: no pan, no zoom, no window geometry. */
+  locked: number
+  created_at: number; updated_at: number
   windows: CanvasWindow[]
 }
 

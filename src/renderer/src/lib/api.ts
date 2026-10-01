@@ -253,7 +253,7 @@ export const api = {
     list: () => req<Canvas[]>('/canvases'),
     get: (id: string) => req<Canvas>(`/canvases/${id}`),
     create: (c: { name?: string; project_id?: string | null; copy_from?: string | null }) => req<Canvas>('/canvases', { method: 'POST', body: json(c) }),
-    update: (id: string, patch: { name?: string; project_id?: string | null; position?: number; snap_mode?: SnapMode; grid_size?: number; zoom?: number; pan_x?: number; pan_y?: number; wallpaper?: string; clear_project?: boolean }) =>
+    update: (id: string, patch: { name?: string; project_id?: string | null; position?: number; snap_mode?: SnapMode; grid_size?: number; zoom?: number; pan_x?: number; pan_y?: number; wallpaper?: string; locked?: boolean; clear_project?: boolean }) =>
       req<Canvas>(`/canvases/${id}`, { method: 'PUT', body: json(patch) }),
     delete: (id: string) => req(`/canvases/${id}`, { method: 'DELETE' }),
     addWindow: (id: string, w: { kind: WidgetKind; ref_id?: string | null; project_id?: string | null; title?: string; x?: number; y?: number; w?: number; h?: number; config?: Record<string, unknown> }) =>

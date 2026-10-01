@@ -7,7 +7,7 @@ import type { CanvasWindow } from '@shared/types'
 import { canExpand, expandWindow } from './expand'
 import ContextMenu, { type MenuEntry } from './Menu'
 import { WIDGETS } from './registry'
-import { useCanvas, useIsFocused } from './store'
+import { useCanvas, useIsFocused, useSpaceLocked } from './store'
 import { getDragOverlay, rectStyle, subscribeDragOverlay, useWindowDrag, type DragOverlay } from './useDrag'
 import WindowHost from './WindowHost'
 import type { Handle, Point } from './snapping'
@@ -68,6 +68,8 @@ function WindowFrame({ win, live, selected = false, status = null }: WindowFrame
   const setWindowState = useCanvas((s) => s.setWindowState)
   const popOut = useCanvas((s) => s.popOut)
   const returnToCanvas = useCanvas((s) => s.returnToCanvas)
+  // Frozen space: the frame keeps its rect and its body, and gives up its grip and its handles.
+  const locked = useSpaceLocked()
   const def = WIDGETS[win.kind]
   // §6/§10: the registry is the floor a resize honours, and the natural size the bottom-centre zone restores to.
   const { onDragPointerDown, onResizePointerDown } = useWindowDrag(win, { node, min: def?.minSize ?? MIN, natural: def?.defaultSize })
@@ -98,25 +100,35 @@ function WindowFrame({ win, live, selected = false, status = null }: WindowFrame
   /** §6 'minimal': a note never offered zoom or minimize, and still does not. */
   const minimal = def?.chrome === 'minimal'
   const zoomed = win.state === 'maximized'
-  const items: MenuEntry[] = [
-    { label: 'Bring to front', run: () => focusWindow(win.id) },
-    ...(minimal
-      ? []
-      : [
-          { label: zoomed ? 'Restore' : 'Zoom', run: () => void setWindowState(win.id, zoomed ? 'normal' : 'maximized') },
-          { label: 'Minimize', accel: '⌘M', run: () => void setWindowState(win.id, 'minimized') }
-        ]),
-    win.state === 'popped'
-      ? { label: 'Return to canvas', accel: '⌃⌘⇧O', run: () => void returnToCanvas(win.id) }
-      : { label: 'Pop out', accel: '⌃⌘O', run: () => void popOut(win.id) },
-    ...(canExpand(win) ? [{ label: 'Expand', run: () => expandWindow(win) }] : []),
-    { label: 'Close', accel: '⌘W', danger: true, run: () => void closeWindow(win.id) }
-  ]
+  const items: MenuEntry[] = locked
+    ? [
+        { label: 'Bring to front', run: () => focusWindow(win.id) },
+        // Coming home is the one geometry change a lock allows: it undoes a pop-out the lock itself
+        // would now refuse, and without it a detached window is stranded until the space is unlocked.
+        ...(win.state === 'popped' ? [{ label: 'Return to canvas', accel: '⌃⌘⇧O', run: () => void returnToCanvas(win.id) }] : []),
+        // Expand only navigates the main window; it moves nothing on the plane, so a lock keeps it.
+        ...(canExpand(win) ? [{ label: 'Expand', run: () => expandWindow(win) }] : []),
+        { label: 'Unlock space', accel: '⌃⌘L', run: () => useCanvas.getState().toggleLock() }
+      ]
+    : [
+        { label: 'Bring to front', run: () => focusWindow(win.id) },
+        ...(minimal
+          ? []
+          : [
+              { label: zoomed ? 'Restore' : 'Zoom', run: () => void setWindowState(win.id, zoomed ? 'normal' : 'maximized') },
+              { label: 'Minimize', accel: '⌘M', run: () => void setWindowState(win.id, 'minimized') }
+            ]),
+        win.state === 'popped'
+          ? { label: 'Return to canvas', accel: '⌃⌘⇧O', run: () => void returnToCanvas(win.id) }
+          : { label: 'Pop out', accel: '⌃⌘O', run: () => void popOut(win.id) },
+        ...(canExpand(win) ? [{ label: 'Expand', run: () => expandWindow(win) }] : []),
+        { label: 'Close', accel: '⌘W', danger: true, run: () => void closeWindow(win.id) }
+      ]
 
   /** ⌘-drag is the escape hatch for a panel whose content fills every pixel; the grip is the route. */
   const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>): void => {
     // `begin` cancels the pointerdown, and that is what suppresses the click on the control beneath.
-    if (e.metaKey && e.button === 0) return onDragPointerDown(e)
+    if (e.metaKey && e.button === 0 && !locked) return onDragPointerDown(e)
     // `deferRaise`: this pointerdown may be the browser anchoring a text selection in a transcript, and
     // restacking the window underneath it in the same event crashes the renderer. See focusWindow.
     focusWindow(win.id, { deferRaise: true })
@@ -143,7 +155,11 @@ function WindowFrame({ win, live, selected = false, status = null }: WindowFrame
     >
       {/* The whole top edge moves the window, so there is a generous target without a title bar.
           The grip sits inside it as the visible hint and as the status glyph's home. */}
-      <div className="win-move" title="Drag to move · right-click for window options" onPointerDown={onDragPointerDown}>
+      <div
+        className="win-move"
+        title={locked ? 'Space locked · right-click for window options' : 'Drag to move · right-click for window options'}
+        onPointerDown={locked ? undefined : onDragPointerDown}
+      >
         <span className="win-grip">
           <span className="win-grip-dots"><GripVertical size={14} strokeWidth={2.25} /></span>
           {status}
@@ -161,7 +177,7 @@ function WindowFrame({ win, live, selected = false, status = null }: WindowFrame
         )}
       </div>
 
-      {win.state === 'normal' && (
+      {win.state === 'normal' && !locked && (
         <>
           {EDGES.map((h) => <div key={h} className={`win-resize ${h}`} onPointerDown={(e) => onResizePointerDown(e, h)} />)}
           {CORNERS.map((h) => <div key={h} className={`win-resize corner ${h}`} onPointerDown={(e) => onResizePointerDown(e, h)} />)}

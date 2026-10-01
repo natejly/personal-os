@@ -196,7 +196,10 @@ function buildMenu(): void {
         { type: 'separator' },
         ...SPACES,
         { type: 'separator' },
-        { label: 'Tidy Up', accelerator: 'Control+Command+T', click: () => sendMenu('canvas:tidy') }
+        { label: 'Tidy Up', accelerator: 'Control+Command+T', click: () => sendMenu('canvas:tidy') },
+        // One item, not a checkbox: the menu is built once and the lock belongs to whichever space
+        // is active, so the renderer's padlock is the state, and this is only the shortcut.
+        { label: 'Lock / Unlock Space', accelerator: 'Control+Command+L', click: () => sendMenu('canvas:lock') }
       ]
     },
     {

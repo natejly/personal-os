@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronRight, LayoutGrid, MoreHorizontal, Plus } from 'lucide-react'
+import { ChevronRight, LayoutGrid, Lock, MoreHorizontal, Plus } from 'lucide-react'
 import { useProject, useStore } from '../store'
 import type { DragKind } from '@shared/types'
 import { useCanvas } from '../canvas/store'
@@ -47,9 +47,12 @@ function SpaceMenu({ at, canvasId, onClose, onRename }: { at: { x: number; y: nu
     onClose()
     fn()
   }
+  const locked = useCanvas((s) => !!s.canvases[canvasId]?.locked)
   const items: MenuItem[] = [
     { label: 'Rename', run: onRename },
+    { label: locked ? 'Unlock space' : 'Lock space', run: () => void useCanvas.getState().setLocked(canvasId, !locked) },
     { label: 'Save as preset…', keep: true, run: () => setSaving(true) },
+    // Left in place while locked: `deleteSpace` refuses, and the toast says why.
     {
       label: 'Delete space',
       danger: true,
@@ -90,6 +93,8 @@ export function SpaceRow({ canvasId }: { canvasId: string }): JSX.Element | null
   const count = useCanvas((s) => s.canvases[canvasId]?.windows.length ?? 0)
   const projectId = useCanvas((s) => s.canvases[canvasId]?.project_id ?? null)
   const isActiveSpace = useCanvas((s) => s.activeCanvasId === canvasId)
+  // A drop here lands through `openWindow`, which a locked space refuses: say so on the row.
+  const locked = useCanvas((s) => !!s.canvases[canvasId]?.locked)
   const inCanvas = useStore((s) => s.view === 'canvas')
   const active = isActiveSpace && inCanvas
   const project = useProject(projectId)
@@ -118,7 +123,7 @@ export function SpaceRow({ canvasId }: { canvasId: string }): JSX.Element | null
         {...handlers}
         role="button"
         tabIndex={0}
-        title={`${name}${project ? ` · ${project.name}` : ''} · ${count} window${count === 1 ? '' : 's'}`}
+        title={`${name}${project ? ` · ${project.name}` : ''} · ${count} window${count === 1 ? '' : 's'}${locked ? ' · locked' : ''}`}
         onClick={() => void useCanvas.getState().enterSpace(canvasId)}
         onKeyDown={(e) => {
           if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
@@ -148,6 +153,7 @@ export function SpaceRow({ canvasId }: { canvasId: string }): JSX.Element | null
           </span>
         )}
         {project && <span className="space-hint">{project.name}</span>}
+        {locked && <Lock size={11} className="space-lock" />}
         <span className="count">{count}</span>
         <button
           className="icon-btn ghost xs"

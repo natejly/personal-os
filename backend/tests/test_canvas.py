@@ -37,6 +37,7 @@ def test_default_seed() -> None:
     check(first[0]["name"] == "Desk 1", "seeded canvas is Desk 1")
     check(first[0]["windows"] == [], "seeded canvas has no windows")
     check(first[0]["snap_mode"] == "both" and first[0]["grid_size"] == 16, "seed defaults")
+    check(first[0]["locked"] == 0, "a seeded space starts unlocked")
     again = j("GET", "/canvases")
     check(len(again) == 1 and again[0]["id"] == first[0]["id"], "seeding is idempotent across two GETs")
 
@@ -220,7 +221,22 @@ def test_notes() -> None:
     j("DELETE", f"/notes/{scoped['id']}")
 
 
-TESTS = [test_default_seed, test_canvas_crud, test_windows_and_z, test_layout_bulk, test_window_config_merges,
+def test_lock() -> None:
+    made = j("POST", "/canvases", {"name": "Frozen"})
+    check(made["locked"] == 0, "a new space starts unlocked")
+    check(j("PUT", f"/canvases/{made['id']}", {"locked": True})["locked"] == 1, "locked stores as 1")
+    check(j("GET", f"/canvases/{made['id']}")["locked"] == 1, "the lock survives a re-read")
+    # The lock is renderer policy: the row itself stays writable, so a client and the row can never
+    # disagree in a way that strands a space.
+    check(j("PUT", f"/canvases/{made['id']}", {"zoom": 2.0})["zoom"] == 2.0, "a locked row still takes writes")
+    copy = j("POST", "/canvases", {"name": "Copy", "copy_from": made["id"]})
+    check(copy["locked"] == 0, "a copy of a locked space starts unlocked")
+    check(j("PUT", f"/canvases/{made['id']}", {"locked": False})["locked"] == 0, "unlock stores as 0")
+    j("DELETE", f"/canvases/{made['id']}")
+    j("DELETE", f"/canvases/{copy['id']}")
+
+
+TESTS = [test_default_seed, test_canvas_crud, test_lock, test_windows_and_z, test_layout_bulk, test_window_config_merges,
          test_raise, test_move_between_canvases, test_copy_from, test_reset_popped, test_notes]
 
 if __name__ == "__main__":

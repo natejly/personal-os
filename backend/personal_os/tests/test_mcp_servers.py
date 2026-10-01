@@ -81,8 +81,9 @@ class TestSlugify(McpTestCase):
 
 class TestReservedNamesMatchTools(McpTestCase):
     def test_every_registered_builtin_is_reserved(self) -> None:
-        """Static read of tools.py, so a new built-in cannot quietly become shadowable."""
-        src = (Path(__file__).resolve().parents[1] / "tools.py").read_text()
+        """Static read of tools.py and the feature modules, so a new built-in cannot quietly become shadowable."""
+        pkg = Path(__file__).resolve().parents[1]
+        src = "\n".join(p.read_text() for p in [pkg / "tools.py", *sorted((pkg / "modules").glob("*.py"))])
         registered = set(re.findall(r'ToolSpec\(\s*"([A-Za-z0-9_]+)"', src))
         self.assertGreaterEqual(len(registered), 25, "regex stopped matching tools.py")
         self.assertEqual(registered - RESERVED_TOOL_NAMES, set(), "built-ins missing from RESERVED_TOOL_NAMES")

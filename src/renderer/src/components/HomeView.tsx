@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Home, Calendar, Mail, CheckSquare, Brain, FolderKanban, Sparkles, RefreshCw, PanelLeftOpen, ExternalLink, Plus, MessageSquare, Mic, SlidersHorizontal, X, ListChecks, HardDrive } from 'lucide-react'
+import { Home, Calendar, Mail, Brain, FolderKanban, Sparkles, RefreshCw, PanelLeftOpen, ExternalLink, Plus, MessageSquare, Mic, SlidersHorizontal, X, ListChecks, HardDrive } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import { formatOffset, offerableCandidates } from '../lib/transcript'
@@ -7,7 +7,7 @@ import { HOME_MODULES, homeModuleOn } from '../modules'
 import AgentInbox from './AgentInbox'
 import HomeCowork from './HomeCowork'
 import type { Meeting, MeetingCandidate } from '@shared/types'
-import TodoItem from './TodoItem'
+import { moduleHome } from '../shell/registry'
 import ProjectChip from './ProjectChip'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -161,6 +161,7 @@ function ConnectGoogle({ what, onConnect }: { what: string; onConnect: () => voi
 }
 
 export default function HomeView(): JSX.Element {
+  const TodosCard = moduleHome('todos')?.home?.Card
   const d = useStore((s) => s.dashboard)
   const google = useStore((s) => s.google)
   const sidebarOpen = useStore((s) => s.sidebarOpen)
@@ -284,10 +285,7 @@ export default function HomeView(): JSX.Element {
             )}
           </section>}
 
-          {on('todos') && <section className="widget">
-            <header><CheckSquare size={14} /> Todos <span className="muted small">{d?.todo_stats.open ?? 0} open{d?.todo_stats.overdue ? ` · ${d.todo_stats.overdue} overdue` : ''}</span><button className="link small" onClick={() => setView('todos')}>View all</button></header>
-            {(d?.todos.length ?? 0) === 0 ? <p className="muted">All clear.</p> : d!.todos.slice(0, 8).map((t) => <TodoItem key={t.id} todo={t} compact />)}
-          </section>}
+          {on('todos') && TodosCard && <TodosCard data={d} />}
 
           {on('inbox') && <section className="widget">
             <header><Mail size={14} /> Inbox {google?.connected && <span className="muted small">unread, 14 days</span>}<button className="link small" onClick={() => setView('mail')}>View all</button></header>

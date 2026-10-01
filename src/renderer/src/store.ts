@@ -6,7 +6,7 @@ import { currentSelection } from './lib/pageContext'
 import { NEEDS_YOU } from '../../shared/types'
 import { finishStatus, mergeConversation, pickEvictions, reduceStatus, settleApprovals } from './sessionStatus'
 import { applyCursor, fetchSegmentPages, needsSegmentReload } from './lib/transcript'
-import { viewHidden } from './modules'
+import { viewHidden } from './moduleToggles'
 import { chainTo, folderKey, groupShutKey } from './lib/docTree'
 
 /**

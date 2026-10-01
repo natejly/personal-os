@@ -3,12 +3,24 @@
  * sidebar offers. Both are user-toggleable (Settings → Modules, or the slider button on Today) and
  * persist in settings as exceptions — a missing key means "on", so new modules ship enabled.
  */
-import type { Settings } from '@shared/types'
 import type { View } from './store'
+import { moduleHome, moduleForView } from './shell/registry'
 
 export interface HomeModule {
   key: string
   label: string
+}
+
+/** The row for a module-owned card or view; throws at load if the module is missing, since that is a build mistake. */
+function homeRow(key: string): HomeModule {
+  const h = moduleHome(key)?.home
+  if (!h) throw new Error(`modules: no module owns the Today card "${key}"`)
+  return { key: h.key, label: h.label }
+}
+function viewRow(view: View): { view: View; label: string } {
+  const m = moduleForView(view)
+  if (!m?.view) throw new Error(`modules: no module owns the view "${view}"`)
+  return { view: m.view.id, label: m.label }
 }
 
 export const HOME_MODULES: HomeModule[] = [
@@ -16,7 +28,7 @@ export const HOME_MODULES: HomeModule[] = [
   { key: 'cowork', label: 'Cowork desks' },
   { key: 'recap', label: 'Daily recap' },
   { key: 'calendar', label: 'Calendar' },
-  { key: 'todos', label: 'Todos' },
+  homeRow('todos'),
   { key: 'inbox', label: 'Inbox' },
   { key: 'gtasks', label: 'Google Tasks' },
   { key: 'drive', label: 'Drive files' },
@@ -28,7 +40,7 @@ export const HOME_MODULES: HomeModule[] = [
 
 /** Views that may be removed from the sidebar. Home and chats are the shell itself and stay. */
 export const OPTIONAL_VIEWS: { view: View; label: string }[] = [
-  { view: 'todos', label: 'Todos' },
+  viewRow('todos'),
   { view: 'calendar', label: 'Calendar' },
   { view: 'mail', label: 'Mail' },
   { view: 'boards', label: 'Boards' },
@@ -42,5 +54,4 @@ export const OPTIONAL_VIEWS: { view: View; label: string }[] = [
   { view: 'meetings', label: 'Meetings' }
 ]
 
-export const homeModuleOn = (s: Settings, key: string): boolean => s.homeWidgets?.[key] !== false
-export const viewHidden = (s: Settings, view: string): boolean => (s.hiddenViews ?? []).includes(view)
+export { homeModuleOn, viewHidden } from './moduleToggles'

@@ -49,15 +49,14 @@ from .cowork import (AUTONOMY, DESK_CONTINUE, DESK_HINT, DESK_RESUME, LIVE as DE
 from .workspace import MAX_PREVIEW, Workspace, WorkspaceError
 from .microvm import Sandboxes
 from .notes import Notes
-from .gtasks import TasksSync
 from .plans import (MUTATING, PLAN_BLOCKED, PLAN_SAFE_DANGER, PLAN_TOOL, PROPOSE_ONLY, Plans,
                     normalize_plan, parse_plan_edits, taint_expected)
 from .outbox import Outbox, router as outbox_router
 from .presets import CanvasPresets
 from .runs import ACTIVE, PROMOTE_STEP, STATUSES, Run, RunBus, RunStore, Topic
 from .style import WritingStyle, learn_style_from_exchange, looks_like_prose
-from .todocal import TodoCalendarMirror
-from .todos import Todos
+from .modules import Module, ModuleContext, build_modules, get as module_get
+from .modules.todos import TodosModule
 from .tools import Toolbox, summarize_result
 from .trace import Tracer, now_ms
 from .usage import Pricing, Usage
@@ -253,23 +252,20 @@ def settings() -> dict[str, Any]:
     return {**llm.DEFAULT_SETTINGS, **db.get_settings()}
 
 
-todos = Todos(db)
 jobs = Jobs(db)
 proposals = Proposals(db)
 boards = Boards(db)
 dashboards = Dashboards(db)
 google = Google(settings, db.set_settings)
-tasks_sync = TasksSync(todos, google, settings, db.set_settings)
-todo_calendar = TodoCalendarMirror(todos, google, settings, db.set_settings)
-
-
-def _todos_changed() -> None:
-    """Any todo write (routes here or assistant tools) nudges both Google sync loops."""
-    tasks_sync.poke()
-    todo_calendar.poke()
-
-
-todos.on_change = _todos_changed
+# sid/wsid are defined further down, so the module context looks them up late.
+modules: list[Module] = build_modules(ModuleContext(
+    db=db, settings=settings, set_settings=db.set_settings, google=google,
+    sid=lambda p: sid(p), wsid=lambda p: wsid(p)))
+_todos_module = module_get(modules, "todos", TodosModule)
+todos, tasks_sync, todo_calendar = _todos_module.store, _todos_module.tasks_sync, _todos_module.calendar_mirror
+for _m in modules:
+    if (_r := _m.router()) is not None:
+        app.include_router(_r)
 usage = Usage(db)
 pricing = Pricing()
 
@@ -311,7 +307,7 @@ skills = Skills(db)
 # instance, so a meeting's rows are never written by two Meetings objects at once.
 meeting_store = Meetings(db)
 meeting_svc = MeetingService(db, settings, llm.complete, meeting_store, google=google, todos=todos)
-toolbox = Toolbox(memories, graph, documents, settings, todos=todos, google=google, boards=boards, sandboxes=sandboxes, docs=docs, activity=monitor,
+toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=google, boards=boards, sandboxes=sandboxes, docs=docs, activity=monitor,
                   outbox=outbox, work_plans=work_plans, results=tool_results, skills=skills, jobs=jobs,
                   style=style, meetings=meeting_svc, desks=desks, workspace=workspace)
 # The insights pass proposes automations, so it is told which tools this install actually has - an
@@ -2527,63 +2523,6 @@ async def _shutdown() -> None:
     await asyncio.to_thread(sandboxes.shutdown)  # after the runs: a live sandbox_exec would just see its container vanish
 
 
-# ---------------- todos ----------------
-class TodoIn(BaseModel):
-    title: str
-    project_id: str | None = None
-    notes: str = ""
-    due: str | None = None
-    priority: int = 2
-
-
-class TodoPatch(BaseModel):
-    title: str | None = None
-    notes: str | None = None
-    due: str | None = None
-    priority: int | None = None
-    done: bool | None = None
-    project_id: str | None = None
-    clear_due: bool = False
-    clear_project: bool = False
-    calendar_event_id: str | None = None
-    calendar_link: str | None = None
-    calendar_id: str | None = None
-
-
-@app.get("/todos")
-def list_todos(project_id: str | None = "all", include_done: bool = False, q: str = "") -> list[dict[str, Any]]:
-    scope = "__all__" if project_id in (None, "all") else sid(project_id)
-    return todos.list(scope, include_done, q)
-
-
-@app.post("/todos")
-def create_todo(body: TodoIn) -> dict[str, Any]:
-    if not body.title.strip():
-        raise HTTPException(400, "Empty title")
-    return todos.create(body.title, wsid(body.project_id), body.notes, body.due, body.priority)
-
-
-@app.put("/todos/{id}")
-def update_todo(id: str, body: TodoPatch) -> dict[str, Any]:
-    patch = body.model_dump(exclude_none=True, exclude={"clear_due", "clear_project"})
-    if body.clear_due:
-        patch["due"] = None
-    if body.clear_project:
-        patch["project_id"] = None
-    elif "project_id" in patch:
-        patch["project_id"] = wsid(patch["project_id"])
-    t = todos.update(id, patch)
-    if not t:
-        raise HTTPException(404)
-    return t
-
-
-@app.delete("/todos/{id}")
-def delete_todo(id: str) -> dict[str, bool]:
-    todos.delete(id)
-    return {"ok": True}
-
-
 # ---------------- Google integration ----------------
 @app.get("/integrations/google/status")
 def google_status() -> dict[str, Any]:
@@ -2844,85 +2783,21 @@ def google_tasks(show_completed: bool = False, refresh: bool = False) -> Any:
     return _gcall(google.tasks_list, "@default", show_completed, refresh=refresh)
 
 
-# ---------------- Google Tasks <-> todos sync ----------------
 @app.get("/integrations/google/tasklists")
 def google_tasklists() -> Any:
     return _gcall(google.tasks_lists)
 
 
-class TasksSyncIn(BaseModel):
-    enabled: bool | None = None
-    tasklist: str | None = None
-    intervalMinutes: int | None = None
-
-
-@app.get("/integrations/google/tasks-sync")
-def google_tasks_sync_status() -> dict[str, Any]:
-    return tasks_sync.status()
-
-
-@app.put("/integrations/google/tasks-sync")
-def google_tasks_sync_config(body: TasksSyncIn) -> dict[str, Any]:
-    tasks_sync.set_config(body.model_dump(exclude_none=True))
-    return tasks_sync.status()
-
-
-@app.post("/integrations/google/tasks-sync/run")
-async def google_tasks_sync_run() -> dict[str, Any]:
-    try:
-        await asyncio.to_thread(tasks_sync.sync_once)
-    except GoogleNotConnected as e:
-        raise HTTPException(409, str(e)) from e
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, f"Google Tasks sync failed: {e}") from e
-    return tasks_sync.status()
-
-
-# ---------------- todos -> Google Calendar mirror ----------------
-class TodoCalendarIn(BaseModel):
-    enabled: bool | None = None
-    calendarId: str | None = None
-    calendarName: str | None = None
-    intervalMinutes: int | None = None
-    keepCompleted: bool | None = None
-
-
-@app.get("/integrations/google/todo-calendar")
-def google_todo_calendar_status() -> dict[str, Any]:
-    return todo_calendar.status()
-
-
-@app.put("/integrations/google/todo-calendar")
-def google_todo_calendar_config(body: TodoCalendarIn) -> dict[str, Any]:
-    todo_calendar.set_config(body.model_dump(exclude_none=True))
-    return todo_calendar.status()
-
-
-@app.post("/integrations/google/todo-calendar/run")
-async def google_todo_calendar_run() -> dict[str, Any]:
-    try:
-        await asyncio.to_thread(todo_calendar.sync_once)
-    except GoogleNotConnected as e:
-        raise HTTPException(409, str(e)) from e
-    except Exception as e:  # noqa: BLE001
-        raise HTTPException(502, f"Todo calendar sync failed: {e}") from e
-    return todo_calendar.status()
-
-
 @app.on_event("startup")
-async def _tasks_sync_startup() -> None:
-    app.state.gtasks_task = asyncio.create_task(tasks_sync.loop())
-    app.state.todocal_task = asyncio.create_task(todo_calendar.loop())
+async def _modules_startup() -> None:
+    for m in modules:
+        await m.start()
 
 
 @app.on_event("shutdown")
-async def _tasks_sync_shutdown() -> None:
-    for attr in ("gtasks_task", "todocal_task"):
-        task = getattr(app.state, attr, None)
-        if task:
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await task
+async def _modules_shutdown() -> None:
+    for m in modules:
+        await m.stop()
 
 
 @app.get("/integrations/google/drive")
@@ -2941,8 +2816,7 @@ async def dashboard() -> dict[str, Any]:
     st = google.status()
     out: dict[str, Any] = {
         "google": st,
-        "todos": todos.list("__all__", include_done=False)[:12],
-        "todo_stats": todos.stats(),
+        **{k: v for m in modules for k, v in m.today().items()},
         "projects": [{**p, "stats": projects.stats(p["id"])} for p in projects.list()],
         "recent_memories": memories.list(ALL)[:6],
         "recent_conversations": convos.list(ALL)[:6],

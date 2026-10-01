@@ -119,6 +119,8 @@ ALTERNATIVE = {
     "sandbox_list_files": "ask the user what the sandbox should contain",
     "sandbox_put_document": "read_document, then sandbox_write_file the excerpt you need",
     "sandbox_reset": "continue with the sandbox as it is",
+    "sandbox_checkpoint": "continue without a checkpoint, or copy the files you care about out with sandbox_read_file",
+    "sandbox_restore": "sandbox_reset to start fresh",
     "save_memory": "state the fact in your reply so the user can keep it",
     "writing_style": "write in plain, direct prose, or ask the user for a sample of their own writing",
     "save_writing_sample": "tell the user they can add the passage themselves under Memory → Voice",
@@ -1291,8 +1293,19 @@ def _register_sandbox(self: Toolbox) -> None:
 
     async def sandbox_reset(ctx: dict[str, Any]) -> Any:
         return await run(sb.reset, ctx["conversation_id"])
-    R("sandbox_reset", ToolSpec("sandbox_reset", "Destroy this chat's sandbox and start the next call from a fresh container. Use when the environment is wedged; all sandbox files are lost.",
+    R("sandbox_reset", ToolSpec("sandbox_reset", "Destroy this chat's sandbox and its checkpoints and start the next call from a fresh container. Use when the environment is wedged and no checkpoint helps (sandbox_restore rolls back instead); all sandbox files are lost.",
         _obj({}, []), sandbox_reset, "sandbox", "executes", examples=[{}]))
+
+    async def sandbox_checkpoint(ctx: dict[str, Any], label: str = "") -> Any:
+        return await run(sb.checkpoint, ctx["conversation_id"], label)
+    R("sandbox_checkpoint", ToolSpec("sandbox_checkpoint", "Save the sandbox's files and installed packages under a name so you can roll back to them with sandbox_restore. Take one before a risky install or a destructive edit. Filesystem only (running processes are not saved); the last 3 are kept.",
+        _obj({"label": {"type": "string", "description": "short name, e.g. 'clean' or 'deps-installed'"}}, []), sandbox_checkpoint, "sandbox", "executes",
+        examples=[{"label": "clean"}, {"label": "before-pip-install"}]))
+
+    async def sandbox_restore(ctx: dict[str, Any], label: str) -> Any:
+        return await run(sb.restore, ctx["conversation_id"], label)
+    R("sandbox_restore", ToolSpec("sandbox_restore", "Replace the sandbox with a checkpoint made by sandbox_checkpoint. Files changed since then are lost; network access follows the current setting, not the checkpoint's.",
+        _obj({"label": {"type": "string"}}, ["label"]), sandbox_restore, "sandbox", "executes", examples=[{"label": "clean"}]))
 
 
 def _register_activity(self: Toolbox) -> None:

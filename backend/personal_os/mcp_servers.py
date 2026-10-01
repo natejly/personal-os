@@ -54,7 +54,7 @@ RESERVED_TOOL_NAMES = frozenset({
     "google_sheets_read", "google_sheets_write", "google_sheets_create",
     "board_list", "board_add_card", "board_move_card", "board_create",
     "sandbox_exec", "sandbox_write_file", "sandbox_read_file", "sandbox_list_files",
-    "sandbox_put_document", "sandbox_reset",
+    "sandbox_put_document", "sandbox_reset", "sandbox_checkpoint", "sandbox_restore",
     "doc_list", "doc_search", "doc_read", "doc_create", "doc_edit",
     "activity_recent", "activity_pause", "activity_access", "activity_insights",
     "find_files", "read_local_file", "write_local_file", "move_local_file", "trash_local_file",

@@ -89,6 +89,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "fetchCacheSeconds": 3600,
     # github_search/github_read; empty = the gh CLI's login (`gh auth token`), else unauthenticated (60 requests/h).
     "githubToken": "",
+    # A stopped sandbox (containers are stopped, not removed, at app quit) is deleted after this many idle days.
+    "sandboxKeepDays": 14,
     # {model: {"input": $/M tokens, "output": $/M tokens}} overrides for cost accounting (proxy prices are used otherwise)
     "modelPrices": {},
     "googleClientId": "",

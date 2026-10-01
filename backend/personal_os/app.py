@@ -652,9 +652,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
 
     async def _final_round() -> AsyncIterator[tuple[str, Any]]:
         """Closing answer after a budget or breaker stop: one tool-free call, itself exempt from the budget."""
+        # One newline, not a blank line: the transcript renders as markdown, where a blank line opens a
+        # new paragraph and reads as an empty line dropped into the middle of the reply.
         if buf and buf[-1] and not buf[-1].endswith("\n"):
-            buf.append("\n\n")
-            yield "delta", {"id": am["id"], "text": "\n\n"}
+            buf.append("\n")
+            yield "delta", {"id": am["id"], "text": "\n"}
         span = tracer.start("llm", model, {"round": _round, "final": True, "messages": len(messages), "tools": len(tool_schemas)})
         yield "span", {"message_id": am["id"], "span": span}
         start, fin = len(buf), {}
@@ -754,8 +756,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             # execute tool calls, then continue the loop with their results
             messages.append(turn)
             if buf and buf[-1] and not buf[-1].endswith("\n"):
-                buf.append("\n\n")
-                yield "delta", {"id": am["id"], "text": "\n\n"}
+                buf.append("\n")
+                yield "delta", {"id": am["id"], "text": "\n"}
             for c in calls:
                 try:
                     args = json.loads(c["arguments"] or "{}")

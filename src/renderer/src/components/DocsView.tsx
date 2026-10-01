@@ -1,73 +1,78 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  FileText, NotebookPen, Plus, PanelLeftOpen, X, History, Columns2, Eye, Pencil,
-  Sparkles, Save, Link2, Link2Off, ChevronDown, Folder
+  FileText, Files, Plus, PanelLeftOpen, X, History, Columns2, Eye, Pencil,
+  Sparkles, Save, Link2, Link2Off, ChevronDown, Folder, FolderKanban
 } from 'lucide-react'
-import { useStore, type Scope } from '../store'
+import { useStore } from '../store'
 import type { Doc } from '@shared/types'
 import MarkdownEditor from './MarkdownEditor'
 import MarkdownPreview from './MarkdownPreview'
 import DiffView from './DiffView'
-import ScopeSelect from './ScopeSelect'
 import DocTree from './DocTree'
+import { scopeOf } from '../lib/docTree'
 import { clip, lines, usePageContext } from '../lib/pageContext'
 import '../styles/docs.css'
-
-const fmtWhen = (ts: number): string => {
-  const d = new Date(ts * 1000)
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  return d.getTime() >= today.getTime()
-    ? d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
-    : d.toLocaleDateString([], { month: 'short', day: 'numeric' })
-}
 
 export default function DocsView(): JSX.Element {
   const docs = useStore((s) => s.docs)
   const docFolders = useStore((s) => s.docFolders)
+  const projects = useStore((s) => s.projects)
   const activeDoc = useStore((s) => s.activeDoc)
   const docDraft = useStore((s) => s.docDraft)
+  const docTitleDraft = useStore((s) => s.docTitleDraft)
   const docTabs = useStore((s) => s.docTabs)
   const docRevisions = useStore((s) => s.docRevisions)
   const docMode = useStore((s) => s.docMode)
   const docSaving = useStore((s) => s.docSaving)
-  const libraryScope = useStore((s) => s.libraryScope)
   const sidebarOpen = useStore((s) => s.sidebarOpen)
   const {
-    refreshDocs, openDoc, closeDocTab, createDoc, editDoc, flushDoc, renameDoc, setDocStar, setDocFolder,
-    deleteDoc, setDocMode, acceptRevision, rejectRevision, restoreRevision, toggleSidebar, setLibraryScope
+    refreshDocs, openDoc, closeDocTab, createDoc, editDoc, editDocTitle, flushDoc, moveDoc,
+    setDocMode, acceptRevision, rejectRevision, restoreRevision, toggleSidebar
   } = useStore()
 
   const [query, setQuery] = useState('')
   const [historyOpen, setHistoryOpen] = useState(false)
   const [linked, setLinked] = useState(true)
   const [editFrac, setEditFrac] = useState<number | null>(null)
-  const [titleDraft, setTitleDraft] = useState<string | null>(null)
-  // Non-null while "New folder…" is being typed. An Electron renderer has no window.prompt, so the
-  // picker turns into a text input in place rather than asking for the name in a dialog.
+  // Non-null while "New folder…" is being typed in the toolbar. An Electron renderer has no
+  // window.prompt, so the picker turns into a text input in place rather than asking in a dialog.
   const [folderDraft, setFolderDraft] = useState<string | null>(null)
   const previewRef = useRef<HTMLDivElement>(null)
 
-  const scope: Scope = libraryScope
-  useEffect(() => { void refreshDocs(query) }, [refreshDocs, query, scope])
-  // Anything still buffered belongs on disk before this view goes away.
-  useEffect(() => () => { void flushDoc() }, [flushDoc])
+  useEffect(() => { void refreshDocs(query) }, [refreshDocs, query])
+  // Anything still buffered belongs on disk before this view goes away — and before the window does.
+  useEffect(() => {
+    const flush = (): void => { void flushDoc() }
+    window.addEventListener('pagehide', flush)
+    window.addEventListener('blur', flush)
+    return () => {
+      window.removeEventListener('pagehide', flush)
+      window.removeEventListener('blur', flush)
+      flush()
+    }
+  }, [flushDoc])
 
   // The editor shows the buffer while typing and the saved body otherwise.
   const body = docDraft ?? activeDoc?.content ?? ''
+  const title = docTitleDraft ?? activeDoc?.title ?? ''
   const pending = activeDoc?.pending ?? []
   const applied = useMemo(() => docRevisions.filter((r) => r.status !== 'pending'), [docRevisions])
   const tabDocs = useMemo(
     () => docTabs.map((id) => docs.find((d) => d.id === id) ?? (activeDoc?.id === id ? activeDoc : null)).filter(Boolean) as Doc[],
     [docTabs, docs, activeDoc]
   )
-  // Every folder that exists, plus the open doc's own: the list may be filtered, and an empty folder
-  // is a real destination the docs themselves cannot vouch for.
+  const scope = activeDoc ? scopeOf(activeDoc) : ''
+  const projectName = projects.find((p) => p.id === scope)?.name
+  // Every folder of the doc's own project, plus the one it is in: the list may be filtered, and an
+  // empty folder is a real destination the docs themselves cannot vouch for.
   const folders = useMemo(() => {
-    const set = new Set([...docFolders.map((f) => f.path), ...docs.map((d) => d.folder).filter(Boolean)])
+    const set = new Set([
+      ...docFolders.filter((f) => f.scope === scope).map((f) => f.path),
+      ...docs.filter((d) => scopeOf(d) === scope).map((d) => d.folder).filter(Boolean)
+    ])
     if (activeDoc?.folder) set.add(activeDoc.folder)
     return [...set].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
-  }, [docFolders, docs, activeDoc])
+  }, [docFolders, docs, activeDoc, scope])
 
   // Linked scrolling: the preview follows the editor's fraction of the way down.
   useEffect(() => {
@@ -77,33 +82,33 @@ export default function DocsView(): JSX.Element {
     if (range > 0) el.scrollTop = editFrac * range
   }, [editFrac, linked])
 
-  const dirty = docDraft !== null && docDraft !== activeDoc?.content
+  const dirty = (docDraft !== null && docDraft !== activeDoc?.content) ||
+    (docTitleDraft !== null && docTitleDraft !== activeDoc?.title)
 
   // ⌘I over a doc answers about that doc: the text as it stands in the editor, unsaved edits and all.
   usePageContext(() => (activeDoc
     ? {
         view: 'docs',
         label: `Doc “${activeDoc.title || 'Untitled'}”`,
-        detail: `The doc is open in the editor${dirty ? ' with unsaved edits' : ''}${activeDoc.folder ? `, in the folder “${activeDoc.folder}”` : ''}. Its id is \`${activeDoc.id}\` — revise it with doc_edit, which lands as a diff the user accepts.\n\n\`\`\`markdown\n${clip(body)}\n\`\`\``,
+        detail: `The doc is open in the editor${dirty ? ' with unsaved edits' : ''}. It is filed under ${projectName ? `the project “${projectName}”` : 'Personal'}${activeDoc.folder ? `, in the folder “${activeDoc.folder}”` : ''}. Its id is \`${activeDoc.id}\` — revise it with doc_edit, which lands as a diff the user accepts.\n\n\`\`\`markdown\n${clip(body)}\n\`\`\``,
         refs: [{ kind: 'doc', id: activeDoc.id, name: activeDoc.title }],
         hints: ['Summarise this doc', 'Tighten the writing', 'Pull out the action items as todos']
       }
     : {
         view: 'docs',
-        label: 'Docs',
-        detail: `No doc is open. The list shows:\n${lines(docs, (d) => `“${d.title || 'Untitled'}” (\`${d.id}\`)${d.folder ? ` in ${d.folder}` : ''}`)}`,
+        label: 'Files',
+        detail: `No doc is open. Files are grouped by project — Personal plus one folder per project. The list shows:\n${lines(docs, (d) => `“${d.title || 'Untitled'}” (\`${d.id}\`)${d.project_id ? ` in project ${d.project_id}` : ' in Personal'}${d.folder ? `/${d.folder}` : ''}`)}`,
         refs: docs.slice(0, 40).map((d) => ({ kind: 'doc', id: d.id, name: d.title })),
-        hints: ['What have I been writing about?', 'Start a doc for this week\u2019s plan']
-      }), [activeDoc?.id, activeDoc?.title, activeDoc?.folder, body, dirty, docs])
+        hints: ['What have I been writing about?', 'Start a doc for this week’s plan']
+      }), [activeDoc?.id, activeDoc?.title, activeDoc?.folder, projectName, body, dirty, docs])
 
   return (
     <main className="page docs-page">
       <header className="page-header drag">
         {!sidebarOpen && <button className="icon-btn no-drag" title="Show sidebar (⌘B)" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
-        <h2><NotebookPen size={16} /> Docs</h2>
+        <h2><Files size={16} /> Files</h2>
         <div className="no-drag header-right">
-          <ScopeSelect value={scope} onChange={(s) => void setLibraryScope(s)} />
-          <button className="primary-btn" onClick={() => void createDoc({ project_id: scope === 'all' || scope === 'personal' ? null : scope })}>
+          <button className="primary-btn" onClick={() => void createDoc({})}>
             <Plus size={14} /> New doc
           </button>
         </div>
@@ -111,20 +116,18 @@ export default function DocsView(): JSX.Element {
 
       <div className="docs-body">
         <aside className="docs-side">
-          <DocTree
-            docs={docs} activeId={activeDoc?.id ?? null} query={query} onQuery={setQuery}
-            showScope={scope === 'all'} projectId={scope === 'all' || scope === 'personal' ? null : scope}
-          />
+          <DocTree docs={docs} activeId={activeDoc?.id ?? null} query={query} onQuery={setQuery} />
         </aside>
 
         {!activeDoc ? (
           <section className="docs-empty">
             <FileText size={30} />
             <h2>Nothing open</h2>
-            <p className="muted">Pick a doc on the left, or start a new one. Write markdown; wrap maths in <code>$…$</code> or <code>$$…$$</code>.</p>
+            <p className="muted">Pick a file on the left, or start a new one. Write markdown; wrap maths in <code>$…$</code> or <code>$$…$$</code>.</p>
             <p className="muted small">
-              In a chat, the assistant can read and revise these with <code>doc_read</code> and <code>doc_edit</code>.
-              Its edits arrive here as a diff you accept or reject — nothing is rewritten behind your back.
+              Everything is filed under Personal or a project — every project gets its own folder, and dragging a
+              doc between them is how you reassign it. In a chat, the assistant can read and revise these
+              with <code>doc_read</code> and <code>doc_edit</code>; its edits arrive here as a diff you accept or reject.
             </p>
             <button className="primary-btn" onClick={() => void createDoc({})}><Plus size={14} /> New doc</button>
           </section>
@@ -144,11 +147,23 @@ export default function DocsView(): JSX.Element {
             <div className="doc-toolbar">
               <input
                 className="doc-title-input"
-                value={titleDraft ?? activeDoc.title}
-                onChange={(e) => setTitleDraft(e.target.value)}
-                onBlur={() => { if (titleDraft !== null && titleDraft !== activeDoc.title) void renameDoc(activeDoc.id, titleDraft); setTitleDraft(null) }}
-                onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setTitleDraft(null) }}
+                value={title}
+                placeholder="Untitled"
+                onChange={(e) => editDocTitle(e.target.value)}
+                onBlur={() => void flushDoc()}
+                onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }}
               />
+              <label className="model-picker doc-folder-pick" title="Project">
+                <FolderKanban size={13} />
+                <select
+                  value={scope}
+                  onChange={(e) => { setFolderDraft(null); void moveDoc(activeDoc.id, e.target.value, '') }}
+                >
+                  <option value="">Personal</option>
+                  {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+                <ChevronDown size={12} />
+              </label>
               <label className="model-picker doc-folder-pick" title="Folder">
                 <Folder size={13} />
                 {folderDraft !== null ? (
@@ -159,7 +174,7 @@ export default function DocsView(): JSX.Element {
                     onChange={(e) => setFolderDraft(e.target.value)}
                     onBlur={() => {
                       const name = folderDraft.trim()
-                      if (name) void setDocFolder(activeDoc.id, name)
+                      if (name) void moveDoc(activeDoc.id, scope, name)
                       setFolderDraft(null)
                     }}
                     onKeyDown={(e) => {
@@ -174,7 +189,7 @@ export default function DocsView(): JSX.Element {
                       onChange={(e) => {
                         const v = e.target.value
                         if (v === '__new__') setFolderDraft('')
-                        else void setDocFolder(activeDoc.id, v)
+                        else void moveDoc(activeDoc.id, scope, v)
                       }}
                     >
                       <option value="">No folder</option>
@@ -199,7 +214,7 @@ export default function DocsView(): JSX.Element {
                   {linked ? <Link2 size={14} /> : <Link2Off size={14} />}
                 </button>
               )}
-              <button className="icon-btn ghost" title="Save now (⌘S)" onClick={() => void flushDoc()}><Save size={14} /></button>
+              <button className="icon-btn ghost" title="Save now (⌘S) — it autosaves anyway" onClick={() => void flushDoc()}><Save size={14} /></button>
               <button className={`icon-btn ghost ${historyOpen ? 'on' : ''}`} title="Revision history" onClick={() => setHistoryOpen((h) => !h)}>
                 <History size={14} />
                 {pending.length > 0 && <span className="dot-badge">{pending.length}</span>}

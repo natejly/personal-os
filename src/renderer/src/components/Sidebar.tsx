@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { MessageSquarePlus, Search, Settings, Sparkles, Trash2, PanelLeftClose, Brain, FileText, NotebookPen, Plus, Folder, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid, Library, Mail, Mic, Users, MonitorDot, BookOpen, Globe } from 'lucide-react'
+import { MessageSquarePlus, Search, Settings, Sparkles, Trash2, PanelLeftClose, Brain, FileText, Files, Plus, Folder, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid, Library, Mail, Mic, Users, MonitorDot, BookOpen, Globe } from 'lucide-react'
 import GrainLogo from './GrainLogo'
 import { useStore, type View } from '../store'
 import { ActivityIndicator } from './ActivityView'
@@ -46,7 +46,7 @@ const NAV: NavEntry[] = [
   { view: 'mail', label: 'Mail', icon: <Mail size={15} /> },
   { view: 'boards', label: 'Boards', icon: <KanbanSquare size={15} /> },
   { view: 'dashboards', label: 'Dashboards', icon: <LayoutDashboard size={15} /> },
-  { view: 'docs', label: 'Docs', icon: <NotebookPen size={15} /> },
+  { view: 'docs', label: 'Files', icon: <Files size={15} /> },
   // No `kind`: no `meeting` widget kind ships in this slice, and a kind outside the WidgetKind
   // union would not typecheck — so the row is not a canvas drag source.
   { view: 'meetings', label: 'Meetings', icon: <Mic size={15} /> },

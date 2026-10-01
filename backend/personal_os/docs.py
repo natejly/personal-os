@@ -49,9 +49,15 @@ CREATE INDEX IF NOT EXISTS idx_rev_pending ON doc_revisions(status, created_at D
 -- Folders are rows, not just a string on each doc: a folder you made and have not filled yet has
 -- to survive a reload, and nesting needs a name for "Work/Research" even when only its children hold
 -- docs. `docs.folder` stays the path, so every existing doc keeps working untouched.
+--
+-- `scope` is which tree the folder belongs to: '' is personal, otherwise a project id. Two projects
+-- can each hold a "Research" without colliding, and a doc's scope is simply its own `project_id`, so
+-- "which project is this filed under" has exactly one home and cannot drift.
 CREATE TABLE IF NOT EXISTS doc_folders (
-  path TEXT PRIMARY KEY,
-  created_at REAL NOT NULL
+  scope TEXT NOT NULL DEFAULT '',
+  path TEXT NOT NULL,
+  created_at REAL NOT NULL,
+  PRIMARY KEY (scope, path)
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
@@ -86,6 +92,11 @@ def ancestors(path: str) -> list[str]:
     return ["/".join(segs[: i + 1]) for i in range(len(segs))]
 
 
+def scope_key(project_id: str | None) -> str:
+    """Which tree a path lives in. A doc's scope is its own project; '' is the personal tree."""
+    return (project_id or "").strip()
+
+
 def word_count(text: str) -> int:
     return len(re.findall(r"\S+", text))
 
@@ -113,6 +124,25 @@ class Docs:
         self.db = db
         with db.tx() as c:
             c.executescript(SCHEMA)
+            self._migrate_folder_scope(c)
+
+    @staticmethod
+    def _migrate_folder_scope(c: Any) -> None:
+        """Give an existing install's folders a scope. They were global, so they are all personal.
+
+        The old table keyed on `path` alone, which would stop two projects ever holding a folder of
+        the same name — so this rebuilds rather than bolting a column on the side.
+        """
+        cols = {r["name"] for r in c.execute("PRAGMA table_info(doc_folders)").fetchall()}
+        if not cols or "scope" in cols:
+            return
+        c.execute("ALTER TABLE doc_folders RENAME TO doc_folders_unscoped")
+        c.execute(
+            "CREATE TABLE doc_folders (scope TEXT NOT NULL DEFAULT '', path TEXT NOT NULL,"
+            " created_at REAL NOT NULL, PRIMARY KEY (scope, path))")
+        c.execute("INSERT OR IGNORE INTO doc_folders(scope, path, created_at)"
+                  " SELECT '', path, created_at FROM doc_folders_unscoped")
+        c.execute("DROP TABLE doc_folders_unscoped")
 
     # ---- indexing ----
     @staticmethod
@@ -265,6 +295,15 @@ class Docs:
                 self._reindex(c, id, d["title"], d["content"])
         return self.get(id)
 
+    def move(self, id: str, scope: str | None, folder: str = "") -> dict[str, Any] | None:
+        """File a doc somewhere in the tree: which project ('' is personal) and which folder in it.
+
+        One call, because the two halves are one gesture — dragging a doc from Personal/Notes into
+        Work/Research has to land both or the doc ends up in a folder its project does not have.
+        """
+        sc = scope_key(scope)
+        return self.update_meta(id, {"project_id": sc or None, "folder": folder})
+
     def delete(self, id: str) -> None:
         with self.db.tx() as c:
             c.execute("DELETE FROM docs WHERE id=?", (id,))
@@ -272,44 +311,52 @@ class Docs:
 
     # ---- folders ----
     def folders(self) -> list[dict[str, Any]]:
-        """Every folder, with the doc counts the tree renders. Ancestors implied by a path are
-        included even if nothing ever created them, so a tree never has a hole in the middle."""
+        """Every folder in every tree, with the doc counts the UI renders. Ancestors implied by a path
+        are included even if nothing ever created them, so a tree never has a hole in the middle, and
+        a folder a doc claims to be in is listed even if its own row went missing."""
         with self.db.tx() as c:
-            named = [r["path"] for r in c.execute("SELECT path FROM doc_folders").fetchall()]
-            used = [r["folder"] for r in c.execute("SELECT DISTINCT folder FROM docs WHERE folder<>''").fetchall()]
-            counts = {r["folder"]: int(r["n"]) for r in c.execute(
-                "SELECT folder, COUNT(*) AS n FROM docs WHERE folder<>'' GROUP BY folder").fetchall()}
-        paths: set[str] = set()
-        for p in [*named, *used]:
-            norm = folder_path(p)
-            for anc in ancestors(norm):
-                paths.add(anc)
+            named = [(r["scope"], r["path"]) for r in c.execute("SELECT scope, path FROM doc_folders").fetchall()]
+            counts = {(r["scope"], r["folder"]): int(r["n"]) for r in c.execute(
+                "SELECT COALESCE(project_id,'') AS scope, folder, COUNT(*) AS n FROM docs"
+                " WHERE folder<>'' GROUP BY scope, folder").fetchall()}
+        keys: set[tuple[str, str]] = set()
+        for scope, p in [*named, *counts.keys()]:
+            for anc in ancestors(folder_path(p)):
+                keys.add((scope_key(scope), anc))
         out = []
-        for path in sorted(paths, key=lambda p: [seg.lower() for seg in p.split("/")]):
+        for scope, path in sorted(keys, key=lambda k: (k[0], [seg.lower() for seg in k[1].split("/")])):
             prefix = path + "/"
             out.append({
+                "scope": scope,
                 "path": path,
                 "name": path.rsplit("/", 1)[-1],
                 "parent": path.rsplit("/", 1)[0] if "/" in path else "",
-                "docs": counts.get(path, 0),
+                "docs": counts.get((scope, path), 0),
                 # What the badge shows on a collapsed folder: everything filed anywhere beneath it.
-                "docs_deep": sum(n for f, n in counts.items() if f == path or f.startswith(prefix)),
+                "docs_deep": sum(n for (s, f), n in counts.items()
+                                 if s == scope and (f == path or f.startswith(prefix))),
             })
         return out
 
-    def create_folder(self, path: str) -> list[dict[str, Any]]:
+    def create_folder(self, path: str, scope: str | None = "") -> list[dict[str, Any]]:
         norm = folder_path(path)
         if not norm:
             raise ValueError("A folder needs a name")
+        sc = scope_key(scope)
         t = now()
         with self.db.tx() as c:
             for anc in ancestors(norm):
-                c.execute("INSERT OR IGNORE INTO doc_folders(path, created_at) VALUES(?,?)", (anc, t))
+                c.execute("INSERT OR IGNORE INTO doc_folders(scope, path, created_at) VALUES(?,?,?)", (sc, anc, t))
         return self.folders()
 
-    def rename_folder(self, path: str, new_path: str) -> list[dict[str, Any]]:
-        """Rename or move a folder, taking its subtree and every doc filed under it along."""
+    def rename_folder(self, path: str, new_path: str, scope: str | None = "") -> list[dict[str, Any]]:
+        """Rename or move a folder within its own tree, taking its subtree and its docs along.
+
+        Moving a folder to a *different* project is deliberately not this operation: the docs' own
+        `project_id` is what decides which tree they are in, so that is a per-doc move.
+        """
         src, dst = folder_path(path), folder_path(new_path)
+        sc = scope_key(scope)
         if not src:
             raise ValueError("A folder needs a name")
         if not dst:
@@ -319,40 +366,55 @@ class Docs:
         # Moving a folder inside itself would orphan the subtree it is carrying.
         if dst.startswith(src + "/"):
             raise ValueError("A folder cannot be moved inside itself")
+        proj_match = "project_id IS NULL" if sc == "" else "project_id = ?"
+        proj_args: tuple[Any, ...] = () if sc == "" else (sc,)
         with self.db.tx() as c:
-            if c.execute("SELECT 1 FROM doc_folders WHERE path=?", (dst,)).fetchone():
+            if c.execute("SELECT 1 FROM doc_folders WHERE scope=? AND path=?", (sc, dst)).fetchone():
                 raise ValueError(f'"{dst}" already exists')
-            rows = c.execute("SELECT path FROM doc_folders WHERE path=? OR path LIKE ?", (src, src + "/%")).fetchall()
+            rows = c.execute("SELECT path FROM doc_folders WHERE scope=? AND (path=? OR path LIKE ?)",
+                             (sc, src, src + "/%")).fetchall()
             t = now()
             for anc in ancestors(dst):
-                c.execute("INSERT OR IGNORE INTO doc_folders(path, created_at) VALUES(?,?)", (anc, t))
+                c.execute("INSERT OR IGNORE INTO doc_folders(scope, path, created_at) VALUES(?,?,?)", (sc, anc, t))
             for r in rows:
                 moved = dst + r["path"][len(src):]
-                c.execute("DELETE FROM doc_folders WHERE path=?", (r["path"],))
-                c.execute("INSERT OR IGNORE INTO doc_folders(path, created_at) VALUES(?,?)", (moved, t))
-            c.execute("UPDATE docs SET folder=? WHERE folder=?", (dst, src))
-            c.execute("UPDATE docs SET folder=? || substr(folder, ?) WHERE folder LIKE ?",
-                      (dst, len(src) + 1, src + "/%"))
+                c.execute("DELETE FROM doc_folders WHERE scope=? AND path=?", (sc, r["path"]))
+                c.execute("INSERT OR IGNORE INTO doc_folders(scope, path, created_at) VALUES(?,?,?)", (sc, moved, t))
+            c.execute(f"UPDATE docs SET folder=? WHERE folder=? AND {proj_match}", (dst, src, *proj_args))
+            c.execute(f"UPDATE docs SET folder=? || substr(folder, ?) WHERE folder LIKE ? AND {proj_match}",
+                      (dst, len(src) + 1, src + "/%", *proj_args))
         return self.folders()
 
-    def delete_folder(self, path: str, delete_docs: bool = False) -> list[dict[str, Any]]:
+    def delete_folder(self, path: str, delete_docs: bool = False, scope: str | None = "") -> list[dict[str, Any]]:
         """Remove a folder and its subfolders. Its docs move up to the parent unless asked otherwise:
         losing a folder must not silently lose what was written in it."""
         src = folder_path(path)
+        sc = scope_key(scope)
         if not src:
             raise ValueError("A folder needs a name")
         parent = src.rsplit("/", 1)[0] if "/" in src else ""
+        proj_match = "project_id IS NULL" if sc == "" else "project_id = ?"
+        proj_args: tuple[Any, ...] = () if sc == "" else (sc,)
         with self.db.tx() as c:
             if delete_docs:
-                ids = [r["id"] for r in c.execute("SELECT id FROM docs WHERE folder=? OR folder LIKE ?",
-                                                  (src, src + "/%")).fetchall()]
+                ids = [r["id"] for r in c.execute(
+                    f"SELECT id FROM docs WHERE (folder=? OR folder LIKE ?) AND {proj_match}",
+                    (src, src + "/%", *proj_args)).fetchall()]
                 for did in ids:
                     c.execute("DELETE FROM docs WHERE id=?", (did,))
                     c.execute("DELETE FROM docs_fts WHERE doc_id=?", (did,))
             else:
-                c.execute("UPDATE docs SET folder=? WHERE folder=? OR folder LIKE ?", (parent, src, src + "/%"))
-            c.execute("DELETE FROM doc_folders WHERE path=? OR path LIKE ?", (src, src + "/%"))
+                c.execute(f"UPDATE docs SET folder=? WHERE (folder=? OR folder LIKE ?) AND {proj_match}",
+                          (parent, src, src + "/%", *proj_args))
+            c.execute("DELETE FROM doc_folders WHERE scope=? AND (path=? OR path LIKE ?)", (sc, src, src + "/%"))
         return self.folders()
+
+    def forget_scope(self, project_id: str) -> None:
+        """Drop a deleted project's folder rows. Its docs are demoted to personal by the schema's
+        ON DELETE SET NULL, so the folders they still name resurface in the personal tree — which is
+        the point: the project is gone, the writing is not."""
+        with self.db.tx() as c:
+            c.execute("DELETE FROM doc_folders WHERE scope=?", (scope_key(project_id),))
 
     # ---- revisions ----
     def _rev_view(self, r: dict[str, Any], current: str | None = None) -> dict[str, Any]:

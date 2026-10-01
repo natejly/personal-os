@@ -1427,12 +1427,17 @@ def _register_docs(self: Toolbox) -> None:
     R("doc_read", ToolSpec("doc_read", "Read a doc's markdown with line numbers (LaTeX written as $…$ or $$…$$ is part of the text). Read before editing: doc_edit matches on exact text, so you need the real wording. Page through a long doc with from_line/to_line.",
         _obj({"doc": {"type": "string", "description": "Doc id or title"}, "from_line": {"type": "integer", "default": 1}, "to_line": {"type": "integer"}}, ["doc"]), doc_read, "docs"))
 
-    async def doc_create(ctx: dict[str, Any], title: str, content: str = "") -> Any:
-        d = self.docs.create(title, content, ctx.get("project_id"), author="assistant")
+    async def doc_create(ctx: dict[str, Any], title: str, content: str = "", folder: str = "") -> Any:
+        # The chat's own project decides which tree it lands in, so a doc written inside a project is
+        # filed under that project without the model having to be told which one it is in.
+        d = self.docs.create(title, content, ctx.get("project_id"), folder=folder, author="assistant")
         return {"created": d["title"], "doc_id": d["id"], "words": d["words"],
-                "note": "Created in Docs. The user can undo it from the doc's revision history."}
-    R("doc_create", ToolSpec("doc_create", "Create a new doc for the user, optionally with a starting markdown body. Use it when they ask you to draft, write up or outline something they will keep and edit. Markdown and LaTeX ($x^2$, $$\\int f\\,dx$$) both render in the editor.",
-        _obj({"title": {"type": "string"}, "content": {"type": "string", "description": "Markdown body"}}, ["title"]), doc_create, "docs", "writes"))
+                "filed_under": (d["folder"] or "the project's root") if d["project_id"] else (d["folder"] or "Personal"),
+                "note": "Created in Files. The user can undo it from the doc's revision history."}
+    R("doc_create", ToolSpec("doc_create", "Create a new doc for the user, optionally with a starting markdown body. Use it when they ask you to draft, write up or outline something they will keep and edit. Markdown and LaTeX ($x^2$, $$\\int f\\,dx$$) both render in the editor. It is filed under the project this chat belongs to, or Personal; pass `folder` to put it in a folder of that project's tree, using a path doc_list has already shown.",
+        _obj({"title": {"type": "string"}, "content": {"type": "string", "description": "Markdown body"},
+              "folder": {"type": "string", "description": "Folder path within this project's tree, e.g. 'Research/2026'. Omit for its root."}},
+             ["title"]), doc_create, "docs", "writes"))
 
     async def doc_edit(ctx: dict[str, Any], doc: str, edits: list[dict[str, Any]] | None = None,
                        content: str | None = None, append: str | None = None,

@@ -1203,6 +1203,8 @@ export interface Doc {
  * own so an empty one survives a reload, and so a rename can carry a subtree.
  */
 export interface DocFolder {
+  /** Which tree it is in: '' is personal, otherwise a project id. Paths are unique per scope only. */
+  scope: string
   path: string
   name: string
   parent: string

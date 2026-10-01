@@ -397,6 +397,16 @@ def _mcp_server_view(row: dict[str, Any]) -> dict[str, Any]:
             "eval": mcp_store.latest_eval(row["id"])}
 
 
+def fscope(raw: str | None) -> str:
+    """Normalise a Files-tree scope: '' is the personal tree, anything else a project id.
+
+    Unlike `sid` there is no "every scope" here — a folder lives in exactly one tree, so 'all'
+    arriving from a stale caller is read as personal rather than as a tree called '__all__'.
+    """
+    s = sid(raw)
+    return "" if s in (None, ALL) else str(s)
+
+
 def sid(project_id: str | None) -> str | None:
     """Normalise the project query param: '' / 'personal' means personal (global) scope, 'all' means every scope."""
     if project_id in (None, "", "global", "personal", "null"):
@@ -675,6 +685,8 @@ def update_project(id: str, body: ProjectPatch) -> dict[str, Any]:
 @app.delete("/projects/{id}")
 def delete_project(id: str) -> dict[str, bool]:
     projects.delete(id)
+    # Its docs survive, demoted to personal; the folder rows for a tree that no longer exists do not.
+    docs.forget_scope(id)
     return {"ok": True}
 
 
@@ -3625,6 +3637,10 @@ class DocMetaPatch(BaseModel):
     starred: bool | None = None
     project_id: str | None = None
     clear_project: bool = False
+    # Where in the Files tree this doc now lives: '' is the personal tree, otherwise a project id.
+    # Unlike `project_id` it can say "personal" out loud, so one patch can carry a whole drag —
+    # project and folder together — without needing `clear_project` as a second flag.
+    scope: str | None = None
 
 
 @app.get("/docs")
@@ -3641,11 +3657,15 @@ def docs_pending() -> dict[str, int]:
 
 class FolderIn(BaseModel):
     path: str
+    # Which tree: '' is the personal one, otherwise a project id. Absent means personal, which is what
+    # every folder made before projects had their own tree was.
+    scope: str = ""
 
 
 class FolderRename(BaseModel):
     path: str
     new_path: str
+    scope: str = ""
 
 
 # Declared above /docs/{id}: FastAPI matches in order, and "folders" would otherwise be read as a doc id.
@@ -3657,7 +3677,7 @@ def list_doc_folders() -> list[dict[str, Any]]:
 @app.post("/docs/folders")
 def create_doc_folder(body: FolderIn) -> list[dict[str, Any]]:
     try:
-        return docs.create_folder(body.path)
+        return docs.create_folder(body.path, fscope(body.scope))
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
@@ -3666,15 +3686,15 @@ def create_doc_folder(body: FolderIn) -> list[dict[str, Any]]:
 def rename_doc_folder(body: FolderRename) -> list[dict[str, Any]]:
     """Rename and move are the same operation: both rewrite the path of a folder and its subtree."""
     try:
-        return docs.rename_folder(body.path, body.new_path)
+        return docs.rename_folder(body.path, body.new_path, fscope(body.scope))
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
 
 @app.delete("/docs/folders")
-def delete_doc_folder(path: str, delete_docs: bool = False) -> list[dict[str, Any]]:
+def delete_doc_folder(path: str, delete_docs: bool = False, scope: str = "") -> list[dict[str, Any]]:
     try:
-        return docs.delete_folder(path, delete_docs)
+        return docs.delete_folder(path, delete_docs, fscope(scope))
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
@@ -3706,8 +3726,10 @@ def save_doc(id: str, body: DocSave) -> dict[str, Any]:
 
 @app.patch("/docs/{id}")
 def patch_doc(id: str, body: DocMetaPatch) -> dict[str, Any]:
-    patch = body.model_dump(exclude_none=True, exclude={"clear_project"})
-    if body.clear_project:
+    patch = body.model_dump(exclude_none=True, exclude={"clear_project", "scope"})
+    if body.scope is not None:
+        patch["project_id"] = fscope(body.scope) or None
+    elif body.clear_project:
         patch["project_id"] = None
     elif "project_id" in patch:
         patch["project_id"] = sid(patch["project_id"])

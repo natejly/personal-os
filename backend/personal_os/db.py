@@ -333,6 +333,10 @@ class Database:
         """Add columns introduced after the first release (CREATE TABLE IF NOT EXISTS won't)."""
         wanted = {
             "projects": {"tools": "TEXT NOT NULL DEFAULT '{}'"},
+            "memories": {"valid_from": "REAL", "invalid_at": "REAL", "superseded_by": "TEXT",
+                         "source_conversation_id": "TEXT", "source_message_id": "TEXT"},
+            "kg_edges": {"valid_at": "REAL", "invalid_at": "REAL", "superseded_by": "TEXT",
+                         "source_message_id": "TEXT", "fact": "TEXT NOT NULL DEFAULT ''"},
             "messages": {"tool_events": "TEXT", "trace": "TEXT", "reasoning": "TEXT"},
             "jobs": {"kind": "TEXT NOT NULL DEFAULT 'cron'", "run_at": "REAL"},
             "action_plans": {"desk_id": "TEXT", "intent": "TEXT NOT NULL DEFAULT ''",
@@ -349,6 +353,7 @@ class Database:
                     c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
         # These index columns the block above may have just added, so they cannot live in SCHEMA:
         # executescript runs before the migration and would hit a column that is not there yet.
+        c.execute("CREATE INDEX IF NOT EXISTS idx_mem_valid ON memories(project_id, invalid_at)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_runs_desk ON agent_runs(desk_id, started_at DESC)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_approvals_desk ON approvals(desk_id, status)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_plans_desk ON action_plans(desk_id, created_at)")

@@ -452,6 +452,12 @@ export interface Memory {
   pinned: number
   created_at: number
   updated_at: number
+  /** Validity interval: `invalid_at` set means superseded or forgotten (history), `superseded_by` is its replacement. */
+  valid_from?: number | null
+  invalid_at?: number | null
+  superseded_by?: string | null
+  source_conversation_id?: string | null
+  source_message_id?: string | null
 }
 
 /** How the user writes, learned from samples of their own writing. One per scope. See backend style.py. */

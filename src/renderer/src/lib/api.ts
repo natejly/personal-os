@@ -306,7 +306,10 @@ export const api = {
     create: (m: { project_id: string | null; content: string; kind?: string; pinned?: boolean }) => req<Memory>('/memories', { method: 'POST', body: json(m) }),
     update: (id: string, patch: { content?: string; kind?: string; pinned?: boolean; project_id?: string | null; move_to_global?: boolean }) =>
       req<Memory>(`/memories/${id}`, { method: 'PUT', body: json(patch) }),
-    delete: (id: string) => req(`/memories/${id}`, { method: 'DELETE' })
+    delete: (id: string) => req(`/memories/${id}`, { method: 'DELETE' }),
+    /** Every row including superseded / forgotten ones. */
+    listWithHistory: (s: Scope) => req<Memory[]>(`/memories?${scope(s)}&include_invalid=true`),
+    restore: (id: string) => req<Memory>(`/memories/${id}/restore`, { method: 'POST' })
   },
   style: {
     get: (s: Scope) => req<StyleState>(`/style?project_id=${encodeURIComponent(s === 'all' ? 'personal' : s)}`),

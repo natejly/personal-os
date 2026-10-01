@@ -562,7 +562,7 @@ class Toolbox:
             examples=[{}, {"offset": 50}]))
 
         async def search_memory(ctx: dict[str, Any], query: str, offset: int = 0) -> Any:
-            rows = [{"id": m["id"], "content": m["content"], "kind": m["kind"], "scope": "project" if m["project_id"] else "personal"} for m in self.memories.list(ctx["project_id"], query)]
+            rows = [{"id": m["id"], "content": m["content"], "kind": m["kind"], "valid_from": m.get("valid_from"), "scope": "project" if m["project_id"] else "personal"} for m in self.memories.list(ctx["project_id"], query)]
             return page(rows, offset=offset, limit=20, key="memories")
         R("search_memory", ToolSpec("search_memory", "Search what you remember about the user (long-term memory) for a topic.",
             _obj({"query": {"type": "string"}, "offset": {"type": "integer", "default": 0}}, ["query"]), search_memory, "memory",

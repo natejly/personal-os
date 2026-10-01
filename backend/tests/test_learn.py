@@ -43,9 +43,11 @@ def test_update_supersedes_instead_of_duplicating(monkeypatch: Any) -> None:
         old = memories.create(None, "User prefers dark mode", kind="preference", source="auto")
         # for_context lists it as [M1]; the extractor returns an update for it.
         out = _run(memories, graph, {"updates": [{"id": "M1", "content": "User prefers light mode", "kind": "preference"}]}, monkeypatch)
-        assert [m["id"] for m in out["updated"]] == [old["id"]]
+        # Non-destructive: the new version is a new row and the old one is kept as history.
+        assert [m["id"] for m in out["updated"]] != [old["id"]]
         rows = memories.list(None)
         assert len(rows) == 1 and rows[0]["content"] == "User prefers light mode"
+        assert memories.get(old["id"])["superseded_by"] == rows[0]["id"]
 
 
 def test_forget_deletes_but_never_pinned(monkeypatch: Any) -> None:

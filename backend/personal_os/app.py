@@ -2363,8 +2363,21 @@ class MemoryPatch(BaseModel):
 
 
 @app.get("/memories")
-def list_memories(project_id: str | None = None, q: str = "", include_global: bool = True) -> list[dict[str, Any]]:
-    return memories.list(sid(project_id), q, include_global)
+def list_memories(project_id: str | None = None, q: str = "", include_global: bool = True, include_invalid: bool = False) -> list[dict[str, Any]]:
+    return memories.list(sid(project_id), q, include_global, include_invalid)
+
+
+@app.post("/memories/{id}/restore")
+def restore_memory(id: str) -> dict[str, Any]:
+    m = memories.restore(id)
+    if not m:
+        raise HTTPException(404)
+    return m
+
+
+@app.get("/memories/{id}/history")
+def memory_history(id: str) -> list[dict[str, Any]]:
+    return memories.history(id)
 
 
 @app.post("/memories")
@@ -2514,8 +2527,8 @@ class EdgePatch(BaseModel):
 
 
 @app.get("/graph")
-def get_graph(project_id: str | None = None, include_global: bool = True) -> dict[str, Any]:
-    return graph.get(sid(project_id), include_global)
+def get_graph(project_id: str | None = None, include_global: bool = True, include_invalid: bool = False) -> dict[str, Any]:
+    return graph.get(sid(project_id), include_global, include_invalid)
 
 
 @app.post("/graph/nodes")

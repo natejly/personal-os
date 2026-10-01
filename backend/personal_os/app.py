@@ -25,7 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import AfterValidator, BaseModel, Field
 
-from . import activity, assist, llm, mac, mcp_eval, tools
+from . import activity, assist, llm, mac, mcp_eval, mcp_search, tools
 from .context import build_context, estimate_tokens
 from .db import Database, data_dir_from_env, new_id
 from .extract_text import extract_text
@@ -1069,7 +1069,19 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     modes = toolbox.effective(cfg.get("tools") or {}, (project or {}).get("tools"), conv["settings"].get("tools")) if use_tools else {}
     # MCP slugs all carry a reserved prefix no built-in may use, so the two mode maps cannot collide.
     mcp_modes, mcp_schemas = _mcp_tooling(conv["project_id"], conv_id) if use_tools else ({}, [])
-    modes.update(mcp_modes)
+    # Past mcpDeferAbove ready tools the model gets mcp_tool_search instead of every schema. Only loaded
+    # slugs are in `modes`, so a call to an unloaded one is off -> denied, never run.
+    mcp_defer = mcp_search.should_defer(len(mcp_schemas), int(cfg.get("mcpDeferAbove", 12) or 0))
+    tool_ctx["mcp_loaded"] = set()
+    if mcp_defer:
+        _mcp_names = {s["id"]: s["name"] for s in mcp_store.servers()}
+        tool_ctx["mcp_catalog"] = lambda: [{**t, "server": _mcp_names.get(t["server_id"], "MCP")}
+                                           for t in mcp_store.tools() if t["slug"] in mcp_modes]
+        if use_tools:
+            modes["mcp_tool_search"] = "on"
+    else:
+        modes.pop("mcp_tool_search", None)
+        modes.update(mcp_modes)
     # ---- the desk this reply belongs to, if any, read once.
     # `autonomy` is read off the desk row rather than off conv["settings"], so changing a desk's
     # autonomy takes effect on its next turn without having to rewrite the conversation.
@@ -1093,24 +1105,32 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         each time rather than rebuilding from a stale snapshot - otherwise the user's 'Always' click
         is silently discarded on the next recompute.
         """
+        offer = mcp_search.select_schemas(mcp_schemas, tool_ctx["mcp_loaded"], mcp_defer)
         if not modes:
-            return mcp_schemas
+            return offer
         m = dict(modes)
         # A desk's workspace tools exist only inside a desk: elsewhere there is no root to resolve.
         if not desk_id:
-            m = {n: v for n, v in m.items() if toolbox.specs[n].group != "desk"}
+            m = {n: v for n, v in m.items() if n not in toolbox.specs or toolbox.specs[n].group != "desk"}
         if planning and not withheld:
             # While a plan is being drafted the model is offered reading and the plan tool, nothing
             # else. Withholding them is kinder than denying them: a tool that is not offered costs no
             # round, where one that is offered and refused costs one every time. `withheld=True` asks
             # for the full set anyway, which is what a plan has to be judged against: its steps name
             # the tools it will use *after* approval.
-            m = {n: v for n, v in m.items() if n == PLAN_TOOL or toolbox.specs[n].danger in PLAN_SAFE_DANGER}
+            m = {n: v for n, v in m.items() if n == PLAN_TOOL or (n in toolbox.specs and toolbox.specs[n].danger in PLAN_SAFE_DANGER)}
             m[PLAN_TOOL] = "ask"
-        return toolbox.schemas(m) + mcp_schemas
+        return toolbox.schemas(m) + offer
 
     tool_schemas = _schemas()
     tools_hint = (TOOLS_HINT + ("\n" + PLAN_HINT if any(s["function"]["name"] == "todo_write" for s in tool_schemas) else "")) if tool_schemas else ""
+    if mcp_defer:
+        _counts: dict[str, int] = {}
+        for t in mcp_store.tools():
+            if t["slug"] in mcp_modes:
+                _n = _mcp_names.get(t["server_id"], "MCP")
+                _counts[_n] = _counts.get(_n, 0) + 1
+        tools_hint = "\n".join(p for p in (tools_hint, mcp_search.catalog_hint(_counts.items())) if p)
     system = "\n\n".join(p for p in (system, RENDER_HINT, tools_hint,
                                      JOB_HINT if proposal_only(run) else "") if p)
     used["system_prompt"] = system
@@ -1508,7 +1528,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 if was_blocked:
                     result: Any = tools.denied(c["name"], f"failing {TOOL_ERROR_LIMIT} times in a row and disabled for the rest of this reply")
                 elif mode == "off":
-                    result = tools.denied(c["name"], "turned off for this chat")
+                    result = tools.denied(c["name"], "not loaded; call mcp_tool_search first"
+                                          if mcp_defer and mcp_is(c["name"]) and c["name"] in mcp_modes
+                                          else "turned off for this chat")
                 elif pre is not None:
                     result = pre  # an unusable plan, or a step of a plan the user rejected
                 elif plan is not None:
@@ -1554,6 +1576,13 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 # page with read_tool_result, so nothing is silently truncated away. See working.py.
                 messages.append({"role": "tool", "tool_call_id": c["id"],
                                  "content": tool_results.for_model(conv_id, am["id"], c["name"], for_model)})
+                if c["name"] == "mcp_tool_search":
+                    # A search loads schemas: bring their modes in (grants and ask are already resolved
+                    # in mcp_modes) and offer them from the next round.
+                    for _slug in tool_ctx["mcp_loaded"]:
+                        if _slug in mcp_modes:
+                            modes.setdefault(_slug, mcp_modes[_slug])
+                    tool_schemas = _schemas()
                 if tool_ctx.pop("plan_changed", None):
                     yield "plan", {"conversation_id": conv_id, "steps": (work_plans.get(conv_id) or {}).get("steps") or []}
             if partial == "loop":

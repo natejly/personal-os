@@ -1117,11 +1117,13 @@ export const useStore = create<State>((set, get) => {
       if (inited) return
       inited = true
       const status = await window.os.backendStatus()
-      if (!status.url) return set({ ready: true, backendError: status.error ?? 'Backend not running' })
+      // A failed start must stay retryable from the error screen's "Try again".
+      if (!status.url) { inited = false; return set({ ready: true, backendError: status.error ?? 'Backend not running' }) }
       setBase(status.url)
       try {
         await api.health()
       } catch (e) {
+        inited = false
         return set({ ready: true, backendError: status.error ?? (e as Error).message })
       }
       const [settings, projects, personalStats, conversations] = await Promise.all([
@@ -1132,7 +1134,7 @@ export const useStore = create<State>((set, get) => {
       // window writes it back; a pop-out (`?surface=widget`) never renders App and must not touch settings.
       const { mode: legacyMode } = settings
       const legacyCanvas = legacyMode === 'canvas'
-      set({ settings: withoutLegacyMode(settings), view: legacyCanvas ? 'canvas' : 'home', projects, personalStats, conversations, ready: true, settingsOpen: !settings.apiKey && conversations.length === 0 })
+      set({ settings: withoutLegacyMode(settings), view: legacyCanvas ? 'canvas' : 'home', projects, personalStats, conversations, ready: true })
       if (legacyCanvas && !isPopout()) void get().saveSettings({ mode: 'classic' }).catch(() => undefined)
       void get().loadModels()
       void get().loadScope('all')

@@ -14,6 +14,9 @@ import type {
   PendingSend, SendHoldConfig, Verification, Verified,
   Meeting, FullMeeting, MeetingActionItem, MeetingCandidate, MeetingConfig, MeetingPreflight, MeetingRevision, MeetingSegment, MeetingStatusInfo, MeetingStreamEvent
 } from '@shared/types'
+import type { ProviderInfo, SetupStatus, SetupTestResult } from '../components/onboarding/steps'
+
+export interface SetupBody { provider: string; baseUrl: string; apiKey: string | null; model: string }
 
 let base = ''
 let token = ''
@@ -92,6 +95,14 @@ export const api = {
   settings: {
     get: () => req<Settings>('/settings'),
     set: (patch: Partial<Settings>) => req<Settings>('/settings', { method: 'PUT', body: json(patch) })
+  },
+  /** First-run setup (backend setup routes). `body` is the same for test and complete. */
+  setup: {
+    status: () => req<SetupStatus>('/setup/status'),
+    providers: () => req<{ providers: ProviderInfo[] }>('/setup/providers'),
+    test: (body: SetupBody) => req<SetupTestResult>('/setup/test', { method: 'POST', body: json(body) }),
+    complete: (body: SetupBody) => req<SetupStatus>('/setup/complete', { method: 'POST', body: json(body) }),
+    reset: () => req<SetupStatus>('/setup/reset', { method: 'POST' })
   },
   models: () => req<ModelInfo[]>('/models'),
   tools: () => req<{ tools: ToolInfo[]; enabled: Record<string, boolean> }>('/tools'),

@@ -76,6 +76,7 @@ dist/mac-arm64/Grain.app/Contents/Resources/backend/python/bin/python3 -m person
   --port 8797 --data-dir "$(mktemp -d)"      # then: curl http://127.0.0.1:8797/health
 ```
 
-Launching the .app itself uses the real `~/Library/Application Support/personal-os` data directory (the
-legacy-dir fallback in `src/main/index.ts` wins over `--user-data-dir`), so test it on a machine or
-account whose data you do not mind touching.
+Launching the .app itself uses the real `~/Library/Application Support/personal-os` data directory by
+default (the legacy-dir fallback in `src/main/index.ts` wins over `--user-data-dir`). To test safely,
+set `GRAIN_USER_DATA` to a temp directory: `GRAIN_USER_DATA=$(mktemp -d) open -n dist/mac-arm64/Grain.app`
+(or run the binary directly so the variable is inherited).

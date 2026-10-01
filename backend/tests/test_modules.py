@@ -41,7 +41,7 @@ class ToolTests(unittest.TestCase):
         names = list(toolbox.specs)
         i = names.index("todo_list")
         self.assertEqual(names[i:i + 4], TODO_TOOLS)
-        self.assertEqual(names[i - 1], "skill_propose")
+        self.assertEqual(names[i - 1], "read_tool_result")  # last of the working-memory block
         self.assertEqual(names[i + 4], "board_list")
 
     def test_tool_metadata_unchanged(self) -> None:

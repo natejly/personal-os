@@ -18,6 +18,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from personal_os import mcp_servers  # noqa: E402
+from personal_os.modules.todos import TodosModule
 from personal_os.tools import DEFAULT_MODE, Toolbox  # noqa: E402
 
 
@@ -47,6 +48,13 @@ class MeetingRepo:
         return None
 
 
+def stub_todos_module() -> TodosModule:
+    """TodosModule with a stub store: registering its tools touches nothing else."""
+    m = TodosModule.__new__(TodosModule)
+    m.store = Stub()  # type: ignore[assignment]
+    return m
+
+
 def full_toolbox(meetings: Any = None) -> Toolbox:
     """A Toolbox with every optional integration present, so every tool registers.
 
@@ -56,7 +64,7 @@ def full_toolbox(meetings: Any = None) -> Toolbox:
     stop being checked.
     """
     return Toolbox(Stub(), Stub(), Stub(), lambda: {},  # type: ignore[arg-type]
-                   todos=Stub(), google=Stub(), boards=Stub(), sandboxes=Stub(),  # type: ignore[arg-type]
+                   modules=[stub_todos_module()], google=Stub(), boards=Stub(), sandboxes=Stub(),  # type: ignore[arg-type]
                    docs=Stub(), activity=Stub(), outbox=Stub(), work_plans=Stub(), results=Stub(),
                    skills=Stub(), jobs=Stub(), style=Stub(), meetings=meetings or Stub(),
                    desks=Stub(), workspace=Stub())

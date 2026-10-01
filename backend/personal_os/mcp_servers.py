@@ -507,6 +507,5 @@ class McpServers:
             return [row_to_dict(r, ("findings",)) for r in c.execute(sql, (*args, max(1, int(limit)))).fetchall()]  # type: ignore[misc]
 
     def latest_eval(self, server_id: str) -> dict[str, Any] | None:
-        # a server's own report; per-tool drift reviews share the table but are not this
-        rows = [r for r in self.evals(server_id=server_id, limit=50) if not r["tool_slug"]]
+        rows = self.evals(server_id=server_id, limit=1)
         return rows[0] if rows else None

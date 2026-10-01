@@ -93,7 +93,8 @@ def apply_review(store: McpServers, slug: str) -> dict[str, Any] | None:
     status = mcp_eval.status_for(findings)
     summary = ("drift: definition changed" + (" and withheld until you accept it" if review["quarantine"] else "")
                + (f"; {len(findings)} new finding{'s' if len(findings) != 1 else ''}" if findings else "; nothing new flagged"))
-    store.record_eval(tool["server_id"], status, summary, findings, tool_slug=tool["slug"], model=mcp_eval.EVAL_MODEL)
+    # server_id stays unset: latest_eval(server) is the server's own report, and a tool's drift note must not replace it
+    store.record_eval(None, status, summary, findings, tool_slug=tool["slug"], model=mcp_eval.EVAL_MODEL)
     return review
 
 

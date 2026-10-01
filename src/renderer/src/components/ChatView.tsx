@@ -34,6 +34,8 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   const { toggleSidebar, toggleContext, renameChat, regenerate, send } = useStore()
   const firstPrompts = useOnboarding((s) => s.firstPrompts && !conversationId)
   const setFirstPrompts = useOnboarding((s) => s.setFirstPrompts)
+  // The chips are for the first empty chat only; once any conversation is open they are spent.
+  useEffect(() => { if (conversationId) setFirstPrompts(false) }, [conversationId, setFirstPrompts])
   const scrollRef = useRef<HTMLDivElement>(null)
   const [stick, setStick] = useState(true)
   const [editingTitle, setEditingTitle] = useState(false)

@@ -3,7 +3,7 @@
 import './TaskCard'
 import './FileCard'
 // --- workstreams add their card import below this line ---
-// import './CalendarCard'   (calendar workstream)
+import './CalendarCard'
 // import './EmailCard'      (mail workstream)
 
 export { TOOL_CARDS, registerToolCard } from './registry'

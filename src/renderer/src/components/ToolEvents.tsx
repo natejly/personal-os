@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronRight, Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, AlertCircle, Laptop, Zap, ListChecks, PenLine, ShieldAlert, ShieldCheck,
   FolderOpen, FileText, FilePen, Trash2, PackageCheck, CircleHelp, CircleCheck,
-  Youtube, Github, Rss } from 'lucide-react'
+  Youtube, Github, Rss, CalendarDays, CalendarClock, CalendarSearch, CalendarPlus, CalendarX } from 'lucide-react'
 import type { DocRevision, ToolEvent, Verification } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore } from '../store'
@@ -17,6 +17,9 @@ import '../styles/docs.css'
 
 const ICONS: Record<string, JSX.Element> = {
   propose_plan: <ListChecks size={13} />,
+  calendar_events: <CalendarDays size={13} />, calendar_get: <CalendarDays size={13} />, calendar_free_busy: <CalendarClock size={13} />,
+  calendar_find_time: <CalendarSearch size={13} />, calendar_propose: <CalendarDays size={13} />, calendar_create: <CalendarPlus size={13} />,
+  calendar_update: <CalendarClock size={13} />, calendar_delete: <CalendarX size={13} />,
   desk_list_files: <FolderOpen size={13} />, desk_read_file: <FileText size={13} />, desk_write_file: <FilePen size={13} />,
   desk_trash_file: <Trash2 size={13} />, desk_deliver: <PackageCheck size={13} />, desk_ask: <CircleHelp size={13} />,
   desk_done: <CircleCheck size={13} />, desk_import_sandbox: <FolderOpen size={13} />,

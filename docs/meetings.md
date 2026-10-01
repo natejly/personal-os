@@ -104,6 +104,18 @@ per-meeting SSE route and client ship (`GET /meetings/{id}/stream`,
 `meetingStream`) but nothing publishes to the meeting bus yet, so the stream opens
 and finishes immediately and the poll is what carries the pane.
 
+**Silence gate and hallucination filter.** Before a segment is sent to STT,
+`meeting_vad.analyze` (stdlib adaptive energy VAD) measures its speech ratio; below
+`vadMinSpeechRatio` (0.03) the segment is stored as `empty`, its wav deleted, and no
+billed call is made. After a reply, `stt.filter_hallucinations` applies faster-whisper's
+rules per verbose_json segment (`no_speech_prob > 0.6` with `avg_logprob < -1.0`, or
+`compression_ratio > 2.4`), drops known silence phrases ("Thank you.") only when the
+segment's speech ratio is under 0.15, and collapses repetition loops; dropped phrases
+land in `detail.filtered`. Local whisper now runs with `-oj`, so `detail.segments`
+carries start/end, and passes `--vad -vm` when `whisperVadModelPath` (or a
+`ggml-silero*.bin` in `<data_dir>/models`) exists. Switches: `vadGate`,
+`hallucinationFilter` (both default on); turning both off restores the old behaviour.
+
 **The calendar nudge** is a 45-second tick with no LLM in it. It lists events
 happening now across `calendarIds` with at least `minAttendees` people, upserts a
 `scheduled` row per event, and offers a Record button on Today and in the rail. A

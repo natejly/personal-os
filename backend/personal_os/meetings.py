@@ -192,6 +192,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "autoStopGraceSeconds": 90,
     "calendarIds": ["primary"],
     "minAttendees": 2,
+    "vadGate": True,          # skip STT for segments with no speech (meeting_vad)
+    "vadMinSpeechRatio": 0.03,
+    "hallucinationFilter": True,
+    "whisperVadModelPath": "",
 }
 
 # `patch` is the user's door into a meeting. Everything the recorder owns - started_at,

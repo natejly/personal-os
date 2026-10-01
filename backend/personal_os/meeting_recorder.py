@@ -26,7 +26,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
-from . import audiocap, stt
+from . import audiocap, meeting_vad, stt
 
 log = logging.getLogger("personal_os.meeting_recorder")
 
@@ -361,6 +361,17 @@ class TranscribeWorker(_RecorderThread):
                 error=f"unusable segment: {note}", keep=note != "empty"))
             return
 
+        cfg = self.config_fn()
+        vad: dict[str, Any] = {}
+        if cfg.get("vadGate", True):
+            # A segment with no speech never reaches the (billed) STT call. An unreadable wav
+            # comes back ok=False and is transcribed anyway: never drop audio on a parse failure.
+            vad = meeting_vad.analyze(path)
+            if vad["ok"] and vad["speech_ratio"] < float(cfg.get("vadMinSpeechRatio", 0.03)):
+                self._report(channel, seq, path, self._result(
+                    state="empty", detail={"vad": vad}, keep=False))
+                return
+
         attempts = 0
         res: dict[str, Any] = {}
         while True:
@@ -373,11 +384,16 @@ class TranscribeWorker(_RecorderThread):
 
         text = str(res.get("text") or "").strip()
         error = str(res.get("error") or "")
+        detail = res.get("detail") or {}
+        if text and not error and cfg.get("hallucinationFilter", True):
+            ratio = vad["speech_ratio"] if vad.get("ok") else None
+            text, detail, _dropped = stt.filter_hallucinations(text, detail, ratio, cfg)
+            text = text.strip()
         if text:
             self._tail[channel] = text[-TAIL_CHARS:]
         self._report(channel, seq, path, self._result(
             state="done" if text and not error else ("failed" if error else "empty"),
-            text=text, detail=res.get("detail") or {}, backend=str(res.get("backend") or ""),
+            text=text, detail=detail, backend=str(res.get("backend") or ""),
             error=error, ms=int(res.get("ms") or 0), attempts=attempts,
             # A failed segment keeps its wav so retranscribe can replay it once the user has
             # fixed their STT route - which today is every segment, since nothing answers

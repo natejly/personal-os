@@ -4090,6 +4090,10 @@ class MeetingConfigIn(BaseModel):
     autoStopGraceSeconds: int | None = None
     calendarIds: list[str] | None = None
     minAttendees: int | None = None
+    vadGate: bool | None = None
+    vadMinSpeechRatio: float | None = None
+    hallucinationFilter: bool | None = None
+    whisperVadModelPath: str | None = None
 
 
 class MeetingActionsIn(BaseModel):

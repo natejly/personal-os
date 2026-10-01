@@ -226,11 +226,11 @@ class RunStore:
                     danger, desk_id, time.time()))
         return self.approval(call_id) or {}
 
-    def decide(self, call_id: str, decision: str, by: str = "user") -> dict[str, Any] | None:
+    def decide(self, call_id: str, decision: str, by: str = "user", note: str | None = None) -> dict[str, Any] | None:
         """First decision wins. None if there is no such approval or it was already decided."""
         status = "denied" if decision == "deny" else "approved"
-        n = self._exec("UPDATE approvals SET status=?, decision=?, decided_by=?, decided_at=? WHERE call_id=? AND status='pending'",
-                       (status, decision, by, time.time(), call_id))
+        n = self._exec("UPDATE approvals SET status=?, decision=?, decided_by=?, decided_at=?, note=? WHERE call_id=? AND status='pending'",
+                       (status, decision, by, time.time(), (note or "").strip()[:500] or None, call_id))
         return self.approval(call_id) if n else None
 
     def approval(self, call_id: str) -> dict[str, Any] | None:

@@ -223,7 +223,33 @@ export interface PlanEdit {
   arguments?: Record<string, unknown>
 }
 
-export type ApprovalDecision = 'allow' | 'deny' | 'always_chat' | 'always_global'
+export type ApprovalDecision = 'allow' | 'deny' | 'always_chat' | 'always_global' | 'always_session' | 'always_rule'
+
+/** What an approval card adds beyond the tool name: the rule that put it there and the rules it can save. */
+export interface PermissionCard {
+  kind: 'rule' | 'opaque' | 'external_directory' | 'doom_loop' | null
+  /** The subject the card is about, e.g. `Bash(git push origin)` or `doom_loop(fs_grep)`. */
+  subject: string | null
+  rule: string | null
+  /** Editable before saving; one per subcommand, at most five. */
+  suggestions: string[]
+  /** False for a forced card (taint, plan mode, doom loop): it can only be answered once. */
+  session: boolean
+}
+
+/** Allow / ask / deny lists of `Tool(pattern)` rules (permrules.py). */
+export interface PermissionRules { allow: string[]; ask: string[]; deny: string[] }
+
+export interface PermissionEvaluation {
+  action: 'allow' | 'ask' | 'deny' | 'none'
+  hardline: boolean
+  reason: string | null
+  rule: string | null
+  kind: string | null
+  subjects: string[]
+  suggestions: string[]
+  external: string[]
+}
 
 /* ---- MCP connectors ---- */
 
@@ -376,6 +402,8 @@ export interface ToolEvent {
   breaker?: PartialReason
   /** Approval was forced by taint even though the tool is set to 'on'. */
   forced?: boolean
+  /** Rule context for an ask card: the suggested rules to save and whether a session grant is offered. */
+  permission?: PermissionCard | null
   /** Id of the proposal this call became: a background run may not complete an outward-facing call. */
   proposal?: string | null
   /** Set when this call's arguments matched an approved plan step, so it ran without its own card. */
@@ -886,6 +914,12 @@ export interface Settings {
   /** How assistant edits to docs land. Missing means review: show the diff and wait. */
   docEditMode?: 'review' | 'apply'
   maxToolRounds: number
+  /** Argument-pattern rules over the per-tool modes. Deny beats ask beats allow; forced approvals are never lifted. */
+  permissionRules?: PermissionRules
+  /** Folders the file and shell tools may work in besides the active desk's workspace. */
+  workspaceRoots?: string[]
+  /** 'deny': a background run that would have to ask is refused instead of waiting for someone. */
+  unattendedApprovals?: 'ask' | 'deny'
   /** Keep the system prompt stable and put per-turn retrieval beside the newest message (prompt caching). Default on. */
   cacheLayout?: boolean
   otelExport?: OtelExportConfig
@@ -986,7 +1020,7 @@ export type ChatEvent =
   | { event: 'title'; data: { id: string; title: string } }
   | { event: 'delta'; data: { id: string; text: string } }
   | { event: 'reasoning'; data: { id: string; text: string } }
-  | { event: 'tool_call'; data: { message_id: string; id: string; name: string; arguments: Record<string, unknown>; needs_approval?: boolean; forced?: boolean; plan?: PlanStepRef | null } }
+  | { event: 'tool_call'; data: { message_id: string; id: string; name: string; arguments: Record<string, unknown>; needs_approval?: boolean; forced?: boolean; permission?: PermissionCard | null; plan?: PlanStepRef | null } }
   | { event: 'tool_result'; data: ToolEvent & { message_id: string } }
   | { event: 'span'; data: { message_id: string; span: Span } }
   | { event: 'done'; data: { id: string; error: string | null; context_used: ContextUsed; tool_events: ToolEvent[]; trace: Span[]; stopped: boolean; partial?: PartialReason | null; segment?: boolean; tainted?: boolean; taint_sources?: string[]; reasoning?: string | null } }

@@ -79,6 +79,17 @@ class StuckDetector:
         err = bool(result.get("error")) if isinstance(result, dict) else False
         self.obs.append(Obs(tool, args_digest(args), result_digest(result), err))
 
+    def repeat_count(self, tool: str, args: Any) -> int:
+        """How many of the most recent executed calls were exactly this call (same tool, same arguments).
+
+        permrules reads it to put a card in front of the third identical call in a row."""
+        key, n = (tool, args_digest(args)), 0
+        for o in reversed(self.obs):
+            if o.call != key:
+                break
+            n += 1
+        return n
+
     def _tail(self, n: int) -> list[Obs]:
         return list(self.obs)[-n:] if len(self.obs) >= n else []
 

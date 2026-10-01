@@ -1,6 +1,6 @@
 import type {
   BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, DriveFile, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Artifact, ArtifactVersion, Recap, Conversation, ConversationSettings, ContextUsed, ContextMeter, Document, GraphData, GraphEdge, GraphNode, Message,
-  ApprovalDecision, PlanEdit,
+  ApprovalDecision, PermissionEvaluation, PlanEdit,
   Memory, MemoryProposal, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo,
   Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
   Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
@@ -99,8 +99,11 @@ export const api = {
   recap: (force = false) => req<Recap>(`/recap?force=${force}`),
   // `steps` / `note` are for a propose_plan card: the steps the user is authorising (with any edited arguments,
   // whose digests the backend re-derives), and one line back to the model.
-  approve: (callId: string, decision: ApprovalDecision, opts?: { steps?: PlanEdit[] | null; note?: string }) =>
-    req(`/approvals/${callId}`, { method: 'POST', body: json({ decision, ...(opts?.steps ? { steps: opts.steps } : {}), ...(opts?.note ? { note: opts.note } : {}) }) }),
+  approve: (callId: string, decision: ApprovalDecision, opts?: { steps?: PlanEdit[] | null; note?: string; rules?: string[] }) =>
+    req(`/approvals/${callId}`, { method: 'POST', body: json({ decision, ...(opts?.steps ? { steps: opts.steps } : {}), ...(opts?.note ? { note: opts.note } : {}), ...(opts?.rules ? { rules: opts.rules } : {}) }) }),
+  /** What the saved permission rules say about one call (nothing runs). `rule` validates one rule string instead. */
+  evaluatePermission: (body: { tool?: string; command?: string; args?: Record<string, unknown>; rule?: string }) =>
+    req<PermissionEvaluation & { ok?: boolean; error?: string }>('/permissions/evaluate', { method: 'POST', body: json(body) }),
   /** The Agent Inbox: pending approvals and proposals, plus what the scheduled jobs did. Built from journal rows. */
   inbox: (hours = 72) => req<AgentInbox>(`/inbox?hours=${hours}`),
   jobs: {

@@ -9,6 +9,7 @@ import type { Settings, ShortcutState, SnapMode } from '@shared/types'
 import { GRID_SIZES } from '../canvas/snapping'
 import { useCanvas } from '../canvas/store'
 import { ToolGlobalToggles } from './ToolPermissions'
+import PermissionRules from './PermissionRules'
 import GoogleSettings from './GoogleSettings'
 import MeetingSettings from './MeetingSettings'
 import UsageView from './UsageView'
@@ -247,6 +248,7 @@ export default function SettingsModal(): JSX.Element {
                 <p className="muted small">Ask waits for you to accept or reject each diff. Accept all writes the change and still shows the diff. You can undo either one from the doc's history.</p>
               </div>
               <ToolGlobalToggles value={draft.tools ?? {}} onChange={(tools) => patch({ tools })} />
+              <PermissionRules value={draft.permissionRules} onChange={(permissionRules) => patch({ permissionRules })} />
               <label className="toggle-row plain">
                 <span className="toggle-text"><b>Cache-friendly prompt layout</b><small>Keep the system prompt identical between turns and send per-turn memories, graph and excerpts next to your newest message, so the provider's prompt cache keeps hitting.</small></span>
                 <input type="checkbox" checked={draft.cacheLayout !== false} onChange={(e) => patch({ cacheLayout: e.target.checked })} /><span className="switch" />

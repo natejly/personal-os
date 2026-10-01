@@ -7,6 +7,7 @@ import { api } from '../lib/api'
 import { useStore } from '../store'
 import DiffView from './DiffView'
 import PlanApproval from './PlanApproval'
+import ApprovalRules from './ApprovalRules'
 import SendToSpace from './SendToSpace'
 // The ask card mounts inline in a chat bubble, so it needs the sheet the desk panes use.
 import '../styles/cowork.css'
@@ -297,6 +298,7 @@ export default function ToolEvents({ events, conversationId }: { events: ToolEve
                 <button className="ghost-btn" onClick={() => void approveTool(t.id, 'always_global', conversationId)}>Always</button>
                 <button className="ghost-btn danger" onClick={() => void approveTool(t.id, 'deny', conversationId)}>Deny</button>
               </div>
+              <ApprovalRules event={t} conversationId={conversationId} />
             </div>
           )}
           {open[t.id] && (

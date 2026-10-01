@@ -185,6 +185,8 @@ CREATE TABLE IF NOT EXISTS approvals (
   status TEXT NOT NULL DEFAULT 'pending',
   decision TEXT,
   decided_by TEXT,
+  -- One line the user (or the unattended policy) gave back with a denial; the model reads it as the tool result.
+  note TEXT,
   created_at REAL NOT NULL,
   decided_at REAL
 );
@@ -385,7 +387,7 @@ class Database:
                      "allowed_tools": "TEXT"},
             "action_plans": {"desk_id": "TEXT", "intent": "TEXT NOT NULL DEFAULT ''",
                              "expected_taint": "TEXT NOT NULL DEFAULT '[]'"},
-            "approvals": {"desk_id": "TEXT", "danger": "TEXT NOT NULL DEFAULT 'external'"},
+            "approvals": {"desk_id": "TEXT", "danger": "TEXT NOT NULL DEFAULT 'external'", "note": "TEXT"},
             "agent_runs": {"desk_id": "TEXT", "turn": "INTEGER NOT NULL DEFAULT 0", "resumed_from": "TEXT"},
             "usage_log": {"cached_tokens": "INTEGER NOT NULL DEFAULT 0", "cache_write_tokens": "INTEGER NOT NULL DEFAULT 0",
                           "reasoning_tokens": "INTEGER NOT NULL DEFAULT 0"},

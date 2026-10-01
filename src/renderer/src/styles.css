@@ -2285,3 +2285,14 @@ select:focus-visible {
 .app.sidebar-collapsed .page-agent.popout { width: min(var(--page-agent-w), calc(100% - 40px)); }
 /* The column draws its own left edge against the view; a floating card has a border all round. */
 .page-agent.popout > header { border-top-left-radius: 12px; border-top-right-radius: 12px; }
+
+/* Permission rules: the approval card's rule block and the Settings editor. */
+.approval-rules { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.approval-rules p { margin: 0; }
+.approval-rule input, .perm-rule-add input, .approval-rules form input { width: 100%; font-family: var(--mono, ui-monospace, monospace); font-size: 12px; }
+.approval-rules form { flex: 1; }
+.perm-rules { display: flex; flex-direction: column; gap: 10px; margin: 14px 0; }
+.perm-rule-group ul { list-style: none; margin: 4px 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.perm-rule-group li { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 12px; }
+.perm-rule-add { display: flex; gap: 6px; align-items: center; }
+.perm-rule-test { display: flex; flex-direction: column; gap: 6px; }

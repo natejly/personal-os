@@ -77,6 +77,13 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "fileSnapshotMaxBytes": 5_000_000,
     "fileSnapshotRetainDays": 14,
     "fileSnapshotBudgetMB": 200,
+    # Argument-pattern rules over the per-tool modes: {allow: [], ask: [], deny: []} of "Tool(pattern)" strings
+    # (permrules.py). Deny beats ask beats allow; a forced approval is never lifted by one.
+    "permissionRules": {"allow": [], "ask": [], "deny": []},
+    # Folders the file and shell tools may work in besides the active desk's workspace.
+    "workspaceRoots": [],
+    # "deny": a job run that would have to ask is refused with a recorded reason instead of waiting for someone.
+    "unattendedApprovals": "ask",
     "stuckDetection": True,  # nudge, then stop, on ping-pong / same-result / error-cycle loops (stuck.py)
     # Bank long messages the user writes as style samples and keep their voice profile current (style.py).
     # Independent of autoLearn: wanting the app to learn facts is not the same as wanting it to copy your voice.

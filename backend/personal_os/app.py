@@ -65,6 +65,7 @@ from .filesnap import FileSnapshots, router as filesnap_router
 from .outbox import Outbox, router as outbox_router
 from .presets import CanvasPresets
 from . import resume
+from . import permrules
 from .runs import ACTIVE, PROMOTE_STEP, STATUSES, Run, RunBus, RunStore, Topic
 from .stuck import STUCK_NUDGE, STUCK_STOP, StuckDetector
 from .style import WritingStyle, learn_style_from_exchange, looks_like_prose
@@ -414,6 +415,20 @@ def _gate(name: str, mode: str, ctx: dict[str, Any]) -> str:
     return toolbox.gate(name, mode, ctx)
 
 
+# The note a user typed with a denial, handed from POST /approvals to the run waiting on that call.
+_approval_notes: dict[str, str] = {}
+# Run kinds that have nobody at the keyboard; with unattendedApprovals = "deny" a call that would ask is refused.
+UNATTENDED_KINDS = ("job", "scheduled")
+
+
+def _perm_roots(cfg: dict[str, Any], desk_id: str | None) -> list[str]:
+    """Folders a shell or file call counts as inside: the granted roots plus the active desk's workspace."""
+    roots = [r for r in (cfg.get("workspaceRoots") or []) if isinstance(r, str) and r]
+    if desk_id:
+        roots.append(str(workspace.desk_root(desk_id)))
+    return roots
+
+
 async def _mcp_call(slug: str, args: dict[str, Any]) -> dict[str, Any]:
     """One MCP tool call, with its failures turned into results the model can read and retry past."""
     try:
@@ -518,6 +533,22 @@ def _check_numeric_setting(key: str, value: Any) -> int | float:
     return int(value) if isinstance(default, int) else float(value)
 
 
+def _check_permission_rules(v: Any) -> dict[str, list[str]]:
+    """The permissionRules setting: three lists of well-formed rule strings, nothing else."""
+    if not isinstance(v, dict):
+        raise HTTPException(422, "permissionRules must be {allow, ask, deny}")
+    out: dict[str, list[str]] = {}
+    for key in ("allow", "ask", "deny"):
+        items = v.get(key) or []
+        if not isinstance(items, list):
+            raise HTTPException(422, f"permissionRules.{key} must be a list")
+        try:
+            out[key] = list(dict.fromkeys(permrules.parse_rule(str(t)).text for t in items))
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from e
+    return out
+
+
 @app.put("/settings")
 def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
     clean = {k: v for k, v in patch.items()
@@ -526,6 +557,12 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
         d = llm.DEFAULT_SETTINGS[k]
         if isinstance(d, (int, float)) and not isinstance(d, bool):
             clean[k] = _check_numeric_setting(k, v)
+        elif k == "permissionRules":
+            clean[k] = _check_permission_rules(v)
+        elif k == "unattendedApprovals" and v not in ("ask", "deny"):
+            raise HTTPException(422, "unattendedApprovals must be 'ask' or 'deny'")
+        elif k == "workspaceRoots" and not (isinstance(v, list) and all(isinstance(x, str) for x in v)):
+            raise HTTPException(422, "workspaceRoots must be a list of folders")
     db.set_settings(clean)
     return {k: v for k, v in settings().items() if k not in PRIVATE_SETTINGS}
 
@@ -1247,6 +1284,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     repeats = 0
     tool_errors: dict[str, int] = {}
     detector = StuckDetector() if cfg.get("stuckDetection", True) else None  # loop shapes REPEAT_LIMIT cannot see
+    perm_rules = permrules.load_rules(cfg.get("permissionRules"))
+    denials = permrules.DenialStreak()  # refused calls in a row; at three the next result says to stop varying them
     stuck_hits = 0
     stop_text: str | None = None
     blocked: set[str] = set()
@@ -1459,6 +1498,17 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         # one at a time. Forced, so the card cannot buy a standing grant that would
                         # quietly switch the mode back off.
                         mode, forced = "ask", True
+                # Argument-pattern rules, session grants and the doom-loop card (permrules.py). A deny refuses; a
+                # forced approval (taint, plan mode) is never downgraded; MCP tools keep their schema-bound grants.
+                perm = permrules.Resolution(mode, forced)
+                if c["name"] != PLAN_TOOL and mode != "off" and not mcp_is(c["name"]):
+                    perm = permrules.resolve(
+                        c["name"], args, mode, forced or (danger == "external" and bool(tool_ctx["tainted"])),
+                        rules=perm_rules, roots=_perm_roots(cfg, desk_id), conv=conv_id,
+                        doom=detector is not None and detector.repeat_count(c["name"], args) >= permrules.DOOM_LIMIT - 1)
+                    mode = perm.mode
+                    if perm.kind == "doom_loop":
+                        forced = True
                 # A background run never waits on an approval: there is nobody at the keyboard, and the call is not
                 # going to happen either way. It becomes a proposal in _call_tool and the run carries on.
                 proposing = proposal_only(run) and toolbox.proposes(c["name"]) and mode != "off"
@@ -1512,9 +1562,23 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         pre = tools.denied(c["name"], "part of a plan you rejected")
                 if blocked_reason and pre is None:
                     pre = tools.denied(c["name"], blocked_reason)
+                if perm.refusal and pre is None:
+                    pre = tools.denied(c["name"], perm.refusal)
+                unattended = False
+                if (mode == "ask" and claimed is None and pre is None and not proposing and run is not None
+                        and run.kind in UNATTENDED_KINDS and cfg.get("unattendedApprovals") == "deny"):
+                    # Nobody is there to answer: refuse with a recorded reason rather than park a card for later.
+                    unattended = True
+                    why = "no one is available to approve it and unattendedApprovals is set to deny"
+                    pre = tools.denied(c["name"], f"refused: {why}")
+                    if run.store is not None:
+                        run.store.open_approval(uid, run.run_id, c["name"], args, conversation_id=conv_id, message_id=am["id"],
+                                                forced=forced, desk_id=run.desk_id, danger=danger)
+                        run.store.decide(uid, "deny", by="unattended", note=why)
                 asks = mode == "ask" and claimed is None and pre is None
                 yield "tool_call", {"message_id": am["id"], "id": uid, "name": c["name"], "arguments": args,
                                     "needs_approval": asks, "forced": forced, "proposal": proposing or None,
+                                    "permission": perm.card() if asks else None,
                                     "plan": {"plan_id": claimed["plan_id"], "idx": claimed["idx"], "title": claimed["title"]} if claimed else None}
                 tspan = tracer.start("tool", c["name"], {"round": _round, "arguments": _short(args), "mode": mode, "forced": forced,
                                                          "plan_step": f"{claimed['plan_id']}#{claimed['idx']}" if claimed else None},
@@ -1522,6 +1586,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 yield "span", {"message_id": am["id"], "span": tspan}
                 t0 = time.time()
                 decision = "allow"
+                deny_note: str | None = None
                 if asks:
                     # Pause the reply until the user approves or denies this call (POST /approvals/{call_id}).
                     # The approval is a row, and it waits as long as it takes: there is no auto-deny.
@@ -1573,6 +1638,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         decision = fut.result() if fut.done() else "deny"
                     finally:
                         _approvals.pop(uid, None)
+                    deny_note = _approval_notes.pop(uid, None)
                     awaiting = None
                     if parked:
                         # The reply ends here, still owing this call an answer. The row stays pending
@@ -1596,6 +1662,13 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                          if (approved_plan or {}).get("status") == "approved" else None)
                     budget.paused += time.time() - approval_t0  # a slow approval must not blow the wall clock
                     t0 = time.time()  # don't count waiting time as tool time
+                    if decision == "always_session":
+                        # Scoped to this chat and to exactly what the card named; a forced card is answered once.
+                        if not forced:
+                            permrules.SESSION.add(conv_id, perm.keys)
+                        decision = "allow"
+                    elif decision == "always_rule":
+                        decision = "allow"  # POST /approvals already saved the rules, or refused to for a forced card
                     granted = decision in ("always_chat", "always_global")
                     # A tainted reply cannot buy a standing grant, and neither can a plan card: 'always' on
                     # propose_plan would leave the plan with no approval at all.
@@ -1651,13 +1724,20 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 elif plan is not None:
                     result = plans.model_result(plan)  # the decision, and the arguments the user actually authorised
                 elif decision != "allow":
-                    result = tools.denied(c["name"], "just declined by the user")
+                    # A note typed with the denial goes back as the result and the reply carries on.
+                    result = (tools.tool_error(f"{c['name']} was declined by the user, who said: {deny_note}",
+                                               alternative="follow what the user said, or ask them what they would like instead")
+                              if deny_note else tools.denied(c["name"], "just declined by the user"))
                 elif mcp_is(c["name"]):
                     result = await _mcp_call(c["name"], args)
                     ran = True
                 else:
                     result = await _call_tool(run, _round, c["name"], args, tool_ctx, uid)
                     ran = True
+                hint = denials.note()
+                if hint and isinstance(result, dict):
+                    result["permission_note"] = hint
+                denials.record(bool(perm.refusal) or unattended or (asks and decision != "allow"))
                 ms = int((time.time() - t0) * 1000)
                 # images (e.g. matplotlib figures from run_python) go to the UI, not to the model
                 images = result.pop("images", None) if isinstance(result, dict) else None
@@ -2092,12 +2172,13 @@ async def stop_run(id: str, run_id: str | None = None) -> dict[str, bool]:
 
 
 class ApprovalIn(BaseModel):
-    decision: str  # allow | deny | always_chat | always_global
+    decision: str  # allow | deny | always_chat | always_global | always_session | always_rule
     # propose_plan only: the steps of the plan the user is authorising, as [{idx, arguments?}]. A step left out is
     # dropped (it asks again if the model calls it); replacement arguments re-derive that step's digest, so the
     # edited values are what gets authorised.
     steps: list[dict[str, Any]] | None = None
-    note: str | None = None  # one line back to the model, e.g. why a plan was rejected
+    note: str | None = None  # one line back to the model, e.g. why a plan was rejected or a call was denied
+    rules: list[str] | None = None  # always_rule: the rules to save, as edited on the card (default: the suggestions)
 
 
 def _patch_tool_event(message_id: str | None, call_id: str, patch: dict[str, Any]) -> None:
@@ -2136,10 +2217,12 @@ async def list_approvals(status: str | None = "pending", run_id: str | None = No
 async def approve_tool_call(call_id: str, body: ApprovalIn) -> dict[str, Any]:
     """Record the decision on the approval row (first decision wins), then wake the run if one is waiting in this
     process. A run that died while waiting does not resume: the decision is recorded and its card is settled."""
-    if body.decision not in ("allow", "deny", "always_chat", "always_global"):
+    if body.decision not in ("allow", "deny", "always_chat", "always_global", "always_session", "always_rule"):
         raise HTTPException(400, "Bad decision")
     pending = run_store.approval(call_id)
     is_plan = bool(pending and pending["tool"] == PLAN_TOOL)
+    if body.decision == "always_rule" and pending and not pending["forced"] and not is_plan and pending["status"] == "pending":
+        _save_allow_rules(pending, body.rules)  # validated before anything is decided
     if body.steps is not None and not is_plan:
         raise HTTPException(400, "Only a propose_plan approval carries edited steps")
     try:  # shape-check the edit before anything is decided, so a bad payload leaves the row pending
@@ -2147,7 +2230,9 @@ async def approve_tool_call(call_id: str, body: ApprovalIn) -> dict[str, Any]:
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     fut = _approvals.get(call_id)
-    row = run_store.decide(call_id, body.decision)
+    if body.decision == "deny" and body.note and not is_plan and fut and not fut.done():
+        _approval_notes[call_id] = body.note.strip()[:500]
+    row = run_store.decide(call_id, body.decision, note=None if is_plan else body.note)
     live = bool(fut and not fut.done())
     if row is None and not live:
         raise HTTPException(404, "No pending approval for that call")
@@ -2177,6 +2262,46 @@ async def approve_tool_call(call_id: str, body: ApprovalIn) -> dict[str, Any]:
         resumed = _wake_desk(desk_id) is not None
     return {"ok": True, "live": live, "resumed": resumed,
             "status": row["status"] if row else ("denied" if body.decision == "deny" else "approved")}
+
+
+def _save_allow_rules(row: dict[str, Any], texts: list[str] | None) -> list[str]:
+    """Append the rules a card offered (possibly edited) to permissionRules.allow. Raises 400 on a bad rule."""
+    cfg = settings()
+    if texts is None:
+        texts = permrules.evaluate(row["tool"], row["args"], permrules.load_rules(cfg.get("permissionRules")),
+                                   roots=_perm_roots(cfg, row.get("desk_id"))).suggestions
+    try:
+        rules = permrules.validate_saved_rules(row["tool"], row["args"], texts)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    cur = {k: list((cfg.get("permissionRules") or {}).get(k) or []) for k in ("allow", "ask", "deny")}
+    cur["allow"] += [r for r in rules if r not in cur["allow"]]
+    db.set_settings({"permissionRules": cur})
+    return rules
+
+
+class PermissionEvalIn(BaseModel):
+    tool: str = "shell_run"
+    command: str | None = None            # shorthand for tool=shell_run
+    args: dict[str, Any] = {}
+    desk_id: str | None = None
+    rule: str | None = None               # validate one rule string instead of evaluating a call
+
+
+@app.post("/permissions/evaluate")
+def evaluate_permission(body: PermissionEvalIn) -> dict[str, Any]:
+    """What the saved rules say about one call, for the Settings test box. Nothing runs."""
+    if body.rule is not None:
+        try:
+            r = permrules.parse_rule(body.rule)
+            return {"ok": True, "rule": r.text, "tool": r.tool, "pattern": r.pattern}
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+    cfg = settings()
+    args = {"command": body.command, **body.args} if body.command is not None else body.args
+    v = permrules.evaluate(body.tool, args, permrules.load_rules(cfg.get("permissionRules")), roots=_perm_roots(cfg, body.desk_id))
+    return {"action": v.action or "none", "hardline": v.hardline, "reason": v.refusal, "rule": v.rule, "kind": v.kind,
+            "subjects": v.subjects, "suggestions": v.suggestions, "external": v.external}
 
 
 @app.on_event("startup")

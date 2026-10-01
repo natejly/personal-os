@@ -11,10 +11,14 @@ user accepts or rejects, which is what makes an LLM safe to point at prose someo
 from __future__ import annotations
 
 import difflib
+import hashlib
 import re
 from typing import Any
 
+from .chunker import chunk_blocks
 from .db import Database, new_id, now, row_to_dict
+from .extract_text import markdown_blocks
+from .repos import ALL, _scope_clause, fts_query
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS docs (
@@ -63,7 +67,42 @@ CREATE TABLE IF NOT EXISTS doc_folders (
 CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
   title, content, doc_id UNINDEXED, tokenize='porter unicode61'
 );
+
+-- The same retrieval pipeline the uploaded files use, over the user's own writing: chunks by heading,
+-- an FTS row per chunk holding the contextualised string, vectors in a parallel table (a chunk id can
+-- only reference one table). doc_chunk_state is the "already indexed this exact title+body" marker, so
+-- autosave rebuilds nothing when the text did not change, and a doc with no chunks is not retried forever.
+CREATE TABLE IF NOT EXISTS doc_chunks (
+  id TEXT PRIMARY KEY,
+  doc_id TEXT NOT NULL REFERENCES docs(id) ON DELETE CASCADE,
+  idx INTEGER NOT NULL,
+  heading TEXT NOT NULL DEFAULT '',
+  text TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_doc_chunks_doc ON doc_chunks(doc_id, idx);
+CREATE TABLE IF NOT EXISTS doc_chunk_state (
+  doc_id TEXT PRIMARY KEY REFERENCES docs(id) ON DELETE CASCADE,
+  hash TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS doc_chunk_embeddings (
+  chunk_id TEXT PRIMARY KEY REFERENCES doc_chunks(id) ON DELETE CASCADE,
+  doc_id TEXT NOT NULL,
+  model TEXT NOT NULL,
+  dim INTEGER NOT NULL,
+  vec BLOB NOT NULL
+);
+CREATE VIRTUAL TABLE IF NOT EXISTS doc_chunks_fts USING fts5(
+  text, chunk_id UNINDEXED, doc_id UNINDEXED, tokenize='porter unicode61'
+);
 """
+
+def doc_hit(r: Any) -> dict[str, Any]:
+    """A doc chunk row as a retrieval hit. `document_id`/`name` mirror the file hits so ranking and the
+    context block treat both stores alike; `source`, `doc_id` and `title` say which one it came from."""
+    return {"chunk_id": r["chunk_id"], "document_id": r["doc_id"], "name": r["title"], "idx": r["idx"], "text": r["text"],
+            "heading": r["heading"], "page": None, "score": r["score"] if "score" in r.keys() else 0.0,
+            "source": "doc", "doc_id": r["doc_id"], "title": r["title"]}
+
 
 # A burst of keystrokes is one edit, not forty. Consecutive user revisions inside this window are
 # folded into the newest one, so the history reads as sessions rather than as a keylogger.
@@ -122,9 +161,12 @@ def unified_diff(before: str, after: str, context: int = 3) -> str:
 class Docs:
     def __init__(self, db: Database):
         self.db = db
+        # Called with a doc id whenever its chunks were rebuilt (app.py wires background embedding to it).
+        self.on_chunks: Any = None
         with db.tx() as c:
             c.executescript(SCHEMA)
             self._migrate_folder_scope(c)
+        self.backfill_chunks()
 
     @staticmethod
     def _migrate_folder_scope(c: Any) -> None:
@@ -145,10 +187,58 @@ class Docs:
         c.execute("DROP TABLE doc_folders_unscoped")
 
     # ---- indexing ----
-    @staticmethod
-    def _reindex(c: Any, doc_id: str, title: str, content: str) -> None:
+    def _reindex(self, c: Any, doc_id: str, title: str, content: str) -> None:
         c.execute("DELETE FROM docs_fts WHERE doc_id=?", (doc_id,))
         c.execute("INSERT INTO docs_fts(title, content, doc_id) VALUES(?,?,?)", (title, content, doc_id))
+        self._index_chunks(c, doc_id, title, content)
+
+    def _index_chunks(self, c: Any, doc_id: str, title: str, content: str) -> bool:
+        """Rebuild this doc's retrieval chunks if title+body changed. Pure SQL inside the caller's
+        transaction: no network here, vectors are made later from the unembedded rows."""
+        digest = hashlib.sha256(f"{title}\x00{content}".encode("utf-8", "replace")).hexdigest()
+        st = c.execute("SELECT hash FROM doc_chunk_state WHERE doc_id=?", (doc_id,)).fetchone()
+        if st and st["hash"] == digest:
+            return False
+        c.execute("DELETE FROM doc_chunks_fts WHERE doc_id=?", (doc_id,))
+        c.execute("DELETE FROM doc_chunks WHERE doc_id=?", (doc_id,))  # cascades the vectors
+        try:
+            chunks = chunk_blocks(markdown_blocks(content), title=title)
+        except Exception:  # noqa: BLE001 - a chunker bug must not fail a save
+            chunks = []
+        for i, ch in enumerate(chunks):
+            cid = new_id()
+            c.execute("INSERT INTO doc_chunks(id,doc_id,idx,heading,text) VALUES(?,?,?,?,?)", (cid, doc_id, i, ch.heading_str, ch.text))
+            c.execute("INSERT INTO doc_chunks_fts(text, chunk_id, doc_id) VALUES(?,?,?)", (ch.ctx, cid, doc_id))
+        c.execute("INSERT OR REPLACE INTO doc_chunk_state(doc_id, hash) VALUES(?,?)", (doc_id, digest))
+        if self.on_chunks and chunks:
+            try:
+                self.on_chunks(doc_id)
+            except Exception:  # noqa: BLE001
+                pass
+        return True
+
+    def backfill_chunks(self) -> int:
+        """Chunk every doc that has never been indexed (existing installs, rows inserted behind our back). Idempotent."""
+        with self.db.tx() as c:
+            rows = c.execute("SELECT id, title, content FROM docs WHERE id NOT IN (SELECT doc_id FROM doc_chunk_state)").fetchall()
+            for r in rows:
+                self._index_chunks(c, r["id"], r["title"], r["content"])
+        return len(rows)
+
+    def chunk_search(self, query: str, project_id: str | None = ALL, limit: int = 6) -> list[dict[str, Any]]:
+        """BM25 over doc chunks, in the same hit shape as Documents.search plus source='doc'.
+        Scope matches files: a project sees its own docs plus personal ones."""
+        fq = fts_query(query)
+        if not fq:
+            return []
+        where, args = _scope_clause(project_id)
+        with self.db.tx() as c:
+            rows = c.execute(
+                f"""SELECT f.chunk_id, f.doc_id, d.title, ch.idx, ch.text, ch.heading, bm25(doc_chunks_fts) AS score
+                    FROM doc_chunks_fts f JOIN docs d ON d.id=f.doc_id JOIN doc_chunks ch ON ch.id=f.chunk_id
+                    WHERE doc_chunks_fts MATCH ? AND {where.replace('project_id', 'd.project_id')}
+                    ORDER BY score LIMIT ?""", (fq, *args, limit)).fetchall()
+        return [doc_hit(r) for r in rows]
 
     # ---- reads ----
     def list(self, project_id: str | None = "__all__", q: str = "") -> list[dict[str, Any]]:
@@ -308,6 +398,7 @@ class Docs:
         with self.db.tx() as c:
             c.execute("DELETE FROM docs WHERE id=?", (id,))
             c.execute("DELETE FROM docs_fts WHERE doc_id=?", (id,))
+            c.execute("DELETE FROM doc_chunks_fts WHERE doc_id=?", (id,))
 
     # ---- folders ----
     def folders(self) -> list[dict[str, Any]]:
@@ -403,6 +494,7 @@ class Docs:
                 for did in ids:
                     c.execute("DELETE FROM docs WHERE id=?", (did,))
                     c.execute("DELETE FROM docs_fts WHERE doc_id=?", (did,))
+                    c.execute("DELETE FROM doc_chunks_fts WHERE doc_id=?", (did,))
             else:
                 c.execute(f"UPDATE docs SET folder=? WHERE (folder=? OR folder LIKE ?) AND {proj_match}",
                           (parent, src, src + "/%", *proj_args))

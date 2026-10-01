@@ -429,8 +429,11 @@ execute inside a Virtualization.framework Linux VM, so the host filesystem is
 unreachable by construction. Containers are created with `--network none`
 (settings `sandboxNetwork: true` attaches the network, and networked results
 then taint the run exactly like `fetch_url`), capabilities dropped, and
-memory/cpu/pids caps; at most 5 exist at once (LRU-reaped) and all are removed
-on app shutdown. `sandboxImage` (default `python:3.12-slim`) and
+memory/cpu/pids caps; at most 5 exist at once (LRU-reaped). They are stopped on
+app shutdown and kept for `sandboxKeepDays` (default 14), so `/workspace` and
+installed packages survive a relaunch. `sandbox_checkpoint` / `sandbox_restore`
+snapshot the filesystem to a local image (3 per chat) and roll back to it;
+`sandbox_reset` also drops the checkpoints. `sandboxImage` (default `python:3.12-slim`) and
 `sandboxRuntime` (default `docker`) are configurable in settings. The tools
 only appear when the runtime is actually reachable.
 

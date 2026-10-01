@@ -6,6 +6,7 @@ import SmartTextarea from './SmartTextarea'
 import type { GmailFullMessage, GmailLabel, GmailMessage } from '@shared/types'
 import { lines, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
+import MailWatchPanel from './MailWatchPanel'
 
 const fromName = (s: string | null): string => (s ?? '').replace(/<.*>/, '').replace(/"/g, '').trim() || (s ?? '')
 const fmtDate = (s: string | null): string => {
@@ -258,6 +259,7 @@ export default function MailView(): JSX.Element {
         </div>
       </div>
 
+      <MailWatchPanel />
       <div className="page-body wide">
         {google?.connected && !loading && messages.length === 0 && !error && (
           <div className="empty-hint big"><p>No mail matches these filters.</p></div>

@@ -6,12 +6,13 @@
  * proposals (GET /inbox) — never from the assistant's prose. A run's own report is shown as the body of
  * its card, but no number, badge or state is read out of that text.
  */
-import { useState } from 'react'
-import { AlertTriangle, Check, ChevronDown, ChevronRight, Clock, Inbox, Pencil, Play, Plus, Timer, Trash2, X } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { AlertTriangle, Check, ChevronDown, ChevronRight, Clock, Eye, History, Inbox, Pencil, Play, Plus, Timer, Trash2, Wrench, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { AgentProposal, Job, JobRunSummary } from '@shared/types'
+import type { AgentProposal, Job, JobRunRecord, JobRunSummary, JobStats } from '@shared/types'
 import { useStore } from '../store'
+import { api } from '../lib/api'
 import { SAFE_MD } from './Message'
 
 const fmtClock = (ts: number): string => new Date(ts * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
@@ -90,6 +91,7 @@ function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
         </button>
         <span className="inbox-job">{r.job}</span>
         {r.manual && <span className="chip">by hand</span>}
+        {r.attempt > 1 && <span className="chip warn" title="Re-launched after the earlier run ended in an error">retry {r.attempt}</span>}
         {r.late && (
           <span className="chip warn" title={r.due_at ? `Due ${fmtWhen(r.due_at)}, ran ${fmtWhen(r.fired_at)}` : undefined}>
             <Clock size={11} /> {fmtLate(r.late_seconds)}{r.missed_slots > 0 ? ` · ${r.missed_slots} skipped` : ''}
@@ -115,14 +117,125 @@ function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
   )
 }
 
+const fmtDur = (s: number | null): string => (s === null ? '' : s < 90 ? `${Math.round(s)}s` : `${Math.round(s / 60)} min`)
+const STATUS_LABEL: Record<JobRunRecord['status'], string> = {
+  running: 'running', done: 'done', error: 'failed', interrupted: 'interrupted', timed_out: 'timed out'
+}
+
+/** A job's last 50 runs from rows: a success-rate strip, then one line per run with a link to its transcript. */
+function JobHistory({ job }: { job: Job }): JSX.Element {
+  const selectChat = useStore((s) => s.selectChat)
+  const [runs, setRuns] = useState<JobRunRecord[] | null>(null)
+  const [stats, setStats] = useState<JobStats | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+
+  useEffect(() => {
+    let live = true
+    Promise.all([api.jobs.runs(job.id, 50), api.jobs.stats(job.id, 30)])
+      .then(([r, s]) => { if (live) { setRuns(r); setStats(s) } })
+      .catch((e: Error) => { if (live) setErr(e.message) })
+    return () => { live = false }
+  }, [job.id])
+
+  const exportCsv = async (): Promise<void> => {
+    try {
+      const url = URL.createObjectURL(new Blob([await api.jobs.csv(job.id)], { type: 'text/csv' }))
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${job.name.replace(/[^\w.-]+/g, '-')}-runs.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      setErr((e as Error).message)
+    }
+  }
+
+  return (
+    <li className="job-history">
+      {err && <p className="msg-error">{err}</p>}
+      {stats && (
+        <div className="job-history-stats muted small">
+          {stats.success_rate === null ? 'No finished runs in 30 days' : `${Math.round(stats.success_rate * 100)}% ok`}
+          {` · ${stats.runs} run${stats.runs === 1 ? '' : 's'}`}
+          {stats.median_duration_s !== null && ` · median ${fmtDur(stats.median_duration_s)}`}
+          {stats.total_cost > 0 && ` · $${stats.total_cost.toFixed(2)}`}
+          <span style={{ flex: 1 }} />
+          <button className="link small" onClick={() => void exportCsv()}>Export CSV</button>
+        </div>
+      )}
+      {runs && runs.length === 0 && <p className="muted small">Not run yet.</p>}
+      {runs && runs.map((r) => (
+        <div key={r.run_id} className="job-history-run small">
+          <span className={`chip ${r.status === 'done' ? '' : r.status === 'running' ? 'warn' : 'bad'}`}>{STATUS_LABEL[r.status]}</span>
+          <span>{fmtDate(r.started_at)}</span>
+          <span className="muted">{fmtDur(r.duration_s)}</span>
+          {r.attempt > 1 && <span className="chip warn">retry {r.attempt}</span>}
+          {r.manual && <span className="chip">by hand</span>}
+          <span className="muted">{r.tool_calls} call{r.tool_calls === 1 ? '' : 's'}</span>
+          {r.proposals.pending + r.proposals.accepted + r.proposals.rejected > 0 && (
+            <span className="muted">{r.proposals.accepted}/{r.proposals.pending + r.proposals.accepted + r.proposals.rejected} proposals accepted</span>
+          )}
+          <span style={{ flex: 1 }} />
+          {r.conversation_id && <button className="link small" onClick={() => void selectChat(r.conversation_id as string)}>open</button>}
+        </div>
+      ))}
+    </li>
+  )
+}
+
+/** Checkboxes for the tools a job may use, grouped like Settings. A job can only be narrowed: nothing here turns a tool on. */
+function ToolPicker({ value, onChange }: { value: string[]; onChange: (next: string[]) => void }): JSX.Element {
+  const tools = useStore((s) => s.tools)
+  const groups = new Map<string, string[]>()
+  // 'schedules' tools are never offered: a scheduled run that can schedule runs is a loop.
+  for (const t of tools) if (t.danger !== 'schedules') groups.set(t.group, [...(groups.get(t.group) ?? []), t.name])
+  const set = new Set(value)
+  const flip = (n: string): void => onChange(set.has(n) ? value.filter((x) => x !== n) : [...value, n])
+  return (
+    <div className="job-tools">
+      {[...groups.entries()].map(([g, names]) => (
+        <div key={g} className="job-tools-group">
+          <span className="muted small">{g}</span>
+          {names.map((n) => (
+            <label key={n} className="chip-check-row small">
+              <input type="checkbox" checked={set.has(n)} onChange={() => flip(n)} /> <span>{n}</span>
+            </label>
+          ))}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function JobRow({ job }: { job: Job }): JSX.Element {
-  const { setJobEnabled, runJobNow, deleteJob } = useStore()
+  const { setJobEnabled, runJobNow, deleteJob, refreshJobs, selectChat, toast } = useStore()
+  const [history, setHistory] = useState(false)
+  const [toolsOpen, setToolsOpen] = useState(false)
+
+  const preview = async (): Promise<void> => {
+    try {
+      const r = await api.jobs.dryRun(job.id)
+      if (r.conversation_id) await selectChat(r.conversation_id)
+      else toast('Preview did not start', 'error')
+    } catch (e) {
+      toast(`Jobs: ${(e as Error).message}`, 'error')
+    }
+  }
+  const saveTools = async (allowed: string[] | null): Promise<void> => {
+    try {
+      await api.jobs.update(job.id, { allowed_tools: allowed })
+      await refreshJobs()
+    } catch (e) {
+      toast(`Jobs: ${(e as Error).message}`, 'error')
+    }
+  }
   const once = job.kind === 'once'
   // A one-off that has already fired has no slot left to wait for, so it is shown as what it did rather than
   // as a switch: the backend refuses to re-arm it, and a toggle that does nothing is worse than no toggle.
   const spent = once && job.last_fired_at !== null && job.next_due_at === null
 
   return (
+    <>
     <li className={spent ? 'spent' : undefined}>
       {spent ? (
         <span className="chip-check-row ev-title">{job.name}</span>
@@ -140,6 +253,21 @@ function JobRow({ job }: { job: Job }): JSX.Element {
           ? `ran ${fmtWhen(job.last_fired_at as number)}`
           : job.enabled && job.next_due_at ? `next ${fmtWhen(job.next_due_at)}` : 'off'}
       </span>
+      {job.last_skip_reason && job.last_skip_at && (
+        <span className="muted small" title={`Slot at ${fmtWhen(job.last_skip_at)} was skipped`}>skipped: {job.last_skip_reason.replace('previous run still running', 'still running')}</span>
+      )}
+      <button className={`icon-btn sm ${toolsOpen ? 'on' : ''}`} title={job.allowed_tools ? `${job.allowed_tools.length} tools allowed` : 'All tools'}
+        aria-label={`Tools for ${job.name}`} onClick={() => setToolsOpen((v) => !v)}>
+        <Wrench size={12} />
+      </button>
+      <button className="icon-btn sm" title="Preview: run it read-only, nothing is proposed or changed" aria-label={`Preview ${job.name}`}
+        onClick={() => void preview()}>
+        <Eye size={12} />
+      </button>
+      <button className={`icon-btn sm ${history ? 'on' : ''}`} title="Run history" aria-label={`History of ${job.name}`}
+        onClick={() => setHistory((v) => !v)}>
+        <History size={12} />
+      </button>
       <button className="icon-btn sm" title="Run it now" aria-label={`Run ${job.name} now`} onClick={() => void runJobNow(job.id)}>
         <Play size={12} />
       </button>
@@ -148,23 +276,40 @@ function JobRow({ job }: { job: Job }): JSX.Element {
         <Trash2 size={12} />
       </button>
     </li>
+    {toolsOpen && (
+      <li className="job-history">
+        <label className="chip-check-row small">
+          <input type="radio" name={`tools-${job.id}`} checked={job.allowed_tools === null} onChange={() => void saveTools(null)} /> <span>All tools</span>
+        </label>
+        <label className="chip-check-row small">
+          <input type="radio" name={`tools-${job.id}`} checked={job.allowed_tools !== null}
+            onChange={() => void saveTools(job.allowed_tools ?? ['current_time'])} /> <span>Only these</span>
+        </label>
+        {job.allowed_tools !== null && <ToolPicker value={job.allowed_tools} onChange={(n) => void saveTools(n)} />}
+        <p className="muted small">A run can only use tools it is given here, on top of your own tool settings. Anything
+          that leaves the app is still a proposal.</p>
+      </li>
+    )}
+    {history && <JobHistory job={job} />}
+    </>
   )
 }
 
-const BLANK = { name: '', prompt: '', when: '', cron: '', repeat: false }
+const BLANK = { name: '', prompt: '', when: '', cron: '', repeat: false, onlyTools: false }
 
 /** Schedule a task by hand: a one-off instant by default, a cron expression if it should repeat. */
 function NewTask({ onDone }: { onDone: () => void }): JSX.Element {
   const createJob = useStore((s) => s.createJob)
   const [f, setF] = useState(BLANK)
   const [busy, setBusy] = useState(false)
+  const [picked, setPicked] = useState<string[]>(['current_time'])
   const ready = !!f.name.trim() && !!f.prompt.trim() && (f.repeat ? !!f.cron.trim() : !!f.when)
 
   const submit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault()
     if (!ready || busy) return
     setBusy(true)
-    const common = { name: f.name.trim(), prompt: f.prompt.trim(), enabled: true }
+    const common = { name: f.name.trim(), prompt: f.prompt.trim(), enabled: true, allowed_tools: f.onlyTools ? picked : null }
     // datetime-local has no zone, so Date.parse reads it as local time — which is what the user typed.
     const ok = await createJob(f.repeat
       ? { ...common, kind: 'cron' as const, cron: f.cron.trim() }
@@ -194,6 +339,11 @@ function NewTask({ onDone }: { onDone: () => void }): JSX.Element {
               onChange={(e) => setF({ ...f, when: e.target.value })} />}
         <button className="primary-btn sm" type="submit" disabled={!ready || busy}>Schedule</button>
       </div>
+      <label className="chip-check-row small">
+        <input type="checkbox" checked={f.onlyTools} onChange={(e) => setF({ ...f, onlyTools: e.target.checked })} />
+        <span>Only allow some tools</span>
+      </label>
+      {f.onlyTools && <ToolPicker value={picked} onChange={setPicked} />}
     </form>
   )
 }
@@ -201,12 +351,13 @@ function NewTask({ onDone }: { onDone: () => void }): JSX.Element {
 export default function AgentInbox(): JSX.Element | null {
   const box = useStore((s) => s.agentInbox)
   const jobs = useStore((s) => s.jobs)
-  const { approveTool, refreshJobs } = useStore()
+  const { approveTool, refreshJobs, setJobEnabled } = useStore()
   const [showJobs, setShowJobs] = useState(false)
   const [adding, setAdding] = useState(false)
 
   if (!box) return null
   const { approvals, proposals } = box.needs_you
+  const paused = box.needs_you.paused_jobs ?? []
   const away = box.while_you_were_away
   const quiet = box.counts.needs_you === 0 && away.length === 0
 
@@ -265,6 +416,16 @@ export default function AgentInbox(): JSX.Element | null {
                   </button>
                 </div>
                 <pre className="inbox-args">{argText(a.args)}</pre>
+              </li>
+            ))}
+            {paused.map((p) => (
+              <li className="inbox-item" key={p.id}>
+                <div className="inbox-item-head">
+                  <span className="inbox-job">{p.name}</span>
+                  <span className="chip bad"><AlertTriangle size={11} /> Paused: {p.reason}</span>
+                  <span style={{ flex: 1 }} />
+                  <button className="primary-btn sm" onClick={() => void setJobEnabled(p.id, true)}><Play size={13} /> Resume</button>
+                </div>
               </li>
             ))}
             {proposals.map((p) => <ProposalCard key={p.id} p={p} />)}

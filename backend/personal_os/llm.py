@@ -20,12 +20,38 @@ def on_usage(fn: UsageListener) -> None:
     _usage_listeners.append(fn)
 
 
+def parse_usage(raw: dict[str, Any] | None) -> dict[str, Any]:
+    """Provider usage object -> the counts we keep, with cache and reasoning buckets normalised.
+
+    OpenAI/Fireworks/LiteLLM report prompt_tokens_details.cached_tokens; Anthropic (through LiteLLM) adds
+    cache_read_input_tokens / cache_creation_input_tokens. Reasoning tokens are already inside completion_tokens.
+    """
+    raw = raw if isinstance(raw, dict) else {}
+    out: dict[str, Any] = {k: raw[k] for k in ("prompt_tokens", "completion_tokens", "total_tokens") if raw.get(k) is not None}
+
+    def num(v: Any) -> int:
+        try:
+            return max(0, int(v or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    ptd = raw.get("prompt_tokens_details") if isinstance(raw.get("prompt_tokens_details"), dict) else {}
+    ctd = raw.get("completion_tokens_details") if isinstance(raw.get("completion_tokens_details"), dict) else {}
+    out["cached_tokens"] = num(ptd.get("cached_tokens")) or num(raw.get("cache_read_input_tokens"))
+    out["cache_write_tokens"] = num(raw.get("cache_creation_input_tokens")) or num(ptd.get("cache_creation_tokens"))
+    out["reasoning_tokens"] = num(ctd.get("reasoning_tokens"))
+    return out
+
+
 def _emit_usage(model: str, kind: str, usage: dict[str, Any] | None, duration_ms: int, prompt_chars: int, completion_chars: int) -> None:
     est = not usage or usage.get("prompt_tokens") is None
     rec = {
         "model": model, "kind": kind, "duration_ms": duration_ms, "estimated": est,
         "prompt_tokens": int((usage or {}).get("prompt_tokens") or prompt_chars // 4),
         "completion_tokens": int((usage or {}).get("completion_tokens") or completion_chars // 4),
+        "cached_tokens": 0 if est else int((usage or {}).get("cached_tokens") or 0),
+        "cache_write_tokens": 0 if est else int((usage or {}).get("cache_write_tokens") or 0),
+        "reasoning_tokens": 0 if est else int((usage or {}).get("reasoning_tokens") or 0),
         **usage_context.get(),
     }
     for fn in _usage_listeners:
@@ -44,7 +70,14 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "excerpts as context; use them when relevant and don't mention them unless asked."
     ),
     "extractionModel": "",
+    "consolidateEvery": 25,  # propose a memory tidy-up after this many new auto memories; 0 = manual only
     "autoLearn": True,
+    # Pre-image copies of local files the agent overwrites or moves, so Undo works (filesnap.py).
+    "fileSnapshots": True,
+    "fileSnapshotMaxBytes": 5_000_000,
+    "fileSnapshotRetainDays": 14,
+    "fileSnapshotBudgetMB": 200,
+    "stuckDetection": True,  # nudge, then stop, on ping-pong / same-result / error-cycle loops (stuck.py)
     # Bank long messages the user writes as style samples and keep their voice profile current (style.py).
     # Independent of autoLearn: wanting the app to learn facts is not the same as wanting it to copy your voice.
     "learnStyle": True,
@@ -60,6 +93,23 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # How doc_edit lands. "review" proposes a diff; "apply" writes it. Missing means review.
     "docEditMode": "review",
     "maxToolRounds": 25,
+    # Keep the system prompt identical between turns and put per-turn retrieval just before the newest
+    # user message, so the provider's prefix cache survives (context.layout_messages).
+    "cacheLayout": True,
+    # Context management (compaction.py). Window and thresholds are estimates (len//4), not provider counts.
+    "contextWindow": 128000,
+    "autoCompact": True,
+    "compactAt": 0.7,
+    "compactKeepRecent": 8,
+    "microKeep": 3,
+    "microAt": 0.5,
+    # Opt-in OpenTelemetry GenAI export (otel_export.py). Off by default; replaced whole through PUT /settings.
+    # Loopback endpoints only unless allowRemote; no message content unless includeContent.
+    "otelExport": {"enabled": False, "endpoint": "", "headers": {}, "includeContent": False, "allowRemote": False, "timeoutSeconds": 5},
+    # Offer MCP tools through mcp_tool_search once more than this many are ready (0 = always send every schema).
+    "mcpDeferAbove": 12,
+    # Approved skills are inlined in the system prompt up to this many characters; past it, an index + skill_view.
+    "skillsInlineBudget": 6000,
     # Per-reply budgets; 0 = unlimited. A run that hits one still writes a final answer, marked partial.
     "maxRunTokens": 200_000,
     "maxRunSeconds": 300,
@@ -73,6 +123,12 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "deskMaxTurns": 12,
     "deskMaxCost": 2.0,
     "deskMaxLive": 4,
+    # Scheduled-job run policy (jobs_policy.py): retry backoff base in seconds (doubles per attempt, capped at
+    # 30 min) and how many consecutive failed fires switch a job off.
+    "jobRetryBackoffS": 120,
+    "jobFailureStreakLimit": 3,
+    # OS notification when an unattended job fails, is paused, or leaves proposals (only while the app is hidden).
+    "notifyJobs": True,
     # Hosts fetch_url may still read once a reply has touched untrusted content (registrable-suffix match).
     "fetchAllowlist": [],
     # Undo window on outgoing mail (outbox.py). `seconds` is clamped to 60-120 on read.
@@ -81,10 +137,16 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "tavilyApiKey": "",
     # Without a Brave/Tavily key, web_search uses Exa (keyless via its hosted MCP server; a key lifts the rate limit).
     "exaApiKey": "",
+    # Base URL of your own SearXNG (needs `json` under search.formats); empty = off. It runs beside Exa and the results are merged.
+    "searxngUrl": "",
     # fetch_url retries a blocked or JavaScript-only page through Jina Reader (r.jina.ai), which then sees the URL.
     "readerFallback": True,
+    # fetch_url reuses a page it fetched this many seconds ago (0 = never); fresh=true on the call bypasses it.
+    "fetchCacheSeconds": 3600,
     # github_search/github_read; empty = the gh CLI's login (`gh auth token`), else unauthenticated (60 requests/h).
     "githubToken": "",
+    # A stopped sandbox (containers are stopped, not removed, at app quit) is deleted after this many idle days.
+    "sandboxKeepDays": 14,
     # {model: {"input": $/M tokens, "output": $/M tokens}} overrides for cost accounting (proxy prices are used otherwise)
     "modelPrices": {},
     "googleClientId": "",
@@ -103,6 +165,21 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # todos -> Google Calendar mirror; defaults in todocal.DEFAULT_CONFIG, patched through
     # /integrations/google/todo-calendar.
     "googleTodoCalendar": {},
+    # Document retrieval (retrieval.py). 'bm25' forces keyword-only; hybrid falls back to it when the
+    # embedding route is unavailable. The floor only drops vector-only hits (exact keyword hits survive).
+    "retrievalMode": "hybrid",
+    "embeddingModel": "qwen3-embedding-8b",
+    "retrievalMinSimilarity": 0.25,
+    "retrievalPerDocCap": 3,
+    "retrievalCandidates": 20,
+    # Also retrieve from the user's own Docs (not just uploaded files) when a chat has useDocuments on.
+    "useDocsInContext": True,
+    # Reply tracker (mailwatch.py); MailWatchModule.config() merges stored values over these defaults.
+    "mailWatch": {"enabled": True, "awaitingAfterDays": 3, "needsReplyAfterHours": 24, "useLLM": False,
+                  "query": "newer_than:14d -category:promotions -category:social", "proposeFollowups": True},
+    # Todo time-block planner (planner.py); PlannerModule.config() merges stored values over these.
+    "planner": {"workStart": "09:00", "workEnd": "17:30", "workDays": [1, 2, 3, 4, 5], "bufferMin": 10, "minBlockMin": 15,
+                "maxBlockMin": 120, "slotStepMin": 15, "lookaheadDays": 7, "calendarName": "Grain Todos"},
 }
 
 
@@ -221,7 +298,7 @@ async def stream_chat(
                         err = obj["error"]
                         raise LLMError(err.get("message") if isinstance(err, dict) else str(err))
                     if isinstance(obj.get("usage"), dict):
-                        usage = {k: obj["usage"].get(k) for k in ("prompt_tokens", "completion_tokens", "total_tokens") if obj["usage"].get(k) is not None}
+                        usage = parse_usage(obj["usage"])
                     choice = (obj.get("choices") or [{}])[0]
                     delta = choice.get("delta") or {}
                     reason = _reason_text(delta)
@@ -279,7 +356,7 @@ async def complete(settings: dict[str, Any], model: str, messages: list[dict[str
         raise LLMError(f"{r.status_code}: {r.text[:500]}")
     data = r.json()
     text = data["choices"][0]["message"]["content"] or ""
-    _emit_usage(model, kind, data.get("usage") if isinstance(data.get("usage"), dict) else None, int((time.time() - t0) * 1000), len(json.dumps(messages)), len(text))
+    _emit_usage(model, kind, parse_usage(data["usage"]) if isinstance(data.get("usage"), dict) else None, int((time.time() - t0) * 1000), len(json.dumps(messages)), len(text))
     return text
 
 

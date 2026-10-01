@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS widgets (
   id TEXT PRIMARY KEY,
   dashboard_id TEXT NOT NULL REFERENCES dashboards(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
-  kind TEXT NOT NULL DEFAULT 'html',          -- html (generated code) | summary (AI text) | markdown (static)
+  kind TEXT NOT NULL DEFAULT 'html',          -- html (generated code) | summary (AI text) | markdown (static) | chart | stat | table (widget_spec.py)
   prompt TEXT NOT NULL DEFAULT '',
   source_ids TEXT NOT NULL DEFAULT '[]',
   code TEXT NOT NULL DEFAULT '',
@@ -54,6 +54,14 @@ CREATE TABLE IF NOT EXISTS recaps (
 );
 """
 
+# Columns added after the table shipped (declarative widgets); CREATE TABLE IF NOT EXISTS will not add them.
+_WIDGET_COLUMNS = {
+    "spec": "TEXT NOT NULL DEFAULT '{}'",         # chart/stat/table binding (widget_spec.py)
+    "data": "TEXT NOT NULL DEFAULT 'null'",       # cached bound rows {rows, stat}, refreshed on the widget's TTL
+    "data_error": "TEXT NOT NULL DEFAULT ''",
+}
+_WIDGET_JSON = ("source_ids", "spec", "data")
+
 INTERNAL_SOURCES = ["todos", "calendar", "gmail", "memories", "projects", "boards"]
 
 
@@ -62,6 +70,10 @@ class Dashboards:
         self.db = db
         with db.tx() as c:
             c.executescript(SCHEMA)
+            have = {r["name"] for r in c.execute("PRAGMA table_info(widgets)")}
+            for col, ddl in _WIDGET_COLUMNS.items():
+                if col not in have:
+                    c.execute(f"ALTER TABLE widgets ADD COLUMN {col} {ddl}")
 
     # ---------- sources ----------
     def sources(self, with_secret: bool = False) -> list[dict[str, Any]]:
@@ -165,7 +177,7 @@ class Dashboards:
             if not d:
                 return None
             ws = c.execute("SELECT * FROM widgets WHERE dashboard_id=? ORDER BY position, created_at", (id,)).fetchall()
-        d["widgets"] = [row_to_dict(w, ("source_ids",)) for w in ws]
+        d["widgets"] = [row_to_dict(w, _WIDGET_JSON) for w in ws]
         return d
 
     def create(self, name: str, description: str = "") -> dict[str, Any]:
@@ -188,23 +200,24 @@ class Dashboards:
     # ---------- widgets ----------
     def widget(self, id: str) -> dict[str, Any] | None:
         with self.db.tx() as c:
-            return row_to_dict(c.execute("SELECT * FROM widgets WHERE id=?", (id,)).fetchone(), ("source_ids",))
+            return row_to_dict(c.execute("SELECT * FROM widgets WHERE id=?", (id,)).fetchone(), _WIDGET_JSON)
 
-    def create_widget(self, dashboard_id: str, title: str, kind: str, prompt: str = "", source_ids: list[str] | None = None, code: str = "", output: str = "", width: int = 1, height: int = 280, refresh_minutes: int = 60) -> dict[str, Any]:
+    def create_widget(self, dashboard_id: str, title: str, kind: str, prompt: str = "", source_ids: list[str] | None = None, code: str = "", output: str = "", width: int = 1, height: int = 280, refresh_minutes: int = 60, spec: dict[str, Any] | None = None) -> dict[str, Any]:
         wid = new_id()
         t = now()
         with self.db.tx() as c:
             pos = c.execute("SELECT COALESCE(MAX(position),-1)+1 FROM widgets WHERE dashboard_id=?", (dashboard_id,)).fetchone()[0]
             c.execute(
-                "INSERT INTO widgets(id,dashboard_id,title,kind,prompt,source_ids,code,output,refresh_minutes,position,width,height,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (wid, dashboard_id, title.strip() or "Widget", kind, prompt, json.dumps(source_ids or []), code, output, refresh_minutes, pos, max(1, min(int(width), 3)), int(height), t, t),
+                "INSERT INTO widgets(id,dashboard_id,title,kind,prompt,source_ids,code,output,refresh_minutes,position,width,height,created_at,updated_at,spec) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (wid, dashboard_id, title.strip() or "Widget", kind, prompt, json.dumps(source_ids or []), code, output, refresh_minutes, pos, max(1, min(int(width), 3)), int(height), t, t, json.dumps(spec or {})),
             )
         return self.widget(wid)  # type: ignore[return-value]
 
     def update_widget(self, id: str, patch: dict[str, Any]) -> dict[str, Any] | None:
-        fields = {k: v for k, v in patch.items() if k in {"title", "kind", "prompt", "source_ids", "code", "output", "refresh_minutes", "position", "width", "height", "refreshed_at"} and v is not None}
-        if "source_ids" in fields:
-            fields["source_ids"] = json.dumps(fields["source_ids"])
+        fields = {k: v for k, v in patch.items() if k in {"title", "kind", "prompt", "source_ids", "code", "output", "refresh_minutes", "position", "width", "height", "refreshed_at", "spec", "data", "data_error"} and v is not None}
+        for k in ("source_ids", "spec", "data"):
+            if k in fields:
+                fields[k] = json.dumps(fields[k])
         if not fields:
             return self.widget(id)
         fields["updated_at"] = now()

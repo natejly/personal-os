@@ -260,6 +260,24 @@ export interface McpTool {
   effective: McpEffective
   /** Only on /mcp/tools: its server is connected right now. */
   ready?: boolean
+  /** Set when the shape changed since the user last saw it; `quarantined` means it is withheld from the model. */
+  drift?: McpDrift | null
+}
+
+export interface McpToolShape {
+  description: string
+  parameters: Record<string, unknown>
+  schema_hash: string
+  seen_at: number
+}
+
+export interface McpDrift {
+  previous: McpToolShape
+  current: McpToolShape
+  diff: { description: string[]; added_params: string[]; removed_params: string[]; changed_params: string[]; new_required: string[] }
+  new_findings: McpFinding[]
+  quarantined: boolean
+  changed_at: number
 }
 
 export interface McpFinding {
@@ -362,12 +380,14 @@ export interface ToolEvent {
   proposal?: string | null
   /** Set when this call's arguments matched an approved plan step, so it ran without its own card. */
   plan?: PlanStepRef | null
+  /** write_local_file / move_local_file: the pre-image kept so the user can undo it (id is null when too large to keep). */
+  undo?: { snapshot_id: string | null; reason?: string | null } | null
 }
 
 /** Why a reply stopped early: a budget axis, or the repetition breaker. */
-export type PartialReason = 'rounds' | 'tokens' | 'time' | 'cost' | 'loop'
+export type PartialReason = 'rounds' | 'tokens' | 'time' | 'cost' | 'loop' | 'stuck' | 'stuck_nudge'
 
-export type SpanKind = 'context' | 'llm' | 'tool' | 'learn'
+export type SpanKind = 'context' | 'llm' | 'tool' | 'learn' | 'compact'
 
 /** One timed step in the execution trace of an assistant reply. */
 export interface Span {
@@ -380,6 +400,26 @@ export interface Span {
   end: number | null
   meta: Record<string, unknown>
   error: string | null
+  /** The span this one nests under (a tool under its model round). Absent on older traces. */
+  parent_id?: string
+}
+
+/** Opt-in OpenTelemetry export of finished replies (otel_export.py). */
+export interface OtelExportConfig {
+  enabled: boolean
+  endpoint: string
+  headers: Record<string, string>
+  includeContent: boolean
+  allowRemote: boolean
+  timeoutSeconds: number
+}
+
+/** GET /conversations/{id}/context-meter: the replayed history against the model window (estimates, len/4). */
+export interface ContextMeter {
+  window: number
+  estimated_tokens: number
+  compact_at: number
+  summary: { summary: string; summarized_messages: number; tokens_before: number; tokens_after: number; updated_at: number } | null
 }
 
 export interface Message {
@@ -452,6 +492,24 @@ export interface Memory {
   pinned: number
   created_at: number
   updated_at: number
+  /** Validity interval: `invalid_at` set means superseded or forgotten (history), `superseded_by` is its replacement. */
+  valid_from?: number | null
+  invalid_at?: number | null
+  superseded_by?: string | null
+  source_conversation_id?: string | null
+  source_message_id?: string | null
+}
+
+/** A pending tidy-up the user can apply or dismiss (backend consolidate.py). Nothing applies by itself. */
+export interface MemoryProposal {
+  id: string
+  project_id: string | null
+  kind: 'merge_memories' | 'rewrite_memory' | 'merge_entities'
+  payload: { ids: string[]; text?: string; label?: string; snapshot: Record<string, string> }
+  rationale: string
+  status: 'pending' | 'applied' | 'dismissed' | 'stale'
+  created_at: number
+  decided_at: number | null
 }
 
 /** How the user writes, learned from samples of their own writing. One per scope. See backend style.py. */
@@ -533,6 +591,13 @@ export interface Document {
   text?: string
 }
 
+/** Recurring todo: completing it spawns the next instance (backend todo_rules.py). */
+export interface TodoRepeat {
+  every: number
+  unit: 'day' | 'week' | 'month' | 'year'
+  mode: 'from_due' | 'from_completion'
+}
+
 export interface Todo {
   id: string
   project_id: string | null
@@ -549,6 +614,11 @@ export interface Todo {
   calendar_id: string | null
   /** Internal: todo fields as last mirrored to the calendar. */
   calendar_sig: string | null
+  repeat?: TodoRepeat | null
+  /** Expected minutes of work; the planner time-blocks with it. */
+  estimate_min?: number | null
+  /** Weighted urgency score; only present on `?sort=urgency` lists. */
+  urgency?: number
   created_at: number
   updated_at: number
   completed_at: number | null
@@ -816,6 +886,16 @@ export interface Settings {
   /** How assistant edits to docs land. Missing means review: show the diff and wait. */
   docEditMode?: 'review' | 'apply'
   maxToolRounds: number
+  /** Keep the system prompt stable and put per-turn retrieval beside the newest message (prompt caching). Default on. */
+  cacheLayout?: boolean
+  otelExport?: OtelExportConfig
+  /** Context management (compaction.py): window in tokens, thresholds as fractions of it. */
+  contextWindow?: number
+  autoCompact?: boolean
+  compactAt?: number
+  compactKeepRecent?: number
+  microKeep?: number
+  microAt?: number
   /** Per-reply budgets; 0 means unlimited. */
   maxRunTokens?: number
   maxRunSeconds?: number
@@ -826,6 +906,10 @@ export interface Settings {
   tavilyApiKey: string
   /** Without a Brave/Tavily key, web search uses Exa (keyless, rate-limited); a key lifts the limit. */
   exaApiKey?: string
+  /** Base URL of your own SearXNG; searched beside Exa and merged. Empty = off. */
+  searxngUrl?: string
+  /** Seconds fetch_url reuses a fetched page (0 = never). */
+  fetchCacheSeconds?: number
   /** fetch_url retries a blocked or JavaScript-only page through Jina Reader (which then sees the URL). Default on. */
   readerFallback?: boolean
   /** github_search/github_read; empty uses the gh CLI's login. */
@@ -840,6 +924,8 @@ export interface Settings {
   parkAfterSeconds?: number
   /** A native notification when a desk stops and cannot go on without you. Missing reads as on. */
   deskNotify?: boolean
+  /** A native notification when a scheduled job fails, is auto-paused or leaves proposals, while the window is hidden. Missing reads as on. */
+  notifyJobs?: boolean
   /** Default plan mode for a new chat: off, auto (the first mutating call arms it), or always. */
   planMode?: 'off' | 'auto' | 'always'
   googleClientId: string
@@ -870,6 +956,11 @@ export interface UsageBucket {
   chat_calls: number
   learn_calls: number
   other_calls: number
+  /** Input tokens served from the provider's prompt cache, and reasoning tokens inside completion_tokens. */
+  cached_tokens?: number
+  reasoning_tokens?: number
+  cache_hit_rate?: number
+  reasoning_share?: number
 }
 
 export interface UsageReport {
@@ -935,6 +1026,7 @@ export interface Learned {
 export type BackgroundEvent =
   | { event: 'learned'; data: Learned }
   | { event: 'learn_error'; data: { conversation_id?: string; message_id?: string; message: string } }
+  | { event: 'job_finished'; data: { run_id: string; job_id: string } }
 
 export interface GrainApi {
   backendUrl: () => Promise<string>
@@ -980,9 +1072,25 @@ export interface DataSource {
   has_secret: boolean; last_status: string | null; last_fetched_at: number | null; created_at: number
 }
 export interface Widget {
-  id: string; dashboard_id: string; title: string; kind: 'html' | 'summary' | 'markdown' | string; prompt: string; source_ids: string[]
+  id: string; dashboard_id: string; title: string; kind: 'html' | 'summary' | 'markdown' | 'chart' | 'stat' | 'table' | string; prompt: string; source_ids: string[]
   code: string; output: string; refresh_minutes: number; refreshed_at: number | null; position: number; width: number; height: number
   created_at: number; updated_at: number
+  /** chart | stat | table only (widget_spec.py): the binding, the cached rows {rows, stat}, and why binding failed */
+  spec?: Record<string, unknown>; data?: unknown; data_error?: string
+}
+/** What the render CSP would break, or an empty document (artifacts.lint). */
+export interface ArtifactLint { blocked: string[]; empty: boolean; repaired?: boolean }
+export interface Artifact {
+  id: string; project_id: string | null; title: string; kind: string; prompt: string; version: number
+  created_at: number; updated_at: number
+  /** the current document; absent from list rows */
+  code?: string
+  size?: number; version_count?: number
+  lint?: ArtifactLint
+}
+export interface ArtifactVersion {
+  id: string; artifact_id: string; version: number; prompt: string; instruction: string
+  source: 'llm' | 'user' | 'restore'; created_at: number; size?: number; code?: string
 }
 export interface Dashboard { id: string; name: string; description: string; created_at: number; widget_count?: number; widgets: Widget[] }
 export interface Recap { day: string; content: string; created_at: number; cached?: boolean }
@@ -1149,7 +1257,7 @@ export interface PromotionResult {
 /** Every widget a canvas window can host. Source of truth for `WIDGET_KINDS` in backend/personal_os/canvas.py. */
 export type WidgetKind =
   | 'chat' | 'todos' | 'calendar' | 'board' | 'note' | 'dashboard-widget'
-  | 'memory' | 'graph' | 'documents' | 'recap' | 'project' | 'usage' | 'activity' | 'web'
+  | 'memory' | 'graph' | 'documents' | 'recap' | 'project' | 'usage' | 'activity' | 'web' | 'artifact'
 
 export type WindowState = 'normal' | 'minimized' | 'maximized' | 'popped'
 export type SnapMode = 'off' | 'grid' | 'guides' | 'both'
@@ -1349,6 +1457,16 @@ export interface Job {
   next_due_at: number | null
   created_at: number
   updated_at: number
+  /** Re-launches of a run that ended in an error, with backoff. 0 = never retry. */
+  max_retries: number
+  /** Fires in a row that ended in failure; at the streak limit the job is paused. */
+  consecutive_failures: number
+  /** Why the scheduler switched this job off by itself. null for a job the user turned off. */
+  paused_reason: string | null
+  last_skip_at: number | null
+  last_skip_reason: string | null
+  /** The only tools this job's runs may use. null = every tool (the default); it can only narrow, never widen. */
+  allowed_tools: string[] | null
 }
 
 /** An outward-facing call a background run recorded instead of making. Accepting it is what runs it. */
@@ -1385,6 +1503,9 @@ export interface JobRunSummary {
   late_seconds: number
   missed_slots: number
   manual: boolean
+  /** 1 for the first launch of a slot; 2+ for a retry of the run `retry_of`. */
+  attempt: number
+  retry_of: string | null
   started_at: number
   ended_at: number | null
   error: string | null
@@ -1395,13 +1516,54 @@ export interface JobRunSummary {
   summary: string
 }
 
+/** One run in a job's History drawer (GET /jobs/{id}/runs). Derived from rows; `summary` is display text only. */
+export interface JobRunRecord {
+  run_id: string
+  conversation_id: string | null
+  status: 'running' | 'done' | 'error' | 'interrupted' | 'timed_out'
+  started_at: number
+  ended_at: number | null
+  duration_s: number | null
+  due_at: number | null
+  late: boolean
+  missed_slots: number
+  attempt: number
+  retry_of: string | null
+  manual: boolean
+  tool_calls: number
+  proposals: { pending: number; accepted: number; rejected: number }
+  cost: number | null
+  error: string | null
+  summary: string
+}
+
+export interface JobStats {
+  runs: number
+  ok: number
+  failed: number
+  success_rate: number | null
+  median_duration_s: number | null
+  last_ok_at: number | null
+  total_cost: number
+}
+
+/** One OS-notification-worthy job event (GET /inbox/notify). Names and counts only, never reply text. */
+export interface JobNotifyEvent {
+  id: string
+  kind: 'job_failed' | 'job_done_with_proposals' | 'job_paused' | 'proposal_pending'
+  title: string
+  body: string
+  at: number
+}
+
 export interface AgentInbox {
   needs_you: {
     approvals: (PendingApproval & { run_kind?: string | null; job?: string | null })[]
     proposals: AgentProposal[]
+    paused_jobs: { id: string; name: string; reason: string; paused_at: number; consecutive_failures: number }[]
   }
   while_you_were_away: JobRunSummary[]
-  counts: { needs_you: number; approvals: number; proposals: number; runs: number; late: number; failed: number }
+  counts: { needs_you: number; approvals: number; proposals: number; paused_jobs: number; runs: number; late: number; failed: number }
   scheduler: { last_tick: number | null; fires: number; next_due_at: number | null; timezone: string }
 }
 
@@ -1485,6 +1647,14 @@ export interface ActivityConfig {
   excludeApps: string[]
   /** Window titles / URLs containing any of these are skipped. */
   excludeTitlePatterns: string[]
+  /** Strings or /regex/ that are never scrubbed. */
+  redactAllow: string[]
+  /** Strings or /regex/ that are always scrubbed. */
+  redactDeny: string[]
+  /** Score a candidate needs before it is scrubbed (0.2-0.9). */
+  redactThreshold: number
+  /** Category rules; null means the shipped default tree. */
+  categories: ActivityCategoryRule[] | null
   audio: ActivityAudioConfig
   /** Blank falls back to the extraction model, then the default model. */
   summaryModel: string
@@ -1656,6 +1826,28 @@ export interface ActivityStatus {
   secure_input: boolean
   /** Palantir mode is on: every signal recording and the gate's filters down. */
   palantir: boolean
+  /** Redactions so far today, by entity. Counts only. */
+  redactions?: Record<string, number>
+}
+
+export interface ActivityCategoryRule {
+  name: string[]
+  rule?: { type: 'regex' | 'none'; pattern?: string; fields?: ('app' | 'title')[]; hosts?: string[] }
+  /** Productivity, -2 (distracting) to 2 (productive); inherited from the parent when absent. */
+  score?: number
+}
+
+export interface ActivityCategoryReport {
+  days: { day: string; total_seconds: number; cats: Record<string, number> }[]
+  totals: Record<string, number>
+  productivity: number | null
+  top_uncategorized_apps: { app: string; seconds: number }[]
+}
+
+export interface ActivityRedactTest {
+  redacted: string
+  active: boolean
+  spans: { entity: string; score: number; start: number; end: number }[]
 }
 
 export type ActivityEventKind = 'focus' | 'input' | 'idle' | 'audio' | 'note'
@@ -1751,6 +1943,8 @@ export interface FullMeeting extends Omit<Meeting, 'notes_preview'> {
   /** Meet/Zoom/Teams URL; a calendar event's own `meet` field is hangoutLink only. */
   conference_link: string
   keep_audio: boolean
+  /** Display names for diarized speaker ids, e.g. { S1: 'Dana' }. */
+  speaker_names: Record<string, string>
   /** Retained wav bytes, against the disk ceiling. */
   audio_bytes: number
   conversation_id: string | null
@@ -1872,6 +2066,20 @@ export interface MeetingConfig {
   calendarIds: string[]
   /** Events with fewer attendees than this are never offered. */
   minAttendees: number
+  /** Skip STT for segments with no speech, and drop known silence hallucinations. */
+  vadGate: boolean
+  vadMinSpeechRatio: number
+  hallucinationFilter: boolean
+  whisperVadModelPath: string
+  /** Longest audio file an import accepts. */
+  maxImportSeconds: number
+  /** Separate remote speakers on retained audio (needs the optional sherpa-onnx backend). */
+  diarize: boolean
+  diarizeBackend: 'auto' | 'none' | 'sherpa'
+  diarizeSegmentationModel: string
+  diarizeEmbeddingModel: string
+  diarizeThreshold: number
+  diarizeSpeakers: number
 }
 
 /** One row of the capability checklist: what this machine can do, and how to fix what it can't. */
@@ -1941,4 +2149,42 @@ export interface MeetingCandidate {
 export interface MeetingStreamEvent {
   event: 'segment' | 'status' | 'error' | 'revision' | 'end'
   data: unknown
+}
+
+/** Reply tracker row (`/mail/watch`): who owes whom an answer. */
+export interface MailWatchThread {
+  thread_id: string
+  subject: string
+  status: 'to_reply' | 'awaiting_reply' | 'fyi' | 'actioned'
+  reason: string
+  last_from: string
+  last_date: string | null
+  age_days: number
+  dismissed: number
+  followup_todo_id: string | null
+}
+export interface MailWatchList {
+  threads: MailWatchThread[]
+  counts: { to_reply: number; awaiting_reply_overdue: number }
+  followups: { thread_id: string; title: string; notes: string; due: string }[]
+}
+
+/** One proposed calendar block from `/planner/suggest`; nothing is written until it is applied. */
+export interface PlannerBlock {
+  todo_id: string
+  title: string
+  start: string
+  end: string
+  score: number
+  part: [number, number]
+  why?: { due: number; priority: number; energy: number; time: number }
+}
+export interface PlannerSuggestion {
+  blocks: PlannerBlock[]
+  unplaced: { id: string; reason: string }[]
+  already_planned: string[]
+  generated_at: string
+}
+export interface PlannerApplyResult {
+  results: { todo_id: string | null; ok: boolean; event_id?: string; link?: string; error?: string }[]
 }

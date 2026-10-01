@@ -32,7 +32,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from . import audiocap, meeting_notes, meeting_recorder, redact, stt
+from . import audiocap, diarize, meeting_notes, meeting_recorder, redact, stt
 from .db import Database, new_id, now, row_to_dict
 from .docs import diff_stat, word_count
 from .repos import fts_query
@@ -192,6 +192,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "autoStopGraceSeconds": 90,
     "calendarIds": ["primary"],
     "minAttendees": 2,
+    "vadGate": True,          # skip STT for segments with no speech (meeting_vad)
+    "vadMinSpeechRatio": 0.03,
+    "hallucinationFilter": True,
+    "whisperVadModelPath": "",
+    "maxImportSeconds": 14400,  # longest audio file an import will accept
+    "diarize": False,           # separate remote speakers on retained audio (diarize.py)
+    "diarizeBackend": "auto",   # auto | none | sherpa
+    "diarizeSegmentationModel": "",
+    "diarizeEmbeddingModel": "",
+    "diarizeThreshold": 0.5,
+    "diarizeSpeakers": 0,       # 0 = decide from the audio
 }
 
 # `patch` is the user's door into a meeting. Everything the recorder owns - started_at,
@@ -205,12 +216,13 @@ PATCH_FIELDS = {"title", "notes", "enhanced", "summary", "template", "project_id
 # the whole row, and the error banner is patched once per failed segment.
 INDEXED_FIELDS = {"title", "notes", "enhanced"}
 
-JSON_FIELDS = ("attendees", "sources", "decisions", "topics", "detail")
+JSON_FIELDS = ("attendees", "sources", "decisions", "topics", "detail", "speaker_names")
 
 # Columns added to `meetings` after the first release, as {name: ddl}. Empty today and applied in
 # __init__ anyway: CREATE TABLE IF NOT EXISTS will not add a column, and db.py's _migrate runs
 # inside Database.__init__, before this class exists (canvas.py:21-23). todos.py:49-53 is the shape.
-ADDED_COLUMNS: dict[str, str] = {}
+# speaker_names maps a diarized id to a display name, e.g. {'S1': 'Dana'} (see diarize.py).
+ADDED_COLUMNS: dict[str, str] = {"speaker_names": "TEXT NOT NULL DEFAULT '{}'"}
 
 # Channel-level attribution only: mic is the user, anything else is the room. There is no
 # diarization in this slice, so every remote participant is one speaker.
@@ -263,6 +275,33 @@ def config_for(db: Database) -> dict[str, Any]:
     """The merged meetings config. A free function so the repo can read it without the service."""
     stored = db.get_settings().get("meetings")
     return _deep_merge(DEFAULT_CONFIG, stored if isinstance(stored, dict) else {})
+
+
+MAX_SPEAKER_NAME = 60
+
+
+def _names(raw: Any) -> dict[str, str]:
+    """speaker_names as a dict, whether it arrives as the stored JSON text or already decoded."""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw or "{}")
+        except ValueError:
+            return {}
+    return {str(k): str(v) for k, v in raw.items() if str(v).strip()} if isinstance(raw, dict) else {}
+
+
+def _speaker_utterances(detail: Any) -> list[dict[str, Any]]:
+    """The diarized utterances in a segment's detail, or [] if it has none with a speaker."""
+    if isinstance(detail, str):
+        try:
+            detail = json.loads(detail or "{}")
+        except ValueError:
+            return []
+    utts = detail.get("utterances") if isinstance(detail, dict) else None
+    if not isinstance(utts, list):
+        return []
+    utts = [u for u in utts if isinstance(u, dict)]
+    return utts if any(u.get("speaker") for u in utts) else []
 
 
 def _mmss(seconds: float) -> str:
@@ -593,6 +632,14 @@ class Meetings:
                       (t, audio_dir, json.dumps([s for s in sources if s in SOURCES]), now(), id))
         return self.get(id)
 
+    def mark_import(self, id: str, audio_dir: str, started_at: float) -> dict[str, Any] | None:
+        """The import twin of mark_started: the file's clock, source 'import', transcribing until done."""
+        with self.db.tx() as c:
+            c.execute("UPDATE meetings SET status='transcribing', started_at=?, audio_dir=?, sources=?, "
+                      " ended_at=NULL, updated_at=? WHERE id=?",
+                      (started_at, audio_dir, json.dumps(["import"]), now(), id))
+        return self.get(id)
+
     def finalize(self, id: str, transcript: str, *, ended_at: float | None = None,
                  status: str = "ready", error: str = "") -> dict[str, Any] | None:
         """Close a meeting out: the rolled-up transcript, the duration, and one reindex."""
@@ -740,22 +787,87 @@ class Meetings:
         this design exists to avoid. Nobody searches a meeting that is still running.
         """
         with self.db.tx() as c:
-            rows = c.execute("SELECT channel, t_start, text FROM meeting_segments "
+            rows = c.execute("SELECT channel, t_start, text, detail FROM meeting_segments "
                              "WHERE meeting_id=? AND state='done' AND text <> '' "
                              "ORDER BY t_start, channel, seq", (meeting_id,)).fetchall()
-        runs: list[tuple[str, float, list[str]]] = []
+            nm = c.execute("SELECT speaker_names FROM meetings WHERE id=?", (meeting_id,)).fetchone()
+        names = _names(nm["speaker_names"] if nm else "")
+        # key is the channel for an ordinary segment and the speaker id for a diarized utterance, so
+        # a transcript with no utterance speakers is built exactly as before.
+        runs: list[tuple[str, float, list[str], str]] = []
         for r in rows:
             text = (r["text"] or "").strip()
             if not text:
                 continue
+            utts = _speaker_utterances(r["detail"]) if r["channel"] != "mic" else []
+            if utts:
+                for u in utts:
+                    spk = str(u.get("speaker") or "")
+                    key = f"spk:{spk}" if spk else r["channel"]
+                    label = f"[{names.get(spk, spk)}]" if spk else CHANNEL_LABELS.get(r["channel"], "[them]")
+                    utext = str(u.get("text") or "").strip()
+                    if not utext:
+                        continue
+                    if runs and runs[-1][0] == key:
+                        runs[-1][2].append(utext)
+                    else:
+                        runs.append((key, float(u.get("start") or r["t_start"]), [utext], label))
+                continue
             if runs and runs[-1][0] == r["channel"]:
                 runs[-1][2].append(text)
             else:
-                runs.append((r["channel"], float(r["t_start"]), [text]))
-        return "\n".join(f"{_mmss(start)} {CHANNEL_LABELS.get(ch, '[them]')} {' '.join(parts)}"
-                         for ch, start, parts in runs)
+                runs.append((r["channel"], float(r["t_start"]), [text], CHANNEL_LABELS.get(r["channel"], "[them]")))
+        return "\n".join(f"{_mmss(start)} {label} {' '.join(parts)}" for _k, start, parts, label in runs)
 
-    # ---- revisions ----
+    # ---- speakers (diarization) ----
+    def set_segment_speakers(self, seg_id: str, speaker: str, utterances: list[dict[str, Any]]) -> None:
+        """Persist per-utterance speakers into detail and the dominant one into the speaker column."""
+        with self.db.tx() as c:
+            r = c.execute("SELECT detail FROM meeting_segments WHERE id=?", (seg_id,)).fetchone()
+            if not r:
+                return
+            try:
+                detail = json.loads(r["detail"] or "{}")
+            except ValueError:
+                detail = {}
+            if not isinstance(detail, dict):
+                detail = {}
+            detail["utterances"] = utterances
+            c.execute("UPDATE meeting_segments SET detail=?, speaker=? WHERE id=?",
+                      (json.dumps(detail), speaker, seg_id))
+
+    def speaker_ids(self, meeting_id: str) -> list[str]:
+        """Diarized speaker ids present in this meeting, in order of first appearance."""
+        seen: list[str] = []
+        for s in self.segments(meeting_id, limit=100000):
+            for u in _speaker_utterances(s.get("detail")):
+                spk = str(u.get("speaker") or "")
+                if spk and spk not in seen:
+                    seen.append(spk)
+        return seen
+
+    def set_speaker_names(self, meeting_id: str, names: dict[str, Any]) -> dict[str, str]:
+        """Merge display names for known speaker ids. Blank removes a name. ValueError on bad input."""
+        known = set(self.speaker_ids(meeting_id))
+        cur = self.get(meeting_id)
+        if cur is None:
+            raise LookupError(meeting_id)
+        out = _names(cur.get("speaker_names"))
+        for sid, raw in (names or {}).items():
+            if sid not in known:
+                raise ValueError(f"unknown speaker {sid!r}")
+            name = str(raw or "").strip()
+            if len(name) > MAX_SPEAKER_NAME:
+                raise ValueError(f"speaker names are limited to {MAX_SPEAKER_NAME} characters")
+            if name:
+                out[sid] = name
+            else:
+                out.pop(sid, None)
+        with self.db.tx() as c:
+            c.execute("UPDATE meetings SET speaker_names=?, updated_at=? WHERE id=?",
+                      (json.dumps(out), now(), meeting_id))
+        return out
+
     def _rev_view(self, r: dict[str, Any], current: str | None = None) -> dict[str, Any]:
         """A revision in DocRevision's field shape, so <DiffView> renders it with no adapter.
 
@@ -958,6 +1070,15 @@ class Meetings:
             c.execute("UPDATE meetings SET audio_bytes=? WHERE id=?", (total, meeting_id))
         return total
 
+    def drop_done_audio(self, meeting_id: str) -> None:
+        """Delete the wavs of segments that settled, keeping failed ones for Retranscribe."""
+        for s in self.segments(meeting_id, limit=100000):
+            if s["state"] in ("done", "empty") and s["wav_path"]:
+                with contextlib.suppress(OSError):
+                    Path(s["wav_path"]).unlink(missing_ok=True)
+                with self.db.tx() as c:
+                    c.execute("UPDATE meeting_segments SET wav_path='', wav_bytes=0 WHERE id=?", (s["id"],))
+
     def delete_audio(self, meeting_id: str) -> dict[str, Any] | None:
         m = self.get(meeting_id)
         if not m:
@@ -1063,6 +1184,7 @@ class MeetingService:
                                             "output through it, then pick it as the output device below.",
             },
             *stt.capabilities(cfg, self.data_dir),
+            diarize.capabilities(cfg, self.data_dir),
         ]
 
     def status(self) -> dict[str, Any]:
@@ -1268,6 +1390,11 @@ class MeetingService:
             notes.append(f"{pending or 'Some'} segment(s) were still transcribing when this meeting "
                          "was closed, so the transcript is incomplete. It fills in as they finish.")
         out = self.meetings.finalize(meeting_id, transcript, status="ready", error="; ".join(notes))
+        if drained and cfg.get("diarize") and cfg.get("keepAudio"):
+            # Only retained audio can be diarized; a missing backend is a quiet no-op.
+            with contextlib.suppress(Exception):
+                await self.diarize(meeting_id)
+                out = self.meetings.get(meeting_id) or out
         if not drained:
             # Not fire-and-forget on purpose: enhance runs INSIDE the watcher, after the rebuild,
             # so the pass is not fed the hole the abandoned worker left behind.
@@ -1477,6 +1604,76 @@ class MeetingService:
             with contextlib.suppress(Exception):
                 self._settle_transcript(mid)
         return done
+
+    # ---- speakers ----
+    def diarize_segments(self, meeting_id: str, backend: Any = None,
+                         concat: Callable[[list[Path], Path], bool] = diarize.concat_wavs) -> dict[str, Any]:
+        """Whole-file diarization of one channel's retained wavs; writes utterances, not the transcript.
+
+        Blocking (an ffmpeg concat and a model run), so callers use a thread. A missing backend,
+        missing audio or an empty result is a note in the return value, never an exception and
+        never an error banner: with no diarizer the transcript keeps its channel labels.
+        """
+        cfg = self.config()
+        backend = backend if backend is not None else diarize.get_backend(cfg, self.data_dir)
+        name = type(backend).__name__
+        if isinstance(backend, diarize.NullBackend):
+            return {"ok": False, "backend": "none", "speakers": 0,
+                    "note": "no speaker-separation backend is installed; see the diarize row in Capabilities"}
+        segs = [s for s in self.meetings.segments(meeting_id, limit=100000)
+                if s["state"] == "done" and s["wav_path"] and Path(s["wav_path"]).is_file()]
+        channel = "import" if any(s["channel"] == "import" for s in segs) else "output"
+        segs = sorted((s for s in segs if s["channel"] == channel), key=lambda s: (s["t_start"], s["seq"]))
+        if not segs:
+            return {"ok": False, "backend": name, "speakers": 0, "note": "no retained audio to separate speakers in"}
+        tmp = self.data_dir / "tmp"
+        tmp.mkdir(parents=True, exist_ok=True)
+        whole = tmp / f"diarize-{meeting_id}.wav"
+        try:
+            if not concat([Path(s["wav_path"]) for s in segs], whole):
+                return {"ok": False, "backend": name, "speakers": 0, "note": "could not join the audio for diarization"}
+            turns = diarize.rename_turns(backend.diarize(whole, cfg))
+        finally:
+            with contextlib.suppress(Exception):
+                whole.unlink(missing_ok=True)
+        if not turns:
+            return {"ok": False, "backend": name, "speakers": 0, "note": "the diarizer found no speech turns"}
+        offset = 0.0
+        for s in segs:
+            length = float(s["duration_ms"] or 0) / 1000.0 or max(0.0, float(s["t_end"]) - float(s["t_start"]))
+            parts = [{"start": float(x.get("start") or 0.0), "end": float(x.get("end") or 0.0),
+                      "text": str(x.get("text") or "").strip()}
+                     for x in ((s.get("detail") or {}).get("segments") or []) if isinstance(x, dict)]
+            parts = [u for u in parts if u["text"]] or [{"start": 0.0, "end": length, "text": (s["text"] or "").strip()}]
+            shifted = [{**u, "start": u["start"] + offset, "end": u["end"] + offset} for u in parts]
+            merged = diarize.merge_adjacent(diarize.assign_speakers(shifted, turns))
+            utts = [{"start": round(u["start"] - offset + float(s["t_start"]), 3),
+                     "end": round(u["end"] - offset + float(s["t_start"]), 3),
+                     "text": u["text"], "speaker": u.get("speaker", "")} for u in merged]
+            weight: dict[str, float] = {}
+            for u in utts:
+                if u["speaker"]:
+                    weight[u["speaker"]] = weight.get(u["speaker"], 0.0) + max(0.0, u["end"] - u["start"])
+            dominant = max(weight.items(), key=lambda kv: kv[1])[0] if weight else ""
+            self.meetings.set_segment_speakers(s["id"], dominant, utts)
+            offset += length
+        return {"ok": True, "backend": name, "speakers": len({t[2] for t in turns}), "note": ""}
+
+    async def diarize(self, meeting_id: str, backend: Any = None) -> dict[str, Any]:
+        """Run diarization, then re-roll the transcript (and FTS) so [S1]/[S2] lines appear."""
+        if self.meetings.get(meeting_id) is None:
+            return {"ok": False, "backend": "none", "speakers": 0, "note": "no such meeting"}
+        res = await asyncio.to_thread(self.diarize_segments, meeting_id, backend)
+        if res["ok"]:
+            await asyncio.to_thread(self._settle_transcript, meeting_id)
+        return res
+
+    def set_speakers(self, meeting_id: str, names: dict[str, Any]) -> dict[str, Any] | None:
+        """Rename diarized speakers and rebuild the transcript. ValueError on an unknown id or long name."""
+        if self.meetings.get(meeting_id) is None:
+            return None
+        self.meetings.set_speaker_names(meeting_id, names)
+        return self._settle_transcript(meeting_id) or self.meetings.get(meeting_id)
 
     # ---- calendar ----
     async def suggest(self) -> list[dict[str, Any]]:

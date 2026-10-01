@@ -1,8 +1,10 @@
 """CRUD for projects, conversations, memories, knowledge graph, documents."""
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+from pathlib import Path
 from typing import Any
 
 from .db import Database, new_id, now, row_to_dict
@@ -190,14 +192,25 @@ class Conversations:
             ).fetchall()
         return [{"role": r["role"], "content": r["content"]} for r in rows]
 
+    def history_rows(self, conv_id: str) -> list[dict[str, Any]]:
+        """history() with the ids and timestamps compaction needs to say where a summary ends."""
+        with self.db.tx() as c:
+            rows = c.execute(
+                "SELECT id, role, content, created_at FROM messages WHERE conversation_id=? AND content != '' ORDER BY created_at, rowid",
+                (conv_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
 
 # ---------------- Memories ----------------
 class Memories:
     def __init__(self, db: Database):
         self.db = db
 
-    def list(self, project_id: str | None, q: str = "", include_global: bool = True) -> list[dict[str, Any]]:
+    def list(self, project_id: str | None, q: str = "", include_global: bool = True, include_invalid: bool = False) -> list[dict[str, Any]]:
         where, args = _scope_clause(project_id, include_global)
+        # Superseded / retracted rows (invalid_at set) are history: out of every default listing.
+        live = "" if include_invalid else " AND invalid_at IS NULL"
         with self.db.tx() as c:
             if q.strip():
                 fq = fts_query(q, prefix=True)
@@ -205,23 +218,25 @@ class Memories:
                     return []
                 rows = c.execute(
                     f"""SELECT m.* FROM memories_fts f JOIN memories m ON m.id = f.memory_id
-                        WHERE memories_fts MATCH ? AND {where.replace('project_id', 'm.project_id')}
+                        WHERE memories_fts MATCH ? AND {where.replace('project_id', 'm.project_id')}{live.replace('invalid_at', 'm.invalid_at')}
                         ORDER BY bm25(memories_fts) LIMIT 100""",
                     (fq, *args),
                 ).fetchall()
             else:
-                rows = c.execute(f"SELECT * FROM memories WHERE {where} ORDER BY pinned DESC, updated_at DESC", args).fetchall()
+                rows = c.execute(f"SELECT * FROM memories WHERE {where}{live} ORDER BY pinned DESC, updated_at DESC", args).fetchall()
         return [row_to_dict(r) for r in rows]  # type: ignore[misc]
 
     def get(self, id: str) -> dict[str, Any] | None:
         with self.db.tx() as c:
             return row_to_dict(c.execute("SELECT * FROM memories WHERE id=?", (id,)).fetchone())
 
-    def create(self, project_id: str | None, content: str, kind: str = "fact", source: str = "user", pinned: bool = False) -> dict[str, Any]:
+    def create(self, project_id: str | None, content: str, kind: str = "fact", source: str = "user", pinned: bool = False,
+               provenance: dict[str, Any] | None = None) -> dict[str, Any]:
         content = content.strip()
+        prov = provenance or {}
         with self.db.tx() as c:
             dup = c.execute(
-                f"SELECT id FROM memories WHERE lower(content)=lower(?) AND {'project_id IS NULL' if project_id is None else 'project_id=?'}",
+                f"SELECT id FROM memories WHERE invalid_at IS NULL AND lower(content)=lower(?) AND {'project_id IS NULL' if project_id is None else 'project_id=?'}",
                 (content,) if project_id is None else (content, project_id),
             ).fetchone()
             if dup:
@@ -229,11 +244,89 @@ class Memories:
             mid = new_id()
             t = now()
             c.execute(
-                "INSERT INTO memories(id,project_id,content,kind,source,pinned,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)",
-                (mid, project_id, content, kind, source, int(pinned), t, t),
+                "INSERT INTO memories(id,project_id,content,kind,source,pinned,created_at,updated_at,valid_from,source_conversation_id,source_message_id) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (mid, project_id, content, kind, source, int(pinned), t, t, t,
+                 prov.get("conversation_id"), prov.get("message_id")),
             )
             c.execute("INSERT INTO memories_fts(content, memory_id) VALUES(?,?)", (content, mid))
         return self.get(mid)  # type: ignore[return-value]
+
+    # ---- non-destructive changes: the old row stays as history, only `invalid_at` says it no longer holds ----
+    def supersede(self, old_id: str, new_content: str, kind: str | None = None, source: str = "auto",
+                  provenance: dict[str, Any] | None = None) -> dict[str, Any] | None:
+        """Replace a memory with a new version, keeping the old one as history. Returns the new row.
+
+        A pinned memory is user-curated: it is rewritten in place and stays valid, never archived.
+        """
+        old = self.get(old_id)
+        new_content = new_content.strip()
+        if not old or old["invalid_at"] is not None or not new_content:
+            return None
+        if old["pinned"]:
+            return self.update(old_id, {"content": new_content, **({"kind": kind} if kind else {})})
+        prov = provenance or {}
+        mid, t = new_id(), now()
+        with self.db.tx() as c:
+            c.execute(
+                "INSERT INTO memories(id,project_id,content,kind,source,pinned,created_at,updated_at,valid_from,source_conversation_id,source_message_id) "
+                "VALUES(?,?,?,?,?,0,?,?,?,?,?)",
+                (mid, old["project_id"], new_content, kind or old["kind"], source, t, t, t,
+                 prov.get("conversation_id"), prov.get("message_id")),
+            )
+            c.execute("INSERT INTO memories_fts(content, memory_id) VALUES(?,?)", (new_content, mid))
+            c.execute("UPDATE memories SET invalid_at=?, superseded_by=? WHERE id=?", (t, mid, old_id))
+            c.execute("DELETE FROM memories_fts WHERE memory_id=?", (old_id,))
+        return self.get(mid)
+
+    def invalidate(self, id: str) -> dict[str, Any] | None:
+        """Soft forget: the row leaves context and search but stays in history. Pinned rows are refused (None)."""
+        m = self.get(id)
+        if not m or m["pinned"] or m["invalid_at"] is not None:
+            return None
+        with self.db.tx() as c:
+            c.execute("UPDATE memories SET invalid_at=? WHERE id=?", (now(), id))
+            c.execute("DELETE FROM memories_fts WHERE memory_id=?", (id,))
+        return self.get(id)
+
+    def restore(self, id: str) -> dict[str, Any] | None:
+        """Bring a superseded or forgotten row back. If its replacement is still live, that one steps aside."""
+        m = self.get(id)
+        if not m:
+            return None
+        if m["invalid_at"] is None:
+            return m
+        t = now()
+        with self.db.tx() as c:
+            nxt = m["superseded_by"]
+            if nxt:
+                c.execute("UPDATE memories SET invalid_at=? WHERE id=? AND invalid_at IS NULL", (t, nxt))
+                c.execute("DELETE FROM memories_fts WHERE memory_id=?", (nxt,))
+            c.execute("UPDATE memories SET invalid_at=NULL, superseded_by=NULL, updated_at=? WHERE id=?", (t, id))
+            c.execute("DELETE FROM memories_fts WHERE memory_id=?", (id,))
+            c.execute("INSERT INTO memories_fts(content, memory_id) VALUES(?,?)", (m["content"], id))
+        return self.get(id)
+
+    def history(self, id: str) -> list[dict[str, Any]]:
+        """The supersession chain through `id`, oldest first."""
+        with self.db.tx() as c:
+            first = row_to_dict(c.execute("SELECT * FROM memories WHERE id=?", (id,)).fetchone())
+            if not first:
+                return []
+            chain, seen = [first], {id}
+            while True:  # predecessors
+                r = c.execute("SELECT * FROM memories WHERE superseded_by=?", (chain[0]["id"],)).fetchone()
+                if not r or r["id"] in seen:
+                    break
+                seen.add(r["id"])
+                chain.insert(0, row_to_dict(r))  # type: ignore[arg-type]
+            while chain[-1]["superseded_by"] and chain[-1]["superseded_by"] not in seen:  # successors
+                r = c.execute("SELECT * FROM memories WHERE id=?", (chain[-1]["superseded_by"],)).fetchone()
+                if not r:
+                    break
+                seen.add(r["id"])
+                chain.append(row_to_dict(r))  # type: ignore[arg-type]
+        return chain
 
     def update(self, id: str, patch: dict[str, Any]) -> dict[str, Any] | None:
         with self.db.tx() as c:
@@ -258,13 +351,13 @@ class Memories:
         """Pinned + recent memories, plus FTS hits for the query, deduped."""
         where, args = _scope_clause(project_id)
         with self.db.tx() as c:
-            base = c.execute(f"SELECT * FROM memories WHERE {where} ORDER BY pinned DESC, updated_at DESC LIMIT ?", (*args, limit)).fetchall()
+            base = c.execute(f"SELECT * FROM memories WHERE {where} AND invalid_at IS NULL ORDER BY pinned DESC, updated_at DESC LIMIT ?", (*args, limit)).fetchall()
             hits: list[Any] = []
             fq = fts_query(query)
             if fq:
                 hits = c.execute(
                     f"""SELECT m.* FROM memories_fts f JOIN memories m ON m.id=f.memory_id
-                        WHERE memories_fts MATCH ? AND {where.replace('project_id', 'm.project_id')} ORDER BY bm25(memories_fts) LIMIT 15""",
+                        WHERE memories_fts MATCH ? AND {where.replace('project_id', 'm.project_id')} AND m.invalid_at IS NULL ORDER BY bm25(memories_fts) LIMIT 15""",
                     (fq, *args),
                 ).fetchall()
         out: dict[str, dict[str, Any]] = {}
@@ -280,11 +373,12 @@ class Graph:
     def __init__(self, db: Database):
         self.db = db
 
-    def get(self, project_id: str | None, include_global: bool = True) -> dict[str, list[dict[str, Any]]]:
+    def get(self, project_id: str | None, include_global: bool = True, include_invalid: bool = False) -> dict[str, list[dict[str, Any]]]:
         where, args = _scope_clause(project_id, include_global)
+        live = "" if include_invalid else " AND invalid_at IS NULL"
         with self.db.tx() as c:
             nodes = c.execute(f"SELECT * FROM kg_nodes WHERE {where} ORDER BY created_at", args).fetchall()
-            edges = c.execute(f"SELECT * FROM kg_edges WHERE {where} ORDER BY created_at", args).fetchall()
+            edges = c.execute(f"SELECT * FROM kg_edges WHERE {where}{live} ORDER BY created_at", args).fetchall()
         return {
             "nodes": [row_to_dict(n, ("properties",)) for n in nodes],  # type: ignore[misc]
             "edges": [row_to_dict(e, ("properties",)) for e in edges],  # type: ignore[misc]
@@ -335,7 +429,8 @@ class Graph:
         with self.db.tx() as c:
             c.execute("DELETE FROM kg_nodes WHERE id=?", (id,))
 
-    def upsert_edge(self, project_id: str | None, source_id: str, target_id: str, relation: str, properties: dict[str, Any] | None = None) -> dict[str, Any]:
+    def upsert_edge(self, project_id: str | None, source_id: str, target_id: str, relation: str, properties: dict[str, Any] | None = None,
+                    valid_at: float | None = None, source_message_id: str | None = None, fact: str = "") -> dict[str, Any]:
         relation = relation.strip()
         with self.db.tx() as c:
             r = c.execute(
@@ -343,11 +438,16 @@ class Graph:
                 (source_id, target_id, relation),
             ).fetchone()
             if r:
+                if r["invalid_at"] is not None:  # re-asserted: revive the old row rather than duplicate it
+                    c.execute("UPDATE kg_edges SET invalid_at=NULL, superseded_by=NULL, valid_at=?, source_message_id=COALESCE(?, source_message_id) WHERE id=?",
+                              (valid_at or now(), source_message_id, r["id"]))
+                    r = c.execute("SELECT * FROM kg_edges WHERE id=?", (r["id"],)).fetchone()
                 return row_to_dict(r, ("properties",))  # type: ignore[return-value]
             eid = new_id()
+            t = now()
             c.execute(
-                "INSERT INTO kg_edges(id,project_id,source_id,target_id,relation,properties,created_at) VALUES(?,?,?,?,?,?,?)",
-                (eid, project_id, source_id, target_id, relation, json.dumps(properties or {}), now()),
+                "INSERT INTO kg_edges(id,project_id,source_id,target_id,relation,properties,created_at,valid_at,source_message_id,fact) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (eid, project_id, source_id, target_id, relation, json.dumps(properties or {}), t, valid_at or t, source_message_id, fact),
             )
             r = c.execute("SELECT * FROM kg_edges WHERE id=?", (eid,)).fetchone()
         return row_to_dict(r, ("properties",))  # type: ignore[return-value]
@@ -359,6 +459,21 @@ class Graph:
             if isinstance(patch.get("properties"), dict):
                 c.execute("UPDATE kg_edges SET properties=? WHERE id=?", (json.dumps(patch["properties"]), id))
             r = c.execute("SELECT * FROM kg_edges WHERE id=?", (id,)).fetchone()
+        return row_to_dict(r, ("properties",))
+
+    def invalidate_edge(self, id: str, at: float | None = None, superseded_by: str | None = None) -> dict[str, Any] | None:
+        """The relation stopped holding: keep the row as history instead of deleting it."""
+        with self.db.tx() as c:
+            c.execute("UPDATE kg_edges SET invalid_at=?, superseded_by=? WHERE id=? AND invalid_at IS NULL", (at or now(), superseded_by, id))
+            r = c.execute("SELECT * FROM kg_edges WHERE id=?", (id,)).fetchone()
+        return row_to_dict(r, ("properties",))
+
+    def find_edge(self, source_id: str, target_id: str, relation: str, live_only: bool = True) -> dict[str, Any] | None:
+        with self.db.tx() as c:
+            r = c.execute(
+                "SELECT * FROM kg_edges WHERE source_id=? AND target_id=? AND lower(relation)=lower(?)" + (" AND invalid_at IS NULL" if live_only else ""),
+                (source_id, target_id, relation.strip()),
+            ).fetchone()
         return row_to_dict(r, ("properties",))
 
     def delete_edge(self, id: str) -> None:
@@ -418,6 +533,9 @@ def chunk_text(text: str) -> list[str]:
 class Documents:
     def __init__(self, db: Database):
         self.db = db
+        # Called after a document's chunks are stored: (document_id, [(chunk_id, text)]). The app wires
+        # it to background embedding, so an upload never waits on (or fails because of) the model.
+        self.on_chunks: Any = None
 
     def list(self, project_id: str | None, include_global: bool = True) -> list[dict[str, Any]]:
         where, args = _scope_clause(project_id, include_global)
@@ -432,19 +550,89 @@ class Documents:
         with self.db.tx() as c:
             return row_to_dict(c.execute("SELECT * FROM documents WHERE id=?", (id,)).fetchone())
 
-    def create(self, project_id: str | None, name: str, mime: str, size: int, path: str, text: str) -> dict[str, Any]:
+    @staticmethod
+    def _build_chunks(name: str, text: str, blocks: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+        """Structure-aware chunks; plain paragraph packing if the chunker cannot cope."""
+        try:
+            from .chunker import chunk_blocks
+            from .extract_text import markdown_blocks
+
+            out = chunk_blocks(blocks if blocks else markdown_blocks(text), title=name)
+            if out:
+                return [{"text": ch.text, "heading": ch.heading_str, "page": ch.page, "ctx": ch.ctx} for ch in out]
+        except Exception:  # noqa: BLE001 - a chunker bug must not lose an upload
+            pass
+        return [{"text": ch, "heading": "", "page": None, "ctx": ch} for ch in chunk_text(text)]
+
+    def _store_chunks(self, c: Any, did: str, chunks: list[dict[str, Any]]) -> list[tuple[str, str]]:
+        stored: list[tuple[str, str]] = []
+        for i, ch in enumerate(chunks):
+            cid = new_id()
+            c.execute("INSERT INTO chunks(id,document_id,idx,text,heading,page) VALUES(?,?,?,?,?,?)",
+                      (cid, did, i, ch["text"], ch["heading"], ch["page"]))
+            # FTS indexes the contextualised string (title + heading path + text); chunks.text stays the clean excerpt.
+            c.execute("INSERT INTO chunks_fts(text, chunk_id, document_id) VALUES(?,?,?)", (ch["ctx"], cid, did))
+            stored.append((cid, ch["text"]))
+        return stored
+
+    def create(self, project_id: str | None, name: str, mime: str, size: int, path: str, text: str,
+               blocks: list[dict[str, Any]] | None = None, content_hash: str | None = None) -> dict[str, Any]:
         did = new_id()
-        chunks = chunk_text(text)
+        chunks = self._build_chunks(name, text, blocks)
+        digest = content_hash if content_hash is not None else hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()
         with self.db.tx() as c:
             c.execute(
-                "INSERT INTO documents(id,project_id,name,mime,size,path,text,chunk_count,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
-                (did, project_id, name, mime, size, path, text, len(chunks), now()),
+                "INSERT INTO documents(id,project_id,name,mime,size,path,text,chunk_count,created_at,content_hash) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (did, project_id, name, mime, size, path, text, len(chunks), now(), digest),
             )
-            for i, ch in enumerate(chunks):
-                cid = new_id()
-                c.execute("INSERT INTO chunks(id,document_id,idx,text) VALUES(?,?,?,?)", (cid, did, i, ch))
-                c.execute("INSERT INTO chunks_fts(text, chunk_id, document_id) VALUES(?,?,?)", (ch, cid, did))
+            stored = self._store_chunks(c, did, chunks)
+        if self.on_chunks and stored:
+            try:
+                self.on_chunks(did, stored)
+            except Exception:  # noqa: BLE001 - indexing is best effort
+                pass
         return self.get(did)  # type: ignore[return-value]
+
+    def find_by_hash(self, project_id: str | None, content_hash: str) -> dict[str, Any] | None:
+        """An existing document with these exact bytes in exactly this scope (None = personal)."""
+        if not content_hash:
+            return None
+        where, args = ("project_id IS NULL", []) if project_id is None else ("project_id=?", [project_id])
+        with self.db.tx() as c:
+            return row_to_dict(c.execute(f"SELECT * FROM documents WHERE content_hash=? AND {where} LIMIT 1", (content_hash, *args)).fetchone())
+
+    def reindex(self, id: str | None = None) -> int:
+        """Re-chunk from the stored upload (or, without a file, the stored text read as markdown).
+        Keeps document ids; embeddings cascade away with the old chunks and are re-made by the next backfill."""
+        from .extract_text import extract_structured
+
+        with self.db.tx() as c:
+            rows = c.execute("SELECT * FROM documents" + (" WHERE id=?" if id else ""), (id,) if id else ()).fetchall()
+        total = 0
+        for d in rows:
+            blocks = None
+            digest = d["content_hash"]
+            p = Path(d["path"]) if d["path"] else None
+            if p is not None and p.is_file():
+                try:
+                    data = p.read_bytes()
+                    blocks = extract_structured(d["name"], data, d["mime"])
+                    digest = digest or hashlib.sha256(data).hexdigest()
+                except Exception:  # noqa: BLE001 - fall back to the stored text
+                    blocks = None
+            chunks = self._build_chunks(d["name"], d["text"], blocks)
+            with self.db.tx() as c:
+                c.execute("DELETE FROM chunks_fts WHERE document_id=?", (d["id"],))
+                c.execute("DELETE FROM chunks WHERE document_id=?", (d["id"],))
+                stored = self._store_chunks(c, d["id"], chunks)
+                c.execute("UPDATE documents SET chunk_count=?, content_hash=? WHERE id=?", (len(chunks), digest, d["id"]))
+            total += len(chunks)
+            if self.on_chunks and stored:
+                try:
+                    self.on_chunks(d["id"], stored)
+                except Exception:  # noqa: BLE001
+                    pass
+        return total
 
     def delete(self, id: str) -> str | None:
         with self.db.tx() as c:
@@ -460,7 +648,7 @@ class Documents:
         where, args = _scope_clause(project_id)
         with self.db.tx() as c:
             rows = c.execute(
-                f"""SELECT f.chunk_id, f.document_id, d.name, ch.idx, ch.text, bm25(chunks_fts) AS score
+                f"""SELECT f.chunk_id, f.document_id, d.name, ch.idx, ch.text, ch.heading, ch.page, bm25(chunks_fts) AS score
                     FROM chunks_fts f JOIN documents d ON d.id=f.document_id JOIN chunks ch ON ch.id=f.chunk_id
                     WHERE chunks_fts MATCH ? AND {where.replace('project_id', 'd.project_id')}
                     ORDER BY score LIMIT ?""",

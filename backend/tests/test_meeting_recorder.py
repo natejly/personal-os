@@ -23,7 +23,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from personal_os import audiocap, meeting_recorder  # noqa: E402
 
 SETTINGS = {"baseUrl": "http://localhost:4000", "apiKey": ""}
-CFG = {"sttBackend": "proxy", "sttModel": "whisper-1"}
+# The fixture wavs are digital silence, so the VAD gate and the filter are off here to keep these
+# tests about the worker's queue behaviour; test_meeting_vad.py covers both switched on.
+CFG = {"sttBackend": "proxy", "sttModel": "whisper-1", "vadGate": False, "hallucinationFilter": False}
 
 
 class transcribes_as:
@@ -82,14 +84,15 @@ def _wav(path: Path, seconds: float = 0.5) -> Path:
 class _Worker:
     """A TranscribeWorker on its own queue, with the results it reported."""
 
-    def __init__(self, out_dir: Path, **kw: object):
+    def __init__(self, out_dir: Path, cfg: dict | None = None, **kw: object):
         self.out_dir = out_dir
+        self.cfg = {**CFG, **(cfg or {})}
         self.results: list[tuple[str, int, dict]] = []
         self.halt = threading.Event()
         self.q: queue.Queue = queue.Queue()
         self.worker = meeting_recorder.TranscribeWorker(
             "m1", self.q, self.halt, out_dir=out_dir, settings_fn=lambda: dict(SETTINGS),
-            config_fn=lambda: dict(CFG), data_dir=out_dir.parent,
+            config_fn=lambda: dict(self.cfg), data_dir=out_dir.parent,
             on_result=lambda c, s, p, r: self.results.append((c, s, dict(r))), **kw)
 
     def __enter__(self) -> _Worker:
@@ -277,6 +280,62 @@ def test_a_chatty_capture_never_wedges_on_a_full_stderr_pipe() -> None:
         meeting_recorder.audiocap.segment_argv = real  # type: ignore[assignment]
         cap.stopping = True
         cap.halt.set()
+
+
+def _tone_wav(path: Path, seconds: float = 4.0) -> Path:
+    import math
+    import struct
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with wave.open(str(path), "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(16000)
+        # A third of near-silence first: the VAD's floor is the quiet tail of the segment, so a
+        # tone that never stops would (correctly) read as steady room noise.
+        quiet = int(16000 * seconds / 3)
+        w.writeframes(b"".join(struct.pack("<h", int(8000 * math.sin(2 * math.pi * 440 * i / 16000)) if i >= quiet else 3)
+                               for i in range(int(16000 * seconds))))
+    return path
+
+
+def test_the_vad_gate_skips_a_silent_segment_without_an_stt_call() -> None:
+    out = _tmp()
+    path = _wav(out / "mic-00000.wav", 2.0)
+    with transcribes_as({"text": "Thank you."}) as stub, _Worker(out, {"vadGate": True}) as w:
+        w.feed(0, path)
+        w.wait(1)
+    res = w.results[0][2]
+    assert res["state"] == "empty" and res["text"] == ""
+    assert stub.calls == [], "silence reached the billed STT call"
+    assert not path.exists()
+
+
+def test_the_vad_gate_lets_a_tone_through_once() -> None:
+    out = _tmp()
+    path = _tone_wav(out / "mic-00000.wav")
+    with transcribes_as({"text": "hello there"}) as stub, _Worker(out, {"vadGate": True}) as w:
+        w.feed(0, path)
+        w.wait(1)
+    assert len(stub.calls) == 1
+    assert w.results[0][2]["state"] == "done" and w.results[0][2]["text"] == "hello there"
+
+
+def test_the_hallucination_filter_empties_a_quiet_thank_you() -> None:
+    out = _tmp()
+    path = _tone_wav(out / "mic-00000.wav")  # speech ratio is high, so the phrase rule must not fire
+    with transcribes_as({"text": "Thank you."}) as stub, _Worker(out, {"vadGate": True, "hallucinationFilter": True}) as w:
+        w.feed(0, path)
+        w.wait(1)
+    assert w.results[0][2]["text"] == "Thank you."
+    out2 = _tmp()
+    seg = out2 / "mic-00000.wav"
+    _tone_wav(seg)
+    bad = {"text": "x", "detail": {"segments": [{"text": "x", "no_speech_prob": 0.9, "avg_logprob": -1.5}]}}
+    with transcribes_as(bad) as stub, _Worker(out2, {"vadGate": True, "hallucinationFilter": True}) as w:
+        w.feed(0, seg)
+        w.wait(1)
+    res = w.results[0][2]
+    assert res["state"] == "empty" and res["detail"]["filtered"] == ["x"]
 
 
 # ---------------------------------------------------------------- the worker

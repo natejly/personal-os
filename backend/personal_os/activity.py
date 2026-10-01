@@ -32,6 +32,8 @@ from . import insights as insights_mod
 from . import stt
 from .audiocap import IS_MAC, LOOPBACK_HINTS, audio_devices, ffmpeg_path, looks_like_loopback  # noqa: F401
 from .db import Database, new_id, now, row_to_dict
+from . import activity_categories as categories_mod
+from . import redact as redact_mod
 from .redact import REDACTIONS, SECRET_ASSIGN  # noqa: F401
 
 log = logging.getLogger("personal_os.activity")
@@ -61,6 +63,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "1Password", "Bitwarden", "Dashlane", "Enpass", "KeePassXC", "Keychain Access",
         "LastPass", "NordPass", "Passwords", "Proton Pass", "Authy", "Secretive", "Tor Browser",
     ],
+    # Redaction v2 (redact.py): strings or /regex/ that are never / always scrubbed, and the score
+    # a candidate span needs to be scrubbed at all.
+    "redactAllow": [],
+    "redactDeny": [],
+    "redactThreshold": 0.4,
     "excludeTitlePatterns": [
         "password", "passphrase", "sign in", "signin", "log in", "login", "2fa",
         "one-time code", "verification code", "authenticator", "seed phrase",
@@ -84,6 +91,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # settings back instead of guessing at defaults.
     "palantir": False,
     "palantirRestore": {},
+    # Category rules (activity_categories.py). None = the shipped default tree; a list replaces it.
+    "categories": None,
 }
 
 SCHEMA = """
@@ -138,6 +147,21 @@ class Gate:
 
     def __init__(self, config_fn: Callable[[], dict[str, Any]]):
         self._config = config_fn
+        self._counts_lock = threading.Lock()
+        self._counts: dict[str, int] = {}
+        self._counts_day = datetime.now().strftime("%Y-%m-%d")
+
+    @property
+    def counts(self) -> dict[str, int]:
+        """Redactions so far today, by entity. Counts only - never the matched text."""
+        with self._counts_lock:
+            self._roll_day()
+            return dict(self._counts)
+
+    def _roll_day(self) -> None:
+        today = datetime.now().strftime("%Y-%m-%d")
+        if today != self._counts_day:
+            self._counts_day, self._counts = today, {}
 
     def cfg(self) -> dict[str, Any]:
         return self._config()
@@ -158,13 +182,48 @@ class Gate:
     def scrub(self, text: str) -> str:
         if not text:
             return ""
-        if not self.cfg().get("redact", True):
+        c = self.cfg()
+        if not c.get("redact", True):
             return text
-        out = text
-        for pat, repl in REDACTIONS:
-            out = pat.sub(repl, out)
-        # Whatever follows a word like "password" is almost certainly the value itself.
-        return SECRET_ASSIGN.sub("[secret]", out)
+        local: dict[str, int] = {}
+        try:
+            thr = float(c.get("redactThreshold", redact_mod.THRESHOLD))
+        except (TypeError, ValueError):
+            thr = redact_mod.THRESHOLD
+        out = redact_mod.scrub_v2(text, allow=c.get("redactAllow") or (), deny=c.get("redactDeny") or (),
+                                  counts=local, threshold=thr)
+        if local:
+            with self._counts_lock:
+                self._roll_day()
+                for k, v in local.items():
+                    self._counts[k] = self._counts.get(k, 0) + v
+        return out
+
+    def scrub_url(self, url: str) -> str:
+        """A page address with its secrets taken out. Unchanged when redaction is off (Palantir)."""
+        if not url or not self.cfg().get("redact", True):
+            return url or ""
+        return redact_mod.sanitize_url(url)
+
+
+def redact_preview(cfg: dict[str, Any], text: str) -> dict[str, Any]:
+    """What the gate would do to `text` under `cfg`, for the Privacy tab's test box.
+
+    Pure and in-memory: nothing is stored, logged or counted.
+    """
+    text = (text or "")[:5000]
+    try:
+        thr = float(cfg.get("redactThreshold", redact_mod.THRESHOLD))
+    except (TypeError, ValueError):
+        thr = redact_mod.THRESHOLD
+    allow, deny = cfg.get("redactAllow") or (), cfg.get("redactDeny") or ()
+    active = bool(cfg.get("redact", True))
+    spans = redact_mod.analyze(text, allow=allow, deny=deny, threshold=thr) if active else []
+    out = redact_mod.scrub_v2(text, allow=allow, deny=deny, threshold=thr) if active else text
+    return {
+        "redacted": out, "active": active,
+        "spans": [{"entity": s.entity, "score": s.score, "start": s.start, "end": s.end} for s in spans],
+    }
 
 
 # ---------------------------------------------------------------- macOS probes
@@ -986,7 +1045,7 @@ class FocusCollector(Collector):
         self.m.store.add(
             "focus", app=cur["app"], bundle=cur["bundle"],
             title=self.m.gate.scrub(cur["title"]) if cur["title"] else "",
-            url=cur["url"], duration_ms=int(dur * 1000), ts=cur["start"],
+            url=self.m.gate.scrub_url(cur["url"]), duration_ms=int(dur * 1000), ts=cur["start"],
             retention_hours=cfg["retentionHours"],
         )
 
@@ -1474,6 +1533,7 @@ class Monitor:
             "audio_devices": audio_devices() if (cfg.get("signals") or {}).get("micAudio") or (cfg.get("signals") or {}).get("outputAudio") else [],
             "secure_input": secure_input_active(),
             "palantir": bool(cfg.get("palantir")),
+            "redactions": self.gate.counts,
         }
 
     def now_line(self) -> str:
@@ -1535,6 +1595,16 @@ class Monitor:
             for app, secs in ranked[:10]:
                 t = sorted(titles.get(app, []))[:6]
                 lines.append(f"- {app}: {_fmt_minutes(secs)}" + (f" | windows: {'; '.join(t)}" if t else ""))
+        if ranked:
+            eng = categories_mod.engine_for(self.config().get("categories"))
+            leaf: dict[str, float] = {}
+            for e in events:
+                if e["kind"] == "focus":
+                    p = eng.classify(e["app"], e["title"], e["url"])
+                    leaf[p] = leaf.get(p, 0.0) + e["duration_ms"] / 1000.0
+            rolled = eng.rollup(leaf)
+            top = sorted(rolled.items(), key=lambda kv: -kv[1])[:6]
+            lines.append("Time by category: " + ", ".join(f"{k} {_fmt_minutes(v)}" for k, v in top))
         if urls:
             lines.append("Pages visited:\n" + "\n".join(f"- {u}" for u in sorted(urls)[:20]))
         if keys or clicks or scrolls:

@@ -22,10 +22,12 @@ from __future__ import annotations
 
 import hashlib
 import posixpath
+import re
 import shutil
 import subprocess
 import threading
 import time
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from .sandbox import IMAGE_EXT, MAX_IMAGE_BYTES
@@ -34,6 +36,9 @@ WORKSPACE = "/workspace"
 DEFAULT_IMAGE = "python:3.12-slim"
 LABEL = "personal-os.sandbox"
 MAX_SANDBOXES = 5           # LRU-reaped: a desktop should not quietly accumulate VMs
+CKPT_REPO = "pos-sbx-ckpt"  # checkpoint images: pos-sbx-ckpt/<container suffix>:<label>
+MAX_CKPTS = 3               # per conversation, oldest evicted
+DEFAULT_KEEP_DAYS = 14      # a stopped sandbox nobody came back to is removed after this long
 STDOUT_CAP = 20_000
 STDERR_CAP = 8_000
 MAX_EXEC_S = 600
@@ -54,6 +59,26 @@ def _line(b: bytes, cap: int = 300) -> str:
     lines = [ln for ln in b.decode(errors="replace").strip().splitlines() if ln.strip()]
     best = next((ln for ln in reversed(lines) if "rror" in ln), None)  # docker ends with a "--help" hint, not the error
     return (best or (lines[-1] if lines else ""))[:cap]
+
+
+def ckpt_slug(label: str) -> str:
+    """A docker-tag-safe checkpoint name; empty labels get a timestamp."""
+    slug = re.sub(r"[^a-z0-9_.-]", "-", (label or "").strip().lower())[:40].lstrip(".-")
+    return slug or f"ckpt-{int(time.time())}"
+
+
+def _finished_at(raw: str) -> float | None:
+    """Docker's RFC3339 FinishedAt (nanoseconds) as a unix time; None if it is not a real timestamp."""
+    m = re.match(r"^(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d)(?:\.(\d+))?(Z|[+-]\d\d:\d\d)?$", raw.strip())
+    if not m:
+        return None
+    frac = (m.group(2) or "0")[:6].ljust(6, "0")
+    tz = "+00:00" if m.group(3) in (None, "Z") else m.group(3)
+    try:
+        dt = datetime.fromisoformat(f"{m.group(1)}.{frac}{tz}")
+    except ValueError:
+        return None
+    return dt.timestamp() if dt.year > 2000 else None  # 0001-01-01 = never started
 
 
 def guest_path(path: str | None) -> str:
@@ -81,6 +106,7 @@ class Sandboxes:
         self._last: dict[str, float] = {}    # container name -> last use, for LRU reaping
         self._shell: dict[str, str] = {}     # container name -> bash|sh
         self._net: dict[str, bool] = {}      # container name -> created with network
+        self._stale_checked = False          # _reap_stale runs once per app run
 
     def _bin(self) -> str:
         return str(self.settings().get("sandboxRuntime") or "docker")
@@ -109,6 +135,7 @@ class Sandboxes:
         binary = self._bin()
         name = self._name(conversation_id)
         with self._lock:
+            self._reap_stale(binary, keep=name)
             p = self._run([binary, "inspect", "-f", "{{.State.Running}}", name], timeout=10)
             if p.returncode == 0:
                 if p.stdout.strip() != b"true":
@@ -123,28 +150,32 @@ class Sandboxes:
                 return name
             self._reap(binary)
             cfg = self.settings()
-            image = str(cfg.get("sandboxImage") or DEFAULT_IMAGE)
-            net = bool(cfg.get("sandboxNetwork"))
-            args = [binary, "run", "-d", "--name", name, "--label", f"{LABEL}=1", "--hostname", "sandbox",
-                    "-w", WORKSPACE, "--memory", "1g", "--cpus", "2", "--pids-limit", "256",
-                    "--cap-drop", "ALL", "--security-opt", "no-new-privileges"]
-            if not net:
-                args += ["--network", "none"]
-            args += [image, "sleep", "infinity"]
-            p = self._run(args, timeout=240)  # generous: the first run of an image pulls it
-            if p.returncode != 0 and b"already in use" not in p.stderr:
-                raise SandboxError(f"could not start the sandbox ({image}): {_line(p.stderr)}")
-            self._net[name] = net
-            self._probe_shell(binary, name)
-            self._last[name] = time.time()
+            self._create(binary, name, str(cfg.get("sandboxImage") or DEFAULT_IMAGE), bool(cfg.get("sandboxNetwork")))
             return name
+
+    def _run_args(self, binary: str, name: str, image: str, net: bool) -> list[str]:
+        """One place for the isolation flags, shared by a fresh create and a checkpoint restore."""
+        args = [binary, "run", "-d", "--name", name, "--label", f"{LABEL}=1", "--hostname", "sandbox",
+                "-w", WORKSPACE, "--memory", "1g", "--cpus", "2", "--pids-limit", "256",
+                "--cap-drop", "ALL", "--security-opt", "no-new-privileges"]
+        if not net:
+            args += ["--network", "none"]
+        return args + [image, "sleep", "infinity"]
+
+    def _create(self, binary: str, name: str, image: str, net: bool) -> None:
+        p = self._run(self._run_args(binary, name, image, net), timeout=240)  # generous: the first run of an image pulls it
+        if p.returncode != 0 and b"already in use" not in p.stderr:
+            raise SandboxError(f"could not start the sandbox ({image}): {_line(p.stderr)}")
+        self._net[name] = net
+        self._probe_shell(binary, name)
+        self._last[name] = time.time()
 
     def _probe_shell(self, binary: str, name: str) -> None:
         p = self._run([binary, "exec", name, "sh", "-c", "command -v bash"], timeout=10)
         self._shell[name] = "bash" if p.returncode == 0 and p.stdout.strip() else "sh"
 
-    def _live(self, binary: str) -> list[str]:
-        p = self._run([binary, "ps", "-a", "--filter", f"label={LABEL}=1", "--format", "{{.Names}}"], timeout=10)
+    def _live(self, binary: str, running_only: bool = False) -> list[str]:
+        p = self._run([binary, "ps", *([] if running_only else ["-a"]), "--filter", f"label={LABEL}=1", "--format", "{{.Names}}"], timeout=10)
         return [n for n in p.stdout.decode(errors="replace").split() if n] if p.returncode == 0 else []
 
     def _reap(self, binary: str) -> None:
@@ -155,6 +186,27 @@ class Sandboxes:
             names.remove(oldest)
             self._forget(oldest)
 
+    def _reap_stale(self, binary: str, keep: str = "") -> None:
+        """Remove stopped sandboxes untouched for sandboxKeepDays (stopping at quit keeps state; this bounds it)."""
+        if self._stale_checked:
+            return
+        self._stale_checked = True
+        days = float(self.settings().get("sandboxKeepDays", DEFAULT_KEEP_DAYS) or 0)
+        if days <= 0:
+            return
+        cutoff = time.time() - days * 86400
+        for n in self._live(binary):
+            if n == keep:
+                continue
+            p = self._run([binary, "inspect", "-f", "{{.State.Running}} {{.State.FinishedAt}}", n], timeout=10)
+            if p.returncode != 0:
+                continue
+            running, _, fin = p.stdout.decode(errors="replace").strip().partition(" ")
+            ts = _finished_at(fin)
+            if running != "true" and ts is not None and ts < cutoff:
+                self._run([binary, "rm", "-f", n], timeout=30)
+                self._forget(n)
+
     def _forget(self, name: str) -> None:
         self._last.pop(name, None)
         self._shell.pop(name, None)
@@ -162,20 +214,70 @@ class Sandboxes:
 
     def reset(self, conversation_id: str) -> dict[str, Any]:
         name = self._name(conversation_id)
-        self._run([self._bin(), "rm", "-f", name], timeout=30)
+        binary = self._bin()
+        self._run([binary, "rm", "-f", name], timeout=30)
         self._forget(name)
+        for tag, _ in self._ckpt_tags(binary, name):  # "reset" keeps meaning "start clean"
+            self._run([binary, "rmi", "-f", f"{CKPT_REPO}/{name[len('pos-sbx-'):]}:{tag}"], timeout=60)
         return {"reset": True, "note": "the next sandbox tool call starts from a fresh container"}
 
     def shutdown(self) -> None:
-        """Remove every labeled container, ours or orphaned from an earlier app run."""
+        """Stop (not remove) every running labeled container: /workspace and installs survive the next launch.
+        _reap_stale removes the ones nobody comes back to."""
         binary = self._bin()
         if not shutil.which(binary):
             return
         try:
-            for name in self._live(binary):
-                self._run([binary, "rm", "-f", name], timeout=30)
+            for name in self._live(binary, running_only=True):
+                self._run([binary, "stop", "-t", "3", name], timeout=30)
         except Exception:  # noqa: BLE001 - shutdown must not fail the app
             pass
+
+    # ---- checkpoints: filesystem snapshots as local images ----
+    def _ckpt_tags(self, binary: str, name: str) -> list[tuple[str, str]]:
+        """[(label, created)] newest first."""
+        p = self._run([binary, "images", f"{CKPT_REPO}/{name[len('pos-sbx-'):]}", "--format", "{{.Tag}}\t{{.CreatedAt}}"], timeout=15)
+        if p.returncode != 0:
+            return []
+        rows = []
+        for ln in p.stdout.decode(errors="replace").splitlines():
+            tag, _, created = ln.partition("\t")
+            if tag.strip() and tag.strip() != "<none>":
+                rows.append((tag.strip(), created.strip()))
+        return sorted(rows, key=lambda r: r[1][:19], reverse=True)  # stable: docker's own order breaks ties
+
+    def checkpoint(self, conversation_id: str, label: str = "") -> dict[str, Any]:
+        name = self.ensure(conversation_id)
+        binary = self._bin()
+        slug = ckpt_slug(label)
+        tag = f"{CKPT_REPO}/{name[len('pos-sbx-'):]}:{slug}"
+        p = self._run([binary, "commit", "--pause=true", "-m", "pos checkpoint", name, tag], timeout=300)
+        if p.returncode != 0:
+            raise SandboxError(f"could not checkpoint the sandbox: {_line(p.stderr)}")
+        tags = self._ckpt_tags(binary, name)
+        for old, _ in [t for t in tags if t[0] != slug][max(0, MAX_CKPTS - 1):]:
+            self._run([binary, "rmi", f"{CKPT_REPO}/{name[len('pos-sbx-'):]}:{old}"], timeout=60)
+        kept = [slug] + [t for t, _ in tags if t != slug][: MAX_CKPTS - 1]
+        return {"checkpoint": slug, "tag": tag, "kept": kept,
+                "note": "filesystem only: running processes are not saved"}
+
+    def checkpoints(self, conversation_id: str) -> dict[str, Any]:
+        name = self._name(conversation_id)
+        return {"checkpoints": [{"label": t, "created": c} for t, c in self._ckpt_tags(self._bin(), name)]}
+
+    def restore(self, conversation_id: str, label: str) -> dict[str, Any]:
+        binary = self._bin()
+        name = self._name(conversation_id)
+        have = [t for t, _ in self._ckpt_tags(binary, name)]
+        slug = ckpt_slug(label) if (label or "").strip() else ""
+        if slug not in have:
+            raise SandboxError(f"no checkpoint named {label or '(empty)'}; have: {', '.join(have) or 'none'}")
+        with self._lock:
+            self._run([binary, "rm", "-f", name], timeout=30)
+            self._forget(name)
+            # Networking is decided now, from current settings: a checkpoint cannot re-enable it.
+            self._create(binary, name, f"{CKPT_REPO}/{name[len('pos-sbx-'):]}:{slug}", bool(self.settings().get("sandboxNetwork")))
+        return {"restored": slug}
 
     def networked(self, conversation_id: str) -> bool:
         return bool(self._net.get(self._name(conversation_id)))

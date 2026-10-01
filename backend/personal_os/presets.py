@@ -28,8 +28,8 @@ CREATE INDEX IF NOT EXISTS idx_canvas_presets_created ON canvas_presets(created_
 """
 PRESET_JSON = ("windows",)
 # needsRef kinds -> the table their ref_id must still exist in. Mirrors `needsRef` in
-# src/renderer/src/canvas/registry.ts (chat, board, note, dashboard-widget, project).
-REF_TABLES = {"chat": "conversations", "board": "boards", "note": "notes", "dashboard-widget": "widgets", "project": "projects"}
+# src/renderer/src/canvas/registry.ts (chat, board, note, dashboard-widget, project, artifact).
+REF_TABLES = {"chat": "conversations", "board": "boards", "note": "notes", "dashboard-widget": "widgets", "project": "projects", "artifact": "artifacts"}
 
 
 def _snap_window(w: dict[str, Any], i: int) -> dict[str, Any]:

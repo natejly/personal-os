@@ -56,7 +56,8 @@ SCRIPT: dict[str, Any] = {"turns": [], "default": {"text": "All done."}, "delay"
 
 async def _scripted_stream(settings: dict[str, Any], model: str, messages: list[dict[str, Any]],
                            tools: list[dict[str, Any]] | None = None, kind: str = "chat",
-                           effort: str = "default", tool_choice: str = "auto") -> Any:
+                           effort: str = "default", tool_choice: str = "auto", fast: bool = False,
+                           cancel: Any = None) -> Any:
     SCRIPT["tools"].append([t["function"]["name"] for t in (tools or [])])
     if tool_choice == "none":
         # The closing round of a budget, park or breaker stop. It never calls a tool and never

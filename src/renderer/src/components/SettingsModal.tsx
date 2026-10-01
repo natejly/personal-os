@@ -12,6 +12,7 @@ import { ToolGlobalToggles } from './ToolPermissions'
 import GoogleSettings from './GoogleSettings'
 import MeetingSettings from './MeetingSettings'
 import UsageView from './UsageView'
+import TraceExportSettings from './TraceExportSettings'
 import MemoryPanel from './MemoryPanel'
 import DocumentsView from './DocumentsView'
 import ScopeSelect from './ScopeSelect'
@@ -246,11 +247,16 @@ export default function SettingsModal(): JSX.Element {
                 <p className="muted small">Ask waits for you to accept or reject each diff. Accept all writes the change and still shows the diff. You can undo either one from the doc's history.</p>
               </div>
               <ToolGlobalToggles value={draft.tools ?? {}} onChange={(tools) => patch({ tools })} />
+              <label className="toggle-row plain">
+                <span className="toggle-text"><b>Cache-friendly prompt layout</b><small>Keep the system prompt identical between turns and send per-turn memories, graph and excerpts next to your newest message, so the provider's prompt cache keeps hitting.</small></span>
+                <input type="checkbox" checked={draft.cacheLayout !== false} onChange={(e) => patch({ cacheLayout: e.target.checked })} /><span className="switch" />
+              </label>
               <label><span>Max tool rounds per reply</span><input type="number" min={1} max={60} value={draft.maxToolRounds} onChange={(e) => patch({ maxToolRounds: Number(e.target.value) })} /></label>
               <label><span>Brave Search API key <small className="muted">(optional; without a key web search uses Exa, then DuckDuckGo)</small></span><input type="password" value={draft.braveApiKey} onChange={(e) => patch({ braveApiKey: e.target.value })} placeholder="BSA…" spellCheck={false} /></label>
               <label><span>Tavily API key <small className="muted">(optional alternative)</small></span><input type="password" value={draft.tavilyApiKey} onChange={(e) => patch({ tavilyApiKey: e.target.value })} placeholder="tvly-…" spellCheck={false} /></label>
               <label><span>Exa API key <small className="muted">(optional; Exa works without one, a key lifts its rate limit)</small></span><input type="password" value={draft.exaApiKey ?? ''} onChange={(e) => patch({ exaApiKey: e.target.value })} placeholder="exa key" spellCheck={false} /></label>
-              <label><span>GitHub token <small className="muted">(optional; GitHub tools use your <code>gh</code> login when this is empty)</small></span><input type="password" value={draft.githubToken ?? ''} onChange={(e) => patch({ githubToken: e.target.value })} placeholder="ghp_…" spellCheck={false} /></label>
+              <label><span>SearXNG URL <small className="muted">(optional; your own instance, searched beside Exa. Needs <code>json</code> under search.formats)</small></span><input value={draft.searxngUrl ?? ''} onChange={(e) => patch({ searxngUrl: e.target.value })} placeholder="http://localhost:8080" spellCheck={false} /></label>
+              <label><span>GitHub token<small className="muted">(optional; GitHub tools use your <code>gh</code> login when this is empty)</small></span><input type="password" value={draft.githubToken ?? ''} onChange={(e) => patch({ githubToken: e.target.value })} placeholder="ghp_…" spellCheck={false} /></label>
               <label className="check">
                 <input type="checkbox" checked={draft.readerFallback !== false} onChange={(e) => patch({ readerFallback: e.target.checked })} />
                 Retry blocked or JavaScript-only pages through Jina Reader (Jina sees the page address)
@@ -341,6 +347,7 @@ export default function SettingsModal(): JSX.Element {
               {shortcut && !shortcut.ok && (
                 <p className="test-msg fail">{shortcut.message ?? `${shortcut.accelerator} could not be registered.`} The menubar icon gathers them too.</p>
               )}
+              <TraceExportSettings value={draft.otelExport} onChange={(otelExport) => patch({ otelExport })} />
             </section>}
           </div>
         </div>

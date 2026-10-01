@@ -6,6 +6,8 @@ import type { Widget } from '@shared/types'
 import { api, getBase } from '../../lib/api'
 import type { WidgetDef, WidgetProps } from '../registry'
 import { SAFE_MD } from '../../components/Message'
+import DeclarativeWidget from '../../components/DeclarativeWidget'
+import { isDeclarative } from '../../lib/boundWidget'
 
 const time = (t: number): string => new Date(t * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
 
@@ -16,20 +18,16 @@ export default function DashboardWidget({ window: win, live, onTitle }: WidgetPr
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
-  // There is no `GET /widgets/{id}` (contract §6), so the widget is picked out of its dashboard — and
-  // only while the window is live, so an off-screen window issues no request at all.
+  // Only while the window is live, so an off-screen window issues no request at all. A declarative widget
+  // then asks for its data, which is the cache inside its refresh_minutes and a re-bind (never the model) after.
   useEffect(() => {
     if (!live || !dashboardId || !refId) return
     let ok = true
-    void api.dashboards
-      .get(dashboardId)
-      .then((d) => {
-        if (!ok) return
-        const found = d.widgets.find((w) => w.id === refId) ?? null
-        setWidget(found)
-        setError(found ? null : 'That widget was deleted from its dashboard.')
-      })
-      .catch((e: Error) => { if (ok) setError(e.message) })
+    void api.widgets
+      .get(refId)
+      .then((w) => (isDeclarative(w.kind) ? api.widgets.data(refId).catch(() => w) : w))
+      .then((w) => { if (ok) { setWidget(w); setError(null) } })
+      .catch((e: Error) => { if (ok) setError(/404|Not Found/i.test(e.message) ? 'That widget was deleted from its dashboard.' : e.message) })
     return () => { ok = false }
   }, [live, dashboardId, refId])
 
@@ -64,7 +62,9 @@ export default function DashboardWidget({ window: win, live, onTitle }: WidgetPr
         {widget.refreshed_at !== null && <span>{time(widget.refreshed_at)}</span>}
         <button className="widget-chip" title="Refresh" onClick={() => void refresh()}><RefreshCw size={11} className={busy ? 'spin' : ''} /></button>
       </div>
-      {widget.kind === 'html' ? (
+      {isDeclarative(widget.kind) ? (
+        <div className="widget-scroll"><DeclarativeWidget widget={widget} height={Math.max(140, win.h - 90)} /></div>
+      ) : widget.kind === 'html' ? (
         widget.code ? (
           // Opaque: a transparent iframe over the vibrancy window reads as a hole to the desktop while
           // the document (re)loads. #232220 matches the dark surface generated widgets style themselves for.

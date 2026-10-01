@@ -182,6 +182,13 @@ def segment_argv(ff: str, input_spec: list[str], out_pattern: str, segment_secon
             "-reset_timestamps", "1", out_pattern]
 
 
+def resegment_argv(ff: str, src: str, out_pattern: str, segment_seconds: int) -> list[str]:
+    """Cut an existing audio/video file into the same 16k mono wav segments a live capture writes."""
+    return [ff, "-hide_banner", "-loglevel", "error", "-i", src, "-vn", "-ac", "1", "-ar", "16000",
+            "-f", "segment", "-segment_time", str(segment_seconds), "-reset_timestamps", "1",
+            "-c:a", "pcm_s16le", out_pattern]
+
+
 def device_input(index: str) -> list[str]:
     """Capture an avfoundation input by index. Resolve it through resolve_device first."""
     return ["-f", "avfoundation", "-i", f":{index}"]

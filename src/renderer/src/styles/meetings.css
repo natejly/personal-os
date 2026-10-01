@@ -203,3 +203,7 @@
   }
   .mtg-panes.with-transcript .mtg-transcript { border-left: 0; border-top: 1px solid var(--border); }
 }
+
+.mtg-speakers { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+.mtg-speaker-chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border: 1px solid var(--border); border-radius: 999px; font-size: 11px; color: var(--text-dim, inherit); }
+.mtg-speaker-chip input { width: 90px; border: 0; background: transparent; color: inherit; font: inherit; outline: none; }

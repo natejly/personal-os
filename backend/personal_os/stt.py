@@ -23,8 +23,10 @@ string on the segment - not an exception that takes the thread down.
 from __future__ import annotations
 
 import contextlib
+import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -226,7 +228,7 @@ def _proxy(path: Path, settings: dict[str, Any], model: str,
 
 
 def _local(path: Path, data_dir: Path, cfg: dict[str, Any]) -> tuple[str, dict[str, Any], str]:
-    """whisper.cpp on this machine. -otxt writes <wav>.txt beside the wav; -nt drops timestamps."""
+    """whisper.cpp on this machine. -oj writes <wav>.json (segment offsets), -otxt the fallback text."""
     cli = whisper_cli_path()
     if not cli:
         return "", {}, "whisper-cli not found on PATH (brew install whisper-cpp)"
@@ -234,11 +236,18 @@ def _local(path: Path, data_dir: Path, cfg: dict[str, Any]) -> tuple[str, dict[s
     if not model:
         return "", {}, f"no whisper model found; download one into {data_dir / 'models'}"
     txt = path.with_suffix(path.suffix + ".txt")
+    js = path.with_suffix(path.suffix + ".json")
+    argv = [cli, "-m", model, "-f", str(path), "-of", str(path), "-oj", "-otxt", "-nt", "-l", "auto"]
+    vad = vad_model_path(data_dir, cfg)
+    if vad:
+        argv += ["--vad", "-vm", vad]
     try:
-        r = subprocess.run([cli, "-m", model, "-f", str(path), "-otxt", "-nt", "-l", "auto"],
-                           capture_output=True, text=True, timeout=300)
+        r = subprocess.run(argv, capture_output=True, text=True, timeout=300)
         if r.returncode != 0:
             return "", {}, _first_line(r.stderr) or f"{Path(cli).name} exited {r.returncode}"
+        segments = _read_local_json(js)
+        if segments:
+            return " ".join(s["text"] for s in segments if s["text"]).strip(), {"segments": segments}, ""
         text = ""
         with contextlib.suppress(OSError):
             text = txt.read_text(errors="replace")
@@ -246,9 +255,107 @@ def _local(path: Path, data_dir: Path, cfg: dict[str, Any]) -> tuple[str, dict[s
     except subprocess.TimeoutExpired:
         return "", {}, "whisper.cpp timed out after 300s"
     finally:
-        # The txt file is a side effect of -otxt, not something worth leaving in recordings/.
-        with contextlib.suppress(Exception):
-            txt.unlink(missing_ok=True)
+        # Both files are side effects of -oj/-otxt, not something worth leaving in recordings/.
+        for f in (txt, js):
+            with contextlib.suppress(Exception):
+                f.unlink(missing_ok=True)
+
+
+def vad_model_path(data_dir: Path, cfg: dict[str, Any]) -> str:
+    """A Silero ggml model for whisper.cpp's --vad, or "" (optional; the energy gate runs regardless)."""
+    configured = str(cfg.get("whisperVadModelPath") or "").strip()
+    if configured and Path(configured).is_file():
+        return configured
+    try:
+        found = sorted(p for p in (data_dir / "models").glob("ggml-silero*.bin") if p.is_file())
+    except Exception:  # noqa: BLE001
+        return ""
+    return str(found[0]) if found else ""
+
+
+def _read_local_json(js: Path) -> list[dict[str, Any]]:
+    """whisper.cpp -oj output as verbose_json-shaped segments; [] if absent or malformed."""
+    try:
+        doc = json.loads(js.read_text(errors="replace"))
+        out = []
+        for e in doc.get("transcription") or []:
+            off = e.get("offsets") or {}
+            out.append({"start": float(off.get("from", 0)) / 1000.0, "end": float(off.get("to", 0)) / 1000.0,
+                        "text": str(e.get("text") or "").strip()})
+        return out
+    except Exception:  # noqa: BLE001 - fall back to the txt file
+        return []
+
+
+# Phrases Whisper emits on silence or noise. Only trusted when the energy VAD also says the
+# segment is nearly silent, because a person can really say "thank you".
+HALLUCINATIONS = frozenset({
+    "thank you", "thanks", "thanks for watching", "thank you for watching", "you", "bye", "bye bye",
+    "subtitles by the amara.org community", "please subscribe", "like and subscribe",
+    "thank you very much", "see you next time", "see you in the next video",
+})
+LOW_SPEECH_RATIO = 0.15
+REPEAT_RUN = 4
+
+
+def _norm(text: str) -> str:
+    return " ".join(re.sub(r"[^\w\s']", " ", text.lower()).split())
+
+
+def _collapse_repeats(text: str) -> str:
+    """A word or short phrase repeated >= REPEAT_RUN times in a row becomes one."""
+    words = text.split()
+    for n in (1, 2, 3):
+        i, out = 0, []
+        while i < len(words):
+            unit = words[i:i + n]
+            j = i + n
+            while len(unit) == n and [_norm(w) for w in words[j:j + n]] == [_norm(w) for w in unit]:
+                j += n
+            if len(unit) == n and (j - i) // n >= REPEAT_RUN:
+                out.extend(unit)
+                i = j
+            else:
+                out.append(words[i])
+                i += 1
+        words = out
+    return " ".join(words)
+
+
+def filter_hallucinations(text: str, detail: dict[str, Any] | None, speech_ratio: float | None = None,
+                          cfg: dict[str, Any] | None = None) -> tuple[str, dict[str, Any], list[str]]:
+    """faster-whisper's decode-quality rules plus a known-phrase rule, applied after the fact.
+
+    Returns (text, detail, dropped). Never raises and never mutates its inputs.
+    """
+    detail = dict(detail or {})
+    dropped: list[str] = []
+    quiet = speech_ratio is not None and speech_ratio < LOW_SPEECH_RATIO
+    segments = detail.get("segments")
+    if isinstance(segments, list) and segments:
+        kept = []
+        for seg in segments:
+            if not isinstance(seg, dict):
+                continue
+            seg_text = str(seg.get("text") or "")
+            nsp, lp, cr = seg.get("no_speech_prob"), seg.get("avg_logprob"), seg.get("compression_ratio")
+            bad = (isinstance(nsp, (int, float)) and isinstance(lp, (int, float)) and nsp > 0.6 and lp < -1.0) \
+                or (isinstance(cr, (int, float)) and cr > 2.4) \
+                or (quiet and _norm(seg_text) in HALLUCINATIONS)
+            if bad:
+                dropped.append(seg_text.strip())
+            else:
+                kept.append(seg)
+        detail["segments"] = kept
+        new_text = _collapse_repeats(" ".join(str(s.get("text") or "").strip() for s in kept).strip())
+    else:
+        new_text = _collapse_repeats(text.strip())
+        if quiet and _norm(new_text) in HALLUCINATIONS:
+            dropped.append(new_text)
+            new_text = ""
+    if dropped:
+        detail["filtered"] = dropped
+    return new_text, detail, dropped
 
 
 def _first_line(text: str) -> str:

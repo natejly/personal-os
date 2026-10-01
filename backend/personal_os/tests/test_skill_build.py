@@ -177,10 +177,10 @@ class SkillToolsTestCase(unittest.TestCase):
         return self.skills.update(s["id"], {"status": "approved"})  # type: ignore[return-value]
 
     # ---------- the group ----------
-    def test_the_group_is_exactly_list_draft_revise(self) -> None:
+    def test_the_group_is_exactly_list_draft_revise_view(self) -> None:
         """There is deliberately no skill_approve, and no tool that can set a status at all."""
         self.assertEqual({n for n, s in self.box.specs.items() if s.group == "skills"},
-                         {"skill_list", "skill_draft", "skill_revise"})
+                         {"skill_list", "skill_draft", "skill_revise", "skill_view"})
         for name in ("skill_draft", "skill_revise"):
             self.assertNotIn("status", self.box.specs[name].parameters["properties"])
 

@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { CalendarEvent, Todo } from '@shared/types'
-import { hourWindow, localDay, withoutTodoEvents } from './CalendarWeek'
+import { hourWindow, localDay, selectionRange, withoutTodoEvents } from './CalendarWeek'
 
 test('localDay uses the local calendar date, not UTC', () => {
   const d = new Date(2026, 8, 30, 0, 30, 0)
@@ -68,6 +68,16 @@ test('withoutTodoEvents keeps a todo scheduled at a time', () => {
   const events = [byId('timed-todo', false)]
   const out = withoutTodoEvents(events, [todo('t1', 'timed-todo')])
   assert.deepEqual(out.map((e) => e.id), ['timed-todo'])
+})
+
+test('selectionRange is an hour on a click and follows a drag', () => {
+  assert.deepEqual(selectionRange(10 * 60, 10 * 60, 24 * 60), { start: 10 * 60, end: 11 * 60 })
+  assert.deepEqual(selectionRange(10 * 60, 11 * 60 + 15, 24 * 60), { start: 10 * 60, end: 11 * 60 + 30 })
+  assert.deepEqual(selectionRange(10 * 60, 9 * 60, 24 * 60), { start: 9 * 60, end: 10 * 60 + 15 })
+})
+
+test('selectionRange keeps a full hour when a click is at the end of the day', () => {
+  assert.deepEqual(selectionRange(23 * 60 + 45, 23 * 60 + 45, 24 * 60), { start: 23 * 60, end: 24 * 60 })
 })
 
 test('withoutTodoEvents is a no-op when no todo has an event', () => {

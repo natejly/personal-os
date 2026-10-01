@@ -1,8 +1,11 @@
-import { useState } from 'react'
-import { ChevronRight, Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, AlertCircle, Laptop, Zap, ListChecks, ShieldAlert, ShieldCheck } from 'lucide-react'
-import type { ToolEvent, Verification } from '@shared/types'
+import { useEffect, useMemo, useState } from 'react'
+import { ChevronRight, Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, AlertCircle, Laptop, Zap, ListChecks, PenLine, ShieldAlert, ShieldCheck } from 'lucide-react'
+import type { DocRevision, ToolEvent, Verification } from '@shared/types'
+import { api } from '../lib/api'
 import { useStore } from '../store'
+import DiffView from './DiffView'
 import PlanApproval from './PlanApproval'
+import '../styles/docs.css'
 
 const ICONS: Record<string, JSX.Element> = {
   propose_plan: <ListChecks size={13} />,
@@ -10,6 +13,8 @@ const ICONS: Record<string, JSX.Element> = {
   find_files: <Laptop size={13} />, read_local_file: <Laptop size={13} />,
   write_local_file: <Laptop size={13} />, move_local_file: <Laptop size={13} />, trash_local_file: <Laptop size={13} />, list_shortcuts: <Zap size={13} />, run_shortcut: <Zap size={13} />,
   search_documents: <FileSearch size={13} />, read_document: <FileSearch size={13} />, list_documents: <FileSearch size={13} />,
+  doc_list: <PenLine size={13} />, doc_search: <PenLine size={13} />, doc_read: <PenLine size={13} />,
+  doc_create: <PenLine size={13} />, doc_edit: <PenLine size={13} />,
   search_memory: <Brain size={13} />, save_memory: <Brain size={13} />,
   graph_search: <Share2 size={13} />, graph_traverse: <Share2 size={13} />, graph_add: <Share2 size={13} />,
   run_python: <Terminal size={13} />, current_time: <Clock size={13} />,
@@ -19,6 +24,10 @@ const ICONS: Record<string, JSX.Element> = {
 
 function summary(t: ToolEvent): string {
   const a = t.arguments ?? {}
+  if (t.name === 'doc_edit') {
+    const s = String(a.summary || a.doc || '')
+    return s.length > 90 ? s.slice(0, 90) + '…' : s
+  }
   if (t.name === 'propose_plan') {
     const steps = Array.isArray(a.steps) ? a.steps : []
     const title = typeof a.title === 'string' && a.title ? a.title : steps.map((s) => (s as { tool?: string })?.tool ?? '?').join(', ')
@@ -52,6 +61,70 @@ function Verdict({ event }: { event: ToolEvent }): JSX.Element | null {
       title={`${v.what} · compared ${v.compared.join(', ') || 'existence'} · ${tries}`}>
       {v.status === 'verified' ? <ShieldCheck size={11} /> : <ShieldAlert size={11} />} {v.status}
     </span>
+  )
+}
+
+function parseDocEdit(preview: string): { revision_id: string; doc_id: string } | null {
+  try {
+    const o = JSON.parse(preview) as { revision_id?: unknown; doc_id?: unknown }
+    if (typeof o.revision_id !== 'string') return null
+    return { revision_id: o.revision_id, doc_id: typeof o.doc_id === 'string' ? o.doc_id : '' }
+  } catch {
+    return null
+  }
+}
+
+/** The diff for a doc_edit, under the tool row. Ask mode can accept or reject it here. */
+function DocEditDiff({ preview }: { preview: string }): JSX.Element | null {
+  const info = useMemo(() => parseDocEdit(preview), [preview])
+  const [rev, setRev] = useState<DocRevision | null>(null)
+  const [current, setCurrent] = useState<string | undefined>(undefined)
+  const [missing, setMissing] = useState(false)
+  const acceptRevision = useStore((s) => s.acceptRevision)
+  const rejectRevision = useStore((s) => s.rejectRevision)
+
+  useEffect(() => {
+    if (!info) return
+    let dead = false
+    setMissing(false)
+    void (async () => {
+      try {
+        const r = await api.docs.revision(info.revision_id)
+        if (dead) return
+        let cur: string | undefined
+        if (r.status === 'pending') {
+          const doc = await api.docs.get(info.doc_id || r.doc_id).catch(() => null)
+          if (dead) return
+          cur = doc?.content
+        }
+        setCurrent(cur)
+        setRev(r.status === 'pending' && cur !== undefined && cur !== r.before ? { ...r, stale: true } : r)
+      } catch {
+        if (!dead) setMissing(true)
+      }
+    })()
+    return () => { dead = true }
+  }, [info])
+
+  if (!info || missing) return null
+  if (!rev) return <p className="muted small tool-doc-diff">Loading diff…</p>
+
+  const pending = rev.status === 'pending'
+  const reload = async (): Promise<void> => {
+    const r = await api.docs.revision(info.revision_id).catch(() => null)
+    if (r) setRev(r)
+    setCurrent(undefined)
+  }
+  return (
+    <div className="tool-doc-diff">
+      <DiffView
+        revision={rev}
+        current={pending ? current : undefined}
+        collapsed
+        onAccept={pending ? () => { void acceptRevision(rev.id).then(reload) } : undefined}
+        onReject={pending ? () => { void rejectRevision(rev.id).then(reload) } : undefined}
+      />
+    </div>
   )
 }
 
@@ -90,6 +163,7 @@ export default function ToolEvents({ events, conversationId }: { events: ToolEve
               ))}
             </div>
           )}
+          {t.name === 'doc_edit' && !t.pending && !t.error && t.result_preview && <DocEditDiff preview={t.result_preview} />}
           {t.pending && t.needs_approval && t.name === 'propose_plan' && <PlanApproval event={t} conversationId={conversationId} />}
           {t.pending && t.needs_approval && t.name !== 'propose_plan' && (
             <div className="approval">

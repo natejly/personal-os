@@ -33,8 +33,11 @@ def j(method: str, path: str, body: Any = None, expect: int = 200) -> Any:
     return r.json()
 
 
-def call(name: str, args: dict[str, Any]) -> Any:
-    return asyncio.get_event_loop().run_until_complete(toolbox.call(name, args, {"project_id": None}))
+def call(name: str, args: dict[str, Any], ctx: dict[str, Any] | None = None) -> Any:
+    base: dict[str, Any] = {"project_id": None}
+    if ctx:
+        base.update(ctx)
+    return asyncio.get_event_loop().run_until_complete(toolbox.call(name, args, base))
 
 
 # ---- helpers ----
@@ -152,6 +155,18 @@ check("error" in ghost and ghost["docs"], "an unknown doc is refused with the ti
 
 app_out = call("doc_edit", {"doc": "Derivation", "append": "\n## Next\n\nMore.\n", "summary": "Add a section"})
 check(app_out["status"] == "pending_review" and app_out["lines_added"] >= 3, f"append proposes: {app_out}")
+
+# ---- accept-all writes the doc and still returns a revision to diff ----
+made2 = call("doc_create", {"title": "Apply me", "content": "alpha\n"})
+auto = call("doc_edit", {"doc": made2["doc_id"], "edits": [{"find": "alpha", "replace": "beta"}], "summary": "Swap"},
+            {"settings": {"docEditMode": "apply"}})
+check(auto["status"] == "applied" and auto["revision_id"], f"accept-all writes: {auto}")
+check(j("GET", f"/docs/{made2['doc_id']}")["content"] == "beta\n", "accept-all changes the body")
+check(j("GET", f"/docs/revisions/{auto['revision_id']}")["status"] == "applied", "the revision is applied, not pending")
+held = call("doc_edit", {"doc": made2["doc_id"], "edits": [{"find": "beta", "replace": "gamma"}]},
+            {"settings": {"docEditMode": "nope"}})
+check(held["status"] == "pending_review", "an unknown mode still asks")
+check(j("GET", f"/docs/{made2['doc_id']}")["content"] == "beta\n", "asking leaves the body alone")
 
 # ---- deletion takes the history with it ----
 j("DELETE", f"/docs/{did}")

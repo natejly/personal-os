@@ -208,8 +208,9 @@ run_store = RunStore(db)
 bus = RunBus(run_store)
 # Plan-level approvals (propose_plan): one card authorises a set of calls, each bound to its argument digest.
 plans = Plans(db)
-# Active chat streams so they can be aborted from the client: message_id -> that run's stop event.
-_active: dict[str, asyncio.Event] = {}
+# Active chat streams so they can be aborted from the client. A Run when the reply is on the bus
+# (stop goes through the bus, which also wakes the provider read); a bare Event for a stream with no run.
+_active: dict[str, asyncio.Event | Run] = {}
 # Pending tool-call approvals: call_id -> Future[decision]. The durable record is the approvals table; this is
 # only how POST /approvals wakes the run that is waiting in this process.
 _approvals: dict[str, asyncio.Future] = {}
@@ -866,6 +867,24 @@ def _title_from(text: str) -> str:
     return (t[:48].rstrip() + "…") if len(t) > 48 else (t or "New chat")
 
 
+def _bind_stop(message_id: str, stop: asyncio.Event, run: Run | None) -> None:
+    _active[message_id] = run if run is not None else stop
+
+
+def _stream_cancel(stop: asyncio.Event, steers: list[dict[str, Any]] | None, run: Run | None) -> asyncio.Event:
+    """The event stream_chat closes its socket on. Cleared first, so only a stop or steer during this call fires it.
+
+    A poke that arrives between the read of wake_gen and clear() is put back: wake_gen moved, so the flag is set again.
+    """
+    if run is None:
+        return stop
+    seen = run.wake_gen
+    run.wake.clear()
+    if run.wake_gen != seen or stop.is_set() or steers:
+        run.wake.set()
+    return run.wake
+
+
 async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: list[dict[str, Any]] | None = None,
                        run: Run | None = None) -> AsyncIterator[tuple[str, Any]]:
     """Yield (event, payload) pairs. The run bus formats them and fans them out; see runs.sse.
@@ -920,8 +939,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
 
     am = convos.add_message(conv_id, "assistant", "", model=model)
 
-    _active[am["id"]] = stop
+    _bind_stop(am["id"], stop, run)
     buf: list[str] = []
+    # Chain-of-thought from reasoning models. Kept out of `buf` so it never becomes the reply, and
+    # never goes back to the model: history() reads content only.
+    rbuf: list[str] = []
     error: str | None = None
     tool_events: list[dict[str, Any]] = []
     tool_ctx: dict[str, Any] = {
@@ -989,14 +1011,21 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         # tools are still declared, with tool_choice "none": the history holds tool_calls, and some OpenAI-compatible
         # backends reject that when no tool list is sent. "none" is the portable way to say "answer, do not call".
         async for ev in llm.stream_chat(cfg, model, messages, tool_schemas or None,
-                                        effort=str(conv["settings"].get("effort") or "default"), tool_choice="none"):
+                                        effort=str(conv["settings"].get("effort") or "default"), tool_choice="none",
+                                        fast=bool(conv["settings"].get("fast")),
+                                        cancel=_stream_cancel(stop, steers, run)):
             if stop.is_set():
                 break
-            if ev["type"] == "delta":
+            if ev["type"] == "reasoning":
+                rbuf.append(ev["text"])
+                yield "reasoning", {"id": am["id"], "text": ev["text"]}
+            elif ev["type"] == "delta":
                 buf.append(ev["text"])
                 yield "delta", {"id": am["id"], "text": ev["text"]}
             else:
                 fin = ev
+            if steers:
+                break
         tracer.end(span, {"finish_reason": fin.get("finish_reason"), "usage": fin.get("usage"),
                           "output_chars": len("".join(buf[start:]))},
                    error="Stopped by user" if stop.is_set() else None)
@@ -1006,22 +1035,26 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         while True:
             if stop.is_set():
                 break
-            # Steered messages fold in at a round boundary: tool results are already appended, so the
-            # user turn lands after them and the assistant/tool message ordering stays legal. The
-            # current reply segment closes with its own `done`, and a fresh assistant message answers.
+            # Steered messages fold in here. A steer also cancels the provider read, so this is reached
+            # as soon as the message arrives, not after the model finishes the segment it was writing.
+            # Tool results are already appended, so the user turn lands after them and the ordering stays
+            # legal. The current reply segment closes with its own `done`, and a fresh assistant message answers.
             if steers:
                 steered, steers[:] = list(steers), []
                 # A segment that already streamed or ran tools closes cleanly; an untouched one is reused.
-                if buf or tool_events:
-                    convos.finish_message(am["id"], "".join(buf).strip(), None, used, tool_events, tracer.spans)
+                if buf or tool_events or rbuf:
+                    reasoning = "".join(rbuf).strip() or None
+                    convos.finish_message(am["id"], "".join(buf).strip(), None, used, tool_events, tracer.spans, reasoning)
                     _active.pop(am["id"], None)
                     yield "done", {"id": am["id"], "error": None, "context_used": used, "tool_events": tool_events,
                                    "trace": tracer.spans, "stopped": False, "partial": partial,
-                                   "tainted": tool_ctx["tainted"], "taint_sources": tool_ctx["taint_sources"]}
+                                   "tainted": tool_ctx["tainted"], "taint_sources": tool_ctx["taint_sources"],
+                                   "reasoning": reasoning}
                     am = convos.add_message(conv_id, "assistant", "", model=model)
-                    _active[am["id"]] = stop
+                    _bind_stop(am["id"], stop, run)
                     tool_ctx["message_id"] = am["id"]
                     buf = []
+                    rbuf = []
                     tool_events = []
                     tracer = Tracer()
                     yield "assistant_message", {**am, "context_used": used}
@@ -1037,17 +1070,27 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             lspan = tracer.start("llm", model, {"round": _round, "messages": len(messages), "tools": len(tool_schemas)})
             yield "span", {"message_id": am["id"], "span": lspan}
             first_token: int | None = None
-            async for ev in llm.stream_chat(cfg, model, messages, tool_schemas or None, effort=str(conv["settings"].get("effort") or "default")):
+            async for ev in llm.stream_chat(cfg, model, messages, tool_schemas or None,
+                                            effort=str(conv["settings"].get("effort") or "default"),
+                                            fast=bool(conv["settings"].get("fast")),
+                                            cancel=_stream_cancel(stop, steers, run)):
                 if stop.is_set():
                     break
-                if ev["type"] == "delta":
+                if ev["type"] == "reasoning":
+                    if first_token is None:
+                        first_token = now_ms()
+                    rbuf.append(ev["text"])
+                    yield "reasoning", {"id": am["id"], "text": ev["text"]}
+                elif ev["type"] == "delta":
                     if first_token is None:
                         first_token = now_ms()
                     buf.append(ev["text"])
                     yield "delta", {"id": am["id"], "text": ev["text"]}
                 else:
                     end = ev
-            calls = end.get("tool_calls") or []
+                if steers:
+                    break
+            calls = [] if end.get("finish_reason") == "cancelled" else (end.get("tool_calls") or [])
             u = end.get("usage") or end.get("usage_est") or {}
             pt, ct = int(u.get("prompt_tokens") or 0), int(u.get("completion_tokens") or 0)
             budget.add(pt, ct, pricing.cost(cfg, model, pt, ct))
@@ -1079,6 +1122,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     messages.append({"role": "tool", "tool_call_id": c["id"], "content": BUDGET_STOP.format(axis=over)})
                 async for chunk in _final_round():
                     yield chunk
+                if steers and not stop.is_set():
+                    continue
                 break
             # execute tool calls, then continue the loop with their results
             messages.append(turn)
@@ -1262,6 +1307,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             if partial == "loop":
                 async for chunk in _final_round():
                     yield chunk
+                if steers and not stop.is_set():
+                    continue
                 break
             if not budget.nudged and budget.fraction() >= 0.6:
                 budget.nudged = True
@@ -1271,7 +1318,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         text = "".join(buf).strip()
         # A call still waiting on approval keeps its card: the approval row stays pending and can still be answered.
         kept = tool_events + ([awaiting] if awaiting else [])
-        convos.finish_message(am["id"], text, None if text else "Cancelled", used, kept, tracer.spans)
+        convos.finish_message(am["id"], text, None if text else "Cancelled", used, kept, tracer.spans, "".join(rbuf).strip() or None)
         convos.touch(conv_id)
         raise
     except Exception as e:  # noqa: BLE001
@@ -1282,7 +1329,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         _active.pop(am["id"], None)
 
     text = "".join(buf).strip()
-    convos.finish_message(am["id"], text, error, used, tool_events, tracer.spans)
+    reasoning = "".join(rbuf).strip() or None
+    convos.finish_message(am["id"], text, error, used, tool_events, tracer.spans, reasoning)
     convos.touch(conv_id)
     if tool_ctx["tainted"]:
         srcs = sorted(set(tool_ctx["taint_sources"]))
@@ -1290,7 +1338,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             convos.update(conv_id, {"settings": {"tainted": True, "taint_sources": srcs}})
     yield "done", {"id": am["id"], "error": error, "context_used": used, "tool_events": tool_events,
                    "trace": tracer.spans, "stopped": stop.is_set(), "partial": partial,
-                   "tainted": tool_ctx["tainted"], "taint_sources": tool_ctx["taint_sources"]}
+                   "tainted": tool_ctx["tainted"], "taint_sources": tool_ctx["taint_sources"],
+                   "reasoning": reasoning}
     if tool_ctx.get("learned"):
         yield "learned", tool_ctx["learned"]
 
@@ -1383,6 +1432,7 @@ async def steer_run(id: str, body: SteerIn) -> dict[str, Any]:
     um = convos.add_message(id, "user", text)
     run.publish("user_message", um)
     run.steers.append(um)
+    run.poke()
     return {"ok": True, "run_id": run.run_id, "message": um}
 
 
@@ -1835,11 +1885,15 @@ async def put_prices(body: PricesIn) -> dict[str, Any]:
 
 
 @app.post("/messages/{mid}/stop")
-def stop_message(mid: str) -> dict[str, bool]:
-    ev = _active.get(mid)
-    if ev:
-        ev.set()
-    return {"ok": ev is not None}
+async def stop_message(mid: str) -> dict[str, bool]:
+    """On the event loop. A sync endpoint would set the flag from a worker thread, which does not wake a waiter."""
+    slot = _active.get(mid)
+    if isinstance(slot, Run):
+        return {"ok": bus.stop(slot.conversation_id, slot.run_id)}
+    if isinstance(slot, asyncio.Event):
+        slot.set()
+        return {"ok": True}
+    return {"ok": False}
 
 
 class ContextPreviewIn(BaseModel):

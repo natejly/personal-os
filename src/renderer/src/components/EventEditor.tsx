@@ -4,13 +4,37 @@ import type { CalendarColors, CalendarEvent, EventPayload, GoogleCalendar } from
 import { api } from '../lib/api'
 import { useStore } from '../store'
 
-/** Seed for create mode: where the user double-clicked. */
-export interface EventDraft { day?: string; hour?: number; title?: string }
+/** Seed for create mode: a clicked hour, a dragged range, or an all-day cell. */
+export interface EventDraft {
+  day?: string
+  hour?: number
+  minute?: number
+  endDay?: string
+  endHour?: number
+  endMinute?: number
+  title?: string
+  allDay?: boolean
+}
 
 const pad = (n: number): string => String(n).padStart(2, '0')
 const toDateInput = (d: Date): string => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 const toDtInput = (iso: string): string => { const d = new Date(iso); return `${toDateInput(d)}T${pad(d.getHours())}:${pad(d.getMinutes())}` }
 const shiftDay = (day: string, n: number): string => { const d = new Date(`${day}T00:00:00`); d.setDate(d.getDate() + n); return toDateInput(d) }
+
+/** Minutes-from-midnight on `day` (end may be 24:00) into the create-mode seed. */
+export function draftFromRange(day: string, startMin: number, endMin: number): EventDraft {
+  const endsNextDay = endMin >= 24 * 60
+  const endClock = endsNextDay ? endMin - 24 * 60 : endMin
+  return {
+    day,
+    hour: Math.floor(startMin / 60),
+    minute: startMin % 60,
+    endDay: endsNextDay ? shiftDay(day, 1) : day,
+    endHour: Math.floor(endClock / 60),
+    endMinute: endClock % 60,
+    allDay: false
+  }
+}
 
 const WEEKDAYS = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA']
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
@@ -51,6 +75,8 @@ export const eventColor = (e: CalendarEvent): string | null =>
   (e.color_id && metaCache?.colors.event[e.color_id]) || (e.calendar_id && metaCache?.calendars.find((c) => c.id === e.calendar_id)?.color) || null
 /** Warm the calendar/color cache; resolves when eventColor() can answer. */
 export const primeCalendarMeta = async (): Promise<void> => { await loadMeta().catch(() => undefined) }
+/** The same fetch, for the calendar list. Rejects on failure so the caller can fall back. */
+export const loadCalendarMeta = loadMeta
 
 export interface EventEditorProps {
   /** Existing event to edit (list-grade is fine; the editor refetches full details). Null = create. */
@@ -115,10 +141,19 @@ export default function EventEditor({ event, draft, onClose, onSaved }: EventEdi
     if (!isEdit) {
       const day = draft?.day ?? toDateInput(new Date())
       const hour = draft?.hour ?? new Date().getHours() + 1
-      setStartDay(day); setEndDay(day)
-      setStartDt(`${day}T${pad(Math.min(hour, 23))}:00`)
-      setEndDt(hour >= 23 ? `${day}T23:59` : `${day}T${pad(hour + 1)}:00`)
-      setAllDay(draft?.hour === undefined && !!draft?.day)
+      const minute = draft?.minute ?? 0
+      const sh = Math.min(hour, 23)
+      setAllDay(draft?.allDay ?? (draft?.hour == null && !!draft?.day))
+      setStartDay(day)
+      setStartDt(`${day}T${pad(sh)}:${pad(minute)}`)
+      if (draft?.endHour != null) {
+        const ed = draft.endDay ?? day
+        setEndDay(ed)
+        setEndDt(`${ed}T${pad(Math.min(draft.endHour, 23))}:${pad(draft.endMinute ?? 0)}`)
+      } else {
+        setEndDay(day)
+        setEndDt(sh >= 23 ? `${day}T23:59` : `${day}T${pad(sh + 1)}:${pad(minute)}`)
+      }
       const primary = metaCache?.calendars.find((c) => c.primary)
       if (primary) setCalendarId(primary.id)
       setLoading(false)
@@ -274,6 +309,17 @@ export default function EventEditor({ event, draft, onClose, onSaved }: EventEdi
   const me = full?.attendee_details?.find((a) => a.self)
   const palette = meta?.colors.event ?? {}
   const calColor = meta?.calendars.find((c) => c.id === calendarId)?.color ?? null
+  const showLink = full?.link || event?.link || ''
+
+  const prep = (): void => {
+    const name = (title || event?.summary || 'this event').trim()
+    const when = allDay ? (startDay || event?.start || '') : startDt ? new Date(startDt).toLocaleString() : event ? new Date(event.start).toLocaleString() : ''
+    const who = attendees.filter((a) => !a.self).map((a) => a.email)
+    const { newChat, send } = useStore.getState()
+    onClose()
+    newChat(null)
+    void send(`Prep me for "${name}"${when ? ` (${when})` : ''}.${who.length ? ` Attendees: ${who.join(', ')}.` : ''} Check my memory, documents and recent email for context on the attendees and topic, then give me a one-page brief.`)
+  }
 
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
@@ -284,7 +330,17 @@ export default function EventEditor({ event, draft, onClose, onSaved }: EventEdi
         </header>
 
         {loading ? (
-          <section><p className="muted">Loading…</p></section>
+          <>
+            <section><p className="muted">Loading…</p></section>
+            {isEdit && (
+              <footer>
+                {showLink && <a className="ghost-btn" href={showLink} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Show in calendar</a>}
+                <button className="ghost-btn" onClick={prep}>Prep me</button>
+                <span style={{ flex: 1 }} />
+                <button className="ghost-btn" onClick={onClose}>Cancel</button>
+              </footer>
+            )}
+          </>
         ) : (
           <>
             {isEdit && isRecurring && event?.recurring_event_id && (
@@ -477,7 +533,8 @@ export default function EventEditor({ event, draft, onClose, onSaved }: EventEdi
 
             <footer>
               {isEdit && <button className="ghost-btn danger" disabled={busy} onClick={() => void remove()}><Trash2 size={13} /> Delete</button>}
-              {full?.link && <a className="ghost-btn" href={full.link} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Open</a>}
+              {isEdit && showLink && <a className="ghost-btn" href={showLink} target="_blank" rel="noreferrer"><ExternalLink size={13} /> Show in calendar</a>}
+              {isEdit && <button className="ghost-btn" onClick={prep}>Prep me</button>}
               <span style={{ flex: 1 }} />
               {attendees.length > 0 && (
                 <select className="ev-notify" title="Email the guests about this change" value={sendUpdates}

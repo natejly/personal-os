@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { PanelLeftOpen, ChevronDown, RefreshCw, Pencil, SlidersHorizontal } from 'lucide-react'
-import type { Effort } from '@shared/types'
+import { PanelLeftOpen, RefreshCw, Pencil, SlidersHorizontal } from 'lucide-react'
 import { useStore, useProject, useConversation, useIsStreaming, useStreamingMessageId } from '../store'
 import ProjectChip from './ProjectChip'
 import MessageView from './Message'
@@ -8,39 +7,8 @@ import Composer from './Composer'
 import ContextDrawer from './ContextDrawer'
 import PlanPanel from './PlanPanel'
 import SendToSpace from './SendToSpace'
+import ModelMenu from './ModelMenu'
 import { clip, usePageContext } from '../lib/pageContext'
-
-function ModelPicker({ value, onChange }: { value: string; onChange: (m: string) => void }): JSX.Element {
-  const models = useStore((s) => s.models)
-  const modelsError = useStore((s) => s.modelsError)
-  const options = models.some((m) => m.id === value) ? models : [{ id: value }, ...models]
-  return (
-    <label className="model-picker" title={modelsError ?? 'Model (served via LiteLLM)'}>
-      <select aria-label="Model" value={value} onChange={(e) => onChange(e.target.value)}>
-        {options.map((m) => <option key={m.id} value={m.id}>{m.id}</option>)}
-      </select>
-      <ChevronDown size={14} />
-    </label>
-  )
-}
-
-const EFFORTS: Effort[] = ['default', 'low', 'medium', 'high']
-
-/**
- * Reasoning effort, next to the model it belongs with. A chat window has always had this control; the
- * page did not, so the only way to raise effort was to open the chat as a widget. `setChatSettings`
- * parks the choice on `draftEffort` while the chat is still a draft.
- */
-function EffortPicker({ value, onChange }: { value: Effort; onChange: (e: Effort) => void }): JSX.Element {
-  return (
-    <label className="model-picker effort-picker" title="Reasoning effort">
-      <select aria-label="Reasoning effort" value={value} onChange={(e) => onChange(e.target.value as Effort)}>
-        {EFFORTS.map((x) => <option key={x} value={x}>{x === 'default' ? 'Effort: default' : `Effort: ${x}`}</option>)}
-      </select>
-      <ChevronDown size={14} />
-    </label>
-  )
-}
 
 function greeting(): string {
   const h = new Date().getHours()
@@ -60,6 +28,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   const contextOpen = useStore((s) => s.contextOpen)
   const draftProjectId = useStore((s) => s.draftProjectId)
   const draftEffort = useStore((s) => s.draftEffort)
+  const draftFast = useStore((s) => s.draftFast)
   const project = useProject(convo?.project_id ?? draftProjectId)
   const { toggleSidebar, toggleContext, setChatModel, setChatSettings, renameChat, regenerate } = useStore()
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -68,6 +37,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
 
   const model = convo?.model ?? settings.defaultModel
   const effort = convo?.settings?.effort ?? draftEffort
+  const fast = convo?.settings?.fast ?? draftFast
   const msgs = convo?.messages ?? []
   const lastLen = msgs[msgs.length - 1]?.content.length ?? 0
 
@@ -112,8 +82,15 @@ export default function ChatView({ conversationId }: { conversationId?: string }
         <div className="no-drag header-right">
           <SendToSpace items={[{ kind: 'chat', refId: convo?.id }]} disabled={!convo?.id} />
           <ProjectChip projectId={convo?.project_id ?? draftProjectId} />
-          <ModelPicker value={model} onChange={(m) => void setChatModel(m, conversationId)} />
-          <EffortPicker value={effort} onChange={(e) => void setChatSettings({ effort: e }, conversationId)} />
+          <ModelMenu
+            model={model}
+            effort={effort}
+            fast={!!fast}
+            placement="down"
+            onModel={(m) => void setChatModel(m, conversationId)}
+            onEffort={(e) => void setChatSettings({ effort: e }, conversationId)}
+            onFast={(f) => void setChatSettings({ fast: f }, conversationId)}
+          />
           <button className={`icon-btn ${contextOpen ? 'on' : ''}`} title="Context panel (⌃⌘I)" aria-label="Toggle context panel" aria-pressed={contextOpen} onClick={toggleContext}><SlidersHorizontal size={16} /></button>
         </div>
       </header>

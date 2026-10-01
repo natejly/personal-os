@@ -1443,13 +1443,25 @@ def _register_docs(self: Toolbox) -> None:
         rev = self.docs.propose(d["id"], new, summary or "Assistant edit", tool="doc_edit", title_after=retitle)
         if not rev:
             return _missing(doc)
+        # "apply" writes the change (Accept all). Anything else, including a missing setting, waits for review.
+        if str((ctx.get("settings") or {}).get("docEditMode") or "review") == "apply":
+            applied = self.docs.accept(rev["id"])
+            if not applied:
+                return _missing(doc)
+            rev = self.docs.revision(rev["id"]) or rev
+            return {"doc_id": d["id"], "title": applied.get("title") or d["title"], "revision_id": rev["id"],
+                    "status": "applied", "lines_added": rev["stat"]["added"], "lines_removed": rev["stat"]["removed"],
+                    "note": "Written into the doc. The user sees the diff in the chat and can undo it from the doc's "
+                            "history. Tell them what you changed. Do not paste the document back."}
         return {"doc_id": d["id"], "title": d["title"], "revision_id": rev["id"], "status": "pending_review",
                 "lines_added": rev["stat"]["added"], "lines_removed": rev["stat"]["removed"],
-                "note": "Proposed, not applied. The user reviews the diff in Docs and accepts or rejects it. "
-                        "Tell them what you changed and that it is waiting for their review."}
+                "note": "Not applied yet. The user sees the diff in the chat and accepts or rejects it. "
+                        "Tell them what you changed and that it is waiting. Do not paste the document back."}
     R("doc_edit", ToolSpec("doc_edit", (
-        "Revise one of the user's docs. The change is *proposed*, never written straight in: it becomes a pending "
-        "revision that the user reviews as a diff and then accepts or rejects, so you can edit their writing freely.\n"
+        "Revise one of the user's docs. The change is always shown to them as a diff. When document edits are set "
+        "to ask, it stays pending until they accept or reject it. When they are set to accept all, it is written "
+        "immediately. The result's status says which happened — do not claim the doc was updated unless status is "
+        "'applied'.\n"
         "Pick one form. 'edits' — targeted find/replace, preferred: each 'find' must be copied exactly from doc_read "
         "and must occur exactly once. 'append' — add markdown at the end. 'content' — replace the whole body (use "
         "sparingly; it makes a large diff). 'title' — rename. Always pass a short 'summary' naming what you changed: "

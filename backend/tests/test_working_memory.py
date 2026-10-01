@@ -45,7 +45,7 @@ ROUNDS: list[dict[str, Any]] = []
 
 async def _scripted_stream(settings: dict[str, Any], model: str, messages: list[dict[str, Any]],
                            tools: list[dict[str, Any]] | None = None, kind: str = "chat",
-                           effort: str = "default", tool_choice: str = "auto") -> Any:
+                           effort: str = "default", tool_choice: str = "auto", fast: bool = False, cancel: asyncio.Event | None = None) -> Any:
     SEEN.append([dict(m) for m in messages])
     step = ROUNDS.pop(0) if ROUNDS else {"text": "all done", "calls": []}
     yield {"type": "delta", "text": step["text"]}

@@ -1,5 +1,4 @@
-import { useMemo, useState, type CSSProperties, type DragEvent } from 'react'
-import { Plus, SlidersHorizontal } from 'lucide-react'
+import { useMemo, useRef, useState, type CSSProperties, type DragEvent, type PointerEvent as ReactPointerEvent } from 'react'
 import type { CalendarEvent, Todo } from '@shared/types'
 import { hasDrag, readDrag } from '../canvas/dnd'
 
@@ -49,21 +48,47 @@ export function hourWindow(events: CalendarEvent[], days: Date[]): { start: numb
   return { start, end }
 }
 
+/** Click-drag snaps to 15 minutes. A click with no drag is one hour, like Google Calendar. */
+export const SLOT_MINUTES = 15
+const CLICK_MINUTES = 60
+
+/**
+ * `anchor` and `pointer` are already snapped down to a slot. A drag includes the slot under the
+ * pointer. A click near the end of the visible day shifts earlier so it still lasts an hour.
+ */
+export function selectionRange(anchor: number, pointer: number, dayEndMin: number): { start: number; end: number } {
+  if (pointer === anchor) {
+    let start = anchor
+    let end = start + CLICK_MINUTES
+    if (end > dayEndMin) {
+      end = dayEndMin
+      start = Math.max(0, end - CLICK_MINUTES)
+    }
+    return { start, end }
+  }
+  if (pointer > anchor) {
+    const end = Math.min(dayEndMin, pointer + SLOT_MINUTES)
+    return { start: anchor, end: Math.max(anchor + SLOT_MINUTES, end) }
+  }
+  const end = Math.min(dayEndMin, anchor + SLOT_MINUTES)
+  return { start: pointer, end: Math.max(pointer + SLOT_MINUTES, end) }
+}
+
 export interface CalendarWeekProps {
   /** One column per day, in order: seven for a week, one for a single day. */
   days: Date[]
   events: CalendarEvent[]
   todos: Todo[]
-  /** Double-clicking a slot offers an inline create. */
+  /** Click or drag an empty slot to create. */
   canCreate?: boolean
   onOpen: (e: CalendarEvent) => void
   onTodo?: (t: Todo) => void
   /** Drop a todo onto a day (hour null = all-day / due date only). */
   onTodoDrop?: (todoId: string, day: string, hour: number | null) => void
-  /** Resolves true when the event was created, which is when the inline input clears. */
-  onCreate?: (day: string, hour: number, title: string) => Promise<boolean>
-  /** Open the full event editor instead of the quick inline create. */
-  onCreateFull?: (day: string, hour: number, title: string) => void
+  /** Click or drag on a day column. Minutes are from midnight; `end` may be 24:00. */
+  onSelectRange?: (day: string, startMin: number, endMin: number) => void
+  /** Click an empty all-day cell. */
+  onCreateAllDay?: (day: string) => void
   /** Per-event display color (Google event color or its calendar's). */
   colorOf?: (e: CalendarEvent) => string | null
 }
@@ -84,11 +109,11 @@ export function withoutTodoEvents(events: CalendarEvent[], todos: Todo[]): Calen
   return events.filter((e) => !(e.all_day && e.id && mirrored.has(e.id)))
 }
 
-export default function CalendarWeek({ days, events, todos, canCreate = false, onOpen, onTodo, onTodoDrop, onCreate, onCreateFull, colorOf }: CalendarWeekProps): JSX.Element {
-  const [creating, setCreating] = useState<{ day: string; hour: number } | null>(null)
-  const [title, setTitle] = useState('')
+export default function CalendarWeek({ days, events, todos, canCreate = false, onOpen, onTodo, onTodoDrop, onSelectRange, onCreateAllDay, colorOf }: CalendarWeekProps): JSX.Element {
   const [over, setOver] = useState<string | null>(null)
   const [showAll, setShowAll] = useState(false)
+  const [ghost, setGhost] = useState<{ day: string; start: number; end: number } | null>(null)
+  const dragRef = useRef<{ day: string; anchor: number; el: HTMLDivElement } | null>(null)
 
   const fitted = useMemo(() => hourWindow(events, days), [events, days])
   const { start: startHour, end: endHour } = showAll ? FULL_DAY : fitted
@@ -113,9 +138,39 @@ export default function CalendarWeek({ days, events, todos, canCreate = false, o
     return m
   }, [todos])
 
-  const create = async (): Promise<void> => {
-    if (!creating || !onCreate || !title.trim()) return
-    if (await onCreate(creating.day, creating.hour, title.trim())) { setTitle(''); setCreating(null) }
+  const dayEndMin = endHour * 60
+  const floorMinute = (clientY: number, rect: DOMRect): number => {
+    const raw = startHour * 60 + ((clientY - rect.top) / HOUR_PX) * 60
+    const floored = Math.floor(raw / SLOT_MINUTES) * SLOT_MINUTES
+    return Math.min(dayEndMin - SLOT_MINUTES, Math.max(startHour * 60, floored))
+  }
+  const rangeAt = (clientY: number, el: HTMLDivElement, anchor: number): { start: number; end: number } =>
+    selectionRange(anchor, floorMinute(clientY, el.getBoundingClientRect()), dayEndMin)
+  const clock = (min: number): string => {
+    const d = new Date()
+    d.setHours(Math.floor(min / 60) % 24, min % 60, 0, 0)
+    return fmtTime(d)
+  }
+  const beginDrag = (e: ReactPointerEvent<HTMLDivElement>, dk: string): void => {
+    if (e.button !== 0 || !canCreate || !onSelectRange) return
+    if ((e.target as HTMLElement).closest('.cal-event, .cal-chip, button, input, a')) return
+    const anchor = floorMinute(e.clientY, e.currentTarget.getBoundingClientRect())
+    dragRef.current = { day: dk, anchor, el: e.currentTarget }
+    e.currentTarget.setPointerCapture(e.pointerId)
+    setGhost({ day: dk, ...selectionRange(anchor, anchor, dayEndMin) })
+  }
+  const moveDrag = (e: ReactPointerEvent<HTMLDivElement>, dk: string): void => {
+    const d = dragRef.current
+    if (!d || d.day !== dk) return
+    setGhost({ day: dk, ...rangeAt(e.clientY, d.el, d.anchor) })
+  }
+  const endDrag = (e: ReactPointerEvent<HTMLDivElement>, dk: string): void => {
+    const d = dragRef.current
+    if (!d || d.day !== dk) return
+    dragRef.current = null
+    const range = rangeAt(e.clientY, d.el, d.anchor)
+    setGhost(null)
+    onSelectRange?.(dk, range.start, range.end)
   }
 
   const dragOver = (e: DragEvent<HTMLDivElement>, slot: string): void => {
@@ -158,17 +213,23 @@ export default function CalendarWeek({ days, events, todos, canCreate = false, o
       {days.map((d) => {
         const dk = dayKey(d)
         return (
-          <div key={'ad' + dk} className={`cal-allday ${over === `ad:${dk}` ? 'drop-over' : ''}`}
-            title={onTodoDrop ? 'Drop a todo to due this day' : undefined}
+          <div key={'ad' + dk} className={`cal-allday ${over === `ad:${dk}` ? 'drop-over' : ''} ${canCreate && onCreateAllDay ? 'can-create' : ''}`}
+            title={[canCreate && onCreateAllDay ? 'Click to add an all-day event' : '', onTodoDrop ? 'Drop a todo to due this day' : ''].filter(Boolean).join(' · ') || undefined}
+            onClick={(e) => {
+              if (!canCreate || !onCreateAllDay) return
+              if ((e.target as HTMLElement).closest('.cal-chip')) return
+              onCreateAllDay(dk)
+            }}
             onDragOver={(e) => dragOver(e, `ad:${dk}`)}
             onDragLeave={() => setOver(null)}
             onDrop={(e) => dropTodo(e, dk, null)}>
             {(eventsByDay[dk] ?? []).filter((e) => e.all_day).map((e) => (
-              <div key={e.id} className="cal-chip" style={colorOf?.(e) ? { background: `${colorOf(e)}38` } : undefined} onClick={() => onOpen(e)}>{e.summary}</div>
+              <div key={e.id} className="cal-chip" style={colorOf?.(e) ? { background: `${colorOf(e)}38` } : undefined}
+                onClick={(ev) => { ev.stopPropagation(); onOpen(e) }}>{e.summary}</div>
             ))}
             {(todosByDay[dk] ?? []).map((t) => (
               <div key={t.id} className={`cal-chip todo p${t.priority}`} title={onTodo ? 'Open todo' : 'Todo due'}
-                onClick={() => onTodo?.(t)}>○ {t.title}</div>
+                onClick={(ev) => { ev.stopPropagation(); onTodo?.(t) }}>○ {t.title}</div>
             ))}
           </div>
         )
@@ -181,9 +242,12 @@ export default function CalendarWeek({ days, events, todos, canCreate = false, o
       {days.map((d) => {
         const dk = dayKey(d)
         return (
-          <div key={'col' + dk} className={`cal-col ${dk === todayKey ? 'today' : ''} ${over?.startsWith(dk + ':') ? 'drop-over' : ''}`} style={{ height: gridPx }}
-            title={canCreate ? 'Double-click to add an event' : onTodoDrop ? 'Drop a todo to schedule it' : undefined}
-            onDoubleClick={(e) => { if (!canCreate) return; setCreating({ day: dk, hour: hourAt(e.clientY, e.currentTarget.getBoundingClientRect()) }) }}
+          <div key={'col' + dk} className={`cal-col ${dk === todayKey ? 'today' : ''} ${over?.startsWith(dk + ':') ? 'drop-over' : ''} ${canCreate && onSelectRange ? 'can-create' : ''}`} style={{ height: gridPx }}
+            title={canCreate && onSelectRange ? 'Click or drag to add an event' : onTodoDrop ? 'Drop a todo to schedule it' : undefined}
+            onPointerDown={(e) => beginDrag(e, dk)}
+            onPointerMove={(e) => moveDrag(e, dk)}
+            onPointerUp={(e) => endDrag(e, dk)}
+            onPointerCancel={() => { if (dragRef.current?.day === dk) { dragRef.current = null; setGhost(null) } }}
             onDragOver={(e) => {
               if (!onTodoDrop || !hasDrag(e.dataTransfer)) return
               dragOver(e, `${dk}:${hourAt(e.clientY, e.currentTarget.getBoundingClientRect())}`)
@@ -197,20 +261,15 @@ export default function CalendarWeek({ days, events, todos, canCreate = false, o
               const top = topOf(s.getHours() + s.getMinutes() / 60)
               const h = Math.max(22, ((en.getTime() - s.getTime()) / 3_600_000) * HOUR_PX - 2)
               return (
-                <div key={e.id} className="cal-event" style={{ top, height: Math.min(h, gridPx - top), ...colorStyle(colorOf?.(e)) }} onClick={() => onOpen(e)} title={e.summary}>
+                <div key={e.id} className="cal-event" style={{ top, height: Math.min(h, gridPx - top), ...colorStyle(colorOf?.(e)) }}
+                  onPointerDown={(ev) => ev.stopPropagation()} onClick={() => onOpen(e)} title={e.summary}>
                   <b>{e.summary}</b><span>{fmtTime(s)}</span>
                 </div>
               )
             })}
-            {creating?.day === dk && (
-              <div className="cal-create" style={{ top: topOf(creating.hour) }}>
-                <input autoFocus placeholder={`New event at ${creating.hour}:00`} value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void create(); if (e.key === 'Escape') { setCreating(null); setTitle('') } }} />
-                {onCreateFull && (
-                  <button className="icon-btn" title="More options" onClick={() => { onCreateFull(creating.day, creating.hour, title.trim()); setCreating(null); setTitle('') }}>
-                    <SlidersHorizontal size={13} />
-                  </button>
-                )}
-                <button className="icon-btn" title="Add" onClick={() => void create()}><Plus size={13} /></button>
+            {ghost?.day === dk && (
+              <div className="cal-ghost" style={{ top: topOf(ghost.start / 60), height: Math.max(18, ((ghost.end - ghost.start) / 60) * HOUR_PX - 1) }}>
+                {clock(ghost.start)} – {clock(ghost.end)}
               </div>
             )}
           </div>

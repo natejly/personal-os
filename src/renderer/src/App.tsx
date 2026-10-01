@@ -21,6 +21,7 @@ import ProjectModal from './components/ProjectModal'
 import Canvas from './canvas/Canvas'
 import { useCanvas } from './canvas/store'
 import { AlertTriangle } from 'lucide-react'
+import { accentId } from './lib/accents'
 
 function Toasts(): JSX.Element {
   const toasts = useStore((s) => s.toasts)
@@ -46,6 +47,7 @@ export default function App(): JSX.Element {
   const projectModal = useStore((s) => s.projectModal)
   const view = useStore((s) => s.view)
   const theme = useStore((s) => s.settings.theme)
+  const accent = useStore((s) => s.settings.accent)
   const inCanvas = useStore((s) => s.view === 'canvas')
   const pageAgentOpen = useStore((s) => s.pageAgentOpen)
 
@@ -54,7 +56,8 @@ export default function App(): JSX.Element {
   }, [init])
   useEffect(() => {
     document.documentElement.dataset.theme = theme
-  }, [theme])
+    document.documentElement.dataset.accent = accentId(accent)
+  }, [theme, accent])
   // What the user has highlighted rides along with the next ⌘I question, whatever view they are in.
   useEffect(() => watchSelection(), [])
   // Spaces are listed in the sidebar, so the canvas store loads with the app, not on first entry.

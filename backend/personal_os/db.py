@@ -307,7 +307,7 @@ class Database:
         """Add columns introduced after the first release (CREATE TABLE IF NOT EXISTS won't)."""
         wanted = {
             "projects": {"tools": "TEXT NOT NULL DEFAULT '{}'"},
-            "messages": {"tool_events": "TEXT", "trace": "TEXT"},
+            "messages": {"tool_events": "TEXT", "trace": "TEXT", "reasoning": "TEXT"},
             "jobs": {"kind": "TEXT NOT NULL DEFAULT 'cron'", "run_at": "REAL"},
         }
         for table, cols in wanted.items():

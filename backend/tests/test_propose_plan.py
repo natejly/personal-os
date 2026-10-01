@@ -37,7 +37,7 @@ ROUNDS: list[Any] = []
 
 async def _scripted(settings: dict[str, Any], model: str, messages: list[dict[str, Any]],
                     tools: list[dict[str, Any]] | None = None, kind: str = "chat",
-                    effort: str = "default", tool_choice: str = "auto") -> Any:
+                    effort: str = "default", tool_choice: str = "auto", fast: bool = False, cancel: asyncio.Event | None = None) -> Any:
     step = ROUNDS.pop(0) if ROUNDS else ["ok"]
     if isinstance(step, dict):
         yield {"type": "end", "finish_reason": "tool_calls", "tool_calls": step["tool_calls"], "usage": None}

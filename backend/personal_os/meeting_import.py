@@ -21,7 +21,7 @@ import wave
 from pathlib import Path
 from typing import Any
 
-from . import audiocap, meeting_recorder
+from . import audiocap, diarize, meeting_recorder
 
 log = logging.getLogger("personal_os.meeting_import")
 
@@ -132,7 +132,14 @@ async def run(svc: Any, meeting_id: str, src_path: Path | str, *, cleanup_src: b
                     meeting_id, "import", k, k * n, k * n + secs, started + k * n, str(wav),
                     wav.stat().st_size, duration_ms=int(secs * 1000), state="recorded")
                 items.append((k, wav))
-            await asyncio.to_thread(_transcribe_all, svc, meeting_id, out_dir, items, cfg)
+            # Diarization needs the wavs after transcription, so they are held until it has run.
+            split = bool(cfg.get("diarize")) and diarize.resolve_backend(cfg, svc.data_dir) != "none"
+            await asyncio.to_thread(_transcribe_all, svc, meeting_id, out_dir, items,
+                                    {**cfg, "keepAudio": bool(cfg.get("keepAudio")) or split})
+            if split:
+                await asyncio.to_thread(svc.diarize_segments, meeting_id)
+                if not cfg.get("keepAudio"):
+                    svc.meetings.drop_done_audio(meeting_id)
         except Exception as e:  # noqa: BLE001 - say so on the meeting instead of leaving it 'transcribing'
             log.warning("meetings: import of %s failed: %s", meeting_id, e)
             svc.meetings.patch(meeting_id, {"status": prior_status, "error": f"import failed: {e}"[:1000]})

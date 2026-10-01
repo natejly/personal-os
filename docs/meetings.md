@@ -459,3 +459,29 @@ touching anything in `meeting_recorder.py` or `stt.py`:
 8. With a loopback device configured, repeat with `output` in the sources and
    confirm your speakers still make sound *and* the transcript carries `[them]`
    lines. This is the one step that cannot be verified without hardware setup.
+
+## Speaker turns (optional)
+
+Off by default (`diarize: false`) and dependency-free: `diarize.py` is a seam with a
+`none` backend that returns no turns, so a transcript keeps its `[you]`/`[them]` labels.
+With `pip install sherpa-onnx` (ONNX only, no torch) plus a pyannote segmentation model
+and an embedding model (paths in `diarizeSegmentationModel` / `diarizeEmbeddingModel`,
+relative paths resolve under `<data_dir>/models`; the `diarize` capability row prints the
+download hints), `diarizeBackend: auto` picks `sherpa`.
+
+It only runs on **retained** audio: an import, or a live meeting with `keepAudio` on. The
+channel's wavs are concatenated and clustered once (never per 20 s clip), turns are renamed
+`S1, S2...` in order of first appearance, and `assign_speakers` gives each whisper utterance
+(from `detail.segments`, or the whole clip) the speaker with the greatest overlap. Results
+live in `detail.utterances` and `meeting_segments.speaker` (dominant); the `mic` channel is
+never diarized and stays `[you]`. `build_transcript` then writes one line per speaker run,
+`[S1]`, or `[Dana]` once named; with no utterance speakers it is byte-identical to before.
+Imports keep their wavs until diarization has run, then drop them unless `keepAudio`.
+
+- `POST /meetings/{id}/diarize` re-runs it (`ok: false` plus a note when there is no
+  backend or no audio, never an error).
+- `PUT /meetings/{id}/speakers` `{names: {S1: "Dana"}}` renames (ids must exist, 60 chars
+  max, blank clears), rebuilds the transcript and reindexes FTS. Names live in
+  `meetings.speaker_names`.
+- The enhance prompt keeps its channel-level rule until at least one name exists; then it
+  may attribute to a speaker only when the transcript line carries that name.

@@ -1751,6 +1751,8 @@ export interface FullMeeting extends Omit<Meeting, 'notes_preview'> {
   /** Meet/Zoom/Teams URL; a calendar event's own `meet` field is hangoutLink only. */
   conference_link: string
   keep_audio: boolean
+  /** Display names for diarized speaker ids, e.g. { S1: 'Dana' }. */
+  speaker_names: Record<string, string>
   /** Retained wav bytes, against the disk ceiling. */
   audio_bytes: number
   conversation_id: string | null
@@ -1872,6 +1874,20 @@ export interface MeetingConfig {
   calendarIds: string[]
   /** Events with fewer attendees than this are never offered. */
   minAttendees: number
+  /** Skip STT for segments with no speech, and drop known silence hallucinations. */
+  vadGate: boolean
+  vadMinSpeechRatio: number
+  hallucinationFilter: boolean
+  whisperVadModelPath: string
+  /** Longest audio file an import accepts. */
+  maxImportSeconds: number
+  /** Separate remote speakers on retained audio (needs the optional sherpa-onnx backend). */
+  diarize: boolean
+  diarizeBackend: 'auto' | 'none' | 'sherpa'
+  diarizeSegmentationModel: string
+  diarizeEmbeddingModel: string
+  diarizeThreshold: number
+  diarizeSpeakers: number
 }
 
 /** One row of the capability checklist: what this machine can do, and how to fix what it can't. */

@@ -186,6 +186,23 @@ export default function MeetingsView(): JSX.Element {
     }
   }
 
+  // Diarized ids seen in the segments or already named; empty (and the chip row hidden) with no diarizer.
+  const speakerIds = useMemo(() => {
+    const ids = new Set<string>(Object.keys(activeMeeting?.speaker_names ?? {}))
+    for (const s of meetingSegments) if (/^S\d+$/.test(s.speaker)) ids.add(s.speaker)
+    return [...ids].sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)))
+  }, [activeMeeting?.speaker_names, meetingSegments])
+  const renameSpeaker = async (id: string, name: string): Promise<void> => {
+    const cur = useStore.getState().activeMeeting
+    if (!cur || name.trim() === (cur.speaker_names?.[id] ?? '')) return
+    try {
+      await api.meetings.setSpeakers(cur.id, { [id]: name })
+      await openMeeting(cur.id)
+    } catch (e) {
+      toast((e as Error).message, 'error')
+    }
+  }
+
   const scope: Scope = libraryScope
   useEffect(() => { void refreshMeetings(query) }, [refreshMeetings, query, scope])
   // Anything still buffered belongs on disk before this view goes away.
@@ -324,10 +341,22 @@ export default function MeetingsView(): JSX.Element {
                         : m.sources.length === 0 ? 'No audio was captured for this meeting.' : 'No speech was transcribed.'}
                     </p>
                   )}
+                  {speakerIds.length > 0 && (
+                    <div className="mtg-speakers">
+                      {speakerIds.map((id) => (
+                        <label key={id + (m.speaker_names?.[id] ?? '')} className="mtg-speaker-chip">
+                          <span>{id}</span>
+                          <input defaultValue={m.speaker_names?.[id] ?? ''} placeholder="Name" maxLength={60}
+                            onBlur={(e) => void renameSpeaker(id, e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }} />
+                        </label>
+                      ))}
+                    </div>
+                  )}
                   {lines.map((l) => (
                     <div key={l.id} className={`mtg-line ${l.pending ? 'pending' : ''}`}>
                       <div className="mtg-line-head">
-                        <span className={`mtg-who ${l.channel === 'mic' ? '' : 'them'}`}>{speakerLabel(l.channel, l.speaker, m.attendees)}</span>
+                        <span className={`mtg-who ${l.channel === 'mic' ? '' : 'them'}`}>{speakerLabel(l.channel, l.speaker, m.attendees, m.speaker_names ?? {})}</span>
                         <span className="mtg-at">{formatOffset(l.t_start)}</span>
                       </div>
                       <p className="mtg-line-text">{l.text || 'still transcribing…'}</p>

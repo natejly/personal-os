@@ -125,6 +125,11 @@ test('speakerLabel names a diarized speaker, matching an attendee when it can', 
   assert.equal(speakerLabel('import', '', []), 'Them')
 })
 
+test('speakerLabel resolves a diarized id through the user-assigned name map', () => {
+  assert.equal(speakerLabel('import', 'S1', [], { S1: 'Dana' }), 'Dana')
+  assert.equal(speakerLabel('import', 'S2', [], { S1: 'Dana' }), 'S2')
+})
+
 test('formatOffset is mm:ss, and grows an hours field only when it needs one', () => {
   assert.equal(formatOffset(0), '00:00')
   assert.equal(formatOffset(9.7), '00:09')

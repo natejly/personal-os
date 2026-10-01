@@ -512,6 +512,11 @@ export const api = {
     dismissAction: (id: string, actionId: string) => req<MeetingActionItem>(`/meetings/${id}/actions/${actionId}/dismiss`, { method: 'POST' }),
     retranscribe: (id: string, limit = 20) => req<{ settled: number; meeting: FullMeeting }>(`/meetings/${id}/retranscribe?limit=${limit}`, { method: 'POST' }),
     deleteAudio: (id: string) => req<FullMeeting>(`/meetings/${id}/audio`, { method: 'DELETE' }),
+    /** Rename diarized speakers ({ S1: 'Dana' }); the transcript is rebuilt server side. A blank name clears one. */
+    setSpeakers: (id: string, names: Record<string, string>) =>
+      req<FullMeeting>(`/meetings/${id}/speakers`, { method: 'PUT', body: json({ names }) }),
+    /** Re-run speaker separation on retained audio. ok=false with a note when nothing can run. */
+    diarize: (id: string) => req<{ ok: boolean; note: string; speakers: number; meeting: FullMeeting }>(`/meetings/${id}/diarize`, { method: 'POST' }),
     /** Transcribe an existing recording into this meeting. 202: progress arrives through the segments poll. */
     importAudio: (id: string, file: File) => {
       const fd = new FormData()

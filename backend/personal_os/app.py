@@ -4095,6 +4095,18 @@ class MeetingConfigIn(BaseModel):
     hallucinationFilter: bool | None = None
     whisperVadModelPath: str | None = None
     maxImportSeconds: int | None = None
+    diarize: bool | None = None
+    diarizeBackend: str | None = None
+    diarizeSegmentationModel: str | None = None
+    diarizeEmbeddingModel: str | None = None
+    diarizeThreshold: float | None = None
+    diarizeSpeakers: int | None = None
+
+
+class MeetingSpeakersIn(BaseModel):
+    """Display names for diarized speaker ids, e.g. {"S1": "Dana"}. A blank name clears one."""
+
+    names: dict[str, str]
 
 
 class MeetingActionsIn(BaseModel):
@@ -4319,6 +4331,27 @@ async def import_meeting_audio(id: str, file: UploadFile = File(...)) -> dict[st
 
     asyncio.ensure_future(_go())
     return meeting_store.get(id) or {}
+
+
+@app.post("/meetings/{id}/diarize")
+async def diarize_meeting(id: str) -> dict[str, Any]:
+    """(Re)run speaker separation on retained audio. With no backend it answers ok=false and a note,
+    never an error: the transcript simply keeps its channel labels."""
+    res = await meeting_svc.diarize(id)
+    if res.get("note") == "no such meeting":
+        raise HTTPException(404)
+    return {**res, "meeting": meeting_store.get(id)}
+
+
+@app.put("/meetings/{id}/speakers")
+def rename_meeting_speakers(id: str, body: MeetingSpeakersIn) -> dict[str, Any]:
+    try:
+        m = meeting_svc.set_speakers(id, body.names)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    if not m:
+        raise HTTPException(404)
+    return m
 
 
 @app.post("/meetings/{id}/pause")

@@ -826,6 +826,10 @@ export interface Settings {
   tavilyApiKey: string
   /** Without a Brave/Tavily key, web search uses Exa (keyless, rate-limited); a key lifts the limit. */
   exaApiKey?: string
+  /** Base URL of your own SearXNG; searched beside Exa and merged. Empty = off. */
+  searxngUrl?: string
+  /** Seconds fetch_url reuses a fetched page (0 = never). */
+  fetchCacheSeconds?: number
   /** fetch_url retries a blocked or JavaScript-only page through Jina Reader (which then sees the URL). Default on. */
   readerFallback?: boolean
   /** github_search/github_read; empty uses the gh CLI's login. */

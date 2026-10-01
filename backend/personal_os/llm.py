@@ -81,6 +81,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "tavilyApiKey": "",
     # Without a Brave/Tavily key, web_search uses Exa (keyless via its hosted MCP server; a key lifts the rate limit).
     "exaApiKey": "",
+    # Base URL of your own SearXNG (needs `json` under search.formats); empty = off. It runs beside Exa and the results are merged.
+    "searxngUrl": "",
     # fetch_url retries a blocked or JavaScript-only page through Jina Reader (r.jina.ai), which then sees the URL.
     "readerFallback": True,
     # fetch_url reuses a page it fetched this many seconds ago (0 = never); fresh=true on the call bypasses it.

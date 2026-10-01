@@ -25,6 +25,7 @@ from .workspace import WorkspaceError
 from . import plans
 from . import reach
 from . import webread
+from . import websearch
 from . import outbox as outbox_mod
 from . import verify
 from .jobs import local_tz_name, parse_when, valid_cron, valid_tz
@@ -641,46 +642,25 @@ class Toolbox:
                       {"source": "Grain", "relation": "uses", "target": "SQLite", "source_type": "project", "target_type": "tool"},
                       {"source": "Acme", "relation": "acquired", "target": "Globex"}]))
 
-        async def web_search(ctx: dict[str, Any], query: str, max_results: int = 6, offset: int = 0) -> Any:
-            cfg = self.settings()
+        async def web_search(ctx: dict[str, Any], query: str, max_results: int = 6, offset: int = 0, time_range: str = "", site: str = "") -> Any:
             n = max(1, min(int(max_results), 10))
             off = max(0, int(offset))
             want = min(off + n, 25)
-            rows: list[dict[str, Any]]
-            if cfg.get("braveApiKey"):
-                async with httpx.AsyncClient(timeout=20) as c:
-                    r = await c.get("https://api.search.brave.com/res/v1/web/search", params={"q": query, "count": want},
-                                    headers={"X-Subscription-Token": cfg["braveApiKey"], "Accept": "application/json"})
-                    r.raise_for_status()
-                    rows = [{"title": w.get("title"), "url": w.get("url"), "snippet": w.get("description")} for w in r.json().get("web", {}).get("results", [])[:want]]
-            elif cfg.get("tavilyApiKey"):
-                async with httpx.AsyncClient(timeout=25) as c:
-                    r = await c.post("https://api.tavily.com/search", json={"api_key": cfg["tavilyApiKey"], "query": query, "max_results": want})
-                    r.raise_for_status()
-                    rows = [{"title": w.get("title"), "url": w.get("url"), "snippet": w.get("content")} for w in r.json().get("results", [])[:want]]
-            else:
-                # Exa first (Agent Reach's pick: semantic, and it returns page highlights rather than one-line
-                # snippets) -- keyless through its hosted MCP server unless the user has a key. DuckDuckGo when Exa
-                # is down or rate-limited.
-                rows = []
-                try:
-                    rows = await reach.exa_search(query, want, str(cfg.get("exaApiKey") or ""))
-                except (reach.ReachError, httpx.HTTPError, ValueError) as e:
-                    log.info("exa search failed, falling back to DuckDuckGo: %s", _first_line(e))
-                if not rows:
-                    from ddgs import DDGS
-
-                    def _ddg() -> list[dict[str, Any]]:
-                        with DDGS() as d:
-                            return [{"title": r.get("title"), "url": r.get("href"), "snippet": r.get("body")} for r in d.text(query, max_results=want)]
-                    rows = await asyncio.to_thread(_ddg)
+            try:
+                rows, meta = await websearch.search(self.settings(), query, want, time_range, site)
+            except ValueError as e:
+                return tool_error(f"web_search: {e}", field="site" if "site" in str(e) else "time_range",
+                                  example={"query": query, "time_range": "week", "site": "sqlite.org"})
             for row in rows:
                 _allow_url(ctx, row.get("url"))
-            return page(rows, offset=off, limit=n, key="results")
-        R("web_search", ToolSpec("web_search", "Search the web for current information. Returns titles, URLs and snippets; call fetch_url to read a result in full.",
-            _obj({"query": {"type": "string"}, "max_results": {"type": "integer", "default": 6}, "offset": {"type": "integer", "default": 0}}, ["query"]), web_search, "web", "network",
+            return page(rows, offset=off, limit=n, key="results", **meta)
+        R("web_search", ToolSpec("web_search", "Search the web for current information. Returns titles, URLs and snippets; call fetch_url to read a result in full. "
+                                 "time_range (day, week, month, year) limits to recent pages; site restricts to one domain.",
+            _obj({"query": {"type": "string"}, "max_results": {"type": "integer", "default": 6}, "offset": {"type": "integer", "default": 0},
+                  "time_range": {"type": "string", "enum": ["day", "week", "month", "year"]}, "site": {"type": "string"}}, ["query"]), web_search, "web", "network",
             examples=[{"query": "EU AI Act enforcement dates"}, {"query": "best espresso machine 2026", "max_results": 10},
-                      {"query": "python 3.13 release notes", "max_results": 6, "offset": 6}], taints=True))
+                      {"query": "python 3.13 release notes", "max_results": 6, "offset": 6},
+                      {"query": "wal checkpoint", "site": "sqlite.org"}, {"query": "OpenAI announcement", "time_range": "week"}], taints=True))
 
         async def fetch_url(ctx: dict[str, Any], url: str, max_chars: int = 12000, focus: str = "", offset: int = 0,
                             fresh: bool = False, links: bool = False) -> Any:

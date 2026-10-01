@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ApprovalDecision, PlanEdit, ActivityConfig, ActivityContextFile, ActivityEvent, ActivitySignal, ActivityStatus, ActivitySummary, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, Document, Effort, FullDoc, GraphData, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodoCalendarStatus, TodayDashboard, Recap, Job } from '@shared/types'
+import type { ApprovalDecision, PlanEdit, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, Document, Effort, FullDoc, GraphData, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodoCalendarStatus, TodayDashboard, Recap, Job } from '@shared/types'
 import { api, backgroundStream, chatStream, setBase, type Scope } from './lib/api'
 import { currentSelection } from './lib/pageContext'
 import { finishStatus, mergeConversation, pickEvictions, reduceStatus, settleApprovals } from './sessionStatus'
@@ -185,6 +185,8 @@ export interface State {
   activitySummaries: ActivitySummary[]
   activityContext: ActivityContextFile | null
   activityBusy: boolean
+  activityInsights: ActivityInsights | null
+  activityInsightsBusy: boolean
 
   init: () => Promise<void>
   loadModels: () => Promise<void>
@@ -292,6 +294,14 @@ export interface State {
   openActivitySettings: (id: string) => Promise<void>
   /** Record everything, or put back the settings palantir mode replaced. */
   setPalantirMode: (on: boolean) => Promise<void>
+  /** Habits noticed and automations on offer. */
+  loadActivityInsights: () => Promise<void>
+  /** `deep` runs the model pass; without it the patterns are just re-mined locally, for free. */
+  refreshActivityInsights: (deep?: boolean) => Promise<void>
+  setInsightStatus: (id: string, status: InsightStatus, note?: string) => Promise<void>
+  /** Apply one suggestion. A `prompt` action does not act: it opens a chat with the message. */
+  applyInsight: (id: string) => Promise<void>
+  forgetActivityHabit: (id: string) => Promise<void>
   refreshDashboard: () => Promise<void>
   refreshRecap: (force?: boolean) => Promise<void>
   refreshAgentInbox: () => Promise<void>
@@ -728,6 +738,8 @@ export const useStore = create<State>((set, get) => {
     activitySummaries: [],
     activityContext: null,
     activityBusy: false,
+    activityInsights: null,
+    activityInsightsBusy: false,
 
     init: async () => {
       // Before the backend check and before the guard: a dead backend must still leave the menu
@@ -1451,7 +1463,72 @@ export const useStore = create<State>((set, get) => {
       const { deleted, status } = await api.activity.purge(scope)
       set({ activity: status })
       get().toast(`Deleted ${deleted.events} samples and ${deleted.summaries} summaries`)
-      await get().loadActivity()
+      await Promise.all([get().loadActivity(), get().loadActivityInsights()])
+    },
+    loadActivityInsights: async () => {
+      try {
+        set({ activityInsights: await api.activity.insights() })
+      } catch {
+        /* same as the status poll: the panel keeps what it had */
+      }
+    },
+    refreshActivityInsights: async (deep = false) => {
+      set({ activityInsightsBusy: true })
+      try {
+        const out = deep ? await api.activity.refreshInsights() : await api.activity.mineInsights()
+        set({ activityInsights: out })
+        const open = out.counts?.open ?? 0
+        get().toast(deep
+          ? (open ? `${open} suggestion${open === 1 ? '' : 's'} waiting` : 'Nothing new worth suggesting')
+          : `Re-read ${out.patterns.length} patterns`)
+        if (deep) await get().refreshMemories()   // habits land in the memory panel
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      } finally {
+        set({ activityInsightsBusy: false })
+      }
+    },
+    setInsightStatus: async (id, status, note = '') => {
+      try {
+        await api.activity.setInsightStatus(id, status, note)
+        await get().loadActivityInsights()
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    applyInsight: async (id) => {
+      try {
+        const out = await api.activity.applyInsight(id)
+        await get().loadActivityInsights()
+        if (out.type === 'prompt' && out.prompt) {
+          // Setting the thing up is a conversation with tool approvals in it, so the suggestion
+          // hands the message over rather than acting: a fresh chat, pre-loaded, nothing sent yet
+          // until the user is looking at it.
+          get().newChat(null)
+          await get().send(out.prompt)
+          return
+        }
+        if (out.type === 'todo' && out.todo) {
+          await get().refreshTodos()
+          get().toast(`Added todo: ${out.todo.title}`)
+        } else if (out.type === 'memory' && out.memory) {
+          await get().refreshMemories()
+          get().toast('Saved to memory')
+        } else {
+          get().toast(out.how || 'Marked as accepted')
+        }
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    forgetActivityHabit: async (id) => {
+      try {
+        await api.activity.forgetHabit(id)
+        await Promise.all([get().loadActivityInsights(), get().refreshMemories()])
+        get().toast('Forgotten, memory and all')
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
     },
     uploadDocuments: async (files, projectId) => {
       for (const f of Array.from(files)) {

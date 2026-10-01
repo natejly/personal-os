@@ -1626,6 +1626,62 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .act-kind.idle { background: transparent; border: 1px solid var(--border-strong); }
 
 /* Sidebar recording indicator */
+/* ---------- Insights: patterns as evidence, suggestions as proposals ---------- */
+.act-patterns, .act-habits { list-style: none; margin: 0; padding: 0 12px 10px; display: flex; flex-direction: column; }
+.act-pattern { display: flex; align-items: flex-start; gap: 9px; padding: 8px 0; border-top: 1px solid var(--border); font-size: 13px; }
+.act-pattern:first-child { border-top: 0; }
+.act-pattern-icon { color: var(--text-faint); margin-top: 2px; flex-shrink: 0; }
+.act-pattern span:nth-child(2) { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.act-pattern small, .act-habit small { color: var(--text-muted); font-size: 11.5px; display: flex; align-items: center; gap: 4px; }
+.act-conf { margin-left: auto; flex-shrink: 0; font-size: 11px; font-variant-numeric: tabular-nums; color: var(--text-faint); }
+
+/* Habits. Each one owns a memory row, which is why Forget sits right next to it. */
+.act-habits { padding: 0; gap: 0; }
+.act-habit { display: flex; align-items: flex-start; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.act-habit .act-conf { margin-left: 0; width: 34px; text-align: right; }
+.act-habit-text { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+.act-habit button { margin-left: auto; opacity: 0; transition: opacity 0.12s; }
+.act-habit:hover button { opacity: 1; }
+
+/* Bars and the hour strip: the deterministic half, shown before any suggestion. */
+.act-split { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 0 12px 4px; }
+.act-split h5, .activity-page .page-body > section h5 { margin: 6px 0 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); }
+.activity-page .page-body > section > h5 { padding: 0 12px; }
+.act-bars { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.act-bars li { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.act-bar-label { width: 108px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
+.act-bar-track { flex: 1; height: 6px; border-radius: 3px; background: var(--bg-input); overflow: hidden; }
+.act-bar-fill { display: block; height: 100%; border-radius: 3px; background: var(--accent); opacity: 0.75; }
+.act-bar-value { width: 48px; text-align: right; flex-shrink: 0; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.act-hours { display: flex; align-items: flex-end; gap: 2px; height: 56px; margin: 0 12px 12px; }
+.act-hours > span { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; gap: 2px; }
+.act-hours i { display: block; width: 100%; border-radius: 2px 2px 0 0; background: var(--accent); opacity: 0.55; }
+.act-hours > span:hover i { opacity: 1; }
+.act-hours em { font-size: 9px; font-style: normal; color: var(--text-faint); }
+
+/* One suggestion. A card, not a banner: it has to carry its own evidence. */
+.act-sugs { display: flex; flex-direction: column; gap: 10px; }
+.act-sug { border: 1px solid var(--border); border-left: 3px solid var(--accent); border-radius: 10px; background: var(--bg-elev); padding: 11px 13px; display: flex; flex-direction: column; gap: 7px; }
+.act-sug.hygiene { border-left-color: var(--warn); }
+.act-sug.platform { border-left-color: var(--text-faint); }
+.act-sug.ruled { opacity: 0.6; border-left-style: dashed; }
+.act-sug header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.act-sug header b { font-size: 13.5px; }
+.act-sug .act-pill { margin-left: 0; background: var(--bg-input); color: var(--text-muted); }
+.act-sug .act-pill.automation { background: rgba(94,129,244,0.14); color: var(--accent); }
+.act-sug .act-pill.hygiene { background: rgba(254,188,46,0.16); color: var(--warn); }
+.act-impact { font-size: 11px; color: var(--ok); background: rgba(70,167,88,0.12); border-radius: 999px; padding: 1px 7px; }
+.act-sug-detail { margin: 0; font-size: 12.5px; color: var(--text); }
+.act-sug-why { margin: 0; font-size: 12px; color: var(--text-muted); }
+.act-sug-why b { color: var(--text-faint); font-weight: 600; text-transform: uppercase; font-size: 10px; letter-spacing: 0.04em; margin-right: 4px; }
+.act-evidence { display: flex; flex-wrap: wrap; gap: 5px; }
+.act-evidence .act-tag { padding: 2px 8px; font-size: 10.5px; gap: 4px; }
+.act-sug footer { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; padding-top: 2px; }
+.act-sug footer .muted { margin-left: auto; }
+.act-state-pill.dismissed { color: var(--danger); border-color: rgba(229,72,77,0.4); }
+.act-state-pill.accepted, .act-state-pill.done { color: var(--ok); border-color: rgba(70,167,88,0.4); }
+.act-state-pill.snoozed { color: var(--warn); border-color: rgba(254,188,46,0.4); }
+
 .act-indicator { display: flex; align-items: center; gap: 7px; width: 100%; padding: 7px 10px; margin-bottom: 4px; border-radius: 8px; font-size: 12px; font-weight: 500; color: var(--danger); background: rgba(229,72,77,0.09); }
 .act-indicator:hover { background: rgba(229,72,77,0.16); }
 .act-indicator.live .act-dot { background: var(--danger); animation: pulse-dot 1.6s ease-in-out infinite; }

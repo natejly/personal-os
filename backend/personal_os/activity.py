@@ -29,6 +29,7 @@ from typing import Any, Callable
 
 import httpx
 
+from . import insights as insights_mod
 from .db import Database, new_id, now, row_to_dict
 
 log = logging.getLogger("personal_os.activity")
@@ -75,6 +76,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "summaryModel": "",
     "profileEveryHours": 6,
+    # Insights: habits worth remembering and automations worth offering, mined from the same data.
+    # See insights.py. Proposals only - nothing here ever acts on its own.
+    "insights": dict(insights_mod.DEFAULTS),
     # Palantir mode: every signal on and the gate's discretionary filters stood down. Never on by
     # default, and it keeps what it replaced in palantirRestore so switching it off puts the old
     # settings back instead of guessing at defaults.
@@ -1382,6 +1386,7 @@ class Monitor:
         self.settings = settings_fn
         self._complete = complete_fn
         self.store = Store(db)
+        self.insights = insights_mod.Insights(db, self.config, settings_fn, complete_fn, self.store)
         self.gate = Gate(self.config)
         self.stop_event = threading.Event()
         self.stop_event.set()  # nothing is running yet
@@ -1709,6 +1714,11 @@ class Monitor:
         ]
         if prof["content"].strip():
             out += ["## How this person works", "", prof["content"].strip(), ""]
+        habits = self.insights.list_habits()
+        if habits:
+            out += ["## Habits noticed", ""]
+            out += [f"- {h['statement']} _(confidence {h['confidence']:.0%})_" for h in habits[:12]]
+            out += [""]
 
         by_day: dict[str, list[dict[str, Any]]] = {}
         for s in summaries:
@@ -1733,6 +1743,16 @@ class Monitor:
         self.md_path.parent.mkdir(parents=True, exist_ok=True)
         self.md_path.write_text("\n".join(out), encoding="utf-8")
         return self.md_path
+
+    def purge(self, scope: str = "expired") -> dict[str, int]:
+        """The user-facing purge. Scope `all` has to reach the derived rows too: a habit memory or a
+        suggestion the monitor wrote is still something the monitor knows, so "delete everything"
+        takes those with it."""
+        cfg = self.config()
+        out = self.store.purge(scope, float(cfg["retentionHours"]), float(cfg["summaryRetentionDays"]))
+        derived = self.insights.purge(everything=scope == "all", keep_days=float(cfg["summaryRetentionDays"]))
+        self.write_markdown()
+        return {**out, **{f"insight_{k}": v for k, v in derived.items()}}
 
     def read_markdown(self) -> str:
         try:
@@ -1776,12 +1796,15 @@ class Monitor:
                 await asyncio.sleep(max(20.0, float(cfg.get("rollupMinutes") or 15) * 60 / 3))
                 self._check_pause()
                 self.store.purge("expired", float(cfg["retentionHours"]), float(cfg["summaryRetentionDays"]))
+                self.insights.days.purge(float(cfg["summaryRetentionDays"]))
                 if self.running:
                     await self.rollup_once()
                     hours = float(cfg.get("profileEveryHours") or 6)
                     if hours > 0 and now() - last_profile >= hours * 3600 and self.store.summaries(limit=1):
                         last_profile = now()
                         await self.refresh_profile()
+                    # Habits and automation suggestions, on their own slower clock.
+                    await self.insights.maybe_refresh()
             except asyncio.CancelledError:
                 raise
             except Exception as e:  # noqa: BLE001 - the loop must outlive any single failure

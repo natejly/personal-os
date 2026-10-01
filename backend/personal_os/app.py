@@ -290,6 +290,9 @@ skills = Skills(db)
 toolbox = Toolbox(memories, graph, documents, settings, todos=todos, google=google, boards=boards, sandboxes=sandboxes, docs=docs, activity=monitor,
                   outbox=outbox, work_plans=work_plans, results=tool_results, skills=skills, jobs=jobs,
                   style=style)
+# The insights pass proposes automations, so it is told which tools this install actually has - an
+# unwired integration must not turn into a suggestion that cannot be carried out.
+monitor.insights.tools_fn = lambda: [t["name"] for t in toolbox.list() if t.get("available")]
 mcp_store = McpServers(db)
 # Third-party servers are supervised, not owned by the chat loop: a wedged server must not be able
 # to hold a reply, so everything it offers goes through McpClient's bounded calls.
@@ -3402,6 +3405,7 @@ class ActivityConfigIn(BaseModel):
     summaryModel: str | None = None
     profileEveryHours: float | None = None
     palantir: bool | None = None
+    insights: dict[str, Any] | None = None
 
 
 class PauseIn(BaseModel):
@@ -3542,10 +3546,72 @@ def activity_devices() -> list[dict[str, str]]:
 
 @app.post("/activity/purge")
 def activity_purge(body: PurgeIn) -> dict[str, Any]:
-    cfg = monitor.config()
-    out = monitor.store.purge(body.scope, float(cfg["retentionHours"]), float(cfg["summaryRetentionDays"]))
+    return {"deleted": monitor.purge(body.scope), "status": monitor.status()}
+
+
+# ---------------- insights: habits and automation suggestions ----------------
+#
+# Everything under here is derived from the activity data: the patterns are mined locally with no
+# model, the habits are written into the ordinary memory panel (and listed with a Forget button),
+# and a suggestion is a proposal with a status. Nothing applies itself - /apply exists because the
+# user pressed a button, and for the common `prompt` action it does not even act: it hands back the
+# message for them to send, so the setup happens in a chat with the usual tool approvals.
+
+
+class SuggestionStatusIn(BaseModel):
+    status: str
+    note: str = ""
+    snooze_days: float = 7.0
+
+
+@app.get("/activity/insights")
+def activity_insights() -> dict[str, Any]:
+    return monitor.insights.overview()
+
+
+@app.post("/activity/insights/mine")
+def activity_insights_mine() -> dict[str, Any]:
+    """Re-mine the patterns without calling a model. Cheap, offline, and what the panel shows."""
+    monitor.insights.mine_now()
+    return monitor.insights.overview()
+
+
+@app.post("/activity/insights/refresh")
+async def activity_insights_refresh() -> dict[str, Any]:
+    return await monitor.insights.refresh(force=True)
+
+
+@app.post("/activity/insights/{sid_}/status")
+def activity_insight_status(sid_: str, body: SuggestionStatusIn) -> dict[str, Any]:
+    try:
+        out = monitor.insights.set_status(sid_, body.status, body.note, body.snooze_days)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    if not out:
+        raise HTTPException(404, "No such suggestion")
+    return out
+
+
+@app.post("/activity/insights/{sid_}/apply")
+def activity_insight_apply(sid_: str) -> dict[str, Any]:
+    try:
+        return monitor.insights.apply(sid_)
+    except KeyError as e:
+        raise HTTPException(404, "No such suggestion") from e
+
+
+@app.delete("/activity/insights/{sid_}")
+def activity_insight_delete(sid_: str) -> dict[str, bool]:
+    monitor.insights.delete(sid_)
+    return {"ok": True}
+
+
+@app.delete("/activity/habits/{hid}")
+def activity_habit_forget(hid: str) -> dict[str, bool]:
+    """Forget a habit and the memory it wrote. The memory panel's own delete still works too."""
+    monitor.insights.forget_habit(hid, drop_memory=True)
     monitor.write_markdown()
-    return {"deleted": out, "status": monitor.status()}
+    return {"ok": True}
 
 
 @app.on_event("startup")

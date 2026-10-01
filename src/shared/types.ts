@@ -1206,6 +1206,112 @@ export interface ActivityConfig {
   profileEveryHours: number
   /** Palantir mode: every signal on, redaction off, both exclusion lists emptied. */
   palantir: boolean
+  insights: ActivityInsightConfig
+}
+
+export interface ActivityInsightConfig {
+  enabled: boolean
+  /** How often the habit/suggestion pass runs on its own. 0 turns the schedule off. */
+  everyHours: number
+  lookbackDays: number
+  /** A pattern has to recur on at least this many days before it counts. */
+  minDays: number
+  maxSuggestions: number
+  /** Write confident habits into the app's memory, where chats already read from. */
+  autoMemory: boolean
+  memoryConfidence: number
+}
+
+/** One thing the miner noticed, computed locally with no model. This is the evidence. */
+export interface ActivityPattern {
+  id: string
+  /** app_routine | site_habit | thrash | deep_work | day_shape | after_hours | input_load |
+   *  recurring_window | topic | switch_rate */
+  kind: string
+  title: string
+  detail: string
+  support: number
+  days: number
+  confidence: number
+  evidence: Record<string, unknown>
+}
+
+/** A durable statement about how the user works. Owns at most one row in the memory panel. */
+export interface ActivityHabit {
+  id: string
+  key: string
+  statement: string
+  kind: string
+  confidence: number
+  /** How many passes have seen it. */
+  support: number
+  evidence: string[]
+  /** The memory this habit wrote; `''` when it was not confident enough, or autoMemory is off. */
+  memory_id: string
+  first_seen: number
+  last_seen: number
+}
+
+export type InsightKind = 'automation' | 'platform' | 'hygiene'
+export type InsightStatus = 'new' | 'accepted' | 'done' | 'dismissed' | 'snoozed'
+/** `prompt` is the common one and it acts on nothing: it hands back a message to send. */
+export type InsightActionType = 'prompt' | 'todo' | 'memory' | 'setting' | 'none'
+
+export interface InsightAction {
+  type: InsightActionType
+  prompt?: string
+  title?: string
+  content?: string
+  how?: string
+}
+
+/** A proposal, never a change. Dismissing one is permanent; a refresh will not raise it again. */
+export interface ActivitySuggestion {
+  id: string
+  key: string
+  kind: InsightKind
+  title: string
+  detail: string
+  why: string
+  impact: string
+  effort: 'low' | 'medium' | 'high'
+  action: InsightAction
+  /** Pattern ids this rests on. */
+  evidence: string[]
+  confidence: number
+  status: InsightStatus
+  status_note: string
+  snooze_until: number
+  created_at: number
+  updated_at: number
+}
+
+export interface ActivityInsights {
+  enabled: boolean
+  generated_at: number
+  last_run: number
+  next_run: number
+  last_error: string
+  window: { days?: number; first_day?: string; last_day?: string }
+  totals: { focus_seconds?: number; idle_seconds?: number; keys?: number; clicks?: number; scrolls?: number; switches?: number }
+  apps: { app: string; seconds: number; days: number }[]
+  /** Host only - never a path or a query string. */
+  hosts: { host: string; visits: number; days: number }[]
+  hours: { hour: number; seconds: number }[]
+  patterns: ActivityPattern[]
+  habits: ActivityHabit[]
+  suggestions: ActivitySuggestion[]
+  counts: { open: number; accepted: number; dismissed: number; habits: number; days: number }
+}
+
+/** What came back from applying one suggestion. `prompt` means nothing happened yet - send it. */
+export interface ActivityApplyResult {
+  type: InsightActionType
+  prompt?: string
+  how?: string
+  todo?: Todo
+  memory?: Memory
+  suggestion: ActivitySuggestion
 }
 
 /** What macOS currently thinks about one permission. `n/a` means nothing on this Mac needs it. */

@@ -7,7 +7,8 @@ import type {
   AgentInbox, AgentProposal, Job,
   Doc, DocFolder, FullDoc, DocRevision,
   McpEffective, McpReport, McpServer, McpServerDraft, McpTool, ToolMode,
-  ActivityCapability, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityGrantResult, ActivityStatus, ActivitySummary,
+  ActivityApplyResult, ActivityCapability, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityGrantResult,
+  ActivityInsights, ActivityStatus, ActivitySuggestion, ActivitySummary, InsightStatus,
   PendingSend, SendHoldConfig, Verification, Verified
 } from '@shared/types'
 
@@ -348,7 +349,17 @@ export const api = {
     requestPermission: (id: string, browser = '') => req<{ result: ActivityGrantResult; status: ActivityStatus }>('/activity/permissions/request', { method: 'POST', body: json({ id, browser }) }),
     openPermissionSettings: (id: string) => req<{ ok: boolean }>('/activity/permissions/open', { method: 'POST', body: json({ id }) }),
     palantir: (on: boolean) => req<ActivityStatus>('/activity/palantir', { method: 'POST', body: json({ on }) }),
-    purge: (scope: 'expired' | 'events' | 'summaries' | 'all') => req<{ deleted: { events: number; summaries: number }; status: ActivityStatus }>('/activity/purge', { method: 'POST', body: json({ scope }) })
+    purge: (scope: 'expired' | 'events' | 'summaries' | 'all') => req<{ deleted: { events: number; summaries: number }; status: ActivityStatus }>('/activity/purge', { method: 'POST', body: json({ scope }) }),
+    /** Habits and automation suggestions mined from the same data. */
+    insights: () => req<ActivityInsights>('/activity/insights'),
+    /** Re-mine the patterns with no model call: free, offline, and the evidence the panel shows. */
+    mineInsights: () => req<ActivityInsights>('/activity/insights/mine', { method: 'POST' }),
+    refreshInsights: () => req<ActivityInsights & { ok: boolean }>('/activity/insights/refresh', { method: 'POST' }),
+    setInsightStatus: (id: string, status: InsightStatus, note = '', snoozeDays = 7) =>
+      req<ActivitySuggestion>(`/activity/insights/${id}/status`, { method: 'POST', body: json({ status, note, snooze_days: snoozeDays }) }),
+    applyInsight: (id: string) => req<ActivityApplyResult>(`/activity/insights/${id}/apply`, { method: 'POST' }),
+    deleteInsight: (id: string) => req<{ ok: boolean }>(`/activity/insights/${id}`, { method: 'DELETE' }),
+    forgetHabit: (id: string) => req<{ ok: boolean }>(`/activity/habits/${id}`, { method: 'DELETE' })
   },
   canvases: {
     list: () => req<Canvas[]>('/canvases'),

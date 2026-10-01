@@ -75,6 +75,18 @@ their own instructions, knowledge files, memories and graph.
   stops keystroke capture dead; credentials and PII are redacted before anything
   is stored; raw samples expire after 48h. The raw log is browsable row by row
   and deletable. See [docs/activity-monitor.md](docs/activity-monitor.md).
+- **Habits and automation suggestions.** On top of that data, a local miner keeps
+  one counts-only row per day — which outlives the 48h sample retention — and
+  detects what recurs: the apps that own your mornings, the site you open eleven
+  times a day, the two apps you ping-pong between, where your long uninterrupted
+  stretches actually land, how much of the day lands after seven. Those patterns
+  are the panel's evidence, computed with no model and no network. A slower pass
+  then turns them into **habits**, each owning one row in your Memory panel so
+  chats already know how you work, and **suggestions** for what the app could do
+  instead — a digest widget to replace the tab reflex, a project for the topic that
+  keeps coming back, a calendar block around your real focus window. Suggestions
+  are proposals: the common action opens a chat pre-loaded with the request rather
+  than acting, "not now" hides one for a week, and dismissing one is permanent.
 - **Context management.** Per-chat toggles for memory, graph, documents, activity,
   auto-learn and tools; an inspector showing exactly what was injected into
   each reply; a live preview for a draft message.

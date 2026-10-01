@@ -1285,6 +1285,17 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .cal-event b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cal-event span { color: var(--text-muted); font-size: 10.5px; }
 .cal-event:hover { background: rgba(59,158,219,0.4); }
+/* Short blocks have no room for a second line, so the time sits after the title. */
+.cal-event.compact { flex-direction: row; align-items: baseline; gap: 5px; padding: 2px 6px; }
+.cal-event.compact b { min-width: 0; flex: 0 1 auto; }
+.cal-event.compact span { flex: none; white-space: nowrap; }
+.cal-event.movable { cursor: grab; }
+.cal-event.dragging { cursor: grabbing; z-index: 4; opacity: 0.9; box-shadow: 0 4px 14px rgba(0,0,0,0.25); }
+.cal-event-grip { position: absolute; left: 0; right: 0; bottom: 0; cursor: ns-resize; }
+.cal-event.movable:hover .cal-event-grip { background: linear-gradient(to bottom, transparent, rgba(0,0,0,0.12)); }
+/* The span being dragged out before it is named. */
+.cal-sel { position: absolute; left: 3px; right: 3px; z-index: 3; border-radius: 5px; border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 18%, transparent); padding: 2px 6px; font-size: 10.5px; color: var(--text-muted); pointer-events: none; overflow: hidden; }
+.cal-grid.dragging { user-select: none; }
 .cal-create { position: absolute; left: 3px; right: 3px; display: flex; gap: 4px; z-index: 3; background: var(--bg-elev); border: 1px solid var(--accent); border-radius: 6px; padding: 4px; }
 .cal-create input { flex: 1; background: none; border: 0; outline: 0; font-size: 12px; }
 

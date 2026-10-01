@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { CalendarEvent, Todo } from '@shared/types'
-import { hourWindow, localDay, withoutTodoEvents } from './CalendarWeek'
+import { fmtMin, fmtTime, hourWindow, localDay, movedSpan, resizedSpan, selectionSlot, slotIso, snapMin, withoutTodoEvents } from './CalendarWeek'
 
 test('localDay uses the local calendar date, not UTC', () => {
   const d = new Date(2026, 8, 30, 0, 30, 0)
@@ -74,4 +74,56 @@ test('withoutTodoEvents is a no-op when no todo has an event', () => {
   const events = [byId('a', true), byId('b', false)]
   assert.equal(withoutTodoEvents(events, [todo('t1', null)]), events)
   assert.equal(withoutTodoEvents(events, []), events)
+})
+
+test('snapMin rounds onto the quarter-hour drag grid', () => {
+  assert.equal(snapMin(0), 0)
+  assert.equal(snapMin(7), 0)
+  assert.equal(snapMin(8), 15)
+  assert.equal(snapMin(-8), -15)
+  assert.equal(snapMin(545), 540)
+})
+
+test('slotIso writes a local wall-clock time, with no zone for the backend to misread', () => {
+  assert.equal(slotIso('2026-09-30', 9 * 60), '2026-09-30T09:00:00')
+  assert.equal(slotIso('2026-09-30', 13 * 60 + 45), '2026-09-30T13:45:00')
+  assert.equal(slotIso('2026-09-30', 0), '2026-09-30T00:00:00')
+})
+
+test('slotIso rolls an end at or past midnight into the next day', () => {
+  // A block dragged to the bottom of the grid ends at 24:00, which Google wants as the next 00:00.
+  assert.equal(slotIso('2026-09-30', 24 * 60), '2026-10-01T00:00:00')
+  assert.equal(slotIso('2026-09-30', 25 * 60 + 30), '2026-10-01T01:30:00')
+})
+
+test('fmtMin labels the dragged edge from the same minute offset', () => {
+  assert.equal(fmtMin('2026-09-30', 14 * 60 + 30), fmtTime(new Date(2026, 8, 30, 14, 30)))
+})
+
+test('a create drag covers the slot it started in, dragged either way', () => {
+  // Down from 9:00 to 10:30.
+  assert.deepEqual(selectionSlot({ day: '2026-09-30', anchorMin: 540, edgeMin: 630 }),
+    { day: '2026-09-30', startMin: 540, endMin: 630 })
+  // Up from 9:00 to 8:00: the anchor slot stays inside the range.
+  assert.deepEqual(selectionSlot({ day: '2026-09-30', anchorMin: 540, edgeMin: 480 }),
+    { day: '2026-09-30', startMin: 480, endMin: 555 })
+  // Pressed and barely moved: one quarter-hour slot, never an empty span.
+  assert.deepEqual(selectionSlot({ day: '2026-09-30', anchorMin: 540, edgeMin: 540 }),
+    { day: '2026-09-30', startMin: 540, endMin: 555 })
+})
+
+test('a move keeps the duration and stays inside the hours on screen', () => {
+  const band = { top: 8 * 60, bottom: 20 * 60 }
+  assert.deepEqual(movedSpan(540, 60, 90, band), { startMin: 630, endMin: 690 })
+  assert.deepEqual(movedSpan(540, 60, -8, band), { startMin: 525, endMin: 585 })
+  assert.deepEqual(movedSpan(540, 60, 600, band), { startMin: 1140, endMin: 1200 })
+  // Dragged clean off the top and off the bottom of a cropped band: the start stays in it.
+  assert.deepEqual(movedSpan(540, 60, -600, band), { startMin: 480, endMin: 540 })
+  assert.deepEqual(movedSpan(540, 60, 1000, band), { startMin: 1185, endMin: 1245 })
+})
+
+test('a resize moves only the bottom edge, never above its own start', () => {
+  assert.deepEqual(resizedSpan(540, 600, 60, 20 * 60), { startMin: 540, endMin: 660 })
+  assert.deepEqual(resizedSpan(540, 600, -600, 20 * 60), { startMin: 540, endMin: 555 })
+  assert.deepEqual(resizedSpan(540, 600, 600, 20 * 60), { startMin: 540, endMin: 1200 })
 })

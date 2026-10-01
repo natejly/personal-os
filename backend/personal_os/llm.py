@@ -98,7 +98,6 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # How doc_edit lands. "review" proposes a diff; "apply" writes it. Missing means review.
     "docEditMode": "review",
     "maxToolRounds": 25,
-    "workspaceRoots": [],  # absolute folders the agent may work in; snapshotted per reply (snapshots.py)
     "snapshotsEnabled": True,
     # Keep the system prompt identical between turns and put per-turn retrieval just before the newest
     # user message, so the provider's prefix cache survives (context.layout_messages).

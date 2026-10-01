@@ -6,6 +6,7 @@ import type {
   Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
   AgentInbox, AgentProposal, Job,
   Doc, DocFolder, FullDoc, DocRevision,
+  McpEffective, McpReport, McpServer, McpServerDraft, McpTool, ToolMode,
   ActivityCapability, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityGrantResult, ActivityStatus, ActivitySummary,
   PendingSend, SendHoldConfig, Verification, Verified
 } from '@shared/types'
@@ -157,6 +158,25 @@ export const api = {
     update: (id: string, patch: { title?: string; notes?: string; due?: string | null; priority?: number; done?: boolean; project_id?: string | null; clear_due?: boolean; clear_project?: boolean; calendar_event_id?: string | null; calendar_link?: string | null; calendar_id?: string | null }) =>
       req<Todo>(`/todos/${id}`, { method: 'PUT', body: json(patch) }),
     delete: (id: string) => req(`/todos/${id}`, { method: 'DELETE' })
+  },
+  mcp: {
+    servers: () => req<McpServer[]>('/mcp/servers'),
+    create: (s: Partial<McpServerDraft> & { name: string; enabled?: boolean }) => req<McpServer>('/mcp/servers', { method: 'POST', body: json(s) }),
+    /** A secret left as '' keeps the stored value; `clear_secrets` removes keys outright. */
+    update: (id: string, patch: Partial<McpServerDraft> & { enabled?: boolean; clear_secrets?: string[] }) =>
+      req<McpServer>(`/mcp/servers/${id}`, { method: 'PATCH', body: json(patch) }),
+    remove: (id: string) => req<{ ok: boolean }>(`/mcp/servers/${id}`, { method: 'DELETE' }),
+    restart: (id: string) => req<McpServer>(`/mcp/servers/${id}/restart`, { method: 'POST' }),
+    logs: (id: string) => req<{ server_id: string; stderr: string[] }>(`/mcp/servers/${id}/logs`),
+    /** Probe + static check of a saved server; files the report as its latest. */
+    check: (id: string) => req<McpReport>(`/mcp/servers/${id}/check`, { method: 'POST' }),
+    /** The same check on a config that has not been saved, so trust can be decided first. */
+    checkDraft: (d: Partial<McpServerDraft>) => req<McpReport>('/mcp/check', { method: 'POST', body: json(d) }),
+    tools: () => req<{ tools: McpTool[] }>('/mcp/tools'),
+    setGrant: (slug: string, mode: ToolMode, scope: 'global' | 'project' | 'chat' = 'global', scopeId?: string) =>
+      req<McpEffective>(`/mcp/tools/${encodeURIComponent(slug)}/grant`, { method: 'PUT', body: json({ mode, scope, scope_id: scopeId ?? null }) }),
+    clearGrant: (slug: string, scope: 'global' | 'project' | 'chat' = 'global') =>
+      req<McpEffective>(`/mcp/tools/${encodeURIComponent(slug)}/grant?scope=${scope}`, { method: 'DELETE' })
   },
   google: {
     status: () => req<GoogleStatus>('/integrations/google/status'),

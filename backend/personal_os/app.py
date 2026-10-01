@@ -24,7 +24,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import AfterValidator, BaseModel, Field
 
-from . import activity, assist, llm, mac, tools
+from . import activity, assist, llm, mac, mcp_eval, tools
 from .context import build_context, estimate_tokens
 from .db import Database, data_dir_from_env, new_id
 from .extract_text import extract_text
@@ -38,6 +38,8 @@ from . import cache as google_cache
 from .google import Google, GoogleNotConnected, json_safe
 from .jobs import (KINDS, PROPOSAL_STATUSES, Jobs, Proposals, Scheduler, local_tz_name, spent, valid_cron,
                    valid_tz)
+from .mcp_client import McpClient, McpError
+from .mcp_servers import MODES as MCP_MODES, RESERVED_PREFIX as MCP_PREFIX, SCOPES as MCP_SCOPES, McpServers
 from .microvm import Sandboxes
 from .notes import Notes
 from .gtasks import TasksSync
@@ -282,6 +284,84 @@ tool_results = ToolResults(db)
 skills = Skills(db)
 toolbox = Toolbox(memories, graph, documents, settings, todos=todos, google=google, boards=boards, sandboxes=sandboxes, docs=docs, activity=monitor,
                   outbox=outbox, work_plans=work_plans, results=tool_results, skills=skills, jobs=jobs)
+mcp_store = McpServers(db)
+# Third-party servers are supervised, not owned by the chat loop: a wedged server must not be able
+# to hold a reply, so everything it offers goes through McpClient's bounded calls.
+mcp = McpClient(mcp_store)
+
+
+def mcp_is(name: str) -> bool:
+    """Is this tool slug a third-party MCP tool? The prefix is reserved, so the check is exact."""
+    return name.startswith(MCP_PREFIX)
+
+
+def _mcp_tooling(project_id: str | None, conversation_id: str | None) -> tuple[dict[str, str], list[dict[str, Any]]]:
+    """Modes + tool schemas for MCP tools whose server is connected right now.
+
+    A tool whose server is down is left out rather than offered and then failed: the model should
+    not spend a round discovering that a connector is offline. `effective_mode` has already decayed
+    an 'on' back to 'ask' for a tool whose shape changed since it was approved.
+    """
+    ready = set(mcp.ready_slugs())
+    if not ready:
+        return {}, []
+    names = {s["id"]: s["name"] for s in mcp_store.servers()}
+    modes: dict[str, str] = {}
+    schemas: list[dict[str, Any]] = []
+    for tool in mcp_store.tools():
+        slug = tool["slug"]
+        if slug not in ready:
+            continue
+        mode = mcp_store.effective_mode(slug, project_id, conversation_id)["mode"]
+        if mode == "off":
+            continue
+        modes[slug] = mode
+        desc = (tool["description"] or tool["name"]).strip()
+        # Provenance goes in the description: the model cannot otherwise tell a third-party tool from
+        # a built-in one, and it should weigh what the tool says about itself accordingly.
+        schemas.append({"type": "function", "function": {
+            "name": slug,
+            "description": f"[{names.get(tool['server_id'], 'MCP')} — third-party MCP connector] {desc}",
+            "parameters": tool["parameters"] or {"type": "object", "properties": {}},
+        }})
+    return modes, schemas
+
+
+def _gate(name: str, mode: str, ctx: dict[str, Any]) -> str:
+    """Effective mode for one call. Untrusted content in the run forces every external tool to ask.
+
+    Every MCP tool is `external` by construction (mcp_client.MCP_DANGER), so the taint rule the
+    Toolbox applies to built-ins has to apply to them too - they are not in Toolbox.specs.
+    """
+    if mcp_is(name):
+        return "ask" if mode == "on" and ctx.get("tainted") else mode
+    return toolbox.gate(name, mode, ctx)
+
+
+async def _mcp_call(slug: str, args: dict[str, Any]) -> dict[str, Any]:
+    """One MCP tool call, with its failures turned into results the model can read and retry past."""
+    try:
+        out = await mcp.call(slug, args)
+    except McpError as e:
+        return tools.tool_error(f"{slug}: {e}", alternative="tell the user the connector is unavailable")
+    except Exception as e:  # noqa: BLE001 - a third-party server must not be able to break a reply
+        log.warning("MCP tool %s failed", slug, exc_info=True)
+        return tools.tool_error(f"{slug}: {type(e).__name__}: {str(e).splitlines()[0][:200]}")
+    if out.get("is_error"):
+        return tools.tool_error(f"{slug}: {out.get('error') or 'the tool reported an error'}")
+    return {k: v for k, v in out.items() if k != "is_error"}
+
+
+def _mcp_server_view(row: dict[str, Any]) -> dict[str, Any]:
+    """One server as the UI wants it: stored config, live supervisor state, its tools, its last report."""
+    live = (mcp.status(row["id"]) or [{}])[0]
+    return {**row,
+            "live": {"status": live.get("status", row["status"]), "detail": live.get("detail", row["status_detail"]),
+                     "running": bool(live.get("running")), "ready": bool(live.get("ready")),
+                     "attempts": live.get("attempts", 0), "server_info": live.get("server_info") or {}},
+            "tools": [{**t, "effective": mcp_store.effective_mode(t["slug"])}
+                      for t in mcp_store.tools(row["id"], include_missing=True)],
+            "eval": mcp_store.latest_eval(row["id"])}
 
 
 def sid(project_id: str | None) -> str | None:
@@ -379,6 +459,166 @@ def register_page_bridge(body: PageBridgeIn) -> dict[str, Any]:
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     return {"ok": True}
+
+
+# ---------------- MCP connectors ----------------
+# Third-party servers the user has added. Everything here is user-driven: a server is never
+# auto-added, never auto-enabled, and its tools never default to running unasked.
+class McpServerIn(BaseModel):
+    name: str
+    transport: str = "stdio"
+    command: str = ""
+    args: list[str] = Field(default_factory=list)
+    cwd: str = ""
+    env: dict[str, str] = Field(default_factory=dict)
+    secrets: dict[str, str] = Field(default_factory=dict)
+    url: str = ""
+    headers: dict[str, str] = Field(default_factory=dict)
+    description: str = ""
+    enabled: bool = True
+
+
+class McpServerPatch(BaseModel):
+    name: str | None = None
+    transport: str | None = None
+    command: str | None = None
+    args: list[str] | None = None
+    cwd: str | None = None
+    env: dict[str, str] | None = None
+    secrets: dict[str, str] | None = None     # '' for a key means "leave the stored value alone"
+    clear_secrets: list[str] = Field(default_factory=list)
+    url: str | None = None
+    headers: dict[str, str] | None = None
+    description: str | None = None
+    enabled: bool | None = None
+
+
+class McpProbeIn(BaseModel):
+    """A launch config that may never have been saved, so it can be checked before it is trusted."""
+    transport: str = "stdio"
+    command: str = ""
+    args: list[str] = Field(default_factory=list)
+    cwd: str = ""
+    env: dict[str, str] = Field(default_factory=dict)
+    secrets: dict[str, str] = Field(default_factory=dict)
+
+
+class McpGrantIn(BaseModel):
+    mode: str
+    scope: str = "global"
+    scope_id: str | None = None
+
+
+@app.get("/mcp/servers")
+def mcp_servers() -> list[dict[str, Any]]:
+    """Every configured server with its live status. Secrets are returned as key names only."""
+    return [_mcp_server_view(s) for s in mcp_store.servers()]
+
+
+@app.post("/mcp/servers")
+async def mcp_create_server(body: McpServerIn) -> dict[str, Any]:
+    if body.transport not in ("stdio", "sse", "http"):
+        raise HTTPException(400, "transport must be stdio, sse or http")
+    row = mcp_store.create_server(name=body.name, transport=body.transport, command=body.command, args=body.args,
+                                 env=body.env, secrets=body.secrets, cwd=body.cwd, url=body.url, headers=body.headers,
+                                 description=body.description, enabled=body.enabled)
+    await mcp.sync()
+    return _mcp_server_view(mcp_store.server(row["id"]) or row)
+
+
+@app.patch("/mcp/servers/{id}")
+async def mcp_update_server(id: str, body: McpServerPatch) -> dict[str, Any]:
+    if mcp_store.server(id) is None:
+        raise HTTPException(404, "No such MCP server")
+    row = mcp_store.update_server(id, body.model_dump(exclude_none=True))
+    await mcp.sync()  # a changed launch config restarts the supervisor; an unchanged one is left alone
+    return _mcp_server_view(mcp_store.server(id) or row or {})
+
+
+@app.delete("/mcp/servers/{id}")
+async def mcp_delete_server(id: str) -> dict[str, bool]:
+    mcp_store.delete_server(id)
+    await mcp.sync()  # stops and reaps the child process; grants survive, keyed by slug
+    return {"ok": True}
+
+
+@app.post("/mcp/servers/{id}/restart")
+async def mcp_restart_server(id: str) -> dict[str, Any]:
+    if mcp_store.server(id) is None:
+        raise HTTPException(404, "No such MCP server")
+    await mcp.restart(id)
+    return _mcp_server_view(mcp_store.server(id) or {})
+
+
+@app.get("/mcp/servers/{id}/logs")
+def mcp_server_logs(id: str) -> dict[str, Any]:
+    """The server's recent stderr. The only window into a connector that will not start."""
+    if mcp_store.server(id) is None:
+        raise HTTPException(404, "No such MCP server")
+    return {"server_id": id, "stderr": mcp.stderr(id)}
+
+
+@app.post("/mcp/servers/{id}/check")
+async def mcp_check_server(id: str) -> dict[str, Any]:
+    """Probe + static evaluation of a saved server, filed as its latest report."""
+    if mcp_store.server(id) is None:
+        raise HTTPException(404, "No such MCP server")
+    return await mcp_eval.evaluate_server(mcp, mcp_store, id)
+
+
+@app.post("/mcp/check")
+async def mcp_check_config(body: McpProbeIn) -> dict[str, Any]:
+    """Evaluate a config that has not been saved: the decision to trust comes before the decision to use."""
+    cfg = body.model_dump()
+    # Same precedence as McpServers.launch_env: a secret wins over a plain env var of the same name.
+    cfg["env"] = {**(cfg.get("env") or {}), **cfg.pop("secrets", {})}
+    return await mcp_eval.evaluate_config(mcp, cfg)
+
+
+@app.get("/mcp/tools")
+def mcp_tools(project_id: str | None = None, conversation_id: str | None = None) -> dict[str, Any]:
+    """Known MCP tools with the mode each resolves to, and which are live right now."""
+    ready = set(mcp.ready_slugs())
+    rows = mcp_store.tools(include_missing=True)
+    return {"tools": [{**t, "ready": t["slug"] in ready,
+                       "effective": mcp_store.effective_mode(t["slug"], sid(project_id), conversation_id)}
+                      for t in rows],
+            "grants": mcp_store.grants()}
+
+
+@app.put("/mcp/tools/{slug}/grant")
+def mcp_set_grant(slug: str, body: McpGrantIn) -> dict[str, Any]:
+    if body.mode not in MCP_MODES:
+        raise HTTPException(400, f"mode must be one of {', '.join(MCP_MODES)}")
+    if body.scope not in MCP_SCOPES:
+        raise HTTPException(400, f"scope must be one of {', '.join(MCP_SCOPES)}")
+    if mcp_store.tool(slug) is None:
+        raise HTTPException(404, "No such MCP tool")
+    mcp_store.set_grant(slug, body.mode, body.scope, body.scope_id)
+    return mcp_store.effective_mode(slug, body.scope_id if body.scope == "project" else None,
+                                    body.scope_id if body.scope == "chat" else None)
+
+
+@app.delete("/mcp/tools/{slug}/grant")
+def mcp_clear_grant(slug: str, scope: str = "global", scope_id: str | None = None) -> dict[str, Any]:
+    mcp_store.clear_grant(slug, scope, scope_id)
+    return mcp_store.effective_mode(slug)
+
+
+@app.on_event("startup")
+async def _mcp_startup() -> None:
+    """Connect whatever is enabled. A server that will not start becomes a status, not a failed boot."""
+    try:
+        await mcp.start()
+    except Exception:  # noqa: BLE001 - a broken connector must never stop the app from coming up
+        log.warning("MCP startup failed", exc_info=True)
+
+
+@app.on_event("shutdown")
+async def _mcp_shutdown() -> None:
+    # Before anything else tears down: this is what guarantees no child server outlives the app.
+    with contextlib.suppress(Exception):
+        await mcp.stop()
 
 
 @app.get("/projects")
@@ -685,8 +925,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         # already turned the call into a proposals row before it got that far.
         "proposal_only": proposal_only(run), "message_id": am["id"],
     }
-    modes = toolbox.effective(cfg.get("tools") or {}, (project or {}).get("tools"), conv["settings"].get("tools")) if conv["settings"].get("useTools", True) else {}
-    tool_schemas = toolbox.schemas(modes)
+    use_tools = conv["settings"].get("useTools", True)
+    modes = toolbox.effective(cfg.get("tools") or {}, (project or {}).get("tools"), conv["settings"].get("tools")) if use_tools else {}
+    # MCP slugs all carry a reserved prefix no built-in may use, so the two mode maps cannot collide.
+    mcp_modes, mcp_schemas = _mcp_tooling(conv["project_id"], conv_id) if use_tools else ({}, [])
+    modes.update(mcp_modes)
+    tool_schemas = toolbox.schemas(modes) + mcp_schemas
     tools_hint = (TOOLS_HINT + ("\n" + PLAN_HINT if any(s["function"]["name"] == "todo_write" for s in tool_schemas) else "")) if tool_schemas else ""
     system = "\n\n".join(p for p in (system, RENDER_HINT, tools_hint,
                                      JOB_HINT if proposal_only(run) else "") if p)
@@ -848,7 +1092,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     messages.append({"role": "tool", "tool_call_id": c["id"], "content": LOOP_STOP.format(name=c["name"], n=REPEAT_LIMIT)})
                     continue
                 raw_mode = modes.get(c["name"], "off")
-                mode = toolbox.gate(c["name"], raw_mode, tool_ctx)
+                mode = _gate(c["name"], raw_mode, tool_ctx)
                 forced = mode != raw_mode  # untrusted content in this reply upgraded on -> ask
                 # A background run never waits on an approval: there is nobody at the keyboard, and the call is not
                 # going to happen either way. It becomes a proposal in _call_tool and the run carries on.
@@ -936,16 +1180,25 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     if granted and not standing:
                         decision = "allow"  # one-shot
                     elif decision == "always_chat":
-                        convos.update(conv_id, {"settings": {"tools": {**(conv["settings"].get("tools") or {}), c["name"]: "on"}}})
-                        conv["settings"].setdefault("tools", {})[c["name"]] = "on"
+                        # MCP grants live in mcp_grants, not in the settings tool maps: a grant there is
+                        # bound to the schema it approved, so a server that rewrites the tool re-asks.
+                        if mcp_is(c["name"]):
+                            mcp_store.set_grant(c["name"], "on", "chat", conv_id)
+                        else:
+                            convos.update(conv_id, {"settings": {"tools": {**(conv["settings"].get("tools") or {}), c["name"]: "on"}}})
+                            conv["settings"].setdefault("tools", {})[c["name"]] = "on"
                         modes[c["name"]] = "on"
                         decision = "allow"
                     elif decision == "always_global":
-                        db.set_settings({"tools": {**(cfg.get("tools") or {}), c["name"]: "on"}})
+                        if mcp_is(c["name"]):
+                            mcp_store.set_grant(c["name"], "on", "global")
+                        else:
+                            db.set_settings({"tools": {**(cfg.get("tools") or {}), c["name"]: "on"}})
                         modes[c["name"]] = "on"
                         decision = "allow"
                     if standing:
-                        tool_schemas = toolbox.schemas(modes)  # the grant changed modes; keep the schemas in step
+                        # the grant changed modes; keep the schemas in step
+                        tool_schemas = toolbox.schemas(modes) + mcp_schemas
                     if plan is not None:
                         # The decision was recorded on the plan by whoever answered it (the route, or the stop
                         # above), including any step the user edited: re-read it rather than trust `args`.
@@ -961,6 +1214,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     result = plans.model_result(plan)  # the decision, and the arguments the user actually authorised
                 elif decision != "allow":
                     result = tools.denied(c["name"], "just declined by the user")
+                elif mcp_is(c["name"]):
+                    result = await _mcp_call(c["name"], args)
                 else:
                     result = await _call_tool(run, _round, c["name"], args, tool_ctx, uid)
                 ms = int((time.time() - t0) * 1000)
@@ -971,8 +1226,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 tool_errors[c["name"]] = tool_errors.get(c["name"], 0) + 1 if err else 0  # reset on success = consecutive
                 if tool_errors[c["name"]] >= TOOL_ERROR_LIMIT:
                     blocked.add(c["name"])
-                tainted = decision == "allow" and not err and toolbox.taints(c["name"])
+                # An MCP result is third-party text by definition, so it taints like a web fetch does.
+                tainted = decision == "allow" and not err and (toolbox.taints(c["name"]) or mcp_is(c["name"]))
                 if tainted:
+                    tool_ctx["tainted"] = True  # Toolbox.call sets this for built-ins; _mcp_call cannot reach ctx
                     if not was_tainted:
                         yield "taint", {"message_id": am["id"], "source": c["name"]}
                     tool_ctx["taint_sources"].append(c["name"])

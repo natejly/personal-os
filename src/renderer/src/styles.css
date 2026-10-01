@@ -1061,6 +1061,56 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .tool-perm.unavailable { opacity: 0.5; }
 .tool-perm.unavailable .tool-perm-name::after, .tool-perm.unavailable .toggle-text > b::after { content: ' · not connected'; color: var(--text-faint); font-weight: 400; font-size: 11px; }
 
+/* ---------- MCP connectors (Settings) ---------- */
+.mcp { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.mcp > p { margin: 0; }
+.mcp .empty { font-size: 12px; }
+.mcp-server { width: 100%; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elev); }
+.mcp-server.open { border-color: var(--border-strong); }
+.mcp-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; }
+.mcp-head > b { flex: 1; font-size: 13px; }
+.mcp-name { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.mcp-name b { font-size: 13px; }
+.mcp-name small { font-size: 11px; }
+.mcp .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: var(--border-strong); }
+.mcp .dot.ok { background: var(--ok); }
+.mcp .dot.warn { background: var(--warn); }
+.mcp .dot.bad { background: var(--danger); }
+.switch-wrap { display: inline-flex; align-items: center; flex-shrink: 0; }
+.switch-wrap input { position: absolute; opacity: 0; width: 0; height: 0; }
+.switch-wrap input:checked + .switch { background: var(--ok); }
+.switch-wrap input:checked + .switch::after { transform: translateX(14px); }
+.switch-wrap input:focus-visible + .switch { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mcp-detail { margin: 0 10px 8px; font-size: 11.5px; }
+.mcp-body { display: flex; flex-direction: column; gap: 10px; padding: 0 10px 10px; border-top: 1px solid var(--border); padding-top: 10px; }
+.mcp-meta { display: flex; flex-direction: column; gap: 3px; }
+.mcp-meta code { font-size: 11px; background: var(--bg-input); border-radius: 6px; padding: 5px 7px; word-break: break-all; }
+.mcp-meta small { font-size: 11px; }
+.mcp-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.mcp-log { margin: 0; max-height: 180px; overflow: auto; font-size: 11px; white-space: pre-wrap; word-break: break-word; background: var(--bg-input); border-radius: 6px; padding: 8px; color: var(--text-muted); }
+.mcp-report { border-radius: 8px; padding: 8px 10px; font-size: 12px; background: var(--bg-input); border: 1px solid var(--border); }
+.mcp-report.warn { background: rgba(254,188,46,0.08); border-color: rgba(254,188,46,0.4); }
+.mcp-report.fail, .mcp-report.error { background: rgba(229,72,77,0.08); border-color: rgba(229,72,77,0.4); }
+.mcp-report.pass { background: rgba(70,167,88,0.08); border-color: rgba(70,167,88,0.35); }
+.mcp-report-head { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+.mcp-report-head b::first-letter { text-transform: uppercase; }
+.mcp-report-head .muted { font-size: 11.5px; }
+.mcp-findings { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+.mcp-findings li { display: flex; gap: 6px; align-items: flex-start; font-size: 11.5px; }
+.mcp-findings .tag { flex-shrink: 0; }
+.mcp-findings li.fail .tag { background: rgba(229,72,77,0.15); color: var(--danger); }
+.mcp-findings li.warn .tag { background: rgba(254,188,46,0.15); color: var(--warn); }
+.mcp-findings code { display: block; margin-top: 2px; font-size: 10.5px; color: var(--text-faint); word-break: break-all; }
+.mcp-limits { margin-top: 8px; }
+.mcp-limits summary { cursor: pointer; font-size: 11px; color: var(--text-muted); }
+.mcp-limits ul { margin: 6px 0 0; padding-left: 18px; font-size: 11px; color: var(--text-muted); display: flex; flex-direction: column; gap: 3px; }
+.mcp-tool .toggle-text > b { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.mcp-tool .toggle-text .mono { font-size: 10px; }
+.mcp-add .mcp-head { border-bottom: 1px solid var(--border); }
+.mcp-add label { margin: 0; }
+.mcp-foot { display: flex; align-items: flex-start; gap: 5px; font-size: 11px; }
+.mcp-foot svg { flex-shrink: 0; margin-top: 2px; }
+
 /* ---------- Sidebar project groups ---------- */
 /* A group reads as a header and its recent lines, the way Claude's own sidebar does: the folder
    carries the project colour, so no dot or count competes with the name, and the rows under it are

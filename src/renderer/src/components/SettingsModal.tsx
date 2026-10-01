@@ -8,6 +8,7 @@ import type { Settings, ShortcutState } from '@shared/types'
 import { ToolGlobalToggles } from './ToolPermissions'
 import GoogleSettings from './GoogleSettings'
 import SkillsReview from './SkillsReview'
+import McpSettings from './McpSettings'
 import UsageView from './UsageView'
 
 export default function SettingsModal(): JSX.Element {
@@ -125,6 +126,11 @@ export default function SettingsModal(): JSX.Element {
               Turning this off makes every send immediate and final.
             </p>
           </div>
+        </section>
+
+        <section>
+          <h3>Connectors</h3>
+          <McpSettings />
         </section>
 
         <section>

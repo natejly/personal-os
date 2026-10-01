@@ -110,10 +110,20 @@ export default function DocTree({ docs, activeId, query, onQuery, showScope, pro
     }
   }
 
-  const newFolder = (parent: string): void => {
-    const name = prompt(parent ? `New folder inside “${parent}”` : 'New folder')?.trim()
-    if (name) void createDocFolder(joinPath(parent, name))
+  /**
+   * An Electron renderer has no window.prompt — calling it throws, so the folder never got made.
+   * The folder is created under a placeholder name and handed straight to the inline rename input,
+   * the same one a double-click opens, so naming it is still one uninterrupted bit of typing.
+   */
+  const newFolder = async (parent: string): Promise<void> => {
     setMenu(null)
+    const taken = new Set(folders.map((f) => f.path))
+    const base = 'Untitled folder'
+    let name = base
+    for (let n = 2; taken.has(joinPath(parent, name)); n++) name = `${base} ${n}`
+    const path = joinPath(parent, name)
+    await createDocFolder(path)  // which expands the tree to it, so the input is on screen
+    setRenaming({ path, draft: name })
   }
 
   const commitRename = (): void => {
@@ -225,7 +235,7 @@ export default function DocTree({ docs, activeId, query, onQuery, showScope, pro
         {menu === f.path && (
           <div className="doc-folder-menu" onMouseDown={(e) => e.stopPropagation()}>
             <button onClick={() => { setMenu(null); void createDoc({ project_id: projectId, folder: f.path }) }}>New doc here</button>
-            <button onClick={() => newFolder(f.path)}>New subfolder…</button>
+            <button onClick={() => void newFolder(f.path)}>New subfolder…</button>
             <button onClick={() => { setMenu(null); setRenaming({ path: f.path, draft: f.name }) }}>Rename</button>
             <button className="danger" onClick={() => removeFolder(f.path, f.deep)}>Delete folder</button>
           </div>
@@ -246,7 +256,7 @@ export default function DocTree({ docs, activeId, query, onQuery, showScope, pro
     >
       <div className="doc-tree-head">
         <label className="search mini"><Search size={12} /><input placeholder="Search docs" value={query} onChange={(e) => onQuery(e.target.value)} /></label>
-        <button className="icon-btn ghost" title="New folder" aria-label="New folder" onClick={() => newFolder('')}><FolderPlus size={14} /></button>
+        <button className="icon-btn ghost" title="New folder" aria-label="New folder" onClick={() => void newFolder('')}><FolderPlus size={14} /></button>
       </div>
 
       {docs.length === 0 && folders.length === 0 && <p className="empty-hint">{searching ? 'No matches.' : 'No docs yet.'}</p>}

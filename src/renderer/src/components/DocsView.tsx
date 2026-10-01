@@ -43,6 +43,9 @@ export default function DocsView(): JSX.Element {
   const [linked, setLinked] = useState(true)
   const [editFrac, setEditFrac] = useState<number | null>(null)
   const [titleDraft, setTitleDraft] = useState<string | null>(null)
+  // Non-null while "New folder…" is being typed. An Electron renderer has no window.prompt, so the
+  // picker turns into a text input in place rather than asking for the name in a dialog.
+  const [folderDraft, setFolderDraft] = useState<string | null>(null)
   const previewRef = useRef<HTMLDivElement>(null)
 
   const scope: Scope = libraryScope
@@ -148,21 +151,39 @@ export default function DocsView(): JSX.Element {
               />
               <label className="model-picker doc-folder-pick" title="Folder">
                 <Folder size={13} />
-                <select
-                  value={activeDoc.folder || ''}
-                  onChange={(e) => {
-                    const v = e.target.value
-                    if (v === '__new__') {
-                      const name = prompt('New folder name')?.trim()
+                {folderDraft !== null ? (
+                  <input
+                    autoFocus
+                    value={folderDraft}
+                    placeholder="Folder name"
+                    onChange={(e) => setFolderDraft(e.target.value)}
+                    onBlur={() => {
+                      const name = folderDraft.trim()
                       if (name) void setDocFolder(activeDoc.id, name)
-                    } else void setDocFolder(activeDoc.id, v)
-                  }}
-                >
-                  <option value="">No folder</option>
-                  {folders.map((f) => <option key={f} value={f}>{f}</option>)}
-                  <option value="__new__">New folder…</option>
-                </select>
-                <ChevronDown size={12} />
+                      setFolderDraft(null)
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') e.currentTarget.blur()
+                      if (e.key === 'Escape') setFolderDraft(null)
+                    }}
+                  />
+                ) : (
+                  <>
+                    <select
+                      value={activeDoc.folder || ''}
+                      onChange={(e) => {
+                        const v = e.target.value
+                        if (v === '__new__') setFolderDraft('')
+                        else void setDocFolder(activeDoc.id, v)
+                      }}
+                    >
+                      <option value="">No folder</option>
+                      {folders.map((f) => <option key={f} value={f}>{f}</option>)}
+                      <option value="__new__">New folder…</option>
+                    </select>
+                    <ChevronDown size={12} />
+                  </>
+                )}
               </label>
               <span className="doc-save-state">
                 {docSaving ? 'Saving…' : dirty ? 'Unsaved' : 'Saved'}

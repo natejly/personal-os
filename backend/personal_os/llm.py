@@ -147,6 +147,13 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "githubToken": "",
     # A stopped sandbox (containers are stopped, not removed, at app quit) is deleted after this many idle days.
     "sandboxKeepDays": 14,
+    # Folders (absolute paths inside the home folder) where fs_edit / fs_copy / fs_mkdir run without asking. A desk's
+    # own workspace is always granted; anywhere else those tools ask first.
+    "workspaceRoots": [],
+    # Mount the active desk's workspace read-write at /workspace/desk in that desk's sandbox container.
+    "sandboxMountDesk": True,
+    # fs_edit and an overwriting write_local_file refuse a file this conversation has not read (or that changed since).
+    "requireReadBeforeWrite": True,
     # {model: {"input": $/M tokens, "output": $/M tokens}} overrides for cost accounting (proxy prices are used otherwise)
     "modelPrices": {},
     "googleClientId": "",

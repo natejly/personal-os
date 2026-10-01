@@ -19,6 +19,7 @@ from typing import Any, Awaitable, Callable
 import httpx
 
 from . import mac
+from . import fsx
 from . import skillbuild
 from .cowork import UNDECIDED_OUTPUTS
 from .workspace import WorkspaceError
@@ -393,6 +394,7 @@ class Toolbox:
         self.desks, self.workspace = desks, workspace
         self.retriever: Any = None  # hybrid document search (retrieval.py); set by app.py
         self.artifacts = artifacts  # artifact_tools.py registers create/edit/rewrite_artifact against it
+        self.fs_reads = fsx.ReadLedger()  # what each conversation has read of each file (fsx.py): the baseline for edits
         self.specs: dict[str, ToolSpec] = {}
         self._meetings_avail: tuple[float, bool] | None = None
         self._register()
@@ -410,6 +412,7 @@ class Toolbox:
         if activity is not None:
             self._register_activity()
         self._register_mac()
+        fsx.register(self)  # fs_glob / fs_grep / fs_edit / fs_copy / fs_mkdir
         self._register_reach()
         self._register_mcp_search()
         if jobs is not None:
@@ -509,6 +512,10 @@ class Toolbox:
     def proposes(self, name: str) -> bool:
         """True if a proposal-only run must record this call instead of making it."""
         return bool((s := self.specs.get(name)) and s.danger in PROPOSAL_ONLY_DANGER)
+
+    def fs_needs_ask(self, name: str, args: dict[str, Any], ctx: dict[str, Any]) -> bool:
+        """True when a file-writing call targets somewhere the user did not grant (fsx.py), so the reply loop shows a card."""
+        return fsx.needs_ask(self, name, args, ctx)
 
     def gate(self, name: str, mode: str, ctx: dict[str, Any]) -> str:
         """Effective mode for one call. Untrusted content in the run forces every external tool to ask."""
@@ -1749,7 +1756,12 @@ def _register_mac(self: Toolbox) -> None:
 
     async def read_local_file(ctx: dict[str, Any], path: str, offset: int = 0, length: int = 8000) -> Any:
         try:
-            return await asyncio.to_thread(mac.read_local, path, offset, length)
+            early = fsx.pre_read(self, ctx, path, offset, length)
+            if early is not None:
+                return early
+            out = await asyncio.to_thread(mac.read_local, path, offset, length)
+            fsx.post_read(self, ctx, path, out)
+            return out
         except mac.LocalPathError as e:
             return tool_error(f"read_local_file: {e}", field="path", expected="a path find_files returned",
                               example={"path": "~/Documents/notes.txt"}, alternative=ALTERNATIVE["read_local_file"])
@@ -1785,8 +1797,13 @@ def _register_mac(self: Toolbox) -> None:
     async def write_local_file(ctx: dict[str, Any], path: str, content: str, mode: str = "create") -> Any:
         snap: dict[str, Any] | None = None
         try:
+            unread = fsx.pre_write(self, ctx, path, mode)
+            if unread:
+                return tool_error(f"write_local_file: {unread}", field="mode", alternative="fs_edit for a small change, or read_local_file first")
             snap = await _snapshot(mode, path, ctx)
-            return await _with_undo(snap, await asyncio.to_thread(mac.write_local, path, content, mode))
+            wrote = await asyncio.to_thread(mac.write_local, path, content, mode)
+            fsx.post_write(self, ctx, path, content, wrote)
+            return await _with_undo(snap, wrote)
         except mac.LocalPathError as e:
             await _with_undo(snap, {"error": "failed"})
             return _path_error("write_local_file", e, example={"path": "~/Desktop/summary.md", "content": "# Summary\n"})

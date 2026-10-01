@@ -33,6 +33,7 @@ from typing import Any, Callable
 from .sandbox import IMAGE_EXT, MAX_IMAGE_BYTES
 
 WORKSPACE = "/workspace"
+DESK_MOUNT = "/workspace/desk"  # where an active desk's own workspace appears inside its container
 DEFAULT_IMAGE = "python:3.12-slim"
 LABEL = "personal-os.sandbox"
 MAX_SANDBOXES = 5           # LRU-reaped: a desktop should not quietly accumulate VMs
@@ -107,6 +108,8 @@ class Sandboxes:
         self._shell: dict[str, str] = {}     # container name -> bash|sh
         self._net: dict[str, bool] = {}      # container name -> created with network
         self._stale_checked = False          # _reap_stale runs once per app run
+        # conversation id -> host path of that conversation's desk workspace, or None. Set by the app, which owns the desks.
+        self.desk_workspace: Callable[[str], str | None] | None = None
 
     def _bin(self) -> str:
         return str(self.settings().get("sandboxRuntime") or "docker")
@@ -150,20 +153,33 @@ class Sandboxes:
                 return name
             self._reap(binary)
             cfg = self.settings()
-            self._create(binary, name, str(cfg.get("sandboxImage") or DEFAULT_IMAGE), bool(cfg.get("sandboxNetwork")))
+            self._create(binary, name, str(cfg.get("sandboxImage") or DEFAULT_IMAGE), bool(cfg.get("sandboxNetwork")),
+                         self._desk_mount(conversation_id))
             return name
 
-    def _run_args(self, binary: str, name: str, image: str, net: bool) -> list[str]:
+    def _desk_mount(self, conversation_id: str) -> str | None:
+        """Host folder to bind at /workspace/desk: only a desk's own workspace, and only when sandboxMountDesk is on."""
+        if self.desk_workspace is None or not self.settings().get("sandboxMountDesk", True):
+            return None
+        try:
+            path = self.desk_workspace(conversation_id)
+        except Exception:  # noqa: BLE001 - no desk lookup means no mount, not a failed sandbox
+            return None
+        return str(path) if path else None
+
+    def _run_args(self, binary: str, name: str, image: str, net: bool, mount: str | None = None) -> list[str]:
         """One place for the isolation flags, shared by a fresh create and a checkpoint restore."""
         args = [binary, "run", "-d", "--name", name, "--label", f"{LABEL}=1", "--hostname", "sandbox",
                 "-w", WORKSPACE, "--memory", "1g", "--cpus", "2", "--pids-limit", "256",
                 "--cap-drop", "ALL", "--security-opt", "no-new-privileges"]
         if not net:
             args += ["--network", "none"]
+        if mount:  # the one bind mount there is: a desk's workspace, nothing else of the host
+            args += ["-v", f"{mount}:{DESK_MOUNT}:rw"]
         return args + [image, "sleep", "infinity"]
 
-    def _create(self, binary: str, name: str, image: str, net: bool) -> None:
-        p = self._run(self._run_args(binary, name, image, net), timeout=240)  # generous: the first run of an image pulls it
+    def _create(self, binary: str, name: str, image: str, net: bool, mount: str | None = None) -> None:
+        p = self._run(self._run_args(binary, name, image, net, mount), timeout=240)  # generous: the first run of an image pulls it
         if p.returncode != 0 and b"already in use" not in p.stderr:
             raise SandboxError(f"could not start the sandbox ({image}): {_line(p.stderr)}")
         self._net[name] = net
@@ -276,7 +292,8 @@ class Sandboxes:
             self._run([binary, "rm", "-f", name], timeout=30)
             self._forget(name)
             # Networking is decided now, from current settings: a checkpoint cannot re-enable it.
-            self._create(binary, name, f"{CKPT_REPO}/{name[len('pos-sbx-'):]}:{slug}", bool(self.settings().get("sandboxNetwork")))
+            self._create(binary, name, f"{CKPT_REPO}/{name[len('pos-sbx-'):]}:{slug}", bool(self.settings().get("sandboxNetwork")),
+                         self._desk_mount(conversation_id))
         return {"restored": slug}
 
     def networked(self, conversation_id: str) -> bool:

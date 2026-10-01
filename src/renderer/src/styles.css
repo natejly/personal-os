@@ -2285,3 +2285,8 @@ select:focus-visible {
 .app.sidebar-collapsed .page-agent.popout { width: min(var(--page-agent-w), calc(100% - 40px)); }
 /* The column draws its own left edge against the view; a floating card has a border all round. */
 .page-agent.popout > header { border-top-left-radius: 12px; border-top-right-radius: 12px; }
+.workspace-roots { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+.workspace-roots .plain-list { list-style: none; margin: 0; padding: 0; }
+.workspace-roots .chip-check-row { justify-content: space-between; cursor: default; }
+.workspace-roots-add { display: flex; gap: 8px; }
+.workspace-roots-add input { flex: 1; min-width: 0; }

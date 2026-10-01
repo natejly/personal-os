@@ -74,6 +74,16 @@ def allowed_path(raw: str) -> Path:
     return p
 
 
+def in_roots(path: str | Path, roots: list[Path]) -> bool:
+    """True when `path` (symlinks resolved) sits inside one of the granted folders. A symlink in a root that
+    points outside it is therefore not inside."""
+    try:
+        p = Path(path).resolve()
+    except OSError:
+        return False
+    return any(p == r or p.is_relative_to(r) for r in roots)
+
+
 def _meta(path: str) -> dict[str, Any]:
     row: dict[str, Any] = {"path": path, "name": os.path.basename(path)}
     try:

@@ -185,7 +185,9 @@ def test_failed_write_leaves_no_row() -> None:
     out = asyncio.run(tb.call("write_local_file", {"path": str(f), "content": "x", "mode": "bogus"}, dict(CTX)))
     check(out.get("error"), "bad mode is an error")
     check(len(FS.list()) == before, "no dangling live row after a failed write")
-    out = asyncio.run(tb.call("write_local_file", {"path": str(f), "content": "x", "mode": "overwrite"}, dict(CTX)))
+    ctx = dict(CTX)
+    asyncio.run(tb.call("read_local_file", {"path": str(f)}, ctx))  # an overwrite needs the file read first
+    out = asyncio.run(tb.call("write_local_file", {"path": str(f), "content": "x", "mode": "overwrite"}, ctx))
     check(out.get("undo", {}).get("snapshot_id"), "a good write returns undo.snapshot_id")
     out2 = asyncio.run(tb.call("move_local_file", {"path": str(f), "to": str(HOME / "Desktop" / "moved.md")}, dict(CTX)))
     check(out2.get("undo", {}).get("snapshot_id"), "move returns undo too")

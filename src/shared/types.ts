@@ -902,6 +902,12 @@ export interface Settings {
   maxRunCost?: number
   /** Hosts fetch_url may still read once the reply has seen untrusted content. */
   fetchAllowlist?: string[]
+  /** Folders where fs_edit / fs_copy / fs_mkdir run without asking (absolute paths inside the home folder). */
+  workspaceRoots?: string[]
+  /** Mount the active desk's workspace at /workspace/desk in its sandbox container. Missing means on. */
+  sandboxMountDesk?: boolean
+  /** fs_edit and an overwriting write refuse a file this chat has not read. Missing means on. */
+  requireReadBeforeWrite?: boolean
   braveApiKey: string
   tavilyApiKey: string
   /** Without a Brave/Tavily key, web search uses Exa (keyless, rate-limited); a key lifts the limit. */

@@ -170,6 +170,8 @@ class ProjectCascadeTests(_Base):
         self.assertIsNone(self.documents.get(self.kb["id"]))
         self.assertEqual(self.docs.get(self.doc["id"])["folder"], "Specs")
         self.assertEqual(self.todos.get(self.todo["id"])["title"], "Atlas todo")
+        # The chat trashed on its own before the project keeps its own retention window.
+        self.assertTrue(self.trash.restore("conversation", self.other_conv["id"]))
 
     def test_purge_refuses_live_items(self) -> None:
         self.assertFalse(self.trash.purge("project", self.p["id"]))
@@ -298,6 +300,12 @@ class RouteTests(unittest.TestCase):
         j("DELETE", f"/trash/memory/{mem['id']}")
         j("DELETE", f"/trash/memory/{mem['id']}", expect=404)
         j("POST", f"/trash/bogus/{mem['id']}/restore", expect=404)
+
+    def test_trash_routes_require_the_token(self) -> None:
+        from personal_os.app import app
+        bare = TestClient(app)
+        for method, path in (("GET", "/trash"), ("POST", "/trash/todo/x/restore"), ("DELETE", "/trash/todo/x"), ("DELETE", "/trash")):
+            self.assertEqual(bare.request(method, path).status_code, 401, f"{method} {path}")
 
     def test_empty_trash_route(self) -> None:
         m = self.j("POST", "/memories", {"content": "to be emptied", "project_id": None})

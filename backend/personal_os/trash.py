@@ -155,6 +155,8 @@ class Trash:
                 c.execute("DELETE FROM memories_fts WHERE memory_id=?", (mid,))
         self._purge_documents(doc_ids)
         with self.db.tx() as c:
+            for ct in CHILD_TABLES:  # trashed on their own earlier: they keep their own 30 days, so step out of the FK cascade
+                c.execute(f"UPDATE {ct} SET project_id=NULL WHERE project_id=? AND deleted_with IS NULL AND deleted_at IS NOT NULL", (id,))
             c.execute("DELETE FROM projects WHERE id=?", (id,))
 
     # ---- reading the trash ----

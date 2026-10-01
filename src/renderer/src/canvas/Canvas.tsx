@@ -150,6 +150,22 @@ function Guides({ view }: { view: Viewport }): JSX.Element | null {
   )
 }
 
+/**
+ * The plane's transform, with the pan snapped to whole device pixels.
+ *
+ * Pan is a float the backend stores verbatim, so a settled pan of 311.4px put every window -- and so
+ * every glyph in it -- on a fractional device pixel, which the rasteriser resolves by smearing the
+ * stems across two. Rounding shifts the plane by under half a pixel and nobody can see it; the text it
+ * sharpens is the whole point. Zoom is left alone: text is laid out in CSS pixels and rastered at the
+ * composited scale, so a fractional zoom is crisp as long as nothing in the window is its own render
+ * surface (see the TEXT SHARPNESS note in canvas.css).
+ */
+const planeTransform = (panX: number, panY: number, zoom: number): string => {
+  const dpr = window.devicePixelRatio || 1
+  const snap = (v: number): number => Math.round(v * dpr) / dpr
+  return `translate(${snap(panX)}px, ${snap(panY)}px) scale(${zoom})`
+}
+
 export default function Canvas(): JSX.Element {
   const el = useRef<HTMLDivElement | null>(null)
   const plane = useRef<HTMLDivElement | null>(null)
@@ -198,7 +214,7 @@ export default function Canvas(): JSX.Element {
 
   const paint = useCallback((): void => {
     const v = gesture.current ?? viewport()
-    if (plane.current) plane.current.style.transform = `translate(${v.panX}px, ${v.panY}px) scale(${v.zoom})`
+    if (plane.current) plane.current.style.transform = planeTransform(v.panX, v.panY, v.zoom)
     const g = dots.current
     if (!g) return
     const pitch = pitchRef.current * v.zoom
@@ -476,7 +492,7 @@ export default function Canvas(): JSX.Element {
             style={{ backgroundSize: `${pitch}px ${pitch}px`, backgroundPosition: `${panX}px ${panY}px`, display: zoom >= GRID_ZOOM ? undefined : 'none' }}
           />
         )}
-        <div ref={plane} className="canvas-plane" style={{ transform: `translate(${panX}px, ${panY}px) scale(${zoom})` }}>
+        <div ref={plane} className="canvas-plane" style={{ transform: planeTransform(panX, panY, zoom) }}>
           {shown.map((w) => (
             <WindowFrame
               key={w.id}

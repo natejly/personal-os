@@ -5,6 +5,13 @@
  * `.canvas.interacting` is the frame-rate lever, not polish: it aliases --material-thick onto the
  * opaque material and drops backdrop-filter for the duration of a drag, resize, zoom or space
  * switch. Blur over a dozen windows is the single biggest cost on the plane.
+ *
+ * TEXT SHARPNESS. A window's glass lives on `.win::before`, never on `.win` itself, and nothing in a
+ * window's content path may carry `opacity`, `filter` or `backdrop-filter`. Any of those turns the
+ * subtree into its own render surface, which the plane's `scale()` then resamples -- so the text is
+ * rasterised once at the layer's scale and stretched, instead of being drawn at the device's. That is
+ * what made transcripts in a space read as fuzzy next to the same transcript on the chat page. De-
+ * emphasis and focus belong on borders, shadows and `color`, which cost no render surface.
  */
 
 :root {
@@ -95,7 +102,7 @@
   --material-thick: var(--material-opaque);
   --material-thin: var(--material-opaque);
 }
-.canvas.interacting .win,
+.canvas.interacting .win::before { display: none; }
 .canvas.interacting .dock { backdrop-filter: none; }
 /* A drag that crosses an iframe must not hand the pointer stream to another document. */
 .canvas.interacting iframe { pointer-events: none; }
@@ -224,7 +231,6 @@
   border: 1px solid var(--win-border);
   border-radius: var(--win-radius);
   background: var(--material-thick);
-  backdrop-filter: var(--material-blur);
   box-shadow: var(--win-glow), var(--shadow-window);
   pointer-events: auto;
   animation: win-open var(--dur-window) var(--spring);
@@ -232,6 +238,22 @@
   /* §8 status, carried on the border instead of a bar marker; the glyph stays in the grip. */
   --win-signal: transparent;
   --win-glow: 0 0 0 0 transparent;
+}
+/*
+ * The glass, on its own layer behind the window's tint. `backdrop-filter` makes whatever carries it a
+ * render surface, and a surface under the plane's `scale()` is rasterised at its own scale and then
+ * resampled -- which is exactly how text inside it goes soft. Keeping it on a contentless pseudo-
+ * element leaves every glyph in `.win-body` on the plane's own layer, drawn at device resolution.
+ * `z-index: -1` puts it under `.win`'s 72% tint, so the stack of blur -> tint -> content is unchanged.
+ */
+.win::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  backdrop-filter: var(--material-blur);
+  pointer-events: none;
 }
 .win::after {
   content: '';
@@ -255,12 +277,11 @@
   /* These two must live on .dragging, not on .canvas.interacting. The dragging class is toggled
      straight onto the node, so it lands in the same frame as the pointerdown, while .interacting goes
      through React and lands a render later. In that gap the window has will-change (so it is promoted
-     to its own compositor layer) but still has backdrop-filter and a 72% alpha background -- and a
+     to its own compositor layer) but still has a blurred backdrop and a 72% alpha background -- and a
      composited layer with a backdrop-filter over a transparent native window renders see-through.
      Whether the render beat the compositor decided whether you saw it, which is why it was
      intermittent. Making the drag state itself opaque closes the race. */
   background: var(--material-opaque);
-  backdrop-filter: none;
 }
 /* The same compositor race fires wherever a .win can be layer-promoted while blurred: during its
    open animation, and permanently for windows whose body holds an iframe (the iframe forces its
@@ -268,8 +289,12 @@
 .win.opening,
 .win.heavy {
   background: var(--material-opaque);
-  backdrop-filter: none;
 }
+/* Opaque means opaque: the backdrop layer goes with the filter it used to carry on .win. */
+.win.dragging::before,
+.win.resizing::before,
+.win.opening::before,
+.win.heavy::before { display: none; }
 /* `translate`, not `transform`: geometry lives on the standalone property (see rectStyle) so the
    win-open transform animation cannot yank a new window to the plane origin. */
 .win:not(.dragging):not(.resizing) {
@@ -318,6 +343,10 @@
 /* The grip is now a child of the strip, so rebase it onto the strip's box. */
 .win-move .win-grip { top: 2px; left: 0; }
 
+/* The grip used to draw six dots as the move hint. They read as clutter on every window at once, so
+   the grip is now an empty slot that only ever holds the status glyph -- the whole top edge
+   (.win-move) is still the move target, and it carries the cursor and the tooltip. Pointer-transparent
+   so a grab that lands on the glyph still reaches the strip underneath. */
 .win-grip {
   position: absolute;
   top: 6px;
@@ -327,24 +356,12 @@
   height: 18px;
   display: grid;
   place-items: center;
-  border-radius: 6px;
   color: var(--text-muted);
-  opacity: 0.32;
-  cursor: grab;
-  touch-action: none;
+  pointer-events: none;
   user-select: none;
-  transition: opacity var(--dur-hover) ease, background var(--dur-hover) ease;
 }
-.win:hover .win-grip,
-.win.focused .win-grip,
-.win-grip:focus-visible { opacity: 1; }
-.win-grip:hover { background: var(--hover); }
-.win.dragging .win-grip { cursor: grabbing; }
-/* A status glyph takes the dots' place, so the signal is never colour alone (contract §8). */
-.win-grip:has(.ring) { opacity: 1; }
-.win-grip:has(.ring) .win-grip-dots { display: none; }
+/* A status glyph lives here, so the signal is never colour alone (contract §8). */
 .win-grip .ring-badge { display: none; }
-.win-grip-dots { display: grid; place-items: center; }
 
 /* ---------- window menu ---------- */
 
@@ -398,7 +415,10 @@
   content-visibility: auto;
   contain-intrinsic-size: auto 320px;
 }
-.win:not(.focused) .win-body { opacity: 0.92; }
+/* This used to be `opacity: 0.92`, which cost every unfocused window a render surface of its own and
+   drew its text at 92% alpha -- soft, washed-out glyphs on the windows you are reading most of the
+   time. Focus is already signalled by the border and the shadow (see `.win.focused`), so the body now
+   stays fully opaque and sharp whether or not the window has focus. */
 
 .win-ghost {
   height: 100%;
@@ -763,7 +783,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .win,
-  .win-grip,
   .win-menu,
   .popout-body,
   .popout-actions .icon-btn,

@@ -44,10 +44,16 @@ const IDLE: DragOverlay = { windowId: null, mode: null, guides: [], gaps: [], zo
 // The standalone `translate` property, not `transform`: the win-open/close animations keyframe
 // `transform`, and an animation on `transform` would replace an inline translate for its whole
 // duration — every new window played its opening at the plane origin, then slid home.
+/**
+ * Geometry is rounded on the way to the DOM only. A drag divides the pointer delta by the zoom, so a
+ * window settles on coordinates like 311.4 -- and a box at a fractional pixel smears the text inside
+ * it across two. The store keeps the exact rect (snapping and the guides are computed from it); this is
+ * the presentation layer deciding that half a pixel of position is worth less than sharp glyphs.
+ */
 export const rectStyle = (r: Rect): { translate: string; width: string; height: string } => ({
-  translate: `${r.x}px ${r.y}px`,
-  width: `${r.w}px`,
-  height: `${r.h}px`
+  translate: `${Math.round(r.x)}px ${Math.round(r.y)}px`,
+  width: `${Math.round(r.w)}px`,
+  height: `${Math.round(r.h)}px`
 })
 
 /** The one way a window's geometry reaches the DOM, so the drag and React agree on the convention. */

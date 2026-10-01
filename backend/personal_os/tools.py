@@ -18,6 +18,7 @@ from typing import Any, Awaitable, Callable
 
 import httpx
 
+from . import mac
 from .learn import SELF_LABELS
 from .microvm import Sandboxes
 from .repos import Documents, Graph, Memories
@@ -89,6 +90,11 @@ ALTERNATIVE = {
     "todo_add": "list the items in your reply so the user can add them",
     "todo_delete": "todo_update(done=true)",
     "board_add_card": "todo_add",
+    "find_files": "search_documents for files the user uploaded, or ask the user where the file is",
+    "read_local_file": "ask the user to upload the file or paste the text",
+    "run_shortcut": "tell the user which Shortcut to run and with what input",
+    "list_shortcuts": "ask the user for the exact Shortcut name",
+    "open_page": "fetch_url, which reads the page without running its scripts",
 }
 
 
@@ -305,6 +311,7 @@ class Toolbox:
             self._register_sandbox()
         if activity is not None:
             self._register_activity()
+        self._register_mac()
 
     def _google_ok(self) -> bool:
         return bool(self.google and self.google.status()["connected"])
@@ -316,6 +323,8 @@ class Toolbox:
             return self._google_ok() if google_ok is None else google_ok
         if spec and spec.group == "sandbox":  # needs a container runtime; the check is TTL-cached
             return self.sandboxes is not None and self.sandboxes.available()
+        if spec and name in MAC_TOOLS:
+            return _mac_available(name)
         return spec is not None
 
     # ---- permission model: mode per tool = on | ask | off ----
@@ -1092,3 +1101,82 @@ def _register_docs(self: Toolbox) -> None:
 
 Toolbox._register_docs = _register_docs  # type: ignore[attr-defined]
 Toolbox._register_activity = _register_activity  # type: ignore[attr-defined]
+
+
+# ---------------- the rest of the Mac: Spotlight, Shortcuts, offscreen pages ----------------
+MAC_TOOLS = ("find_files", "read_local_file", "list_shortcuts", "run_shortcut", "open_page")
+
+
+def _mac_available(name: str) -> bool:
+    if name == "open_page":  # the loader lives in the Electron main process; the backend alone cannot render a page
+        return mac.page_bridge.connected
+    if name == "read_local_file":
+        return True
+    if not mac.is_mac():
+        return False
+    return mac.has_binary("mdfind" if name == "find_files" else "shortcuts")
+
+
+def _register_mac(self: Toolbox) -> None:
+    R = self.specs.__setitem__
+
+    async def find_files(ctx: dict[str, Any], query: str, name_only: bool = False, folders: list[str] | None = None, limit: int = 20) -> Any:
+        try:
+            return await mac.mdfind(query, folders=folders, name_only=bool(name_only), limit=limit)
+        except mac.LocalPathError as e:
+            return tool_error(f"find_files: {e}", field="folders", expected="folders inside the home folder, e.g. ~/Downloads",
+                              example={"query": "lease agreement", "folders": ["~/Documents"]}, alternative=ALTERNATIVE["find_files"])
+        except ValueError as e:
+            return tool_error(f"find_files: {e}", field="query", example={"query": "invoice 2026", "name_only": True})
+    R("find_files", ToolSpec("find_files", "Spotlight search of the user's files on this Mac (default scope: ~/Desktop and ~/Documents). Matches contents and metadata, or file names only with name_only. Returns paths with kind, size and modified time; read one with read_local_file.",
+        _obj({"query": {"type": "string", "description": "Words to look for, or a Spotlight query such as kMDItemContentType == 'com.adobe.pdf'"},
+              "name_only": {"type": "boolean", "default": False, "description": "Match file names only"},
+              "folders": {"type": "array", "items": {"type": "string"}, "description": "Search these folders instead, e.g. ~/Downloads"},
+              "limit": {"type": "integer", "default": 20}}, ["query"]), find_files, "mac",
+        examples=[{"query": "lease agreement"}, {"query": "resume", "name_only": True}, {"query": "boarding pass", "folders": ["~/Downloads"], "limit": 5}]))
+
+    async def read_local_file(ctx: dict[str, Any], path: str, offset: int = 0, length: int = 8000) -> Any:
+        try:
+            return await asyncio.to_thread(mac.read_local, path, offset, length)
+        except mac.LocalPathError as e:
+            return tool_error(f"read_local_file: {e}", field="path", expected="a path find_files returned",
+                              example={"path": "~/Documents/notes.txt"}, alternative=ALTERNATIVE["read_local_file"])
+        except ValueError as e:  # extract_text: a binary format it cannot read
+            return tool_error(f"read_local_file: {e}", field="path", expected="a text, markdown, PDF or .docx file",
+                              alternative=ALTERNATIVE["read_local_file"])
+    R("read_local_file", ToolSpec("read_local_file", "Read the text of a file on this Mac (text, markdown, code, PDF or .docx), or list a folder. Home folder only; hidden folders and ~/Library are off limits. Page through long files with offset.",
+        _obj({"path": {"type": "string", "description": "Absolute or ~/ path, usually from find_files"},
+              "offset": {"type": "integer", "default": 0}, "length": {"type": "integer", "default": 8000}}, ["path"]), read_local_file, "mac",
+        examples=[{"path": "~/Documents/Lease 2026.pdf"}, {"path": "~/Desktop/notes.md", "offset": 8000}], taints=True))
+
+    async def list_shortcuts(ctx: dict[str, Any], folder: str | None = None) -> Any:
+        names = await mac.list_shortcuts(folder)
+        return page(names, limit=100, key="shortcuts")
+    R("list_shortcuts", ToolSpec("list_shortcuts", "List the user's Apple Shortcuts by name, optionally only one Shortcuts folder. Use it to get the exact name for run_shortcut.",
+        _obj({"folder": {"type": "string"}}, []), list_shortcuts, "mac", examples=[{}, {"folder": "Grain"}]))
+
+    async def run_shortcut(ctx: dict[str, Any], name: str, input: str | None = None, timeout: int = 60) -> Any:
+        try:
+            return await mac.run_shortcut(name, input, timeout=max(5, min(int(timeout), 300)))
+        except ValueError as e:
+            return tool_error(f"run_shortcut: {e}", field="name", example={"name": "Add to Reading List", "input": "https://example.com"})
+    R("run_shortcut", ToolSpec("run_shortcut", "Run one of the user's Apple Shortcuts by exact name, optionally passing text as its input, and return its output. A Shortcut acts with the permissions the user gave it (Messages, Reminders, Home…), so this is how you reach other Mac apps.",
+        _obj({"name": {"type": "string", "description": "Exact name from list_shortcuts"},
+              "input": {"type": "string", "description": "Text passed as the Shortcut Input"},
+              "timeout": {"type": "integer", "default": 60, "description": "seconds, max 300"}}, ["name"]), run_shortcut, "mac", "external",
+        examples=[{"name": "Log Water"}, {"name": "Add to Reading List", "input": "https://example.com/article"}]))
+
+    async def open_page(ctx: dict[str, Any], url: str, max_chars: int = 20000) -> Any:
+        try:
+            cur, host = _check_url(url, ctx, self.settings())
+            await _resolve(host)
+        except UrlBlocked as e:
+            return tool_error(f"open_page refused {url}: {str(e).replace('fetch_url', 'open_page')}", field="url",
+                              alternative=e.alternative or ALTERNATIVE["open_page"])
+        return await mac.page_bridge.open_page(cur, max_chars=max_chars)
+    R("open_page", ToolSpec("open_page", "Load a web page in an offscreen browser (its own cookies, separate from the user's) and return its title and visible text. Use it when a page needs JavaScript and fetch_url came back empty. Read-only: it never clicks or fills in forms.",
+        _obj({"url": {"type": "string"}, "max_chars": {"type": "integer", "default": 20000}}, ["url"]), open_page, "web", "network",
+        examples=[{"url": "https://example.com/app/pricing"}], taints=True))
+
+
+Toolbox._register_mac = _register_mac  # type: ignore[attr-defined]

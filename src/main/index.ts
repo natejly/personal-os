@@ -4,6 +4,7 @@ import { join } from 'path'
 import { backendStatus, backendToken, backendUrl, startBackend, stopBackend } from './backend'
 import { registerBus } from './bus'
 import { guardNavigation } from './navigation'
+import { startPageBridge, stopPageBridge } from './pagefetch'
 import { gather, registerPopouts, restorePopouts, setFrontListener, toggleFront } from './popouts'
 import { registerShortcuts } from './shortcuts'
 import { createTray } from './tray'
@@ -251,6 +252,7 @@ app.whenReady().then(async () => {
   } catch (e) {
     console.error('[main] backend failed to start:', (e as Error).message)
   }
+  await startPageBridge() // open_page's offscreen loader; registers itself with the backend
   // After the backend, so the stored accelerator wins over the default; still before any renderer exists.
   registerShortcuts(() => win, await storedGather())
   createWindow()
@@ -261,4 +263,7 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => {
   if (!isMac) app.quit()
 })
-app.on('before-quit', stopBackend)
+app.on('before-quit', () => {
+  stopPageBridge()
+  stopBackend()
+})

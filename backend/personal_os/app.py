@@ -26,7 +26,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 from pydantic import AfterValidator, BaseModel, Field
 
 from . import activity, assist, llm, mac, mcp_eval, tools
-from . import compaction
+from . import compaction, otel_export
 from .context import build_context, estimate_tokens, layout_messages
 from .db import Database, data_dir_from_env, new_id
 from .extract_text import extract_text
@@ -270,6 +270,7 @@ for _m in modules:
         app.include_router(_r)
 usage = Usage(db)
 pricing = Pricing()
+app.include_router(otel_export.router(db, lambda: settings()))
 compactor = compaction.Compactor(db)
 app.include_router(compaction.router(compactor, convos, lambda: settings()))
 
@@ -1053,7 +1054,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                        "history_messages": len(history)})
     compact_span: dict[str, Any] | None = None
     if cinfo.get("compacted"):
-        compact_span = tracer.start("compact", "Compact history", {"kind": "history"})
+        compact_span = tracer.start("compact", "Compact history", {"kind": "history"}, parent=cspan)
         tracer.end(compact_span, {k: cinfo[k] for k in ("tokens_before", "tokens_after", "summarized")})
 
     am = convos.add_message(conv_id, "assistant", "", model=model)
@@ -1251,11 +1252,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             n_cleared, n_saved = compaction.microcompact(messages, _int_setting(cfg, "microKeep", 3), _int_setting(cfg, "contextWindow", 128000),
                                                          float(cfg.get("microAt", 0.5)))
             if n_cleared:
-                mspan = tracer.start("compact", "Clear old tool results", {"kind": "micro"})
+                mspan = tracer.start("compact", "Clear old tool results", {"kind": "micro"}, parent=cspan)
                 tracer.end(mspan, {"cleared": n_cleared, "tokens_saved": n_saved})
                 yield "span", {"message_id": am["id"], "span": mspan}
             _reinject_plan()  # last message in the context, after the previous round's tool results
             lspan = tracer.start("llm", model, {"round": _round, "messages": len(messages), "tools": len(tool_schemas)})
+            round_span = lspan  # the tool calls below nest under it
             yield "span", {"message_id": am["id"], "span": lspan}
             first_token: int | None = None
             async for ev in llm.stream_chat(cfg, model, messages, tool_schemas or None,
@@ -1419,7 +1421,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                     "needs_approval": asks, "forced": forced, "proposal": proposing or None,
                                     "plan": {"plan_id": claimed["plan_id"], "idx": claimed["idx"], "title": claimed["title"]} if claimed else None}
                 tspan = tracer.start("tool", c["name"], {"round": _round, "arguments": _short(args), "mode": mode, "forced": forced,
-                                                         "plan_step": f"{claimed['plan_id']}#{claimed['idx']}" if claimed else None})
+                                                         "plan_step": f"{claimed['plan_id']}#{claimed['idx']}" if claimed else None},
+                                 parent=round_span)
                 yield "span", {"message_id": am["id"], "span": tspan}
                 t0 = time.time()
                 decision = "allow"
@@ -1619,6 +1622,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     reasoning = "".join(rbuf).strip() or None
     convos.finish_message(am["id"], text, error, used, tool_events, tracer.spans, reasoning)
     convos.touch(conv_id)
+    otel_export.export_in_background(cfg, conv_id, am["id"], model, project["name"] if project else None, tracer.spans, used, text)
     if tool_ctx["tainted"]:
         srcs = sorted(set(tool_ctx["taint_sources"]))
         if not conv["settings"].get("tainted") or srcs != sorted(set(conv["settings"].get("taint_sources") or [])):

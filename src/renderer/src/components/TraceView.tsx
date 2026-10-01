@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Layers, Sparkles, Wrench, Wand2, Shrink, AlertCircle, ChevronRight } from 'lucide-react'
+import { api } from '../lib/api'
 import type { Span, SpanKind } from '@shared/types'
 
 /** Waterfall view of one assistant reply's execution trace. */
@@ -32,12 +33,14 @@ function detail(s: Span): string {
       return parts.length ? parts.join(' · ') : 'nothing retrieved'
     }
     case 'llm': {
-      const u = (m.usage as { prompt_tokens?: number; completion_tokens?: number } | undefined) ?? {}
+      const u = (m.usage as { prompt_tokens?: number; completion_tokens?: number; cached_tokens?: number; reasoning_tokens?: number } | undefined) ?? {}
       const calls = (m.tool_calls as string[] | undefined) ?? []
       return [
         `round ${n('round')}`,
         m.ttft_ms != null && `first token ${fmtMs(Number(m.ttft_ms))}`,
         (u.prompt_tokens || u.completion_tokens) && `${(u.prompt_tokens ?? 0).toLocaleString()} in / ${(u.completion_tokens ?? 0).toLocaleString()} out`,
+        u.cached_tokens && `${u.cached_tokens.toLocaleString()} cached`,
+        u.reasoning_tokens && `${u.reasoning_tokens.toLocaleString()} reasoning`,
         calls.length && `→ ${calls.join(', ')}`,
         s.end === null && 'generating…'
       ].filter(Boolean).join(' · ')
@@ -57,7 +60,17 @@ function detail(s: Span): string {
   }
 }
 
-export default function TraceView({ spans, live, model }: { spans: Span[]; live: boolean; model: string | null }): JSX.Element {
+async function downloadOtlp(messageId: string): Promise<void> {
+  const payload = await api.messageOtlp(messageId)
+  const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `grain-trace-${messageId}.otlp.json`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+export default function TraceView({ spans, live, model, messageId }: { spans: Span[]; live: boolean; model: string | null; messageId?: string }): JSX.Element {
   const [now, setNow] = useState(Date.now())
   const [open, setOpen] = useState<Record<string, boolean>>({})
   const running = live || spans.some((s) => s.end === null)
@@ -72,6 +85,7 @@ export default function TraceView({ spans, live, model }: { spans: Span[]; live:
   const t1 = Math.max(...sorted.map((s) => s.end ?? now), t0 + 1)
   const total = t1 - t0
   const sum = traceSummary(spans)
+  const ids = useMemo(() => new Set(spans.map((s) => s.id)), [spans])
 
   return (
     <div className="trace">
@@ -83,13 +97,14 @@ export default function TraceView({ spans, live, model }: { spans: Span[]; live:
         {sum.errors > 0 && <span className="err"><AlertCircle size={11} /> {sum.errors} failed</span>}
       </div>
       {model && <div className="trace-model">{model}</div>}
+      {messageId && !live && <button className="link small" onClick={() => void downloadOtlp(messageId)}>Export OTLP JSON</button>}
       <ol className="trace-rows">
         {sorted.map((s) => {
           const end = s.end ?? now
           const left = ((s.start - t0) / total) * 100
           const width = Math.max(((end - s.start) / total) * 100, 0.8)
           return (
-            <li key={s.id} className={`trace-row ${s.kind} ${s.error ? 'error' : ''} ${s.end === null ? 'running' : ''}`}>
+            <li key={s.id} className={`trace-row ${s.kind} ${s.error ? 'error' : ''} ${s.end === null ? 'running' : ''} ${s.parent_id && ids.has(s.parent_id) ? 'child' : ''}`}>
               <button className="trace-head" onClick={() => setOpen((o) => ({ ...o, [s.id]: !o[s.id] }))}>
                 <ChevronRight size={11} className={open[s.id] ? 'rot90' : ''} />
                 <span className="trace-icon">{ICON[s.kind]}</span>

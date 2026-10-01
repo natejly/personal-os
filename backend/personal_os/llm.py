@@ -96,6 +96,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "compactKeepRecent": 8,
     "microKeep": 3,
     "microAt": 0.5,
+    # Opt-in OpenTelemetry GenAI export (otel_export.py). Off by default; replaced whole through PUT /settings.
+    # Loopback endpoints only unless allowRemote; no message content unless includeContent.
+    "otelExport": {"enabled": False, "endpoint": "", "headers": {}, "includeContent": False, "allowRemote": False, "timeoutSeconds": 5},
     # Per-reply budgets; 0 = unlimited. A run that hits one still writes a final answer, marked partial.
     "maxRunTokens": 200_000,
     "maxRunSeconds": 300,

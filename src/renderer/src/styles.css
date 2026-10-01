@@ -1342,6 +1342,7 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .trace-model { font-family: var(--mono); font-size: 11px; color: var(--text-faint); margin-bottom: 10px; }
 .trace-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .trace-row { border-radius: 6px; background: var(--hover); padding: 4px 6px 6px; --span: var(--chart-1); }
+.trace-row.child { margin-left: 14px; }
 .trace-row.llm { --span: var(--accent); }
 .trace-row.tool { --span: var(--chart-3); }
 .trace-row.context { --span: var(--chart-7); }

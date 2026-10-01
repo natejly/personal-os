@@ -237,7 +237,7 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
         lastCtx ? <ContextUsedView ctx={lastCtx} /> : <p className="muted ctx-empty">Send a message to see its context.</p>
       ) : tab === 'trace' ? (
         traceMsg ? (
-          <TraceView spans={traceMsg.trace ?? []} live={streamingMessageId === traceMsg.id} model={traceMsg.model} />
+          <TraceView spans={traceMsg.trace ?? []} live={streamingMessageId === traceMsg.id} model={traceMsg.model} messageId={traceMsg.id} />
         ) : (
           <p className="muted ctx-empty">Send a message to see its trace.</p>
         )

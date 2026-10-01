@@ -380,6 +380,18 @@ export interface Span {
   end: number | null
   meta: Record<string, unknown>
   error: string | null
+  /** The span this one nests under (a tool under its model round). Absent on older traces. */
+  parent_id?: string
+}
+
+/** Opt-in OpenTelemetry export of finished replies (otel_export.py). */
+export interface OtelExportConfig {
+  enabled: boolean
+  endpoint: string
+  headers: Record<string, string>
+  includeContent: boolean
+  allowRemote: boolean
+  timeoutSeconds: number
 }
 
 /** GET /conversations/{id}/context-meter: the replayed history against the model window (estimates, len/4). */
@@ -826,6 +838,7 @@ export interface Settings {
   maxToolRounds: number
   /** Keep the system prompt stable and put per-turn retrieval beside the newest message (prompt caching). Default on. */
   cacheLayout?: boolean
+  otelExport?: OtelExportConfig
   /** Context management (compaction.py): window in tokens, thresholds as fractions of it. */
   contextWindow?: number
   autoCompact?: boolean

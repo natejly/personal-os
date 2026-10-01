@@ -299,6 +299,8 @@ export const api = {
     setPrices: (modelPrices: Record<string, { input: number; output: number }>) =>
       req<{ repriced: number; prices: Record<string, ModelPrice> }>('/usage/prices', { method: 'PUT', body: json({ modelPrices }) })
   },
+  messageOtlp: (messageId: string) => req<unknown>(`/messages/${messageId}/otlp`),
+  testTraceExport: () => req<{ sent: boolean; reason?: string; status: number | null; error: string | null }>('/traces/export-test', { method: 'POST' }),
   contextMeter: (conversationId: string) => req<ContextMeter>(`/conversations/${conversationId}/context-meter`),
   compactConversation: (conversationId: string, focus?: string) =>
     req<{ compacted: boolean }>(`/conversations/${conversationId}/compact`, { method: 'POST', body: json({ focus: focus ?? null }) }),

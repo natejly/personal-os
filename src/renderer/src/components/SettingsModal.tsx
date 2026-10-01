@@ -12,6 +12,7 @@ import { ToolGlobalToggles } from './ToolPermissions'
 import GoogleSettings from './GoogleSettings'
 import MeetingSettings from './MeetingSettings'
 import UsageView from './UsageView'
+import TraceExportSettings from './TraceExportSettings'
 import MemoryPanel from './MemoryPanel'
 import DocumentsView from './DocumentsView'
 import ScopeSelect from './ScopeSelect'
@@ -345,6 +346,7 @@ export default function SettingsModal(): JSX.Element {
               {shortcut && !shortcut.ok && (
                 <p className="test-msg fail">{shortcut.message ?? `${shortcut.accelerator} could not be registered.`} The menubar icon gathers them too.</p>
               )}
+              <TraceExportSettings value={draft.otelExport} onChange={(otelExport) => patch({ otelExport })} />
             </section>}
           </div>
         </div>

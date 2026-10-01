@@ -43,6 +43,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     ),
     "extractionModel": "",
     "autoLearn": True,
+    # Bank long messages the user writes as style samples and keep their voice profile current (style.py).
+    # Independent of autoLearn: wanting the app to learn facts is not the same as wanting it to copy your voice.
+    "learnStyle": True,
     "theme": "dark",
     "mode": "classic",
     "gatherShortcut": "Control+Alt+Command+Space",

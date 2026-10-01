@@ -618,6 +618,39 @@ button.tag:disabled { cursor: default; }
 .mem-meta select { padding: 2px 6px; font-size: 11px; border-radius: 6px; }
 .mem-actions { display: flex; flex-direction: column; gap: 2px; }
 
+/* ---------- Voice (writing style) ---------- */
+.style-body { display: flex; flex-direction: column; gap: 18px; }
+.style-head { display: flex; gap: 16px; align-items: flex-start; }
+.style-head-text { flex: 1; min-width: 0; }
+.style-head-text h4 { margin: 0 0 4px; display: flex; align-items: center; gap: 6px; font-size: 14px; }
+.style-head-text p { margin: 0; }
+.style-head-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
+/* Same switch as .toggle-row, inline beside a button: the real checkbox is visually hidden. */
+.toggle-inline { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-muted); white-space: nowrap; position: relative; }
+.toggle-inline input { position: absolute; width: 1px; height: 1px; margin: 0; opacity: 0; pointer-events: none; }
+.toggle-inline input:checked + .switch { background: var(--ok); }
+.toggle-inline input:checked + .switch::after { transform: translateX(14px); }
+.toggle-inline input:focus-visible + .switch { outline: 2px solid var(--accent); outline-offset: 2px; }
+.style-meta { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.style-lines h5 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.style-lines h5 .muted { text-transform: none; letter-spacing: 0; }
+.style-lines ul { list-style: none; margin: 0 0 8px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.style-lines li { display: flex; gap: 6px; align-items: center; }
+.style-lines li input { flex: 1; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 7px 10px; outline: 0; font: inherit; color: inherit; }
+.style-lines li input:focus { border-color: var(--accent); }
+.style-lines textarea { width: 100%; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 8px 10px; outline: 0; resize: vertical; font: inherit; color: inherit; line-height: 1.5; }
+.style-lines textarea:focus { border-color: var(--accent); }
+.style-traits { display: flex; flex-wrap: wrap; gap: 6px; }
+.style-traits .tag { max-width: 100%; }
+.style-paste { align-items: flex-end; }
+.style-paste textarea { flex: 1; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 8px 10px; outline: 0; resize: vertical; font: inherit; color: inherit; }
+.style-paste textarea:focus { border-color: var(--accent); }
+.style-sample { display: flex; gap: 8px; padding: 10px 12px; border-radius: 10px; margin-bottom: 8px; background: var(--bg-elev); }
+.style-sample-main { flex: 1; min-width: 0; }
+.style-sample-main p { margin: 0 0 6px; line-height: 1.5; cursor: pointer; white-space: pre-wrap; }
+.style-danger { display: flex; gap: 14px; flex-wrap: wrap; }
+.link.danger { color: var(--danger); }
+
 /* ---------- Documents ---------- */
 .doc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
 .doc-card { border-radius: 10px; padding: 12px; background: var(--bg-elev); cursor: pointer; display: flex; flex-direction: column; gap: 6px; }
@@ -724,6 +757,9 @@ textarea.instructions:focus { border-color: var(--accent); }
 .memory-body.mode-split .mem-row { padding: 9px 10px; font-size: 12.5px; }
 .memory-body.mode-split .mem-meta { flex-wrap: wrap; row-gap: 4px; }
 .memory-body.mode-split .empty-hint.big { padding: 32px 0; }
+/* Voice takes the whole panel: a profile has nothing to sit beside. */
+.memory-body.mode-style { overflow: hidden; }
+.memory-body.mode-style .style-body { max-width: 760px; }
 
 /* Three columns (graph + inspector + memories) need a narrower list on small windows. */
 @media (max-width: 1400px) { .memory-body.mode-split .mem-pane { width: 340px; } }

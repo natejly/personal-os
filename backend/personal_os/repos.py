@@ -84,7 +84,7 @@ class Projects:
 
 
 # ---------------- Conversations ----------------
-DEFAULT_CONV_SETTINGS = {"effort": "default", "useMemory": True, "useGraph": True, "useDocuments": True, "autoLearn": True, "useTools": True, "tools": {}}
+DEFAULT_CONV_SETTINGS = {"effort": "default", "useMemory": True, "useGraph": True, "useDocuments": True, "useStyle": True, "autoLearn": True, "useTools": True, "tools": {}}
 
 
 class Conversations:

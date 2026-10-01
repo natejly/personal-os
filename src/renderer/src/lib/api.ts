@@ -1,6 +1,6 @@
 import type {
   ChatEvent, ToolInfo, Todo, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, DriveFile, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Recap, Conversation, ConversationSettings, ContextUsed, Document, GraphData, GraphEdge, GraphNode, Message,
-  Memory, ModelInfo, ModelPrice, Settings, Project, UsageReport, ChatRunStarted, RunInfo,
+  Memory, ModelInfo, ModelPrice, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo,
   Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
   Doc, FullDoc, DocRevision,
   ActivityConfig, ActivityContextFile, ActivityEvent, ActivityStatus, ActivitySummary
@@ -189,6 +189,17 @@ export const api = {
     update: (id: string, patch: { content?: string; kind?: string; pinned?: boolean; project_id?: string | null; move_to_global?: boolean }) =>
       req<Memory>(`/memories/${id}`, { method: 'PUT', body: json(patch) }),
     delete: (id: string) => req(`/memories/${id}`, { method: 'DELETE' })
+  },
+  style: {
+    get: (s: Scope) => req<StyleState>(`/style?project_id=${encodeURIComponent(s === 'all' ? 'personal' : s)}`),
+    update: (projectId: string | null, patch: Partial<Pick<StyleProfile, 'summary' | 'guidelines' | 'traits' | 'phrases' | 'avoid'>> & { enabled?: boolean }) =>
+      req<StyleState>('/style', { method: 'PUT', body: json({ project_id: projectId, ...patch }) }),
+    learn: (projectId: string | null, model?: string) => req<StyleState>('/style/learn', { method: 'POST', body: json({ project_id: projectId, model }) }),
+    reset: (projectId: string | null, withSamples = false) =>
+      req<StyleState>(`/style?project_id=${encodeURIComponent(projectId ?? 'personal')}&with_samples=${withSamples}`, { method: 'DELETE' }),
+    samples: (s: Scope) => req<StyleSample[]>(`/style/samples?project_id=${encodeURIComponent(s === 'all' ? 'personal' : s)}`),
+    addSample: (projectId: string | null, text: string) => req<StyleSample>('/style/samples', { method: 'POST', body: json({ project_id: projectId, text }) }),
+    deleteSample: (id: string) => req(`/style/samples/${id}`, { method: 'DELETE' })
   },
   graph: {
     get: (s: Scope) => req<GraphData>(`/graph?${scope(s)}`),

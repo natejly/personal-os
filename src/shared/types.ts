@@ -19,6 +19,8 @@ export interface ContextUsed {
   chunks: { chunk_id: string; document_id: string; name: string; idx: number; text: string }[]
   /** The activity-monitor block, verbatim; null when the monitor is off or the chat opted out. */
   activity: string | null
+  /** The writing-style profile this reply drafted with; null when there is none or the chat opted out. */
+  style: { project_id: string | null; summary: string; guidelines: string[]; block: string } | null
   system_prompt: string
   tokens_estimate: number
 }
@@ -110,6 +112,8 @@ export interface ConversationSettings {
   /** Inject what the activity monitor observed. Defaults on, but only ever has an effect while the
    *  monitor is running and its own `injectContext` is left on. */
   useActivity: boolean
+  /** Inject the writing-style profile, so drafts sound like the user. */
+  useStyle: boolean
   autoLearn: boolean
   useTools: boolean
   tools: Record<string, ToolOverride>
@@ -138,6 +142,48 @@ export interface Memory {
   pinned: number
   created_at: number
   updated_at: number
+}
+
+/** How the user writes, learned from samples of their own writing. One per scope. See backend style.py. */
+export interface StyleProfile {
+  id: string
+  project_id: string | null
+  summary: string
+  guidelines: string[]
+  traits: Record<string, string>
+  phrases: string[]
+  avoid: string[]
+  enabled: number
+  /** Hand-edited: auto-relearn leaves it alone until the user asks for a fresh read. */
+  edited: number
+  sample_count: number
+  sample_chars: number
+  model: string
+  created_at: number
+  updated_at: number
+}
+
+/** One passage of the user's own writing, kept so a profile can be re-derived and audited. */
+export interface StyleSample {
+  id: string
+  project_id: string | null
+  text: string
+  source: 'chat' | 'doc' | 'paste' | string
+  ref: string
+  chars: number
+  /** Already folded into the current profile. */
+  folded: number
+  created_at: number
+}
+
+export interface StyleState {
+  /** This scope's own profile, null if it has none. */
+  profile: StyleProfile | null
+  stats: { samples: number; chars: number; pending: number }
+  /** True when a project scope is falling back to the personal voice. */
+  inherited: boolean
+  /** What a chat in this scope would actually draft with. */
+  effective: StyleProfile | null
 }
 
 export interface GraphNode {
@@ -370,6 +416,8 @@ export interface Settings {
   systemPrompt: string
   extractionModel: string
   autoLearn: boolean
+  /** Bank long messages and saved docs as writing samples, and keep the voice profile current. */
+  learnStyle: boolean
   theme: 'dark' | 'light' | 'system'
   /** Legacy, pre-spaces global mode. Read once by init() (→ initial view 'canvas') and reset to 'classic'; nothing else reads it. */
   mode?: 'classic' | 'canvas'
@@ -445,6 +493,7 @@ export type ChatEvent =
   | { event: 'done'; data: { id: string; error: string | null; context_used: ContextUsed; tool_events: ToolEvent[]; trace: Span[]; stopped: boolean; partial?: PartialReason | null; tainted?: boolean; taint_sources?: string[] } }
   | { event: 'taint'; data: { message_id: string; source: string } }
   | { event: 'learned'; data: { memories: Memory[]; nodes: GraphNode[]; edges: GraphEdge[] } }
+  | { event: 'style_learned'; data: { project_id: string | null; profile: StyleProfile | null; sample_id: string } }
   | { event: 'learn_error'; data: { message: string } }
   | { event: 'error'; data: { message: string } }
 

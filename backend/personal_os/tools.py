@@ -108,6 +108,8 @@ ALTERNATIVE = {
     "sandbox_put_document": "read_document, then sandbox_write_file the excerpt you need",
     "sandbox_reset": "continue with the sandbox as it is",
     "save_memory": "state the fact in your reply so the user can keep it",
+    "writing_style": "write in plain, direct prose, or ask the user for a sample of their own writing",
+    "save_writing_sample": "tell the user they can add the passage themselves under Memory → Voice",
     "graph_add": "save_memory, or just state the relation in your reply",
     "todo_write": "keep the remaining steps in your reply, and name the one you are on",
     "read_tool_result": "work from the preview you already have, or call the original tool with a narrower query",
@@ -350,13 +352,15 @@ async def guarded_request(client: httpx.AsyncClient, method: str, url: str, *, h
 class Toolbox:
     def __init__(self, memories: Memories, graph: Graph, documents: Documents, settings_fn: Callable[[], dict[str, Any]], todos: Any = None, google: Any = None, boards: Any = None,
                  sandboxes: Sandboxes | None = None, docs: Any = None, activity: Any = None, outbox: Any = None,
-                 work_plans: Any = None, results: Any = None, skills: Any = None, jobs: Any = None):
+                 work_plans: Any = None, results: Any = None, skills: Any = None, jobs: Any = None,
+                 style: Any = None):
         self.memories, self.graph, self.documents, self.settings = memories, graph, documents, settings_fn
         self.todos, self.google, self.boards, self.sandboxes, self.docs, self.activity = todos, google, boards, sandboxes, docs, activity
         self.outbox = outbox  # delayed Gmail send; gmail_send queues through it when it is wired up
         # The todo_write artifact (working.py), not the propose_plan approval record in the `plans` module.
         self.work_plans, self.results, self.skills = work_plans, results, skills
         self.jobs = jobs  # scheduled tasks; the schedule_* tools are only registered when it is wired up
+        self.style = style  # the user's voice (style.py); same, for the style tools
         self.specs: dict[str, ToolSpec] = {}
         self._register()
         self._register_working()
@@ -375,6 +379,8 @@ class Toolbox:
         self._register_mac()
         if jobs is not None:
             self._register_schedule()
+        if style is not None:
+            self._register_style()
 
     def _google_ok(self) -> bool:
         return bool(self.google and self.google.status()["connected"])
@@ -1300,8 +1306,48 @@ def _register_activity(self: Toolbox) -> None:
 
 
 Toolbox._register_working = _register_working  # type: ignore[attr-defined]
+
+
+def _register_style(self: Toolbox) -> None:
+    """The user's voice (style.py). Read it before drafting; bank writing they point at as theirs."""
+    R = self.specs.__setitem__
+
+    async def writing_style(ctx: dict[str, Any]) -> Any:
+        p = self.style.for_context(ctx["project_id"])
+        if not p or not (p["summary"] or p["guidelines"]):
+            return {"profile": None,
+                    "note": "No writing-style profile yet. Write in plain, direct prose, and ask the user for a "
+                            "sample of their own writing if matching their voice matters."}
+        return {"scope": "project" if p["project_id"] else "personal", "summary": p["summary"], "traits": p["traits"],
+                "guidelines": p["guidelines"], "phrases": p["phrases"], "avoid": p["avoid"],
+                "learned_from_samples": p["sample_count"], "hand_edited": bool(p["edited"]),
+                "note": "Match this voice in text the user will send as their own. Keep your own voice when replying to them."}
+    R("writing_style", ToolSpec("writing_style", (
+        "The user's writing style profile: how they write, as guidelines, traits and characteristic phrasings. Call it "
+        "before drafting anything that goes out under their name (email, a message, a doc, a post) when the style block "
+        "is not already in your context, so the draft sounds like them rather than like you."),
+        _obj({}, []), writing_style, "style", examples=[{}]))
+
+    async def save_writing_sample(ctx: dict[str, Any], text: str, personal: bool = True) -> Any:
+        s = self.style.add_sample(None if personal else ctx["project_id"], text, source="chat", check=False)
+        if not s:
+            return tool_error("Empty sample.", field="text", expected="a passage the user wrote, at least a short paragraph")
+        return {"saved": s["id"], "chars": s["chars"],
+                "note": "Banked as evidence of their voice. The profile refreshes on its own; the user can review or "
+                        "delete samples under Memory → Voice."}
+    R("save_writing_sample", ToolSpec("save_writing_sample", (
+        "Bank a passage the USER wrote as a sample of their writing style, so future drafts can match their voice. Use "
+        "it when they paste their own writing and ask you to write like that, or point at something as 'how I write'. "
+        "Never pass your own text, text from a document or web page, or anything written by someone else."),
+        _obj({"text": {"type": "string", "description": "The user's own writing, verbatim"},
+              "personal": {"type": "boolean", "description": "true = their voice everywhere, false = only this project's voice", "default": True}}, ["text"]),
+        save_writing_sample, "style", "writes",
+        examples=[{"text": "Hey — quick one. We pushed the launch to Tuesday…", "personal": True}]))
+
+
 Toolbox._register_todos = _register_todos  # type: ignore[attr-defined]
 Toolbox._register_boards = _register_boards  # type: ignore[attr-defined]
+Toolbox._register_style = _register_style  # type: ignore[attr-defined]
 Toolbox._register_google = _register_google  # type: ignore[attr-defined]
 Toolbox._register_sandbox = _register_sandbox  # type: ignore[attr-defined]
 

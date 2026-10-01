@@ -29,7 +29,8 @@ their own instructions, knowledge files, memories and graph.
   one key. Per-chat model picker. Markdown, code copy, regenerate, stop.
 - **Tools with permissions.** The assistant can search your documents, read and
   revise your docs, search
-  and save memory, traverse and extend the knowledge graph, search the web and
+  and save memory, traverse and extend the knowledge graph, read your writing
+  style before drafting as you, search the web and
   read pages, run Python in a sandbox, manage todos and kanban boards, and (once
   connected) read your Google Calendar, triage Gmail, draft or send email, and
   manage Google Tasks. Each tool has a mode: **on** (runs automatically),
@@ -40,14 +41,23 @@ their own instructions, knowledge files, memories and graph.
   timing, and every reply carries an execution trace.
 - **Projects.** Groups of chats with instructions, knowledge files, project
   memories and a project graph, layered on top of your personal ones.
-- **Memory.** One panel holding both halves of what the app remembers, over a
-  shared scope filter and search box, as a split view or either half alone:
+- **Memory.** One panel holding what the app remembers about you, over a shared
+  scope filter and search box — the first two halves side by side, either alone,
+  or the voice profile on its own:
   - *Memories* — facts, preferences and goals, auto-extracted after each reply
     or added by hand or by the assistant. Edit, pin, move between personal and
     project scope, forget.
   - *Knowledge graph* — entities and relations, auto-extracted and
     hand-editable in a force-directed view. Relevant subgraphs are injected
     into chats.
+  - *Voice* — how you write, learned from your own writing: long messages you
+    send and docs you save are banked as samples (short instructions, code and
+    quoted text are skipped), and turned into a summary, guidelines, traits and
+    characteristic phrasings. Injected when the assistant drafts something you
+    will send as your own — email, messages, docs — and explicitly *not* used
+    for its replies to you. Every guideline is editable and every sample
+    deletable; editing one stops auto-relearn overwriting it. Projects can have
+    their own voice. See [docs/writing-style.md](docs/writing-style.md).
 - **Documents.** Upload `.txt/.md/.pdf/.docx` and code files. Chunked,
   full-text indexed, best excerpts pulled into replies.
 - **Docs.** Writing of your own, in an editor rather than an upload box:

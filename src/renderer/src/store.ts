@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ApprovalDecision, PlanEdit, ActivityConfig, ActivityContextFile, ActivityEvent, ActivitySignal, ActivityStatus, ActivitySummary, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, Document, Effort, FullDoc, GraphData, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodoCalendarStatus, TodayDashboard, Recap, Job } from '@shared/types'
+import type { ApprovalDecision, PlanEdit, ActivityConfig, ActivityContextFile, ActivityEvent, ActivitySignal, ActivityStatus, ActivitySummary, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, Document, Effort, FullDoc, GraphData, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodoCalendarStatus, TodayDashboard, Recap, Job } from '@shared/types'
 import { api, backgroundStream, chatStream, setBase, type Scope } from './lib/api'
 import { currentSelection } from './lib/pageContext'
 import { finishStatus, mergeConversation, pickEvictions, reduceStatus, settleApprovals } from './sessionStatus'
@@ -22,8 +22,8 @@ export type View = 'home' | 'chat' | 'todos' | 'calendar' | 'mail' | 'boards' | 
 export type ClassicView = Exclude<View, 'canvas'>
 /** How the Docs editor splits its panes. */
 export type DocMode = 'edit' | 'split' | 'preview'
-/** How the Memory panel lays out its two halves: the memory list and the knowledge graph. */
-export type MemoryMode = 'split' | 'list' | 'graph'
+/** How the Memory panel lays out its halves: the memory list, the knowledge graph, the voice profile. */
+export type MemoryMode = 'split' | 'list' | 'graph' | 'style'
 export type ContextTab = 'last' | 'preview' | 'trace'
 export type { Scope, SessionStatus }
 
@@ -79,6 +79,9 @@ const writeExpanded = (paths: string[]): string[] => {
   } catch { /* a private window still gets a working tree, it just forgets */ }
   return paths
 }
+
+/** Writers need a scope a row can live in: 'all' and 'personal' both mean the personal voice. */
+const styleScope = (s: Scope): string | null => (s === 'all' || s === 'personal' ? null : s)
 
 const newSession = (conversation: Conversation): ChatSession =>
   ({ conversation, streaming: null, status: 'idle', finishedAt: null, pendingApprovals: 0, unread: 0, touchedAt: Date.now() })
@@ -154,6 +157,11 @@ export interface State {
   plans: Record<string, PlanStep[]>
   /** Procedural memory — candidates and approved skills. Loaded when the review surface opens. */
   skills: Skill[]
+  /** Writing style for the loaded scope: the profile a chat drafts with, and the samples behind it. */
+  style: StyleState | null
+  styleSamples: StyleSample[]
+  /** An LLM re-read of the samples is in flight (the Learn now button). */
+  styleLearning: boolean
 
   /** Docs: the markdown the user writes. List rows, plus the one open in the editor. */
   docs: Doc[]
@@ -254,6 +262,15 @@ export interface State {
 
   refreshGraph: () => Promise<void>
   refreshDocuments: () => Promise<void>
+
+  /** Writing style, for the loaded scope. `saveStyle` marks the profile hand-edited server-side. */
+  refreshStyle: () => Promise<void>
+  saveStyle: (patch: Parameters<typeof api.style.update>[1]) => Promise<void>
+  /** Re-read the samples now. Forced, so it also refreshes a hand-edited profile. */
+  learnStyle: () => Promise<void>
+  resetStyle: (withSamples?: boolean) => Promise<void>
+  addStyleSample: (text: string) => Promise<void>
+  deleteStyleSample: (id: string) => Promise<void>
 
   /** Status only - cheap enough to poll while the Activity panel is open. */
   refreshActivity: () => Promise<void>
@@ -589,6 +606,11 @@ export const useStore = create<State>((set, get) => {
           case 'plan':
             set((st) => ({ plans: { ...st.plans, [convId]: ev.data.steps } }))
             break
+          case 'style_learned':
+            // A banked sample is quiet; a refreshed voice profile is worth saying once.
+            if (ev.data.profile) get().toast('Updated how you write', 'learned')
+            void get().refreshStyle()
+            break
           case 'learn_error':
             get().toast(`Auto-learn failed: ${ev.data.message}`, 'error')
             break
@@ -646,7 +668,7 @@ export const useStore = create<State>((set, get) => {
   return {
     ready: false,
     backendError: null,
-    settings: { baseUrl: '', apiKey: '', defaultModel: '', systemPrompt: '', extractionModel: '', autoLearn: true, theme: 'dark', gatherShortcut: '', tools: {}, maxToolRounds: 8, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {} },
+    settings: { baseUrl: '', apiKey: '', defaultModel: '', systemPrompt: '', extractionModel: '', autoLearn: true, learnStyle: true, theme: 'dark', gatherShortcut: '', tools: {}, maxToolRounds: 8, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {} },
     models: [],
     modelsError: null,
     tools: [],
@@ -697,6 +719,9 @@ export const useStore = create<State>((set, get) => {
     documents: [],
     plans: {},
     skills: [],
+    style: null,
+    styleSamples: [],
+    styleLearning: false,
 
     activity: null,
     activityEvents: [],
@@ -834,7 +859,8 @@ export const useStore = create<State>((set, get) => {
     },
     loadScope: async (dataScope) => {
       set({ dataScope })
-      await Promise.all([get().refreshMemories(), get().refreshGraph(), get().refreshDocuments(), get().refreshDocs()])
+      await Promise.all([get().refreshMemories(), get().refreshGraph(), get().refreshDocuments(), get().refreshDocs(),
+                         get().refreshStyle().catch(() => undefined)])
     },
 
     refreshConversations: async () => set({ conversations: await api.conversations.list('all') }),
@@ -1263,6 +1289,60 @@ export const useStore = create<State>((set, get) => {
 
     refreshGraph: async () => set({ graph: await api.graph.get(get().dataScope) }),
     refreshDocuments: async () => set({ documents: await api.documents.list(get().dataScope) }),
+
+    // ---- writing style ----
+    // The scope here is the data scope the Memory panel loaded. 'all' has no voice of its own, so the
+    // API maps it to the personal one — the voice every chat falls back to anyway.
+    refreshStyle: async () => {
+      const scope = get().dataScope
+      const [style, styleSamples] = await Promise.all([
+        api.style.get(scope),
+        api.style.samples(scope).catch(() => [] as StyleSample[])
+      ])
+      set({ style, styleSamples })
+    },
+    saveStyle: async (patch) => {
+      try {
+        set({ style: await api.style.update(styleScope(get().dataScope), patch) })
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    learnStyle: async () => {
+      if (get().styleLearning) return
+      set({ styleLearning: true })
+      try {
+        const style = await api.style.learn(styleScope(get().dataScope), get().settings.extractionModel || undefined)
+        set({ style })
+        await get().refreshStyle()
+        get().toast('Re-read your writing', 'learned')
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      } finally {
+        set({ styleLearning: false })
+      }
+    },
+    resetStyle: async (withSamples = false) => {
+      try {
+        set({ style: await api.style.reset(styleScope(get().dataScope), withSamples) })
+        await get().refreshStyle()
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    addStyleSample: async (text) => {
+      try {
+        await api.style.addSample(styleScope(get().dataScope), text)
+        await get().refreshStyle()
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    deleteStyleSample: async (id) => {
+      await api.style.deleteSample(id)
+      set((s) => ({ styleSamples: s.styleSamples.filter((x) => x.id !== id) }))
+      await get().refreshStyle()
+    },
 
     // ---- activity monitor ----
     refreshActivity: async () => {

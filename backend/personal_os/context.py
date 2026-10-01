@@ -4,6 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from .repos import Documents, Graph, Memories
+from .style import context_block as style_block
 
 
 def estimate_tokens(text: str) -> int:
@@ -55,11 +56,12 @@ def build_context(
     activity: Any = None,
     skills: Any = None,
     page: dict[str, Any] | None = None,
+    style: Any = None,
 ) -> tuple[str, dict[str, Any]]:
     """Returns (system_prompt, context_used)."""
     parts: list[str] = [global_system_prompt.strip()] if global_system_prompt.strip() else []
     used: dict[str, Any] = {"memories": [], "nodes": [], "edges": [], "chunks": [], "project": None, "activity": None,
-                            "skills": [], "page": None}
+                            "skills": [], "page": None, "style": None}
 
     if project:
         used["project"] = {"id": project["id"], "name": project["name"]}
@@ -106,6 +108,16 @@ def build_context(
 
             parts.append(skill_block(approved))
             used["skills"] = [{"id": s["id"], "name": s["name"], "description": s["description"]} for s in approved[:MAX_INJECTED_SKILLS]]
+
+    # The user's own voice, for drafting on their behalf (see style.py). One profile per chat — the
+    # project's when it has one — and the block itself tells the model not to *reply* in that voice.
+    if style is not None and conv_settings.get("useStyle", True):
+        profile = style.for_context(project_id)
+        block = style_block(profile)
+        if block:
+            parts.append(block)
+            used["style"] = {"project_id": profile["project_id"], "summary": profile["summary"],
+                             "guidelines": profile["guidelines"], "block": block}
 
     # Observed computer activity. Off unless the user turned the monitor on, and skippable per chat
     # like every other context source.

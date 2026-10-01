@@ -47,6 +47,7 @@ from .plans import PLAN_TOOL, Plans, normalize_plan, parse_plan_edits
 from .outbox import Outbox, router as outbox_router
 from .presets import CanvasPresets
 from .runs import ACTIVE, STATUSES, Run, RunBus, RunStore, Topic
+from .style import WritingStyle, learn_style_from_exchange, looks_like_prose
 from .todocal import TodoCalendarMirror
 from .todos import Todos
 from .tools import Toolbox, summarize_result
@@ -63,6 +64,7 @@ memories = Memories(db)
 graph = Graph(db)
 documents = Documents(db)
 docs = Docs(db)
+style = WritingStyle(db)
 
 
 def _resolve_auth_token() -> str:
@@ -286,7 +288,8 @@ work_plans = WorkPlans(db)
 tool_results = ToolResults(db)
 skills = Skills(db)
 toolbox = Toolbox(memories, graph, documents, settings, todos=todos, google=google, boards=boards, sandboxes=sandboxes, docs=docs, activity=monitor,
-                  outbox=outbox, work_plans=work_plans, results=tool_results, skills=skills, jobs=jobs)
+                  outbox=outbox, work_plans=work_plans, results=tool_results, skills=skills, jobs=jobs,
+                  style=style)
 mcp_store = McpServers(db)
 # Third-party servers are supervised, not owned by the chat loop: a wedged server must not be able
 # to hold a reply, so everything it offers goes through McpClient's bounded calls.
@@ -906,7 +909,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         memories=memories, graph=graph, documents=documents,
         project=project, project_id=conv["project_id"], query=user_text,
         settings=cfg, conv_settings=conv["settings"], global_system_prompt=cfg["systemPrompt"],
-        activity=monitor, skills=skills,
+        activity=monitor, skills=skills, style=style,
         page=body.page_context.model_dump() if body.page_context else None,
     )
     tracer.end(cspan, {"memories": len(used["memories"]), "entities": len(used["nodes"]), "excerpts": len(used["chunks"]),
@@ -1299,6 +1302,29 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             user_text=user_text, assistant_text=text, model=model, settings=cfg,
             spans=list(tracer.spans),
         ))
+
+    # Writing style, from the user's half of the exchange only (style.py). Banking a sample is free;
+    # the LLM re-reads the samples only on the message that crosses the threshold, so most turns add
+    # a row and stop. A failure here is as quiet as a failed memory extraction.
+    # The prose check runs before the span so an ordinary short instruction leaves no trace of a step
+    # that did nothing — and never leaves a span open for the UI to show as still running.
+    if not error and cfg.get("learnStyle", True) and conv["settings"].get("autoLearn", True) and looks_like_prose(user_text):
+        sspan = tracer.start("style", "Learn writing style")
+        yield "span", {"message_id": am["id"], "span": sspan}
+        try:
+            banked = await learn_style_from_exchange(
+                settings=cfg, style=style, project_id=conv["project_id"], user_text=user_text, model=model,
+            )
+            tracer.end(sspan, {"sample_chars": (banked or {}).get("sample", {}).get("chars", 0),
+                               "profile_updated": bool(banked and banked["profile"])})
+            yield "span", {"message_id": am["id"], "span": sspan}
+            if banked:
+                yield "style_learned", {"project_id": conv["project_id"], "profile": banked["profile"],
+                                        "sample_id": banked["sample"]["id"]}
+        except Exception as e:  # noqa: BLE001
+            tracer.end(sspan, error=str(e))
+            yield "span", {"message_id": am["id"], "span": sspan}
+        convos.set_trace(am["id"], tracer.spans)
 
 
 async def _run_chat(run: Run, body: ChatIn) -> None:
@@ -1826,8 +1852,9 @@ def context_preview(body: ContextPreviewIn) -> dict[str, Any]:
     _, used = build_context(
         memories=memories, graph=graph, documents=documents, project=project, project_id=sid(body.project_id),
         query=body.query, settings=cfg,
-        conv_settings={"useMemory": True, "useGraph": True, "useDocuments": True, "useActivity": True, "useSkills": True, **body.conv_settings},
-        global_system_prompt=cfg["systemPrompt"], activity=monitor, skills=skills,
+        conv_settings={"useMemory": True, "useGraph": True, "useDocuments": True, "useActivity": True,
+                       "useSkills": True, "useStyle": True, **body.conv_settings},
+        global_system_prompt=cfg["systemPrompt"], activity=monitor, skills=skills, style=style,
     )
     return used
 
@@ -1876,6 +1903,99 @@ def update_memory(id: str, body: MemoryPatch) -> dict[str, Any]:
 @app.delete("/memories/{id}")
 def delete_memory(id: str) -> dict[str, bool]:
     memories.delete(id)
+    return {"ok": True}
+
+
+# ---------------- writing style ----------------
+class StylePatch(BaseModel):
+    """Hand edits to a profile. Any content key sets `edited`, which stops auto-relearn overwriting it."""
+    project_id: str | None = None
+    summary: str | None = None
+    guidelines: list[str] | None = None
+    traits: dict[str, str] | None = None
+    phrases: list[str] | None = None
+    avoid: list[str] | None = None
+    enabled: bool | None = None
+
+
+class StyleSampleIn(BaseModel):
+    project_id: str | None = None
+    text: str
+    source: str = "paste"
+    ref: str = ""
+
+
+class StyleLearnIn(BaseModel):
+    project_id: str | None = None
+    model: str | None = None
+
+
+def _style_payload(project_id: str | None) -> dict[str, Any]:
+    """What the Voice panel renders: the scope's own profile, the one a chat would actually use, and counts."""
+    effective = style.for_context(project_id)
+    return {"profile": style.profile(project_id), "stats": style.stats(project_id),
+            "inherited": bool(project_id and effective and effective["project_id"] is None),
+            "effective": effective}
+
+
+@app.get("/style")
+def get_style(project_id: str | None = None) -> dict[str, Any]:
+    return _style_payload(sid(project_id))
+
+
+@app.put("/style")
+def put_style(body: StylePatch) -> dict[str, Any]:
+    patch = body.model_dump(exclude_none=True, exclude={"project_id"})
+    if not patch:
+        raise HTTPException(400, "Nothing to update")
+    # Toggling `enabled` is not authorship; editing the text is.
+    if set(patch) - {"enabled"}:
+        patch["edited"] = True
+    style.save_profile(wsid(body.project_id), patch)
+    return _style_payload(wsid(body.project_id))
+
+
+@app.post("/style/learn")
+async def learn_style(body: StyleLearnIn) -> dict[str, Any]:
+    """Re-read the samples now. Forced, so it also refreshes a profile the user has hand-edited."""
+    pid = wsid(body.project_id)
+    cfg = settings()
+    if not style.samples(pid, limit=1):
+        raise HTTPException(400, "No writing samples in this scope yet. Add one, or let a long message be banked.")
+    try:
+        profile = await style.relearn(settings=cfg, project_id=pid, model=body.model or cfg["defaultModel"], force=True)
+    except llm.LLMError as e:
+        raise HTTPException(502, str(e)) from e
+    if not profile:
+        raise HTTPException(502, "The model did not return a usable style profile. Try again, or add more samples.")
+    return _style_payload(pid)
+
+
+@app.delete("/style")
+def delete_style(project_id: str | None = None, with_samples: bool = False) -> dict[str, Any]:
+    """Drop the profile. `with_samples` also throws away the writing it was derived from."""
+    pid = sid(project_id)
+    style.delete_profile(pid if pid is not ALL else None, with_samples=with_samples)
+    return _style_payload(pid if pid is not ALL else None)
+
+
+@app.get("/style/samples")
+def list_style_samples(project_id: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    return style.samples(sid(project_id), limit=min(limit, 200))
+
+
+@app.post("/style/samples")
+def add_style_sample(body: StyleSampleIn) -> dict[str, Any]:
+    """Add a passage by hand. The prose filter is skipped: a deliberate paste is already a decision."""
+    s = style.add_sample(wsid(body.project_id), body.text, source=body.source or "paste", ref=body.ref, check=False)
+    if not s:
+        raise HTTPException(400, "Empty sample")
+    return s
+
+
+@app.delete("/style/samples/{id}")
+def delete_style_sample(id: str) -> dict[str, bool]:
+    style.delete_sample(id)
     return {"ok": True}
 
 
@@ -3191,6 +3311,10 @@ def save_doc(id: str, body: DocSave) -> dict[str, Any]:
     d = docs.save(id, body.content, body.title, body.summary)
     if not d:
         raise HTTPException(404)
+    # A doc the user wrote is the best evidence of their voice there is — far better than chat. Banked
+    # under a stable ref, so editing one doc for a week refreshes one sample instead of adding seven.
+    if settings().get("learnStyle", True):
+        style.add_sample(d["project_id"], d["content"], source="doc", ref=f"doc:{id}")
     return d
 
 

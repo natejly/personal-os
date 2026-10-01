@@ -153,7 +153,29 @@ kbd {
   min-width: 0;
   overflow: hidden;
   width: var(--sidebar-w);
+  position: relative;
 }
+
+/* ---------- Resize handles (ResizeHandle.tsx) ---------- */
+/* A 7px grab strip with a hairline that lights up on hover. `.at-right`/`.at-left` sit inside their
+   pane's edge; the others are pinned from a parent because the pane itself scrolls. */
+.resize-handle {
+  position: absolute; top: 0; bottom: 0; width: 7px; z-index: 6;
+  cursor: col-resize; touch-action: none; outline: 0;
+}
+.resize-handle::after {
+  content: ''; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px;
+  background: transparent; transition: background 0.12s ease;
+}
+.resize-handle:hover::after, .resize-handle:focus-visible::after, .resize-handle:active::after { background: var(--accent); width: 2px; }
+.resize-handle.at-right { right: 0; }
+.resize-handle.at-right::after { left: auto; right: 0; }
+.resize-handle.at-left { left: 0; }
+.resize-handle.at-left::after { left: 0; }
+/* While dragging: no column animation trailing the pointer, no text selection, and the resize
+   cursor even where the pointer outruns the strip. */
+.pane-resizing, .pane-resizing * { cursor: col-resize !important; user-select: none !important; }
+.pane-resizing .app { transition: none; }
 .sidebar-collapsed .sidebar { visibility: hidden; }
 .sidebar-top {
   height: 52px;
@@ -617,9 +639,10 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .ghost-btn.full { width: 100%; justify-content: center; margin-top: 12px; }
 
 /* ---------- Chat body + context drawer ---------- */
-.chat-body { flex: 1; display: flex; min-height: 0; }
+.chat-body { flex: 1; display: flex; min-height: 0; position: relative; }
+.resize-handle.ctx-edge { right: calc(var(--context-drawer-w, 340px) - 4px); }
 .chat-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
-.context-drawer { width: 340px; border-left: 1px solid var(--border); background: var(--bg-elev); display: flex; flex-direction: column; overflow-y: auto; font-size: 13px; flex-shrink: 0; }
+.context-drawer { width: var(--context-drawer-w, 340px); border-left: 1px solid var(--border); background: var(--bg-elev); display: flex; flex-direction: column; overflow-y: auto; font-size: 13px; flex-shrink: 0; }
 .context-drawer > header { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--bg-elev); z-index: 1; }
 .context-drawer h3 { margin: 0; font-size: 14px; }
 .ctx-section { padding: 12px 14px; border-bottom: 1px solid var(--border); }
@@ -1929,7 +1952,7 @@ select:focus-visible {
 .skill-edit-actions { display: flex; align-items: center; gap: 10px; }
 
 /* ---------- Page agent (⌘I) ---------- */
-.page-agent { display: flex; flex-direction: column; min-width: 0; overflow: hidden; background: var(--bg-elev); border-left: 1px solid var(--border); font-size: 13px; }
+.page-agent { position: relative; display: flex; flex-direction: column; min-width: 0; overflow: hidden; background: var(--bg-elev); border-left: 1px solid var(--border); font-size: 13px; }
 .page-agent > header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); }
 .page-agent > header h3 { margin: 0; font-size: 13px; display: inline-flex; align-items: center; gap: 6px; }
 .page-agent-actions { display: flex; align-items: center; gap: 2px; }

@@ -6,6 +6,7 @@ import ProjectChip from './ProjectChip'
 import MessageView from './Message'
 import Composer from './Composer'
 import ContextDrawer from './ContextDrawer'
+import ResizeHandle from './ResizeHandle'
 import PlanPanel from './PlanPanel'
 import SendToSpace from './SendToSpace'
 import { clip, usePageContext } from '../lib/pageContext'
@@ -142,6 +143,8 @@ export default function ChatView({ conversationId }: { conversationId?: string }
           <PlanPanel conversationId={conversationId} />
           <Composer conversationId={conversationId} />
         </div>
+        {/* The drawer scrolls, so its handle sits on the chat body, pinned to the drawer's left edge. */}
+        {contextOpen && <ResizeHandle id="context-drawer-w" defaultSize={340} min={260} max={640} grows="left" onCollapse={toggleContext} label="Context panel width" className="ctx-edge" />}
         {contextOpen && <ContextDrawer conversationId={conversationId} />}
       </div>
     </main>

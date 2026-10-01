@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { MessageSquarePlus, Sparkles, SquareArrowOutUpRight, X } from 'lucide-react'
 import { useConversation, useIsStreaming, useStore, useStreamingMessageId } from '../store'
 import Composer from './Composer'
+import ResizeHandle from './ResizeHandle'
 import MessageView from './Message'
 
 /** `pick()` falls back to the focused chat on an undefined id, so an empty panel needs a dead key. */
@@ -40,6 +41,7 @@ export default function PageAgentPanel({ popout = false }: { popout?: boolean })
 
   return (
     <aside className={`page-agent${popout ? ' popout' : ''}`} aria-label="Page agent">
+      <ResizeHandle id="page-agent-w" defaultSize={380} min={280} max={720} grows="left" onCollapse={closePageAgent} label="Page agent width" className="at-left" />
       <header>
         <h3><Sparkles size={13} /> Ask about this page</h3>
         <div className="page-agent-actions">

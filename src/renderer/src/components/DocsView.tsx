@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   FileText, Files, Plus, PanelLeftOpen, X, History, Columns2, Eye, Pencil,
-  Sparkles, Save, Link2, Link2Off, ChevronDown, Folder, FolderKanban
+  Sparkles, Save, Link2, Link2Off, ChevronDown, Folder, FolderKanban, FolderTree
 } from 'lucide-react'
 import { useStore } from '../store'
 import type { Doc } from '@shared/types'
@@ -10,9 +10,15 @@ import MarkdownPreview from './MarkdownPreview'
 import DiffView from './DiffView'
 import DocTree from './DocTree'
 import { scopeOf } from '../lib/docTree'
+import ResizeHandle from './ResizeHandle'
 import { clip, lines, usePageContext } from '../lib/pageContext'
 import '../styles/docs.css'
 import AppSwitcher from './AppSwitcher'
+
+const TREE_KEY = 'grain.docs.treeOpen'
+const treeWasOpen = (): boolean => {
+  try { return localStorage.getItem(TREE_KEY) !== '0' } catch { return true }
+}
 
 export default function DocsView(): JSX.Element {
   const docs = useStore((s) => s.docs)
@@ -33,6 +39,11 @@ export default function DocsView(): JSX.Element {
 
   const [query, setQuery] = useState('')
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [treeOpen, setTreeOpenState] = useState(treeWasOpen)
+  const setTreeOpen = (open: boolean): void => {
+    setTreeOpenState(open)
+    try { localStorage.setItem(TREE_KEY, open ? '1' : '0') } catch { /* private window */ }
+  }
   const [linked, setLinked] = useState(true)
   const [editFrac, setEditFrac] = useState<number | null>(null)
   // Non-null while "New folder…" is being typed in the toolbar. An Electron renderer has no
@@ -107,6 +118,10 @@ export default function DocsView(): JSX.Element {
     <main className="page docs-page">
       <header className="page-header drag">
         {!sidebarOpen && <button className="icon-btn no-drag" title="Show sidebar (⌘B)" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
+        <button
+          className={`icon-btn no-drag ${treeOpen ? 'on' : ''}`} title={treeOpen ? 'Hide file tree' : 'Show file tree'}
+          aria-label="Toggle file tree" aria-pressed={treeOpen} onClick={() => setTreeOpen(!treeOpen)}
+        ><FolderTree size={16} /></button>
         <h2><Files size={16} /> Files</h2>
         <div className="no-drag header-right">
           <button className="primary-btn" onClick={() => void createDoc({})}>
@@ -116,10 +131,19 @@ export default function DocsView(): JSX.Element {
         <AppSwitcher />
       </header>
 
-      <div className="docs-body">
-        <aside className="docs-side">
-          <DocTree docs={docs} activeId={activeDoc?.id ?? null} query={query} onQuery={setQuery} />
-        </aside>
+      <div className={`docs-body ${treeOpen ? '' : 'tree-hidden'}`}>
+        {/* Both side panels scroll, so their handles live on the body, pinned to the column edges. */}
+        {treeOpen && (
+          <>
+            <aside className="docs-side">
+              <DocTree docs={docs} activeId={activeDoc?.id ?? null} query={query} onQuery={setQuery} />
+            </aside>
+            <ResizeHandle id="docs-tree-w" defaultSize={240} min={170} max={480} grows="right" onCollapse={() => setTreeOpen(false)} label="File tree width" className="docs-tree-edge" />
+          </>
+        )}
+        {activeDoc && historyOpen && (
+          <ResizeHandle id="docs-history-w" defaultSize={380} min={280} max={720} grows="left" onCollapse={() => setHistoryOpen(false)} label="History width" className="docs-history-edge" />
+        )}
 
         {!activeDoc ? (
           <section className="docs-empty">
@@ -237,6 +261,9 @@ export default function DocsView(): JSX.Element {
             )}
 
             <div className={`doc-panes ${docMode}`}>
+              {docMode === 'split' && (
+                <ResizeHandle id="doc-split" unit="%" defaultSize={50} min={20} max={80} grows="right" label="Editor and preview split" className="doc-split-edge" />
+              )}
               {docMode !== 'preview' && (
                 <MarkdownEditor
                   value={body}

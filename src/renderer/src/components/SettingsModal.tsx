@@ -172,8 +172,8 @@ export default function SettingsModal(): JSX.Element {
           <div className="settings-pane" id="settings-pane" role="tabpanel" aria-labelledby={`settings-tab-${tab}`}>
             {tab === 'provider' && <section>
               <h3>Provider</h3>
-              <p className="muted">Grain talks to a <a href="https://docs.litellm.ai/" target="_blank" rel="noreferrer">LiteLLM</a> proxy, so any model LiteLLM can route to works here. Point it at your proxy and paste a virtual key.</p>
-              <label><span>LiteLLM base URL</span><input autoFocus value={draft.baseUrl} onChange={(e) => patch({ baseUrl: e.target.value })} placeholder="http://localhost:4000" spellCheck={false} /></label>
+              <p className="muted">Grain talks to any OpenAI-compatible endpoint: Fireworks, OpenAI, Anthropic, OpenRouter, a local Ollama, or your own <a href="https://docs.litellm.ai/" target="_blank" rel="noreferrer">LiteLLM</a> proxy. Run setup again to switch providers with a connection test.</p>
+              <label><span>Base URL</span><input autoFocus value={draft.baseUrl} onChange={(e) => patch({ baseUrl: e.target.value })} placeholder="https://api.fireworks.ai/inference/v1" spellCheck={false} /></label>
               <label><span>API key</span>
                 {settings.apiKeySet && !replacingKey ? (
                   <div className="input-row">
@@ -197,7 +197,7 @@ export default function SettingsModal(): JSX.Element {
                 <span className="muted small">Walks through choosing a provider and key from the start.</span>
               </div>
               <label><span>Default chat model</span>
-                <input list="model-options" value={draft.defaultModel} onChange={(e) => patch({ defaultModel: e.target.value })} placeholder="gpt-4o" spellCheck={false} />
+                <input list="model-options" value={draft.defaultModel} onChange={(e) => patch({ defaultModel: e.target.value })} placeholder="Model id" spellCheck={false} />
                 <datalist id="model-options">{models.map((m) => <option key={m.id} value={m.id} />)}</datalist>
               </label>
             </section>}
@@ -230,7 +230,7 @@ export default function SettingsModal(): JSX.Element {
                 <input type="checkbox" checked={draft.learnStyle !== false} onChange={(e) => patch({ learnStyle: e.target.checked })} /><span className="switch" />
               </label>
               <label><span>Extraction model <small className="muted">(blank = same as chat model)</small></span>
-                <input list="model-options" value={draft.extractionModel} onChange={(e) => patch({ extractionModel: e.target.value })} placeholder="e.g. gpt-4o-mini" spellCheck={false} />
+                <input list="model-options" value={draft.extractionModel} onChange={(e) => patch({ extractionModel: e.target.value })} placeholder="Same as the default model" spellCheck={false} />
               </label>
             </section>}
 

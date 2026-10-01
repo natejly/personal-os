@@ -151,7 +151,7 @@ export default function ModelMenu({ model, effort, fast, onModel, onEffort, onFa
         title={modelsError ?? label}
         onClick={() => setOpen((v) => !v)}
       >
-        <span className="model-menu-name">{model || 'Select model'}</span>
+        <span className="model-menu-name">{model ? model.split('/').pop() : 'Select model'}</span>
         {suffix && <span className="model-menu-suffix">{suffix}</span>}
         <ChevronDown size={12} className="model-menu-chevron" />
       </button>

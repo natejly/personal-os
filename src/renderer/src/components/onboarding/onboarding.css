@@ -39,3 +39,6 @@
 .backend-error details { text-align: left; margin-top: 16px; }
 .backend-error summary { cursor: pointer; color: var(--text-muted); font-size: 13px; }
 .backend-error-actions { display: flex; gap: 8px; justify-content: center; margin-top: 16px; }
+
+/* The title takes focus on each step for screen readers; it is not an interactive control. */
+#ob-title:focus { outline: none; }

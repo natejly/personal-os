@@ -93,7 +93,7 @@ export default function DataSettings(): JSX.Element {
       )}
 
       <div className="data-row">
-        <span className="toggle-text"><b>Export all data</b><small>A zip with a full database copy, your uploads, and conversations, memories and documents as readable Markdown and JSON. It includes settings such as API keys, so keep it private.</small></span>
+        <span className="toggle-text"><b>Export all data</b><small>A zip with a full database copy, your uploads, and conversations, memories and documents as readable Markdown and JSON. API keys and tokens stay in your Keychain and are not included, but the export holds everything else Grain knows, so keep it private.</small></span>
         <button className="ghost-btn" onClick={() => void exportAll()} disabled={busy !== null}><Download size={14} /> {busy === 'export' ? 'Exporting…' : 'Export all data…'}</button>
       </div>
 

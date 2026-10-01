@@ -374,6 +374,9 @@ class Toolbox:
     web_cache: Any = None  # webread.WebCache, wired in app.py; fetch_url runs uncached without it
     subagents: Any = None  # subagents.Subagents, wired in app.py; the agent_* tools say so without it
     desk_starter: Any = None  # async (ctx, title, brief, mode) -> result, wired in app.py for desk_start
+    workflows: Any = None  # workflows.Workflows and its Engine, commands.Commands: wired in app.py
+    workflow_engine: Any = None
+    commands: Any = None
 
     def __init__(self, memories: Memories, graph: Graph, documents: Documents, settings_fn: Callable[[], dict[str, Any]], modules: list[Any] | None = None, google: Any = None, boards: Any = None,
                  sandboxes: Sandboxes | None = None, docs: Any = None, activity: Any = None, outbox: Any = None,
@@ -429,6 +432,9 @@ class Toolbox:
             artifact_tools.register(self, artifacts)
         from . import subagents
         subagents.register(self)
+        from . import commands as _commands, workflows as _workflows
+        _workflows.register(self)
+        _commands.register(self)
 
     def _google_ok(self) -> bool:
         return bool(self.google and self.google.status()["connected"])

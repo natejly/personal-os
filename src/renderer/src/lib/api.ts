@@ -2,7 +2,7 @@ import type {
   BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, DriveFile, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Artifact, ArtifactVersion, Recap, Conversation, ConversationSettings, ContextUsed, ContextMeter, Document, GraphData, GraphEdge, GraphNode, Message,
   ApprovalDecision, PlanEdit,
   Memory, MemoryProposal, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
-  Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
+  Command, Workflow, WorkflowRun, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
   Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
   Desk, DeskAutonomy, DeskBudget, DeskDiff, DeskEvent, DeskFilePreview, DeskFileTree, DeskOutput,
   DeskStatus, FullDesk, PlanRecord, PromotionKind, PromotionResult,
@@ -304,6 +304,28 @@ export const api = {
   toolResults: {
     list: (convId: string, limit = 20) => req<ToolResultHandle[]>(`/conversations/${convId}/tool-results?limit=${limit}`),
     read: (id: string, offset = 0, limit = 20000) => req<{ text: string; total_chars: number; offset: number; has_more: boolean }>(`/tool-results/${id}?offset=${offset}&limit=${limit}`)
+  },
+  /** Saved multi-step jobs. A run starts only after its plan digest is approved; editing the workflow withdraws that. */
+  workflows: {
+    list: () => req<Workflow[]>('/workflows'),
+    validate: (text: string) => req<{ ok: boolean; errors: string[] }>('/workflows/validate', { method: 'POST', body: json({ text }) }),
+    create: (text: string) => req<Workflow>('/workflows', { method: 'POST', body: json({ text }) }),
+    update: (id: string, text: string) => req<Workflow>(`/workflows/${id}`, { method: 'PUT', body: json({ text }) }),
+    delete: (id: string) => req<{ ok: boolean }>(`/workflows/${id}`, { method: 'DELETE' }),
+    propose: (id: string, params: Record<string, unknown>) => req<WorkflowRun>(`/workflows/${id}/runs`, { method: 'POST', body: json({ params }) }),
+    runs: (workflowId?: string) => req<WorkflowRun[]>(`/workflow-runs${workflowId ? `?workflow_id=${encodeURIComponent(workflowId)}` : ''}`),
+    run: (runId: string) => req<WorkflowRun>(`/workflow-runs/${runId}`),
+    approveRun: (runId: string, planDigest: string) =>
+      req<WorkflowRun>(`/workflow-runs/${runId}/approve`, { method: 'POST', body: json({ plan_digest: planDigest }) }),
+    resumeRun: (runId: string) => req<WorkflowRun>(`/workflow-runs/${runId}/resume`, { method: 'POST' }),
+    cancelRun: (runId: string) => req<{ ok: boolean }>(`/workflow-runs/${runId}/cancel`, { method: 'POST' })
+  },
+  /** Saved prompt templates ($ARGUMENTS, $1..$n). */
+  commands: {
+    list: () => req<Command[]>('/commands'),
+    create: (text: string) => req<Command>('/commands', { method: 'POST', body: json({ text }) }),
+    update: (id: string, text: string) => req<Command>(`/commands/${id}`, { method: 'PUT', body: json({ text }) }),
+    delete: (id: string) => req<{ ok: boolean }>(`/commands/${id}`, { method: 'DELETE' })
   },
   /** Procedural memory. Nothing here is injected until its status is 'approved'. */
   skills: {

@@ -66,6 +66,8 @@ from .outbox import Outbox, router as outbox_router
 from .presets import CanvasPresets
 from . import resume
 from .subagents import AgentDefs, Subagents
+from .commands import Commands
+from .workflows import ApprovalError as WorkflowApprovalError, Engine as WorkflowEngine, Workflows
 from .runs import ACTIVE, PROMOTE_STEP, STATUSES, Run, RunBus, RunStore, Topic
 from .stuck import STUCK_NUDGE, STUCK_STOP, StuckDetector
 from .style import WritingStyle, learn_style_from_exchange, looks_like_prose
@@ -364,6 +366,11 @@ agent_defs = AgentDefs(db)
 subagent_mgr = Subagents(run_store, toolbox, settings, defs=agent_defs, results=tool_results, pricing=pricing, memories=memories,
                          projects=projects, workspace=workspace, approvals=_approvals)
 toolbox.subagents = subagent_mgr
+# Workflows (workflows.py) and commands (commands.py): saved definitions, approved by hash before a run starts.
+workflow_store = Workflows(db, lambda: set(toolbox.specs), lambda n: subagent_mgr.role_for(n) is not None)
+workflow_engine = WorkflowEngine(workflow_store, toolbox, subagent_mgr, run_store, settings, projects)
+command_store = Commands(db)
+toolbox.workflows, toolbox.workflow_engine, toolbox.commands = workflow_store, workflow_engine, command_store
 # The insights pass proposes automations, so it is told which tools this install actually has - an
 # unwired integration must not turn into a suggestion that cannot be carried out.
 monitor.insights.tools_fn = lambda: [t["name"] for t in toolbox.list() if t.get("available")]
@@ -2090,6 +2097,149 @@ async def run_events(run_id: str, since: int = 0, limit: int = 500) -> list[dict
         raise HTTPException(404, "No such run")
     evs = [{"seq": s, "event": e, "data": d} for s, e, d in run_store.events(run_id, since) if e != "transcript"]
     return evs[:max(1, min(limit, 2000))]
+
+
+# ---------------- workflows and commands ----------------
+class WorkflowIn(BaseModel):
+    text: str
+
+
+class WorkflowRunIn(BaseModel):
+    params: dict[str, Any] = {}
+
+
+class WorkflowApproveIn(BaseModel):
+    plan_digest: str
+
+
+@app.on_event("startup")
+async def _recover_workflows() -> None:
+    """A workflow run left running died with the last process: it becomes interrupted and Resume continues it."""
+    workflow_store.recover()
+
+
+@app.post("/workflows/validate")
+def validate_workflow(body: WorkflowIn) -> dict[str, Any]:
+    """Every problem with a definition, for the editor. Never saves."""
+    try:
+        defn = _wf_parse(body.text)
+    except ValueError as e:
+        return {"ok": False, "errors": [str(e)]}
+    errs = workflow_store.check(defn)
+    return {"ok": not errs, "errors": errs}
+
+
+def _wf_parse(text: str) -> dict[str, Any]:
+    from . import workflows as _w
+    return _w.parse(text)
+
+
+@app.get("/workflows")
+def list_workflows() -> list[dict[str, Any]]:
+    return workflow_store.list()
+
+
+@app.post("/workflows")
+def create_workflow(body: WorkflowIn) -> dict[str, Any]:
+    try:
+        return workflow_store.save(body.text)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.put("/workflows/{wf_id}")
+def update_workflow(wf_id: str, body: WorkflowIn) -> dict[str, Any]:
+    if not workflow_store.get(wf_id):
+        raise HTTPException(404, "No such workflow")
+    try:  # an edit changes the digest, which is what invalidates every run still waiting on the old one
+        return workflow_store.save(body.text, wf_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.delete("/workflows/{wf_id}")
+def delete_workflow(wf_id: str) -> dict[str, bool]:
+    if not workflow_store.delete(wf_id):
+        raise HTTPException(404, "No such workflow")
+    return {"ok": True}
+
+
+@app.post("/workflows/{wf_id}/runs")
+def propose_workflow_run(wf_id: str, body: WorkflowRunIn) -> dict[str, Any]:
+    """Record a run with its expanded plan. It starts only when the user approves its digest."""
+    wf = workflow_store.get(wf_id)
+    if not wf:
+        raise HTTPException(404, "No such workflow")
+    try:
+        return workflow_store.create_run(wf, body.params, source="user")
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.get("/workflow-runs")
+def list_workflow_runs(workflow_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+    return workflow_store.list_runs(workflow_id, max(1, min(limit, 200)))
+
+
+@app.get("/workflow-runs/{run_id}")
+def get_workflow_run(run_id: str) -> dict[str, Any]:
+    r = workflow_store.get_run(run_id)
+    if not r:
+        raise HTTPException(404, "No such run")
+    return r
+
+
+@app.post("/workflow-runs/{run_id}/approve")
+async def approve_workflow_run(run_id: str, body: WorkflowApproveIn) -> dict[str, Any]:
+    try:
+        return workflow_engine.approve(run_id, body.plan_digest)
+    except WorkflowApprovalError as e:
+        raise HTTPException(409, str(e)) from e
+
+
+@app.post("/workflow-runs/{run_id}/resume")
+async def resume_workflow_run(run_id: str) -> dict[str, Any]:
+    try:
+        return workflow_engine.resume(run_id)
+    except WorkflowApprovalError as e:
+        raise HTTPException(409, str(e)) from e
+
+
+@app.post("/workflow-runs/{run_id}/cancel")
+async def cancel_workflow_run(run_id: str) -> dict[str, bool]:
+    if not workflow_store.get_run(run_id):
+        raise HTTPException(404, "No such run")
+    return {"ok": workflow_engine.cancel(run_id)}
+
+
+@app.get("/commands")
+def list_commands() -> list[dict[str, Any]]:
+    return command_store.list()
+
+
+@app.post("/commands")
+def create_command(body: WorkflowIn) -> dict[str, Any]:
+    try:
+        return command_store.save(body.text)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.put("/commands/{cmd_id}")
+def update_command(cmd_id: str, body: WorkflowIn) -> dict[str, Any]:
+    if not command_store.get(cmd_id):
+        raise HTTPException(404, "No such command")
+    try:
+        return command_store.save(body.text, cmd_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.delete("/commands/{cmd_id}")
+def delete_command(cmd_id: str) -> dict[str, bool]:
+    if not command_store.delete(cmd_id):
+        raise HTTPException(404, "No such command")
+    return {"ok": True}
 
 
 class AgentDefIn(BaseModel):

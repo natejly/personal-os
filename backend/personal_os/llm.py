@@ -133,6 +133,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "subagentMaxCost": 0.25,
     "subagentStaleSeconds": 450,
     "subagentToolSeconds": 1200,
+    # Workflows (workflows.py): the most items one fan-out step may map over, and a cost cap per run
+    # (0 = none) over every subagent the run starts.
+    "workflowMaxFanOut": 50,
+    "workflowMaxCost": 1.0,
     # Scheduled-job run policy (jobs_policy.py): retry backoff base in seconds (doubles per attempt, capped at
     # 30 min) and how many consecutive failed fires switch a job off.
     "jobRetryBackoffS": 120,

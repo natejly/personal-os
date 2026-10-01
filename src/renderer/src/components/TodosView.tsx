@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Plus, CheckSquare, PanelLeftOpen, RefreshCw } from 'lucide-react'
+import type { TodoRepeat } from '@shared/types'
 import { useStore, type Scope } from '../store'
 import TodoItem from './TodoItem'
 import ScopeSelect from './ScopeSelect'
@@ -19,8 +20,10 @@ export default function TodosView(): JSX.Element {
   const [title, setTitle] = useState('')
   const [due, setDue] = useState('')
   const [priority, setPriority] = useState(2)
+  const [repeat, setRepeat] = useState<'' | TodoRepeat['unit']>('')
+  const [sort, setSort] = useState<'due' | 'urgency'>('due')
 
-  useEffect(() => { void refreshTodos(scope, showDone) }, [scope, showDone, refreshTodos])
+  useEffect(() => { void refreshTodos(scope, showDone, sort) }, [scope, showDone, sort, refreshTodos])
   useEffect(() => { void refreshTasksSync() }, [refreshTasksSync])
 
   // Cleared before the request, so a second Enter (or Enter then Add) cannot post the same todo twice;
@@ -30,12 +33,12 @@ export default function TodosView(): JSX.Element {
     if (!t.trim()) return
     setTitle(''); setDue('')
     try {
-      await addTodo({ title: t, due: d || null, priority, project_id: scope === 'all' || scope === 'personal' ? null : scope })
+      await addTodo({ title: t, due: d || null, priority, project_id: scope === 'all' || scope === 'personal' ? null : scope, repeat: repeat ? { every: 1, unit: repeat, mode: 'from_due' } : null })
     } catch (e) {
       setTitle(t); setDue(d)
       return toast((e as Error).message, 'error')
     }
-    await refreshTodos(scope, showDone)
+    await refreshTodos(scope, showDone, sort)
   }
 
   const open = todos.filter((t) => !t.done)
@@ -83,6 +86,7 @@ export default function TodosView(): JSX.Element {
             </button>
           )}
           <SendToSpace items={[{ kind: 'todos' }]} />
+          <select aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as 'due' | 'urgency')} title="Urgency scores due date, priority and age"><option value="due">Sort: Due</option><option value="urgency">Sort: Urgency</option></select>
           <label className="check"><input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} /> Show done</label>
           <ScopeSelect value={scope} onChange={setScope} />
         </div>
@@ -102,13 +106,16 @@ export default function TodosView(): JSX.Element {
           />
           <input type="date" aria-label="Due date (optional)" value={due} onChange={(e) => setDue(e.target.value)} className="date-input" />
           <select aria-label="Priority" value={priority} onChange={(e) => setPriority(Number(e.target.value))}><option value={1}>P1</option><option value={2}>P2</option><option value={3}>P3</option></select>
+          <select aria-label="Repeat" value={repeat} onChange={(e) => setRepeat(e.target.value as '' | TodoRepeat['unit'])}><option value="">No repeat</option><option value="day">Daily</option><option value="week">Weekly</option><option value="month">Monthly</option><option value="year">Yearly</option></select>
           <button className="primary-btn" onClick={() => void add()} disabled={!title.trim()}><Plus size={14} /> Add</button>
         </div>
         {todos.length === 0 && <p className="empty-hint big">No todos yet.</p>}
-        <Section label="Overdue" items={overdue} />
-        <Section label="Today" items={today} />
-        <Section label="Upcoming" items={upcoming} />
-        <Section label="Someday" items={someday} />
+        {sort === 'urgency' ? <Section label="By urgency" items={open} /> : <>
+          <Section label="Overdue" items={overdue} />
+          <Section label="Today" items={today} />
+          <Section label="Upcoming" items={upcoming} />
+          <Section label="Someday" items={someday} />
+        </>}
         {showDone && <Section label="Done" items={done} />}
       </div>
     </main>

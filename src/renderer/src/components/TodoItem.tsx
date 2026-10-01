@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Check, Trash2, Calendar, CalendarPlus, ExternalLink } from 'lucide-react'
+import { Check, Trash2, Calendar, CalendarPlus, ExternalLink, Repeat } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import type { Todo } from '@shared/types'
@@ -81,6 +81,8 @@ export default function TodoItem({ todo, showProject = true, compact = false }: 
         {!compact && todo.notes && <span className="todo-notes">{todo.notes}</span>}
       </div>
       <div className="todo-meta">
+        {todo.urgency !== undefined && !todo.done && <span className="todo-urgency" title="Urgency score (due, priority, age)">{todo.urgency.toFixed(1)}</span>}
+        {todo.repeat && <span className="todo-repeat" title={`Repeats every ${todo.repeat.every > 1 ? todo.repeat.every + ' ' : ''}${todo.repeat.unit}${todo.repeat.every > 1 ? 's' : ''}${todo.repeat.mode === 'from_completion' ? ' after completion' : ''}`}><Repeat size={11} /></span>}
         {todo.external_id && <span className="g-logo g-logo-sm" title="Synced with Google Tasks">G</span>}
         {showProject && todo.project_id && <ProjectChip projectId={todo.project_id} />}
         <label className={`todo-due ${due.cls}`} title="Due date">

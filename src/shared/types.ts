@@ -533,6 +533,13 @@ export interface Document {
   text?: string
 }
 
+/** Recurring todo: completing it spawns the next instance (backend todo_rules.py). */
+export interface TodoRepeat {
+  every: number
+  unit: 'day' | 'week' | 'month' | 'year'
+  mode: 'from_due' | 'from_completion'
+}
+
 export interface Todo {
   id: string
   project_id: string | null
@@ -549,6 +556,9 @@ export interface Todo {
   calendar_id: string | null
   /** Internal: todo fields as last mirrored to the calendar. */
   calendar_sig: string | null
+  repeat?: TodoRepeat | null
+  /** Taskwarrior-style score; only present on `?sort=urgency` lists. */
+  urgency?: number
   created_at: number
   updated_at: number
   completed_at: number | null

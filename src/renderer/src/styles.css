@@ -1217,6 +1217,7 @@ textarea.instructions:focus { border-color: var(--accent); }
 .todo-due { position: relative; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-faint); padding: 2px 6px; border-radius: 8px; cursor: pointer; }
 .todo-due:hover { background: var(--hover); color: var(--text); }
 .todo-due.today { color: var(--accent); }
+.todo-repeat, .todo-urgency { display: inline-flex; align-items: center; font-size: 11px; color: var(--text-faint); }
 .todo-due.overdue { color: var(--danger); }
 .todo-due input[type=date] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
 .todo-prio { font-size: 11px; padding: 2px 4px; border-radius: 6px; background: var(--bg-input); border: 1px solid var(--border); }

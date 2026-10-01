@@ -15,8 +15,11 @@ had an event leaves an event tombstone so the mirror can delete the event too.
 """
 from __future__ import annotations
 
+import json
+from datetime import date
 from typing import Any, Callable
 
+from . import todo_rules
 from .db import Database, new_id, now, row_to_dict
 
 SCHEMA = """
@@ -62,9 +65,20 @@ class Todos:
             # Columns arrived after the first release; CREATE TABLE IF NOT EXISTS won't add them.
             have = {r["name"] for r in c.execute("PRAGMA table_info(todos)").fetchall()}
             for col, ddl in {"calendar_event_id": "TEXT", "calendar_link": "TEXT", "synced_at": "REAL",
-                             "remote_updated": "TEXT", "calendar_id": "TEXT", "calendar_sig": "TEXT"}.items():
+                             "remote_updated": "TEXT", "calendar_id": "TEXT", "calendar_sig": "TEXT",
+                             "repeat": "TEXT"}.items():
                 if col not in have:
                     c.execute(f"ALTER TABLE todos ADD COLUMN {col} {ddl}")
+
+    @staticmethod
+    def _out(row: dict[str, Any] | None) -> dict[str, Any] | None:
+        """`repeat` is stored as JSON text and handed out as a dict (or None)."""
+        if row and isinstance(row.get("repeat"), str):
+            try:
+                row["repeat"] = json.loads(row["repeat"])
+            except ValueError:
+                row["repeat"] = None
+        return row
 
     def _changed(self) -> None:
         if self.on_change:
@@ -88,28 +102,37 @@ class Todos:
             args += [f"%{q}%", f"%{q}%"]
         sql = "SELECT * FROM todos" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY done, CASE WHEN due IS NULL THEN 1 ELSE 0 END, due, priority, created_at DESC"
         with self.db.tx() as c:
-            return [row_to_dict(r) for r in c.execute(sql, args).fetchall()]  # type: ignore[misc]
+            return [self._out(row_to_dict(r)) for r in c.execute(sql, args).fetchall()]  # type: ignore[misc]
 
     def get(self, id: str) -> dict[str, Any] | None:
         with self.db.tx() as c:
-            return row_to_dict(c.execute("SELECT * FROM todos WHERE id=?", (id,)).fetchone())
+            return self._out(row_to_dict(c.execute("SELECT * FROM todos WHERE id=?", (id,)).fetchone()))
 
-    def create(self, title: str, project_id: str | None = None, notes: str = "", due: str | None = None, priority: int = 2, source: str = "local", external_id: str | None = None, notify: bool = True) -> dict[str, Any]:
+    def create(self, title: str, project_id: str | None = None, notes: str = "", due: str | None = None, priority: int = 2, source: str = "local", external_id: str | None = None, notify: bool = True, repeat: dict[str, Any] | None = None) -> dict[str, Any]:
+        rep = todo_rules.parse_repeat(repeat)
         tid = new_id()
         t = now()
         with self.db.tx() as c:
             c.execute(
-                "INSERT INTO todos(id,project_id,title,notes,due,priority,done,source,external_id,created_at,updated_at) VALUES(?,?,?,?,?,?,0,?,?,?,?)",
-                (tid, project_id, title.strip(), notes, due or None, int(priority), source, external_id, t, t),
+                "INSERT INTO todos(id,project_id,title,notes,due,priority,done,source,external_id,created_at,updated_at,repeat) VALUES(?,?,?,?,?,?,0,?,?,?,?,?)",
+                (tid, project_id, title.strip(), notes, due or None, int(priority), source, external_id, t, t, json.dumps(rep) if rep else None),
             )
         if notify:
             self._changed()
         return self.get(tid)  # type: ignore[return-value]
 
-    def update(self, id: str, patch: dict[str, Any], notify: bool = True) -> dict[str, Any] | None:
-        fields = {k: v for k, v in patch.items() if k in {"title", "notes", "due", "priority", "done", "project_id", "calendar_event_id", "calendar_link", "calendar_id"}}
+    def update(self, id: str, patch: dict[str, Any], notify: bool = True, today: date | None = None) -> dict[str, Any] | None:
+        """Apply a patch. Completing an open repeating todo spawns its next instance (_spawn_next); Tasks-sync
+        completions come through here too, so they recur as well. The completed row has its repeat cleared,
+        so reopening and completing it again never spawns a second copy."""
+        fields = {k: v for k, v in patch.items() if k in {"title", "notes", "due", "priority", "done", "project_id", "calendar_event_id", "calendar_link", "calendar_id", "repeat"}}
         if not fields:
             return self.get(id)
+        if "repeat" in fields:
+            rep = todo_rules.parse_repeat(fields["repeat"])
+            fields["repeat"] = json.dumps(rep) if rep else None
+        before = self.get(id)
+        completing = bool(before and fields.get("done") and not before["done"] and before.get("repeat"))
         if "done" in fields:
             fields["done"] = int(bool(fields["done"]))
             fields["completed_at"] = now() if fields["done"] else None
@@ -117,9 +140,21 @@ class Todos:
         sets = ", ".join(f"{k}=?" for k in fields)
         with self.db.tx() as c:
             c.execute(f"UPDATE todos SET {sets} WHERE id=?", (*fields.values(), id))
+            if completing:
+                c.execute("UPDATE todos SET repeat=NULL WHERE id=?", (id,))
+        if completing and before:
+            self._spawn_next(before, today or date.today())
         if notify:
             self._changed()
         return self.get(id)
+
+    def _spawn_next(self, row: dict[str, Any], completed_on: date) -> dict[str, Any]:
+        """Next instance of a just-completed repeating todo. source='local' so Tasks sync makes it a fresh
+        remote task instead of treating it as the completed one."""
+        due = date.fromisoformat(row["due"][:10]) if row.get("due") else None
+        nxt = todo_rules.next_due(due, row["repeat"], completed_on)
+        return self.create(row["title"], row.get("project_id"), row.get("notes") or "", nxt.isoformat(), row["priority"],
+                           source="local", notify=False, repeat=row["repeat"])
 
     def delete(self, id: str, notify: bool = True, tombstone: bool = True) -> None:
         t = self.get(id)

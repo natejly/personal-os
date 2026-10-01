@@ -421,8 +421,8 @@ export interface State {
   runTodoCalendar: () => Promise<void>
   setTasksSync: (patch: { enabled?: boolean; tasklist?: string; intervalMinutes?: number }) => Promise<void>
   runTasksSync: () => Promise<void>
-  refreshTodos: (scope?: Scope, includeDone?: boolean) => Promise<void>
-  addTodo: (t: { title: string; project_id?: string | null; due?: string | null; priority?: number; notes?: string }) => Promise<void>
+  refreshTodos: (scope?: Scope, includeDone?: boolean, sort?: 'due' | 'urgency') => Promise<void>
+  addTodo: (t: Parameters<typeof api.todos.create>[0]) => Promise<void>
   updateTodo: (id: string, patch: Parameters<typeof api.todos.update>[1]) => Promise<void>
   deleteTodo: (id: string) => Promise<void>
   uploadDocuments: (files: FileList | File[], projectId: string | null) => Promise<void>
@@ -2839,13 +2839,15 @@ export const useStore = create<State>((set, get) => {
       void api.tools().then((t) => set({ tools: t.tools })).catch(() => undefined)
     },
 
-    refreshTodos: async (scope = 'all', includeDone = false) => set({ todos: await api.todos.list(scope, includeDone) }),
+    refreshTodos: async (scope = 'all', includeDone = false, sort = 'due') => set({ todos: await api.todos.list(scope, includeDone, '', sort) }),
     addTodo: async (t) => {
       await api.todos.create(t)
       await Promise.all([get().refreshTodos(), get().refreshDashboard()])
     },
     updateTodo: async (id, patch) => {
+      const recurs = patch.done === true && !!get().todos.find((x) => x.id === id)?.repeat
       const t = await api.todos.update(id, patch)
+      if (recurs) void get().refreshTodos()  // the next instance was just created server-side
       set((s) => ({ todos: s.todos.map((x) => (x.id === id ? t : x)), dashboard: s.dashboard && { ...s.dashboard, todos: s.dashboard.todos.map((x) => (x.id === id ? t : x)).filter((x) => !x.done) } }))
     },
     deleteTodo: async (id) => {

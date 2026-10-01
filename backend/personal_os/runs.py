@@ -601,6 +601,8 @@ class RunBus:
         # Runs displaced by a newer one while their auto-learn tail was still open. Only `shutdown`
         # cares: nothing routes to them any more, and the task holds what keeps them alive.
         self._retired: set[Run] = set()
+        # Awaited when a run's runner finishes, before the run is closed (the after-snapshot of a reply).
+        self.after_hooks: list[Callable[[Run], Awaitable[None]]] = []
 
     def get(self, conversation_id: str) -> Run | None:
         return self._runs.get(conversation_id)
@@ -684,6 +686,11 @@ class RunBus:
             log.exception("run %s failed", run.run_id)
             run.publish("error", {"message": str(e)})
         finally:
+            for hook in self.after_hooks:
+                try:
+                    await hook(run)
+                except BaseException:  # noqa: BLE001 - a hook must not stop the run from closing
+                    log.debug("after hook failed for run %s", run.run_id, exc_info=True)
             run.end(status)
             self._retired.discard(run)
 

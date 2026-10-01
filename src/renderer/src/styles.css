@@ -520,6 +520,8 @@ kbd {
 }
 .msg:hover .msg-actions { opacity: 1; }
 .msg.user .msg-actions { justify-content: flex-end; }
+.files-changed { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-top: 6px; font-size: 12px; color: var(--muted, var(--text)); }
+.files-changed-note { margin-left: 6px; opacity: 0.8; }
 .model-tag { font-size: 11px; color: var(--text-faint); font-family: var(--mono); }
 .msg-error {
   display: flex; align-items: center; gap: 6px;

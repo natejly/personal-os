@@ -62,6 +62,7 @@ from .notes import Notes
 from .plans import (MUTATING, PLAN_BLOCKED, PLAN_SAFE_DANGER, PLAN_TOOL, PROPOSE_ONLY, Plans,
                     normalize_plan, parse_plan_edits, taint_expected)
 from .filesnap import FileSnapshots, router as filesnap_router
+from .snapshots import Snapshots, router as snapshots_router
 from .outbox import Outbox, router as outbox_router
 from .presets import CanvasPresets
 from . import resume
@@ -329,6 +330,16 @@ app.include_router(outbox_router(outbox))
 # Pre-images of local files the agent overwrites or moves; the restore route is the user's, never a tool (filesnap.py).
 filesnap = FileSnapshots(db, db.data_dir / "snapshots", settings)
 app.include_router(filesnap_router(filesnap))
+# Whole-folder snapshots per reply, so Undo can take back shell effects too (snapshots.py); user-only routes.
+snaps = Snapshots(db, db.data_dir / "snapshots", settings, workspace.desk_root)
+app.include_router(snapshots_router(snaps, lambda rid: run_store.get(rid) is not None))
+
+
+async def _snapshot_after(run: Run) -> None:
+    await asyncio.to_thread(snaps.finish, run.run_id)
+
+
+bus.after_hooks.append(_snapshot_after)
 # Working memory that is not the chat: the per-conversation plan, the full tool-result blobs behind
 # their handles (working.py), and procedural memory awaiting review (learn.Skills). `work_plans` is the
 # todo_write artifact and is a different thing from `plans`, the propose_plan approval record.
@@ -1002,6 +1013,8 @@ async def _call_tool(run: Run | None, step: int, name: str, args: dict[str, Any]
     spec = toolbox.specs.get(name)
     if proposal_only(run) and toolbox.proposes(name):
         return _propose(run, name, args, call_id, ctx)  # type: ignore[arg-type]
+    if run is not None and snaps.wants(name, args, run.desk_id):
+        await asyncio.to_thread(snaps.before, run.run_id, snaps.roots_for_call(name, args, run.desk_id))
     if run is None or run.store is None or spec is None or spec.danger not in IDEMPOTENT_DANGER:
         return await toolbox.call(name, args, ctx)
     result, replayed = await run.store.call_once(run.run_id, step, name, args, lambda: toolbox.call(name, args, ctx), call_id=call_id,
@@ -5029,6 +5042,8 @@ async def _outbox_startup() -> None:
     app.state.outbox_task = asyncio.create_task(outbox.loop())
     with contextlib.suppress(Exception):
         await asyncio.to_thread(filesnap.prune)  # snapshots past their age or byte budget
+    with contextlib.suppress(Exception):
+        await asyncio.to_thread(snaps.prune)  # folder snapshots: gc once a day, evict past the byte budget
 
 
 @app.on_event("shutdown")

@@ -488,10 +488,35 @@ kbd {
   position: sticky; bottom: 0; z-index: 2;
   background: var(--bg-elev); border-top: 1px solid var(--border);
 }
+/* Settings: a wide fixed-height dialog, sections on a left tab bar, one pane scrolling at a time. */
+.modal.settings-modal {
+  width: 920px; height: min(720px, calc(100vh - 60px));
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.settings-body { flex: 1; min-height: 0; display: flex; }
+.settings-tabs {
+  flex: 0 0 200px; display: flex; flex-direction: column; gap: 2px;
+  padding: 12px 10px; overflow-y: auto; border-right: 1px solid var(--border);
+}
+.settings-tabs button {
+  display: flex; align-items: center; gap: 9px; padding: 7px 10px; border-radius: 8px;
+  font-size: 13px; color: var(--text-muted); text-align: left;
+}
+.settings-tabs button:hover { background: var(--hover); color: var(--text); }
+.settings-tabs button.active { background: var(--hover); color: var(--text); font-weight: 500; }
+.settings-tabs button.active svg { color: var(--accent); }
+.settings-tabs button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-pane { flex: 1; min-width: 0; overflow-y: auto; }
+.settings-pane section { border-bottom: 0; padding: 20px 28px; }
+.settings-modal footer { position: static; }
 /* Narrow windows: keep a real gutter instead of going nearly full-bleed. */
 @media (max-width: 720px) {
   .modal { max-width: calc(100vw - 32px); }
   .modal header, .modal section, .modal footer { padding-left: 14px; padding-right: 14px; }
+  /* No room for a side rail: the tabs become a scrolling strip above the pane. */
+  .settings-body { flex-direction: column; }
+  .settings-tabs { flex: 0 0 auto; flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--border); padding: 8px 10px; }
+  .settings-tabs button { flex: 0 0 auto; }
 }
 
 ::-webkit-scrollbar { width: 10px; }

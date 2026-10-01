@@ -737,9 +737,29 @@ export type ChatEvent =
   | { event: 'done'; data: { id: string; error: string | null; context_used: ContextUsed; tool_events: ToolEvent[]; trace: Span[]; stopped: boolean; partial?: PartialReason | null; tainted?: boolean; taint_sources?: string[] } }
   | { event: 'taint'; data: { message_id: string; source: string } }
   | { event: 'plan'; data: { conversation_id: string; steps: PlanStep[] } }
-  | { event: 'learned'; data: { memories: Memory[]; updated?: Memory[]; removed?: Memory[]; nodes: GraphNode[]; edges: GraphEdge[] } }
+  | { event: 'learned'; data: Learned }
   | { event: 'learn_error'; data: { message: string } }
   | { event: 'error'; data: { message: string } }
+
+/** What one auto-learn pass (or the `remember` tool) put away. The ids are set only off `/events`. */
+export interface Learned {
+  memories: Memory[]
+  /** Durable preferences auto-learn superseded or dropped, rather than adding a near-duplicate. */
+  updated?: Memory[]
+  removed?: Memory[]
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+  conversation_id?: string
+  message_id?: string
+}
+
+/**
+ * `GET /events`: app-wide work no single run is waiting on. Auto-learn runs here, after its reply's
+ * run has already ended, so these never arrive on a conversation stream.
+ */
+export type BackgroundEvent =
+  | { event: 'learned'; data: Learned }
+  | { event: 'learn_error'; data: { conversation_id?: string; message_id?: string; message: string } }
 
 export interface GrainApi {
   backendUrl: () => Promise<string>

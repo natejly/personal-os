@@ -17,8 +17,10 @@ def now_ms() -> int:
 
 
 class Tracer:
-    def __init__(self) -> None:
-        self.spans: list[dict[str, Any]] = []
+    def __init__(self, spans: list[dict[str, Any]] | None = None) -> None:
+        # `spans` continues a trace the reply already wrote: auto-learn appends its span to the
+        # finished message's trace from a worker, long after the run's own tracer is gone.
+        self.spans: list[dict[str, Any]] = list(spans or [])
 
     def start(self, kind: str, name: str, meta: dict[str, Any] | None = None) -> dict[str, Any]:
         span = {"id": new_id(), "kind": kind, "name": name, "start": now_ms(), "end": None, "meta": dict(meta or {}), "error": None}

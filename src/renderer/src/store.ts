@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { ApprovalDecision, PlanEdit, ActivityConfig, ActivityContextFile, ActivityEvent, ActivitySignal, ActivityStatus, ActivitySummary, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, Document, Effort, FullDoc, GraphData, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodoCalendarStatus, TodayDashboard, Recap, Job } from '@shared/types'
-import { api, chatStream, setBase, type Scope } from './lib/api'
+import { api, backgroundStream, chatStream, setBase, type Scope } from './lib/api'
 import { currentSelection } from './lib/pageContext'
 import { finishStatus, mergeConversation, pickEvictions, reduceStatus, settleApprovals } from './sessionStatus'
 import { viewHidden } from './modules'
@@ -519,6 +519,36 @@ export const useStore = create<State>((set, get) => {
     void get().refreshProjects()
   }
 
+  /**
+   * Follow `/events` for the whole session. Auto-learn runs after its reply's run has ended — that
+   * is the point, the chat is free again — so its results have no conversation stream left to
+   * arrive on. The connection is re-opened for as long as the window lives, resuming from the last
+   * seq so a reconnect replays rather than skips, and backing off so a dead backend is not hammered.
+   */
+  const watchBackgroundEvents = async (): Promise<void> => {
+    let since = 0
+    let backoff = 1000
+    for (;;) {
+      try {
+        for await (const ev of backgroundStream(since)) {
+          if (ev.seq !== null) since = ev.seq
+          backoff = 1000
+          if (ev.event === 'learned') {
+            const { memories, nodes, edges } = ev.data
+            get().toast(`Learned ${memories.length} memor${memories.length === 1 ? 'y' : 'ies'}, ${nodes.length} entities, ${edges.length} relations`, 'learned')
+            if (memories.length + nodes.length + edges.length) refreshAll()
+          } else if (ev.event === 'learn_error') {
+            get().toast(`Auto-learn failed: ${ev.data.message}`, 'error')
+          }
+        }
+      } catch {
+        // A dropped or refused connection is normal here (backend restart, sleep); just retry.
+      }
+      await new Promise((r) => setTimeout(r, backoff))
+      backoff = Math.min(backoff * 2, 30000)
+    }
+  }
+
   /** Consume one run's events into a session. `attached` means the run was started by someone else. */
   const watchRun = async (convId: string, run: ChatRunStarted, from: { messageId: string | null; approvals: number; attached: boolean }): Promise<void> => {
     // One subscription per conversation. A second subscription to the same run would apply every
@@ -545,6 +575,7 @@ export const useStore = create<State>((set, get) => {
             if (!ev.data.error) hold(convId)
             void get().refreshConversations()
             break
+          // Only the `remember` tool reaches here now; auto-learn reports on `/events` instead.
           case 'learned': {
             const { memories, nodes, edges, updated = [], removed = [] } = ev.data
             const parts = [`Learned ${memories.length} memor${memories.length === 1 ? 'y' : 'ies'}`]
@@ -705,6 +736,8 @@ export const useStore = create<State>((set, get) => {
       void get().refreshRecap()
       void get().refreshDocsPending()
       void get().refreshActivity()
+      // One watcher per app: a pop-out would only duplicate every toast in another window.
+      if (!isPopout()) void watchBackgroundEvents()
     },
 
     loadModels: async () => {

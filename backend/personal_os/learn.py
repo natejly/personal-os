@@ -9,13 +9,20 @@ that wrote it. Induction only ever produces a *candidate* the user must read, re
 """
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
+import logging
 import re
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Callable
 
 from . import llm
 from .db import Database, new_id, now, row_to_dict
 from .repos import Graph, Memories
+from .trace import Tracer
+
+log = logging.getLogger("personal_os")
 
 EXTRACT_PROMPT = """You maintain a personal memory and knowledge graph for a user.
 Given the latest exchange, extract durable, useful information and keep the existing memories current.
@@ -306,3 +313,102 @@ async def induce_skill(
         return None
     return skills.propose(name, str(data.get("description") or "").strip(), procedure,
                           project_id=project_id, conversation_id=conversation_id, source="induced")
+
+
+@dataclass
+class LearnJob:
+    """One finished exchange, waiting to be mined. Everything is a snapshot: the chat has moved on."""
+
+    conversation_id: str
+    message_id: str
+    project_id: str | None
+    user_text: str
+    assistant_text: str
+    model: str
+    settings: dict[str, Any]
+    spans: list[dict[str, Any]]
+
+
+class LearnWorker:
+    """Auto-learn, off the reply's critical path.
+
+    Extraction is another LLM call. Running it inside the chat generator kept the run alive past
+    `done`: the conversation stayed 409-locked against the next message and its SSE stayed open, so
+    a reply the user could already read still counted as busy. Jobs are queued here instead and
+    drained by one task, serially — a burst of replies must not fan out into a burst of extraction
+    calls — and the results reach the UI on the app topic, which outlives any run.
+    """
+
+    def __init__(
+        self,
+        *,
+        memories: Memories,
+        graph: Graph,
+        set_trace: Callable[[str, list[dict[str, Any]]], None],
+        publish: Callable[[str, Any], None],
+        depth: int = 32,
+    ) -> None:
+        self._memories = memories
+        self._graph = graph
+        self._set_trace = set_trace
+        self._publish = publish
+        self._q: asyncio.Queue[LearnJob] = asyncio.Queue(depth)
+        self._task: asyncio.Task[None] | None = None
+
+    def start(self) -> None:
+        if self._task is None or self._task.done():
+            self._task = asyncio.create_task(self._drain(), name="auto-learn")
+
+    async def stop(self) -> None:
+        """Drop what is still queued and cancel the one in flight; nothing here is worth a wait."""
+        task, self._task = self._task, None
+        if task and not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+
+    def submit(self, job: LearnJob) -> bool:
+        """Never blocks and never raises: a reply must not fail over its own bookkeeping."""
+        self.start()  # a worker that died on an unexpected error comes back with the next reply
+        try:
+            self._q.put_nowait(job)
+            return True
+        except asyncio.QueueFull:
+            log.warning("auto-learn queue full; dropping message %s", job.message_id)
+            return False
+
+    async def _drain(self) -> None:
+        while True:
+            job = await self._q.get()
+            try:
+                await self._run(job)
+            except asyncio.CancelledError:
+                raise
+            except Exception:  # noqa: BLE001 - one bad exchange must not take the worker down
+                log.exception("auto-learn failed for message %s", job.message_id)
+            finally:
+                self._q.task_done()
+
+    async def _run(self, job: LearnJob) -> None:
+        tracer = Tracer(job.spans)
+        span = tracer.start("learn", job.settings.get("extractionModel") or job.model)
+        try:
+            learned = await learn_from_exchange(
+                settings=job.settings, memories=self._memories, graph=self._graph,
+                project_id=job.project_id, user_text=job.user_text,
+                assistant_text=job.assistant_text, model=job.model,
+            )
+            tracer.end(span, {"memories": len(learned["memories"]), "entities": len(learned["nodes"]),
+                              "relations": len(learned["edges"])})
+            if learned["memories"] or learned["nodes"] or learned["edges"]:
+                self._publish("learned", {"conversation_id": job.conversation_id,
+                                          "message_id": job.message_id, **learned})
+        except asyncio.CancelledError:
+            tracer.end(span, error="Cancelled")  # shutdown: keep the trace honest about the gap
+            self._set_trace(job.message_id, tracer.spans)
+            raise
+        except Exception as e:  # noqa: BLE001
+            tracer.end(span, error=str(e))
+            self._publish("learn_error", {"conversation_id": job.conversation_id,
+                                          "message_id": job.message_id, "message": str(e)})
+        self._set_trace(job.message_id, tracer.spans)

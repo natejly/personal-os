@@ -1,5 +1,5 @@
 import type {
-  ChatEvent, ToolInfo, Todo, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, DriveFile, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Recap, Conversation, ConversationSettings, ContextUsed, Document, GraphData, GraphEdge, GraphNode, Message,
+  BackgroundEvent, ChatEvent, ToolInfo, Todo, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, DriveFile, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Recap, Conversation, ConversationSettings, ContextUsed, Document, GraphData, GraphEdge, GraphNode, Message,
   ApprovalDecision, PlanEdit,
   Memory, ModelInfo, ModelPrice, PageContext, Settings, Project, UsageReport, ChatRunStarted, RunInfo,
   Plan, PlanStep, Skill, SkillStatus, ToolResultHandle,
@@ -406,6 +406,34 @@ export const api = {
 
 const STREAM_RETRIES = 8
 
+/** One SSE connection, parsed. `seq` is the event's `id:` line, which only the app topic sends. */
+async function* sseStream(path: string, signal?: AbortSignal): AsyncGenerator<{ event: string; data: unknown; seq: number | null }> {
+  const r = await fetch(`${base}${path}`, { signal, headers: await auth() })
+  if (!r.ok || !r.body) throw new Error(`${r.status} ${r.statusText}`)
+  const reader = r.body.getReader()
+  const dec = new TextDecoder()
+  let buf = ''
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+    buf += dec.decode(value, { stream: true })
+    let idx: number
+    while ((idx = buf.indexOf('\n\n')) >= 0) {
+      const block = buf.slice(0, idx)
+      buf = buf.slice(idx + 2)
+      let event = 'message'
+      let data = ''
+      let id = ''
+      for (const line of block.split('\n')) {
+        if (line.startsWith('event:')) event = line.slice(6).trim()
+        else if (line.startsWith('data:')) data += line.slice(5).trim()
+        else if (line.startsWith('id:')) id = line.slice(3).trim()
+      }
+      if (data) yield { event, data: JSON.parse(data), seq: id ? Number(id) : null }
+    }
+  }
+}
+
 /**
  * Attach to a conversation's run and iterate its server-sent events from `since`. Any number of clients may.
  * The stream is a tail on the run's stored tape, and every event carries its seq (`id:`), so with a `runId` a
@@ -417,37 +445,26 @@ export async function* chatStream(convId: string, since = 0, signal?: AbortSigna
   while (true) {
     try {
       const q = `since=${last}${runId ? `&run_id=${encodeURIComponent(runId)}` : ''}`
-      const r = await fetch(`${base}/conversations/${convId}/stream?${q}`, { signal, headers: await auth() })
-      if (!r.ok || !r.body) throw new Error(`${r.status} ${r.statusText}`)
-      const reader = r.body.getReader()
-      const dec = new TextDecoder()
-      let buf = ''
-      while (true) {
-        const { value, done } = await reader.read()
-        if (done) return
-        buf += dec.decode(value, { stream: true })
-        let idx: number
-        while ((idx = buf.indexOf('\n\n')) >= 0) {
-          const block = buf.slice(0, idx)
-          buf = buf.slice(idx + 2)
-          let event = 'message'
-          let data = ''
-          let seq: number | null = null
-          for (const line of block.split('\n')) {
-            if (line.startsWith('event:')) event = line.slice(6).trim()
-            else if (line.startsWith('data:')) data += line.slice(5).trim()
-            else if (line.startsWith('id:')) seq = Number(line.slice(3).trim())
-          }
-          if (data) {
-            failures = 0
-            if (seq !== null && Number.isFinite(seq)) last = seq
-            yield { event, data: JSON.parse(data) } as ChatEvent
-          }
-        }
+      for await (const { event, data, seq } of sseStream(`/conversations/${convId}/stream?${q}`, signal)) {
+        failures = 0
+        if (seq !== null && Number.isFinite(seq)) last = seq
+        yield { event, data } as ChatEvent
       }
+      return
     } catch (e) {
       if (signal?.aborted || !runId || ++failures > STREAM_RETRIES) throw e
       await new Promise((res) => setTimeout(res, Math.min(5000, 500 * 2 ** (failures - 1))))
     }
+  }
+}
+
+/**
+ * Follow the app topic: background work (auto-learn) that finishes after its run has ended. The
+ * stream never completes on its own, so the caller reconnects: each event carries the seq to
+ * resume from, and the server's ring replays whatever happened while the socket was down.
+ */
+export async function* backgroundStream(since = 0, signal?: AbortSignal): AsyncGenerator<BackgroundEvent & { seq: number | null }> {
+  for await (const { event, data, seq } of sseStream(`/events?since=${since}`, signal)) {
+    yield { event, data, seq } as BackgroundEvent & { seq: number | null }
   }
 }

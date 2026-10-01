@@ -23,6 +23,7 @@ import httpx  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
 from personal_os import app as app_mod  # noqa: E402
+from personal_os import learn as learn_mod  # noqa: E402
 from personal_os import llm  # noqa: E402
 from personal_os.app import AUTH_TOKEN, app, bus  # noqa: E402
 from personal_os.runs import QUEUE_MAX, RING, Run  # noqa: E402
@@ -282,9 +283,10 @@ def test_steer_folds_into_the_live_run() -> None:
     j("POST", "/conversations/nope/steer", {"content": "x"}, expect=404)
 
 
-def test_the_learn_tail_is_not_a_reply_in_progress() -> None:
-    """Auto-learn runs inside the run, after its `done`. The run stays live for it, so `live` is not
-    the question a window should ask: everything that paints a reply as in flight asks `answering`.
+def test_the_learn_tail_does_not_hold_the_conversation() -> None:
+    """Auto-learn no longer runs inside the run: the exchange goes to learn.LearnWorker and the run
+    ends at its `done` (see test_learn_async.py). So a held-up extraction must not keep the
+    conversation locked — the reply is persisted, and the next message starts its own run at once.
     """
     full = script(4)
     gate = threading.Event()
@@ -293,26 +295,24 @@ def test_the_learn_tail_is_not_a_reply_in_progress() -> None:
         await asyncio.get_running_loop().run_in_executor(None, gate.wait)
         return {"memories": [], "nodes": [], "edges": []}
 
-    real, app_mod.learn_from_exchange = app_mod.learn_from_exchange, _gated_learn
+    real, learn_mod.learn_from_exchange = learn_mod.learn_from_exchange, _gated_learn
     client.put("/settings", json={"autoLearn": True, "baseUrl": ""})
     cid = new_conv()
     try:
         j("POST", f"/conversations/{cid}/chat", {"content": "hi"})
-        # /runs lists live runs only, so reading answering False off it proves both halves at once.
-        wait_until(lambda: run_info(cid).get("answering") is False, "the reply to finish inside a live run")
-        check(run_info(cid)["live"] is True, "the run is still live, held open by auto-learn")
+        drain(cid)
         check(message(cid)["content"] == full, "the whole reply is persisted before the tail starts")
         late = client.post(f"/conversations/{cid}/steer", json={"content": "late"})
-        check(late.status_code == 409, f"a steer into the tail is refused, not swallowed, got {late.status_code}")
+        check(late.status_code == 409, f"a steer after the reply is refused, not swallowed, got {late.status_code}")
         check(len(j("GET", f"/conversations/{cid}")["messages"]) == 2, "and it left no unanswered message behind")
 
         nxt = client.post(f"/conversations/{cid}/chat", json={"content": "next"})
         check(nxt.status_code == 200, f"a new message starts its own run instead of a 409, got {nxt.status_code}")
-        check(run_info(cid)["run_id"] == nxt.json()["run_id"], "and that run is the conversation's current one")
-        check(j("POST", f"/conversations/{cid}/stop")["ok"] is True, "which stops like any other run")
+        check(bool(nxt.json()["run_id"]), "and it is a run of its own, not the first one resumed")
+        drain(cid)
     finally:
         gate.set()
-        app_mod.learn_from_exchange = real
+        learn_mod.learn_from_exchange = real
         client.put("/settings", json={"autoLearn": False, "baseUrl": ""})
     drain(cid)
 
@@ -392,7 +392,7 @@ def test_an_overflowed_subscriber_reconnects_without_a_gap() -> None:
 
 TESTS = [test_post_starts_a_background_run, test_second_post_conflicts, test_two_clients_see_the_same_events,
          test_late_client_replays_from_the_ring, test_event_names_are_the_chatevent_union, test_stop_ends_the_run,
-         test_steer_folds_into_the_live_run, test_the_learn_tail_is_not_a_reply_in_progress,
+         test_steer_folds_into_the_live_run, test_the_learn_tail_does_not_hold_the_conversation,
          test_run_survives_every_subscriber_leaving, test_an_overflowed_subscriber_reconnects_without_a_gap,
          test_shutdown_cancels_a_live_run_and_keeps_its_text]
 

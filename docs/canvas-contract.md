@@ -361,6 +361,12 @@ unchanged: `user_message`, `assistant_message`, `removed_message`, `title`, `del
 conversation, `QUEUE_MAX` **1000** per subscriber — the `QUEUE_MAX < RING` invariant is what lets an
 overflowed subscriber reconnect without a gap. `sse()` moves from `app.py:108` into `runs.py`.
 
+`GET /events?since=<seq>` is the app-wide topic beside the per-conversation ones: background work
+that outlives the run that queued it. Auto-learn is the only producer so far, and it emits the same
+`learned` / `learn_error` payloads plus the `conversation_id` and `message_id` they belong to. The
+stream never ends, each event carries its seq as the SSE `id`, and the ring holds **200** events, so
+a window that reconnects resumes at its last seq instead of missing what happened while it was away.
+
 ### 3.4 Unchanged routes the canvas consumes
 
 Read-only callers. Nobody changes these.
@@ -653,9 +659,9 @@ hold still pending from the previous one.
 | `delta` | `content += text` | unchanged — the hot path does **no** recount and **no** unread bump |
 | `tool_call` | append a pending `ToolEvent`; if `needs_approval` then `settleApprovals` | → `needs-approval`, `pendingApprovals = 1..n` |
 | `tool_result` | replace the tool event, `pending: false`; `settleApprovals` | at 0 pending, `needs-approval` → `working` (because `streaming` is still set) |
-| `span` | merge-or-append by span id | **unchanged, deliberately.** `app.py:456-470` emits auto-learn spans *after* `done`; touching status here would resurrect `working`. |
+| `span` | merge-or-append by span id | **unchanged, deliberately.** A span can still land beside `done`; touching status here would resurrect `working`. |
 | `done` | fill `error`/`context_used`/`tool_events`/`trace`; `finish(convId, error ? 'error' : 'done')`; `refreshConversations()` | `done` or `error`. `stopped === true` is treated as `done`. |
-| `learned` | toast + `refreshAll()` when anything came back | unchanged (already `done`) |
+| `learned` | toast + `refreshAll()` when anything came back | unchanged (already `done`). On this stream only the `remember` tool reaches it; auto-learn arrives on `/events`, handled the same way. |
 | `learn_error` | toast | unchanged — a failed extraction must not redden a reply that succeeded |
 | `error` | toast; `finish(convId, 'error')` | `error`, no hold timer |
 | `catch` (fetch threw) | if `!abort.signal.aborted`: toast + `finish(convId, 'error')` | an aborted signal is a user Stop, not an error |

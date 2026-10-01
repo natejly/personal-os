@@ -28,7 +28,7 @@ from . import activity, assist, llm, mac, mcp_eval, tools
 from .context import build_context, estimate_tokens
 from .db import Database, data_dir_from_env, new_id
 from .extract_text import extract_text
-from .learn import Skills, induce_skill, learn_from_exchange
+from .learn import LearnJob, LearnWorker, Skills, induce_skill
 from .repos import ALL, Conversations, Documents, Graph, Memories, Projects
 from .boards import Boards
 from .canvas import SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
@@ -46,7 +46,7 @@ from .gtasks import TasksSync
 from .plans import PLAN_TOOL, Plans, normalize_plan, parse_plan_edits
 from .outbox import Outbox, router as outbox_router
 from .presets import CanvasPresets
-from .runs import ACTIVE, STATUSES, Run, RunBus, RunStore
+from .runs import ACTIVE, STATUSES, Run, RunBus, RunStore, Topic
 from .todocal import TodoCalendarMirror
 from .todos import Todos
 from .tools import Toolbox, summarize_result
@@ -211,6 +211,9 @@ _active: dict[str, asyncio.Event] = {}
 # Pending tool-call approvals: call_id -> Future[decision]. The durable record is the approvals table; this is
 # only how POST /approvals wakes the run that is waiting in this process.
 _approvals: dict[str, asyncio.Future] = {}
+# Background work that outlives the run that queued it, and the topic it reports on.
+events = Topic()
+learner = LearnWorker(memories=memories, graph=graph, set_trace=convos.set_trace, publish=events.publish)
 
 
 ENV_SEED = {
@@ -1285,26 +1288,17 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     if tool_ctx.get("learned"):
         yield "learned", tool_ctx["learned"]
 
-    # A scheduled run never writes to long-term memory: it is one more model call nobody asked for, on text the
-    # user has not read yet. What it found belongs in its report and in the inbox.
+    # Auto-learn is another LLM call, and the run owns the conversation for as long as this
+    # generator lives — a second message is a 409 until it returns. So the exchange is handed to the
+    # worker and the run ends here; what the worker learns arrives on the app topic (GET /events).
+    # A scheduled run never writes to long-term memory either way: it is one more model call nobody
+    # asked for, on text the user has not read yet. What it found belongs in its report and the inbox.
     if not error and text and not proposal_only(run) and cfg.get("autoLearn", True) and conv["settings"].get("autoLearn", True):
-        lspan = tracer.start("learn", cfg.get("extractionModel") or model)
-        yield "span", {"message_id": am["id"], "span": lspan}
-        try:
-            learned = await learn_from_exchange(
-                settings=cfg, memories=memories, graph=graph, project_id=conv["project_id"],
-                user_text=user_text, assistant_text=text, model=model,
-            )
-            tracer.end(lspan, {"memories": len(learned["memories"]), "updated": len(learned["updated"]),
-                               "removed": len(learned["removed"]), "entities": len(learned["nodes"]), "relations": len(learned["edges"])})
-            yield "span", {"message_id": am["id"], "span": lspan}
-            if any(learned[k] for k in ("memories", "updated", "removed", "nodes", "edges")):
-                yield "learned", learned
-        except Exception as e:  # noqa: BLE001
-            tracer.end(lspan, error=str(e))
-            yield "span", {"message_id": am["id"], "span": lspan}
-            yield "learn_error", {"message": str(e)}
-        convos.set_trace(am["id"], tracer.spans)
+        learner.submit(LearnJob(
+            conversation_id=conv_id, message_id=am["id"], project_id=conv["project_id"],
+            user_text=user_text, assistant_text=text, model=model, settings=cfg,
+            spans=list(tracer.spans),
+        ))
 
 
 async def _run_chat(run: Run, body: ChatIn) -> None:
@@ -1378,6 +1372,16 @@ async def stream_conversation(id: str, since: int = 0, run_id: str | None = None
         if row and row["conversation_id"] == id:
             body = run_store.tail(row["run_id"], since)
     return StreamingResponse(body, media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.get("/events")
+async def stream_events(since: int = 0) -> StreamingResponse:
+    """App-wide background events (auto-learn, so far), for work no single run is waiting on.
+
+    Each event's SSE `id` is its seq; reconnect with `?since=<last id>` to replay what was missed.
+    """
+    return StreamingResponse(events.subscribe(since), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
@@ -2000,6 +2004,7 @@ def search_documents(id: str, q: str) -> list[dict[str, Any]]:  # convenience fo
 @app.on_event("shutdown")
 async def _shutdown() -> None:
     await bus.shutdown()  # before the rmtree: a live run's sandboxed run_python writes in there
+    await learner.stop()  # after the runs, so nothing is still queueing work at it
     shutil.rmtree(db.data_dir / "tmp", ignore_errors=True)
     await asyncio.to_thread(sandboxes.shutdown)  # after the runs: a live sandbox_exec would just see its container vanish
 

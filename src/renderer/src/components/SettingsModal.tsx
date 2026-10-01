@@ -33,7 +33,7 @@ export default function SettingsModal(): JSX.Element {
   const settings = useStore((s) => s.settings)
   const models = useStore((s) => s.models)
   const view = useStore((s) => s.view)
-  const { saveSettings, setSettingsOpen, setView } = useStore()
+  const { saveSettings, setSettingsOpen, setView, toast } = useStore()
   const [draft, setDraft] = useState<Settings>(settings)
   const [showKey, setShowKey] = useState(false)
   const [test, setTest] = useState<{ state: 'idle' | 'testing' | 'ok' | 'fail'; msg?: string }>({ state: 'idle' })
@@ -74,7 +74,15 @@ export default function SettingsModal(): JSX.Element {
     const accel = draft.gatherShortcut.trim()
     const applied = accel === settings.gatherShortcut.trim() ? null : await window.os.shortcuts.setGather(accel)
     if (applied) setShortcut(applied)
-    await saveSettings({ ...draft, gatherShortcut: applied?.accelerator ?? draft.gatherShortcut })
+    // A cleared or out-of-range rounds field is clamped here: 0 would mean unlimited to the backend.
+    const rounds = Number.isFinite(draft.maxToolRounds) && draft.maxToolRounds >= 1
+      ? Math.min(60, Math.round(draft.maxToolRounds)) : settings.maxToolRounds
+    try {
+      await saveSettings({ ...draft, maxToolRounds: rounds, gatherShortcut: applied?.accelerator ?? draft.gatherShortcut })
+    } catch (e) {
+      // The dialog stays open with the draft intact, so nothing typed is lost.
+      return toast((e as Error).message, 'error')
+    }
     // The active view can be removed from the sidebar; don't leave the app parked on an unreachable one.
     if ((draft.hiddenViews ?? []).includes(view)) setView('home')
     // The reason is printed under the shortcut field, so show that tab.

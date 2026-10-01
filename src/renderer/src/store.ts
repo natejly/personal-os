@@ -436,6 +436,8 @@ const share = (map: Map<string, Promise<void>>, key: string, fn: () => Promise<v
   return p
 }
 
+/** The draft chat being created by `send`, so a concurrent send joins it rather than making another. */
+let draftCreate: Promise<string | null> | null = null
 const loads = new Map<string, Promise<void>>()
 const attaches = new Map<string, Promise<void>>()
 
@@ -1010,10 +1012,21 @@ export const useStore = create<State>((set, get) => {
         if (!get().sessions[id]) await get().openSession(id)
         return runStream(id, { content: text })
       }
+      // A second send while the draft's row is still being created (a quick follow-up, Enter then a
+      // click on Send) used to take this branch too and make a second chat with a second run. It
+      // waits for the first chat instead and goes into it as an ordinary follow-up or steer.
+      if (draftCreate) {
+        const cid = await draftCreate
+        return cid ? get().send(text, cid) : false
+      }
       let c: Conversation
+      let created: (id: string | null) => void = () => undefined
+      draftCreate = new Promise((r) => { created = r })
       try {
         c = await api.conversations.create(get().draftProjectId, get().draftModel ?? get().settings.defaultModel)
       } catch (e) {
+        draftCreate = null
+        created(null)
         // `send` never rejects: a caller holding the user's draft needs a verdict, not an exception.
         get().toast((e as Error).message, 'error')
         return false
@@ -1023,9 +1036,18 @@ export const useStore = create<State>((set, get) => {
       if (effort !== 'default') c = await api.conversations.patch(c.id, { settings: { effort } }).catch(() => c)
       c.messages = []
       putSession(c)
-      set({ focusedConversationId: c.id, view: 'chat', draftEffort: 'default', draftModel: null })
+      // Listed now, not when the reply ends: the sidebar should show the chat you are in while it streams.
+      const { messages: _m, ...row } = c
+      set((s) => ({
+        focusedConversationId: c.id, view: 'chat', draftEffort: 'default', draftModel: null,
+        conversations: [row as Conversation, ...s.conversations.filter((x) => x.id !== c.id)]
+      }))
       void get().refreshProjects()
-      return runStream(c.id, { content: text })
+      // Released once the run has started, so a waiting send sees it streaming and steers it.
+      const ok = await runStream(c.id, { content: text })
+      draftCreate = null
+      created(c.id)
+      return ok
     },
     sendToPageAgent: async (text) => {
       if (!text.trim()) return false

@@ -1019,7 +1019,7 @@ export const useStore = create<State>((set, get) => {
   return {
     ready: false,
     backendError: null,
-    settings: { baseUrl: '', apiKey: '', defaultModel: '', systemPrompt: '', extractionModel: '', autoLearn: true, learnStyle: true, theme: 'dark', accent: 'sage', gatherShortcut: '', tools: {}, maxToolRounds: 8, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {} },
+    settings: { baseUrl: '', apiKey: '', apiKeySet: false, defaultModel: '', systemPrompt: '', extractionModel: '', autoLearn: true, learnStyle: true, theme: 'dark', accent: 'sage', gatherShortcut: '', tools: {}, maxToolRounds: 8, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {} },
     models: [],
     modelsError: null,
     tools: [],
@@ -1132,7 +1132,7 @@ export const useStore = create<State>((set, get) => {
       // window writes it back; a pop-out (`?surface=widget`) never renders App and must not touch settings.
       const { mode: legacyMode } = settings
       const legacyCanvas = legacyMode === 'canvas'
-      set({ settings: withoutLegacyMode(settings), view: legacyCanvas ? 'canvas' : 'home', projects, personalStats, conversations, ready: true, settingsOpen: !settings.apiKey && conversations.length === 0 })
+      set({ settings: withoutLegacyMode(settings), view: legacyCanvas ? 'canvas' : 'home', projects, personalStats, conversations, ready: true, settingsOpen: !settings.apiKeySet && conversations.length === 0 })
       if (legacyCanvas && !isPopout()) void get().saveSettings({ mode: 'classic' }).catch(() => undefined)
       void get().loadModels()
       void get().loadScope('all')

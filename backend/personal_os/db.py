@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
 import time
@@ -9,6 +10,15 @@ import uuid
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
+
+from .secrets import SecretStore
+
+log = logging.getLogger("personal_os.db")
+
+# Settings whose values live in the secret store, not in SQLite (the settings row is left blank).
+SECRET_SETTINGS = ("apiKey", "braveApiKey", "tavilyApiKey", "exaApiKey", "githubToken", "googleClientSecret")
+# googleToken is a dict; only these fields are secret, the rest (email, expiry, scopes) stays in SQLite.
+GOOGLE_TOKEN_SECRET_FIELDS = ("token", "refresh_token", "client_secret")
 
 SCHEMA = """
 PRAGMA journal_mode=WAL;
@@ -324,9 +334,48 @@ class Database:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         (self.data_dir / "uploads").mkdir(exist_ok=True)
         self.path = self.data_dir / "personal-os.db"
+        self.secrets = SecretStore(self.data_dir)
         with self.connect() as c:
             c.executescript(SCHEMA)
             self._migrate(c)
+        self._migrate_secrets()
+        self._lock_down()
+
+    def _lock_down(self) -> None:
+        """Owner-only: 0700 on the data dir, 0600 on the database and its WAL/SHM sidecars."""
+        try:
+            os.chmod(self.data_dir, 0o700)
+            for suffix in ("", "-wal", "-shm"):
+                p = self.path.with_name(self.path.name + suffix)
+                if p.exists():
+                    os.chmod(p, 0o600)
+        except OSError as e:
+            log.warning("Could not tighten permissions under %s: %s", self.data_dir, e)
+
+    def _migrate_secrets(self) -> None:
+        """Move plaintext secrets left in the settings table into the secret store. Idempotent: a blank
+        row (or a token without secret fields) has nothing to move, and a failed move leaves the value."""
+        with self.tx() as c:
+            rows = {r["key"]: r["value"] for r in c.execute("SELECT key, value FROM settings").fetchall()}
+        for k in SECRET_SETTINGS:
+            try:
+                v = json.loads(rows[k]) if k in rows else ""
+            except ValueError:
+                continue
+            if isinstance(v, str) and v:
+                try:
+                    self.set_settings({k: v})
+                except Exception as e:  # noqa: BLE001 - keep the plaintext rather than lose the key
+                    log.warning("Could not move %s into the secret store: %s", k, e)
+        try:
+            tok = json.loads(rows["googleToken"]) if "googleToken" in rows else None
+        except ValueError:
+            tok = None
+        if isinstance(tok, dict) and any(tok.get(f) for f in GOOGLE_TOKEN_SECRET_FIELDS):
+            try:
+                self.set_settings({"googleToken": tok})
+            except Exception as e:  # noqa: BLE001
+                log.warning("Could not move the Google token into the secret store: %s", e)
 
     @staticmethod
     def _migrate(c: sqlite3.Connection) -> None:
@@ -376,11 +425,43 @@ class Database:
     def get_settings(self) -> dict[str, Any]:
         with self.tx() as c:
             rows = c.execute("SELECT key, value FROM settings").fetchall()
-        return {r["key"]: json.loads(r["value"]) for r in rows}
+        out = {r["key"]: json.loads(r["value"]) for r in rows}
+        for k in SECRET_SETTINGS:
+            if k in out or self.secrets.get(k):
+                out[k] = self.secrets.get(k) or out.get(k) or ""  # the SQLite value is only a not-yet-migrated legacy
+        tok = out.get("googleToken")
+        if isinstance(tok, dict) and tok:
+            try:
+                tok = {**tok, **json.loads(self.secrets.get("googleToken") or "{}")}
+            except ValueError:
+                pass
+            out["googleToken"] = tok
+        return out
 
     def set_settings(self, patch: dict[str, Any]) -> None:
+        """Secret keys go to the secret store and leave a blank (or secret-free) row behind. An empty
+        value here is an explicit clear; the HTTP layer is what treats an empty apiKey as "unchanged"."""
+        rows: dict[str, Any] = {}
+        for k, v in patch.items():
+            if k in SECRET_SETTINGS:
+                if v:
+                    self.secrets.set(k, str(v))
+                else:
+                    self.secrets.delete(k)
+                v = ""
+            elif k == "googleToken":
+                if isinstance(v, dict):
+                    hidden = {f: v[f] for f in GOOGLE_TOKEN_SECRET_FIELDS if v.get(f)}
+                    if hidden:
+                        self.secrets.set(k, json.dumps(hidden))
+                    else:
+                        self.secrets.delete(k)
+                    v = {f: x for f, x in v.items() if f not in GOOGLE_TOKEN_SECRET_FIELDS}
+                else:
+                    self.secrets.delete(k)
+            rows[k] = v
         with self.tx() as c:
-            for k, v in patch.items():
+            for k, v in rows.items():
                 c.execute(
                     "INSERT INTO settings(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                     (k, json.dumps(v)),

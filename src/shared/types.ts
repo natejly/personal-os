@@ -795,6 +795,13 @@ export interface TodayDashboard {
 export interface Settings {
   baseUrl: string
   apiKey: string
+  /** The backend never returns secret values: apiKey etc. arrive blank and these say whether one is saved. */
+  apiKeySet?: boolean
+  braveApiKeySet?: boolean
+  tavilyApiKeySet?: boolean
+  exaApiKeySet?: boolean
+  githubTokenSet?: boolean
+  googleClientSecretSet?: boolean
   defaultModel: string
   systemPrompt: string
   extractionModel: string

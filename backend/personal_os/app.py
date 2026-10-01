@@ -27,7 +27,7 @@ from pydantic import AfterValidator, BaseModel, Field
 
 from . import activity, assist, llm, mac, mcp_eval, tools
 from .context import build_context, estimate_tokens
-from .db import Database, data_dir_from_env, new_id
+from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
 from .extract_text import extract_text
 from .learn import MAX_INJECTED_SKILLS, LearnJob, LearnWorker, Skills, induce_skill, skill_block
 from .repos import ALL, Conversations, Documents, Graph, Memories, Projects
@@ -429,9 +429,18 @@ PRIVATE_SETTINGS = {"googleToken", "googleAuthPending"}
 SETTINGS_READ_ONLY = {"activity", "googleTasksSync", "googleTodoCalendar", "meetings"}
 
 
+def public_settings() -> dict[str, Any]:
+    """What the renderer may see: secret values are blanked and reported as <key>Set booleans instead."""
+    out = {k: v for k, v in settings().items() if k not in PRIVATE_SETTINGS}
+    for k in SECRET_SETTINGS:
+        out[f"{k}Set"] = bool(out.get(k))
+        out[k] = ""
+    return out
+
+
 @app.get("/settings")
 def get_settings() -> dict[str, Any]:
-    return {k: v for k, v in settings().items() if k not in PRIVATE_SETTINGS}
+    return public_settings()
 
 
 # Numeric settings the Budget reads. A clamp keeps a cleared or mistyped field from becoming "unlimited"
@@ -463,8 +472,13 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
         d = llm.DEFAULT_SETTINGS[k]
         if isinstance(d, (int, float)) and not isinstance(d, bool):
             clean[k] = _check_numeric_setting(k, v)
+    for k in SECRET_SETTINGS:
+        if k in clean and clean[k] == "":  # blank means "unchanged" (the form never holds the saved key); null clears
+            del clean[k]
+        elif k in clean and clean[k] is not None and not isinstance(clean[k], str):
+            raise HTTPException(422, f"{k} must be a string or null")
     db.set_settings(clean)
-    return {k: v for k, v in settings().items() if k not in PRIVATE_SETTINGS}
+    return public_settings()
 
 
 @app.get("/models")

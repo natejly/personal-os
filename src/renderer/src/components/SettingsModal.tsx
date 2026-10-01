@@ -9,6 +9,7 @@ import { ToolGlobalToggles } from './ToolPermissions'
 import GoogleSettings from './GoogleSettings'
 import SkillsReview from './SkillsReview'
 import McpSettings from './McpSettings'
+import MeetingSettings from './MeetingSettings'
 import UsageView from './UsageView'
 
 export default function SettingsModal(): JSX.Element {
@@ -135,6 +136,11 @@ export default function SettingsModal(): JSX.Element {
         <section>
           <h3>Connectors</h3>
           <McpSettings />
+        </section>
+
+        <section>
+          <h3>Meetings</h3>
+          <MeetingSettings variant="modal" />
         </section>
 
         <section>

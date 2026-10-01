@@ -55,11 +55,12 @@ RESERVED_TOOL_NAMES = frozenset({
     "sandbox_exec", "sandbox_write_file", "sandbox_read_file", "sandbox_list_files",
     "sandbox_put_document", "sandbox_reset",
     "doc_list", "doc_search", "doc_read", "doc_create", "doc_edit",
-    "activity_recent", "activity_pause",
+    "activity_recent", "activity_pause", "activity_access", "activity_insights",
     "find_files", "read_local_file", "write_local_file", "move_local_file", "trash_local_file",
     "list_shortcuts", "run_shortcut", "open_page",
     "schedule_task", "scheduled_tasks", "cancel_scheduled_task",
     "writing_style", "save_writing_sample",
+    "meeting_list", "meeting_search", "meeting_read",
 })
 
 SCHEMA = """

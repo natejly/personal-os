@@ -87,8 +87,19 @@ their own instructions, knowledge files, memories and graph.
   keeps coming back, a calendar block around your real focus window. Suggestions
   are proposals: the common action opens a chat pre-loaded with the request rather
   than acting, "not now" hides one for a week, and dismissing one is permanent.
+- **Meetings** (macOS, opt-in, off by default). A notepad that listens: type
+  during a call while one long-lived ffmpeg per channel records it, segments
+  transcribe in the background, and afterwards the enhance pass proposes your
+  outline with the transcript filled in around it — as a diff you accept or
+  reject. Your typed notes live in their own column and no model ever writes
+  them. Calendar events happening now offer a Record button; action items become
+  todos on a click. Nothing is recorded until you acknowledge a modal naming the
+  exact directory the audio lands in and the exact URL it is uploaded to, and
+  transcription can run entirely on-device through whisper.cpp. Meetings never
+  expire, are unreachable from the activity monitor's purge, and never reach
+  auto-learn. See [docs/meetings.md](docs/meetings.md).
 - **Context management.** Per-chat toggles for memory, graph, documents, activity,
-  auto-learn and tools; an inspector showing exactly what was injected into
+  meetings, auto-learn and tools; an inspector showing exactly what was injected into
   each reply; a live preview for a draft message.
 - **Charts and diagrams.** Replies can include a ```` ```chart ```` block (a small
   JSON spec rendered as a bar / line / area / pie / scatter chart, each with
@@ -297,6 +308,7 @@ and its verdict is kept on the row.
 | ⌘0 … ⌘6, ⌘8 | Today / Chats / Todos / Calendar / Boards / Dashboards / Memory / Documents |
 | ⌘7 | Memory, opened on the knowledge graph |
 | ⌘9 | Activity |
+| ⌘⇧M | Meetings |
 | ⌘B | Toggle sidebar |
 | ⌘I | Toggle context panel |
 | ⌘U | Upload document |
@@ -440,6 +452,27 @@ development the grants go to **Electron**, not Personal OS.
 Full design, privacy model, API and limits:
 [docs/activity-monitor.md](docs/activity-monitor.md).
 
+## Meetings
+
+Also off by default, and a separate switch from the activity monitor. Open the
+**Meetings** view (⌘⇧M), pick a microphone, and press **Test** before you rely on
+it — a default `litellm.yaml` has nothing behind `/v1/audio/transcriptions`, so
+the self-test is what tells you transcription works, and a failing one blocks
+Record rather than warning:
+
+```bash
+brew install ffmpeg                             # capture and segmenting
+brew install whisper-cpp                        # on-device transcription, no cloud
+brew install blackhole-2ch                      # the other side of the call
+```
+
+A loopback device also needs a Multi-Output Device built by hand in Audio MIDI
+Setup, or your speakers go silent; without one a meeting records mic-only.
+Attribution is channel-level — you versus them — not per person.
+
+Full design, pipeline, privacy model, the Audio MIDI Setup recipe, API and limits:
+[docs/meetings.md](docs/meetings.md).
+
 ## Sandbox
 
 `run_python` executes scripts with `python -I` in a throwaway directory, with
@@ -458,12 +491,15 @@ backend/personal_os app.py routes · repos.py storage · context.py · learn.py
                     tools.py · sandbox.py · google.py · todos.py · boards.py
                     docs.py · dashboards.py · usage.py · trace.py · llm.py
                     activity.py collectors, privacy gate, rollup, activity.md
+                    meetings.py repo + service · meeting_notes.py templates/enhance
+                    meeting_recorder.py capture threads · stt.py · audiocap.py · redact.py
 scripts/dev.sh      LiteLLM + backend + Electron
 scripts/litellm.sh  LiteLLM proxy alone
 litellm.yaml        Model routing (Fireworks by default)
 docs/research.md    Feature research and roadmap
 docs/docs-editor.md The Docs editor: revisions, diffs and the doc_* tools
 docs/activity-monitor.md  Activity monitor: signals, privacy model, API
+docs/meetings.md    Meetings: the capture pipeline, consent, STT setup, API
 ```
 
 ## Roadmap

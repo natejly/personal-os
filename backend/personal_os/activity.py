@@ -18,7 +18,6 @@ import contextlib
 import json
 import logging
 import re
-import shutil
 import subprocess
 import sys
 import threading
@@ -30,11 +29,12 @@ from typing import Any, Callable
 import httpx
 
 from . import insights as insights_mod
+from . import stt
+from .audiocap import IS_MAC, LOOPBACK_HINTS, audio_devices, ffmpeg_path, looks_like_loopback  # noqa: F401
 from .db import Database, new_id, now, row_to_dict
+from .redact import REDACTIONS, SECRET_ASSIGN  # noqa: F401
 
 log = logging.getLogger("personal_os.activity")
-
-IS_MAC = sys.platform == "darwin"
 
 # Signals the user can turn on one at a time, most benign first (the UI renders them in this order).
 SIGNALS = ("apps", "browserUrls", "input", "text", "micAudio", "outputAudio")
@@ -128,30 +128,9 @@ CREATE TABLE IF NOT EXISTS activity_profile (
 
 # ---------------------------------------------------------------- the gate
 
-# Anything matching these is scrubbed out of typed text and transcripts before it is stored.
-# Deliberately blunt: a false positive costs a few characters of context, a miss stores a secret.
-REDACTIONS: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.S), "[private-key]"),
-    (re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"), "[email]"),
-    (re.compile(r"\b(?:\d[ -]*?){13,19}\b"), "[card-number]"),
-    (re.compile(r"\b\d{3}-\d{2}-\d{4}\b"), "[ssn]"),
-    (re.compile(r"\b(?:sk|pk|rk|api|key|tok|ghp|gho|ghu|ghs|ghr|xox[baprs])[-_][A-Za-z0-9_-]{12,}\b", re.I), "[token]"),
-    (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "[aws-key]"),
-    (re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"), "[jwt]"),
-    (re.compile(r"\b(?:\+?\d{1,2}[ .-]?)?\(?\d{3}\)?[ .-]?\d{3}[ .-]?\d{4}\b"), "[phone]"),
-    # Long unbroken mixed-case-and-digit runs: almost never prose, often a credential.
-    (re.compile(r"\b(?=[A-Za-z0-9+/=_-]*\d)(?=[A-Za-z0-9+/=_-]*[A-Za-z])[A-Za-z0-9+/=_-]{28,}\b"), "[redacted]"),
-]
-
-# A word that announces a secret, plus whatever follows it - that is where the value lives.
-# Scoped to the value rather than the whole line on purpose: typed text arrives as one long
-# single-line buffer, so dropping the line would throw away thousands of harmless characters
-# because of one word.
-SECRET_ASSIGN = re.compile(
-    r"(?:password|passwd|passphrase|secret|token|api[ _-]?key|access[ _-]?key|credit ?card|cvv|"
-    r"pin ?code|seed phrase)\s*(?:is|are|=|:)?\s*\S{0,64}",
-    re.I,
-)
+# The named rules, and the "password is ..." sweep, live in redact.py: meetings need the
+# credential subset without the identity rules, and one copy means one place to fix a pattern.
+# Re-exported above, so activity.REDACTIONS and activity.SECRET_ASSIGN still resolve.
 
 
 class Gate:
@@ -361,55 +340,10 @@ def browser_url(app: str) -> str:
         return ""
 
 
-def ffmpeg_path() -> str:
-    return shutil.which("ffmpeg") or ""
-
-
-_devices_cache: tuple[float, list[dict[str, str]]] = (0.0, [])
-
-
-def audio_devices(max_age: float = 20.0) -> list[dict[str, str]]:
-    """avfoundation audio inputs ffmpeg can see, as [{index, name}].
-
-    Cached for a few seconds: the status route is polled while the panel is open, and listing
-    devices means launching ffmpeg each time.
-    """
-    global _devices_cache
-    ff = ffmpeg_path()
-    if not ff or not IS_MAC:
-        return []
-    age, cached = _devices_cache
-    if cached and (time.time() - age) < max_age:
-        return cached
-    try:
-        r = subprocess.run([ff, "-hide_banner", "-f", "avfoundation", "-list_devices", "true", "-i", ""],
-                           capture_output=True, text=True, timeout=15)
-    except Exception:  # noqa: BLE001
-        return []
-    out: list[dict[str, str]] = []
-    in_audio = False
-    for line in (r.stderr or "").splitlines():
-        if "AVFoundation audio devices" in line:
-            in_audio = True
-            continue
-        if "AVFoundation video devices" in line:
-            in_audio = False
-            continue
-        m = re.search(r"\[(\d+)\]\s+(.+?)\s*$", line)
-        if in_audio and m:
-            out.append({"index": m.group(1), "name": m.group(2)})
-    _devices_cache = (time.time(), out)
-    return out
-
-
-# Loopback drivers that can carry system output back in as an input device. Without one of these
-# macOS gives no way to record what the speakers played.
-LOOPBACK_HINTS = ("blackhole", "loopback", "soundflower", "aggregate", "multi-output", "existential audio")
-
-
-def looks_like_loopback(name: str) -> bool:
-    n = (name or "").lower()
-    return any(h in n for h in LOOPBACK_HINTS)
+# ffmpeg_path, audio_devices, LOOPBACK_HINTS and looks_like_loopback moved to audiocap.py so the
+# meetings recorder shares one copy of the device layer; they are re-exported above under the same
+# names. audio_devices is TTL-cached there, which also kills the two 15-second ffmpeg probes that
+# one status() poll used to spawn - capabilities(cfg) calls it, then status() calls it again.
 
 
 # ---------------------------------------------------------------- permissions
@@ -1247,6 +1181,9 @@ class AudioCollector(Collector):
             path = tmp / f"{self.channel}-{new_id()}.wav"
             text = ""
             try:
+                # The row's ts must be when recording STARTED: store.add defaults to now(), which
+                # is when transcription returned, so ts + duration_ms pointed into the future.
+                started = now()
                 r = subprocess.run(
                     [ff, "-hide_banner", "-loglevel", "error", "-f", "avfoundation", "-i", f":{device}",
                      "-t", str(chunk), "-ac", "1", "-ar", "16000", "-y", str(path)],
@@ -1274,24 +1211,18 @@ class AudioCollector(Collector):
             self.m.store.add(
                 "audio", app=app, text=self.m.gate.scrub(text)[:4000],
                 meta={"channel": self.channel, "seconds": chunk},
-                duration_ms=chunk * 1000, retention_hours=cfg["retentionHours"],
+                duration_ms=chunk * 1000, ts=started, retention_hours=cfg["retentionHours"],
             )
 
     def _transcribe(self, path: Path, model: str) -> str:
-        s = self.m.settings()
-        base = str(s.get("baseUrl") or "http://localhost:4000").rstrip("/")
-        headers = {"Authorization": f"Bearer {s['apiKey']}"} if s.get("apiKey") else {}
-        with httpx.Client(timeout=120) as client, path.open("rb") as fh:
-            r = client.post(f"{base}/v1/audio/transcriptions", headers=headers,
-                            files={"file": (path.name, fh, "audio/wav")},
-                            data={"model": model, "response_format": "json"})
-        if r.status_code >= 400:
-            self.error = f"transcription {r.status_code}: {r.text[:160]}"
-            return ""
-        try:
-            return str(r.json().get("text") or "")
-        except Exception:  # noqa: BLE001
-            return r.text[:2000]
+        """Hand the wav to stt.py, which never raises and reports its own failure."""
+        # Pinned to the proxy backend: the monitor has always posted to the chat base URL, and a
+        # silent switch to on-device whisper is a meetings setting, not an activity one.
+        res = stt.transcribe(path, settings=self.m.settings(),
+                             cfg={"sttBackend": "proxy", "sttModel": model}, data_dir=self.m.data_dir)
+        if res["error"]:
+            self.error = res["error"]
+        return res["text"]
 
 
 # ---------------------------------------------------------------- rollup prompts

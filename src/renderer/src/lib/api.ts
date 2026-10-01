@@ -9,7 +9,8 @@ import type {
   McpEffective, McpReport, McpServer, McpServerDraft, McpTool, ToolMode,
   ActivityApplyResult, ActivityCapability, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityGrantResult,
   ActivityInsights, ActivityStatus, ActivitySuggestion, ActivitySummary, InsightStatus,
-  PendingSend, SendHoldConfig, Verification, Verified
+  PendingSend, SendHoldConfig, Verification, Verified,
+  Meeting, FullMeeting, MeetingActionItem, MeetingCandidate, MeetingConfig, MeetingPreflight, MeetingRevision, MeetingSegment, MeetingStatusInfo, MeetingStreamEvent
 } from '@shared/types'
 
 let base = ''
@@ -406,6 +407,53 @@ export const api = {
     reject: (revId: string) => req<FullDoc>(`/docs/revisions/${revId}/reject`, { method: 'POST' }),
     restore: (revId: string) => req<FullDoc>(`/docs/revisions/${revId}/restore`, { method: 'POST' })
   },
+  /** Recorded calls. `status`/`preflight`/`pending` are the only ones safe to poll; everything else is a user action. */
+  meetings: {
+    list: (s: Scope = 'all', q = '') => req<Meeting[]>(`/meetings?project_id=${encodeURIComponent(s)}&q=${encodeURIComponent(q)}`),
+    get: (id: string) => req<FullMeeting>(`/meetings/${id}`),
+    create: (m: { title?: string; project_id?: string | null; template?: string; status?: string; calendar_event_id?: string | null; calendar_id?: string | null; calendar_link?: string; conference_link?: string; attendees?: unknown[]; scheduled_start?: number | null; scheduled_end?: number | null }) =>
+      req<FullMeeting>('/meetings', { method: 'POST', body: json(m) }),
+    /** PUT, not PATCH — notes autosave through here, and `status` is the service's to write, not a body's. */
+    patch: (id: string, patch: { title?: string; notes?: string; enhanced?: string; summary?: string; template?: string; keep_audio?: boolean; conversation_id?: string | null; project_id?: string | null; clear_project?: boolean }) =>
+      req<FullMeeting>(`/meetings/${id}`, { method: 'PUT', body: json(patch) }),
+    del: (id: string) => req<{ ok: boolean }>(`/meetings/${id}`, { method: 'DELETE' }),
+    status: () => req<MeetingStatusInfo>('/meetings/status'),
+    /** Registered under both verbs; a GET keeps the ten-minute cache honest in the devtools network log. */
+    preflight: (force = false) => req<MeetingPreflight>(`/meetings/preflight?force=${force}`),
+    config: () => req<MeetingConfig>('/meetings/config'),
+    /** Returns the whole status, like `/activity/config` does — the config is under `.config`. */
+    setConfig: (patch: Partial<MeetingConfig>) => req<MeetingStatusInfo>('/meetings/config', { method: 'PUT', body: json(patch) }),
+    consent: () => req<MeetingStatusInfo>('/meetings/consent', { method: 'POST' }),
+    /** The whole preflight, not just its `selftest` key: a passing round trip also clears what it blocked. */
+    selftest: () => req<MeetingPreflight>('/meetings/selftest', { method: 'POST' }),
+    devices: (refresh = false) => req<{ index: string; name: string; loopback: boolean }[]>(`/meetings/devices?refresh=${refresh}`),
+    suggest: () => req<MeetingCandidate[]>('/meetings/suggest'),
+    search: (q: string, s: Scope = 'all', limit = 10) =>
+      req<{ meeting_id: string; title: string; status: string; started_at: number | null; snippet: string; field: string; score: number }[]>(`/meetings/search?q=${encodeURIComponent(q)}&project_id=${encodeURIComponent(s)}&limit=${limit}`),
+    pending: () => req<{ pending: number }>('/meetings/pending'),
+    start: (id: string) => req<FullMeeting>(`/meetings/${id}/start`, { method: 'POST' }),
+    /** Blocks while the transcription backlog drains (up to `drainSeconds`), so give it time. */
+    stop: (id: string) => req<FullMeeting>(`/meetings/${id}/stop`, { method: 'POST' }),
+    pause: (id: string) => req<MeetingStatusInfo>(`/meetings/${id}/pause`, { method: 'POST' }),
+    resume: (id: string) => req<MeetingStatusInfo>(`/meetings/${id}/resume`, { method: 'POST' }),
+    /** `since` is a rowid cursor: 0 is the whole tail with cursors, then pass back the last row's. */
+    segments: (id: string, since = 0, limit = 200) => req<MeetingSegment[]>(`/meetings/${id}/segments?since=${since}&limit=${limit}`),
+    transcript: (id: string, offset = 0, limit = 500) =>
+      req<{ meeting_id: string; text: string; lines: string[]; total: number; offset: number; count: number; has_more: boolean }>(`/meetings/${id}/transcript?offset=${offset}&limit=${limit}`),
+    /** Returns the REVISION. An auto-applied one comes back `applied` with the meeting's `pending` null, so re-fetch the meeting. */
+    enhance: (id: string, force = false, template?: string) =>
+      req<MeetingRevision>(`/meetings/${id}/enhance?force=${force}${template ? `&template=${encodeURIComponent(template)}` : ''}`, { method: 'POST' }),
+    revisions: (id: string, limit = 100) => req<MeetingRevision[]>(`/meetings/${id}/revisions?limit=${limit}`),
+    accept: (revId: string) => req<FullMeeting>(`/meetings/revisions/${revId}/accept`, { method: 'POST' }),
+    reject: (revId: string) => req<FullMeeting>(`/meetings/revisions/${revId}/reject`, { method: 'POST' }),
+    actions: (id: string) => req<MeetingActionItem[]>(`/meetings/${id}/actions`),
+    /** Empty `ids` promotes every item still proposed. Returns the full list afterwards. */
+    addTodos: (id: string, ids: string[] = [], projectId?: string | null) =>
+      req<MeetingActionItem[]>(`/meetings/${id}/actions/add-todos`, { method: 'POST', body: json({ ids, project_id: projectId ?? null }) }),
+    dismissAction: (id: string, actionId: string) => req<MeetingActionItem>(`/meetings/${id}/actions/${actionId}/dismiss`, { method: 'POST' }),
+    retranscribe: (id: string, limit = 20) => req<{ settled: number; meeting: FullMeeting }>(`/meetings/${id}/retranscribe?limit=${limit}`, { method: 'POST' }),
+    deleteAudio: (id: string) => req<FullMeeting>(`/meetings/${id}/audio`, { method: 'DELETE' })
+  },
   notes: {
     list: (s: Scope = 'all', q = '') => req<Note[]>(`/notes?project_id=${encodeURIComponent(s)}&q=${encodeURIComponent(q)}`),
     get: (id: string) => req<Note>(`/notes/${id}`),
@@ -488,5 +536,16 @@ export async function* chatStream(convId: string, since = 0, signal?: AbortSigna
 export async function* backgroundStream(since = 0, signal?: AbortSignal): AsyncGenerator<BackgroundEvent & { seq: number | null }> {
   for await (const { event, data, seq } of sseStream(`/events?since=${since}`, signal)) {
     yield { event, data, seq } as BackgroundEvent & { seq: number | null }
+  }
+}
+
+/**
+ * The per-meeting event stream. Nothing publishes to the meeting bus yet, so today this opens, ends
+ * at once and the transcript pane keeps polling `/segments`; the generator ships so switching over
+ * is a store change rather than a new protocol.
+ */
+export async function* meetingStream(meetingId: string, since = 0, signal?: AbortSignal): AsyncGenerator<MeetingStreamEvent> {
+  for await (const { event, data } of sseStream(`/meetings/${meetingId}/stream?since=${since}`, signal)) {
+    yield { event, data } as MeetingStreamEvent
   }
 }

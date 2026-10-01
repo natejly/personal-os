@@ -73,6 +73,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Activity monitor. Shape and defaults live in activity.DEFAULT_CONFIG; patched through
     # /activity/config rather than /settings so the merge is a deep one.
     "activity": {"enabled": False},
+    # Meetings. Shape and defaults live in meetings.DEFAULT_CONFIG; patched through
+    # /meetings/config rather than /settings so the merge is a deep one.
+    "meetings": {"enabled": False},
     # Google Tasks <-> todos sync. Shape and defaults live in gtasks.DEFAULT_CONFIG; patched
     # through /integrations/google/tasks-sync rather than /settings for the same reason.
     # Empty on purpose: anything named here would override that module's defaults.
@@ -194,3 +197,15 @@ async def complete(settings: dict[str, Any], model: str, messages: list[dict[str
     text = data["choices"][0]["message"]["content"] or ""
     _emit_usage(model, kind, data.get("usage") if isinstance(data.get("usage"), dict) else None, int((time.time() - t0) * 1000), len(json.dumps(messages)), len(text))
     return text
+
+
+def audio_usage(model: str, seconds: float, kind: str = "meeting-stt") -> None:
+    """Record transcribed audio in the usage log; duration_ms carries the audio length, not wall time.
+
+    Synchronous and silent on purpose: transcription runs on worker threads, and a missing
+    accounting row must never fail a transcription.
+    """
+    try:
+        _emit_usage(model, kind, None, int(seconds * 1000), 0, 0)
+    except Exception:  # noqa: BLE001 - accounting must never break a transcription
+        pass

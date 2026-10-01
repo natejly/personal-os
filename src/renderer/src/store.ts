@@ -1,8 +1,9 @@
 import { create } from 'zustand'
-import type { ApprovalDecision, PlanEdit, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, Document, Effort, FullDoc, GraphData, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodoCalendarStatus, TodayDashboard, Recap, Job } from '@shared/types'
-import { api, backgroundStream, chatStream, setBase, type Scope } from './lib/api'
+import type { ApprovalDecision, PlanEdit, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, Document, Effort, FullDoc, GraphData, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodoCalendarStatus, TodayDashboard, Recap, Job, Meeting, MeetingCandidate, MeetingCapability, MeetingConfig, MeetingPreflight, MeetingSegment, MeetingStatus, MeetingStatusInfo, MeetingStreamEvent, FullMeeting } from '@shared/types'
+import { api, backgroundStream, chatStream, meetingStream, setBase, type Scope } from './lib/api'
 import { currentSelection } from './lib/pageContext'
 import { finishStatus, mergeConversation, pickEvictions, reduceStatus, settleApprovals } from './sessionStatus'
+import { applyCursor, fetchSegmentPages, needsSegmentReload } from './lib/transcript'
 import { viewHidden } from './modules'
 
 /**
@@ -17,7 +18,7 @@ const withoutLegacyMode = (s: Settings): Settings => {
 }
 
 /** `'canvas'` is the spaces desktop: one destination among the views, not a separate shell. */
-export type View = 'home' | 'chat' | 'todos' | 'calendar' | 'mail' | 'boards' | 'dashboards' | 'memory' | 'documents' | 'docs' | 'activity' | 'project' | 'canvas'
+export type View = 'home' | 'chat' | 'todos' | 'calendar' | 'mail' | 'boards' | 'dashboards' | 'memory' | 'documents' | 'docs' | 'meetings' | 'activity' | 'project' | 'canvas'
 /** Every view but the canvas: what ⌘⇧C and the sidebar's LayoutGrid button return to. */
 export type ClassicView = Exclude<View, 'canvas'>
 /** How the Docs editor splits its panes. */
@@ -179,6 +180,29 @@ export interface State {
   /** Editor buffer for the open doc: what the user has typed but autosave has not yet flushed. */
   docDraft: string | null
   docSaving: boolean
+
+  /** Meetings: recorded calls. List rows, plus the one open in the notepad. */
+  meetings: Meeting[]
+  activeMeeting: FullMeeting | null
+  /** `null` until the first status poll lands; `.active` is the live recording, if any. */
+  meetingStatus: MeetingStatusInfo | null
+  /** The open meeting's transcript tail, de-duplicated by `applyCursor`. */
+  meetingSegments: MeetingSegment[]
+  /** Rowid cursor the next `/segments` poll resumes from. 0 = the whole tail. */
+  meetingCursor: number
+  meetingPreflight: MeetingPreflight | null
+  /** Enhance proposals awaiting review, across every meeting — the sidebar badge. */
+  meetingsPending: number
+  /** The rail's search box, held here rather than in the view: `refreshMeetings` is called from the
+   *  recorder bar's 5s tick and from the autosave too, and those must not drop the user's filter. */
+  meetingQuery: string
+  /** Notepad buffer for the open meeting: what the user has typed but autosave has not flushed. */
+  meetingNotesDraft: string | null
+  meetingSaving: boolean
+  /** A lifecycle call (start/stop/enhance/retranscribe) is in flight; every such button disables. */
+  meetingBusy: boolean
+  meetingConsentOpen: boolean
+
   /** Activity monitor. `null` until the first status poll lands. */
   activity: ActivityStatus | null
   activityEvents: ActivityEvent[]
@@ -358,12 +382,69 @@ export interface State {
   acceptRevision: (revId: string) => Promise<void>
   rejectRevision: (revId: string) => Promise<void>
   restoreRevision: (revId: string) => Promise<void>
+
+  /** No argument re-issues the filter the rail is currently showing, never the unfiltered list. */
+  refreshMeetings: (query?: string) => Promise<void>
+  /** Type in the rail's search box. The view's effect does the fetch. */
+  setMeetingQuery: (query: string) => void
+  /** Status only — cheap enough to poll, and it keeps its own 5s tick while a recording is live. */
+  refreshMeetingStatus: () => Promise<void>
+  refreshMeetingsPending: () => Promise<void>
+  openMeeting: (id: string) => Promise<void>
+  /** No id creates a meeting first. Opens the consent modal instead when the notice is unacknowledged. */
+  startRecording: (meetingId?: string) => Promise<void>
+  /** There is only ever one live recording, so none of these four takes an id. */
+  stopRecording: () => Promise<void>
+  pauseMeeting: () => Promise<void>
+  resumeMeeting: () => Promise<void>
+  /** Adopt a calendar candidate (find-or-create on its event id) and start recording it. */
+  recordCandidate: (candidate: MeetingCandidate) => Promise<void>
+  /** Type into the open meeting's notes. Buffers locally and flushes on a debounce. */
+  editMeetingNotes: (next: string) => void
+  /** Flush the buffer now (⌘S, switching meetings, leaving the view, unmount). */
+  flushMeetingNotes: () => Promise<void>
+  /** The 2s tick: the live status plus the segment tail from `meetingCursor`. */
+  pollMeetingLive: () => Promise<void>
+  /** Attach to one meeting's SSE. Idempotent per meeting; a no-op stream today. */
+  watchMeeting: (meetingId: string) => Promise<void>
+  enhanceMeeting: (id: string, force?: boolean) => Promise<void>
+  acceptMeetingRevision: (revisionId: string) => Promise<void>
+  rejectMeetingRevision: (revisionId: string) => Promise<void>
+  promoteActionItems: (meetingId: string, actionIds: string[]) => Promise<void>
+  dismissActionItem: (meetingId: string, actionId: string) => Promise<void>
+  deleteMeeting: (id: string) => Promise<void>
+  setMeetingConfig: (patch: Partial<MeetingConfig>) => Promise<void>
+  loadMeetingPreflight: (force?: boolean) => Promise<void>
+  retranscribeMeeting: (id: string) => Promise<void>
+  /** No id deletes every retained wav: there is no bulk route, so this loops the list. */
+  deleteMeetingAudio: (meetingId?: string) => Promise<void>
+  setMeetingConsentOpen: (open: boolean) => void
+  /** Stamps `consentedAt`, closes the modal and starts what the user clicked Record on. */
+  acceptMeetingConsent: () => Promise<void>
 }
 
 let toastSeq = 0
 /** Autosave debounce for the doc editor: long enough to be one history entry, short enough to trust. */
 const SAVE_DEBOUNCE_MS = 1200
 let saveTimer: ReturnType<typeof setTimeout> | null = null
+/** The same debounce for the meeting notepad, on its own timer: typing notes during a call must not
+ *  be cancelled by, or cancel, an autosave in the Docs editor. */
+const MEETING_SAVE_DEBOUNCE_MS = 1200
+let meetingSaveTimer: ReturnType<typeof setTimeout> | null = null
+/** While a recording is live the sidebar indicator is mounted in every view but only the Meetings
+ *  view polls, so the status poll keeps its own tick. Cleared the moment `active` goes null. */
+let meetingLiveTimer: ReturnType<typeof setInterval> | null = null
+/**
+ * Epoch ms the post-stop watch window closes at.
+ *
+ * `POST /meetings/{id}/stop` answers with the row already finalized to `ready` and only THEN
+ * schedules the enhance pass, so the status poll right after a stop sees no live session and a
+ * settled status, and would tear the tick down a moment before the revision, the action items and
+ * the late transcriptions land. The window keeps it ticking across that gap; it is bounded so a
+ * stop can never leave a poll running for the rest of the session.
+ */
+let meetingSettleUntil = 0
+const MEETING_SETTLE_MS = 90_000
 
 /**
  * A pop-out renderer (`?surface=widget`). Same lookup as main.tsx: dev serves the query off
@@ -382,6 +463,42 @@ const clearHold = (convId: string): void => {
     clearTimeout(t)
     holds.delete(convId)
   }
+}
+
+/** Statuses that are still moving on their own: the capture, the transcription queue or the enhance
+ *  pass is running, so one tick keeps the sidebar indicator and the open meeting from freezing. */
+const SETTLING: MeetingStatus[] = ['recording', 'stopped', 'transcribing', 'enhancing']
+
+/** A hand-started meeting has no calendar event to take a title from. */
+const newMeetingTitle = (): string =>
+  `Meeting ${new Date().toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`
+
+/** Google's ISO timestamps as the epoch seconds `POST /meetings` wants. */
+const epochSeconds = (iso: string): number | null => {
+  const t = Date.parse(iso)
+  return Number.isFinite(t) ? t / 1000 : null
+}
+
+/** The newest rowid in a `?since=` batch, which is what the next poll resumes from. */
+const lastCursor = (rows: MeetingSegment[], from = 0): number =>
+  rows.reduce((n, r) => Math.max(n, r.cursor ?? 0), from)
+
+/**
+ * A blocked `POST /meetings/{id}/start` is a 409 whose body is the capability checklist. `req()`
+ * JSON-encodes a non-string `detail` into the error message, exactly as a `RunConflict` arrives, so
+ * naming the first blocker and its fix is what turns "409" into "install a loopback device".
+ */
+const startBlockers = (e: unknown): MeetingCapability[] => {
+  try {
+    const d = JSON.parse((e as Error).message) as { blockers?: MeetingCapability[] }
+    return Array.isArray(d?.blockers) ? d.blockers : []
+  } catch {
+    return []
+  }
+}
+const startFailure = (e: unknown): string => {
+  const first = startBlockers(e).find((b) => !b.ok)
+  return first ? `${first.label}: ${first.detail}${first.fix ? ` — ${first.fix}` : ''}` : (e as Error).message
 }
 
 /** A 409 from `POST /chat` arrives as a `RunConflict` JSON-encoded in the error detail. */
@@ -481,6 +598,42 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean): Cha
   }
 }
 
+/** The slice one meeting stream event can move. Nothing else, so the reducer stays testable. */
+type MeetingWatch = Pick<State, 'activeMeeting' | 'meetingSegments' | 'meetingCursor' | 'meetingStatus'>
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null
+/** `MeetingStreamEvent.data` is `unknown`, because the bus is a seam: the frames are declared here
+ *  and nothing publishes them yet, so every one is checked rather than cast. */
+const isSegment = (v: unknown): v is MeetingSegment => isRecord(v) && typeof v.id === 'string' && typeof v.meeting_id === 'string' && typeof v.seq === 'number'
+const isStatus = (v: unknown): v is MeetingStatusInfo => isRecord(v) && isRecord(v.config) && isRecord(v.counts)
+const isRevision = (v: unknown): v is NonNullable<FullMeeting['pending']> =>
+  isRecord(v) && typeof v.id === 'string' && typeof v.meeting_id === 'string' && typeof v.after === 'string'
+
+/**
+ * Every meeting mutation a stream event makes, as one new slice. No side effects — a toast or a
+ * refetch belongs to `watchMeeting`, which is what makes this safe to run on a replayed frame.
+ */
+const applyMeetingEvent = (s: MeetingWatch, ev: MeetingStreamEvent): MeetingWatch => {
+  switch (ev.event) {
+    case 'segment': {
+      if (!isSegment(ev.data) || ev.data.meeting_id !== s.activeMeeting?.id) return s
+      // `applyCursor` is the same fold the 2s poll uses, so a pushed row and a polled row that
+      // describe the same segment collapse into one line rather than two.
+      return { ...s, meetingSegments: applyCursor(s.meetingSegments, [ev.data]), meetingCursor: Math.max(s.meetingCursor, ev.data.cursor ?? 0) }
+    }
+    case 'status':
+      return isStatus(ev.data) ? { ...s, meetingStatus: ev.data } : s
+    case 'revision': {
+      if (!isRevision(ev.data) || !s.activeMeeting || ev.data.meeting_id !== s.activeMeeting.id) return s
+      // Only a proposal still waiting is `pending`; an applied one arrives with the meeting refetch.
+      return { ...s, activeMeeting: { ...s.activeMeeting, pending: ev.data.status === 'pending' ? ev.data : s.activeMeeting.pending, has_pending: ev.data.status === 'pending' } }
+    }
+    default:
+      // 'error' and 'end' are the loop's business: one toasts, the other just lets the generator finish.
+      return s
+  }
+}
+
 export const useStore = create<State>((set, get) => {
   /**
    * App's init effect runs twice under React.StrictMode, so both of these are latched. A second
@@ -490,6 +643,15 @@ export const useStore = create<State>((set, get) => {
    */
   let menuWired = false
   let inited = false
+  /** The live meeting SSE subscription. Store-local, like `Streaming.abort`: a running
+   *  AbortController must never cross the IPC bus. */
+  let meetingWatch: { id: string; abort: AbortController } | null = null
+  /** Which meeting the Record click that opened the consent modal was for; `undefined` means
+   *  "create one". Kept out of state because the modal must not be able to re-target it. */
+  let consentIntent: string | undefined
+  /** The meeting `openMeeting` is currently fetching, so a slower response cannot clobber one the
+   *  user has since switched away from. */
+  let openingMeeting: string | null = null
 
   const wireMenu = (): void => {
     if (menuWired) return
@@ -574,6 +736,59 @@ export const useStore = create<State>((set, get) => {
       await new Promise((r) => setTimeout(r, backoff))
       backoff = Math.min(backoff * 2, 30000)
     }
+  }
+
+  /**
+   * The whole segment tail, cursor reset. A `?since=` poll is keyed on rowid and an UPDATE does not
+   * move one, so a segment whose TEXT changed — exactly what retranscribe does — is never
+   * re-delivered incrementally. Opening a meeting and replaying one both have to reload.
+   */
+  const loadSegments = async (meetingId: string): Promise<void> => {
+    // Paged, because one request is capped: an hour on two channels at the default 20s clips is
+    // ~360 rows, and a single `?since=0` page would show the first half of the call and stop
+    // mid-sentence with nothing on screen saying so.
+    const page = await fetchSegmentPages((since, limit) => api.meetings.segments(meetingId, since, limit)).catch(() => null)
+    if (page === null || get().activeMeeting?.id !== meetingId) return
+    set({ meetingSegments: page.segments, meetingCursor: page.cursor })
+  }
+
+  /**
+   * Keystrokes aimed at the meeting being left behind.
+   *
+   * A switch is two round trips long and the notepad accepts input for the whole of it, so the
+   * flush at the top of `openMeeting`/`startRecording` is not the last word: without this second
+   * flush the unconditional `meetingNotesDraft: null` that follows eats everything typed since the
+   * click. Returns the saved row when it flushed one, so the caller can adopt its notes.
+   */
+  const flushOutgoing = async (outgoing: string | null): Promise<FullMeeting | null> => {
+    if (outgoing === null || get().activeMeeting?.id !== outgoing || get().meetingNotesDraft === null) return null
+    await get().flushMeetingNotes()
+    const after = get().activeMeeting
+    return after?.id === outgoing ? after : null
+  }
+
+  /**
+   * The 5s tick that runs while anything is still settling. The Meetings view polls the segment tail
+   * itself, so this exists for every OTHER view: the sidebar indicator's clock, and a meeting whose
+   * transcript and enhance pass land minutes after Stop returned.
+   */
+  const liveTick = async (): Promise<void> => {
+    await get().refreshMeetingStatus()
+    const m = get().activeMeeting
+    // The post-stop window counts as settling: the row is already `ready` while the enhance pass
+    // and the last transcriptions are still landing on it.
+    if (!m || !(SETTLING.includes(m.status) || Date.now() < meetingSettleUntil)) return
+    // Never mid-autosave: a read that lands between the PUT and its merge-back would put the
+    // pre-save notes back on screen and the next keystroke would diff against them.
+    if (get().meetingSaving) return
+    const fresh = await api.meetings.get(m.id).catch(() => null)
+    if (fresh && get().activeMeeting?.id === fresh.id) {
+      set({ activeMeeting: fresh })
+      // A clip that transcribed after Stop kept its rowid, so `meetingCursor` will never re-deliver
+      // it: the tail has to be reloaded whole or those words never appear.
+      if (needsSegmentReload(get().meetingSegments, fresh.segment_count)) await loadSegments(fresh.id)
+    }
+    void get().refreshMeetingsPending()
   }
 
   /** Consume one run's events into a session. `attached` means the run was started by someone else. */
@@ -711,6 +926,18 @@ export const useStore = create<State>((set, get) => {
     docMode: 'split',
     docDraft: null,
     docSaving: false,
+    meetings: [],
+    activeMeeting: null,
+    meetingStatus: null,
+    meetingSegments: [],
+    meetingCursor: 0,
+    meetingPreflight: null,
+    meetingsPending: 0,
+    meetingQuery: '',
+    meetingNotesDraft: null,
+    meetingSaving: false,
+    meetingBusy: false,
+    meetingConsentOpen: false,
     sidebarOpen: true,
     contextOpen: false,
     contextTab: 'last',
@@ -775,6 +1002,10 @@ export const useStore = create<State>((set, get) => {
       void get().refreshActivity()
       // One watcher per app: a pop-out would only duplicate every toast in another window.
       if (!isPopout()) void watchBackgroundEvents()
+      // Both for the sidebar: the review badge, and the indicator that says a recording is running.
+      // `refreshMeetingStatus` also starts the live tick, so a meeting a crash left running is visible.
+      void get().refreshMeetingsPending()
+      void get().refreshMeetingStatus()
     },
 
     loadModels: async () => {
@@ -793,11 +1024,17 @@ export const useStore = create<State>((set, get) => {
       const cur = get().view
       // Leaving the editor must not drop what is still in the buffer.
       if (cur === 'docs' && view !== 'docs') void get().flushDoc()
+      if (cur === 'meetings' && view !== 'meetings') void get().flushMeetingNotes()
       if (view === 'canvas' && cur !== 'canvas') set({ view, lastClassicView: cur })
       else set({ view })
       if (view === 'docs') {
         void get().refreshDocs()
         void get().refreshDocsPending()
+      }
+      if (view === 'meetings') {
+        void get().refreshMeetings()
+        void get().refreshMeetingStatus()
+        void get().refreshMeetingsPending()
       }
       if (view === 'home') void get().refreshDashboard()
       if (view === 'todos') void get().refreshTodos()
@@ -1281,6 +1518,419 @@ export const useStore = create<State>((set, get) => {
       } catch (e) {
         get().toast((e as Error).message, 'error')
       }
+    },
+
+    // ---- meetings ----
+    refreshMeetings: async (query) => {
+      // Defaulting to the stored query rather than '' is the whole point: the recorder bar's 5s
+      // tick and the notes autosave both call this with no argument, and an unfiltered answer
+      // would replace the list under a search box that still reads "budget".
+      const q = query ?? get().meetingQuery
+      if (q !== get().meetingQuery) set({ meetingQuery: q })
+      try {
+        set({ meetings: await api.meetings.list(get().dataScope, q) })
+      } catch { /* the recorder bar re-runs this every 5s; one flaky request must not toast */ }
+    },
+    setMeetingQuery: (query) => set({ meetingQuery: query }),
+    refreshMeetingStatus: async () => {
+      try {
+        const meetingStatus = await api.meetings.status()
+        set({ meetingStatus })
+        const m = get().activeMeeting
+        // `counts.pending` covers the one path the 90s window cannot: when `stop` abandons the
+        // drain, the row is finalized 'ready' straight away and a background watcher waits up to
+        // 15 minutes for the segments to settle before re-rolling the transcript and enhancing.
+        // 'ready' is not in SETTLING, so without this the tick dies at 90s and neither the late
+        // transcript nor the enhanced-notes proposal ever reaches the open meeting.
+        const draining = meetingStatus.counts.pending > 0
+        const settling = !!meetingStatus.active || draining || (m !== null && SETTLING.includes(m.status)) || Date.now() < meetingSettleUntil
+        if (settling && !meetingLiveTimer) meetingLiveTimer = setInterval(() => void liveTick(), 5000)
+        if (!settling && meetingLiveTimer) {
+          clearInterval(meetingLiveTimer)
+          meetingLiveTimer = null
+        }
+      } catch { /* the panel shows whatever it last had; a failed poll is not worth a toast */ }
+    },
+    refreshMeetingsPending: async () => {
+      try {
+        set({ meetingsPending: (await api.meetings.pending()).pending })
+      } catch { /* a badge is not worth a toast */ }
+    },
+    openMeeting: async (id) => {
+      const outgoing = get().activeMeeting?.id ?? null
+      if (outgoing !== id) await get().flushMeetingNotes()
+      openingMeeting = id
+      set({ view: 'meetings' })
+      try {
+        const m = await api.meetings.get(id)
+        if (openingMeeting !== id) return
+        // Anything typed during the two round trips still belongs to the outgoing meeting, and the
+        // reset below is about to drop it.
+        const late = await flushOutgoing(outgoing)
+        if (openingMeeting !== id) return
+        // Reopening the row that is already open: the flush just saved newer notes than the GET
+        // above returned, and a draft that arrived during the PUT is still unsaved.
+        const same = late !== null && late.id === id
+        const draft = get().meetingNotesDraft
+        set({
+          activeMeeting: same ? { ...m, notes: late.notes } : m,
+          meetingNotesDraft: same ? draft : null,
+          meetingSegments: [],
+          meetingCursor: 0
+        })
+        await loadSegments(id)
+        // A meeting that is still recording or settling gets the tick and the stream; one that is
+        // finished needs neither, and would otherwise poll a row nothing is writing to.
+        if (SETTLING.includes(m.status)) {
+          void get().refreshMeetingStatus()
+          void get().watchMeeting(id)
+        }
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    startRecording: async (meetingId) => {
+      // Asked once per install, and nothing records until it is acknowledged. The click is
+      // remembered rather than dropped, so accepting the notice finishes what the user pressed.
+      if (!get().meetingStatus?.consented) {
+        consentIntent = meetingId
+        return set({ meetingConsentOpen: true })
+      }
+      set({ meetingBusy: true })
+      try {
+        // Whatever is buffered belongs to the meeting being left behind, so it goes first.
+        const outgoing = get().activeMeeting?.id ?? null
+        await get().flushMeetingNotes()
+        const id = meetingId ?? (await api.meetings.create({ title: newMeetingTitle() })).id
+        const m = await api.meetings.start(id)
+        // Typing carried on through create+start; the reset below would otherwise discard it.
+        const late = await flushOutgoing(outgoing)
+        const same = late !== null && late.id === id
+        const draft = get().meetingNotesDraft
+        // Claims the open slot: an `openMeeting` still in flight for another row must not land on
+        // top of the one that just started recording.
+        openingMeeting = id
+        set({
+          view: 'meetings',
+          activeMeeting: same ? { ...m, notes: late.notes } : m,
+          meetingNotesDraft: same ? draft : null,
+          meetingSegments: [],
+          meetingCursor: 0
+        })
+        void get().watchMeeting(id)
+        await Promise.all([get().refreshMeetings(), get().refreshMeetingStatus()])
+      } catch (e) {
+        get().toast(startFailure(e), 'error')
+        // Whatever blocked it is now ten minutes stale in the cached checklist; re-probe so the
+        // panel's rows agree with the toast the user just read.
+        void get().loadMeetingPreflight(true)
+      } finally {
+        set({ meetingBusy: false })
+      }
+    },
+    stopRecording: async () => {
+      const id = get().meetingStatus?.active?.meeting_id
+      if (!id) return
+      set({ meetingBusy: true })
+      try {
+        // Blocks while the transcription backlog drains, so the button stays disabled for as long
+        // as the request runs rather than looking idle with ffmpeg still up.
+        const m = await api.meetings.stop(id)
+        set((st) => (st.activeMeeting?.id === id ? { activeMeeting: m } : {}))
+        get().toast('Recording stopped. The transcript and the enhanced notes finish in the background.')
+        // /stop answers with the row already `ready` and schedules the enhance pass afterwards, so
+        // without this the status poll below would conclude nothing is settling and stop the tick
+        // seconds before the proposal, the action items and the last transcriptions arrive.
+        meetingSettleUntil = Date.now() + MEETING_SETTLE_MS
+        await loadSegments(id)
+        await Promise.all([get().refreshMeetings(), get().refreshMeetingStatus(), get().refreshMeetingsPending()])
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+        void get().refreshMeetingStatus()
+      } finally {
+        set({ meetingBusy: false })
+      }
+    },
+    pauseMeeting: async () => {
+      const id = get().meetingStatus?.active?.meeting_id
+      if (!id) return
+      try {
+        set({ meetingStatus: await api.meetings.pause(id) })
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    resumeMeeting: async () => {
+      const id = get().meetingStatus?.active?.meeting_id
+      if (!id) return
+      try {
+        set({ meetingStatus: await api.meetings.resume(id) })
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    recordCandidate: async (candidate) => {
+      let id = candidate.meeting_id
+      if (!id) {
+        set({ meetingBusy: true })
+        try {
+          // Find-or-create: the partial unique index on calendar_event_id makes a second POST for
+          // one event hand back the row that already exists, so there is no adopt route to call.
+          const m = await api.meetings.create({
+            title: candidate.title,
+            calendar_event_id: candidate.event_id,
+            calendar_id: candidate.calendar_id,
+            conference_link: candidate.conference_link,
+            scheduled_start: epochSeconds(candidate.start),
+            scheduled_end: epochSeconds(candidate.end)
+          })
+          id = m.id
+        } catch (e) {
+          return get().toast((e as Error).message, 'error')
+        } finally {
+          set({ meetingBusy: false })
+        }
+      }
+      await get().startRecording(id)
+    },
+    editMeetingNotes: (next) => {
+      if (!get().activeMeeting) return
+      set({ meetingNotesDraft: next })
+      if (meetingSaveTimer) clearTimeout(meetingSaveTimer)
+      meetingSaveTimer = setTimeout(() => { void get().flushMeetingNotes() }, MEETING_SAVE_DEBOUNCE_MS)
+    },
+    flushMeetingNotes: async () => {
+      if (meetingSaveTimer) {
+        clearTimeout(meetingSaveTimer)
+        meetingSaveTimer = null
+      }
+      const { activeMeeting: m, meetingNotesDraft: draft } = get()
+      if (!m || draft === null || draft === m.notes) return set({ meetingNotesDraft: null })
+      set({ meetingSaving: true })
+      try {
+        const saved = await api.meetings.patch(m.id, { notes: draft })
+        // Keep whatever was typed while the request was in flight; adopt only the server's metadata.
+        set((st) => {
+          if (st.activeMeeting?.id !== m.id) return { meetingSaving: false }
+          const newer = st.meetingNotesDraft !== null && st.meetingNotesDraft !== draft
+          return {
+            activeMeeting: newer ? { ...saved, notes: st.meetingNotesDraft as string } : saved,
+            meetingNotesDraft: newer ? st.meetingNotesDraft : null,
+            meetingSaving: false
+          }
+        })
+        void get().refreshMeetings()
+      } catch (e) {
+        set({ meetingSaving: false })
+        get().toast(`Could not save: ${(e as Error).message}`, 'error')
+      }
+    },
+    pollMeetingLive: async () => {
+      try {
+        await get().refreshMeetingStatus()
+        const id = get().activeMeeting?.id
+        if (!id) return
+        const rows = await api.meetings.segments(id, get().meetingCursor)
+        if (!rows.length || get().activeMeeting?.id !== id) return
+        set((st) => ({ meetingSegments: applyCursor(st.meetingSegments, rows), meetingCursor: lastCursor(rows, st.meetingCursor) }))
+      } catch { /* a 2s poll that toasts would paper the screen over one flaky request */ }
+    },
+    watchMeeting: async (meetingId) => {
+      // One subscription per meeting: a second would fold every pushed frame in twice. Nothing
+      // publishes to the meeting bus yet, so today this opens and ends at once — the transcript
+      // pane is carried by `pollMeetingLive`, and this is the seam that replaces it.
+      if (meetingWatch?.id === meetingId) return
+      meetingWatch?.abort.abort()
+      const abort = new AbortController()
+      meetingWatch = { id: meetingId, abort }
+      try {
+        for await (const ev of meetingStream(meetingId, 0, abort.signal)) {
+          set((st) => {
+            const next = applyMeetingEvent(st, ev)
+            return next === st ? {} : next
+          })
+          if (ev.event === 'error') {
+            const d = ev.data
+            get().toast(isRecord(d) && typeof d.message === 'string' ? d.message : 'The recording reported an error', 'error')
+          } else if (ev.event === 'end') {
+            void get().refreshMeetings()
+            void get().refreshMeetingsPending()
+          }
+        }
+      } catch (e) {
+        // An aborted signal is a newer subscription or a view teardown, not a failure.
+        if (!abort.signal.aborted) get().toast((e as Error).message, 'error')
+      } finally {
+        // Abort-identity guarded: a newer subscription has already replaced this one.
+        if (meetingWatch?.abort === abort) meetingWatch = null
+      }
+    },
+    enhanceMeeting: async (id, force = false) => {
+      set({ meetingBusy: true })
+      try {
+        // The pass reads the notes, so an unflushed paragraph would be missing from the proposal.
+        await get().flushMeetingNotes()
+        const rev = await api.meetings.enhance(id, force)
+        // An auto-applied revision comes back `applied` with the meeting's `pending` already null,
+        // so the meeting is re-fetched rather than patched from the revision.
+        const m = await api.meetings.get(id)
+        if (get().activeMeeting?.id === id) set({ activeMeeting: m })
+        if (rev.degraded) get().toast('The model call failed — these are mechanically enhanced notes', 'error')
+        else get().toast(rev.status === 'pending' ? 'Enhanced notes are waiting for review' : 'Enhanced notes ready')
+        await Promise.all([get().refreshMeetings(), get().refreshMeetingsPending()])
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      } finally {
+        set({ meetingBusy: false })
+      }
+    },
+    acceptMeetingRevision: async (revisionId) => {
+      try {
+        // No flush first, unlike `acceptRevision`: accepting writes `enhanced` and nothing else, so
+        // a buffered note is in no danger and stays buffered.
+        const m = await api.meetings.accept(revisionId)
+        if (get().activeMeeting?.id === m.id) set({ activeMeeting: m })
+        get().toast('Enhanced notes applied')
+        await Promise.all([get().refreshMeetings(), get().refreshMeetingsPending()])
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    rejectMeetingRevision: async (revisionId) => {
+      try {
+        const m = await api.meetings.reject(revisionId)
+        if (get().activeMeeting?.id === m.id) set({ activeMeeting: m })
+        await Promise.all([get().refreshMeetings(), get().refreshMeetingsPending()])
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    promoteActionItems: async (meetingId, actionIds) => {
+      set({ meetingBusy: true })
+      try {
+        const was = (get().activeMeeting?.actions ?? []).filter((a) => a.status === 'added').length
+        const actions = await api.meetings.addTodos(meetingId, actionIds)
+        set((st) => (st.activeMeeting?.id === meetingId ? { activeMeeting: { ...st.activeMeeting, actions } } : {}))
+        const added = actions.filter((a) => a.status === 'added').length - was
+        get().toast(added > 0 ? `${added} action item${added === 1 ? '' : 's'} added to your todos` : 'Those items are already todos')
+        await Promise.all([get().refreshTodos(), get().refreshDashboard()])
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      } finally {
+        set({ meetingBusy: false })
+      }
+    },
+    dismissActionItem: async (meetingId, actionId) => {
+      try {
+        const item = await api.meetings.dismissAction(meetingId, actionId)
+        set((st) => (st.activeMeeting?.id === meetingId
+          ? { activeMeeting: { ...st.activeMeeting, actions: st.activeMeeting.actions.map((a) => (a.id === item.id ? item : a)) } }
+          : {}))
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    deleteMeeting: async (id) => {
+      try {
+        // Stop first. DELETE only drops the row, and the recorder bar — the only Stop, Pause and
+        // Resume in the app — is mounted on the open meeting, so deleting the live row would leave
+        // ffmpeg capturing with no control anywhere that can reach it.
+        if (get().meetingStatus?.active?.meeting_id === id) await get().stopRecording()
+        await api.meetings.del(id)
+        if (get().activeMeeting?.id === id) {
+          // The buffered notes belong to a row that no longer exists.
+          if (meetingSaveTimer) {
+            clearTimeout(meetingSaveTimer)
+            meetingSaveTimer = null
+          }
+          openingMeeting = null
+          set({ activeMeeting: null, meetingNotesDraft: null, meetingSegments: [], meetingCursor: 0 })
+        }
+        await Promise.all([get().refreshMeetings(), get().refreshMeetingsPending()])
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    setMeetingConfig: async (patch) => {
+      try {
+        set({ meetingStatus: await api.meetings.setConfig(patch) })
+        // A device or backend change invalidates what preflight concluded up to ten minutes ago.
+        if (['micDevice', 'outputDevice', 'sources', 'sttBackend', 'sttModel', 'whisperModelPath'].some((k) => k in patch)) {
+          void get().loadMeetingPreflight(true)
+        }
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    loadMeetingPreflight: async (force = false) => {
+      try {
+        set({ meetingPreflight: await api.meetings.preflight(force) })
+      } catch (e) {
+        // Only the Re-check button passes `force`; the mount-time probe stays quiet and the panel
+        // keeps whatever checklist it last had.
+        if (force) get().toast((e as Error).message, 'error')
+      }
+    },
+    retranscribeMeeting: async (id) => {
+      set({ meetingBusy: true })
+      try {
+        const { settled, meeting } = await api.meetings.retranscribe(id)
+        if (get().activeMeeting?.id === id) set({ activeMeeting: meeting })
+        if (settled > 0) get().toast(`${settled} clip${settled === 1 ? '' : 's'} transcribed`)
+        else get().toast('Nothing could be transcribed — the audio is gone, or the provider is still failing', 'error')
+        // The replayed rows kept their rowids, so the cursor would never re-deliver them.
+        await loadSegments(id)
+        await get().refreshMeetings()
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      } finally {
+        set({ meetingBusy: false })
+      }
+    },
+    deleteMeetingAudio: async (meetingId) => {
+      set({ meetingBusy: true })
+      try {
+        if (meetingId) {
+          const m = await api.meetings.deleteAudio(meetingId)
+          if (get().activeMeeting?.id === meetingId) set({ activeMeeting: m })
+          get().toast('Recorded audio deleted')
+        } else {
+          // There is no bulk route — the audio directory is per meeting — so the sweep is a loop
+          // over a freshly loaded rail rather than over whatever it happened to be showing.
+          await get().refreshMeetings()
+          const rows = get().meetings
+          for (const r of rows) await api.meetings.deleteAudio(r.id).catch(() => undefined)
+          const open = get().activeMeeting?.id
+          if (open) {
+            const m = await api.meetings.get(open).catch(() => null)
+            if (m && get().activeMeeting?.id === open) set({ activeMeeting: m })
+          }
+          get().toast(`Deleted the recorded audio of ${rows.length} meeting${rows.length === 1 ? '' : 's'}`)
+        }
+        await get().refreshMeetings()
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      } finally {
+        set({ meetingBusy: false })
+      }
+    },
+    setMeetingConsentOpen: (open) => {
+      // Dismissing the notice drops the Record click it was gating: a recording never starts by
+      // default, and a remembered intent would make the next acknowledgement record something
+      // the user did not just ask for.
+      if (!open) consentIntent = undefined
+      set({ meetingConsentOpen: open })
+    },
+    acceptMeetingConsent: async () => {
+      try {
+        set({ meetingStatus: await api.meetings.consent() })
+      } catch (e) {
+        return get().toast((e as Error).message, 'error')
+      }
+      const intent = consentIntent
+      consentIntent = undefined
+      set({ meetingConsentOpen: false })
+      await get().startRecording(intent)
     },
 
     refreshMemories: async (q = '') => set({ memories: await api.memories.list(get().dataScope, q) }),

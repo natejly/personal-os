@@ -25,6 +25,8 @@ export interface ContextUsed {
   page: PageContext | null
   /** The writing-style profile this reply drafted with; null when there is none or the chat opted out. */
   style: { project_id: string | null; summary: string; guidelines: string[]; block: string } | null
+  /** The recent-meetings block, verbatim; null when meetings are off or the chat opted out. */
+  meetings: string | null
   system_prompt: string
   tokens_estimate: number
 }
@@ -326,6 +328,9 @@ export interface ConversationSettings {
   useActivity: boolean
   /** Inject the writing-style profile, so drafts sound like the user. */
   useStyle: boolean
+  /** Inject the recent-meetings block. Optional because stored conversations predate the key; a
+   *  missing value reads as on, the way the backend's `.get(..., True)` does. */
+  useMeetings?: boolean
   autoLearn: boolean
   useTools: boolean
   /** Inject the skills the user approved. Defaults on; only approved ones are ever eligible. */
@@ -733,6 +738,8 @@ export interface Settings {
   googleClientSecret: string
   /** Undo window on outgoing mail. `seconds` is clamped to 60-120 by the backend. */
   gmailSendHold?: { enabled: boolean; seconds: number }
+  /** Read-only here: the full shape is MeetingConfig, patched through /meetings/config so the merge is a deep one. */
+  meetings?: { enabled: boolean }
 }
 
 export interface ModelPrice {
@@ -1410,4 +1417,250 @@ export interface ActivityContextFile {
   markdown: string
   /** The trimmed block chats actually receive. */
   injected: string
+}
+
+/** ---- meetings -----------------------------------------------------------
+ *  A recorded conversation plus the notes taken during it. The fourth text-bearing type, and
+ *  distinct from the other three: `Doc` is markdown the user writes, `Document` is a file they
+ *  uploaded and had chunked for retrieval, `Note` is canvas mode's sticky. A meeting is the only
+ *  one whose body is partly machine-made, so it keeps the two apart — `notes` is what the user
+ *  typed and has exactly one writer, `enhanced` is only ever set by accepting a MeetingRevision.
+ *  Nothing here expires: unlike ActivityEvent there is no `expires_at`, so /activity/purge cannot
+ *  reach a meeting. */
+
+export type MeetingStatus =
+  | 'scheduled' | 'recording' | 'stopped' | 'transcribing' | 'enhancing' | 'ready' | 'failed' | 'notes_only'
+
+/** Shapes the enhance prompt and the notes skeleton; keys into meeting_notes.TEMPLATES. */
+export type MeetingTemplate = 'general' | 'standup' | 'one_on_one' | 'user_interview' | 'sales_call' | 'lecture'
+
+/** A list row: counts and a preview, never a body. */
+export interface Meeting {
+  id: string
+  title: string
+  project_id: string | null
+  status: MeetingStatus
+  template: MeetingTemplate
+  /** First 240 characters of the notes, for the list rail. */
+  notes_preview: string
+  words: number
+  segment_count: number
+  /** An enhance proposal is waiting to be accepted or rejected. */
+  has_pending: boolean
+  duration_ms: number
+  attendee_count: number
+  started_at: number | null
+  scheduled_start: number | null
+  ended_at: number | null
+  updated_at: number
+  /** Last recorder/stt/enhance failure, shown as a banner; empty when fine. */
+  error: string
+}
+
+/** A meeting with its bodies loaded — what GET /meetings/{id} returns. */
+export interface FullMeeting extends Omit<Meeting, 'notes_preview'> {
+  /** What the user typed. No model ever writes this. */
+  notes: string
+  /** The accepted enhanced markdown; empty until a revision is applied. */
+  enhanced: string
+  summary: string
+  attendees: MeetingAttendee[]
+  /** What was actually captured, e.g. ['mic'] on a machine with no loopback device. */
+  sources: string[]
+  calendar_event_id: string | null
+  calendar_id: string | null
+  calendar_link: string
+  /** Meet/Zoom/Teams URL; a calendar event's own `meet` field is hangoutLink only. */
+  conference_link: string
+  keep_audio: boolean
+  /** Retained wav bytes, against the disk ceiling. */
+  audio_bytes: number
+  conversation_id: string | null
+  /** The newest unresolved enhance proposal, if any. */
+  pending: MeetingRevision | null
+  actions: MeetingActionItem[]
+}
+
+export interface MeetingAttendee {
+  email: string
+  name: string
+  /** accepted | declined | tentative | needsAction */
+  response: string
+  organizer: boolean
+  self: boolean
+}
+
+/** One closed ffmpeg segment and its transcription. */
+export interface MeetingSegment {
+  id: string
+  meeting_id: string
+  /** Attribution is channel-level only: mic = you, output/import = everyone else. */
+  channel: 'mic' | 'output' | 'import'
+  /** ffmpeg's segment number, so ordering survives a restart. */
+  seq: number
+  /** Seconds from the start of the meeting, off the recording clock rather than when transcription returned. */
+  t_start: number
+  t_end: number
+  /** Absolute epoch seconds of the segment's first sample. */
+  started_at: number
+  duration_ms: number
+  text: string
+  /** '' until diarized; 'me' by convention for mic. */
+  speaker: string
+  /** recorded | transcribing | done | failed | empty | discarded */
+  state: string
+  /** 'proxy' | 'local', for the usage/debug line. */
+  backend: string
+  error: string
+  /** GET /meetings/{id}/segments?since= only: the rowid to poll from next. */
+  cursor?: number
+}
+
+/**
+ * An enhance proposal. EXTENDS DocRevision on purpose: <DiffView> is typed `revision: DocRevision`
+ * (DiffView.tsx:101) and the backend's `_rev_view` emits those exact field names with `doc_id` set
+ * to the meeting id, so the existing diff UI renders a meeting revision with no adapter.
+ */
+export interface MeetingRevision extends DocRevision {
+  meeting_id: string
+  template: string
+  model: string
+  /** The LLM failed and this is the mechanical fallback. */
+  degraded: boolean
+  decisions: string[]
+  topics: string[]
+}
+
+/** Recorded here first and promoted into a Todo on demand, so the review screen can show which already are tasks. */
+export interface MeetingActionItem {
+  id: string
+  meeting_id: string
+  text: string
+  /** Attendee email or display name; empty when unassigned. */
+  owner: string
+  /** YYYY-MM-DD, empty when none. */
+  due: string
+  status: 'proposed' | 'added' | 'dismissed'
+  /** The todo it became. No FK on purpose: deleting the task must not erase that this meeting produced the item. */
+  todo_id: string | null
+}
+
+/** Mirrors meetings.DEFAULT_CONFIG. Patched through /meetings/config rather than /settings, so the merge is a deep one. */
+export interface MeetingConfig {
+  enabled: boolean
+  /** Unix seconds the consent modal was acknowledged; 0 means never, and recording stays blocked. */
+  consentedAt: number
+  /** Start capturing when a calendar meeting begins instead of only offering to. */
+  autoRecord: boolean
+  /** How early a calendar event is offered as a candidate. */
+  nudgeSeconds: number
+  /** ffmpeg avfoundation device index, as a string. Empty means "not chosen yet". */
+  micDevice: string
+  /** The name that index had when it was chosen, so a reshuffled device list is refused rather than recorded. */
+  micDeviceName: string
+  /** A loopback device (BlackHole/Loopback) - macOS cannot record its own output without one. */
+  outputDevice: string
+  outputDeviceName: string
+  /** Channels to capture; validated against meetings.SOURCES ('mic', 'output'). */
+  sources: string[]
+  /** Segment-muxer length: how far behind live the transcript runs. */
+  segmentSeconds: number
+  /** Hard cap handed to ffmpeg as -t, so no capture can run unbounded. */
+  maxMeetingSeconds: number
+  /** How long stop() waits for the transcription queue to drain. */
+  drainSeconds: number
+  /** 'off' blocks Start outright rather than recording audio nothing will read. */
+  sttBackend: 'auto' | 'proxy' | 'local' | 'off'
+  /** Speech-to-text model on the configured LLM base URL. */
+  sttModel: string
+  /** whisper.cpp ggml model file, for the local backend. */
+  whisperModelPath: string
+  template: MeetingTemplate
+  enhanceOnStop: boolean
+  /** Blank falls back to the extraction model, then the default model. */
+  enhanceModel: string
+  /** Head-and-tail cap on the transcript sent to the model; decisions land at the end. */
+  maxTranscriptChars: number
+  keepAudio: boolean
+  /** Disk ceiling for retained wavs, oldest failed segment evicted first. */
+  maxAudioBytes: number
+  /** Scrub credential-shaped strings before anything is stored. Never activity's identity rules, which
+   *  replace every email with [email] and every phone number with [phone]. */
+  redactSecrets: boolean
+  /** Feed recent meetings into chats at all. */
+  injectContext: boolean
+  /** Auto-stop this long after the scheduled end. Purely time-based: there is no voice-activity detection. */
+  autoStopGraceSeconds: number
+  calendarIds: string[]
+  /** Events with fewer attendees than this are never offered. */
+  minAttendees: number
+}
+
+/** One row of the capability checklist: what this machine can do, and how to fix what it can't. */
+export interface MeetingCapability {
+  id: string
+  label: string
+  ok: boolean
+  detail: string
+  /** Empty when `ok`. */
+  fix: string
+}
+
+/** GET /meetings/status. Cheap enough to poll: unlike /activity/status it never spawns a subprocess. */
+export interface MeetingStatusInfo {
+  enabled: boolean
+  /** The consent modal has been acknowledged. */
+  consented: boolean
+  config: MeetingConfig
+  active: {
+    meeting_id: string
+    status: MeetingStatus
+    started_at: number
+    elapsed_ms: number
+    segments_done: number
+    segments_pending: number
+    /** Waiting on the transcription queue, for the honest "~20s behind · N queued" line. */
+    queued: number
+    /** Pause keeps ffmpeg running and throws the audio away, so `channels[].alive` stays true while
+     *  paused. This flag is the only honest source of pausedness; never infer it from the channels. */
+    paused: boolean
+    channels: { channel: string; alive: boolean; error: string }[]
+    error: string
+  } | null
+  upcoming: MeetingCandidate[]
+  /** `loopback` marks the devices that can carry system audio. */
+  devices: { index: string; name: string; loopback: boolean }[]
+  stt: { backend: string; ok: boolean; detail: string }
+  counts: { total: number; pending: number }
+}
+
+/** POST /meetings/preflight. `ok` false blocks Start rather than warning. */
+export interface MeetingPreflight {
+  ok: boolean
+  blockers: MeetingCapability[]
+  capabilities: MeetingCapability[]
+  /** A real round trip: a synthesized silent wav, recorded and transcribed. */
+  selftest: { ok: boolean; backend: string; record_ms: number; transcribe_ms: number; text: string; error: string }
+}
+
+/** A calendar event the 45s tick offers to take notes on. No LLM is involved. */
+export interface MeetingCandidate {
+  event_id: string
+  calendar_id: string
+  title: string
+  /** Google's ISO timestamps, as CalendarEvent carries them. */
+  start: string
+  end: string
+  attendee_count: number
+  /** Someone other than the user is invited. */
+  has_external: boolean
+  conference_link: string
+  /** Set once a meeting row exists for this event, so the nudge is not offered twice. */
+  meeting_id: string | null
+}
+
+/** One frame of the per-meeting SSE stream. */
+export interface MeetingStreamEvent {
+  event: 'segment' | 'status' | 'error' | 'revision' | 'end'
+  data: unknown
 }

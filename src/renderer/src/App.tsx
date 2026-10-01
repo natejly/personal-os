@@ -6,6 +6,7 @@ import ChatView from './components/ChatView'
 import MemoryPanel from './components/MemoryPanel'
 import DocumentsView from './components/DocumentsView'
 import DocsView from './components/DocsView'
+import MeetingsView from './components/MeetingsView'
 import ActivityView from './components/ActivityView'
 import ProjectView from './components/ProjectView'
 import HomeView from './components/HomeView'
@@ -115,6 +116,7 @@ export default function App(): JSX.Element {
           {view === 'memory' && <MemoryPanel />}
           {view === 'documents' && <DocumentsView />}
           {view === 'docs' && <DocsView />}
+          {view === 'meetings' && <MeetingsView />}
           {view === 'activity' && <ActivityView />}
           {view === 'project' && <ProjectView />}
         </>

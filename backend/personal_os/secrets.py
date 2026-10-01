@@ -8,8 +8,7 @@ stdin, so the secret never appears in argv (visible to `ps`). The value is base6
 hex-encoded (-X), which keeps newlines and non-ASCII safe through `find-generic-password -w`.
 
 A Keychain failure (locked, no GUI session, denied, no `security` binary) never raises: the secret goes to
-the file instead and the failure is logged. Reads check the Keychain first, then the file, so a value
-written during an outage is still found afterwards.
+the file instead and the failure is logged. Reads check the file first (it only holds what the Keychain refused, so it is newer), then the Keychain.
 
 GRAIN_SECRETS_BACKEND=file forces the file backend (tests, headless installs).
 """
@@ -44,9 +43,10 @@ class SecretStore:
         with self._lock:
             if name in self._cache:
                 return self._cache[name]
-            value = self._kc_get(name) if self.use_keychain else None
-            if value is None:
-                value = self._file_read().get(name)
+            # The file wins: it only holds a value the Keychain refused, so it is newer than any Keychain copy.
+            value = self._file_read().get(name)
+            if value is None and self.use_keychain:
+                value = self._kc_get(name)
             self._cache[name] = value
             return value
 

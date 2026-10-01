@@ -49,6 +49,18 @@ class FileBackendTests(unittest.TestCase):
         s.set("a", "")
         self.assertIsNone(s.get("a"))
 
+    def test_file_copy_beats_a_stale_keychain_value(self) -> None:
+        d = Path(tempfile.mkdtemp())
+        s = SecretStore(d, backend="file")
+        s.use_keychain = True
+        s._kc_get = lambda name: "old"  # type: ignore[method-assign]
+        s._kc_set = lambda name, value: False  # type: ignore[method-assign]  # Keychain refuses the replace
+        s.set("a", "new")
+        fresh = SecretStore(d, backend="file")
+        fresh.use_keychain = True
+        fresh._kc_get = lambda name: "old"  # type: ignore[method-assign]
+        self.assertEqual(fresh.get("a"), "new")
+
 
 class MigrationTests(unittest.TestCase):
     def test_plaintext_moves_out_of_sqlite_and_is_idempotent(self) -> None:
@@ -104,11 +116,14 @@ class PermissionTests(unittest.TestCase):
 
 class SettingsRouteTests(unittest.TestCase):
     def tearDown(self) -> None:
-        client.put("/settings", json={"apiKey": None, "braveApiKey": None})
+        client.put("/settings", json={"apiKey": None, "braveApiKey": None, "exaApiKey": None, "githubToken": None})
 
     def test_get_never_returns_secret_values(self) -> None:
-        client.put("/settings", json={"apiKey": KEY, "braveApiKey": "BSA-xyz"})
+        client.put("/settings", json={"apiKey": KEY, "braveApiKey": "BSA-xyz", "exaApiKey": "exa-1", "githubToken": "ghp_zz"})
         body = client.get("/settings")
+        self.assertNotIn("exa-1", body.text)
+        self.assertNotIn("ghp_zz", body.text)
+        self.assertTrue(body.json()["githubTokenSet"])
         self.assertNotIn(KEY, body.text)
         self.assertNotIn("BSA-xyz", body.text)
         j = body.json()

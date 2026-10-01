@@ -799,6 +799,8 @@ export interface Settings {
   apiKeySet?: boolean
   braveApiKeySet?: boolean
   tavilyApiKeySet?: boolean
+  exaApiKeySet?: boolean
+  githubTokenSet?: boolean
   googleClientSecretSet?: boolean
   defaultModel: string
   systemPrompt: string

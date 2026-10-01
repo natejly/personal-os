@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ApprovalDecision, PlanEdit, PlanDecision, PlanRecord,
+import type { ApprovalDecision, BackendInfo, BackendState, PlanEdit, PlanDecision, PlanRecord,
   Desk, DeskEvent, DeskFile, FullDesk, PromotionResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, Document, Effort, TrashKind, FullDoc, GraphData, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodoCalendarStatus, TodayDashboard, Recap, Job, Meeting, MeetingCandidate, MeetingCapability, MeetingConfig, MeetingPreflight, MeetingSegment, MeetingStatus, MeetingStatusInfo, MeetingStreamEvent, FullMeeting } from '@shared/types'
 import { api, backgroundStream, chatStream, meetingStream, setBase, type Scope } from './lib/api'
 import { currentSelection } from './lib/pageContext'
@@ -103,6 +103,8 @@ const countApprovals = (c: Conversation): number =>
 export interface State {
   ready: boolean
   backendError: string | null
+  /** The supervisor's view of the sidecar; anything but "ready" shows the reconnecting banner. */
+  backendState: BackendState
   settings: Settings
   models: ModelInfo[]
   modelsError: string | null
@@ -250,6 +252,7 @@ export interface State {
   deskBusy: boolean
 
   init: () => Promise<void>
+  restartBackend: () => Promise<void>
   loadModels: () => Promise<void>
   saveSettings: (patch: Partial<Settings>) => Promise<void>
   setView: (v: View) => void
@@ -814,6 +817,41 @@ export const useStore = create<State>((set, get) => {
     void get().refreshProjects()
   }
 
+  /** True once init has loaded the app's data at least once; a recovered backend then needs a refresh, not a re-init. */
+  let loadedOnce = false
+  let backendSeen: BackendState = 'ready'
+  let watching = false
+  let stateWired = false
+
+  /**
+   * The main process supervises the sidecar and announces each state. While it restarts the UI stays up
+   * (the banner says so); when it is back the port may have moved, so the base URL is re-pointed and the
+   * data re-fetched. If the first start failed, init never loaded anything, so it runs for real now.
+   */
+  const onBackendState = (info: BackendInfo): void => {
+    const was = backendSeen
+    backendSeen = info.state
+    set({ backendState: info.state })
+    if (info.state === 'failed') {
+      set({ ready: true, backendError: info.error ?? 'The backend stopped and could not be restarted.' })
+    } else if (info.state === 'ready' && (was !== 'ready' || get().backendError)) {
+      set({ backendError: null })
+      if (!loadedOnce) {
+        inited = false
+        void get().init()
+        return
+      }
+      setBase(info.url)
+      void get().loadModels()
+      void get().loadScope('all')
+      void get().refreshDashboard()
+      void get().refreshTodos()
+      void get().refreshDocsPending()
+      void get().refreshActivity()
+      refreshAll()
+    }
+  }
+
   /**
    * Follow `/events` for the whole session. Auto-learn runs after its reply's run has ended — that
    * is the point, the chat is free again — so its results have no conversation stream left to
@@ -1024,6 +1062,7 @@ export const useStore = create<State>((set, get) => {
   return {
     ready: false,
     backendError: null,
+    backendState: 'ready',
     settings: { baseUrl: '', apiKey: '', apiKeySet: false, defaultModel: '', systemPrompt: '', extractionModel: '', autoLearn: true, learnStyle: true, theme: 'dark', accent: 'sage', gatherShortcut: '', tools: {}, maxToolRounds: 8, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {} },
     models: [],
     modelsError: null,
@@ -1121,6 +1160,10 @@ export const useStore = create<State>((set, get) => {
       wireMenu()
       if (inited) return
       inited = true
+      if (!stateWired && typeof window.os.onBackendState === 'function') {
+        stateWired = true
+        window.os.onBackendState(onBackendState)
+      }
       const status = await window.os.backendStatus()
       if (!status.url) return set({ ready: true, backendError: status.error ?? 'Backend not running' })
       setBase(status.url)
@@ -1148,11 +1191,20 @@ export const useStore = create<State>((set, get) => {
       void get().refreshDocsPending()
       void get().refreshActivity()
       // One watcher per app: a pop-out would only duplicate every toast in another window.
-      if (!isPopout()) void watchBackgroundEvents()
+      if (!isPopout() && !watching) {
+        watching = true
+        void watchBackgroundEvents()
+      }
+      loadedOnce = true
       // Both for the sidebar: the review badge, and the indicator that says a recording is running.
       // `refreshMeetingStatus` also starts the live tick, so a meeting a crash left running is visible.
       void get().refreshMeetingsPending()
       void get().refreshMeetingStatus()
+    },
+
+    restartBackend: async () => {
+      set({ backendState: 'restarting' })
+      onBackendState(await window.os.restartBackend())
     },
 
     loadModels: async () => {

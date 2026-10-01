@@ -11,6 +11,7 @@ import { useCanvas } from '../canvas/store'
 import { ToolGlobalToggles } from './ToolPermissions'
 import GoogleSettings from './GoogleSettings'
 import MeetingSettings from './MeetingSettings'
+import SupportSettings from './SupportSettings'
 import UsageView from './UsageView'
 import MemoryPanel from './MemoryPanel'
 import DocumentsView from './DocumentsView'
@@ -360,6 +361,7 @@ export default function SettingsModal(): JSX.Element {
               {shortcut && !shortcut.ok && (
                 <p className="test-msg fail">{shortcut.message ?? `${shortcut.accelerator} could not be registered.`} The menubar icon gathers them too.</p>
               )}
+              <SupportSettings draft={draft} patch={patch} />
             </section>}
           </div>
         </div>

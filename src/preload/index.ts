@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { BusMessage, GrainApi, PopoutChange, PopoutOpenRequest, ShortcutState } from '../shared/types'
+import type { BackendInfo, BusMessage, GrainApi, PopoutChange, PopoutOpenRequest, ShortcutState } from '../shared/types'
 
 /** Subscribe to a main->renderer channel, returning an unsubscribe function. */
 function listen<T>(channel: string, cb: (payload: T) => void): () => void {
@@ -12,6 +12,10 @@ const api: GrainApi = {
   backendUrl: () => ipcRenderer.invoke('backend:url'),
   backendStatus: () => ipcRenderer.invoke('backend:status'),
   backendToken: () => ipcRenderer.invoke('backend:token'),
+  backendInfo: () => ipcRenderer.invoke('backend:info'),
+  restartBackend: () => ipcRenderer.invoke('backend:restart'),
+  onBackendState: (cb) => listen<BackendInfo>('backend:state', cb),
+  openLogs: () => ipcRenderer.invoke('backend:open-logs'),
   platform: process.platform,
   onMenu: (cb) => listen<string>('menu', cb),
   popout: {

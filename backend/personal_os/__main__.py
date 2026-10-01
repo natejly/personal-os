@@ -35,7 +35,13 @@ def main() -> None:
     p.add_argument("--reload", action="store_true")
     args = p.parse_args()
     os.environ["PERSONAL_OS_DATA_DIR"] = args.data_dir
-    uvicorn.run("personal_os.app:app", host=args.host, port=args.port, reload=args.reload, log_level="info")
+    from .logs import register_secret, setup_logging
+
+    register_secret(os.environ.get("PERSONAL_OS_AUTH_TOKEN"))
+    setup_logging()
+    # log_config=None: uvicorn's own dictConfig would give its loggers private handlers and cut them off from the
+    # redacting file handler on the root logger.
+    uvicorn.run("personal_os.app:app", host=args.host, port=args.port, reload=args.reload, log_level="info", log_config=None)
 
 
 if __name__ == "__main__":

@@ -91,6 +91,7 @@ const scope = (s: Scope): string => `project_id=${encodeURIComponent(s)}&include
 
 export const api = {
   health: () => req<{ ok: boolean; data_dir: string }>('/health'),
+  diagnostics: () => req<Record<string, unknown>>('/diagnostics'),
   settings: {
     get: () => req<Settings>('/settings'),
     set: (patch: Partial<Settings>) => req<Settings>('/settings', { method: 'PUT', body: json(patch) })

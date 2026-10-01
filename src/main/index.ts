@@ -1,9 +1,10 @@
 import { app, BrowserWindow, dialog, Menu, shell } from 'electron'
 import { existsSync, statSync } from 'fs'
 import { join } from 'path'
-import { backendStatus, backendToken, backendUrl, startBackend, stopBackend } from './backend'
+import { backendInfo, backendStatus, backendToken, backendUrl, onBackendState, restartBackend, startBackend, stopBackend } from './backend'
 import { registerBus } from './bus'
 import { handle, on } from './ipc'
+import { hookConsole, initLogs, logDir } from './logging'
 import { guardNavigation } from './navigation'
 import { startPageBridge, stopPageBridge } from './pagefetch'
 import { gather, OPACITY_LEVELS, registerPopouts, restorePopouts, setFrontListener, toggleFront } from './popouts'
@@ -23,6 +24,11 @@ for (const legacy of ['personal-os', 'Personal OS']) {
     break
   }
 }
+
+// Rotating logs for this process and the backend's raw output: ~/Library/Logs/Grain when packaged,
+// <userData>/logs in dev. The backend writes its own backend.log into the same folder (PERSONAL_OS_LOG_DIR).
+initLogs(app.isPackaged ? app.getPath('logs') : join(app.getPath('userData'), 'logs'))
+hookConsole()
 
 function createWindow(): void {
   win = new BrowserWindow({
@@ -258,6 +264,13 @@ app.whenReady().then(async () => {
   handle('backend:url', () => backendUrl())
   handle('backend:status', () => backendStatus())
   handle('backend:token', () => backendToken())
+  handle('backend:info', () => backendInfo())
+  handle('backend:restart', () => restartBackend())
+  handle('backend:open-logs', () => (logDir() ? shell.openPath(logDir()) : 'No log folder'))
+  // Every window hears the supervisor: the main window re-fetches, a pop-out re-points at a new port.
+  onBackendState((info) => {
+    for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed() && !w.webContents.isDestroyed()) w.webContents.send('backend:state', info)
+  })
   handle('data:choose-export-path', async () => {
     const stamp = new Date().toISOString().slice(0, 10)
     const r = await dialog.showSaveDialog({ title: 'Export all data', defaultPath: join(app.getPath('documents'), `grain-export-${stamp}.zip`), filters: [{ name: 'Zip archive', extensions: ['zip'] }] })

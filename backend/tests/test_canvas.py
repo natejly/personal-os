@@ -186,6 +186,20 @@ def test_reset_popped() -> None:
     j("DELETE", f"/windows/{w['id']}")
 
 
+def test_opacity() -> None:
+    cid = j("GET", "/canvases")[0]["id"]
+    w = j("POST", f"/canvases/{cid}/windows", {"kind": "chat", "ref_id": "c1"})
+    check(w["opacity"] == 1.0, "a new window is opaque")
+    check(j("PUT", f"/windows/{w['id']}", {"opacity": 0.6})["opacity"] == 0.6, "opacity round-trips")
+    check(j("PUT", f"/windows/{w['id']}", {"opacity": 0.01})["opacity"] == 0.2, "opacity clamps to the 0.2 floor")
+    check(j("PUT", f"/windows/{w['id']}", {"opacity": 4})["opacity"] == 1.0, "opacity clamps to 1")
+    j("PUT", f"/windows/{w['id']}", {"opacity": 0.45})
+    copy = j("POST", "/canvases", {"name": "Faded", "copy_from": cid})
+    check(0.45 in [x["opacity"] for x in copy["windows"]], "duplicating a space carries opacity")
+    j("DELETE", f"/canvases/{copy['id']}")
+    j("DELETE", f"/windows/{w['id']}")
+
+
 def test_notes() -> None:
     n = j("POST", "/notes", {"body": "milk, eggs"})
     check(n["color"] == "yellow" and n["project_id"] is None, "note defaults")
@@ -237,7 +251,7 @@ def test_lock() -> None:
 
 
 TESTS = [test_default_seed, test_canvas_crud, test_lock, test_windows_and_z, test_layout_bulk, test_window_config_merges,
-         test_raise, test_move_between_canvases, test_copy_from, test_reset_popped, test_notes]
+         test_raise, test_move_between_canvases, test_copy_from, test_reset_popped, test_opacity, test_notes]
 
 if __name__ == "__main__":
     failures = 0

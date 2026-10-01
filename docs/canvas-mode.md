@@ -467,6 +467,9 @@ Lifecycle:
 - `move` / `resize` on the BrowserWindow → debounced 400 ms → `PUT /windows/{id} { popout_bounds }`.
 - Close the pop-out → `state` → `normal`, the ghost fills back in.
 - Pin (⌃⌘P) → `setAlwaysOnTop(true, 'floating')`, persisted in `pinned`.
+- Transparency (⌃⌘[ / ⌃⌘], the pop-out's own slider, or the tray for all of them at once) →
+  `win.setOpacity(o)`, persisted in `opacity` and clamped to `[0.2, 1]` so a pop-out can never
+  fade out of reach. Only pop-outs wear it; a window back on the canvas just remembers the level.
 - Quitting the app closes all pop-outs; relaunching restores them if `state === 'popped'`.
 
 **Pop-out requires the stream bus (§5)** — without it, detaching a chat mid-reply kills the reply,
@@ -594,6 +597,7 @@ channel (`store.ts:246`), which already handles this pattern.
 | ⌃⌘O | Pop out focused window |
 | ⌃⌘⇧O | Return popped window to canvas |
 | ⌃⌘P | Pin popped window on top |
+| ⌃⌘[ / ⌃⌘] | More / less transparent (pop-out) |
 | ⌥⌘G | Gather (in-app equivalent) |
 | **⌃⌥⌘Space** | **Gather / scatter (global, works from any app)** |
 | ⌘W | In canvas mode, closes the **focused canvas window** — not the app window |

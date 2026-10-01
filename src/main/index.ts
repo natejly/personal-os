@@ -5,7 +5,7 @@ import { backendStatus, backendToken, backendUrl, startBackend, stopBackend } fr
 import { registerBus } from './bus'
 import { guardNavigation } from './navigation'
 import { startPageBridge, stopPageBridge } from './pagefetch'
-import { gather, registerPopouts, restorePopouts, setFrontListener, toggleFront } from './popouts'
+import { gather, OPACITY_LEVELS, registerPopouts, restorePopouts, setFrontListener, toggleFront } from './popouts'
 import { registerShortcuts } from './shortcuts'
 import { createTray } from './tray'
 
@@ -217,6 +217,17 @@ function buildMenu(): void {
         { label: 'Pop Out', accelerator: 'Control+Command+O', click: () => sendWindowMenu('canvas:popout') },
         { label: 'Return to Canvas', accelerator: 'Control+Command+Shift+O', click: () => sendWindowMenu('canvas:unpopout') },
         { label: 'Pin on Top', accelerator: 'Control+Command+P', click: () => sendWindowMenu('canvas:pin') },
+        // Transparency is a pop-out's own property, so these ride sendWindowMenu like the pin above:
+        // whoever has focus answers, and a widget still on the canvas only stores the level.
+        { label: 'More Transparent', accelerator: 'Control+Command+[', click: () => sendWindowMenu('canvas:opacity:down') },
+        { label: 'Less Transparent', accelerator: 'Control+Command+]', click: () => sendWindowMenu('canvas:opacity:up') },
+        {
+          label: 'Transparency',
+          submenu: OPACITY_LEVELS.map((o) => ({
+            label: o === 1 ? 'Opaque' : `${Math.round(o * 100)}%`,
+            click: () => sendWindowMenu(`canvas:opacity:${Math.round(o * 100)}`)
+          }))
+        },
         { type: 'separator' },
         { label: 'Gather Widgets', accelerator: 'Alt+Command+G', click: () => void gather() },
         {

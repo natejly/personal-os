@@ -617,6 +617,7 @@ export interface GrainApi {
     close: (windowId: string) => Promise<boolean>
     focus: (windowId: string) => Promise<boolean>
     setPinned: (windowId: string, pinned: boolean) => Promise<boolean>
+    setOpacity: (windowId: string, opacity: number) => Promise<boolean>
     setMinSize: (windowId: string, minWidth: number, minHeight: number) => Promise<boolean>
     list: () => Promise<PopoutInfo[]>
     gather: () => Promise<GatherState>
@@ -684,6 +685,8 @@ export interface CanvasWindow {
   popout_bounds: PopoutBounds | null
   /** 0 | 1 — SQLite has no boolean. Always-on-top while popped. */
   pinned: number
+  /** Window alpha while popped out, 0.2..1. 1 is opaque; the canvas ignores it. */
+  opacity: number
   config: Record<string, unknown>
   created_at: number; updated_at: number
 }
@@ -775,6 +778,8 @@ export interface PresetWindow {
   x: number; y: number; w: number; h: number
   z: number
   pinned: number /** 0 | 1 */
+  /** window alpha while popped, 0.2..1 */
+  opacity: number
   config: Record<string, unknown>
 }
 /** A named, user-saved template of a space. Instantiating it creates a new Canvas. */
@@ -928,9 +933,9 @@ export interface PendingApproval {
 export interface RunConflict { message: string; run_id: string; seq: number }
 
 /** One detached widget window as the main process sees it. */
-export interface PopoutInfo { windowId: string; bounds: PopoutBounds; pinned: boolean }
+export interface PopoutInfo { windowId: string; bounds: PopoutBounds; pinned: boolean; opacity: number }
 
-export interface PopoutOpenRequest { bounds?: Partial<PopoutBounds>; minWidth?: number; minHeight?: number; title?: string; pinned?: boolean }
+export interface PopoutOpenRequest { bounds?: Partial<PopoutBounds>; minWidth?: number; minHeight?: number; title?: string; pinned?: boolean; opacity?: number }
 
 export interface PopoutChange { windowId: string; event: 'opened' | 'closed'; bounds: PopoutBounds | null }
 

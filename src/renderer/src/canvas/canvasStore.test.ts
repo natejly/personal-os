@@ -6,6 +6,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { Canvas, CanvasWindow } from '@shared/types'
 import { liveWindows, renderOrder } from './Canvas'
+import { clampOpacity, nextOpacity } from './opacity'
 import { WIDGETS } from './registry'
 import { flushLayoutOnUnload, setLiveViewport, useCanvas, viewport } from './store'
 import { toUrl } from './widgets/web'
@@ -32,7 +33,7 @@ g.fetch = async (url: string, init?: { method?: string; body?: string; keepalive
 const win = (over: Partial<CanvasWindow> = {}): CanvasWindow => ({
   id: 'w1', canvas_id: 'c1', kind: 'chat', ref_id: null, project_id: null, title: '',
   x: 100, y: 120, w: 400, h: 300, z: 0, state: 'normal', restore_bounds: null, popout_bounds: null,
-  pinned: 0, config: {}, created_at: 0, updated_at: 0, ...over
+  pinned: 0, opacity: 1, config: {}, created_at: 0, updated_at: 0, ...over
 })
 
 const canvas = (id: string, windows: CanvasWindow[], over: Partial<Canvas> = {}): Canvas => ({
@@ -264,6 +265,34 @@ test('an id from another space really does resolve and delete, which is the haza
   st.setActiveCanvas('c2')
   await useCanvas.getState().closeWindow('w1')
   assert.equal(useCanvas.getState().canvases['c1'].windows.length, 0)
+})
+
+// ---- pop-out transparency ---------------------------------------------------------
+
+test('nextOpacity walks the rungs and stops at both ends', () => {
+  assert.equal(nextOpacity(1, 1), 0.9)
+  assert.equal(nextOpacity(0.9, 1), 0.75)
+  assert.equal(nextOpacity(0.3, 1), 0.3, 'already at the most transparent rung')
+  assert.equal(nextOpacity(0.75, -1), 0.9)
+  assert.equal(nextOpacity(1, -1), 1, 'already opaque')
+  // A level the slider left between rungs still moves, in the direction asked.
+  assert.equal(nextOpacity(0.55, 1), 0.45)
+  assert.equal(nextOpacity(0.55, -1), 0.6)
+  assert.equal(clampOpacity(0.05), 0.2, 'the floor holds')
+  assert.equal(clampOpacity('nonsense'), 1)
+})
+
+test('setWindowOpacity clamps, patches the row and tells main', async () => {
+  seed(canvas('c1', [win({ id: 'w1' })]))
+  const asked: number[] = []
+  const os = (g.window as { os: Record<string, unknown> }).os
+  os.popout = { setOpacity: (_id: string, o: number) => void asked.push(o) }
+  await useCanvas.getState().setWindowOpacity('w1', 0.6)
+  assert.equal(rowOf('c1', 'w1').opacity, 0.6)
+  await useCanvas.getState().setWindowOpacity('w1', 0)
+  assert.equal(rowOf('c1', 'w1').opacity, 0.2, 'below the floor lands on the floor')
+  assert.deepEqual(asked, [0.6, 0.2])
+  assert.equal(calls.filter((c) => c.method === 'PUT' && c.url.includes('/windows/w1')).length, 2)
 })
 
 test('filtering to the active canvas is what stops it', () => {

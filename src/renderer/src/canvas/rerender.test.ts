@@ -126,7 +126,7 @@ const KINDS = ['chat', 'note', 'note', 'note', 'todos', 'board', 'calendar', 'gr
 const WINDOWS: CanvasWindow[] = KINDS.map((kind, i) => ({
   id: `w${i}`, canvas_id: 'c1', kind, ref_id: kind === 'chat' ? 'c1' : `r${i}`, project_id: null, title: '',
   x: i * 40, y: i * 30, w: 400, h: 320, z: i, state: 'normal', restore_bounds: null, popout_bounds: null,
-  pinned: 0, config: {}, created_at: 0, updated_at: 0
+  pinned: 0, opacity: 1, config: {}, created_at: 0, updated_at: 0
 }))
 
 interface Frame { win: CanvasWindow; live: boolean; selected: boolean; status: ReactNode }

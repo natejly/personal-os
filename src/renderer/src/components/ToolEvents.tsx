@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { ChevronRight, Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, AlertCircle, Laptop, Zap, ListChecks } from 'lucide-react'
-import type { ToolEvent } from '@shared/types'
+import { ChevronRight, Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, AlertCircle, Laptop, Zap, ListChecks, ShieldAlert, ShieldCheck } from 'lucide-react'
+import type { ToolEvent, Verification } from '@shared/types'
 import { useStore } from '../store'
 import PlanApproval from './PlanApproval'
 
@@ -29,6 +29,32 @@ function summary(t: ToolEvent): string {
   return s.length > 90 ? s.slice(0, 90) + '…' : s
 }
 
+/** The read-back verdict the backend put on the result (verify.py). It rides in result_preview,
+ *  which is also what the stored tool-event row keeps, so an old reply still shows how its writes
+ *  were proven. An unverified write already carries `error`, so this only has to label it. */
+function verdict(t: ToolEvent): Verification | null {
+  if (!t.result_preview) return null
+  try {
+    const v = (JSON.parse(t.result_preview) as { verification?: Verification }).verification
+    return v && typeof v.status === 'string' ? v : null
+  } catch {
+    return null
+  }
+}
+
+/** Badge for how an external write was proved, naming the fields that were compared. */
+function Verdict({ event }: { event: ToolEvent }): JSX.Element | null {
+  const v = verdict(event)
+  if (!v) return null
+  const tries = `${v.attempts} read-back${v.attempts === 1 ? '' : 's'}`
+  return (
+    <span className={`tag ${v.status === 'verified' ? 'verified' : 'unproven'}`}
+      title={`${v.what} · compared ${v.compared.join(', ') || 'existence'} · ${tries}`}>
+      {v.status === 'verified' ? <ShieldCheck size={11} /> : <ShieldAlert size={11} />} {v.status}
+    </span>
+  )
+}
+
 function pretty(v: unknown): string {
   if (typeof v === 'string') {
     try { return JSON.stringify(JSON.parse(v), null, 2) } catch { return v }
@@ -48,6 +74,7 @@ export default function ToolEvents({ events, conversationId }: { events: ToolEve
             <span className="tool-icon">{ICONS[t.name] ?? <Wrench size={13} />}</span>
             <span className="tool-name">{t.name.replace(/_/g, ' ')}</span>
             <span className="tool-summary">{summary(t)}</span>
+            <Verdict event={t} />
             {t.plan ? (
               <span className="tag plan" title={`Approved in the plan "${t.plan.title || 'untitled'}" (step ${t.plan.idx + 1})`}>in plan</span>
             ) : t.approval && t.approval !== 'allow' && <span className="tag">{t.approval === 'deny' ? 'denied' : 'approved'}</span>}

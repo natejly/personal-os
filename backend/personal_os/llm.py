@@ -58,6 +58,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "maxRunCost": 0.50,
     # Hosts fetch_url may still read once a reply has touched untrusted content (registrable-suffix match).
     "fetchAllowlist": [],
+    # Undo window on outgoing mail (outbox.py). `seconds` is clamped to 60-120 on read.
+    "gmailSendHold": {"enabled": True, "seconds": 90},
     "braveApiKey": "",
     "tavilyApiKey": "",
     # {model: {"input": $/M tokens, "output": $/M tokens}} overrides for cost accounting (proxy prices are used otherwise)

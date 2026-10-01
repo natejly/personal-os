@@ -245,7 +245,59 @@ export interface GoogleStatus {
   reauth_reason: string | null
 }
 
-export interface CalendarEvent {
+/** Verdict of the read-back that every external write goes through (backend verify.py).
+ *  Anything other than 'verified' must not be rendered as success. */
+export interface Verification {
+  status: 'verified' | 'unverified' | 'mismatch'
+  /** What was re-read, e.g. "calendar event ev1 on primary". */
+  what: string
+  /** The field names that were compared. */
+  compared: string[]
+  /** How many read-backs it took (bounded retry for eventual consistency). */
+  attempts: number
+  ms?: number
+  reason?: 'not_visible' | 'read_failed' | 'field_mismatch' | 'still_present'
+  detail?: string
+  differences?: Record<string, { expected: unknown; actual: unknown }>
+}
+
+/** Any write result that carries a read-back verdict. */
+export interface Verified {
+  verified?: boolean
+  verification?: Verification
+}
+
+/** One email waiting out its undo hold before Gmail sends it (backend outbox.py). */
+export interface PendingSend {
+  id: string
+  to: string
+  subject: string
+  status: 'holding' | 'sending' | 'sent' | 'cancelled' | 'failed' | 'expired'
+  origin: 'app' | 'assistant'
+  conversation_id: string | null
+  hold_seconds: number
+  created_at: number
+  send_after: number
+  /** Counts down while holding, 0 otherwise. */
+  seconds_left: number
+  message_id: string | null
+  thread_id: string | null
+  error: string | null
+  /** null until it has been sent. */
+  verified: boolean | null
+  verification?: Verification | null
+  /** Only on the response to a send: false when the hold was off and it went straight out. */
+  held?: boolean
+}
+
+export interface SendHoldConfig {
+  enabled: boolean
+  seconds: number
+  min: number
+  max: number
+}
+
+export interface CalendarEvent extends Verified {
   id: string
   calendar_id: string | null
   summary: string
@@ -428,6 +480,8 @@ export interface Settings {
   modelPrices: Record<string, ModelPrice>
   googleClientId: string
   googleClientSecret: string
+  /** Undo window on outgoing mail. `seconds` is clamped to 60-120 by the backend. */
+  gmailSendHold?: { enabled: boolean; seconds: number }
 }
 
 export interface ModelPrice {

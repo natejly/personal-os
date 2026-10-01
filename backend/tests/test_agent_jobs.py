@@ -25,6 +25,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from personal_os import app as appmod  # noqa: E402
 from personal_os import llm  # noqa: E402
+from personal_os import verify  # noqa: E402
 from personal_os.jobs import (  # noqa: E402
     LATE_GRACE_S, SEED_JOBS, Jobs, Scheduler, next_fire, prev_fire, slots_between, valid_cron, valid_tz,
 )
@@ -77,6 +78,10 @@ def _script():  # type: ignore[no-untyped-def]
     # Only the job a test creates may be armed, so a tick fires exactly what that test is about.
     with appmod.db.tx() as c:
         c.execute("UPDATE jobs SET enabled=0, next_due_at=NULL")
+    # Nothing may be left holding in the outbox between tests, or one test's mail goes out under another.
+    for row in appmod.outbox.list():
+        if row["status"] == "holding":
+            appmod.outbox.cancel(row["id"])
     for name in ("gmail_send", "gmail_draft", "calendar_create"):
         setattr(appmod.google, name, _recorder(name))
     yield
@@ -86,7 +91,11 @@ def _script():  # type: ignore[no-untyped-def]
 def _recorder(name: str):  # type: ignore[no-untyped-def]
     def fn(*args: Any, **kw: Any) -> dict[str, Any]:
         SENT.append((name, {"args": args, "kw": kw}))
-        return {"id": f"{name}-{len(SENT)}", "ok": True}
+        # A real write comes back with its read-back verdict attached (verify.py); an unproven one is
+        # an error, not a result, so a stub that omits it would fail every write for the wrong reason.
+        return {"id": f"{name}-{len(SENT)}", "ok": True, "sent": f"{name}-{len(SENT)}",
+                "verified": True,
+                "verification": {"status": verify.VERIFIED, "what": name, "attempts": 1, "compared": ["id"]}}
     return fn
 
 
@@ -366,15 +375,26 @@ def _one_proposal(tool: str, args: dict[str, Any], prompt: str = "do the thing")
     return proposals.list("pending", run_id=job_runs(job["id"])[0]["run_id"])[0]
 
 
+def _flush_outbox() -> None:
+    """Accepting a send queues it behind the undo window (outbox.py); this is the user cutting that short."""
+    for row in appmod.outbox.list():
+        if row["status"] == "holding":  # list() also carries recently resolved rows, which cannot be sent again
+            j("POST", f"/outbox/gmail/{row['id']}/send-now")
+
+
 def test_accepting_a_proposal_executes_it_once_and_re_accepting_does_not_double_send() -> None:
     args = {"to": "a@example.com", "subject": "Hello", "body": "Body."}
     p = _one_proposal("gmail_send", args)
     res = j("POST", f"/proposals/{p['id']}/accept")
     assert res["ok"] is True and res["replayed"] is False
-    assert [n for n, _ in SENT] == ["gmail_send"], "accepting is what sends it"
+    assert SENT == [], "accepting queues the mail; the undo window is what sends it"
+    _flush_outbox()
+    assert [n for n, _ in SENT] == ["gmail_send"], "accepting is what puts it on its way"
     assert SENT[0][1]["args"][:3] == ("a@example.com", "Hello", "Body.")
     row = proposals.get(p["id"])
-    assert row["status"] == "accepted" and row["decided_at"] and row["result"]["ok"] is True and row["error"] is None
+    assert row["status"] == "accepted" and row["decided_at"] and row["error"] is None
+    assert row["result"]["queued"] and row["result"]["status"] == "holding", \
+        "the model is told it is held, never that it is sent"
 
     j("POST", f"/proposals/{p['id']}/accept", expect=409)
     j("POST", f"/proposals/{p['id']}/reject", expect=409)
@@ -388,6 +408,7 @@ def test_a_proposal_can_be_edited_before_it_is_accepted_or_simply_rejected() -> 
     edited = {"to": "a@example.com", "subject": "Draft", "body": "Warmer, and shorter."}
     res = j("POST", f"/proposals/{p['id']}/accept", {"args": edited})
     assert res["ok"] is True
+    _flush_outbox()
     assert SENT[0][1]["args"][2] == "Warmer, and shorter.", "the user's text is what went out, not the model's"
     row = proposals.get(p["id"])
     assert row["edited"] is True and row["args"] == edited

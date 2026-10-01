@@ -45,6 +45,34 @@ export interface ToolImage {
   data: string
 }
 
+/** One call a `propose_plan` card asks the user to authorise, with the arguments it will really be made with. */
+export interface PlanStep {
+  tool: string
+  arguments: Record<string, unknown>
+  why?: string
+}
+
+/** The arguments of a `propose_plan` call: what the plan card renders. */
+export interface ProposedPlan {
+  title?: string
+  steps: PlanStep[]
+}
+
+/** The approved plan step a call was matched against, instead of asking again. */
+export interface PlanStepRef {
+  plan_id: string
+  idx: number
+  title: string
+}
+
+/** What the user authorises on a plan card: the steps to keep, by their proposed index, with any edited arguments. */
+export interface PlanEdit {
+  idx: number
+  arguments?: Record<string, unknown>
+}
+
+export type ApprovalDecision = 'allow' | 'deny' | 'always_chat' | 'always_global'
+
 export interface ToolEvent {
   id: string
   name: string
@@ -64,6 +92,8 @@ export interface ToolEvent {
   breaker?: PartialReason
   /** Approval was forced by taint even though the tool is set to 'on'. */
   forced?: boolean
+  /** Set when this call's arguments matched an approved plan step, so it ran without its own card. */
+  plan?: PlanStepRef | null
 }
 
 /** Why a reply stopped early: a budget axis, or the repetition breaker. */
@@ -439,7 +469,7 @@ export type ChatEvent =
   | { event: 'removed_message'; data: { id: string } }
   | { event: 'title'; data: { id: string; title: string } }
   | { event: 'delta'; data: { id: string; text: string } }
-  | { event: 'tool_call'; data: { message_id: string; id: string; name: string; arguments: Record<string, unknown>; needs_approval?: boolean; forced?: boolean } }
+  | { event: 'tool_call'; data: { message_id: string; id: string; name: string; arguments: Record<string, unknown>; needs_approval?: boolean; forced?: boolean; plan?: PlanStepRef | null } }
   | { event: 'tool_result'; data: ToolEvent & { message_id: string } }
   | { event: 'span'; data: { message_id: string; span: Span } }
   | { event: 'done'; data: { id: string; error: string | null; context_used: ContextUsed; tool_events: ToolEvent[]; trace: Span[]; stopped: boolean; partial?: PartialReason | null; tainted?: boolean; taint_sources?: string[] } }

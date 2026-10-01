@@ -990,8 +990,34 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .approval { margin: 0 10px 10px; padding: 10px 12px; border-radius: 8px; background: rgba(217,119,87,0.08); border: 1px solid rgba(217,119,87,0.4); }
 .approval-text { font-size: 13px; margin-bottom: 6px; }
 .approval-args { margin: 0 0 8px; font-size: 11px; white-space: pre-wrap; background: var(--bg-input); border-radius: 6px; padding: 8px; max-height: 160px; overflow: auto; }
-.approval-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.approval-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .tag.ask { background: rgba(217,119,87,0.15); color: var(--accent); }
+.tag.plan { background: rgba(217,119,87,0.12); color: var(--text-muted); }
+
+/* One card for a whole plan: the arguments are the card, so they are shown, not summarised. */
+.plan-head { display: flex; align-items: center; gap: 6px; font-size: 13px; margin-bottom: 4px; }
+.plan-head > svg { color: var(--accent); flex-shrink: 0; }
+.plan-count { margin-left: auto; font-size: 11px; color: var(--text-faint); white-space: nowrap; }
+.plan-steps { list-style: none; margin: 8px 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.plan-step { border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; background: var(--bg-input); }
+.plan-step.dropped { opacity: 0.45; }
+.plan-step-head { display: flex; align-items: center; gap: 6px; }
+.plan-keep { display: flex; align-items: center; gap: 6px; cursor: pointer; min-width: 0; }
+.plan-keep input { accent-color: var(--accent); }
+.plan-tool { font-size: 12px; font-weight: 600; text-transform: capitalize; }
+.plan-step-head .ghost-btn.tiny { margin-left: auto; }
+.ghost-btn.tiny { padding: 1px 6px; font-size: 10.5px; display: inline-flex; align-items: center; gap: 3px; }
+.plan-why { font-size: 11px; color: var(--text-faint); margin: 2px 0 0 22px; }
+.plan-args { margin: 4px 0 0 22px; font-size: 11.5px; display: flex; flex-direction: column; gap: 2px; }
+.plan-arg { display: flex; gap: 6px; align-items: baseline; }
+.plan-arg dt { color: var(--text-faint); min-width: 64px; flex-shrink: 0; }
+.plan-arg dd { margin: 0; white-space: pre-wrap; word-break: break-word; min-width: 0; }
+.plan-empty { font-size: 11px; color: var(--text-faint); }
+.plan-edit { width: 100%; margin: 4px 0 2px; font-family: var(--mono); font-size: 11px; resize: vertical;
+  background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px; }
+.plan-note { width: 100%; margin: 0 0 8px; font-size: 11.5px; padding: 5px 7px; border-radius: 6px;
+  background: var(--bg-input); color: var(--text); border: 1px solid var(--border); }
+.plan-warn { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--danger); margin: 2px 0; }
 .tag.p1, .tag.overdue { background: rgba(229,72,77,0.15); color: var(--danger); }
 .tool-perm.row { justify-content: space-between; padding: 6px 0; }
 .tool-perm.unavailable { opacity: 0.5; }

@@ -38,6 +38,7 @@ from .google import Google, GoogleNotConnected, json_safe
 from .microvm import Sandboxes
 from .notes import Notes
 from .gtasks import TasksSync
+from .plans import PLAN_TOOL, Plans, normalize_plan, parse_plan_edits
 from .presets import CanvasPresets
 from .runs import ACTIVE, STATUSES, Run, RunBus, RunStore
 from .todos import Todos
@@ -184,6 +185,8 @@ app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_credenti
 # Each run is also a row (agent_runs) with its event tape (run_events); the bus is the hot path over it.
 run_store = RunStore(db)
 bus = RunBus(run_store)
+# Plan-level approvals (propose_plan): one card authorises a set of calls, each bound to its argument digest.
+plans = Plans(db)
 # Active chat streams so they can be aborted from the client: message_id -> that run's stop event.
 _active: dict[str, asyncio.Event] = {}
 # Pending tool-call approvals: call_id -> Future[decision]. The durable record is the approvals table; this is
@@ -589,6 +592,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     blocked: set[str] = set()
     _round = 0
     awaiting: dict[str, Any] | None = None  # the tool event of a call blocked on approval, for a cancelled run to keep
+    # Whether this chat has any plan at all. One query per reply, so the plan lookups below stay off the hot path
+    # of a chat that never proposed one.
+    plan_seen = plans.any_in(conv_id)
 
     async def _final_round() -> AsyncIterator[tuple[str, Any]]:
         """Closing answer after a budget or breaker stop: one tool-free call, itself exempt from the budget."""
@@ -718,13 +724,39 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 # both produce "call_0". Key anything cross-conversation by the message id too, or one
                 # chat's approval resolves another chat's call. The model still sees c["id"].
                 uid = f"{am['id']}:{c['id']}"
+                plan: dict[str, Any] | None = None     # this call's own proposed plan, when it is propose_plan
+                claimed: dict[str, Any] | None = None  # the approved plan step this call consumed instead of asking
+                pre: Any = None                        # a result settled before the gate: nothing to approve
+                if c["name"] == PLAN_TOOL and mode != "off":
+                    # A plan is nothing but its card, so it asks whatever the mode says, and no standing grant
+                    # below can turn that off. It is not a taint upgrade either, so it is not `forced`.
+                    mode, forced = "ask", False
+                    # A plan the user cannot act on never reaches them. A tool missing from this reply's schemas
+                    # (an integration that is not connected) is as unusable as one that is off.
+                    offered = {s["function"]["name"] for s in tool_schemas}
+                    args, pre = normalize_plan(args, {n: (m if n in offered else "off") for n, m in modes.items()})
+                    if pre is None:
+                        plan = plans.open(uid, args, run_id=run.run_id if run else None, conversation_id=conv_id,
+                                          message_id=am["id"], tainted=bool(tool_ctx["tainted"]))
+                        plan_seen = True
+                elif plan_seen and c["name"] != PLAN_TOOL:
+                    # Digest binding: an approved step whose arguments hash to the same thing stands in for the
+                    # modal, exactly once. A forced approval never consults a plan -- untrusted content in this
+                    # reply must always reach the user -- and a claim only matches inside its own run.
+                    if mode == "ask" and not forced:
+                        claimed = plans.claim(run.run_id if run else None, c["name"], args, uid)
+                    if claimed is None and plans.rejected(conv_id, c["name"], args):
+                        pre = tools.denied(c["name"], "part of a plan you rejected")
+                asks = mode == "ask" and claimed is None and pre is None
                 yield "tool_call", {"message_id": am["id"], "id": uid, "name": c["name"], "arguments": args,
-                                    "needs_approval": mode == "ask", "forced": forced}
-                tspan = tracer.start("tool", c["name"], {"round": _round, "arguments": _short(args), "mode": mode, "forced": forced})
+                                    "needs_approval": asks, "forced": forced,
+                                    "plan": {"plan_id": claimed["plan_id"], "idx": claimed["idx"], "title": claimed["title"]} if claimed else None}
+                tspan = tracer.start("tool", c["name"], {"round": _round, "arguments": _short(args), "mode": mode, "forced": forced,
+                                                         "plan_step": f"{claimed['plan_id']}#{claimed['idx']}" if claimed else None})
                 yield "span", {"message_id": am["id"], "span": tspan}
                 t0 = time.time()
                 decision = "allow"
-                if mode == "ask":
+                if asks:
                     # Pause the reply until the user approves or denies this call (POST /approvals/{call_id}).
                     # The approval is a row, and it waits as long as it takes: there is no auto-deny.
                     approval_t0 = time.time()
@@ -743,6 +775,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                 fut.set_result("deny")
                                 if store is not None:
                                     store.decide(uid, "deny", by="stop")
+                                if plan is not None:  # a stop means "stop", not "never": this no does not block later
+                                    plans.decide(uid, "deny", by="stop", note="You stopped the reply before answering this plan.")
                                 break
                             try:
                                 # Short, so an approval-blocked run notices a stop or a shutdown promptly.
@@ -760,8 +794,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     budget.paused += time.time() - approval_t0  # a slow approval must not blow the wall clock
                     t0 = time.time()  # don't count waiting time as tool time
                     granted = decision in ("always_chat", "always_global")
-                    if forced and granted:
-                        decision = "allow"  # one-shot: a tainted reply cannot buy a standing grant
+                    # A tainted reply cannot buy a standing grant, and neither can a plan card: 'always' on
+                    # propose_plan would leave the plan with no approval at all.
+                    standing = granted and not forced and c["name"] != PLAN_TOOL
+                    if granted and not standing:
+                        decision = "allow"  # one-shot
                     elif decision == "always_chat":
                         convos.update(conv_id, {"settings": {"tools": {**(conv["settings"].get("tools") or {}), c["name"]: "on"}}})
                         conv["settings"].setdefault("tools", {})[c["name"]] = "on"
@@ -771,13 +808,21 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         db.set_settings({"tools": {**(cfg.get("tools") or {}), c["name"]: "on"}})
                         modes[c["name"]] = "on"
                         decision = "allow"
-                    if granted and not forced:
+                    if standing:
                         tool_schemas = toolbox.schemas(modes)  # the grant changed modes; keep the schemas in step
+                    if plan is not None:
+                        # The decision was recorded on the plan by whoever answered it (the route, or the stop
+                        # above), including any step the user edited: re-read it rather than trust `args`.
+                        plan = plans.by_call(uid) or plan
                 was_tainted, was_blocked = tool_ctx["tainted"], c["name"] in blocked
                 if was_blocked:
                     result: Any = tools.denied(c["name"], f"failing {TOOL_ERROR_LIMIT} times in a row and disabled for the rest of this reply")
                 elif mode == "off":
                     result = tools.denied(c["name"], "turned off for this chat")
+                elif pre is not None:
+                    result = pre  # an unusable plan, or a step of a plan the user rejected
+                elif plan is not None:
+                    result = plans.model_result(plan)  # the decision, and the arguments the user actually authorised
                 elif decision != "allow":
                     result = tools.denied(c["name"], "just declined by the user")
                 else:
@@ -796,7 +841,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         yield "taint", {"message_id": am["id"], "source": c["name"]}
                     tool_ctx["taint_sources"].append(c["name"])
                 event = {"id": uid, "name": c["name"], "arguments": args, "result_preview": preview, "duration_ms": ms,
-                         "error": err, "images": images or None, "approval": (decision if mode == "ask" else None),
+                         "error": err, "images": images or None,
+                         "approval": (("plan" if claimed else decision) if mode == "ask" else None),
+                         "plan": {"plan_id": claimed["plan_id"], "idx": claimed["idx"], "title": claimed["title"]} if claimed else None,
                          "forced": forced, "tainted": tainted, "blocked": c["name"] if was_blocked else None, "breaker": partial}
                 tracer.end(tspan, {"result_chars": len(preview), "images": len(images or [])}, error=err)
                 tool_events.append(event)
@@ -942,7 +989,8 @@ async def get_run(run_id: str) -> dict[str, Any]:
         raise HTTPException(404, "No such run")
     mem = bus.get(row["conversation_id"]) if row["conversation_id"] else None
     over = mem.info() if mem is not None and mem.run_id == run_id else {"seq": row["last_seq"], "live": False}
-    return {**row, **over, "approvals": run_store.approvals(None, run_id=run_id), "executed_calls": run_store.executed(run_id)}
+    return {**row, **over, "approvals": run_store.approvals(None, run_id=run_id), "executed_calls": run_store.executed(run_id),
+            "plans": plans.for_run(run_id)}
 
 
 # async, so the run's asyncio.Event is set on the loop that owns it rather than from a threadpool.
@@ -954,6 +1002,11 @@ async def stop_run(id: str, run_id: str | None = None) -> dict[str, bool]:
 
 class ApprovalIn(BaseModel):
     decision: str  # allow | deny | always_chat | always_global
+    # propose_plan only: the steps of the plan the user is authorising, as [{idx, arguments?}]. A step left out is
+    # dropped (it asks again if the model calls it); replacement arguments re-derive that step's digest, so the
+    # edited values are what gets authorised.
+    steps: list[dict[str, Any]] | None = None
+    note: str | None = None  # one line back to the model, e.g. why a plan was rejected
 
 
 def _patch_tool_event(message_id: str | None, call_id: str, patch: dict[str, Any]) -> None:
@@ -989,11 +1042,22 @@ async def approve_tool_call(call_id: str, body: ApprovalIn) -> dict[str, Any]:
     process. A run that died while waiting does not resume: the decision is recorded and its card is settled."""
     if body.decision not in ("allow", "deny", "always_chat", "always_global"):
         raise HTTPException(400, "Bad decision")
+    pending = run_store.approval(call_id)
+    is_plan = bool(pending and pending["tool"] == PLAN_TOOL)
+    if body.steps is not None and not is_plan:
+        raise HTTPException(400, "Only a propose_plan approval carries edited steps")
+    try:  # shape-check the edit before anything is decided, so a bad payload leaves the row pending
+        edits = parse_plan_edits(body.steps)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
     fut = _approvals.get(call_id)
     row = run_store.decide(call_id, body.decision)
     live = bool(fut and not fut.done())
     if row is None and not live:
         raise HTTPException(404, "No pending approval for that call")
+    if row is not None and is_plan:
+        # The plan is decided before the run is woken: what it reads back is the user's answer, edits included.
+        plans.decide(call_id, body.decision, edits=edits, note=body.note)
     if live:
         fut.set_result(body.decision)  # type: ignore[union-attr]
     elif row is not None:

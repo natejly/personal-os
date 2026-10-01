@@ -1,9 +1,11 @@
 import { useState } from 'react'
-import { ChevronRight, Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, AlertCircle } from 'lucide-react'
+import { ChevronRight, Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, AlertCircle, ListChecks } from 'lucide-react'
 import type { ToolEvent } from '@shared/types'
 import { useStore } from '../store'
+import PlanApproval from './PlanApproval'
 
 const ICONS: Record<string, JSX.Element> = {
+  propose_plan: <ListChecks size={13} />,
   web_search: <Globe size={13} />, fetch_url: <Globe size={13} />,
   search_documents: <FileSearch size={13} />, read_document: <FileSearch size={13} />, list_documents: <FileSearch size={13} />,
   search_memory: <Brain size={13} />, save_memory: <Brain size={13} />,
@@ -15,6 +17,11 @@ const ICONS: Record<string, JSX.Element> = {
 
 function summary(t: ToolEvent): string {
   const a = t.arguments ?? {}
+  if (t.name === 'propose_plan') {
+    const steps = Array.isArray(a.steps) ? a.steps : []
+    const title = typeof a.title === 'string' && a.title ? a.title : steps.map((s) => (s as { tool?: string })?.tool ?? '?').join(', ')
+    return `${steps.length} ${steps.length === 1 ? 'action' : 'actions'}${title ? ` · ${title}` : ''}`.slice(0, 90)
+  }
   const first = a.query ?? a.url ?? a.command ?? a.path ?? a.entity ?? a.content ?? a.document_id ?? (a.code ? String(a.code).split('\n')[0] : '') ?? ''
   const s = String(first ?? '')
   return s.length > 90 ? s.slice(0, 90) + '…' : s
@@ -39,7 +46,9 @@ export default function ToolEvents({ events, conversationId }: { events: ToolEve
             <span className="tool-icon">{ICONS[t.name] ?? <Wrench size={13} />}</span>
             <span className="tool-name">{t.name.replace(/_/g, ' ')}</span>
             <span className="tool-summary">{summary(t)}</span>
-            {t.approval && t.approval !== 'allow' && <span className="tag">{t.approval === 'deny' ? 'denied' : 'approved'}</span>}
+            {t.plan ? (
+              <span className="tag plan" title={`Approved in the plan "${t.plan.title || 'untitled'}" (step ${t.plan.idx + 1})`}>in plan</span>
+            ) : t.approval && t.approval !== 'allow' && <span className="tag">{t.approval === 'deny' ? 'denied' : 'approved'}</span>}
             {t.pending ? (t.needs_approval ? <span className="tag ask">needs approval</span> : <span className="thinking mini"><span /><span /><span /></span>) : t.error ? <AlertCircle size={12} /> : <span className="tool-ms">{t.duration_ms} ms</span>}
           </button>
           {t.images && t.images.length > 0 && (
@@ -52,7 +61,8 @@ export default function ToolEvents({ events, conversationId }: { events: ToolEve
               ))}
             </div>
           )}
-          {t.pending && t.needs_approval && (
+          {t.pending && t.needs_approval && t.name === 'propose_plan' && <PlanApproval event={t} conversationId={conversationId} />}
+          {t.pending && t.needs_approval && t.name !== 'propose_plan' && (
             <div className="approval">
               <div className="approval-text"><b>{t.name.replace(/_/g, ' ')}</b> wants to run. This acts outside the app.</div>
               <pre className="approval-args">{pretty(t.arguments)}</pre>

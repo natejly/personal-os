@@ -4,8 +4,12 @@ import type { CalendarColors, CalendarEvent, EventPayload, GoogleCalendar } from
 import { api } from '../lib/api'
 import { useStore } from '../store'
 
-/** Seed for create mode: where the user double-clicked. */
-export interface EventDraft { day?: string; hour?: number; title?: string }
+/** Seed for create mode: the slot the user dragged out or double-clicked.
+ *
+ * `start`/`end` are local wall-clock `YYYY-MM-DDTHH:MM` strings and win over `day`/`hour`, so a
+ * dragged span keeps its exact minutes instead of being rounded back to the hour.
+ */
+export interface EventDraft { day?: string; hour?: number; title?: string; start?: string; end?: string }
 
 const pad = (n: number): string => String(n).padStart(2, '0')
 const toDateInput = (d: Date): string => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
@@ -113,12 +117,17 @@ export default function EventEditor({ event, draft, onClose, onSaved }: EventEdi
   // Seed the form: from the draft slot (create) or the fully fetched event (edit).
   useEffect(() => {
     if (!isEdit) {
-      const day = draft?.day ?? toDateInput(new Date())
+      const day = draft?.start?.slice(0, 10) ?? draft?.day ?? toDateInput(new Date())
       const hour = draft?.hour ?? new Date().getHours() + 1
-      setStartDay(day); setEndDay(day)
-      setStartDt(`${day}T${pad(Math.min(hour, 23))}:00`)
-      setEndDt(hour >= 23 ? `${day}T23:59` : `${day}T${pad(hour + 1)}:00`)
-      setAllDay(draft?.hour === undefined && !!draft?.day)
+      setStartDay(day); setEndDay(draft?.end?.slice(0, 10) ?? day)
+      if (draft?.start) {
+        setStartDt(draft.start.slice(0, 16))
+        setEndDt((draft.end ?? draft.start).slice(0, 16))
+      } else {
+        setStartDt(`${day}T${pad(Math.min(hour, 23))}:00`)
+        setEndDt(hour >= 23 ? `${day}T23:59` : `${day}T${pad(hour + 1)}:00`)
+      }
+      setAllDay(!draft?.start && draft?.hour === undefined && !!draft?.day)
       const primary = metaCache?.calendars.find((c) => c.primary)
       if (primary) setCalendarId(primary.id)
       setLoading(false)

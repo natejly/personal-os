@@ -3,7 +3,7 @@ import { Calendar as CalIcon, ChevronLeft, ChevronRight, ExternalLink, Pencil, P
 import type { CalendarEvent, DragKind, Todo } from '@shared/types'
 import { useStore } from '../../store'
 import { api } from '../../lib/api'
-import CalendarWeek, { addDays, dayKey, fmtTime, localDay, startOfWeek, withoutTodoEvents } from '../../components/CalendarWeek'
+import CalendarWeek, { addDays, dayKey, fmtTime, localDay, slotIso, startOfWeek, withoutTodoEvents, type Slot } from '../../components/CalendarWeek'
 import EventEditor, { eventColor, primeCalendarMeta, type EventDraft } from '../../components/EventEditor'
 import { scheduleTodo } from '../../components/TodoItem'
 import { hasDrag, readDrag, useDropTarget } from '../dnd'
@@ -81,15 +81,31 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
     }
   }
 
-  const create = async (day: string, hour: number, title: string): Promise<boolean> => {
+  const create = async (slot: Slot, title: string): Promise<boolean> => {
     try {
-      await api.google.createEvent({ summary: title, start: `${day}T${String(hour).padStart(2, '0')}:00:00` })
+      await api.google.createEvent({ summary: title, start: slotIso(slot.day, slot.startMin), end: slotIso(slot.day, slot.endMin) })
       toast(`Added "${title}"`)
       await reload()
       return true
     } catch (e) {
       toast((e as Error).message, 'error')
       return false
+    }
+  }
+
+  /** Drag-moved or resized a block: patch just its start and end, then re-read the week. */
+  const move = async (e: CalendarEvent, start: string, end: string): Promise<void> => {
+    // A new time for a meeting is news to its guests, so ask before mailing them, as Google does.
+    const send_updates = e.attendees.length > 0 && window.confirm(`Email the ${e.attendees.length} guest${e.attendees.length > 1 ? 's' : ''} about the new time?`) ? 'all' : 'none'
+    const before = events
+    setEvents((list) => list.map((x) => (x.id === e.id ? { ...x, start: new Date(start).toISOString(), end: new Date(end).toISOString() } : x)))
+    try {
+      await api.google.updateEvent(e.id, { start, end, calendar_id: e.calendar_id ?? 'primary', send_updates })
+      toast(`Moved to ${new Date(start).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}`)
+      await reload()
+    } catch (err) {
+      setEvents(before)
+      toast((err as Error).message, 'error')
     }
   }
 
@@ -183,7 +199,8 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
         <div className="cal-scroll">
           <CalendarWeek days={columns} events={shown} todos={todos} canCreate={connected}
             onOpen={setOpen} onTodo={() => setView('todos')} onTodoDrop={(id, day, hour) => void dropTodo(id, day, hour)} onCreate={create}
-            onCreateFull={(day, hour, title) => setEditing({ event: null, draft: { day, hour, title } })}
+            onCreateFull={(slot, title) => setEditing({ event: null, draft: { day: slot.day, title, start: slotIso(slot.day, slot.startMin), end: slotIso(slot.day, slot.endMin) } })}
+            onMove={connected ? (e, start, end) => void move(e, start, end) : undefined}
             colorOf={eventColor} />
         </div>
       )}

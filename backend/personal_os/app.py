@@ -800,9 +800,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 settings=cfg, memories=memories, graph=graph, project_id=conv["project_id"],
                 user_text=user_text, assistant_text=text, model=model,
             )
-            tracer.end(lspan, {"memories": len(learned["memories"]), "entities": len(learned["nodes"]), "relations": len(learned["edges"])})
+            tracer.end(lspan, {"memories": len(learned["memories"]), "updated": len(learned["updated"]),
+                               "removed": len(learned["removed"]), "entities": len(learned["nodes"]), "relations": len(learned["edges"])})
             yield "span", {"message_id": am["id"], "span": lspan}
-            if learned["memories"] or learned["nodes"] or learned["edges"]:
+            if any(learned[k] for k in ("memories", "updated", "removed", "nodes", "edges")):
                 yield "learned", learned
         except Exception as e:  # noqa: BLE001
             tracer.end(lspan, error=str(e))

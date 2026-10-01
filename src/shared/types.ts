@@ -444,7 +444,7 @@ export type ChatEvent =
   | { event: 'span'; data: { message_id: string; span: Span } }
   | { event: 'done'; data: { id: string; error: string | null; context_used: ContextUsed; tool_events: ToolEvent[]; trace: Span[]; stopped: boolean; partial?: PartialReason | null; tainted?: boolean; taint_sources?: string[] } }
   | { event: 'taint'; data: { message_id: string; source: string } }
-  | { event: 'learned'; data: { memories: Memory[]; nodes: GraphNode[]; edges: GraphEdge[] } }
+  | { event: 'learned'; data: { memories: Memory[]; updated?: Memory[]; removed?: Memory[]; nodes: GraphNode[]; edges: GraphEdge[] } }
   | { event: 'learn_error'; data: { message: string } }
   | { event: 'error'; data: { message: string } }
 

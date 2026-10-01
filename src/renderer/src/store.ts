@@ -439,9 +439,13 @@ export const useStore = create<State>((set, get) => {
             void get().refreshConversations()
             break
           case 'learned': {
-            const { memories, nodes, edges } = ev.data
-            get().toast(`Learned ${memories.length} memor${memories.length === 1 ? 'y' : 'ies'}, ${nodes.length} entities, ${edges.length} relations`, 'learned')
-            if (memories.length + nodes.length + edges.length) refreshAll()
+            const { memories, nodes, edges, updated = [], removed = [] } = ev.data
+            const parts = [`Learned ${memories.length} memor${memories.length === 1 ? 'y' : 'ies'}`]
+            if (updated.length) parts.push(`updated ${updated.length}`)
+            if (removed.length) parts.push(`forgot ${removed.length}`)
+            parts.push(`${nodes.length} entities, ${edges.length} relations`)
+            get().toast(parts.join(', '), 'learned')
+            if (memories.length + updated.length + removed.length + nodes.length + edges.length) refreshAll()
             break
           }
           case 'learn_error':

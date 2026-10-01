@@ -9,6 +9,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { SAFE_MD } from './Message'
 import { lines, usePageContext } from '../lib/pageContext'
+import AppSwitcher from './AppSwitcher'
 
 function greeting(): string {
   const h = new Date().getHours()
@@ -97,6 +98,7 @@ export default function HomeView(): JSX.Element {
           </div>
           <button className="primary-btn" onClick={() => void brief()}><Sparkles size={14} /> Brief me</button>
         </div>
+        <AppSwitcher />
       </header>
       <div className="page-body wide">
         <div className="home-hero">

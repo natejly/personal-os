@@ -9,6 +9,7 @@ import { clearHandoff, peekHandoff } from '../lib/handoff'
 import SendToSpace from './SendToSpace'
 import type { Dashboard, DataSource, Widget } from '@shared/types'
 import { lines, usePageContext } from '../lib/pageContext'
+import AppSwitcher from './AppSwitcher'
 
 const KIND_LABEL: Record<string, string> = { http: 'HTTP API', rss: 'RSS / Atom', internal: 'Grain data' }
 
@@ -220,6 +221,7 @@ export default function DashboardsView(): JSX.Element {
           {dash && <button className="primary-btn" onClick={() => setComposer((v) => !v)}><Wand2 size={14} /> Add widget</button>}
           {dash && <button className="icon-btn danger" title="Delete dashboard" aria-label={`Delete dashboard ${dash.name}`} onClick={() => { if (confirm(`Delete "${dash.name}"?`)) void api.dashboards.delete(dash.id).then(() => { setActiveId(null); setDash(null); void loadList() }) }}><Trash2 size={15} /></button>}
         </div>
+        <AppSwitcher />
       </header>
 
       {composer && dash && (

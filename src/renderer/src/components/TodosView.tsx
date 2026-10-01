@@ -7,6 +7,7 @@ import SmartTextarea from './SmartTextarea'
 import { localDay } from './CalendarWeek'
 import SendToSpace from './SendToSpace'
 import { lines, usePageContext } from '../lib/pageContext'
+import AppSwitcher from './AppSwitcher'
 
 export default function TodosView(): JSX.Element {
   const todos = useStore((s) => s.todos)
@@ -77,6 +78,7 @@ export default function TodosView(): JSX.Element {
           <label className="check"><input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} /> show done</label>
           <ScopeSelect value={scope} onChange={setScope} />
         </div>
+        <AppSwitcher />
       </header>
       <div className="page-body">
         <div className="add-row">

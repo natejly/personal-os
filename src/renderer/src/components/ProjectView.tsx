@@ -7,6 +7,7 @@ import MemoryPanel from './MemoryPanel'
 import DocumentsView from './DocumentsView'
 import SendToSpace from './SendToSpace'
 import { lines, usePageContext } from '../lib/pageContext'
+import AppSwitcher from './AppSwitcher'
 
 type Tab = 'chats' | 'instructions' | 'knowledge' | 'memory'
 
@@ -57,6 +58,7 @@ export default function ProjectView(): JSX.Element {
           <button className="ghost-btn" onClick={() => setProjectModal({ mode: 'edit', project })}><Pencil size={13} /> Edit</button>
           <button className="primary-btn" onClick={() => newChat(id)}><MessageSquarePlus size={14} /> New chat</button>
         </div>
+        <AppSwitcher />
       </header>
 
       <div className="project-hero">

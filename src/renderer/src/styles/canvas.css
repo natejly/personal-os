@@ -548,6 +548,7 @@
 .spaces-bar .spacer { flex: 1; }
 .spaces-inset { flex: 0 0 76px; align-self: stretch; }
 .spaces-bar .icon-btn.on { color: var(--accent); }
+.spaces-bar .app-switch { width: 24px; height: 24px; }
 .space-snap {
   height: 22px;
   padding: 0 4px;

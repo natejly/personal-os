@@ -7,6 +7,7 @@ import ProjectChip from './ProjectChip'
 import SendToSpace from './SendToSpace'
 import { clearHandoff, peekHandoff } from '../lib/handoff'
 import { lines, usePageContext } from '../lib/pageContext'
+import AppSwitcher from './AppSwitcher'
 
 const PRIO = ['', 'P1', 'P2', 'P3']
 
@@ -206,6 +207,7 @@ export default function BoardsView(): JSX.Element {
             <button className="primary-btn" onClick={() => setCreating(true)}><Plus size={14} /> New board</button>
           )}
         </div>
+        <AppSwitcher />
       </header>
       {!board ? (
         <div className="page-body">

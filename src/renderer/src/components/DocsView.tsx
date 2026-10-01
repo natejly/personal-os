@@ -12,6 +12,7 @@ import ScopeSelect from './ScopeSelect'
 import DocTree from './DocTree'
 import { clip, lines, usePageContext } from '../lib/pageContext'
 import '../styles/docs.css'
+import AppSwitcher from './AppSwitcher'
 
 const fmtWhen = (ts: number): string => {
   const d = new Date(ts * 1000)
@@ -107,6 +108,7 @@ export default function DocsView(): JSX.Element {
             <Plus size={14} /> New doc
           </button>
         </div>
+        <AppSwitcher />
       </header>
 
       <div className="docs-body">

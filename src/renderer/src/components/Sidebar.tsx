@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { MessageSquarePlus, Search, Settings, Sparkles, Trash2, PanelLeftClose, Brain, FileText, NotebookPen, Plus, Folder, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid, Mail, MonitorDot, BookOpen, Globe } from 'lucide-react'
+import { MessageSquarePlus, Search, Settings, Sparkles, Trash2, PanelLeftClose, Brain, FileText, NotebookPen, Plus, Folder, FolderKanban, ChevronRight, Home, KanbanSquare, LayoutDashboard, LayoutGrid, MonitorDot, BookOpen, Globe } from 'lucide-react'
 import GrainLogo from './GrainLogo'
 import { useStore, type View } from '../store'
 import { ActivityIndicator } from './ActivityView'
@@ -38,11 +38,9 @@ type ProjectRow =
   | { kind: 'chat'; id: string; title: string; at: number }
   | { kind: 'doc'; id: string; title: string; at: number }
 
+// Todos, Calendar and Mail live in the title bar instead (AppSwitcher).
 const NAV: NavEntry[] = [
   { view: 'home', label: 'Today', icon: <Home size={15} />, kind: 'recap' },
-  { view: 'todos', label: 'Todos', icon: <CheckSquare size={15} />, kind: 'todos' },
-  { view: 'calendar', label: 'Calendar', icon: <Calendar size={15} />, kind: 'calendar' },
-  { view: 'mail', label: 'Mail', icon: <Mail size={15} /> },
   { view: 'boards', label: 'Boards', icon: <KanbanSquare size={15} /> },
   { view: 'dashboards', label: 'Dashboards', icon: <LayoutDashboard size={15} /> },
   { view: 'docs', label: 'Docs', icon: <NotebookPen size={15} /> },
@@ -121,10 +119,8 @@ export default function Sidebar(): JSX.Element {
     return out
   }, [conversations, query])
 
-  const todoStats = useStore((s) => s.dashboard?.todo_stats)
   const libCount = (v: View): number | null => {
-    if (v === 'home' || v === 'calendar' || v === 'mail' || v === 'boards' || v === 'dashboards' || v === 'activity') return null
-    if (v === 'todos') return todoStats?.open ?? null
+    if (v === 'home' || v === 'boards' || v === 'dashboards' || v === 'activity') return null
     if (v === 'docs') return docCount
     const total = (key: 'memories' | 'nodes' | 'documents'): number =>
       (personalStats?.[key] ?? 0) + projects.reduce((n, p) => n + (p.stats?.[key] ?? 0), 0)

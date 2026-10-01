@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { applyEvent, type ChatSession } from './store'
+import { applyEvent, useStore, type ChatSession } from './store'
 import type { ChatEvent, Message } from '@shared/types'
 
 /**
@@ -60,4 +60,29 @@ test('a stopped reply is finished too: `done` carries the partial text and ends 
   const stopped = { event: 'done', data: { id: 'm1', error: null, context_used: null, tool_events: [], trace: [], stopped: true, partial: null } } as unknown as ChatEvent
   const after = applyEvent(session(), stopped, true)
   assert.equal(after.streaming?.answering, false, 'Stop settles the composer at once, not when the tail closes')
+})
+
+/**
+ * A new chat is personal unless the user said otherwise. Both regressions this pins were implicit:
+ * ⌘N read the project behind whatever was on screen, and merely opening a project armed the draft.
+ * (⌘N itself arrives through `window.os.onMenu`, so what is asserted here is the `newChat(null)`
+ * it now calls rather than the keystroke.)
+ */
+test('a new chat defaults to no project, and only an explicit choice files it in one', () => {
+  const draft = (): string | null => useStore.getState().draftProjectId
+
+  useStore.getState().newChat()
+  assert.equal(draft(), null, 'the plain case is personal')
+
+  // Looking at a project is not choosing it for the next chat.
+  useStore.getState().openProject('p1')
+  assert.equal(draft(), null, 'opening a project must not arm the next chat')
+
+  // Its own "New chat" button passes the id, and still files the chat there.
+  useStore.getState().newChat('p1')
+  assert.equal(draft(), 'p1')
+
+  // And the next plain one is personal again rather than inheriting it.
+  useStore.getState().newChat()
+  assert.equal(draft(), null)
 })

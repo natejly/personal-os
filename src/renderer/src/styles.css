@@ -133,6 +133,9 @@ kbd {
      --sidebar-bg now composites over this rather than over the desktop; drop this line (and keep
      .canvas's own background) to get the frosted-desktop look back. */
   background: var(--bg);
+  /* The popout variant of the page agent anchors to the shell, so it floats over whichever view
+     is in the middle column instead of being clipped by it. */
+  position: relative;
 }
 .app.sidebar-collapsed { grid-template-columns: 0 1fr; }
 /* The page agent is a third column of the shell, not a drawer inside one view: ⌘I opens it over
@@ -1815,3 +1818,26 @@ textarea:focus-visible,
 .page-agent-empty { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; }
 .page-agent-hint { text-align: left; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text-muted); font-size: 12px; }
 .page-agent-hint:hover { background: var(--active); color: var(--text); }
+
+/* ---------- The page agent as a popout (Docs) ----------
+   In a document the side column is the wrong shape: it takes a third of the width away from the
+   thing being written, and the Cursor reflex ⌘I borrows from is a small box floating over the
+   text, not a panel beside it. Same panel, same thread, different frame -- it anchors to .app
+   rather than to the editor so a scroll inside the doc cannot drag it off screen, and it is
+   deliberately not pinned to the caret: a textarea gives no reliable caret rectangle, and a box
+   that jumps around while typing is worse than one that stays put. */
+.page-agent.popout {
+  position: absolute;
+  top: 56px;
+  right: 20px;
+  z-index: 40;
+  width: min(var(--page-agent-w), calc(100% - var(--sidebar-w) - 40px));
+  max-height: min(70vh, 620px);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.28);
+  background: var(--bg-elev);
+}
+.app.sidebar-collapsed .page-agent.popout { width: min(var(--page-agent-w), calc(100% - 40px)); }
+/* The column draws its own left edge against the view; a floating card has a border all round. */
+.page-agent.popout > header { border-top-left-radius: 12px; border-top-right-radius: 12px; }

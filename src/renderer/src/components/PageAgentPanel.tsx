@@ -12,7 +12,7 @@ const NO_THREAD = '\u0000page-agent'
  * carries a snapshot of the view behind it (see `usePageContext`), so "summarise this", "add these
  * as todos" or "move it to Thursday" resolve against what the user is actually looking at.
  */
-export default function PageAgentPanel(): JSX.Element {
+export default function PageAgentPanel({ popout = false }: { popout?: boolean }): JSX.Element {
   const ctx = useStore((s) => s.pageContext)
   const threadId = useStore((s) => s.pageAgentId)
   const convo = useConversation(threadId ?? NO_THREAD)
@@ -39,7 +39,7 @@ export default function PageAgentPanel(): JSX.Element {
   const hints = ctx?.hints ?? []
 
   return (
-    <aside className="page-agent" aria-label="Page agent">
+    <aside className={`page-agent${popout ? ' popout' : ''}`} aria-label="Page agent">
       <header>
         <h3><Sparkles size={13} /> Ask about this page</h3>
         <div className="page-agent-actions">

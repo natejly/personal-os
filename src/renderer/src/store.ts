@@ -660,7 +660,10 @@ export const useStore = create<State>((set, get) => {
       const s = get()
       // In the canvas view ⌘N opens a chat window instead; canvas/store.ts handles it there.
       if (action === 'new-chat') {
-        if (s.view !== 'canvas') s.newChat(s.view === 'project' ? s.projectViewId : selectActive(s)?.project_id ?? null)
+        // Always personal: a new chat belongs to a project only when the user asked for one by
+        // clicking "New chat" inside it. Inheriting the project behind the current screen meant a
+        // ⌘N taken while reading a project chat silently filed the next unrelated thought under it.
+        if (s.view !== 'canvas') s.newChat(null)
       } else if (action === 'settings') s.setSettingsOpen(true)
       else if (action === 'toggle-sidebar') s.toggleSidebar()
       else if (action === 'toggle-context') s.toggleContext()
@@ -1074,7 +1077,9 @@ export const useStore = create<State>((set, get) => {
       const [projects, personalStats] = await Promise.all([api.projects.list(), api.projects.globalStats()])
       set({ projects, personalStats })
     },
-    openProject: (id) => set({ view: 'project', projectViewId: id, draftProjectId: id, settingsOpen: false }),
+    // `draftProjectId` is deliberately not set here: opening a project is looking at it, not
+    // choosing it for the next chat. Its own "New chat" buttons pass the id to `newChat` instead.
+    openProject: (id) => set({ view: 'project', projectViewId: id, draftProjectId: null, settingsOpen: false }),
     createProject: async (p) => {
       const project = await api.projects.create(p)
       await get().refreshProjects()

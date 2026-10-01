@@ -48,6 +48,8 @@ export default function App(): JSX.Element {
   const view = useStore((s) => s.view)
   const theme = useStore((s) => s.settings.theme)
   const inCanvas = useStore((s) => s.view === 'canvas')
+  /* Over a document the agent floats rather than taking a third column: see .page-agent.popout. */
+  const agentPopout = useStore((s) => s.view === 'docs')
   const pageAgentOpen = useStore((s) => s.pageAgentOpen)
 
   useEffect(() => {
@@ -100,7 +102,7 @@ export default function App(): JSX.Element {
   }
 
   return (
-    <div className={`app ${sidebarOpen ? '' : 'sidebar-collapsed'} ${pageAgentOpen ? 'page-agent-open' : ''}`}>
+    <div className={`app ${sidebarOpen ? '' : 'sidebar-collapsed'} ${pageAgentOpen && !agentPopout ? 'page-agent-open' : ''}`}>
       <Sidebar />
       {inCanvas ? (
         <Canvas />
@@ -121,7 +123,7 @@ export default function App(): JSX.Element {
           {view === 'project' && <ProjectView />}
         </>
       )}
-      {pageAgentOpen && <PageAgentPanel />}
+      {pageAgentOpen && <PageAgentPanel popout={agentPopout} />}
       {settingsOpen && <SettingsModal />}
       {projectModal && <ProjectModal />}
       <Toasts />

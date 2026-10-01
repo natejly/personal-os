@@ -9,7 +9,7 @@ import {
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import type {
-  ActivityCapability, ActivityEvent, ActivityHabit, ActivityInsights, ActivityPattern,
+  ActivityCapability, ActivityCategoryReport, ActivityCategoryRule, ActivityEvent, ActivityHabit, ActivityInsights, ActivityPattern,
   ActivitySignal, ActivityStatus, ActivitySuggestion, InsightKind
 } from '@shared/types'
 import AppSwitcher from './AppSwitcher'
@@ -259,6 +259,98 @@ function ListEditor({ label, hint, items, placeholder, onChange }: {
         <button className="ghost-btn" onClick={add} disabled={!draft.trim()}>Add</button>
       </div>
     </div>
+  )
+}
+
+const CAT_COLORS = ['var(--accent)', 'var(--info)', 'var(--warn)', 'var(--ok)', 'var(--danger)', 'var(--text-faint)']
+
+/** Time by category (stacked bar, local and model-free) plus the rule editor. */
+function CategoriesCard({ categories }: { categories: ActivityStatus['config']['categories'] }): JSX.Element {
+  const [report, setReport] = useState<ActivityCategoryReport | null>(null)
+  const [rules, setRules] = useState<ActivityCategoryRule[]>([])
+  const [isDefault, setIsDefault] = useState(true)
+  const [open, setOpen] = useState(false)
+  const [err, setErr] = useState('')
+  const load = (): void => {
+    api.activity.categoryReport(7).then(setReport).catch(() => setReport(null))
+    api.activity.categories().then((r) => { setRules(r.rules); setIsDefault(r.default) }).catch(() => undefined)
+  }
+  useEffect(load, [categories])
+  const save = async (next: ActivityCategoryRule[] | null): Promise<void> => {
+    try {
+      const r = await api.activity.setCategories(next)
+      setRules(r.rules); setIsDefault(r.default); setErr('')
+      api.activity.categoryReport(7).then(setReport).catch(() => undefined)
+    } catch (e) { setErr(e instanceof Error ? e.message : 'Could not save the rules') }
+  }
+  const patch = (i: number, p: Partial<ActivityCategoryRule>): void => setRules(rules.map((r, j) => (j === i ? { ...r, ...p } : r)))
+  const top = Object.entries(report?.totals ?? {}).filter(([k]) => !k.includes('/')).sort((a, b) => b[1] - a[1])
+  const total = top.reduce((n, [, v]) => n + v, 0)
+  const addRule = (app: string): void => {
+    const esc = app.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    setOpen(true)
+    setRules([...rules, { name: ['Custom', app], rule: { type: 'regex', pattern: esc, fields: ['app'] }, score: 0 }])
+  }
+  return (
+    <section className="act-card">
+      <div className="act-card-head static">
+        <b>Time by category</b>
+        <span className="muted small">
+          last 7 days{report?.productivity != null ? ` · productivity ${report.productivity.toFixed(1)} of 2` : ''}
+        </span>
+      </div>
+      {total > 0 ? (
+        <>
+          <div className="act-catbar" role="img" aria-label="Time by category">
+            {top.map(([k, v], i) => (
+              <span key={k} title={`${k} ${(v / 3600).toFixed(1)}h`} style={{ width: `${(v / total) * 100}%`, background: CAT_COLORS[i % CAT_COLORS.length] }} />
+            ))}
+          </div>
+          <ul className="act-catlegend">
+            {top.map(([k, v], i) => (
+              <li key={k}><i style={{ background: CAT_COLORS[i % CAT_COLORS.length] }} />{k} <em>{(v / 3600).toFixed(1)}h · {Math.round((v / total) * 100)}%</em></li>
+            ))}
+          </ul>
+        </>
+      ) : <p className="empty-hint">No focused time recorded yet.</p>}
+      {(report?.top_uncategorized_apps?.length ?? 0) > 0 && (
+        <div className="act-list-editor">
+          <b>Top uncategorized apps</b>
+          <div className="act-tags">
+            {report!.top_uncategorized_apps.slice(0, 6).map((a) => (
+              <span key={a.app} className="act-tag">{a.app} {Math.round(a.seconds / 60)}m
+                <button className="icon-btn ghost xs" title={`Add a rule for ${a.app}`} onClick={() => addRule(a.app)}><ListPlus size={11} /></button>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+      <button className="link" onClick={() => setOpen(!open)}>{open ? 'Hide' : 'Edit'} category rules{isDefault ? ' (defaults)' : ''}</button>
+      {open && (
+        <div className="act-rules">
+          {err && <p className="act-warn"><AlertTriangle size={13} /> {err}</p>}
+          {rules.map((r, i) => (
+            <div key={i} className="act-rule">
+              <input value={r.name.join(' > ')} aria-label="Category path" title="Path, e.g. Work > Coding"
+                onChange={(e) => patch(i, { name: e.target.value.split('>').map((s) => s.trim()).filter(Boolean) })} />
+              <input value={r.rule?.pattern ?? ''} placeholder="regex over app / title" aria-label="Regex"
+                onChange={(e) => patch(i, { rule: { ...(r.rule ?? {}), type: e.target.value ? 'regex' : 'none', pattern: e.target.value } })} />
+              <select value={r.score ?? ''} aria-label="Score" onChange={(e) => patch(i, { score: e.target.value === '' ? undefined : Number(e.target.value) })}>
+                <option value="">inherit</option>
+                {[-2, -1, 0, 1, 2].map((n) => <option key={n} value={n}>{n > 0 ? `+${n}` : n}</option>)}
+              </select>
+              <button className="icon-btn ghost xs" title="Remove rule" onClick={() => setRules(rules.filter((_, j) => j !== i))}><X size={11} /></button>
+            </div>
+          ))}
+          <div className="act-add">
+            <button className="ghost-btn" onClick={() => setRules([...rules, { name: ['New category'], rule: { type: 'regex', pattern: '', fields: ['app', 'title'] }, score: 0 }])}>Add rule</button>
+            <button className="ghost-btn" onClick={() => void save(rules)}>Save rules</button>
+            <button className="ghost-btn" onClick={() => void save(null)}>Reset to default</button>
+          </div>
+          <p className="muted small">The deepest matching rule wins. New rules apply to future time; days already counted keep their totals.</p>
+        </div>
+      )}
+    </section>
   )
 }
 
@@ -689,6 +781,8 @@ export default function ActivityView(): JSX.Element {
             and they are what the panel shows you first. The suggestions on top of them are proposals: nothing here
             changes anything until you press a button, and dismissing one means it is never raised again.
           </p>
+
+          <CategoriesCard categories={cfg.categories} />
 
           <section className="act-card">
             <div className="act-card-head static">

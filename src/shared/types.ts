@@ -1491,6 +1491,8 @@ export interface ActivityConfig {
   redactDeny: string[]
   /** Score a candidate needs before it is scrubbed (0.2-0.9). */
   redactThreshold: number
+  /** Category rules; null means the shipped default tree. */
+  categories: ActivityCategoryRule[] | null
   audio: ActivityAudioConfig
   /** Blank falls back to the extraction model, then the default model. */
   summaryModel: string
@@ -1664,6 +1666,20 @@ export interface ActivityStatus {
   palantir: boolean
   /** Redactions so far today, by entity. Counts only. */
   redactions?: Record<string, number>
+}
+
+export interface ActivityCategoryRule {
+  name: string[]
+  rule?: { type: 'regex' | 'none'; pattern?: string; fields?: ('app' | 'title')[]; hosts?: string[] }
+  /** Productivity, -2 (distracting) to 2 (productive); inherited from the parent when absent. */
+  score?: number
+}
+
+export interface ActivityCategoryReport {
+  days: { day: string; total_seconds: number; cats: Record<string, number> }[]
+  totals: Record<string, number>
+  productivity: number | null
+  top_uncategorized_apps: { app: string; seconds: number }[]
 }
 
 export interface ActivityRedactTest {

@@ -1326,6 +1326,12 @@ def _register_activity(self: Toolbox) -> None:
     R("activity_insights", ToolSpec("activity_insights", "The habits the activity monitor has noticed about how this person works, the patterns behind them, and the automation suggestions it has on offer but the user has not accepted yet. Use it when the user asks how they could save time, what you have noticed about their workflow, or what to automate - and when you are about to suggest a workflow change, so you can ground it in their real patterns instead of guessing. Read-only: never treat a suggestion as approved.",
         _obj({"limit": {"type": "integer", "default": 5}}, []), activity_insights, "activity"))
 
+    async def activity_report(ctx: dict[str, Any], days: int = 7) -> Any:
+        from . import activity_categories as cats
+        return cats.report_for(self.activity, max(1, min(90, int(days))))
+    R("activity_report", ToolSpec("activity_report", "Where the user's focused computer time went by category (Work/Coding, Comms, Social/Media...) over the last few days, with a productivity score from -2 to 2 and the apps that are still uncategorized. Computed locally from the activity monitor; read-only. Use it for 'how was my week' or 'how much time did I spend on X'.",
+        _obj({"days": {"type": "integer", "default": 7}}, []), activity_report, "activity"))
+
     async def activity_pause(ctx: dict[str, Any], minutes: float = 30.0) -> Any:
         return {"paused_until": self.activity.pause(minutes)["pause_until"]}
     R("activity_pause", ToolSpec("activity_pause", "Pause the activity monitor for a while, so nothing about the user's screen, typing or audio is recorded. Use it whenever the user asks you to stop watching.",

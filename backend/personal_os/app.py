@@ -3777,6 +3777,7 @@ class ActivityConfigIn(BaseModel):
     redactAllow: list[str] | None = None
     redactDeny: list[str] | None = None
     redactThreshold: float | None = None
+    categories: list[dict[str, Any]] | None = None
     audio: dict[str, Any] | None = None
     summaryModel: str | None = None
     profileEveryHours: float | None = None
@@ -3808,6 +3809,32 @@ def activity_config(body: ActivityConfigIn) -> dict[str, Any]:
     if palantir is not None and bool(palantir) != bool(monitor.config().get("palantir")):
         monitor.set_palantir(bool(palantir))
     return monitor.status()
+
+
+@app.get("/activity/categories")
+def activity_categories_get() -> dict[str, Any]:
+    from . import activity_categories as cats
+    return cats.effective(monitor.config())
+
+
+class CategoriesIn(BaseModel):
+    rules: list[dict[str, Any]] | None = None   # null resets to the default tree
+
+
+@app.put("/activity/categories")
+def activity_categories_put(body: CategoriesIn) -> dict[str, Any]:
+    from . import activity_categories as cats
+    try:
+        return cats.save(monitor, body.rules)
+    except ValueError as e:
+        msg, idx = e.args
+        raise HTTPException(400, {"error": msg, "index": idx})
+
+
+@app.get("/activity/categories/report")
+def activity_categories_report(days: int = 7) -> dict[str, Any]:
+    from . import activity_categories as cats
+    return cats.report_for(monitor, max(1, min(90, days)))
 
 
 class RedactTestIn(BaseModel):

@@ -198,6 +198,21 @@ whether confident habits are written to memory at all, how much history to mine,
 recurrence floor, and how many suggestions to hold at once. Turning
 `autoMemory` off deletes the habit memories already written, on the next pass.
 
+## Categories
+
+`activity_categories.py` is an ActivityWatch-style rule tree: each rule has a name path
+(`["Work", "Coding"]`), an optional regex over app and/or title, optional `hosts` (suffix
+match against the page's host) and a productivity `score` from -2 to 2 that children inherit.
+The deepest matching rule wins (ties go to list order), `type: "none"` rules are folders that
+only group, and an invalid regex is skipped rather than raised. Rules live in the activity
+config under `categories` (`null` = the shipped default tree).
+
+Classification is local and model-free. `activity_day_stats` gains a `cats` map (path string
+and every ancestor prefix, to seconds, max-merged like the other maps), so a changed rule
+affects future time while counted days keep their totals. Only paths and seconds are stored,
+never titles or URLs. `insights.mine()` adds `category_share` and `distraction_drift`
+patterns, and the rollup digest gains a "Time by category" line.
+
 ## Retention
 
 Raw samples carry an `expires_at` and are swept on every loop tick; the default
@@ -290,6 +305,8 @@ The assistant gets two tools when the monitor exists:
   and it can.
 - `activity_access()` — which permissions exist, which signals each one gates, and what is missing,
   so "why isn't it recording my typing?" gets a real answer. Read-only: it cannot grant anything.
+- `activity_report(days)` — time by category, productivity score and uncategorized apps.
+  Read-only, computed locally.
 - `activity_insights(limit)` — the habits noticed, the patterns behind them, and the suggestions
   still on offer. For "how could I save time?", and for grounding any workflow advice in real
   patterns instead of guesses. Read-only on purpose: the assistant may raise a suggestion in
@@ -316,6 +333,9 @@ The assistant gets two tools when the monitor exists:
 | `POST /activity/permissions/request` | Ask macOS for one - the only route that can show a dialog |
 | `POST /activity/permissions/open` | Open that permission's Privacy & Security pane |
 | `POST /activity/palantir` | Record everything, or restore what the mode replaced |
+| `GET /activity/categories` · `PUT /activity/categories` | Effective rules (and whether default); replace them (`rules: null` resets). 400 names the bad index |
+| `GET /activity/categories/report?days=7` | Category seconds per day, totals, productivity (-2..2) and top uncategorized apps |
+| `POST /activity/redact/test` | Run a string through the current redaction config; nothing is stored |
 | `GET /activity/insights` | Patterns, habits, suggestions and counts |
 | `POST /activity/insights/mine` | Re-mine the patterns. No model call, works offline |
 | `POST /activity/insights/refresh` | Mine, then run the pass that proposes habits and automations |

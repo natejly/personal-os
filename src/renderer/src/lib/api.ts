@@ -10,7 +10,7 @@ import type {
   Doc, DocFolder, FullDoc, DocRevision,
   McpEffective, McpReport, McpServer, McpServerDraft, McpTool, ToolMode,
   ActivityApplyResult, ActivityCapability, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityGrantResult,
-  ActivityInsights, ActivityRedactTest, ActivityStatus, ActivitySuggestion, ActivitySummary, InsightStatus,
+  ActivityCategoryReport, ActivityCategoryRule, ActivityInsights, ActivityRedactTest, ActivityStatus, ActivitySuggestion, ActivitySummary, InsightStatus,
   PendingSend, SendHoldConfig, Verification, Verified,
   Meeting, FullMeeting, MeetingActionItem, MeetingCandidate, MeetingConfig, MeetingPreflight, MeetingRevision, MeetingSegment, MeetingStatusInfo, MeetingStreamEvent
 } from '@shared/types'
@@ -359,6 +359,9 @@ export const api = {
     permissions: () => req<ActivityCapability[]>('/activity/permissions'),
     requestPermission: (id: string, browser = '') => req<{ result: ActivityGrantResult; status: ActivityStatus }>('/activity/permissions/request', { method: 'POST', body: json({ id, browser }) }),
     openPermissionSettings: (id: string) => req<{ ok: boolean }>('/activity/permissions/open', { method: 'POST', body: json({ id }) }),
+    categories: () => req<{ rules: ActivityCategoryRule[]; default: boolean }>('/activity/categories'),
+    setCategories: (rules: ActivityCategoryRule[] | null) => req<{ rules: ActivityCategoryRule[]; default: boolean }>('/activity/categories', { method: 'PUT', body: json({ rules }) }),
+    categoryReport: (days = 7) => req<ActivityCategoryReport>(`/activity/categories/report?days=${days}`),
     redactTest: (text: string) => req<ActivityRedactTest>('/activity/redact/test', { method: 'POST', body: json({ text }) }),
     palantir: (on: boolean) => req<ActivityStatus>('/activity/palantir', { method: 'POST', body: json({ on }) }),
     purge: (scope: 'expired' | 'events' | 'summaries' | 'all') => req<{ deleted: { events: number; summaries: number }; status: ActivityStatus }>('/activity/purge', { method: 'POST', body: json({ scope }) }),

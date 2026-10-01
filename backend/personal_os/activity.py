@@ -32,6 +32,7 @@ from . import insights as insights_mod
 from . import stt
 from .audiocap import IS_MAC, LOOPBACK_HINTS, audio_devices, ffmpeg_path, looks_like_loopback  # noqa: F401
 from .db import Database, new_id, now, row_to_dict
+from . import activity_categories as categories_mod
 from . import redact as redact_mod
 from .redact import REDACTIONS, SECRET_ASSIGN  # noqa: F401
 
@@ -90,6 +91,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # settings back instead of guessing at defaults.
     "palantir": False,
     "palantirRestore": {},
+    # Category rules (activity_categories.py). None = the shipped default tree; a list replaces it.
+    "categories": None,
 }
 
 SCHEMA = """
@@ -1592,6 +1595,16 @@ class Monitor:
             for app, secs in ranked[:10]:
                 t = sorted(titles.get(app, []))[:6]
                 lines.append(f"- {app}: {_fmt_minutes(secs)}" + (f" | windows: {'; '.join(t)}" if t else ""))
+        if ranked:
+            eng = categories_mod.engine_for(self.config().get("categories"))
+            leaf: dict[str, float] = {}
+            for e in events:
+                if e["kind"] == "focus":
+                    p = eng.classify(e["app"], e["title"], e["url"])
+                    leaf[p] = leaf.get(p, 0.0) + e["duration_ms"] / 1000.0
+            rolled = eng.rollup(leaf)
+            top = sorted(rolled.items(), key=lambda kv: -kv[1])[:6]
+            lines.append("Time by category: " + ", ".join(f"{k} {_fmt_minutes(v)}" for k, v in top))
         if urls:
             lines.append("Pages visited:\n" + "\n".join(f"- {u}" for u in sorted(urls)[:20]))
         if keys or clicks or scrolls:

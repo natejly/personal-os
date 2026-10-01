@@ -26,7 +26,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 from pydantic import AfterValidator, BaseModel, Field
 
 from . import activity, assist, llm, mac, mcp_eval, tools
-from .context import build_context, estimate_tokens
+from .context import build_context, estimate_tokens, layout_messages
 from .db import Database, data_dir_from_env, new_id
 from .extract_text import extract_text
 from .learn import MAX_INJECTED_SKILLS, LearnJob, LearnWorker, Skills, induce_skill, skill_block
@@ -276,9 +276,11 @@ def _record_usage(ev: dict[str, Any]) -> None:
     try:
         cfg = settings()
         pt, ct = int(ev.get("prompt_tokens") or 0), int(ev.get("completion_tokens") or 0)
+        cached, cwrite, reasoning = int(ev.get("cached_tokens") or 0), int(ev.get("cache_write_tokens") or 0), int(ev.get("reasoning_tokens") or 0)
         usage.record(model=ev.get("model", ""), kind=ev.get("kind", "chat"), prompt_tokens=pt, completion_tokens=ct,
-                     duration_ms=int(ev.get("duration_ms") or 0), cost=pricing.cost(cfg, ev.get("model", ""), pt, ct),
-                     estimated=bool(ev.get("estimated")), conversation_id=ev.get("conversation_id"), project_id=ev.get("project_id"))
+                     duration_ms=int(ev.get("duration_ms") or 0), cost=pricing.cost(cfg, ev.get("model", ""), pt, ct, cached, cwrite),
+                     estimated=bool(ev.get("estimated")), conversation_id=ev.get("conversation_id"), project_id=ev.get("project_id"),
+                     cached_tokens=cached, cache_write_tokens=cwrite, reasoning_tokens=reasoning)
     except Exception:  # noqa: BLE001 - accounting must never break a reply
         pass
 
@@ -1111,11 +1113,19 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
 
     tool_schemas = _schemas()
     tools_hint = (TOOLS_HINT + ("\n" + PLAN_HINT if any(s["function"]["name"] == "todo_write" for s in tool_schemas) else "")) if tool_schemas else ""
-    system = "\n\n".join(p for p in (system, RENDER_HINT, tools_hint,
-                                     JOB_HINT if proposal_only(run) else "") if p)
+    hints = (RENDER_HINT, tools_hint, JOB_HINT if proposal_only(run) else "")
+    if cfg.get("cacheLayout", True):
+        # Stable prefix first, per-turn retrieval just before the newest user message (see context.layout_messages).
+        stable = "\n\n".join(p for p in (used["stable_system"], *hints) if p)
+        messages = layout_messages(stable, used["volatile_blocks"], history)
+        system = "\n\n".join(p for p in (stable, *used["volatile_blocks"]) if p)
+        used["stable_hash"] = hashlib.sha256(stable.encode()).hexdigest()[:12]
+        cspan["meta"]["stable_hash"] = used["stable_hash"]
+    else:
+        system = "\n\n".join(p for p in (system, *hints) if p)
+        messages = [{"role": "system", "content": system}] + history
     used["system_prompt"] = system
     used["tokens_estimate"] = estimate_tokens(system)
-    messages = [{"role": "system", "content": system}] + history
     yield "assistant_message", {**am, "context_used": used}
     yield "span", {"message_id": am["id"], "span": cspan}
 

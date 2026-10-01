@@ -18,6 +18,8 @@ const hourLabel = (h: number): string => `${((h + 11) % 12) + 1}${h < 12 ? 'am' 
 
 const spec = (o: Record<string, unknown>): string => JSON.stringify(o)
 
+const pct = (f: number): string => `${Math.round(f * 100)}%`
+
 function Tile({ label, value, sub }: { label: string; value: string; sub?: string }): JSX.Element {
   return (
     <div className="usage-tile">
@@ -150,6 +152,8 @@ export default function UsageView(): JSX.Element {
             <Tile label="Tokens" value={compact(t.tokens)} sub={`${compact(t.prompt_tokens)} in · ${compact(t.completion_tokens)} out`} />
             <Tile label="Model calls" value={String(t.calls)} sub={`${t.chat_calls} chat · ${t.learn_calls} auto-learn`} />
             <Tile label="Avg latency" value={ms(t.avg_ms)} sub="per model call" />
+            <Tile label="Cache hit rate" value={pct(t.cache_hit_rate ?? 0)} sub={`${compact(t.cached_tokens ?? 0)} input tokens served from the provider cache`} />
+            <Tile label="Reasoning tokens" value={compact(t.reasoning_tokens ?? 0)} sub={`${pct(t.reasoning_share ?? 0)} of output tokens`} />
           </div>
 
           <div className="markdown usage-charts">

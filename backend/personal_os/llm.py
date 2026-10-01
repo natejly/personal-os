@@ -20,12 +20,38 @@ def on_usage(fn: UsageListener) -> None:
     _usage_listeners.append(fn)
 
 
+def parse_usage(raw: dict[str, Any] | None) -> dict[str, Any]:
+    """Provider usage object -> the counts we keep, with cache and reasoning buckets normalised.
+
+    OpenAI/Fireworks/LiteLLM report prompt_tokens_details.cached_tokens; Anthropic (through LiteLLM) adds
+    cache_read_input_tokens / cache_creation_input_tokens. Reasoning tokens are already inside completion_tokens.
+    """
+    raw = raw if isinstance(raw, dict) else {}
+    out: dict[str, Any] = {k: raw[k] for k in ("prompt_tokens", "completion_tokens", "total_tokens") if raw.get(k) is not None}
+
+    def num(v: Any) -> int:
+        try:
+            return max(0, int(v or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    ptd = raw.get("prompt_tokens_details") if isinstance(raw.get("prompt_tokens_details"), dict) else {}
+    ctd = raw.get("completion_tokens_details") if isinstance(raw.get("completion_tokens_details"), dict) else {}
+    out["cached_tokens"] = num(ptd.get("cached_tokens")) or num(raw.get("cache_read_input_tokens"))
+    out["cache_write_tokens"] = num(raw.get("cache_creation_input_tokens")) or num(ptd.get("cache_creation_tokens"))
+    out["reasoning_tokens"] = num(ctd.get("reasoning_tokens"))
+    return out
+
+
 def _emit_usage(model: str, kind: str, usage: dict[str, Any] | None, duration_ms: int, prompt_chars: int, completion_chars: int) -> None:
     est = not usage or usage.get("prompt_tokens") is None
     rec = {
         "model": model, "kind": kind, "duration_ms": duration_ms, "estimated": est,
         "prompt_tokens": int((usage or {}).get("prompt_tokens") or prompt_chars // 4),
         "completion_tokens": int((usage or {}).get("completion_tokens") or completion_chars // 4),
+        "cached_tokens": 0 if est else int((usage or {}).get("cached_tokens") or 0),
+        "cache_write_tokens": 0 if est else int((usage or {}).get("cache_write_tokens") or 0),
+        "reasoning_tokens": 0 if est else int((usage or {}).get("reasoning_tokens") or 0),
         **usage_context.get(),
     }
     for fn in _usage_listeners:
@@ -60,6 +86,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # How doc_edit lands. "review" proposes a diff; "apply" writes it. Missing means review.
     "docEditMode": "review",
     "maxToolRounds": 25,
+    # Keep the system prompt identical between turns and put per-turn retrieval just before the newest
+    # user message, so the provider's prefix cache survives (context.layout_messages).
+    "cacheLayout": True,
     # Per-reply budgets; 0 = unlimited. A run that hits one still writes a final answer, marked partial.
     "maxRunTokens": 200_000,
     "maxRunSeconds": 300,
@@ -221,7 +250,7 @@ async def stream_chat(
                         err = obj["error"]
                         raise LLMError(err.get("message") if isinstance(err, dict) else str(err))
                     if isinstance(obj.get("usage"), dict):
-                        usage = {k: obj["usage"].get(k) for k in ("prompt_tokens", "completion_tokens", "total_tokens") if obj["usage"].get(k) is not None}
+                        usage = parse_usage(obj["usage"])
                     choice = (obj.get("choices") or [{}])[0]
                     delta = choice.get("delta") or {}
                     reason = _reason_text(delta)
@@ -279,7 +308,7 @@ async def complete(settings: dict[str, Any], model: str, messages: list[dict[str
         raise LLMError(f"{r.status_code}: {r.text[:500]}")
     data = r.json()
     text = data["choices"][0]["message"]["content"] or ""
-    _emit_usage(model, kind, data.get("usage") if isinstance(data.get("usage"), dict) else None, int((time.time() - t0) * 1000), len(json.dumps(messages)), len(text))
+    _emit_usage(model, kind, parse_usage(data["usage"]) if isinstance(data.get("usage"), dict) else None, int((time.time() - t0) * 1000), len(json.dumps(messages)), len(text))
     return text
 
 

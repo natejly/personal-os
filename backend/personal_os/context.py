@@ -42,6 +42,25 @@ def page_block(page: dict[str, Any]) -> str:
     return "\n\n".join(lines)
 
 
+VOLATILE_HEADER = "## Context for this turn"
+
+
+def layout_messages(system_stable: str, volatile: list[str], history: list[dict[str, Any]], cache_layout: bool = True) -> list[dict[str, Any]]:
+    """The messages sent to the model: a system prefix that never changes between turns, then history,
+    then the per-turn retrieval blocks as their own system message just before the newest user message.
+
+    Provider prefix caches match from the first token, so anything query-dependent has to come after
+    everything that can be reused. With `cache_layout` off the blocks stay in one system message, as before.
+    """
+    vol = [v for v in volatile if v]
+    if not cache_layout or not vol:
+        return [{"role": "system", "content": "\n\n".join([p for p in [system_stable, *vol] if p])}] + list(history)
+    msgs: list[dict[str, Any]] = [{"role": "system", "content": system_stable}] + list(history)
+    at = len(msgs) - 1 if msgs[-1].get("role") == "user" else len(msgs)
+    msgs.insert(at, {"role": "system", "content": VOLATILE_HEADER + "\n" + "\n\n".join(vol)})
+    return msgs
+
+
 def build_context(
     *,
     memories: Memories,
@@ -60,7 +79,10 @@ def build_context(
     meetings: Any = None,
 ) -> tuple[str, dict[str, Any]]:
     """Returns (system_prompt, context_used)."""
+    # Two lists so a caller can keep the stable prefix byte-identical turn to turn (prompt caching):
+    # `parts` holds what does not depend on the query, `volatile` what does. `system` is both, as shown to the user.
     parts: list[str] = [global_system_prompt.strip()] if global_system_prompt.strip() else []
+    volatile: list[str] = []
     used: dict[str, Any] = {"memories": [], "nodes": [], "edges": [], "chunks": [], "project": None, "activity": None,
                             "skills": [], "page": None, "style": None, "meetings": None}
 
@@ -73,14 +95,14 @@ def build_context(
     if page:
         block = page_block(page)
         if block:
-            parts.append(block)
+            volatile.append(block)
             used["page"] = page
 
     if conv_settings.get("useMemory", True):
         mems = memories.for_context(project_id, query)
         if mems:
             lines = [f"- {m['content']}" for m in mems]
-            parts.append("## What you remember about the user\n" + "\n".join(lines))
+            volatile.append("## What you remember about the user\n" + "\n".join(lines))
             used["memories"] = [{"id": m["id"], "content": m["content"], "project_id": m["project_id"]} for m in mems]
 
     if conv_settings.get("useGraph", True):
@@ -89,7 +111,7 @@ def build_context(
             by_id = {n["id"]: n for n in sub["nodes"]}
             triples = [f"- {by_id[e['source_id']]['label']} —[{e['relation']}]→ {by_id[e['target_id']]['label']}" for e in sub["edges"]]
             ents = [f"- {n['label']} ({n['type']})" + (f": {n['properties']}" if n["properties"] else "") for n in sub["nodes"]]
-            parts.append("## Knowledge graph (relevant entities)\n" + "\n".join(ents) + ("\n\nRelations:\n" + "\n".join(triples) if triples else ""))
+            volatile.append("## Knowledge graph (relevant entities)\n" + "\n".join(ents) + ("\n\nRelations:\n" + "\n".join(triples) if triples else ""))
             used["nodes"] = [{"id": n["id"], "label": n["label"], "type": n["type"]} for n in sub["nodes"]]
             used["edges"] = [{"id": e["id"], "relation": e["relation"], "source_id": e["source_id"], "target_id": e["target_id"]} for e in sub["edges"]]
 
@@ -97,7 +119,7 @@ def build_context(
         hits = documents.search(project_id, query)
         if hits:
             blocks = [f"### {h['name']} (chunk {h['idx'] + 1})\n{h['text']}" for h in hits]
-            parts.append("## Relevant document excerpts\n" + "\n\n".join(blocks))
+            volatile.append("## Relevant document excerpts\n" + "\n\n".join(blocks))
             used["chunks"] = [{"chunk_id": h["chunk_id"], "document_id": h["document_id"], "name": h["name"], "idx": h["idx"], "text": h["text"][:400]} for h in hits]
 
     # Procedural memory. Only skills the user approved by hand are ever injected, and the block says so
@@ -125,7 +147,7 @@ def build_context(
     if activity is not None and conv_settings.get("useActivity", True):
         block = activity.context_block()
         if block:
-            parts.append(block)
+            volatile.append(block)
             used["activity"] = block
 
     # Recent meetings: titles and accepted notes, never raw transcript. Off per chat like the rest,
@@ -133,10 +155,13 @@ def build_context(
     if meetings is not None and conv_settings.get("useMeetings", True):
         block = meetings.context_block()
         if block:
-            parts.append(block)
+            volatile.append(block)
             used["meetings"] = block
 
-    system = "\n\n".join(parts)
+    stable = "\n\n".join(parts)
+    system = "\n\n".join(parts + volatile)
+    used["stable_system"] = stable
+    used["volatile_blocks"] = list(volatile)
     used["system_prompt"] = system
     used["tokens_estimate"] = estimate_tokens(system)
     return system, used

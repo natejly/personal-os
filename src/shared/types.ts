@@ -816,6 +816,8 @@ export interface Settings {
   /** How assistant edits to docs land. Missing means review: show the diff and wait. */
   docEditMode?: 'review' | 'apply'
   maxToolRounds: number
+  /** Keep the system prompt stable and put per-turn retrieval beside the newest message (prompt caching). Default on. */
+  cacheLayout?: boolean
   /** Per-reply budgets; 0 means unlimited. */
   maxRunTokens?: number
   maxRunSeconds?: number
@@ -870,6 +872,11 @@ export interface UsageBucket {
   chat_calls: number
   learn_calls: number
   other_calls: number
+  /** Input tokens served from the provider's prompt cache, and reasoning tokens inside completion_tokens. */
+  cached_tokens?: number
+  reasoning_tokens?: number
+  cache_hit_rate?: number
+  reasoning_share?: number
 }
 
 export interface UsageReport {

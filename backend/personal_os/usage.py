@@ -43,7 +43,12 @@ class Pricing:
                 info = m.get("model_info") or {}
                 i, o = info.get("input_cost_per_token"), info.get("output_cost_per_token")
                 if m.get("model_name") and (i is not None or o is not None):
-                    out[m["model_name"]] = {"input": float(i or 0) * 1e6, "output": float(o or 0) * 1e6}
+                    row = {"input": float(i or 0) * 1e6, "output": float(o or 0) * 1e6}
+                    if info.get("cache_read_input_token_cost") is not None:
+                        row["cache_read"] = float(info["cache_read_input_token_cost"]) * 1e6
+                    if info.get("cache_creation_input_token_cost") is not None:
+                        row["cache_write"] = float(info["cache_creation_input_token_cost"]) * 1e6
+                    out[m["model_name"]] = row
             self._proxy = out
         except Exception:  # noqa: BLE001 - pricing is best effort
             pass
@@ -53,14 +58,24 @@ class Pricing:
         out: dict[str, dict[str, Any]] = {m: {**p, "source": "proxy"} for m, p in self._proxy.items()}
         for m, p in (settings.get("modelPrices") or {}).items():
             if isinstance(p, dict) and (p.get("input") is not None or p.get("output") is not None):
-                out[m] = {"input": float(p.get("input") or 0), "output": float(p.get("output") or 0), "source": "override"}
+                row = {"input": float(p.get("input") or 0), "output": float(p.get("output") or 0), "source": "override"}
+                for k in ("cache_read", "cache_write"):
+                    if p.get(k) is not None:
+                        row[k] = float(p[k])
+                out[m] = row
         return out
 
-    def cost(self, settings: dict[str, Any], model: str, prompt_tokens: int, completion_tokens: int) -> float | None:
+    def cost(self, settings: dict[str, Any], model: str, prompt_tokens: int, completion_tokens: int,
+             cached_tokens: int = 0, cache_write_tokens: int = 0) -> float | None:
+        """Reasoning tokens are already inside completion_tokens, so they cost nothing extra here."""
         p = self.table(settings).get(model)
         if not p:
             return None
-        return (prompt_tokens * p["input"] + completion_tokens * p["output"]) / 1e6
+        cached = max(0, min(int(cached_tokens or 0), prompt_tokens))
+        written = max(0, min(int(cache_write_tokens or 0), prompt_tokens - cached))
+        uncached = prompt_tokens - cached - written
+        return (uncached * p["input"] + cached * p.get("cache_read", p["input"]) + written * p.get("cache_write", p["input"])
+                + completion_tokens * p["output"]) / 1e6
 
 
 class Usage:
@@ -68,20 +83,22 @@ class Usage:
         self.db = db
 
     def record(self, *, model: str, kind: str, prompt_tokens: int, completion_tokens: int, duration_ms: int, cost: float | None,
-               estimated: bool, conversation_id: str | None, project_id: str | None) -> None:
+               estimated: bool, conversation_id: str | None, project_id: str | None,
+               cached_tokens: int = 0, cache_write_tokens: int = 0, reasoning_tokens: int = 0) -> None:
         with self.db.tx() as c:
             c.execute(
-                "INSERT INTO usage_log(id,created_at,model,kind,conversation_id,project_id,prompt_tokens,completion_tokens,duration_ms,cost,estimated) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                (new_id(), now(), model, kind, conversation_id, project_id, int(prompt_tokens), int(completion_tokens), int(duration_ms), cost, 1 if estimated else 0),
+                "INSERT INTO usage_log(id,created_at,model,kind,conversation_id,project_id,prompt_tokens,completion_tokens,duration_ms,cost,estimated,cached_tokens,cache_write_tokens,reasoning_tokens) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (new_id(), now(), model, kind, conversation_id, project_id, int(prompt_tokens), int(completion_tokens), int(duration_ms), cost, 1 if estimated else 0,
+                 int(cached_tokens), int(cache_write_tokens), int(reasoning_tokens)),
             )
 
     def reprice(self, pricing: Pricing, settings: dict[str, Any]) -> int:
         """Recompute cost for every row (after prices change). Returns rows updated."""
         with self.db.tx() as c:
-            rows = c.execute("SELECT id, model, prompt_tokens, completion_tokens FROM usage_log").fetchall()
+            rows = c.execute("SELECT id, model, prompt_tokens, completion_tokens, cached_tokens, cache_write_tokens FROM usage_log").fetchall()
             n = 0
             for r in rows:
-                cost = pricing.cost(settings, r["model"], r["prompt_tokens"], r["completion_tokens"])
+                cost = pricing.cost(settings, r["model"], r["prompt_tokens"], r["completion_tokens"], r["cached_tokens"], r["cache_write_tokens"])
                 c.execute("UPDATE usage_log SET cost=? WHERE id=?", (cost, r["id"]))
                 n += 1
         return n
@@ -95,12 +112,14 @@ class Usage:
             projects = {r["id"]: r["name"] for r in c.execute("SELECT id, name FROM projects").fetchall()}
 
         def bucket() -> dict[str, Any]:
-            return {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "cost": 0.0, "unpriced": 0, "ms": 0, "chat_calls": 0, "learn_calls": 0, "other_calls": 0}
+            return {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "cached_tokens": 0, "reasoning_tokens": 0, "cost": 0.0, "unpriced": 0, "ms": 0, "chat_calls": 0, "learn_calls": 0, "other_calls": 0}
 
         def add(b: dict[str, Any], r: dict[str, Any]) -> None:
             b["calls"] += 1
             b["prompt_tokens"] += r["prompt_tokens"]
             b["completion_tokens"] += r["completion_tokens"]
+            b["cached_tokens"] += r["cached_tokens"]
+            b["reasoning_tokens"] += r["reasoning_tokens"]
             b["ms"] += r["duration_ms"]
             if r["cost"] is None:
                 b["unpriced"] += 1
@@ -130,7 +149,9 @@ class Usage:
             add(by_project.setdefault(projects.get(r["project_id"], "Personal") if r["project_id"] else "Personal", bucket()), r)
 
         def finish(b: dict[str, Any]) -> dict[str, Any]:
-            return {**b, "cost": round(b["cost"], 6), "avg_ms": int(b["ms"] / b["calls"]) if b["calls"] else 0, "tokens": b["prompt_tokens"] + b["completion_tokens"]}
+            return {**b, "cost": round(b["cost"], 6), "avg_ms": int(b["ms"] / b["calls"]) if b["calls"] else 0, "tokens": b["prompt_tokens"] + b["completion_tokens"],
+                    "cache_hit_rate": round(b["cached_tokens"] / b["prompt_tokens"], 4) if b["prompt_tokens"] else 0,
+                    "reasoning_share": round(b["reasoning_tokens"] / b["completion_tokens"], 4) if b["completion_tokens"] else 0}
 
         return {
             "days": days,

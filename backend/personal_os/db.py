@@ -176,6 +176,10 @@ CREATE TABLE IF NOT EXISTS approvals (
   status TEXT NOT NULL DEFAULT 'pending',
   decision TEXT,
   decided_by TEXT,
+  -- A human's rewrite of `args` (approval_edits.py). `args` stays the model's original; `args_digest` is
+  -- re-bound to whatever will actually run, so the row proves what was authorised.
+  edited_args TEXT,
+  edited_by TEXT,
   created_at REAL NOT NULL,
   decided_at REAL
 );
@@ -337,7 +341,8 @@ class Database:
             "jobs": {"kind": "TEXT NOT NULL DEFAULT 'cron'", "run_at": "REAL"},
             "action_plans": {"desk_id": "TEXT", "intent": "TEXT NOT NULL DEFAULT ''",
                              "expected_taint": "TEXT NOT NULL DEFAULT '[]'"},
-            "approvals": {"desk_id": "TEXT", "danger": "TEXT NOT NULL DEFAULT 'external'"},
+            "approvals": {"desk_id": "TEXT", "danger": "TEXT NOT NULL DEFAULT 'external'",
+                          "edited_args": "TEXT", "edited_by": "TEXT"},
             "agent_runs": {"desk_id": "TEXT", "turn": "INTEGER NOT NULL DEFAULT 0"},
             "plan_steps": {"result_error": "TEXT", "title": "TEXT NOT NULL DEFAULT ''",
                            "danger": "TEXT NOT NULL DEFAULT 'safe'"},

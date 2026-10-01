@@ -25,7 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import AfterValidator, BaseModel, Field
 
-from . import activity, assist, llm, mac, mcp_eval, tools
+from . import activity, approval_edits, assist, llm, mac, mcp_eval, tools
 from .context import build_context, estimate_tokens
 from .db import Database, data_dir_from_env, new_id
 from .extract_text import extract_text
@@ -1388,6 +1388,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 yield "span", {"message_id": am["id"], "span": tspan}
                 t0 = time.time()
                 decision = "allow"
+                edit_info: dict[str, Any] = {}
                 if asks:
                     # Pause the reply until the user approves or denies this call (POST /approvals/{call_id}).
                     # The approval is a row, and it waits as long as it takes: there is no auto-deny.
@@ -1440,6 +1441,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     finally:
                         _approvals.pop(uid, None)
                     awaiting = None
+                    if decision != "deny" and store is not None and (arow := store.approval(uid)) and arow.get("edited_args"):
+                        # The user rewrote this call on its card. approval_edits validated it in the route and the row's
+                        # digest was re-bound to it; from here on the edited arguments are THE call: they run, are
+                        # journaled, verified and queued (outbox) in place of the model's. Never read from the model's call.
+                        original_args, args = args, arow["edited_args"]
+                        edit_info = {"original_arguments": original_args, "edited_arguments": args, "edited_by": "user"}
                     if parked:
                         # The reply ends here, still owing this call an answer. The row stays pending
                         # and decidable; the desk moves from a live waiting state to `blocked`, which
@@ -1535,7 +1542,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         yield "taint", {"message_id": am["id"], "source": c["name"]}
                     tool_ctx["taint_sources"].append(c["name"])
                 event = {"id": uid, "name": c["name"], "arguments": args, "result_preview": preview, "duration_ms": ms,
-                         "error": err, "images": images or None,
+                         "error": err, "images": images or None, **edit_info,
                          "approval": (("plan" if claimed else decision) if mode == "ask" else None),
                          "plan": {"plan_id": claimed["plan_id"], "idx": claimed["idx"], "title": claimed["title"]} if claimed else None,
                          "forced": forced, "tainted": tainted, "blocked": c["name"] if was_blocked else None, "breaker": partial,
@@ -1915,6 +1922,9 @@ class ApprovalIn(BaseModel):
     # edited values are what gets authorised.
     steps: list[dict[str, Any]] | None = None
     note: str | None = None  # one line back to the model, e.g. why a plan was rejected
+    # An editable tool's approval only (approval_edits.EDITABLE_TOOLS): the arguments the user wants run instead of the
+    # model's. Validated against the tool's schema; what executes, is journaled and is verified is this, not the original.
+    arguments: dict[str, Any] | None = None
 
 
 def _patch_tool_event(message_id: str | None, call_id: str, patch: dict[str, Any]) -> None:
@@ -1963,8 +1973,21 @@ async def approve_tool_call(call_id: str, body: ApprovalIn) -> dict[str, Any]:
         edits = parse_plan_edits(body.steps)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
+    edited: dict[str, Any] | None = None
+    if body.arguments is not None:
+        if body.decision == "deny":
+            raise HTTPException(400, "A denial cannot carry edited arguments")
+        if is_plan:
+            raise HTTPException(400, "A plan is edited through its steps, not arguments")
+        if pending is None or pending["status"] != "pending":
+            raise HTTPException(404, "No pending approval for that call")
+        spec = toolbox.specs.get(pending["tool"])
+        try:
+            edited = approval_edits.validate(pending["tool"], body.arguments, spec.parameters if spec else None)
+        except approval_edits.EditError as e:
+            raise HTTPException(400, str(e)) from e
     fut = _approvals.get(call_id)
-    row = run_store.decide(call_id, body.decision)
+    row = run_store.decide(call_id, body.decision, edited_args=edited)
     live = bool(fut and not fut.done())
     if row is None and not live:
         raise HTTPException(404, "No pending approval for that call")
@@ -1976,6 +1999,7 @@ async def approve_tool_call(call_id: str, body: ApprovalIn) -> dict[str, Any]:
     elif row is not None and not (row.get("desk_id") and row.get("decided_by") == "park"):
         _patch_tool_event(row["message_id"], call_id, {
             "pending": False, "needs_approval": False, "approval": body.decision,
+            **({"arguments": edited, "original_arguments": row["args"], "edited_arguments": edited, "edited_by": "user"} if edited else {}),
             "error": "Not run: the reply was interrupted before this was answered. The decision is recorded; ask again to run it."})
     # A desk's card can outlive the run that raised it (see parking), so answering one is also how a
     # desk is woken. Nothing here resumes a chat: a chat run that died stays dead, as above.

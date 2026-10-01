@@ -362,6 +362,11 @@ export interface ToolEvent {
   proposal?: string | null
   /** Set when this call's arguments matched an approved plan step, so it ran without its own card. */
   plan?: PlanStepRef | null
+  /** Set when the user rewrote the arguments on the approval card (approval_edits.py). `arguments` is then what ran. */
+  edited_by?: 'user' | null
+  /** What the model originally asked for, kept beside the edit so a card can show what changed. */
+  original_arguments?: Record<string, unknown> | null
+  edited_arguments?: Record<string, unknown> | null
 }
 
 /** Why a reply stopped early: a budget axis, or the repetition breaker. */

@@ -5,7 +5,7 @@ import json
 import sqlite3
 from typing import Any
 
-from .canvas import _INSERT_WINDOW, WIDGET_KINDS, Canvases
+from .canvas import _INSERT_WINDOW, WIDGET_KINDS, Canvases, clamp_opacity
 from .db import Database, new_id, now, row_to_dict
 
 # Owned here, like canvas.py's tables: CREATE TABLE IF NOT EXISTS in the constructor covers existing databases.
@@ -43,7 +43,7 @@ def _snap_window(w: dict[str, Any], i: int) -> dict[str, Any]:
     return {
         "kind": w["kind"], "ref_id": w["ref_id"], "project_id": w["project_id"], "title": w["title"],
         "x": b["x"], "y": b["y"], "w": b["w"], "h": b["h"], "z": i,
-        "pinned": int(bool(w["pinned"])), "config": w["config"] or {},
+        "pinned": int(bool(w["pinned"])), "opacity": clamp_opacity(w.get("opacity", 1.0)), "config": w["config"] or {},
     }
 
 
@@ -124,6 +124,7 @@ class CanvasPresets:
                     new_id(), cid, kind, w.get("ref_id"),
                     w.get("project_id") if _exists(c, "projects", w.get("project_id")) else None,
                     w.get("title") or "", w["x"], w["y"], w["w"], w["h"], w.get("z", 0), "normal",
-                    None, None, int(bool(w.get("pinned"))), json.dumps(w.get("config") or {}), t, t,
+                    None, None, int(bool(w.get("pinned"))), clamp_opacity(w.get("opacity", 1.0)),
+                    json.dumps(w.get("config") or {}), t, t,
                 ))
         return {**self.canvases.get(cid), "skipped": skipped}  # type: ignore[dict-item]

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { AlignJustify, LayoutGrid, Plus, Trash2 } from 'lucide-react'
+import { AlignJustify, LayoutGrid, Lock, LockOpen, Plus, Trash2 } from 'lucide-react'
 import type { DragPayload, SnapMode } from '@shared/types'
 import { api } from '../lib/api'
 import { useProject, useStore } from '../store'
@@ -7,7 +7,7 @@ import { AddWidgetButton } from './AddWidgetMenu'
 import { PresetsButton } from './PresetsMenu'
 import { hasDrag, readDrag } from './dnd'
 import { GRID_SIZES } from './snapping'
-import { useCanvas } from './store'
+import { useCanvas, useSpaceLocked } from './store'
 
 /** Reorder payload, local to the bar: a space tab is not one of the shared `DragKind`s. */
 const SPACE_MIME = 'application/x-personal-os-space'
@@ -36,6 +36,7 @@ function Tab({ canvasId, index }: { canvasId: string; index: number }): JSX.Elem
   const count = useCanvas((s) => s.canvases[canvasId]?.windows.length ?? 0)
   const projectId = useCanvas((s) => s.canvases[canvasId]?.project_id ?? null)
   const active = useCanvas((s) => s.activeCanvasId === canvasId)
+  const locked = useCanvas((s) => !!s.canvases[canvasId]?.locked)
   const project = useProject(projectId)
   const [editing, setEditing] = useState<string | null>(null)
   const [over, setOver] = useState<'' | 'project' | 'space'>('')
@@ -59,7 +60,7 @@ function Tab({ canvasId, index }: { canvasId: string; index: number }): JSX.Elem
   return (
     <div
       className={['space-tab', active && 'active', over && 'drop-target', dragging && 'dragging'].filter(Boolean).join(' ')}
-      title={`${name}${project ? ` · ${project.name}` : ''} · ${count} window${count === 1 ? '' : 's'}`}
+      title={`${name}${project ? ` · ${project.name}` : ''} · ${count} window${count === 1 ? '' : 's'}${locked ? ' · locked' : ''}`}
       draggable={editing === null}
       onDragStart={(e) => {
         setDragging(true)
@@ -94,7 +95,9 @@ function Tab({ canvasId, index }: { canvasId: string; index: number }): JSX.Elem
         />
       )}
       {index < 9 && <span className="space-count">⌃{index + 1}</span>}
-      {active && (
+      {/* The padlock replaces the delete button rather than joining it: `deleteSpace` refuses a
+          locked space, so the trash would be a button that does nothing but toast. */}
+      {locked ? <Lock size={11} className="space-lock" /> : active && (
         <button
           className="icon-btn ghost sm danger"
           title="Delete space"
@@ -116,6 +119,7 @@ export default function SpacesBar(): JSX.Element {
   const activeId = useCanvas((s) => s.activeCanvasId)
   const snapMode = useCanvas((s) => (s.activeCanvasId ? s.canvases[s.activeCanvasId]?.snap_mode : undefined))
   const gridSize = useCanvas((s) => (s.activeCanvasId ? s.canvases[s.activeCanvasId]?.grid_size : undefined))
+  const locked = useSpaceLocked()
   const sidebarOpen = useStore((s) => s.sidebarOpen)
 
   return (
@@ -148,7 +152,15 @@ export default function SpacesBar(): JSX.Element {
           </select>
         </>
       )}
-      <button className="icon-btn ghost sm" title="Tidy up (⌃⌘T)" onClick={() => useCanvas.getState().tidyUp()}><AlignJustify size={14} /></button>
+      <button className="icon-btn ghost sm" title="Tidy up (⌃⌘T)" disabled={locked} onClick={() => useCanvas.getState().tidyUp()}><AlignJustify size={14} /></button>
+      <button
+        className={`icon-btn ghost sm${locked ? ' on' : ''}`}
+        title={locked ? 'Unlock space (⌃⌘L)' : 'Lock space (⌃⌘L)'}
+        disabled={!activeId}
+        onClick={() => useCanvas.getState().toggleLock()}
+      >
+        {locked ? <Lock size={14} /> : <LockOpen size={14} />}
+      </button>
       <button className={`icon-btn ghost sm${overview ? ' on' : ''}`} title="Space overview (⌥⌘↑)" onClick={() => useCanvas.getState().toggleOverview()}><LayoutGrid size={14} /></button>
     </div>
   )

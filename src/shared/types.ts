@@ -19,8 +19,75 @@ export interface ContextUsed {
   chunks: { chunk_id: string; document_id: string; name: string; idx: number; text: string }[]
   /** The activity-monitor block, verbatim; null when the monitor is off or the chat opted out. */
   activity: string | null
+  /** Approved skills injected as procedural memory. Absent on messages written before skills existed. */
+  skills?: { id: string; name: string; description: string }[]
+  /** What the user was looking at when they asked, when the turn came from the page agent (⌘I). */
+  page: PageContext | null
+  /** The writing-style profile this reply drafted with; null when there is none or the chat opted out. */
+  style: { project_id: string | null; summary: string; guidelines: string[]; block: string } | null
   system_prompt: string
   tokens_estimate: number
+}
+
+export type PlanStatus = 'pending' | 'in_progress' | 'done'
+/** One step of a chat's plan artifact: written by the model with `todo_write`, tickable by the user. */
+export interface PlanStep {
+  id: string
+  text: string
+  status: PlanStatus
+  note: string
+}
+export interface Plan {
+  conversation_id: string
+  steps: PlanStep[]
+  updated_at: number | null
+}
+
+export type SkillStatus = 'candidate' | 'approved' | 'rejected'
+/** Procedural memory. A candidate is inert: only an approved skill is ever injected into a prompt. */
+export interface Skill {
+  id: string
+  project_id: string | null
+  name: string
+  description: string
+  procedure: string
+  status: SkillStatus
+  /** induced (from a conversation) · proposed (by the assistant mid-chat) · user */
+  source: string
+  source_conversation_id: string | null
+  created_at: number
+  updated_at: number
+  approved_at: number | null
+}
+
+/** A large tool result kept out of the model's context; `read_tool_result` pages it. */
+export interface ToolResultHandle {
+  id: string
+  tool: string
+  total_chars: number
+  shape: Record<string, unknown>
+  message_id: string | null
+  created_at: number
+}
+
+/**
+ * A snapshot of the screen the user is on, published by the active view and sent with a page-agent
+ * turn. It is a description of what is visible, not a fetch: `refs` name the rows so the model can
+ * read or change them with the ordinary tools.
+ */
+export interface PageContext {
+  /** The view that published it — 'docs', 'calendar', ... Matches the renderer's View union. */
+  view: string
+  /** One line for the panel's chip and the system prompt's heading, e.g. `Doc “Weekly notes”`. */
+  label: string
+  /** What is on screen, as markdown the model reads: the open doc's text, the visible events, ... */
+  detail?: string
+  /** The user's current selection, when the view has one. */
+  selection?: string
+  /** Rows the page is about, so the model can act on them by id rather than searching. */
+  refs?: { kind: string; id: string; name?: string }[]
+  /** Starter prompts offered in an empty panel. Three at most; the view knows its own verbs. */
+  hints?: string[]
 }
 
 export type ToolMode = 'on' | 'ask' | 'off'
@@ -30,7 +97,7 @@ export interface ToolInfo {
   name: string
   description: string
   group: string
-  danger: 'safe' | 'writes' | 'network' | 'executes' | 'external'
+  danger: 'safe' | 'writes' | 'network' | 'executes' | 'external' | 'schedules'
   available: boolean
   default_mode: ToolMode
   /** Results carry untrusted third-party content, so one call taints the rest of the reply. */
@@ -43,6 +110,149 @@ export interface ToolImage {
   bytes: number
   /** data: URI */
   data: string
+}
+
+/** One call a `propose_plan` card asks the user to authorise, with the arguments it will really be made with.
+ *  Distinct from PlanStep, which is a step of the chat's own todo_write plan artifact. */
+export interface ProposedStep {
+  tool: string
+  arguments: Record<string, unknown>
+  why?: string
+}
+
+/** The arguments of a `propose_plan` call: what the plan card renders. */
+export interface ProposedPlan {
+  title?: string
+  steps: ProposedStep[]
+}
+
+/** The approved plan step a call was matched against, instead of asking again. */
+export interface PlanStepRef {
+  plan_id: string
+  idx: number
+  title: string
+}
+
+/** What the user authorises on a plan card: the steps to keep, by their proposed index, with any edited arguments. */
+export interface PlanEdit {
+  idx: number
+  arguments?: Record<string, unknown>
+}
+
+export type ApprovalDecision = 'allow' | 'deny' | 'always_chat' | 'always_global'
+
+/* ---- MCP connectors ---- */
+
+/** How a tool's mode was arrived at, and whether the approved shape still matches the offered one. */
+export interface McpEffective {
+  slug: string
+  mode: ToolMode
+  source: 'default' | 'global' | 'project' | 'chat'
+  /** The server changed this tool since it was approved, so an `on` has decayed back to `ask`. */
+  stale: boolean
+  approved_hash: string
+  schema_hash: string
+  missing: boolean
+  known: boolean
+}
+
+export interface McpTool {
+  id: string
+  server_id: string
+  /** The name the server exports. */
+  name: string
+  /** `mcp__<server>__<tool>`, derived by the backend and stable across reconnects. */
+  slug: string
+  description: string
+  parameters: Record<string, unknown>
+  schema_hash: string
+  danger: ToolInfo['danger']
+  first_seen_at: number
+  last_seen_at: number
+  /** Set when the advertised shape last changed. */
+  schema_changed_at: number | null
+  /** Set when the server stopped offering it; the row is kept so the slug cannot be reused. */
+  missing_since: number | null
+  effective: McpEffective
+  /** Only on /mcp/tools: its server is connected right now. */
+  ready?: boolean
+}
+
+export interface McpFinding {
+  code: string
+  severity: 'info' | 'warn' | 'fail'
+  where: string
+  detail: string
+  excerpt?: string
+}
+
+export interface McpEvalRecord {
+  id: string
+  server_id: string | null
+  tool_slug: string
+  status: 'pass' | 'warn' | 'fail' | 'error'
+  summary: string
+  findings: McpFinding[]
+  created_at: number
+}
+
+/** The full report from a check; `evaluate_config`/`evaluate_server` shape. */
+export interface McpReport {
+  status: McpEvalRecord['status']
+  summary: string
+  findings: McpFinding[]
+  /** What a static check cannot show. Always displayed with the verdict. */
+  limits: string[]
+  tools: { name: string; description: string; parameters: Record<string, unknown> }[]
+  server_info: { name?: string; version?: string; protocol?: string; instructions?: string }
+  stderr: string[]
+  eval?: McpEvalRecord
+}
+
+export interface McpServer {
+  id: string
+  /** Derived backend-side from the name; never chosen by the client. */
+  slug: string
+  name: string
+  transport: 'stdio' | 'sse' | 'http'
+  command: string
+  args: string[]
+  cwd: string
+  env: Record<string, string>
+  /** Key names only — stored secret values never leave the backend. */
+  secret_keys: string[]
+  url: string
+  headers: Record<string, string>
+  description: string
+  enabled: boolean
+  status: string
+  status_detail: string
+  last_connected_at: number | null
+  created_at: number
+  updated_at: number
+  tool_count: number
+  live: {
+    status: 'idle' | 'connecting' | 'ready' | 'error' | 'disabled' | string
+    detail: string
+    running: boolean
+    ready: boolean
+    attempts: number
+    server_info: McpReport['server_info']
+  }
+  tools: McpTool[]
+  eval: McpEvalRecord | null
+}
+
+/** A launch config, as the add form holds it and as /mcp/check takes it. */
+export interface McpServerDraft {
+  name: string
+  transport: 'stdio' | 'sse' | 'http'
+  command: string
+  args: string[]
+  cwd: string
+  env: Record<string, string>
+  secrets: Record<string, string>
+  description: string
 }
 
 export interface ToolEvent {
@@ -64,6 +274,10 @@ export interface ToolEvent {
   breaker?: PartialReason
   /** Approval was forced by taint even though the tool is set to 'on'. */
   forced?: boolean
+  /** Id of the proposal this call became: a background run may not complete an outward-facing call. */
+  proposal?: string | null
+  /** Set when this call's arguments matched an approved plan step, so it ran without its own card. */
+  plan?: PlanStepRef | null
 }
 
 /** Why a reply stopped early: a budget axis, or the repetition breaker. */
@@ -110,12 +324,19 @@ export interface ConversationSettings {
   /** Inject what the activity monitor observed. Defaults on, but only ever has an effect while the
    *  monitor is running and its own `injectContext` is left on. */
   useActivity: boolean
+  /** Inject the writing-style profile, so drafts sound like the user. */
+  useStyle: boolean
   autoLearn: boolean
   useTools: boolean
+  /** Inject the skills the user approved. Defaults on; only approved ones are ever eligible. */
+  useSkills?: boolean
   tools: Record<string, ToolOverride>
   /** Sticky: a reply read untrusted content, so external tools keep asking and fetch_url stays restricted. */
   tainted?: boolean
   taint_sources?: string[]
+  /** Set when this conversation is a scheduled job's transcript. Such chats are indexed by the Agent
+   *  Inbox and left out of the sidebar list (GET /conversations?include_jobs=true includes them). */
+  job_id?: string
 }
 
 export interface Conversation {
@@ -138,6 +359,48 @@ export interface Memory {
   pinned: number
   created_at: number
   updated_at: number
+}
+
+/** How the user writes, learned from samples of their own writing. One per scope. See backend style.py. */
+export interface StyleProfile {
+  id: string
+  project_id: string | null
+  summary: string
+  guidelines: string[]
+  traits: Record<string, string>
+  phrases: string[]
+  avoid: string[]
+  enabled: number
+  /** Hand-edited: auto-relearn leaves it alone until the user asks for a fresh read. */
+  edited: number
+  sample_count: number
+  sample_chars: number
+  model: string
+  created_at: number
+  updated_at: number
+}
+
+/** One passage of the user's own writing, kept so a profile can be re-derived and audited. */
+export interface StyleSample {
+  id: string
+  project_id: string | null
+  text: string
+  source: 'chat' | 'doc' | 'paste' | string
+  ref: string
+  chars: number
+  /** Already folded into the current profile. */
+  folded: number
+  created_at: number
+}
+
+export interface StyleState {
+  /** This scope's own profile, null if it has none. */
+  profile: StyleProfile | null
+  stats: { samples: number; chars: number; pending: number }
+  /** True when a project scope is falling back to the personal voice. */
+  inherited: boolean
+  /** What a chat in this scope would actually draft with. */
+  effective: StyleProfile | null
 }
 
 export interface GraphNode {
@@ -189,6 +452,10 @@ export interface Todo {
   external_id: string | null
   calendar_event_id: string | null
   calendar_link: string | null
+  /** Which Google calendar the mirrored event lives on; null means the primary one. */
+  calendar_id: string | null
+  /** Internal: todo fields as last mirrored to the calendar. */
+  calendar_sig: string | null
   created_at: number
   updated_at: number
   completed_at: number | null
@@ -210,7 +477,59 @@ export interface GoogleStatus {
   reauth_reason: string | null
 }
 
-export interface CalendarEvent {
+/** Verdict of the read-back that every external write goes through (backend verify.py).
+ *  Anything other than 'verified' must not be rendered as success. */
+export interface Verification {
+  status: 'verified' | 'unverified' | 'mismatch'
+  /** What was re-read, e.g. "calendar event ev1 on primary". */
+  what: string
+  /** The field names that were compared. */
+  compared: string[]
+  /** How many read-backs it took (bounded retry for eventual consistency). */
+  attempts: number
+  ms?: number
+  reason?: 'not_visible' | 'read_failed' | 'field_mismatch' | 'still_present'
+  detail?: string
+  differences?: Record<string, { expected: unknown; actual: unknown }>
+}
+
+/** Any write result that carries a read-back verdict. */
+export interface Verified {
+  verified?: boolean
+  verification?: Verification
+}
+
+/** One email waiting out its undo hold before Gmail sends it (backend outbox.py). */
+export interface PendingSend {
+  id: string
+  to: string
+  subject: string
+  status: 'holding' | 'sending' | 'sent' | 'cancelled' | 'failed' | 'expired'
+  origin: 'app' | 'assistant'
+  conversation_id: string | null
+  hold_seconds: number
+  created_at: number
+  send_after: number
+  /** Counts down while holding, 0 otherwise. */
+  seconds_left: number
+  message_id: string | null
+  thread_id: string | null
+  error: string | null
+  /** null until it has been sent. */
+  verified: boolean | null
+  verification?: Verification | null
+  /** Only on the response to a send: false when the hold was off and it went straight out. */
+  held?: boolean
+}
+
+export interface SendHoldConfig {
+  enabled: boolean
+  seconds: number
+  min: number
+  max: number
+}
+
+export interface CalendarEvent extends Verified {
   id: string
   calendar_id: string | null
   summary: string
@@ -322,6 +641,23 @@ export interface TasksSyncStatus {
   syncing: boolean
 }
 
+/** One-way todos -> Google Calendar mirror (`/integrations/google/todo-calendar`). */
+export interface TodoCalendarStatus {
+  config: {
+    enabled: boolean
+    /** Empty until the first pass resolves or creates the calendar. */
+    calendarId: string
+    calendarName: string
+    intervalMinutes: number
+    keepCompleted: boolean
+  }
+  /** Unix seconds of the last successful pass. */
+  last_sync: number | null
+  last_error: string | null
+  last_result: Record<string, number> | null
+  syncing: boolean
+}
+
 export interface DriveFile {
   id: string
   name: string
@@ -370,6 +706,8 @@ export interface Settings {
   systemPrompt: string
   extractionModel: string
   autoLearn: boolean
+  /** Bank long messages and saved docs as writing samples, and keep the voice profile current. */
+  learnStyle: boolean
   theme: 'dark' | 'light' | 'system'
   /** Legacy, pre-spaces global mode. Read once by init() (→ initial view 'canvas') and reset to 'classic'; nothing else reads it. */
   mode?: 'classic' | 'canvas'
@@ -393,6 +731,8 @@ export interface Settings {
   modelPrices: Record<string, ModelPrice>
   googleClientId: string
   googleClientSecret: string
+  /** Undo window on outgoing mail. `seconds` is clamped to 60-120 by the backend. */
+  gmailSendHold?: { enabled: boolean; seconds: number }
 }
 
 export interface ModelPrice {
@@ -439,14 +779,36 @@ export type ChatEvent =
   | { event: 'removed_message'; data: { id: string } }
   | { event: 'title'; data: { id: string; title: string } }
   | { event: 'delta'; data: { id: string; text: string } }
-  | { event: 'tool_call'; data: { message_id: string; id: string; name: string; arguments: Record<string, unknown>; needs_approval?: boolean; forced?: boolean } }
+  | { event: 'tool_call'; data: { message_id: string; id: string; name: string; arguments: Record<string, unknown>; needs_approval?: boolean; forced?: boolean; plan?: PlanStepRef | null } }
   | { event: 'tool_result'; data: ToolEvent & { message_id: string } }
   | { event: 'span'; data: { message_id: string; span: Span } }
   | { event: 'done'; data: { id: string; error: string | null; context_used: ContextUsed; tool_events: ToolEvent[]; trace: Span[]; stopped: boolean; partial?: PartialReason | null; tainted?: boolean; taint_sources?: string[] } }
   | { event: 'taint'; data: { message_id: string; source: string } }
-  | { event: 'learned'; data: { memories: Memory[]; nodes: GraphNode[]; edges: GraphEdge[] } }
+  | { event: 'plan'; data: { conversation_id: string; steps: PlanStep[] } }
+  | { event: 'learned'; data: Learned }
+  | { event: 'style_learned'; data: { project_id: string | null; profile: StyleProfile | null; sample_id: string } }
   | { event: 'learn_error'; data: { message: string } }
   | { event: 'error'; data: { message: string } }
+
+/** What one auto-learn pass (or the `remember` tool) put away. The ids are set only off `/events`. */
+export interface Learned {
+  memories: Memory[]
+  /** Durable preferences auto-learn superseded or dropped, rather than adding a near-duplicate. */
+  updated?: Memory[]
+  removed?: Memory[]
+  nodes: GraphNode[]
+  edges: GraphEdge[]
+  conversation_id?: string
+  message_id?: string
+}
+
+/**
+ * `GET /events`: app-wide work no single run is waiting on. Auto-learn runs here, after its reply's
+ * run has already ended, so these never arrive on a conversation stream.
+ */
+export type BackgroundEvent =
+  | { event: 'learned'; data: Learned }
+  | { event: 'learn_error'; data: { conversation_id?: string; message_id?: string; message: string } }
 
 export interface GrainApi {
   backendUrl: () => Promise<string>
@@ -459,6 +821,7 @@ export interface GrainApi {
     close: (windowId: string) => Promise<boolean>
     focus: (windowId: string) => Promise<boolean>
     setPinned: (windowId: string, pinned: boolean) => Promise<boolean>
+    setOpacity: (windowId: string, opacity: number) => Promise<boolean>
     setMinSize: (windowId: string, minWidth: number, minHeight: number) => Promise<boolean>
     list: () => Promise<PopoutInfo[]>
     gather: () => Promise<GatherState>
@@ -526,6 +889,8 @@ export interface CanvasWindow {
   popout_bounds: PopoutBounds | null
   /** 0 | 1 — SQLite has no boolean. Always-on-top while popped. */
   pinned: number
+  /** Window alpha while popped out, 0.2..1. 1 is opaque; the canvas ignores it. */
+  opacity: number
   config: Record<string, unknown>
   created_at: number; updated_at: number
 }
@@ -533,7 +898,10 @@ export interface CanvasWindow {
 export interface Canvas {
   id: string; name: string; project_id: string | null; position: number
   snap_mode: SnapMode; grid_size: number; zoom: number; pan_x: number; pan_y: number
-  wallpaper: string; created_at: number; updated_at: number
+  wallpaper: string
+  /** 0 | 1 — SQLite has no boolean. 1 freezes the view: no pan, no zoom, no window geometry. */
+  locked: number
+  created_at: number; updated_at: number
   windows: CanvasWindow[]
 }
 
@@ -560,6 +928,20 @@ export interface Doc {
   size?: number
   content?: string
   pending?: number | DocRevision[]
+}
+
+/**
+ * A folder in the Docs tree. `path` is the whole path ('Work/Research'); folders are rows of their
+ * own so an empty one survives a reload, and so a rename can carry a subtree.
+ */
+export interface DocFolder {
+  path: string
+  name: string
+  parent: string
+  /** Docs filed directly in it. */
+  docs: number
+  /** Docs anywhere beneath it, itself included — what a collapsed row shows. */
+  docs_deep: number
 }
 
 /** A doc with its body loaded — what GET /docs/{id} returns. */
@@ -600,6 +982,8 @@ export interface PresetWindow {
   x: number; y: number; w: number; h: number
   z: number
   pinned: number /** 0 | 1 */
+  /** window alpha while popped, 0.2..1 */
+  opacity: number
   config: Record<string, unknown>
 }
 /** A named, user-saved template of a space. Instantiating it creates a new Canvas. */
@@ -647,15 +1031,121 @@ export interface RunInfo {
   seq: number
   started_at: number
   live: boolean
+  /** Still producing a reply. `live` outlasts it by the auto-learn tail that follows the last `done`. */
+  answering: boolean
+  /** Durable status from agent_runs. */
+  status?: 'running' | 'awaiting_approval' | 'done' | 'error' | 'interrupted'
+  ended_at?: number | null
+  error?: string | null
+}
+
+// ---------------- scheduled jobs + the Agent Inbox ----------------
+
+/** One scheduled job (`jobs` table). `cron` is read in `timezone`, so it follows the wall clock through DST. */
+export interface Job {
+  id: string
+  name: string
+  /** 'cron' repeats on `cron` forever; 'once' fires at `run_at` and then switches itself off. */
+  kind: 'cron' | 'once'
+  /** Empty for a one-off. */
+  cron: string
+  /** The single instant a one-off runs at; null for a repeating job. */
+  run_at: number | null
+  timezone: string
+  enabled: boolean
+  prompt: string
+  project_id: string | null
+  /** When the last fire actually started, and the slot it was *for*: apart means it ran late. */
+  last_fired_at: number | null
+  last_due_at: number | null
+  last_run_id: string | null
+  last_error: string | null
+  /** The slot the scheduler is waiting for. null when the job is disabled. */
+  next_due_at: number | null
+  created_at: number
+  updated_at: number
+}
+
+/** An outward-facing call a background run recorded instead of making. Accepting it is what runs it. */
+export interface AgentProposal {
+  id: string
+  run_id: string | null
+  job_id: string | null
+  conversation_id: string | null
+  message_id: string | null
+  call_id: string | null
+  tool: string
+  args: Record<string, unknown>
+  args_digest: string
+  status: 'pending' | 'accepted' | 'rejected'
+  result: unknown
+  error: string | null
+  /** The user changed the arguments before accepting. */
+  edited: boolean
+  created_at: number
+  decided_at: number | null
+}
+
+/** One job run as "While you were away" shows it. Every field but `summary` comes from a row, not from prose. */
+export interface JobRunSummary {
+  run_id: string
+  conversation_id: string | null
+  status: 'running' | 'awaiting_approval' | 'done' | 'error' | 'interrupted'
+  job_id: string | null
+  job: string
+  kind: 'cron' | 'once'
+  due_at: number | null
+  fired_at: number
+  late: boolean
+  late_seconds: number
+  missed_slots: number
+  manual: boolean
+  started_at: number
+  ended_at: number | null
+  error: string | null
+  tool_calls: number
+  proposals: number
+  pending_proposals: number
+  /** The run's own report, from the event tape. Shown as the body; nothing is parsed out of it. */
+  summary: string
+}
+
+export interface AgentInbox {
+  needs_you: {
+    approvals: (PendingApproval & { run_kind?: string | null; job?: string | null })[]
+    proposals: AgentProposal[]
+  }
+  while_you_were_away: JobRunSummary[]
+  counts: { needs_you: number; approvals: number; proposals: number; runs: number; late: number; failed: number }
+  scheduler: { last_tick: number | null; fires: number; next_due_at: number | null; timezone: string }
+}
+
+/** A tool call waiting on the user (`approvals` table). */
+export interface PendingApproval {
+  call_id: string
+  run_id: string | null
+  conversation_id: string | null
+  message_id: string | null
+  tool: string
+  args: Record<string, unknown>
+  args_digest: string
+  forced: boolean
+  status: 'pending' | 'approved' | 'denied'
+  decision: string | null
+  decided_by: string | null
+  created_at: number
+  decided_at: number | null
+  /** A run in this process is waiting on it right now. */
+  live?: boolean
 }
 
 /** 409 detail of POST /conversations/{id}/chat when that conversation already has a live run. */
 export interface RunConflict { message: string; run_id: string; seq: number }
 
 /** One detached widget window as the main process sees it. */
-export interface PopoutInfo { windowId: string; bounds: PopoutBounds; pinned: boolean }
+export interface PopoutInfo { windowId: string; bounds: PopoutBounds; pinned: boolean; opacity: number }
 
-export interface PopoutOpenRequest { bounds?: Partial<PopoutBounds>; minWidth?: number; minHeight?: number; title?: string; pinned?: boolean }
+export interface PopoutOpenRequest { bounds?: Partial<PopoutBounds>; minWidth?: number; minHeight?: number; title?: string; pinned?: boolean; opacity?: number }
 
 export interface PopoutChange { windowId: string; event: 'opened' | 'closed'; bounds: PopoutBounds | null }
 
@@ -714,7 +1204,118 @@ export interface ActivityConfig {
   /** Blank falls back to the extraction model, then the default model. */
   summaryModel: string
   profileEveryHours: number
+  /** Palantir mode: every signal on, redaction off, both exclusion lists emptied. */
+  palantir: boolean
+  insights: ActivityInsightConfig
 }
+
+export interface ActivityInsightConfig {
+  enabled: boolean
+  /** How often the habit/suggestion pass runs on its own. 0 turns the schedule off. */
+  everyHours: number
+  lookbackDays: number
+  /** A pattern has to recur on at least this many days before it counts. */
+  minDays: number
+  maxSuggestions: number
+  /** Write confident habits into the app's memory, where chats already read from. */
+  autoMemory: boolean
+  memoryConfidence: number
+}
+
+/** One thing the miner noticed, computed locally with no model. This is the evidence. */
+export interface ActivityPattern {
+  id: string
+  /** app_routine | site_habit | thrash | deep_work | day_shape | after_hours | input_load |
+   *  recurring_window | topic | switch_rate */
+  kind: string
+  title: string
+  detail: string
+  support: number
+  days: number
+  confidence: number
+  evidence: Record<string, unknown>
+}
+
+/** A durable statement about how the user works. Owns at most one row in the memory panel. */
+export interface ActivityHabit {
+  id: string
+  key: string
+  statement: string
+  kind: string
+  confidence: number
+  /** How many passes have seen it. */
+  support: number
+  evidence: string[]
+  /** The memory this habit wrote; `''` when it was not confident enough, or autoMemory is off. */
+  memory_id: string
+  first_seen: number
+  last_seen: number
+}
+
+export type InsightKind = 'automation' | 'platform' | 'hygiene'
+export type InsightStatus = 'new' | 'accepted' | 'done' | 'dismissed' | 'snoozed'
+/** `prompt` is the common one and it acts on nothing: it hands back a message to send. */
+export type InsightActionType = 'prompt' | 'todo' | 'memory' | 'setting' | 'none'
+
+export interface InsightAction {
+  type: InsightActionType
+  prompt?: string
+  title?: string
+  content?: string
+  how?: string
+}
+
+/** A proposal, never a change. Dismissing one is permanent; a refresh will not raise it again. */
+export interface ActivitySuggestion {
+  id: string
+  key: string
+  kind: InsightKind
+  title: string
+  detail: string
+  why: string
+  impact: string
+  effort: 'low' | 'medium' | 'high'
+  action: InsightAction
+  /** Pattern ids this rests on. */
+  evidence: string[]
+  confidence: number
+  status: InsightStatus
+  status_note: string
+  snooze_until: number
+  created_at: number
+  updated_at: number
+}
+
+export interface ActivityInsights {
+  enabled: boolean
+  generated_at: number
+  last_run: number
+  next_run: number
+  last_error: string
+  window: { days?: number; first_day?: string; last_day?: string }
+  totals: { focus_seconds?: number; idle_seconds?: number; keys?: number; clicks?: number; scrolls?: number; switches?: number }
+  apps: { app: string; seconds: number; days: number }[]
+  /** Host only - never a path or a query string. */
+  hosts: { host: string; visits: number; days: number }[]
+  hours: { hour: number; seconds: number }[]
+  patterns: ActivityPattern[]
+  habits: ActivityHabit[]
+  suggestions: ActivitySuggestion[]
+  counts: { open: number; accepted: number; dismissed: number; habits: number; days: number }
+}
+
+/** What came back from applying one suggestion. `prompt` means nothing happened yet - send it. */
+export interface ActivityApplyResult {
+  type: InsightActionType
+  prompt?: string
+  how?: string
+  todo?: Todo
+  memory?: Memory
+  suggestion: ActivitySuggestion
+}
+
+/** What macOS currently thinks about one permission. `n/a` means nothing on this Mac needs it. */
+export type ActivityPermissionState = 'granted' | 'denied' | 'unasked' | 'unknown' | 'n/a' | ''
 
 /** One row of the capability checklist: what this machine can do, and how to fix what it can't. */
 export interface ActivityCapability {
@@ -724,6 +1325,28 @@ export interface ActivityCapability {
   detail: string
   /** Empty when `ok`. */
   fix: string
+  /** Set only for the macOS permissions; `''` for rows that are just a yes/no about this machine. */
+  state: ActivityPermissionState
+  /** True when pressing Grant can make macOS ask for this one. */
+  requestable: boolean
+  /** Deep link into the matching Privacy & Security pane; `''` when there isn't one. */
+  settings_url: string
+  /** Which signals this row gates. */
+  signals: ActivitySignal[]
+  /** Missing this only costs one optional signal, never the monitor as a whole. */
+  optional: boolean
+  /** The grant only reaches a running process after a restart. */
+  restart: boolean
+  /** Per-browser Automation states on the `automation` row. */
+  extra: { name: string; state: ActivityPermissionState }[]
+}
+
+/** What came back from pressing Grant. `prompted` is false when macOS refuses to ask at all. */
+export interface ActivityGrantResult {
+  id: string
+  state: ActivityPermissionState
+  prompted: boolean
+  note: string
 }
 
 export interface ActivityStatus {
@@ -746,6 +1369,8 @@ export interface ActivityStatus {
   audio_devices: { index: string; name: string }[]
   /** True while macOS reports a password field focused; keystrokes are dropped meanwhile. */
   secure_input: boolean
+  /** Palantir mode is on: every signal recording and the gate's filters down. */
+  palantir: boolean
 }
 
 export type ActivityEventKind = 'focus' | 'input' | 'idle' | 'audio' | 'note'

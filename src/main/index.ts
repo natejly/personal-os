@@ -4,7 +4,8 @@ import { join } from 'path'
 import { backendStatus, backendToken, backendUrl, startBackend, stopBackend } from './backend'
 import { registerBus } from './bus'
 import { guardNavigation } from './navigation'
-import { gather, registerPopouts, restorePopouts, setFrontListener, toggleFront } from './popouts'
+import { startPageBridge, stopPageBridge } from './pagefetch'
+import { gather, OPACITY_LEVELS, registerPopouts, restorePopouts, setFrontListener, toggleFront } from './popouts'
 import { registerShortcuts } from './shortcuts'
 import { createTray } from './tray'
 
@@ -170,7 +171,10 @@ function buildMenu(): void {
         { type: 'separator' },
         { label: 'Toggle Spaces', accelerator: 'CmdOrCtrl+Shift+C', click: () => sendMenu('canvas:toggle') },
         { label: 'Toggle Sidebar', accelerator: 'CmdOrCtrl+B', click: () => sendMenu('toggle-sidebar') },
-        { label: 'Toggle Context Panel', accelerator: 'CmdOrCtrl+I', click: () => sendMenu('toggle-context') },
+        // ⌘I is the Cursor reflex: ask about what is on screen. The chat's context inspector, which
+        // used to own it, moves one modifier over.
+        { label: 'Ask About This Page', accelerator: 'CmdOrCtrl+I', click: () => sendMenu('page-agent') },
+        { label: 'Toggle Context Panel', accelerator: 'Control+Command+I', click: () => sendMenu('toggle-context') },
         { type: 'separator' },
         { role: 'reload' },
         { role: 'toggleDevTools' },
@@ -195,7 +199,10 @@ function buildMenu(): void {
         { type: 'separator' },
         ...SPACES,
         { type: 'separator' },
-        { label: 'Tidy Up', accelerator: 'Control+Command+T', click: () => sendMenu('canvas:tidy') }
+        { label: 'Tidy Up', accelerator: 'Control+Command+T', click: () => sendMenu('canvas:tidy') },
+        // One item, not a checkbox: the menu is built once and the lock belongs to whichever space
+        // is active, so the renderer's padlock is the state, and this is only the shortcut.
+        { label: 'Lock / Unlock Space', accelerator: 'Control+Command+L', click: () => sendMenu('canvas:lock') }
       ]
     },
     {
@@ -210,6 +217,17 @@ function buildMenu(): void {
         { label: 'Pop Out', accelerator: 'Control+Command+O', click: () => sendWindowMenu('canvas:popout') },
         { label: 'Return to Canvas', accelerator: 'Control+Command+Shift+O', click: () => sendWindowMenu('canvas:unpopout') },
         { label: 'Pin on Top', accelerator: 'Control+Command+P', click: () => sendWindowMenu('canvas:pin') },
+        // Transparency is a pop-out's own property, so these ride sendWindowMenu like the pin above:
+        // whoever has focus answers, and a widget still on the canvas only stores the level.
+        { label: 'More Transparent', accelerator: 'Control+Command+[', click: () => sendWindowMenu('canvas:opacity:down') },
+        { label: 'Less Transparent', accelerator: 'Control+Command+]', click: () => sendWindowMenu('canvas:opacity:up') },
+        {
+          label: 'Transparency',
+          submenu: OPACITY_LEVELS.map((o) => ({
+            label: o === 1 ? 'Opaque' : `${Math.round(o * 100)}%`,
+            click: () => sendWindowMenu(`canvas:opacity:${Math.round(o * 100)}`)
+          }))
+        },
         { type: 'separator' },
         { label: 'Gather Widgets', accelerator: 'Alt+Command+G', click: () => void gather() },
         {
@@ -251,6 +269,7 @@ app.whenReady().then(async () => {
   } catch (e) {
     console.error('[main] backend failed to start:', (e as Error).message)
   }
+  await startPageBridge() // open_page's offscreen loader; registers itself with the backend
   // After the backend, so the stored accelerator wins over the default; still before any renderer exists.
   registerShortcuts(() => win, await storedGather())
   createWindow()
@@ -261,4 +280,7 @@ app.whenReady().then(async () => {
 app.on('window-all-closed', () => {
   if (!isMac) app.quit()
 })
-app.on('before-quit', stopBackend)
+app.on('before-quit', () => {
+  stopPageBridge()
+  stopBackend()
+})

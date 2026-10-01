@@ -29,7 +29,8 @@ their own instructions, knowledge files, memories and graph.
   one key. Per-chat model picker. Markdown, code copy, regenerate, stop.
 - **Tools with permissions.** The assistant can search your documents, read and
   revise your docs, search
-  and save memory, traverse and extend the knowledge graph, search the web and
+  and save memory, traverse and extend the knowledge graph, read your writing
+  style before drafting as you, search the web and
   read pages, run Python in a sandbox, manage todos and kanban boards, and (once
   connected) read your Google Calendar, triage Gmail, draft or send email, and
   manage Google Tasks. Each tool has a mode: **on** (runs automatically),
@@ -40,14 +41,23 @@ their own instructions, knowledge files, memories and graph.
   timing, and every reply carries an execution trace.
 - **Projects.** Groups of chats with instructions, knowledge files, project
   memories and a project graph, layered on top of your personal ones.
-- **Memory.** One panel holding both halves of what the app remembers, over a
-  shared scope filter and search box, as a split view or either half alone:
+- **Memory.** One panel holding what the app remembers about you, over a shared
+  scope filter and search box — the first two halves side by side, either alone,
+  or the voice profile on its own:
   - *Memories* — facts, preferences and goals, auto-extracted after each reply
     or added by hand or by the assistant. Edit, pin, move between personal and
     project scope, forget.
   - *Knowledge graph* — entities and relations, auto-extracted and
     hand-editable in a force-directed view. Relevant subgraphs are injected
     into chats.
+  - *Voice* — how you write, learned from your own writing: long messages you
+    send and docs you save are banked as samples (short instructions, code and
+    quoted text are skipped), and turned into a summary, guidelines, traits and
+    characteristic phrasings. Injected when the assistant drafts something you
+    will send as your own — email, messages, docs — and explicitly *not* used
+    for its replies to you. Every guideline is editable and every sample
+    deletable; editing one stops auto-relearn overwriting it. Projects can have
+    their own voice. See [docs/writing-style.md](docs/writing-style.md).
 - **Documents.** Upload `.txt/.md/.pdf/.docx` and code files. Chunked,
   full-text indexed, best excerpts pulled into replies.
 - **Docs.** Writing of your own, in an editor rather than an upload box:
@@ -65,6 +75,18 @@ their own instructions, knowledge files, memories and graph.
   stops keystroke capture dead; credentials and PII are redacted before anything
   is stored; raw samples expire after 48h. The raw log is browsable row by row
   and deletable. See [docs/activity-monitor.md](docs/activity-monitor.md).
+- **Habits and automation suggestions.** On top of that data, a local miner keeps
+  one counts-only row per day — which outlives the 48h sample retention — and
+  detects what recurs: the apps that own your mornings, the site you open eleven
+  times a day, the two apps you ping-pong between, where your long uninterrupted
+  stretches actually land, how much of the day lands after seven. Those patterns
+  are the panel's evidence, computed with no model and no network. A slower pass
+  then turns them into **habits**, each owning one row in your Memory panel so
+  chats already know how you work, and **suggestions** for what the app could do
+  instead — a digest widget to replace the tab reflex, a project for the topic that
+  keeps coming back, a calendar block around your real focus window. Suggestions
+  are proposals: the common action opens a chat pre-loaded with the request rather
+  than acting, "not now" hides one for a week, and dismissing one is permanent.
 - **Context management.** Per-chat toggles for memory, graph, documents, activity,
   auto-learn and tools; an inspector showing exactly what was injected into
   each reply; a live preview for a draft message.
@@ -89,6 +111,19 @@ their own instructions, knowledge files, memories and graph.
   plus a one-click brief. A native todo list, a week calendar (Google events
   plus due todos, double-click to add), and kanban boards with drag and drop.
   The assistant can drive all of them through tools.
+- **Scheduled tasks and the agent inbox.** Give the assistant work to do later:
+  once at a time you pick ("tomorrow at 3pm, check whether they replied") or
+  repeatedly on a cron expression ("every Friday at 17:00, write my weekly
+  review"). Schedule it from the Agent inbox on Today, or just ask in a chat —
+  the assistant has a `schedule_task` tool, which asks before it books anything.
+  A scheduled run happens with nobody watching, so it is deliberately boxed in:
+  it runs in a fresh chat on a tighter budget, it can read and write inside
+  Grain, and anything that would leave the app — mail, calendar events, Docs —
+  comes back to the Agent inbox as a **proposal** you accept, edit or reject.
+  Accepting is what actually sends it, exactly once. A run cannot schedule
+  further runs either; that proposal is yours to accept too. If the machine was
+  asleep over a slot the task still runs, once, and is told it is late so it says
+  so in its report. A one-off retires itself after it fires.
 - **Dashboards you describe.** Register data sources (an HTTP API with an API
   key, an RSS feed, or your own todos/calendar/mail), then describe a widget in
   plain English. The model writes a self-contained HTML widget that runs in a
@@ -191,6 +226,69 @@ tokens after 7 days) or is missing a permission that was unticked on the consent
 screen, Integrations shows why and offers **Reconnect** instead of failing the
 next calendar or mail call with an opaque error.
 
+### Verified writes
+
+A 200 from an API is not proof that anything was written, and a model's report
+that it wrote something is worth even less: on real tasks, agents claim
+completion they did not achieve about 45% of the time, and an independent
+read-back of the remote state cuts that to about 3%. So every external write in
+`google.py` reads itself back and compares the fields it wrote
+(`backend/personal_os/verify.py`):
+
+| Write | How it is proved |
+|---|---|
+| `calendar_create` / `calendar_update` | the event is fetched by id and the written fields compared (times as instants, since Google re-renders the offset) |
+| `calendar_delete` | the event must 404 or come back as a `cancelled` tombstone |
+| `calendar_respond` | the event is refetched and your own `responseStatus` compared |
+| Gmail send | the message is fetched by id, must carry the `SENT` label, and its thread, subject and recipients are compared |
+| `gmail_draft` | the draft is fetched by id and its subject compared |
+| `gmail_modify` | the message's labels are refetched: every added label present, every removed one gone |
+| Google Tasks insert / patch / delete | the task is fetched by id (title, notes, due, status), or must be gone |
+| Docs create / append | the document is refetched and the written text found in its body |
+| Sheets create / write | the title, or the written range's row and filled-cell counts, read back |
+
+The verdict is one of **verified**, **unverified** (the read-back could not find
+it — eventual consistency, or it never happened) or **mismatch** (it is there
+but stored differently, or still there after a delete), and it is never collapsed
+into "ok". Eventual consistency gets two quick retries, ~2 s in total (one more
+rung for mail, which files into `SENT` a beat later) and then reports
+`unverified` rather than waiting.
+
+Anything but `verified` is surfaced as a failure, not a success:
+
+- The tool result the model sees comes back with an `error` that begins
+  `UNVERIFIED` and tells it not to claim success — so it cannot say "I sent
+  that" on the strength of its own request. It also says not to retry, because
+  the write may well have landed.
+- The tool-call row in the chat shows a **verified** / **unverified** /
+  **mismatch** badge naming what was compared, and an unverified write renders as
+  an error. The verdict is stored with the row, so an old reply still shows how
+  its writes were proved.
+- The calendar and mail views reject an unverified write instead of toasting
+  success, and say to check Google.
+
+### Undo on outgoing mail
+
+Agency people will actually use is reversible, so nothing sends mail
+immediately. A send — from the compose window or from the assistant — is written
+to `pending_sends` and held for 90 s (configurable, 60–120, Settings →
+Integrations) while a countdown with an **Undo** button sits above the toasts.
+"Send now" is in that card and deliberately not a tool: the assistant can cancel
+a send it queued (`gmail_outbox`), but only you can shorten the window.
+
+The queue is in SQLite, so a restart cannot lose a send or fire one twice.
+Firing and cancelling race on one atomic `UPDATE … WHERE status='holding'`, so a
+send is cancellable right up to the instant it is claimed and never after. On
+startup the remaining hold is simply resumed; a send that came due while the
+backend was down goes out if that was less than 15 minutes ago, and otherwise is
+marked `expired` and **not** sent — a mail queued before a laptop slept for a day
+should not go out by itself once the user has had no chance to stop it, and it
+stays in the list with a Send now button so it cannot be mistaken for something
+that went out. A send interrupted mid-API-call is marked `failed` and never
+retried, because an exception can be raised after Gmail accepted the message.
+When the hold expires and the mail goes out, the verification above runs on it
+and its verdict is kept on the row.
+
 ## Keyboard shortcuts
 
 | Shortcut | Action |
@@ -221,7 +319,10 @@ next calendar or mail call with an opaque error.
    or deny it, in which case the model is told to continue without it.
 6. After the reply, if auto-learn is on, a second (cheaper) model call extracts
    new memories and graph relations. Facts must come from what you said, and
-   the user is never a graph entity.
+   the user is never a graph entity. It runs in a background worker, one job at
+   a time, *after* the run has ended — the chat is free for your next message
+   while it works — and reports what it learned on `GET /events`, the app-wide
+   event stream, since the reply's own stream is long closed by then.
 
 Everything used is stored on the assistant message (`context_used`,
 `tool_events`) and shown in the Context panel.
@@ -318,17 +419,23 @@ from character counts and the row is flagged `estimated`.
 ## Activity monitor
 
 Off by default. Turn it on in the **Activity** panel (⌘9), where each signal is a
-separate switch with a plain description of what it records, and a capability
-checklist prints the exact fix for any missing permission. Optional extras:
+separate switch with a plain description of what it records — or flip **Palantir
+mode** for one switch that records everything, with the redaction and
+“never record” filters down. Turning that mode off restores the settings it
+replaced rather than resetting to defaults.
+
+One script installs what can be installed and prints what is left to grant:
 
 ```bash
-cd backend && uv pip install -e '.[activity]'   # window titles + keystroke tap
-brew install ffmpeg                             # either audio signal
-brew install blackhole-2ch                      # system audio only
+./scripts/activity-setup.sh
 ```
 
-Then System Settings → Privacy & Security → Accessibility, enable the app, and
-restart it. In development the grant goes to **Electron**, not Personal OS.
+The panel's access checklist probes all six macOS permissions — Accessibility,
+Input Monitoring, Screen Recording, browser Automation, Microphone, Full Disk
+Access — says which signals each one gates, and offers a **Grant** button that
+asks macOS directly plus a deep link to the right Settings pane. Restart the app
+after granting: a keystroke tap created before the grant stays dead. In
+development the grants go to **Electron**, not Personal OS.
 
 Full design, privacy model, API and limits:
 [docs/activity-monitor.md](docs/activity-monitor.md).
@@ -373,6 +480,6 @@ that survives its HTTP connection) are the shared prerequisite for the
 approval queue, the scheduled brief, scheduled tasks and the session tape.
 
 Near-term after those: budgets replacing the fixed tool-round cap, taint
-tracking and an undo journal, tool-use examples and result pagination, skills,
-an agent inbox on Today, and scheduled jobs. Later: MCP client, code mode and
-file/browser reach — after an eval harness exists.
+tracking and an undo journal, tool-use examples and result pagination, and
+skills. Later: MCP client, code mode and file/browser reach — after an eval
+harness exists.

@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { MessageSquarePlus, Search, Settings, Trash2, PanelLeftClose, Brain, FileText, NotebookPen, Plus, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid, Mail, MonitorDot, BookOpen, Globe } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { MessageSquarePlus, Search, Settings, Sparkles, Trash2, PanelLeftClose, Brain, FileText, NotebookPen, Plus, Folder, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid, Mail, MonitorDot, BookOpen, Globe } from 'lucide-react'
 import GrainLogo from './GrainLogo'
 import { useStore, type View } from '../store'
 import { ActivityIndicator } from './ActivityView'
@@ -8,9 +8,12 @@ import SidebarSpaces from './SidebarSpaces'
 import { viewHidden } from '../modules'
 import { dragProps } from '../canvas/dnd'
 import { useCanvas } from '../canvas/store'
-import type { Conversation, WidgetKind } from '@shared/types'
+import { api } from '../lib/api'
+import type { Conversation, Doc, WidgetKind } from '@shared/types'
 
 const DAY = 86_400_000
+/** Rows shown under a project group before the "View all" link takes over. */
+const PROJECT_ROWS = 4
 function groupLabel(ts: number): string {
   const start = new Date()
   start.setHours(0, 0, 0, 0)
@@ -29,6 +32,11 @@ function groupLabel(ts: number): string {
  * opens its window directly.
  */
 type NavEntry = { view?: View; label: string; icon: JSX.Element; kind?: WidgetKind }
+
+/** One line under a project group header: a chat or a doc, sorted together by recency. */
+type ProjectRow =
+  | { kind: 'chat'; id: string; title: string; at: number }
+  | { kind: 'doc'; id: string; title: string; at: number }
 
 const NAV: NavEntry[] = [
   { view: 'home', label: 'Today', icon: <Home size={15} />, kind: 'recap' },
@@ -65,24 +73,38 @@ export default function Sidebar(): JSX.Element {
   const selectChat = useStore((s) => s.selectChat)
   const deleteChat = useStore((s) => s.deleteChat)
   const setSettingsOpen = useStore((s) => s.setSettingsOpen)
+  const pageAgentOpen = useStore((s) => s.pageAgentOpen)
+  const togglePageAgent = useStore((s) => s.togglePageAgent)
   const toggleSidebar = useStore((s) => s.toggleSidebar)
   const setView = useStore((s) => s.setView)
   const openProject = useStore((s) => s.openProject)
   const setProjectModal = useStore((s) => s.setProjectModal)
-  // In the canvas view a chat lives in a window, not the router: clicking one focuses or opens its window.
-  const openConversation = (id: string): void => {
-    if (useStore.getState().view === 'canvas') void useCanvas.getState().openChat(id)
-    else void selectChat(id)
-  }
+  const openDoc = useStore((s) => s.openDoc)
+  // Picking an item in the sidebar is a navigation gesture: from the canvas it leaves the space and
+  // routes to the classic view, rather than opening the chat as one more window in the space. Adding
+  // to a space stays the drag gesture (and ⌘N / the dock for a new chat window).
+  const openConversation = (id: string): void => void selectChat(id)
   const [query, setQuery] = useState('')
   const [projectsOpen, setProjectsOpen] = useState(true)
   const [knowledgeOpen, setKnowledgeOpen] = useState(true)
-  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
-  const chatsByProject = useMemo(() => {
-    const m: Record<string, Conversation[]> = {}
-    for (const c of conversations) if (c.project_id) (m[c.project_id] ??= []).push(c)
+  // Project groups list docs beside chats, but `docs` in the store is the Docs view's result set:
+  // narrowed by its scope picker and its search box. The sidebar keeps its own unfiltered copy so a
+  // search over there cannot empty the groups over here. Debounced, because `docs` changes per keystroke.
+  const [projectDocs, setProjectDocs] = useState<Doc[]>([])
+  const storeDocs = useStore((s) => s.docs)
+  useEffect(() => {
+    const t = setTimeout(() => { void api.docs.list('all').then(setProjectDocs).catch(() => undefined) }, 300)
+    return () => clearTimeout(t)
+  }, [storeDocs])
+
+  // One row list per project, newest first: its chats and its docs interleaved.
+  const rowsByProject = useMemo(() => {
+    const m: Record<string, ProjectRow[]> = {}
+    for (const c of conversations) if (c.project_id) (m[c.project_id] ??= []).push({ kind: 'chat', id: c.id, title: c.title, at: c.updated_at })
+    for (const d of projectDocs) if (d.project_id) (m[d.project_id] ??= []).push({ kind: 'doc', id: d.id, title: d.title, at: d.updated_at })
+    for (const rows of Object.values(m)) rows.sort((a, b) => b.at - a.at)
     return m
-  }, [conversations])
+  }, [conversations, projectDocs])
   const projectById = useMemo(() => Object.fromEntries(projects.map((p) => [p.id, p])), [projects])
 
   const groups = useMemo(() => {
@@ -162,30 +184,30 @@ export default function Sidebar(): JSX.Element {
         <div className="project-list">
           {projects.length === 0 && <p className="empty-hint">No projects yet.</p>}
           {projects.map((p) => {
-            const chats = chatsByProject[p.id] ?? []
-            const isOpen = expanded[p.id] ?? (view === 'project' && projectViewId === p.id) ?? false
+            const rows = rowsByProject[p.id] ?? []
             return (
               <div key={p.id} className="project-group">
-                <div className={`project-item ${view === 'project' && projectViewId === p.id ? 'active' : ''}`} onClick={() => { const sp = inCanvas ? useCanvas.getState().spaceForProject(p.id) : null; if (sp) void useCanvas.getState().enterSpace(sp); else openProject(p.id) }} role="button" tabIndex={0}
+                <div className={`project-item ${view === 'project' && projectViewId === p.id ? 'active' : ''}`} onClick={() => openProject(p.id)} role="button" tabIndex={0}
                   {...dragProps({ kind: 'project', id: p.id, label: p.name })}>
-                  <button className="icon-btn ghost xs" aria-label={isOpen ? `Collapse ${p.name}` : `Expand chats in ${p.name}`} aria-expanded={isOpen} title={isOpen ? 'Collapse' : 'Expand chats'} onClick={(e) => { e.stopPropagation(); setExpanded((x) => ({ ...x, [p.id]: !isOpen })) }}><ChevronRight size={12} className={isOpen ? 'rot90' : ''} /></button>
-                  <span className="project-dot" style={{ background: p.color }} />
+                  <Folder size={13} style={{ color: p.color }} />
                   <span className="project-name">{p.name}</span>
-                  <span className="count">{chats.length}</span>
                 </div>
-                {isOpen && (
-                  <div className="project-chats">
-                    {chats.length === 0 && <button className="convo-item sub muted" onClick={() => (inCanvas ? void useCanvas.getState().newChatWindow(p.id) : newChat(p.id))}><MessageSquarePlus size={12} /> New chat in project</button>}
-                    {chats.slice(0, 12).map((c) => (
-                      <div key={c.id} className={`convo-item sub ${c.id === focusedId && view === 'chat' ? 'active' : ''}`} onClick={() => openConversation(c.id)} role="button" tabIndex={0}
-                        {...dragProps({ kind: 'conversation', id: c.id, label: c.title, projectId: p.id })}>
-                        <span className="convo-title"><ChatPulse conversationId={c.id} />{c.title}</span>
-                        <button className="icon-btn ghost" aria-label={`Delete chat: ${c.title}`} title="Delete" onClick={(e) => { e.stopPropagation(); void deleteChat(c.id) }}><Trash2 size={13} /></button>
-                      </div>
-                    ))}
-                    {chats.length > 12 && <button className="link small sub" onClick={() => openProject(p.id)}>all {chats.length} chats…</button>}
-                  </div>
-                )}
+                <div className="project-rows">
+                  {rows.length === 0 && <button className="convo-item sub muted" onClick={() => (inCanvas ? void useCanvas.getState().newChatWindow(p.id) : newChat(p.id))}><MessageSquarePlus size={12} /> New chat in project</button>}
+                  {rows.slice(0, PROJECT_ROWS).map((r) => (r.kind === 'doc' ? (
+                    <div key={`d${r.id}`} className="convo-item sub" onClick={() => void openDoc(r.id)} role="button" tabIndex={0}>
+                      <span className="convo-title">{r.title}</span>
+                      <FileText size={12} className="row-kind" />
+                    </div>
+                  ) : (
+                    <div key={`c${r.id}`} className={`convo-item sub ${r.id === focusedId && view === 'chat' ? 'active' : ''}`} onClick={() => openConversation(r.id)} role="button" tabIndex={0}
+                      {...dragProps({ kind: 'conversation', id: r.id, label: r.title, projectId: p.id })}>
+                      <span className="convo-title"><ChatPulse conversationId={r.id} />{r.title}</span>
+                      <button className="icon-btn ghost" aria-label={`Delete chat: ${r.title}`} title="Delete" onClick={(e) => { e.stopPropagation(); void deleteChat(r.id) }}><Trash2 size={13} /></button>
+                    </div>
+                  )))}
+                  {rows.length > 0 && <button className="project-viewall" onClick={() => openProject(p.id)}>View all</button>}
+                </div>
               </div>
             )
           })}
@@ -221,6 +243,9 @@ export default function Sidebar(): JSX.Element {
 
       <div className="sidebar-bottom">
         <ActivityIndicator />
+        <button className={`settings-btn ${pageAgentOpen ? 'on' : ''}`} aria-pressed={pageAgentOpen} onClick={togglePageAgent}>
+          <Sparkles size={16} /><span>Ask about this page</span><kbd>⌘I</kbd>
+        </button>
         <button className="settings-btn" onClick={() => setSettingsOpen(true)}><Settings size={16} /><span>Settings</span><kbd>⌘,</kbd></button>
       </div>
     </aside>

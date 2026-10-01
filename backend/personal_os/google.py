@@ -8,10 +8,18 @@ with a user-supplied client (googleClientId / googleClientSecret).
 Google treats the client secret of a "Desktop app" OAuth client as non-confidential, so
 shipping it with the app is the sanctioned pattern (it is what gcloud, rclone etc. do).
 Tokens are stored in the app database (settings.googleToken).
+
+Every write here proves itself: after the API call returns, the object is read back from the
+server and the written fields are compared, and the verdict rides on the result under
+`verification` (see verify.py). A write whose read-back fails or disagrees comes back with
+`verified: False`, which tools.py turns into a tool error and the UI refuses to render as
+success. Gmail sends do not happen here at all any more -- they are queued through outbox.py so
+they can be undone, and the verification runs when the hold expires and the send goes out.
 """
 from __future__ import annotations
 
 import base64
+import contextlib
 import datetime as dt
 import email.mime.text
 from email.utils import parsedate_to_datetime
@@ -20,8 +28,12 @@ import logging
 import os
 import re
 import secrets
+import threading
 import time
 from typing import Any, Callable
+
+from . import verify
+from .cache import TTLCache, cached, invalidates
 
 # Google lists the scopes it actually granted in the token response, and that set rarely
 # matches the request byte for byte (openid aliases, scopes granted to this client earlier).
@@ -50,6 +62,27 @@ SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
 ]
 
+# How long each kind of read may be served from cache. The numbers trade "the UI
+# feels instant" against "an edit made in Google's own web UI shows up here", so
+# anything the user stares at is seconds, and anything near-static is hours.
+# Our own writes invalidate their namespace outright, so these only bound how
+# stale a *third-party* change can be.
+TTL = {
+    "calendar_list": 10 * 60,   # calendars are added/removed rarely
+    "calendar_colors": 24 * 3600,  # Google's fixed palette
+    "calendar_events": 60,      # the week grid: refetched on every mount and week step
+    "calendar_event": 30,       # one event, opened in the editor
+    "gmail_list": 60,           # a thread list costs 1 + N batched gets
+    "gmail_message": 15 * 60,   # a fetched body never changes
+    "gmail_labels": 10 * 60,
+    "tasks_lists": 10 * 60,
+    "tasks": 30,
+    "drive_list": 2 * 60,
+    "drive_read": 10 * 60,
+    "docs_get": 60,
+    "sheets_read": 60,
+}
+
 
 class GoogleNotConnected(Exception):
     pass
@@ -60,6 +93,27 @@ class Google:
         self.get_settings = get_settings
         self.set_settings = set_settings
         self._pending: dict[str, Any] = {}  # state -> flow
+        self._cache = TTLCache()
+        # Built API clients and the Credentials they wrap, reused across calls; see _svc.
+        self._svc_lock = threading.Lock()
+        self._svcs: dict[tuple[str, str], tuple[Any, Any]] = {}
+        self._creds_obj: Any = None
+        self._creds_key: tuple[str, str] | None = None
+
+    def invalidate(self, *namespaces: str) -> int:
+        """Forget cached reads. No arguments forgets everything Google-related."""
+        return self._cache.invalidate(*namespaces)
+
+    def cache_stats(self) -> dict[str, Any]:
+        return self._cache.stats()
+
+    def _reset_clients(self) -> None:
+        """Drop cached credentials, API clients and reads - used when the account changes."""
+        with self._svc_lock:
+            self._svcs.clear()
+            self._creds_obj = None
+            self._creds_key = None
+        self._cache.clear()
 
     # ---------- status / auth ----------
     def _client(self) -> tuple[str | None, str | None, str | None]:
@@ -179,6 +233,7 @@ class Google:
             "connected_at": time.time(),
         }
         self.set_settings({"googleToken": token})
+        self._reset_clients()  # a new sign-in may be a different account
         return self.status()
 
     def disconnect(self) -> None:
@@ -191,6 +246,7 @@ class Google:
             except Exception:  # noqa: BLE001
                 pass
         self.set_settings({"googleToken": {}, PENDING_KEY: {}})
+        self._reset_clients()
 
     def _creds(self):  # type: ignore[no-untyped-def]
         from google.auth.transport.requests import Request
@@ -199,6 +255,15 @@ class Google:
         tok = self.get_settings().get("googleToken") or {}
         if not tok.get("refresh_token"):
             raise GoogleNotConnected("Google account not connected")
+        # One Credentials object per (account, client), reused across calls: building a
+        # fresh one every call threw away the live access token, so a long-lived backend
+        # re-checked expiry - and sometimes re-refreshed - on every single API call.
+        key = (tok["refresh_token"], tok.get("client_id") or "")
+        with self._svc_lock:
+            if self._creds_key == key and self._creds_obj is not None and self._creds_obj.valid:
+                return self._creds_obj
+            # A different account (or OAuth client) must not read the old one's cache.
+            changed_account = self._creds_key is not None and self._creds_key != key
         creds = Credentials(
             token=tok.get("token"), refresh_token=tok["refresh_token"], token_uri=tok["token_uri"],
             client_id=tok["client_id"], client_secret=tok["client_secret"], scopes=tok.get("scopes") or SCOPES,
@@ -220,14 +285,37 @@ class Google:
                     "Google sign-in expired or was revoked. Open Settings → Integrations and sign in again."
                 ) from e
             self.set_settings({"googleToken": {**tok, "token": creds.token, "expiry": creds.expiry.isoformat() if creds.expiry else None, "needs_reauth": False}})
+        with self._svc_lock:
+            self._creds_obj = creds
+            self._creds_key = key
+        if changed_account:
+            self._cache.clear()
         return creds
 
     def _svc(self, name: str, version: str):  # type: ignore[no-untyped-def]
+        """A built API client, reused per (api, version).
+
+        `build()` parses a discovery document and synthesises the whole resource tree,
+        which costs tens of milliseconds - noticeable when drawing one calendar week
+        does it fifteen times over. Each client is remembered alongside the exact
+        Credentials object it captured, so once `_creds` mints a new one (a token
+        refresh, or a different account) the stale client is rebuilt rather than reused.
+        """
         from googleapiclient.discovery import build
 
-        return build(name, version, credentials=self._creds(), cache_discovery=False)
+        creds = self._creds()
+        key = (name, version)
+        with self._svc_lock:
+            entry = self._svcs.get(key)
+            if entry is not None and entry[0] is creds:
+                return entry[1]
+        svc = build(name, version, credentials=creds, cache_discovery=False)
+        with self._svc_lock:
+            self._svcs[key] = (creds, svc)
+        return svc
 
     # ---------- Calendar ----------
+    @cached("calendar", TTL["calendar_list"])
     def calendars(self) -> list[dict[str, Any]]:
         """The user's calendar list: primary first, then the ones they can write to."""
         res = self._svc("calendar", "v3").calendarList().list(maxResults=100).execute()
@@ -247,6 +335,24 @@ class Google:
             })
         return sorted(out, key=lambda c: (not c["primary"], c["access_role"] not in ("owner", "writer"), c["summary"].lower()))
 
+    def calendar_ensure(self, summary: str) -> dict[str, Any]:
+        """Find, or create, a secondary calendar of this name that we can write to.
+
+        Used for the todo mirror: its own calendar keeps generated events out of the
+        primary one and lets the user hide them all with one checkbox in Google Calendar.
+        """
+        want = summary.strip().lower()
+        for c in self.calendars():
+            if c["summary"].strip().lower() == want and c["access_role"] in ("owner", "writer"):
+                return {"id": c["id"], "summary": c["summary"], "created": False}
+        svc = self._svc("calendar", "v3")
+        cal = svc.calendars().insert(body={"summary": summary, "timeZone": _local_tz()}).execute()
+        # A brand new calendar is not necessarily shown in the UI; make sure it is.
+        with contextlib.suppress(Exception):
+            svc.calendarList().patch(calendarId=cal["id"], body={"selected": True}).execute()
+        return {"id": cal["id"], "summary": cal.get("summary") or summary, "created": True}
+
+    @cached("calendar", TTL["calendar_colors"])
     def calendar_colors(self) -> dict[str, Any]:
         """Google's fixed palettes, id -> hex; events reference these by colorId."""
         res = self._svc("calendar", "v3").colors().get().execute()
@@ -255,6 +361,7 @@ class Google:
             "calendar": {k: v.get("background") for k, v in (res.get("calendar") or {}).items()},
         }
 
+    @cached("calendar", TTL["calendar_events"])
     def calendar_events(self, days: int = 2, calendar_id: str = "primary", max_results: int = 30, start: str | None = None, calendar_ids: list[str] | None = None) -> list[dict[str, Any]]:
         now = _parse_iso(start) if start else dt.datetime.now(dt.timezone.utc)
         if now.tzinfo is None:
@@ -279,10 +386,12 @@ class Google:
         out.sort(key=lambda e: e["start"] or "")
         return out[: max_results if len(ids) == 1 else max_results * 2]
 
+    @cached("calendar", TTL["calendar_event"])
     def calendar_get(self, event_id: str, calendar_id: str = "primary") -> dict[str, Any]:
         e = self._svc("calendar", "v3").events().get(calendarId=calendar_id, eventId=event_id).execute()
         return _event_out(e, calendar_id, full=True)
 
+    @invalidates("calendar")
     def calendar_create(self, event: dict[str, Any], calendar_id: str = "primary", send_updates: str = "none") -> dict[str, Any]:
         body = self._event_body(event)
         kwargs: dict[str, Any] = {"calendarId": calendar_id, "body": body, "sendUpdates": _send_updates(send_updates)}
@@ -290,8 +399,10 @@ class Google:
             body["conferenceData"] = {"createRequest": {"requestId": secrets.token_hex(16), "conferenceSolutionKey": {"type": "hangoutsMeet"}}}
             kwargs["conferenceDataVersion"] = 1
         e = self._svc("calendar", "v3").events().insert(**kwargs).execute()
-        return _event_out(e, calendar_id, full=True)
+        out = _event_out(e, calendar_id, full=True)
+        return verify.attach(out, self._verify_event(calendar_id, out["id"], out, body))
 
+    @invalidates("calendar")
     def calendar_update(self, event_id: str, event: dict[str, Any], calendar_id: str = "primary", send_updates: str = "none") -> dict[str, Any]:
         """Patch an event; only the keys present in `event` change.
 
@@ -312,16 +423,19 @@ class Google:
         elif event.get("clear_meet"):
             body["conferenceData"] = None
             kwargs["conferenceDataVersion"] = 1
-        if body:
-            e = svc.patch(**kwargs).execute()
-        else:
-            e = svc.get(calendarId=calendar_id, eventId=event_id).execute()
-        return _event_out(e, calendar_id, full=True)
+        if not body:
+            # Nothing was written (a bare move, or an empty patch), so there is nothing to prove.
+            return _event_out(svc.get(calendarId=calendar_id, eventId=event_id).execute(), calendar_id, full=True)
+        out = _event_out(svc.patch(**kwargs).execute(), calendar_id, full=True)
+        return verify.attach(out, self._verify_event(calendar_id, event_id, out, body))
 
+    @invalidates("calendar")
     def calendar_delete(self, event_id: str, calendar_id: str = "primary", send_updates: str = "none") -> dict[str, Any]:
         self._svc("calendar", "v3").events().delete(calendarId=calendar_id, eventId=event_id, sendUpdates=_send_updates(send_updates)).execute()
-        return {"deleted": event_id, "calendar_id": calendar_id}
+        return verify.attach({"deleted": event_id, "calendar_id": calendar_id},
+                             self._verify_event_gone(calendar_id, event_id))
 
+    @invalidates("calendar")
     def calendar_respond(self, event_id: str, response: str, calendar_id: str = "primary", send_updates: str = "none") -> dict[str, Any]:
         """RSVP to an invitation: accepted, declined, tentative or needsAction."""
         if response not in ("accepted", "declined", "tentative", "needsAction"):
@@ -334,7 +448,46 @@ class Google:
             raise ValueError("You are not an attendee of this event, so there is nothing to respond to.")
         me["responseStatus"] = response
         e = svc.patch(calendarId=calendar_id, eventId=event_id, body={"attendees": attendees}, sendUpdates=_send_updates(send_updates)).execute()
-        return _event_out(e, calendar_id, full=True)
+        out = _event_out(e, calendar_id, full=True)
+        return verify.attach(out, self._verify_rsvp(calendar_id, event_id, response))
+
+    # ---------- Calendar read-backs ----------
+    # Each one re-fetches from the server rather than trusting the write's own echo, and names in
+    # `compared` exactly which fields it proved.
+    def _event_reader(self, calendar_id: str, event_id: str) -> Callable[[], dict[str, Any]]:
+        def read_back() -> dict[str, Any]:
+            try:
+                return self._svc("calendar", "v3").events().get(calendarId=calendar_id, eventId=event_id).execute()
+            except Exception as e:  # noqa: BLE001
+                if verify.is_missing(e):
+                    raise verify.NotVisible(f"event {event_id} is not on {calendar_id}") from e
+                raise
+        return read_back
+
+    def _verify_event(self, calendar_id: str, event_id: str, wrote: dict[str, Any], body: dict[str, Any]) -> dict[str, Any]:
+        """Fetch the event back by id and compare the fields this call actually wrote."""
+        keys = [flat for api, flat in _EVENT_VERIFY_FIELDS.items() if api in body] or ["summary", "start"]
+        want = {**{k: wrote.get(k) for k in keys}, "status": wrote.get("status") or "confirmed"}
+
+        def compare(e: dict[str, Any]) -> dict[str, Any]:
+            got = _event_out(e, calendar_id, full=True)
+            return verify.diff(want, got, time_fields=("start", "end"))
+
+        return verify.check(f"calendar event {event_id} on {calendar_id}", self._event_reader(calendar_id, event_id),
+                            compare=compare, compared=sorted(want))
+
+    def _verify_event_gone(self, calendar_id: str, event_id: str) -> dict[str, Any]:
+        """A deleted event must be 404, or kept as a cancelled tombstone."""
+        return verify.check(f"calendar event {event_id} on {calendar_id}", self._event_reader(calendar_id, event_id),
+                            absent=True, gone_if=lambda e: e.get("status") == "cancelled", compared=["absent"])
+
+    def _verify_rsvp(self, calendar_id: str, event_id: str, response: str) -> dict[str, Any]:
+        def compare(e: dict[str, Any]) -> dict[str, Any]:
+            me = next((a for a in e.get("attendees") or [] if a.get("self")), {})
+            return verify.diff({"my_response": response}, {"my_response": me.get("responseStatus")})
+
+        return verify.check(f"RSVP on event {event_id}", self._event_reader(calendar_id, event_id),
+                            compare=compare, compared=["my_response"])
 
     def _event_body(self, f: dict[str, Any], patch: bool = False) -> dict[str, Any]:
         """Translate our flat event fields into a Calendar API body (insert or patch)."""
@@ -392,6 +545,7 @@ class Google:
         return body
 
     # ---------- Gmail ----------
+    @cached("gmail", TTL["gmail_list"])
     def gmail_search(self, query: str = "is:unread in:inbox newer_than:14d", max_results: int = 15) -> list[dict[str, Any]]:
         svc = self._svc("gmail", "v1")
         res = svc.users().messages().list(userId="me", q=query, maxResults=max(1, min(int(max_results), 50))).execute()
@@ -415,6 +569,7 @@ class Google:
         batch.execute()
         return [by_id[i] for i in ids if i in by_id]
 
+    @cached("gmail", TTL["gmail_message"])
     def gmail_get(self, message_id: str, max_chars: int = 8000) -> dict[str, Any]:
         svc = self._svc("gmail", "v1")
         msg = svc.users().messages().get(userId="me", id=message_id, format="full").execute()
@@ -431,6 +586,7 @@ class Google:
         headers = {"in_reply_to": mid, "references": f"{h.get('references', '')} {mid}".strip()} if mid else {}
         return orig.get("threadId"), headers
 
+    @invalidates("gmail")
     def gmail_draft(self, to: str, subject: str, body: str, reply_to_message_id: str | None = None) -> dict[str, Any]:
         svc = self._svc("gmail", "v1")
         message: dict[str, Any] = {}
@@ -441,9 +597,12 @@ class Google:
                 message["threadId"] = tid
         message["raw"] = _raw_message(to, subject, body, **headers)
         d = svc.users().drafts().create(userId="me", body={"message": message}).execute()
-        return {"draft_id": d.get("id"), "to": to, "subject": subject, "note": "Draft saved in Gmail; not sent."}
+        out = {"draft_id": d.get("id"), "to": to, "subject": subject, "note": "Draft saved in Gmail; not sent."}
+        return verify.attach(out, self._verify_draft(d.get("id") or "", subject))
 
+    @invalidates("gmail")
     def gmail_send(self, to: str, subject: str, body: str, reply_to_message_id: str | None = None) -> dict[str, Any]:
+        """Send now. Callers go through outbox.py instead, which holds the send so it can be undone."""
         svc = self._svc("gmail", "v1")
         message: dict[str, Any] = {}
         headers: dict[str, str] = {}
@@ -453,8 +612,59 @@ class Google:
                 message["threadId"] = tid
         message["raw"] = _raw_message(to, subject, body, **headers)
         m = svc.users().messages().send(userId="me", body=message).execute()
-        return {"sent": m.get("id"), "to": to, "subject": subject, "thread_id": m.get("threadId")}
+        out = {"sent": m.get("id"), "to": to, "subject": subject, "thread_id": m.get("threadId")}
+        return verify.attach(out, self._verify_sent(m.get("id") or "", to, subject, m.get("threadId")))
 
+    def _verify_sent(self, message_id: str, to: str, subject: str, thread_id: str | None) -> dict[str, Any]:
+        """Prove the mail is really in SENT: fetch it by id, insist on the SENT label, and check
+        the thread, subject and recipients of the message the server actually stored."""
+        if not message_id:
+            return {"status": verify.UNVERIFIED, "reason": "not_visible", "what": "sent message",
+                    "detail": "Gmail returned no message id", "attempts": 0, "compared": []}
+        want_to = _addresses(to)
+
+        def read_back() -> dict[str, Any]:
+            try:
+                m = self._svc("gmail", "v1").users().messages().get(
+                    userId="me", id=message_id, format="metadata", metadataHeaders=["To", "Subject"]).execute()
+            except Exception as e:  # noqa: BLE001
+                if verify.is_missing(e):
+                    raise verify.NotVisible(f"message {message_id} is not in the mailbox") from e
+                raise
+            if "SENT" not in (m.get("labelIds") or []):
+                # It exists but Gmail has not filed it as sent yet: not visible, not a mismatch.
+                raise verify.NotVisible(f"message {message_id} is not labelled SENT yet")
+            return m
+
+        def compare(m: dict[str, Any]) -> dict[str, Any]:
+            h = {x["name"].lower(): x["value"] for x in m.get("payload", {}).get("headers", [])}
+            got_to = _addresses(h.get("to", ""))
+            d = verify.diff({"thread_id": thread_id, "subject": subject},
+                            {"thread_id": m.get("threadId"), "subject": h.get("subject")})
+            missing = [a for a in want_to if a not in got_to]
+            if missing:
+                d["to"] = {"expected": ", ".join(want_to), "actual": h.get("to")}
+            return d
+
+        return verify.check(f"sent message {message_id} in Gmail SENT", read_back, compare=compare,
+                            compared=["SENT label", "thread_id", "subject", "to"], delays=verify.MAIL_RETRY_DELAYS)
+
+    def _verify_draft(self, draft_id: str, subject: str) -> dict[str, Any]:
+        def read_back() -> dict[str, Any]:
+            try:
+                return self._svc("gmail", "v1").users().drafts().get(userId="me", id=draft_id, format="metadata").execute()
+            except Exception as e:  # noqa: BLE001
+                if verify.is_missing(e):
+                    raise verify.NotVisible(f"draft {draft_id} is not in Gmail") from e
+                raise
+
+        def compare(d: dict[str, Any]) -> dict[str, Any]:
+            h = {x["name"].lower(): x["value"] for x in (d.get("message") or {}).get("payload", {}).get("headers", [])}
+            return verify.diff({"subject": subject}, {"subject": h.get("subject")})
+
+        return verify.check(f"draft {draft_id} in Gmail", read_back, compare=compare, compared=["exists", "subject"])
+
+    @invalidates("gmail")
     def gmail_modify(self, message_id: str, mark_read: bool | None = None, archive: bool = False, star: bool | None = None) -> dict[str, Any]:
         add, rem = [], []
         if mark_read is True:
@@ -468,35 +678,73 @@ class Google:
         if star is False:
             rem.append("STARRED")
         self._svc("gmail", "v1").users().messages().modify(userId="me", id=message_id, body={"addLabelIds": add, "removeLabelIds": rem}).execute()
-        return {"ok": True, "added": add, "removed": rem}
+        return verify.attach({"ok": True, "added": add, "removed": rem}, self._verify_labels(message_id, add, rem))
 
+    def _verify_labels(self, message_id: str, add: list[str], rem: list[str]) -> dict[str, Any]:
+        """Re-read the message's labels: every added one present, every removed one gone."""
+        def read_back() -> dict[str, Any]:
+            try:
+                return self._svc("gmail", "v1").users().messages().get(
+                    userId="me", id=message_id, format="minimal").execute()
+            except Exception as e:  # noqa: BLE001
+                if verify.is_missing(e):
+                    raise verify.NotVisible(f"message {message_id} is not in the mailbox") from e
+                raise
+
+        def compare(m: dict[str, Any]) -> dict[str, Any]:
+            have = set(m.get("labelIds") or [])
+            out: dict[str, Any] = {}
+            for label in add:
+                if label not in have:
+                    out[f"+{label}"] = {"expected": "present", "actual": "missing"}
+            for label in rem:
+                if label in have:
+                    out[f"-{label}"] = {"expected": "removed", "actual": "still set"}
+            return out
+
+        labels = [f"+{x}" for x in add] + [f"-{x}" for x in rem]
+        return verify.check(f"labels on message {message_id}", read_back, compare=compare,
+                            compared=labels or ["labels"])
+
+    @cached("gmail", TTL["gmail_labels"])
     def gmail_labels(self) -> list[dict[str, Any]]:
         res = self._svc("gmail", "v1").users().labels().list(userId="me").execute()
         labels = [{"id": l["id"], "name": l.get("name", l["id"]), "type": l.get("type", "user")} for l in res.get("labels", [])]
         return sorted(labels, key=lambda x: (x["type"] != "system", x["name"].lower()))
 
     # ---------- Tasks ----------
+    @cached("tasks", TTL["tasks_lists"])
     def tasks_lists(self) -> list[dict[str, Any]]:
         res = self._svc("tasks", "v1").tasklists().list(maxResults=50).execute()
         return [{"id": t["id"], "title": t["title"]} for t in res.get("items", [])]
 
+    @cached("tasks", TTL["tasks"])
     def tasks_list(self, tasklist: str = "@default", show_completed: bool = False, max_results: int = 50) -> list[dict[str, Any]]:
         res = self._svc("tasks", "v1").tasks().list(tasklist=tasklist, showCompleted=show_completed, showHidden=show_completed, maxResults=max_results).execute()
         return [{"id": t["id"], "title": t.get("title"), "notes": t.get("notes"), "due": t.get("due"), "status": t.get("status")} for t in res.get("items", [])]
 
+    @invalidates("tasks")
     def tasks_add(self, title: str, notes: str = "", due: str | None = None, tasklist: str = "@default") -> dict[str, Any]:
         body: dict[str, Any] = {"title": title, "notes": notes}
         if due:
             body["due"] = due if "T" in due else f"{due}T00:00:00.000Z"
         t = self._svc("tasks", "v1").tasks().insert(tasklist=tasklist, body=body).execute()
-        return {"id": t["id"], "title": t.get("title"), "due": t.get("due")}
+        out = {"id": t["id"], "title": t.get("title"), "due": t.get("due")}
+        return verify.attach(out, self._verify_task(tasklist, t["id"], _task_row(t), ("title", "due", "status")))
 
+    @invalidates("tasks")
     def tasks_complete(self, task_id: str, tasklist: str = "@default") -> dict[str, Any]:
         t = self._svc("tasks", "v1").tasks().patch(tasklist=tasklist, task=task_id, body={"status": "completed"}).execute()
-        return {"id": t["id"], "status": t.get("status")}
+        return verify.attach({"id": t["id"], "status": t.get("status")},
+                             self._verify_task(tasklist, task_id, {"status": "completed"}, ("status",)))
 
     def tasks_all(self, tasklist: str = "@default") -> list[dict[str, Any]]:
-        """Every task in a list, completed and hidden included, with `updated` timestamps (for sync)."""
+        """Every task in a list, completed and hidden included, with `updated` timestamps (for sync).
+
+        Deliberately uncached: this is the two-way sync's view of remote state, and it
+        resolves conflicts by comparing `updated` timestamps. A stale read here could
+        push over a newer remote edit, which no latency win is worth.
+        """
         svc = self._svc("tasks", "v1").tasks()
         out: list[dict[str, Any]] = []
         token = None
@@ -507,18 +755,50 @@ class Google:
             if not token:
                 return out
 
+    def tasks_get(self, task_id: str, tasklist: str = "@default") -> dict[str, Any]:
+        return _task_row(self._svc("tasks", "v1").tasks().get(tasklist=tasklist, task=task_id).execute())
+
+    @invalidates("tasks")
     def tasks_insert(self, body: dict[str, Any], tasklist: str = "@default") -> dict[str, Any]:
         t = self._svc("tasks", "v1").tasks().insert(tasklist=tasklist, body=_task_body(body)).execute()
-        return _task_row(t)
+        row = _task_row(t)
+        return verify.attach(row, self._verify_task(tasklist, t["id"], row, ("title", "notes", "due", "status")))
 
+    @invalidates("tasks")
     def tasks_update(self, task_id: str, patch: dict[str, Any], tasklist: str = "@default") -> dict[str, Any]:
         t = self._svc("tasks", "v1").tasks().patch(tasklist=tasklist, task=task_id, body=_task_body(patch)).execute()
-        return _task_row(t)
+        row = _task_row(t)
+        fields = tuple(k for k in ("title", "notes", "due", "status") if k in patch) or ("title",)
+        return verify.attach(row, self._verify_task(tasklist, task_id, row, fields))
 
-    def tasks_delete(self, task_id: str, tasklist: str = "@default") -> None:
+    @invalidates("tasks")
+    def tasks_delete(self, task_id: str, tasklist: str = "@default") -> dict[str, Any]:
         self._svc("tasks", "v1").tasks().delete(tasklist=tasklist, task=task_id).execute()
+        return verify.attach({"deleted": task_id, "tasklist": tasklist},
+                             verify.check(f"task {task_id} in {tasklist}", self._task_reader(tasklist, task_id),
+                                          absent=True, gone_if=lambda t: bool(t.get("deleted")), compared=["absent"]))
+
+    def _task_reader(self, tasklist: str, task_id: str) -> Callable[[], dict[str, Any]]:
+        def read_back() -> dict[str, Any]:
+            try:
+                return self.tasks_get(task_id, tasklist)
+            except Exception as e:  # noqa: BLE001
+                if verify.is_missing(e):
+                    raise verify.NotVisible(f"task {task_id} is not in {tasklist}") from e
+                raise
+        return read_back
+
+    def _verify_task(self, tasklist: str, task_id: str, wrote: dict[str, Any], fields: tuple[str, ...]) -> dict[str, Any]:
+        want = {k: wrote.get(k) for k in fields}
+
+        def compare(t: dict[str, Any]) -> dict[str, Any]:
+            return verify.diff(want, t, time_fields=("due",))
+
+        return verify.check(f"task {task_id} in {tasklist}", self._task_reader(tasklist, task_id),
+                            compare=compare, compared=sorted(want))
 
     # ---------- Drive ----------
+    @cached("drive", TTL["drive_list"])
     def drive_files(self, query: str = "", max_results: int = 20) -> list[dict[str, Any]]:
         """Search Drive by name/content; with no query, list recently modified files."""
         params: dict[str, Any] = {
@@ -541,6 +821,7 @@ class Google:
             })
         return out
 
+    @cached("drive", TTL["drive_read"])
     def drive_read(self, file_id: str, max_chars: int = 8000) -> dict[str, Any]:
         svc = self._svc("drive", "v3")
         meta = svc.files().get(fileId=file_id, fields="id,name,mimeType,webViewLink,size").execute()
@@ -560,6 +841,7 @@ class Google:
     # ---------- Docs / Sheets ----------
     _MIME = {"doc": "application/vnd.google-apps.document", "sheet": "application/vnd.google-apps.spreadsheet"}
 
+    @cached("drive", TTL["drive_list"])
     def drive_find(self, query: str = "", kind: str | None = None, max_results: int = 20) -> list[dict[str, Any]]:
         q = ["trashed = false"]
         if query:
@@ -574,6 +856,7 @@ class Google:
                  "kind": "sheet" if f.get("mimeType") == self._MIME["sheet"] else "doc",
                  "modified": f.get("modifiedTime"), "link": f.get("webViewLink")} for f in res.get("files", [])]
 
+    @cached("docs", TTL["docs_get"])
     def docs_get(self, document_id: str, max_chars: int = 20000) -> dict[str, Any]:
         doc = self._svc("docs", "v1").documents().get(documentId=document_id).execute()
         text = _doc_text(doc)
@@ -581,6 +864,7 @@ class Google:
                 "truncated": len(text) > max_chars,
                 "link": f"https://docs.google.com/document/d/{document_id}/edit"}
 
+    @invalidates("docs", "drive")
     def docs_create(self, title: str, content: str = "") -> dict[str, Any]:
         svc = self._svc("docs", "v1")
         doc = svc.documents().create(body={"title": title}).execute()
@@ -588,8 +872,10 @@ class Google:
         if content:
             svc.documents().batchUpdate(documentId=did, body={"requests": [
                 {"insertText": {"location": {"index": 1}, "text": content}}]}).execute()
-        return {"id": did, "title": title, "link": f"https://docs.google.com/document/d/{did}/edit"}
+        out = {"id": did, "title": title, "link": f"https://docs.google.com/document/d/{did}/edit"}
+        return verify.attach(out, self._verify_doc(did, title, content))
 
+    @invalidates("docs", "drive")
     def docs_append(self, document_id: str, content: str) -> dict[str, Any]:
         svc = self._svc("docs", "v1")
         doc = svc.documents().get(documentId=document_id, fields="title,body(content(endIndex))").execute()
@@ -598,8 +884,37 @@ class Google:
         end = (doc.get("body", {}).get("content") or [{}])[-1].get("endIndex", 2)
         svc.documents().batchUpdate(documentId=document_id, body={"requests": [
             {"insertText": {"location": {"index": max(1, end - 1)}, "text": "\n" + content}}]}).execute()
-        return {"id": document_id, "title": doc.get("title"), "appended_chars": len(content)}
+        out = {"id": document_id, "title": doc.get("title"), "appended_chars": len(content)}
+        return verify.attach(out, self._verify_doc(document_id, None, content))
 
+    def _verify_doc(self, document_id: str, title: str | None, content: str) -> dict[str, Any]:
+        """Re-read the doc: the title when we set one, and that the text we wrote is in the body.
+
+        Content is matched on whitespace-collapsed text (Docs splits a paragraph into runs), and
+        only on its tail, which is enough to tell "the write landed" from "the write vanished".
+        """
+        needle = _collapse(content)[-200:]
+        want = {k: v for k, v in (("title", title), ("content", needle or None)) if v}
+
+        def read_back() -> dict[str, Any]:
+            try:
+                return self._svc("docs", "v1").documents().get(documentId=document_id).execute()
+            except Exception as e:  # noqa: BLE001
+                if verify.is_missing(e):
+                    raise verify.NotVisible(f"document {document_id} is not in Drive") from e
+                raise
+
+        def compare(doc: dict[str, Any]) -> dict[str, Any]:
+            out: dict[str, Any] = {}
+            if title and (doc.get("title") or "").strip() != title.strip():
+                out["title"] = {"expected": title, "actual": doc.get("title")}
+            if needle and needle not in _collapse(_doc_text(doc)):
+                out["content"] = {"expected": f"…{needle[-60:]}", "actual": "not found in the document"}
+            return out
+
+        return verify.check(f"document {document_id}", read_back, compare=compare, compared=sorted(want) or ["exists"])
+
+    @cached("sheets", TTL["sheets_read"])
     def sheets_read(self, spreadsheet_id: str, cell_range: str | None = None, max_rows: int = 200) -> dict[str, Any]:
         svc = self._svc("sheets", "v4").spreadsheets()
         meta = svc.get(spreadsheetId=spreadsheet_id, fields="properties(title),sheets(properties(title))").execute()
@@ -611,17 +926,50 @@ class Google:
                 "range": res.get("range"), "values": values[:max_rows], "truncated": len(values) > max_rows,
                 "link": f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/edit"}
 
+    @invalidates("sheets", "drive")
     def sheets_write(self, spreadsheet_id: str, cell_range: str, values: list[list[Any]], append: bool = False) -> dict[str, Any]:
         vals = self._svc("sheets", "v4").spreadsheets().values()
         if append:
             r = vals.append(spreadsheetId=spreadsheet_id, range=cell_range, valueInputOption="USER_ENTERED",
                             insertDataOption="INSERT_ROWS", body={"values": values}).execute()
             u = r.get("updates", {})
-            return {"id": spreadsheet_id, "range": u.get("updatedRange"), "cells": u.get("updatedCells")}
-        r = vals.update(spreadsheetId=spreadsheet_id, range=cell_range, valueInputOption="USER_ENTERED",
-                        body={"values": values}).execute()
-        return {"id": spreadsheet_id, "range": r.get("updatedRange"), "cells": r.get("updatedCells")}
+            out = {"id": spreadsheet_id, "range": u.get("updatedRange"), "cells": u.get("updatedCells")}
+        else:
+            r = vals.update(spreadsheetId=spreadsheet_id, range=cell_range, valueInputOption="USER_ENTERED",
+                            body={"values": values}).execute()
+            out = {"id": spreadsheet_id, "range": r.get("updatedRange"), "cells": r.get("updatedCells")}
+        return verify.attach(out, self._verify_cells(spreadsheet_id, out["range"] or cell_range, values))
 
+    def _verify_cells(self, spreadsheet_id: str, written_range: str, values: list[list[Any]]) -> dict[str, Any]:
+        """Re-read the range Sheets says it wrote and compare its shape.
+
+        Shape, not text: USER_ENTERED coerces input (a date becomes a serial, "1,400" a number), so
+        comparing the strings we sent against what comes back would cry wolf. Row count and filled-cell
+        count prove the write landed where it was supposed to, which is the claim being checked.
+        """
+        want = {"rows": len(values), "filled_cells": sum(1 for row in values for v in row if str(v) != "")}
+
+        def read_back() -> dict[str, Any]:
+            try:
+                res = self._svc("sheets", "v4").spreadsheets().values().get(
+                    spreadsheetId=spreadsheet_id, range=written_range).execute()
+            except Exception as e:  # noqa: BLE001
+                if verify.is_missing(e):
+                    raise verify.NotVisible(f"range {written_range} is not readable") from e
+                raise
+            if not res.get("values"):
+                raise verify.NotVisible(f"range {written_range} came back empty")
+            return res
+
+        def compare(res: dict[str, Any]) -> dict[str, Any]:
+            got = res.get("values") or []
+            return verify.diff(want, {"rows": len(got),
+                                      "filled_cells": sum(1 for row in got for v in row if str(v) != "")})
+
+        return verify.check(f"range {written_range} in spreadsheet {spreadsheet_id}", read_back,
+                            compare=compare, compared=["rows", "filled_cells"])
+
+    @invalidates("sheets", "drive")
     def sheets_create(self, title: str, values: list[list[Any]] | None = None) -> dict[str, Any]:
         svc = self._svc("sheets", "v4").spreadsheets()
         ss = svc.create(body={"properties": {"title": title}}, fields="spreadsheetId,spreadsheetUrl").execute()
@@ -629,7 +977,20 @@ class Google:
         if values:
             svc.values().update(spreadsheetId=sid, range="A1", valueInputOption="USER_ENTERED",
                                 body={"values": values}).execute()
-        return {"id": sid, "title": title, "link": ss.get("spreadsheetUrl")}
+        out = {"id": sid, "title": title, "link": ss.get("spreadsheetUrl")}
+
+        def read_back() -> dict[str, Any]:
+            try:
+                return self._svc("sheets", "v4").spreadsheets().get(
+                    spreadsheetId=sid, fields="properties(title)").execute()
+            except Exception as e:  # noqa: BLE001
+                if verify.is_missing(e):
+                    raise verify.NotVisible(f"spreadsheet {sid} is not in Drive") from e
+                raise
+
+        v = verify.check(f"spreadsheet {sid}", read_back, compared=["title"],
+                         compare=lambda ss_: verify.diff({"title": title}, {"title": (ss_.get("properties") or {}).get("title")}))
+        return verify.attach(out, v)
 
 
 # Google-native formats can't be downloaded raw; export to the closest text form.
@@ -669,6 +1030,25 @@ def _task_body(fields: dict[str, Any]) -> dict[str, Any]:
 def _send_updates(v: str | None) -> str:
     """Whether Google emails guests about the change; anything unrecognized means don't."""
     return v if v in ("all", "externalOnly") else "none"
+
+
+# Calendar API body key -> the flat key _event_out puts it under. Only the keys a call actually
+# wrote are compared on the read-back, so a patch is judged on the patch, not on the whole event.
+# Both sides of the comparison come out of _event_out, so the guest list Google adds the organizer
+# to is compared against the same server's view of it, not against what we asked for.
+_EVENT_VERIFY_FIELDS = {"summary": "summary", "location": "location", "description": "description",
+                        "start": "start", "end": "end", "attendees": "attendees",
+                        "recurrence": "recurrence"}
+
+
+def _collapse(text: str) -> str:
+    """Whitespace-insensitive form, for matching text we wrote against text a service stored."""
+    return re.sub(r"\s+", " ", text or "").strip()
+
+
+def _addresses(to: str) -> list[str]:
+    """The bare email addresses in a To header, lowercased."""
+    return [a.lower() for a in re.findall(r"[\w.!#$%&'*+/=?^`{|}~-]+@[\w-]+(?:\.[\w-]+)+", to or "")]
 
 
 def _event_out(e: dict[str, Any], calendar_id: str | None = None, full: bool = False) -> dict[str, Any]:

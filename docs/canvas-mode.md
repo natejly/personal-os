@@ -172,6 +172,7 @@ CREATE TABLE IF NOT EXISTS canvases (
   pan_x REAL NOT NULL DEFAULT 0,
   pan_y REAL NOT NULL DEFAULT 0,
   wallpaper TEXT NOT NULL DEFAULT '',       -- '' | tint token | later: image path
+  locked INTEGER NOT NULL DEFAULT 0,        -- 1 = the view is frozen: no pan/zoom, no window geometry
   created_at REAL NOT NULL,
   updated_at REAL NOT NULL
 );
@@ -215,7 +216,7 @@ that already exists (conversations, todos, boards, documents, memories, widgets)
 ```
 GET    /canvases                     -> Canvas[] (with windows)
 POST   /canvases                     { name, project_id?, copy_from? }
-PUT    /canvases/{id}                { name?, snap_mode?, grid_size?, zoom?, pan_x?, pan_y?, wallpaper?, position? }
+PUT    /canvases/{id}                { name?, snap_mode?, grid_size?, zoom?, pan_x?, pan_y?, wallpaper?, locked?, position? }
 DELETE /canvases/{id}
 POST   /canvases/{id}/windows        { kind, ref_id?, x, y, w, h, config? } -> CanvasWindow
 PUT    /canvases/{id}/layout         { windows: [{id, x, y, w, h, z, state}] }   # bulk, debounced 400 ms
@@ -252,7 +253,7 @@ export interface Rect { x: number; y: number; w: number; h: number }
 export interface Canvas {
   id: string; name: string; project_id: string | null; position: number
   snap_mode: SnapMode; grid_size: number; zoom: number; pan_x: number; pan_y: number
-  wallpaper: string; created_at: number; updated_at: number
+  wallpaper: string; locked: number; created_at: number; updated_at: number
   windows: CanvasWindow[]
 }
 ```
@@ -307,6 +308,10 @@ commits, `Esc` or dragging away cancels.
 - hold **⇧**: constrain to one axis
 - hold **⌥** while resizing: resize about the centre
 - **⌃⌘T Tidy Up**: masonry-pack the space's windows on the grid pitch in reading order, animated
+- **⌃⌘L Lock / Unlock Space**: freeze the space. The pan, the zoom and every window rect stay put —
+  no pan, no zoom, no drag, no resize, no drop, no add, no close, no tidy, and the space itself
+  cannot be deleted. Widgets stay fully interactive: a locked space still scrolls, types and streams.
+  Per space, persisted (`canvases.locked`), shown as a padlock on the space tab and the sidebar row.
 - Per-space menu: Snap → Off / Grid only / Guides only / Both
 
 ---
@@ -462,6 +467,9 @@ Lifecycle:
 - `move` / `resize` on the BrowserWindow → debounced 400 ms → `PUT /windows/{id} { popout_bounds }`.
 - Close the pop-out → `state` → `normal`, the ghost fills back in.
 - Pin (⌃⌘P) → `setAlwaysOnTop(true, 'floating')`, persisted in `pinned`.
+- Transparency (⌃⌘[ / ⌃⌘], the pop-out's own slider, or the tray for all of them at once) →
+  `win.setOpacity(o)`, persisted in `opacity` and clamped to `[0.2, 1]` so a pop-out can never
+  fade out of reach. Only pop-outs wear it; a window back on the canvas just remembers the level.
 - Quitting the app closes all pop-outs; relaunching restores them if `state === 'popped'`.
 
 **Pop-out requires the stream bus (§5)** — without it, detaching a chat mid-reply kills the reply,
@@ -585,9 +593,11 @@ channel (`store.ts:246`), which already handles this pattern.
 | ⌃1…⌃9 | Jump to space *n* |
 | ⌃↑ | Space overview |
 | ⌃⌘T | Tidy up |
+| ⌃⌘L | Lock / unlock the active space |
 | ⌃⌘O | Pop out focused window |
 | ⌃⌘⇧O | Return popped window to canvas |
 | ⌃⌘P | Pin popped window on top |
+| ⌃⌘[ / ⌃⌘] | More / less transparent (pop-out) |
 | ⌥⌘G | Gather (in-app equivalent) |
 | **⌃⌥⌘Space** | **Gather / scatter (global, works from any app)** |
 | ⌘W | In canvas mode, closes the **focused canvas window** — not the app window |

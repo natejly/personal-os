@@ -21,7 +21,7 @@ from typing import Any, Iterable
 from .db import Database, new_id, now, row_to_dict
 
 # Mirrors DEFAULT_MODE / ToolSpec.danger in tools.py, which owns the built-in permission model.
-DANGER_LEVELS = ("safe", "writes", "network", "executes", "external")
+DANGER_LEVELS = ("safe", "writes", "network", "executes", "external")  # "plan" is built-in only: see plans.py
 MODES = ("on", "ask", "off")
 # Third-party code we did not write: it asks by default, whatever the server claims.
 DEFAULT_DANGER = "external"
@@ -42,10 +42,11 @@ RESERVED_TOOL_NAMES = frozenset({
     "search_memory", "save_memory",
     "graph_search", "graph_traverse", "graph_add",
     "web_search", "fetch_url",
-    "run_python", "current_time",
+    "run_python", "current_time", "propose_plan",
+    "todo_write", "read_tool_result", "skill_propose",
     "todo_list", "todo_add", "todo_update", "todo_delete",
     "calendar_events", "calendar_create", "calendar_get", "calendar_update", "calendar_delete", "calendar_respond",
-    "gmail_search", "gmail_read", "gmail_draft", "gmail_send", "gmail_modify",
+    "gmail_search", "gmail_read", "gmail_draft", "gmail_send", "gmail_modify", "gmail_outbox",
     "google_tasks_list", "google_tasks_add", "google_tasks_complete",
     "google_drive_search", "google_drive_read",
     "google_docs_search", "google_docs_read", "google_docs_create", "google_docs_append",
@@ -55,6 +56,10 @@ RESERVED_TOOL_NAMES = frozenset({
     "sandbox_put_document", "sandbox_reset",
     "doc_list", "doc_search", "doc_read", "doc_create", "doc_edit",
     "activity_recent", "activity_pause",
+    "find_files", "read_local_file", "write_local_file", "move_local_file", "trash_local_file",
+    "list_shortcuts", "run_shortcut", "open_page",
+    "schedule_task", "scheduled_tasks", "cancel_scheduled_task",
+    "writing_style", "save_writing_sample",
 })
 
 SCHEMA = """

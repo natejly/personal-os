@@ -58,6 +58,14 @@ test('one toggle-context action toggles the context panel once', () => {
   assert.equal(useStore.getState().contextOpen, !before)
 })
 
+test('one page-agent action toggles the page agent once', () => {
+  const before = useStore.getState().pageAgentOpen
+  fire('page-agent')
+  assert.equal(useStore.getState().pageAgentOpen, !before)
+  fire('page-agent')
+  assert.equal(useStore.getState().pageAgentOpen, before)
+})
+
 test('a view action routes, and view:graph opens memory on the graph', () => {
   fire('view:todos')
   assert.equal(useStore.getState().view, 'todos')

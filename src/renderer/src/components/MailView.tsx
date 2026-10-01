@@ -4,6 +4,7 @@ import { useStore } from '../store'
 import { api } from '../lib/api'
 import SmartTextarea from './SmartTextarea'
 import type { GmailFullMessage, GmailLabel, GmailMessage } from '@shared/types'
+import { lines, usePageContext } from '../lib/pageContext'
 
 const fromName = (s: string | null): string => (s ?? '').replace(/<.*>/, '').replace(/"/g, '').trim() || (s ?? '')
 const fmtDate = (s: string | null): string => {
@@ -80,13 +81,15 @@ export default function MailView(): JSX.Element {
     return (): void => clearTimeout(t)
   }, [search])
 
-  const load = async (): Promise<void> => {
+  // `refresh` is for the Refresh button: it bypasses the backend's read cache, where a
+  // query the user just ran a moment ago would otherwise still be warm.
+  const load = async (refresh = false): Promise<void> => {
     if (!google?.connected) return
     const mine = ++seq.current
     setLoading(true)
     setError(null)
     try {
-      const out = await api.google.gmail(query, 30)
+      const out = await api.google.gmail(query, 30, refresh)
       if (seq.current === mine) setMessages(out)
     } catch (e) {
       if (seq.current === mine) setError((e as Error).message)
@@ -146,8 +149,10 @@ export default function MailView(): JSX.Element {
     if (!compose) return
     setBusy('send')
     try {
-      await api.google.gmailSend({ to: compose.to, subject: compose.subject, body: compose.body, reply_to_message_id: compose.replyTo?.id ?? null })
-      toast('Email sent.')
+      // Queued behind its undo hold, not sent: say so, and let PendingSends count it down.
+      const queued = await api.google.gmailSend({ to: compose.to, subject: compose.subject, body: compose.body, reply_to_message_id: compose.replyTo?.id ?? null })
+      if (queued.status === 'sent' && queued.verified === false) toast(queued.error ?? 'Sent, but Gmail did not confirm it. Check your Sent folder.', 'error')
+      else toast(queued.status === 'sent' ? 'Email sent.' : `Sending in ${queued.seconds_left}s — you can still undo it.`)
       setCompose(null)
       setReview(null)
     } catch (e) {
@@ -190,6 +195,16 @@ export default function MailView(): JSX.Element {
 
   const isStarred = (m: GmailMessage): boolean => m.labels.includes('STARRED')
 
+  usePageContext(() => ({
+    view: 'mail',
+    label: open ? `Email “${open.subject || '(no subject)'}”` : `Mail · ${folder}`,
+    detail: open
+      ? `The user has this message open — Gmail id \`${open.id}\`, thread \`${open.thread_id}\`.\nFrom: ${open.from}\nSubject: ${open.subject}\nDate: ${open.date}\n\n${(full?.body ?? open.snippet).slice(0, 4000)}`
+      : `The ${folder} list is on screen${q ? ` filtered by “${q}”` : ''}:\n${lines(messages, (m) => `${m.unread ? '[unread] ' : ''}${m.from} — ${m.subject} (\`${m.id}\`)`, 25)}`,
+    refs: open ? [{ kind: 'email', id: open.id, name: open.subject ?? '' }] : messages.slice(0, 25).map((m) => ({ kind: 'email', id: m.id, name: m.subject ?? '' })),
+    hints: open ? ['Draft a reply', 'What is being asked of me here?'] : ['What needs a reply today?', 'Summarise this inbox']
+  }), [open, full, messages, folder, q])
+
   return (
     <main className="page mail-page">
       <header className="page-header drag">
@@ -201,7 +216,7 @@ export default function MailView(): JSX.Element {
             <Search size={14} />
             <input placeholder="Search mail (from:, subject:, …)" value={search} onChange={(e) => setSearch(e.target.value)} />
           </label>
-          <button className="icon-btn" title="Refresh" onClick={() => void load()} disabled={loading}><RefreshCw size={15} className={loading ? 'spin' : ''} /></button>
+          <button className="icon-btn" title="Refresh" onClick={() => void load(true)} disabled={loading}><RefreshCw size={15} className={loading ? 'spin' : ''} /></button>
         </div>
       </header>
 

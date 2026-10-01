@@ -5,7 +5,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { Canvas, CanvasWindow } from '@shared/types'
-import { liveWindows } from './Canvas'
+import { liveWindows, renderOrder } from './Canvas'
+import { clampOpacity, nextOpacity } from './opacity'
 import { WIDGETS } from './registry'
 import { flushLayoutOnUnload, setLiveViewport, useCanvas, viewport } from './store'
 import { toUrl } from './widgets/web'
@@ -32,12 +33,12 @@ g.fetch = async (url: string, init?: { method?: string; body?: string; keepalive
 const win = (over: Partial<CanvasWindow> = {}): CanvasWindow => ({
   id: 'w1', canvas_id: 'c1', kind: 'chat', ref_id: null, project_id: null, title: '',
   x: 100, y: 120, w: 400, h: 300, z: 0, state: 'normal', restore_bounds: null, popout_bounds: null,
-  pinned: 0, config: {}, created_at: 0, updated_at: 0, ...over
+  pinned: 0, opacity: 1, config: {}, created_at: 0, updated_at: 0, ...over
 })
 
-const canvas = (id: string, windows: CanvasWindow[]): Canvas => ({
+const canvas = (id: string, windows: CanvasWindow[], over: Partial<Canvas> = {}): Canvas => ({
   id, name: id, project_id: null, position: 0, snap_mode: 'both', grid_size: 16,
-  zoom: 1, pan_x: 0, pan_y: 0, wallpaper: '', created_at: 0, updated_at: 0, windows
+  zoom: 1, pan_x: 0, pan_y: 0, wallpaper: '', locked: 0, created_at: 0, updated_at: 0, windows, ...over
 })
 
 const seed = (...cs: Canvas[]): void => {
@@ -207,6 +208,55 @@ test('the unload flush writes nothing when no geometry is dirty', () => {
   assert.deepEqual(calls, [])
 })
 
+// ---- a locked space is frozen: geometry in, and nothing out ------------------------
+
+test('a locked space refuses every geometry change', async () => {
+  seed(canvas('c1', [win({ id: 'w1', x: 100, y: 120 })], { locked: 1 }))
+  const st = useCanvas.getState()
+
+  st.setViewport('c1', { zoom: 2, pan_x: -300 })
+  assert.equal(useCanvas.getState().canvases['c1'].zoom, 1)
+
+  // A rect that somehow moved is not written back either: there is nothing to persist.
+  st.patchWindow('w1', { x: 999 })
+  st.markLayoutDirty(['w1'])
+  await st.flushLayout()
+  assert.deepEqual(layoutPuts(), [])
+
+  await st.setWindowState('w1', 'minimized')
+  assert.equal(rowOf('c1', 'w1').state, 'normal')
+
+  assert.equal(await st.openWindow('note'), null)
+  await st.closeWindow('w1')
+  assert.equal(useCanvas.getState().canvases['c1'].windows.length, 1)
+
+  st.tidyUp()
+  await st.deleteSpace('c1')
+  assert.ok(useCanvas.getState().canvases['c1'], 'a locked space cannot be deleted either')
+  // Every refusal was local: nothing above reached the backend at all.
+  assert.deepEqual(calls, [])
+})
+
+test('unlocking gives the space back', async () => {
+  seed(canvas('c1', [win({ id: 'w1' })], { locked: 1 }))
+  const st = useCanvas.getState()
+  st.toggleLock()
+  assert.equal(useCanvas.getState().canvases['c1'].locked, 0)
+  assert.equal(calls.at(-1)?.url, '/canvases/c1')
+
+  await useCanvas.getState().setWindowState('w1', 'minimized')
+  assert.equal(rowOf('c1', 'w1').state, 'minimized')
+})
+
+test('a locked space still takes focus, titles and config: only geometry is frozen', async () => {
+  seed(canvas('c1', [win({ id: 'w1' })], { locked: 1 }))
+  const st = useCanvas.getState()
+  st.focusWindow('w1')
+  assert.equal(useCanvas.getState().focusedWindowId, 'w1')
+  await st.setWindowConfig('w1', { url: 'https://example.com' })
+  assert.deepEqual(rowOf('c1', 'w1').config, { url: 'https://example.com' })
+})
+
 // ---- why the marquee selection has to be filtered to the active space --------------
 
 test('an id from another space really does resolve and delete, which is the hazard', async () => {
@@ -217,6 +267,34 @@ test('an id from another space really does resolve and delete, which is the haza
   assert.equal(useCanvas.getState().canvases['c1'].windows.length, 0)
 })
 
+// ---- pop-out transparency ---------------------------------------------------------
+
+test('nextOpacity walks the rungs and stops at both ends', () => {
+  assert.equal(nextOpacity(1, 1), 0.9)
+  assert.equal(nextOpacity(0.9, 1), 0.75)
+  assert.equal(nextOpacity(0.3, 1), 0.3, 'already at the most transparent rung')
+  assert.equal(nextOpacity(0.75, -1), 0.9)
+  assert.equal(nextOpacity(1, -1), 1, 'already opaque')
+  // A level the slider left between rungs still moves, in the direction asked.
+  assert.equal(nextOpacity(0.55, 1), 0.45)
+  assert.equal(nextOpacity(0.55, -1), 0.6)
+  assert.equal(clampOpacity(0.05), 0.2, 'the floor holds')
+  assert.equal(clampOpacity('nonsense'), 1)
+})
+
+test('setWindowOpacity clamps, patches the row and tells main', async () => {
+  seed(canvas('c1', [win({ id: 'w1' })]))
+  const asked: number[] = []
+  const os = (g.window as { os: Record<string, unknown> }).os
+  os.popout = { setOpacity: (_id: string, o: number) => void asked.push(o) }
+  await useCanvas.getState().setWindowOpacity('w1', 0.6)
+  assert.equal(rowOf('c1', 'w1').opacity, 0.6)
+  await useCanvas.getState().setWindowOpacity('w1', 0)
+  assert.equal(rowOf('c1', 'w1').opacity, 0.2, 'below the floor lands on the floor')
+  assert.deepEqual(asked, [0.6, 0.2])
+  assert.equal(calls.filter((c) => c.method === 'PUT' && c.url.includes('/windows/w1')).length, 2)
+})
+
 test('filtering to the active canvas is what stops it', () => {
   seed(canvas('c1', [win({ id: 'w1' }), win({ id: 'w2' }), win({ id: 'w3' })]), canvas('c2', [win({ id: 'w9', canvas_id: 'c2' })]))
   const selected = ['w1', 'w2', 'w3']
@@ -225,4 +303,32 @@ test('filtering to the active canvas is what stops it', () => {
   // The guard Canvas.tsx applies before closing anything.
   const here = new Set((s.activeCanvasId ? s.canvases[s.activeCanvasId]?.windows ?? [] : []).map((w) => w.id))
   assert.deepEqual(selected.filter((id) => here.has(id)), [])
+})
+
+// ---- why the frames are not rendered in the store's z order -------------------------
+
+test('raising a window reorders the store but never the rendered frames', () => {
+  seed(
+    canvas('c1', [
+      win({ id: 'a', z: 0, created_at: 1 }),
+      win({ id: 'b', z: 1, created_at: 2 }),
+      win({ id: 'c', z: 2, created_at: 3 })
+    ])
+  )
+  const stored = (): string[] => useCanvas.getState().canvases['c1'].windows.map((w) => w.id)
+  const rendered = (): string[] => renderOrder(useCanvas.getState().canvases['c1'].windows).map((w) => w.id)
+  assert.deepEqual(rendered(), ['a', 'b', 'c'])
+
+  // A click on the bottom window: focusWindow's raise, without the pointerup defer or the POST.
+  useCanvas.getState().patchWindow('a', { z: 3 })
+  // The store stays sorted by z -- the live cap and every topmost-first walk depend on that.
+  assert.deepEqual(stored(), ['b', 'c', 'a'])
+  // The DOM does not follow it. A reordered keyed child is re-inserted, and re-insertion restarts
+  // `win-open` and reloads any iframe or <webview> inside: that is the "reload" a click looked like.
+  assert.deepEqual(rendered(), ['a', 'b', 'c'])
+})
+
+test('a minimized window is the only one renderOrder drops', () => {
+  seed(canvas('c1', [win({ id: 'a', created_at: 1 }), win({ id: 'b', created_at: 2, state: 'minimized' })]))
+  assert.deepEqual(renderOrder(useCanvas.getState().canvases['c1'].windows).map((w) => w.id), ['a'])
 })

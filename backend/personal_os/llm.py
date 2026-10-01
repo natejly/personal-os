@@ -43,6 +43,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     ),
     "extractionModel": "",
     "autoLearn": True,
+    # Bank long messages the user writes as style samples and keep their voice profile current (style.py).
+    # Independent of autoLearn: wanting the app to learn facts is not the same as wanting it to copy your voice.
+    "learnStyle": True,
     "theme": "dark",
     "mode": "classic",
     "gatherShortcut": "Control+Alt+Command+Space",
@@ -58,6 +61,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "maxRunCost": 0.50,
     # Hosts fetch_url may still read once a reply has touched untrusted content (registrable-suffix match).
     "fetchAllowlist": [],
+    # Undo window on outgoing mail (outbox.py). `seconds` is clamped to 60-120 on read.
+    "gmailSendHold": {"enabled": True, "seconds": 90},
     "braveApiKey": "",
     "tavilyApiKey": "",
     # {model: {"input": $/M tokens, "output": $/M tokens}} overrides for cost accounting (proxy prices are used otherwise)
@@ -70,7 +75,11 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "activity": {"enabled": False},
     # Google Tasks <-> todos sync. Shape and defaults live in gtasks.DEFAULT_CONFIG; patched
     # through /integrations/google/tasks-sync rather than /settings for the same reason.
-    "googleTasksSync": {"enabled": False},
+    # Empty on purpose: anything named here would override that module's defaults.
+    "googleTasksSync": {},
+    # todos -> Google Calendar mirror; defaults in todocal.DEFAULT_CONFIG, patched through
+    # /integrations/google/todo-calendar.
+    "googleTodoCalendar": {},
 }
 
 

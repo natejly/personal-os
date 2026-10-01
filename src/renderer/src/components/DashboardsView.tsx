@@ -8,6 +8,7 @@ import { api, getBase } from '../lib/api'
 import { clearHandoff, peekHandoff } from '../lib/handoff'
 import SendToSpace from './SendToSpace'
 import type { Dashboard, DataSource, Widget } from '@shared/types'
+import { lines, usePageContext } from '../lib/pageContext'
 
 const KIND_LABEL: Record<string, string> = { http: 'HTTP API', rss: 'RSS / Atom', internal: 'Grain data' }
 
@@ -180,6 +181,22 @@ export default function DashboardsView(): JSX.Element {
       setGenerating(false)
     }
   }
+
+  usePageContext(() => (dash
+    ? {
+        view: 'dashboards',
+        label: `Dashboard “${dash.name}”`,
+        detail: `Dashboard \`${dash.id}\`${dash.description ? ` — ${dash.description}` : ''}. Its widgets:\n${lines(dash.widgets, (w) => `${w.title} (\`${w.id}\`, ${w.kind})${w.prompt ? ` — asked for: ${w.prompt}` : ''}`)}`,
+        refs: [{ kind: 'dashboard', id: dash.id, name: dash.name }, ...dash.widgets.slice(0, 20).map((w) => ({ kind: 'widget', id: w.id, name: w.title }))],
+        hints: ['Add a widget for this week\u2019s numbers', 'What is this dashboard missing?']
+      }
+    : {
+        view: 'dashboards',
+        label: 'Dashboards',
+        detail: list.length ? `Dashboards:\n${lines(list, (d) => `${d.name} (\`${d.id}\`, ${d.widget_count ?? 0} widgets)`)}` : 'No dashboards yet.',
+        refs: list.slice(0, 40).map((d) => ({ kind: 'dashboard', id: d.id, name: d.name })),
+        hints: ['Build me a dashboard for my week']
+      }), [dash, list])
 
   return (
     <main className="page dash-page">

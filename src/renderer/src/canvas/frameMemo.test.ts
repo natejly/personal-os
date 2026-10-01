@@ -9,7 +9,7 @@ import WindowFrame, { sameFrameProps } from './WindowFrame'
 const win = (over: Partial<CanvasWindow> = {}): CanvasWindow => ({
   id: 'w1', canvas_id: 'c1', kind: 'chat', ref_id: 'conv1', project_id: null, title: '',
   x: 10, y: 20, w: 520, h: 640, z: 3, state: 'normal', restore_bounds: null, popout_bounds: null,
-  pinned: 0, config: {}, created_at: 0, updated_at: 0, ...over
+  pinned: 0, opacity: 1, config: {}, created_at: 0, updated_at: 0, ...over
 })
 
 const ring = (id: string | null): JSX.Element => createElement(StatusRing, { conversationId: id })

@@ -19,6 +19,7 @@ const api: GrainApi = {
     close: (windowId: string) => ipcRenderer.invoke('popout:close', windowId),
     focus: (windowId: string) => ipcRenderer.invoke('popout:focus', windowId),
     setPinned: (windowId: string, pinned: boolean) => ipcRenderer.invoke('popout:set-pinned', windowId, pinned),
+    setOpacity: (windowId: string, opacity: number) => ipcRenderer.invoke('popout:set-opacity', windowId, opacity),
     setMinSize: (windowId: string, minWidth: number, minHeight: number) =>
       ipcRenderer.invoke('popout:set-min-size', windowId, minWidth, minHeight),
     list: () => ipcRenderer.invoke('popout:list'),

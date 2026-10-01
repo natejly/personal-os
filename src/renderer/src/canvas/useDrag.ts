@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, type PointerEvent as ReactPointerEvent, type RefObject } from 'react'
 import type { CanvasWindow, Rect } from '@shared/types'
-import { useCanvas, viewport, viewportPoint } from './store'
+import { spaceLocked, useCanvas, viewport, viewportPoint } from './store'
 import {
   EDGE_HOLD_MS, clampSize, constrain, edgeZone, guideLines, resizeRect, snapMove, snapResize, zoneRect,
   type AppliedGuide, type GapPill, type Handle, type Point, type Size, type SnapContext, type WindowRect, type Zone
@@ -44,10 +44,16 @@ const IDLE: DragOverlay = { windowId: null, mode: null, guides: [], gaps: [], zo
 // The standalone `translate` property, not `transform`: the win-open/close animations keyframe
 // `transform`, and an animation on `transform` would replace an inline translate for its whole
 // duration — every new window played its opening at the plane origin, then slid home.
+/**
+ * Geometry is rounded on the way to the DOM only. A drag divides the pointer delta by the zoom, so a
+ * window settles on coordinates like 311.4 -- and a box at a fractional pixel smears the text inside
+ * it across two. The store keeps the exact rect (snapping and the guides are computed from it); this is
+ * the presentation layer deciding that half a pixel of position is worth less than sharp glyphs.
+ */
 export const rectStyle = (r: Rect): { translate: string; width: string; height: string } => ({
-  translate: `${r.x}px ${r.y}px`,
-  width: `${r.w}px`,
-  height: `${r.h}px`
+  translate: `${Math.round(r.x)}px ${Math.round(r.y)}px`,
+  width: `${Math.round(r.w)}px`,
+  height: `${Math.round(r.h)}px`
 })
 
 /** The one way a window's geometry reaches the DOM, so the drag and React agree on the convention. */
@@ -230,6 +236,8 @@ const onKey = (e: KeyboardEvent): void => {
 
 const begin = (e: ReactPointerEvent, win: CanvasWindow, o: DragOptions, handle: Handle | null): void => {
   if (live || e.button !== 0 || win.state !== 'normal') return
+  // The single gate for every route into a drag: the grip, a resize handle and the ⌘-drag shortcut.
+  if (spaceLocked(win.canvas_id)) return
   const node = o.node.current
   if (!node) return
   e.preventDefault()

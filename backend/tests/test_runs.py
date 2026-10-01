@@ -22,13 +22,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import httpx  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
+from personal_os import app as app_mod  # noqa: E402
+from personal_os import learn as learn_mod  # noqa: E402
 from personal_os import llm  # noqa: E402
 from personal_os.app import AUTH_TOKEN, app, bus  # noqa: E402
 from personal_os.runs import QUEUE_MAX, RING, Run  # noqa: E402
 
 # The ChatEvent union in src/shared/types.ts. Nothing may leave the bus that is not one of these.
 CHAT_EVENTS = {"user_message", "assistant_message", "removed_message", "title", "delta", "tool_call",
-               "tool_result", "span", "done", "learned", "learn_error", "error", "taint"}
+               "tool_result", "span", "done", "learned", "learn_error", "error", "taint", "plan"}
 
 client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
 
@@ -281,6 +283,40 @@ def test_steer_folds_into_the_live_run() -> None:
     j("POST", "/conversations/nope/steer", {"content": "x"}, expect=404)
 
 
+def test_the_learn_tail_does_not_hold_the_conversation() -> None:
+    """Auto-learn no longer runs inside the run: the exchange goes to learn.LearnWorker and the run
+    ends at its `done` (see test_learn_async.py). So a held-up extraction must not keep the
+    conversation locked — the reply is persisted, and the next message starts its own run at once.
+    """
+    full = script(4)
+    gate = threading.Event()
+
+    async def _gated_learn(**kw: Any) -> dict[str, list[Any]]:
+        await asyncio.get_running_loop().run_in_executor(None, gate.wait)
+        return {"memories": [], "nodes": [], "edges": []}
+
+    real, learn_mod.learn_from_exchange = learn_mod.learn_from_exchange, _gated_learn
+    client.put("/settings", json={"autoLearn": True, "baseUrl": ""})
+    cid = new_conv()
+    try:
+        j("POST", f"/conversations/{cid}/chat", {"content": "hi"})
+        drain(cid)
+        check(message(cid)["content"] == full, "the whole reply is persisted before the tail starts")
+        late = client.post(f"/conversations/{cid}/steer", json={"content": "late"})
+        check(late.status_code == 409, f"a steer after the reply is refused, not swallowed, got {late.status_code}")
+        check(len(j("GET", f"/conversations/{cid}")["messages"]) == 2, "and it left no unanswered message behind")
+
+        nxt = client.post(f"/conversations/{cid}/chat", json={"content": "next"})
+        check(nxt.status_code == 200, f"a new message starts its own run instead of a 409, got {nxt.status_code}")
+        check(bool(nxt.json()["run_id"]), "and it is a run of its own, not the first one resumed")
+        drain(cid)
+    finally:
+        gate.set()
+        learn_mod.learn_from_exchange = real
+        client.put("/settings", json={"autoLearn": False, "baseUrl": ""})
+    drain(cid)
+
+
 async def _detach_mid_run() -> tuple[str, str, str]:
     """Attach two clients, drop both mid-reply, and let the run finish alone."""
     full = script(30, 0.03)
@@ -356,7 +392,7 @@ def test_an_overflowed_subscriber_reconnects_without_a_gap() -> None:
 
 TESTS = [test_post_starts_a_background_run, test_second_post_conflicts, test_two_clients_see_the_same_events,
          test_late_client_replays_from_the_ring, test_event_names_are_the_chatevent_union, test_stop_ends_the_run,
-         test_steer_folds_into_the_live_run,
+         test_steer_folds_into_the_live_run, test_the_learn_tail_does_not_hold_the_conversation,
          test_run_survives_every_subscriber_leaving, test_an_overflowed_subscriber_reconnects_without_a_gap,
          test_shutdown_cancels_a_live_run_and_keeps_its_text]
 

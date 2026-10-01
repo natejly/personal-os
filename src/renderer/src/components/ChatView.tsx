@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { PanelLeftOpen, ChevronDown, RefreshCw, Pencil, SlidersHorizontal } from 'lucide-react'
+import type { Effort } from '@shared/types'
 import { useStore, useProject, useConversation, useIsStreaming, useStreamingMessageId } from '../store'
 import ProjectChip from './ProjectChip'
 import MessageView from './Message'
 import Composer from './Composer'
 import ContextDrawer from './ContextDrawer'
+import PlanPanel from './PlanPanel'
 import SendToSpace from './SendToSpace'
+import { clip, usePageContext } from '../lib/pageContext'
 
 function ModelPicker({ value, onChange }: { value: string; onChange: (m: string) => void }): JSX.Element {
   const models = useStore((s) => s.models)
@@ -15,6 +18,24 @@ function ModelPicker({ value, onChange }: { value: string; onChange: (m: string)
     <label className="model-picker" title={modelsError ?? 'Model (served via LiteLLM)'}>
       <select aria-label="Model" value={value} onChange={(e) => onChange(e.target.value)}>
         {options.map((m) => <option key={m.id} value={m.id}>{m.id}</option>)}
+      </select>
+      <ChevronDown size={14} />
+    </label>
+  )
+}
+
+const EFFORTS: Effort[] = ['default', 'low', 'medium', 'high']
+
+/**
+ * Reasoning effort, next to the model it belongs with. A chat window has always had this control; the
+ * page did not, so the only way to raise effort was to open the chat as a widget. `setChatSettings`
+ * parks the choice on `draftEffort` while the chat is still a draft.
+ */
+function EffortPicker({ value, onChange }: { value: Effort; onChange: (e: Effort) => void }): JSX.Element {
+  return (
+    <label className="model-picker effort-picker" title="Reasoning effort">
+      <select aria-label="Reasoning effort" value={value} onChange={(e) => onChange(e.target.value as Effort)}>
+        {EFFORTS.map((x) => <option key={x} value={x}>{x === 'default' ? 'Effort: default' : `Effort: ${x}`}</option>)}
       </select>
       <ChevronDown size={14} />
     </label>
@@ -38,13 +59,15 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   const sidebarOpen = useStore((s) => s.sidebarOpen)
   const contextOpen = useStore((s) => s.contextOpen)
   const draftProjectId = useStore((s) => s.draftProjectId)
+  const draftEffort = useStore((s) => s.draftEffort)
   const project = useProject(convo?.project_id ?? draftProjectId)
-  const { toggleSidebar, toggleContext, setChatModel, renameChat, regenerate } = useStore()
+  const { toggleSidebar, toggleContext, setChatModel, setChatSettings, renameChat, regenerate } = useStore()
   const scrollRef = useRef<HTMLDivElement>(null)
   const [stick, setStick] = useState(true)
   const [editingTitle, setEditingTitle] = useState(false)
 
   const model = convo?.model ?? settings.defaultModel
+  const effort = convo?.settings?.effort ?? draftEffort
   const msgs = convo?.messages ?? []
   const lastLen = msgs[msgs.length - 1]?.content.length ?? 0
 
@@ -58,6 +81,17 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   }
 
   const last = msgs[msgs.length - 1]
+
+  // Only the full-window chat is a "page"; a chat window on the canvas is one of many on screen.
+  usePageContext(() => (conversationId ? undefined : {
+    view: 'chat',
+    label: convo ? `Chat “${convo.title}”` : 'Chat',
+    detail: convo
+      ? `The user is reading this conversation (\`${convo.id}\`). Its last turns:\n\n${clip(msgs.slice(-6).map((m) => `**${m.role}**: ${m.content}`).join('\n\n'), 3000)}`
+      : 'An empty chat, nothing sent yet.',
+    refs: convo ? [{ kind: 'conversation', id: convo.id, name: convo.title }] : [],
+    hints: convo ? ['Summarise this conversation', 'What did we decide?'] : []
+  }), [conversationId, convo?.id, convo?.title, msgs.length, lastLen])
 
   return (
     <main className="chat">
@@ -79,7 +113,8 @@ export default function ChatView({ conversationId }: { conversationId?: string }
           <SendToSpace items={[{ kind: 'chat', refId: convo?.id }]} disabled={!convo?.id} />
           <ProjectChip projectId={convo?.project_id ?? draftProjectId} />
           <ModelPicker value={model} onChange={(m) => void setChatModel(m, conversationId)} />
-          <button className={`icon-btn ${contextOpen ? 'on' : ''}`} title="Context panel (⌘I)" aria-label="Toggle context panel" aria-pressed={contextOpen} onClick={toggleContext}><SlidersHorizontal size={16} /></button>
+          <EffortPicker value={effort} onChange={(e) => void setChatSettings({ effort: e }, conversationId)} />
+          <button className={`icon-btn ${contextOpen ? 'on' : ''}`} title="Context panel (⌃⌘I)" aria-label="Toggle context panel" aria-pressed={contextOpen} onClick={toggleContext}><SlidersHorizontal size={16} /></button>
         </div>
       </header>
 
@@ -102,6 +137,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
               </div>
             )}
           </div>
+          <PlanPanel conversationId={conversationId} />
           <Composer conversationId={conversationId} />
         </div>
         {contextOpen && <ContextDrawer conversationId={conversationId} />}

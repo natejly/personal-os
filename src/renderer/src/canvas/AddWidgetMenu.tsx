@@ -6,7 +6,7 @@ import { useStore } from '../store'
 import ContextMenu, { type MenuEntry } from './Menu'
 import { WIDGETS } from './registry'
 import type { Point } from './snapping'
-import { useCanvas } from './store'
+import { useCanvas, useSpaceLocked } from './store'
 
 const noop = (): void => undefined
 const FAILED: MenuEntry[] = [{ label: "Couldn't load", disabled: true, run: noop }]
@@ -150,6 +150,8 @@ export function addWidgetEntries(opts: { canvasId: string; at?: Point }): MenuEn
 /** SpacesBar button: opens ContextMenu under itself with a header 'Add widget' + addWidgetEntries({canvasId: active}). */
 export function AddWidgetButton(): JSX.Element {
   const activeId = useCanvas((s) => (s.activeCanvasId && s.canvases[s.activeCanvasId] ? s.activeCanvasId : null))
+  // `openWindow` refuses a locked space; the button says so up front instead of opening a dead menu.
+  const locked = useSpaceLocked()
   // Remembers the space it was opened for: a space switch while it is open closes it, since an open
   // submenu's entries captured the old canvasId and would add to a space nobody is looking at.
   const [opened, setOpened] = useState<{ at: Point; canvasId: string } | null>(null)
@@ -166,8 +168,8 @@ export function AddWidgetButton(): JSX.Element {
     <>
       <button
         className="icon-btn ghost sm"
-        title="Add widget"
-        disabled={!activeId}
+        title={locked ? 'Space locked (⌃⌘L to unlock)' : 'Add widget'}
+        disabled={!activeId || locked}
         onClick={(e) => {
           const r = e.currentTarget.getBoundingClientRect()
           if (activeId) setOpened({ at: { x: r.left, y: r.bottom + 4 }, canvasId: activeId })

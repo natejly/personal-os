@@ -18,6 +18,11 @@ from typing import Any, Awaitable, Callable
 
 import httpx
 
+from . import mac
+from . import plans
+from . import outbox as outbox_mod
+from . import verify
+from .jobs import local_tz_name, parse_when, valid_cron, valid_tz
 from .learn import SELF_LABELS
 from .microvm import Sandboxes
 from .repos import Documents, Graph, Memories
@@ -29,7 +34,24 @@ log = logging.getLogger(__name__)
 
 # danger levels: safe (read-only, in-app) · writes (in-app write) · network (reads the internet)
 #                executes (sandboxed code) · external (writes to systems outside the app → asks by default)
-DEFAULT_MODE = {"safe": "on", "writes": "on", "network": "on", "executes": "on", "external": "ask"}
+#                plan (propose_plan: the call *is* an approval card, so it always asks)
+#                schedules (books future unattended work → asks by default)
+DEFAULT_MODE = {"safe": "on", "writes": "on", "network": "on", "executes": "on", "external": "ask",
+                "plan": "ask", "schedules": "ask"}
+
+# Danger levels a proposal-only run (a scheduled job: app.PROPOSAL_ONLY_KINDS) may not complete. Those calls are
+# recorded as proposals before they reach call() — this is the second gate, in the module that owns the tool
+# functions, so a new call site cannot let a background run send mail by forgetting the first one.
+# 'schedules' is here for a different reason than 'external': a job that can create jobs is a loop, and the one
+# thing this feature must not grow into is an agent that keeps itself running.
+PROPOSAL_ONLY_DANGER = ("external", "schedules")
+PROPOSAL_ONLY_REFUSED = ("{name} does something outside the app, and this is an unattended background run, so it "
+                         "cannot be executed here. It is recorded as a proposal the user accepts, edits or rejects; "
+                         "there is no way around that. Describe what you proposed and move on.")
+PROPOSAL_ONLY_REFUSED_SCHEDULE = ("{name} books future unattended work, and this is itself an unattended background "
+                                  "run: a scheduled run that can schedule runs is a loop nobody asked for. It is "
+                                  "recorded as a proposal the user accepts or rejects. Say what you proposed and "
+                                  "move on.")
 
 
 class ToolSpec:
@@ -60,6 +82,7 @@ def _obj(props: dict[str, Any], required: list[str]) -> dict[str, Any]:
 # ---- error shaping: no tracebacks to the model, always a way forward ----
 ALTERNATIVE = {
     "gmail_send": "gmail_draft, which writes the same email without sending it",
+    "gmail_outbox": "tell the user to use the Undo button on the pending send",
     "gmail_draft": "write the email text in your reply so the user can send it",
     "gmail_modify": "gmail_read, then tell the user what you would change",
     "gmail_search": "ask the user to paste the email you need",
@@ -85,10 +108,27 @@ ALTERNATIVE = {
     "sandbox_put_document": "read_document, then sandbox_write_file the excerpt you need",
     "sandbox_reset": "continue with the sandbox as it is",
     "save_memory": "state the fact in your reply so the user can keep it",
+    "writing_style": "write in plain, direct prose, or ask the user for a sample of their own writing",
+    "save_writing_sample": "tell the user they can add the passage themselves under Memory → Voice",
     "graph_add": "save_memory, or just state the relation in your reply",
+    "todo_write": "keep the remaining steps in your reply, and name the one you are on",
+    "read_tool_result": "work from the preview you already have, or call the original tool with a narrower query",
+    "skill_propose": "write the procedure out in your reply so the user can keep it themselves",
     "todo_add": "list the items in your reply so the user can add them",
     "todo_delete": "todo_update(done=true)",
     "board_add_card": "todo_add",
+    "find_files": "search_documents for files the user uploaded, or ask the user where the file is",
+    "read_local_file": "ask the user to upload the file or paste the text",
+    "write_local_file": "put the text in your reply so the user can save it themselves",
+    "move_local_file": "tell the user which file to move and where",
+    "trash_local_file": "tell the user which file to drag to the Trash",
+    "run_shortcut": "tell the user which Shortcut to run and with what input",
+    "list_shortcuts": "ask the user for the exact Shortcut name",
+    "open_page": "fetch_url, which reads the page without running its scripts",
+    "propose_plan": "make the calls one at a time; each consequential one asks the user on its own",
+    "schedule_task": "todo_add with a due date, so the user is reminded and decides when to act",
+    "cancel_scheduled_task": "scheduled_tasks, then tell the user which one to switch off in the Agent inbox",
+    "scheduled_tasks": "ask the user what they have scheduled",
 }
 
 
@@ -104,6 +144,29 @@ def tool_error(message: str, *, field: str | None = None, expected: str | None =
     if alternative:
         e["try_instead"] = alternative
     return e
+
+
+UNVERIFIED_ALTERNATIVE = ("tell the user it is unconfirmed and ask them to check; do NOT repeat the write, "
+                          "because it may well have landed")
+
+
+def unverified(name: str, out: dict[str, Any]) -> dict[str, Any]:
+    """Turn an unproven external write into a failed tool call, keeping the payload.
+
+    `error` is the only channel the chat loop treats as "this did not succeed": it is what makes the
+    UI refuse to render the row as success and what the model is handed back. So an unverified write
+    goes down it, with the ids still attached so the model can tell the user what to go and check.
+    An unverified write is still a write that may have happened — hence "do not retry".
+    """
+    v = out.get("verification")
+    return {**out, "error": verify.tool_error_text(name, v), "try_instead": UNVERIFIED_ALTERNATIVE}
+
+
+def checked(name: str, out: Any) -> Any:
+    """Pass a google.py result through, unless its read-back failed to prove the write."""
+    if not isinstance(out, dict) or out.get("error") or "verification" not in out:
+        return out
+    return out if verify.ok(out["verification"]) else unverified(name, out)
 
 
 def denied(name: str, reason: str) -> dict[str, Any]:
@@ -288,11 +351,19 @@ async def guarded_request(client: httpx.AsyncClient, method: str, url: str, *, h
 
 class Toolbox:
     def __init__(self, memories: Memories, graph: Graph, documents: Documents, settings_fn: Callable[[], dict[str, Any]], todos: Any = None, google: Any = None, boards: Any = None,
-                 sandboxes: Sandboxes | None = None, docs: Any = None, activity: Any = None):
+                 sandboxes: Sandboxes | None = None, docs: Any = None, activity: Any = None, outbox: Any = None,
+                 work_plans: Any = None, results: Any = None, skills: Any = None, jobs: Any = None,
+                 style: Any = None):
         self.memories, self.graph, self.documents, self.settings = memories, graph, documents, settings_fn
         self.todos, self.google, self.boards, self.sandboxes, self.docs, self.activity = todos, google, boards, sandboxes, docs, activity
+        self.outbox = outbox  # delayed Gmail send; gmail_send queues through it when it is wired up
+        # The todo_write artifact (working.py), not the propose_plan approval record in the `plans` module.
+        self.work_plans, self.results, self.skills = work_plans, results, skills
+        self.jobs = jobs  # scheduled tasks; the schedule_* tools are only registered when it is wired up
+        self.style = style  # the user's voice (style.py); same, for the style tools
         self.specs: dict[str, ToolSpec] = {}
         self._register()
+        self._register_working()
         if todos is not None:
             self._register_todos()
         if boards is not None:
@@ -305,6 +376,11 @@ class Toolbox:
             self._register_sandbox()
         if activity is not None:
             self._register_activity()
+        self._register_mac()
+        if jobs is not None:
+            self._register_schedule()
+        if style is not None:
+            self._register_style()
 
     def _google_ok(self) -> bool:
         return bool(self.google and self.google.status()["connected"])
@@ -316,6 +392,8 @@ class Toolbox:
             return self._google_ok() if google_ok is None else google_ok
         if spec and spec.group == "sandbox":  # needs a container runtime; the check is TTL-cached
             return self.sandboxes is not None and self.sandboxes.available()
+        if spec and name in MAC_TOOLS:
+            return _mac_available(name)
         return spec is not None
 
     # ---- permission model: mode per tool = on | ask | off ----
@@ -349,6 +427,10 @@ class Toolbox:
         """True if this tool's result carries untrusted third-party content."""
         return bool((s := self.specs.get(name)) and s.taints)
 
+    def proposes(self, name: str) -> bool:
+        """True if a proposal-only run must record this call instead of making it."""
+        return bool((s := self.specs.get(name)) and s.danger in PROPOSAL_ONLY_DANGER)
+
     def gate(self, name: str, mode: str, ctx: dict[str, Any]) -> str:
         """Effective mode for one call. Untrusted content in the run forces every external tool to ask."""
         spec = self.specs.get(name)
@@ -360,6 +442,9 @@ class Toolbox:
         spec = self.specs.get(name)
         if not spec:
             return tool_error(f"Unknown tool {name}.", alternative="use one of the tools listed in this request")
+        if ctx.get("proposal_only") and spec.danger in PROPOSAL_ONLY_DANGER:
+            refused = PROPOSAL_ONLY_REFUSED_SCHEDULE if spec.danger == "schedules" else PROPOSAL_ONLY_REFUSED
+            return tool_error(refused.format(name=name), alternative=ALTERNATIVE.get(name))
         try:
             out = await spec.fn(ctx, **args)
         except TypeError as e:  # backstop: signature mismatch, wrong types
@@ -376,7 +461,9 @@ class Toolbox:
             return tool_error(f"{name}: {type(e).__name__}: {_first_line(e)}", alternative=ALTERNATIVE.get(name))
         if spec.taints and not (isinstance(out, dict) and out.get("error")):
             ctx["tainted"] = True  # monotonic: never cleared for the rest of the run
-        return out
+        # One gate for every external write: a result whose read-back did not prove the write is
+        # reported as a failure, here, so no individual tool can forget to do it.
+        return checked(name, out)
 
     # ---- tool implementations ----
     def _register(self) -> None:
@@ -567,6 +654,124 @@ class Toolbox:
             return {"iso": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "unix": int(time.time()), "timezone": time.strftime("%Z")}
         R("current_time", ToolSpec("current_time", "Get the current local date and time.", _obj({}, []), current_time, "utility", examples=[{}]))
 
+        async def propose_plan(ctx: dict[str, Any], steps: Any = None, title: str = "") -> Any:
+            """Unreachable from a chat: the plan *is* its approval card, so app.py records the plan at the approval
+            gate and answers the call from the user's decision. Only a direct toolbox.call lands here."""
+            return tool_error("propose_plan is answered by the approval gate, which is not running for this call.",
+                              alternative=ALTERNATIVE["propose_plan"])
+        R("propose_plan", ToolSpec("propose_plan", plans.PLAN_DESCRIPTION, plans.PLAN_PARAMETERS, propose_plan, "utility",
+                                   "plan", examples=plans.PLAN_EXAMPLES))
+
+    # ---- scheduled tasks: work the app runs later, on its own ----
+    def _register_schedule(self) -> None:
+        R = self.specs.__setitem__
+
+        def _iso(ts: float | None) -> str | None:
+            return time.strftime("%Y-%m-%dT%H:%M", time.localtime(ts)) if ts else None
+
+        def _row(j: dict[str, Any]) -> dict[str, Any]:
+            """One scheduled task as the model should see it: when it runs, not how the row is stored."""
+            return {"id": j["id"], "name": j["name"],
+                    "schedule": j["cron"] if j["kind"] == "cron" else f"once at {_iso(j['run_at'])}",
+                    "repeats": j["kind"] == "cron", "timezone": j["timezone"], "enabled": j["enabled"],
+                    "next_run": _iso(j["next_due_at"]), "last_run": _iso(j["last_fired_at"]),
+                    "last_error": j["last_error"]}
+
+        async def schedule_task(ctx: dict[str, Any], name: str, prompt: str, when: str | None = None,
+                                in_minutes: int | None = None, cron: str | None = None,
+                                timezone: str | None = None) -> Any:
+            if not (name or "").strip():
+                return tool_error("A scheduled task needs a short name.", field="name",
+                                  example={"name": "Chase the invoice", "prompt": "Check whether Acme replied…",
+                                           "when": "2026-10-01T15:00"})
+            if len(prompt or "") > 8000:
+                return tool_error("That prompt is too long to schedule (8000 characters max).", field="prompt",
+                                  expected="the instruction to run later, on its own")
+            if not (prompt or "").strip():
+                return tool_error("A scheduled task needs the prompt it should run.", field="prompt",
+                                  expected="what you want done then, written as an instruction to yourself")
+            tz = timezone or local_tz_name()
+            if not valid_tz(tz):
+                return tool_error(f"'{tz}' is not a timezone name.", field="timezone", expected="e.g. 'Europe/Berlin'")
+            given = [k for k, v in (("cron", cron), ("when", when), ("in_minutes", in_minutes)) if v]
+            if len(given) > 1:
+                return tool_error(f"Give one schedule, not {len(given)} ({', '.join(given)}).",
+                                  expected="`cron` for something repeating, or `when`/`in_minutes` for a one-off")
+            pid = ctx.get("project_id")
+            if cron:
+                if not valid_cron(cron):
+                    return tool_error(f"'{cron}' is not a cron expression I can read.", field="cron",
+                                      expected="five fields: minute hour day-of-month month day-of-week",
+                                      example={"name": "Weekly review", "prompt": "Write my weekly review…",
+                                               "cron": "0 17 * * 5"})
+                job = self.jobs.create(name.strip(), cron, prompt, kind="cron", timezone=tz, enabled=True, project_id=pid)
+            else:
+                if in_minutes is not None:
+                    run_at = time.time() + max(1, int(in_minutes)) * 60
+                else:
+                    run_at = parse_when(when or "", tz)
+                if run_at is None:
+                    return tool_error("I could not read that as a date and time.", field="when",
+                                      expected="an ISO-8601 local date and time, including the time of day — call "
+                                               "current_time first if you are unsure what today is",
+                                      example={"name": "Chase the invoice", "prompt": "Check whether Acme replied…",
+                                               "when": "2026-10-01T15:00"})
+                if run_at < time.time() - 60:
+                    return tool_error(f"{_iso(run_at)} has already passed.", field="when",
+                                      expected="a time in the future",
+                                      alternative="do it now instead of scheduling it")
+                job = self.jobs.create(name.strip(), "", prompt, kind="once", run_at=run_at, timezone=tz,
+                                       enabled=True, project_id=pid)
+            return {**_row(job), "scheduled": True,
+                    "note": "It will run on its own, with nobody watching. It can read and write inside Grain; "
+                            "anything that leaves the app (mail, calendar, Docs) comes back to the user as a "
+                            "proposal to accept instead of being sent. Tell the user when it will run."}
+        R("schedule_task", ToolSpec("schedule_task",
+            "Schedule work for YOU to do later, unattended — once at a given time, or repeatedly on a cron "
+            "expression. The prompt is what you will be asked to do then, so write it as a complete instruction "
+            "that stands on its own: a later run starts in a fresh conversation and cannot see this one. "
+            "Use it when the user asks for something to happen at a time ('tomorrow at 3pm, check whether they "
+            "replied', 'every Friday afternoon, write my weekly review'). For something the USER should do, use "
+            "todo_add instead — this schedules the assistant, not the person. One-off: `when` as an ISO-8601 local "
+            "date and time (call current_time first if you are unsure of today's date), or `in_minutes`. "
+            "Repeating: `cron`, five fields.",
+            _obj({"name": {"type": "string", "description": "Short label, shown in the Agent inbox"},
+                  "prompt": {"type": "string", "description": "The self-contained instruction to run later"},
+                  "when": {"type": "string", "description": "One-off: ISO-8601 local date and time, e.g. 2026-10-01T15:00"},
+                  "in_minutes": {"type": "integer", "description": "One-off, relative: run this many minutes from now"},
+                  "cron": {"type": "string", "description": "Repeating: five-field cron expression, e.g. '0 17 * * 5'"},
+                  "timezone": {"type": "string", "description": "IANA name; defaults to this machine's"}},
+                 ["name", "prompt"]), schedule_task, "schedule", "schedules",
+            examples=[{"name": "Chase the invoice", "prompt": "Check whether Acme has replied about invoice 2231; if not, draft a short follow-up.", "when": "2026-10-01T15:00"},
+                      {"name": "Weekly review", "prompt": "Write my weekly review from my todos, calendar and recent chats.", "cron": "0 17 * * 5"},
+                      {"name": "Check the build", "prompt": "Check whether the deploy finished and summarise what changed.", "in_minutes": 45}]))
+
+        async def scheduled_tasks(ctx: dict[str, Any], include_off: bool = False) -> Any:
+            rows = [_row(j) for j in self.jobs.list() if include_off or j["enabled"]]
+            return {"tasks": rows, "count": len(rows)}
+        R("scheduled_tasks", ToolSpec("scheduled_tasks",
+            "List the scheduled tasks: what runs on its own, when it next runs, and how the last run went. "
+            "By default only the ones that are switched on.",
+            _obj({"include_off": {"type": "boolean", "default": False}}, []), scheduled_tasks, "schedule", "safe",
+            examples=[{}, {"include_off": True}]))
+
+        async def cancel_scheduled_task(ctx: dict[str, Any], id: str) -> Any:
+            job = self.jobs.get(id)
+            if not job:
+                return tool_error(f"No scheduled task with id '{id}'.", field="id",
+                                  expected="an id from scheduled_tasks", alternative=ALTERNATIVE["cancel_scheduled_task"])
+            if not job["enabled"]:
+                return {**_row(job), "cancelled": False, "note": "That one was already switched off."}
+            off = self.jobs.update(id, {"enabled": False})
+            return {**_row(off or job), "cancelled": True,
+                    "note": "Switched off, not deleted: it stays in the Agent inbox, where the user can switch it "
+                            "back on or remove it."}
+        R("cancel_scheduled_task", ToolSpec("cancel_scheduled_task",
+            "Switch off a scheduled task so it stops running. It is kept, not deleted — the user can re-enable or "
+            "remove it in the Agent inbox. Ids come from scheduled_tasks.",
+            _obj({"id": {"type": "string"}}, ["id"]), cancel_scheduled_task, "schedule", "schedules",
+            examples=[{"id": "job_8f21ac"}]))
+
 
 def summarize_result(result: Any, limit: int = 1500) -> str:
     """Short JSON preview of a tool result. Never cuts mid-structure: it drops list items, or says what it cut."""
@@ -638,6 +843,84 @@ def _register_todos(self: Toolbox) -> None:
         return {"deleted": t["title"]}
     R("todo_delete", ToolSpec("todo_delete", "Delete a todo permanently by id. Prefer todo_update(done=true) to complete; delete only when the user asks to remove it.",
         _obj({"id": {"type": "string"}}, ["id"]), todo_delete, "todos", "writes", examples=[{"id": "td_8c41a2"}]))
+
+
+def _register_working(self: Toolbox) -> None:
+    """The model's own working memory: the plan artifact, result handles, and proposing a skill.
+
+    See working.py for why the plan lives outside the transcript and why a large result becomes a
+    handle; see learn.py for why a proposed skill is inert until the user approves it.
+    """
+    R = self.specs.__setitem__
+
+    if self.work_plans is not None:
+        async def todo_write(ctx: dict[str, Any], steps: list[Any]) -> Any:
+            from .working import render_plan
+
+            plan = self.work_plans.set(ctx["conversation_id"], steps)
+            rows = plan["steps"]
+            if not rows and steps:
+                return tool_error("No usable steps: each step needs a non-empty 'text'.", field="steps",
+                                  expected="a list of {text, status, note}",
+                                  example={"steps": [{"text": "Read the config", "status": "in_progress", "note": ""}]})
+            ctx["plan_changed"] = True
+            return {"steps": len(rows), "done": sum(1 for s in rows if s["status"] == "done"), "plan": render_plan(rows)}
+        R("todo_write", ToolSpec("todo_write", (
+            "Write this conversation's plan: the step list you are working from. Use it as soon as a request needs more "
+            "than two or three steps, and again after each step to move its status on (keep exactly one step "
+            "in_progress). The plan is re-sent to you at the end of every round and shown to the user as a live "
+            "checklist, so it is how you keep the thread on a long task. It is not the user's todo list — that is "
+            "todo_add/todo_list. Each call replaces the whole plan, so always send every step."),
+            _obj({"steps": {"type": "array", "description": "The whole plan, in order",
+                            "items": _obj({"text": {"type": "string", "description": "What this step does, one line"},
+                                           "status": {"type": "string", "enum": ["pending", "in_progress", "done"], "default": "pending"},
+                                           "note": {"type": "string", "description": "Short result or blocker, once known"}}, ["text"])}}, ["steps"]),
+            todo_write, "plan", "writes",
+            examples=[{"steps": [{"text": "Find the migration file", "status": "in_progress"}, {"text": "Add the column", "status": "pending"}, {"text": "Run the tests", "status": "pending"}]},
+                      {"steps": [{"text": "Find the migration file", "status": "done", "note": "db.py line 155"}, {"text": "Add the column", "status": "in_progress"}, {"text": "Run the tests", "status": "pending"}]}]))
+
+    if self.results is not None:
+        async def read_tool_result(ctx: dict[str, Any], result_id: str, offset: int = 0, limit: int = 4000) -> Any:
+            out = self.results.read(ctx["conversation_id"], result_id, offset, limit)
+            if out is None:
+                recent = [r["id"] for r in self.results.list(ctx["conversation_id"], limit=5)]
+                return tool_error(f"No stored result with id '{result_id}' in this chat.", field="result_id",
+                                  expected="the result_id from a tool result that came back as a handle",
+                                  example={"result_id": recent[0] if recent else "tr_9f1c2a84", "offset": 0},
+                                  alternative="call the tool again with a narrower query, or page the handle you do have: " + (", ".join(recent) or "none yet"))
+            return out
+        R("read_tool_result", ToolSpec("read_tool_result", (
+            "Read part of a large tool result that was stored instead of put in your context. When a tool answered with "
+            "{result_id, total_chars, shape, preview}, the full text is kept out of the conversation; read it here, "
+            "starting at offset 0 and following next_offset. `shape` tells you what is in there before you page."),
+            _obj({"result_id": {"type": "string"}, "offset": {"type": "integer", "default": 0, "description": "character offset into the stored result"},
+                  "limit": {"type": "integer", "default": 4000, "description": "characters to return, max 20000"}}, ["result_id"]),
+            read_tool_result, "context",
+            examples=[{"result_id": "tr_9f1c2a84"}, {"result_id": "tr_9f1c2a84", "offset": 4000}, {"result_id": "tr_9f1c2a84", "offset": 0, "limit": 20000}]))
+
+    if self.skills is not None:
+        async def skill_propose(ctx: dict[str, Any], name: str, description: str, procedure: str) -> Any:
+            if len((procedure or "").strip()) < 40:
+                return tool_error("The procedure is too short to be useful.", field="procedure",
+                                  expected="numbered steps describing the method, at least a few lines",
+                                  example={"name": "Reconcile the monthly invoices", "description": "When the user asks to check a month's invoices",
+                                           "procedure": "1. google_sheets_read the ledger tab\n2. gmail_search for that month's invoices\n3. compare totals and report the gaps"})
+            s = self.skills.propose(name, description, procedure, project_id=ctx.get("project_id"),
+                                    conversation_id=ctx.get("conversation_id"), source="proposed")
+            return {"candidate_id": s["id"], "name": s["name"], "status": s["status"],
+                    "note": "Saved as a candidate for the user to review in Settings → Skills. It is not active, and it "
+                            "will not reach your instructions unless the user approves it. Tell them it is waiting."}
+        R("skill_propose", ToolSpec("skill_propose", (
+            "Propose a reusable procedure (a 'skill') from a task that just went well, for the user to review. It is "
+            "stored as a candidate only: it does not change your instructions and has no effect until the user approves "
+            "it. Use it when they ask you to remember how something is done, or after finishing a multi-step task they "
+            "are likely to repeat. Describe the method, not this instance — no ids, names or dates."),
+            _obj({"name": {"type": "string", "description": "Short imperative name"},
+                  "description": {"type": "string", "description": "One line on when it applies"},
+                  "procedure": {"type": "string", "description": "Numbered steps: tools used, order, checks, pitfalls"}}, ["name", "description", "procedure"]),
+            skill_propose, "skills", "writes",
+            examples=[{"name": "Draft the weekly status mail", "description": "When the user asks for their Friday status update",
+                       "procedure": "1. calendar_events for the past week\n2. todo_list for what closed\n3. draft with gmail_draft, never send\n4. list anything still open at the end"}]))
 
 
 def _register_google(self: Toolbox) -> None:
@@ -748,10 +1031,35 @@ def _register_google(self: Toolbox) -> None:
                   {"to": "team@example.com", "subject": "Re: sprint review", "body": "Works for me.", "reply_to_message_id": "18f2c1a9b7e4d0aa"}]))
 
     async def gmail_send(ctx: dict[str, Any], to: str, subject: str, body: str) -> Any:
-        return await run(g.gmail_send, to, subject, body)
-    R("gmail_send", ToolSpec("gmail_send", "Send an email from the user's Gmail. Only when the user explicitly asked to send it.",
+        if self.outbox is None:
+            return await run(g.gmail_send, to, subject, body)
+        row = await run(self.outbox.queue, to, subject, body, None, "assistant", ctx.get("conversation_id"))
+        return outbox_mod.queued_result(row)
+    R("gmail_send", ToolSpec("gmail_send", "Queue an email to send from the user's Gmail. It is held for about a minute and a half first so the user can undo it, so it is NOT sent when this returns — say it will go out shortly, never that it is sent. Only when the user explicitly asked to send it.",
         _obj({"to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"}}, ["to", "subject", "body"]), gmail_send, "google", "external",
         examples=[{"to": "mira@example.com", "subject": "Running late", "body": "I will be 10 minutes late."}]))
+
+    async def gmail_outbox(ctx: dict[str, Any], action: str = "list", id: str | None = None) -> Any:
+        if self.outbox is None:
+            return tool_error("The send hold is not enabled, so there is no outbox.", alternative="gmail_search for what was sent")
+        if action == "cancel":
+            if not id:
+                return tool_error("cancel needs the id of a queued send.", field="id",
+                                  expected="an id from gmail_outbox(action='list')", example={"action": "cancel", "id": "a1b2c3d4"})
+            row = await run(self.outbox.cancel, id)
+            if not row:
+                return tool_error(f"Send '{id}' can no longer be cancelled — it has already gone out.", field="id",
+                                  alternative="tell the user it was sent, and offer to send a follow-up")
+            return {"cancelled": id, "to": row["to"], "subject": row["subject"], "note": "It was never sent."}
+        rows = await run(self.outbox.list)
+        waiting = [{"id": r["id"], "to": r["to"], "subject": r["subject"], "sends_in_seconds": r["seconds_left"]}
+                   for r in rows if r["status"] == "holding"]
+        return {"waiting": waiting, "count": len(waiting),
+                "recent": [{"id": r["id"], "to": r["to"], "subject": r["subject"], "status": r["status"],
+                            "verified": r["verified"], "error": r["error"]} for r in rows if r["status"] != "holding"][:10]}
+    R("gmail_outbox", ToolSpec("gmail_outbox", "The emails waiting out their undo hold before Gmail sends them: list them, or cancel one so it never goes out. Use cancel when the user changes their mind about a send you just queued. Sending cannot be hurried from here — only the user can do that.",
+        _obj({"action": {"type": "string", "enum": ["list", "cancel"], "default": "list"}, "id": {"type": "string", "description": "the queued send to cancel"}}, []), gmail_outbox, "google", "writes",
+        examples=[{}, {"action": "cancel", "id": "a1b2c3d4"}]))
 
     async def gmail_modify(ctx: dict[str, Any], message_id: str, mark_read: bool | None = None, archive: bool = False, star: bool | None = None) -> Any:
         return await run(g.gmail_modify, message_id, mark_read, archive, star)
@@ -973,14 +1281,80 @@ def _register_activity(self: Toolbox) -> None:
     R("activity_recent", ToolSpec("activity_recent", "What the user has actually been doing on their computer recently, from the local activity monitor: a live line about the current window, the durable profile of how they work, and the summarized periods. Empty when the monitor is off. Use it when the user asks what they were doing, where their time went, or to ground advice in their real workflow.",
         _obj({"hours": {"type": "number", "default": 8}}, []), activity_recent, "activity"))
 
+    async def activity_access(ctx: dict[str, Any]) -> Any:
+        """Read-only: which macOS permissions the monitor has, so the assistant can answer "why is
+        nothing being recorded?" without the user hunting through System Settings."""
+        from . import activity as act
+
+        rows = act.permissions()
+        return {
+            "signals_on": [k for k, v in (self.activity.config().get("signals") or {}).items() if v],
+            "palantir_mode": bool(self.activity.config().get("palantir")),
+            "permissions": [{"id": r["id"], "label": r["label"], "state": r["state"],
+                             "gates": r["signals"], "fix": r["fix"]} for r in rows],
+            "missing": [r["label"] for r in rows if not r["ok"]],
+            "note": "Grants live in the Activity panel; macOS attributes them to the app bundle, "
+                    "and the app has to be restarted after a grant for the keystroke tap to work.",
+        }
+    R("activity_access", ToolSpec("activity_access", "Which macOS permissions the activity monitor currently has (Accessibility, Input Monitoring, Screen Recording, browser Automation, Microphone, Full Disk Access), which signals each one gates, and what is missing. Use it when the user asks why the monitor is not recording something, or what access it has.",
+        _obj({}, []), activity_access, "activity"))
+
+    async def activity_insights(ctx: dict[str, Any], limit: int = 5) -> Any:
+        """Read-only on purpose. The assistant may bring a suggestion up in conversation, but it
+        cannot accept one on the user's behalf: applying is a button in the Activity panel."""
+        return self.activity.insights.brief(limit=int(limit))
+    R("activity_insights", ToolSpec("activity_insights", "The habits the activity monitor has noticed about how this person works, the patterns behind them, and the automation suggestions it has on offer but the user has not accepted yet. Use it when the user asks how they could save time, what you have noticed about their workflow, or what to automate - and when you are about to suggest a workflow change, so you can ground it in their real patterns instead of guessing. Read-only: never treat a suggestion as approved.",
+        _obj({"limit": {"type": "integer", "default": 5}}, []), activity_insights, "activity"))
+
     async def activity_pause(ctx: dict[str, Any], minutes: float = 30.0) -> Any:
         return {"paused_until": self.activity.pause(minutes)["pause_until"]}
     R("activity_pause", ToolSpec("activity_pause", "Pause the activity monitor for a while, so nothing about the user's screen, typing or audio is recorded. Use it whenever the user asks you to stop watching.",
         _obj({"minutes": {"type": "number", "default": 30}}, []), activity_pause, "activity", "writes"))
 
 
+Toolbox._register_working = _register_working  # type: ignore[attr-defined]
+
+
+def _register_style(self: Toolbox) -> None:
+    """The user's voice (style.py). Read it before drafting; bank writing they point at as theirs."""
+    R = self.specs.__setitem__
+
+    async def writing_style(ctx: dict[str, Any]) -> Any:
+        p = self.style.for_context(ctx["project_id"])
+        if not p or not (p["summary"] or p["guidelines"]):
+            return {"profile": None,
+                    "note": "No writing-style profile yet. Write in plain, direct prose, and ask the user for a "
+                            "sample of their own writing if matching their voice matters."}
+        return {"scope": "project" if p["project_id"] else "personal", "summary": p["summary"], "traits": p["traits"],
+                "guidelines": p["guidelines"], "phrases": p["phrases"], "avoid": p["avoid"],
+                "learned_from_samples": p["sample_count"], "hand_edited": bool(p["edited"]),
+                "note": "Match this voice in text the user will send as their own. Keep your own voice when replying to them."}
+    R("writing_style", ToolSpec("writing_style", (
+        "The user's writing style profile: how they write, as guidelines, traits and characteristic phrasings. Call it "
+        "before drafting anything that goes out under their name (email, a message, a doc, a post) when the style block "
+        "is not already in your context, so the draft sounds like them rather than like you."),
+        _obj({}, []), writing_style, "style", examples=[{}]))
+
+    async def save_writing_sample(ctx: dict[str, Any], text: str, personal: bool = True) -> Any:
+        s = self.style.add_sample(None if personal else ctx["project_id"], text, source="chat", check=False)
+        if not s:
+            return tool_error("Empty sample.", field="text", expected="a passage the user wrote, at least a short paragraph")
+        return {"saved": s["id"], "chars": s["chars"],
+                "note": "Banked as evidence of their voice. The profile refreshes on its own; the user can review or "
+                        "delete samples under Memory → Voice."}
+    R("save_writing_sample", ToolSpec("save_writing_sample", (
+        "Bank a passage the USER wrote as a sample of their writing style, so future drafts can match their voice. Use "
+        "it when they paste their own writing and ask you to write like that, or point at something as 'how I write'. "
+        "Never pass your own text, text from a document or web page, or anything written by someone else."),
+        _obj({"text": {"type": "string", "description": "The user's own writing, verbatim"},
+              "personal": {"type": "boolean", "description": "true = their voice everywhere, false = only this project's voice", "default": True}}, ["text"]),
+        save_writing_sample, "style", "writes",
+        examples=[{"text": "Hey — quick one. We pushed the launch to Tuesday…", "personal": True}]))
+
+
 Toolbox._register_todos = _register_todos  # type: ignore[attr-defined]
 Toolbox._register_boards = _register_boards  # type: ignore[attr-defined]
+Toolbox._register_style = _register_style  # type: ignore[attr-defined]
 Toolbox._register_google = _register_google  # type: ignore[attr-defined]
 Toolbox._register_sandbox = _register_sandbox  # type: ignore[attr-defined]
 
@@ -1092,3 +1466,128 @@ def _register_docs(self: Toolbox) -> None:
 
 Toolbox._register_docs = _register_docs  # type: ignore[attr-defined]
 Toolbox._register_activity = _register_activity  # type: ignore[attr-defined]
+
+
+# ---------------- the rest of the Mac: Spotlight, Shortcuts, offscreen pages ----------------
+FILE_TOOLS = ("read_local_file", "write_local_file", "move_local_file", "trash_local_file")
+MAC_TOOLS = ("find_files", "list_shortcuts", "run_shortcut", "open_page", *FILE_TOOLS)
+
+
+def _mac_available(name: str) -> bool:
+    if name == "open_page":  # the loader lives in the Electron main process; the backend alone cannot render a page
+        return mac.page_bridge.connected
+    if name in FILE_TOOLS:  # plain file system work: no Spotlight, no Shortcuts, no platform check
+        return True
+    if not mac.is_mac():
+        return False
+    return mac.has_binary("mdfind" if name == "find_files" else "shortcuts")
+
+
+def _register_mac(self: Toolbox) -> None:
+    R = self.specs.__setitem__
+
+    async def find_files(ctx: dict[str, Any], query: str, name_only: bool = False, folders: list[str] | None = None, limit: int = 20) -> Any:
+        try:
+            return await mac.mdfind(query, folders=folders, name_only=bool(name_only), limit=limit)
+        except mac.LocalPathError as e:
+            return tool_error(f"find_files: {e}", field="folders", expected="folders inside the home folder, e.g. ~/Downloads",
+                              example={"query": "lease agreement", "folders": ["~/Documents"]}, alternative=ALTERNATIVE["find_files"])
+        except ValueError as e:
+            return tool_error(f"find_files: {e}", field="query", example={"query": "invoice 2026", "name_only": True})
+    R("find_files", ToolSpec("find_files", "Spotlight search of the user's files on this Mac (default scope: ~/Desktop and ~/Documents). Matches contents and metadata, or file names only with name_only. Returns paths with kind, size and modified time; read one with read_local_file.",
+        _obj({"query": {"type": "string", "description": "Words to look for, or a Spotlight query such as kMDItemContentType == 'com.adobe.pdf'"},
+              "name_only": {"type": "boolean", "default": False, "description": "Match file names only"},
+              "folders": {"type": "array", "items": {"type": "string"}, "description": "Search these folders instead, e.g. ~/Downloads"},
+              "limit": {"type": "integer", "default": 20}}, ["query"]), find_files, "files",
+        examples=[{"query": "lease agreement"}, {"query": "resume", "name_only": True}, {"query": "boarding pass", "folders": ["~/Downloads"], "limit": 5}]))
+
+    async def read_local_file(ctx: dict[str, Any], path: str, offset: int = 0, length: int = 8000) -> Any:
+        try:
+            return await asyncio.to_thread(mac.read_local, path, offset, length)
+        except mac.LocalPathError as e:
+            return tool_error(f"read_local_file: {e}", field="path", expected="a path find_files returned",
+                              example={"path": "~/Documents/notes.txt"}, alternative=ALTERNATIVE["read_local_file"])
+        except ValueError as e:  # extract_text: a binary format it cannot read
+            return tool_error(f"read_local_file: {e}", field="path", expected="a text, markdown, PDF or .docx file",
+                              alternative=ALTERNATIVE["read_local_file"])
+    R("read_local_file", ToolSpec("read_local_file", "Read the text of a file on this Mac (text, markdown, code, PDF or .docx), or list a folder. Home folder only; hidden folders and ~/Library are off limits. Page through long files with offset.",
+        _obj({"path": {"type": "string", "description": "Absolute or ~/ path, usually from find_files"},
+              "offset": {"type": "integer", "default": 0}, "length": {"type": "integer", "default": 8000}}, ["path"]), read_local_file, "files",
+        examples=[{"path": "~/Documents/Lease 2026.pdf"}, {"path": "~/Desktop/notes.md", "offset": 8000}], taints=True))
+
+    def _path_error(name: str, e: Exception, **extra: Any) -> Any:
+        return tool_error(f"{name}: {e}", field="path", expected="a path inside the home folder, outside ~/Library and hidden folders",
+                          alternative=ALTERNATIVE[name], **extra)
+
+    async def write_local_file(ctx: dict[str, Any], path: str, content: str, mode: str = "create") -> Any:
+        try:
+            return await asyncio.to_thread(mac.write_local, path, content, mode)
+        except mac.LocalPathError as e:
+            return _path_error("write_local_file", e, example={"path": "~/Desktop/summary.md", "content": "# Summary\n"})
+        except ValueError as e:
+            return tool_error(f"write_local_file: {e}", field="mode", expected="create, overwrite or append",
+                              example={"path": "~/Desktop/notes.md", "content": "one more line\n", "mode": "append"})
+        except OSError as e:
+            return tool_error(f"write_local_file: {_first_line(e)}", field="path", alternative=ALTERNATIVE["write_local_file"])
+    R("write_local_file", ToolSpec("write_local_file", "Write a text file on this Mac (notes, markdown, CSV, code). Home folder only; hidden folders and ~/Library are off limits. Default mode 'create' refuses to replace an existing file: pass 'overwrite' to replace it or 'append' to add to the end. Missing parent folders are created.",
+        _obj({"path": {"type": "string", "description": "Absolute or ~/ path, e.g. ~/Desktop/notes.md"},
+              "content": {"type": "string", "description": "The full text to write"},
+              "mode": {"type": "string", "enum": list(mac.WRITE_MODES), "default": "create"}}, ["path", "content"]), write_local_file, "files", "external",
+        examples=[{"path": "~/Desktop/packing list.md", "content": "- passport\n- charger\n"},
+                  {"path": "~/Documents/log.md", "content": "\n2026-09-30: shipped\n", "mode": "append"}]))
+
+    async def move_local_file(ctx: dict[str, Any], path: str, to: str) -> Any:
+        try:
+            return await asyncio.to_thread(mac.move_local, path, to)
+        except mac.LocalPathError as e:
+            return _path_error("move_local_file", e, example={"path": "~/Downloads/scan.pdf", "to": "~/Documents/Receipts/"})
+        except OSError as e:
+            return tool_error(f"move_local_file: {_first_line(e)}", field="to", alternative=ALTERNATIVE["move_local_file"])
+    R("move_local_file", ToolSpec("move_local_file", "Move or rename a file or folder on this Mac. Give a folder as `to` to move it there keeping its name, or a full path to rename it. Refuses to replace anything that already exists.",
+        _obj({"path": {"type": "string", "description": "What to move, usually from find_files"},
+              "to": {"type": "string", "description": "Destination folder, or the new full path"}}, ["path", "to"]), move_local_file, "files", "external",
+        examples=[{"path": "~/Downloads/scan.pdf", "to": "~/Documents/Receipts/"},
+                  {"path": "~/Desktop/untitled.md", "to": "~/Desktop/lease notes.md"}]))
+
+    async def trash_local_file(ctx: dict[str, Any], path: str) -> Any:
+        try:
+            return await asyncio.to_thread(mac.trash_local, path)
+        except mac.LocalPathError as e:
+            return _path_error("trash_local_file", e, example={"path": "~/Downloads/duplicate.pdf"})
+        except OSError as e:
+            return tool_error(f"trash_local_file: {_first_line(e)}", field="path", alternative=ALTERNATIVE["trash_local_file"])
+    R("trash_local_file", ToolSpec("trash_local_file", "Move a file or folder on this Mac to the Trash. Nothing is erased: the user can put it back from the Finder. There is no tool that deletes outright, so say what you are about to trash before you do.",
+        _obj({"path": {"type": "string", "description": "What to trash, usually from find_files"}}, ["path"]), trash_local_file, "files", "external",
+        examples=[{"path": "~/Downloads/duplicate.pdf"}]))
+
+    async def list_shortcuts(ctx: dict[str, Any], folder: str | None = None) -> Any:
+        names = await mac.list_shortcuts(folder)
+        return page(names, limit=100, key="shortcuts")
+    R("list_shortcuts", ToolSpec("list_shortcuts", "List the user's Apple Shortcuts by name, optionally only one Shortcuts folder. Use it to get the exact name for run_shortcut.",
+        _obj({"folder": {"type": "string"}}, []), list_shortcuts, "mac", examples=[{}, {"folder": "Grain"}]))
+
+    async def run_shortcut(ctx: dict[str, Any], name: str, input: str | None = None, timeout: int = 60) -> Any:
+        try:
+            return await mac.run_shortcut(name, input, timeout=max(5, min(int(timeout), 300)))
+        except ValueError as e:
+            return tool_error(f"run_shortcut: {e}", field="name", example={"name": "Add to Reading List", "input": "https://example.com"})
+    R("run_shortcut", ToolSpec("run_shortcut", "Run one of the user's Apple Shortcuts by exact name, optionally passing text as its input, and return its output. A Shortcut acts with the permissions the user gave it (Messages, Reminders, Home…), so this is how you reach other Mac apps.",
+        _obj({"name": {"type": "string", "description": "Exact name from list_shortcuts"},
+              "input": {"type": "string", "description": "Text passed as the Shortcut Input"},
+              "timeout": {"type": "integer", "default": 60, "description": "seconds, max 300"}}, ["name"]), run_shortcut, "mac", "external",
+        examples=[{"name": "Log Water"}, {"name": "Add to Reading List", "input": "https://example.com/article"}]))
+
+    async def open_page(ctx: dict[str, Any], url: str, max_chars: int = 20000) -> Any:
+        try:
+            cur, host = _check_url(url, ctx, self.settings())
+            await _resolve(host)
+        except UrlBlocked as e:
+            return tool_error(f"open_page refused {url}: {str(e).replace('fetch_url', 'open_page')}", field="url",
+                              alternative=e.alternative or ALTERNATIVE["open_page"])
+        return await mac.page_bridge.open_page(cur, max_chars=max_chars)
+    R("open_page", ToolSpec("open_page", "Load a web page in an offscreen browser (its own cookies, separate from the user's) and return its title and visible text. Use it when a page needs JavaScript and fetch_url came back empty. Read-only: it never clicks or fills in forms.",
+        _obj({"url": {"type": "string"}, "max_chars": {"type": "integer", "default": 20000}}, ["url"]), open_page, "web", "network",
+        examples=[{"url": "https://example.com/app/pricing"}], taints=True))
+
+
+Toolbox._register_mac = _register_mac  # type: ignore[attr-defined]

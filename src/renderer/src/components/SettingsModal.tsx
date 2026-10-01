@@ -7,6 +7,8 @@ import { useModal } from '../lib/useModal'
 import type { Settings, ShortcutState } from '@shared/types'
 import { ToolGlobalToggles } from './ToolPermissions'
 import GoogleSettings from './GoogleSettings'
+import SkillsReview from './SkillsReview'
+import McpSettings from './McpSettings'
 import UsageView from './UsageView'
 
 export default function SettingsModal(): JSX.Element {
@@ -19,6 +21,7 @@ export default function SettingsModal(): JSX.Element {
   const [test, setTest] = useState<{ state: 'idle' | 'testing' | 'ok' | 'fail'; msg?: string }>({ state: 'idle' })
   const [shortcut, setShortcut] = useState<ShortcutState | null>(null)
   const patch = (p: Partial<Settings>): void => setDraft((d) => ({ ...d, ...p }))
+  const hold = draft.gmailSendHold ?? { enabled: true, seconds: 90 }
   // Closing discards `draft` — Escape and the backdrop are exactly the Cancel button.
   const { titleId, backdrop, modal } = useModal(() => setSettingsOpen(false))
 
@@ -90,15 +93,48 @@ export default function SettingsModal(): JSX.Element {
             <span className="toggle-text"><b>Auto-learn</b><small>After each reply, extract memories and knowledge-graph relations.</small></span>
             <input type="checkbox" checked={draft.autoLearn} onChange={(e) => patch({ autoLearn: e.target.checked })} /><span className="switch" />
           </label>
+          <label className="toggle-row plain">
+            <span className="toggle-text"><b>Learn how you write</b><small>Bank long messages you write and docs you save as writing samples, and keep your voice profile current, so drafts sound like you. Review it under Memory → Voice.</small></span>
+            <input type="checkbox" checked={draft.learnStyle !== false} onChange={(e) => patch({ learnStyle: e.target.checked })} /><span className="switch" />
+          </label>
           <label><span>Extraction model <small className="muted">(blank = same as chat model)</small></span>
             <input list="model-options" value={draft.extractionModel} onChange={(e) => patch({ extractionModel: e.target.value })} placeholder="e.g. gpt-4o-mini" spellCheck={false} />
           </label>
         </section>
 
         <section>
+          <h3>Skills <small className="muted">(procedural memory)</small></h3>
+          <SkillsReview />
+        </section>
+
+        <section>
           <h3>Integrations</h3>
           <GoogleSettings clientId={draft.googleClientId ?? ''} clientSecret={draft.googleClientSecret ?? ''} onChange={(p) => patch(p)}
             onSaveCreds={() => saveSettings({ googleClientId: draft.googleClientId, googleClientSecret: draft.googleClientSecret })} />
+          {/* The undo window on outgoing mail. The backend clamps the number to HOLD_MIN..HOLD_MAX (outbox.py). */}
+          <div className="send-hold">
+            <label className="check">
+              <input type="checkbox" checked={hold.enabled} onChange={(e) => patch({ gmailSendHold: { ...hold, enabled: e.target.checked } })} />
+              Hold outgoing email before sending, so it can be undone
+            </label>
+            {hold.enabled && (
+              <label className="inline"><span>Hold for</span>
+                <input type="number" min={60} max={120} step={10} value={hold.seconds}
+                  onChange={(e) => patch({ gmailSendHold: { ...hold, seconds: Number(e.target.value) } })} />
+                <span>seconds</span>
+              </label>
+            )}
+            <p className="muted small">
+              Applies to the assistant and to the compose window alike. While a send is held it shows a countdown with
+              an Undo button; the assistant can cancel a send it queued, but only you can send one early.
+              Turning this off makes every send immediate and final.
+            </p>
+          </div>
+        </section>
+
+        <section>
+          <h3>Connectors</h3>
+          <McpSettings />
         </section>
 
         <section>

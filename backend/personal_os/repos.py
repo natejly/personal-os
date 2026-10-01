@@ -84,18 +84,21 @@ class Projects:
 
 
 # ---------------- Conversations ----------------
-DEFAULT_CONV_SETTINGS = {"effort": "default", "useMemory": True, "useGraph": True, "useDocuments": True, "autoLearn": True, "useTools": True, "tools": {}}
+DEFAULT_CONV_SETTINGS = {"effort": "default", "useMemory": True, "useGraph": True, "useDocuments": True, "useStyle": True, "autoLearn": True, "useTools": True, "tools": {}}
 
 
 class Conversations:
     def __init__(self, db: Database):
         self.db = db
 
-    def list(self, project_id: str | None) -> list[dict[str, Any]]:
+    def list(self, project_id: str | None, include_jobs: bool = False) -> list[dict[str, Any]]:
+        """A scheduled job's transcript is a conversation too, but it is indexed by the Agent Inbox, not the
+        sidebar: one daily job would otherwise bury the user's own chats within a month."""
         where, args = _scope_clause(project_id, include_global=False)
         with self.db.tx() as c:
             rows = c.execute(f"SELECT * FROM conversations WHERE {where} ORDER BY updated_at DESC", args).fetchall()
-        return [self._hydrate(r) for r in rows]
+        out = [self._hydrate(r) for r in rows]
+        return out if include_jobs else [c for c in out if not c["settings"].get("job_id")]
 
     def _hydrate(self, r: Any) -> dict[str, Any]:
         d = row_to_dict(r, ("settings",)) or {}

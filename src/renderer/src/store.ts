@@ -1,6 +1,7 @@
 import { create } from 'zustand'
-import type { ActivityConfig, ActivityContextFile, ActivityEvent, ActivitySignal, ActivityStatus, ActivitySummary, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocRevision, Document, FullDoc, GraphData, Memory, Message, ModelInfo, Settings, Project, RunConflict, SessionStatus, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap } from '@shared/types'
-import { api, chatStream, setBase, type Scope } from './lib/api'
+import type { ApprovalDecision, PlanEdit, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, Document, Effort, FullDoc, GraphData, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodoCalendarStatus, TodayDashboard, Recap, Job } from '@shared/types'
+import { api, backgroundStream, chatStream, setBase, type Scope } from './lib/api'
+import { currentSelection } from './lib/pageContext'
 import { finishStatus, mergeConversation, pickEvictions, reduceStatus, settleApprovals } from './sessionStatus'
 import { viewHidden } from './modules'
 
@@ -21,13 +22,20 @@ export type View = 'home' | 'chat' | 'todos' | 'calendar' | 'mail' | 'boards' | 
 export type ClassicView = Exclude<View, 'canvas'>
 /** How the Docs editor splits its panes. */
 export type DocMode = 'edit' | 'split' | 'preview'
-/** How the Memory panel lays out its two halves: the memory list and the knowledge graph. */
-export type MemoryMode = 'split' | 'list' | 'graph'
+/** How the Memory panel lays out its halves: the memory list, the knowledge graph, the voice profile. */
+export type MemoryMode = 'split' | 'list' | 'graph' | 'style'
 export type ContextTab = 'last' | 'preview' | 'trace'
 export type { Scope, SessionStatus }
 
-/** `abort` only detaches this window from the run's SSE; ending the run itself is `api.stopRun(runId)`. */
-export interface Streaming { messageId: string | null; runId: string; abort: AbortController }
+/**
+ * `abort` only detaches this window from the run's SSE; ending the run itself is `api.stopRun(runId)`.
+ *
+ * `answering` is the run still producing a reply, which is *not* the same as the SSE being open: the
+ * run goes on to auto-learn after its `done`, and that tail can outlast the reply it followed. Every
+ * busy affordance — the caret, Stop, the hidden message actions, the chart placeholders — reads
+ * `answering`, so a finished reply settles at `done` instead of at the end of the connection.
+ */
+export interface Streaming { messageId: string | null; runId: string; abort: AbortController; answering: boolean }
 
 /** One live conversation. Store-local: a running AbortController must never cross the IPC bus. */
 export interface ChatSession {
@@ -50,6 +58,31 @@ interface Toast { id: number; text: string; kind: 'info' | 'error' | 'learned' }
 const MAX_SESSIONS = 12
 const HOLD_MS = 6000
 
+/**
+ * Which folders are open in the Docs tree. localStorage rather than the backend: it is this window's
+ * view of the tree, not a fact about the docs, and it must survive a reload without a round trip.
+ */
+const EXPANDED_KEY = 'grain.docs.expandedFolders'
+
+const readExpanded = (): string[] => {
+  try {
+    const raw = JSON.parse(localStorage.getItem(EXPANDED_KEY) ?? '[]')
+    return Array.isArray(raw) ? raw.filter((p): p is string => typeof p === 'string') : []
+  } catch {
+    return []
+  }
+}
+
+const writeExpanded = (paths: string[]): string[] => {
+  try {
+    localStorage.setItem(EXPANDED_KEY, JSON.stringify(paths))
+  } catch { /* a private window still gets a working tree, it just forgets */ }
+  return paths
+}
+
+/** Writers need a scope a row can live in: 'all' and 'personal' both mean the personal voice. */
+const styleScope = (s: Scope): string | null => (s === 'all' || s === 'personal' ? null : s)
+
 const newSession = (conversation: Conversation): ChatSession =>
   ({ conversation, streaming: null, status: 'idle', finishedAt: null, pendingApprovals: 0, unread: 0, touchedAt: Date.now() })
 
@@ -65,10 +98,14 @@ export interface State {
   tools: ToolInfo[]
   google: GoogleStatus | null
   tasksSync: TasksSyncStatus | null
+  todoCalendar: TodoCalendarStatus | null
   dashboard: TodayDashboard | null
   todos: Todo[]
   recap: Recap | null
   recapLoading: boolean
+  /** The Agent Inbox on Today: what needs the user, and what the scheduled jobs did. */
+  agentInbox: AgentInbox | null
+  jobs: Job[]
 
   projects: Project[]
   personalStats: Project['stats']
@@ -81,6 +118,11 @@ export interface State {
   projectViewId: string | null
   /** Project the next new chat will be created in (null = personal). */
   draftProjectId: string | null
+  /**
+   * Reasoning effort the next new chat will be created with. A draft chat has no row to PATCH, so the
+   * header's effort picker parks its choice here and `send` applies it once the conversation exists.
+   */
+  draftEffort: Effort
   /** Scope filter used by the Memory / Graph / Documents library views. */
   libraryScope: Scope
   /** Scope the memories/graph/documents arrays are currently loaded for. */
@@ -89,6 +131,13 @@ export interface State {
   sidebarOpen: boolean
   contextOpen: boolean
   contextTab: ContextTab
+  /**
+   * The page agent (⌘I): a chat pinned to whatever view is on screen. `pageContext` is republished
+   * by the active view on every change; `pageAgentId` is the thread, created on the first send.
+   */
+  pageAgentOpen: boolean
+  pageAgentId: string | null
+  pageContext: PageContext | null
   /** Message whose execution trace the Trace tab shows (null = latest assistant reply). */
   traceMessageId: string | null
   settingsOpen: boolean
@@ -104,12 +153,26 @@ export interface State {
   graph: GraphData
   documents: Document[]
 
+  /** Each chat's plan artifact, keyed by conversation id: the checklist the assistant works from. */
+  plans: Record<string, PlanStep[]>
+  /** Procedural memory — candidates and approved skills. Loaded when the review surface opens. */
+  skills: Skill[]
+  /** Writing style for the loaded scope: the profile a chat drafts with, and the samples behind it. */
+  style: StyleState | null
+  styleSamples: StyleSample[]
+  /** An LLM re-read of the samples is in flight (the Learn now button). */
+  styleLearning: boolean
+
   /** Docs: the markdown the user writes. List rows, plus the one open in the editor. */
   docs: Doc[]
   activeDoc: FullDoc | null
   /** Ids of the docs open as tabs, most recent last. */
   docTabs: string[]
   docRevisions: DocRevision[]
+  /** Folders of the Docs tree, nested by path. Server-owned, so an empty folder survives a reload. */
+  docFolders: DocFolder[]
+  /** Paths whose children are showing. Kept in localStorage: a tree that forgets is a tree you refold every morning. */
+  expandedFolders: string[]
   /** Assistant edits awaiting review, across every doc — the sidebar badge. */
   docsPending: number
   docMode: DocMode
@@ -122,6 +185,8 @@ export interface State {
   activitySummaries: ActivitySummary[]
   activityContext: ActivityContextFile | null
   activityBusy: boolean
+  activityInsights: ActivityInsights | null
+  activityInsightsBusy: boolean
 
   init: () => Promise<void>
   loadModels: () => Promise<void>
@@ -134,6 +199,13 @@ export interface State {
   openMemory: (m?: MemoryMode) => void
   toggleSidebar: () => void
   toggleContext: () => void
+  /** ⌘I. Opening focuses the panel's composer; the thread itself waits for the first message. */
+  togglePageAgent: () => void
+  closePageAgent: () => void
+  /** Drop the current thread and start a fresh one against the page on screen. */
+  resetPageAgent: () => void
+  /** Called by the active view. Passing null means "this view has nothing to say". */
+  setPageContext: (ctx: PageContext | null) => void
   setContextTab: (t: ContextTab) => void
   openTrace: (messageId: string) => void
   setSettingsOpen: (o: boolean) => void
@@ -168,6 +240,8 @@ export interface State {
   setChatSettings: (patch: Partial<ConversationSettings>, conversationId?: string) => Promise<void>
   /** `false` when the text was refused, so the caller must keep it. Never rejects. */
   send: (text: string, conversationId?: string) => Promise<boolean>
+  /** Send from the ⌘I panel: same contract as `send`, plus the page snapshot and its own thread. */
+  sendToPageAgent: (text: string) => Promise<boolean>
   regenerate: (conversationId?: string) => Promise<void>
   stop: (conversationId?: string) => Promise<void>
 
@@ -176,8 +250,29 @@ export interface State {
   updateMemory: (id: string, patch: Parameters<typeof api.memories.update>[1]) => Promise<void>
   deleteMemory: (id: string) => Promise<void>
 
+  /** The plan of one chat. Cheap, and the `plan` stream event keeps it current after the first read. */
+  loadPlan: (conversationId: string) => Promise<void>
+  setPlanSteps: (conversationId: string, steps: PlanStep[]) => Promise<void>
+  clearPlan: (conversationId: string) => Promise<void>
+
+  refreshSkills: () => Promise<void>
+  /** Rename, edit, approve or reject. Approving is what lets a skill into the system prompt. */
+  updateSkill: (id: string, patch: Parameters<typeof api.skills.update>[1]) => Promise<void>
+  deleteSkill: (id: string) => Promise<void>
+  /** Ask the backend to distil a chat into a candidate skill for review. */
+  induceSkill: (conversationId: string) => Promise<void>
+
   refreshGraph: () => Promise<void>
   refreshDocuments: () => Promise<void>
+
+  /** Writing style, for the loaded scope. `saveStyle` marks the profile hand-edited server-side. */
+  refreshStyle: () => Promise<void>
+  saveStyle: (patch: Parameters<typeof api.style.update>[1]) => Promise<void>
+  /** Re-read the samples now. Forced, so it also refreshes a hand-edited profile. */
+  learnStyle: () => Promise<void>
+  resetStyle: (withSamples?: boolean) => Promise<void>
+  addStyleSample: (text: string) => Promise<void>
+  deleteStyleSample: (id: string) => Promise<void>
 
   /** Status only - cheap enough to poll while the Activity panel is open. */
   refreshActivity: () => Promise<void>
@@ -194,13 +289,38 @@ export interface State {
   deleteActivityEvent: (id: string) => Promise<void>
   deleteActivitySummary: (id: string) => Promise<void>
   purgeActivity: (scope: 'expired' | 'events' | 'summaries' | 'all') => Promise<void>
+  /** Ask macOS for one permission. Returns the note to show; '' when it went through silently. */
+  grantActivityPermission: (id: string, browser?: string) => Promise<void>
+  openActivitySettings: (id: string) => Promise<void>
+  /** Record everything, or put back the settings palantir mode replaced. */
+  setPalantirMode: (on: boolean) => Promise<void>
+  /** Habits noticed and automations on offer. */
+  loadActivityInsights: () => Promise<void>
+  /** `deep` runs the model pass; without it the patterns are just re-mined locally, for free. */
+  refreshActivityInsights: (deep?: boolean) => Promise<void>
+  setInsightStatus: (id: string, status: InsightStatus, note?: string) => Promise<void>
+  /** Apply one suggestion. A `prompt` action does not act: it opens a chat with the message. */
+  applyInsight: (id: string) => Promise<void>
+  forgetActivityHabit: (id: string) => Promise<void>
   refreshDashboard: () => Promise<void>
   refreshRecap: (force?: boolean) => Promise<void>
-  approveTool: (callId: string, decision: 'allow' | 'deny' | 'always_chat' | 'always_global', conversationId?: string) => Promise<void>
+  refreshAgentInbox: () => Promise<void>
+  refreshJobs: () => Promise<void>
+  /** Schedule a task: a one-off (kind 'once' + run_at) or a repeating job (cron). True if it was created. */
+  createJob: (input: Parameters<typeof api.jobs.create>[0]) => Promise<boolean>
+  deleteJob: (id: string) => Promise<void>
+  setJobEnabled: (id: string, enabled: boolean) => Promise<void>
+  runJobNow: (id: string) => Promise<void>
+  decideProposal: (id: string, accept: boolean, args?: Record<string, unknown>) => Promise<void>
+  /** `opts` carries a propose_plan card's answer: the steps being authorised (with any edits) and a note. */
+  approveTool: (callId: string, decision: ApprovalDecision, conversationId?: string, opts?: { steps?: PlanEdit[] | null; note?: string }) => Promise<void>
   refreshGoogle: () => Promise<void>
   connectGoogle: () => Promise<void>
   disconnectGoogle: () => Promise<void>
   refreshTasksSync: () => Promise<void>
+  refreshTodoCalendar: () => Promise<void>
+  setTodoCalendar: (patch: { enabled?: boolean; calendarId?: string; keepCompleted?: boolean }) => Promise<void>
+  runTodoCalendar: () => Promise<void>
   setTasksSync: (patch: { enabled?: boolean; tasklist?: string; intervalMinutes?: number }) => Promise<void>
   runTasksSync: () => Promise<void>
   refreshTodos: (scope?: Scope, includeDone?: boolean) => Promise<void>
@@ -214,7 +334,7 @@ export interface State {
   refreshDocsPending: () => Promise<void>
   openDoc: (id: string) => Promise<void>
   closeDocTab: (id: string) => void
-  createDoc: (d?: { title?: string; content?: string; project_id?: string | null }) => Promise<void>
+  createDoc: (d?: { title?: string; content?: string; project_id?: string | null; folder?: string }) => Promise<void>
   /** Type into the open doc. Buffers locally and flushes to the backend on a debounce. */
   editDoc: (content: string) => void
   /** Flush the buffer now (⌘S, switching docs, leaving the view). */
@@ -223,6 +343,15 @@ export interface State {
   setDocStar: (id: string, starred: boolean) => Promise<void>
   /** Move a doc into a folder; '' takes it out of any folder. */
   setDocFolder: (id: string, folder: string) => Promise<void>
+  refreshDocFolders: () => Promise<void>
+  createDocFolder: (path: string) => Promise<void>
+  /** Rename or move: both rewrite a folder's path, and its subtree follows. */
+  renameDocFolder: (path: string, newPath: string) => Promise<void>
+  /** Without `deleteDocs` the folder's docs move up to its parent. */
+  deleteDocFolder: (path: string, deleteDocs?: boolean) => Promise<void>
+  toggleFolder: (path: string) => void
+  /** Open every folder on the way down to `path`, so a revealed doc is actually on screen. */
+  expandTo: (path: string) => void
   deleteDoc: (id: string) => Promise<void>
   setDocMode: (m: DocMode) => void
   refreshDocRevisions: (id?: string) => Promise<void>
@@ -298,8 +427,8 @@ const share = (map: Map<string, Promise<void>>, key: string, fn: () => Promise<v
 const loads = new Map<string, Promise<void>>()
 const attaches = new Map<string, Promise<void>>()
 
-/** Every conversation mutation a stream event makes, as one new session. No side effects. */
-const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean): ChatSession => {
+/** Every conversation mutation a stream event makes, as one new session. No side effects — exported for store.test.ts. */
+export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean): ChatSession => {
   const c = s.conversation
   const msgs = c.messages ?? []
   const withMsgs = (messages: Message[]): ChatSession => ({ ...s, conversation: { ...c, messages } })
@@ -319,7 +448,7 @@ const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean): ChatSessio
         ...(held
           ? mapMsg(ev.data.id, (m) => ({ ...ev.data, content: ev.data.content || m.content }))
           : withMsgs([...msgs, ev.data])),
-        streaming: s.streaming && { ...s.streaming, messageId: ev.data.id },
+        streaming: s.streaming && { ...s.streaming, messageId: ev.data.id, answering: true },
         // A steered run opens a new segment after a `done`; the green hold belongs to the real end.
         finishedAt: null,
         unread: focused || held ? s.unread : s.unread + 1
@@ -332,7 +461,7 @@ const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean): ChatSessio
     case 'delta':
       return mapMsg(ev.data.id, (m) => ({ ...m, content: m.content + ev.data.text }))
     case 'tool_call':
-      return mapMsg(ev.data.message_id, (m) => ({ ...m, tool_events: [...(m.tool_events ?? []), { id: ev.data.id, name: ev.data.name, arguments: ev.data.arguments, result_preview: '', duration_ms: 0, error: null, pending: true, needs_approval: !!ev.data.needs_approval }] }))
+      return mapMsg(ev.data.message_id, (m) => ({ ...m, tool_events: [...(m.tool_events ?? []), { id: ev.data.id, name: ev.data.name, arguments: ev.data.arguments, result_preview: '', duration_ms: 0, error: null, pending: true, needs_approval: !!ev.data.needs_approval, forced: !!ev.data.forced, plan: ev.data.plan ?? null }] }))
     case 'tool_result':
       return mapMsg(ev.data.message_id, (m) => ({ ...m, tool_events: (m.tool_events ?? []).map((t) => (t.id === ev.data.id ? { ...ev.data, pending: false } : t)) }))
     case 'span':
@@ -341,8 +470,12 @@ const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean): ChatSessio
         const i = trace.findIndex((sp) => sp.id === ev.data.span.id)
         return { ...m, trace: i >= 0 ? trace.map((sp, j) => (j === i ? ev.data.span : sp)) : [...trace, ev.data.span] }
       })
-    case 'done':
-      return { ...mapMsg(ev.data.id, (m) => ({ ...m, error: ev.data.error, context_used: ev.data.context_used, tool_events: ev.data.tool_events?.length ? ev.data.tool_events : m.tool_events, trace: ev.data.trace?.length ? ev.data.trace : m.trace })), finishedAt: Date.now() }
+    case 'done': {
+      const done = mapMsg(ev.data.id, (m) => ({ ...m, error: ev.data.error, context_used: ev.data.context_used, tool_events: ev.data.tool_events?.length ? ev.data.tool_events : m.tool_events, trace: ev.data.trace?.length ? ev.data.trace : m.trace }))
+      // The reply is whole and persisted here. The stream stays open for the auto-learn tail, so the
+      // subscription is left alone and only `answering` drops.
+      return { ...done, streaming: done.streaming && { ...done.streaming, answering: false }, finishedAt: Date.now() }
+    }
     default:
       return s
   }
@@ -369,6 +502,7 @@ export const useStore = create<State>((set, get) => {
       } else if (action === 'settings') s.setSettingsOpen(true)
       else if (action === 'toggle-sidebar') s.toggleSidebar()
       else if (action === 'toggle-context') s.toggleContext()
+      else if (action === 'page-agent') s.togglePageAgent()
       else if (action === 'view:graph') s.openMemory('graph')
       else if (action.startsWith('view:')) s.setView(action.slice(5) as View)
       else if (action === 'upload') {
@@ -412,6 +546,36 @@ export const useStore = create<State>((set, get) => {
     void get().refreshProjects()
   }
 
+  /**
+   * Follow `/events` for the whole session. Auto-learn runs after its reply's run has ended — that
+   * is the point, the chat is free again — so its results have no conversation stream left to
+   * arrive on. The connection is re-opened for as long as the window lives, resuming from the last
+   * seq so a reconnect replays rather than skips, and backing off so a dead backend is not hammered.
+   */
+  const watchBackgroundEvents = async (): Promise<void> => {
+    let since = 0
+    let backoff = 1000
+    for (;;) {
+      try {
+        for await (const ev of backgroundStream(since)) {
+          if (ev.seq !== null) since = ev.seq
+          backoff = 1000
+          if (ev.event === 'learned') {
+            const { memories, nodes, edges } = ev.data
+            get().toast(`Learned ${memories.length} memor${memories.length === 1 ? 'y' : 'ies'}, ${nodes.length} entities, ${edges.length} relations`, 'learned')
+            if (memories.length + nodes.length + edges.length) refreshAll()
+          } else if (ev.event === 'learn_error') {
+            get().toast(`Auto-learn failed: ${ev.data.message}`, 'error')
+          }
+        }
+      } catch {
+        // A dropped or refused connection is normal here (backend restart, sleep); just retry.
+      }
+      await new Promise((r) => setTimeout(r, backoff))
+      backoff = Math.min(backoff * 2, 30000)
+    }
+  }
+
   /** Consume one run's events into a session. `attached` means the run was started by someone else. */
   const watchRun = async (convId: string, run: ChatRunStarted, from: { messageId: string | null; approvals: number; attached: boolean }): Promise<void> => {
     // One subscription per conversation. A second subscription to the same run would apply every
@@ -423,9 +587,9 @@ export const useStore = create<State>((set, get) => {
     const abort = new AbortController()
     const attached = from.attached
     clearHold(convId)
-    patchSession(convId, (s) => ({ ...s, streaming: { messageId: from.messageId, runId: run.run_id, abort }, status: settleApprovals('working', from.approvals), finishedAt: null, pendingApprovals: from.approvals, touchedAt: Date.now() }))
+    patchSession(convId, (s) => ({ ...s, streaming: { messageId: from.messageId, runId: run.run_id, abort, answering: true }, status: settleApprovals('working', from.approvals), finishedAt: null, pendingApprovals: from.approvals, touchedAt: Date.now() }))
     try {
-      for await (const ev of chatStream(convId, run.seq, abort.signal)) {
+      for await (const ev of chatStream(convId, run.seq, abort.signal, run.run_id)) {
         const focused = get().focusedConversationId === convId
         patchSession(convId, (s) => {
           const next = applyEvent(s, ev, focused)
@@ -438,12 +602,25 @@ export const useStore = create<State>((set, get) => {
             if (!ev.data.error) hold(convId)
             void get().refreshConversations()
             break
+          // Only the `remember` tool reaches here now; auto-learn reports on `/events` instead.
           case 'learned': {
-            const { memories, nodes, edges } = ev.data
-            get().toast(`Learned ${memories.length} memor${memories.length === 1 ? 'y' : 'ies'}, ${nodes.length} entities, ${edges.length} relations`, 'learned')
-            if (memories.length + nodes.length + edges.length) refreshAll()
+            const { memories, nodes, edges, updated = [], removed = [] } = ev.data
+            const parts = [`Learned ${memories.length} memor${memories.length === 1 ? 'y' : 'ies'}`]
+            if (updated.length) parts.push(`updated ${updated.length}`)
+            if (removed.length) parts.push(`forgot ${removed.length}`)
+            parts.push(`${nodes.length} entities, ${edges.length} relations`)
+            get().toast(parts.join(', '), 'learned')
+            if (memories.length + updated.length + removed.length + nodes.length + edges.length) refreshAll()
             break
           }
+          case 'plan':
+            set((st) => ({ plans: { ...st.plans, [convId]: ev.data.steps } }))
+            break
+          case 'style_learned':
+            // A banked sample is quiet; a refreshed voice profile is worth saying once.
+            if (ev.data.profile) get().toast('Updated how you write', 'learned')
+            void get().refreshStyle()
+            break
           case 'learn_error':
             get().toast(`Auto-learn failed: ${ev.data.message}`, 'error')
             break
@@ -469,7 +646,7 @@ export const useStore = create<State>((set, get) => {
    * `false` means the backend never accepted `body`, so the caller still owns the text it sent.
    * Resolves on that verdict, not at the end of the run: a composer is holding a draft on it.
    */
-  const runStream = async (convId: string, body: { content?: string; model?: string }): Promise<boolean> => {
+  const runStream = async (convId: string, body: { content?: string; model?: string; page_context?: PageContext }): Promise<boolean> => {
     let run: ChatRunStarted
     try {
       run = await api.chat(convId, body)
@@ -501,16 +678,19 @@ export const useStore = create<State>((set, get) => {
   return {
     ready: false,
     backendError: null,
-    settings: { baseUrl: '', apiKey: '', defaultModel: '', systemPrompt: '', extractionModel: '', autoLearn: true, theme: 'dark', gatherShortcut: '', tools: {}, maxToolRounds: 8, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {} },
+    settings: { baseUrl: '', apiKey: '', defaultModel: '', systemPrompt: '', extractionModel: '', autoLearn: true, learnStyle: true, theme: 'dark', gatherShortcut: '', tools: {}, maxToolRounds: 8, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {} },
     models: [],
     modelsError: null,
     tools: [],
     google: null,
     tasksSync: null,
+    todoCalendar: null,
     dashboard: null,
     todos: [],
     recap: null,
     recapLoading: false,
+    agentInbox: null,
+    jobs: [],
     projects: [],
     personalStats: undefined,
     view: 'home',
@@ -518,12 +698,15 @@ export const useStore = create<State>((set, get) => {
     memoryMode: 'split',
     projectViewId: null,
     draftProjectId: null,
+    draftEffort: 'default',
     libraryScope: 'all',
     dataScope: 'all',
     docs: [],
     activeDoc: null,
     docTabs: [],
     docRevisions: [],
+    docFolders: [],
+    expandedFolders: readExpanded(),
     docsPending: 0,
     docMode: 'split',
     docDraft: null,
@@ -531,6 +714,9 @@ export const useStore = create<State>((set, get) => {
     sidebarOpen: true,
     contextOpen: false,
     contextTab: 'last',
+    pageAgentOpen: false,
+    pageAgentId: null,
+    pageContext: null,
     traceMessageId: null,
     settingsOpen: false,
     projectModal: null,
@@ -541,12 +727,19 @@ export const useStore = create<State>((set, get) => {
     memories: [],
     graph: { nodes: [], edges: [] },
     documents: [],
+    plans: {},
+    skills: [],
+    style: null,
+    styleSamples: [],
+    styleLearning: false,
 
     activity: null,
     activityEvents: [],
     activitySummaries: [],
     activityContext: null,
     activityBusy: false,
+    activityInsights: null,
+    activityInsightsBusy: false,
 
     init: async () => {
       // Before the backend check and before the guard: a dead backend must still leave the menu
@@ -580,6 +773,8 @@ export const useStore = create<State>((set, get) => {
       void get().refreshRecap()
       void get().refreshDocsPending()
       void get().refreshActivity()
+      // One watcher per app: a pop-out would only duplicate every toast in another window.
+      if (!isPopout()) void watchBackgroundEvents()
     },
 
     loadModels: async () => {
@@ -619,6 +814,15 @@ export const useStore = create<State>((set, get) => {
     openMemory: (memoryMode) => set(memoryMode ? { view: 'memory', memoryMode } : { view: 'memory' }),
     toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
     toggleContext: () => set((s) => ({ contextOpen: !s.contextOpen })),
+    togglePageAgent: () => set((s) => ({ pageAgentOpen: !s.pageAgentOpen })),
+    closePageAgent: () => set({ pageAgentOpen: false }),
+    resetPageAgent: () => {
+      const id = get().pageAgentId
+      // The thread stays in the chat list — the panel is a way in, not a scratchpad that eats history.
+      if (id) get().closeSession(id)
+      set({ pageAgentId: null })
+    },
+    setPageContext: (pageContext) => set((s) => (s.pageContext === pageContext ? {} : { pageContext })),
     setContextTab: (contextTab) => set({ contextTab }),
     openTrace: (traceMessageId) => set({ traceMessageId, contextTab: 'trace', contextOpen: true }),
     setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
@@ -667,11 +871,12 @@ export const useStore = create<State>((set, get) => {
     },
     loadScope: async (dataScope) => {
       set({ dataScope })
-      await Promise.all([get().refreshMemories(), get().refreshGraph(), get().refreshDocuments(), get().refreshDocs()])
+      await Promise.all([get().refreshMemories(), get().refreshGraph(), get().refreshDocuments(), get().refreshDocs(),
+                         get().refreshStyle().catch(() => undefined)])
     },
 
     refreshConversations: async () => set({ conversations: await api.conversations.list('all') }),
-    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, view: 'chat', settingsOpen: false }),
+    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, draftEffort: 'default', view: 'chat', settingsOpen: false }),
     createConversation: async (projectId) => {
       try {
         const c = await api.conversations.create(projectId, get().settings.defaultModel)
@@ -705,7 +910,10 @@ export const useStore = create<State>((set, get) => {
       share(attaches, conversationId, async () => {
         // A run started before this window existed: `GET /runs` is the only way it can know.
         const runs = await api.runs().catch(() => null)
-        const run = runs?.find((r) => r.conversation_id === conversationId && r.live)
+        // `answering`, not `live`: a run in its auto-learn tail has nothing left to stream, and
+        // attaching to one would paint a caret and a Stop button over a reply `openSession` just
+        // fetched whole.
+        const run = runs?.find((r) => r.conversation_id === conversationId && r.answering)
         await get().openSession(conversationId)
         const s = get().sessions[conversationId]
         if (!run || !s) return
@@ -749,7 +957,12 @@ export const useStore = create<State>((set, get) => {
     },
     setChatSettings: async (patch, conversationId) => {
       const id = conversationId ?? get().focusedConversationId
-      if (!id) return
+      if (!id) {
+        // No conversation to PATCH yet. Effort is the one setting a draft can still carry, so park it
+        // and let `send` apply it to the conversation it is about to create.
+        if (patch.effort !== undefined) set({ draftEffort: patch.effort })
+        return
+      }
       const c = await api.conversations.patch(id, { settings: patch })
       patchConversation(id, (cur) => ({ ...cur, settings: c.settings }))
     },
@@ -758,9 +971,11 @@ export const useStore = create<State>((set, get) => {
       if (!text.trim()) return false
       const id = conversationId ?? get().focusedConversationId
       if (id) {
-        // Mid-reply sends steer the live run: the message lands in the conversation now and the
-        // model folds it in at its next round boundary.
-        if (get().sessions[id]?.streaming) {
+        // Mid-reply sends steer the run: the message lands in the conversation now and the model
+        // folds it in at its next round boundary. Only a run that is still *answering* has a round
+        // boundary left — in its auto-learn tail the loop is over, and a steer accepted there would
+        // be stored and never replied to — so that tail takes an ordinary send instead.
+        if (get().sessions[id]?.streaming?.answering) {
           try {
             await api.steer(id, text)
             return true
@@ -779,15 +994,53 @@ export const useStore = create<State>((set, get) => {
         get().toast((e as Error).message, 'error')
         return false
       }
+      // An effort chosen on the draft lands before the first run, so it applies to this very reply.
+      const effort = get().draftEffort
+      if (effort !== 'default') c = await api.conversations.patch(c.id, { settings: { effort } }).catch(() => c)
       c.messages = []
       putSession(c)
-      set({ focusedConversationId: c.id, view: 'chat' })
+      set({ focusedConversationId: c.id, view: 'chat', draftEffort: 'default' })
       void get().refreshProjects()
       return runStream(c.id, { content: text })
     },
+    sendToPageAgent: async (text) => {
+      if (!text.trim()) return false
+      const ctx = get().pageContext
+      // The selection is read at send time, not when the view published itself: the user highlights
+      // a paragraph and *then* reaches for ⌘I.
+      const selection = ctx?.selection || currentSelection()
+      const page = ctx ? { ...ctx, selection: selection || undefined } : undefined
+      let id = get().pageAgentId
+      if (id) {
+        // Mid-reply the panel steers, exactly as the composer does in a chat.
+        if (get().sessions[id]?.streaming) {
+          try {
+            await api.steer(id, text)
+            return true
+          } catch { /* the run ended in the gap */ }
+        }
+        // The thread can have been deleted from the chat list since; fall back to a fresh one.
+        if (!get().sessions[id]) await get().openSession(id).catch(() => { id = null })
+      }
+      if (!id) {
+        let c: Conversation
+        try {
+          c = await api.conversations.create(get().draftProjectId, get().settings.defaultModel)
+        } catch (e) {
+          get().toast((e as Error).message, 'error')
+          return false
+        }
+        c.messages = []
+        putSession(c)
+        id = c.id
+        set({ pageAgentId: id })
+        void get().refreshProjects()
+      }
+      return runStream(id, { content: text, page_context: page })
+    },
     regenerate: async (conversationId) => {
       const id = conversationId ?? get().focusedConversationId
-      if (!id || get().sessions[id]?.streaming) return
+      if (!id || get().sessions[id]?.streaming?.answering) return
       if (!get().sessions[id]) await get().openSession(id)
       await runStream(id, {})
     },
@@ -831,8 +1084,9 @@ export const useStore = create<State>((set, get) => {
     },
     createDoc: async (d = {}) => {
       try {
-        const doc = await api.docs.create({ title: d.title ?? 'Untitled', content: d.content ?? '', project_id: d.project_id ?? null })
+        const doc = await api.docs.create({ title: d.title ?? 'Untitled', content: d.content ?? '', project_id: d.project_id ?? null, folder: d.folder ?? '' })
         await get().refreshDocs()
+        if (d.folder) get().expandTo(d.folder)
         set((st) => ({ view: 'docs', docTabs: [...st.docTabs, doc.id], activeDoc: doc, docDraft: null }))
         void get().refreshDocRevisions(doc.id)
       } catch (e) {
@@ -895,6 +1149,53 @@ export const useStore = create<State>((set, get) => {
         get().toast((e as Error).message, 'error')
       }
     },
+    refreshDocFolders: async () => {
+      try {
+        set({ docFolders: await api.docs.folders() })
+      } catch { /* the tree still renders from the docs' own paths */ }
+    },
+    createDocFolder: async (path) => {
+      try {
+        set({ docFolders: await api.docs.createFolder(path) })
+        get().expandTo(path)
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    renameDocFolder: async (path, newPath) => {
+      try {
+        set({ docFolders: await api.docs.renameFolder(path, newPath) })
+        // Every doc under it moved with it, and the open one's own folder is now stale.
+        await get().refreshDocs()
+        const open = get().activeDoc
+        if (open) void get().openDoc(open.id)
+        get().expandTo(newPath)
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    deleteDocFolder: async (path, deleteDocs = false) => {
+      try {
+        set({ docFolders: await api.docs.deleteFolder(path, deleteDocs) })
+        await get().refreshDocs()
+        const open = get().activeDoc
+        if (open && deleteDocs && !get().docs.some((d) => d.id === open.id)) get().closeDocTab(open.id)
+        else if (open) void get().openDoc(open.id)
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    toggleFolder: (path) => set((st) => ({
+      expandedFolders: writeExpanded(st.expandedFolders.includes(path)
+        ? st.expandedFolders.filter((p) => p !== path)
+        : [...st.expandedFolders, path])
+    })),
+    expandTo: (path) => set((st) => {
+      const segs = path.split('/').filter(Boolean)
+      const chain = segs.map((_, i) => segs.slice(0, i + 1).join('/'))
+      const missing = chain.filter((p) => !st.expandedFolders.includes(p))
+      return missing.length ? { expandedFolders: writeExpanded([...st.expandedFolders, ...missing]) } : {}
+    }),
     deleteDoc: async (id) => {
       await api.docs.delete(id)
       get().closeDocTab(id)
@@ -942,6 +1243,46 @@ export const useStore = create<State>((set, get) => {
       }
     },
 
+    loadPlan: async (conversationId) => {
+      const plan = await api.plan.get(conversationId).catch(() => null)
+      if (plan) set((s) => ({ plans: { ...s.plans, [conversationId]: plan.steps } }))
+    },
+    setPlanSteps: async (conversationId, steps) => {
+      // Optimistic: ticking a step off must feel like a checkbox, and the model reads the stored plan
+      // at the top of its next round either way.
+      set((s) => ({ plans: { ...s.plans, [conversationId]: steps } }))
+      const plan = await api.plan.set(conversationId, steps).catch((e: Error) => {
+        get().toast(e.message, 'error')
+        return null
+      })
+      if (plan) set((s) => ({ plans: { ...s.plans, [conversationId]: plan.steps } }))
+    },
+    clearPlan: async (conversationId) => {
+      set((s) => ({ plans: { ...s.plans, [conversationId]: [] } }))
+      await api.plan.clear(conversationId).catch(() => undefined)
+    },
+
+    refreshSkills: async () => set({ skills: await api.skills.list() }),
+    updateSkill: async (id, patch) => {
+      const s = await api.skills.update(id, patch)
+      set((st) => ({ skills: st.skills.map((x) => (x.id === id ? s : x)) }))
+    },
+    deleteSkill: async (id) => {
+      await api.skills.delete(id)
+      set((st) => ({ skills: st.skills.filter((x) => x.id !== id) }))
+    },
+    induceSkill: async (conversationId) => {
+      try {
+        const { candidate, reason } = await api.skills.induce(conversationId)
+        if (candidate) {
+          set((st) => ({ skills: [candidate, ...st.skills] }))
+          get().toast(`Candidate skill “${candidate.name}” is waiting for your review`, 'learned')
+        } else get().toast(reason ?? 'Nothing reusable to propose', 'info')
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+
     refreshMemories: async (q = '') => set({ memories: await api.memories.list(get().dataScope, q) }),
     addMemory: async (content, kind, projectId) => {
       await api.memories.create({ project_id: projectId, content, kind })
@@ -960,6 +1301,60 @@ export const useStore = create<State>((set, get) => {
 
     refreshGraph: async () => set({ graph: await api.graph.get(get().dataScope) }),
     refreshDocuments: async () => set({ documents: await api.documents.list(get().dataScope) }),
+
+    // ---- writing style ----
+    // The scope here is the data scope the Memory panel loaded. 'all' has no voice of its own, so the
+    // API maps it to the personal one — the voice every chat falls back to anyway.
+    refreshStyle: async () => {
+      const scope = get().dataScope
+      const [style, styleSamples] = await Promise.all([
+        api.style.get(scope),
+        api.style.samples(scope).catch(() => [] as StyleSample[])
+      ])
+      set({ style, styleSamples })
+    },
+    saveStyle: async (patch) => {
+      try {
+        set({ style: await api.style.update(styleScope(get().dataScope), patch) })
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    learnStyle: async () => {
+      if (get().styleLearning) return
+      set({ styleLearning: true })
+      try {
+        const style = await api.style.learn(styleScope(get().dataScope), get().settings.extractionModel || undefined)
+        set({ style })
+        await get().refreshStyle()
+        get().toast('Re-read your writing', 'learned')
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      } finally {
+        set({ styleLearning: false })
+      }
+    },
+    resetStyle: async (withSamples = false) => {
+      try {
+        set({ style: await api.style.reset(styleScope(get().dataScope), withSamples) })
+        await get().refreshStyle()
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    addStyleSample: async (text) => {
+      try {
+        await api.style.addSample(styleScope(get().dataScope), text)
+        await get().refreshStyle()
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    deleteStyleSample: async (id) => {
+      await api.style.deleteSample(id)
+      set((s) => ({ styleSamples: s.styleSamples.filter((x) => x.id !== id) }))
+      await get().refreshStyle()
+    },
 
     // ---- activity monitor ----
     refreshActivity: async () => {
@@ -1002,6 +1397,32 @@ export const useStore = create<State>((set, get) => {
       set({ activity: await api.activity.stop() })
       get().toast('Activity monitor off')
     },
+    grantActivityPermission: async (id, browser = '') => {
+      try {
+        const { result, status } = await api.activity.requestPermission(id, browser)
+        set({ activity: status })
+        // macOS shows each of these at most once per app, so the note matters more than the state:
+        // it is what tells the user to go to the pane by hand, or to restart the app.
+        if (result.note) get().toast(result.note, result.prompted ? 'info' : 'error')
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    openActivitySettings: async (id) => {
+      try {
+        await api.activity.openPermissionSettings(id)
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    setPalantirMode: async (on) => {
+      try {
+        set({ activity: await api.activity.palantir(on) })
+        get().toast(on ? 'Palantir mode on — recording everything' : 'Palantir mode off — previous settings restored')
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
     pauseActivity: async (minutes = 30) => set({ activity: await api.activity.pause(minutes) }),
     resumeActivity: async () => set({ activity: await api.activity.resume() }),
     rollupActivity: async () => {
@@ -1042,7 +1463,72 @@ export const useStore = create<State>((set, get) => {
       const { deleted, status } = await api.activity.purge(scope)
       set({ activity: status })
       get().toast(`Deleted ${deleted.events} samples and ${deleted.summaries} summaries`)
-      await get().loadActivity()
+      await Promise.all([get().loadActivity(), get().loadActivityInsights()])
+    },
+    loadActivityInsights: async () => {
+      try {
+        set({ activityInsights: await api.activity.insights() })
+      } catch {
+        /* same as the status poll: the panel keeps what it had */
+      }
+    },
+    refreshActivityInsights: async (deep = false) => {
+      set({ activityInsightsBusy: true })
+      try {
+        const out = deep ? await api.activity.refreshInsights() : await api.activity.mineInsights()
+        set({ activityInsights: out })
+        const open = out.counts?.open ?? 0
+        get().toast(deep
+          ? (open ? `${open} suggestion${open === 1 ? '' : 's'} waiting` : 'Nothing new worth suggesting')
+          : `Re-read ${out.patterns.length} patterns`)
+        if (deep) await get().refreshMemories()   // habits land in the memory panel
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      } finally {
+        set({ activityInsightsBusy: false })
+      }
+    },
+    setInsightStatus: async (id, status, note = '') => {
+      try {
+        await api.activity.setInsightStatus(id, status, note)
+        await get().loadActivityInsights()
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    applyInsight: async (id) => {
+      try {
+        const out = await api.activity.applyInsight(id)
+        await get().loadActivityInsights()
+        if (out.type === 'prompt' && out.prompt) {
+          // Setting the thing up is a conversation with tool approvals in it, so the suggestion
+          // hands the message over rather than acting: a fresh chat, pre-loaded, nothing sent yet
+          // until the user is looking at it.
+          get().newChat(null)
+          await get().send(out.prompt)
+          return
+        }
+        if (out.type === 'todo' && out.todo) {
+          await get().refreshTodos()
+          get().toast(`Added todo: ${out.todo.title}`)
+        } else if (out.type === 'memory' && out.memory) {
+          await get().refreshMemories()
+          get().toast('Saved to memory')
+        } else {
+          get().toast(out.how || 'Marked as accepted')
+        }
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    forgetActivityHabit: async (id) => {
+      try {
+        await api.activity.forgetHabit(id)
+        await Promise.all([get().loadActivityInsights(), get().refreshMemories()])
+        get().toast('Forgotten, memory and all')
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
     },
     uploadDocuments: async (files, projectId) => {
       for (const f of Array.from(files)) {
@@ -1062,6 +1548,7 @@ export const useStore = create<State>((set, get) => {
     },
 
     refreshDashboard: async () => {
+      void get().refreshAgentInbox()
       try {
         const dashboard = await api.dashboard()
         set({ dashboard, google: dashboard.google })
@@ -1079,11 +1566,76 @@ export const useStore = create<State>((set, get) => {
         set({ recapLoading: false })
       }
     },
-    approveTool: async (callId, decision, conversationId) => {
+    refreshAgentInbox: async () => {
+      try {
+        set({ agentInbox: await api.inbox() })
+      } catch (e) {
+        /* the inbox is a card on Today, not the shell: a failed read must not toast on every refresh */
+        void e
+      }
+    },
+    refreshJobs: async () => {
+      try {
+        set({ jobs: await api.jobs.list() })
+      } catch (e) {
+        get().toast(`Jobs: ${(e as Error).message}`, 'error')
+      }
+    },
+    createJob: async (input) => {
+      try {
+        const job = await api.jobs.create(input)
+        set((s) => ({ jobs: [...s.jobs, job].sort((a, b) => a.name.localeCompare(b.name)) }))
+        get().toast(`Scheduled: ${job.name}`, 'info')
+        void get().refreshAgentInbox()
+        return true
+      } catch (e) {
+        get().toast(`Jobs: ${(e as Error).message}`, 'error')
+        return false
+      }
+    },
+    deleteJob: async (id) => {
+      try {
+        await api.jobs.delete(id)
+        set((s) => ({ jobs: s.jobs.filter((j) => j.id !== id) }))
+        void get().refreshAgentInbox()
+      } catch (e) {
+        get().toast(`Jobs: ${(e as Error).message}`, 'error')
+      }
+    },
+    setJobEnabled: async (id, enabled) => {
+      try {
+        const job = await api.jobs.update(id, { enabled })
+        set((s) => ({ jobs: s.jobs.map((x) => (x.id === id ? job : x)) }))
+        void get().refreshAgentInbox()
+      } catch (e) {
+        get().toast(`Jobs: ${(e as Error).message}`, 'error')
+      }
+    },
+    runJobNow: async (id) => {
+      try {
+        const { run_id } = await api.jobs.runNow(id)
+        get().toast(run_id ? 'Job started. It will show up under “While you were away”.' : 'Job did not start', run_id ? 'info' : 'error')
+        void get().refreshJobs()
+      } catch (e) {
+        get().toast(`Jobs: ${(e as Error).message}`, 'error')
+      }
+    },
+    decideProposal: async (id, accept, args) => {
+      try {
+        const res = accept ? await api.proposals.accept(id, args) : await api.proposals.reject(id)
+        if (accept && !res.ok) get().toast(`That did not go through: ${res.proposal.error ?? 'unknown error'}`, 'error')
+        else get().toast(accept ? 'Done — that one actually ran.' : 'Dropped.', 'info')
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      } finally {
+        void get().refreshAgentInbox()
+      }
+    },
+    approveTool: async (callId, decision, conversationId, opts) => {
       const id = conversationId ?? get().focusedConversationId
       if (!id) return
       try {
-        await api.approve(callId, decision)
+        await api.approve(callId, decision, opts)
         // Mark as no longer awaiting in the UI; the tool_result event fills in the rest. The count
         // settles now rather than when the tool returns, since an external action can take seconds.
         patchSession(id, (s) => {
@@ -1100,12 +1652,37 @@ export const useStore = create<State>((set, get) => {
         set({ google: await api.google.status() })
         void api.tools().then((t) => set({ tools: t.tools })).catch(() => undefined)
         void get().refreshTasksSync()
+        void get().refreshTodoCalendar()
       } catch { /* ignore */ }
     },
     refreshTasksSync: async () => {
       try {
         set({ tasksSync: await api.google.tasksSync() })
       } catch { /* ignore */ }
+    },
+    refreshTodoCalendar: async () => {
+      try {
+        set({ todoCalendar: await api.google.todoCalendar() })
+      } catch { /* ignore */ }
+    },
+    setTodoCalendar: async (patch) => {
+      try {
+        set({ todoCalendar: await api.google.todoCalendarConfig(patch) })
+        // Turning it on mirrors in the background; show the result as soon as it lands.
+        if (patch.enabled) void get().runTodoCalendar()
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    runTodoCalendar: async () => {
+      set((s) => ({ todoCalendar: s.todoCalendar && { ...s.todoCalendar, syncing: true } }))
+      try {
+        set({ todoCalendar: await api.google.todoCalendarRun() })
+        await get().refreshTodos()
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+        void get().refreshTodoCalendar()
+      }
     },
     setTasksSync: async (patch) => {
       try {
@@ -1200,6 +1777,10 @@ export const selectActive = (s: State): Conversation | null => pick(s)?.conversa
 export const useSession = (convId?: string): ChatSession | undefined => useStore((s) => pick(s, convId))
 export const useConversation = (convId?: string): Conversation | null => useStore((s) => pick(s, convId)?.conversation ?? null)
 export const useSessionStatus = (convId?: string): SessionStatus => useStore((s) => pick(s, convId)?.status ?? 'idle')
-export const useIsStreaming = (convId?: string): boolean => useStore((s) => !!pick(s, convId)?.streaming)
-export const useStreamingMessageId = (convId?: string): string | null => useStore((s) => pick(s, convId)?.streaming?.messageId ?? null)
+export const useIsStreaming = (convId?: string): boolean => useStore((s) => !!pick(s, convId)?.streaming?.answering)
+export const useStreamingMessageId = (convId?: string): string | null =>
+  useStore((s) => {
+    const st = pick(s, convId)?.streaming
+    return st?.answering ? st.messageId : null
+  })
 export const useUnread = (convId?: string): number => useStore((s) => pick(s, convId)?.unread ?? 0)

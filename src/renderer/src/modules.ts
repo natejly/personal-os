@@ -12,6 +12,7 @@ export interface HomeModule {
 }
 
 export const HOME_MODULES: HomeModule[] = [
+  { key: 'agent', label: 'Agent inbox' },
   { key: 'recap', label: 'Daily recap' },
   { key: 'calendar', label: 'Calendar' },
   { key: 'todos', label: 'Todos' },

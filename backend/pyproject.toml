@@ -12,6 +12,7 @@ dependencies = [
   "pypdf>=4.2",
   "python-docx>=1.1",
   "ddgs>=9.0",
+  "croniter>=3.0",
   "mcp>=2.2",
   "trafilatura>=1.12",
   "matplotlib>=3.8",
@@ -27,6 +28,8 @@ activity = [
   "pyobjc-framework-Cocoa>=10.3; sys_platform == 'darwin'",
   "pyobjc-framework-Quartz>=10.3; sys_platform == 'darwin'",
   "pyobjc-framework-ApplicationServices>=10.3; sys_platform == 'darwin'",
+  # Microphone authorization status, so the panel can tell "not asked yet" from "denied".
+  "pyobjc-framework-AVFoundation>=10.3; sys_platform == 'darwin'",
 ]
 
 [project.scripts]

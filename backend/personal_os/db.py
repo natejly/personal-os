@@ -124,6 +124,157 @@ CREATE TABLE IF NOT EXISTS chunks (
 );
 CREATE INDEX IF NOT EXISTS idx_chunk_doc ON chunks(document_id, idx);
 
+-- Durable runs (see runs.RunStore). A run is a row; its SSE stream is a tail on run_events.
+-- status: running | awaiting_approval | done | error | interrupted
+CREATE TABLE IF NOT EXISTS agent_runs (
+  run_id TEXT PRIMARY KEY,
+  conversation_id TEXT REFERENCES conversations(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL DEFAULT 'chat',
+  status TEXT NOT NULL DEFAULT 'running',
+  message_id TEXT,
+  input TEXT NOT NULL DEFAULT '{}',
+  budget TEXT,
+  error TEXT,
+  last_seq INTEGER NOT NULL DEFAULT 0,
+  started_at REAL NOT NULL,
+  updated_at REAL NOT NULL,
+  ended_at REAL
+);
+CREATE INDEX IF NOT EXISTS idx_runs_conv ON agent_runs(conversation_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_status ON agent_runs(status, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS run_events (
+  run_id TEXT NOT NULL REFERENCES agent_runs(run_id) ON DELETE CASCADE,
+  seq INTEGER NOT NULL,
+  type TEXT NOT NULL,
+  data TEXT NOT NULL,
+  ts REAL NOT NULL,
+  PRIMARY KEY (run_id, seq)
+);
+
+-- One row per tool call that asked the user. status: pending | approved | denied. A pending row waits forever.
+CREATE TABLE IF NOT EXISTS approvals (
+  call_id TEXT PRIMARY KEY,
+  run_id TEXT REFERENCES agent_runs(run_id) ON DELETE CASCADE,
+  conversation_id TEXT,
+  message_id TEXT,
+  tool TEXT NOT NULL,
+  args TEXT NOT NULL DEFAULT '{}',
+  args_digest TEXT NOT NULL,
+  forced INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'pending',
+  decision TEXT,
+  decided_by TEXT,
+  created_at REAL NOT NULL,
+  decided_at REAL
+);
+CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_approvals_run ON approvals(run_id);
+
+-- Idempotency journal for side-effecting tool calls. key = sha256(run_id, step, tool, args_digest).
+-- status: started (in flight, or the process died mid-call: outcome unknown) | done | error
+CREATE TABLE IF NOT EXISTS executed_calls (
+  key TEXT PRIMARY KEY,
+  run_id TEXT REFERENCES agent_runs(run_id) ON DELETE CASCADE,
+  step INTEGER NOT NULL,
+  tool TEXT NOT NULL,
+  args_digest TEXT NOT NULL,
+  call_id TEXT,
+  status TEXT NOT NULL DEFAULT 'started',
+  result TEXT,
+  attempts INTEGER NOT NULL DEFAULT 1,
+  created_at REAL NOT NULL,
+  finished_at REAL
+);
+CREATE INDEX IF NOT EXISTS idx_exec_run ON executed_calls(run_id, step);
+
+-- Scheduled background work (see jobs.Jobs / jobs.Scheduler). A job fires one run with kind='job'.
+-- next_due_at is the slot the scheduler is waiting for; last_due_at is the slot the last launch was *for*,
+-- so last_fired_at - last_due_at is how late that fire was (the machine was asleep, or the backend was down).
+CREATE TABLE IF NOT EXISTS jobs (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  -- kind='cron': `cron` is the expression, read in `timezone`, and the job repeats forever.
+  -- kind='once': `run_at` is the single instant it fires, and `cron` is ''. A fired one-off switches itself
+  -- off (enabled=0, next_due_at=NULL) rather than being deleted, so the inbox can still show what it did.
+  kind TEXT NOT NULL DEFAULT 'cron',
+  cron TEXT NOT NULL,
+  run_at REAL,
+  timezone TEXT NOT NULL DEFAULT 'UTC',
+  enabled INTEGER NOT NULL DEFAULT 0,
+  prompt TEXT NOT NULL DEFAULT '',
+  project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+  last_fired_at REAL,
+  last_due_at REAL,
+  last_run_id TEXT,
+  last_error TEXT,
+  next_due_at REAL,
+  created_at REAL NOT NULL,
+  updated_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_jobs_due ON jobs(enabled, next_due_at);
+
+-- An outward-facing tool call a background run was not allowed to make: recorded here instead of executed
+-- (see app.PROPOSAL_ONLY_KINDS). Accepting one is a user action and is what actually runs it, exactly once.
+-- status: pending | accepted | rejected
+CREATE TABLE IF NOT EXISTS proposals (
+  id TEXT PRIMARY KEY,
+  run_id TEXT REFERENCES agent_runs(run_id) ON DELETE CASCADE,
+  job_id TEXT,
+  conversation_id TEXT,
+  message_id TEXT,
+  call_id TEXT,
+  tool TEXT NOT NULL,
+  args TEXT NOT NULL DEFAULT '{}',
+  args_digest TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  result TEXT,
+  error TEXT,
+  edited INTEGER NOT NULL DEFAULT 0,
+  created_at REAL NOT NULL,
+  decided_at REAL
+);
+CREATE INDEX IF NOT EXISTS idx_proposals_status ON proposals(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_proposals_run ON proposals(run_id);
+
+-- propose_plan (see plans.py): one approval artifact per batch of consequential calls. This is an
+-- approval record, not a progress checklist -- approving a plan pre-authorises exactly the argument
+-- values in plan_steps, one use per step. status: pending | approved | rejected
+CREATE TABLE IF NOT EXISTS action_plans (
+  plan_id TEXT PRIMARY KEY,
+  call_id TEXT UNIQUE,                 -- the propose_plan call whose approval decides this plan
+  run_id TEXT REFERENCES agent_runs(run_id) ON DELETE CASCADE,
+  conversation_id TEXT,
+  message_id TEXT,
+  title TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'pending',
+  tainted INTEGER NOT NULL DEFAULT 0,  -- the chat had read untrusted content when the plan was proposed
+  decided_by TEXT,                     -- user | stop; only the user's own rejection blocks its steps later
+  note TEXT,
+  created_at REAL NOT NULL,
+  decided_at REAL
+);
+CREATE INDEX IF NOT EXISTS idx_plans_run ON action_plans(run_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_plans_conv ON action_plans(conversation_id, created_at);
+
+-- One proposed call. args_digest is runs.args_digest, the same canonicalisation the approvals table uses.
+-- status: proposed | approved (claimable once) | consumed | dropped (edited out) | rejected
+CREATE TABLE IF NOT EXISTS plan_steps (
+  step_id TEXT PRIMARY KEY,
+  plan_id TEXT NOT NULL REFERENCES action_plans(plan_id) ON DELETE CASCADE,
+  idx INTEGER NOT NULL,
+  tool TEXT NOT NULL,
+  args TEXT NOT NULL DEFAULT '{}',
+  args_digest TEXT NOT NULL,
+  why TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'proposed',
+  edited INTEGER NOT NULL DEFAULT 0,
+  call_id TEXT,                        -- the call that consumed this step
+  consumed_at REAL,
+  UNIQUE(plan_id, idx)
+);
+CREATE INDEX IF NOT EXISTS idx_plan_steps_claim ON plan_steps(tool, args_digest, status);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
   text, chunk_id UNINDEXED, document_id UNINDEXED, tokenize='porter unicode61'
 );
@@ -157,6 +308,7 @@ class Database:
         wanted = {
             "projects": {"tools": "TEXT NOT NULL DEFAULT '{}'"},
             "messages": {"tool_events": "TEXT", "trace": "TEXT"},
+            "jobs": {"kind": "TEXT NOT NULL DEFAULT 'cron'", "run_at": "REAL"},
         }
         for table, cols in wanted.items():
             have = {r["name"] for r in c.execute(f"PRAGMA table_info({table})")}

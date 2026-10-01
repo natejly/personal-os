@@ -194,7 +194,9 @@ export default function MarkdownEditor({
       e.preventDefault()
       return apply(wrapSelection(el, '**'))
     }
-    if (mod && !e.shiftKey && e.key.toLowerCase() === 'i') {
+    // ⇧⌘I, not ⌘I: the app menu owns ⌘I (Ask About This Page) and a menu accelerator never
+    // reaches the page, so the plain chord here could not fire. ⌥⌘I is Electron's dev tools.
+    if (mod && e.shiftKey && e.key.toLowerCase() === 'i') {
       e.preventDefault()
       return apply(wrapSelection(el, '*'))
     }
@@ -269,7 +271,7 @@ export default function MarkdownEditor({
         <span>Ln {caret.line}, Col {caret.col}</span>
         <span>{lineCount} lines</span>
         <span>{value.trim() ? value.trim().split(/\s+/).length : 0} words</span>
-        <span className="md-hints">⌘B bold · ⌘I italic · ⌘K link · ⇧⌘M maths · ⇧⌘E code · Tab indent</span>
+        <span className="md-hints">⌘B bold · ⇧⌘I italic · ⌘K link · ⇧⌘M maths · ⇧⌘E code · Tab indent</span>
       </div>
     </div>
   )

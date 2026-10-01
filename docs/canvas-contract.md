@@ -175,6 +175,8 @@ export interface CanvasWindow {
   popout_bounds: PopoutBounds | null
   /** 0 | 1 — SQLite has no boolean. Always-on-top while popped. */
   pinned: number
+  /** Window alpha while popped out, 0.2..1. 1 is opaque; the canvas ignores it. */
+  opacity: number
   config: Record<string, unknown>
   created_at: number; updated_at: number
 }
@@ -182,7 +184,10 @@ export interface CanvasWindow {
 export interface Canvas {
   id: string; name: string; project_id: string | null; position: number
   snap_mode: SnapMode; grid_size: number; zoom: number; pan_x: number; pan_y: number
-  wallpaper: string; created_at: number; updated_at: number
+  wallpaper: string
+  /** 0 | 1 — SQLite has no boolean. 1 freezes the view: no pan, no zoom, no window geometry. */
+  locked: number
+  created_at: number; updated_at: number
   windows: CanvasWindow[]
 }
 
@@ -226,9 +231,9 @@ export interface RunInfo {
 export interface RunConflict { message: string; run_id: string; seq: number }
 
 /** One detached widget window as the main process sees it. */
-export interface PopoutInfo { windowId: string; bounds: PopoutBounds; pinned: boolean }
+export interface PopoutInfo { windowId: string; bounds: PopoutBounds; pinned: boolean; opacity: number }
 
-export interface PopoutOpenRequest { bounds?: Partial<PopoutBounds>; minWidth?: number; minHeight?: number; title?: string; pinned?: boolean }
+export interface PopoutOpenRequest { bounds?: Partial<PopoutBounds>; minWidth?: number; minHeight?: number; title?: string; pinned?: boolean; opacity?: number }
 
 export interface PopoutChange { windowId: string; event: 'opened' | 'closed'; bounds: PopoutBounds | null }
 
@@ -258,6 +263,7 @@ export interface PersonalOSApi {
     close: (windowId: string) => Promise<boolean>
     focus: (windowId: string) => Promise<boolean>
     setPinned: (windowId: string, pinned: boolean) => Promise<boolean>
+    setOpacity: (windowId: string, opacity: number) => Promise<boolean>
     setMinSize: (windowId: string, minWidth: number, minHeight: number) => Promise<boolean>
     list: () => Promise<PopoutInfo[]>
     gather: () => Promise<GatherState>
@@ -306,13 +312,13 @@ Plus, elsewhere in the same file: `TodayDashboard` (was the second `Dashboard`),
 |---|---|---|
 | `GET /canvases` | — | `Canvas[]`, ordered by `(position, created_at)`, each with `windows` ordered by `(z, created_at)`. Seeds `"Desk 1"` when the table is empty and returns it, so the client never handles an empty list. 2 queries, not N+1. |
 | `GET /canvases/{id}` | — | `Canvas` \| 404 |
-| `POST /canvases` | `{ name?: string = "Desk", project_id?: string \| null, copy_from?: string \| null }` | `Canvas`. `position = COALESCE(MAX(position),-1)+1`. `copy_from` copies `snap_mode/grid_size/zoom/pan_x/pan_y/wallpaper` and duplicates every window (fresh ids, same geometry and `z`, `config` copied, `state` forced `'normal'`, `popout_bounds` dropped). 404 on unknown `copy_from`. |
-| `PUT /canvases/{id}` | `{ name?, project_id?, position?, snap_mode?, grid_size?, zoom?, pan_x?, pan_y?, wallpaper?, clear_project?: boolean }` | `Canvas` \| 404. 400 if `snap_mode ∉ SNAP_MODES`. `clear_project: true` unbinds (the `todos.py` `clear_*` convention; a bare `project_id: null` is dropped by `exclude_none`). |
+| `POST /canvases` | `{ name?: string = "Desk", project_id?: string \| null, copy_from?: string \| null }` | `Canvas`. `position = COALESCE(MAX(position),-1)+1`. `copy_from` copies `snap_mode/grid_size/zoom/pan_x/pan_y/wallpaper` (never `locked`: a copy starts unlocked) and duplicates every window (fresh ids, same geometry and `z`, `config` copied, `state` forced `'normal'`, `popout_bounds` dropped). 404 on unknown `copy_from`. |
+| `PUT /canvases/{id}` | `{ name?, project_id?, position?, snap_mode?, grid_size?, zoom?, pan_x?, pan_y?, wallpaper?, locked?: boolean, clear_project?: boolean }` | `Canvas` \| 404. 400 if `snap_mode ∉ SNAP_MODES`. `clear_project: true` unbinds (the `todos.py` `clear_*` convention; a bare `project_id: null` is dropped by `exclude_none`). |
 | `DELETE /canvases/{id}` | — | `{ ok: true }`, always 200. `canvas_windows` go via `ON DELETE CASCADE`. |
 | `POST /canvases/{id}/windows` | `{ kind: WidgetKind, ref_id?: string \| null, project_id?: string \| null, title?: string = "", x?: number = 0, y?: number = 0, w?: number = 520, h?: number = 640, config?: object = {} }` | `CanvasWindow`. 404 unknown canvas, 400 `kind ∉ WIDGET_KINDS`. `z = COALESCE(MAX(z),-1)+1` within that canvas. |
 | `PUT /canvases/{id}/layout` | `{ windows: WindowLayout[] }` | `{ ok: true, updated: number }` |
 | `GET /windows/{wid}` | — | `CanvasWindow` \| 404 |
-| `PUT /windows/{wid}` | `{ title?, config?, state?, pinned?, x?, y?, w?, h?, z?, canvas_id?, restore_bounds?, popout_bounds?, clear_restore_bounds?, clear_popout_bounds? }` | `CanvasWindow` \| 404. **`config` is MERGED** into the stored object (the `Conversations.update` settings pattern) so `onConfig(patch)` never wipes sibling keys; send `{}` to no-op and use the `clear_*` flags to null the bounds. 400 if `state ∉ WINDOW_STATES`. `canvas_id` moves the window between spaces and re-bases `z` to `MAX(z)+1` in the destination. |
+| `PUT /windows/{wid}` | `{ title?, config?, state?, pinned?, opacity?, x?, y?, w?, h?, z?, canvas_id?, restore_bounds?, popout_bounds?, clear_restore_bounds?, clear_popout_bounds? }` | `CanvasWindow` \| 404. **`config` is MERGED** into the stored object (the `Conversations.update` settings pattern) so `onConfig(patch)` never wipes sibling keys; send `{}` to no-op and use the `clear_*` flags to null the bounds. 400 if `state ∉ WINDOW_STATES`. `canvas_id` moves the window between spaces and re-bases `z` to `MAX(z)+1` in the destination. |
 | `POST /windows/{wid}/raise` | — | `CanvasWindow` \| 404. `z = MAX(z)+1` within the window's canvas, no-op when already topmost. |
 | `DELETE /windows/{wid}` | — | `{ ok: true }` |
 
@@ -355,6 +361,12 @@ unchanged: `user_message`, `assistant_message`, `removed_message`, `title`, `del
 conversation, `QUEUE_MAX` **1000** per subscriber — the `QUEUE_MAX < RING` invariant is what lets an
 overflowed subscriber reconnect without a gap. `sse()` moves from `app.py:108` into `runs.py`.
 
+`GET /events?since=<seq>` is the app-wide topic beside the per-conversation ones: background work
+that outlives the run that queued it. Auto-learn is the only producer so far, and it emits the same
+`learned` / `learn_error` payloads plus the `conversation_id` and `message_id` they belong to. The
+stream never ends, each event carries its seq as the SSE `id`, and the ring holds **200** events, so
+a window that reconnects resumes at its last seq instead of missing what happened while it was away.
+
 ### 3.4 Unchanged routes the canvas consumes
 
 Read-only callers. Nobody changes these.
@@ -384,6 +396,7 @@ All renderer-facing access goes through `window.os`; nobody imports `ipcRenderer
 | `popout:close` | invoke | `(windowId: string)` | `boolean` |
 | `popout:focus` | invoke | `(windowId: string)` | `boolean` |
 | `popout:set-pinned` | invoke | `(windowId: string, pinned: boolean)` | `boolean` |
+| `popout:set-opacity` | invoke | `(windowId: string, opacity: number)` | `boolean` — clamped to `[0.2, 1]`; `false` when that window is not popped out |
 | `popout:set-min-size` | invoke | `(windowId: string, minWidth: number, minHeight: number)` | `boolean` |
 | `popout:list` | invoke | `()` | `PopoutInfo[]` |
 | `popout:gather` | invoke | `()` | `GatherState` |
@@ -451,6 +464,16 @@ export interface CanvasState {
   toggleOverview: () => void
   bindSpace: (canvasId: string, projectId: string | null) => Promise<void>
   setSnap: (canvasId: string, patch: { snap_mode?: SnapMode; grid_size?: number }) => Promise<void>
+  /**
+   * Freeze or release the space. A locked space keeps its pan, its zoom and every window's geometry;
+   * widgets stay interactive, but nothing on it can be moved, resized, added, closed or deleted. The
+   * store is where that is enforced — `openWindow`, `closeWindow`, `setWindowState`,
+   * `moveWindowToCanvas`, `popOut`, `markLayoutDirty`, `setViewport`, `tidyUp` and `deleteSpace` all
+   * refuse — and the UI only mirrors it (no grab cursor, no resize handles, no drop ghost).
+   */
+  setLocked: (canvasId: string, locked: boolean) => Promise<void>
+  /** ⌃⌘L and the bar's padlock: flips the active space's lock. */
+  toggleLock: () => void
   /** Local + 600 ms debounced PUT /canvases/{id}. */
   setViewport: (canvasId: string, v: { zoom?: number; pan_x?: number; pan_y?: number }) => void
 
@@ -465,6 +488,7 @@ export interface CanvasState {
   /** Merges server-side; safe to call with one key. */
   setWindowConfig: (windowId: string, patch: Record<string, unknown>) => Promise<void>
   setWindowPinned: (windowId: string, pinned: boolean) => Promise<void>
+  setWindowOpacity: (windowId: string, opacity: number) => Promise<void>
   moveWindowToCanvas: (windowId: string, canvasId: string) => Promise<void>
   /** Mark dirty; the 400 ms debounce flushes through PUT /canvases/{id}/layout. Call on pointerup, never mid-drag. */
   markLayoutDirty: (windowIds: string[]) => void
@@ -635,9 +659,9 @@ hold still pending from the previous one.
 | `delta` | `content += text` | unchanged — the hot path does **no** recount and **no** unread bump |
 | `tool_call` | append a pending `ToolEvent`; if `needs_approval` then `settleApprovals` | → `needs-approval`, `pendingApprovals = 1..n` |
 | `tool_result` | replace the tool event, `pending: false`; `settleApprovals` | at 0 pending, `needs-approval` → `working` (because `streaming` is still set) |
-| `span` | merge-or-append by span id | **unchanged, deliberately.** `app.py:456-470` emits auto-learn spans *after* `done`; touching status here would resurrect `working`. |
+| `span` | merge-or-append by span id | **unchanged, deliberately.** A span can still land beside `done`; touching status here would resurrect `working`. |
 | `done` | fill `error`/`context_used`/`tool_events`/`trace`; `finish(convId, error ? 'error' : 'done')`; `refreshConversations()` | `done` or `error`. `stopped === true` is treated as `done`. |
-| `learned` | toast + `refreshAll()` when anything came back | unchanged (already `done`) |
+| `learned` | toast + `refreshAll()` when anything came back | unchanged (already `done`). On this stream only the `remember` tool reaches it; auto-learn arrives on `/events`, handled the same way. |
 | `learn_error` | toast | unchanged — a failed extraction must not redden a reply that succeeded |
 | `error` | toast; `finish(convId, 'error')` | `error`, no hold timer |
 | `catch` (fetch threw) | if `!abort.signal.aborted`: toast + `finish(convId, 'error')` | an aborted signal is a user Stop, not an error |
@@ -720,7 +744,7 @@ Classes:
 - dock — `.dock` `.dock-tile` `.dock-tile.focused`
 - spaces — `.spaces-bar` `.space-tab` `.space-tab.active` `.space-tab.drop-target`
 - overview — `.overview` `.overview-space` `.overview-proxy` `.proxy-card`
-- pop-out — `.popout` `.popout.focused` `.popout-bar` `.popout-title` `.popout-actions` `.popout-body`
+- pop-out — `.popout` `.popout.focused` `.popout.tuning` `.popout.translucent` `.popout-bar` `.popout-title` `.popout-actions` `.popout-opacity` `.popout-body`
   `.popout-error`
 
 **Every animation this slice adds gets a prefixed name** — `ring-breathe`, `ring-pulse`, `win-open`,

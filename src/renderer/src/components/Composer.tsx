@@ -9,9 +9,12 @@ interface ComposerProps {
   footer?: ReactNode
   /** Tightens the padding, for a widget where vertical space is scarce. */
   compact?: boolean
+  /** Overrides the store's `send`, for a composer that is not a plain chat — the ⌘I page agent. */
+  onSend?: (text: string) => Promise<boolean>
+  placeholder?: string
 }
 
-export default function Composer({ conversationId, footer, compact = false }: ComposerProps): JSX.Element {
+export default function Composer({ conversationId, footer, compact = false, onSend, placeholder }: ComposerProps): JSX.Element {
   const [text, setText] = useState('')
   const box = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -36,7 +39,7 @@ export default function Composer({ conversationId, footer, compact = false }: Co
     if (!text.trim()) return
     const t = text
     setText('')
-    const ok = await send(t, conversationId).catch(() => false)
+    const ok = await (onSend ? onSend(t) : send(t, conversationId)).catch(() => false)
     if (!ok) setText((cur) => (cur.trim() ? `${t}\n\n${cur}` : t))
   }
 
@@ -57,7 +60,7 @@ export default function Composer({ conversationId, footer, compact = false }: Co
           minChars={8}
           value={text}
           onChange={setText}
-          placeholder={streaming ? 'Steer the reply…' : 'Message… Tab accepts a suggestion'}
+          placeholder={streaming ? 'Steer the reply…' : placeholder ?? 'Message… Tab accepts a suggestion'}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void submit() } }}
         />
         {streaming && !text.trim() ? (

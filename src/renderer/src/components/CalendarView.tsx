@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronLeft, ChevronRight, PanelLeftOpen, Calendar as CalIcon, ExternalLink, Pencil, Plus, Repeat, Video, X } from 'lucide-react'
+import { ChevronLeft, ChevronRight, PanelLeftOpen, Calendar as CalIcon, ExternalLink, Pencil, Plus, RefreshCw, Repeat, Video, X } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import SendToSpace from './SendToSpace'
-import CalendarWeek, { addDays, fmtTime, startOfWeek } from './CalendarWeek'
+import CalendarWeek, { addDays, fmtTime, startOfWeek, withoutTodoEvents } from './CalendarWeek'
 import EventEditor, { eventColor, primeCalendarMeta, type EventDraft } from './EventEditor'
 import { scheduleTodo } from './TodoItem'
 import type { CalendarEvent } from '@shared/types'
+import { lines, usePageContext } from '../lib/pageContext'
 
 export default function CalendarView(): JSX.Element {
   const sidebarOpen = useStore((s) => s.sidebarOpen)
@@ -23,12 +24,15 @@ export default function CalendarView(): JSX.Element {
   const [, setMetaTick] = useState(0)
 
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(week, i)), [week])
+  const shown = useMemo(() => withoutTodoEvents(events, todos), [events, todos])
 
-  const load = async (): Promise<void> => {
+  // Stepping between weeks is served from the backend's read cache; `refresh` is the
+  // Refresh button, for picking up an edit made in Google Calendar itself.
+  const load = async (refresh = false): Promise<void> => {
     if (!google?.connected) return
     setLoading(true); setError(null)
     try {
-      setEvents(await api.google.calendarRange(week.toISOString(), 7, 'all'))
+      setEvents(await api.google.calendarRange(week.toISOString(), 7, 'all', refresh))
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -70,6 +74,22 @@ export default function CalendarView(): JSX.Element {
     }
   }
 
+  const fmtEvent = (e: CalendarEvent): string =>
+    `${e.all_day ? e.start : new Date(e.start).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })} — ${e.summary || '(no title)'} (\`${e.id}\`)${e.location ? ` at ${e.location}` : ''}`
+  const span = `${days[0].toDateString()} – ${days[6].toDateString()}`
+  usePageContext(() => ({
+    view: 'calendar',
+    label: open ? `Event “${open.summary || 'untitled'}”` : `Calendar · ${span}`,
+    detail: [
+      `The week of ${span} is on screen.`,
+      open ? `The user has this event open: ${fmtEvent(open)}${open.description ? `\n\n${open.description}` : ''}` : '',
+      events.length ? `Events that week:\n${lines(events, fmtEvent)}` : 'No events that week.',
+      todos.some((t) => !t.done && t.due) ? `Todos with dates:\n${lines(todos.filter((t) => !t.done && t.due), (t) => `${t.due} — ${t.title} (\`${t.id}\`)`)}` : ''
+    ].filter(Boolean).join('\n\n'),
+    refs: (open ? [{ kind: 'event', id: open.id, name: open.summary }] : events.slice(0, 40).map((e) => ({ kind: 'event', id: e.id, name: e.summary }))),
+    hints: open ? ['Move this an hour later', 'Draft a note to the guests'] : ['Where is my free time this week?', 'Schedule my overdue todos into the gaps']
+  }), [events, open, todos, span])
+
   return (
     <main className="page cal-page">
       <header className="page-header drag">
@@ -79,6 +99,7 @@ export default function CalendarView(): JSX.Element {
           {google?.connected && <button className="ghost-btn" onClick={() => setEditing({ event: null, draft: {} })}><Plus size={13} /> New event</button>}
           <SendToSpace items={[{ kind: 'calendar' }]} />
           <button className="ghost-btn" onClick={() => setWeek(startOfWeek(new Date()))}>Today</button>
+          {google?.connected && <button className="icon-btn" title="Refresh" onClick={() => void load(true)} disabled={loading}><RefreshCw size={15} className={loading ? 'spin' : ''} /></button>}
           <button className="icon-btn" aria-label="Previous week" onClick={() => setWeek(addDays(week, -7))}><ChevronLeft size={16} /></button>
           <button className="icon-btn" aria-label="Next week" onClick={() => setWeek(addDays(week, 7))}><ChevronRight size={16} /></button>
           <button className="primary-btn" onClick={() => { newChat(null); void send('Help me plan this week. Look at my calendar for the next 7 days and my open todos, then propose a schedule.') }}>Plan my week</button>
@@ -91,7 +112,7 @@ export default function CalendarView(): JSX.Element {
       {error && <div className="notice-bar error">{error}</div>}
 
       <div className="cal-scroll">
-        <CalendarWeek days={days} events={events} todos={todos} canCreate={!!google?.connected}
+        <CalendarWeek days={days} events={shown} todos={todos} canCreate={!!google?.connected}
           onOpen={setOpen} onTodo={() => setView('todos')} onTodoDrop={(id, day, hour) => void dropTodo(id, day, hour)} onCreate={create}
           onCreateFull={(day, hour, title) => setEditing({ event: null, draft: { day, hour, title } })}
           colorOf={eventColor} />

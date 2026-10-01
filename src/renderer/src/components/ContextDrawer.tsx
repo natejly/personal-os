@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { X, Brain, Share2, FileText, Wand2, Eye, Globe, Wrench, Activity, ShieldAlert, MonitorDot } from 'lucide-react'
+import { X, Brain, Share2, FileText, Wand2, Eye, Globe, GraduationCap, Wrench, Activity, ShieldAlert, MonitorDot, PenLine } from 'lucide-react'
 import { ToolOverrides } from './ToolPermissions'
 import TraceView from './TraceView'
 import { useStore, useProject, useConversation, useStreamingMessageId } from '../store'
@@ -18,9 +18,10 @@ function Toggle({ label, hint, value, onChange, icon }: { label: string; hint: s
 }
 
 function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
-  const { setView, openMemory, memories } = useStore()
+  const { setView, openMemory, memories, setSettingsOpen } = useStore()
   const [showPrompt, setShowPrompt] = useState(false)
-  const has = ctx.memories.length + ctx.nodes.length + ctx.chunks.length > 0 || Boolean(ctx.activity)
+  const has = ctx.memories.length + ctx.nodes.length + ctx.chunks.length + (ctx.skills?.length ?? 0) > 0
+    || Boolean(ctx.activity) || Boolean(ctx.page) || Boolean(ctx.style)
   return (
     <div className="ctx-used">
       <div className="ctx-meta">
@@ -29,10 +30,24 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
       </div>
       {showPrompt && <pre className="ctx-prompt">{ctx.system_prompt}</pre>}
       {!has && <p className="muted">Nothing from memory, graph, or documents was relevant.</p>}
+      {ctx.page && (
+        <section>
+          <h5><MonitorDot size={12} /> Page — {ctx.page.label}</h5>
+          {ctx.page.selection && <div className="chunk-preview"><b>selection:</b> {ctx.page.selection}</div>}
+          <pre className="ctx-prompt">{ctx.page.detail}</pre>
+        </section>
+      )}
       {ctx.activity && (
         <section>
           <h5><MonitorDot size={12} /> Activity <button className="link" onClick={() => setView('activity')}>manage</button></h5>
           <pre className="ctx-prompt">{ctx.activity}</pre>
+        </section>
+      )}
+      {ctx.style && (
+        <section>
+          <h5><PenLine size={12} /> Writing style {ctx.style.project_id ? '(project voice)' : '(your voice)'} <button className="link" onClick={() => openMemory('style')}>edit</button></h5>
+          <p className="muted small">{ctx.style.summary}</p>
+          <ul>{ctx.style.guidelines.map((g) => <li key={g}>{g}</li>)}</ul>
         </section>
       )}
       {ctx.memories.length > 0 && (
@@ -54,6 +69,12 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
           </ul>
         </section>
       )}
+      {(ctx.skills?.length ?? 0) > 0 && (
+        <section>
+          <h5><GraduationCap size={12} /> Skills ({ctx.skills?.length}) <button className="link" onClick={() => setSettingsOpen(true)}>review</button></h5>
+          <ul>{ctx.skills?.map((s) => <li key={s.id}><b>{s.name}</b>{s.description ? ` — ${s.description}` : ''}</li>)}</ul>
+        </section>
+      )}
       {ctx.chunks.length > 0 && (
         <section>
           <h5><FileText size={12} /> Documents ({ctx.chunks.length} excerpt{ctx.chunks.length === 1 ? '' : 's'}) <button className="link" onClick={() => setView('documents')}>manage</button></h5>
@@ -70,7 +91,7 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
   const settings = useStore((s) => s.settings)
   const projectId = convo?.project_id ?? draftProjectId
   const project = useProject(projectId)
-  const { toggleContext, setChatSettings, openProject, setContextTab: setTab } = useStore()
+  const { toggleContext, setChatSettings, openProject, induceSkill, setContextTab: setTab } = useStore()
   const tab = useStore((s) => s.contextTab)
   const traceMessageId = useStore((s) => s.traceMessageId)
   const streamingMessageId = useStreamingMessageId(conversationId)
@@ -78,7 +99,8 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
   const [preview, setPreview] = useState<ContextUsed | null>(null)
 
   const activityRunning = useStore((s) => Boolean(s.activity?.running && !s.activity.paused))
-  const cs: ConversationSettings = convo?.settings ?? { effort: 'default', useMemory: true, useGraph: true, useDocuments: true, useActivity: true, autoLearn: true, useTools: true, tools: {} }
+  const hasStyle = useStore((s) => Boolean(s.style?.effective))
+  const cs: ConversationSettings = convo?.settings ?? { effort: 'default', useMemory: true, useGraph: true, useDocuments: true, useActivity: true, useStyle: true, autoLearn: true, useTools: true, tools: {} }
   const [toolsOpen, setToolsOpen] = useState(false)
   const allTools = useStore((s) => s.tools)
   const norm = (v: unknown, fb: 'on' | 'ask' | 'off'): 'on' | 'ask' | 'off' => (v === true ? 'on' : v === false ? 'off' : v === 'on' || v === 'ask' || v === 'off' ? v : fb)
@@ -106,7 +128,7 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
       void api.contextPreview(projectId, query, cs).then(setPreview).catch(() => setPreview(null))
     }, 300)
     return () => clearTimeout(t)
-  }, [tab, query, projectId, cs.useMemory, cs.useGraph, cs.useDocuments, cs.useActivity])
+  }, [tab, query, projectId, cs.useMemory, cs.useGraph, cs.useDocuments, cs.useActivity, cs.useStyle])
 
   return (
     <aside className="context-drawer">
@@ -130,8 +152,16 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
         <Toggle icon={<Share2 size={14} />} label="Knowledge graph" hint="Entities mentioned + their neighbours" value={cs.useGraph} onChange={(v) => void setChatSettings({ useGraph: v }, conversationId)} />
         <Toggle icon={<FileText size={14} />} label="Documents" hint="Best matching excerpts (full-text search)" value={cs.useDocuments} onChange={(v) => void setChatSettings({ useDocuments: v }, conversationId)} />
         <Toggle icon={<MonitorDot size={14} />} label="Activity" hint={activityRunning ? 'What you have been doing on this computer' : 'Activity monitor is off'} value={cs.useActivity !== false} onChange={(v) => void setChatSettings({ useActivity: v }, conversationId)} />
-        <Toggle icon={<Wand2 size={14} />} label="Auto-learn" hint={settings.autoLearn ? 'Extract memories & graph after each reply' : 'Disabled globally in settings'} value={cs.autoLearn && settings.autoLearn} onChange={(v) => void setChatSettings({ autoLearn: v }, conversationId)} />
+        <Toggle icon={<PenLine size={14} />} label="Writing style" hint={hasStyle ? 'Drafts sound like you, not like the assistant' : 'No voice learned yet'} value={cs.useStyle !== false} onChange={(v) => void setChatSettings({ useStyle: v }, conversationId)} />
+        <Toggle icon={<Wand2 size={14} />} label="Auto-learn" hint={settings.autoLearn ? 'Extract memories, graph & writing style after each reply' : 'Disabled globally in settings'} value={cs.autoLearn && settings.autoLearn} onChange={(v) => void setChatSettings({ autoLearn: v }, conversationId)} />
         <Toggle icon={<Wrench size={14} />} label="Tools" hint="Web, documents, memory, graph, todos, boards, Python… External actions ask first." value={cs.useTools} onChange={(v) => void setChatSettings({ useTools: v }, conversationId)} />
+        <Toggle icon={<GraduationCap size={14} />} label="Skills" hint="Procedures you approved, injected as procedural memory. Candidates are never injected." value={cs.useSkills !== false} onChange={(v) => void setChatSettings({ useSkills: v }, conversationId)} />
+        {convo && (
+          <div className="ctx-tools">
+            <button className="link small" onClick={() => void induceSkill(convo.id)}>propose a skill from this chat…</button>
+            <span className="muted small"> it lands in Settings → Skills as a candidate for you to review.</span>
+          </div>
+        )}
         {cs.useTools && (
           <div className="ctx-tools">
             <button className="link small" onClick={() => setToolsOpen((o) => !o)}>{toolsOpen ? 'hide per-tool overrides' : 'per-tool overrides…'}</button>

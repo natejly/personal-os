@@ -2,11 +2,13 @@ import { useEffect, useState } from 'react'
 import { Calendar, Mail, CheckSquare, Brain, FolderKanban, Sparkles, RefreshCw, PanelLeftOpen, ExternalLink, Plus, MessageSquare, SlidersHorizontal, X, ListChecks, HardDrive } from 'lucide-react'
 import { useStore } from '../store'
 import { HOME_MODULES, homeModuleOn } from '../modules'
+import AgentInbox from './AgentInbox'
 import TodoItem from './TodoItem'
 import ProjectChip from './ProjectChip'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { SAFE_MD } from './Message'
+import { lines, usePageContext } from '../lib/pageContext'
 
 function greeting(): string {
   const h = new Date().getHours()
@@ -55,6 +57,20 @@ export default function HomeView(): JSX.Element {
   const todayEvents = events.filter((e) => dayKey(e.start) === today)
   const laterEvents = events.filter((e) => dayKey(e.start) !== today)
 
+  usePageContext(() => ({
+    view: 'home',
+    label: 'Today',
+    detail: [
+      `Today is ${today}.`,
+      todayEvents.length ? `Today\u2019s calendar:\n${lines(todayEvents, (e) => `${e.start} — ${e.summary} (\`${e.id}\`)`)}` : 'Nothing on the calendar today.',
+      laterEvents.length ? `Coming up:\n${lines(laterEvents, (e) => `${e.start} — ${e.summary}`, 10)}` : '',
+      d?.todos?.length ? `Open todos:\n${lines(d.todos, (t) => `${t.title} (\`${t.id}\`${t.due ? `, due ${t.due}` : ''})`)}` : 'No open todos.',
+      recap?.content ? `Yesterday\u2019s recap:\n${recap.content.slice(0, 1500)}` : ''
+    ].filter(Boolean).join('\n\n'),
+    refs: (d?.todos ?? []).slice(0, 20).map((t) => ({ kind: 'todo', id: t.id, name: t.title })),
+    hints: ['What should I focus on today?', 'Block time for my todos', 'Anything I am forgetting?']
+  }), [d, recap, today])
+
   return (
     <main className="page home">
       <header className="page-header drag">
@@ -95,6 +111,8 @@ export default function HomeView(): JSX.Element {
             <button className="ghost-btn" onClick={() => void quickAdd()} disabled={!quick.trim()} title="Add as todo (⌘↵)"><Plus size={13} /> Todo</button>
           </div>
         </div>
+
+        {on('agent') && <AgentInbox />}
 
         {on('recap') && (recap?.content || recapLoading) && recapOpen && (
           <section className="recap">

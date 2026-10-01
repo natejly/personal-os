@@ -6,12 +6,13 @@
  * proposals (GET /inbox) — never from the assistant's prose. A run's own report is shown as the body of
  * its card, but no number, badge or state is read out of that text.
  */
-import { useState } from 'react'
-import { AlertTriangle, Check, ChevronDown, ChevronRight, Clock, Inbox, Pencil, Play, Plus, Timer, Trash2, X } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { AlertTriangle, Check, ChevronDown, ChevronRight, Clock, History, Inbox, Pencil, Play, Plus, Timer, Trash2, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { AgentProposal, Job, JobRunSummary } from '@shared/types'
+import type { AgentProposal, Job, JobRunRecord, JobRunSummary, JobStats } from '@shared/types'
 import { useStore } from '../store'
+import { api } from '../lib/api'
 import { SAFE_MD } from './Message'
 
 const fmtClock = (ts: number): string => new Date(ts * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
@@ -116,14 +117,82 @@ function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
   )
 }
 
+const fmtDur = (s: number | null): string => (s === null ? '' : s < 90 ? `${Math.round(s)}s` : `${Math.round(s / 60)} min`)
+const STATUS_LABEL: Record<JobRunRecord['status'], string> = {
+  running: 'running', done: 'done', error: 'failed', interrupted: 'interrupted', timed_out: 'timed out'
+}
+
+/** A job's last 50 runs from rows: a success-rate strip, then one line per run with a link to its transcript. */
+function JobHistory({ job }: { job: Job }): JSX.Element {
+  const selectChat = useStore((s) => s.selectChat)
+  const [runs, setRuns] = useState<JobRunRecord[] | null>(null)
+  const [stats, setStats] = useState<JobStats | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+
+  useEffect(() => {
+    let live = true
+    Promise.all([api.jobs.runs(job.id, 50), api.jobs.stats(job.id, 30)])
+      .then(([r, s]) => { if (live) { setRuns(r); setStats(s) } })
+      .catch((e: Error) => { if (live) setErr(e.message) })
+    return () => { live = false }
+  }, [job.id])
+
+  const exportCsv = async (): Promise<void> => {
+    try {
+      const url = URL.createObjectURL(new Blob([await api.jobs.csv(job.id)], { type: 'text/csv' }))
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${job.name.replace(/[^\w.-]+/g, '-')}-runs.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      setErr((e as Error).message)
+    }
+  }
+
+  return (
+    <li className="job-history">
+      {err && <p className="msg-error">{err}</p>}
+      {stats && (
+        <div className="job-history-stats muted small">
+          {stats.success_rate === null ? 'No finished runs in 30 days' : `${Math.round(stats.success_rate * 100)}% ok`}
+          {` · ${stats.runs} run${stats.runs === 1 ? '' : 's'}`}
+          {stats.median_duration_s !== null && ` · median ${fmtDur(stats.median_duration_s)}`}
+          {stats.total_cost > 0 && ` · $${stats.total_cost.toFixed(2)}`}
+          <span style={{ flex: 1 }} />
+          <button className="link small" onClick={() => void exportCsv()}>Export CSV</button>
+        </div>
+      )}
+      {runs && runs.length === 0 && <p className="muted small">Not run yet.</p>}
+      {runs && runs.map((r) => (
+        <div key={r.run_id} className="job-history-run small">
+          <span className={`chip ${r.status === 'done' ? '' : r.status === 'running' ? 'warn' : 'bad'}`}>{STATUS_LABEL[r.status]}</span>
+          <span>{fmtDate(r.started_at)}</span>
+          <span className="muted">{fmtDur(r.duration_s)}</span>
+          {r.attempt > 1 && <span className="chip warn">retry {r.attempt}</span>}
+          {r.manual && <span className="chip">by hand</span>}
+          <span className="muted">{r.tool_calls} call{r.tool_calls === 1 ? '' : 's'}</span>
+          {r.proposals.pending + r.proposals.accepted + r.proposals.rejected > 0 && (
+            <span className="muted">{r.proposals.accepted}/{r.proposals.pending + r.proposals.accepted + r.proposals.rejected} proposals accepted</span>
+          )}
+          <span style={{ flex: 1 }} />
+          {r.conversation_id && <button className="link small" onClick={() => void selectChat(r.conversation_id as string)}>open</button>}
+        </div>
+      ))}
+    </li>
+  )
+}
+
 function JobRow({ job }: { job: Job }): JSX.Element {
   const { setJobEnabled, runJobNow, deleteJob } = useStore()
+  const [history, setHistory] = useState(false)
   const once = job.kind === 'once'
   // A one-off that has already fired has no slot left to wait for, so it is shown as what it did rather than
   // as a switch: the backend refuses to re-arm it, and a toggle that does nothing is worse than no toggle.
   const spent = once && job.last_fired_at !== null && job.next_due_at === null
 
   return (
+    <>
     <li className={spent ? 'spent' : undefined}>
       {spent ? (
         <span className="chip-check-row ev-title">{job.name}</span>
@@ -144,6 +213,10 @@ function JobRow({ job }: { job: Job }): JSX.Element {
       {job.last_skip_reason && job.last_skip_at && (
         <span className="muted small" title={`Slot at ${fmtWhen(job.last_skip_at)} was skipped`}>skipped: {job.last_skip_reason.replace('previous run still running', 'still running')}</span>
       )}
+      <button className={`icon-btn sm ${history ? 'on' : ''}`} title="Run history" aria-label={`History of ${job.name}`}
+        onClick={() => setHistory((v) => !v)}>
+        <History size={12} />
+      </button>
       <button className="icon-btn sm" title="Run it now" aria-label={`Run ${job.name} now`} onClick={() => void runJobNow(job.id)}>
         <Play size={12} />
       </button>
@@ -152,6 +225,8 @@ function JobRow({ job }: { job: Job }): JSX.Element {
         <Trash2 size={12} />
       </button>
     </li>
+    {history && <JobHistory job={job} />}
+    </>
   )
 }
 

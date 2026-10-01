@@ -22,7 +22,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from pydantic import AfterValidator, BaseModel, Field
 
 from . import activity, assist, llm, mac, mcp_eval, tools
@@ -37,6 +37,7 @@ from .dashboards import Dashboards, generate_recap, generate_summary, generate_w
 from .docs import Docs, unified_diff
 from . import cache as google_cache
 from .google import Google, GoogleNotConnected, json_safe
+from . import job_history
 from .jobs_policy import JobPolicy
 from .jobs import (KINDS, PROPOSAL_STATUSES, Jobs, Proposals, Scheduler, local_tz_name, spent, valid_cron,
                    valid_tz)
@@ -2062,6 +2063,10 @@ async def _launch_job(job: dict[str, Any], fire: dict[str, Any]) -> str | None:
     body = ChatIn(content=_job_prompt(job, fire))
     run = bus.start(conv["id"], lambda r: _run_chat(r, body), input={**fire, "conversation_id": conv["id"]}, kind="job")
     log.info("job %s fired for %s as run %s", job["name"], _stamp(fire["due_at"]), run.run_id)
+    # Runs after _drive has ended the run, so the row the renderer then asks about is final. Ids only: the
+    # app topic is a doorbell, and what to notify about is decided from rows by GET /inbox/notify.
+    if run.task is not None:
+        run.task.add_done_callback(lambda _t, rid=run.run_id, jid=job["id"]: events.publish("job_finished", {"run_id": rid, "job_id": jid}))
     return run.run_id
 
 
@@ -2184,6 +2189,46 @@ async def run_job_now(id: str) -> dict[str, Any]:
     return {"ok": bool(run_id), "run_id": run_id, "conversation_id": (row or {}).get("conversation_id")}
 
 
+def _job_run_summaries(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    counts = proposals.counts([r["run_id"] for r in rows])
+    out = []
+    for r in rows:
+        text = run_store.transcript(r["run_id"], r["message_id"])[0] if r.get("message_id") else ""
+        out.append(job_history.summarize_run(r, run_store.event_counts(r["run_id"]), counts.get(r["run_id"], {}), text))
+    return out
+
+
+def _known_job(id: str) -> dict[str, Any]:
+    job = jobs.get(id)
+    if not job:
+        raise HTTPException(404, "No such job")
+    return job
+
+
+@app.get("/jobs/{id}/runs")
+def job_runs(id: str, limit: int = 50) -> list[dict[str, Any]]:
+    """The job's last runs (50 by default, 200 at most): status incl. timed_out, duration, cost, tool and proposal counts."""
+    _known_job(id)
+    return _job_run_summaries(run_store.of_job(id, limit))
+
+
+@app.get("/jobs/{id}/stats")
+def job_stats(id: str, days: float = 30.0) -> dict[str, Any]:
+    _known_job(id)
+    since = time.time() - max(0.0, float(days)) * 86400
+    rows = [job_history.summarize_run(r, None, None) for r in run_store.of_job(id, 200, since)]
+    return job_history.stats(rows)
+
+
+@app.get("/jobs/{id}/runs.csv")
+def job_runs_csv(id: str, limit: int = 200) -> Response:
+    """The run history as a CSV download. Local only: nothing is sent anywhere."""
+    job = _known_job(id)
+    body = job_history.to_csv(_job_run_summaries(run_store.of_job(id, limit)))
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", job["name"])[:40]
+    return Response(body, media_type="text/csv", headers={"Content-Disposition": f'attachment; filename="job-{slug}-runs.csv"'})
+
+
 class ProposalIn(BaseModel):
     args: dict[str, Any] | None = None  # the user's edit, accept only
 
@@ -2282,6 +2327,17 @@ def agent_inbox(hours: float = 72.0, limit: int = 20) -> dict[str, Any]:
                        "failed": sum(1 for a in away if a["status"] in ("error", "interrupted"))},
             "scheduler": {"last_tick": scheduler.last_tick, "fires": scheduler.fires,
                           "next_due_at": jobs.earliest_due(), "timezone": local_tz_name()}}
+
+
+@app.get("/inbox/notify")
+def inbox_notify(since: float = 0.0) -> list[dict[str, Any]]:
+    """Events worth an OS notification since `since` (unix seconds), at most 20. Names and counts only: never reply
+    text, which can quote mail. The renderer decides whether to show them (app hidden, notifyJobs on)."""
+    by_id = {j["id"]: j for j in jobs.list()}
+    runs = run_store.of_kind("job", since=max(0.0, since - 86400), limit=100)
+    counts = proposals.counts([r["run_id"] for r in runs])
+    rows = [job_history.summarize_run(r, None, counts.get(r["run_id"], {})) for r in runs]
+    return job_history.notify_events(rows, by_id, proposals.list("pending", limit=100), since)
 
 
 @app.on_event("startup")

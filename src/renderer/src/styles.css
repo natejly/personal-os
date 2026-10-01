@@ -1500,6 +1500,9 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .inbox-jobs ul { list-style: none; margin: 0; padding: 0; }
 .inbox-jobs li { display: flex; align-items: center; gap: 10px; font-size: 13px; }
 .inbox-jobs li .chip-check-row { flex: 1; min-width: 0; }
+.inbox-jobs li.job-history { display: block; padding: 4px 0 8px 22px; border-left: 2px solid var(--border); margin-left: 6px; }
+.job-history-stats { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }
+.job-history-run { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
 .inbox-jobs li code { font-size: 11.5px; }
 .inbox-jobs > p { margin: 8px 0 0; line-height: 1.5; }
 .inbox-jobs h5 { display: flex; align-items: center; gap: 8px; }

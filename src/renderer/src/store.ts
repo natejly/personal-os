@@ -829,6 +829,9 @@ export const useStore = create<State>((set, get) => {
             if (memories.length + nodes.length + edges.length) refreshAll()
           } else if (ev.event === 'learn_error') {
             get().toast(`Auto-learn failed: ${ev.data.message}`, 'error')
+          } else if (ev.event === 'job_finished') {
+            void get().refreshAgentInbox()
+            window.dispatchEvent(new Event('grain-job-finished'))
           }
         }
       } catch {

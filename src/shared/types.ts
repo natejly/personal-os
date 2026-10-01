@@ -840,6 +840,8 @@ export interface Settings {
   parkAfterSeconds?: number
   /** A native notification when a desk stops and cannot go on without you. Missing reads as on. */
   deskNotify?: boolean
+  /** A native notification when a scheduled job fails, is auto-paused or leaves proposals, while the window is hidden. Missing reads as on. */
+  notifyJobs?: boolean
   /** Default plan mode for a new chat: off, auto (the first mutating call arms it), or always. */
   planMode?: 'off' | 'auto' | 'always'
   googleClientId: string
@@ -935,6 +937,7 @@ export interface Learned {
 export type BackgroundEvent =
   | { event: 'learned'; data: Learned }
   | { event: 'learn_error'; data: { conversation_id?: string; message_id?: string; message: string } }
+  | { event: 'job_finished'; data: { run_id: string; job_id: string } }
 
 export interface GrainApi {
   backendUrl: () => Promise<string>
@@ -1404,6 +1407,46 @@ export interface JobRunSummary {
   pending_proposals: number
   /** The run's own report, from the event tape. Shown as the body; nothing is parsed out of it. */
   summary: string
+}
+
+/** One run in a job's History drawer (GET /jobs/{id}/runs). Derived from rows; `summary` is display text only. */
+export interface JobRunRecord {
+  run_id: string
+  conversation_id: string | null
+  status: 'running' | 'done' | 'error' | 'interrupted' | 'timed_out'
+  started_at: number
+  ended_at: number | null
+  duration_s: number | null
+  due_at: number | null
+  late: boolean
+  missed_slots: number
+  attempt: number
+  retry_of: string | null
+  manual: boolean
+  tool_calls: number
+  proposals: { pending: number; accepted: number; rejected: number }
+  cost: number | null
+  error: string | null
+  summary: string
+}
+
+export interface JobStats {
+  runs: number
+  ok: number
+  failed: number
+  success_rate: number | null
+  median_duration_s: number | null
+  last_ok_at: number | null
+  total_cost: number
+}
+
+/** One OS-notification-worthy job event (GET /inbox/notify). Names and counts only, never reply text. */
+export interface JobNotifyEvent {
+  id: string
+  kind: 'job_failed' | 'job_done_with_proposals' | 'job_paused' | 'proposal_pending'
+  title: string
+  body: string
+  at: number
 }
 
 export interface AgentInbox {

@@ -172,6 +172,12 @@ class RunStore:
                          (kind, since, max(1, min(int(limit), 500))))
         return [r for r in (self._run_row(x) for x in rows) if r]
 
+    def of_job(self, job_id: str, limit: int = 50, since: float = 0.0) -> list[dict[str, Any]]:
+        """One job's runs, newest first. Reads agent_runs.input.job_id; no table of its own, no retention change."""
+        rows = self._all("SELECT * FROM agent_runs WHERE kind='job' AND json_extract(input,'$.job_id')=? AND started_at>=? "
+                         "ORDER BY started_at DESC, rowid DESC LIMIT ?", (job_id, since, max(1, min(int(limit), 200))))
+        return [r for r in (self._run_row(x) for x in rows) if r]
+
     # ---- events ----
     def append(self, run_id: str, seq: int, event: str, data: Any) -> bool:
         try:

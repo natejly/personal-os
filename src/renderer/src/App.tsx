@@ -24,6 +24,7 @@ import Canvas from './canvas/Canvas'
 import { useCanvas } from './canvas/store'
 import { AlertTriangle } from 'lucide-react'
 import { accentId } from './lib/accents'
+import { api } from './lib/api'
 
 /** The transitions worth interrupting for: the desk has stopped and cannot go on without the user. */
 const NOTIFY_ON: DeskStatus[] = ['review', 'blocked', 'failed']
@@ -73,6 +74,62 @@ function notifyDesk(body: string): void {
   } catch {
     // A notification is never worth a render crash.
   }
+}
+
+const JOB_SEEN_KEY = 'grain.jobNotifySince'
+const readSeen = (): number => {
+  try {
+    const v = Number(localStorage.getItem(JOB_SEEN_KEY))
+    return Number.isFinite(v) && v > 0 ? v : Date.now() / 1000
+  } catch {
+    return Date.now() / 1000
+  }
+}
+const writeSeen = (t: number): void => {
+  try {
+    localStorage.setItem(JOB_SEEN_KEY, String(t))
+  } catch {
+    // Per-viewer convenience only; without it the next check starts from now.
+  }
+}
+
+/**
+ * An OS notification when an unattended job fails, is paused or leaves proposals. Doorbell, not poller: the
+ * backend rings `job_finished` on the app topic and this asks /inbox/notify what is new since the last look.
+ * Bodies are names and counts only (the backend never sends reply text). It only speaks while the window is
+ * hidden; coming back to the window just moves the cursor, because the inbox is then in front of the user.
+ */
+function JobNotifier(): null {
+  const enabled = useStore((s) => s.settings.notifyJobs !== false)
+  useEffect(() => {
+    if (!enabled) return
+    let busy = false
+    const check = async (speak: boolean): Promise<void> => {
+      if (busy) return
+      busy = true
+      try {
+        const since = readSeen()
+        if (!speak) return writeSeen(Date.now() / 1000)
+        const events = await api.inboxNotify(since)
+        if (events.length) writeSeen(Math.max(...events.map((e) => e.at)))
+        if (typeof Notification !== 'function' || Notification.permission === 'denied') return
+        for (const e of events) new Notification(e.title, { body: e.body })
+      } catch {
+        // A notification is never worth a render crash, and a backend that is down has nothing to say.
+      } finally {
+        busy = false
+      }
+    }
+    const onFinished = (): void => void check(document.hidden)
+    const onFocus = (): void => void check(false)
+    window.addEventListener('grain-job-finished', onFinished)
+    window.addEventListener('focus', onFocus)
+    return () => {
+      window.removeEventListener('grain-job-finished', onFinished)
+      window.removeEventListener('focus', onFocus)
+    }
+  }, [enabled])
+  return null
 }
 
 function Toasts(): JSX.Element {
@@ -182,6 +239,7 @@ export default function App(): JSX.Element {
       {settingsOpen && <SettingsModal />}
       {projectModal && <ProjectModal />}
       <DeskNotifier />
+      <JobNotifier />
       <Toasts />
     </div>
   )

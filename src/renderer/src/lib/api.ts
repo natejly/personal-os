@@ -6,7 +6,7 @@ import type {
   Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
   Desk, DeskAutonomy, DeskBudget, DeskDiff, DeskEvent, DeskFilePreview, DeskFileTree, DeskOutput,
   DeskStatus, FullDesk, PlanRecord, PromotionKind, PromotionResult,
-  AgentInbox, AgentProposal, Job,
+  AgentInbox, AgentProposal, Job, JobNotifyEvent, JobRunRecord, JobStats,
   Doc, DocFolder, FullDoc, DocRevision,
   McpEffective, McpReport, McpServer, McpServerDraft, McpTool, ToolMode,
   ActivityApplyResult, ActivityCapability, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityGrantResult,
@@ -112,8 +112,18 @@ export const api = {
       req<Job>(`/jobs/${id}`, { method: 'PATCH', body: json(patch) }),
     delete: (id: string) => req(`/jobs/${id}`, { method: 'DELETE' }),
     /** Fire it now by hand. Still proposal-only and on the job budget; the cron schedule is untouched. */
+    runs: (id: string, limit = 50) => req<JobRunRecord[]>(`/jobs/${id}/runs?limit=${limit}`),
+    stats: (id: string, days = 30) => req<JobStats>(`/jobs/${id}/stats?days=${days}`),
+    /** The run history as CSV text, fetched with the auth header (a plain link could not carry it). */
+    csv: async (id: string): Promise<string> => {
+      const r = await fetch(`${base}/jobs/${id}/runs.csv`, { headers: await auth() })
+      if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
+      return r.text()
+    },
     runNow: (id: string) => req<{ ok: boolean; run_id: string | null; conversation_id: string | null }>(`/jobs/${id}/run`, { method: 'POST' })
   },
+  /** OS-notification-worthy job events newer than `since` (unix seconds). */
+  inboxNotify: (since: number) => req<JobNotifyEvent[]>(`/inbox/notify?since=${since}`),
   proposals: {
     list: (status: 'pending' | 'accepted' | 'rejected' | 'all' = 'pending') => req<AgentProposal[]>(`/proposals?status=${status}`),
     /** Executes it, as the user. `args` replaces the call's arguments first. Accepting twice is a 409, never a resend. */

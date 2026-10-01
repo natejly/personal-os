@@ -411,7 +411,7 @@ export interface State {
   runJobNow: (id: string) => Promise<void>
   decideProposal: (id: string, accept: boolean, args?: Record<string, unknown>) => Promise<void>
   /** `opts` carries a propose_plan card's answer: the steps being authorised (with any edits) and a note. */
-  approveTool: (callId: string, decision: ApprovalDecision, conversationId?: string, opts?: { steps?: PlanEdit[] | null; note?: string }) => Promise<void>
+  approveTool: (callId: string, decision: ApprovalDecision, conversationId?: string, opts?: { steps?: PlanEdit[] | null; note?: string; arguments?: Record<string, unknown> }) => Promise<void>
   refreshGoogle: () => Promise<void>
   connectGoogle: () => Promise<void>
   disconnectGoogle: () => Promise<void>

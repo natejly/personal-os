@@ -1050,13 +1050,19 @@ def _register_google(self: Toolbox) -> None:
         examples=[{"to": "mira@example.com", "subject": "Invoice 42", "body": "Hi Mira,\n\nAttached is invoice 42.\n\nThanks"},
                   {"to": "team@example.com", "subject": "Re: sprint review", "body": "Works for me.", "reply_to_message_id": "18f2c1a9b7e4d0aa"}]))
 
-    async def gmail_send(ctx: dict[str, Any], to: str, subject: str, body: str) -> Any:
+    async def gmail_send(ctx: dict[str, Any], to: str, subject: str, body: str, reply_to_message_id: str | None = None,
+                         as_draft: bool = False) -> Any:
+        if as_draft:
+            # The user chose "Save as draft" on the approval card: the same email, written to Drafts and never sent.
+            # It still goes through gmail_draft's read-back, so the card can say "Saved to Drafts, verified".
+            return await run(g.gmail_draft, to, subject, body, reply_to_message_id)
         if self.outbox is None:
-            return await run(g.gmail_send, to, subject, body)
-        row = await run(self.outbox.queue, to, subject, body, None, "assistant", ctx.get("conversation_id"))
+            return await run(g.gmail_send, to, subject, body, reply_to_message_id)
+        row = await run(self.outbox.queue, to, subject, body, reply_to_message_id, "assistant", ctx.get("conversation_id"))
         return outbox_mod.queued_result(row)
-    R("gmail_send", ToolSpec("gmail_send", "Queue an email to send from the user's Gmail. It is held for about a minute and a half first so the user can undo it, so it is NOT sent when this returns — say it will go out shortly, never that it is sent. Only when the user explicitly asked to send it.",
-        _obj({"to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"}}, ["to", "subject", "body"]), gmail_send, "google", "external",
+    R("gmail_send", ToolSpec("gmail_send", "Queue an email to send from the user's Gmail. It is held for about a minute and a half first so the user can undo it, so it is NOT sent when this returns — say it will go out shortly, never that it is sent. Only when the user explicitly asked to send it. Pass reply_to_message_id to answer an existing message in its thread. Leave as_draft unset: the user sets it on the approval card.",
+        _obj({"to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"}, "reply_to_message_id": {"type": "string"},
+              "as_draft": {"type": "boolean", "default": False}}, ["to", "subject", "body"]), gmail_send, "google", "external",
         examples=[{"to": "mira@example.com", "subject": "Running late", "body": "I will be 10 minutes late."}]))
 
     async def gmail_outbox(ctx: dict[str, Any], action: str = "list", id: str | None = None) -> Any:

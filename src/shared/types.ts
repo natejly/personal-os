@@ -362,6 +362,10 @@ export interface ToolEvent {
   proposal?: string | null
   /** Set when this call's arguments matched an approved plan step, so it ran without its own card. */
   plan?: PlanStepRef | null
+  /** The arguments the person changed on the card before approving; `arguments` then holds what ran. */
+  edited_arguments?: Record<string, unknown> | null
+  original_arguments?: Record<string, unknown> | null
+  edited_by?: 'user' | null
 }
 
 /** Why a reply stopped early: a budget axis, or the repetition breaker. */

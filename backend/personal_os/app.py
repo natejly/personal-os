@@ -40,6 +40,7 @@ from .google import Google, GoogleNotConnected, json_safe
 from .jobs import (KINDS, PROPOSAL_STATUSES, Jobs, Proposals, Scheduler, local_tz_name, spent, valid_cron,
                    valid_tz)
 from . import skillbuild
+from . import approval_edits, mail_edits  # noqa: F401 - mail_edits registers the gmail validators
 from .mcp_client import McpClient, McpError
 from .mcp_servers import MODES as MCP_MODES, RESERVED_PREFIX as MCP_PREFIX, SCOPES as MCP_SCOPES, McpServers
 from .meeting_recorder import RecorderBusy
@@ -225,6 +226,8 @@ _active: dict[str, asyncio.Event | Run] = {}
 # Pending tool-call approvals: call_id -> Future[decision]. The durable record is the approvals table; this is
 # only how POST /approvals wakes the run that is waiting in this process.
 _approvals: dict[str, asyncio.Future] = {}
+# Arguments the person edited on a card, validated at POST /approvals and picked up by the run when it wakes.
+_edited_args: dict[str, dict[str, Any]] = {}
 # Background work that outlives the run that queued it, and the topic it reports on.
 events = Topic()
 learner = LearnWorker(memories=memories, graph=graph, set_trace=convos.set_trace, publish=events.publish)
@@ -1388,6 +1391,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 yield "span", {"message_id": am["id"], "span": tspan}
                 t0 = time.time()
                 decision = "allow"
+                edited_args: dict[str, Any] | None = None
+                original_args: dict[str, Any] = args
                 if asks:
                     # Pause the reply until the user approves or denies this call (POST /approvals/{call_id}).
                     # The approval is a row, and it waits as long as it takes: there is no auto-deny.
@@ -1462,6 +1467,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                          if (approved_plan or {}).get("status") == "approved" else None)
                     budget.paused += time.time() - approval_t0  # a slow approval must not blow the wall clock
                     t0 = time.time()  # don't count waiting time as tool time
+                    edited_args = _edited_args.pop(uid, None) if decision != "deny" else None
+                    if edited_args is not None:
+                        # What the person approved is what runs, is journalled and is verified: the model's
+                        # original is kept on the event, never executed.
+                        original_args, args = args, edited_args
                     granted = decision in ("always_chat", "always_global")
                     # A tainted reply cannot buy a standing grant, and neither can a plan card: 'always' on
                     # propose_plan would leave the plan with no approval at all.
@@ -1538,6 +1548,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                          "error": err, "images": images or None,
                          "approval": (("plan" if claimed else decision) if mode == "ask" else None),
                          "plan": {"plan_id": claimed["plan_id"], "idx": claimed["idx"], "title": claimed["title"]} if claimed else None,
+                         **({"edited_arguments": edited_args, "original_arguments": original_args, "edited_by": "user"} if edited_args is not None else {}),
                          "forced": forced, "tainted": tainted, "blocked": c["name"] if was_blocked else None, "breaker": partial,
                          "blocked_by": "plan_mode" if blocked_reason == PLAN_BLOCKED else None,
                          "proposal": (result.get("proposal_id") if proposing and isinstance(result, dict) else None)}
@@ -1915,6 +1926,8 @@ class ApprovalIn(BaseModel):
     # edited values are what gets authorised.
     steps: list[dict[str, Any]] | None = None
     note: str | None = None  # one line back to the model, e.g. why a plan was rejected
+    # The person's edits to the call's arguments (editable tools only, see approval_edits). Re-validated here.
+    arguments: dict[str, Any] | None = None
 
 
 def _patch_tool_event(message_id: str | None, call_id: str, patch: dict[str, Any]) -> None:
@@ -1963,8 +1976,22 @@ async def approve_tool_call(call_id: str, body: ApprovalIn) -> dict[str, Any]:
         edits = parse_plan_edits(body.steps)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
+    edited: dict[str, Any] | None = None
+    if body.arguments is not None and body.decision != "deny":
+        tool = pending["tool"] if pending else None
+        spec = toolbox.specs.get(tool) if tool else None
+        if spec is None:
+            raise HTTPException(404, "No pending approval for that call")
+        try:
+            edited = approval_edits.prepare(tool, body.arguments, spec.parameters)
+        except PermissionError as e:
+            raise HTTPException(400, str(e)) from e
+        except approval_edits.ApprovalEditError as e:
+            raise HTTPException(400, str(e)) from e
     fut = _approvals.get(call_id)
     row = run_store.decide(call_id, body.decision)
+    if edited is not None and row is not None:
+        _edited_args[call_id] = edited
     live = bool(fut and not fut.done())
     if row is None and not live:
         raise HTTPException(404, "No pending approval for that call")

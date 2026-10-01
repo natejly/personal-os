@@ -7,6 +7,8 @@ import { api } from '../lib/api'
 import { useStore } from '../store'
 import DiffView from './DiffView'
 import PlanApproval from './PlanApproval'
+import { TOOL_CARDS } from './toolcards/registry'
+import './toolcards' // registers the tool-specific cards
 // The ask card mounts inline in a chat bubble, so it needs the sheet the desk panes use.
 import '../styles/cowork.css'
 import '../styles/docs.css'
@@ -202,7 +204,14 @@ export default function ToolEvents({ events, conversationId }: { events: ToolEve
   const approveTool = useStore((s) => s.approveTool)
   return (
     <div className="tool-events">
-      {events.map((t) => (
+      {events.map((t) => {
+        const Card = TOOL_CARDS[t.name]
+        if (Card) {
+          const decide = async (approve: boolean, editedArgs?: Record<string, unknown>): Promise<void> =>
+            approveTool(t.id, approve ? 'allow' : 'deny', conversationId, editedArgs ? { arguments: editedArgs } : undefined)
+          return <div key={t.id} className="tool-card-slot"><Card event={t} pending={Boolean(t.pending && t.needs_approval)} decide={decide} /></div>
+        }
+        return (
         <div key={t.id} className={`tool-event ${t.pending ? 'pending' : ''} ${t.error ? 'error' : ''}`}>
           <button className="tool-head" onClick={() => setOpen((o) => ({ ...o, [t.id]: !o[t.id] }))}>
             <ChevronRight size={12} className={open[t.id] ? 'rot90' : ''} />
@@ -252,7 +261,8 @@ export default function ToolEvents({ events, conversationId }: { events: ToolEve
             </div>
           )}
         </div>
-      ))}
+        )
+      })}
     </div>
   )
 }

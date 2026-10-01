@@ -1,0 +1,72 @@
+import { useState } from 'react'
+import { CalendarClock } from 'lucide-react'
+import { api } from '../lib/api'
+import { useStore } from '../store'
+import type { PlannerBlock, PlannerSuggestion } from '@shared/types'
+
+const when = (b: PlannerBlock): string => {
+  const s = new Date(b.start), e = new Date(b.end)
+  return `${s.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })} ${s.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}–${e.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`
+}
+const key = (b: PlannerBlock): string => `${b.todo_id}:${b.start}`
+const why = (b: PlannerBlock): string =>
+  b.why ? `Score ${b.score.toFixed(2)}: due ${b.why.due.toFixed(2)}, priority ${b.why.priority.toFixed(2)}, energy ${b.why.energy.toFixed(2)}, time of day ${b.why.time.toFixed(2)}` : `Score ${b.score.toFixed(2)}`
+
+/** "Plan my day": proposes calendar blocks for todos with estimates. Nothing reaches Google until "Add selected". */
+export default function PlannerPanel(): JSX.Element {
+  const toast = useStore((s) => s.toast)
+  const google = useStore((s) => s.google)
+  const [plan, setPlan] = useState<PlannerSuggestion | null>(null)
+  const [picked, setPicked] = useState<Set<string>>(new Set())
+  const [busy, setBusy] = useState(false)
+
+  if (!google?.connected) return <></>
+
+  const suggest = async (): Promise<void> => {
+    setBusy(true)
+    try {
+      const p = await api.planner.suggest()
+      setPlan(p)
+      setPicked(new Set(p.blocks.map(key)))
+    } catch (e) {
+      toast((e as Error).message, 'error')
+    } finally { setBusy(false) }
+  }
+  const apply = async (): Promise<void> => {
+    if (!plan) return
+    setBusy(true)
+    try {
+      const { results } = await api.planner.apply(plan.blocks.filter((b) => picked.has(key(b))))
+      const failed = results.filter((r) => !r.ok)
+      if (failed.length) toast(`${results.length - failed.length} added, ${failed.length} failed: ${failed[0].error}`, 'error')
+      else toast(`${results.length} block${results.length === 1 ? '' : 's'} added to your calendar`)
+      setPlan(null)
+    } catch (e) {
+      toast((e as Error).message, 'error')
+    } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="planner-panel">
+      {!plan && <button className="ghost-btn" onClick={() => void suggest()} disabled={busy}><CalendarClock size={14} /> {busy ? 'Planning…' : 'Plan my day'}</button>}
+      {plan && (
+        <section className="todo-section">
+          <h4 className="section-h">Proposed blocks <span>{plan.blocks.length}</span></h4>
+          {plan.blocks.length === 0 && <p className="empty-hint">Nothing to place. Give todos a due date or an estimate in minutes.</p>}
+          {plan.blocks.map((b) => (
+            <label key={key(b)} className="planner-row" title={why(b)}>
+              <input type="checkbox" checked={picked.has(key(b))} onChange={() => setPicked((p) => { const n = new Set(p); n.has(key(b)) ? n.delete(key(b)) : n.add(key(b)); return n })} />
+              <span>{b.title}{b.part[1] > 1 ? ` (part ${b.part[0]}/${b.part[1]})` : ''}</span>
+              <span className="planner-when">{when(b)}</span>
+            </label>
+          ))}
+          {plan.unplaced.length > 0 && <p className="empty-hint">{plan.unplaced.length} could not fit before their due date.</p>}
+          <div className="planner-row">
+            <button className="primary-btn" onClick={() => void apply()} disabled={busy || picked.size === 0}>Add selected to calendar</button>
+            <button className="ghost-btn" onClick={() => setPlan(null)} disabled={busy}>Dismiss</button>
+          </div>
+        </section>
+      )}
+    </div>
+  )
+}

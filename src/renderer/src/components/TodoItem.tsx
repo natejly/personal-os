@@ -90,6 +90,11 @@ export default function TodoItem({ todo, showProject = true, compact = false }: 
           <span>{due.text || 'no date'}</span>
           <input type="date" aria-label={`Due date for ${todo.title}`} value={todo.due ?? ''} onChange={(e) => void updateTodo(todo.id, e.target.value ? { due: e.target.value } : { clear_due: true })} />
         </label>
+        {!compact && !todo.done && (
+          <input className="todo-est" type="number" min={0} max={960} step={5} placeholder="min" title="Estimate in minutes (used by Plan my day)" aria-label={`Estimate in minutes for ${todo.title}`}
+            defaultValue={todo.estimate_min ?? ''} key={todo.estimate_min ?? 'none'}
+            onBlur={(e) => { const v = Number(e.target.value); if ((v || null) !== (todo.estimate_min ?? null)) void updateTodo(todo.id, v > 0 ? { estimate_min: v } : { clear_estimate: true }) }} />
+        )}
         {!compact && (
           <select className="todo-prio" value={todo.priority} onChange={(e) => void updateTodo(todo.id, { priority: Number(e.target.value) })} title="Priority">
             <option value={1}>P1</option><option value={2}>P2</option><option value={3}>P3</option>

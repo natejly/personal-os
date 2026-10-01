@@ -9,6 +9,7 @@ import { localDay } from './CalendarWeek'
 import SendToSpace from './SendToSpace'
 import { lines, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
+import PlannerPanel from './PlannerPanel'
 
 export default function TodosView(): JSX.Element {
   const todos = useStore((s) => s.todos)
@@ -93,6 +94,7 @@ export default function TodosView(): JSX.Element {
         <AppSwitcher />
       </header>
       <div className="page-body">
+        <PlannerPanel />
         <div className="add-row">
           <SmartTextarea
             kind="todo"

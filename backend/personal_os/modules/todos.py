@@ -28,6 +28,7 @@ class TodoIn(BaseModel):
     due: str | None = None
     priority: int = 2
     repeat: dict[str, Any] | None = None
+    estimate_min: int | None = None
 
 
 class TodoPatch(BaseModel):
@@ -41,6 +42,8 @@ class TodoPatch(BaseModel):
     clear_project: bool = False
     repeat: dict[str, Any] | None = None
     clear_repeat: bool = False
+    estimate_min: int | None = None
+    clear_estimate: bool = False
     calendar_event_id: str | None = None
     calendar_link: str | None = None
     calendar_id: str | None = None
@@ -98,15 +101,17 @@ class TodosModule(Module):
             if not body.title.strip():
                 raise HTTPException(400, "Empty title")
             try:
-                return store.create(body.title, ctx.wsid(body.project_id), body.notes, body.due, body.priority, repeat=body.repeat)
+                return store.create(body.title, ctx.wsid(body.project_id), body.notes, body.due, body.priority, repeat=body.repeat, estimate_min=body.estimate_min)
             except ValueError as e:
                 raise HTTPException(400, str(e)) from e
 
         @r.put("/todos/{id}")
         def update_todo(id: str, body: TodoPatch) -> dict[str, Any]:
-            patch = body.model_dump(exclude_none=True, exclude={"clear_due", "clear_project", "clear_repeat"})
+            patch = body.model_dump(exclude_none=True, exclude={"clear_due", "clear_project", "clear_repeat", "clear_estimate"})
             if body.clear_due:
                 patch["due"] = None
+            if body.clear_estimate:
+                patch["estimate_min"] = None
             if body.clear_repeat:
                 patch["repeat"] = None
             if body.clear_project:
@@ -182,7 +187,7 @@ class TodosModule(Module):
             if sort == "urgency":
                 items = sorted(items, key=lambda t: -todo_rules.urgency(t, today))
             rows = [{"id": t["id"], "title": t["title"], "due": t["due"], "priority": t["priority"], "done": bool(t["done"]), "notes": t["notes"][:200],
-                     "urgency": todo_rules.urgency(t, today), "repeat": t.get("repeat")} for t in items]
+                     "urgency": todo_rules.urgency(t, today), "repeat": t.get("repeat"), "estimate_min": t.get("estimate_min")} for t in items]
             return page(rows, offset=offset, limit=50, key="todos")
         R("todo_list", ToolSpec("todo_list", "List the user's todos (open by default) in this chat's scope: the project's todos plus personal ones.",
             _obj({"include_done": {"type": "boolean", "default": False}, "all_projects": {"type": "boolean", "default": False}, "offset": {"type": "integer", "default": 0},
@@ -190,25 +195,28 @@ class TodosModule(Module):
             examples=[{}, {"include_done": True}, {"all_projects": True, "offset": 50}, {"sort": "urgency"}]))
 
         async def todo_add(ctx: dict[str, Any], title: str, due: str | None = None, notes: str = "", priority: int = 2, personal: bool = False,
-                           repeat_every: int | None = None, repeat_unit: str | None = None, repeat_mode: str = "from_due") -> Any:
+                           repeat_every: int | None = None, repeat_unit: str | None = None, repeat_mode: str = "from_due",
+                           estimate_min: int | None = None) -> Any:
             try:
                 rp = {"every": repeat_every or 1, "unit": repeat_unit, "mode": repeat_mode} if repeat_unit else None
-                t = store.create(title, None if personal else ctx["project_id"], notes=notes, due=due, priority=priority, repeat=rp)
+                t = store.create(title, None if personal else ctx["project_id"], notes=notes, due=due, priority=priority, repeat=rp, estimate_min=estimate_min)
             except ValueError as e:
                 return tool_error(str(e), field="repeat_unit", expected="day, week, month or year", example={"title": "Water plants", "due": "2026-10-05", "repeat_every": 1, "repeat_unit": "week"})
             return {"id": t["id"], "title": t["title"], "due": t["due"]}
         R("todo_add", ToolSpec("todo_add", "Add a todo for the user. Dates as YYYY-MM-DD. Priority 1 (high) to 3 (low).",
             _obj({"title": {"type": "string"}, "due": {"type": "string"}, "notes": {"type": "string"}, "priority": {"type": "integer", "default": 2}, "personal": {"type": "boolean", "default": False},
              "repeat_every": {"type": "integer", "description": "Repeat every N units (default 1)."}, "repeat_unit": {"type": "string", "enum": ["day", "week", "month", "year"]},
-             "repeat_mode": {"type": "string", "enum": ["from_due", "from_completion"], "default": "from_due"}}, ["title"]), todo_add, "todos", "writes",
+             "repeat_mode": {"type": "string", "enum": ["from_due", "from_completion"], "default": "from_due"},
+             "estimate_min": {"type": "integer", "description": "Expected minutes of work; the planner uses it to time-block."}}, ["title"]), todo_add, "todos", "writes",
             examples=[{"title": "Renew passport", "due": "2026-10-14", "priority": 1},
                       {"title": "Buy milk", "personal": True},
                       {"title": "Water the plants", "due": "2026-10-05", "repeat_every": 1, "repeat_unit": "week"},
                       {"title": "Draft the migration plan", "notes": "start from the Q3 doc", "priority": 2}]))
 
         async def todo_update(ctx: dict[str, Any], id: str, done: bool | None = None, title: str | None = None, due: str | None = None, priority: int | None = None, notes: str | None = None,
-                              repeat_every: int | None = None, repeat_unit: str | None = None, repeat_mode: str = "from_due") -> Any:
-            patch = {k: v for k, v in {"done": done, "title": title, "due": due, "priority": priority, "notes": notes}.items() if v is not None}
+                              repeat_every: int | None = None, repeat_unit: str | None = None, repeat_mode: str = "from_due",
+                              estimate_min: int | None = None) -> Any:
+            patch = {k: v for k, v in {"done": done, "title": title, "due": due, "priority": priority, "notes": notes, "estimate_min": estimate_min}.items() if v is not None}
             if repeat_unit:
                 patch["repeat"] = {"every": repeat_every or 1, "unit": repeat_unit, "mode": repeat_mode}
             try:
@@ -220,7 +228,8 @@ class TodosModule(Module):
         R("todo_update", ToolSpec("todo_update", "Update or complete a todo by id (from todo_list).",
             _obj({"id": {"type": "string"}, "done": {"type": "boolean"}, "title": {"type": "string"}, "due": {"type": "string"}, "priority": {"type": "integer"}, "notes": {"type": "string"},
              "repeat_every": {"type": "integer"}, "repeat_unit": {"type": "string", "enum": ["day", "week", "month", "year"]},
-             "repeat_mode": {"type": "string", "enum": ["from_due", "from_completion"], "default": "from_due"}}, ["id"]), todo_update, "todos", "writes",
+             "repeat_mode": {"type": "string", "enum": ["from_due", "from_completion"], "default": "from_due"},
+             "estimate_min": {"type": "integer"}}, ["id"]), todo_update, "todos", "writes",
             examples=[{"id": "td_8c41a2", "done": True}, {"id": "td_8c41a2", "due": "2026-11-01", "priority": 1}, {"id": "td_8c41a2", "title": "Renew passport (expedited)"},
                       {"id": "td_8c41a2", "repeat_every": 2, "repeat_unit": "week"}]))
 

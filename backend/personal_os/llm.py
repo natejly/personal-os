@@ -106,6 +106,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Reply tracker (mailwatch.py); MailWatchModule.config() merges stored values over these defaults.
     "mailWatch": {"enabled": True, "awaitingAfterDays": 3, "needsReplyAfterHours": 24, "useLLM": False,
                   "query": "newer_than:14d -category:promotions -category:social", "proposeFollowups": True},
+    # Todo time-block planner (planner.py); PlannerModule.config() merges stored values over these.
+    "planner": {"workStart": "09:00", "workEnd": "17:30", "workDays": [1, 2, 3, 4, 5], "bufferMin": 10, "minBlockMin": 15,
+                "maxBlockMin": 120, "slotStepMin": 15, "lookaheadDays": 7, "calendarName": "Grain Todos"},
 }
 
 

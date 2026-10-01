@@ -1097,6 +1097,8 @@ def _event_out(e: dict[str, Any], calendar_id: str | None = None, full: bool = F
         "recurring_event_id": e.get("recurringEventId"),
         "transparency": e.get("transparency") or "opaque",
         "status": e.get("status"),
+        # The user's own RSVP (accepted/declined/tentative/needsAction); None when not an invitee.
+        "self_response": next((x.get("responseStatus") for x in e.get("attendees", []) if x.get("self")), None),
     }
     if full:
         out.update({

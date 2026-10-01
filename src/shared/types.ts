@@ -557,6 +557,8 @@ export interface Todo {
   /** Internal: todo fields as last mirrored to the calendar. */
   calendar_sig: string | null
   repeat?: TodoRepeat | null
+  /** Expected minutes of work; the planner time-blocks with it. */
+  estimate_min?: number | null
   /** Taskwarrior-style score; only present on `?sort=urgency` lists. */
   urgency?: number
   created_at: number
@@ -1969,4 +1971,24 @@ export interface MailWatchList {
   threads: MailWatchThread[]
   counts: { to_reply: number; awaiting_reply_overdue: number }
   followups: { thread_id: string; title: string; notes: string; due: string }[]
+}
+
+/** One proposed calendar block from `/planner/suggest`; nothing is written until it is applied. */
+export interface PlannerBlock {
+  todo_id: string
+  title: string
+  start: string
+  end: string
+  score: number
+  part: [number, number]
+  why?: { due: number; priority: number; energy: number; time: number }
+}
+export interface PlannerSuggestion {
+  blocks: PlannerBlock[]
+  unplaced: { id: string; reason: string }[]
+  already_planned: string[]
+  generated_at: string
+}
+export interface PlannerApplyResult {
+  results: { todo_id: string | null; ok: boolean; event_id?: string; link?: string; error?: string }[]
 }

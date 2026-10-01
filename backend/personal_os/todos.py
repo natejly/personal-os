@@ -66,7 +66,7 @@ class Todos:
             have = {r["name"] for r in c.execute("PRAGMA table_info(todos)").fetchall()}
             for col, ddl in {"calendar_event_id": "TEXT", "calendar_link": "TEXT", "synced_at": "REAL",
                              "remote_updated": "TEXT", "calendar_id": "TEXT", "calendar_sig": "TEXT",
-                             "repeat": "TEXT"}.items():
+                             "repeat": "TEXT", "estimate_min": "INTEGER"}.items():
                 if col not in have:
                     c.execute(f"ALTER TABLE todos ADD COLUMN {col} {ddl}")
 
@@ -108,14 +108,14 @@ class Todos:
         with self.db.tx() as c:
             return self._out(row_to_dict(c.execute("SELECT * FROM todos WHERE id=?", (id,)).fetchone()))
 
-    def create(self, title: str, project_id: str | None = None, notes: str = "", due: str | None = None, priority: int = 2, source: str = "local", external_id: str | None = None, notify: bool = True, repeat: dict[str, Any] | None = None) -> dict[str, Any]:
+    def create(self, title: str, project_id: str | None = None, notes: str = "", due: str | None = None, priority: int = 2, source: str = "local", external_id: str | None = None, notify: bool = True, repeat: dict[str, Any] | None = None, estimate_min: int | None = None) -> dict[str, Any]:
         rep = todo_rules.parse_repeat(repeat)
         tid = new_id()
         t = now()
         with self.db.tx() as c:
             c.execute(
-                "INSERT INTO todos(id,project_id,title,notes,due,priority,done,source,external_id,created_at,updated_at,repeat) VALUES(?,?,?,?,?,?,0,?,?,?,?,?)",
-                (tid, project_id, title.strip(), notes, due or None, int(priority), source, external_id, t, t, json.dumps(rep) if rep else None),
+                "INSERT INTO todos(id,project_id,title,notes,due,priority,done,source,external_id,created_at,updated_at,repeat,estimate_min) VALUES(?,?,?,?,?,?,0,?,?,?,?,?,?)",
+                (tid, project_id, title.strip(), notes, due or None, int(priority), source, external_id, t, t, json.dumps(rep) if rep else None, int(estimate_min) if estimate_min else None),
             )
         if notify:
             self._changed()
@@ -125,12 +125,14 @@ class Todos:
         """Apply a patch. Completing an open repeating todo spawns its next instance (_spawn_next); Tasks-sync
         completions come through here too, so they recur as well. The completed row has its repeat cleared,
         so reopening and completing it again never spawns a second copy."""
-        fields = {k: v for k, v in patch.items() if k in {"title", "notes", "due", "priority", "done", "project_id", "calendar_event_id", "calendar_link", "calendar_id", "repeat"}}
+        fields = {k: v for k, v in patch.items() if k in {"title", "notes", "due", "priority", "done", "project_id", "calendar_event_id", "calendar_link", "calendar_id", "repeat", "estimate_min"}}
         if not fields:
             return self.get(id)
         if "repeat" in fields:
             rep = todo_rules.parse_repeat(fields["repeat"])
             fields["repeat"] = json.dumps(rep) if rep else None
+        if "estimate_min" in fields:
+            fields["estimate_min"] = int(fields["estimate_min"]) if fields["estimate_min"] else None
         before = self.get(id)
         completing = bool(before and fields.get("done") and not before["done"] and before.get("repeat"))
         if "done" in fields:
@@ -154,7 +156,7 @@ class Todos:
         due = date.fromisoformat(row["due"][:10]) if row.get("due") else None
         nxt = todo_rules.next_due(due, row["repeat"], completed_on)
         return self.create(row["title"], row.get("project_id"), row.get("notes") or "", nxt.isoformat(), row["priority"],
-                           source="local", notify=False, repeat=row["repeat"])
+                           source="local", notify=False, repeat=row["repeat"], estimate_min=row.get("estimate_min"))
 
     def delete(self, id: str, notify: bool = True, tombstone: bool = True) -> None:
         t = self.get(id)

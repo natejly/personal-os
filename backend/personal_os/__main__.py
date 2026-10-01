@@ -9,6 +9,9 @@ def load_dotenv() -> None:
     import re
     from pathlib import Path
 
+    if os.environ.get("PERSONAL_OS_PACKAGED"):
+        return
+
     for env_path in (Path.cwd() / ".env", Path(__file__).resolve().parents[2] / ".env"):
         if not env_path.exists():
             continue

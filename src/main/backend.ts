@@ -129,7 +129,14 @@ export async function startBackend(): Promise<string> {
 
   child = spawn(py, ['-m', 'personal_os', '--port', String(port), '--data-dir', dataDir], {
     cwd: dir,
-    env: { ...loadDotEnv(), ...process.env, PYTHONUNBUFFERED: '1', PERSONAL_OS_AUTH_TOKEN: token },
+    // A packaged app must not inherit the developer's .env: users onboard through Settings instead.
+    env: {
+      ...(app.isPackaged ? {} : loadDotEnv()),
+      ...process.env,
+      PYTHONUNBUFFERED: '1',
+      PERSONAL_OS_AUTH_TOKEN: token,
+      ...(app.isPackaged ? { PERSONAL_OS_PACKAGED: '1' } : {})
+    },
     stdio: ['ignore', 'pipe', 'pipe']
   })
   child.stdout?.on('data', (d) => process.stdout.write(`[backend] ${d}`))

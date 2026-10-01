@@ -1,4 +1,4 @@
-"""Provider-agnostic LLM access through a LiteLLM proxy (OpenAI-compatible API)."""
+"""Provider-agnostic LLM access over any OpenAI-compatible API (a LiteLLM proxy is just one of them)."""
 from __future__ import annotations
 
 import asyncio
@@ -9,6 +9,8 @@ from contextvars import ContextVar
 from typing import Any, AsyncIterator, Callable
 
 import httpx
+
+from . import providers
 
 # Usage accounting. The app registers a listener; callers that know the chat/project set usage_context.
 UsageListener = Callable[[dict[str, Any]], None]
@@ -35,9 +37,14 @@ def _emit_usage(model: str, kind: str, usage: dict[str, Any] | None, duration_ms
             pass
 
 DEFAULT_SETTINGS: dict[str, Any] = {
-    "baseUrl": "http://localhost:4000",
+    # Empty until onboarding (or an upgrade from a stored baseUrl). Nothing here is a model alias that only
+    # one provider knows: a default that fails on every other provider is worse than none.
+    "baseUrl": "",
     "apiKey": "",
-    "defaultModel": "gpt-4o",
+    "defaultModel": "",
+    # Preset id from providers.py, or None to infer it from baseUrl. onboardedAt is the ISO time setup finished.
+    "provider": None,
+    "onboardedAt": None,
     "systemPrompt": (
         "You are the assistant inside the user's personal AI OS. Be direct, concise, and useful. "
         "Use markdown when it helps. You may be given memories, a knowledge graph, and document "
@@ -110,8 +117,21 @@ class LLMError(Exception):
     pass
 
 
-def _base(settings: dict[str, Any]) -> str:
-    return str(settings.get("baseUrl") or DEFAULT_SETTINGS["baseUrl"]).rstrip("/")
+NOT_CONFIGURED = "No AI provider is set up yet. Open Settings and choose one."
+
+
+def _url(settings: dict[str, Any], path: str, model: str | None = None) -> str:
+    base = str(settings.get("baseUrl") or "").strip()
+    if not base:
+        raise LLMError(NOT_CONFIGURED)
+    if model is not None and not model.strip():
+        raise LLMError("No model is selected. Pick one in Settings.")
+    return providers.endpoint(base, path)
+
+
+def supports_service_tier(settings: dict[str, Any]) -> bool:
+    """Only OpenAI-shaped priority routing; elsewhere an unknown field can fail the whole request."""
+    return providers.effective(settings) in ("openai", "litellm", "custom")
 
 
 def _headers(settings: dict[str, Any]) -> dict[str, str]:
@@ -122,8 +142,9 @@ def _headers(settings: dict[str, Any]) -> dict[str, str]:
 
 
 async def list_models(settings: dict[str, Any]) -> list[dict[str, str]]:
+    url = _url(settings, "/models")
     async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(f"{_base(settings)}/v1/models", headers=_headers(settings))
+        r = await client.get(url, headers=_headers(settings))
     if r.status_code >= 400:
         raise LLMError(f"{r.status_code}: {r.text[:300]}")
     data = r.json().get("data", [])
@@ -178,11 +199,12 @@ async def stream_chat(
     # Only sent when asked for: a model that does not support it rejects the whole request.
     if effort and effort != "default":
         body["reasoning_effort"] = effort
-    if fast:
+    if fast and supports_service_tier(settings):
         body["service_tier"] = "priority"
     if tools:
         body["tools"] = tools
         body["tool_choice"] = tool_choice
+    url = _url(settings, "/chat/completions", model)
     calls: dict[int, dict[str, Any]] = {}
     finish: str | None = None
     usage: dict[str, Any] | None = None
@@ -193,7 +215,7 @@ async def stream_chat(
     async with httpx.AsyncClient(timeout=httpx.Timeout(10, read=None)) as client:
         async with client.stream(
             "POST",
-            f"{_base(settings)}/v1/chat/completions",
+            url,
             headers=_headers(settings),
             json=body,
         ) as r:
@@ -268,10 +290,11 @@ async def stream_chat(
 
 async def complete(settings: dict[str, Any], model: str, messages: list[dict[str, str]], kind: str = "learn") -> str:
     """Non-streaming completion (used for extraction)."""
+    url = _url(settings, "/chat/completions", model)
     t0 = time.time()
     async with httpx.AsyncClient(timeout=120) as client:
         r = await client.post(
-            f"{_base(settings)}/v1/chat/completions",
+            url,
             headers=_headers(settings),
             json={"model": model, "messages": messages, "stream": False},
         )

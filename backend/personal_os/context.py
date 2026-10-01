@@ -22,10 +22,11 @@ def build_context(
     conv_settings: dict[str, Any],
     global_system_prompt: str,
     activity: Any = None,
+    meetings: Any = None,
 ) -> tuple[str, dict[str, Any]]:
     """Returns (system_prompt, context_used)."""
     parts: list[str] = [global_system_prompt.strip()] if global_system_prompt.strip() else []
-    used: dict[str, Any] = {"memories": [], "nodes": [], "edges": [], "chunks": [], "project": None, "activity": None}
+    used: dict[str, Any] = {"memories": [], "nodes": [], "edges": [], "chunks": [], "project": None, "activity": None, "meetings": None}
 
     if project:
         used["project"] = {"id": project["id"], "name": project["name"]}
@@ -64,6 +65,14 @@ def build_context(
         if block:
             parts.append(block)
             used["activity"] = block
+
+    # Recent meetings: titles and accepted notes, never raw transcript. Off per chat like the rest,
+    # and empty until the user records something.
+    if meetings is not None and conv_settings.get("useMeetings", True):
+        block = meetings.context_block()
+        if block:
+            parts.append(block)
+            used["meetings"] = block
 
     system = "\n\n".join(parts)
     used["system_prompt"] = system

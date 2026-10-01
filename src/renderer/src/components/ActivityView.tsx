@@ -153,6 +153,41 @@ function ListEditor({ label, hint, items, placeholder, onChange }: {
   )
 }
 
+/**
+ * The mic and system-audio device pair, exported because the meetings panel picks the same two
+ * devices. One picker means one place where the loopback caveat is written down, and no chance of
+ * the two panels disagreeing about what an empty value means.
+ *
+ * `devices` is deliberately the narrower `{index, name}` shape: `/meetings/status` adds a
+ * `loopback` flag to its rows and `/activity/devices` does not, so the common shape is this one.
+ */
+export function AudioDevicePicker({ devices, micValue, outputValue, onChange }: {
+  devices: { index: string; name: string }[]
+  micValue: string
+  outputValue: string
+  onChange: (patch: { micDevice?: string; outputDevice?: string }) => void
+}): JSX.Element {
+  const options = devices.map((d) => <option key={d.index} value={d.index}>[{d.index}] {d.name}</option>)
+  return (
+    <>
+      <label className="act-field">
+        <span><b>Microphone device</b><small>ffmpeg avfoundation input</small></span>
+        <select value={micValue} onChange={(e) => onChange({ micDevice: e.target.value })}>
+          <option value="">(none)</option>
+          {options}
+        </select>
+      </label>
+      <label className="act-field">
+        <span><b>System audio device</b><small>must be a loopback device such as BlackHole</small></span>
+        <select value={outputValue} onChange={(e) => onChange({ outputDevice: e.target.value })}>
+          <option value="">(none)</option>
+          {options}
+        </select>
+      </label>
+    </>
+  )
+}
+
 function EventRow({ e, onDelete }: { e: ActivityEvent; onDelete: () => void }): JSX.Element {
   const meta = e.meta as { keys?: number; clicks?: number; scrolls?: number; wpm?: number; secure_skipped?: number; channel?: string; since_seconds?: number }
   const detail = e.kind === 'input'
@@ -355,20 +390,10 @@ export default function ActivityView(): JSX.Element {
                 Recordings are transcribed and then deleted; only text is stored. Transcription goes to
                 <code> {cfg.audio.model}</code> on your configured base URL.
               </p>
-              <label className="act-field">
-                <span><b>Microphone device</b><small>ffmpeg avfoundation input</small></span>
-                <select value={cfg.audio.micDevice} onChange={(e) => void setActivityConfig({ audio: { ...cfg.audio, micDevice: e.target.value } })}>
-                  <option value="">(none)</option>
-                  {(st.audio_devices.length ? st.audio_devices : []).map((d) => <option key={d.index} value={d.index}>[{d.index}] {d.name}</option>)}
-                </select>
-              </label>
-              <label className="act-field">
-                <span><b>System audio device</b><small>must be a loopback device such as BlackHole</small></span>
-                <select value={cfg.audio.outputDevice} onChange={(e) => void setActivityConfig({ audio: { ...cfg.audio, outputDevice: e.target.value } })}>
-                  <option value="">(none)</option>
-                  {st.audio_devices.map((d) => <option key={d.index} value={d.index}>[{d.index}] {d.name}</option>)}
-                </select>
-              </label>
+              <AudioDevicePicker
+                devices={st.audio_devices} micValue={cfg.audio.micDevice} outputValue={cfg.audio.outputDevice}
+                onChange={(p) => void setActivityConfig({ audio: { ...cfg.audio, ...p } })}
+              />
               <label className="act-field">
                 <span><b>Transcription model</b><small>any speech-to-text model your proxy exposes</small></span>
                 <input value={cfg.audio.model} onChange={(e) => void setActivityConfig({ audio: { ...cfg.audio, model: e.target.value } })} />

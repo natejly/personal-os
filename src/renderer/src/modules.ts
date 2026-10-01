@@ -18,6 +18,7 @@ export const HOME_MODULES: HomeModule[] = [
   { key: 'inbox', label: 'Inbox' },
   { key: 'gtasks', label: 'Google Tasks' },
   { key: 'drive', label: 'Drive files' },
+  { key: 'meetings', label: 'Upcoming meetings' },
   { key: 'projects', label: 'Projects' },
   { key: 'memories', label: 'Recently learned' },
   { key: 'chats', label: 'Recent chats' }
@@ -31,7 +32,10 @@ export const OPTIONAL_VIEWS: { view: View; label: string }[] = [
   { view: 'boards', label: 'Boards' },
   { view: 'dashboards', label: 'Dashboards' },
   { view: 'memory', label: 'Memory' },
-  { view: 'documents', label: 'Documents' }
+  { view: 'documents', label: 'Documents' },
+  // Showing the view records nothing. Recording is `meetings.enabled` plus an acknowledged consent
+  // notice, both off until the user sets them, so this toggle only decides whether the row is there.
+  { view: 'meetings', label: 'Meetings' }
 ]
 
 export const homeModuleOn = (s: Settings, key: string): boolean => s.homeWidgets?.[key] !== false

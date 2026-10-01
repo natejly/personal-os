@@ -84,7 +84,10 @@ class Projects:
 
 
 # ---------------- Conversations ----------------
-DEFAULT_CONV_SETTINGS = {"effort": "default", "useMemory": True, "useGraph": True, "useDocuments": True, "autoLearn": True, "useTools": True, "tools": {}}
+# useActivity/useMeetings are listed even though context.py reads them with a `.get(..., True)`
+# fallback: without them the toggles never appear in a stored conversation's settings.
+DEFAULT_CONV_SETTINGS = {"effort": "default", "useMemory": True, "useGraph": True, "useDocuments": True, "useActivity": True,
+                         "useMeetings": True, "autoLearn": True, "useTools": True, "tools": {}}
 
 
 class Conversations:

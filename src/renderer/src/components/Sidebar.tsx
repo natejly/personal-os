@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react'
-import { MessageSquarePlus, Search, Settings, Trash2, PanelLeftClose, Brain, FileText, NotebookPen, Plus, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid, Mail, MonitorDot, BookOpen, Globe } from 'lucide-react'
+import { MessageSquarePlus, Search, Settings, Trash2, PanelLeftClose, Brain, FileText, NotebookPen, Plus, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid, Mail, Mic, MonitorDot, BookOpen, Globe } from 'lucide-react'
 import GrainLogo from './GrainLogo'
 import { useStore, type View } from '../store'
 import { ActivityIndicator } from './ActivityView'
+import { MeetingIndicator } from './MeetingsView'
 import ChatPulse from './ChatPulse'
 import SidebarSpaces from './SidebarSpaces'
 import { viewHidden } from '../modules'
@@ -38,6 +39,9 @@ const NAV: NavEntry[] = [
   { view: 'boards', label: 'Boards', icon: <KanbanSquare size={15} /> },
   { view: 'dashboards', label: 'Dashboards', icon: <LayoutDashboard size={15} /> },
   { view: 'docs', label: 'Docs', icon: <NotebookPen size={15} /> },
+  // No `kind`: no `meeting` widget kind ships in this slice, and a kind outside the WidgetKind
+  // union would not typecheck — so the row is not a canvas drag source.
+  { view: 'meetings', label: 'Meetings', icon: <Mic size={15} /> },
   { view: 'activity', label: 'Activity', icon: <MonitorDot size={15} />, kind: 'activity' },
   { label: 'Web', icon: <Globe size={15} />, kind: 'web' }
 ]
@@ -58,6 +62,7 @@ export default function Sidebar(): JSX.Element {
   const settings = useStore((s) => s.settings)
   const docCount = useStore((s) => s.docs.length)
   const docsPending = useStore((s) => s.docsPending)
+  const meetingsPending = useStore((s) => s.meetingsPending)
   const inCanvas = useStore((s) => s.view === 'canvas')
   // One selector per action. Sidebar is mounted in every view, the canvas included, so a bare
   // useStore() here is what made App's whole subtree commit once per streamed token.
@@ -104,6 +109,9 @@ export default function Sidebar(): JSX.Element {
     if (v === 'home' || v === 'calendar' || v === 'mail' || v === 'boards' || v === 'dashboards' || v === 'activity') return null
     if (v === 'todos') return todoStats?.open ?? null
     if (v === 'docs') return docCount
+    // Load-bearing, not cosmetic: there is no default branch below, so without this a Meetings row
+    // would fall through to `total('documents')` and show the uploaded-document count.
+    if (v === 'meetings') return meetingsPending || null
     const total = (key: 'memories' | 'nodes' | 'documents'): number =>
       (personalStats?.[key] ?? 0) + projects.reduce((n, p) => n + (p.stats?.[key] ?? 0), 0)
     // Memory is one panel now: memories and graph entities counted together.
@@ -220,6 +228,8 @@ export default function Sidebar(): JSX.Element {
       </div>
 
       <div className="sidebar-bottom">
+        {/* Both are mounted in every view: a capture running somewhere must never be invisible. */}
+        <MeetingIndicator />
         <ActivityIndicator />
         <button className="settings-btn" onClick={() => setSettingsOpen(true)}><Settings size={16} /><span>Settings</span><kbd>⌘,</kbd></button>
       </div>

@@ -35,6 +35,8 @@ from .canvas import SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
 from .dashboards import Dashboards, generate_recap, generate_summary, generate_widget_code
 from .docs import Docs, unified_diff
 from .google import Google, GoogleNotConnected, json_safe
+from .meeting_recorder import RecorderBusy
+from .meetings import MeetingBlocked, Meetings, MeetingService
 from .microvm import Sandboxes
 from .notes import Notes
 from .gtasks import TasksSync
@@ -182,6 +184,10 @@ app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_credenti
 
 # Live runs, one per conversation, each owning its own task. Any number of clients may watch one.
 bus = RunBus()
+# A second, independent bus, keyed by MEETING id. Nothing in RunBus is conversation-specific - _runs
+# is a plain dict[str, Run] and Run.__init__ only stores the id (runs.py:46-48, 123-127) - so a
+# meeting's live segments get their own stream without sharing a key space with chat.
+meeting_bus = RunBus()
 # Active chat streams so they can be aborted from the client: message_id -> that run's stop event.
 _active: dict[str, asyncio.Event] = {}
 # Pending tool-call approvals: call_id -> Future[decision]
@@ -238,7 +244,11 @@ if not any(getattr(f, "__name__", "") == "_record_usage" for f in llm._usage_lis
     llm.on_usage(_record_usage)
 sandboxes = Sandboxes(settings)
 monitor = activity.Monitor(db, settings, llm.complete)
-toolbox = Toolbox(memories, graph, documents, settings, todos=todos, google=google, boards=boards, sandboxes=sandboxes, docs=docs, activity=monitor)
+# The repo first, then the service around it: both routes and the 45s tick read through one
+# instance, so a meeting's rows are never written by two Meetings objects at once.
+meeting_store = Meetings(db)
+meeting_svc = MeetingService(db, settings, llm.complete, meeting_store, google=google, todos=todos)
+toolbox = Toolbox(memories, graph, documents, settings, todos=todos, google=google, boards=boards, sandboxes=sandboxes, docs=docs, activity=monitor, meetings=meeting_svc)
 
 
 def sid(project_id: str | None) -> str | None:
@@ -276,7 +286,7 @@ def health() -> dict[str, Any]:
 PRIVATE_SETTINGS = {"googleToken", "googleAuthPending"}
 # Readable through /settings, but only writable through its own route: a plain PUT would replace the
 # whole nested dict and silently drop the signal switches and exclusion lists.
-SETTINGS_READ_ONLY = {"activity", "googleTasksSync"}
+SETTINGS_READ_ONLY = {"activity", "googleTasksSync", "meetings"}
 
 
 @app.get("/settings")
@@ -524,7 +534,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         memories=memories, graph=graph, documents=documents,
         project=project, project_id=conv["project_id"], query=user_text,
         settings=cfg, conv_settings=conv["settings"], global_system_prompt=cfg["systemPrompt"],
-        activity=monitor,
+        activity=monitor, meetings=meeting_svc,
     )
     tracer.end(cspan, {"memories": len(used["memories"]), "entities": len(used["nodes"]), "excerpts": len(used["chunks"]),
                        "history_messages": len(history)})
@@ -932,8 +942,9 @@ def context_preview(body: ContextPreviewIn) -> dict[str, Any]:
     _, used = build_context(
         memories=memories, graph=graph, documents=documents, project=project, project_id=sid(body.project_id),
         query=body.query, settings=cfg,
-        conv_settings={"useMemory": True, "useGraph": True, "useDocuments": True, "useActivity": True, **body.conv_settings},
-        global_system_prompt=cfg["systemPrompt"], activity=monitor,
+        conv_settings={"useMemory": True, "useGraph": True, "useDocuments": True, "useActivity": True,
+                       "useMeetings": True, **body.conv_settings},
+        global_system_prompt=cfg["systemPrompt"], activity=monitor, meetings=meeting_svc,
     )
     return used
 
@@ -1110,6 +1121,7 @@ def search_documents(id: str, q: str) -> list[dict[str, Any]]:  # convenience fo
 @app.on_event("shutdown")
 async def _shutdown() -> None:
     await bus.shutdown()  # before the rmtree: a live run's sandboxed run_python writes in there
+    await meeting_bus.shutdown()
     shutil.rmtree(db.data_dir / "tmp", ignore_errors=True)
     await asyncio.to_thread(sandboxes.shutdown)  # after the runs: a live sandbox_exec would just see its container vanish
 
@@ -2376,7 +2388,10 @@ def activity_context() -> dict[str, Any]:
 
 @app.get("/activity/devices")
 def activity_devices() -> list[dict[str, str]]:
-    return activity.audio_devices()
+    # ttl=0 only here: audio_devices() is TTL-cached for 20s so one status() poll stops spawning
+    # two 15-second ffmpeg probes, but this route answers an explicit "what is plugged in now" and
+    # a device the user just connected must not be missing from the picker.
+    return activity.audio_devices(ttl=0)
 
 
 @app.post("/activity/purge")
@@ -2406,6 +2421,426 @@ async def _activity_shutdown() -> None:
         with contextlib.suppress(asyncio.CancelledError, Exception):
             await task
     monitor.stop(persist=False)  # keep `enabled` so the next launch resumes
+
+
+# ---------------- meetings: recorded calls with reviewable enhanced notes ----------------
+#
+# Inert until the user turns it on AND acknowledges the recording notice: `consentedAt` is 0 by
+# default and preflight blocks Start until it is stamped. Start is blocked rather than warned
+# about, because recording an hour of audio nothing can transcribe is worse than refusing.
+#
+# Nothing here expires. /activity/purge runs a bare DELETE FROM activity_events, and no route
+# below can be reached by it.
+
+
+class MeetingIn(BaseModel):
+    """A new meeting. `status` is `scheduled` rather than the repo's `notes_only` default because
+    this row was made in order to be recorded; the one the 45s tick adopts says so for itself."""
+
+    title: str = ""
+    project_id: str | None = None
+    template: str = "general"
+    status: str = "scheduled"
+    # Adopting a calendar candidate comes through here too: the partial unique index on
+    # calendar_event_id makes a second POST for one event hand back the row that already exists.
+    calendar_event_id: str | None = None
+    calendar_id: str | None = None
+    calendar_link: str = ""
+    conference_link: str = ""
+    # list[Any] because create() normalises either shape: a list of {email,name,...} dicts, or the
+    # bare email strings a caller holding only a calendar event's `attendees` array would send.
+    attendees: list[Any] = []
+    scheduled_start: float | None = None
+    scheduled_end: float | None = None
+
+
+class MeetingPatch(BaseModel):
+    """What the user owns. `started_at`, `sources`, `transcript`, `duration_ms` and `audio_dir` are
+    deliberately absent: those go through the service, so no PATCH body can claim a meeting
+    captured a channel it never opened."""
+
+    title: str | None = None
+    notes: str | None = None
+    enhanced: str | None = None
+    summary: str | None = None
+    template: str | None = None
+    keep_audio: bool | None = None
+    conversation_id: str | None = None
+    project_id: str | None = None
+    clear_project: bool = False  # exclude_none=True would otherwise drop a null project_id
+
+
+class MeetingConfigIn(BaseModel):
+    """A partial patch, deep-merged over the stored config (ActivityConfigIn's shape).
+
+    `consentedAt` is not here: it is stamped by POST /meetings/consent and nothing else, so a
+    settings PUT cannot acknowledge the recording notice on the user's behalf.
+    """
+
+    enabled: bool | None = None
+    autoRecord: bool | None = None
+    nudgeSeconds: int | None = None
+    micDevice: str | None = None
+    micDeviceName: str | None = None
+    outputDevice: str | None = None
+    outputDeviceName: str | None = None
+    sources: list[str] | None = None
+    segmentSeconds: int | None = None
+    maxMeetingSeconds: int | None = None
+    drainSeconds: int | None = None
+    sttBackend: str | None = None
+    sttModel: str | None = None
+    whisperModelPath: str | None = None
+    template: str | None = None
+    enhanceOnStop: bool | None = None
+    enhanceModel: str | None = None
+    maxTranscriptChars: int | None = None
+    keepAudio: bool | None = None
+    maxAudioBytes: int | None = None
+    redactSecrets: bool | None = None
+    injectContext: bool | None = None
+    autoStopGraceSeconds: int | None = None
+    calendarIds: list[str] | None = None
+    minAttendees: int | None = None
+
+
+class MeetingActionsIn(BaseModel):
+    """Which proposed action items become todos. Empty `ids` means every one still proposed."""
+
+    ids: list[str] = []
+    project_id: str | None = None
+
+
+# Every literal sub-path is registered BEFORE /meetings/{id}: FastAPI matches in declaration
+# order, so a later /meetings/status would be read as a meeting id. Same trap as the one flagged
+# at app.py:1302 and relied on by /docs/pending.
+@app.get("/meetings/status")
+def meeting_status() -> dict[str, Any]:
+    """Cheap enough to poll at a second or two: no network call, and the device list is TTL-cached."""
+    return meeting_svc.status()
+
+
+# Both verbs on purpose. It reads like a GET, src/shared/types.ts documents it as a POST, and a 405
+# here would show up in the panel as "Start is permanently blocked" with nothing to fix.
+@app.get("/meetings/preflight")
+@app.post("/meetings/preflight")
+async def meeting_preflight(force: bool = False) -> dict[str, Any]:
+    """Capabilities plus a real round trip, cached ten minutes. Threaded: it runs ffmpeg and an
+    HTTP request with a 120s timeout, neither of which belongs on the event loop."""
+    return await asyncio.to_thread(meeting_svc.preflight, force)
+
+
+@app.put("/meetings/config")
+def meeting_config(body: MeetingConfigIn) -> dict[str, Any]:
+    """Deep-merged, and it never touches a live recording: picking a different microphone halfway
+    through a call applies to the next segment instead of tearing the capture down."""
+    meeting_svc.set_config(body.model_dump(exclude_none=True))
+    return meeting_svc.status()
+
+
+@app.get("/meetings/config")
+def get_meeting_config() -> dict[str, Any]:
+    return meeting_svc.config()
+
+
+@app.post("/meetings/consent")
+def meeting_consent() -> dict[str, Any]:
+    """The one-time acknowledgement that the people on the call will be told."""
+    meeting_svc.consent()
+    return meeting_svc.status()
+
+
+@app.post("/meetings/selftest")
+async def meeting_selftest() -> dict[str, Any]:
+    """Force the probe: a synthesized silent wav, recorded and transcribed for real. Returns the
+    whole preflight, so a passing self-test also clears whatever it was blocking."""
+    return await asyncio.to_thread(meeting_svc.preflight, True)
+
+
+@app.get("/meetings/devices")
+def meeting_devices(refresh: bool = False) -> list[dict[str, Any]]:
+    """The audio inputs ffmpeg can see. refresh=true re-probes instead of using the 20s cache."""
+    return meeting_svc.devices(refresh)
+
+
+@app.get("/meetings/suggest")
+async def meeting_suggest() -> list[dict[str, Any]]:
+    """Calendar events happening right now that are worth taking notes on. No LLM, 60s cached.
+
+    [] rather than an error whenever Google is not connected or the scope was never granted: a
+    missing suggestion is a missing row in a panel, not a broken panel.
+    """
+    st = google.status()
+    if not st["connected"] or not _google_has(st, "calendar"):
+        return []
+    return await meeting_svc.suggest()
+
+
+@app.get("/meetings/search")
+def search_meetings(q: str, project_id: str | None = "all", limit: int = 10) -> list[dict[str, Any]]:
+    """FTS over titles, notes, enhanced notes and transcripts. Each hit's `field` says which one."""
+    scope = "__all__" if project_id in (None, "all") else sid(project_id)
+    return meeting_store.search(q, scope, limit)
+
+
+@app.get("/meetings/pending")
+def meetings_pending() -> dict[str, int]:
+    """Badge count for the sidebar: enhance proposals waiting to be reviewed."""
+    return {"pending": meeting_store.pending_count()}
+
+
+@app.post("/meetings/revisions/{rev_id}/accept")
+def accept_meeting_revision(rev_id: str) -> dict[str, Any]:
+    """Writes `enhanced` and nothing else - what the user typed is never touched."""
+    m = meeting_store.accept(rev_id)
+    if not m:
+        raise HTTPException(404, "No pending revision with that id")
+    return m
+
+
+@app.post("/meetings/revisions/{rev_id}/reject")
+def reject_meeting_revision(rev_id: str) -> dict[str, Any]:
+    m = meeting_store.reject(rev_id)
+    if not m:
+        raise HTTPException(404, "No pending revision with that id")
+    return m
+
+
+@app.get("/meetings")
+def list_meetings(project_id: str | None = "all", q: str = "", status: str = "",
+                  since_days: int = 0, limit: int = 100) -> list[dict[str, Any]]:
+    """Preview rows: counts and the first 240 characters of the notes, never a body."""
+    scope = "__all__" if project_id in (None, "all") else sid(project_id)
+    return meeting_store.list(scope, q, status, since_days, limit)
+
+
+@app.post("/meetings")
+def create_meeting(body: MeetingIn) -> dict[str, Any]:
+    return meeting_store.create(
+        title=body.title, project_id=wsid(body.project_id), template=body.template,
+        calendar_event_id=body.calendar_event_id, calendar_id=body.calendar_id,
+        calendar_link=body.calendar_link, conference_link=body.conference_link,
+        attendees=body.attendees, scheduled_start=body.scheduled_start,
+        scheduled_end=body.scheduled_end, status=body.status)
+
+
+@app.get("/meetings/{id}")
+def get_meeting(id: str) -> dict[str, Any]:
+    m = meeting_store.get(id)
+    if not m:
+        raise HTTPException(404)
+    return m
+
+
+@app.put("/meetings/{id}")
+def update_meeting(id: str, body: MeetingPatch) -> dict[str, Any]:
+    patch = body.model_dump(exclude_none=True, exclude={"clear_project"})
+    if body.clear_project:
+        patch["project_id"] = None
+    elif "project_id" in patch:
+        patch["project_id"] = wsid(patch["project_id"])
+    m = meeting_store.patch(id, patch)
+    if not m:
+        raise HTTPException(404)
+    return m
+
+
+@app.delete("/meetings/{id}")
+def delete_meeting(id: str) -> dict[str, bool]:
+    """Idempotent, like delete_note: a missing id is already the state the caller asked for."""
+    meeting_store.delete(id)
+    # No `meeting` widget kind ships in this slice, so this sweep is a no-op today - but doing it
+    # anyway is the cleanup delete_note does and delete_doc forgets, and the first widget to ship
+    # would otherwise leave orphan windows pointing at a deleted meeting.
+    with contextlib.suppress(Exception):
+        canvases.delete_windows_for("meeting", id)
+    return {"ok": True}
+
+
+@app.post("/meetings/{id}/start")
+async def start_meeting(id: str) -> dict[str, Any]:
+    """Open the configured channels. Blocked, not warned: a failing preflight is a 409 carrying the
+    checklist, and something already recording is a 409 naming the meeting that holds the mic."""
+    if not activity.IS_MAC:
+        row = next((r for r in meeting_svc.capabilities() if r["id"] == "platform"), {})
+        raise HTTPException(400, row.get("fix") or "Recording is macOS-only.")
+    try:  # preflight runs ffmpeg and a real HTTP round trip, and launching ffmpeg blocks too
+        m = await asyncio.to_thread(meeting_svc.start, id)
+    except MeetingBlocked as e:
+        raise HTTPException(409, {"blockers": e.blockers}) from e
+    except RecorderBusy as e:
+        raise HTTPException(409, {"meeting_id": e.meeting_id, "blockers": [{
+            "id": "busy", "label": "Already recording", "ok": False, "detail": str(e),
+            "fix": "Stop the meeting that is recording before starting another."}]}) from e
+    if not m:
+        raise HTTPException(404)
+    return m
+
+
+@app.post("/meetings/{id}/stop")
+async def stop_meeting(id: str) -> dict[str, Any]:
+    """Captures down, queue drained (up to drainSeconds), transcript rolled up. The enhance pass is
+    queued rather than awaited, so a slow model does not hold the stop request open."""
+    m = await meeting_svc.stop(id)
+    if not m:
+        raise HTTPException(404)
+    return m
+
+
+@app.post("/meetings/{id}/pause")
+def pause_meeting(id: str) -> dict[str, Any]:
+    """ffmpeg keeps running so segment numbering stays monotonic; the worker discards the audio.
+    Never a stop/start pair: that would restart the counter and overwrite earlier files."""
+    st = meeting_svc.pause(id)
+    if not st:
+        raise HTTPException(409, "That meeting is not recording")
+    return st
+
+
+@app.post("/meetings/{id}/resume")
+def resume_meeting(id: str) -> dict[str, Any]:
+    st = meeting_svc.resume(id)
+    if not st:
+        raise HTTPException(409, "That meeting is not recording")
+    return st
+
+
+@app.get("/meetings/{id}/segments")
+def meeting_segments(id: str, since: int = -1, offset: int = 0, limit: int = 200,
+                     channel: str = "") -> list[dict[str, Any]]:
+    """The live transcript pane's poll. `since` is a rowid cursor and each row carries the `cursor`
+    to pass back, so since=0 is the whole tail with cursors; omitting it pages by t_start."""
+    if since >= 0:
+        return meeting_store.since(id, since, limit)
+    return meeting_store.segments(id, offset, limit, channel)
+
+
+@app.get("/meetings/{id}/stream")
+async def stream_meeting(id: str, since: int = 0) -> StreamingResponse:
+    """The seam for pushing segments instead of polling: the bus is keyed by meeting id and nothing
+    publishes to it yet, so this answers an empty stream rather than 404ing."""
+    run = meeting_bus.get(id)
+    return StreamingResponse(run.subscribe(since) if run else iter(()), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.get("/meetings/{id}/transcript")
+def meeting_transcript(id: str, offset: int = 0, limit: int = 500) -> dict[str, Any]:
+    """The rolled-up transcript, by line. An hour of speech is far more than one response should
+    carry, and the column is only ever rewritten on finalize, so paging it is a pure read."""
+    m = meeting_store.get(id)
+    if not m:
+        raise HTTPException(404)
+    lines = (m["transcript"] or "").splitlines()
+    off, lim = max(0, int(offset)), max(1, min(int(limit), 2000))
+    win = lines[off:off + lim]
+    return {"meeting_id": id, "text": "\n".join(win), "lines": win, "total": len(lines),
+            "offset": off, "count": len(win), "has_more": off + len(win) < len(lines)}
+
+
+@app.post("/meetings/{id}/enhance")
+async def enhance_meeting(id: str, force: bool = False, template: str | None = None) -> dict[str, Any]:
+    """Cache-or-generate, like /recap: an existing proposal is the answer unless ?force=true.
+
+    Returns a REVISION, not the meeting. A degraded pass is a 200 carrying `degraded: true` - its
+    mechanical fallback still holds the user's notes verbatim, so there is something to accept -
+    and only a pass that could write no revision at all is a 502.
+    """
+    if not meeting_store.get(id):
+        raise HTTPException(404)
+    rev = await meeting_svc.enhance(id, force, template)
+    if not rev:
+        raise HTTPException(502, meeting_svc.last_error or "The enhance pass produced no revision")
+    return rev
+
+
+@app.get("/meetings/{id}/revisions")
+def meeting_revisions(id: str, limit: int = 100) -> list[dict[str, Any]]:
+    if not meeting_store.get(id):
+        raise HTTPException(404)
+    return meeting_store.revisions(id, limit)
+
+
+@app.get("/meetings/{id}/actions")
+def meeting_actions(id: str) -> list[dict[str, Any]]:
+    if not meeting_store.get(id):
+        raise HTTPException(404)
+    return meeting_store.action_items(id)
+
+
+@app.post("/meetings/{id}/actions/add-todos")
+def meeting_actions_add_todos(id: str, body: MeetingActionsIn) -> list[dict[str, Any]]:
+    """Promote proposed items into real todos. Idempotent per item - one that already carries a
+    todo_id is left alone - and todos.on_change pushes each new task to Google within ~2s."""
+    if not meeting_store.get(id):
+        raise HTTPException(404)
+    scope = wsid(body.project_id) if body.project_id else None  # None means "the meeting's own"
+    want = set(body.ids)
+    for a in meeting_store.action_items(id):
+        if a["status"] == "proposed" and (not want or a["id"] in want):
+            meeting_store.promote_action_item(a["id"], todos, scope)
+    return meeting_store.action_items(id)
+
+
+@app.post("/meetings/{id}/actions/{action_id}/dismiss")
+def meeting_action_dismiss(id: str, action_id: str) -> dict[str, Any]:
+    a = meeting_store.dismiss_action_item(action_id)
+    if not a:
+        raise HTTPException(404)
+    return a
+
+
+@app.post("/meetings/{id}/retranscribe")
+async def retranscribe_meeting(id: str, limit: int = 20) -> dict[str, Any]:
+    """Replay the failed segments whose wav is still on disk. One HTTP request per segment, so it
+    runs in a thread; a segment past its attempt ceiling is left alone."""
+    if not meeting_store.get(id):
+        raise HTTPException(404)
+    settled = await asyncio.to_thread(meeting_svc.retranscribe, id, limit)
+    if settled:
+        # `transcript` has exactly one writer, finalize(), so replayed text only reaches the
+        # rolled-up column and the FTS index by closing the meeting out again on its own clock.
+        m = meeting_store.get(id) or {}
+        text = meeting_store.build_transcript(id)
+        # Clear the banner only when it can no longer be true: "N segment(s) could not be
+        # transcribed, so there is no transcript" must not outlive the retry that fixed it.
+        error = "" if text and not meeting_store.failed_segments(id) else (m.get("error") or "")
+        meeting_store.finalize(id, text, ended_at=m.get("ended_at"),
+                               status=m.get("status") or "ready", error=error)
+    return {"settled": settled, "meeting": meeting_store.get(id)}
+
+
+@app.delete("/meetings/{id}/audio")
+def delete_meeting_audio(id: str) -> dict[str, Any]:
+    """The wavs go; the segment rows stay, so the UI can still say why retranscribe is over."""
+    m = meeting_store.delete_audio(id)
+    if not m:
+        raise HTTPException(404)
+    return m
+
+
+@app.on_event("startup")
+async def _meetings_startup() -> None:
+    """Close out whatever a quit interrupted, then run the 45s nudge/auto-stop/retranscribe tick."""
+    try:
+        meeting_svc.recover()
+    except Exception as e:  # noqa: BLE001 - a failing probe must not stop the backend booting
+        log.warning("meetings: could not recover interrupted meetings: %s", e)
+    app.state.meetings_task = asyncio.create_task(meeting_svc.loop())
+
+
+@app.on_event("shutdown")
+async def _meetings_shutdown() -> None:
+    task = getattr(app.state, "meetings_task", None)
+    if task:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
+    # Synchronous, and up to ~5s per live meeting: every ffmpeg gets its graceful `q` so the last
+    # segment is flushed rather than left as a 0-byte orphan.
+    await asyncio.to_thread(meeting_svc.shutdown)
+
+
 # ---------------- space presets: named templates of a canvas ----------------
 class PresetIn(BaseModel):
     canvas_id: str

@@ -21,7 +21,11 @@ from typing import Any, Iterable
 from .db import Database, new_id, now, row_to_dict
 
 # Mirrors DEFAULT_MODE / ToolSpec.danger in tools.py, which owns the built-in permission model.
-DANGER_LEVELS = ("safe", "writes", "network", "executes", "external")
+DANGER_LEVELS = ("safe", "writes", "network", "executes", "external", "plan")
+# What a server is allowed to claim for itself. `plan` means "this tool IS the approval card", which
+# is the one level planning mode lets through; a third party must never be able to label itself with
+# it, so it is in DANGER_LEVELS (the mirror must be complete) but not in what sync_tools accepts.
+DECLARABLE_DANGER = tuple(d for d in DANGER_LEVELS if d != "plan")
 MODES = ("on", "ask", "off")
 # Third-party code we did not write: it asks by default, whatever the server claims.
 DEFAULT_DANGER = "external"
@@ -55,6 +59,9 @@ RESERVED_TOOL_NAMES = frozenset({
     "sandbox_put_document", "sandbox_reset",
     "doc_list", "doc_search", "doc_read", "doc_create", "doc_edit",
     "activity_recent", "activity_pause",
+    "propose_plan",
+    "desk_list_files", "desk_read_file", "desk_write_file", "desk_trash_file",
+    "desk_deliver", "desk_ask", "desk_done", "desk_import_sandbox",
 })
 
 SCHEMA = """
@@ -329,7 +336,7 @@ class McpServers:
                 if params is None:
                     params = spec.get("inputSchema") or {}
                 desc = str(spec.get("description") or "")
-                danger = spec.get("danger") if spec.get("danger") in DANGER_LEVELS else DEFAULT_DANGER
+                danger = spec.get("danger") if spec.get("danger") in DECLARABLE_DANGER else DEFAULT_DANGER
                 h = schema_hash(name, desc, params)
                 seen.add(name)
                 row = known.get(name)

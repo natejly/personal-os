@@ -73,6 +73,41 @@ test('post-done auto-learn events never resurrect working', () => {
   }
 })
 
+test('a proposed plan blocks the session on its own kind of amber', () => {
+  const plan = ev('plan', { message_id: 'm1', call_id: 'c1', plan: { plan_id: 'p1', status: 'pending' } })
+  assert.equal(reduceStatus('working', plan, 0), 'awaiting-plan')
+  // The propose_plan call itself lands first and reads as a card; the plan event is what refines it.
+  assert.equal(reduceStatus('needs-approval', plan, 1), 'awaiting-plan')
+  // A desk's next turn proposes a plan after the previous turn's `done`, so this one does resurrect.
+  assert.equal(reduceStatus('done', plan, 0), 'awaiting-plan')
+})
+
+test('approving a plan hands the run back, rejecting it keeps the verdict it had', () => {
+  const decided = (decision: string): ChatEvent => ev('plan_decision', { message_id: 'm1', plan_id: 'p1', call_id: 'c1', decision, by: 'user' })
+  assert.equal(reduceStatus('awaiting-plan', decided('approve'), 0), 'working')
+  assert.equal(reduceStatus('awaiting-plan', decided('edit'), 0), 'working')
+  // A rejection ends the run, so a decision taken after the reply finished must not revive it.
+  assert.equal(reduceStatus('done', decided('reject'), 0), 'done')
+  assert.equal(reduceStatus('error', decided('reject'), 0), 'error')
+  assert.equal(reduceStatus('idle', decided('reject'), 0), 'idle')
+})
+
+test('a plan that was never decided falls back to idle like any unfinished run', () => {
+  assert.equal(finishStatus('awaiting-plan'), 'idle')
+})
+
+test('desk events never resurrect a finished run', () => {
+  const status = (s: string): ChatEvent => ev('desk_status', { id: 'd1', status: s })
+  const handoff = ev('desk_handoff', { desk_id: 'd1', conversation_id: 'c1', turn: 2 })
+  // The settled row is published once more at the end of every turn, after `done` has landed.
+  for (const e of [status('review'), status('working'), status('done'), handoff]) {
+    assert.equal(reduceStatus('done', e, 0), 'done')
+    assert.equal(reduceStatus('error', e, 0), 'error')
+    assert.equal(reduceStatus('idle', e, 0), 'idle')
+    assert.equal(reduceStatus('awaiting-plan', e, 0), 'awaiting-plan')
+  }
+})
+
 test('a run that ends without a verdict falls back to idle', () => {
   assert.equal(finishStatus('working'), 'idle')
   assert.equal(finishStatus('needs-approval'), 'idle')

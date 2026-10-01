@@ -1,4 +1,4 @@
-import { Check, Loader2, Lock, TriangleAlert } from 'lucide-react'
+import { Check, ListChecks, Loader2, Lock, TriangleAlert } from 'lucide-react'
 import type { SessionStatus } from '@shared/types'
 import { useRingStatus } from './useRingStatus'
 // Also imported by registry.ts; a ring rendered by the frame alone must still bring its own styles.
@@ -8,7 +8,8 @@ const LABEL: Record<Exclude<SessionStatus, 'idle'>, string> = {
   working: 'Working…',
   done: 'Just finished',
   error: 'Last reply failed',
-  'needs-approval': 'Waiting for your approval'
+  'needs-approval': 'Waiting for your approval',
+  'awaiting-plan': 'Waiting for you to approve a plan'
 }
 
 /** The status as a shape. Colour is decoration; this is what a colour-blind user actually reads. */
@@ -22,6 +23,9 @@ export const StatusGlyph = ({ status, size = 11 }: { status: SessionStatus; size
       return <span className="status-glyph error"><TriangleAlert size={size} strokeWidth={2.5} /></span>
     case 'needs-approval':
       return <span className="status-glyph needs-approval"><Lock size={size} strokeWidth={2.5} /></span>
+    // Without a case here the ring renders as an empty span: the default returns null.
+    case 'awaiting-plan':
+      return <span className="status-glyph awaiting-plan"><ListChecks size={size} strokeWidth={2.5} /></span>
     default:
       return null
   }

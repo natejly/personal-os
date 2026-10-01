@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu } from 'electron'
+import { app, BrowserWindow, ipcMain, Menu, Notification } from 'electron'
 import { existsSync } from 'fs'
 import { join } from 'path'
 import { backendStatus, backendToken, backendUrl, startBackend, stopBackend } from './backend'
@@ -115,6 +115,24 @@ const sendWindowMenu = (action: string): void => {
   deliver(BrowserWindow.getFocusedWindow() ?? win, action)
 }
 
+/**
+ * A desk reaching a terminal state (review / blocked / failed) is the one thing worth saying outside
+ * the window: it is what makes "hand it a task and go away" finish. The renderer sends this when it
+ * sees that `desk_status` — an event already flowing, not a poller — having already de-duplicated on
+ * (desk, status), because the same row is republished on every runtime flush. Clicking the banner
+ * brings the main window back, which is where the desk is.
+ */
+const deskNotify = (body: string): void => {
+  if (!Notification.isSupported() || !body) return
+  try {
+    const n = new Notification({ title: 'Cowork', body, silent: false })
+    n.on('click', showMain)
+    n.show()
+  } catch (e) {
+    console.warn('[desk] could not post notification:', (e as Error).message)
+  }
+}
+
 const SPACES: Electron.MenuItemConstructorOptions[] = Array.from({ length: 9 }, (_, i) => ({
   label: `Space ${i + 1}`,
   accelerator: `Control+${i + 1}`,
@@ -167,6 +185,9 @@ function buildMenu(): void {
         { label: 'Memory: Knowledge Graph', accelerator: 'CmdOrCtrl+7', click: () => sendMenu('view:graph') },
         { label: 'Documents', accelerator: 'CmdOrCtrl+8', click: () => sendMenu('view:documents') },
         { label: 'Activity', accelerator: 'CmdOrCtrl+9', click: () => sendMenu('view:activity') },
+        // ⌘0-⌘9 are exhausted above and ⌘⇧C / ⌘B / ⌘I are taken below; ⌘⇧K is free. No renderer
+        // change: the store routes any `view:*` action generically.
+        { label: 'Cowork', accelerator: 'CmdOrCtrl+Shift+K', click: () => sendMenu('view:cowork') },
         { type: 'separator' },
         { label: 'Toggle Spaces', accelerator: 'CmdOrCtrl+Shift+C', click: () => sendMenu('canvas:toggle') },
         { label: 'Toggle Sidebar', accelerator: 'CmdOrCtrl+B', click: () => sendMenu('toggle-sidebar') },
@@ -238,6 +259,7 @@ app.whenReady().then(async () => {
   ipcMain.handle('backend:token', () => backendToken())
   ipcMain.on('window:close-self', (e) => BrowserWindow.fromWebContents(e.sender)?.close())
   ipcMain.on('window:minimize-self', (e) => BrowserWindow.fromWebContents(e.sender)?.minimize())
+  ipcMain.on('desk:notify', (_e, body: string) => deskNotify(body))
   registerPopouts(() => win)
   registerBus()
   buildMenu()

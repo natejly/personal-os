@@ -65,3 +65,10 @@ test('a view action routes, and view:graph opens memory on the graph', () => {
   assert.equal(useStore.getState().view, 'memory')
   assert.equal(useStore.getState().memoryMode, 'graph')
 })
+
+// ⌘⇧K is the only new accelerator Cowork adds, and it adds no renderer wiring: the generic
+// `view:*` route is the whole mechanism, so the thing worth pinning is that it stays generic.
+test('view:cowork routes with no view-specific wiring (⌘⇧K)', () => {
+  fire('view:cowork')
+  assert.equal(useStore.getState().view, 'cowork')
+})

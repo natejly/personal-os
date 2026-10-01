@@ -20,7 +20,8 @@ export const HOME_MODULES: HomeModule[] = [
   { key: 'drive', label: 'Drive files' },
   { key: 'projects', label: 'Projects' },
   { key: 'memories', label: 'Recently learned' },
-  { key: 'chats', label: 'Recent chats' }
+  { key: 'chats', label: 'Recent chats' },
+  { key: 'cowork', label: 'Cowork desks' }
 ]
 
 /** Views that may be removed from the sidebar. Home and chats are the shell itself and stay. */
@@ -30,6 +31,7 @@ export const OPTIONAL_VIEWS: { view: View; label: string }[] = [
   { view: 'mail', label: 'Mail' },
   { view: 'boards', label: 'Boards' },
   { view: 'dashboards', label: 'Dashboards' },
+  { view: 'cowork', label: 'Cowork' },
   { view: 'memory', label: 'Memory' },
   { view: 'documents', label: 'Documents' }
 ]

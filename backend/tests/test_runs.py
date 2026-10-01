@@ -28,7 +28,8 @@ from personal_os.runs import QUEUE_MAX, RING, Run  # noqa: E402
 
 # The ChatEvent union in src/shared/types.ts. Nothing may leave the bus that is not one of these.
 CHAT_EVENTS = {"user_message", "assistant_message", "removed_message", "title", "delta", "tool_call",
-               "tool_result", "span", "done", "learned", "learn_error", "error", "taint"}
+               "tool_result", "span", "done", "learned", "learn_error", "error", "taint",
+               "plan", "plan_decision", "desk_status", "desk_handoff"}
 
 client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
 
@@ -108,6 +109,19 @@ def events(text: str) -> list[tuple[str, Any]]:
                 data += line[5:].strip()
         if event and data:
             out.append((event, json.loads(data)))
+    return out
+
+
+def numbered(text: str) -> list[int]:
+    """The `id:` of every event block, in the order the stream sent them. Keepalives have none."""
+    out: list[int] = []
+    for block in text.split("\n\n"):
+        if "event:" not in block:
+            continue
+        for line in block.split("\n"):
+            if line.startswith("id:"):
+                out.append(int(line[3:].strip()))
+                break
     return out
 
 
@@ -201,6 +215,32 @@ def test_two_clients_see_the_same_events() -> None:
     names = [e for e, _ in a]
     check(names[0] == "user_message" and names.index("assistant_message") < names.index("delta"), f"ordered from the user message, got {names[:4]}")
     check(a[-1][0] == "done" and a[-1][1]["error"] is None, "the sequence ends with a clean done")
+
+
+def test_live_stream_numbers_every_event() -> None:
+    """chatStream (api.ts) only advances its resume cursor on an `id:` line, so a live stream
+    without one makes a dropped socket replay the whole reply and duplicate every applied event."""
+    full = script(10, 0.04)
+    cid = new_conv()
+    j("POST", f"/conversations/{cid}/chat", {"content": "hi"})
+    body: list[str] = []
+    t = threading.Thread(target=lambda: body.append(client.get(f"/conversations/{cid}/stream?since=0").text),
+                         daemon=True)
+    t.start()
+    wait_until(lambda: bool(bus.get(cid) and bus.get(cid)._subs), "the client to attach while the run is live")  # noqa: SLF001
+    t.join(20)
+    check(len(body) == 1, "the live stream ended with the run")
+    check(bus.get(cid) is not None, "the run was served from the bus, not the tape")
+    ids, evs = numbered(body[0]), events(body[0])
+    check(text_of(evs) == full, "the live stream carried the whole reply")
+    check(len(ids) == len(evs), f"every event block carries an id, got {len(ids)} ids for {len(evs)} events")
+    check(ids == list(range(1, len(evs) + 1)), f"numbered from 1, in order, got {ids[:6]}")
+    check(f"id: {len(ids)}\nevent: done" in body[0], "the id leads its block, so it parses with the event")
+
+    replay = read_streams([f"/conversations/{cid}/stream?since=0"])[0]
+    check(numbered(replay) == ids, "the ring replay numbers the same events the same way")
+    tail = read_streams([f"/conversations/{cid}/stream?since={ids[-1] - 1}"])[0]
+    check(numbered(tail) == [ids[-1]], f"?since= still skips what the client already has, got {numbered(tail)}")
 
 
 def test_late_client_replays_from_the_ring() -> None:
@@ -355,6 +395,7 @@ def test_an_overflowed_subscriber_reconnects_without_a_gap() -> None:
 
 
 TESTS = [test_post_starts_a_background_run, test_second_post_conflicts, test_two_clients_see_the_same_events,
+         test_live_stream_numbers_every_event,
          test_late_client_replays_from_the_ring, test_event_names_are_the_chatevent_union, test_stop_ends_the_run,
          test_steer_folds_into_the_live_run,
          test_run_survives_every_subscriber_leaving, test_an_overflowed_subscriber_reconnects_without_a_gap,

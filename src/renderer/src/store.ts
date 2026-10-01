@@ -1,5 +1,12 @@
 import { create } from 'zustand'
-import type { ActivityConfig, ActivityContextFile, ActivityEvent, ActivitySignal, ActivityStatus, ActivitySummary, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocRevision, Document, FullDoc, GraphData, Memory, Message, ModelInfo, Settings, Project, RunConflict, SessionStatus, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap } from '@shared/types'
+import type { ActionPlan, ActivityConfig, ActivityContextFile, ActivityEvent, ActivitySignal, ActivityStatus, ActivitySummary, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Desk, DeskEvent, DeskFile, Doc, DocRevision, Document, FullDesk, FullDoc, GraphData, Memory, Message, ModelInfo, PlanDecision, PlanEdit, PromotionResult, Settings, Project, RunConflict, SessionStatus, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap } from '@shared/types'
+/**
+ * `NEEDS_YOU` is a value, not a type: the rail's triage set, mirrored from `cowork.NEEDS_YOU`. It is
+ * imported by relative path on purpose — `npm test` bundles this module with a bare `esbuild`, which
+ * reads no `paths` from the root tsconfig, so a runtime `@shared/*` import fails to resolve there
+ * while an erased `import type` one does not.
+ */
+import { NEEDS_YOU } from '../../shared/types'
 import { api, chatStream, setBase, type Scope } from './lib/api'
 import { finishStatus, mergeConversation, pickEvictions, reduceStatus, settleApprovals } from './sessionStatus'
 import { viewHidden } from './modules'
@@ -16,7 +23,7 @@ const withoutLegacyMode = (s: Settings): Settings => {
 }
 
 /** `'canvas'` is the spaces desktop: one destination among the views, not a separate shell. */
-export type View = 'home' | 'chat' | 'todos' | 'calendar' | 'mail' | 'boards' | 'dashboards' | 'memory' | 'documents' | 'docs' | 'activity' | 'project' | 'canvas'
+export type View = 'home' | 'chat' | 'todos' | 'calendar' | 'mail' | 'boards' | 'dashboards' | 'memory' | 'documents' | 'docs' | 'activity' | 'cowork' | 'project' | 'canvas'
 /** Every view but the canvas: what ⌘⇧C and the sidebar's LayoutGrid button return to. */
 export type ClassicView = Exclude<View, 'canvas'>
 /** How the Docs editor splits its panes. */
@@ -53,8 +60,12 @@ const HOLD_MS = 6000
 const newSession = (conversation: Conversation): ChatSession =>
   ({ conversation, streaming: null, status: 'idle', finishedAt: null, pendingApprovals: 0, unread: 0, touchedAt: Date.now() })
 
+/**
+ * What the run is waiting on the user for. A pending action plan counts: it gates the reply exactly
+ * as a card does, and the propose_plan call that carries it resolves only once the plan is decided.
+ */
 const countApprovals = (c: Conversation): number =>
-  (c.messages ?? []).reduce((n, m) => n + (m.tool_events ?? []).filter((t) => t.pending && t.needs_approval).length, 0)
+  (c.messages ?? []).reduce((n, m) => n + (m.plan?.status === 'pending' ? 1 : 0) + (m.tool_events ?? []).filter((t) => t.pending && t.needs_approval).length, 0)
 
 export interface State {
   ready: boolean
@@ -122,6 +133,17 @@ export interface State {
   activitySummaries: ActivitySummary[]
   activityContext: ActivityContextFile | null
   activityBusy: boolean
+
+  /** Cowork: the desk rail, the open desk, and everything its detail pane shows. */
+  desks: Desk[]
+  /** Set the moment a desk is opened, so a slower `desks.get` cannot land on a desk since left. */
+  activeDeskId: string | null
+  activeDesk: FullDesk | null
+  deskFiles: DeskFile[]
+  deskPreview: { path: string; text: string } | null
+  /** Unseen `needs_you` events across every desk: the sidebar badge and the Today card. */
+  deskInbox: DeskEvent[]
+  deskBusy: boolean
 
   init: () => Promise<void>
   loadModels: () => Promise<void>
@@ -194,9 +216,37 @@ export interface State {
   deleteActivityEvent: (id: string) => Promise<void>
   deleteActivitySummary: (id: string) => Promise<void>
   purgeActivity: (scope: 'expired' | 'events' | 'summaries' | 'all') => Promise<void>
+
+  refreshDesks: () => Promise<void>
+  refreshDeskInbox: () => Promise<void>
+  /** Load one desk whole and, when it is live, attach to the run driving it. */
+  openDesk: (id: string) => Promise<void>
+  /** Resolves null on failure — the new-desk card is holding the user's brief on the verdict. */
+  createDesk: (p: Parameters<typeof api.cowork.desks.create>[0]) => Promise<Desk | null>
+  startDesk: (id: string) => Promise<void>
+  resumeDesk: (id: string, reason?: string) => Promise<void>
+  pauseDesk: (id: string) => Promise<void>
+  stopDesk: (id: string) => Promise<void>
+  /** The steer box, awake or asleep. `false` means the text was refused, so the caller keeps it. */
+  messageDesk: (id: string, text: string) => Promise<boolean>
+  patchDesk: (id: string, patch: Parameters<typeof api.cowork.desks.patch>[1]) => Promise<void>
+  deleteDesk: (id: string, purge?: boolean) => Promise<void>
+  loadDeskFiles: (id: string, path?: string) => Promise<void>
+  previewDeskFile: (id: string, path: string) => Promise<void>
+  /** The promotion verdicts, so the Output tab can show a verified tick or the write that failed. */
+  acceptOutputs: (id: string, sel: Parameters<typeof api.cowork.desks.accept>[1]) => Promise<PromotionResult[]>
+  rejectOutputs: (id: string, outputIds?: string[], note?: string) => Promise<void>
+  decidePlan: (planId: string, decision: PlanDecision, edits?: PlanEdit[], note?: string) => Promise<void>
+  setPlanMode: (convId: string, mode: 'off' | 'auto' | 'always') => Promise<void>
+  markDeskEventSeen: (eventId: string) => Promise<void>
+  /** Every unseen needs-you row of ONE desk at once — opening the desk is the acknowledgement. */
+  markDeskSeen: (deskId: string) => Promise<void>
+
   refreshDashboard: () => Promise<void>
   refreshRecap: (force?: boolean) => Promise<void>
-  approveTool: (callId: string, decision: 'allow' | 'deny' | 'always_chat' | 'always_global', conversationId?: string) => Promise<void>
+  /** `note` rides to the backend with the decision and reaches the call as `user_note`: it is how a
+   *  `desk_ask` card answers the question it is gating rather than merely permitting it. */
+  approveTool: (callId: string, decision: 'allow' | 'deny' | 'always_chat' | 'always_global', conversationId?: string, note?: string) => Promise<void>
   refreshGoogle: () => Promise<void>
   connectGoogle: () => Promise<void>
   disconnectGoogle: () => Promise<void>
@@ -295,6 +345,8 @@ const share = (map: Map<string, Promise<void>>, key: string, fn: () => Promise<v
   return p
 }
 
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
 const loads = new Map<string, Promise<void>>()
 const attaches = new Map<string, Promise<void>>()
 
@@ -343,6 +395,18 @@ const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean): ChatSessio
       })
     case 'done':
       return { ...mapMsg(ev.data.id, (m) => ({ ...m, error: ev.data.error, context_used: ev.data.context_used, tool_events: ev.data.tool_events?.length ? ev.data.tool_events : m.tool_events, trace: ev.data.trace?.length ? ev.data.trace : m.trace })), finishedAt: Date.now() }
+    // The plan rides on the message that proposed it, so `ActionPlanCard` mounts inline in the reply
+    // and a replayed stream rebuilds it without a second fetch. It is not persisted on the row.
+    case 'plan':
+      return mapMsg(ev.data.message_id, (m) => ({ ...m, plan: ev.data.plan }))
+    case 'plan_decision':
+      return mapMsg(ev.data.message_id, (m) => (m.plan && m.plan.plan_id === ev.data.plan_id
+        ? { ...m, plan: { ...m.plan, status: ev.data.decision === 'reject' ? 'rejected' : 'approved' } }
+        : m))
+    // Desk-level, not conversation-level: both are handled in `watchRun`'s side-effect switch.
+    case 'desk_status':
+    case 'desk_handoff':
+      return s
     default:
       return s
   }
@@ -398,6 +462,55 @@ export const useStore = create<State>((set, get) => {
     })
   const patchConversation = (convId: string, fn: (c: Conversation) => Conversation): void =>
     patchSession(convId, (s) => ({ ...s, conversation: fn(s.conversation) }))
+  /**
+   * One desk row, folded into the rail and the open detail pane. Update-only on the list: a
+   * `desk_status` for a desk the current scope filter excludes must not splice it in behind the
+   * filter. Everything that creates a desk refreshes the list itself.
+   */
+  const putDesk = (d: Desk): void =>
+    set((st) => ({
+      desks: st.desks.some((x) => x.id === d.id) ? st.desks.map((x) => (x.id === d.id ? d : x)) : st.desks,
+      activeDesk: st.activeDesk?.id === d.id ? { ...st.activeDesk, ...d } : st.activeDesk
+    }))
+  /** The conversation a desk owns, from whichever copy of the row is loaded. */
+  const deskConv = (id: string): string | undefined => {
+    const st = get()
+    return (st.activeDesk?.id === id ? st.activeDesk : st.desks.find((d) => d.id === id))?.conversation_id
+  }
+  /**
+   * A decided plan, back into both places that show it: the message that proposed it and the Plan
+   * tab. The approval count is recomputed with it, since a plan leaving `pending` is what releases
+   * the run — without this the amber never clears on the window that pressed Approve.
+   */
+  const putPlan = (plan: ActionPlan): void => {
+    patchSession(plan.conversation_id, (s) => {
+      const messages = (s.conversation.messages ?? []).map((m) => (m.plan?.plan_id === plan.plan_id ? { ...m, plan } : m))
+      const conversation = { ...s.conversation, messages }
+      const pendingApprovals = countApprovals(conversation)
+      return { ...s, conversation, pendingApprovals, status: settleApprovals(s.status, pendingApprovals) }
+    })
+    set((st) => ({ activeDesk: st.activeDesk?.plan?.plan_id === plan.plan_id ? { ...st.activeDesk, plan } : st.activeDesk }))
+  }
+  /**
+   * `Message.plan` is deliberately not persisted on the row, so after a reload a pending card has
+   * nowhere to mount and the run is left waiting on an approval the user can no longer see. The
+   * conversation's newest plan is fetched back and re-hung on the message that proposed it, which
+   * is also what puts the chat back into `needs-approval`.
+   */
+  const hydratePlan = async (convId: string): Promise<void> => {
+    const msgs = get().sessions[convId]?.conversation.messages ?? []
+    // A live stream already delivered it: a second copy would only race the decision back in.
+    if (msgs.some((m) => m.plan)) return
+    const plan = await api.conversations.plan(convId).catch(() => null)
+    if (!plan?.message_id) return
+    patchSession(convId, (s) => {
+      const cur = s.conversation.messages ?? []
+      if (!cur.some((m) => m.id === plan.message_id && !m.plan)) return s
+      const conversation = { ...s.conversation, messages: cur.map((m) => (m.id === plan.message_id ? { ...m, plan } : m)) }
+      const pendingApprovals = countApprovals(conversation)
+      return { ...s, conversation, pendingApprovals, status: settleApprovals(s.status, pendingApprovals) }
+    })
+  }
   const hold = (convId: string): void => {
     clearHold(convId)
     holds.set(convId, setTimeout(() => {
@@ -422,6 +535,8 @@ export const useStore = create<State>((set, get) => {
     prev?.abort.abort()
     const abort = new AbortController()
     const attached = from.attached
+    /** Set by a `desk_handoff`: this desk's next turn is a different run on the same conversation. */
+    let handoff: { desk_id: string; conversation_id: string; turn: number } | null = null
     clearHold(convId)
     patchSession(convId, (s) => ({ ...s, streaming: { messageId: from.messageId, runId: run.run_id, abort }, status: settleApprovals('working', from.approvals), finishedAt: null, pendingApprovals: from.approvals, touchedAt: Date.now() }))
     try {
@@ -429,8 +544,10 @@ export const useStore = create<State>((set, get) => {
         const focused = get().focusedConversationId === convId
         patchSession(convId, (s) => {
           const next = applyEvent(s, ev, focused)
-          // Only the approval events can move the count, and delta must stay free of any recount.
-          const pendingApprovals = ev.event === 'tool_call' || ev.event === 'tool_result' ? countApprovals(next.conversation) : s.pendingApprovals
+          // Only the events that open or settle a gate can move the count, and delta must stay free
+          // of any recount: it is the one event that arrives per token.
+          const gate = ev.event === 'tool_call' || ev.event === 'tool_result' || ev.event === 'plan' || ev.event === 'plan_decision'
+          const pendingApprovals = gate ? countApprovals(next.conversation) : s.pendingApprovals
           return { ...next, pendingApprovals, status: reduceStatus(s.status, ev, pendingApprovals) }
         })
         switch (ev.event) {
@@ -447,6 +564,14 @@ export const useStore = create<State>((set, get) => {
           case 'learn_error':
             get().toast(`Auto-learn failed: ${ev.data.message}`, 'error')
             break
+          case 'desk_status':
+            putDesk(ev.data)
+            if (ev.data.status === 'review') void get().loadDeskFiles(ev.data.id)
+            if (NEEDS_YOU.includes(ev.data.status)) void get().refreshDeskInbox()
+            break
+          case 'desk_handoff':
+            handoff = ev.data
+            break
           case 'error':
             get().toast(ev.data.message, 'error')
             break
@@ -462,6 +587,17 @@ export const useStore = create<State>((set, get) => {
       patchSession(convId, (s) => (s.streaming?.abort === abort ? { ...s, streaming: null, status: finishStatus(s.status) } : s))
       // An attached run wrote deltas this window never saw; the persisted message is the whole reply.
       if (attached) void get().openSession(convId)
+      // A chained desk turn is a *new* run on this same conversation, and the stream for the old one
+      // closes before the bus has registered it. Poll a few times rather than leave the pane dead.
+      // `attachSession` is shared and `watchRun` dedupes on run_id, so every extra attempt is a no-op.
+      if (handoff && !abort.signal.aborted) {
+        for (let i = 0; i < 6 && !get().sessions[convId]?.streaming; i++) {
+          await sleep(250)
+          // Swallowed: this runs in a `finally` nobody awaits, so a failed re-attach must not
+          // surface as an unhandled rejection. The next `openDesk` recovers the pane.
+          await get().attachSession(convId).catch(() => undefined)
+        }
+      }
     }
   }
 
@@ -548,6 +684,14 @@ export const useStore = create<State>((set, get) => {
     activityContext: null,
     activityBusy: false,
 
+    desks: [],
+    activeDeskId: null,
+    activeDesk: null,
+    deskFiles: [],
+    deskPreview: null,
+    deskInbox: [],
+    deskBusy: false,
+
     init: async () => {
       // Before the backend check and before the guard: a dead backend must still leave the menu
       // shortcuts wired, and StrictMode's second mount must not add a second listener.
@@ -580,6 +724,9 @@ export const useStore = create<State>((set, get) => {
       void get().refreshRecap()
       void get().refreshDocsPending()
       void get().refreshActivity()
+      // Once, so the sidebar badge and the Today card are live before Cowork is ever opened. The
+      // inbox stays current from `desk_status` after that; there is no timer anywhere.
+      void get().refreshDeskInbox()
     },
 
     loadModels: async () => {
@@ -607,6 +754,7 @@ export const useStore = create<State>((set, get) => {
       if (view === 'home') void get().refreshDashboard()
       if (view === 'todos') void get().refreshTodos()
       if (view === 'activity') void get().loadActivity()
+      if (view === 'cowork') void get().refreshDesks()
     },
     leaveCanvas: () => {
       const s = get()
@@ -664,6 +812,8 @@ export const useStore = create<State>((set, get) => {
     setLibraryScope: async (libraryScope) => {
       set({ libraryScope })
       await get().loadScope(libraryScope)
+      // Desks are not library data, so `loadScope` does not carry them; the rail is still scoped.
+      if (get().view === 'cowork') void get().refreshDesks()
     },
     loadScope: async (dataScope) => {
       set({ dataScope })
@@ -692,14 +842,19 @@ export const useStore = create<State>((set, get) => {
       get().clearSessionStatus(id)
       // A session mid-run holds content the backend has not persisted yet, so never refetch over it.
       if (get().sessions[id]?.streaming) return
-      const c = await api.conversations.get(id)
-      if (get().focusedConversationId !== id) return
-      putSession(c)
+      // `attachSession`, not a bare fetch, the way the canvas chat widget already opens one: a reply
+      // in flight — started in another window, or before this reload — has to be adopted here too,
+      // or the card it is waiting on never paints. It loads the conversation on the way.
+      await get().attachSession(id)
+      const c = get().sessions[id]?.conversation
+      if (!c || get().focusedConversationId !== id) return
       set({ draftProjectId: c.project_id })
     },
     openSession: async (conversationId) =>
       share(loads, conversationId, async () => {
         putSession(await api.conversations.get(conversationId))
+        // Awaited, so `attachSession` counts a pending plan as an approval and paints amber.
+        await hydratePlan(conversationId)
       }),
     attachSession: async (conversationId) =>
       share(attaches, conversationId, async () => {
@@ -1044,6 +1199,215 @@ export const useStore = create<State>((set, get) => {
       get().toast(`Deleted ${deleted.events} samples and ${deleted.summaries} summaries`)
       await get().loadActivity()
     },
+    // ---- cowork desks ----
+    refreshDesks: async () => {
+      try {
+        set({ desks: await api.cowork.desks.list(get().libraryScope) })
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    refreshDeskInbox: async () => {
+      try {
+        set({ deskInbox: await api.cowork.inbox.list() })
+      } catch { /* a badge is not worth a toast */ }
+    },
+    openDesk: async (id) => {
+      // The files and the preview belong to the desk that was open, so they go now rather than
+      // after the fetch: the Files tab must never paint another desk's workspace for a frame.
+      if (get().activeDeskId !== id) set({ activeDeskId: id, activeDesk: null, deskFiles: [], deskPreview: null })
+      try {
+        const desk = await api.cowork.desks.get(id)
+        // A slower fetch must not clobber a desk the user has since switched away from.
+        if (get().activeDeskId !== id) return
+        set({ activeDesk: desk })
+        putDesk(desk)
+        // `retainSession` is the detail pane's own effect pair: the 12-session LRU evicts by
+        // `touchedAt`, and a desk pane is never `focusedConversationId`.
+        if (desk.live) await get().attachSession(desk.conversation_id)
+        else await get().openSession(desk.conversation_id)
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    createDesk: async (p) => {
+      set({ deskBusy: true })
+      try {
+        const { desk, conversation_id, run_id, seq } = await api.cowork.desks.create(p)
+        await get().refreshDesks()
+        await get().openDesk(desk.id)
+        // Start returns the run outright, so the pane paints without waiting for `GET /runs` to
+        // notice it. `watchRun` dedupes on run_id against whatever `openDesk` already attached.
+        if (run_id) void watchRun(conversation_id, { run_id, seq: seq ?? 0 }, { messageId: null, approvals: 0, attached: true })
+        return desk
+      } catch (e) {
+        // Never rejects: the new-desk card is holding the user's brief on this verdict.
+        get().toast((e as Error).message, 'error')
+        return null
+      } finally {
+        set({ deskBusy: false })
+      }
+    },
+    startDesk: async (id) => {
+      try {
+        const { run_id, seq, conversation_id } = await api.cowork.desks.start(id)
+        await get().openDesk(id)
+        void watchRun(conversation_id, { run_id, seq }, { messageId: null, approvals: 0, attached: true })
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    resumeDesk: async (id, reason) => {
+      const convId = deskConv(id)
+      try {
+        const { run_id, seq } = await api.cowork.desks.resume(id, reason)
+        await get().openDesk(id)
+        if (convId) void watchRun(convId, { run_id, seq }, { messageId: null, approvals: 0, attached: true })
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    pauseDesk: async (id) => {
+      try {
+        putDesk(await api.cowork.desks.pause(id))
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    stopDesk: async (id) => {
+      try {
+        putDesk(await api.cowork.desks.stop(id))
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    messageDesk: async (id, text) => {
+      if (!text.trim()) return false
+      try {
+        await api.cowork.desks.message(id, text.trim())
+        // Awake it steered the live reply, asleep it woke a new turn — either way the row has moved
+        // (the question is answered, the status is live again), and `openDesk` re-attaches.
+        await get().openDesk(id)
+        return true
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+        return false
+      }
+    },
+    patchDesk: async (id, patch) => {
+      try {
+        putDesk(await api.cowork.desks.patch(id, patch))
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    deleteDesk: async (id, purge = false) => {
+      const convId = deskConv(id)
+      try {
+        await api.cowork.desks.delete(id, purge)
+      } catch (e) {
+        return get().toast((e as Error).message, 'error')
+      }
+      if (convId) get().closeSession(convId)
+      set((st) => ({
+        desks: st.desks.filter((d) => d.id !== id),
+        activeDeskId: st.activeDeskId === id ? null : st.activeDeskId,
+        activeDesk: st.activeDesk?.id === id ? null : st.activeDesk,
+        deskFiles: st.activeDeskId === id ? [] : st.deskFiles,
+        deskPreview: st.activeDeskId === id ? null : st.deskPreview
+      }))
+      void get().refreshConversations()
+    },
+    loadDeskFiles: async (id, path = '') => {
+      try {
+        const { files } = await api.cowork.desks.files(id, path)
+        // `desk_status` loads these for whichever desk reached review, which need not be the open one.
+        if (get().activeDeskId === id) set({ deskFiles: files })
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    previewDeskFile: async (id, path) => {
+      set({ deskPreview: { path, text: '' } })
+      try {
+        const f = await api.cowork.desks.file(id, path)
+        // A binary has no window to show, so it reads as its name and its size.
+        const text = f.binary ? `${f.path} — ${f.bytes} bytes` : f.text
+        if (get().deskPreview?.path === path) set({ deskPreview: { path, text } })
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    acceptOutputs: async (id, sel) => {
+      if (!sel.length) return []
+      set({ deskBusy: true })
+      try {
+        const { results } = await api.cowork.desks.accept(id, sel)
+        // `verified` is read from the response, never assumed: a promotion the backend could not
+        // read back is a red row, not a tick.
+        const bad = results.filter((r) => !r.ok || !r.verified).length
+        get().toast(bad ? `${bad} of ${results.length} could not be verified` : `Promoted ${results.length} output${results.length === 1 ? '' : 's'}`, bad ? 'error' : 'info')
+        await get().openDesk(id)
+        return results
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+        return []
+      } finally {
+        set({ deskBusy: false })
+      }
+    },
+    rejectOutputs: async (id, outputIds, note) => {
+      set({ deskBusy: true })
+      try {
+        putDesk(await api.cowork.desks.reject(id, outputIds, note))
+        await get().openDesk(id)
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      } finally {
+        set({ deskBusy: false })
+      }
+    },
+    decidePlan: async (planId, decision, edits, note) => {
+      set({ deskBusy: true })
+      try {
+        const r = await api.cowork.plans.decide(planId, decision, edits, note)
+        // First-decision-wins on the server: `{ok: false}` is a normal answer from a second window,
+        // and the row it returns is the decision that did land.
+        if (!r.ok) get().toast(r.error ?? 'That plan was already decided', 'error')
+        if (r.plan) putPlan(r.plan)
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      } finally {
+        set({ deskBusy: false })
+      }
+    },
+    setPlanMode: async (convId, mode) => {
+      try {
+        await get().setChatSettings({ planMode: mode }, convId)
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    markDeskEventSeen: async (eventId) => {
+      // Optimistic: the badge is the whole point, so it must not wait on a round trip.
+      set((st) => ({ deskInbox: st.deskInbox.filter((e) => e.id !== eventId) }))
+      try {
+        await api.cowork.inbox.seen(eventId)
+      } catch {
+        void get().refreshDeskInbox()
+      }
+    },
+    markDeskSeen: async (deskId) => {
+      // Optimistic for the same reason as the single-event version: the badge must not wait on a
+      // round trip. The route answers with the refreshed desk row, so the rail follows it too.
+      set((st) => ({ deskInbox: st.deskInbox.filter((e) => e.desk_id !== deskId) }))
+      try {
+        putDesk(await api.cowork.desks.seen(deskId))
+      } catch {
+        void get().refreshDeskInbox()
+      }
+    },
+
     uploadDocuments: async (files, projectId) => {
       for (const f of Array.from(files)) {
         try {
@@ -1079,11 +1443,11 @@ export const useStore = create<State>((set, get) => {
         set({ recapLoading: false })
       }
     },
-    approveTool: async (callId, decision, conversationId) => {
+    approveTool: async (callId, decision, conversationId, note) => {
       const id = conversationId ?? get().focusedConversationId
       if (!id) return
       try {
-        await api.approve(callId, decision)
+        await api.approve(callId, decision, note)
         // Mark as no longer awaiting in the UI; the tool_result event fills in the rest. The count
         // settles now rather than when the tool returns, since an external action can take seconds.
         patchSession(id, (s) => {

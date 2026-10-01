@@ -26,11 +26,15 @@ export interface ContextUsed {
 export type ToolMode = 'on' | 'ask' | 'off'
 export type ToolOverride = 'inherit' | ToolMode
 
+/** How consequential a tool call is. `plan` means "this tool IS the approval card": always asks,
+ *  allowed while planning, never grantable. Mirrors `mcp_servers.DANGER_LEVELS`. */
+export type ToolDanger = 'safe' | 'writes' | 'network' | 'executes' | 'external' | 'plan'
+
 export interface ToolInfo {
   name: string
   description: string
   group: string
-  danger: 'safe' | 'writes' | 'network' | 'executes' | 'external'
+  danger: ToolDanger
   available: boolean
   default_mode: ToolMode
   /** Results carry untrusted third-party content, so one call taints the rest of the reply. */
@@ -64,6 +68,12 @@ export interface ToolEvent {
   breaker?: PartialReason
   /** Approval was forced by taint even though the tool is set to 'on'. */
   forced?: boolean
+  /** A plan is approved and this call is not one of its steps, so it still showed a card. */
+  off_plan?: boolean
+  /** The `step_id` this call consumed, when it matched an approved step exactly. */
+  plan_step?: string | null
+  /** Refused before it ran because planning mode is on and nothing has been approved yet. */
+  blocked_by?: 'plan_mode' | null
 }
 
 /** Why a reply stopped early: a budget axis, or the repetition breaker. */
@@ -97,6 +107,8 @@ export interface Message {
   created_at: number
   /** Set when the reply ran out of budget or hit a breaker; not persisted. */
   partial?: PartialReason | null
+  /** The action plan this reply proposed, carried by the `plan` event; not persisted. */
+  plan?: ActionPlan | null
 }
 
 export type Effort = 'default' | 'low' | 'medium' | 'high'
@@ -116,6 +128,10 @@ export interface ConversationSettings {
   /** Sticky: a reply read untrusted content, so external tools keep asking and fetch_url stays restricted. */
   tainted?: boolean
   taint_sources?: string[]
+  /** Plan before acting: 'always' from the first round, 'auto' from the first mutating attempt. null = inherit. */
+  planMode?: 'off' | 'auto' | 'always' | null
+  /** Set when this conversation belongs to a cowork desk; what keeps it out of Recent chats. */
+  deskId?: string | null
 }
 
 export interface Conversation {
@@ -393,6 +409,19 @@ export interface Settings {
   modelPrices: Record<string, ModelPrice>
   googleClientId: string
   googleClientSecret: string
+  /** Plan before acting, as the default for new chats; a conversation's own planMode overrides it. */
+  planMode?: 'off' | 'auto' | 'always'
+  /** How long a run waits on an approval card before giving up on it entirely. */
+  approvalWaitSeconds?: number
+  /** With nobody watching, an undecided card parks after this long: the desk blocks, the run ends. */
+  parkAfterSeconds?: number
+  /** Desk budgets; 0 on an axis means unlimited. */
+  deskMaxTurns?: number
+  deskMaxCost?: number
+  /** How many desks may be live at once. */
+  deskMaxLive?: number
+  /** Native notification on a terminal desk transition. */
+  deskNotify?: boolean
 }
 
 export interface ModelPrice {
@@ -439,11 +468,15 @@ export type ChatEvent =
   | { event: 'removed_message'; data: { id: string } }
   | { event: 'title'; data: { id: string; title: string } }
   | { event: 'delta'; data: { id: string; text: string } }
-  | { event: 'tool_call'; data: { message_id: string; id: string; name: string; arguments: Record<string, unknown>; needs_approval?: boolean; forced?: boolean } }
+  | { event: 'tool_call'; data: { message_id: string; id: string; name: string; arguments: Record<string, unknown>; needs_approval?: boolean; forced?: boolean; off_plan?: boolean; plan_step?: string | null; blocked_by?: 'plan_mode' | null } }
   | { event: 'tool_result'; data: ToolEvent & { message_id: string } }
   | { event: 'span'; data: { message_id: string; span: Span } }
   | { event: 'done'; data: { id: string; error: string | null; context_used: ContextUsed; tool_events: ToolEvent[]; trace: Span[]; stopped: boolean; partial?: PartialReason | null; tainted?: boolean; taint_sources?: string[] } }
   | { event: 'taint'; data: { message_id: string; source: string } }
+  | { event: 'plan'; data: { message_id: string; call_id: string; plan: ActionPlan } }
+  | { event: 'plan_decision'; data: { message_id: string; plan_id: string; call_id: string; decision: PlanDecision; by: string; note?: string } }
+  | { event: 'desk_status'; data: Desk }
+  | { event: 'desk_handoff'; data: { desk_id: string; conversation_id: string; turn: number } }
   | { event: 'learned'; data: { memories: Memory[]; nodes: GraphNode[]; edges: GraphEdge[] } }
   | { event: 'learn_error'; data: { message: string } }
   | { event: 'error'; data: { message: string } }
@@ -497,6 +530,203 @@ export interface Widget {
 }
 export interface Dashboard { id: string; name: string; description: string; created_at: number; widget_count?: number; widgets: Widget[] }
 export interface Recap { day: string; content: string; created_at: number; cached?: boolean }
+
+// ---------------- Cowork desks and action plans ----------------
+/**
+ * Named `ActionPlan*` and `Desk*` throughout, never a bare `Plan` / `PlanStep`: two unmerged
+ * branches each define those differently. The CSS mirrors are `.aplan-`, `.cowork-` and `.desk-`.
+ */
+
+export type DeskStatus = 'draft' | 'planning' | 'awaiting_plan' | 'working' | 'needs_approval' | 'blocked'
+  | 'paused' | 'interrupted' | 'review' | 'done' | 'failed' | 'stopped'
+
+/** Mirrors `cowork.NEEDS_YOU`: the statuses that put a desk in the rail's "Needs you" section. */
+export const NEEDS_YOU: DeskStatus[] = ['awaiting_plan', 'needs_approval', 'blocked', 'interrupted', 'review']
+/** Mirrors `cowork.LIVE`: something is driving the desk right now. Also what `Desk.live` is computed from. */
+export const DESK_LIVE: DeskStatus[] = ['planning', 'working', 'needs_approval']
+
+export type DeskAutonomy = 'plan' | 'ask' | 'propose'
+export type PlanDecision = 'approve' | 'edit' | 'reject'
+export type PlanStepStatus = 'proposed' | 'approved' | 'consumed' | 'done' | 'failed' | 'dropped' | 'rejected'
+
+/** One entry of POST /cowork/plans/{id}'s `steps`. `idx` is 1-based, exactly as the card numbers it. */
+export interface PlanEdit { idx: number; arguments?: Record<string, unknown>; drop?: boolean }
+
+export interface ActionPlanStep {
+  step_id: string
+  plan_id: string
+  /** 1-BASED, so the card's "Step 2" label and the edit payload agree without an off-by-one. */
+  idx: number
+  title: string
+  /** '' = a reasoning step that calls nothing. */
+  tool: string
+  /** The wire key is `arguments`, the column is `args`. Approving binds `args_digest` of exactly this. */
+  arguments: Record<string, unknown>
+  args_digest: string
+  why: string
+  danger: ToolDanger
+  status: PlanStepStatus
+  /** The user rewrote the arguments, so the agent is bound to theirs rather than its own. */
+  edited: boolean
+  call_id: string | null
+  result_error: string | null
+  consumed_at: number | null
+}
+
+export interface ActionPlan {
+  plan_id: string
+  /** The approvals row this plan is decided through; null once the run that proposed it is gone. */
+  call_id: string | null
+  run_id: string
+  conversation_id: string
+  desk_id: string | null
+  message_id: string | null
+  title: string
+  intent: string
+  status: 'pending' | 'approved' | 'rejected' | 'superseded'
+  /** The reply had already read untrusted content when this plan was proposed. */
+  tainted: boolean
+  /** Tools in this plan that taint, so a later external step is not re-gated by the plan's own research. */
+  expected_taint: string[]
+  note: string
+  decided_by: string | null
+  created_at: number
+  decided_at: number | null
+  steps: ActionPlanStep[]
+}
+
+export interface DeskBudget { maxTurns?: number; maxCost?: number }
+
+export interface Desk {
+  id: string
+  conversation_id: string
+  project_id: string | null
+  title: string
+  brief: string
+  status: DeskStatus
+  status_reason: string
+  /** The rail's live "now" line, debounced server-side; never written per delta. */
+  headline: string
+  /** Written by `desk_ask`, cleared by the steer that answers it. */
+  question: string
+  autonomy: DeskAutonomy
+  plan_id: string | null
+  run_id: string | null
+  /** "cowork/<id>", RELATIVE to the backend data dir. Never an absolute path. */
+  workspace: string
+  turn: number
+  cost: number
+  budget: DeskBudget
+  last_error: string | null
+  archived: boolean
+  /** Derived: the status is in DESK_LIVE. */
+  live: boolean
+  /** Derived: unseen `needs_you` events on this desk. */
+  unseen: number
+  created_at: number
+  updated_at: number
+  ended_at: number | null
+}
+
+/** GET /cowork/desks/{id}: the desk plus everything the detail pane opens with. */
+export interface FullDesk extends Desk {
+  plan: ActionPlan | null
+  outputs: DeskOutput[]
+  events: DeskEvent[]
+  runs: RunInfo[]
+}
+
+export type DeskOutputStatus = 'proposed' | 'stale' | 'accepted' | 'promoted' | 'promote_failed' | 'rejected'
+export type PromotionKind = 'doc' | 'doc_append' | 'document' | 'download'
+
+export interface DeskOutput {
+  id: string
+  desk_id: string
+  /** Workspace-relative, always under `outputs/`. */
+  path: string
+  title: string
+  summary: string
+  /** The digest recorded at delivery; `stale` means the file has moved on since. */
+  sha256: string
+  bytes: number
+  run_id: string | null
+  status: DeskOutputStatus
+  promoted_kind: PromotionKind | string | null
+  promoted_id: string | null
+  /** The promoted copy was read back and matched. Read from the response, never assumed. */
+  verified: boolean
+  created_at: number
+  updated_at: number
+  decided_at: number | null
+  /** Set by GET .../outputs when the file could not be re-hashed at all. */
+  error?: string
+}
+
+export type DeskFileState = 'new' | 'modified' | 'unchanged'
+
+export interface DeskFile {
+  path: string
+  bytes: number
+  modified: number
+  is_dir: boolean
+  is_text: boolean
+  state: DeskFileState
+}
+
+/** GET /cowork/desks/{id}/files */
+export interface DeskFileTree { files: DeskFile[]; usage: { files: number; bytes: number } }
+
+/** GET /cowork/desks/{id}/file — a character window, or a named-and-sized stub for a binary. */
+export interface DeskFilePreview {
+  path: string
+  text: string
+  bytes: number
+  truncated: boolean
+  binary: boolean
+  state: DeskFileState
+  /** Absent on the binary stub, which has no window. */
+  offset?: number
+  chars?: number
+  /** Present only when truncated: where the next page starts. */
+  next_offset?: number
+}
+
+/** GET /cowork/desks/{id}/diff — the unified diff against the pre-desk baseline. */
+export interface DeskDiff {
+  path: string
+  state: DeskFileState
+  diff: string
+  truncated: boolean
+  added: number
+  removed: number
+  /** False for a file the desk created: it diffs as all additions against empty. */
+  has_baseline: boolean
+}
+
+export interface DeskEvent {
+  id: string
+  desk_id: string
+  run_id: string | null
+  /** status|plan|step|output|question|blocked|review|failed|promoted|interrupted|note */
+  kind: string
+  body: string
+  data: Record<string, unknown>
+  needs_you: boolean
+  seen: boolean
+  created_at: number
+  /** GET /cowork/inbox only, so the Today card can name the desk without a second fetch. */
+  desk_title?: string
+}
+
+/** One row of POST /cowork/desks/{id}/accept's response. */
+export interface PromotionResult {
+  output_id: string
+  ok: boolean
+  verified: boolean
+  kind: string
+  ref: string | null
+  error?: string
+}
 
 // ---------------- Canvas Mode ----------------
 
@@ -631,7 +861,7 @@ export interface DragPayload {
 }
 
 /** Run state of one chat session. Travels the cross-window bus, so it is a shared type, not a store-local one. */
-export type SessionStatus = 'idle' | 'working' | 'done' | 'error' | 'needs-approval'
+export type SessionStatus = 'idle' | 'working' | 'done' | 'error' | 'needs-approval' | 'awaiting-plan'
 
 /** 200 body of POST /conversations/{id}/chat once the run is a background task. */
 export interface ChatRunStarted {
@@ -647,6 +877,17 @@ export interface RunInfo {
   seq: number
   started_at: number
   live: boolean
+  kind: 'chat' | 'desk' | string
+  desk_id: string | null
+  /** Which chained desk turn this is; 0 for an ordinary chat. */
+  turn: number
+  status: 'running' | 'awaiting' | 'done' | 'error' | 'stopped' | 'interrupted' | string
+  /** Tape columns, present on the table-backed rows GET /runs and GET /runs/{id} return. */
+  cost?: number
+  rounds?: number
+  error?: string | null
+  last_seq?: number
+  ended_at?: number | null
 }
 
 /** 409 detail of POST /conversations/{id}/chat when that conversation already has a live run. */

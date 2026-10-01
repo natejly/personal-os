@@ -22,10 +22,12 @@ def build_context(
     conv_settings: dict[str, Any],
     global_system_prompt: str,
     activity: Any = None,
+    ledger: list[dict[str, Any]] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Returns (system_prompt, context_used)."""
     parts: list[str] = [global_system_prompt.strip()] if global_system_prompt.strip() else []
-    used: dict[str, Any] = {"memories": [], "nodes": [], "edges": [], "chunks": [], "project": None, "activity": None}
+    used: dict[str, Any] = {"memories": [], "nodes": [], "edges": [], "chunks": [], "project": None, "activity": None,
+                            "ledger": 0}
 
     if project:
         used["project"] = {"id": project["id"], "name": project["name"]}
@@ -64,6 +66,16 @@ def build_context(
         if block:
             parts.append(block)
             used["activity"] = block
+
+    # What this desk already did, as prose. A resumed desk gets no reconstructed
+    # assistant(tool_calls)/tool pairs — history() replays content only, and one malformed pair
+    # breaks the whole request on an OpenAI-compatible backend. The agent's real memory of its own
+    # work is the workspace; this is just the index into it, with the honest 'unknown' lines kept.
+    if ledger:
+        lines = [str(r.get("line") or "") for r in ledger if r.get("line")]
+        if lines:
+            parts.append("## Work already completed on this desk. Do not repeat it.\n" + "\n".join(lines))
+            used["ledger"] = len(lines)
 
     system = "\n\n".join(parts)
     used["system_prompt"] = system

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { MessageSquarePlus, Search, Settings, Trash2, PanelLeftClose, Brain, FileText, NotebookPen, Plus, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid, Mail, MonitorDot, BookOpen, Globe } from 'lucide-react'
+import { MessageSquarePlus, Search, Settings, Trash2, PanelLeftClose, Brain, FileText, NotebookPen, Plus, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid, Mail, MonitorDot, BookOpen, Globe, Users } from 'lucide-react'
 import GrainLogo from './GrainLogo'
 import { useStore, type View } from '../store'
 import { ActivityIndicator } from './ActivityView'
@@ -39,6 +39,9 @@ const NAV: NavEntry[] = [
   { view: 'dashboards', label: 'Dashboards', icon: <LayoutDashboard size={15} /> },
   { view: 'docs', label: 'Docs', icon: <NotebookPen size={15} /> },
   { view: 'activity', label: 'Activity', icon: <MonitorDot size={15} />, kind: 'activity' },
+  // Deliberately no `kind`: there is no cowork canvas widget in v1, and a kind would make this row a
+  // drag source for a window that cannot be opened.
+  { view: 'cowork', label: 'Cowork', icon: <Users size={15} /> },
   { label: 'Web', icon: <Globe size={15} />, kind: 'web' }
 ]
 
@@ -58,6 +61,10 @@ export default function Sidebar(): JSX.Element {
   const settings = useStore((s) => s.settings)
   const docCount = useStore((s) => s.docs.length)
   const docsPending = useStore((s) => s.docsPending)
+  // DESKS waiting on you, not needs-you events: one desk raises several, and the badge's tooltip
+  // has always claimed desks. A Set of desk_ids keeps the selector a primitive, so the sidebar
+  // still only re-renders when the number itself moves.
+  const needsYou = useStore((s) => new Set(s.deskInbox.map((e) => e.desk_id)).size)
   const inCanvas = useStore((s) => s.view === 'canvas')
   // One selector per action. Sidebar is mounted in every view, the canvas included, so a bare
   // useStore() here is what made App's whole subtree commit once per streamed token.
@@ -104,6 +111,13 @@ export default function Sidebar(): JSX.Element {
     if (v === 'home' || v === 'calendar' || v === 'mail' || v === 'boards' || v === 'dashboards' || v === 'activity') return null
     if (v === 'todos') return todoStats?.open ?? null
     if (v === 'docs') return docCount
+    // Counted from the inbox rather than `desks`, which is only loaded once the Cowork view has
+    // been opened: the inbox is refreshed on every NEEDS_YOU desk_status and once at init, so the
+    // badge is live before the view has ever been opened. Opening a desk clears its rows
+    // (DeskDetail calls markDeskSeen), which is also what keeps an archived desk out of the count.
+    // `|| null` hides a zero: the fallthrough below would otherwise count documents here, which
+    // means nothing for a desk.
+    if (v === 'cowork') return needsYou || null
     const total = (key: 'memories' | 'nodes' | 'documents'): number =>
       (personalStats?.[key] ?? 0) + projects.reduce((n, p) => n + (p.stats?.[key] ?? 0), 0)
     // Memory is one panel now: memories and graph entities counted together.
@@ -119,7 +133,12 @@ export default function Sidebar(): JSX.Element {
       {n.view === 'docs' && docsPending > 0 && (
         <span className="count pending" title={`${docsPending} assistant edit${docsPending === 1 ? '' : 's'} awaiting review`}>{docsPending}</span>
       )}
-      {n.view != null && libCount(n.view) !== null && <span className="count">{libCount(n.view)}</span>}
+      {n.view != null && libCount(n.view) !== null && (
+        // A desk waiting on you is the same urgency as an unreviewed doc edit, so it gets the amber
+        // badge rather than the neutral library count.
+        <span className={n.view === 'cowork' ? 'count pending' : 'count'}
+          title={n.view === 'cowork' ? `${needsYou} desk${needsYou === 1 ? '' : 's'} waiting on you` : undefined}>{libCount(n.view)}</span>
+      )}
     </button>
   )
   const knowledgeItems = KNOWLEDGE.filter((n) => n.view && !viewHidden(settings, n.view))

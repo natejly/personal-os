@@ -5,7 +5,8 @@ const TITLE: Record<Exclude<SessionStatus, 'idle'>, string> = {
   working: 'Working…',
   done: 'Just finished',
   error: 'Last reply failed',
-  'needs-approval': 'Waiting for your approval'
+  'needs-approval': 'Waiting for your approval',
+  'awaiting-plan': 'Waiting for you to approve a plan'
 }
 
 /**

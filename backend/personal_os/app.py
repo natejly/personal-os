@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import hmac
 import html
 import json
@@ -21,7 +22,7 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import AfterValidator, BaseModel, Field
 
 from . import activity, assist, llm, tools
@@ -39,6 +40,11 @@ from .microvm import Sandboxes
 from .notes import Notes
 from .gtasks import TasksSync
 from .presets import CanvasPresets
+from .cowork import (AUTONOMY, DESK_CONTINUE, DESK_HINT, DESK_RESUME, LIVE as DESK_LIVE,
+                     STATUSES as DESK_STATUSES, DeskRuntime, Desks)
+from .plans import PLAN_SAFE_DANGER, PLAN_TOOL, ActionPlans, CallPolicy, autoplan, decide_call, normalize_plan, parse_plan_edits
+from .runlog import ACTIVE as RUN_ACTIVE, PROMOTE_STEP, RunStore
+from .workspace import MAX_PREVIEW, Workspace, WorkspaceError
 from .runs import Run, RunBus
 from .todos import Todos
 from .tools import Toolbox, summarize_result
@@ -54,6 +60,14 @@ memories = Memories(db)
 graph = Graph(db)
 documents = Documents(db)
 docs = Docs(db)
+# Construction order is schema-creation order and is load-bearing: action_plans.run_id and
+# desks.conversation_id carry real foreign keys, so agent_runs and conversations must exist first.
+# The workspace is a directory, not a table, but it comes before Desks so a desk's root exists at
+# create time and the row can store the relative "cowork/<id>" rel_root() hands back.
+run_store = RunStore(db)
+aplans = ActionPlans(db)
+workspace = Workspace(db.data_dir)
+desks = Desks(db, workspace)
 
 
 def _resolve_auth_token() -> str:
@@ -181,11 +195,16 @@ app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_credenti
                    allow_headers=["Content-Type", "X-Personal-OS-Token", "Authorization"])
 
 # Live runs, one per conversation, each owning its own task. Any number of clients may watch one.
-bus = RunBus()
+bus = RunBus(run_store)
 # Active chat streams so they can be aborted from the client: message_id -> that run's stop event.
 _active: dict[str, asyncio.Event] = {}
 # Pending tool-call approvals: call_id -> Future[decision]
 _approvals: dict[str, asyncio.Future] = {}
+# Fast-wake only. The `approvals` row is the source of truth; a restart loses the Future and the
+# waiting run falls back to polling the row, so no card is ever orphaned.
+_answers: dict[str, str] = {}
+# One supervisor task per desk, so a chained turn is owned by something outside the run it follows.
+_desk_tasks: dict[str, asyncio.Task[None]] = {}
 
 
 ENV_SEED = {
@@ -238,7 +257,8 @@ if not any(getattr(f, "__name__", "") == "_record_usage" for f in llm._usage_lis
     llm.on_usage(_record_usage)
 sandboxes = Sandboxes(settings)
 monitor = activity.Monitor(db, settings, llm.complete)
-toolbox = Toolbox(memories, graph, documents, settings, todos=todos, google=google, boards=boards, sandboxes=sandboxes, docs=docs, activity=monitor)
+toolbox = Toolbox(memories, graph, documents, settings, todos=todos, google=google, boards=boards, sandboxes=sandboxes, docs=docs, activity=monitor,
+                  desks=desks, plans=aplans, workspace=workspace)
 
 
 def sid(project_id: str | None) -> str | None:
@@ -366,8 +386,10 @@ class ConvPatch(BaseModel):
 
 
 @app.get("/conversations")
-def list_conversations(project_id: str | None = None) -> list[dict[str, Any]]:
-    return convos.list(sid(project_id))
+def list_conversations(project_id: str | None = None, include_desks: bool = False) -> list[dict[str, Any]]:
+    """A desk's own conversation is hidden by default: it belongs on the Cowork rail, not in Recent
+    chats. `include_desks=true` is there so one can still be listed on demand."""
+    return convos.list(sid(project_id), include_desks)
 
 
 @app.post("/conversations")
@@ -423,6 +445,48 @@ Only chart real values you have or computed; never invent data for decoration. T
 
 TOOLS_HINT = "You have tools. Use them when they would make the answer more accurate or current; otherwise answer directly. After using tools, write the final answer for the user."
 
+PLAN_MODE_HINT = """## Planning mode
+You cannot change anything yet. Only read-only tools are available: everything that writes, runs code,
+sends, or touches anything outside this app is withheld until the user approves a plan.
+Investigate with the read-only tools if you need to, then call `propose_plan` once with the ordered
+steps you intend to take. One step per real action, with the exact tool name and the exact arguments
+you will call it with — approving a step approves those arguments and nothing else. If the task needs
+no actions at all, just answer; do not propose an empty plan."""
+
+PLAN_BOUND_HINT = ("The plan is approved. Run its steps with exactly the arguments that were approved; "
+                   "anything else still asks the user. If reality differs from the plan, say so and "
+                   "propose a new one rather than improvising around it.")
+
+# PLAN_BLOCKED lives in plans.py and DESK_HINT / DESK_CONTINUE / DESK_RESUME in cowork.py, each in
+# the module that enforces it: decide_call formats the first and the desk runner sends the rest, so
+# a second copy here would be a string that drifts out of step with the rule it describes.
+GATE_TOOLS = (PLAN_TOOL, "desk_ask")   # exempt from the chat approval timeout; they park instead
+
+# What a desk may spend. 0 means unlimited on an axis, so it loses to any positive limit: a desk's
+# own budget may only make the user's settings stricter, never looser.
+_DESK_CAPS = ("deskMaxTurns", "deskMaxCost", "deskMaxLive")
+
+
+def _caps(cfg: dict[str, Any], override: dict[str, Any] | None) -> dict[str, Any]:
+    """Downward only: a desk may be stricter than the user's settings, never looser. 0 = unlimited,
+    so it loses to any positive limit."""
+    out = {k: cfg.get(k, llm.DEFAULT_SETTINGS[k]) for k in _DESK_CAPS}
+    for key, src in (("deskMaxTurns", "maxTurns"), ("deskMaxCost", "maxCost")):
+        want = (override or {}).get(src)
+        if want is None:
+            continue
+        try:
+            want = float(want)
+        except (TypeError, ValueError):
+            continue
+        have = float(out[key] or 0)
+        if want > 0 and (have <= 0 or want < have):
+            out[key] = want
+    out["deskMaxTurns"] = int(out["deskMaxTurns"] or 0)
+    out["deskMaxCost"] = float(out["deskMaxCost"] or 0)
+    out["deskMaxLive"] = int(out["deskMaxLive"] or 0)
+    return out
+
 
 BUDGET_STOP = ("Out of budget ({axis}): this tool call was not executed and no further tool calls will run. "
                "Write the best final answer you can from what you already have, and say in one line what is still missing.")
@@ -430,6 +494,8 @@ SOFT_NUDGE = ("Budget check: about {pct}% of this reply's budget is used. "
               "Make at most one or two more tool calls, then write the final answer.")
 LOOP_STOP = ("{name} has been called with identical arguments {n} times in a row, so this reply is stopping tool use. "
              "Answer with what you already have, and say in one line what you could not finish.")
+PARKED_TOOL = ("{name} is waiting for the user's approval and was not executed. The card is still open, so do "
+               "not try another way around it: say what you are waiting on and stop.")
 REPEAT_LIMIT = 5
 TOOL_ERROR_LIMIT = 3
 
@@ -480,8 +546,13 @@ def _title_from(text: str) -> str:
     return (t[:48].rstrip() + "…") if len(t) > 48 else (t or "New chat")
 
 
-async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: list[dict[str, Any]] | None = None) -> AsyncIterator[tuple[str, Any]]:
-    """Yield (event, payload) pairs. The run bus formats them and fans them out; see runs.sse."""
+async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: list[dict[str, Any]] | None = None,
+                       run: Run | None = None) -> AsyncIterator[tuple[str, Any]]:
+    """Yield (event, payload) pairs. The run bus formats them and fans them out; see runs.sse.
+
+    `run` is the Run this reply belongs to. It is optional only so the generator stays callable on
+    its own; with one, every tool call is taped through run_store.call_once, approvals become rows,
+    and the reply reports `partial`/`cost`/`steps_consumed` back onto it for the desk supervisor."""
     conv = convos.get(conv_id)
     if not conv:
         yield "error", {"message": "Conversation not found"}
@@ -514,6 +585,20 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             return
         user_text = users[-1]["content"]
 
+    # Where planning mode comes from (§4.1). A desk plans its first run unless its autonomy says
+    # otherwise; an ordinary chat follows its own planMode, falling back to the global setting.
+    # 'auto' deliberately does NOT start the reply in planning: it arms on the first mutating call
+    # instead (§4.7), which is the whole difference between the two modes.
+    desk_id = conv["settings"].get("deskId")
+    desk = desks.get(desk_id) if desk_id else None
+    plan = aplans.active(conv_id)                                  # the approved, unconsumed plan, or None
+    mode_pref = conv["settings"].get("planMode") or cfg["planMode"]
+    autonomy = str((desk or {}).get("autonomy") or "plan")
+    # A desk's autonomy is the authority on whether it plans, not the conversation's planMode:
+    # 'ask as it goes' is the one mode that deliberately does NOT plan first (decide_call rule 8b
+    # cards each change instead), and the user can change autonomy long after the desk was created.
+    planning = plan is None and (autonomy != "ask" if desk else mode_pref == "always")
+
     tracer = Tracer()
     llm.usage_context.set({"conversation_id": conv_id, "project_id": conv["project_id"]})
     await pricing.refresh(cfg)
@@ -524,7 +609,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         memories=memories, graph=graph, documents=documents,
         project=project, project_id=conv["project_id"], query=user_text,
         settings=cfg, conv_settings=conv["settings"], global_system_prompt=cfg["systemPrompt"],
-        activity=monitor,
+        activity=monitor, ledger=run_store.ledger(desk_id) if desk_id else None,
     )
     tracer.end(cspan, {"memories": len(used["memories"]), "entities": len(used["nodes"]), "excerpts": len(used["chunks"]),
                        "history_messages": len(history)})
@@ -541,10 +626,37 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         # waiting one turn must not re-arm a standing 'always' grant. Only the user clears it (Context -> this chat).
         "tainted": bool(conv["settings"].get("tainted")), "taint_sources": list(conv["settings"].get("taint_sources") or []),
         "allowed_urls": _urls(user_text), "settings": cfg,
+        # Planning and desk context. `plan_phase` and `proposal_only` are read by BOTH gates — the
+        # one here and Toolbox.call's — so a call site that forgets one is still held by the other.
+        # `desk_id` is what every desk_* handler derives its workspace root from; without it they
+        # refuse outright, by design.
+        "plan_phase": planning, "proposal_only": autonomy == "propose",
+        "desk_id": desk_id, "workspace": workspace, "plan_id": (plan or {}).get("plan_id"),
+        "run_id": run.run_id if run else None, "message_id": am["id"], "call_id": None,
     }
     modes = toolbox.effective(cfg.get("tools") or {}, (project or {}).get("tools"), conv["settings"].get("tools")) if conv["settings"].get("useTools", True) else {}
-    tool_schemas = toolbox.schemas(modes)
-    system = "\n\n".join(p for p in (system, RENDER_HINT, TOOLS_HINT if tool_schemas else "") if p)
+
+    def _schemas() -> list[dict[str, Any]]:
+        """One function, because the always_chat/always_global grant path recomputes tool_schemas
+        below; a plan-mode filter applied at only one of the two sites lets a granted write tool
+        reappear mid-plan. `modes` is mutated in place by that grant path, so this filters a copy and
+        reads it fresh each time rather than rebuilding from a stale snapshot — otherwise the user's
+        'Always' click is silently discarded on the next recompute."""
+        if not modes:
+            return []
+        m = dict(modes)
+        if not desk_id:
+            m = {n: v for n, v in m.items() if toolbox.specs[n].group != "desk"}
+        if tool_ctx["plan_phase"]:
+            m = {n: v for n, v in m.items()
+                 if n == PLAN_TOOL or toolbox.specs[n].danger in PLAN_SAFE_DANGER}
+            m[PLAN_TOOL] = "ask"
+        return toolbox.schemas(m)
+
+    tool_schemas = _schemas()
+    system = "\n\n".join(p for p in (system, RENDER_HINT, DESK_HINT if desk else "",
+                                     TOOLS_HINT if tool_schemas else "",
+                                     PLAN_MODE_HINT if planning else (PLAN_BOUND_HINT if plan else "")) if p)
     used["system_prompt"] = system
     used["tokens_estimate"] = estimate_tokens(system)
     messages = [{"role": "system", "content": system}] + history
@@ -558,9 +670,28 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     tool_errors: dict[str, int] = {}
     blocked: set[str] = set()
     _round = 0
+    plan_msg: dict[str, Any] | None = None
+
+    def _reinject_plan() -> None:
+        """The approved plan as the LAST system message of each round. convos.history() replays
+        prose only, so from the second turn of a chained desk the plan is otherwise invisible and
+        the agent redoes step one. The previous copy is removed by identity first, so a twelve-round
+        reply carries one checklist rather than twelve."""
+        nonlocal plan_msg
+        block = aplans.block(plan["plan_id"]) if plan else None
+        if plan_msg is not None:
+            for i, m in enumerate(messages):
+                if m is plan_msg:
+                    del messages[i]
+                    break
+            plan_msg = None
+        if block:
+            plan_msg = {"role": "system", "content": block}
+            messages.append(plan_msg)
 
     async def _final_round() -> AsyncIterator[tuple[str, Any]]:
         """Closing answer after a budget or breaker stop: one tool-free call, itself exempt from the budget."""
+        _reinject_plan()
         if buf and buf[-1] and not buf[-1].endswith("\n"):
             buf.append("\n\n")
             yield "delta", {"id": am["id"], "text": "\n\n"}
@@ -596,11 +727,16 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 if buf or tool_events:
                     convos.finish_message(am["id"], "".join(buf).strip(), None, used, tool_events, tracer.spans)
                     _active.pop(am["id"], None)
+                    # `segment` says this `done` closes one reply segment, not the run: the run
+                    # carries on with a fresh assistant message. Anything that counts a turn —
+                    # _run_desk's charge, and so the desk's budget — must skip it, or a steered
+                    # desk is billed twice for one turn.
                     yield "done", {"id": am["id"], "error": None, "context_used": used, "tool_events": tool_events,
-                                   "trace": tracer.spans, "stopped": False, "partial": partial,
+                                   "trace": tracer.spans, "stopped": False, "partial": partial, "segment": True,
                                    "tainted": tool_ctx["tainted"], "taint_sources": tool_ctx["taint_sources"]}
                     am = convos.add_message(conv_id, "assistant", "", model=model)
                     _active[am["id"]] = stop
+                    tool_ctx["message_id"] = am["id"]
                     buf = []
                     tool_events = []
                     tracer = Tracer()
@@ -611,6 +747,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     tool_ctx["allowed_urls"] |= _urls(um["content"])
             _round += 1
             budget.rounds = _round - 1  # rounds already completed: the Nth round's tool calls must still be allowed to run
+            # Last, so the checklist is the final system message the model reads. At the TOP of the
+            # round rather than the bottom of the previous one, because the round that needs it most
+            # is the FIRST of a chained turn — the one that would otherwise redo step one.
+            _reinject_plan()
             round_start = len(buf)
             end: dict[str, Any] = {}
             lspan = tracer.start("llm", model, {"round": _round, "messages": len(messages), "tools": len(tool_schemas)})
@@ -662,7 +802,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             if buf and buf[-1] and not buf[-1].endswith("\n"):
                 buf.append("\n\n")
                 yield "delta", {"id": am["id"], "text": "\n\n"}
-            for c in calls:
+            # A hint raised mid-loop is stashed, not appended: `turn` is already in `messages` and
+            # every one of its tool_calls must be answered by a `tool` message with nothing in
+            # between. A system message wedged in there is a sequence providers reject. These are
+            # flushed below, once the loop has emitted the last reply.
+            hints: list[str] = []
+            for ci, c in enumerate(calls):
                 try:
                     args = json.loads(c["arguments"] or "{}")
                     if not isinstance(args, dict):
@@ -678,28 +823,103 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     messages.append({"role": "tool", "tool_call_id": c["id"], "content": LOOP_STOP.format(name=c["name"], n=REPEAT_LIMIT)})
                     continue
                 raw_mode = modes.get(c["name"], "off")
-                mode = toolbox.gate(c["name"], raw_mode, tool_ctx)
-                forced = mode != raw_mode  # untrusted content in this reply upgraded on -> ask
+                # §4.7 'auto': the first mutating call of a reply arms planning rather than running.
+                # The flip mutates this reply's in-memory conversation settings only — the same
+                # documented in-memory mutation the always_chat grant below performs — because
+                # _chat_stream read `conv` once and keeps using that copy for the whole reply.
+                if autoplan(c["name"], specs=toolbox.specs, mode_pref=mode_pref, planning=planning,
+                            plan=plan):
+                    planning = True
+                    conv["settings"]["planMode"] = "always"
+                    tool_ctx["plan_phase"] = True
+                    tool_schemas = _schemas()
+                    hints.append(PLAN_MODE_HINT)
                 # The provider's call id is only unique within one request -- llm.stream_chat falls back
                 # to "call_<idx>" when the provider omits one -- so two conversations streaming at once
                 # both produce "call_0". Key anything cross-conversation by the message id too, or one
                 # chat's approval resolves another chat's call. The model still sees c["id"].
-                uid = f"{am['id']}:{c['id']}"
+                # The round is in the key for the same reason one level down: that fallback restarts at
+                # "call_0" every round, so without it round two's first call would reuse round one's
+                # id — and now that approvals are rows rather than a popped dict entry, it would find
+                # the already-approved row and run without a card.
+                uid = f"{am['id']}:{_round}:{c['id']}"
+                tool_ctx["call_id"] = uid
+                # Every rule that can stop a call lives in one pure function, so the one contested
+                # region of this loop has a testable centre and both call sites cannot drift.
+                pol: CallPolicy = decide_call(
+                    c["name"], args, raw_mode=raw_mode, specs=toolbox.specs, ctx=tool_ctx,
+                    planning=planning, plan=plan, autonomy=autonomy, gate=toolbox.gate,
+                    plans=aplans, call_id=uid)
+                mode, forced = pol.mode, pol.forced
+                spec = toolbox.specs.get(c["name"])
+                # Rule 3 is the only one that both denies and forces, so it is what `plan_mode` means.
+                blocked_by = "plan_mode" if (pol.deny and pol.forced) else None
                 yield "tool_call", {"message_id": am["id"], "id": uid, "name": c["name"], "arguments": args,
-                                    "needs_approval": mode == "ask", "forced": forced}
+                                    "needs_approval": mode == "ask", "forced": forced,
+                                    "off_plan": pol.off_plan, "plan_step": pol.claimed_step,
+                                    "blocked_by": blocked_by}
                 tspan = tracer.start("tool", c["name"], {"round": _round, "arguments": _short(args), "mode": mode, "forced": forced})
                 yield "span", {"message_id": am["id"], "span": tspan}
                 t0 = time.time()
                 decision = "allow"
+                parked: str | None = None
+                plan_row: dict[str, Any] | None = None
+                forced_result: Any = None
+                if pol.is_plan:
+                    # Validate against the UNFILTERED mode map before any card is shown, so the user
+                    # is never asked to approve a plan that could not execute once approved.
+                    steps, plan_error = normalize_plan(args, modes, toolbox.specs, available=toolbox.available)
+                    if plan_error is not None:
+                        mode, forced_result = "on", plan_error
+                    else:
+                        aplans.supersede(conv_id)
+                        plan_row = aplans.open(conversation_id=conv_id, desk_id=desk_id,
+                                               run_id=run.run_id if run else "", message_id=am["id"],
+                                               call_id=uid, title=str(args.get("title") or ""),
+                                               intent=str(args.get("intent") or ""), steps=steps,
+                                               tainted=bool(tool_ctx["tainted"]))
+                        yield "plan", {"message_id": am["id"], "call_id": uid, "plan": plan_row}
                 if mode == "ask":
                     # Pause the reply until the user approves or denies this call (POST /approvals/{call_id}).
                     approval_t0 = time.time()
+                    # The row is the truth and the Future is only a fast wake: a decision made in
+                    # another window, or before a restart, is picked up by polling the row.
+                    row = run_store.open_approval(
+                        call_id=uid, run_id=run.run_id, conversation_id=conv_id, desk_id=desk_id,
+                        message_id=am["id"], tool=c["name"], args=args,
+                        danger=spec.danger if spec else "safe", forced=forced,
+                        plan_id=plan_row["plan_id"] if plan_row else None) if run else None
+                    if run is not None:
+                        run.set_status("awaiting")
+                    if desk_id:
+                        desks.set_status(desk_id, "awaiting_plan" if pol.is_plan else "needs_approval",
+                                         run_id=run.run_id if run else None)
+                    park_after = float(cfg.get("parkAfterSeconds") or 0)
+                    approval_wait = float(cfg.get("approvalWaitSeconds") or 0)
                     fut: asyncio.Future = asyncio.get_event_loop().create_future()
                     _approvals[uid] = fut
                     try:
                         waited = 0.0
                         while not fut.done():
                             if stop.is_set():
+                                if row:
+                                    run_store.decide(uid, "deny", by="stop")
+                                fut.set_result("deny")
+                                break
+                            cur = run_store.approval(uid) if row else None
+                            if cur and cur["status"] != "pending":
+                                fut.set_result(cur["decision"] or "deny")
+                                break
+                            # Park, do not auto-deny, and never park in front of somebody who is
+                            # looking at the card: with a viewer attached the run waits indefinitely.
+                            if (row and park_after > 0 and waited >= park_after and run is not None
+                                    and run.watchers == 0 and (desk_id or c["name"] in GATE_TOOLS)):
+                                run_store.park(uid)
+                                parked = uid
+                                break
+                            if not desk_id and c["name"] not in GATE_TOOLS and approval_wait > 0 and waited >= approval_wait:
+                                if row:
+                                    run_store.decide(uid, "deny", by="timeout")
                                 fut.set_result("deny")
                                 break
                             try:
@@ -707,14 +927,19 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                 await asyncio.wait_for(asyncio.shield(fut), timeout=2)
                             except asyncio.TimeoutError:
                                 waited += 2
-                                if waited >= 600:
-                                    fut.set_result("deny")
-                        decision = fut.result()
+                        decision = fut.result() if fut.done() else "deny"
                     finally:
                         _approvals.pop(uid, None)
+                    if run is not None and not parked:
+                        run.set_status("running")
                     budget.paused += time.time() - approval_t0  # a slow approval must not blow the wall clock
                     t0 = time.time()  # don't count waiting time as tool time
                     granted = decision in ("always_chat", "always_global")
+                    if pol.is_plan:
+                        # A plan card is never a permission card: approving a plan cannot turn
+                        # propose_plan, or anything else, on for the rest of the chat.
+                        granted = False
+                        decision = "deny" if decision == "deny" else "allow"
                     if forced and granted:
                         decision = "allow"  # one-shot: a tainted reply cannot buy a standing grant
                     elif decision == "always_chat":
@@ -727,16 +952,80 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         modes[c["name"]] = "on"
                         decision = "allow"
                     if granted and not forced:
-                        tool_schemas = toolbox.schemas(modes)  # the grant changed modes; keep the schemas in step
+                        tool_schemas = _schemas()  # the grant changed modes; keep the schemas in step
+                if parked:
+                    # Parking is not an exception. Every pending call still gets a tool message —
+                    # the same reason the budget path answers them all — so the message list stays
+                    # legal and the run leaves through _final_round rather than through a raise.
+                    partial = "blocked"
+                    if desk_id:
+                        # The park timer is the writer here (§3.7). settle() cannot do it: a desk
+                        # sitting in awaiting_plan is already outside LIVE, so settle leaves it be.
+                        desks.set_status(desk_id, "blocked", reason="plan" if pol.is_plan else "approval",
+                                         headline="")
+                    for rest in calls[ci:]:
+                        messages.append({"role": "tool", "tool_call_id": rest["id"],
+                                         "content": PARKED_TOOL.format(name=rest["name"])})
+                    tracer.end(tspan, {"parked": True})
+                    yield "span", {"message_id": am["id"], "span": tspan}
+                    break
+                if pol.is_plan and plan_row is not None:
+                    # decide() is first-wins, so this only writes when the decision came from
+                    # somewhere other than POST /cowork/plans — a Stop, or a plain approval card.
+                    aplans.decide(plan_row["plan_id"], "reject" if decision == "deny" else "approve",
+                                  decided_by="stop" if (decision == "deny" and stop.is_set()) else "user")
+                    fresh = aplans.get(plan_row["plan_id"]) or plan_row
+                    forced_result = aplans.model_result(fresh)
+                    # Re-read after ANY decision, not only an approval: opening this plan
+                    # superseded whatever was live, so on a rejection the in-memory snapshot is a
+                    # dead plan whose steps would otherwise keep answering for the one the user
+                    # just said no to.
+                    plan = aplans.active(conv_id)
+                    if fresh["status"] == "approved":
+                        planning = False
+                        tool_ctx["plan_phase"] = False
+                        tool_ctx["plan_id"] = fresh["plan_id"]
+                        tool_schemas = _schemas()
+                        hints.append(PLAN_BOUND_HINT)
+                        if desk_id:
+                            desks.set_status(desk_id, "working", reason="plan", plan_id=fresh["plan_id"],
+                                             run_id=run.run_id if run else None)
+                    elif desk_id and not stop.is_set():
+                        # Only a rejection the USER made puts the desk back in planning. A plan
+                        # rejected because the run was stopped must not drag a paused or stopped
+                        # desk back to a live status the route just decided it out of.
+                        desks.set_status(desk_id, "planning", reason="rejected",
+                                         run_id=run.run_id if run else None)
+                    yield "plan_decision", {"message_id": am["id"], "plan_id": fresh["plan_id"], "call_id": uid,
+                                            "decision": "reject" if fresh["status"] == "rejected" else "approve",
+                                            "by": fresh.get("decided_by") or "user", "note": fresh.get("note") or ""}
                 was_tainted, was_blocked = tool_ctx["tainted"], c["name"] in blocked
-                if was_blocked:
-                    result: Any = tools.denied(c["name"], f"failing {TOOL_ERROR_LIMIT} times in a row and disabled for the rest of this reply")
+                if forced_result is not None:
+                    result: Any = forced_result
+                elif was_blocked:
+                    result = tools.denied(c["name"], f"failing {TOOL_ERROR_LIMIT} times in a row and disabled for the rest of this reply")
+                elif pol.deny:
+                    # A plan-mode or propose-only refusal, or a step the user already rejected. The
+                    # tool's ALTERNATIVE rides along, so the model puts it in a plan step rather
+                    # than retrying the same call into the repeat breaker. The plan-mode refusal is
+                    # the one that already says how to get the call authorised, so it does not also
+                    # carry "Do not retry it" — the model cannot obey both.
+                    result = tools.denied(c["name"], pol.deny, may_retry=blocked_by == "plan_mode")
                 elif mode == "off":
                     result = tools.denied(c["name"], "turned off for this chat")
                 elif decision != "allow":
                     result = tools.denied(c["name"], "just declined by the user")
+                elif run is not None:
+                    # Committed at 'started' and COMMITTED before the call is awaited, so a crash
+                    # mid-write leaves an honest 'unknown' row rather than a silent repeat on resume.
+                    result = await run_store.call_once(run.run_id, _round * 1000 + ci, c["name"], args,
+                                                       lambda: toolbox.call(c["name"], args, tool_ctx),
+                                                       call_id=uid, desk_id=desk_id)
                 else:
                     result = await toolbox.call(c["name"], args, tool_ctx)
+                note = _answers.pop(uid, "")
+                if note and isinstance(result, dict) and "user_note" not in result:
+                    result = {**result, "user_note": note}
                 ms = int((time.time() - t0) * 1000)
                 # images (e.g. matplotlib figures from run_python) go to the UI, not to the model
                 images = result.pop("images", None) if isinstance(result, dict) else None
@@ -745,6 +1034,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 tool_errors[c["name"]] = tool_errors.get(c["name"], 0) + 1 if err else 0  # reset on success = consecutive
                 if tool_errors[c["name"]] >= TOOL_ERROR_LIMIT:
                     blocked.add(c["name"])
+                if pol.claimed_step:
+                    # The step was consumed before the call; this is what turns it into done|failed,
+                    # and what `progress` means to the desk supervisor.
+                    aplans.finish(uid, not err, err if isinstance(err, str) else None)
+                    if run is not None:
+                        run.steps_consumed += 1
                 tainted = decision == "allow" and not err and toolbox.taints(c["name"])
                 if tainted:
                     if not was_tainted:
@@ -752,14 +1047,20 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     tool_ctx["taint_sources"].append(c["name"])
                 event = {"id": uid, "name": c["name"], "arguments": args, "result_preview": preview, "duration_ms": ms,
                          "error": err, "images": images or None, "approval": (decision if mode == "ask" else None),
-                         "forced": forced, "tainted": tainted, "blocked": c["name"] if was_blocked else None, "breaker": partial}
+                         "forced": forced, "tainted": tainted, "blocked": c["name"] if was_blocked else None, "breaker": partial,
+                         "off_plan": pol.off_plan, "plan_step": pol.claimed_step, "blocked_by": blocked_by}
                 tracer.end(tspan, {"result_chars": len(preview), "images": len(images or [])}, error=err)
                 tool_events.append(event)
                 yield "tool_result", {"message_id": am["id"], **event}
                 yield "span", {"message_id": am["id"], "span": tspan}
                 for_model = {**result, "images_shown_to_user": [i["name"] for i in images]} if images and isinstance(result, dict) else result
                 messages.append({"role": "tool", "tool_call_id": c["id"], "content": summarize_result(for_model, 24000)})
-            if partial == "loop":
+            # Every `tool` reply is out, including the parked break's, so the stashed hints can
+            # land as system messages without splitting the assistant turn from its answers.
+            for hint in hints:
+                messages.append({"role": "system", "content": hint})
+            hints = []
+            if partial in ("loop", "blocked"):
                 async for chunk in _final_round():
                     yield chunk
                 break
@@ -786,6 +1087,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         srcs = sorted(set(tool_ctx["taint_sources"]))
         if not conv["settings"].get("tainted") or srcs != sorted(set(conv["settings"].get("taint_sources") or [])):
             convos.update(conv_id, {"settings": {"tainted": True, "taint_sources": srcs}})
+    if run is not None:
+        # Three plain attributes the desk supervisor reads to decide whether another bounded turn
+        # is worth starting; they also land on the agent_runs row at end().
+        run.partial, run.cost, run.rounds = partial, budget.cost, budget.rounds
+        run.budget = {"rounds": budget.rounds, "tokens": budget.tokens, "cost": round(budget.cost, 6),
+                      "seconds": round(budget.elapsed(), 3), "partial": partial}
     yield "done", {"id": am["id"], "error": error, "context_used": used, "tool_events": tool_events,
                    "trace": tracer.spans, "stopped": stop.is_set(), "partial": partial,
                    "tainted": tool_ctx["tainted"], "taint_sources": tool_ctx["taint_sources"]}
@@ -812,10 +1119,162 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
 
 
 async def _run_chat(run: Run, body: ChatIn) -> None:
-    async for event, data in _chat_stream(run.conversation_id, body, run.stop, run.steers):
+    async for event, data in _chat_stream(run.conversation_id, body, run.stop, run.steers, run=run):
         if event == "assistant_message":
             run.message_id = data.get("id")
         run.publish(event, data)
+
+
+async def _run_desk(run: Run, desk_id: str, body: ChatIn) -> dict[str, Any]:
+    """A desk turn is an ordinary reply with run.desk_id set. Returns the settled desk row; the
+    supervisor decides whether to chain. Everything autonomous about it — the loop, the budget, the
+    breakers, the approval pause — is _chat_stream's, unchanged."""
+    rt = DeskRuntime(desks, desk_id)
+    partial: str | None = None
+    stopped = False
+    chain = False
+    err: str | None = None
+    desks.update_run(desk_id, run.run_id)
+    try:
+        async for event, data in _chat_stream(run.conversation_id, body, run.stop, run.steers, run=run):
+            if event == "assistant_message":
+                run.message_id = data.get("id")
+            if event == "done" and not data.get("segment"):
+                # A steered reply closes its current segment with its own `done` and keeps going;
+                # only the run's real final `done` ends the turn, so only it may charge one.
+                partial, stopped = data.get("partial"), bool(data.get("stopped"))
+                err = err or data.get("error")
+                # Charge BEFORE deciding, so the row both _should_chain calls read — this one and
+                # the supervisor's after settle — has already counted this turn. Deciding on two
+                # different rows is how a desk ends up `working` with nothing driving it.
+                desks.charge(desk_id, run.cost, 1)
+                chain = _should_chain(desks.get(desk_id) or {}, run)
+                if chain:
+                    # The successor is announced before this stream closes: a chained run is a new
+                    # Run with a new run_id and seq restarting at 0, and no client is subscribed to
+                    # it yet. The renderer treats this as a promise and re-attaches, bounded.
+                    run.publish("desk_handoff", {"desk_id": desk_id, "conversation_id": run.conversation_id,
+                                                 "turn": int((desks.get(desk_id) or {}).get("turn") or 0)})
+            run.publish(event, data)
+            try:
+                if (upd := rt.observe(event, data)) is not None:
+                    run.publish("desk_status", upd)
+            except Exception:  # noqa: BLE001 - a rail label must never kill a run
+                pass
+    except asyncio.CancelledError:
+        # Only a desk still LIVE was interrupted by this cancellation. One that already settled
+        # itself — Stop writes `stopped` before it cancels, pause writes `paused` — keeps the
+        # decision it made; a crash outranks a turn, never a user.
+        if (desks.get(desk_id, False) or {}).get("status") in DESK_LIVE:
+            desks.set_status(desk_id, "interrupted", reason="restart", headline="")
+        raise
+    if (desks.get(desk_id) or {}).get("status") == "paused":
+        # The pause route already decided how this turn ends; its cooperative stop must not be
+        # read back as a user Stop and overwrite `paused` with `stopped`.
+        stopped = False
+    settled = desks.settle(desk_id, partial=partial, stopped=stopped, error=err, chain=chain)
+    try:
+        run.publish("desk_status", settled)
+    except Exception:  # noqa: BLE001 - a rail label must never kill a run
+        pass
+    return settled
+
+
+def _should_chain(desk: dict[str, Any], run: Run) -> bool:
+    """Five guards, all of which must hold. `progress` is the one that stops a desk burning twelve
+    turns re-reading the same file: a turn that consumed no plan step is not progress."""
+    caps = _caps(settings(), desk.get("budget"))
+    turns, cost = caps["deskMaxTurns"], caps["deskMaxCost"]
+    return (desk.get("status") == "working"
+            and run.partial == "rounds"               # only a budget-window stop chains
+            and not run.stop.is_set()
+            and bool(aplans.remaining(desk.get("plan_id") or ""))
+            and run.steps_consumed > 0
+            # 0 on either axis means unlimited, the same reading _caps gives it.
+            and (turns <= 0 or int(desk.get("turn") or 0) + 1 < turns)
+            and (cost <= 0 or float(desk.get("cost") or 0) < cost))
+
+
+def _missed_wake(desk_id: str) -> dict[str, Any] | None:
+    """The desk whose parked card was decided while its own run was still closing, claimed for
+    another turn — or None when there is nothing to retry.
+
+    POST /approvals writes the decision and calls _wake_desk, but _launch_desk refuses while a run
+    is live on the conversation, and a run that parked a card stays live for _final_round and the
+    auto-learn tail. The route answered `resumed: False` and the desk sat blocked with nobody
+    coming back for it. park() deliberately leaves the row 'pending', so a card the user has not
+    actually answered is still visible here and is not mistaken for a missed wake."""
+    desk = desks.get(desk_id, with_outputs=False)
+    if not desk or desk["status"] != "blocked" or desk["status_reason"] not in ("approval", "plan"):
+        return None
+    if run_store.approvals(status="pending", desk_id=desk_id):
+        return None
+    return desks.claim_run(desk_id, RESUME_FROM)
+
+
+async def _desk_supervisor(desk_id: str, run: Run) -> None:
+    """Owns the chain. A chained turn is started here, never from inside the previous run's
+    teardown, so the next turn is owned by something that outlives the run it follows."""
+    try:
+        while True:
+            # Shielded: cancelling the supervisor ends the CHAIN, not the turn already in flight.
+            # Without it, Stop's task.cancel() reaches the run through this await and the run dies
+            # as `interrupted` instead of settling cooperatively as `stopped`.
+            await (asyncio.shield(run.task) if run.task else asyncio.sleep(0))
+            state = desks.get(desk_id)
+            if not state or not _should_chain(state, run):
+                # The run has really ended now, so a wake that lost the race against it can be
+                # retried here (§F5): _launch_desk refuses while a run is live on the conversation,
+                # and a run that parked a card stays live for _final_round and the learn tail.
+                state = _missed_wake(desk_id)
+                if not state:
+                    return
+            body = ChatIn(content=DESK_CONTINUE)
+            run = bus.start(state["conversation_id"], lambda r, b=body: _run_desk(r, desk_id, b),
+                            kind="desk", desk_id=desk_id, turn=int(state["turn"] or 0),
+                            input={"content": body.content})
+    except asyncio.CancelledError:
+        raise
+    except Exception:  # noqa: BLE001 - a dead supervisor must not take the backend with it
+        log.exception("desk supervisor %s failed", desk_id)
+        desks.set_status(desk_id, "failed", reason="supervisor")
+    finally:
+        _desk_tasks.pop(desk_id, None)
+
+
+# Which statuses each entry point may claim a desk out of. `claim_run`'s rowcount is the lock, so a
+# double-clicked Start makes one run, not two.
+START_FROM = ("draft",)
+# `awaiting_plan` is resumable too: a restart strands a desk on a plan card nobody is waiting on,
+# and Desks.recover() sweeps that status, so Resume has to be able to claim out of it.
+RESUME_FROM = ("awaiting_plan", "blocked", "paused", "interrupted", "review")
+# A typed message may also wake a desk the user had let finish — the same box, awake or not.
+MESSAGE_FROM = (*START_FROM, *RESUME_FROM, "done", "failed", "stopped")
+
+
+def _launch_desk(desk_id: str, content: str | None, from_statuses: tuple[str, ...]) -> Run | None:
+    """Claim the desk, start its first turn now — so the route can hand back a run_id — and give
+    the chain to a supervisor task. None means the claim was lost or a run is already live."""
+    desk = desks.get(desk_id, with_outputs=False)
+    if not desk or bus.live(desk["conversation_id"]):
+        return None
+    claimed = desks.claim_run(desk_id, from_statuses)
+    if not claimed:
+        return None
+    body = ChatIn(content=(content or "").strip() or claimed["brief"])
+    run = bus.start(claimed["conversation_id"], lambda r: _run_desk(r, desk_id, body), kind="desk",
+                    desk_id=desk_id, turn=int(claimed["turn"] or 0), input={"content": body.content})
+    _desk_tasks[desk_id] = asyncio.create_task(_desk_supervisor(desk_id, run), name=f"desk:{desk_id}")
+    return run
+
+
+def _wake_desk(desk_id: str) -> Run | None:
+    """Resume a desk that is not running: used by the resume route, by a decided approval that had
+    parked, and by a plan approved after its run had already let go."""
+    desk = desks.get(desk_id, with_outputs=False)
+    if not desk or desk["status"] not in RESUME_FROM:
+        return None
+    return _launch_desk(desk_id, DESK_RESUME if desk["status"] == "interrupted" else DESK_CONTINUE, RESUME_FROM)
 
 
 @app.post("/conversations/{id}/chat")
@@ -854,16 +1313,65 @@ async def steer_run(id: str, body: SteerIn) -> dict[str, Any]:
 
 
 @app.get("/conversations/{id}/stream")
-async def stream_conversation(id: str, since: int = 0) -> StreamingResponse:
-    """Any number of clients may attach; detaching one never touches the run."""
+async def stream_conversation(id: str, since: int = 0, run_id: str | None = None) -> StreamingResponse:
+    """Any number of clients may attach; detaching one never touches the run.
+
+    A run that has left the bus — ended more than RETAIN_S ago, or died with the process — is
+    replayed from the tape instead. A `run_id` that does not match the live run is ALWAYS served
+    from the tape, so a stale `since` from a previous turn can never be applied to a new run's seq
+    space and silently swallow its first events."""
     run = bus.get(id)
-    return StreamingResponse(run.subscribe(since) if run else iter(()), media_type="text/event-stream",
+    if run is not None and (not run_id or run_id == run.run_id):
+        return StreamingResponse(run.subscribe(since), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+    rid = run_id or (run_store.latest(id) or {}).get("run_id")
+    gen: Any = run_store.tail(rid, since) if rid else _empty_stream()
+    return StreamingResponse(gen, media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
+async def _empty_stream() -> AsyncIterator[str]:
+    """An async generator, because StreamingResponse picks its path from the body's type and the
+    tape branch is one."""
+    return
+    yield ""  # pragma: no cover - unreachable, but it is what makes this a generator
+
+
 @app.get("/runs")
-async def list_runs() -> list[dict[str, Any]]:
-    return bus.list()
+async def list_runs(status: str | None = None, kind: str | None = None, conversation_id: str | None = None,
+                    desk_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+    """Table-backed, so a run blocked on an approval still appears after it has left the bus. The
+    live bus is merged over the rows, because `seq` and `live` are only known in memory.
+
+    `status` is a comma-separated list and defaults to the ACTIVE set, because the renderer attaches
+    to everything this returns: a finished run listed here would be watched forever. `status=all`,
+    or an explicit list, is how history is asked for."""
+    sel: tuple[str, ...] | None
+    if status == "all":
+        sel = None
+    elif status:
+        sel = tuple(s.strip() for s in status.split(",") if s.strip())
+    else:
+        sel = RUN_ACTIVE
+    rows = run_store.list(status=sel, kind=kind, conversation_id=conversation_id, desk_id=desk_id, limit=limit)
+    live = {r["run_id"]: r for r in bus.list()}
+    return [{**r, "live": False, **live.get(r["run_id"], {})} for r in rows]
+
+
+@app.get("/runs/{run_id}")
+async def get_run(run_id: str) -> dict[str, Any]:
+    row = run_store.get(run_id)
+    if not row:
+        raise HTTPException(404, "No such run")
+    live = next((r for r in bus.list() if r["run_id"] == run_id), None)
+    return {**row, "live": False, **(live or {}),
+            "executed": run_store.executed(run_id), "approvals": run_store.approvals(status=None, run_id=run_id)}
+
+
+@app.get("/approvals")
+async def list_approvals(status: str | None = "pending", desk_id: str | None = None) -> list[dict[str, Any]]:
+    """The durable pending list: decidable from any window, and a restart does not orphan it."""
+    return run_store.approvals(status=status or None, desk_id=desk_id)
 
 
 # async, so the run's asyncio.Event is set on the loop that owns it rather than from a threadpool.
@@ -875,17 +1383,33 @@ async def stop_run(id: str, run_id: str | None = None) -> dict[str, bool]:
 
 class ApprovalIn(BaseModel):
     decision: str  # allow | deny | always_chat | always_global
+    note: str | None = None
 
 
+# async, so the Future is resolved on the loop that owns it rather than from a threadpool.
 @app.post("/approvals/{call_id}")
-def approve_tool_call(call_id: str, body: ApprovalIn) -> dict[str, bool]:
-    fut = _approvals.get(call_id)
-    if not fut or fut.done():
-        raise HTTPException(404, "No pending approval for that call")
+async def approve_tool_call(call_id: str, body: ApprovalIn) -> dict[str, Any]:
+    """The row is written first and first-decision-wins; the Future is only a fast wake. A card
+    whose run died — parked, or lost to a restart — still decides cleanly, and resumes its desk."""
     if body.decision not in ("allow", "deny", "always_chat", "always_global"):
         raise HTTPException(400, "Bad decision")
-    fut.set_result(body.decision)
-    return {"ok": True}
+    row = run_store.approval(call_id)
+    fut = _approvals.get(call_id)
+    if row is None and (fut is None or fut.done()):
+        raise HTTPException(404, "No pending approval for that call")
+    if row is not None:
+        decided = run_store.decide(call_id, body.decision, by="user", note=body.note or "")
+        if decided is None:
+            return {"ok": False, "error": "already decided", "resumed": False}
+    if body.note:
+        _answers[call_id] = body.note
+    if fut is not None and not fut.done():
+        fut.set_result(body.decision)
+    resumed = False
+    did = (row or {}).get("desk_id")
+    if did:
+        resumed = _wake_desk(did) is not None
+    return {"ok": True, "resumed": resumed}
 
 
 # ---------------- usage / cost ----------------
@@ -933,7 +1457,7 @@ def context_preview(body: ContextPreviewIn) -> dict[str, Any]:
         memories=memories, graph=graph, documents=documents, project=project, project_id=sid(body.project_id),
         query=body.query, settings=cfg,
         conv_settings={"useMemory": True, "useGraph": True, "useDocuments": True, "useActivity": True, **body.conv_settings},
-        global_system_prompt=cfg["systemPrompt"], activity=monitor,
+        global_system_prompt=cfg["systemPrompt"], activity=monitor, ledger=None,
     )
     return used
 
@@ -1479,7 +2003,7 @@ async def dashboard() -> dict[str, Any]:
         "todo_stats": todos.stats(),
         "projects": [{**p, "stats": projects.stats(p["id"])} for p in projects.list()],
         "recent_memories": memories.list(ALL)[:6],
-        "recent_conversations": convos.list(ALL)[:6],
+        "recent_conversations": convos.list(ALL)[:6],   # desks excluded: a desk belongs on the Cowork rail
         "calendar": None, "gmail": None, "tasks": None, "drive": None, "errors": {},
     }
     if st["connected"]:
@@ -1889,7 +2413,7 @@ async def recap(force: bool = False) -> dict[str, Any]:
     if not cfg.get("apiKey"):
         return {"day": day, "content": "", "cached": False}
     since = time.time() - 36 * 3600
-    recent_convs = [c for c in convos.list(ALL) if c["updated_at"] >= since][:10]
+    recent_convs = [c for c in convos.list(ALL, include_desks=True) if c["updated_at"] >= since][:10]  # a desk's work happened too
     facts = {
         "recent_chats": [{"title": c["title"], "project_id": c["project_id"]} for c in recent_convs],
         "recent_memories": [m["content"] for m in memories.list(ALL) if m["created_at"] >= since][:15],
@@ -2466,3 +2990,534 @@ def instantiate_canvas_preset(pid: str, body: PresetInstantiateIn) -> dict[str, 
     if not c:
         raise HTTPException(404, "No such preset")
     return c
+
+
+# ---------------- cowork: desks, plans and workspaces ----------------
+class DeskIn(BaseModel):
+    brief: str
+    title: str | None = None
+    project_id: str | None = None
+    autonomy: str = "plan"
+    budget: dict[str, Any] | None = None
+    start: bool = True
+
+
+class DeskPatch(BaseModel):
+    title: str | None = None
+    autonomy: str | None = None
+    project_id: str | None = None
+    archived: bool | None = None
+    budget: dict[str, Any] | None = None
+    clear_project: bool = False
+
+
+class DeskMessageIn(BaseModel):
+    content: str
+
+
+class DeskResumeIn(BaseModel):
+    reason: str | None = None
+
+
+class AcceptItem(BaseModel):
+    output_id: str
+    destination: str                      # doc | doc_append | document | download
+    title: str | None = None
+    doc_id: str | None = None
+    project_id: str | None = None
+
+
+class AcceptIn(BaseModel):
+    outputs: list[AcceptItem]
+
+
+class RejectIn(BaseModel):
+    output_ids: list[str] | None = None   # None = every undecided output
+    note: str | None = None
+
+
+class PlanDecisionIn(BaseModel):
+    decision: str                          # approve | edit | reject
+    steps: Any = None                      # [{idx, arguments} | {idx, drop: true}]
+    note: str | None = None
+
+
+UNDECIDED = ("proposed", "stale", "promote_failed")
+
+
+def _desk_or_404(id: str, with_outputs: bool = True) -> dict[str, Any]:
+    desk = desks.get(id, with_outputs)
+    if not desk:
+        raise HTTPException(404, "No such desk")
+    return desk
+
+
+def _read_whole(desk_id: str, rel: str) -> str:
+    """The whole file, paged. Workspace.read is a window by design; promotion needs all of it."""
+    out: list[str] = []
+    off = 0
+    while True:
+        chunk = workspace.read(desk_id, rel, off, MAX_PREVIEW)
+        out.append(chunk["text"])
+        nxt = int(chunk.get("next_offset") or 0)
+        if not chunk.get("truncated") or nxt <= off:
+            break
+        off = nxt
+    return "".join(out)
+
+
+def _outputs_view(desk_id: str) -> list[dict[str, Any]]:
+    """Each output with its sha re-checked against the disk, so the review UI can never preview
+    bytes the agent has since rewritten. The row itself is not rewritten: `stale` is a statement
+    about this moment, and claim_output accepts a stale row anyway."""
+    rows: list[dict[str, Any]] = []
+    for o in desks.outputs(desk_id):
+        row = dict(o)
+        if o["status"] in ("proposed", "stale"):
+            try:
+                row["status"] = "proposed" if workspace.sha(desk_id, o["path"]) == o["sha256"] else "stale"
+            except WorkspaceError as e:
+                row["status"], row["error"] = "stale", str(e)
+        rows.append(row)
+    return rows
+
+
+@app.get("/cowork/desks")
+def list_desks(project_id: str | None = None, status: str | None = None, archived: bool = False) -> list[dict[str, Any]]:
+    if status and status not in DESK_STATUSES:
+        raise HTTPException(400, f"Unknown desk status {status!r}")
+    scope = sid(project_id)
+    return desks.list("__all__" if project_id is None or scope is ALL else scope, status, archived)
+
+
+@app.post("/cowork/desks")
+async def create_desk(body: DeskIn) -> dict[str, Any]:
+    brief = (body.brief or "").strip()
+    if not brief:
+        raise HTTPException(400, "A desk needs a brief")
+    if body.autonomy not in AUTONOMY:
+        raise HTTPException(400, f"Unknown autonomy {body.autonomy!r}")
+    pid = wsid(body.project_id)
+    cfg = settings()
+    live_cap = int(cfg.get("deskMaxLive") or 0)
+    if body.start and live_cap > 0 and desks.live_count() >= live_cap:
+        raise HTTPException(409, {"message": "Too many desks are running at once",
+                                  "live": desks.live_count(), "max": live_cap})
+    conv = convos.create(pid, _title_from(body.title or brief), cfg["defaultModel"])
+    try:
+        desk = desks.create(conversation_id=conv["id"], brief=brief, title=(body.title or "").strip(),
+                            project_id=pid, autonomy=body.autonomy or "plan", budget=body.budget)
+    except ValueError as e:
+        convos.delete(conv["id"])        # the conversation exists only to hold this desk's transcript
+        raise HTTPException(400, str(e)) from e
+    # Marked here rather than in Desks: `deskId` is what keeps the conversation out of Recent
+    # chats. planMode follows the autonomy the user picked — 'ask as it goes' cards each change
+    # instead of planning first, so writing 'always' for it would make the two modes identical and
+    # the chat view's own plan toggle a lie. _chat_stream reads the desk's autonomy, not this, so a
+    # later change of autonomy still takes effect; this keeps the stored setting honest.
+    convos.update(conv["id"], {"settings": {"deskId": desk["id"],
+                                            "planMode": "off" if desk["autonomy"] == "ask" else "always"}})
+    out: dict[str, Any] = {"desk": desk, "conversation_id": conv["id"]}
+    if body.start:
+        run = _launch_desk(desk["id"], brief, START_FROM)
+        if run is not None:
+            out["run_id"], out["seq"] = run.run_id, run.seq
+        out["desk"] = desks.get(desk["id"]) or desk
+    return out
+
+
+@app.get("/cowork/desks/{id}")
+def get_desk(id: str) -> dict[str, Any]:
+    desk = _desk_or_404(id)
+    plan = aplans.get(desk["plan_id"]) if desk.get("plan_id") else aplans.for_desk(id)
+    return {**desk, "plan": plan, "outputs": _outputs_view(id), "events": desks.events(id),
+            "runs": run_store.list(desk_id=id, limit=20)}
+
+
+@app.patch("/cowork/desks/{id}")
+def patch_desk(id: str, body: DeskPatch) -> dict[str, Any]:
+    if body.autonomy is not None and body.autonomy not in AUTONOMY:
+        raise HTTPException(400, f"Unknown autonomy {body.autonomy!r}")
+    patch = body.model_dump(exclude_none=True)
+    patch.pop("clear_project", None)
+    if body.clear_project:
+        patch["project_id"] = None
+    elif "project_id" in patch:
+        patch["project_id"] = wsid(patch["project_id"])
+    try:
+        desk = desks.update(id, patch)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    if not desk:
+        raise HTTPException(404, "No such desk")
+    return desk
+
+
+@app.delete("/cowork/desks/{id}")
+async def delete_desk(id: str, purge: bool = False) -> dict[str, bool]:
+    """The workspace is kept by default: a deleted desk's files are the one thing the user cannot
+    regenerate. The conversation is deleted explicitly, because the cascade runs conversation ->
+    desk and not the other way round, and that is what takes the runs and their tapes with it."""
+    desk = _desk_or_404(id, False)
+    bus.stop(desk["conversation_id"])
+    task = _desk_tasks.pop(id, None)
+    if task is not None:
+        task.cancel()
+    desks.delete(id)
+    convos.delete(desk["conversation_id"])
+    if purge:
+        workspace.purge(id)
+    return {"ok": True}
+
+
+@app.post("/cowork/desks/{id}/start")
+async def start_desk(id: str) -> dict[str, Any]:
+    desk = _desk_or_404(id, False)
+    live_cap = int(settings().get("deskMaxLive") or 0)
+    if live_cap > 0 and desks.live_count() >= live_cap:
+        raise HTTPException(409, {"message": "Too many desks are running at once",
+                                  "live": desks.live_count(), "max": live_cap})
+    run = _launch_desk(id, desk["brief"], START_FROM)
+    if run is None:
+        raise HTTPException(409, {"message": "That desk is already running, or is not startable",
+                                  "status": (desks.get(id, False) or {}).get("status")})
+    return {"run_id": run.run_id, "seq": run.seq, "conversation_id": desk["conversation_id"]}
+
+
+@app.post("/cowork/desks/{id}/resume")
+async def resume_desk(id: str, body: DeskResumeIn | None = None) -> dict[str, Any]:
+    _desk_or_404(id, False)
+    run = _wake_desk(id)
+    if run is None:
+        raise HTTPException(409, {"message": "That desk cannot be resumed from here",
+                                  "status": (desks.get(id, False) or {}).get("status")})
+    return {"run_id": run.run_id, "seq": run.seq}
+
+
+@app.post("/cowork/desks/{id}/message")
+async def message_desk(id: str, body: DeskMessageIn) -> dict[str, Any]:
+    """The same box whether the agent is awake or not: live, it steers the running reply; asleep,
+    it is the content of the next turn. An answer to desk_ask clears the question either way."""
+    desk = _desk_or_404(id, False)
+    text = (body.content or "").strip()
+    if not text:
+        raise HTTPException(400, "Empty message")
+    if desk["question"]:
+        desks.set_status(id, desk["status"], reason=desk["status_reason"], question="", event=False)
+    run = bus.live(desk["conversation_id"])
+    if run is not None:
+        um = convos.add_message(desk["conversation_id"], "user", text)
+        run.publish("user_message", um)
+        run.steers.append(um)
+        return {"ok": True, "steered": True, "run_id": run.run_id}
+    started = _launch_desk(id, text, MESSAGE_FROM)
+    if started is None:
+        raise HTTPException(409, {"message": "That desk could not take a message right now",
+                                  "status": (desks.get(id, False) or {}).get("status")})
+    return {"ok": True, "steered": False, "run_id": started.run_id}
+
+
+@app.post("/cowork/desks/{id}/pause")
+async def pause_desk(id: str) -> dict[str, Any]:
+    """Paused before the run is stopped, so settle() sees a desk that is no longer LIVE and leaves
+    the decision alone rather than reading the cooperative stop back as a user Stop."""
+    desk = _desk_or_404(id, False)
+    out = desks.set_status(id, "paused", reason="paused", headline="")
+    bus.stop(desk["conversation_id"])
+    return out or desk
+
+
+@app.post("/cowork/desks/{id}/stop")
+async def stop_desk(id: str) -> dict[str, Any]:
+    """Stopped before the run is, for the same reason pause is: settle() and the cancellation
+    handler both read the row back, and whichever of them runs last must find the decision the
+    user made, not overwrite it."""
+    desk = _desk_or_404(id, False)
+    out = desks.set_status(id, "stopped", reason="stopped", headline="")
+    bus.stop(desk["conversation_id"])
+    task = _desk_tasks.pop(id, None)
+    if task is not None:
+        task.cancel()
+    return out or desk
+
+
+@app.get("/cowork/desks/{id}/events")
+def desk_event_list(id: str, limit: int = 200) -> list[dict[str, Any]]:
+    _desk_or_404(id, False)
+    return desks.events(id, limit)
+
+
+@app.post("/cowork/desks/{id}/seen")
+def desk_mark_seen(id: str) -> dict[str, Any]:
+    """Clear this desk's Needs-you badge: every unseen needs_you event of the desk, marked seen."""
+    _desk_or_404(id, False)
+    desks.mark_desk_seen(id)
+    return get_desk(id)
+
+
+@app.get("/cowork/desks/{id}/files")
+def desk_file_tree(id: str, path: str = "") -> dict[str, Any]:
+    _desk_or_404(id, False)
+    try:
+        return {"files": workspace.tree(id, path), "usage": workspace.usage(id)}
+    except WorkspaceError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.get("/cowork/desks/{id}/file")
+def desk_file_preview(id: str, path: str, offset: int = 0, length: int = 6000) -> dict[str, Any]:
+    _desk_or_404(id, False)
+    try:
+        return {**workspace.read(id, path, offset, length), "binary": False, "state": workspace.state(id, path)}
+    except WorkspaceError as e:
+        if "not a text file" not in str(e):
+            raise HTTPException(400, str(e)) from e
+    # A binary file is named and sized, never decoded: the preview pane says what it is instead.
+    p = workspace.resolve_in(id, path)
+    return {"path": path, "text": "", "bytes": p.stat().st_size if p.is_file() else 0,
+            "truncated": False, "binary": True, "state": workspace.state(id, path)}
+
+
+@app.get("/cowork/desks/{id}/download")
+def desk_file_download(id: str, path: str) -> FileResponse:
+    """The one way bytes leave a desk, and what the `download` promotion destination promises.
+    Without it that destination marked the row promoted and verified while handing over nothing:
+    the preview route returns text only, and says of a binary file just its name and size."""
+    _desk_or_404(id, False)
+    try:
+        p = workspace.resolve_in(id, path)
+    except WorkspaceError as e:
+        raise HTTPException(400, str(e)) from e
+    if not p.is_file():
+        raise HTTPException(404, "No such file")
+    # octet-stream, always: a desk's workspace is agent-written, and letting the browser decide to
+    # render an .html or .svg from it would be rendering agent output as a page.
+    return FileResponse(p, filename=Path(path).name, media_type="application/octet-stream")
+
+
+@app.get("/cowork/desks/{id}/diff")
+def desk_file_diff(id: str, path: str) -> dict[str, Any]:
+    _desk_or_404(id, False)
+    try:
+        return workspace.diff(id, path)
+    except WorkspaceError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.get("/cowork/desks/{id}/outputs")
+def desk_output_list(id: str) -> list[dict[str, Any]]:
+    _desk_or_404(id, False)
+    return _outputs_view(id)
+
+
+async def _promote(desk_id: str, out: dict[str, Any], item: AcceptItem) -> dict[str, Any]:
+    """Promote one output and read it back. Returns {ref, verified, error}.
+
+    Nothing here trusts the write: `verified` is the result of fetching the promoted copy again and
+    comparing it to the bytes that were actually promoted, never to what was intended.
+    """
+    rel = out["path"]
+    dest = item.destination
+    if dest not in ("doc", "doc_append", "document", "download"):
+        return {"ref": None, "verified": False, "error": f"unknown destination {dest!r}"}
+    title = (item.title or out["title"] or Path(rel).name).strip()
+    if dest == "download":
+        # Nothing enters the app, so the hand-off IS the file: `ref` is the path GET
+        # /cowork/desks/{id}/download serves, and the read-back is that file still being there and
+        # still being the bytes this output was declared with. Without both, the row would read
+        # promoted and verified having given the user nothing at all.
+        try:
+            p = workspace.resolve_in(desk_id, rel)
+        except WorkspaceError as e:
+            return {"ref": None, "verified": False, "error": str(e)}
+        if not p.is_file():
+            return {"ref": None, "verified": False, "error": "the file is no longer in the workspace"}
+        ok = hashlib.sha256(p.read_bytes()).hexdigest() == out["sha256"]
+        return {"ref": rel, "verified": ok,
+                "error": None if ok else "the file has changed since it was delivered"}
+    content = _read_whole(desk_id, rel)
+    if dest == "doc":
+        doc = docs.create(title, content, wsid(item.project_id) if item.project_id else None)
+        fresh = docs.get(doc["id"])
+        ok = bool(fresh) and fresh["content"] == content
+        return {"ref": doc["id"], "verified": ok, "error": None if ok else "the saved doc does not match the file"}
+    if dest == "doc_append":
+        if not item.doc_id:
+            return {"ref": None, "verified": False, "error": "doc_append needs a doc_id"}
+        cur = docs.get(item.doc_id)
+        if not cur:
+            return {"ref": None, "verified": False, "error": "no such doc"}
+        after = (cur["content"].rstrip() + "\n\n" + content) if cur["content"].strip() else content
+        # propose, never apply: the doc the user wrote is untouched until they accept the revision
+        # in the existing Docs review UI. An agent never overwrites a document the user wrote.
+        rev = docs.propose(item.doc_id, after, f"Appended {rel} from a cowork desk", tool="cowork")
+        if not rev:
+            return {"ref": None, "verified": False, "error": "could not record the revision"}
+        fresh = docs.revision(rev["id"])
+        untouched = (docs.get(item.doc_id) or {}).get("content") == cur["content"]
+        ok = bool(fresh) and fresh["after"] == after and untouched
+        return {"ref": rev["id"], "verified": ok,
+                "error": None if ok else "the pending revision does not match the file"}
+    data = workspace.resolve_in(desk_id, rel).read_bytes()
+    stored = db.data_dir / "uploads" / f"{new_id()}-{Path(rel).name}"
+    stored.parent.mkdir(parents=True, exist_ok=True)
+    stored.write_bytes(data)
+    try:
+        text = extract_text(Path(rel).name, data, "")
+    except Exception as e:  # noqa: BLE001 - an unreadable file is a failed promotion, not a 500
+        return {"ref": None, "verified": False, "error": str(e)}
+    doc = documents.create(wsid(item.project_id) if item.project_id else None, title, "", len(data), str(stored), text)
+    # Compared against the STORED UPLOAD FILE, not the chunk text: the chunks are a derived,
+    # normalised representation, and comparing to them would report a failure on every upload.
+    ok = stored.is_file() and hashlib.sha256(stored.read_bytes()).hexdigest() == hashlib.sha256(data).hexdigest()
+    return {"ref": doc["id"], "verified": ok,
+            "error": None if ok else "the stored upload does not match the file"}
+
+
+@app.post("/cowork/desks/{id}/accept")
+async def accept_outputs(id: str, body: AcceptIn) -> dict[str, Any]:
+    """The only promotion path. Per output: claim (the rowcount is the lock, so a double-clicked
+    Accept promotes once), book the work through call_once so a crash between the claim and the
+    read-back leaves an auditable `unknown` row rather than a silent half-promotion, promote, then
+    verify by reading the promoted copy back. A mismatch is `promote_failed` and stays retryable."""
+    desk = _desk_or_404(id, False)
+    results: list[dict[str, Any]] = []
+    for item in body.outputs:
+        out = desks.output(item.output_id)
+        if not out or out["desk_id"] != id:
+            results.append({"output_id": item.output_id, "ok": False, "verified": False,
+                            "kind": item.destination, "ref": None, "error": "no such output"})
+            continue
+        claimed = desks.claim_output(item.output_id)
+        if claimed is None:
+            results.append({"output_id": item.output_id, "ok": False, "verified": False,
+                            "kind": item.destination, "ref": None, "error": "already decided"})
+            continue
+        rid = out.get("run_id") or (run_store.latest(desk["conversation_id"]) or {}).get("run_id")
+        # The claim's timestamp is in the args, so each user-initiated Accept gets its own
+        # tool_calls key. A failed promotion is retryable (§6.4) and a constant key is not: the
+        # cached failure would be replayed for ever and the retry would never run.
+        args = {"output_id": item.output_id, "destination": item.destination, "doc_id": item.doc_id,
+                "claimed_at": claimed.get("decided_at")}
+
+        async def _fn(o: dict[str, Any] = out, it: AcceptItem = item) -> Any:
+            return await _promote(id, o, it)
+
+        try:
+            booked = await (run_store.call_once(rid, PROMOTE_STEP, "promote", args, _fn) if rid else _fn())
+        except Exception as e:  # noqa: BLE001 - one bad output must not abort the rest of the batch
+            log.exception("promoting %s failed", item.output_id)
+            booked = {"ref": None, "verified": False, "error": str(e)}
+        ref, ok = booked.get("ref"), bool(booked.get("verified"))
+        err = booked.get("error")
+        try:
+            desks.finish_output(item.output_id, kind=item.destination, ref=ref, verified=ok)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
+        results.append({"output_id": item.output_id, "ok": ok, "verified": ok,
+                        "kind": item.destination, "ref": ref, **({"error": err} if err else {})})
+    _close_review(id)
+    return {"results": results}
+
+
+@app.post("/cowork/desks/{id}/reject")
+async def reject_outputs(id: str, body: RejectIn) -> dict[str, Any]:
+    desk = _desk_or_404(id, False)
+    ids = body.output_ids
+    if ids is None:
+        ids = [o["id"] for o in desks.outputs(id) if o["status"] in UNDECIDED]
+    for oid in ids:
+        desks.reject_output(oid)
+    if body.note:
+        desks.event(id, "note", body.note)
+    return _close_review(id) or desk
+
+
+def _close_review(desk_id: str) -> dict[str, Any] | None:
+    """A desk in review is done once nothing is left to decide — the one place a desk reaches a
+    terminal state without the agent saying so, because the user just did."""
+    desk = desks.get(desk_id, False)
+    if not desk or desk["status"] != "review":
+        return desk
+    if any(o["status"] in UNDECIDED for o in desks.outputs(desk_id)):
+        return desk
+    return desks.set_status(desk_id, "done", reason="reviewed", headline="")
+
+
+@app.get("/cowork/inbox")
+def cowork_inbox(limit: int = 40) -> list[dict[str, Any]]:
+    return desks.inbox(limit)
+
+
+@app.post("/cowork/inbox/{event_id}/seen")
+def cowork_inbox_seen(event_id: str) -> dict[str, bool]:
+    desks.mark_seen(event_id)
+    return {"ok": True}
+
+
+@app.get("/cowork/plans/{plan_id}")
+def get_action_plan(plan_id: str) -> dict[str, Any]:
+    plan = aplans.get(plan_id)
+    if not plan:
+        raise HTTPException(404, "No such plan")
+    return plan
+
+
+@app.get("/conversations/{id}/plan")
+def conversation_plan(id: str) -> dict[str, Any] | None:
+    """The newest plan of this conversation, so a reloaded chat still shows its card."""
+    return aplans.latest(id)
+
+
+@app.post("/cowork/plans/{plan_id}")
+async def decide_action_plan(plan_id: str, body: PlanDecisionIn) -> dict[str, Any]:
+    """The row is the truth, so it is written first: aplans.decide, then the approvals row, then
+    the in-process Future if one still exists, then the desk. A plan whose run has died still
+    decides cleanly; only a missing plan row is a 404."""
+    if not aplans.get(plan_id, with_steps=False):
+        raise HTTPException(404, "No such plan")
+    if body.decision not in ("approve", "edit", "reject"):
+        raise HTTPException(400, "Bad decision")
+    try:
+        edits = parse_plan_edits(body.steps) if body.decision == "edit" else None
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    decided = aplans.decide(plan_id, body.decision, steps=edits, note=body.note or "")
+    if decided is None:
+        return {"ok": False, "plan": aplans.get(plan_id), "resumed": False, "error": "already decided"}
+    answer = "deny" if body.decision == "reject" else "allow"
+    call_id = decided.get("call_id")
+    if call_id:
+        run_store.decide(call_id, answer, by="user", note=body.note or "")
+        if body.note:
+            _answers[call_id] = body.note
+        fut = _approvals.get(call_id)
+        if fut is not None and not fut.done():
+            fut.set_result(answer)
+    did = decided.get("desk_id")
+    if did and body.decision != "reject":
+        # The in-run approval writes desks.plan_id as it flips the desk to `working`; a plan decided
+        # out of band — parked, or after its run let go — has to write it too, or claim_run reads an
+        # empty plan_id and wakes the desk back into `planning`, and _should_chain never chains.
+        current = desks.get(did, False)
+        if current and not current.get("plan_id"):
+            desks.set_status(did, current["status"], reason=current["status_reason"],
+                             plan_id=plan_id, event=False)
+    resumed = bool(did) and _wake_desk(did) is not None
+    return {"ok": True, "plan": aplans.get(plan_id), "resumed": resumed}
+
+
+@app.on_event("startup")
+async def _cowork_startup() -> None:
+    """Recovery must never stop the backend from starting. Nothing is resumed here: every active
+    run becomes `interrupted`, every in-flight tool call becomes `unknown`, every live desk lands
+    in Needs you, and the user presses Resume."""
+    try:
+        marked = run_store.recover()   # runs -> interrupted; tool_calls 'started' -> 'unknown';
+                                       # salvage transcript() into any empty message row; prune()
+        woken = desks.recover()        # LIVE -> interrupted + a needs_you event each
+        if marked.get("runs") or woken:
+            log.info("cowork recovery: %s runs, %s unknown calls, %s salvaged, %s desks",
+                     marked.get("runs"), marked.get("calls"), marked.get("salvaged"), woken)
+    except Exception:  # noqa: BLE001
+        log.warning("cowork recovery failed", exc_info=True)

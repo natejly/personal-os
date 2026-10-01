@@ -235,6 +235,8 @@ kbd {
 .pulse.needs-approval { background: var(--accent); animation-duration: 1s; }
 .pulse.done { background: var(--ok); animation: none; }
 .pulse.error { background: var(--danger); animation: none; }
+/* A plan on the table is a harder stop than a tool approval: it holds the whole run, not one call. */
+.pulse.awaiting-plan { background: var(--accent); animation-duration: 1s; box-shadow: 0 0 0 2px rgba(217,119,87,0.25); }
 .empty-hint { color: var(--text-faint); font-size: 13px; padding: 12px 8px; }
 .sidebar-bottom { border-top: 1px solid var(--border); padding: 6px 0; }
 
@@ -993,6 +995,13 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .approval-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .tag.ask { background: rgba(217,119,87,0.15); color: var(--accent); }
 .tag.p1, .tag.overdue { background: rgba(229,72,77,0.15); color: var(--danger); }
+
+/* ---------- Action plans ----------
+   Only the tags a tool event grows once planning mode exists. The card itself is `.aplan-*` in
+   styles/cowork.css, which ActionPlanCard imports: it mounts inline in a chat bubble as well as in
+   the Cowork view, and that sheet has to come with it. */
+.tag.plan { background: rgba(217,119,87,0.12); color: var(--accent); }
+.tag.off-plan { background: rgba(229,72,77,0.15); color: var(--danger); }
 .tool-perm.row { justify-content: space-between; padding: 6px 0; }
 .tool-perm.unavailable { opacity: 0.5; }
 .tool-perm.unavailable .tool-perm-name::after, .tool-perm.unavailable .toggle-text > b::after { content: ' · not connected'; color: var(--text-faint); font-weight: 400; font-size: 11px; }

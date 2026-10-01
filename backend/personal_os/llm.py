@@ -71,6 +71,21 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Google Tasks <-> todos sync. Shape and defaults live in gtasks.DEFAULT_CONFIG; patched
     # through /integrations/google/tasks-sync rather than /settings for the same reason.
     "googleTasksSync": {"enabled": False},
+    # Planning mode and cowork desks. These must be here, not only in the renderer: PUT /settings
+    # drops any key this dict does not declare, silently, so a missing default is a setting the
+    # user can change once and never again.
+    # planMode: off | auto | always, the global default a conversation's own planMode overrides.
+    "planMode": "off",
+    # How long an ordinary chat's approval card waits before it expires (decided_by='timeout').
+    "approvalWaitSeconds": 600,
+    # How long an unwatched desk card waits before the run lets go of it and the desk blocks. The
+    # row stays pending either way, so the card is still decidable tomorrow.
+    "parkAfterSeconds": 180,
+    # Per-desk caps on the chained turns of §3.6. A desk's own budget may lower these, never raise them.
+    "deskMaxTurns": 12,
+    "deskMaxCost": 2.0,
+    "deskMaxLive": 4,
+    "deskNotify": True,
 }
 
 

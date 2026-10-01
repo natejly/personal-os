@@ -3,7 +3,8 @@ import type {
   Memory, ModelInfo, ModelPrice, Settings, Project, UsageReport, ChatRunStarted, RunInfo,
   Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
   Doc, FullDoc, DocRevision,
-  ActivityConfig, ActivityContextFile, ActivityEvent, ActivityStatus, ActivitySummary
+  ActivityConfig, ActivityContextFile, ActivityEvent, ActivityStatus, ActivitySummary,
+  ActionPlan, Desk, DeskAutonomy, DeskBudget, DeskDiff, DeskEvent, DeskFilePreview, DeskFileTree, DeskOutput, DeskStatus, FullDesk, PlanDecision, PlanEdit, PromotionKind, PromotionResult
 } from '@shared/types'
 
 let base = ''
@@ -68,7 +69,11 @@ export const api = {
   tools: () => req<{ tools: ToolInfo[]; enabled: Record<string, boolean> }>('/tools'),
   dashboard: () => req<TodayDashboard>('/dashboard'),
   recap: (force = false) => req<Recap>(`/recap?force=${force}`),
-  approve: (callId: string, decision: 'allow' | 'deny' | 'always_chat' | 'always_global') => req(`/approvals/${callId}`, { method: 'POST', body: json({ decision }) }),
+  /** First-decision-wins on the server: `{ok: false, error: 'already decided'}` is a normal answer, not a throw. */
+  approve: (callId: string, decision: 'allow' | 'deny' | 'always_chat' | 'always_global', note?: string) =>
+    req<{ ok: boolean; resumed?: boolean; error?: string }>(`/approvals/${callId}`, { method: 'POST', body: json({ decision, note }) }),
+  /** The durable pending cards: decidable from any window, and a restart does not orphan them. */
+  approvals: (deskId?: string) => req<Record<string, unknown>[]>(`/approvals?status=pending${deskId ? `&desk_id=${encodeURIComponent(deskId)}` : ''}`),
   boards: {
     list: () => req<Board[]>('/boards'),
     get: (id: string) => req<Board>(`/boards/${id}`),
@@ -166,14 +171,20 @@ export const api = {
     patch: (id: string, patch: { title?: string; model?: string; settings?: Partial<ConversationSettings> }) =>
       req<Conversation>(`/conversations/${id}`, { method: 'PATCH', body: json(patch) }),
     delete: (id: string) => req(`/conversations/${id}`, { method: 'DELETE' }),
-    deleteMessage: (id: string, mid: string) => req(`/conversations/${id}/messages/${mid}`, { method: 'DELETE' })
+    deleteMessage: (id: string, mid: string) => req(`/conversations/${id}/messages/${mid}`, { method: 'DELETE' }),
+    /** The newest action plan of this conversation, so a reloaded chat still shows its card. */
+    plan: (id: string) => req<ActionPlan | null>(`/conversations/${id}/plan`)
   },
   stop: (mid: string) => req(`/messages/${mid}/stop`, { method: 'POST' }),
   /** Starts the reply as a background task and returns at once; watch it with `chatStream(convId, seq)`. Throws a 409 carrying a `RunConflict` when that conversation already has a live run. */
   chat: (convId: string, body: { content?: string; model?: string }) => req<ChatRunStarted>(`/conversations/${convId}/chat`, { method: 'POST', body: json(body) }),
   /** Injects a user message into a live run (steering). Throws a 409 when nothing is running. */
   steer: (convId: string, content: string) => req<{ ok: boolean; run_id: string; message: Message }>(`/conversations/${convId}/steer`, { method: 'POST', body: json({ content }) }),
-  runs: () => req<RunInfo[]>('/runs'),
+  /** Defaults to the ACTIVE runs only — the renderer attaches to everything this returns, so a
+   *  finished run listed here would be watched forever. `status: 'all'` is how history is asked for. */
+  runs: (q: { status?: string; kind?: 'chat' | 'desk'; conversation_id?: string; desk_id?: string; limit?: number } = {}) =>
+    req<RunInfo[]>(`/runs?${new URLSearchParams(Object.entries(q).filter(([, v]) => v !== undefined).map(([k, v]) => [k, String(v)]))}`),
+  run: (runId: string) => req<RunInfo & { executed: Record<string, unknown>[]; approvals: Record<string, unknown>[] }>(`/runs/${runId}`),
   /** Stops a run before its assistant message exists. Detaching the stream would only drop a viewer. */
   stopRun: (convId: string, runId?: string) => req<{ ok: boolean }>(`/conversations/${convId}/stop${runId ? `?run_id=${encodeURIComponent(runId)}` : ''}`, { method: 'POST' }),
   usage: {
@@ -228,6 +239,52 @@ export const api = {
     context: () => req<ActivityContextFile>('/activity/context'),
     devices: () => req<{ index: string; name: string }[]>('/activity/devices'),
     purge: (scope: 'expired' | 'events' | 'summaries' | 'all') => req<{ deleted: { events: number; summaries: number }; status: ActivityStatus }>('/activity/purge', { method: 'POST', body: json({ scope }) })
+  },
+  /** Cowork: background desks, their workspaces, and the action plans that gate what they do. */
+  cowork: {
+    desks: {
+      list: (s: Scope = 'all', status: DeskStatus | '' = '', archived = false) =>
+        req<Desk[]>(`/cowork/desks?project_id=${encodeURIComponent(s)}&status=${encodeURIComponent(status)}&archived=${archived}`),
+      get: (id: string) => req<FullDesk>(`/cowork/desks/${id}`),
+      /** `start: false` leaves the desk a draft. Throws a 409 carrying `{live, max}` over `deskMaxLive`. */
+      create: (d: { brief: string; title?: string; project_id?: string | null; autonomy?: DeskAutonomy; budget?: DeskBudget; start?: boolean }) =>
+        req<{ desk: Desk; conversation_id: string; run_id?: string; seq?: number }>('/cowork/desks', { method: 'POST', body: json(d) }),
+      patch: (id: string, patch: { title?: string; autonomy?: DeskAutonomy; project_id?: string | null; archived?: boolean; budget?: DeskBudget; clear_project?: boolean }) =>
+        req<Desk>(`/cowork/desks/${id}`, { method: 'PATCH', body: json(patch) }),
+      /** The workspace is kept unless `purge`: a deleted desk's files are the one thing the user cannot regenerate. */
+      delete: (id: string, purge = false) => req<{ ok: boolean }>(`/cowork/desks/${id}?purge=${purge}`, { method: 'DELETE' }),
+      start: (id: string) => req<{ run_id: string; seq: number; conversation_id: string }>(`/cowork/desks/${id}/start`, { method: 'POST' }),
+      resume: (id: string, reason?: string) => req<{ run_id: string; seq: number }>(`/cowork/desks/${id}/resume`, { method: 'POST', body: json({ reason }) }),
+      /** The same box awake or asleep: live it steers the running reply, otherwise it is the next turn's content. */
+      message: (id: string, content: string) => req<{ ok: boolean; steered: boolean; run_id?: string }>(`/cowork/desks/${id}/message`, { method: 'POST', body: json({ content }) }),
+      /** Marks every unseen needs-you event of ONE desk read — opening the desk is the acknowledgement. */
+      seen: (id: string) => req<Desk>(`/cowork/desks/${id}/seen`, { method: 'POST' }),
+      pause: (id: string) => req<Desk>(`/cowork/desks/${id}/pause`, { method: 'POST' }),
+      stop: (id: string) => req<Desk>(`/cowork/desks/${id}/stop`, { method: 'POST' }),
+      events: (id: string, limit = 200) => req<DeskEvent[]>(`/cowork/desks/${id}/events?limit=${limit}`),
+      files: (id: string, path = '') => req<DeskFileTree>(`/cowork/desks/${id}/files?path=${encodeURIComponent(path)}`),
+      file: (id: string, path: string, offset = 0, length = 6000) =>
+        req<DeskFilePreview>(`/cowork/desks/${id}/file?path=${encodeURIComponent(path)}&offset=${offset}&length=${length}`),
+      diff: (id: string, path: string) => req<DeskDiff>(`/cowork/desks/${id}/diff?path=${encodeURIComponent(path)}`),
+      /** Each sha re-checked against the disk, so a row the agent has since rewritten reads `stale`. */
+      outputs: (id: string) => req<DeskOutput[]>(`/cowork/desks/${id}/outputs`),
+      /** Exactly-once per output: a double-clicked Accept promotes once. `verified` is read, never assumed. */
+      accept: (id: string, outputs: { output_id: string; destination: PromotionKind; title?: string; doc_id?: string; project_id?: string | null }[]) =>
+        req<{ results: PromotionResult[] }>(`/cowork/desks/${id}/accept`, { method: 'POST', body: json({ outputs }) }),
+      /** No `output_ids` rejects every undecided output. */
+      reject: (id: string, output_ids?: string[], note?: string) =>
+        req<Desk>(`/cowork/desks/${id}/reject`, { method: 'POST', body: json({ output_ids, note }) })
+    },
+    plans: {
+      get: (planId: string) => req<ActionPlan>(`/cowork/plans/${planId}`),
+      /** First-decision-wins: `{ok: false, error: 'already decided'}` comes back 200, with the row as it stands. */
+      decide: (planId: string, decision: PlanDecision, steps?: PlanEdit[], note?: string) =>
+        req<{ ok: boolean; plan: ActionPlan | null; resumed: boolean; error?: string }>(`/cowork/plans/${planId}`, { method: 'POST', body: json({ decision, steps, note }) })
+    },
+    inbox: {
+      list: (limit = 40) => req<DeskEvent[]>(`/cowork/inbox?limit=${limit}`),
+      seen: (eventId: string) => req<{ ok: boolean }>(`/cowork/inbox/${eventId}/seen`, { method: 'POST' })
+    }
   },
   canvases: {
     list: () => req<Canvas[]>('/canvases'),
@@ -287,9 +344,11 @@ export const api = {
   }
 }
 
-/** Attach to a conversation's run and iterate its server-sent events from `since`. Any number of clients may. */
-export async function* chatStream(convId: string, since = 0, signal?: AbortSignal): AsyncGenerator<ChatEvent> {
-  const r = await fetch(`${base}/conversations/${convId}/stream?since=${since}`, { signal, headers: await auth() })
+/** One connection's worth of events. Reports every `id:` line back, so the caller can resume from it. */
+async function* streamOnce(convId: string, since: number, signal: AbortSignal | undefined, runId: string | undefined,
+                           seen: (seq: number) => void): AsyncGenerator<ChatEvent> {
+  const q = `since=${since}${runId ? `&run_id=${encodeURIComponent(runId)}` : ''}`
+  const r = await fetch(`${base}/conversations/${convId}/stream?${q}`, { signal, headers: await auth() })
   if (!r.ok || !r.body) throw new Error(`${r.status} ${r.statusText}`)
   const reader = r.body.getReader()
   const dec = new TextDecoder()
@@ -304,11 +363,43 @@ export async function* chatStream(convId: string, since = 0, signal?: AbortSigna
       buf = buf.slice(idx + 2)
       let event = 'message'
       let data = ''
+      let id = ''
       for (const line of block.split('\n')) {
         if (line.startsWith('event:')) event = line.slice(6).trim()
         else if (line.startsWith('data:')) data += line.slice(5).trim()
+        else if (line.startsWith('id:')) id = line.slice(3).trim()
       }
       if (data) yield { event, data: JSON.parse(data) } as ChatEvent
+      // After the yield, so a consumer that stops mid-block does not record an event it never saw.
+      if (id) seen(Number(id))
+    }
+  }
+}
+
+const RECONNECTS = 8
+const BACKOFF_CAP_MS = 5000
+const wait = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+/**
+ * Attach to a conversation's run and iterate its server-sent events from `since`. Any number of
+ * clients may, and this one survives a dropped socket: a read error that is not an abort is retried
+ * up to RECONNECTS times with exponential backoff, resuming from the last `id:` the tape sent. That
+ * is what makes "leave and come back tomorrow" and a closed laptop lid work.
+ *
+ * A clean end of stream is NOT retried, so a `run_id` served from the tape — which replays and then
+ * closes rather than following live — terminates here instead of reconnecting forever.
+ */
+export async function* chatStream(convId: string, since = 0, signal?: AbortSignal, runId?: string): AsyncGenerator<ChatEvent> {
+  let from = since
+  for (let attempt = 0; ; attempt++) {
+    try {
+      yield* streamOnce(convId, from, signal, runId, (seq) => {
+        if (seq > from) from = seq
+      })
+      return
+    } catch (e) {
+      if (signal?.aborted || attempt >= RECONNECTS - 1) throw e
+      await wait(Math.min(BACKOFF_CAP_MS, 250 * 2 ** attempt))
     }
   }
 }

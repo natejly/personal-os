@@ -30,6 +30,19 @@ export const reduceStatus = (prev: SessionStatus, ev: ChatEvent, pendingApproval
     case 'learned':
     case 'learn_error':
       return prev
+    // A proposed plan blocks the run exactly as an approval card does, and the amber it paints is a
+    // different one: the user is being asked to read a plan, not to wave one call through.
+    case 'plan':
+      return 'awaiting-plan'
+    // Approving (or editing) resumes the run; a rejection ends it, so the previous verdict stands
+    // rather than being resurrected into `working` by a decision taken after the reply finished.
+    case 'plan_decision':
+      return ev.data.decision === 'reject' ? prev : 'working'
+    // Desk-level events ride the same stream but say nothing about this reply. Without these two the
+    // `default` below would turn a `desk_status` arriving after `done` back into `working`.
+    case 'desk_status':
+    case 'desk_handoff':
+      return prev
     default:
       return prev === 'idle' ? 'working' : prev
   }

@@ -84,18 +84,25 @@ class Projects:
 
 
 # ---------------- Conversations ----------------
-DEFAULT_CONV_SETTINGS = {"effort": "default", "useMemory": True, "useGraph": True, "useDocuments": True, "autoLearn": True, "useTools": True, "tools": {}}
+# planMode: None inherits the global setting; deskId marks a conversation as a desk's own, which is
+# what keeps it out of Recent chats (list(include_desks=False)) without a second table.
+DEFAULT_CONV_SETTINGS = {"effort": "default", "useMemory": True, "useGraph": True, "useDocuments": True, "autoLearn": True, "useTools": True, "tools": {},
+                         "planMode": None, "deskId": None}
 
 
 class Conversations:
     def __init__(self, db: Database):
         self.db = db
 
-    def list(self, project_id: str | None) -> list[dict[str, Any]]:
+    def list(self, project_id: str | None, include_desks: bool = False) -> list[dict[str, Any]]:
+        """A desk owns a conversation, and that conversation belongs on the Cowork rail rather than
+        in Recent chats — so it is filtered out here by default. The filter is on the hydrated row,
+        not in SQL, because `settings` is a JSON blob."""
         where, args = _scope_clause(project_id, include_global=False)
         with self.db.tx() as c:
             rows = c.execute(f"SELECT * FROM conversations WHERE {where} ORDER BY updated_at DESC", args).fetchall()
-        return [self._hydrate(r) for r in rows]
+        out = [self._hydrate(r) for r in rows]
+        return out if include_desks else [c for c in out if not c["settings"].get("deskId")]
 
     def _hydrate(self, r: Any) -> dict[str, Any]:
         d = row_to_dict(r, ("settings",)) or {}

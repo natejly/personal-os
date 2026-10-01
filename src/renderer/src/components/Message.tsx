@@ -3,6 +3,7 @@ import { AlertCircle, User, Sparkles, Brain, Share2, FileText, Activity } from '
 import type { Message } from '@shared/types'
 import { useStore } from '../store'
 import ToolEvents from './ToolEvents'
+import ActionPlanCard from './ActionPlanCard'
 import MarkdownPreview, { CopyButton } from './MarkdownPreview'
 export { SAFE_MD } from './MarkdownPreview'
 import { traceSummary, fmtMs } from './TraceView'
@@ -22,7 +23,11 @@ const MessageView = memo(function MessageView({ message, streaming }: { message:
           <div className="user-text">{message.content}</div>
         ) : (
           <div className="markdown">
-            {message.tool_events && message.tool_events.length > 0 && <ToolEvents events={message.tool_events} conversationId={message.conversation_id} />}
+            {message.tool_events && message.tool_events.length > 0 && <ToolEvents events={message.tool_events} conversationId={message.conversation_id} hasPlan={!!message.plan} />}
+            {/* The plan card, inline wherever the plan was proposed. It arrives on the `plan` event and
+                is not persisted, so a reloaded transcript shows the plan in the Plan tab instead.
+                ToolEvents suppresses its own approval block for the propose_plan call this replaces. */}
+            {message.plan && <ActionPlanCard plan={message.plan} />}
             {message.content ? (
               <MarkdownPreview source={message.content} streaming={streaming} />
             ) : streaming && !message.tool_events?.some((t) => t.pending) ? (

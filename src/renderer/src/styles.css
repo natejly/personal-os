@@ -1552,3 +1552,51 @@ textarea:focus-visible,
     opacity: 1;
   }
 }
+
+/* ---------- Plan panel (the chat's plan artifact) ---------- */
+.plan-panel {
+  max-width: 808px; width: 100%; margin: 0 auto; padding: 8px 24px 0;
+  font-size: 12.5px;
+}
+.plan-panel > header { display: flex; align-items: center; gap: 10px; }
+.plan-head {
+  display: flex; align-items: center; gap: 6px;
+  border: 0; background: none; padding: 2px 0; cursor: pointer;
+  color: var(--text-muted); font: inherit;
+}
+.plan-head:hover { color: var(--text); }
+.plan-head b { font-weight: 600; }
+.plan-bar { flex: 1; height: 3px; border-radius: 2px; background: var(--border); overflow: hidden; }
+.plan-bar span { display: block; height: 100%; background: var(--accent); transition: width 0.2s ease; }
+.plan-steps {
+  list-style: none; margin: 6px 0 0; padding: 8px 10px;
+  border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-elev);
+  max-height: 180px; overflow-y: auto;
+}
+.plan-step { display: flex; align-items: flex-start; gap: 7px; padding: 3px 0; }
+.plan-check { border: 0; background: none; padding: 1px 0 0; cursor: pointer; color: var(--text-faint); line-height: 1; }
+.plan-step.in_progress .plan-check { color: var(--accent); }
+.plan-step.done .plan-check { color: var(--ok); }
+.plan-check:hover { color: var(--text); }
+.plan-text { flex: 1; display: flex; flex-direction: column; gap: 1px; }
+.plan-text small { color: var(--text-faint); }
+.plan-step.done .plan-text { color: var(--text-faint); text-decoration: line-through; }
+.plan-step.in_progress .plan-text { color: var(--text); font-weight: 500; }
+
+/* ---------- Skills review (procedural memory) ---------- */
+.skills-review h4 { margin: 14px 0 6px; font-size: 11px; font-weight: 600; color: var(--text-faint); }
+.skill-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.skill-row { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 10px; background: var(--bg-elev); }
+.skill-row.approved { border-color: var(--border-strong); }
+.skill-row.rejected { opacity: 0.6; }
+.skill-head { display: flex; align-items: center; gap: 8px; }
+.skill-title { flex: 1; display: flex; align-items: center; gap: 6px; min-width: 0; border: 0; background: none; padding: 0; cursor: pointer; color: var(--text); font: inherit; text-align: left; }
+.skill-title b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.skill-badge { font-size: 10px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--border-strong); color: var(--text-faint); }
+.skill-badge.approved { color: var(--ok); border-color: var(--ok); }
+.skill-badge.candidate { color: var(--warn); border-color: var(--warn); }
+.skill-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
+.skill-desc { margin: 4px 0 0; }
+.skill-edit { display: flex; flex-direction: column; gap: 8px; padding-top: 10px; }
+.skill-edit textarea { font-family: var(--mono); font-size: 12px; }
+.skill-edit-actions { display: flex; align-items: center; gap: 10px; }

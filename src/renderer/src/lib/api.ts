@@ -2,6 +2,7 @@ import type {
   ChatEvent, ToolInfo, Todo, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, DriveFile, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Recap, Conversation, ConversationSettings, ContextUsed, Document, GraphData, GraphEdge, GraphNode, Message,
   ApprovalDecision, PlanEdit,
   Memory, ModelInfo, ModelPrice, Settings, Project, UsageReport, ChatRunStarted, RunInfo,
+  Plan, PlanStep, Skill, SkillStatus, ToolResultHandle,
   Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
   AgentInbox, AgentProposal, Job,
   Doc, FullDoc, DocRevision,
@@ -218,6 +219,27 @@ export const api = {
       req<Conversation>(`/conversations/${id}`, { method: 'PATCH', body: json(patch) }),
     delete: (id: string) => req(`/conversations/${id}`, { method: 'DELETE' }),
     deleteMessage: (id: string, mid: string) => req(`/conversations/${id}/messages/${mid}`, { method: 'DELETE' })
+  },
+  /** The chat's plan artifact: the model writes it with `todo_write`, the user ticks steps off here. */
+  plan: {
+    get: (convId: string) => req<Plan>(`/conversations/${convId}/plan`),
+    set: (convId: string, steps: PlanStep[]) => req<Plan>(`/conversations/${convId}/plan`, { method: 'PUT', body: json({ steps }) }),
+    clear: (convId: string) => req<{ ok: boolean }>(`/conversations/${convId}/plan`, { method: 'DELETE' })
+  },
+  /** Large tool results that were stored instead of inlined into the model's context. */
+  toolResults: {
+    list: (convId: string, limit = 20) => req<ToolResultHandle[]>(`/conversations/${convId}/tool-results?limit=${limit}`),
+    read: (id: string, offset = 0, limit = 20000) => req<{ text: string; total_chars: number; offset: number; has_more: boolean }>(`/tool-results/${id}?offset=${offset}&limit=${limit}`)
+  },
+  /** Procedural memory. Nothing here is injected until its status is 'approved'. */
+  skills: {
+    list: (status?: SkillStatus) => req<Skill[]>(`/skills${status ? `?status=${status}` : ''}`),
+    create: (s: { name: string; description?: string; procedure?: string; project_id?: string | null }) => req<Skill>('/skills', { method: 'POST', body: json(s) }),
+    update: (id: string, patch: { name?: string; description?: string; procedure?: string; status?: SkillStatus }) =>
+      req<Skill>(`/skills/${id}`, { method: 'PATCH', body: json(patch) }),
+    delete: (id: string) => req<{ ok: boolean }>(`/skills/${id}`, { method: 'DELETE' }),
+    /** Distil a conversation into a candidate for review. Never enables anything. */
+    induce: (convId: string) => req<{ candidate: Skill | null; reason: string | null }>(`/conversations/${convId}/skills/induce`, { method: 'POST' })
   },
   stop: (mid: string) => req(`/messages/${mid}/stop`, { method: 'POST' }),
   /** Starts the reply as a background task and returns at once; watch it with `chatStream(convId, seq)`. Throws a 409 carrying a `RunConflict` when that conversation already has a live run. */

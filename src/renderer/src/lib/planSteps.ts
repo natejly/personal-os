@@ -6,7 +6,7 @@
  * digest from what is sent here, and a step whose arguments do not match asks again on its own. Dropping a step
  * is therefore safe -- it loses its pre-authorisation, nothing more.
  */
-import type { PlanEdit, PlanStep, ProposedPlan } from '@shared/types'
+import type { PlanEdit, ProposedStep, ProposedPlan } from '@shared/types'
 
 /** One row of the card: the proposed step, whether it is kept, and the edited JSON while it is being typed. */
 export interface StepDraft {
@@ -24,7 +24,7 @@ export interface StepDraft {
 export function readPlan(args: unknown): ProposedPlan {
   const a = (args ?? {}) as Record<string, unknown>
   const raw = Array.isArray(a.steps) ? a.steps : []
-  const steps: PlanStep[] = raw.map((s) => {
+  const steps: ProposedStep[] = raw.map((s) => {
     const o = (s ?? {}) as Record<string, unknown>
     return {
       tool: typeof o.tool === 'string' ? o.tool : 'unknown',

@@ -5,6 +5,7 @@ import ProjectChip from './ProjectChip'
 import MessageView from './Message'
 import Composer from './Composer'
 import ContextDrawer from './ContextDrawer'
+import PlanPanel from './PlanPanel'
 import SendToSpace from './SendToSpace'
 
 function ModelPicker({ value, onChange }: { value: string; onChange: (m: string) => void }): JSX.Element {
@@ -102,6 +103,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
               </div>
             )}
           </div>
+          <PlanPanel conversationId={conversationId} />
           <Composer conversationId={conversationId} />
         </div>
         {contextOpen && <ContextDrawer conversationId={conversationId} />}

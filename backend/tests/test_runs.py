@@ -28,7 +28,7 @@ from personal_os.runs import QUEUE_MAX, RING, Run  # noqa: E402
 
 # The ChatEvent union in src/shared/types.ts. Nothing may leave the bus that is not one of these.
 CHAT_EVENTS = {"user_message", "assistant_message", "removed_message", "title", "delta", "tool_call",
-               "tool_result", "span", "done", "learned", "learn_error", "error", "taint"}
+               "tool_result", "span", "done", "learned", "learn_error", "error", "taint", "plan"}
 
 client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
 

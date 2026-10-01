@@ -172,6 +172,68 @@ CREATE TABLE IF NOT EXISTS agent_defs (
   updated_at REAL NOT NULL
 );
 
+-- Workflows (workflows.py): a saved definition, the runs of it (each carries the exact definition and
+-- parameters it was approved with), and one row per step of a run. status of a run: awaiting_approval |
+-- running | waiting_approval | done | failed | cancelled | interrupted | stale.
+CREATE TABLE IF NOT EXISTS workflows (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  description TEXT NOT NULL DEFAULT '',
+  definition TEXT NOT NULL,
+  text TEXT NOT NULL DEFAULT '',
+  created_at REAL NOT NULL,
+  updated_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS workflow_runs (
+  id TEXT PRIMARY KEY,
+  workflow_id TEXT,
+  name TEXT NOT NULL,
+  definition TEXT NOT NULL,
+  params TEXT NOT NULL DEFAULT '{}',
+  plan_digest TEXT NOT NULL,
+  approved_digest TEXT,
+  approved_at REAL,
+  status TEXT NOT NULL DEFAULT 'awaiting_approval',
+  error TEXT,
+  result TEXT,
+  project_id TEXT,
+  conversation_id TEXT,
+  source TEXT NOT NULL DEFAULT 'user',
+  started_at REAL,
+  ended_at REAL,
+  created_at REAL NOT NULL,
+  updated_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_wfruns_wf ON workflow_runs(workflow_id, created_at DESC);
+CREATE TABLE IF NOT EXISTS workflow_steps (
+  run_id TEXT NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
+  step_id TEXT NOT NULL,
+  idx INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  result TEXT,
+  items TEXT,
+  error TEXT,
+  approval_call_id TEXT,
+  idempotency_key TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  started_at REAL,
+  ended_at REAL,
+  PRIMARY KEY (run_id, step_id)
+);
+
+-- Commands (commands.py): markdown prompt templates, the light tier beside workflows.
+CREATE TABLE IF NOT EXISTS commands (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  description TEXT NOT NULL DEFAULT '',
+  body TEXT NOT NULL DEFAULT '',
+  subtask INTEGER NOT NULL DEFAULT 0,
+  role TEXT,
+  created_at REAL NOT NULL,
+  updated_at REAL NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS run_events (
   run_id TEXT NOT NULL REFERENCES agent_runs(run_id) ON DELETE CASCADE,
   seq INTEGER NOT NULL,

@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react'
-import { BookOpen, FileText, KanbanSquare, LayoutDashboard, PanelLeftOpen, Plug, Sparkles } from 'lucide-react'
+import { BookOpen, FileText, KanbanSquare, LayoutDashboard, PanelLeftOpen, Plug, Sparkles, Workflow } from 'lucide-react'
 import { useStore, type LibraryTab } from '../store'
 import { api } from '../lib/api'
 import type { Board, Dashboard } from '@shared/types'
 import SkillsPanel from './SkillsPanel'
 import McpSettings from './McpSettings'
+import WorkflowsPanel from './WorkflowsPanel'
 import AppSwitcher from './AppSwitcher'
 
 const TABS: { key: LibraryTab; label: string; icon: JSX.Element; blurb: string }[] = [
   { key: 'skills', label: 'Skills', icon: <Sparkles size={14} />, blurb: 'Procedures the assistant may follow again' },
+  { key: 'workflows', label: 'Workflows', icon: <Workflow size={14} />, blurb: 'Repeatable multi-step jobs you approve once, by hash' },
   { key: 'connectors', label: 'Connectors', icon: <Plug size={14} />, blurb: 'MCP servers whose tools the assistant can call' },
   { key: 'made', label: 'Made', icon: <BookOpen size={14} />, blurb: 'Everything built in this app, in one place' }
 ]
@@ -115,6 +117,7 @@ export default function LibraryView(): JSX.Element {
       </header>
       <div className="page-body">
         {tab === 'skills' && <SkillsPanel />}
+        {tab === 'workflows' && <WorkflowsPanel />}
         {tab === 'connectors' && <div className="library-panel"><McpSettings /></div>}
         {tab === 'made' && <MadePanel />}
       </div>

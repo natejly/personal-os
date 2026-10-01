@@ -45,6 +45,7 @@ RESERVED_TOOL_NAMES = frozenset({
     "youtube_video", "youtube_search", "github_search", "github_read", "read_feed",
     "run_python", "current_time", "propose_plan",
     "agent_spawn", "agent_wait", "agent_stop", "desk_start",
+    "workflow_list", "workflow_run", "workflow_resume", "command_list", "command_run",
     "todo_write", "read_tool_result", "skill_list", "skill_draft", "skill_revise", "skill_view",
     "mcp_tool_search",
     "fs_glob", "fs_grep", "fs_edit", "fs_copy", "fs_mkdir",

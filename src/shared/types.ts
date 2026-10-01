@@ -2262,3 +2262,68 @@ export interface RunChanges {
   skipped: string[]
 }
 export interface RunUndoResult { ok: boolean; direction: 'undo' | 'redo'; reverted: string[]; edited_since: string[] }
+// ---- Workflows and commands (backend workflows.py / commands.py) ----
+export type WorkflowParamType = 'string' | 'number' | 'integer' | 'boolean' | 'list' | 'object'
+export interface WorkflowParam { type: WorkflowParamType; required: boolean; default: unknown }
+export type WorkflowStepKind = 'tool' | 'agent' | 'fan_out'
+export interface Workflow {
+  id: string
+  name: string
+  description: string
+  /** The text as the user wrote it (JSON, or YAML when the backend can read it). */
+  text: string
+  /** Hash of the normalized definition; any edit changes it and withdraws the approval of runs proposed earlier. */
+  digest: string
+  params: Record<string, WorkflowParam>
+  created_at: number
+  updated_at: number
+export type WorkflowRunStatus =
+  | 'awaiting_approval' | 'running' | 'waiting_approval' | 'done' | 'failed' | 'cancelled' | 'interrupted' | 'stale'
+export type WorkflowStepStatus = 'pending' | 'running' | 'waiting_approval' | 'done' | 'failed' | 'skipped' | 'blocked'
+export interface WorkflowStepRow {
+  step_id: string
+  idx: number
+  kind: WorkflowStepKind
+  status: WorkflowStepStatus
+  result: unknown
+  items: Record<string, unknown> | null
+  error: string | null
+  approval_call_id: string | null
+  idempotency_key: string
+/** One step of the expanded plan the user approves: parameters filled in, step results still shown as {{step.result}}. */
+export interface WorkflowPlanStep {
+  id: string
+  kind: WorkflowStepKind
+  needs: string[]
+  approval: 'required' | null
+  tool?: string
+  args?: Record<string, unknown>
+  agent?: Record<string, unknown>
+  fan_out?: Record<string, unknown>
+  when?: unknown
+export interface WorkflowRun {
+  id: string
+  workflow_id: string | null
+  name: string
+  params: Record<string, unknown>
+  plan_digest: string
+  approved_digest: string | null
+  status: WorkflowRunStatus
+  error: string | null
+  result: unknown
+  source: string
+  created_at: number
+  updated_at: number
+  started_at: number | null
+  ended_at: number | null
+  steps: WorkflowStepRow[]
+  /** Not sent in the run list. */
+  plan?: WorkflowPlanStep[]
+export interface Command {
+  id: string
+  name: string
+  description: string
+  body: string
+  subtask: boolean
+  role: string | null
+  text: string

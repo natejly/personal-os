@@ -52,6 +52,7 @@ from .notes import Notes
 from .plans import (MUTATING, PLAN_BLOCKED, PLAN_SAFE_DANGER, PLAN_TOOL, PROPOSE_ONLY, Plans,
                     normalize_plan, parse_plan_edits, taint_expected)
 from .outbox import Outbox, router as outbox_router
+from .setup import router as setup_router
 from .presets import CanvasPresets
 from .runs import ACTIVE, PROMOTE_STEP, STATUSES, Run, RunBus, RunStore, Topic
 from .style import WritingStyle, learn_style_from_exchange, looks_like_prose
@@ -239,7 +240,11 @@ ENV_SEED = {
 
 
 def _seed_settings_from_env() -> None:
-    """First launch: take provider defaults from the environment (.env) if nothing is stored yet."""
+    """First launch: take provider defaults from the environment (.env) if nothing is stored yet.
+
+    Dev only. The packaged app (Electron sets PERSONAL_OS_PACKAGED) starts empty and onboards instead."""
+    if os.environ.get("PERSONAL_OS_PACKAGED"):
+        return
     stored = db.get_settings()
     patch = {k: os.environ[v] for k, v in ENV_SEED.items() if k not in stored and os.environ.get(v)}
     if patch:
@@ -258,6 +263,7 @@ proposals = Proposals(db)
 boards = Boards(db)
 dashboards = Dashboards(db)
 google = Google(settings, db.set_settings)
+app.include_router(setup_router(settings, db.set_settings, lambda: google.status()["connected"]))
 # sid/wsid are defined further down, so the module context looks them up late.
 modules: list[Module] = build_modules(ModuleContext(
     db=db, settings=settings, set_settings=db.set_settings, google=google,
@@ -995,7 +1001,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         yield "error", {"message": "Conversation not found"}
         return
     cfg = settings()
-    model = body.model or conv["model"]
+    model = body.model or conv["model"] or cfg["defaultModel"]
     if body.model and body.model != conv["model"]:
         convos.update(conv_id, {"model": body.model})
 

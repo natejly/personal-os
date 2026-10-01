@@ -2,11 +2,15 @@ import { useEffect, useMemo, useState } from 'react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
-  AlertTriangle, Check, ChevronRight, Eye, EyeOff, FileText, Globe, Keyboard, MonitorDot,
-  Mic, PanelLeftOpen, Pause, Play, RefreshCw, Shield, Speaker, Sparkles, Trash2, X
+  AlertTriangle, BellOff, Brain, CalendarClock, Check, ChevronRight, Clock, Eye, EyeOff, FileText,
+  Globe, Keyboard, Lightbulb, ListPlus, MonitorDot, Mic, PanelLeftOpen, Pause, Play, RefreshCw,
+  Repeat, Send, Shield, Speaker, Sparkles, Trash2, TrendingUp, X, Zap
 } from 'lucide-react'
 import { useStore } from '../store'
-import type { ActivityCapability, ActivityEvent, ActivitySignal, ActivityStatus } from '@shared/types'
+import type {
+  ActivityCapability, ActivityEvent, ActivityHabit, ActivityInsights, ActivityPattern,
+  ActivitySignal, ActivityStatus, ActivitySuggestion, InsightKind
+} from '@shared/types'
 
 /** The activity monitor: what it records, what it inferred, and every switch that turns it off.
  *
@@ -17,6 +21,7 @@ import type { ActivityCapability, ActivityEvent, ActivitySignal, ActivityStatus 
 
 const TABS = [
   { key: 'overview', label: 'Overview' },
+  { key: 'insights', label: 'Insights' },
   { key: 'signals', label: 'Signals' },
   { key: 'privacy', label: 'Privacy' },
   { key: 'context', label: 'Context file' },
@@ -255,6 +260,156 @@ function ListEditor({ label, hint, items, placeholder, onChange }: {
   )
 }
 
+const KIND_META: Record<InsightKind, { label: string; icon: JSX.Element; blurb: string }> = {
+  automation: {
+    label: 'Automate', icon: <Zap size={13} />,
+    blurb: 'Something the app can take over for you.'
+  },
+  hygiene: {
+    label: 'Working pattern', icon: <TrendingUp size={13} />,
+    blurb: 'Not an automation — a change to how the day is shaped.'
+  },
+  platform: {
+    label: 'Grain itself', icon: <Lightbulb size={13} />,
+    blurb: 'Friction visible in your data that the app should remove. Keep it as a note for later.'
+  }
+}
+
+const PATTERN_ICON: Record<string, JSX.Element> = {
+  app_routine: <Clock size={13} />, site_habit: <Globe size={13} />, thrash: <Repeat size={13} />,
+  deep_work: <Brain size={13} />, day_shape: <CalendarClock size={13} />, after_hours: <Clock size={13} />,
+  input_load: <Keyboard size={13} />, recurring_window: <MonitorDot size={13} />,
+  topic: <Sparkles size={13} />, switch_rate: <Repeat size={13} />
+}
+
+/** What the primary button on a suggestion does — and what it deliberately does not do. */
+const ACTION_LABEL: Record<string, { label: string; icon: JSX.Element }> = {
+  prompt: { label: 'Set it up in chat', icon: <Send size={13} /> },
+  todo: { label: 'Add as todo', icon: <ListPlus size={13} /> },
+  memory: { label: 'Save to memory', icon: <Brain size={13} /> },
+  setting: { label: 'Got it', icon: <Check size={13} /> },
+  none: { label: 'Got it', icon: <Check size={13} /> }
+}
+
+/** Plain horizontal bars. No chart library for six rows of one number each. */
+function Bars({ rows, fmt }: { rows: { label: string; value: number }[]; fmt: (v: number) => string }): JSX.Element {
+  const max = Math.max(1, ...rows.map((r) => r.value))
+  return (
+    <ul className="act-bars">
+      {rows.map((r) => (
+        <li key={r.label}>
+          <span className="act-bar-label" title={r.label}>{r.label}</span>
+          <span className="act-bar-track"><span className="act-bar-fill" style={{ width: `${(r.value / max) * 100}%` }} /></span>
+          <span className="act-bar-value">{fmt(r.value)}</span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/** The 24 hours of the day, so "mornings" is something you can see rather than take on trust. */
+function HoursStrip({ hours }: { hours: { hour: number; seconds: number }[] }): JSX.Element {
+  const max = Math.max(1, ...hours.map((h) => h.seconds))
+  return (
+    <div className="act-hours">
+      {hours.map((h) => (
+        <span key={h.hour} title={`${String(h.hour).padStart(2, '0')}:00 — ${fmtDur(h.seconds * 1000)}`}>
+          <i style={{ height: `${Math.max(2, (h.seconds / max) * 100)}%` }} />
+          {h.hour % 6 === 0 && <em>{String(h.hour).padStart(2, '0')}</em>}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+function HabitRow({ h, onForget }: { h: ActivityHabit; onForget: () => void }): JSX.Element {
+  return (
+    <li className="act-habit">
+      <span className="act-conf" title={`confidence ${Math.round(h.confidence * 100)}%`}>
+        {Math.round(h.confidence * 100)}%
+      </span>
+      <span className="act-habit-text">
+        {h.statement}
+        <small>
+          {h.memory_id
+            ? <><Brain size={11} /> in memory, so chats already know it</>
+            : <>not written to memory (below the confidence floor)</>}
+          {h.support > 1 && ` · seen in ${h.support} passes`}
+        </small>
+      </span>
+      <button className="icon-btn ghost danger xs" title="Forget this, and the memory it wrote" onClick={onForget}>
+        <Trash2 size={12} />
+      </button>
+    </li>
+  )
+}
+
+function SuggestionCard({ s, patterns, onApply, onStatus }: {
+  s: ActivitySuggestion
+  patterns: Record<string, ActivityPattern>
+  onApply: () => void
+  onStatus: (status: 'dismissed' | 'snoozed' | 'new') => void
+}): JSX.Element {
+  const meta = KIND_META[s.kind] ?? KIND_META.automation
+  const act = ACTION_LABEL[s.action?.type ?? 'none'] ?? ACTION_LABEL.none
+  const ruled = s.status !== 'new'
+  return (
+    <article className={`act-sug ${s.kind} ${ruled ? 'ruled' : ''}`}>
+      <header>
+        <span className={`act-pill ${s.kind}`}>{meta.icon} {meta.label}</span>
+        <b>{s.title}</b>
+        {s.impact && <span className="act-impact">{s.impact}</span>}
+        <span className="act-conf" title={`confidence ${Math.round(s.confidence * 100)}%`}>{Math.round(s.confidence * 100)}%</span>
+      </header>
+      <p className="act-sug-detail">{s.detail}</p>
+      {s.why && <p className="act-sug-why"><b>Because</b> {s.why}</p>}
+      {s.evidence.length > 0 && (
+        <div className="act-evidence">
+          {s.evidence.map((id) => (
+            <span key={id} className="act-tag" title={patterns[id]?.detail ?? id}>
+              {PATTERN_ICON[patterns[id]?.kind ?? ''] ?? <Sparkles size={11} />}
+              {patterns[id]?.title ?? id}
+            </span>
+          ))}
+        </div>
+      )}
+      <footer>
+        {s.status === 'new' && (
+          <>
+            <button className="primary-btn sm" onClick={onApply}>{act.icon} {act.label}</button>
+            <button className="ghost-btn sm" onClick={() => onStatus('snoozed')} title="Hide it for a week">
+              <BellOff size={13} /> Not now
+            </button>
+            <button className="ghost-btn sm danger" onClick={() => onStatus('dismissed')} title="Never suggest this again">
+              <X size={13} /> Dismiss
+            </button>
+            <span className="muted small">effort: {s.effort}</span>
+          </>
+        )}
+        {ruled && (
+          <>
+            <span className={`act-state-pill ${s.status}`}>{s.status}{s.status_note ? ` — ${s.status_note}` : ''}</span>
+            <button className="link" onClick={() => onStatus('new')}>put it back</button>
+          </>
+        )}
+      </footer>
+    </article>
+  )
+}
+
+function PatternRow({ p }: { p: ActivityPattern }): JSX.Element {
+  return (
+    <li className="act-pattern">
+      <span className="act-pattern-icon">{PATTERN_ICON[p.kind] ?? <Sparkles size={13} />}</span>
+      <span>
+        <b>{p.title}</b>
+        <small>{p.detail}</small>
+      </span>
+      <span className="act-conf" title={`seen on ${p.days} day(s)`}>{Math.round(p.confidence * 100)}%</span>
+    </li>
+  )
+}
+
 function EventRow({ e, onDelete }: { e: ActivityEvent; onDelete: () => void }): JSX.Element {
   const meta = e.meta as { keys?: number; clicks?: number; scrolls?: number; wpm?: number; secure_skipped?: number; channel?: string; since_seconds?: number }
   const detail = e.kind === 'input'
@@ -280,18 +435,27 @@ export default function ActivityView(): JSX.Element {
   const events = useStore((s) => s.activityEvents)
   const summaries = useStore((s) => s.activitySummaries)
   const context = useStore((s) => s.activityContext)
+  const insights = useStore((s) => s.activityInsights)
+  const insightsBusy = useStore((s) => s.activityInsightsBusy)
   const busy = useStore((s) => s.activityBusy)
   const sidebarOpen = useStore((s) => s.sidebarOpen)
   const {
     toggleSidebar, loadActivity, refreshActivity, setActivityConfig, toggleActivitySignal,
     startActivity, stopActivity, pauseActivity, resumeActivity, rollupActivity,
     refreshActivityProfile, deleteActivityEvent, deleteActivitySummary, purgeActivity,
-    grantActivityPermission, openActivitySettings, setPalantirMode
+    grantActivityPermission, openActivitySettings, setPalantirMode,
+    loadActivityInsights, refreshActivityInsights, setInsightStatus, applyInsight, forgetActivityHabit
   } = useStore()
   const [tab, setTab] = useState<Tab>('overview')
   const [confirmPurge, setConfirmPurge] = useState<'events' | 'summaries' | 'all' | null>(null)
+  const [showRuled, setShowRuled] = useState(false)
+  const patternById = useMemo(
+    () => Object.fromEntries(((insights as ActivityInsights | null)?.patterns ?? []).map((p) => [p.id, p])),
+    [insights]
+  )
 
   useEffect(() => { void loadActivity() }, [loadActivity])
+  useEffect(() => { void loadActivityInsights() }, [loadActivityInsights])
   // Poll the live line while the panel is open; it is a cheap status read.
   useEffect(() => {
     const t = setInterval(() => void refreshActivity(), 5000)
@@ -371,6 +535,7 @@ export default function ActivityView(): JSX.Element {
             <button key={t.key} className={tab === t.key ? 'active' : ''} onClick={() => setTab(t.key)}>
               {t.label}
               {t.key === 'log' && <span className="count">{events.length}</span>}
+              {t.key === 'insights' && (insights?.counts.open ?? 0) > 0 && <span className="count">{insights?.counts.open}</span>}
             </button>
           ))}
         </div>
@@ -425,6 +590,148 @@ export default function ActivityView(): JSX.Element {
               </article>
             ))}
           </div>
+        </div>
+      )}
+
+      {tab === 'insights' && (
+        <div className="page-body">
+          <p className="muted small">
+            Patterns are mined from the same data, on this machine, with no model involved — they are the evidence,
+            and they are what the panel shows you first. The suggestions on top of them are proposals: nothing here
+            changes anything until you press a button, and dismissing one means it is never raised again.
+          </p>
+
+          <section className="act-card">
+            <div className="act-card-head static">
+              <b>What has been noticed</b>
+              <span className="muted small">
+                {insights?.window?.days
+                  ? `${insights.window.days} day${insights.window.days === 1 ? '' : 's'} of history · ${insights.counts.days} day${insights.counts.days === 1 ? '' : 's'} aggregated · last pass ${ago(insights.last_run || null)}`
+                  : 'nothing mined yet'}
+              </span>
+              <button className="link" disabled={insightsBusy} onClick={() => void refreshActivityInsights(false)}>re-read patterns</button>
+              <button className="ghost-btn sm" disabled={insightsBusy} onClick={() => void refreshActivityInsights(true)}>
+                <Sparkles size={13} className={insightsBusy ? 'spin' : ''} /> Find automations
+              </button>
+            </div>
+            {insights?.last_error && <p className="act-warn"><AlertTriangle size={13} /> {insights.last_error}</p>}
+            {insights && insights.patterns.length === 0 && (
+              <p className="empty-hint">
+                Not enough yet. A pattern has to recur on at least {cfg.insights.minDays} separate days before it
+                counts, so give the monitor a couple of days of ordinary work — then press “Find automations”.
+              </p>
+            )}
+            {insights && insights.patterns.length > 0 && (
+              <>
+                <ul className="act-patterns">
+                  {insights.patterns.slice(0, 10).map((p) => <PatternRow key={p.id} p={p} />)}
+                </ul>
+                <div className="act-split">
+                  <div>
+                    <h5>Where the time goes</h5>
+                    <Bars rows={insights.apps.slice(0, 6).map((a) => ({ label: a.app, value: a.seconds }))}
+                      fmt={(v) => fmtDur(v * 1000)} />
+                  </div>
+                  <div>
+                    <h5>Sites you keep opening</h5>
+                    {insights.hosts.length === 0
+                      ? <p className="muted small">Nothing — browser URLs are off, or no browser was sampled.</p>
+                      : <Bars rows={insights.hosts.slice(0, 6).map((h) => ({ label: h.host, value: h.visits }))}
+                          fmt={(v) => `${v}×`} />}
+                  </div>
+                </div>
+                <h5>Hour of the day</h5>
+                <HoursStrip hours={insights.hours} />
+              </>
+            )}
+          </section>
+
+          <h4 className="act-h">Habits <span className="muted small">— written into your memory, so chats already know them</span></h4>
+          {!insights?.habits.length && (
+            <p className="empty-hint">
+              No habits yet. They are written once a pattern is confident enough, and each one owns a single row in
+              the Memory panel — forgetting it here deletes that row too.
+            </p>
+          )}
+          {!!insights?.habits.length && (
+            <ul className="act-habits">
+              {insights.habits.map((h) => (
+                <HabitRow key={h.id} h={h} onForget={() => void forgetActivityHabit(h.id)} />
+              ))}
+            </ul>
+          )}
+
+          <h4 className="act-h">
+            Suggestions
+            {(insights?.counts.open ?? 0) > 0 && <span className="act-pill">{insights?.counts.open} waiting</span>}
+          </h4>
+          {!insights?.suggestions.filter((x) => x.status === 'new').length && (
+            <p className="empty-hint">
+              Nothing on offer. Press “Find automations” to look again — it reads the patterns above, not your
+              screen.
+            </p>
+          )}
+          <div className="act-sugs">
+            {insights?.suggestions.filter((x) => x.status === 'new').map((x) => (
+              <SuggestionCard key={x.id} s={x} patterns={patternById}
+                onApply={() => void applyInsight(x.id)}
+                onStatus={(status) => void setInsightStatus(x.id, status)} />
+            ))}
+          </div>
+
+          {!!insights?.suggestions.filter((x) => x.status !== 'new').length && (
+            <>
+              <button className="link" onClick={() => setShowRuled((v) => !v)}>
+                {showRuled ? 'hide' : 'show'} {insights.suggestions.filter((x) => x.status !== 'new').length} already
+                decided
+              </button>
+              {showRuled && (
+                <div className="act-sugs">
+                  {insights.suggestions.filter((x) => x.status !== 'new').map((x) => (
+                    <SuggestionCard key={x.id} s={x} patterns={patternById}
+                      onApply={() => void applyInsight(x.id)}
+                      onStatus={(status) => void setInsightStatus(x.id, status)} />
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+
+          <h4 className="act-h">How this runs</h4>
+          <label className="toggle-row">
+            <span className="toggle-icon"><Sparkles size={15} /></span>
+            <span className="toggle-text">
+              <b>Look for habits and automations on a schedule</b>
+              <small>One extra model call every {cfg.insights.everyHours}h, on the summaries and aggregates that are
+                already stored. Off means the panel only looks when you press the button.</small>
+            </span>
+            <input type="checkbox" checked={cfg.insights.enabled}
+              onChange={() => void setActivityConfig({ insights: { ...cfg.insights, enabled: !cfg.insights.enabled } })} />
+            <span className="switch" />
+          </label>
+          <label className="toggle-row">
+            <span className="toggle-icon"><Brain size={15} /></span>
+            <span className="toggle-text">
+              <b>Write confident habits into memory</b>
+              <small>Each habit becomes one memory, visible and deletable in the Memory panel. Off leaves them here
+                only, and deletes the ones already written on the next pass.</small>
+            </span>
+            <input type="checkbox" checked={cfg.insights.autoMemory}
+              onChange={() => void setActivityConfig({ insights: { ...cfg.insights, autoMemory: !cfg.insights.autoMemory } })} />
+            <span className="switch" />
+          </label>
+          <NumberField label="Look again every" hint="0 only ever looks when you ask" value={cfg.insights.everyHours}
+            min={0} max={168} suffix="hours"
+            onCommit={(v) => void setActivityConfig({ insights: { ...cfg.insights, everyHours: v } })} />
+          <NumberField label="History to mine" hint="How many days of aggregates a pattern may draw on"
+            value={cfg.insights.lookbackDays} min={2} max={90} suffix="days"
+            onCommit={(v) => void setActivityConfig({ insights: { ...cfg.insights, lookbackDays: v } })} />
+          <NumberField label="Recurrence floor" hint="Days a pattern must appear on before it counts"
+            value={cfg.insights.minDays} min={1} max={14} suffix="days"
+            onCommit={(v) => void setActivityConfig({ insights: { ...cfg.insights, minDays: v } })} />
+          <NumberField label="Suggestions at a time" hint="Fewer and better beats a long list"
+            value={cfg.insights.maxSuggestions} min={1} max={20} suffix="items"
+            onCommit={(v) => void setActivityConfig({ insights: { ...cfg.insights, maxSuggestions: v } })} />
         </div>
       )}
 

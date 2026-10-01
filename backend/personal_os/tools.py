@@ -407,6 +407,13 @@ def _register_activity(self: Toolbox) -> None:
     R("activity_access", ToolSpec("activity_access", "Which macOS permissions the activity monitor currently has (Accessibility, Input Monitoring, Screen Recording, browser Automation, Microphone, Full Disk Access), which signals each one gates, and what is missing. Use it when the user asks why the monitor is not recording something, or what access it has.",
         _obj({}, []), activity_access, "activity"))
 
+    async def activity_insights(ctx: dict[str, Any], limit: int = 5) -> Any:
+        """Read-only on purpose. The assistant may bring a suggestion up in conversation, but it
+        cannot accept one on the user's behalf: applying is a button in the Activity panel."""
+        return self.activity.insights.brief(limit=int(limit))
+    R("activity_insights", ToolSpec("activity_insights", "The habits the activity monitor has noticed about how this person works, the patterns behind them, and the automation suggestions it has on offer but the user has not accepted yet. Use it when the user asks how they could save time, what you have noticed about their workflow, or what to automate - and when you are about to suggest a workflow change, so you can ground it in their real patterns instead of guessing. Read-only: never treat a suggestion as approved.",
+        _obj({"limit": {"type": "integer", "default": 5}}, []), activity_insights, "activity"))
+
     async def activity_pause(ctx: dict[str, Any], minutes: float = 30.0) -> Any:
         return {"paused_until": self.activity.pause(minutes)["pause_until"]}
     R("activity_pause", ToolSpec("activity_pause", "Pause the activity monitor for a while, so nothing about the user's screen, typing or audio is recorded. Use it whenever the user asks you to stop watching.",

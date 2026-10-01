@@ -104,7 +104,7 @@ class TodosModule(Module):
 
         @r.delete("/todos/{id}")
         def delete_todo(id: str) -> dict[str, bool]:
-            store.delete(id)
+            store.trash(id)  # restorable from the trash; Google still gets the delete
             return {"ok": True}
 
         # ---- Google Tasks <-> todos sync ----
@@ -188,9 +188,9 @@ class TodosModule(Module):
             if not t:
                 return tool_error(f"No todo with id '{id}'.", field="id", expected="an id from todo_list",
                                   example={"id": "td_8c41a2"}, alternative="todo_list to get the current ids")
-            store.delete(id)
-            return {"deleted": t["title"]}
-        R("todo_delete", ToolSpec("todo_delete", "Delete a todo permanently by id. Prefer todo_update(done=true) to complete; delete only when the user asks to remove it.",
+            store.trash(id)
+            return {"deleted": t["title"], "note": "moved to the trash; the user can restore it for 30 days"}
+        R("todo_delete", ToolSpec("todo_delete", "Delete a todo by id (it goes to the trash, restorable for 30 days). Prefer todo_update(done=true) to complete; delete only when the user asks to remove it.",
             _obj({"id": {"type": "string"}}, ["id"]), todo_delete, "todos", "writes", examples=[{"id": "td_8c41a2"}]))
 
     # ---- loops ----

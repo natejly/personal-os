@@ -82,7 +82,10 @@ function Toasts(): JSX.Element {
       {/* Global, not per-view: a send the assistant queued has to be undoable from wherever you are. */}
       <PendingSends />
       {toasts.map((t) => (
-        <div key={t.id} className={`toast ${t.kind}`}>{t.text}</div>
+        <div key={t.id} className={`toast ${t.kind}${t.action ? ' with-action' : ''}`}>
+          <span>{t.text}</span>
+          {t.action && <button className="toast-action" onClick={() => { t.action?.run(); useStore.setState((s) => ({ toasts: s.toasts.filter((x) => x.id !== t.id) })) }}>{t.action.label}</button>}
+        </div>
       ))}
     </div>
   )

@@ -332,7 +332,12 @@ class Database:
     def _migrate(c: sqlite3.Connection) -> None:
         """Add columns introduced after the first release (CREATE TABLE IF NOT EXISTS won't)."""
         wanted = {
-            "projects": {"tools": "TEXT NOT NULL DEFAULT '{}'"},
+            # Soft delete (trash.py): deleted_at hides a row from every read; deleted_with names the project
+            # whose deletion took it along, so restoring the project brings back exactly those rows.
+            "projects": {"tools": "TEXT NOT NULL DEFAULT '{}'", "deleted_at": "REAL"},
+            "conversations": {"deleted_at": "REAL", "deleted_with": "TEXT"},
+            "memories": {"deleted_at": "REAL", "deleted_with": "TEXT"},
+            "documents": {"deleted_at": "REAL", "deleted_with": "TEXT"},
             "messages": {"tool_events": "TEXT", "trace": "TEXT", "reasoning": "TEXT"},
             "jobs": {"kind": "TEXT NOT NULL DEFAULT 'cron'", "run_at": "REAL"},
             "action_plans": {"desk_id": "TEXT", "intent": "TEXT NOT NULL DEFAULT ''",

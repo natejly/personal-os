@@ -58,6 +58,7 @@ from .style import WritingStyle, learn_style_from_exchange, looks_like_prose
 from .modules import Module, ModuleContext, build_modules, get as module_get
 from .modules.todos import TodosModule
 from .tools import Toolbox, summarize_result
+from .trash import Trash, router as trash_router
 from .trace import Tracer, now_ms
 from .usage import Pricing, Usage
 from .working import Plans as WorkPlans, ToolResults
@@ -267,6 +268,9 @@ todos, tasks_sync, todo_calendar = _todos_module.store, _todos_module.tasks_sync
 for _m in modules:
     if (_r := _m.router()) is not None:
         app.include_router(_r)
+# Soft delete: the DELETE routes below move things here, and /trash restores or erases them (trash.py).
+trash = Trash(db, todos, docs)
+app.include_router(trash_router(trash))
 usage = Usage(db)
 pricing = Pricing()
 
@@ -672,6 +676,18 @@ def mcp_clear_grant(slug: str, scope: str = "global", scope_id: str | None = Non
 
 
 @app.on_event("startup")
+async def _trash_startup() -> None:
+    app.state.trash_task = asyncio.create_task(trash.loop(), name="trash-purge")
+
+
+@app.on_event("shutdown")
+async def _trash_shutdown() -> None:
+    t = getattr(app.state, "trash_task", None)
+    if t:
+        t.cancel()
+
+
+@app.on_event("startup")
 async def _mcp_startup() -> None:
     """Connect whatever is enabled. A server that will not start becomes a status, not a failed boot."""
     try:
@@ -707,9 +723,7 @@ def update_project(id: str, body: ProjectPatch) -> dict[str, Any]:
 
 @app.delete("/projects/{id}")
 def delete_project(id: str) -> dict[str, bool]:
-    projects.delete(id)
-    # Its docs survive, demoted to personal; the folder rows for a tree that no longer exists do not.
-    docs.forget_scope(id)
+    trash.trash("project", id)  # its chats, memories and uploads go to the trash; docs and todos are demoted to personal
     return {"ok": True}
 
 
@@ -762,7 +776,7 @@ def patch_conversation(id: str, body: ConvPatch) -> dict[str, Any]:
 
 @app.delete("/conversations/{id}")
 def delete_conversation(id: str) -> dict[str, bool]:
-    convos.delete(id)
+    trash.trash("conversation", id)
     return {"ok": True}
 
 
@@ -2389,7 +2403,7 @@ def update_memory(id: str, body: MemoryPatch) -> dict[str, Any]:
 
 @app.delete("/memories/{id}")
 def delete_memory(id: str) -> dict[str, bool]:
-    memories.delete(id)
+    trash.trash("memory", id)
     return {"ok": True}
 
 
@@ -2591,12 +2605,7 @@ async def upload_document(file: UploadFile = File(...), project_id: str | None =
 
 @app.delete("/documents/{id}")
 def delete_document(id: str) -> dict[str, bool]:
-    path = documents.delete(id)
-    if path:
-        try:
-            Path(path).unlink()
-        except OSError:
-            pass
+    trash.trash("document", id)  # the uploaded file stays on disk until the trash is purged
     return {"ok": True}
 
 
@@ -3709,7 +3718,7 @@ def patch_doc(id: str, body: DocMetaPatch) -> dict[str, Any]:
 
 @app.delete("/docs/{id}")
 def delete_doc(id: str) -> dict[str, bool]:
-    docs.delete(id)
+    trash.trash("doc", id)
     return {"ok": True}
 
 

@@ -39,7 +39,7 @@ from .microvm import Sandboxes
 from .notes import Notes
 from .gtasks import TasksSync
 from .presets import CanvasPresets
-from .runs import Run, RunBus
+from .runs import ACTIVE, STATUSES, Run, RunBus, RunStore
 from .todos import Todos
 from .tools import Toolbox, summarize_result
 from .trace import Tracer, now_ms
@@ -181,10 +181,13 @@ app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_credenti
                    allow_headers=["Content-Type", "X-Personal-OS-Token", "Authorization"])
 
 # Live runs, one per conversation, each owning its own task. Any number of clients may watch one.
-bus = RunBus()
+# Each run is also a row (agent_runs) with its event tape (run_events); the bus is the hot path over it.
+run_store = RunStore(db)
+bus = RunBus(run_store)
 # Active chat streams so they can be aborted from the client: message_id -> that run's stop event.
 _active: dict[str, asyncio.Event] = {}
-# Pending tool-call approvals: call_id -> Future[decision]
+# Pending tool-call approvals: call_id -> Future[decision]. The durable record is the approvals table; this is
+# only how POST /approvals wakes the run that is waiting in this process.
 _approvals: dict[str, asyncio.Future] = {}
 
 
@@ -464,6 +467,31 @@ class Budget:
     def exceeded(self) -> str | None:
         return next((k for k, r in self._ratios().items() if r >= 1.0), None)
 
+    def snapshot(self) -> dict[str, Any]:
+        """What agent_runs.budget stores: the limits and how much of each the run has used."""
+        return {"max_rounds": self.max_rounds, "max_tokens": self.max_tokens, "max_seconds": self.max_seconds,
+                "max_cost": self.max_cost, "rounds": self.rounds, "tokens": self.tokens, "cost": round(self.cost, 6),
+                "seconds": round(self.elapsed(), 3), "paused_seconds": round(self.paused, 3)}
+
+
+# Tools whose call changes something outside the reply: each runs at most once per (run, round, tool, args).
+IDEMPOTENT_DANGER = ("writes", "external")
+
+
+async def _call_tool(run: Run | None, step: int, name: str, args: dict[str, Any], ctx: dict[str, Any], call_id: str) -> Any:
+    """toolbox.call, through the executed_calls journal for side-effecting tools, so a retry or a replay of the same
+    step returns the recorded result instead of sending the email twice. Read-only tools run directly."""
+    spec = toolbox.specs.get(name)
+    if run is None or run.store is None or spec is None or spec.danger not in IDEMPOTENT_DANGER:
+        return await toolbox.call(name, args, ctx)
+    result, replayed = await run.store.call_once(run.run_id, step, name, args, lambda: toolbox.call(name, args, ctx), call_id=call_id)
+    if replayed:
+        if isinstance(result, dict):
+            result = {**result, "replayed": True}
+        if spec.taints and not (isinstance(result, dict) and result.get("error")):
+            ctx["tainted"] = True
+    return result
+
 
 def _urls(text: str) -> set[str]:
     """URLs the user typed this turn: still fetchable, whole, once the reply has read untrusted content."""
@@ -480,8 +508,10 @@ def _title_from(text: str) -> str:
     return (t[:48].rstrip() + "…") if len(t) > 48 else (t or "New chat")
 
 
-async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: list[dict[str, Any]] | None = None) -> AsyncIterator[tuple[str, Any]]:
-    """Yield (event, payload) pairs. The run bus formats them and fans them out; see runs.sse."""
+async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: list[dict[str, Any]] | None = None,
+                       run: Run | None = None) -> AsyncIterator[tuple[str, Any]]:
+    """Yield (event, payload) pairs. The run bus formats them and fans them out; see runs.sse.
+    `run` (when there is one) gets the durable side: approval rows, run status, budget snapshots, the idempotency journal."""
     conv = convos.get(conv_id)
     if not conv:
         yield "error", {"message": "Conversation not found"}
@@ -558,6 +588,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     tool_errors: dict[str, int] = {}
     blocked: set[str] = set()
     _round = 0
+    awaiting: dict[str, Any] | None = None  # the tool event of a call blocked on approval, for a cancelled run to keep
 
     async def _final_round() -> AsyncIterator[tuple[str, Any]]:
         """Closing answer after a budget or breaker stop: one tool-free call, itself exempt from the budget."""
@@ -630,6 +661,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             u = end.get("usage") or end.get("usage_est") or {}
             pt, ct = int(u.get("prompt_tokens") or 0), int(u.get("completion_tokens") or 0)
             budget.add(pt, ct, pricing.cost(cfg, model, pt, ct))
+            if run is not None:
+                run.budget = budget.snapshot()
             tracer.end(lspan, {"finish_reason": end.get("finish_reason"), "usage": end.get("usage"),
                                "ttft_ms": (first_token - lspan["start"]) if first_token else None,
                                "output_chars": len("".join(buf[round_start:])), "tool_calls": [c["name"] for c in calls]},
@@ -693,25 +726,37 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 decision = "allow"
                 if mode == "ask":
                     # Pause the reply until the user approves or denies this call (POST /approvals/{call_id}).
+                    # The approval is a row, and it waits as long as it takes: there is no auto-deny.
                     approval_t0 = time.time()
                     fut: asyncio.Future = asyncio.get_event_loop().create_future()
                     _approvals[uid] = fut
+                    store = run.store if run is not None else None
+                    if store is not None:
+                        store.open_approval(uid, run.run_id, c["name"], args, conversation_id=conv_id, message_id=am["id"], forced=forced)
+                        run.budget = budget.snapshot()
+                        run.set_status("awaiting_approval")
+                    awaiting = {"id": uid, "name": c["name"], "arguments": args, "result_preview": "", "duration_ms": 0,
+                                "error": None, "pending": True, "needs_approval": True, "forced": forced}
                     try:
-                        waited = 0.0
                         while not fut.done():
                             if stop.is_set():
                                 fut.set_result("deny")
+                                if store is not None:
+                                    store.decide(uid, "deny", by="stop")
                                 break
                             try:
                                 # Short, so an approval-blocked run notices a stop or a shutdown promptly.
                                 await asyncio.wait_for(asyncio.shield(fut), timeout=2)
                             except asyncio.TimeoutError:
-                                waited += 2
-                                if waited >= 600:
-                                    fut.set_result("deny")
+                                row = store.approval(uid) if store is not None else None
+                                if row and row["status"] != "pending" and not fut.done():  # decided on the row alone
+                                    fut.set_result(row["decision"])
                         decision = fut.result()
                     finally:
                         _approvals.pop(uid, None)
+                    awaiting = None
+                    if run is not None:
+                        run.set_status("running")
                     budget.paused += time.time() - approval_t0  # a slow approval must not blow the wall clock
                     t0 = time.time()  # don't count waiting time as tool time
                     granted = decision in ("always_chat", "always_global")
@@ -736,7 +781,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 elif decision != "allow":
                     result = tools.denied(c["name"], "just declined by the user")
                 else:
-                    result = await toolbox.call(c["name"], args, tool_ctx)
+                    result = await _call_tool(run, _round, c["name"], args, tool_ctx, uid)
                 ms = int((time.time() - t0) * 1000)
                 # images (e.g. matplotlib figures from run_python) go to the UI, not to the model
                 images = result.pop("images", None) if isinstance(result, dict) else None
@@ -769,7 +814,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     except asyncio.CancelledError:
         # Shutdown or a dropped task, not a user Stop: persist what was written and re-raise.
         text = "".join(buf).strip()
-        convos.finish_message(am["id"], text, None if text else "Cancelled", used, tool_events, tracer.spans)
+        # A call still waiting on approval keeps its card: the approval row stays pending and can still be answered.
+        kept = tool_events + ([awaiting] if awaiting else [])
+        convos.finish_message(am["id"], text, None if text else "Cancelled", used, kept, tracer.spans)
         convos.touch(conv_id)
         raise
     except Exception as e:  # noqa: BLE001
@@ -812,7 +859,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
 
 
 async def _run_chat(run: Run, body: ChatIn) -> None:
-    async for event, data in _chat_stream(run.conversation_id, body, run.stop, run.steers):
+    async for event, data in _chat_stream(run.conversation_id, body, run.stop, run.steers, run=run):
         if event == "assistant_message":
             run.message_id = data.get("id")
         run.publish(event, data)
@@ -827,7 +874,7 @@ async def chat(id: str, body: ChatIn) -> dict[str, Any]:
     if running:
         raise HTTPException(409, {"message": "That conversation already has a running reply",
                                  "run_id": running.run_id, "seq": running.seq})
-    run = bus.start(id, lambda r: _run_chat(r, body))
+    run = bus.start(id, lambda r: _run_chat(r, body), input=body.model_dump())
     return {"run_id": run.run_id, "seq": run.seq}
 
 
@@ -854,16 +901,48 @@ async def steer_run(id: str, body: SteerIn) -> dict[str, Any]:
 
 
 @app.get("/conversations/{id}/stream")
-async def stream_conversation(id: str, since: int = 0) -> StreamingResponse:
-    """Any number of clients may attach; detaching one never touches the run."""
+async def stream_conversation(id: str, since: int = 0, run_id: str | None = None) -> StreamingResponse:
+    """Any number of clients may attach; detaching one never touches the run. A tail on the run's tape: past events
+    come from run_events (?since= is the last seq the client has), then live ones follow. A run that is no longer in
+    memory -- finished long ago, or cut off by a backend restart -- replays from the table and ends. `run_id` pins
+    the run, so a reconnect cannot land on a newer run with a stale seq."""
     run = bus.get(id)
-    return StreamingResponse(run.subscribe(since) if run else iter(()), media_type="text/event-stream",
+    body: Any = iter(())
+    if run and (run_id is None or run.run_id == run_id):
+        body = run.subscribe(since)
+    else:
+        row = run_store.get(run_id) if run_id else run_store.latest(id)
+        if row and row["conversation_id"] == id:
+            body = run_store.tail(row["run_id"], since)
+    return StreamingResponse(body, media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
 @app.get("/runs")
-async def list_runs() -> list[dict[str, Any]]:
-    return bus.list()
+async def list_runs(status: str | None = None, conversation_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+    """Active runs by default (running / awaiting_approval). ?status=all, or a comma list of statuses, reads the
+    history from the table, so finished and interrupted runs are still visible after a restart."""
+    statuses: tuple[str, ...] | None
+    if not status:
+        statuses = ACTIVE
+    elif status == "all":
+        statuses = None
+    else:
+        statuses = tuple(x for x in status.split(",") if x)
+        if not statuses or any(x not in STATUSES for x in statuses):
+            raise HTTPException(400, f"status must be 'all' or a comma list of {', '.join(STATUSES)}")
+    return bus.list(statuses, conversation_id, limit)
+
+
+@app.get("/runs/{run_id}")
+async def get_run(run_id: str) -> dict[str, Any]:
+    """One run row, with its approvals and its idempotency journal."""
+    row = run_store.get(run_id)
+    if not row:
+        raise HTTPException(404, "No such run")
+    mem = bus.get(row["conversation_id"]) if row["conversation_id"] else None
+    over = mem.info() if mem is not None and mem.run_id == run_id else {"seq": row["last_seq"], "live": False}
+    return {**row, **over, "approvals": run_store.approvals(None, run_id=run_id), "executed_calls": run_store.executed(run_id)}
 
 
 # async, so the run's asyncio.Event is set on the loop that owns it rather than from a threadpool.
@@ -877,15 +956,74 @@ class ApprovalIn(BaseModel):
     decision: str  # allow | deny | always_chat | always_global
 
 
+def _patch_tool_event(message_id: str | None, call_id: str, patch: dict[str, Any]) -> None:
+    """Rewrite one persisted tool event in place: how an approval answered after its run died stops showing a card."""
+    if not message_id:
+        return
+    with db.tx() as c:
+        r = c.execute("SELECT tool_events FROM messages WHERE id=?", (message_id,)).fetchone()
+        if not r or not r["tool_events"]:
+            return
+        evs = json.loads(r["tool_events"])
+        hit = [e for e in evs if isinstance(e, dict) and e.get("id") == call_id]
+        for e in hit:
+            e.update(patch)
+        if hit:
+            c.execute("UPDATE messages SET tool_events=? WHERE id=?", (json.dumps(evs), message_id))
+
+
+@app.get("/approvals")
+async def list_approvals(status: str | None = "pending", run_id: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
+    """Approval rows, pending by default -- including ones whose run was interrupted, so they can still be answered.
+    `live` says whether a run in this process is waiting on it."""
+    if status not in (None, "", "all", "pending", "approved", "denied"):
+        raise HTTPException(400, "status must be pending, approved, denied or all")
+    rows = run_store.approvals(None if status in (None, "", "all") else status, run_id, limit)
+    return [{**a, "live": a["call_id"] in _approvals} for a in rows]
+
+
+# async, so the waiting run's future is resolved on the loop that owns it rather than from a threadpool.
 @app.post("/approvals/{call_id}")
-def approve_tool_call(call_id: str, body: ApprovalIn) -> dict[str, bool]:
-    fut = _approvals.get(call_id)
-    if not fut or fut.done():
-        raise HTTPException(404, "No pending approval for that call")
+async def approve_tool_call(call_id: str, body: ApprovalIn) -> dict[str, Any]:
+    """Record the decision on the approval row (first decision wins), then wake the run if one is waiting in this
+    process. A run that died while waiting does not resume: the decision is recorded and its card is settled."""
     if body.decision not in ("allow", "deny", "always_chat", "always_global"):
         raise HTTPException(400, "Bad decision")
-    fut.set_result(body.decision)
-    return {"ok": True}
+    fut = _approvals.get(call_id)
+    row = run_store.decide(call_id, body.decision)
+    live = bool(fut and not fut.done())
+    if row is None and not live:
+        raise HTTPException(404, "No pending approval for that call")
+    if live:
+        fut.set_result(body.decision)  # type: ignore[union-attr]
+    elif row is not None:
+        _patch_tool_event(row["message_id"], call_id, {
+            "pending": False, "needs_approval": False, "approval": body.decision,
+            "error": "Not run: the reply was interrupted before this was answered. The decision is recorded; ask again to run it."})
+    return {"ok": True, "live": live, "status": row["status"] if row else ("denied" if body.decision == "deny" else "approved")}
+
+
+@app.on_event("startup")
+async def _recover_runs() -> None:
+    """Runs left active by the last process died with it: mark them interrupted and salvage their reply from the tape."""
+    for r in run_store.recover(bus.live_ids()):
+        mid = r.get("message_id")
+        if not mid:
+            continue
+        try:
+            with db.tx() as c:
+                cur = c.execute("SELECT content, tool_events, context_used FROM messages WHERE id=?", (mid,)).fetchone()
+            if cur is None or cur["content"] or cur["tool_events"]:
+                continue  # already finished (the cancel path persisted it): the message is the better record
+            text, tool_events = run_store.transcript(r["run_id"], mid)
+            done = {e.get("id") for e in tool_events}
+            for a in r["pending_approvals"]:
+                if a["message_id"] == mid and a["call_id"] not in done:
+                    tool_events.append({"id": a["call_id"], "name": a["tool"], "arguments": a["args"], "result_preview": "",
+                                        "duration_ms": 0, "error": None, "pending": True, "needs_approval": True, "forced": a["forced"]})
+            convos.finish_message(mid, text, r["error"], json.loads(cur["context_used"]) if cur["context_used"] else None, tool_events)
+        except Exception:  # noqa: BLE001 - recovery must never stop the backend from starting
+            log.warning("could not salvage the reply of run %s", r["run_id"], exc_info=True)
 
 
 # ---------------- usage / cost ----------------

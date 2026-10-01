@@ -287,28 +287,50 @@ export const api = {
   }
 }
 
-/** Attach to a conversation's run and iterate its server-sent events from `since`. Any number of clients may. */
-export async function* chatStream(convId: string, since = 0, signal?: AbortSignal): AsyncGenerator<ChatEvent> {
-  const r = await fetch(`${base}/conversations/${convId}/stream?since=${since}`, { signal, headers: await auth() })
-  if (!r.ok || !r.body) throw new Error(`${r.status} ${r.statusText}`)
-  const reader = r.body.getReader()
-  const dec = new TextDecoder()
-  let buf = ''
+const STREAM_RETRIES = 8
+
+/**
+ * Attach to a conversation's run and iterate its server-sent events from `since`. Any number of clients may.
+ * The stream is a tail on the run's stored tape, and every event carries its seq (`id:`), so with a `runId` a
+ * dropped connection (a backend restart, the Mac waking up) reconnects from the last seq it saw instead of failing.
+ */
+export async function* chatStream(convId: string, since = 0, signal?: AbortSignal, runId?: string): AsyncGenerator<ChatEvent> {
+  let last = since
+  let failures = 0
   while (true) {
-    const { value, done } = await reader.read()
-    if (done) break
-    buf += dec.decode(value, { stream: true })
-    let idx: number
-    while ((idx = buf.indexOf('\n\n')) >= 0) {
-      const block = buf.slice(0, idx)
-      buf = buf.slice(idx + 2)
-      let event = 'message'
-      let data = ''
-      for (const line of block.split('\n')) {
-        if (line.startsWith('event:')) event = line.slice(6).trim()
-        else if (line.startsWith('data:')) data += line.slice(5).trim()
+    try {
+      const q = `since=${last}${runId ? `&run_id=${encodeURIComponent(runId)}` : ''}`
+      const r = await fetch(`${base}/conversations/${convId}/stream?${q}`, { signal, headers: await auth() })
+      if (!r.ok || !r.body) throw new Error(`${r.status} ${r.statusText}`)
+      const reader = r.body.getReader()
+      const dec = new TextDecoder()
+      let buf = ''
+      while (true) {
+        const { value, done } = await reader.read()
+        if (done) return
+        buf += dec.decode(value, { stream: true })
+        let idx: number
+        while ((idx = buf.indexOf('\n\n')) >= 0) {
+          const block = buf.slice(0, idx)
+          buf = buf.slice(idx + 2)
+          let event = 'message'
+          let data = ''
+          let seq: number | null = null
+          for (const line of block.split('\n')) {
+            if (line.startsWith('event:')) event = line.slice(6).trim()
+            else if (line.startsWith('data:')) data += line.slice(5).trim()
+            else if (line.startsWith('id:')) seq = Number(line.slice(3).trim())
+          }
+          if (data) {
+            failures = 0
+            if (seq !== null && Number.isFinite(seq)) last = seq
+            yield { event, data: JSON.parse(data) } as ChatEvent
+          }
+        }
       }
-      if (data) yield { event, data: JSON.parse(data) } as ChatEvent
+    } catch (e) {
+      if (signal?.aborted || !runId || ++failures > STREAM_RETRIES) throw e
+      await new Promise((res) => setTimeout(res, Math.min(5000, 500 * 2 ** (failures - 1))))
     }
   }
 }

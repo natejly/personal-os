@@ -124,6 +124,70 @@ CREATE TABLE IF NOT EXISTS chunks (
 );
 CREATE INDEX IF NOT EXISTS idx_chunk_doc ON chunks(document_id, idx);
 
+-- Durable runs (see runs.RunStore). A run is a row; its SSE stream is a tail on run_events.
+-- status: running | awaiting_approval | done | error | interrupted
+CREATE TABLE IF NOT EXISTS agent_runs (
+  run_id TEXT PRIMARY KEY,
+  conversation_id TEXT REFERENCES conversations(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL DEFAULT 'chat',
+  status TEXT NOT NULL DEFAULT 'running',
+  message_id TEXT,
+  input TEXT NOT NULL DEFAULT '{}',
+  budget TEXT,
+  error TEXT,
+  last_seq INTEGER NOT NULL DEFAULT 0,
+  started_at REAL NOT NULL,
+  updated_at REAL NOT NULL,
+  ended_at REAL
+);
+CREATE INDEX IF NOT EXISTS idx_runs_conv ON agent_runs(conversation_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_status ON agent_runs(status, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS run_events (
+  run_id TEXT NOT NULL REFERENCES agent_runs(run_id) ON DELETE CASCADE,
+  seq INTEGER NOT NULL,
+  type TEXT NOT NULL,
+  data TEXT NOT NULL,
+  ts REAL NOT NULL,
+  PRIMARY KEY (run_id, seq)
+);
+
+-- One row per tool call that asked the user. status: pending | approved | denied. A pending row waits forever.
+CREATE TABLE IF NOT EXISTS approvals (
+  call_id TEXT PRIMARY KEY,
+  run_id TEXT REFERENCES agent_runs(run_id) ON DELETE CASCADE,
+  conversation_id TEXT,
+  message_id TEXT,
+  tool TEXT NOT NULL,
+  args TEXT NOT NULL DEFAULT '{}',
+  args_digest TEXT NOT NULL,
+  forced INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL DEFAULT 'pending',
+  decision TEXT,
+  decided_by TEXT,
+  created_at REAL NOT NULL,
+  decided_at REAL
+);
+CREATE INDEX IF NOT EXISTS idx_approvals_status ON approvals(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_approvals_run ON approvals(run_id);
+
+-- Idempotency journal for side-effecting tool calls. key = sha256(run_id, step, tool, args_digest).
+-- status: started (in flight, or the process died mid-call: outcome unknown) | done | error
+CREATE TABLE IF NOT EXISTS executed_calls (
+  key TEXT PRIMARY KEY,
+  run_id TEXT REFERENCES agent_runs(run_id) ON DELETE CASCADE,
+  step INTEGER NOT NULL,
+  tool TEXT NOT NULL,
+  args_digest TEXT NOT NULL,
+  call_id TEXT,
+  status TEXT NOT NULL DEFAULT 'started',
+  result TEXT,
+  attempts INTEGER NOT NULL DEFAULT 1,
+  created_at REAL NOT NULL,
+  finished_at REAL
+);
+CREATE INDEX IF NOT EXISTS idx_exec_run ON executed_calls(run_id, step);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
   text, chunk_id UNINDEXED, document_id UNINDEXED, tokenize='porter unicode61'
 );

@@ -425,7 +425,7 @@ export const useStore = create<State>((set, get) => {
     clearHold(convId)
     patchSession(convId, (s) => ({ ...s, streaming: { messageId: from.messageId, runId: run.run_id, abort }, status: settleApprovals('working', from.approvals), finishedAt: null, pendingApprovals: from.approvals, touchedAt: Date.now() }))
     try {
-      for await (const ev of chatStream(convId, run.seq, abort.signal)) {
+      for await (const ev of chatStream(convId, run.seq, abort.signal, run.run_id)) {
         const focused = get().focusedConversationId === convId
         patchSession(convId, (s) => {
           const next = applyEvent(s, ev, focused)

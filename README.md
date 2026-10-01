@@ -108,6 +108,14 @@ their own instructions, knowledge files, memories and graph.
   connected OpenAI account — a Plus or Pro subscription is not itself a pool of
   API credits — so the flow has to name the account being charged before the
   first call.
+- **RLHF on company data.** *(Planned — enterprise, later.)* Once Grain is
+  running on an organisation's own mail, docs, tickets and accepted/rejected
+  drafts, those preference signals (approve vs deny on tool cards, accept vs
+  reject on doc diffs, edited vs sent mail) become labelled pairs. A later
+  enterprise build trains or DPO-adapts a tenant-local policy on that data so
+  the assistant writes and acts in the company's voice, against the company's
+  rules, without the traces leaving the tenant. Personal Grain stays
+  single-user and does not train on your machine.
 
 ## Architecture
 

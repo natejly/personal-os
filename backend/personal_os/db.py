@@ -348,6 +348,20 @@ CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
   content, memory_id UNINDEXED, tokenize='porter unicode61'
 );
+
+-- Whole-folder snapshots a run took of a granted root (snapshots.py). `files` is the ledger of what the run
+-- changed: [{status, path, before, after}] with blob ids. state: applied | undone.
+CREATE TABLE IF NOT EXISTS run_snapshots (
+  run_id TEXT NOT NULL REFERENCES agent_runs(run_id) ON DELETE CASCADE,
+  root TEXT NOT NULL,
+  before_tree TEXT,
+  after_tree TEXT,
+  files TEXT NOT NULL DEFAULT '[]',
+  skipped TEXT NOT NULL DEFAULT '[]',
+  state TEXT NOT NULL DEFAULT 'applied',
+  created_at REAL NOT NULL,
+  PRIMARY KEY (run_id, root)
+);
 """
 
 

@@ -2228,3 +2228,14 @@ export interface PlannerSuggestion {
 export interface PlannerApplyResult {
   results: { todo_id: string | null; ok: boolean; event_id?: string; link?: string; error?: string }[]
 }
+
+/** What a reply changed in the granted folders (snapshots.py), and whether Undo / Redo is on offer. */
+export interface RunChanges {
+  run_id?: string
+  available: boolean
+  count: number
+  state: 'applied' | 'undone'
+  files: { root: string; status: 'A' | 'M' | 'D'; path: string }[]
+  skipped: string[]
+}
+export interface RunUndoResult { ok: boolean; direction: 'undo' | 'redo'; reverted: string[]; edited_since: string[] }

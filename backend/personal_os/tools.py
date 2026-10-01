@@ -86,6 +86,9 @@ ALTERNATIVE = {
     "sandbox_reset": "continue with the sandbox as it is",
     "save_memory": "state the fact in your reply so the user can keep it",
     "graph_add": "save_memory, or just state the relation in your reply",
+    "todo_write": "keep the remaining steps in your reply, and name the one you are on",
+    "read_tool_result": "work from the preview you already have, or call the original tool with a narrower query",
+    "skill_propose": "write the procedure out in your reply so the user can keep it themselves",
     "todo_add": "list the items in your reply so the user can add them",
     "todo_delete": "todo_update(done=true)",
     "board_add_card": "todo_add",
@@ -288,11 +291,13 @@ async def guarded_request(client: httpx.AsyncClient, method: str, url: str, *, h
 
 class Toolbox:
     def __init__(self, memories: Memories, graph: Graph, documents: Documents, settings_fn: Callable[[], dict[str, Any]], todos: Any = None, google: Any = None, boards: Any = None,
-                 sandboxes: Sandboxes | None = None, docs: Any = None, activity: Any = None):
+                 sandboxes: Sandboxes | None = None, docs: Any = None, activity: Any = None, plans: Any = None, results: Any = None, skills: Any = None):
         self.memories, self.graph, self.documents, self.settings = memories, graph, documents, settings_fn
         self.todos, self.google, self.boards, self.sandboxes, self.docs, self.activity = todos, google, boards, sandboxes, docs, activity
+        self.plans, self.results, self.skills = plans, results, skills
         self.specs: dict[str, ToolSpec] = {}
         self._register()
+        self._register_working()
         if todos is not None:
             self._register_todos()
         if boards is not None:
@@ -640,6 +645,84 @@ def _register_todos(self: Toolbox) -> None:
         _obj({"id": {"type": "string"}}, ["id"]), todo_delete, "todos", "writes", examples=[{"id": "td_8c41a2"}]))
 
 
+def _register_working(self: Toolbox) -> None:
+    """The model's own working memory: the plan artifact, result handles, and proposing a skill.
+
+    See working.py for why the plan lives outside the transcript and why a large result becomes a
+    handle; see learn.py for why a proposed skill is inert until the user approves it.
+    """
+    R = self.specs.__setitem__
+
+    if self.plans is not None:
+        async def todo_write(ctx: dict[str, Any], steps: list[Any]) -> Any:
+            from .working import render_plan
+
+            plan = self.plans.set(ctx["conversation_id"], steps)
+            rows = plan["steps"]
+            if not rows and steps:
+                return tool_error("No usable steps: each step needs a non-empty 'text'.", field="steps",
+                                  expected="a list of {text, status, note}",
+                                  example={"steps": [{"text": "Read the config", "status": "in_progress", "note": ""}]})
+            ctx["plan_changed"] = True
+            return {"steps": len(rows), "done": sum(1 for s in rows if s["status"] == "done"), "plan": render_plan(rows)}
+        R("todo_write", ToolSpec("todo_write", (
+            "Write this conversation's plan: the step list you are working from. Use it as soon as a request needs more "
+            "than two or three steps, and again after each step to move its status on (keep exactly one step "
+            "in_progress). The plan is re-sent to you at the end of every round and shown to the user as a live "
+            "checklist, so it is how you keep the thread on a long task. It is not the user's todo list — that is "
+            "todo_add/todo_list. Each call replaces the whole plan, so always send every step."),
+            _obj({"steps": {"type": "array", "description": "The whole plan, in order",
+                            "items": _obj({"text": {"type": "string", "description": "What this step does, one line"},
+                                           "status": {"type": "string", "enum": ["pending", "in_progress", "done"], "default": "pending"},
+                                           "note": {"type": "string", "description": "Short result or blocker, once known"}}, ["text"])}}, ["steps"]),
+            todo_write, "plan", "writes",
+            examples=[{"steps": [{"text": "Find the migration file", "status": "in_progress"}, {"text": "Add the column", "status": "pending"}, {"text": "Run the tests", "status": "pending"}]},
+                      {"steps": [{"text": "Find the migration file", "status": "done", "note": "db.py line 155"}, {"text": "Add the column", "status": "in_progress"}, {"text": "Run the tests", "status": "pending"}]}]))
+
+    if self.results is not None:
+        async def read_tool_result(ctx: dict[str, Any], result_id: str, offset: int = 0, limit: int = 4000) -> Any:
+            out = self.results.read(ctx["conversation_id"], result_id, offset, limit)
+            if out is None:
+                recent = [r["id"] for r in self.results.list(ctx["conversation_id"], limit=5)]
+                return tool_error(f"No stored result with id '{result_id}' in this chat.", field="result_id",
+                                  expected="the result_id from a tool result that came back as a handle",
+                                  example={"result_id": recent[0] if recent else "tr_9f1c2a84", "offset": 0},
+                                  alternative="call the tool again with a narrower query, or page the handle you do have: " + (", ".join(recent) or "none yet"))
+            return out
+        R("read_tool_result", ToolSpec("read_tool_result", (
+            "Read part of a large tool result that was stored instead of put in your context. When a tool answered with "
+            "{result_id, total_chars, shape, preview}, the full text is kept out of the conversation; read it here, "
+            "starting at offset 0 and following next_offset. `shape` tells you what is in there before you page."),
+            _obj({"result_id": {"type": "string"}, "offset": {"type": "integer", "default": 0, "description": "character offset into the stored result"},
+                  "limit": {"type": "integer", "default": 4000, "description": "characters to return, max 20000"}}, ["result_id"]),
+            read_tool_result, "context",
+            examples=[{"result_id": "tr_9f1c2a84"}, {"result_id": "tr_9f1c2a84", "offset": 4000}, {"result_id": "tr_9f1c2a84", "offset": 0, "limit": 20000}]))
+
+    if self.skills is not None:
+        async def skill_propose(ctx: dict[str, Any], name: str, description: str, procedure: str) -> Any:
+            if len((procedure or "").strip()) < 40:
+                return tool_error("The procedure is too short to be useful.", field="procedure",
+                                  expected="numbered steps describing the method, at least a few lines",
+                                  example={"name": "Reconcile the monthly invoices", "description": "When the user asks to check a month's invoices",
+                                           "procedure": "1. google_sheets_read the ledger tab\n2. gmail_search for that month's invoices\n3. compare totals and report the gaps"})
+            s = self.skills.propose(name, description, procedure, project_id=ctx.get("project_id"),
+                                    conversation_id=ctx.get("conversation_id"), source="proposed")
+            return {"candidate_id": s["id"], "name": s["name"], "status": s["status"],
+                    "note": "Saved as a candidate for the user to review in Settings → Skills. It is not active, and it "
+                            "will not reach your instructions unless the user approves it. Tell them it is waiting."}
+        R("skill_propose", ToolSpec("skill_propose", (
+            "Propose a reusable procedure (a 'skill') from a task that just went well, for the user to review. It is "
+            "stored as a candidate only: it does not change your instructions and has no effect until the user approves "
+            "it. Use it when they ask you to remember how something is done, or after finishing a multi-step task they "
+            "are likely to repeat. Describe the method, not this instance — no ids, names or dates."),
+            _obj({"name": {"type": "string", "description": "Short imperative name"},
+                  "description": {"type": "string", "description": "One line on when it applies"},
+                  "procedure": {"type": "string", "description": "Numbered steps: tools used, order, checks, pitfalls"}}, ["name", "description", "procedure"]),
+            skill_propose, "skills", "writes",
+            examples=[{"name": "Draft the weekly status mail", "description": "When the user asks for their Friday status update",
+                       "procedure": "1. calendar_events for the past week\n2. todo_list for what closed\n3. draft with gmail_draft, never send\n4. list anything still open at the end"}]))
+
+
 def _register_google(self: Toolbox) -> None:
     R = self.specs.__setitem__
     g = self.google
@@ -979,6 +1062,7 @@ def _register_activity(self: Toolbox) -> None:
         _obj({"minutes": {"type": "number", "default": 30}}, []), activity_pause, "activity", "writes"))
 
 
+Toolbox._register_working = _register_working  # type: ignore[attr-defined]
 Toolbox._register_todos = _register_todos  # type: ignore[attr-defined]
 Toolbox._register_boards = _register_boards  # type: ignore[attr-defined]
 Toolbox._register_google = _register_google  # type: ignore[attr-defined]

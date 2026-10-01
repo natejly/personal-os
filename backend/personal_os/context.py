@@ -22,10 +22,11 @@ def build_context(
     conv_settings: dict[str, Any],
     global_system_prompt: str,
     activity: Any = None,
+    skills: Any = None,
 ) -> tuple[str, dict[str, Any]]:
     """Returns (system_prompt, context_used)."""
     parts: list[str] = [global_system_prompt.strip()] if global_system_prompt.strip() else []
-    used: dict[str, Any] = {"memories": [], "nodes": [], "edges": [], "chunks": [], "project": None, "activity": None}
+    used: dict[str, Any] = {"memories": [], "nodes": [], "edges": [], "chunks": [], "project": None, "activity": None, "skills": []}
 
     if project:
         used["project"] = {"id": project["id"], "name": project["name"]}
@@ -56,6 +57,16 @@ def build_context(
             blocks = [f"### {h['name']} (chunk {h['idx'] + 1})\n{h['text']}" for h in hits]
             parts.append("## Relevant document excerpts\n" + "\n\n".join(blocks))
             used["chunks"] = [{"chunk_id": h["chunk_id"], "document_id": h["document_id"], "name": h["name"], "idx": h["idx"], "text": h["text"][:400]} for h in hits]
+
+    # Procedural memory. Only skills the user approved by hand are ever injected, and the block says so
+    # inside the prompt: a model-written procedure is data, never a second set of instructions.
+    if skills is not None and conv_settings.get("useSkills", True):
+        approved = [s for s in skills.list(status="approved", project_id=project_id) if (s["procedure"] or "").strip()]
+        if approved:
+            from .learn import MAX_INJECTED_SKILLS, skill_block
+
+            parts.append(skill_block(approved))
+            used["skills"] = [{"id": s["id"], "name": s["name"], "description": s["description"]} for s in approved[:MAX_INJECTED_SKILLS]]
 
     # Observed computer activity. Off unless the user turned the monitor on, and skippable per chat
     # like every other context source.

@@ -28,7 +28,7 @@ from . import activity, assist, llm, tools
 from .context import build_context, estimate_tokens
 from .db import Database, data_dir_from_env, new_id
 from .extract_text import extract_text
-from .learn import learn_from_exchange
+from .learn import Skills, induce_skill, learn_from_exchange
 from .repos import ALL, Conversations, Documents, Graph, Memories, Projects
 from .boards import Boards
 from .canvas import SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
@@ -44,6 +44,7 @@ from .todos import Todos
 from .tools import Toolbox, summarize_result
 from .trace import Tracer, now_ms
 from .usage import Pricing, Usage
+from .working import Plans, ToolResults
 
 log = logging.getLogger("personal_os")
 
@@ -238,7 +239,13 @@ if not any(getattr(f, "__name__", "") == "_record_usage" for f in llm._usage_lis
     llm.on_usage(_record_usage)
 sandboxes = Sandboxes(settings)
 monitor = activity.Monitor(db, settings, llm.complete)
-toolbox = Toolbox(memories, graph, documents, settings, todos=todos, google=google, boards=boards, sandboxes=sandboxes, docs=docs, activity=monitor)
+# Working memory that is not the chat: the per-conversation plan, the full tool-result blobs behind
+# their handles (working.py), and procedural memory awaiting review (learn.Skills).
+plans = Plans(db)
+tool_results = ToolResults(db)
+skills = Skills(db)
+toolbox = Toolbox(memories, graph, documents, settings, todos=todos, google=google, boards=boards, sandboxes=sandboxes, docs=docs, activity=monitor,
+                  plans=plans, results=tool_results, skills=skills)
 
 
 def sid(project_id: str | None) -> str | None:
@@ -422,6 +429,10 @@ Besides normal markdown, the UI renders three fenced code blocks inline:
 Only chart real values you have or computed; never invent data for decoration. Text before and after a block is shown as usual."""
 
 TOOLS_HINT = "You have tools. Use them when they would make the answer more accurate or current; otherwise answer directly. After using tools, write the final answer for the user."
+# Only added when todo_write is actually available in this chat (see _chat_stream).
+PLAN_HINT = ("When a request needs more than a couple of tool calls, open with todo_write to lay out the steps, then update it "
+             "as each one lands. Your current plan is re-sent to you at the end of every round, so it — not your memory of "
+             "earlier rounds — is what keeps a long task on track.")
 
 
 BUDGET_STOP = ("Out of budget ({axis}): this tool call was not executed and no further tool calls will run. "
@@ -524,7 +535,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         memories=memories, graph=graph, documents=documents,
         project=project, project_id=conv["project_id"], query=user_text,
         settings=cfg, conv_settings=conv["settings"], global_system_prompt=cfg["systemPrompt"],
-        activity=monitor,
+        activity=monitor, skills=skills,
     )
     tracer.end(cspan, {"memories": len(used["memories"]), "entities": len(used["nodes"]), "excerpts": len(used["chunks"]),
                        "history_messages": len(history)})
@@ -544,7 +555,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     }
     modes = toolbox.effective(cfg.get("tools") or {}, (project or {}).get("tools"), conv["settings"].get("tools")) if conv["settings"].get("useTools", True) else {}
     tool_schemas = toolbox.schemas(modes)
-    system = "\n\n".join(p for p in (system, RENDER_HINT, TOOLS_HINT if tool_schemas else "") if p)
+    tools_hint = (TOOLS_HINT + ("\n" + PLAN_HINT if any(s["function"]["name"] == "todo_write" for s in tool_schemas) else "")) if tool_schemas else ""
+    system = "\n\n".join(p for p in (system, RENDER_HINT, tools_hint) if p)
     used["system_prompt"] = system
     used["tokens_estimate"] = estimate_tokens(system)
     messages = [{"role": "system", "content": system}] + history
@@ -558,9 +570,24 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     tool_errors: dict[str, int] = {}
     blocked: set[str] = set()
     _round = 0
+    # The plan artifact (working.py) rides at the very end of the context, re-sent before every model
+    # call rather than remembered: after a round of long tool results the task itself is the first
+    # thing to fall out of attention. One slot, moved, never accumulated.
+    plan_msg: dict[str, Any] | None = None
+
+    def _reinject_plan() -> None:
+        nonlocal plan_msg
+        if plan_msg is not None:
+            messages[:] = [m for m in messages if m is not plan_msg]
+            plan_msg = None
+        block = plans.block(conv_id)
+        if block:
+            plan_msg = {"role": "system", "content": block}
+            messages.append(plan_msg)
 
     async def _final_round() -> AsyncIterator[tuple[str, Any]]:
         """Closing answer after a budget or breaker stop: one tool-free call, itself exempt from the budget."""
+        _reinject_plan()
         if buf and buf[-1] and not buf[-1].endswith("\n"):
             buf.append("\n\n")
             yield "delta", {"id": am["id"], "text": "\n\n"}
@@ -613,6 +640,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             budget.rounds = _round - 1  # rounds already completed: the Nth round's tool calls must still be allowed to run
             round_start = len(buf)
             end: dict[str, Any] = {}
+            _reinject_plan()  # last message in the context, after the previous round's tool results
             lspan = tracer.start("llm", model, {"round": _round, "messages": len(messages), "tools": len(tool_schemas)})
             yield "span", {"message_id": am["id"], "span": lspan}
             first_token: int | None = None
@@ -758,7 +786,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 yield "tool_result", {"message_id": am["id"], **event}
                 yield "span", {"message_id": am["id"], "span": tspan}
                 for_model = {**result, "images_shown_to_user": [i["name"] for i in images]} if images and isinstance(result, dict) else result
-                messages.append({"role": "tool", "tool_call_id": c["id"], "content": summarize_result(for_model, 24000)})
+                # Small results go in whole; a big one is stored and replaced by a handle the model can
+                # page with read_tool_result, so nothing is silently truncated away. See working.py.
+                messages.append({"role": "tool", "tool_call_id": c["id"],
+                                 "content": tool_results.for_model(conv_id, am["id"], c["name"], for_model)})
+                if tool_ctx.pop("plan_changed", None):
+                    yield "plan", {"conversation_id": conv_id, "steps": (plans.get(conv_id) or {}).get("steps") or []}
             if partial == "loop":
                 async for chunk in _final_round():
                     yield chunk
@@ -932,8 +965,8 @@ def context_preview(body: ContextPreviewIn) -> dict[str, Any]:
     _, used = build_context(
         memories=memories, graph=graph, documents=documents, project=project, project_id=sid(body.project_id),
         query=body.query, settings=cfg,
-        conv_settings={"useMemory": True, "useGraph": True, "useDocuments": True, "useActivity": True, **body.conv_settings},
-        global_system_prompt=cfg["systemPrompt"], activity=monitor,
+        conv_settings={"useMemory": True, "useGraph": True, "useDocuments": True, "useActivity": True, "useSkills": True, **body.conv_settings},
+        global_system_prompt=cfg["systemPrompt"], activity=monitor, skills=skills,
     )
     return used
 
@@ -2466,3 +2499,111 @@ def instantiate_canvas_preset(pid: str, body: PresetInstantiateIn) -> dict[str, 
     if not c:
         raise HTTPException(404, "No such preset")
     return c
+
+
+# ---------------- working memory: the plan, result handles, skills ----------------
+class PlanIn(BaseModel):
+    steps: list[dict[str, Any]] = Field(default_factory=list)
+
+
+def _plan_payload(conv_id: str) -> dict[str, Any]:
+    plan = plans.get(conv_id)
+    return {"conversation_id": conv_id, "steps": (plan or {}).get("steps") or [], "updated_at": (plan or {}).get("updated_at")}
+
+
+@app.get("/conversations/{id}/plan")
+def get_plan(id: str) -> dict[str, Any]:
+    if not convos.get(id, with_messages=False):
+        raise HTTPException(404, "Conversation not found")
+    return _plan_payload(id)
+
+
+@app.put("/conversations/{id}/plan")
+def put_plan(id: str, body: PlanIn) -> dict[str, Any]:
+    """The user's half of the artifact: tick a step off, reorder, reword. The model sees the edit next round."""
+    if not convos.get(id, with_messages=False):
+        raise HTTPException(404, "Conversation not found")
+    plans.set(id, body.steps)
+    return _plan_payload(id)
+
+
+@app.delete("/conversations/{id}/plan")
+def delete_plan(id: str) -> dict[str, bool]:
+    plans.clear(id)
+    return {"ok": True}
+
+
+@app.get("/conversations/{id}/tool-results")
+def list_tool_results(id: str, limit: int = 20) -> list[dict[str, Any]]:
+    """The handles this conversation produced: what was stored instead of inlined."""
+    return tool_results.list(id, limit)
+
+
+@app.get("/tool-results/{rid}")
+def read_tool_result_blob(rid: str, offset: int = 0, limit: int = 20000) -> dict[str, Any]:
+    row = tool_results.get(rid)
+    if not row:
+        raise HTTPException(404, "No such tool result")
+    out = tool_results.read(row["conversation_id"], rid, offset, limit)
+    return out or {}
+
+
+class SkillPatch(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    procedure: str | None = None
+    status: str | None = None
+    project_id: str | None = None
+
+
+class SkillIn(BaseModel):
+    name: str
+    description: str = ""
+    procedure: str = ""
+    project_id: str | None = None
+
+
+@app.get("/skills")
+def list_skills(status: str | None = None, project_id: str = "all") -> list[dict[str, Any]]:
+    return skills.list(status=status, project_id="__all__" if project_id == "all" else sid(project_id))
+
+
+@app.post("/skills")
+def create_skill(body: SkillIn) -> dict[str, Any]:
+    """A skill the user writes themselves. Still created as a candidate: approval is one explicit step, always."""
+    return skills.propose(body.name, body.description, body.procedure, project_id=body.project_id, source="user")
+
+
+@app.patch("/skills/{skill_id}")
+def patch_skill(skill_id: str, body: SkillPatch) -> dict[str, Any]:
+    """Rename, edit, approve ('approved') or reject ('rejected'). Approving here is the only way a skill
+    ever reaches a system prompt — see learn.Skills.approved_block and context.build_context."""
+    patch = body.model_dump(exclude_unset=True)
+    if patch.get("status") and patch["status"] not in ("candidate", "approved", "rejected"):
+        raise HTTPException(400, "status must be candidate, approved or rejected")
+    s = skills.update(skill_id, patch)
+    if not s:
+        raise HTTPException(404, "No such skill")
+    return s
+
+
+@app.delete("/skills/{skill_id}")
+def delete_skill(skill_id: str) -> dict[str, bool]:
+    skills.delete(skill_id)
+    return {"ok": True}
+
+
+@app.post("/conversations/{id}/skills/induce")
+async def induce_conversation_skill(id: str) -> dict[str, Any]:
+    """Distil this conversation into a candidate procedure for review. Never enables anything."""
+    conv = convos.get(id)
+    if not conv:
+        raise HTTPException(404, "Conversation not found")
+    msgs = [m for m in conv["messages"] if m["role"] in ("user", "assistant") and (m["content"] or "").strip()]
+    if len(msgs) < 2:
+        return {"candidate": None, "reason": "Not enough of a conversation to learn a procedure from."}
+    transcript = "\n\n".join(f"{m['role'].upper()}: {m['content'][:2000]}" for m in msgs[-24:])
+    cfg = settings()
+    cand = await induce_skill(settings=cfg, skills=skills, project_id=conv["project_id"], conversation_id=id,
+                              transcript=transcript, model=conv["model"] or cfg["defaultModel"])
+    return {"candidate": cand, "reason": None if cand else "Nothing reusable enough to propose."}

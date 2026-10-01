@@ -19,8 +19,51 @@ export interface ContextUsed {
   chunks: { chunk_id: string; document_id: string; name: string; idx: number; text: string }[]
   /** The activity-monitor block, verbatim; null when the monitor is off or the chat opted out. */
   activity: string | null
+  /** Approved skills injected as procedural memory. Absent on messages written before skills existed. */
+  skills?: { id: string; name: string; description: string }[]
   system_prompt: string
   tokens_estimate: number
+}
+
+export type PlanStatus = 'pending' | 'in_progress' | 'done'
+/** One step of a chat's plan artifact: written by the model with `todo_write`, tickable by the user. */
+export interface PlanStep {
+  id: string
+  text: string
+  status: PlanStatus
+  note: string
+}
+export interface Plan {
+  conversation_id: string
+  steps: PlanStep[]
+  updated_at: number | null
+}
+
+export type SkillStatus = 'candidate' | 'approved' | 'rejected'
+/** Procedural memory. A candidate is inert: only an approved skill is ever injected into a prompt. */
+export interface Skill {
+  id: string
+  project_id: string | null
+  name: string
+  description: string
+  procedure: string
+  status: SkillStatus
+  /** induced (from a conversation) · proposed (by the assistant mid-chat) · user */
+  source: string
+  source_conversation_id: string | null
+  created_at: number
+  updated_at: number
+  approved_at: number | null
+}
+
+/** A large tool result kept out of the model's context; `read_tool_result` pages it. */
+export interface ToolResultHandle {
+  id: string
+  tool: string
+  total_chars: number
+  shape: Record<string, unknown>
+  message_id: string | null
+  created_at: number
 }
 
 export type ToolMode = 'on' | 'ask' | 'off'
@@ -112,6 +155,8 @@ export interface ConversationSettings {
   useActivity: boolean
   autoLearn: boolean
   useTools: boolean
+  /** Inject the skills the user approved. Defaults on; only approved ones are ever eligible. */
+  useSkills?: boolean
   tools: Record<string, ToolOverride>
   /** Sticky: a reply read untrusted content, so external tools keep asking and fetch_url stays restricted. */
   tainted?: boolean
@@ -444,6 +489,7 @@ export type ChatEvent =
   | { event: 'span'; data: { message_id: string; span: Span } }
   | { event: 'done'; data: { id: string; error: string | null; context_used: ContextUsed; tool_events: ToolEvent[]; trace: Span[]; stopped: boolean; partial?: PartialReason | null; tainted?: boolean; taint_sources?: string[] } }
   | { event: 'taint'; data: { message_id: string; source: string } }
+  | { event: 'plan'; data: { conversation_id: string; steps: PlanStep[] } }
   | { event: 'learned'; data: { memories: Memory[]; nodes: GraphNode[]; edges: GraphEdge[] } }
   | { event: 'learn_error'; data: { message: string } }
   | { event: 'error'; data: { message: string } }

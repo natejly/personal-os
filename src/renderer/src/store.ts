@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ActivityConfig, ActivityContextFile, ActivityEvent, ActivitySignal, ActivityStatus, ActivitySummary, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocRevision, Document, FullDoc, GraphData, Memory, Message, ModelInfo, Settings, Project, RunConflict, SessionStatus, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap } from '@shared/types'
+import type { ActivityConfig, ActivityContextFile, ActivityEvent, ActivitySignal, ActivityStatus, ActivitySummary, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocRevision, Document, FullDoc, GraphData, Memory, Message, ModelInfo, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap } from '@shared/types'
 import { api, chatStream, setBase, type Scope } from './lib/api'
 import { finishStatus, mergeConversation, pickEvictions, reduceStatus, settleApprovals } from './sessionStatus'
 import { viewHidden } from './modules'
@@ -104,6 +104,11 @@ export interface State {
   graph: GraphData
   documents: Document[]
 
+  /** Each chat's plan artifact, keyed by conversation id: the checklist the assistant works from. */
+  plans: Record<string, PlanStep[]>
+  /** Procedural memory — candidates and approved skills. Loaded when the review surface opens. */
+  skills: Skill[]
+
   /** Docs: the markdown the user writes. List rows, plus the one open in the editor. */
   docs: Doc[]
   activeDoc: FullDoc | null
@@ -175,6 +180,18 @@ export interface State {
   addMemory: (content: string, kind: string, projectId: string | null) => Promise<void>
   updateMemory: (id: string, patch: Parameters<typeof api.memories.update>[1]) => Promise<void>
   deleteMemory: (id: string) => Promise<void>
+
+  /** The plan of one chat. Cheap, and the `plan` stream event keeps it current after the first read. */
+  loadPlan: (conversationId: string) => Promise<void>
+  setPlanSteps: (conversationId: string, steps: PlanStep[]) => Promise<void>
+  clearPlan: (conversationId: string) => Promise<void>
+
+  refreshSkills: () => Promise<void>
+  /** Rename, edit, approve or reject. Approving is what lets a skill into the system prompt. */
+  updateSkill: (id: string, patch: Parameters<typeof api.skills.update>[1]) => Promise<void>
+  deleteSkill: (id: string) => Promise<void>
+  /** Ask the backend to distil a chat into a candidate skill for review. */
+  induceSkill: (conversationId: string) => Promise<void>
 
   refreshGraph: () => Promise<void>
   refreshDocuments: () => Promise<void>
@@ -444,6 +461,9 @@ export const useStore = create<State>((set, get) => {
             if (memories.length + nodes.length + edges.length) refreshAll()
             break
           }
+          case 'plan':
+            set((st) => ({ plans: { ...st.plans, [convId]: ev.data.steps } }))
+            break
           case 'learn_error':
             get().toast(`Auto-learn failed: ${ev.data.message}`, 'error')
             break
@@ -541,6 +561,8 @@ export const useStore = create<State>((set, get) => {
     memories: [],
     graph: { nodes: [], edges: [] },
     documents: [],
+    plans: {},
+    skills: [],
 
     activity: null,
     activityEvents: [],
@@ -937,6 +959,46 @@ export const useStore = create<State>((set, get) => {
         set({ activeDoc: doc, docDraft: null })
         get().toast('Document restored')
         await Promise.all([get().refreshDocRevisions(doc.id), get().refreshDocs()])
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+
+    loadPlan: async (conversationId) => {
+      const plan = await api.plan.get(conversationId).catch(() => null)
+      if (plan) set((s) => ({ plans: { ...s.plans, [conversationId]: plan.steps } }))
+    },
+    setPlanSteps: async (conversationId, steps) => {
+      // Optimistic: ticking a step off must feel like a checkbox, and the model reads the stored plan
+      // at the top of its next round either way.
+      set((s) => ({ plans: { ...s.plans, [conversationId]: steps } }))
+      const plan = await api.plan.set(conversationId, steps).catch((e: Error) => {
+        get().toast(e.message, 'error')
+        return null
+      })
+      if (plan) set((s) => ({ plans: { ...s.plans, [conversationId]: plan.steps } }))
+    },
+    clearPlan: async (conversationId) => {
+      set((s) => ({ plans: { ...s.plans, [conversationId]: [] } }))
+      await api.plan.clear(conversationId).catch(() => undefined)
+    },
+
+    refreshSkills: async () => set({ skills: await api.skills.list() }),
+    updateSkill: async (id, patch) => {
+      const s = await api.skills.update(id, patch)
+      set((st) => ({ skills: st.skills.map((x) => (x.id === id ? s : x)) }))
+    },
+    deleteSkill: async (id) => {
+      await api.skills.delete(id)
+      set((st) => ({ skills: st.skills.filter((x) => x.id !== id) }))
+    },
+    induceSkill: async (conversationId) => {
+      try {
+        const { candidate, reason } = await api.skills.induce(conversationId)
+        if (candidate) {
+          set((st) => ({ skills: [candidate, ...st.skills] }))
+          get().toast(`Candidate skill “${candidate.name}” is waiting for your review`, 'learned')
+        } else get().toast(reason ?? 'Nothing reusable to propose', 'info')
       } catch (e) {
         get().toast((e as Error).message, 'error')
       }

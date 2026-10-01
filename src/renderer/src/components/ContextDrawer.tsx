@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { X, Brain, Share2, FileText, Wand2, Eye, Globe, Wrench, Activity, ShieldAlert, MonitorDot } from 'lucide-react'
+import { X, Brain, Share2, FileText, Wand2, Eye, Globe, GraduationCap, Wrench, Activity, ShieldAlert, MonitorDot } from 'lucide-react'
 import { ToolOverrides } from './ToolPermissions'
 import TraceView from './TraceView'
 import { useStore, useProject, useConversation, useStreamingMessageId } from '../store'
@@ -18,9 +18,9 @@ function Toggle({ label, hint, value, onChange, icon }: { label: string; hint: s
 }
 
 function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
-  const { setView, openMemory, memories } = useStore()
+  const { setView, openMemory, memories, setSettingsOpen } = useStore()
   const [showPrompt, setShowPrompt] = useState(false)
-  const has = ctx.memories.length + ctx.nodes.length + ctx.chunks.length > 0 || Boolean(ctx.activity)
+  const has = ctx.memories.length + ctx.nodes.length + ctx.chunks.length + (ctx.skills?.length ?? 0) > 0 || Boolean(ctx.activity)
   return (
     <div className="ctx-used">
       <div className="ctx-meta">
@@ -54,6 +54,12 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
           </ul>
         </section>
       )}
+      {(ctx.skills?.length ?? 0) > 0 && (
+        <section>
+          <h5><GraduationCap size={12} /> Skills ({ctx.skills?.length}) <button className="link" onClick={() => setSettingsOpen(true)}>review</button></h5>
+          <ul>{ctx.skills?.map((s) => <li key={s.id}><b>{s.name}</b>{s.description ? ` — ${s.description}` : ''}</li>)}</ul>
+        </section>
+      )}
       {ctx.chunks.length > 0 && (
         <section>
           <h5><FileText size={12} /> Documents ({ctx.chunks.length} excerpt{ctx.chunks.length === 1 ? '' : 's'}) <button className="link" onClick={() => setView('documents')}>manage</button></h5>
@@ -70,7 +76,7 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
   const settings = useStore((s) => s.settings)
   const projectId = convo?.project_id ?? draftProjectId
   const project = useProject(projectId)
-  const { toggleContext, setChatSettings, openProject, setContextTab: setTab } = useStore()
+  const { toggleContext, setChatSettings, openProject, induceSkill, setContextTab: setTab } = useStore()
   const tab = useStore((s) => s.contextTab)
   const traceMessageId = useStore((s) => s.traceMessageId)
   const streamingMessageId = useStreamingMessageId(conversationId)
@@ -132,6 +138,13 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
         <Toggle icon={<MonitorDot size={14} />} label="Activity" hint={activityRunning ? 'What you have been doing on this computer' : 'Activity monitor is off'} value={cs.useActivity !== false} onChange={(v) => void setChatSettings({ useActivity: v }, conversationId)} />
         <Toggle icon={<Wand2 size={14} />} label="Auto-learn" hint={settings.autoLearn ? 'Extract memories & graph after each reply' : 'Disabled globally in settings'} value={cs.autoLearn && settings.autoLearn} onChange={(v) => void setChatSettings({ autoLearn: v }, conversationId)} />
         <Toggle icon={<Wrench size={14} />} label="Tools" hint="Web, documents, memory, graph, todos, boards, Python… External actions ask first." value={cs.useTools} onChange={(v) => void setChatSettings({ useTools: v }, conversationId)} />
+        <Toggle icon={<GraduationCap size={14} />} label="Skills" hint="Procedures you approved, injected as procedural memory. Candidates are never injected." value={cs.useSkills !== false} onChange={(v) => void setChatSettings({ useSkills: v }, conversationId)} />
+        {convo && (
+          <div className="ctx-tools">
+            <button className="link small" onClick={() => void induceSkill(convo.id)}>propose a skill from this chat…</button>
+            <span className="muted small"> it lands in Settings → Skills as a candidate for you to review.</span>
+          </div>
+        )}
         {cs.useTools && (
           <div className="ctx-tools">
             <button className="link small" onClick={() => setToolsOpen((o) => !o)}>{toolsOpen ? 'hide per-tool overrides' : 'per-tool overrides…'}</button>

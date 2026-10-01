@@ -7,6 +7,7 @@ import { useModal } from '../lib/useModal'
 import type { Settings, ShortcutState } from '@shared/types'
 import { ToolGlobalToggles } from './ToolPermissions'
 import GoogleSettings from './GoogleSettings'
+import SkillsReview from './SkillsReview'
 import UsageView from './UsageView'
 
 export default function SettingsModal(): JSX.Element {
@@ -93,6 +94,11 @@ export default function SettingsModal(): JSX.Element {
           <label><span>Extraction model <small className="muted">(blank = same as chat model)</small></span>
             <input list="model-options" value={draft.extractionModel} onChange={(e) => patch({ extractionModel: e.target.value })} placeholder="e.g. gpt-4o-mini" spellCheck={false} />
           </label>
+        </section>
+
+        <section>
+          <h3>Skills <small className="muted">(procedural memory)</small></h3>
+          <SkillsReview />
         </section>
 
         <section>

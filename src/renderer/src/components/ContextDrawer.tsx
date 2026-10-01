@@ -18,7 +18,7 @@ function Toggle({ label, hint, value, onChange, icon }: { label: string; hint: s
 }
 
 function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
-  const { setView, openMemory, memories, setSettingsOpen } = useStore()
+  const { setView, openMemory, openSettings, memories, setSettingsOpen } = useStore()
   const [showPrompt, setShowPrompt] = useState(false)
   const has = ctx.memories.length + ctx.nodes.length + ctx.chunks.length + (ctx.skills?.length ?? 0) > 0
     || Boolean(ctx.activity) || Boolean(ctx.page) || Boolean(ctx.style) || Boolean(ctx.meetings)
@@ -83,7 +83,7 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
       )}
       {ctx.chunks.length > 0 && (
         <section>
-          <h5><FileText size={12} /> Documents ({ctx.chunks.length} excerpt{ctx.chunks.length === 1 ? '' : 's'}) <button className="link" onClick={() => setView('documents')}>manage</button></h5>
+          <h5><FileText size={12} /> Documents ({ctx.chunks.length} excerpt{ctx.chunks.length === 1 ? '' : 's'}) <button className="link" onClick={() => openSettings('knowledge', 'documents')}>manage</button></h5>
           <ul>{ctx.chunks.map((c) => <li key={c.chunk_id}><b>{c.name}</b> · chunk {c.idx + 1}<div className="chunk-preview">{c.text}</div></li>)}</ul>
         </section>
       )}

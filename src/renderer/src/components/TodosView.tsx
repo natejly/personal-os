@@ -13,7 +13,7 @@ export default function TodosView(): JSX.Element {
   const todos = useStore((s) => s.todos)
   const sidebarOpen = useStore((s) => s.sidebarOpen)
   const tasksSync = useStore((s) => s.tasksSync)
-  const { refreshTodos, addTodo, toggleSidebar, refreshTasksSync, runTasksSync } = useStore()
+  const { refreshTodos, addTodo, toggleSidebar, refreshTasksSync, runTasksSync, toast } = useStore()
   const [scope, setScope] = useState<Scope>('all')
   const [showDone, setShowDone] = useState(false)
   const [title, setTitle] = useState('')
@@ -23,10 +23,18 @@ export default function TodosView(): JSX.Element {
   useEffect(() => { void refreshTodos(scope, showDone) }, [scope, showDone, refreshTodos])
   useEffect(() => { void refreshTasksSync() }, [refreshTasksSync])
 
+  // Cleared before the request, so a second Enter (or Enter then Add) cannot post the same todo twice;
+  // handed back if the request fails.
   const add = async (): Promise<void> => {
-    if (!title.trim()) return
-    await addTodo({ title, due: due || null, priority, project_id: scope === 'all' || scope === 'personal' ? null : scope })
+    const t = title, d = due
+    if (!t.trim()) return
     setTitle(''); setDue('')
+    try {
+      await addTodo({ title: t, due: d || null, priority, project_id: scope === 'all' || scope === 'personal' ? null : scope })
+    } catch (e) {
+      setTitle(t); setDue(d)
+      return toast((e as Error).message, 'error')
+    }
     await refreshTodos(scope, showDone)
   }
 

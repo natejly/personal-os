@@ -45,8 +45,6 @@ export const OPTIONAL_VIEWS: { view: View; label: string }[] = [
   { view: 'mail', label: 'Mail' },
   { view: 'boards', label: 'Boards' },
   { view: 'dashboards', label: 'Dashboards' },
-  { view: 'memory', label: 'Memory' },
-  { view: 'documents', label: 'Documents' },
   { view: 'library', label: 'Library' },
   { view: 'cowork', label: 'Cowork' },
   // Showing the view records nothing. Recording is `meetings.enabled` plus an acknowledged consent

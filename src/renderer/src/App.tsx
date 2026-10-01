@@ -3,8 +3,6 @@ import { useStore } from './store'
 import { watchSelection } from './lib/pageContext'
 import Sidebar from './components/Sidebar'
 import ChatView from './components/ChatView'
-import MemoryPanel from './components/MemoryPanel'
-import DocumentsView from './components/DocumentsView'
 import DocsView from './components/DocsView'
 import MeetingsView from './components/MeetingsView'
 import ActivityView from './components/ActivityView'
@@ -169,8 +167,6 @@ export default function App(): JSX.Element {
           {view === 'mail' && <MailView />}
           {view === 'boards' && <BoardsView />}
           {view === 'dashboards' && <DashboardsView />}
-          {view === 'memory' && <MemoryPanel />}
-          {view === 'documents' && <DocumentsView />}
           {view === 'docs' && <DocsView />}
           {view === 'meetings' && <MeetingsView />}
           {view === 'activity' && <ActivityView />}

@@ -17,7 +17,8 @@ export default function DocumentsView({ projectId, embedded = false }: { project
   const libraryScope = useStore((s) => s.libraryScope)
   const sidebarOpen = useStore((s) => s.sidebarOpen)
   const { uploadDocuments, deleteDocument, toggleSidebar, setLibraryScope, loadScope } = useStore()
-  const scope: Scope = embedded ? projectId! : libraryScope
+  // Embedded without a project (Settings → Knowledge base) it follows the library scope, like the page did.
+  const scope: Scope = projectId ?? libraryScope
   const fileRef = useRef<HTMLInputElement>(null)
   const [drag, setDrag] = useState(false)
   const [open, setOpen] = useState<Document | null>(null)
@@ -28,7 +29,7 @@ export default function DocumentsView({ projectId, embedded = false }: { project
 
   const uploadBtn = (
     <>
-      <input id={embedded ? 'doc-upload-input-project' : 'doc-upload-input'} ref={fileRef} type="file" multiple hidden accept={ACCEPT}
+      <input id={projectId ? 'doc-upload-input-project' : 'doc-upload-input'} ref={fileRef} type="file" multiple hidden accept={ACCEPT}
         onChange={(e) => { if (e.target.files?.length) void uploadDocuments(e.target.files, targetProject); e.target.value = '' }} />
       <button className="primary-btn" onClick={() => fileRef.current?.click()}><Upload size={14} /> Upload{targetProject ? ' to project' : ''}</button>
     </>
@@ -38,7 +39,7 @@ export default function DocumentsView({ projectId, embedded = false }: { project
     <div className={`page-body ${drag ? 'dragging' : ''}`} onDragOver={(e) => { e.preventDefault(); setDrag(true) }} onDragLeave={() => setDrag(false)}
       title="Drop files to upload"
       onDrop={(e) => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files.length) void uploadDocuments(e.dataTransfer.files, targetProject) }}>
-      {embedded && <div className="add-row">{uploadBtn}<span className="muted small">Knowledge for this project: .txt, .md, .pdf, .docx and code files. Drop files anywhere here.</span></div>}
+      {embedded && <div className="add-row">{uploadBtn}<span className="muted small">{projectId ? 'Knowledge for this project: ' : ''}.txt, .md, .pdf, .docx and code files. Drop files anywhere here.</span></div>}
       {!embedded && <p className="muted small">Supports .txt, .md, .pdf, .docx and common code/text files. Documents are chunked and full-text indexed; the best matching excerpts are pulled into chats automatically. Personal documents are available everywhere; project documents only inside that project. Drop files anywhere here.</p>}
       {documents.length === 0 && (
         <div className="empty-state">
@@ -62,9 +63,10 @@ export default function DocumentsView({ projectId, embedded = false }: { project
         ))}
       </div>
       {open && (
-        <div className="modal-backdrop" onMouseDown={() => setOpen(null)}>
+        <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) setOpen(null) }}
+          onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setOpen(null) } }}>
           <div className="modal wide" onMouseDown={(e) => e.stopPropagation()}>
-            <header><h2>{open.name}</h2><button className="icon-btn" aria-label="Close document" onClick={() => setOpen(null)}><X size={16} /></button></header>
+            <header><h2>{open.name}</h2><button autoFocus className="icon-btn" aria-label="Close document" onClick={() => setOpen(null)}><X size={16} /></button></header>
             <pre className="doc-text">{open.text}</pre>
           </div>
         </div>

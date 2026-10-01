@@ -446,10 +446,36 @@ def get_settings() -> dict[str, Any]:
     return {k: v for k, v in settings().items() if k not in PRIVATE_SETTINGS}
 
 
+# Numeric settings the Budget reads. A clamp keeps a cleared or mistyped field from becoming "unlimited"
+# (0) or from wedging every reply (a string the int() in Budget cannot parse).
+NUMERIC_SETTING_RANGES: dict[str, tuple[float, float]] = {
+    "maxToolRounds": (1, 60),
+    "maxRunTokens": (0, 10_000_000),
+    "maxRunSeconds": (0, 86_400),
+    "maxRunCost": (0, 1_000),
+}
+
+
+def _check_numeric_setting(key: str, value: Any) -> int | float:
+    """A number settings key must stay a finite number of its default's kind, within its range."""
+    default = llm.DEFAULT_SETTINGS[key]
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        raise HTTPException(422, f"{key} must be a number")
+    lo, hi = NUMERIC_SETTING_RANGES.get(key, (0, math.inf))
+    if not lo <= value <= hi:
+        raise HTTPException(422, f"{key} must be between {lo:g} and {hi:g}")
+    return int(value) if isinstance(default, int) else float(value)
+
+
 @app.put("/settings")
 def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
-    db.set_settings({k: v for k, v in patch.items()
-                     if k in llm.DEFAULT_SETTINGS and k not in PRIVATE_SETTINGS and k not in SETTINGS_READ_ONLY})
+    clean = {k: v for k, v in patch.items()
+             if k in llm.DEFAULT_SETTINGS and k not in PRIVATE_SETTINGS and k not in SETTINGS_READ_ONLY}
+    for k, v in clean.items():
+        d = llm.DEFAULT_SETTINGS[k]
+        if isinstance(d, (int, float)) and not isinstance(d, bool):
+            clean[k] = _check_numeric_setting(k, v)
+    db.set_settings(clean)
     return {k: v for k, v in settings().items() if k not in PRIVATE_SETTINGS}
 
 
@@ -833,21 +859,35 @@ def _desk_caps(cfg: dict[str, Any], override: dict[str, Any] | None) -> dict[str
 
 def _caps(cfg: dict[str, Any], caps: dict[str, Any]) -> dict[str, Any]:
     """`cfg` with each cap applied downward: a stricter user setting wins, and 0 (unlimited) loses to the cap."""
-    return {**cfg, **{k: (cap if not (cur := cfg.get(k) or 0) else min(cur, cap)) for k, cap in caps.items()}}
+    return {**cfg, **{k: (cap if not (cur := _num(cfg, k)) else min(cur, cap)) for k, cap in caps.items()}}
 
 
 def proposal_only(run: Run | None) -> bool:
     return run is not None and run.kind in PROPOSAL_ONLY_KINDS
 
 
+def _num(cfg: dict[str, Any], key: str) -> float:
+    """`cfg[key]` as a non-negative finite number; anything else is the shipped default (0 for job caps)."""
+    v = cfg.get(key)
+    try:
+        f = float(v) if v is not None and not isinstance(v, bool) else math.nan
+    except (TypeError, ValueError):
+        f = math.nan
+    if not math.isfinite(f) or f < 0:
+        return float(llm.DEFAULT_SETTINGS.get(key) or 0)
+    return f
+
+
 class Budget:
     """Rounds / tokens / wall-clock / USD for one reply. 0 on any axis means unlimited; approval waits do not count."""
 
     def __init__(self, cfg: dict[str, Any]):
-        self.max_rounds = int(cfg.get("maxToolRounds") or 0)
-        self.max_tokens = int(cfg.get("maxRunTokens") or 0)
-        self.max_seconds = float(cfg.get("maxRunSeconds") or 0)
-        self.max_cost = float(cfg.get("maxRunCost") or 0)
+        # A junk value already stored (from before PUT /settings validated) falls back to the default
+        # instead of raising on every reply.
+        self.max_rounds = int(_num(cfg, "maxToolRounds"))
+        self.max_tokens = int(_num(cfg, "maxRunTokens"))
+        self.max_seconds = _num(cfg, "maxRunSeconds")
+        self.max_cost = _num(cfg, "maxRunCost")
         self.t0, self.paused = time.monotonic(), 0.0
         self.rounds = self.tokens = 0
         self.cost = 0.0

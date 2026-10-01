@@ -54,16 +54,10 @@ const SHELL_NAV: NavEntry[] = [
   // Deliberately no `kind`: a desk is a place you go to, not something to pin on a canvas, and a
   // kind outside the WidgetKind union would not typecheck anyway.
   { view: 'cowork', label: 'Cowork', icon: <Users size={15} /> },
+  // No widget kind: the Library is a place to review and author, not something to pin on a canvas.
+  { view: 'library', label: 'Library', icon: <Library size={15} /> },
   { view: 'activity', label: 'Activity', icon: <MonitorDot size={15} />, kind: 'activity' },
   { label: 'Web', icon: <Globe size={15} />, kind: 'web' }
-]
-
-// What the assistant knows: memories and uploaded documents, grouped under their own section.
-const KNOWLEDGE_SHELL: NavEntry[] = [
-  { view: 'memory', label: 'Memory', icon: <Brain size={15} />, kind: 'memory' },
-  { view: 'documents', label: 'Documents', icon: <FileText size={15} />, kind: 'documents' },
-  // No widget kind: the Library is a place to review and author, not something to pin on a canvas.
-  { view: 'library', label: 'Library', icon: <Library size={15} /> }
 ]
 
 /** The shell's own rows take 0, 10, 20… in their listed order; a module's `nav.order` slots between them. */
@@ -76,8 +70,9 @@ function withModules(shell: NavEntry[], section: 'main' | 'knowledge'): NavEntry
   // Array.sort is stable, so equal orders keep the shell row first.
   return rows.sort((a, b) => a.order - b.order).map((r) => r.n)
 }
-const NAV = withModules(SHELL_NAV, 'main')
-const KNOWLEDGE = withModules(KNOWLEDGE_SHELL, 'knowledge')
+// Memory and Documents moved into Settings → Knowledge base, so the sidebar has no Knowledge section
+// any more; a module that asks for one is listed with the main rows instead.
+const NAV = [...withModules(SHELL_NAV, 'main'), ...withModules([], 'knowledge')]
 const NAV_MODULES = MODULES.filter((m) => m.nav && m.view)
 
 export default function Sidebar(): JSX.Element {
@@ -86,7 +81,6 @@ export default function Sidebar(): JSX.Element {
   const focusedId = useStore((s) => s.focusedConversationId)
   const view = useStore((s) => s.view)
   const projectViewId = useStore((s) => s.projectViewId)
-  const personalStats = useStore((s) => s.personalStats)
   const settings = useStore((s) => s.settings)
   const docCount = useStore((s) => s.docs.length)
   const docsPending = useStore((s) => s.docsPending)
@@ -114,7 +108,6 @@ export default function Sidebar(): JSX.Element {
   const openConversation = (id: string): void => void selectChat(id)
   const [query, setQuery] = useState('')
   const [projectsOpen, setProjectsOpen] = useState(true)
-  const [knowledgeOpen, setKnowledgeOpen] = useState(true)
   const [recentsOpen, setRecentsOpen] = useState(true)
   // Project groups list docs beside chats, but `docs` in the store is the Docs view's result set:
   // narrowed by its scope picker and its search box. The sidebar keeps its own unfiltered copy so a
@@ -162,13 +155,9 @@ export default function Sidebar(): JSX.Element {
     if (v === 'cowork') return needsYou || null
     if (v === 'library') return skillCandidates || null
     if (v === 'docs') return docCount
-    // Load-bearing, not cosmetic: there is no default branch below, so without this a Meetings row
-    // would fall through to `total('documents')` and show the uploaded-document count.
+    // Load-bearing, not cosmetic: without it a Meetings row would show no review count.
     if (v === 'meetings') return meetingsPending || null
-    const total = (key: 'memories' | 'nodes' | 'documents'): number =>
-      (personalStats?.[key] ?? 0) + projects.reduce((n, p) => n + (p.stats?.[key] ?? 0), 0)
-    // Memory is one panel now: memories and graph entities counted together.
-    return v === 'memory' ? total('memories') + total('nodes') : total('documents')
+    return null
   }
 
   // A row without a `view` (Web) exists only as a canvas widget: a click opens its window directly.
@@ -183,7 +172,6 @@ export default function Sidebar(): JSX.Element {
       {n.view != null && libCount(n.view) !== null && <span className="count">{libCount(n.view)}</span>}
     </button>
   )
-  const knowledgeItems = KNOWLEDGE.filter((n) => n.view && !viewHidden(settings, n.view))
 
   return (
     <aside className="sidebar">
@@ -205,16 +193,6 @@ export default function Sidebar(): JSX.Element {
         {NAV.filter((n) => (n.view ? n.view === 'home' || !viewHidden(settings, n.view) : inCanvas)).map(navItem)}
       </nav>
 
-      {knowledgeItems.length > 0 && (
-        <>
-          <div className="section-row">
-            <button className="section-toggle" onClick={() => setKnowledgeOpen((o) => !o)}>
-              <ChevronRight size={12} className={knowledgeOpen ? 'rot90' : ''} /><BookOpen size={13} /> Knowledge Base
-            </button>
-          </div>
-          {knowledgeOpen && <nav className="nav">{knowledgeItems.map(navItem)}</nav>}
-        </>
-      )}
       <SidebarSpaces />
 
       <div className="section-row">

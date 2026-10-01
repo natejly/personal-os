@@ -346,10 +346,6 @@ kbd {
 }
 .model-picker select:hover { border-color: var(--border-strong); }
 .model-picker svg { position: absolute; right: 8px; pointer-events: none; }
-/* Effort sits beside the model and is the one that gives way: a long model id is the harder thing to
-   read at a glance, so the model keeps its width and this one shrinks. */
-.effort-picker { flex-shrink: 0; }
-.effort-picker select { max-width: 150px; }
 
 .messages { flex: 1; overflow-y: auto; }
 .messages-inner { max-width: 760px; margin: 0 auto; padding: 24px 24px 12px; }
@@ -459,6 +455,33 @@ kbd {
   padding: 10px 10px 10px 16px;
   transition: box-shadow 0.15s, border-color 0.15s;
 }
+/* Model and effort sit under the text box, quiet until you go looking for them. */
+.composer-footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 2px 0;
+  min-width: 0;
+}
+.chat-control {
+  max-width: 48%;
+  height: 22px;
+  padding: 0 4px;
+  font: 11px var(--font);
+  color: var(--text-faint);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  outline: 0;
+  cursor: pointer;
+  text-overflow: ellipsis;
+  transition: color var(--dur-hover) ease, background var(--dur-hover) ease, border-color var(--dur-hover) ease;
+}
+.chat-control:hover { color: var(--text); background: var(--hover); border-color: var(--border); }
+.composer-wrap:not(.compact) .composer-footer { padding: 6px 8px 0; }
+.composer-wrap:not(.compact) .chat-control { font-size: 12px; height: 24px; }
+/* Size each select to its value, so the chevron sits by the text instead of at the end of a fixed box. */
+.chat-control { field-sizing: content; }
 .composer:focus-within {
   border-color: transparent;
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent);
@@ -522,20 +545,22 @@ kbd {
   position: sticky; top: 0; z-index: 2; background: var(--bg-elev);
 }
 .modal h2 { margin: 0; font-size: 16px; }
-.modal section { padding: 16px 20px; border-bottom: 1px solid var(--border); }
+.modal section:not(.modal-free *) { padding: 16px 20px; border-bottom: 1px solid var(--border); }
 .modal > section:last-of-type { border-bottom: 0; }
-.modal h3 { margin: 0 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); }
+.modal h3:not(.modal-free *) { margin: 0 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); }
 .muted { color: var(--text-muted); font-size: 13px; margin: 0 0 12px; line-height: 1.5; }
 /* .muted is paragraph-shaped (bottom margin), but it is also the inline subtitle in headers, where that
    margin lifted it off the title's baseline. */
 h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weight: 400; }
-.modal label { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; font-size: 13px; }
-.modal label > span { color: var(--text-muted); }
-.modal input, .modal textarea, .modal select {
+/* `.modal-free` marks an app panel hosted inside a dialog (Settings → Knowledge base): it keeps its own
+   styling, so these form rules stop at its edge. */
+.modal label:not(.modal-free *) { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; font-size: 13px; }
+.modal label:not(.modal-free *) > span { color: var(--text-muted); }
+.modal input:not(.modal-free *), .modal textarea:not(.modal-free *), .modal select:not(.modal-free *) {
   background: var(--bg-input); border: 1px solid var(--border-strong);
   border-radius: 8px; padding: 8px 10px; outline: 0; width: 100%;
 }
-.modal input:focus, .modal textarea:focus, .modal select:focus { border-color: var(--accent); }
+.modal input:not(.modal-free *):focus, .modal textarea:not(.modal-free *):focus, .modal select:not(.modal-free *):focus { border-color: var(--accent); }
 .modal textarea { resize: vertical; font-family: var(--font); }
 /* A switch row is label-left, switch-right like the rest of macOS settings. `.modal label` stacks its
    children for text fields, which centred the copy and dropped the switch beneath it; and
@@ -554,10 +579,48 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
   position: sticky; bottom: 0; z-index: 2;
   background: var(--bg-elev); border-top: 1px solid var(--border);
 }
+/* Settings: a wide fixed-height dialog, sections on a left tab bar, one pane scrolling at a time. */
+.modal.settings-modal {
+  width: 920px; height: min(720px, calc(100vh - 60px));
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.settings-body { flex: 1; min-height: 0; display: flex; }
+.settings-tabs {
+  flex: 0 0 200px; display: flex; flex-direction: column; gap: 2px;
+  padding: 12px 10px; overflow-y: auto; border-right: 1px solid var(--border);
+}
+.settings-tabs button {
+  display: flex; align-items: center; gap: 9px; padding: 7px 10px; border-radius: 8px;
+  font-size: 13px; color: var(--text-muted); text-align: left;
+}
+.settings-tabs button:hover { background: var(--hover); color: var(--text); }
+.settings-tabs button.active { background: var(--hover); color: var(--text); font-weight: 500; }
+.settings-tabs button.active svg { color: var(--accent); }
+.settings-tabs button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.settings-pane { flex: 1; min-width: 0; overflow-y: auto; }
+.settings-pane section { border-bottom: 0; padding: 20px 28px; }
+.settings-modal footer { position: static; }
+/* The knowledge graph and the memory list need room side by side: this tab widens the dialog. */
+.modal.settings-modal.wide-pane { width: min(1240px, calc(100vw - 60px)); height: min(860px, calc(100vh - 60px)); }
+/* Knowledge base: the Memory panel and the document library, filling the pane instead of scrolling it. */
+.settings-pane section.knowledge-section { display: flex; flex-direction: column; height: 100%; padding-bottom: 16px; }
+.knowledge-section > .muted { margin: 8px 0 12px; }
+.knowledge-head { display: flex; align-items: center; gap: 10px; }
+.knowledge-head h3 { margin: 0 auto 0 0; }
+.knowledge-controls { display: flex; align-items: center; gap: 8px; }
+.knowledge-body { flex: 1; min-height: 0; display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--bg); }
+.knowledge-body .memory-panel.embedded .memory-body { min-height: 0; }
+.knowledge-body .memory-toolbar { padding: 8px 12px; }
+.knowledge-body .memory-body.mode-split .mem-pane { width: 340px; }
+.knowledge-body > .page-body { padding: 12px 14px 24px; max-width: none; }
 /* Narrow windows: keep a real gutter instead of going nearly full-bleed. */
 @media (max-width: 720px) {
   .modal { max-width: calc(100vw - 32px); }
   .modal header, .modal section, .modal footer { padding-left: 14px; padding-right: 14px; }
+  /* No room for a side rail: the tabs become a scrolling strip above the pane. */
+  .settings-body { flex-direction: column; }
+  .settings-tabs { flex: 0 0 auto; flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--border); padding: 8px 10px; }
+  .settings-tabs button { flex: 0 0 auto; }
 }
 
 ::-webkit-scrollbar { width: 10px; }
@@ -877,6 +940,7 @@ textarea.instructions:focus { border-color: var(--accent); }
 .memory-toolbar { display: flex; align-items: center; gap: 12px; padding: 10px 24px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .memory-toolbar .toolbar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 .memory-toolbar .search { margin: 0; width: 180px; }
+.memory-toolbar > .muted { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .memory-panel.embedded { flex: 1; display: flex; flex-direction: column; min-height: 0; }
 .memory-panel.embedded .memory-body { min-height: 520px; }
 
@@ -1781,7 +1845,7 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .act-indicator.paused .act-dot { background: var(--warn); }
 /* ---------- Form controls (one select treatment everywhere) ---------- */
 /* .model-picker draws its own chevron in markup, so it stays out of these lists. */
-.add-row select, .node-panel select, .modal select {
+.add-row select, .node-panel select, .modal select:not(.modal-free *) {
   appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='7' viewBox='0 0 10 7' fill='none' stroke='%238f8d86' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1.5l4 4 4-4'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
@@ -1829,6 +1893,7 @@ select:focus-visible {
 }
 /* Borderless fields live inside a container that rings itself on :focus-within, so they add nothing. */
 .composer textarea:focus-visible,
+.composer input:focus-visible,
 .quick-ask input:focus-visible,
 .search input:focus-visible,
 .kcol.new input:focus-visible,

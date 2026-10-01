@@ -22,7 +22,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   const streaming = useIsStreaming(conversationId)
   const activeId = useStore((s) => conversationId ?? s.focusedConversationId)
   const uploadTarget = useStore((s) => s.sessions[conversationId ?? s.focusedConversationId ?? '']?.conversation.project_id ?? s.draftProjectId)
-  const hasKey = useStore((s) => !!s.settings.apiKey)
+  const hasKey = useStore((s) => !!s.settings.apiKeySet)
   // One selector per action: a bare useStore() subscribes this textarea to every streamed token.
   const send = useStore((s) => s.send)
   const stop = useStore((s) => s.stop)

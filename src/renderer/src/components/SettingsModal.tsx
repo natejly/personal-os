@@ -40,6 +40,8 @@ export default function SettingsModal(): JSX.Element {
   const { saveSettings, setSettingsOpen, setView, toast } = useStore()
   const [draft, setDraft] = useState<Settings>(settings)
   const [showKey, setShowKey] = useState(false)
+  // The saved key never reaches the renderer: with one saved the field stays hidden until Replace is pressed.
+  const [replacingKey, setReplacingKey] = useState(false)
   const [test, setTest] = useState<{ state: 'idle' | 'testing' | 'ok' | 'fail'; msg?: string }>({ state: 'idle' })
   const [shortcut, setShortcut] = useState<ShortcutState | null>(null)
   const [tab, setTab] = useState<Tab>(() => useStore.getState().settingsTab)
@@ -157,10 +159,18 @@ export default function SettingsModal(): JSX.Element {
               <p className="muted">Grain talks to a <a href="https://docs.litellm.ai/" target="_blank" rel="noreferrer">LiteLLM</a> proxy, so any model LiteLLM can route to works here. Point it at your proxy and paste a virtual key.</p>
               <label><span>LiteLLM base URL</span><input autoFocus value={draft.baseUrl} onChange={(e) => patch({ baseUrl: e.target.value })} placeholder="http://localhost:4000" spellCheck={false} /></label>
               <label><span>API key</span>
+                {settings.apiKeySet && !replacingKey ? (
+                  <div className="input-row">
+                    <span className="muted">Key saved ••••</span>
+                    <button className="ghost-btn" type="button" onClick={() => setReplacingKey(true)}>Replace</button>
+                    <button className="ghost-btn" type="button" onClick={() => void saveSettings({ apiKey: null } as unknown as Partial<Settings>)}>Remove</button>
+                  </div>
+                ) : (
                 <div className="input-row">
                   <input type={showKey ? 'text' : 'password'} value={draft.apiKey} onChange={(e) => patch({ apiKey: e.target.value })} placeholder="sk-…" spellCheck={false} />
                   <button className="icon-btn" type="button" aria-label={showKey ? 'Hide API key' : 'Show API key'} aria-pressed={showKey} title={showKey ? 'Hide API key' : 'Show API key'} onClick={() => setShowKey((v) => !v)}>{showKey ? <EyeOff size={14} /> : <Eye size={14} />}</button>
                 </div>
+                )}
               </label>
               <div className="test-row">
                 <button className="ghost-btn" onClick={() => void testConnection()} disabled={test.state === 'testing'}><Plug size={14} /> {test.state === 'testing' ? 'Testing…' : 'Test connection'}</button>
@@ -247,8 +257,8 @@ export default function SettingsModal(): JSX.Element {
               </div>
               <ToolGlobalToggles value={draft.tools ?? {}} onChange={(tools) => patch({ tools })} />
               <label><span>Max tool rounds per reply</span><input type="number" min={1} max={60} value={draft.maxToolRounds} onChange={(e) => patch({ maxToolRounds: Number(e.target.value) })} /></label>
-              <label><span>Brave Search API key <small className="muted">(optional; without a key web search uses Exa, then DuckDuckGo)</small></span><input type="password" value={draft.braveApiKey} onChange={(e) => patch({ braveApiKey: e.target.value })} placeholder="BSA…" spellCheck={false} /></label>
-              <label><span>Tavily API key <small className="muted">(optional alternative)</small></span><input type="password" value={draft.tavilyApiKey} onChange={(e) => patch({ tavilyApiKey: e.target.value })} placeholder="tvly-…" spellCheck={false} /></label>
+              <label><span>Brave Search API key <small className="muted">(optional; without a key web search uses Exa, then DuckDuckGo)</small></span><input type="password" value={draft.braveApiKey} onChange={(e) => patch({ braveApiKey: e.target.value })} placeholder={settings.braveApiKeySet ? 'Saved. Type to replace' : 'BSA…'} spellCheck={false} /></label>
+              <label><span>Tavily API key <small className="muted">(optional alternative)</small></span><input type="password" value={draft.tavilyApiKey} onChange={(e) => patch({ tavilyApiKey: e.target.value })} placeholder={settings.tavilyApiKeySet ? 'Saved. Type to replace' : 'tvly-…'} spellCheck={false} /></label>
               <label><span>Exa API key <small className="muted">(optional; Exa works without one, a key lifts its rate limit)</small></span><input type="password" value={draft.exaApiKey ?? ''} onChange={(e) => patch({ exaApiKey: e.target.value })} placeholder="exa key" spellCheck={false} /></label>
               <label><span>GitHub token <small className="muted">(optional; GitHub tools use your <code>gh</code> login when this is empty)</small></span><input type="password" value={draft.githubToken ?? ''} onChange={(e) => patch({ githubToken: e.target.value })} placeholder="ghp_…" spellCheck={false} /></label>
               <label className="check">

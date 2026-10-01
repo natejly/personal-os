@@ -73,6 +73,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "deskMaxTurns": 12,
     "deskMaxCost": 2.0,
     "deskMaxLive": 4,
+    # A system notification when a desk needs you or finishes, while the window is not focused.
+    "deskNotify": True,
+    # Plan mode for ordinary chats when the chat has no setting of its own: off | auto | always.
+    "planMode": "off",
     # Hosts fetch_url may still read once a reply has touched untrusted content (registrable-suffix match).
     "fetchAllowlist": [],
     # Undo window on outgoing mail (outbox.py). `seconds` is clamped to 60-120 on read.

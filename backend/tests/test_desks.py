@@ -400,10 +400,10 @@ def test_runtime_debounce() -> None:
     check(spy.writes == 2, "exactly two writes for seven events")
 
     clock[0] = 11.2
-    out = rt.observe("plan", {"message_id": "m", "call_id": "c", "plan": {}})
+    out = rt.observe("plan_card", {"message_id": "m", "call_id": "c", "plan": {}})
     check(out is not None and out["headline"] == "waiting on your plan",
           "a status change flushes immediately, inside the window")
-    check(rt.observe("plan", {"message_id": "m", "call_id": "c", "plan": {}}) is None,
+    check(rt.observe("plan_card", {"message_id": "m", "call_id": "c", "plan": {}}) is None,
           "…but an unchanged label publishes nothing")
     check(desks.get(d["id"])["headline"] == "waiting on your plan", "the row holds the last flushed label")
     check(HEADLINE_FLUSH_S == 1.0, "the window is the documented one")

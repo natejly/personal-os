@@ -3,13 +3,19 @@ import {
   Ban, CircleCheck, CircleDashed, CircleHelp, CircleSlash, FileCheck2,
   ListChecks, LoaderCircle, Pause, TriangleAlert
 } from 'lucide-react'
-import type { Desk, DeskStatus } from '@shared/types'
+import type { Desk, DeskAutonomy, DeskStatus } from '@shared/types'
 // The runtime values come from the relative path, not `@shared/*`: `npm test`'s esbuild line maps no
 // alias, so a component that ever becomes reachable from a bundled test would fail to build. store.ts
 // imports NEEDS_YOU the same way and says so for the same reason.
 import { NEEDS_YOU } from '../../../shared/types'
 import { useStore } from '../store'
 import ChatPulse from './ChatPulse'
+
+export const AUTONOMY: { value: DeskAutonomy; label: string; hint: string }[] = [
+  { value: 'plan', label: 'Plan first', hint: 'Drafts a plan and waits for you before it touches anything.' },
+  { value: 'ask', label: 'Ask as it goes', hint: 'No plan up front; every consequential tool still shows a card.' },
+  { value: 'propose', label: 'Work and propose', hint: 'Works in its own folder and brings the result back for review.' }
+]
 
 export const STATUS_LABEL: Record<DeskStatus, string> = {
   draft: 'Draft',

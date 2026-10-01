@@ -41,7 +41,9 @@ if "pytest" in sys.modules:  # pragma: no cover - collection guard, not behaviou
 
 from personal_os import llm  # noqa: E402
 from personal_os.app import (AUTH_TOKEN, _desk_tasks, _missed_wake, _should_chain, app,  # noqa: E402
-                             plans, desks, docs, run_store, workspace)
+                             bus, db, plans, desks, docs, run_store, toolbox, workspace)
+from personal_os.app import events as topic  # noqa: E402
+from personal_os.plans import PLAN_SAFE_DANGER  # noqa: E402
 from personal_os.cowork import LIVE, NEEDS_YOU  # noqa: E402
 from personal_os.plans import PLAN_TOOL  # noqa: E402
 from personal_os.runs import Run  # noqa: E402
@@ -51,13 +53,15 @@ passed = 0
 
 REPORT = "# The report\n\nOne finding, written down.\n"
 
-SCRIPT: dict[str, Any] = {"turns": [], "default": {"text": "All done."}, "delay": 0.0, "tools": []}
+SCRIPT: dict[str, Any] = {"turns": [], "default": {"text": "All done."}, "delay": 0.0, "tools": [], "messages": []}
 
 
 async def _scripted_stream(settings: dict[str, Any], model: str, messages: list[dict[str, Any]],
                            tools: list[dict[str, Any]] | None = None, kind: str = "chat",
-                           effort: str = "default", tool_choice: str = "auto") -> Any:
+                           effort: str = "default", tool_choice: str = "auto", fast: bool = False,
+                           cancel: asyncio.Event | None = None) -> Any:
     SCRIPT["tools"].append([t["function"]["name"] for t in (tools or [])])
+    SCRIPT["messages"].append([dict(m) for m in messages])
     if tool_choice == "none":
         # The closing round of a budget, park or breaker stop. It never calls a tool and never
         # consumes a scripted turn: the next turn's first round is still waiting for its entry.
@@ -101,6 +105,7 @@ def script(*turns: dict[str, Any], delay: float = 0.0) -> None:
     SCRIPT["turns"] = [dict(t) for t in turns]
     SCRIPT["delay"] = delay
     SCRIPT["tools"] = []
+    SCRIPT["messages"] = []
 
 
 def settings_patch(**patch: Any) -> None:
@@ -707,6 +712,173 @@ TESTS = [test_a_desk_is_a_conversation_the_chat_list_hides,
          test_download_hands_over_the_file_it_marks_promoted,
          test_doc_append_proposes_a_revision_and_leaves_the_doc_alone,
          test_delete_keeps_the_workspace_unless_purge]
+
+
+def _system_text(round_messages: list[dict[str, Any]]) -> str:
+    return "\n".join(str(m.get("content") or "") for m in round_messages if m.get("role") == "system")
+
+
+def _tool_text(round_messages: list[dict[str, Any]]) -> str:
+    return "\n".join(str(m.get("content") or "") for m in round_messages if m.get("role") == "tool")
+
+
+def test_a_desk_is_told_it_is_a_desk() -> None:
+    script({"text": "Looked."})
+    did = make_desk("Just look")["desk"]["id"]
+    quiet(did)
+    check("## This is a cowork desk" in _system_text(SCRIPT["messages"][0]),
+          "DESK_HINT reaches the model, so it knows about outputs/, desk_deliver, desk_ask and desk_done")
+
+
+def test_a_woken_desk_sees_its_approved_plan_and_what_the_user_said() -> None:
+    """A parked plan approved later wakes the desk with a fresh turn whose history is text only, so
+    the plan and the answer have to be put in front of the model explicitly."""
+    settings_patch(parkAfterSeconds=1)
+    try:
+        did, row = _parked_desk()
+        settings_patch(parkAfterSeconds=0)
+        cid = desk(did)["conversation_id"]
+        with db.tx() as c:
+            msg = c.execute("SELECT tool_events FROM messages WHERE conversation_id=? AND role='assistant' "
+                            "ORDER BY created_at LIMIT 1", (cid,)).fetchone()
+        parked_card = [e for e in json.loads(msg["tool_events"] or "[]") if e["id"] == row["call_id"]]
+        check(parked_card and parked_card[0]["pending"], "the parked turn persisted its card, still answerable after a reload")
+        first_round = len(SCRIPT["messages"])
+        j("POST", f"/approvals/{row['call_id']}", {"decision": "allow", "note": "Keep it short."})
+        wait_until(lambda: len(run_store.list(desk_id=did, statuses=None)) == 2, "the woken turn")
+        quiet(did)
+        woken = _system_text(SCRIPT["messages"][first_round])
+        check("## Approved plan: Needs a decision" in woken, "the woken turn is shown the plan it is carrying out")
+        check("## While this desk was waiting" in woken and "approved the plan" in woken,
+              "and told the user approved it while it was parked")
+        check("Keep it short." in woken, "with the note the user gave")
+        check(run_store.approval(row["call_id"])["reported_at"], "which is told once, then marked")
+        later = _system_text(SCRIPT["messages"][-1])
+        check("[x] 1." in later, f"the plan block tracks step status as it runs, got {later[-300:]!r}")
+        with db.tx() as c:
+            msg = c.execute("SELECT tool_events FROM messages WHERE conversation_id=? AND role='assistant' "
+                            "ORDER BY created_at LIMIT 1", (cid,)).fetchone()
+        settled = [e for e in json.loads(msg["tool_events"] or "[]") if e["id"] == row["call_id"]][0]
+        check(not settled["pending"] and not settled.get("error"), "and the parked card settles as answered, not as an error")
+    finally:
+        settings_patch(parkAfterSeconds=0)
+
+
+def test_an_approved_parked_call_runs_on_the_next_turn_without_a_second_card() -> None:
+    settings_patch(parkAfterSeconds=1)
+    try:
+        script({"calls": [WRITE]}, {"calls": [WRITE]}, {"text": "Written."})
+        did = make_desk("Ask me first", autonomy="ask")["desk"]["id"]
+        row = card(did, "desk_write_file")
+        wait_until(lambda: desk(did)["status"] == "blocked", "the ask-as-it-goes card to park")
+        quiet(did)
+        settings_patch(parkAfterSeconds=0)
+        j("POST", f"/approvals/{row['call_id']}", {"decision": "allow"})
+        wait_until(lambda: len(run_store.list(desk_id=did, statuses=None)) == 2, "the woken turn")
+        quiet(did)
+        check(workspace.resolve_in(did, "outputs/report.md").is_file(), "the repeated call ran")
+        check(not [a for a in run_store.approvals(None, desk_id=did) if a["call_id"] != row["call_id"]],
+              "without opening a second card")
+        check(run_store.approval(row["call_id"])["claimed_by"], "spending the parked grant")
+        check(run_store.claim_parked(did, "desk_write_file", WRITE["arguments"], "again") is None,
+              "which is single use")
+    finally:
+        settings_patch(parkAfterSeconds=0)
+
+
+def test_answering_a_desk_ask_card_carries_on_in_the_same_turn() -> None:
+    script({"calls": [call("desk_ask", question="Which vendor?")]}, {"text": "Pricing against Acme."})
+    did = make_desk("Ask, then carry on")["desk"]["id"]
+    row = card(did, "desk_ask")
+    check("Which vendor?" in desk(did)["question"], "the open card puts its question on the desk for the banner")
+    j("POST", f"/approvals/{row['call_id']}", {"decision": "allow", "note": "Acme"})
+    quiet(did)
+    check('"answer": "Acme"' in _tool_text(SCRIPT["messages"][-1]), "the answer goes back as the tool result")
+    state = desk(did)
+    check(state["status_reason"] != "question" and not state["question"],
+          f"and the desk does not block on a question already answered, got {state['status']}/{state['status_reason']}")
+
+
+def test_a_message_answers_an_open_desk_ask_card() -> None:
+    script({"calls": [call("desk_ask", question="Which quarter?")]}, {"text": "Using Q3."})
+    did = make_desk("Ask through the banner")["desk"]["id"]
+    card(did, "desk_ask")
+    out = j("POST", f"/cowork/desks/{did}/message", {"content": "Q3"})
+    check(out.get("answered") is True and out.get("live") is True, "the banner's answer settles the live card")
+    quiet(did)
+    check('"answer": "Q3"' in _tool_text(SCRIPT["messages"][-1]), "and reaches the model as the answer")
+
+
+def test_a_pending_plan_shows_in_the_desk() -> None:
+    script({"calls": [propose("Show me", step("desk_write_file", WRITE["arguments"]))]}, {"text": "ok"})
+    did = make_desk("Plan it")["desk"]["id"]
+    row = card(did, PLAN_TOOL)
+    plan = desk(did)["plan"]
+    check(plan and plan["status"] == "pending" and plan["call_id"] == row["call_id"],
+          "a plan waiting on the user is in the desk payload, with the call id the card is decided by")
+    j("POST", f"/approvals/{row['call_id']}", {"decision": "deny"})
+    quiet(did)
+
+
+def test_pause_and_stop_refuse_a_finished_desk() -> None:
+    state = delivering_desk("Finish, then try to pause")
+    check(state["status"] == "review", f"precondition: in review, got {state['status']}")
+    j("POST", f"/cowork/desks/{state['id']}/pause", expect=409)
+    j("POST", f"/cowork/desks/{state['id']}/stop", expect=409)
+    check(desk(state["id"])["status"] == "review", "and the desk is left in review")
+
+
+def test_desk_changes_reach_the_app_topic() -> None:
+    seq = topic.seq
+    did = make_desk("Draft only", start=False)["desk"]["id"]
+    j("PATCH", f"/cowork/desks/{did}", {"title": "Renamed"})
+    wait_until(lambda: any(e == "desk_status" and d.get("id") == did and d.get("title") == "Renamed"
+                           for s, e, d in list(topic._ring) if s > seq),
+               "a desk_status event for the rename on /events")
+
+
+def _chat(plan_mode: str) -> str:
+    cid = j("POST", "/conversations", {"title": f"plan {plan_mode}"})["id"]
+    j("PATCH", f"/conversations/{cid}", {"settings": {"planMode": plan_mode}})
+    return cid
+
+
+def _chat_turn(cid: str, text: str) -> None:
+    j("POST", f"/conversations/{cid}/chat", {"content": text})
+    wait_until(lambda: not bus.live(cid), "the chat reply to end")
+
+
+def test_chat_plan_mode_always_offers_only_reading_and_the_plan() -> None:
+    script({"text": "ok"})
+    _chat_turn(_chat("always"), "add a todo")
+    offered = SCRIPT["tools"][0]
+    check(PLAN_TOOL in offered, "the plan tool is offered")
+    check(all(toolbox.specs[n].danger in PLAN_SAFE_DANGER for n in offered if n in toolbox.specs),
+          f"and nothing consequential, got {[n for n in offered if toolbox.specs.get(n) and toolbox.specs[n].danger not in PLAN_SAFE_DANGER]}")
+    check("## Plan mode is on" in _system_text(SCRIPT["messages"][0]), "and the model is told why")
+    script({"text": "ok"})
+    _chat_turn(_chat("off"), "add a todo")
+    check("todo_add" in SCRIPT["tools"][0], "with plan mode off the same chat is offered writes")
+
+
+def test_chat_plan_mode_auto_turns_on_at_the_first_change() -> None:
+    script({"calls": [call("todo_add", text="Buy milk")]}, {"text": "I will propose a plan."})
+    _chat_turn(_chat("auto"), "add a todo")
+    check("todo_add" in SCRIPT["tools"][0], "auto offers everything until something consequential is reached for")
+    check("planning" in _tool_text(SCRIPT["messages"][1]), f"the first write is refused with the planning message, got {_tool_text(SCRIPT['messages'][1])[:300]!r} / {len(SCRIPT['messages'])}")
+    check("todo_add" not in SCRIPT["tools"][1], "and from the next round only reading and the plan are offered")
+
+
+TESTS += [test_a_desk_is_told_it_is_a_desk,
+         test_a_woken_desk_sees_its_approved_plan_and_what_the_user_said,
+         test_an_approved_parked_call_runs_on_the_next_turn_without_a_second_card,
+         test_answering_a_desk_ask_card_carries_on_in_the_same_turn,
+         test_a_message_answers_an_open_desk_ask_card,
+         test_a_pending_plan_shows_in_the_desk,
+         test_pause_and_stop_refuse_a_finished_desk,
+         test_desk_changes_reach_the_app_topic,
+         test_chat_plan_mode_always_offers_only_reading_and_the_plan,
+         test_chat_plan_mode_auto_turns_on_at_the_first_change]
 
 
 def _loose_ends() -> Iterator[str]:

@@ -1,18 +1,13 @@
 import { useEffect, useState } from 'react'
-import { PanelLeftOpen, Plus, Users, X } from 'lucide-react'
+import { Archive, PanelLeftOpen, Plus, Users, X } from 'lucide-react'
 import type { DeskAutonomy } from '@shared/types'
 import { useStore, type Scope } from '../store'
 import ScopeSelect from './ScopeSelect'
-import DeskRail, { railOrder } from './DeskRail'
+import DeskRail, { AUTONOMY, railOrder } from './DeskRail'
 import DeskDetail from './DeskDetail'
 import '../styles/cowork.css'
 import AppSwitcher from './AppSwitcher'
 
-const AUTONOMY: { value: DeskAutonomy; label: string; hint: string }[] = [
-  { value: 'plan', label: 'Plan first', hint: 'Drafts a plan and waits for you before it touches anything.' },
-  { value: 'ask', label: 'Ask as it goes', hint: 'No plan up front; every consequential tool still shows a card.' },
-  { value: 'propose', label: 'Work and propose', hint: 'Works in its own folder and brings the result back for review.' }
-]
 
 /** The brief, and the four knobs that decide how much rope the desk gets. ⌘↵ submits. */
 function NewDeskCard({ scope, onDone }: { scope: Scope; onDone: () => void }): JSX.Element {
@@ -22,6 +17,10 @@ function NewDeskCard({ scope, onDone }: { scope: Scope; onDone: () => void }): J
   const [title, setTitle] = useState('')
   const [autonomy, setAutonomy] = useState<DeskAutonomy>('plan')
   const [start, setStart] = useState(true)
+  const [maxTurns, setMaxTurns] = useState('')
+  const [maxCost, setMaxCost] = useState('')
+  const maxTurnsDefault = useStore((s) => s.settings.deskMaxTurns ?? 12)
+  const maxCostDefault = useStore((s) => s.settings.deskMaxCost ?? 2)
 
   const submit = async (): Promise<void> => {
     if (!brief.trim() || busy) return
@@ -30,6 +29,11 @@ function NewDeskCard({ scope, onDone }: { scope: Scope; onDone: () => void }): J
       title: title.trim() || undefined,
       project_id: scope === 'all' || scope === 'personal' ? null : scope,
       autonomy,
+      // Only what the user typed: an empty box means "the Settings cap", and a desk may only tighten it.
+      budget: {
+        ...(Number(maxTurns) > 0 ? { maxTurns: Number(maxTurns) } : {}),
+        ...(Number(maxCost) > 0 ? { maxCost: Number(maxCost) } : {})
+      },
       start
     })
     // `createDesk` resolves null rather than rejecting, so a refused desk keeps the typed brief.
@@ -71,6 +75,14 @@ function NewDeskCard({ scope, onDone }: { scope: Scope; onDone: () => void }): J
             ))}
           </div>
         </div>
+        <div className="desk-field">
+          <span>Limits</span>
+          <div className="desk-limits">
+            <label>Turns <input type="number" min={1} step={1} placeholder={String(maxTurnsDefault)} value={maxTurns} onChange={(e) => setMaxTurns(e.target.value)} /></label>
+            <label>Spend $ <input type="number" min={0.05} step={0.05} placeholder={String(maxCostDefault)} value={maxCost} onChange={(e) => setMaxCost(e.target.value)} /></label>
+            <small className="muted">Blank uses your Settings caps. A desk can only be held tighter than those.</small>
+          </div>
+        </div>
         <label className="chip-check-row">
           <input type="checkbox" checked={start} onChange={(e) => setStart(e.target.checked)} />
           <span>Start it now</span>
@@ -91,7 +103,8 @@ export default function CoworkView(): JSX.Element {
   const activeDeskId = useStore((s) => s.activeDeskId)
   const libraryScope = useStore((s) => s.libraryScope)
   const sidebarOpen = useStore((s) => s.sidebarOpen)
-  const { refreshDesks, refreshDeskInbox, openDesk, toggleSidebar, setLibraryScope } = useStore()
+  const showArchived = useStore((s) => s.deskShowArchived)
+  const { refreshDesks, refreshDeskInbox, openDesk, toggleSidebar, setLibraryScope, setDeskShowArchived } = useStore()
   const [creating, setCreating] = useState(false)
 
   const scope: Scope = libraryScope
@@ -125,6 +138,14 @@ export default function CoworkView(): JSX.Element {
         <h2><Users size={16} /> Cowork</h2>
         <div className="no-drag header-right">
           <ScopeSelect value={scope} onChange={(s) => void setLibraryScope(s)} />
+          <button
+            className={`ghost-btn ${showArchived ? 'active' : ''}`}
+            aria-pressed={showArchived}
+            title={showArchived ? 'Back to current desks' : 'Show archived desks'}
+            onClick={() => void setDeskShowArchived(!showArchived)}
+          >
+            <Archive size={13} /> {showArchived ? 'Archived' : 'Archive'}
+          </button>
           <button className="primary-btn" onClick={() => setCreating(true)}><Plus size={14} /> New desk</button>
         </div>
         <AppSwitcher />

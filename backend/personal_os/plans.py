@@ -352,6 +352,15 @@ class Plans:
                           "ORDER BY created_at DESC LIMIT 1", (desk_id,)).fetchone()
             return self._plan(c, r) if r is not None else None
 
+    def latest_for_desk(self, desk_id: str) -> dict[str, Any] | None:
+        """The desk's newest plan whatever its state, so a plan still waiting on the user shows in the
+        desk's Plan tab. `for_desk` is the authority (approved only); this is only for display."""
+        if not desk_id:
+            return None
+        with self.db.tx() as c:
+            r = c.execute("SELECT * FROM action_plans WHERE desk_id=? ORDER BY created_at DESC LIMIT 1", (desk_id,)).fetchone()
+            return self._plan(c, r) if r is not None else None
+
     def finish(self, call_id: str, ok: bool, error: str | None = None) -> None:
         """Record what became of a claimed step.
 
@@ -382,6 +391,34 @@ class Plans:
         return self._step(r) if r is not None else None
 
     # ---- what the model is told ----
+    @staticmethod
+    def block(plan: dict[str, Any] | None) -> str:
+        """The approved plan as a context block, re-sent at the end of every desk round.
+
+        A desk carries one plan across many turns, and the plan's tool result lives only in the turn
+        that proposed it - `history()` replays text, not tool calls. Without this a woken or chained
+        turn is told to "pick up at the first unfinished step" of a plan it cannot see.
+        """
+        if not plan or plan.get("status") != "approved":
+            return ""
+        marks = {"approved": "[ ]", "consumed": "[~]", "done": "[x]", "failed": "[!]", "dropped": "[-]", "rejected": "[-]"}
+        lines = [f"## Approved plan: {plan.get('title') or 'untitled'}"]
+        if plan.get("intent"):
+            lines.append(plan["intent"])
+        lines.append("Each open step [ ] is authorised once, with exactly these arguments; [x] is done, [!] failed, "
+                     "[~] ran with an unknown outcome, [-] is not authorised.")
+        for s in plan.get("steps") or []:
+            args = json.dumps(s.get("arguments") or {}, ensure_ascii=False, default=str)
+            if len(args) > 600:
+                args = args[:600] + "…"
+            line = f"{marks.get(s.get('status'), '[ ]')} {int(s['idx']) + 1}. {s.get('title') or s['tool']} - {s['tool']}({args})"
+            if s.get("status") == "failed" and s.get("result_error"):
+                line += f" -> failed: {str(s['result_error'])[:160]}"
+            lines.append(line)
+        if plan.get("note"):
+            lines.append(f"The user's note on approval: {plan['note']}")
+        return "\n".join(lines)
+
     @staticmethod
     def model_result(plan: dict[str, Any]) -> dict[str, Any]:
         """The propose_plan tool result: the decision, and for an approved plan the final arguments to use."""

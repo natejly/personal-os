@@ -2,7 +2,6 @@ import {
   isValidElement, memo, useEffect, useRef, useState,
   type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode
 } from 'react'
-import { GripVertical } from 'lucide-react'
 import type { CanvasWindow } from '@shared/types'
 import { canExpand, expandWindow } from './expand'
 import ContextMenu, { type MenuEntry } from './Menu'
@@ -26,7 +25,7 @@ export interface WindowFrameProps {
   selected?: boolean
   /**
    * Status slot: Canvas passes a `<StatusRing>` for a statusful kind, `null` for the rest. It renders
-   * inside the grip, which swaps its dots for the glyph, and it lights the window's border through the
+   * inside the grip, which is otherwise empty, and it lights the window's border through the
    * `:has(.ring)` rules — so `useRingStatus` stays the only status source and nothing here repeats it.
    */
   status?: ReactNode
@@ -141,13 +140,11 @@ function WindowFrame({ win, live, selected = false, status = null }: WindowFrame
       onPointerDown={onPointerDown}
       onContextMenu={onContextMenu}
     >
-      {/* The whole top edge moves the window, so there is a generous target without a title bar.
-          The grip sits inside it as the visible hint and as the status glyph's home. */}
+      {/* The whole top edge moves the window, so there is a generous target without a title bar. The
+          cursor and the tooltip are the hint now that the grip draws nothing of its own; the grip
+          stays as the status glyph's home. */}
       <div className="win-move" title="Drag to move · right-click for window options" onPointerDown={onDragPointerDown}>
-        <span className="win-grip">
-          <span className="win-grip-dots"><GripVertical size={14} strokeWidth={2.25} /></span>
-          {status}
-        </span>
+        <span className="win-grip">{status}</span>
       </div>
 
       <div className="win-body">

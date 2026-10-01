@@ -290,6 +290,10 @@ kbd {
 }
 .model-picker select:hover { border-color: var(--border-strong); }
 .model-picker svg { position: absolute; right: 8px; pointer-events: none; }
+/* Effort sits beside the model and is the one that gives way: a long model id is the harder thing to
+   read at a glance, so the model keeps its width and this one shrinks. */
+.effort-picker { flex-shrink: 0; }
+.effort-picker select { max-width: 150px; }
 
 .messages { flex: 1; overflow-y: auto; }
 .messages-inner { max-width: 760px; margin: 0 auto; padding: 24px 24px 12px; }

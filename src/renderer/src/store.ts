@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ActivityConfig, ActivityContextFile, ActivityEvent, ActivitySignal, ActivityStatus, ActivitySummary, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocRevision, Document, FullDoc, GraphData, Memory, Message, ModelInfo, Settings, Project, RunConflict, SessionStatus, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap } from '@shared/types'
+import type { ActivityConfig, ActivityContextFile, ActivityEvent, ActivitySignal, ActivityStatus, ActivitySummary, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, Effort, DocRevision, Document, FullDoc, GraphData, Memory, Message, ModelInfo, Settings, Project, RunConflict, SessionStatus, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap } from '@shared/types'
 import { api, chatStream, setBase, type Scope } from './lib/api'
 import { finishStatus, mergeConversation, pickEvictions, reduceStatus, settleApprovals } from './sessionStatus'
 import { viewHidden } from './modules'
@@ -81,6 +81,11 @@ export interface State {
   projectViewId: string | null
   /** Project the next new chat will be created in (null = personal). */
   draftProjectId: string | null
+  /**
+   * Reasoning effort the next new chat will be created with. A draft chat has no row to PATCH, so the
+   * header's effort picker parks its choice here and `send` applies it once the conversation exists.
+   */
+  draftEffort: Effort
   /** Scope filter used by the Memory / Graph / Documents library views. */
   libraryScope: Scope
   /** Scope the memories/graph/documents arrays are currently loaded for. */
@@ -518,6 +523,7 @@ export const useStore = create<State>((set, get) => {
     memoryMode: 'split',
     projectViewId: null,
     draftProjectId: null,
+    draftEffort: 'default',
     libraryScope: 'all',
     dataScope: 'all',
     docs: [],
@@ -671,7 +677,7 @@ export const useStore = create<State>((set, get) => {
     },
 
     refreshConversations: async () => set({ conversations: await api.conversations.list('all') }),
-    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, view: 'chat', settingsOpen: false }),
+    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, draftEffort: 'default', view: 'chat', settingsOpen: false }),
     createConversation: async (projectId) => {
       try {
         const c = await api.conversations.create(projectId, get().settings.defaultModel)
@@ -749,7 +755,12 @@ export const useStore = create<State>((set, get) => {
     },
     setChatSettings: async (patch, conversationId) => {
       const id = conversationId ?? get().focusedConversationId
-      if (!id) return
+      if (!id) {
+        // No conversation to PATCH yet. Effort is the one setting a draft can still carry, so park it
+        // and let `send` apply it to the conversation it is about to create.
+        if (patch.effort !== undefined) set({ draftEffort: patch.effort })
+        return
+      }
       const c = await api.conversations.patch(id, { settings: patch })
       patchConversation(id, (cur) => ({ ...cur, settings: c.settings }))
     },
@@ -779,9 +790,12 @@ export const useStore = create<State>((set, get) => {
         get().toast((e as Error).message, 'error')
         return false
       }
+      // An effort chosen on the draft lands before the first run, so it applies to this very reply.
+      const effort = get().draftEffort
+      if (effort !== 'default') c = await api.conversations.patch(c.id, { settings: { effort } }).catch(() => c)
       c.messages = []
       putSession(c)
-      set({ focusedConversationId: c.id, view: 'chat' })
+      set({ focusedConversationId: c.id, view: 'chat', draftEffort: 'default' })
       void get().refreshProjects()
       return runStream(c.id, { content: text })
     },

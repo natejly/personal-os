@@ -210,23 +210,29 @@ export default function MailView(): JSX.Element {
       <header className="page-header drag">
         {!sidebarOpen && <button className="icon-btn no-drag" title="Show sidebar (⌘B)" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
         <h2><MailIcon size={16} /> Mail {google?.email && <span className="muted">· {google.email}</span>}</h2>
-        <div className="no-drag header-right">
-          <button className="ghost-btn" disabled={!google?.connected} onClick={startCompose}><SquarePen size={14} /> Compose</button>
+        {google?.connected && <div className="no-drag header-right">
+          <button className="ghost-btn" onClick={startCompose}><SquarePen size={14} /> Compose</button>
           <label className="search">
             <Search size={14} />
             <input placeholder="Search mail (from:, subject:, …)" value={search} onChange={(e) => setSearch(e.target.value)} />
           </label>
-          <button className="icon-btn" title="Refresh" onClick={() => void load(true)} disabled={loading}><RefreshCw size={15} className={loading ? 'spin' : ''} /></button>
-        </div>
+          <button className="icon-btn" title="Refresh" aria-label="Refresh mail" onClick={() => void load(true)} disabled={loading}><RefreshCw size={15} className={loading ? 'spin' : ''} /></button>
+        </div>}
       </header>
 
+      {/* Disconnected, the filters below have nothing to filter: one clear next step instead of a banner
+          over a dead toolbar and a blank page. */}
       {!google?.connected && (
-        <div className="notice-bar">
-          Mail needs a Google connection. <button className="link" onClick={() => setSettingsOpen(true)}>Connect Google</button>
+        <div className="empty-state">
+          <MailIcon size={28} />
+          <h2>Connect your inbox</h2>
+          <p>Grain reads and triages Gmail once Google is connected. Nothing is sent without asking you first.</p>
+          <button className="primary-btn" onClick={() => setSettingsOpen(true)}>Connect Google</button>
         </div>
       )}
       {error && <div className="notice-bar error">{error}</div>}
 
+      {google?.connected && <>
       <div className="mail-toolbar no-drag">
         <div className="seg">
           <button className={read === 'all' ? 'active' : ''} onClick={() => setRead('all')}>All</button>
@@ -278,6 +284,7 @@ export default function MailView(): JSX.Element {
           ))}
         </div>
       </div>
+      </>}
 
       {open && (
         <div className="modal-backdrop" onMouseDown={() => setOpen(null)}>

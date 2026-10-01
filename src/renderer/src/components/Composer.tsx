@@ -60,7 +60,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
           minChars={8}
           value={text}
           onChange={setText}
-          placeholder={streaming ? 'Steer the reply…' : placeholder ?? 'Message… Tab accepts a suggestion'}
+          placeholder={streaming ? 'Steer the reply…' : placeholder ?? 'Message…'}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void submit() } }}
         />
         {streaming && !text.trim() ? (

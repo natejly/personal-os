@@ -69,7 +69,7 @@ export default function SettingsModal(): JSX.Element {
 
         <section>
           <h3>Provider</h3>
-          <p className="muted">Personal OS talks to a <a href="https://docs.litellm.ai/" target="_blank" rel="noreferrer">LiteLLM</a> proxy, so any model LiteLLM can route to works here. Point it at your proxy and paste a virtual key.</p>
+          <p className="muted">Grain talks to a <a href="https://docs.litellm.ai/" target="_blank" rel="noreferrer">LiteLLM</a> proxy, so any model LiteLLM can route to works here. Point it at your proxy and paste a virtual key.</p>
           <label><span>LiteLLM base URL</span><input autoFocus value={draft.baseUrl} onChange={(e) => patch({ baseUrl: e.target.value })} placeholder="http://localhost:4000" spellCheck={false} /></label>
           <label><span>API key</span>
             <div className="input-row">

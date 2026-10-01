@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { MessageSquarePlus, Search, Settings, Sparkles, Trash2, PanelLeftClose, Brain, FileText, NotebookPen, Plus, Folder, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid, Mail, MonitorDot, BookOpen, Globe } from 'lucide-react'
+import { MessageSquare, MessageSquarePlus, Search, Settings, Sparkles, Trash2, PanelLeftClose, Brain, FileText, NotebookPen, Plus, Folder, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid, Mail, MonitorDot, BookOpen, Globe } from 'lucide-react'
 import GrainLogo from './GrainLogo'
 import { useStore, type View } from '../store'
 import { ActivityIndicator } from './ActivityView'
@@ -87,6 +87,7 @@ export default function Sidebar(): JSX.Element {
   const [query, setQuery] = useState('')
   const [projectsOpen, setProjectsOpen] = useState(true)
   const [knowledgeOpen, setKnowledgeOpen] = useState(true)
+  const [recentsOpen, setRecentsOpen] = useState(true)
   // Project groups list docs beside chats, but `docs` in the store is the Docs view's result set:
   // narrowed by its scope picker and its search box. The sidebar keeps its own unfiltered copy so a
   // search over there cannot empty the groups over here. Debounced, because `docs` changes per keystroke.
@@ -158,6 +159,9 @@ export default function Sidebar(): JSX.Element {
         <MessageSquarePlus size={16} /><span>New chat</span><kbd>⌘N</kbd>
       </button>
 
+      {/* One scroller for everything between New chat and the footer. Recents used to be the only part
+          that scrolled, so with a few projects open it was squeezed to a sliver at the bottom. */}
+      <div className="sidebar-scroll">
       <nav className="nav">
         {NAV.filter((n) => (n.view ? n.view === 'home' || !viewHidden(settings, n.view) : inCanvas)).map(navItem)}
       </nav>
@@ -215,8 +219,11 @@ export default function Sidebar(): JSX.Element {
       )}
 
       <div className="section-row">
-        <span className="section-toggle static">Recents</span>
+        <button className="section-toggle" onClick={() => setRecentsOpen((o) => !o)}>
+          <ChevronRight size={12} className={recentsOpen ? 'rot90' : ''} /><MessageSquare size={13} /> Recents
+        </button>
       </div>
+      {recentsOpen && (<>
       <label className="search">
         <Search size={14} />
         <input placeholder="Search" value={query} onChange={(e) => setQuery(e.target.value)} />
@@ -239,6 +246,8 @@ export default function Sidebar(): JSX.Element {
             ))}
           </section>
         ))}
+      </div>
+      </>)}
       </div>
 
       <div className="sidebar-bottom">

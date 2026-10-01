@@ -40,8 +40,10 @@ export default function DocumentsView({ projectId, embedded = false }: { project
       {embedded && <div className="add-row">{uploadBtn}<span className="muted small">Knowledge for this project: .txt, .md, .pdf, .docx and code files. Drop files anywhere here.</span></div>}
       {!embedded && <p className="muted small">Supports .txt, .md, .pdf, .docx and common code/text files. Documents are chunked and full-text indexed; the best matching excerpts are pulled into chats automatically. Personal documents are available everywhere; project documents only inside that project. Drop files anywhere here.</p>}
       {documents.length === 0 && (
-        <div className="empty-hint big">
-          <p>No documents here yet.</p>
+        <div className="empty-state">
+          <FileText size={28} />
+          <h2>No documents yet</h2>
+          <p>Upload files, or drop them anywhere on this page.</p>
           <button className="primary-btn" onClick={() => fileRef.current?.click()}><Upload size={14} /> Upload{targetProject ? ' to project' : ''}</button>
         </div>
       )}

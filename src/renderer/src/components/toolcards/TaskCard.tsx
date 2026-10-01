@@ -11,7 +11,8 @@ export default function TaskCard(props: ToolCardProps): JSX.Element {
   const { event, pending } = props
   const a = event.arguments
   const [title, setTitle] = useState(str(a.title))
-  const [due, setDue] = useState(/^\d{4}-\d{2}-\d{2}$/.test(str(a.due)) ? str(a.due) : '')
+  const dueInit = /^\d{4}-\d{2}-\d{2}$/.test(str(a.due)) ? str(a.due) : ''
+  const [due, setDue] = useState(dueInit)
   const [notes, setNotes] = useState(str(a.notes))
 
   const edited = wasEdited(event)
@@ -28,7 +29,8 @@ export default function TaskCard(props: ToolCardProps): JSX.Element {
       invalid={pending && !title.trim() ? 'A task needs a title' : null}
       getEdited={() => {
         const out: Record<string, unknown> = { ...a, title: title.trim() }
-        if (due) out.due = due; else delete out.due
+        // A due the date input cannot show (not YYYY-MM-DD) is kept unless the user touched the field.
+        if (due !== dueInit) { if (due) out.due = due; else delete out.due }
         if (notes.trim()) out.notes = notes; else delete out.notes
         return out
       }}

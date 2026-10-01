@@ -269,3 +269,15 @@ def test_an_edit_on_an_orphaned_card_is_recorded_not_run(editable) -> None:  # t
     ev = [m for m in j("GET", f"/conversations/{cid}")["messages"] if m["id"] == am["id"]][0]["tool_events"][0]
     assert ev["pending"] is False and ev["edited_by"] == "user" and ev["arguments"] == {"title": "fixed"} and ev["original_arguments"] == {"title": "orig"}
     assert todos_named("fixed") == []
+
+
+def test_a_parked_card_refuses_edits_and_stays_pending(editable) -> None:  # type: ignore[no-untyped-def]
+    """No run reads a parked card's edit back, so it must not be accepted (the desk would run the original)."""
+    cid = j("POST", "/conversations", {})["id"]
+    am = appmod.convos.add_message(cid, "assistant", "")
+    run = Run(cid, store)
+    uid = f"{am['id']}:call_0"
+    store.open_approval(uid, run.run_id, "todo_add", {"title": "orig"}, conversation_id=cid, message_id=am["id"])
+    store.park(uid)
+    j("POST", f"/approvals/{uid}", {"decision": "allow", "arguments": {"title": "fixed"}}, expect=400)
+    assert store.approval(uid)["status"] == "pending"

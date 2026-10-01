@@ -1557,6 +1557,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 yield "tool_result", {"message_id": am["id"], **event}
                 yield "span", {"message_id": am["id"], "span": tspan}
                 for_model = {**result, "images_shown_to_user": [i["name"] for i in images]} if images and isinstance(result, dict) else result
+                if edit_info and isinstance(for_model, dict):
+                    # The model proposed one thing and the user ran another: say so, or it reports the wrong call as done.
+                    for_model = {**for_model, "note": "The user edited these arguments before approving; this ran with their version: "
+                                 + json.dumps(args, default=str)[:1500]}
                 # Small results go in whole; a big one is stored and replaced by a handle the model can
                 # page with read_tool_result, so nothing is silently truncated away. See working.py.
                 messages.append({"role": "tool", "tool_call_id": c["id"],
@@ -1981,6 +1985,10 @@ async def approve_tool_call(call_id: str, body: ApprovalIn) -> dict[str, Any]:
             raise HTTPException(400, "A plan is edited through its steps, not arguments")
         if pending is None or pending["status"] != "pending":
             raise HTTPException(404, "No pending approval for that call")
+        if pending.get("decided_by") == "park":
+            # No run is waiting on a parked card and nothing reads its edit back, so "approved with edits" would be a
+            # lie: the resumed desk would not run these arguments. Decide it as it is, or deny it.
+            raise HTTPException(400, "This approval is parked and cannot take edits; approve it as proposed or deny it")
         spec = toolbox.specs.get(pending["tool"])
         try:
             edited = approval_edits.validate(pending["tool"], body.arguments, spec.parameters if spec else None)

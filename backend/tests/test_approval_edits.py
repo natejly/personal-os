@@ -281,3 +281,11 @@ def test_a_parked_card_refuses_edits_and_stays_pending(editable) -> None:  # typ
     store.park(uid)
     j("POST", f"/approvals/{uid}", {"decision": "allow", "arguments": {"title": "fixed"}}, expect=400)
     assert store.approval(uid)["status"] == "pending"
+
+
+def test_calendar_propose_validator_follows_contract() -> None:
+    """Registered validators return an error string or None; a valid proposal must not read as an error."""
+    fns = approval_edits._validators["calendar_propose"]
+    ok = {"changes": [{"op": "create", "summary": "Focus", "start": "2026-10-02T09:00", "end": "2026-10-02T10:00"}]}
+    assert fns and all(fn(ok) is None for fn in fns)
+    assert any(isinstance(fn({"changes": [{"op": "teleport"}]}), str) for fn in fns)

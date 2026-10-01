@@ -950,17 +950,16 @@ def _register_working(self: Toolbox) -> None:
 def _register_approval_validators() -> None:
     """Hold an edited calendar_propose to the same rules as one the model wrote.
 
-    approval_edits (the approvals workstream) owns the registry; this is a no-op until it exists.
-    A validator takes the edited arguments, returns them (normalised) or raises ValueError.
+    approval_edits owns the registry: a validator returns an error string for the 400, or None when the edit is fine.
     """
-    try:
-        from . import approval_edits  # type: ignore[attr-defined]
-    except ImportError:
-        return
+    from . import approval_edits
 
-    def _validate(args: dict[str, Any]) -> dict[str, Any]:
-        scheduling.validate_changes(args.get("changes"))
-        return args
+    def _validate(args: dict[str, Any]) -> str | None:
+        try:
+            scheduling.validate_changes(args.get("changes"))
+        except ValueError as e:
+            return str(e)
+        return None
     approval_edits.register_validator("calendar_propose", _validate)
 
 

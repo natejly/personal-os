@@ -17,6 +17,7 @@ import MailView from './components/MailView'
 import DashboardsView from './components/DashboardsView'
 import PendingSends from './components/PendingSends'
 import PageAgentPanel from './components/PageAgentPanel'
+import LibraryView from './components/LibraryView'
 import SettingsModal from './components/SettingsModal'
 import ProjectModal from './components/ProjectModal'
 import Canvas from './canvas/Canvas'
@@ -120,6 +121,7 @@ export default function App(): JSX.Element {
           {view === 'docs' && <DocsView />}
           {view === 'meetings' && <MeetingsView />}
           {view === 'activity' && <ActivityView />}
+          {view === 'library' && <LibraryView />}
           {view === 'project' && <ProjectView />}
         </>
       )}

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { MessageSquarePlus, Search, Settings, Sparkles, Trash2, PanelLeftClose, Brain, FileText, NotebookPen, Plus, Folder, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid, Mail, Mic, MonitorDot, BookOpen, Globe } from 'lucide-react'
+import { MessageSquarePlus, Search, Settings, Sparkles, Trash2, PanelLeftClose, Brain, FileText, NotebookPen, Plus, Folder, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid, Library, Mail, Mic, MonitorDot, BookOpen, Globe } from 'lucide-react'
 import GrainLogo from './GrainLogo'
 import { useStore, type View } from '../store'
 import { ActivityIndicator } from './ActivityView'
@@ -57,7 +57,9 @@ const NAV: NavEntry[] = [
 // What the assistant knows: memories and uploaded documents, grouped under their own section.
 const KNOWLEDGE: NavEntry[] = [
   { view: 'memory', label: 'Memory', icon: <Brain size={15} />, kind: 'memory' },
-  { view: 'documents', label: 'Documents', icon: <FileText size={15} />, kind: 'documents' }
+  { view: 'documents', label: 'Documents', icon: <FileText size={15} />, kind: 'documents' },
+  // No widget kind: the Library is a place to review and author, not something to pin on a canvas.
+  { view: 'library', label: 'Library', icon: <Library size={15} /> }
 ]
 
 export default function Sidebar(): JSX.Element {

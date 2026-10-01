@@ -28,7 +28,7 @@ from . import activity, assist, llm, mac, mcp_eval, tools
 from .context import build_context, estimate_tokens
 from .db import Database, data_dir_from_env, new_id
 from .extract_text import extract_text
-from .learn import LearnJob, LearnWorker, Skills, induce_skill
+from .learn import MAX_INJECTED_SKILLS, LearnJob, LearnWorker, Skills, induce_skill, skill_block
 from .repos import ALL, Conversations, Documents, Graph, Memories, Projects
 from .boards import Boards
 from .canvas import SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
@@ -38,6 +38,7 @@ from . import cache as google_cache
 from .google import Google, GoogleNotConnected, json_safe
 from .jobs import (KINDS, PROPOSAL_STATUSES, Jobs, Proposals, Scheduler, local_tz_name, spent, valid_cron,
                    valid_tz)
+from . import skillbuild
 from .mcp_client import McpClient, McpError
 from .mcp_servers import MODES as MCP_MODES, RESERVED_PREFIX as MCP_PREFIX, SCOPES as MCP_SCOPES, McpServers
 from .meeting_recorder import RecorderBusy
@@ -4211,6 +4212,19 @@ class SkillIn(BaseModel):
     project_id: str | None = None
 
 
+class SkillDraftIn(BaseModel):
+    name: str = ""
+    description: str = ""
+    procedure: str = ""
+    skill_id: str | None = None
+
+
+class SkillIntentIn(BaseModel):
+    intent: str
+    conversation_id: str | None = None
+    project_id: str | None = None
+
+
 @app.get("/skills")
 def list_skills(status: str | None = None, project_id: str = "all") -> list[dict[str, Any]]:
     return skills.list(status=status, project_id="__all__" if project_id == "all" else sid(project_id))
@@ -4229,6 +4243,16 @@ def patch_skill(skill_id: str, body: SkillPatch) -> dict[str, Any]:
     patch = body.model_dump(exclude_unset=True)
     if patch.get("status") and patch["status"] not in ("candidate", "approved", "rejected"):
         raise HTTPException(400, "status must be candidate, approved or rejected")
+    before = skills.get(skill_id)
+    if not before:
+        raise HTTPException(404, "No such skill")
+    # An approved skill is text in a later system prompt, so approving one -- or editing one that is
+    # already live -- is checked on the same footing. Warnings never block: only the author weighs
+    # those. Errors are authority claims, which is the one thing the fence cannot make safe.
+    bad = skillbuild.approval_blockers(before, patch, known_tools=_known_tools(), existing=skills.list())
+    if bad:
+        raise HTTPException(422, "This procedure cannot be approved as written. " +
+                            " ".join(f["message"] for f in bad))
     s = skills.update(skill_id, patch)
     if not s:
         raise HTTPException(404, "No such skill")
@@ -4239,6 +4263,52 @@ def patch_skill(skill_id: str, body: SkillPatch) -> dict[str, Any]:
 def delete_skill(skill_id: str) -> dict[str, bool]:
     skills.delete(skill_id)
     return {"ok": True}
+
+
+def _known_tools() -> set[str]:
+    """Every tool name the assistant could actually call, so the lint can catch an invented one."""
+    return set(toolbox.specs)
+
+
+def _lint_skill(name: str, description: str, procedure: str, skill_id: str | None = None) -> list[dict[str, Any]]:
+    return skillbuild.lint_skill(name, description, procedure, known_tools=_known_tools(),
+                                 existing=skills.list(), skill_id=skill_id)
+
+
+@app.post("/skills/lint")
+def lint_skill_draft(body: SkillDraftIn) -> dict[str, Any]:
+    """Review a draft without saving it. The review surface calls this as the user types, and
+    `skill_draft` runs the identical checks on what a model wrote."""
+    findings = _lint_skill(body.name, body.description, body.procedure, skill_id=body.skill_id)
+    return {"findings": findings, "blocking": skillbuild.blocking(findings)}
+
+
+@app.post("/skills/draft")
+async def draft_skill_from_intent(body: SkillIntentIn) -> dict[str, Any]:
+    """Turn a line of intent into a draft procedure. Stores nothing: the user gets text to edit."""
+    cfg = settings()
+    context = ""
+    if body.conversation_id:
+        conv = convos.get(body.conversation_id)
+        msgs = [m for m in ((conv or {}).get("messages") or [])
+                if m["role"] in ("user", "assistant") and (m.get("content") or "").strip()]
+        context = "\n\n".join(f"{m['role']}: {m['content']}" for m in msgs[-12:])
+    return await skillbuild.draft_skill(settings=cfg, model=cfg["defaultModel"], intent=body.intent,
+                                        context=context, known_tools=_known_tools(), existing=skills.list())
+
+
+@app.get("/skills/preview")
+def preview_skills(project_id: str | None = None) -> dict[str, Any]:
+    """Exactly what the assistant will be shown, assembled by the same function the chat uses.
+
+    Not a rendering of it: `skill_block` is the real injected text, so the preview cannot drift from
+    what is actually sent, which is the only reason a preview of this is worth anything.
+    """
+    rows = [s for s in skills.list(status="approved", project_id=sid(project_id)) if (s["procedure"] or "").strip()]
+    block = skill_block(rows) if rows else ""
+    return {"block": block, "tokens_estimate": estimate_tokens(block),
+            "included": [{"id": s["id"], "name": s["name"]} for s in rows[:MAX_INJECTED_SKILLS]],
+            "omitted": [{"id": s["id"], "name": s["name"]} for s in rows[MAX_INJECTED_SKILLS:]]}
 
 
 @app.post("/conversations/{id}/skills/induce")

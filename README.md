@@ -98,6 +98,17 @@ their own instructions, knowledge files, memories and graph.
   transcription can run entirely on-device through whisper.cpp. Meetings never
   expire, are unreachable from the activity monitor's purge, and never reach
   auto-learn. See [docs/meetings.md](docs/meetings.md).
+- **Library.** One place for what the assistant may follow and reach: **Skills**,
+  the procedures it can be asked to repeat; **Connectors**, the MCP servers whose
+  tools join the toolbox; and **Made**, every doc, dashboard and board built here.
+  A skill is the one place prose a model wrote could land inside a later system
+  prompt, so authoring is lint-gated: warnings are quality, but any sentence that
+  claims authority over the assistant's permissions is an error that blocks
+  approval, and the same check runs on what `skill_draft` writes and on what you
+  approve by hand. `skill_draft` and `skill_revise` can only ever produce a
+  candidate — there is no tool that approves one, and a revision of an approved
+  procedure is forked beside it rather than overwriting the text in use. The
+  preview shows the real injected block, assembled by the function the chat uses.
 - **Context management.** Per-chat toggles for memory, graph, documents, activity,
   meetings, auto-learn and tools; an inspector showing exactly what was injected into
   each reply; a live preview for a draft message.

@@ -7,8 +7,6 @@ import { useModal } from '../lib/useModal'
 import type { Settings, ShortcutState } from '@shared/types'
 import { ToolGlobalToggles } from './ToolPermissions'
 import GoogleSettings from './GoogleSettings'
-import SkillsReview from './SkillsReview'
-import McpSettings from './McpSettings'
 import MeetingSettings from './MeetingSettings'
 import UsageView from './UsageView'
 
@@ -104,11 +102,6 @@ export default function SettingsModal(): JSX.Element {
         </section>
 
         <section>
-          <h3>Skills <small className="muted">(procedural memory)</small></h3>
-          <SkillsReview />
-        </section>
-
-        <section>
           <h3>Integrations</h3>
           <GoogleSettings clientId={draft.googleClientId ?? ''} clientSecret={draft.googleClientSecret ?? ''} onChange={(p) => patch(p)}
             onSaveCreds={() => saveSettings({ googleClientId: draft.googleClientId, googleClientSecret: draft.googleClientSecret })} />
@@ -131,11 +124,6 @@ export default function SettingsModal(): JSX.Element {
               Turning this off makes every send immediate and final.
             </p>
           </div>
-        </section>
-
-        <section>
-          <h3>Connectors</h3>
-          <McpSettings />
         </section>
 
         <section>

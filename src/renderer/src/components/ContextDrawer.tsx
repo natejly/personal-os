@@ -167,7 +167,7 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
         {convo && (
           <div className="ctx-tools">
             <button className="link small" onClick={() => void induceSkill(convo.id)}>propose a skill from this chat…</button>
-            <span className="muted small"> it lands in Settings → Skills as a candidate for you to review.</span>
+            <span className="muted small"> it lands in Library → Skills as a candidate for you to review.</span>
           </div>
         )}
         {cs.useTools && (

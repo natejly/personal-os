@@ -2,7 +2,7 @@ import type {
   BackgroundEvent, ChatEvent, ToolInfo, Todo, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, DriveFile, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Recap, Conversation, ConversationSettings, ContextUsed, Document, GraphData, GraphEdge, GraphNode, Message,
   ApprovalDecision, PlanEdit,
   Memory, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo,
-  Plan, PlanStep, Skill, SkillStatus, ToolResultHandle,
+  Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
   Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
   AgentInbox, AgentProposal, Job,
   Doc, DocFolder, FullDoc, DocRevision,
@@ -274,7 +274,15 @@ export const api = {
       req<Skill>(`/skills/${id}`, { method: 'PATCH', body: json(patch) }),
     delete: (id: string) => req<{ ok: boolean }>(`/skills/${id}`, { method: 'DELETE' }),
     /** Distil a conversation into a candidate for review. Never enables anything. */
-    induce: (convId: string) => req<{ candidate: Skill | null; reason: string | null }>(`/conversations/${convId}/skills/induce`, { method: 'POST' })
+    induce: (convId: string) => req<{ candidate: Skill | null; reason: string | null }>(`/conversations/${convId}/skills/induce`, { method: 'POST' }),
+    /** Review a draft without saving it. `blocking` is what `update({status:'approved'})` would refuse. */
+    lint: (d: { name?: string; description?: string; procedure?: string; skill_id?: string }) =>
+      req<{ findings: SkillFinding[]; blocking: SkillFinding[] }>('/skills/lint', { method: 'POST', body: json(d) }),
+    /** Draft a procedure from a line of intent. Stores nothing — the user edits the text first. */
+    draft: (intent: string, conversationId?: string | null) =>
+      req<SkillDraftResult>('/skills/draft', { method: 'POST', body: json({ intent, conversation_id: conversationId ?? null }) }),
+    /** What a chat in this scope is actually shown. 'all' is not a scope any one chat sees. */
+    preview: (scope: Scope = 'personal') => req<SkillPreview>(`/skills/preview?project_id=${encodeURIComponent(scope)}`)
   },
   stop: (mid: string) => req(`/messages/${mid}/stop`, { method: 'POST' }),
   /** Starts the reply as a background task and returns at once; watch it with `chatStream(convId, seq)`. Throws a 409 carrying a `RunConflict` when that conversation already has a live run. */

@@ -1,0 +1,128 @@
+import { useState } from 'react'
+import { Check, ChevronDown, ChevronRight, Plus, Trash2, Undo2, X } from 'lucide-react'
+import { useStore } from '../store'
+import type { Skill } from '@shared/types'
+import ProjectChip from './ProjectChip'
+
+/** Why a procedure exists, in the user's terms. 'proposed' is reserved for the assistant asking directly. */
+const SOURCE_LABEL: Record<Skill['source'], string> = {
+  induced: 'learned from a chat',
+  proposed: 'suggested by the assistant',
+  user: 'written by you'
+}
+
+const ORDER: Skill['status'][] = ['candidate', 'approved', 'rejected']
+const SECTION: Record<Skill['status'], { title: string; blurb: string }> = {
+  candidate: { title: 'Waiting for you', blurb: 'Nothing here is in use. Read it, edit it if you like, then approve or discard.' },
+  approved: { title: 'In use', blurb: 'Injected into chats that have procedures turned on, as reference material the assistant may follow.' },
+  rejected: { title: 'Discarded', blurb: 'Kept so the same suggestion is recognisable if it comes back.' }
+}
+
+function SkillRow({ skill }: { skill: Skill }): JSX.Element {
+  const { updateSkill, deleteSkill } = useStore()
+  const [open, setOpen] = useState(false)
+  const [draft, setDraft] = useState<{ name: string; description: string; procedure: string } | null>(null)
+
+  const edit = draft ?? { name: skill.name, description: skill.description, procedure: skill.procedure }
+  const dirty = draft !== null && (draft.name !== skill.name || draft.description !== skill.description || draft.procedure !== skill.procedure)
+  const save = async (): Promise<void> => {
+    if (dirty) await updateSkill(skill.id, draft!)
+    setDraft(null)
+  }
+
+  return (
+    <div className={`skill-row ${skill.status}`}>
+      <div className="skill-head" onClick={() => setOpen(!open)} role="button" tabIndex={0}
+        onKeyDown={(e) => { if (e.key === 'Enter') setOpen(!open) }}>
+        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        <span className="skill-name">{skill.name}</span>
+        <span className="skill-desc muted">{skill.description}</span>
+        <ProjectChip projectId={skill.project_id} showPersonal />
+        <small className="muted">{SOURCE_LABEL[skill.source]}</small>
+        <div className="skill-actions no-drag" onClick={(e) => e.stopPropagation()}>
+          {skill.status !== 'approved' && (
+            <button className="primary-btn small" title="Let the assistant use this procedure"
+              onClick={() => void updateSkill(skill.id, { status: 'approved' })}><Check size={13} /> Approve</button>
+          )}
+          {skill.status === 'approved' && (
+            <button className="small" title="Stop injecting this procedure"
+              onClick={() => void updateSkill(skill.id, { status: 'candidate' })}><Undo2 size={13} /> Revoke</button>
+          )}
+          {skill.status === 'candidate' && (
+            <button className="small" title="Discard" onClick={() => void updateSkill(skill.id, { status: 'rejected' })}><X size={13} /></button>
+          )}
+          <button className="icon-btn ghost danger" aria-label={`Delete ${skill.name}`} onClick={() => void deleteSkill(skill.id)}><Trash2 size={13} /></button>
+        </div>
+      </div>
+      {open && (
+        <div className="skill-body">
+          <label>Name<input value={edit.name} onChange={(e) => setDraft({ ...edit, name: e.target.value })} /></label>
+          <label>When it applies<input value={edit.description} onChange={(e) => setDraft({ ...edit, description: e.target.value })} /></label>
+          <label>Procedure
+            <textarea rows={10} value={edit.procedure} onChange={(e) => setDraft({ ...edit, procedure: e.target.value })} />
+          </label>
+          <div className="row-actions">
+            <button className="primary-btn small" disabled={!dirty} onClick={() => void save()}>Save</button>
+            {dirty && <button className="small" onClick={() => setDraft(null)}>Cancel</button>}
+            {skill.status === 'approved' && <span className="muted small">Edits take effect in the next reply.</span>}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default function SkillsPanel(): JSX.Element {
+  const skills = useStore((s) => s.skills)
+  const { createSkill } = useStore()
+  const [adding, setAdding] = useState(false)
+  const [form, setForm] = useState({ name: '', description: '', procedure: '' })
+
+  const add = async (): Promise<void> => {
+    if (!form.name.trim()) return
+    await createSkill(form)
+    setForm({ name: '', description: '', procedure: '' })
+    setAdding(false)
+  }
+
+  return (
+    <div className="library-panel">
+      <div className="add-row">
+        <button className="primary-btn" onClick={() => setAdding(!adding)}><Plus size={14} /> New procedure</button>
+        <span className="muted small">
+          A procedure is method, not fact: how a task went well, so it can go that way again. Approved ones are injected
+          as clearly fenced reference material — they cannot grant the assistant permissions or change its instructions.
+        </span>
+      </div>
+      {adding && (
+        <div className="skill-body standalone">
+          <label>Name<input autoFocus value={form.name} placeholder="Weekly review" onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
+          <label>When it applies<input value={form.description} placeholder="when I ask for a weekly review" onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
+          <label>Procedure<textarea rows={8} value={form.procedure} placeholder={'1. Pull this week\'s done todos.\n2. Check the calendar for what slipped.\n3. Draft the summary as bullets.'} onChange={(e) => setForm({ ...form, procedure: e.target.value })} /></label>
+          <div className="row-actions">
+            <button className="primary-btn small" disabled={!form.name.trim()} onClick={() => void add()}>Add as candidate</button>
+            <button className="small" onClick={() => setAdding(false)}>Cancel</button>
+            <span className="muted small">Saved unapproved, like everything else here — one more click turns it on.</span>
+          </div>
+        </div>
+      )}
+      {skills.length === 0 && !adding && (
+        <div className="empty-hint big">
+          <p>No procedures yet.</p>
+          <p className="muted small">Finish something worth repeating in a chat, then use “Learn a procedure” in that chat’s menu — or write one here.</p>
+        </div>
+      )}
+      {ORDER.map((status) => {
+        const rows = skills.filter((s) => s.status === status)
+        if (!rows.length) return null
+        return (
+          <section key={status} className="skill-section">
+            <h4>{SECTION[status].title} <span className="count">{rows.length}</span></h4>
+            <p className="muted small">{SECTION[status].blurb}</p>
+            {rows.map((s) => <SkillRow key={s.id} skill={s} />)}
+          </section>
+        )
+      })}
+    </div>
+  )
+}

@@ -18,7 +18,9 @@ const withoutLegacyMode = (s: Settings): Settings => {
 }
 
 /** `'canvas'` is the spaces desktop: one destination among the views, not a separate shell. */
-export type View = 'home' | 'chat' | 'todos' | 'calendar' | 'mail' | 'boards' | 'dashboards' | 'memory' | 'documents' | 'docs' | 'meetings' | 'activity' | 'project' | 'canvas'
+export type View = 'home' | 'chat' | 'todos' | 'calendar' | 'mail' | 'boards' | 'dashboards' | 'memory' | 'documents' | 'docs' | 'meetings' | 'activity' | 'library' | 'project' | 'canvas'
+/** Which shelf of the Library is showing. Kept in the store so leaving and coming back lands you where you were. */
+export type LibraryTab = 'skills' | 'connectors' | 'made'
 /** Every view but the canvas: what ⌘⇧C and the sidebar's LayoutGrid button return to. */
 export type ClassicView = Exclude<View, 'canvas'>
 /** How the Docs editor splits its panes. */
@@ -279,7 +281,14 @@ export interface State {
   setPlanSteps: (conversationId: string, steps: PlanStep[]) => Promise<void>
   clearPlan: (conversationId: string) => Promise<void>
 
+  libraryTab: LibraryTab
+  setLibraryTab: (tab: LibraryTab) => void
+  /** Everything the Library shows that it does not already hold. Safe to call on every entry. */
+  refreshLibrary: () => Promise<void>
+
   refreshSkills: () => Promise<void>
+  /** A procedure the user writes by hand. Still stored as a candidate: approval is always its own step. */
+  createSkill: (s: { name: string; description?: string; procedure?: string; project_id?: string | null }) => Promise<void>
   /** Rename, edit, approve or reject. Approving is what lets a skill into the system prompt. */
   updateSkill: (id: string, patch: Parameters<typeof api.skills.update>[1]) => Promise<void>
   deleteSkill: (id: string) => Promise<void>
@@ -944,6 +953,7 @@ export const useStore = create<State>((set, get) => {
     sidebarOpen: true,
     contextOpen: false,
     contextTab: 'last',
+    libraryTab: 'skills',
     pageAgentOpen: false,
     pageAgentId: null,
     pageContext: null,
@@ -1504,7 +1514,22 @@ export const useStore = create<State>((set, get) => {
       await api.plan.clear(conversationId).catch(() => undefined)
     },
 
+    setLibraryTab: (libraryTab) => set({ libraryTab }),
+    // The docs list is already kept live elsewhere; this is for the two things the Library reads
+    // that nothing else refreshes on its behalf.
+    refreshLibrary: async () => {
+      await Promise.all([get().refreshSkills().catch(() => undefined), get().refreshDocs().catch(() => undefined)])
+    },
+
     refreshSkills: async () => set({ skills: await api.skills.list() }),
+    createSkill: async (draft) => {
+      try {
+        const s = await api.skills.create(draft)
+        set((st) => ({ skills: [s, ...st.skills] }))
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
     updateSkill: async (id, patch) => {
       const s = await api.skills.update(id, patch)
       set((st) => ({ skills: st.skills.map((x) => (x.id === id ? s : x)) }))

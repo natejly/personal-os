@@ -47,6 +47,38 @@ export interface Plan {
 
 export type SkillStatus = 'candidate' | 'approved' | 'rejected'
 /** Procedural memory. A candidate is inert: only an approved skill is ever injected into a prompt. */
+/** One finding from the skill lint. 'error' blocks approval — it is always text claiming authority
+ *  over the assistant's permissions. 'warn' is quality, for the author to weigh. */
+export interface SkillFinding {
+  level: 'error' | 'warn'
+  code: string
+  message: string
+  field: 'name' | 'description' | 'procedure'
+  hint?: string
+  excerpt?: string
+}
+
+export interface SkillDraft {
+  name: string
+  description: string
+  procedure: string
+}
+
+/** The result of drafting from intent. Nothing is stored: `draft` is text for the user to edit. */
+export interface SkillDraftResult {
+  draft: SkillDraft | null
+  reason?: string
+  findings?: SkillFinding[]
+}
+
+/** The real injected block, assembled by the same function the chat uses, plus what did not fit. */
+export interface SkillPreview {
+  block: string
+  tokens_estimate: number
+  included: { id: string; name: string }[]
+  omitted: { id: string; name: string }[]
+}
+
 export interface Skill {
   id: string
   project_id: string | null

@@ -34,6 +34,7 @@ export const OPTIONAL_VIEWS: { view: View; label: string }[] = [
   { view: 'dashboards', label: 'Dashboards' },
   { view: 'memory', label: 'Memory' },
   { view: 'documents', label: 'Documents' },
+  { view: 'library', label: 'Library' },
   // Showing the view records nothing. Recording is `meetings.enabled` plus an acknowledged consent
   // notice, both off until the user sets them, so this toggle only decides whether the row is there.
   { view: 'meetings', label: 'Meetings' }

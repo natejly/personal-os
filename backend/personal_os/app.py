@@ -25,7 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import AfterValidator, BaseModel, Field
 
-from . import activity, assist, llm, mac, mcp_eval, tools
+from . import activity, assist, backups, llm, mac, mcp_eval, tools
 from .context import build_context, estimate_tokens
 from .db import Database, data_dir_from_env, new_id
 from .extract_text import extract_text
@@ -64,6 +64,7 @@ from .working import Plans as WorkPlans, ToolResults
 
 log = logging.getLogger("personal_os")
 
+backups.apply_pending_restore(data_dir_from_env())  # a restore staged in Settings → Data swaps in before the file is opened
 db = Database(data_dir_from_env())
 projects = Projects(db)
 convos = Conversations(db)
@@ -298,6 +299,7 @@ monitor = activity.Monitor(db, settings, llm.complete)
 # Every Gmail send is held here first so it can be undone (outbox.py); its own routes are included below.
 outbox = Outbox(db, google, settings)
 app.include_router(outbox_router(outbox))
+app.include_router(backups.router(db.data_dir))
 # Working memory that is not the chat: the per-conversation plan, the full tool-result blobs behind
 # their handles (working.py), and procedural memory awaiting review (learn.Skills). `work_plans` is the
 # todo_write artifact and is a different thing from `plans`, the propose_plan approval record.
@@ -4497,6 +4499,21 @@ async def _outbox_startup() -> None:
 @app.on_event("shutdown")
 async def _outbox_shutdown() -> None:
     task = getattr(app.state, "outbox_task", None)
+    if task:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
+
+
+# ---------------- backups: the daily snapshot timer (backups.py) ----------------
+@app.on_event("startup")
+async def _backups_startup() -> None:
+    app.state.backups_task = asyncio.create_task(backups.Backups(db.data_dir).loop(), name="daily-backup")
+
+
+@app.on_event("shutdown")
+async def _backups_shutdown() -> None:
+    task = getattr(app.state, "backups_task", None)
     if task:
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError, Exception):

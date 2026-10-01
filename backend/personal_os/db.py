@@ -10,6 +10,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 
+from . import backups, migrations
+
 SCHEMA = """
 PRAGMA journal_mode=WAL;
 PRAGMA foreign_keys=ON;
@@ -324,9 +326,15 @@ class Database:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         (self.data_dir / "uploads").mkdir(exist_ok=True)
         self.path = self.data_dir / "personal-os.db"
+        existing = self.path.exists() and self.path.stat().st_size > 0
         with self.connect() as c:
+            # A database with content gets a snapshot before anything pending touches it (adopting the
+            # versioned system on a pre-existing file counts: the baseline re-runs _migrate).
+            if existing and migrations.pending(c):
+                backups.create(self.data_dir, "premigrate")
             c.executescript(SCHEMA)
             self._migrate(c)
+            migrations.run(c)
 
     @staticmethod
     def _migrate(c: sqlite3.Connection) -> None:

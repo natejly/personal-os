@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
-import { X, Eye, EyeOff, Plug, Cpu, Brain, Mail, Mic, Wrench, Gauge, LayoutGrid, Magnet, SlidersHorizontal, BookOpen, FileText, type LucideIcon } from 'lucide-react'
+import { X, Eye, EyeOff, Plug, Cpu, Brain, Mail, Mic, Wrench, Gauge, LayoutGrid, Magnet, SlidersHorizontal, BookOpen, FileText, Database, type LucideIcon } from 'lucide-react'
 import { useStore, type SettingsTab } from '../store'
 import { api } from '../lib/api'
 import { HOME_MODULES, OPTIONAL_VIEWS } from '../modules'
@@ -15,6 +15,7 @@ import UsageView from './UsageView'
 import MemoryPanel from './MemoryPanel'
 import DocumentsView from './DocumentsView'
 import ScopeSelect from './ScopeSelect'
+import DataSettings from './DataSettings'
 
 type Tab = SettingsTab
 
@@ -28,7 +29,8 @@ const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
   { id: 'usage', label: 'Usage & cost', icon: Gauge },
   { id: 'spaces', label: 'Spaces', icon: Magnet },
   { id: 'modules', label: 'Modules', icon: LayoutGrid },
-  { id: 'behavior', label: 'Behavior', icon: SlidersHorizontal }
+  { id: 'behavior', label: 'Behavior', icon: SlidersHorizontal },
+  { id: 'data', label: 'Data', icon: Database }
 ]
 
 const SNAP_LABEL: Record<SnapMode, string> = { off: 'No snap', grid: 'Grid', guides: 'Guides', both: 'Grid + guides' }
@@ -256,6 +258,8 @@ export default function SettingsModal(): JSX.Element {
                 Retry blocked or JavaScript-only pages through Jina Reader (Jina sees the page address)
               </label>
             </section>}
+
+            {tab === 'data' && <DataSettings />}
 
             {tab === 'usage' && <section>
               <h3>Usage &amp; cost</h3>

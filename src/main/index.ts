@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, Menu, shell } from 'electron'
 import { existsSync } from 'fs'
 import { join } from 'path'
 import { backendStatus, backendToken, backendUrl, startBackend, stopBackend } from './backend'
@@ -257,6 +257,14 @@ app.whenReady().then(async () => {
   ipcMain.handle('backend:url', () => backendUrl())
   ipcMain.handle('backend:status', () => backendStatus())
   ipcMain.handle('backend:token', () => backendToken())
+  ipcMain.handle('data:choose-export-path', async () => {
+    const stamp = new Date().toISOString().slice(0, 10)
+    const r = await dialog.showSaveDialog({ title: 'Export all data', defaultPath: join(app.getPath('documents'), `grain-export-${stamp}.zip`), filters: [{ name: 'Zip archive', extensions: ['zip'] }] })
+    return r.canceled || !r.filePath ? null : r.filePath
+  })
+  ipcMain.handle('data:reveal', async (_e, path: string) => !(await shell.openPath(String(path))))
+  // A staged restore is applied by the backend at its next start, so relaunching the whole app does it.
+  ipcMain.handle('data:relaunch', () => { app.relaunch(); app.quit() })
   ipcMain.on('window:close-self', (e) => BrowserWindow.fromWebContents(e.sender)?.close())
   ipcMain.on('window:minimize-self', (e) => BrowserWindow.fromWebContents(e.sender)?.minimize())
   registerPopouts(() => win)

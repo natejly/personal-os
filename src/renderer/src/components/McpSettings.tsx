@@ -108,7 +108,43 @@ function Report({ report, label }: { report: Pick<McpReport, 'status' | 'summary
   )
 }
 
-function ToolRow({ tool, onMode }: { tool: McpTool; onMode: (mode: ToolMode) => void }): JSX.Element {
+/** What changed in a tool's definition since the user last saw it, exactly as the model would now read it. */
+function DriftBanner({ tool, onAccept }: { tool: McpTool; onAccept: () => void }): JSX.Element | null {
+  const d = tool.drift
+  if (!d) return null
+  const { diff } = d
+  const moved = [
+    diff.added_params.length ? `added ${diff.added_params.join(', ')}` : '',
+    diff.removed_params.length ? `removed ${diff.removed_params.join(', ')}` : '',
+    diff.changed_params.length ? `changed ${diff.changed_params.join(', ')}` : '',
+    diff.new_required.length ? `now required: ${diff.new_required.join(', ')}` : ''
+  ].filter(Boolean)
+  return (
+    <details className={`mcp-drift ${d.quarantined ? 'quarantined' : ''}`} open={d.quarantined}>
+      <summary>
+        <b>{d.quarantined ? 'Quarantined: definition changed' : 'Definition changed'}</b>
+        {d.quarantined && <span className="muted"> — withheld from the assistant until you accept it</span>}
+      </summary>
+      {diff.description.length > 0 && (
+        <pre className="mcp-diff">{diff.description.filter((l) => !l.startsWith('---') && !l.startsWith('+++')).map((l, i) => (
+          <span key={i} className={l.startsWith('+') ? 'add' : l.startsWith('-') ? 'del' : ''}>{l + '\n'}</span>
+        ))}</pre>
+      )}
+      {moved.length > 0 && <p className="small muted">Parameters: {moved.join('; ')}</p>}
+      {d.new_findings.length > 0 && (
+        <ul className="mcp-findings">
+          {d.new_findings.map((f, i) => <li key={i} className={f.severity}><b>{f.code}</b> {f.detail}{f.excerpt ? <i className="muted"> “{f.excerpt}”</i> : null}</li>)}
+        </ul>
+      )}
+      <div className="row-actions">
+        <button className="primary-btn small" onClick={onAccept}>{d.quarantined ? 'Accept change' : 'Mark as reviewed'}</button>
+        <span className="muted small">Accepting does not turn the tool on: it still asks first.</span>
+      </div>
+    </details>
+  )
+}
+
+function ToolRow({ tool, onMode, onAccept }: { tool: McpTool; onMode: (mode: ToolMode) => void; onAccept: () => void }): JSX.Element {
   const eff = tool.effective
   const gone = !!tool.missing_since
   return (
@@ -121,6 +157,7 @@ function ToolRow({ tool, onMode }: { tool: McpTool; onMode: (mode: ToolMode) => 
         </b>
         <small>{tool.description || <i className="muted">no description</i>}</small>
         <small className="muted mono">{tool.slug}</small>
+        <DriftBanner tool={tool} onAccept={onAccept} />
       </span>
       <div className="seg">
         {(['on', 'ask', 'off'] as ToolMode[]).map((m) => (
@@ -215,6 +252,12 @@ export default function McpSettings(): JSX.Element {
   const setMode = (slug: string, mode: ToolMode): Promise<void> =>
     run(`grant-${slug}`, async () => {
       await api.mcp.setGrant(slug, mode, 'global')
+      await refresh()
+    })
+
+  const acceptChange = (slug: string): Promise<void> =>
+    run(`accept-${slug}`, async () => {
+      await api.mcp.acceptChange(slug)
       await refresh()
     })
 
@@ -314,7 +357,7 @@ export default function McpSettings(): JSX.Element {
                 {s.tools.length > 0 ? (
                   <div className="tool-perms">
                     <h5>Tools</h5>
-                    {s.tools.map((t) => <ToolRow key={t.slug} tool={t} onMode={(m) => void setMode(t.slug, m)} />)}
+                    {s.tools.map((t) => <ToolRow key={t.slug} tool={t} onMode={(m) => void setMode(t.slug, m)} onAccept={() => void acceptChange(t.slug)} />)}
                   </div>
                 ) : (
                   <p className="muted empty">{s.live.ready ? 'This server offers no tools.' : 'Tools appear once the server connects.'}</p>

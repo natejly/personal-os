@@ -1438,6 +1438,12 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .mcp-findings li.fail .tag { background: rgba(229,72,77,0.15); color: var(--danger); }
 .mcp-findings li.warn .tag { background: rgba(254,188,46,0.15); color: var(--warn); }
 .mcp-findings code { display: block; margin-top: 2px; font-size: 10.5px; color: var(--text-faint); word-break: break-all; }
+.mcp-drift { margin-top: 6px; font-size: 12px; border-left: 2px solid var(--warn, #c98a2b); padding-left: 8px; }
+.mcp-drift.quarantined { border-left-color: var(--danger, #c0392b); }
+.mcp-drift summary { cursor: pointer; }
+.mcp-diff { margin: 6px 0; padding: 6px 8px; white-space: pre-wrap; font-size: 11px; background: var(--surface-2, rgba(127,127,127,.08)); border-radius: 6px; }
+.mcp-diff .add { color: var(--success, #2e8b57); }
+.mcp-diff .del { color: var(--danger, #c0392b); }
 .mcp-limits { margin-top: 8px; }
 .mcp-limits summary { cursor: pointer; font-size: 11px; color: var(--text-muted); }
 .mcp-limits ul { margin: 6px 0 0; padding-left: 18px; font-size: 11px; color: var(--text-muted); display: flex; flex-direction: column; gap: 3px; }

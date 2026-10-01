@@ -260,6 +260,24 @@ export interface McpTool {
   effective: McpEffective
   /** Only on /mcp/tools: its server is connected right now. */
   ready?: boolean
+  /** Set when the shape changed since the user last saw it; `quarantined` means it is withheld from the model. */
+  drift?: McpDrift | null
+}
+
+export interface McpToolShape {
+  description: string
+  parameters: Record<string, unknown>
+  schema_hash: string
+  seen_at: number
+}
+
+export interface McpDrift {
+  previous: McpToolShape
+  current: McpToolShape
+  diff: { description: string[]; added_params: string[]; removed_params: string[]; changed_params: string[]; new_required: string[] }
+  new_findings: McpFinding[]
+  quarantined: boolean
+  changed_at: number
 }
 
 export interface McpFinding {

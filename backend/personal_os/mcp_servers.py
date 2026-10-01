@@ -103,9 +103,21 @@ CREATE TABLE IF NOT EXISTS mcp_tools (
   last_seen_at REAL NOT NULL,
   schema_changed_at REAL,                      -- last time the advertised shape changed
   missing_since REAL,                          -- gone from the server's list, row kept so the slug holds
+  quarantined_at REAL,                         -- a changed shape that added a fail-level finding: withheld until accepted
+  reviewed_hash TEXT NOT NULL DEFAULT '',      -- the shape the user last saw or accepted
   UNIQUE(server_id, name)
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_mcp_tool_slug ON mcp_tools(lower(slug));
+
+CREATE TABLE IF NOT EXISTS mcp_tool_versions (
+  id TEXT PRIMARY KEY,
+  tool_slug TEXT NOT NULL,                     -- by slug, like grants: history outlives the server row
+  schema_hash TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  parameters TEXT NOT NULL DEFAULT '{}',
+  seen_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_mcp_tool_versions ON mcp_tool_versions(tool_slug, seen_at DESC);
 
 CREATE TABLE IF NOT EXISTS mcp_grants (
   id TEXT PRIMARY KEY,
@@ -134,6 +146,7 @@ CREATE TABLE IF NOT EXISTS mcp_evals (
 CREATE INDEX IF NOT EXISTS idx_mcp_eval_server ON mcp_evals(server_id, created_at DESC);
 """
 
+MAX_VERSIONS = 10  # shapes kept per tool; the history is for a human to read, not an audit log
 SERVER_JSON = ("args", "env", "headers")
 TOOL_JSON = ("parameters",)
 _SERVER_FIELDS = {"name", "transport", "command", "args", "cwd", "env", "url", "headers", "description", "enabled"}
@@ -199,6 +212,11 @@ class McpServers:
         self.db = db
         with db.tx() as c:
             c.executescript(SCHEMA)
+            # mcp_* tables are created here, after Database._migrate ran, so their later columns are added here too.
+            have = {r["name"] for r in c.execute("PRAGMA table_info(mcp_tools)")}
+            for col, ddl in (("quarantined_at", "REAL"), ("reviewed_hash", "TEXT NOT NULL DEFAULT ''")):
+                if col not in have:
+                    c.execute(f"ALTER TABLE mcp_tools ADD COLUMN {col} {ddl}")
 
     # ---------- servers ----------
     def servers(self, with_secrets: bool = False) -> list[dict[str, Any]]:
@@ -347,10 +365,11 @@ class McpServers:
                     slug = derive_tool_slug(srv["slug"], name, taken)
                     taken.append(slug)
                     c.execute(
-                        "INSERT INTO mcp_tools(id,server_id,name,slug,description,parameters,schema_hash,danger,first_seen_at,last_seen_at,schema_changed_at,missing_since)"
-                        " VALUES(?,?,?,?,?,?,?,?,?,?,NULL,NULL)",
-                        (new_id(), server_id, name, slug, desc, json.dumps(params), h, danger, t, t),
+                        "INSERT INTO mcp_tools(id,server_id,name,slug,description,parameters,schema_hash,danger,first_seen_at,last_seen_at,schema_changed_at,missing_since,reviewed_hash)"
+                        " VALUES(?,?,?,?,?,?,?,?,?,?,NULL,NULL,?)",
+                        (new_id(), server_id, name, slug, desc, json.dumps(params), h, danger, t, t, h),
                     )
+                    self._write_version(c, slug, h, desc, params, t)
                     out["added"].append(slug)
                     continue
                 slug = row["slug"]
@@ -358,6 +377,11 @@ class McpServers:
                     c.execute("UPDATE mcp_tools SET last_seen_at=?, missing_since=NULL, danger=? WHERE id=?", (t, danger, row["id"]))
                     out["unchanged"].append(slug)
                 else:
+                    if not c.execute("SELECT 1 FROM mcp_tool_versions WHERE tool_slug=? LIMIT 1", (slug,)).fetchone():
+                        # a tool that predates the history table: keep the shape it is being changed *from*
+                        self._write_version(c, slug, row["schema_hash"], row["description"],
+                                            json.loads(row["parameters"] or "{}"), row["first_seen_at"])
+                    self._write_version(c, slug, h, desc, params, t)
                     c.execute(
                         "UPDATE mcp_tools SET description=?, parameters=?, schema_hash=?, danger=?, last_seen_at=?, schema_changed_at=?, missing_since=NULL WHERE id=?",
                         (desc, json.dumps(params), h, danger, t, t, row["id"]),
@@ -369,6 +393,30 @@ class McpServers:
                         c.execute("UPDATE mcp_tools SET missing_since=? WHERE id=?", (t, row["id"]))
                     out["missing"].append(row["slug"])
         return out
+
+    @staticmethod
+    def _write_version(c: sqlite3.Connection, slug: str, h: str, desc: str, params: Any, seen_at: float) -> None:
+        """Append one shape to a tool's history and trim it to the last MAX_VERSIONS."""
+        c.execute("INSERT INTO mcp_tool_versions(id,tool_slug,schema_hash,description,parameters,seen_at) VALUES(?,?,?,?,?,?)",
+                  (new_id(), slug, h, desc, json.dumps(params), seen_at))
+        c.execute("DELETE FROM mcp_tool_versions WHERE tool_slug=? AND id NOT IN ("
+                  "SELECT id FROM mcp_tool_versions WHERE tool_slug=? ORDER BY seen_at DESC, rowid DESC LIMIT ?)",
+                  (slug, slug, MAX_VERSIONS))
+
+    def versions(self, slug: str, limit: int = MAX_VERSIONS) -> list[dict[str, Any]]:
+        """A tool's recorded shapes, newest first."""
+        with self.db.tx() as c:
+            rows = c.execute("SELECT * FROM mcp_tool_versions WHERE tool_slug=? ORDER BY seen_at DESC, rowid DESC LIMIT ?",
+                             (slug, max(1, int(limit)))).fetchall()
+        return [row_to_dict(r, TOOL_JSON) for r in rows]  # type: ignore[misc]
+
+    def set_quarantine(self, slug: str, on: bool) -> None:
+        with self.db.tx() as c:
+            c.execute("UPDATE mcp_tools SET quarantined_at=? WHERE lower(slug)=lower(?)", (now() if on else None, slug))
+
+    def mark_reviewed(self, slug: str) -> None:
+        with self.db.tx() as c:
+            c.execute("UPDATE mcp_tools SET quarantined_at=NULL, reviewed_hash=schema_hash WHERE lower(slug)=lower(?)", (slug,))
 
     # ---------- grants ----------
     def grants(self, tool_slug: str | None = None) -> list[dict[str, Any]]:
@@ -459,5 +507,6 @@ class McpServers:
             return [row_to_dict(r, ("findings",)) for r in c.execute(sql, (*args, max(1, int(limit)))).fetchall()]  # type: ignore[misc]
 
     def latest_eval(self, server_id: str) -> dict[str, Any] | None:
-        rows = self.evals(server_id=server_id, limit=1)
+        # a server's own report; per-tool drift reviews share the table but are not this
+        rows = [r for r in self.evals(server_id=server_id, limit=50) if not r["tool_slug"]]
         return rows[0] if rows else None

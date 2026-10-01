@@ -25,7 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import AfterValidator, BaseModel, Field
 
-from . import activity, assist, llm, mac, mcp_eval, mcp_search, tools
+from . import activity, assist, llm, mac, mcp_drift, mcp_eval, mcp_search, tools
 from .context import build_context, estimate_tokens
 from .db import Database, data_dir_from_env, new_id
 from .extract_text import extract_text
@@ -338,7 +338,7 @@ def _mcp_tooling(project_id: str | None, conversation_id: str | None) -> tuple[d
     names = {s["id"]: s["name"] for s in mcp_store.servers()}
     modes: dict[str, str] = {}
     schemas: list[dict[str, Any]] = []
-    for tool in mcp_store.tools():
+    for tool in mcp_drift.offerable(mcp_store.tools()):  # a quarantined (drifted) tool is not offered
         slug = tool["slug"]
         if slug not in ready:
             continue
@@ -385,11 +385,12 @@ async def _mcp_call(slug: str, args: dict[str, Any]) -> dict[str, Any]:
 def _mcp_server_view(row: dict[str, Any]) -> dict[str, Any]:
     """One server as the UI wants it: stored config, live supervisor state, its tools, its last report."""
     live = (mcp.status(row["id"]) or [{}])[0]
+    every = mcp_store.tools()
     return {**row,
             "live": {"status": live.get("status", row["status"]), "detail": live.get("detail", row["status_detail"]),
                      "running": bool(live.get("running")), "ready": bool(live.get("ready")),
                      "attempts": live.get("attempts", 0), "server_info": live.get("server_info") or {}},
-            "tools": [{**t, "effective": mcp_store.effective_mode(t["slug"])}
+            "tools": [{**t, "effective": mcp_store.effective_mode(t["slug"]), "drift": mcp_drift.view(mcp_store, t, every)}
                       for t in mcp_store.tools(row["id"], include_missing=True)],
             "eval": mcp_store.latest_eval(row["id"])}
 
@@ -647,9 +648,18 @@ def mcp_tools(project_id: str | None = None, conversation_id: str | None = None)
     ready = set(mcp.ready_slugs())
     rows = mcp_store.tools(include_missing=True)
     return {"tools": [{**t, "ready": t["slug"] in ready,
-                       "effective": mcp_store.effective_mode(t["slug"], sid(project_id), conversation_id)}
+                       "effective": mcp_store.effective_mode(t["slug"], sid(project_id), conversation_id),
+                       "drift": mcp_drift.view(mcp_store, t, rows)}
                       for t in rows],
             "grants": mcp_store.grants()}
+
+
+@app.post("/mcp/tools/{slug}/accept")
+def mcp_accept_change(slug: str) -> dict[str, Any]:
+    """The user read the diff. Releases a quarantined tool; its grant is untouched, so an 'on' stays 'ask'."""
+    if mcp_drift.accept(mcp_store, slug) is None:
+        raise HTTPException(404, "No such MCP tool")
+    return mcp_store.effective_mode(slug)
 
 
 @app.put("/mcp/tools/{slug}/grant")

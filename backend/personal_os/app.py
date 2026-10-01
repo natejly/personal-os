@@ -38,6 +38,7 @@ from .boards import Boards
 from .canvas import SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
 from .dashboards import Dashboards, generate_recap, generate_summary, generate_widget_code
 from .docs import Docs, unified_diff
+from . import widget_spec
 from . import cache as google_cache
 from .google import Google, GoogleNotConnected, json_safe
 from .jobs import (KINDS, PROPOSAL_STATUSES, Jobs, Proposals, Scheduler, local_tz_name, spent, valid_cron,
@@ -3093,7 +3094,7 @@ class DashboardIn(BaseModel):
 
 class WidgetIn(BaseModel):
     title: str = ""
-    kind: str = "html"           # html | summary | markdown
+    kind: str = "html"           # html | summary | markdown | chart | stat | table
     prompt: str = ""
     source_ids: list[str] = []
     code: str = ""
@@ -3113,6 +3114,7 @@ class WidgetPatch(BaseModel):
     height: int | None = None
     position: int | None = None
     refresh_minutes: int | None = None
+    spec: dict[str, Any] | None = None
 
 
 async def _internal_data() -> dict[str, Any]:
@@ -3244,7 +3246,14 @@ async def _run_widget(w: dict[str, Any], request: Request, regenerate_code: bool
         data = await _samples(w["source_ids"])
         text = await generate_summary(cfg, model, w["prompt"], data)
         w = dashboards.update_widget(w["id"], {"output": text, "refreshed_at": time.time()}) or w
+    elif w["kind"] in widget_spec.KINDS:
+        w = await widget_spec.run_widget(dashboards, w, cfg, model, _widget_fetch, regenerate=regenerate_code)
     return w
+
+
+async def _widget_fetch(source_id: str) -> Any:
+    internal = await _internal_data() if (dashboards.source(source_id) or {}).get("kind") == "internal" else None
+    return await dashboards.fetch_source(source_id, internal)
 
 
 @app.post("/dashboards/{id}/widgets")
@@ -3253,12 +3262,29 @@ async def create_widget(id: str, body: WidgetIn, request: Request) -> dict[str, 
         raise HTTPException(404)
     title = body.title.strip() or (body.prompt.strip()[:40] or "Widget")
     w = dashboards.create_widget(id, title, body.kind, body.prompt, body.source_ids, body.code, body.output, body.width, body.height, body.refresh_minutes)
-    if body.kind in ("html", "summary"):
+    if body.kind in ("html", "summary") + widget_spec.KINDS:
         try:
             w = await _run_widget(w, request, regenerate_code=(body.kind == "html" and not body.code))
         except Exception as e:  # noqa: BLE001
-            w = dashboards.update_widget(w["id"], {"output": f"Generation failed: {e}"}) or w
+            w = dashboards.update_widget(w["id"], {"output": f"Generation failed: {e}", "data_error": f"Generation failed: {e}"}) or w
     return w
+
+
+@app.get("/widgets/{wid}")
+def get_widget(wid: str) -> dict[str, Any]:
+    w = dashboards.widget(wid)
+    if not w:
+        raise HTTPException(404)
+    return w
+
+
+@app.get("/widgets/{wid}/data")
+async def widget_data(wid: str) -> dict[str, Any]:
+    """A declarative widget's bound rows: cached inside its refresh_minutes TTL, otherwise re-bound. Never calls the model."""
+    w = dashboards.widget(wid)
+    if not w or w["kind"] not in widget_spec.KINDS:
+        raise HTTPException(404)
+    return await widget_spec.widget_data(dashboards, w, _widget_fetch)
 
 
 @app.put("/widgets/{wid}")

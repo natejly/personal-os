@@ -980,9 +980,11 @@ export interface DataSource {
   has_secret: boolean; last_status: string | null; last_fetched_at: number | null; created_at: number
 }
 export interface Widget {
-  id: string; dashboard_id: string; title: string; kind: 'html' | 'summary' | 'markdown' | string; prompt: string; source_ids: string[]
+  id: string; dashboard_id: string; title: string; kind: 'html' | 'summary' | 'markdown' | 'chart' | 'stat' | 'table' | string; prompt: string; source_ids: string[]
   code: string; output: string; refresh_minutes: number; refreshed_at: number | null; position: number; width: number; height: number
   created_at: number; updated_at: number
+  /** chart | stat | table only (widget_spec.py): the binding, the cached rows {rows, stat}, and why binding failed */
+  spec?: Record<string, unknown>; data?: unknown; data_error?: string
 }
 /** What the render CSP would break, or an empty document (artifacts.lint). */
 export interface ArtifactLint { blocked: string[]; empty: boolean; repaired?: boolean }

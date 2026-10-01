@@ -10,6 +10,8 @@ import SendToSpace from './SendToSpace'
 import type { Dashboard, DataSource, Widget } from '@shared/types'
 import { lines, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
+import DeclarativeWidget from './DeclarativeWidget'
+import { isDeclarative } from '../lib/boundWidget'
 
 const KIND_LABEL: Record<string, string> = { http: 'HTTP API', rss: 'RSS / Atom', internal: 'Grain data' }
 
@@ -112,11 +114,11 @@ function WidgetCard({ w, sources, onChange }: { w: Widget; sources: DataSource[]
   return (
     <div className={`dwidget w${w.width}`} style={{ minHeight: w.height + 40 }}>
       <header>
-        <span className="dw-title">{w.kind === 'summary' ? <Sparkles size={13} /> : w.kind === 'html' ? <Code2 size={13} /> : null}{w.title}</span>
+        <span className="dw-title">{w.kind === 'summary' || isDeclarative(w.kind) ? <Sparkles size={13} /> : w.kind === 'html' ? <Code2 size={13} /> : null}{w.title}</span>
         <span className="muted small">{w.source_ids.map((id) => sources.find((s) => s.id === id)?.name).filter(Boolean).join(', ')}</span>
         <span style={{ flex: 1 }} />
         {w.refreshed_at && <span className="muted small">{new Date(w.refreshed_at * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}</span>}
-        {w.kind === 'html' && <button className="icon-btn sm" title="Revise with AI" aria-label={`Revise ${w.title} with AI`} onClick={() => setRevising((v) => !v)}><Wand2 size={13} /></button>}
+        {(w.kind === 'html' || isDeclarative(w.kind)) && <button className="icon-btn sm" title="Revise with AI" aria-label={`Revise ${w.title} with AI`} onClick={() => setRevising((v) => !v)}><Wand2 size={13} /></button>}
         {w.kind === 'html' && <button className="icon-btn sm" title="View code" aria-label={`View code for ${w.title}`} onClick={() => setShowCode((v) => !v)}><Code2 size={13} /></button>}
         <button className="icon-btn sm" title="Refresh" aria-label={`Refresh ${w.title}`} onClick={() => void run(() => api.widgets.refresh(w.id))}><RefreshCw size={13} className={busy ? 'spin' : ''} /></button>
         <select className="dw-width" value={w.width} title="Width" aria-label={`Width of ${w.title}`} onChange={(e) => void run(() => api.widgets.update(w.id, { width: Number(e.target.value) }))}><option value={1}>1×</option><option value={2}>2×</option><option value={3}>3×</option></select>
@@ -134,6 +136,7 @@ function WidgetCard({ w, sources, onChange }: { w: Widget; sources: DataSource[]
       )}
       {w.kind === 'html' && showCode && <pre className="dw-code">{w.code}</pre>}
       {w.kind === 'summary' && <div className="dw-md markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={SAFE_MD}>{w.output || (busy ? 'Summarizing…' : 'No summary yet.')}</ReactMarkdown></div>}
+      {isDeclarative(w.kind) && <DeclarativeWidget widget={w} height={w.height} />}
       {w.kind === 'markdown' && <div className="dw-md markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={SAFE_MD}>{w.output}</ReactMarkdown></div>}
     </div>
   )
@@ -152,7 +155,7 @@ export default function DashboardsView(): JSX.Element {
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
   const [composer, setComposer] = useState(false)
-  const [kind, setKind] = useState<'html' | 'summary'>('html')
+  const [kind, setKind] = useState<'html' | 'summary' | 'chart' | 'stat' | 'table'>('html')
   const [prompt, setPrompt] = useState('')
   const [picked, setPicked] = useState<string[]>([])
   const [width, setWidth] = useState(1)
@@ -174,7 +177,7 @@ export default function DashboardsView(): JSX.Element {
     if (!dash || !prompt.trim()) return
     setGenerating(true)
     try {
-      await api.dashboards.addWidget(dash.id, { kind, prompt: prompt.trim(), source_ids: picked, width, height: kind === 'summary' ? 200 : 300 })
+      await api.dashboards.addWidget(dash.id, { kind, prompt: prompt.trim(), source_ids: picked, width, height: kind === 'summary' || kind === 'stat' ? 200 : 300 })
       setPrompt(''); setPicked([]); setComposer(false); await loadDash()
     } catch (e) {
       toast((e as Error).message, 'error')
@@ -227,7 +230,7 @@ export default function DashboardsView(): JSX.Element {
       {composer && dash && (
         <div className="dw-composer">
           <div className="row">
-            <label className="model-picker"><select aria-label="Widget type" value={kind} onChange={(e) => setKind(e.target.value as 'html' | 'summary')}><option value="html">Interactive widget (AI-coded)</option><option value="summary">AI summary</option></select><ChevronDown size={14} /></label>
+            <label className="model-picker"><select aria-label="Widget type" value={kind} onChange={(e) => setKind(e.target.value as typeof kind)}><option value="html">Interactive widget (AI-coded)</option><option value="summary">AI summary</option><option value="chart">Chart (bound to a source)</option><option value="stat">Stat (bound to a source)</option><option value="table">Table (bound to a source)</option></select><ChevronDown size={14} /></label>
             <label className="model-picker"><select aria-label="Widget width" value={width} onChange={(e) => setWidth(Number(e.target.value))}><option value={1}>1 column</option><option value={2}>2 columns</option><option value={3}>full width</option></select><ChevronDown size={14} /></label>
             <div className="src-picker">
               {sources.length === 0 && <span className="muted small">No sources yet: <button className="link" onClick={() => setShowSources(true)}>add one</button></span>}
@@ -238,9 +241,9 @@ export default function DashboardsView(): JSX.Element {
           </div>
           <div className="row">
             <textarea rows={2} autoFocus value={prompt} onChange={(e) => setPrompt(e.target.value)}
-              placeholder={kind === 'html' ? 'Describe the widget…' : 'What should the summary focus on?…'}
+              placeholder={kind === 'html' ? 'Describe the widget…' : kind === 'summary' ? 'What should the summary focus on?…' : 'What should it show? Pick one source above.'}
               onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void generate() }} />
-            <button className="primary-btn" disabled={!prompt.trim() || generating} onClick={() => void generate()}>{generating ? 'Building…' : kind === 'html' ? 'Build' : 'Summarize'}</button>
+            <button className="primary-btn" disabled={!prompt.trim() || generating} onClick={() => void generate()}>{generating ? 'Building…' : kind === 'summary' ? 'Summarize' : 'Build'}</button>
           </div>
         </div>
       )}

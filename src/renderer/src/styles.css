@@ -1707,6 +1707,12 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
    iframe over the vibrancy window can read as a hole to the desktop while it (re)loads. */
 .dwidget iframe { border: 0; width: 100%; background: #232220; display: block; }
 .dw-empty { padding: 16px; color: var(--text-muted); font-size: 13px; }
+.stat-tile { display: flex; flex-direction: column; justify-content: center; gap: 4px; padding: 16px 14px; min-height: 120px; }
+.stat-label { font-size: 12px; color: var(--text-muted); }
+.stat-value { font-size: 40px; line-height: 1.1; font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.stat-delta { font-size: 13px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.stat-delta.up { color: var(--chart-2, var(--text)); }
+.stat-delta.down { color: var(--chart-4, var(--text)); }
 .dw-md { padding: 10px 14px; font-size: 13px; overflow: auto; }
 .dw-code { margin: 0; padding: 10px; font-size: 11px; overflow: auto; max-height: 400px; white-space: pre-wrap; }
 .dw-revise { display: flex; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--border); background: color-mix(in srgb, var(--accent) 6%, transparent); }

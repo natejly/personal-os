@@ -151,6 +151,9 @@ export const api = {
   },
   /** AI dashboard widgets (`/widgets/{id}`). Not `api.windows`, which is a canvas window. */
   widgets: {
+    get: (id: string) => req<Widget>(`/widgets/${id}`),
+    /** A declarative widget's rows: the cache inside its refresh_minutes, a re-bind after. Never a model call. */
+    data: (id: string) => req<Widget>(`/widgets/${id}/data`),
     update: (id: string, patch: Record<string, unknown>) => req<Widget>(`/widgets/${id}`, { method: 'PUT', body: json(patch) }),
     refresh: (id: string, regenerate = false) => req<Widget>(`/widgets/${id}/refresh?regenerate=${regenerate}`, { method: 'POST' }),
     revise: (id: string, instruction: string) => req<Widget>(`/widgets/${id}/revise`, { method: 'POST', body: json({ instruction }) }),

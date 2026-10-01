@@ -33,6 +33,7 @@ from .extract_text import extract_structured, extract_text
 from .consolidate import Consolidator
 from .learn import MAX_INJECTED_SKILLS, LearnJob, LearnWorker, Skills, induce_skill, skill_block
 from .embed import Embedder
+from .memory_index import MemoryIndex
 from .retrieval import Retriever
 from .repos import ALL, Conversations, Documents, Graph, Memories, Projects
 from .artifact_routes import is_render_path as _is_artifact_render, make_router as artifact_router
@@ -360,6 +361,8 @@ toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=
 # every search is the old BM25 one.
 embedder = Embedder()
 retriever = Retriever(db, documents, embedder, docs=docs)
+memory_index = MemoryIndex(db, memories, graph, embedder)
+learner.index = memory_index
 documents.on_chunks = lambda did, _rows: retriever.schedule(settings, did)
 docs.on_chunks = lambda _did: retriever.schedule_docs(settings)
 
@@ -370,6 +373,7 @@ async def _start_retrieval() -> None:
     retriever.schedule(settings)  # embed whatever is still waiting; silent when the route is down
     retriever.schedule_docs(settings)
 toolbox.retriever = retriever
+toolbox.memory_index = memory_index
 toolbox.web_cache = WebCache(db)  # fetch_url's response cache
 # The insights pass proposes automations, so it is told which tools this install actually has - an
 # unwired integration must not turn into a suggestion that cannot be carried out.
@@ -1150,6 +1154,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     doc_hits = await _doc_hits(conv["project_id"], user_text, cfg, conv["settings"])
     system, used = build_context(
         memories=memories, graph=graph, documents=documents, doc_hits=doc_hits,
+        memory_hits=await _memory_hits(conv["project_id"], user_text, cfg, conv["settings"]),
         project=project, project_id=conv["project_id"], query=user_text,
         settings=cfg, conv_settings=conv["settings"], global_system_prompt=cfg["systemPrompt"],
         activity=monitor, skills=skills, style=style, meetings=meeting_svc,
@@ -2788,6 +2793,21 @@ async def _doc_hits(project_id: str | None, query: str, cfg: dict[str, Any], con
         return None
 
 
+async def _memory_hits(project_id: str | None, query: str, cfg: dict[str, Any], conv_settings: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """Fused memory hits for build_context. None = embeddings off or unavailable: the plain pinned/recent + BM25 path."""
+    if not conv_settings.get("useMemory", True):
+        return None
+    try:
+        memory_index.schedule(cfg)  # lazily embed rows that have no vector yet
+        qvec = await memory_index.query_vec(cfg, query)
+        if qvec is None:
+            return None
+        return memory_index.search(project_id, query, qvec, limit=40, settings=cfg)
+    except Exception:  # noqa: BLE001
+        log.exception("memory retrieval failed; falling back to keyword search")
+        return None
+
+
 @app.post("/context/preview")
 async def context_preview(body: ContextPreviewIn) -> dict[str, Any]:
     cfg = settings()
@@ -2797,6 +2817,7 @@ async def context_preview(body: ContextPreviewIn) -> dict[str, Any]:
     _, used = build_context(
         memories=memories, graph=graph, documents=documents, project=project,
         doc_hits=await _doc_hits(sid(body.project_id), body.query, cfg, conv_settings), project_id=sid(body.project_id),
+        memory_hits=await _memory_hits(sid(body.project_id), body.query, cfg, conv_settings),
         query=body.query, settings=cfg, conv_settings=conv_settings,
         global_system_prompt=cfg["systemPrompt"], activity=monitor, skills=skills, style=style, meetings=meeting_svc,
     )
@@ -2834,6 +2855,15 @@ async def consolidate_memories(body: ConsolidateIn) -> list[dict[str, Any]]:
     """Manual 'Tidy up': proposes only. Nothing changes until a proposal is applied by hand."""
     cfg = settings()
     return await consolidator.propose(cfg, sid(body.project_id), body.model or cfg["defaultModel"])
+
+
+@app.post("/memories/reindex")
+async def reindex_memories() -> dict[str, Any]:
+    """Embed every live memory that has no current vector (200 per call; call again while `pending` > 0)."""
+    cfg = settings()
+    embedder.reset()  # an explicit retry, so an earlier back-off does not apply
+    n = await memory_index.index(cfg)
+    return {"indexed": n, "pending": memory_index.pending_count(embedder.model(cfg)) if memory_index.enabled(cfg) else 0}
 
 
 @app.get("/memories/proposals")

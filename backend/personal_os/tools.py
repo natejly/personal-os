@@ -392,6 +392,7 @@ class Toolbox:
         # autonomy is exactly the boundary of the workspace directory, and the root is derived from
         # ctx["desk_id"] inside each handler so desk A cannot address desk B's files.
         self.desks, self.workspace = desks, workspace
+        self.memory_index: Any = None  # memory_index.MemoryIndex (hybrid memory search); set by app.py
         self.retriever: Any = None  # hybrid document search (retrieval.py); set by app.py
         self.artifacts = artifacts  # artifact_tools.py registers create/edit/rewrite_artifact against it
         self.fs_reads = fsx.ReadLedger()  # what each conversation has read of each file (fsx.py): the baseline for edits
@@ -594,7 +595,15 @@ class Toolbox:
             examples=[{}, {"offset": 50}]))
 
         async def search_memory(ctx: dict[str, Any], query: str, offset: int = 0) -> Any:
-            rows = [{"id": m["id"], "content": m["content"], "kind": m["kind"], "valid_from": m.get("valid_from"), "scope": "project" if m["project_id"] else "personal"} for m in self.memories.list(ctx["project_id"], query)]
+            found = None
+            if self.memory_index is not None:
+                cfg = self.settings()
+                qvec = await self.memory_index.query_vec(cfg, query)
+                if qvec is not None:
+                    found = self.memory_index.search(ctx["project_id"], query, qvec, limit=100, settings=cfg)
+            if found is None:
+                found = self.memories.list(ctx["project_id"], query)
+            rows = [{"id": m["id"], "content": m["content"], "kind": m["kind"], "valid_from": m.get("valid_from"), "scope": "project" if m["project_id"] else "personal"} for m in found]
             return page(rows, offset=offset, limit=20, key="memories")
         R("search_memory", ToolSpec("search_memory", "Search what you remember about the user (long-term memory) for a topic.",
             _obj({"query": {"type": "string"}, "offset": {"type": "integer", "default": 0}}, ["query"]), search_memory, "memory",

@@ -88,6 +88,7 @@ def build_context(
     style: Any = None,
     meetings: Any = None,
     doc_hits: list[dict[str, Any]] | None = None,
+    memory_hits: list[dict[str, Any]] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Returns (system_prompt, context_used)."""
     # Two lists so a caller can keep the stable prefix byte-identical turn to turn (prompt caching):
@@ -110,7 +111,8 @@ def build_context(
             used["page"] = page
 
     if conv_settings.get("useMemory", True):
-        mems = memories.for_context(project_id, query)
+        # app.py precomputes fused hits when embeddings are up (this function is sync); otherwise plain pinned/recent + BM25.
+        mems = memory_hits if memory_hits is not None else memories.for_context(project_id, query)
         if mems:
             lines = [f"- {m['content']}" for m in mems]
             volatile.append("## What you remember about the user\n" + "\n".join(lines))

@@ -110,7 +110,7 @@ function Capabilities({ caps, onGrant, onOpen }: {
                 <Shield size={13} /> Ask for everything missing
               </button>
               <span className="muted small">
-                macOS asks one dialog at a time, and the grant lands on the app bundle — Personal OS, or Electron in
+                macOS asks one dialog at a time, and the grant lands on the app bundle — Grain, or Electron in
                 a dev build. Restart the app afterwards so the keystroke tap is created with the grants in place.
               </span>
             </div>

@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react'
+<<<<<<< HEAD
 import { Calendar, Mail, CheckSquare, Brain, FolderKanban, Sparkles, RefreshCw, PanelLeftOpen, ExternalLink, Plus, MessageSquare, Mic, SlidersHorizontal, X, ListChecks, HardDrive } from 'lucide-react'
+=======
+import { Home, Calendar, Mail, CheckSquare, Brain, FolderKanban, Sparkles, RefreshCw, PanelLeftOpen, ExternalLink, Plus, MessageSquare, SlidersHorizontal, X, ListChecks, HardDrive } from 'lucide-react'
+>>>>>>> worktree-ui-ux-review
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import { formatOffset, offerableCandidates } from '../lib/transcript'
@@ -148,6 +152,17 @@ function MeetingsCard(): JSX.Element {
   )
 }
 
+const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`
+
+/** One disconnected state for every Google card, so each says what it would show and offers the fix. */
+function ConnectGoogle({ what, onConnect }: { what: string; onConnect: () => void }): JSX.Element {
+  return (
+    <p className="muted widget-connect">
+      Connect Google to see {what} here. <button className="link" onClick={onConnect}>Connect</button>
+    </p>
+  )
+}
+
 export default function HomeView(): JSX.Element {
   const d = useStore((s) => s.dashboard)
   const google = useStore((s) => s.google)
@@ -203,7 +218,7 @@ export default function HomeView(): JSX.Element {
     <main className="page home">
       <header className="page-header drag">
         {!sidebarOpen && <button className="icon-btn no-drag" aria-label="Show sidebar" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
-        <h2>Today <span className="muted">{new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</span></h2>
+        <h2><Home size={16} /> Today <span className="muted">· {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}</span></h2>
         <div className="no-drag header-right">
           <button className="icon-btn" title="Refresh" aria-label="Refresh today’s data" onClick={() => void refresh()}><RefreshCw size={15} className={busy ? 'spin' : ''} /></button>
           <div className="home-customize-wrap">
@@ -257,9 +272,7 @@ export default function HomeView(): JSX.Element {
           {on('calendar') && <section className="widget">
             <header><Calendar size={14} /> Calendar {google?.connected && <span className="muted small">next 48h</span>}</header>
             {!google?.connected ? (
-              <div className="widget-empty">
-                <button className="primary-btn" onClick={() => setSettingsOpen(true)}>Connect Google</button>
-              </div>
+              <ConnectGoogle what="your calendar" onConnect={() => setSettingsOpen(true)} />
             ) : d?.errors.calendar ? <p className="msg-error">{d.errors.calendar}</p> : events.length === 0 ? <p className="muted">Nothing scheduled.</p> : (
               <ul className="events">
                 {todayEvents.map((e) => (
@@ -274,13 +287,13 @@ export default function HomeView(): JSX.Element {
           </section>}
 
           {on('todos') && <section className="widget">
-            <header><CheckSquare size={14} /> Todos <span className="muted small">{d?.todo_stats.open ?? 0} open{d?.todo_stats.overdue ? ` · ${d.todo_stats.overdue} overdue` : ''}</span><button className="link small" onClick={() => setView('todos')}>all</button></header>
+            <header><CheckSquare size={14} /> Todos <span className="muted small">{d?.todo_stats.open ?? 0} open{d?.todo_stats.overdue ? ` · ${d.todo_stats.overdue} overdue` : ''}</span><button className="link small" onClick={() => setView('todos')}>View all</button></header>
             {(d?.todos.length ?? 0) === 0 ? <p className="muted">All clear.</p> : d!.todos.slice(0, 8).map((t) => <TodoItem key={t.id} todo={t} compact />)}
           </section>}
 
           {on('inbox') && <section className="widget">
-            <header><Mail size={14} /> Inbox {google?.connected && <span className="muted small">unread, 14 days</span>}<button className="link small" onClick={() => setView('mail')}>all</button></header>
-            {!google?.connected ? <p className="muted">Connect Google.</p> : d?.errors.gmail ? <p className="msg-error">{d.errors.gmail}</p> : (d?.gmail?.length ?? 0) === 0 ? <p className="muted">Inbox zero.</p> : (
+            <header><Mail size={14} /> Inbox {google?.connected && <span className="muted small">unread, 14 days</span>}<button className="link small" onClick={() => setView('mail')}>View all</button></header>
+            {!google?.connected ? <ConnectGoogle what="unread mail" onConnect={() => setSettingsOpen(true)} /> : d?.errors.gmail ? <p className="msg-error">{d.errors.gmail}</p> : (d?.gmail?.length ?? 0) === 0 ? <p className="muted">Inbox zero.</p> : (
               <ul className="mails">
                 {d!.gmail!.slice(0, 8).map((m) => (
                   <li key={m.id} onClick={() => { newChat(null); void send(`Summarize this email and suggest a reply if one is needed. Gmail message id: ${m.id} (subject: ${m.subject})`) }} title="Ask the assistant about this email">
@@ -295,7 +308,7 @@ export default function HomeView(): JSX.Element {
 
           {on('gtasks') && <section className="widget">
             <header><ListChecks size={14} /> Google Tasks</header>
-            {!google?.connected ? <p className="muted">Connect Google.</p> : d?.errors.tasks ? <p className="msg-error">{d.errors.tasks}</p> : (d?.tasks?.length ?? 0) === 0 ? <p className="muted">No open tasks.</p> : (
+            {!google?.connected ? <ConnectGoogle what="Google Tasks" onConnect={() => setSettingsOpen(true)} /> : d?.errors.tasks ? <p className="msg-error">{d.errors.tasks}</p> : (d?.tasks?.length ?? 0) === 0 ? <p className="muted">No open tasks.</p> : (
               <ul className="events">
                 {d!.tasks!.slice(0, 8).map((t) => (
                   <li key={t.id}><span className="ev-title">{t.title || '(untitled)'}</span>{t.due && <span className="muted small">{fmtDue(t.due)}</span>}</li>
@@ -306,7 +319,7 @@ export default function HomeView(): JSX.Element {
 
           {on('drive') && <section className="widget">
             <header><HardDrive size={14} /> Drive {google?.connected && d?.drive && <span className="muted small">recently modified</span>}</header>
-            {!google?.connected ? <p className="muted">Connect Google.</p>
+            {!google?.connected ? <ConnectGoogle what="recent Drive files" onConnect={() => setSettingsOpen(true)} />
               : google.missing_scopes.some((s) => s.includes('drive')) ? (
                 <div className="widget-empty">
                   <p className="muted">Drive needs a fresh sign-in.</p>
@@ -334,7 +347,7 @@ export default function HomeView(): JSX.Element {
                 {d!.projects.map((p) => (
                   <li key={p.id} onClick={() => openProject(p.id)}>
                     <span className="project-dot" style={{ background: p.color }} /><span className="ev-title">{p.name}</span>
-                    <span className="muted small">{p.stats?.conversations ?? 0} chats · {p.stats?.documents ?? 0} docs</span>
+                    <span className="muted small">{plural(p.stats?.conversations ?? 0, 'chat')} · {plural(p.stats?.documents ?? 0, 'doc')}</span>
                   </li>
                 ))}
               </ul>
@@ -342,7 +355,7 @@ export default function HomeView(): JSX.Element {
           </section>}
 
           {on('memories') && <section className="widget">
-            <header><Brain size={14} /> Recently learned <button className="link small" onClick={() => setView('memory')}>all</button></header>
+            <header><Brain size={14} /> Recently learned <button className="link small" onClick={() => setView('memory')}>View all</button></header>
             {(d?.recent_memories.length ?? 0) === 0 ? <p className="muted">Nothing yet. Chat with auto-learn on.</p> : (
               <ul className="mem-list">{d!.recent_memories.map((m) => <li key={m.id}>{m.content} <ProjectChip projectId={m.project_id} clickable={false} /></li>)}</ul>
             )}

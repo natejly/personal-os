@@ -190,7 +190,7 @@ export default function GoogleSettings({ clientId, clientSecret, onChange, onSav
 
           {!hasClient && (
             <p className="muted small">
-              Google will only run a sign-in flow on behalf of a registered app, so Personal OS needs an OAuth
+              Google will only run a sign-in flow on behalf of a registered app, so Grain needs an OAuth
               client of its own. There is no way around that, but you do it once and it stays on your account.
             </p>
           )}

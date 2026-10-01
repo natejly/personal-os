@@ -245,8 +245,10 @@ export default function DashboardsView(): JSX.Element {
 
       {!dash ? (
         <div className="page-body">
-          <div className="empty-hint big">
-            <p>No dashboards yet. Create one, add a data source (an API URL and key, an RSS feed, or your own todos/calendar), then describe the widget you want.</p>
+          <div className="empty-state">
+            <LayoutDashboard size={28} />
+            <h2>No dashboards yet</h2>
+            <p>Add a data source (an API URL and key, an RSS feed, or your own todos and calendar), then describe the widget you want.</p>
             <button className="primary-btn" onClick={() => setCreating(true)}><Plus size={14} /> New dashboard</button>
           </div>
         </div>

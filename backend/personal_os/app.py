@@ -54,6 +54,7 @@ from .plans import (MUTATING, PLAN_BLOCKED, PLAN_SAFE_DANGER, PLAN_TOOL, PROPOSE
 from .outbox import Outbox, router as outbox_router
 from .presets import CanvasPresets
 from .runs import ACTIVE, PROMOTE_STEP, STATUSES, Run, RunBus, RunStore, Topic
+from .stuck import STUCK_NUDGE, STUCK_STOP, StuckDetector
 from .style import WritingStyle, learn_style_from_exchange, looks_like_prose
 from .modules import Module, ModuleContext, build_modules, get as module_get
 from .modules.todos import TodosModule
@@ -1124,6 +1125,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     last_sig: str | None = None
     repeats = 0
     tool_errors: dict[str, int] = {}
+    detector = StuckDetector() if cfg.get("stuckDetection", True) else None  # loop shapes REPEAT_LIMIT cannot see
+    stuck_hits = 0
+    stop_text: str | None = None
     blocked: set[str] = set()
     _round = 0
     awaiting: dict[str, Any] | None = None  # the tool event of a call blocked on approval, for a cancelled run to keep
@@ -1296,7 +1300,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 if repeats >= REPEAT_LIMIT:  # before the approval gate: denying the same call forever is still a loop
                     partial = "loop"
                 if partial == "loop":  # every pending call still needs a tool message, executed or not
-                    messages.append({"role": "tool", "tool_call_id": c["id"], "content": LOOP_STOP.format(name=c["name"], n=REPEAT_LIMIT)})
+                    messages.append({"role": "tool", "tool_call_id": c["id"], "content": stop_text or LOOP_STOP.format(name=c["name"], n=REPEAT_LIMIT)})
                     continue
                 raw_mode = modes.get(c["name"], "off")
                 spec = toolbox.specs.get(c["name"])
@@ -1505,6 +1509,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         # sees the answer even when it was given somewhere else.
                         yield "plan_decision", {"message_id": am["id"], "call_id": uid, "plan": plan}
                 was_tainted, was_blocked = tool_ctx["tainted"], c["name"] in blocked
+                ran = False  # only a call that really executed says anything about being stuck
                 if was_blocked:
                     result: Any = tools.denied(c["name"], f"failing {TOOL_ERROR_LIMIT} times in a row and disabled for the rest of this reply")
                 elif mode == "off":
@@ -1517,8 +1522,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     result = tools.denied(c["name"], "just declined by the user")
                 elif mcp_is(c["name"]):
                     result = await _mcp_call(c["name"], args)
+                    ran = True
                 else:
                     result = await _call_tool(run, _round, c["name"], args, tool_ctx, uid)
+                    ran = True
                 ms = int((time.time() - t0) * 1000)
                 # images (e.g. matplotlib figures from run_python) go to the UI, not to the model
                 images = result.pop("images", None) if isinstance(result, dict) else None
@@ -1541,7 +1548,19 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                          "forced": forced, "tainted": tainted, "blocked": c["name"] if was_blocked else None, "breaker": partial,
                          "blocked_by": "plan_mode" if blocked_reason == PLAN_BLOCKED else None,
                          "proposal": (result.get("proposal_id") if proposing and isinstance(result, dict) else None)}
-                tracer.end(tspan, {"result_chars": len(preview), "images": len(images or [])}, error=err)
+                stuck = None
+                if detector is not None and ran:
+                    detector.observe(c["name"], args, result)
+                    stuck = detector.check()
+                    if stuck and stuck_hits == 0:
+                        stuck_hits = 1
+                        detector.obs.clear()  # the model gets a fresh run at it; the same shape again ends tool use
+                        event["breaker"] = "stuck_nudge"
+                    elif stuck:
+                        stuck_hits += 1
+                        partial, stop_text = "loop", STUCK_STOP.format(detail=stuck.detail)
+                        event["breaker"] = "stuck"
+                tracer.end(tspan, {"result_chars": len(preview), "images": len(images or []), **({"stuck": stuck.pattern} if stuck else {})}, error=err)
                 if claimed is not None:
                     # The step was spent at the gate; this records whether the call it authorised
                     # actually worked, so the plan can be read after the fact.
@@ -1552,8 +1571,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 for_model = {**result, "images_shown_to_user": [i["name"] for i in images]} if images and isinstance(result, dict) else result
                 # Small results go in whole; a big one is stored and replaced by a handle the model can
                 # page with read_tool_result, so nothing is silently truncated away. See working.py.
-                messages.append({"role": "tool", "tool_call_id": c["id"],
-                                 "content": tool_results.for_model(conv_id, am["id"], c["name"], for_model)})
+                content = tool_results.for_model(conv_id, am["id"], c["name"], for_model)
+                if stuck and event["breaker"] == "stuck_nudge":
+                    content = f"{content}\n\n[stuck_notice] {STUCK_NUDGE.format(detail=stuck.detail)}"
+                messages.append({"role": "tool", "tool_call_id": c["id"], "content": content})
                 if tool_ctx.pop("plan_changed", None):
                     yield "plan", {"conversation_id": conv_id, "steps": (work_plans.get(conv_id) or {}).get("steps") or []}
             if partial == "loop":

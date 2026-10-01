@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
-import { X, Eye, EyeOff, Plug, Cpu, Brain, Mail, Mic, Wrench, Gauge, LayoutGrid, Magnet, SlidersHorizontal, BookOpen, FileText, Database, type LucideIcon } from 'lucide-react'
+import { X, Eye, EyeOff, Plug, Cpu, Brain, Mail, Mic, Wrench, Gauge, LayoutGrid, Magnet, SlidersHorizontal, BookOpen, FileText, Database, Trash2, type LucideIcon } from 'lucide-react'
 import { useStore, type SettingsTab } from '../store'
 import { api } from '../lib/api'
 import { HOME_MODULES, OPTIONAL_VIEWS } from '../modules'
@@ -16,6 +16,7 @@ import MemoryPanel from './MemoryPanel'
 import DocumentsView from './DocumentsView'
 import ScopeSelect from './ScopeSelect'
 import DataSettings from './DataSettings'
+import TrashPanel from './TrashPanel'
 
 type Tab = SettingsTab
 
@@ -30,7 +31,8 @@ const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
   { id: 'spaces', label: 'Spaces', icon: Magnet },
   { id: 'modules', label: 'Modules', icon: LayoutGrid },
   { id: 'behavior', label: 'Behavior', icon: SlidersHorizontal },
-  { id: 'data', label: 'Data', icon: Database }
+  { id: 'data', label: 'Data', icon: Database },
+  { id: 'trash', label: 'Trash', icon: Trash2 }
 ]
 
 const SNAP_LABEL: Record<SnapMode, string> = { off: 'No snap', grid: 'Grid', guides: 'Guides', both: 'Grid + guides' }
@@ -319,6 +321,8 @@ export default function SettingsModal(): JSX.Element {
                 </select>
               </label>
             </section>}
+
+            {tab === 'trash' && <TrashPanel />}
 
             {tab === 'behavior' && <section>
               <h3>Behavior</h3>

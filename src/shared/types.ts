@@ -1215,6 +1215,26 @@ export interface WindowLayout { id: string; x?: number; y?: number; w?: number; 
 
 export interface Note { id: string; project_id: string | null; body: string; color: string; created_at: number; updated_at: number }
 
+/** One row in the trash (GET /trash). Deleting is soft: it sits here for `retention_days`, then is purged. */
+export type TrashKind = 'project' | 'conversation' | 'doc' | 'document' | 'memory' | 'todo'
+export interface TrashItem {
+  type: TrashKind
+  id: string
+  title: string
+  deleted_at: number
+  /** When the automatic purge will erase it. */
+  purge_at: number
+  project_id: string | null
+  project_name: string | null
+  /** Projects only: how many chats / memories / uploads went into the trash with it. */
+  contents?: Record<string, number>
+}
+export interface TrashListing {
+  groups: { projects: TrashItem[]; conversations: TrashItem[]; docs: TrashItem[]; documents: TrashItem[]; memories: TrashItem[]; todos: TrashItem[] }
+  total: number
+  retention_days: number
+}
+
 /**
  * A doc: long-form markdown the user writes in the Docs editor. Distinct from `Document` (a file they
  * uploaded, for retrieval) and from `Note` (canvas mode's sticky note).

@@ -8,6 +8,7 @@ import type {
   DeskStatus, FullDesk, PlanRecord, PromotionKind, PromotionResult,
   AgentInbox, AgentProposal, Job,
   Doc, DocFolder, FullDoc, DocRevision,
+  TrashKind, TrashListing,
   McpEffective, McpReport, McpServer, McpServerDraft, McpTool, ToolMode,
   ActivityApplyResult, ActivityCapability, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityGrantResult,
   ActivityInsights, ActivityStatus, ActivitySuggestion, ActivitySummary, InsightStatus,
@@ -163,6 +164,13 @@ export const api = {
     update: (id: string, patch: { title?: string; notes?: string; due?: string | null; priority?: number; done?: boolean; project_id?: string | null; clear_due?: boolean; clear_project?: boolean; calendar_event_id?: string | null; calendar_link?: string | null; calendar_id?: string | null }) =>
       req<Todo>(`/todos/${id}`, { method: 'PUT', body: json(patch) }),
     delete: (id: string) => req(`/todos/${id}`, { method: 'DELETE' })
+  },
+  /** Soft delete: every DELETE above lands here first; these restore it or erase it for good. */
+  trash: {
+    list: () => req<TrashListing>('/trash'),
+    restore: (type: TrashKind, id: string) => req<{ ok: boolean; moved_to_personal: boolean }>(`/trash/${type}/${id}/restore`, { method: 'POST' }),
+    purge: (type: TrashKind, id: string) => req<{ ok: boolean }>(`/trash/${type}/${id}`, { method: 'DELETE' }),
+    empty: () => req<{ ok: boolean; purged: number }>('/trash', { method: 'DELETE' })
   },
   mcp: {
     servers: () => req<McpServer[]>('/mcp/servers'),

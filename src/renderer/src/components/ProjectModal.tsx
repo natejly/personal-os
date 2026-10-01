@@ -54,7 +54,7 @@ export default function ProjectModal(): JSX.Element {
         <footer>
           {existing && (
             confirmDelete
-              ? <button className="ghost-btn danger" onClick={() => { void deleteProject(existing.id); setProjectModal(null) }}><Trash2 size={14} /> Really delete everything in this project</button>
+              ? <button className="ghost-btn danger" onClick={() => { void deleteProject(existing.id); setProjectModal(null) }}><Trash2 size={14} /> Really delete this project and its chats?</button>
               : <button className="ghost-btn danger" onClick={() => setConfirmDelete(true)}><Trash2 size={14} /> Delete project</button>
           )}
           <span style={{ flex: 1 }} />

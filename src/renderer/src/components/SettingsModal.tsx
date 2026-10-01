@@ -209,8 +209,14 @@ export default function SettingsModal(): JSX.Element {
               <p className="muted"><b>on</b> runs automatically, <b>ask</b> pauses the reply for your approval, <b>off</b> hides the tool. Anything that acts outside the app (email, calendar, Google Tasks) asks by default.</p>
               <ToolGlobalToggles value={draft.tools ?? {}} onChange={(tools) => patch({ tools })} />
               <label><span>Max tool rounds per reply</span><input type="number" min={1} max={60} value={draft.maxToolRounds} onChange={(e) => patch({ maxToolRounds: Number(e.target.value) })} /></label>
-              <label><span>Brave Search API key <small className="muted">(optional; without a key web search uses DuckDuckGo)</small></span><input type="password" value={draft.braveApiKey} onChange={(e) => patch({ braveApiKey: e.target.value })} placeholder="BSA…" spellCheck={false} /></label>
+              <label><span>Brave Search API key <small className="muted">(optional; without a key web search uses Exa, then DuckDuckGo)</small></span><input type="password" value={draft.braveApiKey} onChange={(e) => patch({ braveApiKey: e.target.value })} placeholder="BSA…" spellCheck={false} /></label>
               <label><span>Tavily API key <small className="muted">(optional alternative)</small></span><input type="password" value={draft.tavilyApiKey} onChange={(e) => patch({ tavilyApiKey: e.target.value })} placeholder="tvly-…" spellCheck={false} /></label>
+              <label><span>Exa API key <small className="muted">(optional; Exa works without one, a key lifts its rate limit)</small></span><input type="password" value={draft.exaApiKey ?? ''} onChange={(e) => patch({ exaApiKey: e.target.value })} placeholder="exa key" spellCheck={false} /></label>
+              <label><span>GitHub token <small className="muted">(optional; GitHub tools use your <code>gh</code> login when this is empty)</small></span><input type="password" value={draft.githubToken ?? ''} onChange={(e) => patch({ githubToken: e.target.value })} placeholder="ghp_…" spellCheck={false} /></label>
+              <label className="check">
+                <input type="checkbox" checked={draft.readerFallback !== false} onChange={(e) => patch({ readerFallback: e.target.checked })} />
+                Retry blocked or JavaScript-only pages through Jina Reader (Jina sees the page address)
+              </label>
             </section>}
 
             {tab === 'usage' && <section>

@@ -23,6 +23,7 @@ from . import skillbuild
 from .cowork import UNDECIDED_OUTPUTS
 from .workspace import WorkspaceError
 from . import plans
+from . import reach
 from . import outbox as outbox_mod
 from . import verify
 from .jobs import local_tz_name, parse_when, valid_cron, valid_tz
@@ -102,6 +103,11 @@ ALTERNATIVE = {
     "google_tasks_list": "todo_list",
     "fetch_url": "web_search, whose snippets often answer the question",
     "web_search": "search_documents and search_memory for what the user already has",
+    "youtube_video": "fetch_url on the video page, whose description often summarizes it",
+    "youtube_search": "web_search with 'youtube' in the query",
+    "github_search": "web_search with 'site:github.com' in the query",
+    "github_read": "fetch_url on the github.com page",
+    "read_feed": "fetch_url on the site's front page",
     "search_documents": "list_documents to see what exists, or ask the user to paste the text",
     "read_document": "search_documents for the relevant excerpt",
     "run_python": "do the arithmetic or the reasoning directly in your reply",
@@ -393,6 +399,7 @@ class Toolbox:
         if activity is not None:
             self._register_activity()
         self._register_mac()
+        self._register_reach()
         if jobs is not None:
             self._register_schedule()
         if style is not None:
@@ -649,13 +656,21 @@ class Toolbox:
                     r.raise_for_status()
                     rows = [{"title": w.get("title"), "url": w.get("url"), "snippet": w.get("content")} for w in r.json().get("results", [])[:want]]
             else:
-                # keyless fallback: DuckDuckGo
-                from ddgs import DDGS
+                # Exa first (Agent Reach's pick: semantic, and it returns page highlights rather than one-line
+                # snippets) -- keyless through its hosted MCP server unless the user has a key. DuckDuckGo when Exa
+                # is down or rate-limited.
+                rows = []
+                try:
+                    rows = await reach.exa_search(query, want, str(cfg.get("exaApiKey") or ""))
+                except (reach.ReachError, httpx.HTTPError, ValueError) as e:
+                    log.info("exa search failed, falling back to DuckDuckGo: %s", _first_line(e))
+                if not rows:
+                    from ddgs import DDGS
 
-                def _ddg() -> list[dict[str, Any]]:
-                    with DDGS() as d:
-                        return [{"title": r.get("title"), "url": r.get("href"), "snippet": r.get("body")} for r in d.text(query, max_results=want)]
-                rows = await asyncio.to_thread(_ddg)
+                    def _ddg() -> list[dict[str, Any]]:
+                        with DDGS() as d:
+                            return [{"title": r.get("title"), "url": r.get("href"), "snippet": r.get("body")} for r in d.text(query, max_results=want)]
+                    rows = await asyncio.to_thread(_ddg)
             for row in rows:
                 _allow_url(ctx, row.get("url"))
             return page(rows, offset=off, limit=n, key="results")
@@ -694,9 +709,24 @@ class Toolbox:
                 text = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", body, flags=re.S | re.I)
                 text = html.unescape(re.sub(r"<[^>]+>", " ", text))
                 text = re.sub(r"[ \t]+", " ", re.sub(r"\n\s*\n+", "\n\n", text)).strip()
-            return {"url": str(r.url), "status": r.status_code, "content_type": ctype, "text": text[: max(1000, min(int(max_chars), 40000))],
-                    "truncated": len(text) > max_chars, "redirects": hops}
-        R("fetch_url", ToolSpec("fetch_url", "Fetch a web page and return its main text as markdown. Public http(s) addresses only.",
+            via = None
+            # Agent Reach's web path: when our plain client is turned away, or the page is a JavaScript shell, read it
+            # through Jina Reader, which renders it on Jina's side. Only ever a URL that already passed _check_url.
+            if self.settings().get("readerFallback", True) and (
+                    r.status_code in (401, 403, 429, 503) or (len(text) < 300 and "html" in ctype.lower())):
+                try:
+                    j = await reach.jina_read(str(r.url))
+                    if len(j["text"]) > len(text):
+                        text, via = j["text"], "jina-reader"
+                except (reach.ReachError, httpx.HTTPError) as e:
+                    log.info("jina reader fallback failed for %s: %s", r.url, _first_line(e))
+            out = {"url": str(r.url), "status": r.status_code, "content_type": ctype, "text": text[: max(1000, min(int(max_chars), 40000))],
+                   "truncated": len(text) > max_chars, "redirects": hops}
+            if via:
+                out["via"] = via
+            return out
+        R("fetch_url", ToolSpec("fetch_url", "Fetch a web page and return its main text as markdown. Public http(s) addresses only. "
+                                "Pages that block plain fetches or need JavaScript are retried through a reader service.",
             _obj({"url": {"type": "string"}, "max_chars": {"type": "integer", "default": 12000}}, ["url"]), fetch_url, "web", "network",
             examples=[{"url": "https://example.com/blog/post"}, {"url": "https://en.wikipedia.org/wiki/SQLite", "max_chars": 20000}], taints=True))
 
@@ -2095,3 +2125,112 @@ def _register_cowork(self: Toolbox) -> None:
 
 Toolbox._register_cowork = _register_cowork  # type: ignore[attr-defined]
 Toolbox._register_meetings = _register_meetings  # type: ignore[attr-defined]
+
+
+# ---- Agent Reach: platform readers (reach.py) ----
+# The same taint stance as web_search: a query sent to a fixed first-party search API (GitHub, YouTube) is accepted,
+# since nobody downstream of that API can read it back. A URL the model chose goes through _check_url like fetch_url.
+REACH_TOOLS = ("youtube_video", "youtube_search", "github_search", "github_read", "read_feed")
+
+
+def _register_reach(self: Toolbox) -> None:
+    R = self.specs.__setitem__
+
+    def failed(name: str, e: BaseException) -> dict[str, Any]:
+        msg = str(e) if isinstance(e, reach.ReachError) else _first_line(e)
+        return tool_error(f"{name} failed: {msg}", alternative=ALTERNATIVE[name])
+
+    async def youtube_video(ctx: dict[str, Any], url: str, lang: str = "en", max_chars: int = 30000) -> Any:
+        try:
+            cur, host = _check_url(url, ctx, self.settings())
+        except UrlBlocked as e:
+            return tool_error(f"youtube_video refused {url}: {str(e).replace('fetch_url', 'youtube_video')}", field="url",
+                              alternative=e.alternative or ALTERNATIVE["youtube_video"])
+        if not reach.is_youtube(host):
+            return tool_error(f"{host} is not YouTube", field="url", expected="a youtube.com or youtu.be video URL",
+                              example={"url": "https://www.youtube.com/watch?v=aircAruvnKk"}, alternative="fetch_url for other sites")
+        try:
+            out = await reach.youtube_video(cur, lang)
+        except Exception as e:  # noqa: BLE001 -- yt-dlp raises its own DownloadError family
+            return failed("youtube_video", e)
+        cap = max(2000, min(int(max_chars), 80000))
+        t = out.get("transcript") or ""
+        out["transcript"], out["transcript_truncated"] = t[:cap], len(t) > cap
+        return out
+    R("youtube_video", ToolSpec("youtube_video", "Read a YouTube video: title, channel, description and the full transcript "
+                                "(subtitles, else auto captions), stamped [m:ss] about every 30 seconds.",
+        _obj({"url": {"type": "string"}, "lang": {"type": "string", "default": "en"}, "max_chars": {"type": "integer", "default": 30000}}, ["url"]),
+        youtube_video, "web", "network",
+        examples=[{"url": "https://www.youtube.com/watch?v=aircAruvnKk"}, {"url": "https://youtu.be/aircAruvnKk", "lang": "de"}], taints=True))
+
+    async def youtube_search(ctx: dict[str, Any], query: str, max_results: int = 8) -> Any:
+        try:
+            rows = await reach.youtube_search(query, max_results)
+        except Exception as e:  # noqa: BLE001
+            return failed("youtube_search", e)
+        for row in rows:
+            _allow_url(ctx, row["url"])
+        return {"results": rows}
+    R("youtube_search", ToolSpec("youtube_search", "Search YouTube. Returns video titles, URLs, channels, durations and view counts; "
+                                 "call youtube_video to read one.",
+        _obj({"query": {"type": "string"}, "max_results": {"type": "integer", "default": 8}}, ["query"]), youtube_search, "web", "network",
+        examples=[{"query": "sqlite internals talk"}, {"query": "how to descale a breville espresso machine", "max_results": 5}], taints=True))
+
+    async def github_search(ctx: dict[str, Any], query: str, kind: str = "repos", max_results: int = 10) -> Any:
+        try:
+            rows = await reach.github_search(kind, query, max_results, token=reach.gh_token(self.settings()))
+        except (reach.ReachError, httpx.HTTPError, ValueError) as e:
+            return failed("github_search", e)
+        for row in rows:
+            _allow_url(ctx, row.get("url"))
+        return {"results": rows}
+    R("github_search", ToolSpec("github_search", "Search GitHub. kind: repos (default), issues (issues and PRs) or code. "
+                                "Accepts GitHub search qualifiers such as language:, stars:>, repo:, is:open.",
+        _obj({"query": {"type": "string"}, "kind": {"type": "string", "enum": ["repos", "issues", "code"], "default": "repos"},
+              "max_results": {"type": "integer", "default": 10}}, ["query"]), github_search, "web", "network",
+        examples=[{"query": "local-first sync language:typescript stars:>500"},
+                  {"query": "repo:BerriAI/litellm is:issue is:open embedding", "kind": "issues"},
+                  {"query": "trafilatura extract repo:adbar/trafilatura", "kind": "code"}], taints=True))
+
+    async def github_read(ctx: dict[str, Any], repo: str, path: str = "", number: int | None = None, ref: str = "",
+                          max_chars: int = 20000) -> Any:
+        try:
+            return await reach.github_read(repo, path=path, number=number, ref=ref, token=reach.gh_token(self.settings()),
+                                           max_chars=max(2000, min(int(max_chars), 60000)))
+        except (reach.ReachError, httpx.HTTPError, ValueError, KeyError) as e:
+            return failed("github_read", e)
+    R("github_read", ToolSpec("github_read", "Read from a GitHub repository. With just `repo`: description, stars, top-level files "
+                              "and the README. With `path`: that file's text, or a directory listing. With `number`: that "
+                              "issue or pull request and its comments.",
+        _obj({"repo": {"type": "string", "description": "owner/name, or a github.com URL"}, "path": {"type": "string", "default": ""},
+              "number": {"type": "integer"}, "ref": {"type": "string", "default": ""}, "max_chars": {"type": "integer", "default": 20000}}, ["repo"]),
+        github_read, "web", "network",
+        examples=[{"repo": "BerriAI/litellm"}, {"repo": "adbar/trafilatura", "path": "trafilatura/core.py"},
+                  {"repo": "electron/electron", "number": 40000}], taints=True))
+
+    async def read_feed(ctx: dict[str, Any], url: str, max_items: int = 20) -> Any:
+        try:
+            _check_url(url, ctx, self.settings())  # the taint rule; guarded_request re-checks SSRF on every hop
+            async with httpx.AsyncClient(timeout=20, follow_redirects=False, transport=httpx.AsyncHTTPTransport(retries=0),
+                                         headers={"User-Agent": reach.UA}) as c:
+                r = await guarded_request(c, "GET", url)
+        except UrlBlocked as e:
+            return tool_error(f"read_feed refused {url}: {str(e).replace('fetch_url', 'read_feed')}", field="url",
+                              alternative=e.alternative or ALTERNATIVE["read_feed"])
+        except httpx.HTTPError as e:
+            return failed("read_feed", e)
+        if r.status_code != 200:
+            return tool_error(f"read_feed: {url} answered {r.status_code}", field="url", alternative=ALTERNATIVE["read_feed"])
+        try:
+            out = reach.parse_feed(r.content, max_items)
+        except reach.ReachError as e:
+            return failed("read_feed", e)
+        for it in out["items"]:
+            _allow_url(ctx, it.get("url"))
+        return out
+    R("read_feed", ToolSpec("read_feed", "Read an RSS or Atom feed: the latest items with titles, links, dates and summaries.",
+        _obj({"url": {"type": "string"}, "max_items": {"type": "integer", "default": 20}}, ["url"]), read_feed, "web", "network",
+        examples=[{"url": "https://hnrss.org/frontpage"}, {"url": "https://simonwillison.net/atom/everything/", "max_items": 10}], taints=True))
+
+
+Toolbox._register_reach = _register_reach  # type: ignore[attr-defined]

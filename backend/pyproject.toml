@@ -15,6 +15,9 @@ dependencies = [
   "croniter>=3.0",
   "mcp>=2.2",
   "trafilatura>=1.12",
+  # Agent Reach platform readers (reach.py): YouTube transcripts/search, RSS/Atom
+  "yt-dlp>=2025.1",
+  "feedparser>=6.0",
   "matplotlib>=3.8",
   "google-api-python-client>=2.140",
   "google-auth-oauthlib>=1.2",

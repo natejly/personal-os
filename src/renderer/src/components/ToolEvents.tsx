@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ChevronRight, Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, AlertCircle, Laptop, Zap, ListChecks, ShieldAlert, ShieldCheck,
-  FolderOpen, FileText, FilePen, Trash2, PackageCheck, CircleHelp, CircleCheck } from 'lucide-react'
+  FolderOpen, FileText, FilePen, Trash2, PackageCheck, CircleHelp, CircleCheck,
+  Youtube, Github, Rss } from 'lucide-react'
 import type { ToolEvent, Verification } from '@shared/types'
 import { useStore } from '../store'
 import PlanApproval from './PlanApproval'
@@ -13,6 +14,8 @@ const ICONS: Record<string, JSX.Element> = {
   desk_trash_file: <Trash2 size={13} />, desk_deliver: <PackageCheck size={13} />, desk_ask: <CircleHelp size={13} />,
   desk_done: <CircleCheck size={13} />, desk_import_sandbox: <FolderOpen size={13} />,
   web_search: <Globe size={13} />, fetch_url: <Globe size={13} />, open_page: <Globe size={13} />,
+  youtube_video: <Youtube size={13} />, youtube_search: <Youtube size={13} />,
+  github_search: <Github size={13} />, github_read: <Github size={13} />, read_feed: <Rss size={13} />,
   find_files: <Laptop size={13} />, read_local_file: <Laptop size={13} />,
   write_local_file: <Laptop size={13} />, move_local_file: <Laptop size={13} />, trash_local_file: <Laptop size={13} />, list_shortcuts: <Zap size={13} />, run_shortcut: <Zap size={13} />,
   search_documents: <FileSearch size={13} />, read_document: <FileSearch size={13} />, list_documents: <FileSearch size={13} />,

@@ -42,6 +42,7 @@ RESERVED_TOOL_NAMES = frozenset({
     "search_memory", "save_memory",
     "graph_search", "graph_traverse", "graph_add",
     "web_search", "fetch_url",
+    "youtube_video", "youtube_search", "github_search", "github_read", "read_feed",
     "run_python", "current_time", "propose_plan",
     "todo_write", "read_tool_result", "skill_list", "skill_draft", "skill_revise",
     "todo_list", "todo_add", "todo_update", "todo_delete",

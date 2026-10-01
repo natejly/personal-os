@@ -816,6 +816,12 @@ export interface Settings {
   fetchAllowlist?: string[]
   braveApiKey: string
   tavilyApiKey: string
+  /** Without a Brave/Tavily key, web search uses Exa (keyless, rate-limited); a key lifts the limit. */
+  exaApiKey?: string
+  /** fetch_url retries a blocked or JavaScript-only page through Jina Reader (which then sees the URL). Default on. */
+  readerFallback?: boolean
+  /** github_search/github_read; empty uses the gh CLI's login. */
+  githubToken?: string
   /** Per-model cost overrides, $ per million tokens. Proxy prices are used for models not listed. */
   modelPrices: Record<string, ModelPrice>
   /** Cowork desk budgets. 0 on either axis means unlimited; a desk may tighten them, never loosen. */

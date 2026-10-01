@@ -65,6 +65,12 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "gmailSendHold": {"enabled": True, "seconds": 90},
     "braveApiKey": "",
     "tavilyApiKey": "",
+    # Without a Brave/Tavily key, web_search uses Exa (keyless via its hosted MCP server; a key lifts the rate limit).
+    "exaApiKey": "",
+    # fetch_url retries a blocked or JavaScript-only page through Jina Reader (r.jina.ai), which then sees the URL.
+    "readerFallback": True,
+    # github_search/github_read; empty = the gh CLI's login (`gh auth token`), else unauthenticated (60 requests/h).
+    "githubToken": "",
     # {model: {"input": $/M tokens, "output": $/M tokens}} overrides for cost accounting (proxy prices are used otherwise)
     "modelPrices": {},
     "googleClientId": "",

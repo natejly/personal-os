@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
-import { MessageSquarePlus, Search, Settings, Sparkles, Trash2, PanelLeftClose, Brain, FileText, NotebookPen, Plus, Folder, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid, Mail, MonitorDot, BookOpen, Globe } from 'lucide-react'
+import { MessageSquarePlus, Search, Settings, Sparkles, Trash2, PanelLeftClose, Brain, FileText, NotebookPen, Plus, Folder, FolderKanban, ChevronRight, Home, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid, Mail, MonitorDot, BookOpen, Globe } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
 import GrainLogo from './GrainLogo'
 import { useStore, type View } from '../store'
 import { ActivityIndicator } from './ActivityView'
 import ChatPulse from './ChatPulse'
 import SidebarSpaces from './SidebarSpaces'
-import { viewHidden } from '../modules'
+import { viewHidden } from '../moduleToggles'
+import { MODULES } from '../shell/registry'
 import { dragProps } from '../canvas/dnd'
 import { useCanvas } from '../canvas/store'
 import { api } from '../lib/api'
@@ -38,9 +40,8 @@ type ProjectRow =
   | { kind: 'chat'; id: string; title: string; at: number }
   | { kind: 'doc'; id: string; title: string; at: number }
 
-const NAV: NavEntry[] = [
+const SHELL_NAV: NavEntry[] = [
   { view: 'home', label: 'Today', icon: <Home size={15} />, kind: 'recap' },
-  { view: 'todos', label: 'Todos', icon: <CheckSquare size={15} />, kind: 'todos' },
   { view: 'calendar', label: 'Calendar', icon: <Calendar size={15} />, kind: 'calendar' },
   { view: 'mail', label: 'Mail', icon: <Mail size={15} /> },
   { view: 'boards', label: 'Boards', icon: <KanbanSquare size={15} /> },
@@ -51,10 +52,24 @@ const NAV: NavEntry[] = [
 ]
 
 // What the assistant knows: memories and uploaded documents, grouped under their own section.
-const KNOWLEDGE: NavEntry[] = [
+const KNOWLEDGE_SHELL: NavEntry[] = [
   { view: 'memory', label: 'Memory', icon: <Brain size={15} />, kind: 'memory' },
   { view: 'documents', label: 'Documents', icon: <FileText size={15} />, kind: 'documents' }
 ]
+
+/** The shell's own rows take 0, 10, 20… in their listed order; a module's `nav.order` slots between them. */
+function withModules(shell: NavEntry[], section: 'main' | 'knowledge'): NavEntry[] {
+  const rows = shell.map((n, i) => ({ n, order: i * 10 }))
+  for (const m of MODULES) {
+    if (m.nav?.section !== section || !m.view) continue
+    rows.push({ n: { view: m.view.id, label: m.label, icon: m.icon, kind: m.widget?.kind }, order: m.nav.order })
+  }
+  // Array.sort is stable, so equal orders keep the shell row first.
+  return rows.sort((a, b) => a.order - b.order).map((r) => r.n)
+}
+const NAV = withModules(SHELL_NAV, 'main')
+const KNOWLEDGE = withModules(KNOWLEDGE_SHELL, 'knowledge')
+const NAV_MODULES = MODULES.filter((m) => m.nav && m.view)
 
 export default function Sidebar(): JSX.Element {
   const conversations = useStore((s) => s.conversations)
@@ -121,10 +136,13 @@ export default function Sidebar(): JSX.Element {
     return out
   }, [conversations, query])
 
-  const todoStats = useStore((s) => s.dashboard?.todo_stats)
+  // Module badges are pure functions of the store; useShallow compares the array element-wise, so a
+  // fresh array with the same counts does not re-render.
+  const moduleBadges = useStore(useShallow((s) => NAV_MODULES.map((m) => m.nav?.badge?.(s) ?? null)))
   const libCount = (v: View): number | null => {
     if (v === 'home' || v === 'calendar' || v === 'mail' || v === 'boards' || v === 'dashboards' || v === 'activity') return null
-    if (v === 'todos') return todoStats?.open ?? null
+    const mi = NAV_MODULES.findIndex((m) => m.view?.id === v)
+    if (mi >= 0) return moduleBadges[mi]
     if (v === 'docs') return docCount
     const total = (key: 'memories' | 'nodes' | 'documents'): number =>
       (personalStats?.[key] ?? 0) + projects.reduce((n, p) => n + (p.stats?.[key] ?? 0), 0)

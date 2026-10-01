@@ -17,7 +17,7 @@ This is the pilot contract (docs/module-manifest.md). Built-in only: nothing is 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, TypeVar
 
 if TYPE_CHECKING:
     from fastapi import APIRouter
@@ -73,8 +73,14 @@ def build_modules(ctx: ModuleContext) -> list[Module]:
     return [TodosModule(ctx)]
 
 
-def get(modules: list[Module], key: str) -> Module:
+M = TypeVar("M", bound=Module)
+
+
+def get(modules: list[Module], key: str, cls: type[M]) -> M:
+    """The module with this key, as its concrete class, for the app code that still reads its internals."""
     for m in modules:
         if m.key == key:
+            if not isinstance(m, cls):
+                raise TypeError(f"module {key!r} is {type(m).__name__}, not {cls.__name__}")
             return m
     raise KeyError(key)

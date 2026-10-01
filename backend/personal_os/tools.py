@@ -350,12 +350,13 @@ async def guarded_request(client: httpx.AsyncClient, method: str, url: str, *, h
 
 
 class Toolbox:
-    def __init__(self, memories: Memories, graph: Graph, documents: Documents, settings_fn: Callable[[], dict[str, Any]], todos: Any = None, google: Any = None, boards: Any = None,
+    def __init__(self, memories: Memories, graph: Graph, documents: Documents, settings_fn: Callable[[], dict[str, Any]], modules: list[Any] | None = None, google: Any = None, boards: Any = None,
                  sandboxes: Sandboxes | None = None, docs: Any = None, activity: Any = None, outbox: Any = None,
                  work_plans: Any = None, results: Any = None, skills: Any = None, jobs: Any = None,
                  style: Any = None):
         self.memories, self.graph, self.documents, self.settings = memories, graph, documents, settings_fn
-        self.todos, self.google, self.boards, self.sandboxes, self.docs, self.activity = todos, google, boards, sandboxes, docs, activity
+        self.modules = modules or []  # feature modules (modules/); each registers its own tools
+        self.google, self.boards, self.sandboxes, self.docs, self.activity = google, boards, sandboxes, docs, activity
         self.outbox = outbox  # delayed Gmail send; gmail_send queues through it when it is wired up
         # The todo_write artifact (working.py), not the propose_plan approval record in the `plans` module.
         self.work_plans, self.results, self.skills = work_plans, results, skills
@@ -364,8 +365,8 @@ class Toolbox:
         self.specs: dict[str, ToolSpec] = {}
         self._register()
         self._register_working()
-        if todos is not None:
-            self._register_todos()
+        for m in self.modules:
+            m.register_tools(self)
         if boards is not None:
             self._register_boards()
         if docs is not None:
@@ -394,6 +395,10 @@ class Toolbox:
             return self.sandboxes is not None and self.sandboxes.available()
         if spec and name in MAC_TOOLS:
             return _mac_available(name)
+        for m in self.modules:
+            v = m.tool_available(name)
+            if v is not None:
+                return v
         return spec is not None
 
     # ---- permission model: mode per tool = on | ask | off ----
@@ -799,50 +804,6 @@ def summarize_result(result: Any, limit: int = 1500) -> str:
                 return best
     shown = max(0, limit - 200)
     return json.dumps({"truncated": True, "total_chars": len(s), "shown": shown, "preview": s[:shown]}, ensure_ascii=False)
-
-
-# ---------------- todo + google tool registration ----------------
-def _register_todos(self: Toolbox) -> None:
-    R = self.specs.__setitem__
-
-    async def todo_list(ctx: dict[str, Any], include_done: bool = False, all_projects: bool = False, offset: int = 0) -> Any:
-        scope = "__all__" if all_projects else ctx["project_id"]
-        items = self.todos.list(scope, include_done=include_done) if not all_projects else self.todos.list("__all__", include_done=include_done)
-        if not all_projects and ctx["project_id"] is not None:
-            items = self.todos.list(ctx["project_id"], include_done=include_done) + self.todos.list(None, include_done=include_done)
-        rows = [{"id": t["id"], "title": t["title"], "due": t["due"], "priority": t["priority"], "done": bool(t["done"]), "notes": t["notes"][:200]} for t in items]
-        return page(rows, offset=offset, limit=50, key="todos")
-    R("todo_list", ToolSpec("todo_list", "List the user's todos (open by default) in this chat's scope: the project's todos plus personal ones.",
-        _obj({"include_done": {"type": "boolean", "default": False}, "all_projects": {"type": "boolean", "default": False}, "offset": {"type": "integer", "default": 0}}, []), todo_list, "todos",
-        examples=[{}, {"include_done": True}, {"all_projects": True, "offset": 50}]))
-
-    async def todo_add(ctx: dict[str, Any], title: str, due: str | None = None, notes: str = "", priority: int = 2, personal: bool = False) -> Any:
-        t = self.todos.create(title, None if personal else ctx["project_id"], notes=notes, due=due, priority=priority)
-        return {"id": t["id"], "title": t["title"], "due": t["due"]}
-    R("todo_add", ToolSpec("todo_add", "Add a todo for the user. Dates as YYYY-MM-DD. Priority 1 (high) to 3 (low).",
-        _obj({"title": {"type": "string"}, "due": {"type": "string"}, "notes": {"type": "string"}, "priority": {"type": "integer", "default": 2}, "personal": {"type": "boolean", "default": False}}, ["title"]), todo_add, "todos", "writes",
-        examples=[{"title": "Renew passport", "due": "2026-10-14", "priority": 1},
-                  {"title": "Buy milk", "personal": True},
-                  {"title": "Draft the migration plan", "notes": "start from the Q3 doc", "priority": 2}]))
-
-    async def todo_update(ctx: dict[str, Any], id: str, done: bool | None = None, title: str | None = None, due: str | None = None, priority: int | None = None, notes: str | None = None) -> Any:
-        patch = {k: v for k, v in {"done": done, "title": title, "due": due, "priority": priority, "notes": notes}.items() if v is not None}
-        t = self.todos.update(id, patch)
-        return t or tool_error(f"No todo with id '{id}'.", field="id", expected="an id from todo_list",
-                               example={"id": "td_8c41a2", "done": True}, alternative="todo_list to get the current ids")
-    R("todo_update", ToolSpec("todo_update", "Update or complete a todo by id (from todo_list).",
-        _obj({"id": {"type": "string"}, "done": {"type": "boolean"}, "title": {"type": "string"}, "due": {"type": "string"}, "priority": {"type": "integer"}, "notes": {"type": "string"}}, ["id"]), todo_update, "todos", "writes",
-        examples=[{"id": "td_8c41a2", "done": True}, {"id": "td_8c41a2", "due": "2026-11-01", "priority": 1}, {"id": "td_8c41a2", "title": "Renew passport (expedited)"}]))
-
-    async def todo_delete(ctx: dict[str, Any], id: str) -> Any:
-        t = self.todos.get(id)
-        if not t:
-            return tool_error(f"No todo with id '{id}'.", field="id", expected="an id from todo_list",
-                              example={"id": "td_8c41a2"}, alternative="todo_list to get the current ids")
-        self.todos.delete(id)
-        return {"deleted": t["title"]}
-    R("todo_delete", ToolSpec("todo_delete", "Delete a todo permanently by id. Prefer todo_update(done=true) to complete; delete only when the user asks to remove it.",
-        _obj({"id": {"type": "string"}}, ["id"]), todo_delete, "todos", "writes", examples=[{"id": "td_8c41a2"}]))
 
 
 def _register_working(self: Toolbox) -> None:
@@ -1352,7 +1313,6 @@ def _register_style(self: Toolbox) -> None:
         examples=[{"text": "Hey — quick one. We pushed the launch to Tuesday…", "personal": True}]))
 
 
-Toolbox._register_todos = _register_todos  # type: ignore[attr-defined]
 Toolbox._register_boards = _register_boards  # type: ignore[attr-defined]
 Toolbox._register_style = _register_style  # type: ignore[attr-defined]
 Toolbox._register_google = _register_google  # type: ignore[attr-defined]

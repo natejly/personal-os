@@ -55,6 +55,15 @@ pilot because it touches every surface. Built-in only — no runtime loading, no
 | `src/renderer/src/shell/registry.test.ts` | new, add to `npm test` list in `package.json`: every module's `view.id`/`widget.kind`/`home.key` is unique and matches the shell's lists. |
 | `package.json` | only the `test` script line. |
 
+## Amendments after integration
+
+- `modules.get(modules, key, cls)` takes the concrete class and returns it typed, so app.py's aliases need no ignores.
+- `homeModuleOn`/`viewHidden` live in the leaf `src/renderer/src/moduleToggles.ts` (re-exported from `modules.ts`).
+  `store.ts` imports them, and `modules.ts` now imports the catalog, whose views import the store: going
+  through `modules.ts` made a cycle that would throw on any entry that loads the catalog before the store.
+- `test_mcp_servers` scans `modules/*.py` too, so tools that move into a module stay covered by the
+  reserved-name check.
+
 ## Later (not this pilot)
 Open the `View`/`WidgetKind` unions; move store slices into modules; a settings-panel slot (GoogleSettings'
 sync UI); per-module SCHEMA registration; port calendar, boards, docs, mail; then think about third-party.

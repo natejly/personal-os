@@ -3,7 +3,7 @@ import type { ApprovalDecision, PlanEdit, ActivityConfig, ActivityContextFile, A
 import { api, backgroundStream, chatStream, setBase, type Scope } from './lib/api'
 import { currentSelection } from './lib/pageContext'
 import { finishStatus, mergeConversation, pickEvictions, reduceStatus, settleApprovals } from './sessionStatus'
-import { viewHidden } from './modules'
+import { viewHidden } from './moduleToggles'
 
 /**
  * Settings as the renderer holds them: without the legacy `mode`, which only init() reads. Kept out

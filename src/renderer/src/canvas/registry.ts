@@ -12,9 +12,9 @@ import { def as memory } from './widgets/memory'
 import { def as note } from './widgets/note'
 import { def as project } from './widgets/project'
 import { def as recap } from './widgets/recap'
-import { def as todos } from './widgets/todos'
 import { def as usage } from './widgets/usage'
 import { def as web } from './widgets/web'
+import { MODULES } from '../shell/registry'
 import '../styles/widgets.css'
 
 /** One entry of the catalog: everything the canvas needs to open, size, chrome and drop onto a kind. */
@@ -47,6 +47,14 @@ export interface WidgetProps {
   onConfig: (patch: Record<string, unknown>) => void
   onTitle: (t: string) => void
 }
+
+/** A kind a module owns; absent means the module list and the catalog disagree, which cannot render. */
+function moduleWidget(kind: WidgetKind): WidgetDef {
+  const w = MODULES.find((m) => m.widget?.kind === kind)?.widget
+  if (!w) throw new Error(`canvas registry: no module provides the "${kind}" widget`)
+  return w
+}
+const todos = moduleWidget('todos')
 
 /**
  * The catalog, in the order of contract §6. The annotation is the guard: `Record<WidgetKind, WidgetDef>`

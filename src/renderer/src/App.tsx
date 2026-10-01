@@ -9,7 +9,6 @@ import DocsView from './components/DocsView'
 import ActivityView from './components/ActivityView'
 import ProjectView from './components/ProjectView'
 import HomeView from './components/HomeView'
-import TodosView from './components/TodosView'
 import BoardsView from './components/BoardsView'
 import CalendarView from './components/CalendarView'
 import MailView from './components/MailView'
@@ -18,6 +17,7 @@ import PendingSends from './components/PendingSends'
 import PageAgentPanel from './components/PageAgentPanel'
 import SettingsModal from './components/SettingsModal'
 import ProjectModal from './components/ProjectModal'
+import { moduleForView } from './shell/registry'
 import Canvas from './canvas/Canvas'
 import { useCanvas } from './canvas/store'
 import { AlertTriangle } from 'lucide-react'
@@ -45,6 +45,7 @@ export default function App(): JSX.Element {
   const settingsOpen = useStore((s) => s.settingsOpen)
   const projectModal = useStore((s) => s.projectModal)
   const view = useStore((s) => s.view)
+  const ModView = moduleForView(view)?.view?.Component
   const theme = useStore((s) => s.settings.theme)
   const inCanvas = useStore((s) => s.view === 'canvas')
   const pageAgentOpen = useStore((s) => s.pageAgentOpen)
@@ -107,7 +108,7 @@ export default function App(): JSX.Element {
         <>
           {view === 'home' && <HomeView />}
           {view === 'chat' && <ChatView />}
-          {view === 'todos' && <TodosView />}
+          {ModView && <ModView />}
           {view === 'calendar' && <CalendarView />}
           {view === 'mail' && <MailView />}
           {view === 'boards' && <BoardsView />}

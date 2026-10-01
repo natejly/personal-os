@@ -1,6 +1,6 @@
 import type { CanvasWindow, WidgetKind } from '@shared/types'
 import { handoff } from '../lib/handoff'
-import { viewHidden } from '../modules'
+import { viewHidden } from '../moduleToggles'
 import { useStore } from '../store'
 
 /** Kinds with a classic equivalent. A note and usage have none, so they get no Expand. */

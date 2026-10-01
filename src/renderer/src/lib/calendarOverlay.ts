@@ -420,7 +420,7 @@ export const MAX_DAYS = 5
  * Which day columns to draw: the days the changes touch (their new and old positions), filled in
  * between when that span is short, else just the days with activity. Never more than MAX_DAYS.
  */
-export function rangeDays(changes: Change[], old: Record<string, CalendarEvent> = {}, extra: string[] = []): string[] {
+export function rangeDays(changes: Change[], old: Record<string, CalendarEvent> = {}, extra: string[] = [], max = MAX_DAYS): string[] {
   const days = new Set<string>(extra)
   for (const c of changes) {
     const prior = c.event_id ? old[c.event_id] : undefined
@@ -432,10 +432,10 @@ export function rangeDays(changes: Change[], old: Record<string, CalendarEvent> 
   if (!sorted.length) return []
   const first = toDate(sorted[0]), last = toDate(sorted[sorted.length - 1])
   const span = Math.round((last.getTime() - first.getTime()) / 86_400_000) + 1
-  if (span <= MAX_DAYS) {
+  if (span <= max) {
     return Array.from({ length: span }, (_, n) => dayKey(new Date(first.getFullYear(), first.getMonth(), first.getDate() + n)))
   }
-  return sorted.slice(0, MAX_DAYS)
+  return sorted.slice(0, max)
 }
 
 // ------------------------------------------------------------------ agenda (find_time / events)

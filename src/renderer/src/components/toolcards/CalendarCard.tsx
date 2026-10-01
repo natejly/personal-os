@@ -1,20 +1,20 @@
-import { useEffect, useMemo, useState } from 'react'
-import { AlertCircle, ArrowRight, CalendarClock, CalendarDays, CalendarPlus, CalendarSearch, CalendarX, Check, ExternalLink, Loader2, ShieldAlert, ShieldCheck, TriangleAlert, Video, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { AlertCircle, ArrowRight, CalendarClock, CalendarDays, CalendarPlus, CalendarSearch, CalendarX, Check, ExternalLink, Loader2, ShieldAlert, ShieldCheck, Trash2, TriangleAlert, Video, X } from 'lucide-react'
 import type { CalendarEvent, ToolEvent } from '@shared/types'
 import { api } from '../../lib/api'
 import {
-  argsFromChanges, buildOverlay, cardState, changeProblem, changesFromArgs, dayHeading, findConflicts, groupByDay, hourBand, layoutLanes, notConnected,
+  argsFromChanges, buildOverlay, cardState, changeProblem, changesFromArgs, dayHeading, findConflicts, groupByDay, notConnected,
   parseAgendaEvents, parseResult, parseSlots, rangeDays, sameChanges, slotReplyText, toDate, toInput, newPosition,
-  type Block, type CardState, type Change, type Outcome, type Placed
+  type CardState, type Change, type Outcome
 } from '../../lib/calendarOverlay'
+import { blockAriaLabel, changeAt, classifyBlocks, firstChangeMin, hourRange, LEGEND_LABEL, legendKeys, outcomeFor, weekLabel, type ViewBlock } from '../../lib/calendarProposal'
 import { insertIntoComposer } from '../../lib/composerInsert'
 import { useStore } from '../../store'
-import { fmtMin, fmtTime } from '../CalendarWeek'
+import { dayKey, fmtMin, fmtTime } from '../CalendarWeek'
 import { eventColor, primeCalendarMeta } from '../EventEditor'
 import { registerToolCard, type ToolCardProps } from './registry'
 import '../../styles/calcard.css'
 
-const HOUR_PX = 26
 const pretty = (v: unknown): string => {
   if (typeof v === 'string') { try { return JSON.stringify(JSON.parse(v), null, 2) } catch { return v } }
   return JSON.stringify(v, null, 2)
@@ -44,7 +44,7 @@ function ConnectNotice(): JSX.Element {
   return (
     <div className="ccard-notice" role="status">
       <AlertCircle size={14} />
-      <span>Google Calendar is not connected, so this can&apos;t read or change your calendar.</span>
+      <span>Google Calendar isn&apos;t connected.</span>
       <button className="ghost-btn sm" onClick={() => openSettings('integrations')}>Connect Google</button>
     </div>
   )
@@ -89,56 +89,128 @@ function when(start?: string, end?: string): string {
   return same ? `${day} · ${fmtTime(s)} – ${fmtTime(e)}` : `${day} ${fmtTime(s)} – ${e.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })} ${fmtTime(e)}`
 }
 
-// ------------------------------------------------------------------ mini timeline
-function Timeline({ days, blocks, label }: { days: string[]; blocks: Block[]; label: string }): JSX.Element | null {
-  const shown = useMemo(() => blocks.filter((b) => days.includes(b.day)), [blocks, days])
-  const band = useMemo(() => hourBand(shown), [shown])
-  const placed = useMemo(() => layoutLanes(shown), [shown])
-  if (!days.length) return null
-  const hours = band.end - band.start
-  const top = (min: number): number => ((min - band.start * 60) / 60) * HOUR_PX
-  const allDay = shown.filter((b) => b.allDay)
-  const place = (p: Placed): React.CSSProperties => ({
-    top: top(p.startMin), height: Math.max(15, top(p.endMin) - top(p.startMin) - 1),
-    left: `calc(${(p.lane / p.lanes) * 100}% + 1px)`, width: `calc(${100 / p.lanes}% - 2px)`,
-    ...(p.kind === 'existing' && p.color ? { background: `${p.color}38`, borderLeftColor: p.color } : {})
-  })
+// ------------------------------------------------------------------ the calendar grid
+const GRID_HOUR_PX = 48
+const todayKey = (): string => dayKey(new Date())
+const hourLabel = (h: number): string => (h === 0 || h === 24 ? '' : `${h % 12 || 12} ${h < 12 ? 'AM' : 'PM'}`)
+
+interface GridProps {
+  days: string[]
+  blocks: ViewBlock[]
+  changes: Change[]
+  selected: number | null
+  outcomes: Outcome[]
+  label: string
+  onSelect: (i: number) => void
+}
+
+function BlockBody({ b, tall }: { b: ViewBlock; tall: boolean }): JSX.Element {
+  const range = b.allDay ? 'all day' : `${fmtMin(b.day, b.startMin)} – ${fmtMin(b.day, b.endMin)}`
   return (
-    <div className="ccard-tl" role="img" aria-label={label} style={{ gridTemplateColumns: `34px repeat(${days.length}, minmax(0, 1fr))` }}>
-      <div />
-      {days.map((d) => <div key={d} className="ccard-dayhead">{dayHeading(d)}</div>)}
-      {allDay.length > 0 && <div className="ccard-gutter ccard-adlabel">all day</div>}
+    <>
+      <b className="pg-title">
+        {b.variant === 'delete' && <Trash2 size={12} />}
+        {b.variant === 'done' && <Check size={12} />}
+        {b.variant === 'failed' && <X size={12} />}
+        {b.variant === 'moved-to' && <ArrowRight size={12} />}
+        <span>{b.summary}</span>
+      </b>
+      {tall && <span className="pg-time">{range}{b.movedTo ? ` → ${fmtMin(b.movedTo.day, b.movedTo.startMin)}` : ''}</span>}
+      {tall && b.movedFrom && <span className="pg-time">from {fmtMin(b.movedFrom.day, b.movedFrom.startMin)}</span>}
+      {b.variant === 'new' && <span className="pg-tag">+ New</span>}
+      {b.variant === 'edited' && <span className="pg-tag">edited</span>}
+      {b.variant === 'moved-to' && !tall && <span className="pg-tag">moved</span>}
+    </>
+  )
+}
+
+function CalendarGrid({ days, blocks, changes, selected, outcomes, label, onSelect }: GridProps): JSX.Element {
+  const band = useMemo(() => hourRange(blocks), [blocks])
+  const hours = band.end - band.start
+  const scroller = useRef<HTMLDivElement>(null)
+  const today = todayKey()
+  const shown = useMemo(() => blocks.filter((b) => days.includes(b.day)), [blocks, days])
+  const first = useMemo(() => firstChangeMin(shown), [shown])
+  const allDay = shown.filter((b) => b.allDay)
+  const top = (min: number): number => ((min - band.start * 60) / 60) * GRID_HOUR_PX
+
+  // Land on the first change, one hour of context above it.
+  useEffect(() => {
+    const el = scroller.current
+    if (el && first !== null) el.scrollTop = Math.max(0, top(first) - GRID_HOUR_PX * 0.75)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [first, band.start, days.join(',')])
+
+  const place = (b: ViewBlock): React.CSSProperties => ({
+    top: top(b.startMin), height: Math.max(22, top(b.endMin) - top(b.startMin) - 2),
+    left: `calc(${(b.lane / b.lanes) * 100}% + 2px)`, width: `calc(${100 / b.lanes}% - 4px)`,
+    ...(b.variant === 'existing' && b.color ? { borderLeftColor: b.color } : {})
+  })
+  const attend = (b: ViewBlock): string[] => changeAt(changes, b.change)?.attendees ?? []
+  const badge = (b: ViewBlock): JSX.Element | null => {
+    const o = outcomeFor(outcomes, b.change)
+    if (!o) return null
+    return <span className={`pg-badge ${o.ok ? 'ok' : 'bad'}`} title={o.ok ? (o.v === 'verified' ? 'Done and verified' : `Done${o.v ? `, ${o.v}` : ''}`) : o.err || 'Not applied'}>{o.ok ? <ShieldCheck size={11} /> : <ShieldAlert size={11} />}</span>
+  }
+
+  const cls = (b: ViewBlock): string => `pg-block v-${b.variant}${b.off ? ' off' : ''}${b.conflict ? ' conflict' : ''}${b.change !== undefined && b.change === selected ? ' sel' : ''}`
+  const tip = (b: ViewBlock): string => `${b.summary} · ${b.allDay ? 'all day' : `${fmtMin(b.day, b.startMin)} – ${fmtMin(b.day, b.endMin)}`}${b.conflict ? ' · conflict: overlaps another event' : ''}`
+
+  return (
+    <div className="pg" ref={scroller} role="group" aria-label={label}
+      style={{ gridTemplateColumns: `46px repeat(${days.length}, minmax(0, 1fr))` }}>
+      <div className="pg-corner" />
+      {days.map((d) => {
+        const dt = toDate(d)
+        return (
+          <div key={d} className={`pg-dayhead${d === today ? ' today' : ''}`}>
+            <span>{dt.toLocaleDateString(undefined, { weekday: 'short' })}</span>
+            <b>{dt.getDate()}</b>
+          </div>
+        )
+      })}
+      {allDay.length > 0 && <div className="pg-gutter pg-adlabel">all day</div>}
       {allDay.length > 0 && days.map((d) => (
-        <div key={'ad' + d} className="ccard-allday">
-          {allDay.filter((b) => b.day === d).map((b) => <div key={b.key} className={`ccard-chip k-${b.kind} ${b.conflict ? 'conflict' : ''}`} title={b.summary}>{b.summary}</div>)}
+        <div key={'ad' + d} className="pg-allday">
+          {allDay.filter((b) => b.day === d).map((b) => (b.change !== undefined
+            ? <button key={b.key} type="button" className={`pg-chip ${cls(b)}`} title={tip(b)} aria-label={blockAriaLabel(b, attend(b))} aria-pressed={b.change === selected} onClick={() => onSelect(b.change as number)}>{badge(b)}<span>{b.summary}</span></button>
+            : <div key={b.key} className="pg-chip v-existing" title={tip(b)} style={b.color ? { borderLeftColor: b.color } : undefined}><span>{b.summary}</span></div>))}
         </div>
       ))}
-      <div className="ccard-gutter" style={{ height: hours * HOUR_PX }}>
+      <div className="pg-gutter" style={{ height: hours * GRID_HOUR_PX }}>
         {Array.from({ length: hours }, (_, i) => band.start + i).map((h) => (
-          <div key={h} className="ccard-hour" style={{ height: HOUR_PX }}>{h === 0 ? '' : `${h % 12 || 12}${h < 12 ? 'a' : 'p'}`}</div>
+          <div key={h} className="pg-hour" style={{ height: GRID_HOUR_PX }}><span>{hourLabel(h)}</span></div>
         ))}
       </div>
       {days.map((d) => (
-        <div key={d} className="ccard-col" style={{ height: hours * HOUR_PX }}>
-          {Array.from({ length: hours }, (_, i) => <div key={i} className="ccard-line" style={{ top: i * HOUR_PX }} />)}
-          {placed.filter((p) => p.day === d).map((p) => (
-            <div key={p.key} className={`ccard-block k-${p.kind} ${p.conflict ? 'conflict' : ''}`} style={place(p)}
-              title={`${p.summary} · ${fmtMin(d, p.startMin)} – ${fmtMin(d, p.endMin)}${p.conflict ? ' · overlaps another event' : ''}`}>
-              <b>{p.kind === 'move-to' && <ArrowRight size={9} />}{p.kind === 'done' && <Check size={9} />}{p.summary}</b>
-              {top(p.endMin) - top(p.startMin) >= 30 && <span>{fmtMin(d, p.startMin)}</span>}
-            </div>
-          ))}
+        <div key={d} className={`pg-col${d === today ? ' today' : ''}`} style={{ height: hours * GRID_HOUR_PX }}>
+          {Array.from({ length: hours }, (_, i) => <div key={i} className="pg-line" style={{ top: i * GRID_HOUR_PX }} />)}
+          {shown.filter((b) => b.day === d && !b.allDay).map((b) => {
+            const tall = top(b.endMin) - top(b.startMin) >= 40
+            return b.change !== undefined ? (
+              <button key={b.key} type="button" className={cls(b)} style={place(b)} title={tip(b)} aria-label={blockAriaLabel(b, attend(b))}
+                aria-pressed={b.change === selected} onClick={() => onSelect(b.change as number)}>
+                <BlockBody b={b} tall={tall} />{badge(b)}
+              </button>
+            ) : (
+              <div key={b.key} className={cls(b)} style={place(b)} title={tip(b)}><BlockBody b={b} tall={tall} /></div>
+            )
+          })}
         </div>
       ))}
     </div>
   )
 }
 
-function Legend({ kinds }: { kinds: Set<string> }): JSX.Element {
-  const items: [string, string][] = [['existing', 'Your calendar'], ['create', 'New'], ['move-to', 'Moved to'], ['move-from', 'Moved from'], ['delete', 'Deleted'], ['done', 'Done'], ['failed', 'Not made']]
+function GridBar({ days, blocks, count }: { days: string[]; blocks: ViewBlock[]; count: number }): JSX.Element {
+  const keys = legendKeys(blocks)
   return (
-    <div className="ccard-legend" aria-hidden="true">
-      {items.filter(([k]) => kinds.has(k)).map(([k, l]) => <span key={k}><i className={`k-${k}`} />{l}</span>)}
+    <div className="pg-bar">
+      <b className="pg-week">{weekLabel(days)}</b>
+      <div className="pg-legend" aria-hidden="true">
+        {keys.map((k) => <span key={k} className={`pg-chipkey k-${k}`}><i />{LEGEND_LABEL[k]}</span>)}
+      </div>
+      <span className="pg-count">{count} {count === 1 ? 'change' : 'changes'}</span>
     </div>
   )
 }
@@ -167,7 +239,7 @@ function useTimelineData(changes: Change[], connected: boolean, fresh: boolean):
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [targetKey, connected])
 
-  const days = useMemo(() => rangeDays(changes, old), [changes, old])
+  const days = useMemo(() => rangeDays(changes, old, [], 7), [changes, old])
   const dayKey = days.join(',')
 
   useEffect(() => {
@@ -248,6 +320,7 @@ function ChangeRow({ c, i, editing, on, old, outcome, state, conflicts, onToggle
           <label>Start<input type={allDay ? 'date' : 'datetime-local'} value={toInput(c.start ?? old?.start ?? '')} onChange={(e) => setStart(e.target.value)} /></label>
           <label>End<input type={allDay ? 'date' : 'datetime-local'} value={toInput(c.end ?? (c.start ? '' : old?.end ?? ''))} onChange={(e) => onEdit({ end: e.target.value })} /></label>
           <label className="wide">Guests<input value={guests} placeholder="email, email" onChange={(e) => { setGuests(e.target.value); onEdit({ attendees: parseGuests(e.target.value) }) }} /></label>
+          <label className="ccard-meet"><input type="checkbox" checked={!!c.conference} onChange={(e) => onEdit({ conference: e.target.checked })} /> <Video size={12} /> Add Google Meet link</label>
         </div>
       ) : (
         <div className="ccard-when">
@@ -294,10 +367,14 @@ function ProposalCard({ event, pending, decide }: ToolCardProps): JSX.Element {
 
   const { old, days, existing, failed } = useTimelineData(changes, connected, !editing)
   const conflicts = useMemo(() => (editing && existing ? findConflicts(changes, existing, { enabled, old }) : {}), [editing, changes, existing, enabled, old])
+  // Switched-off changes stay on the grid, greyed, so the picture never loses what the user is declining.
   const blocks = useMemo(() => {
-    const bs = buildOverlay(changes, existing ?? [], { enabled: editing ? enabled : undefined, old, outcomes: finished ? outcomes : null, colorOf: eventColor })
-    return bs.map((b) => (b.change !== undefined && conflicts[b.change] ? { ...b, conflict: true } : b))
+    const bs = buildOverlay(changes, existing ?? [], { old, outcomes: finished ? outcomes : null, colorOf: eventColor })
+    return classifyBlocks(bs.map((b) => (b.change !== undefined && conflicts[b.change] ? { ...b, conflict: true } : b)), editing ? enabled : undefined)
   }, [changes, existing, enabled, editing, old, finished, outcomes, conflicts])
+  const [selectedRaw, setSelected] = useState<number | null>(0)
+  const [listView, setListView] = useState(false)
+  const selected = selectedRaw !== null && selectedRaw < changes.length ? selectedRaw : null
 
   const patch = (i: number, p: Partial<Change>): void => setDraft((d) => d.map((c, n) => (n === i ? { ...c, ...p } : c)))
   const picked = draft.filter((_, i) => enabled[i])
@@ -305,7 +382,7 @@ function ProposalCard({ event, pending, decide }: ToolCardProps): JSX.Element {
   const allOn = enabled.every(Boolean)
   const guests = picked.some((c) => (c.attendees?.length ?? 0) > 0)
   const note = typeof argsOf(event).note === 'string' ? (argsOf(event).note as string) : ''
-  const kinds = new Set(blocks.map((b) => b.kind))
+  const hasGrid = existing !== null && days.length > 0
   const okCount = outcomes.filter((o) => o.ok).length
   const total = state === 'awaiting' ? picked.length : changes.length
 
@@ -330,29 +407,52 @@ function ProposalCard({ event, pending, decide }: ToolCardProps): JSX.Element {
       <header className="ccard-head">
         <CalendarDays size={14} />
         <b>{title}</b>
-        <span className="ccard-count">{total} {total === 1 ? 'change' : 'changes'}</span>
+        {!hasGrid && <span className="ccard-count">{total} {total === 1 ? 'change' : 'changes'}</span>}
         <span className={`tag ${st.cls}`}>{st.label}</span>
       </header>
       {note && <p className="ccard-note">{note}</p>}
       {(notConnected(event.error) || (!connected && (editing || state === 'failed'))) && <ConnectNotice />}
 
       {connected && existing === null && days.length > 0 && <div className="ccard-loading"><Loader2 size={12} className="spin" /> Loading your calendar…</div>}
-      {connected && existing !== null && days.length > 0 && (
+      {/* Without Google there are no existing events (existing = []), but the proposed changes still get the grid. */}
+      {hasGrid && (
         <>
-          <Timeline days={days} blocks={blocks} label={`Calendar preview of ${days.length} ${days.length === 1 ? 'day' : 'days'} with ${changes.length} ${changes.length === 1 ? 'change' : 'changes'}`} />
-          <Legend kinds={kinds} />
+          <GridBar days={days} blocks={blocks} count={total} />
+          <CalendarGrid days={days} blocks={blocks} changes={changes} selected={editing ? selected : null} outcomes={outcomes} onSelect={setSelected}
+            label={`Calendar preview of ${days.length} ${days.length === 1 ? 'day' : 'days'} with ${changes.length} ${changes.length === 1 ? 'change' : 'changes'}`} />
           {failed && <p className="ccard-muted">Couldn&apos;t load your existing events, so conflicts are not checked.</p>}
         </>
       )}
 
-      <ul className="ccard-list">
-        {changes.map((c, i) => (
-          <ChangeRow key={i} c={c} i={i} editing={editing} on={editing ? enabled[i] !== false : true} state={state}
-            old={c.event_id ? old[c.event_id] : undefined}
-            outcome={outcomes.find((o) => o.i === i)} conflicts={conflicts[i]}
-            onToggle={(on) => setEnabled((en) => en.map((v, n) => (n === i ? on : v)))} onEdit={(p) => patch(i, p)} />
-        ))}
-      </ul>
+      {editing && hasGrid && changes.length > 0 && (
+        <div className="pg-pick" role="group" aria-label="Changes">
+          {changes.map((c, i) => (
+            <button key={i} type="button" className={`pg-pickbtn op-${c.op}${i === selected ? ' sel' : ''}${enabled[i] === false ? ' off' : ''}`} aria-pressed={i === selected} onClick={() => setSelected(i)}>
+              {OP_ICON[c.op]}<span>{c.summary ?? old[c.event_id ?? '']?.summary ?? OP_LABEL[c.op]}</span>
+            </button>
+          ))}
+          <button type="button" className="ghost-btn sm pg-listtoggle" aria-pressed={listView} onClick={() => setListView((v) => !v)}>{listView ? 'Hide list' : 'List view'}</button>
+        </div>
+      )}
+
+      {(() => {
+        // Editing with a grid: one compact panel for the picked change (or all rows via List view). Otherwise the full list, which carries the results.
+        const only = editing && hasGrid && !listView
+        const rows = only ? (selected !== null ? [selected] : []) : changes.map((_, i) => i)
+        return (
+          <ul className={`ccard-list${only ? ' panel' : ''}`}>
+            {rows.map((i) => {
+              const c = changes[i]
+              return (
+                <ChangeRow key={i} c={c} i={i} editing={editing} on={editing ? enabled[i] !== false : true} state={state}
+                  old={c.event_id ? old[c.event_id] : undefined}
+                  outcome={outcomes.find((o) => o.i === i)} conflicts={conflicts[i]}
+                  onToggle={(on) => setEnabled((en) => en.map((v, n) => (n === i ? on : v)))} onEdit={(p) => patch(i, p)} />
+              )
+            })}
+          </ul>
+        )
+      })()}
       {finished && parsed.truncated && <p className="ccard-muted">The saved result was cut short, so some changes show no outcome. Open the calendar to check them.</p>}
       {state === 'failed' && !outcomes.length && event.error && !notConnected(event.error) && <div className="ccard-warn bad"><AlertCircle size={12} /> {event.error}</div>}
       {state === 'denied' && <p className="ccard-muted">You declined this. Nothing was changed.</p>}

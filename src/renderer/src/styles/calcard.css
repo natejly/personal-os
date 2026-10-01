@@ -27,63 +27,95 @@
 @media (prefers-reduced-motion: reduce) { .ccard .spin { animation: none; } }
 
 .ccard-notice {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 10px; border-radius: 8px;
+  display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 8px; font-size: 12px; min-height: 0;
   background: color-mix(in srgb, var(--warn) 12%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
-  color: var(--text); line-height: 1.4;
+  color: var(--text); line-height: 1.3;
 }
 .ccard-notice > svg { flex: none; color: var(--warn); }
-.ccard-notice span { flex: 1; min-width: 160px; }
+.ccard-notice .ghost-btn { flex: none; margin-left: auto; }
+.ccard-notice span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-/* ---- the mini timeline ---- */
-.ccard-tl {
+/* ---- the calendar grid (the card's main view) ---- */
+.pg-bar { display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; }
+.pg-week { font-size: 13px; font-weight: 600; color: var(--text); }
+.pg-legend { display: flex; flex-wrap: wrap; gap: 4px 6px; margin-right: auto; }
+.pg-chipkey { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-muted); padding: 1px 8px 1px 6px; border-radius: 10px; background: var(--hover); }
+.pg-chipkey i { width: 11px; height: 9px; border-radius: 2px; display: inline-block; box-sizing: border-box; background: color-mix(in srgb, var(--text-faint) 30%, transparent); border: 1px solid var(--text-faint); }
+.pg-chipkey.k-new i { border: 1.5px dashed var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.pg-chipkey.k-moved i { border: 1.5px solid var(--accent); background: color-mix(in srgb, var(--accent) 32%, transparent); }
+.pg-chipkey.k-edited i { border: 1.5px solid var(--accent); background: transparent; }
+.pg-chipkey.k-delete i { border: 1.5px solid var(--danger); background: color-mix(in srgb, var(--danger) 16%, transparent); }
+.pg-chipkey.k-done i { border: 1.5px solid var(--ok); background: color-mix(in srgb, var(--ok) 20%, transparent); }
+.pg-chipkey.k-failed i { border: 1.5px dashed var(--danger); background: transparent; }
+.pg-count { font-size: 11.5px; color: var(--text-faint); }
+
+.pg {
   display: grid; align-items: start; border: 1px solid var(--border); border-radius: 8px; background: var(--bg);
-  overflow: hidden; font-size: 10.5px; max-height: 330px; overflow-y: auto;
+  max-height: 420px; overflow-y: auto; overflow-x: hidden; font-size: 12px; position: relative;
 }
-.ccard-dayhead {
-  position: sticky; top: 0; z-index: 3; background: var(--bg); padding: 4px 6px; text-align: center; font-weight: 600;
-  color: var(--text-muted); border-bottom: 1px solid var(--border); border-left: 1px solid var(--border);
-}
-.ccard-tl > div:first-child { position: sticky; top: 0; z-index: 3; background: var(--bg); border-bottom: 1px solid var(--border); }
-.ccard-gutter { color: var(--text-faint); }
-.ccard-adlabel { padding: 4px 4px 0; text-align: right; font-size: 9.5px; }
-.ccard-allday { display: flex; flex-direction: column; gap: 2px; padding: 3px; border-left: 1px solid var(--border); border-bottom: 1px solid var(--border); min-height: 8px; }
-.ccard-chip { padding: 1px 5px; border-radius: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: color-mix(in srgb, var(--info) 22%, transparent); }
-.ccard-hour { text-align: right; padding-right: 4px; transform: translateY(-6px); font-size: 9.5px; }
-.ccard-col { position: relative; border-left: 1px solid var(--border); }
-.ccard-line { position: absolute; left: 0; right: 0; border-top: 1px solid var(--border); }
-.ccard-block {
-  position: absolute; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; z-index: 1;
-  padding: 1px 4px; border-radius: 4px; line-height: 1.25; color: var(--text);
-  background: color-mix(in srgb, var(--info) 22%, transparent); border-left: 3px solid var(--info);
-}
-.ccard-block b { display: flex; align-items: center; gap: 2px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.ccard-block b svg { flex: none; }
-.ccard-block span { color: var(--text-muted); font-size: 9.5px; }
+.pg-corner, .pg-dayhead { position: sticky; top: 0; z-index: 4; background: var(--bg); border-bottom: 1px solid var(--border); }
+.pg-dayhead { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 5px 4px 4px; border-left: 1px solid var(--border); color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; }
+.pg-dayhead b { font-size: 15px; line-height: 1; font-weight: 500; text-transform: none; color: var(--text); width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; }
+.pg-dayhead.today { color: var(--accent); }
+.pg-dayhead.today b { background: var(--accent-solid); color: #fff; }
+.pg-gutter { color: var(--text-faint); }
+.pg-adlabel { padding: 6px 6px 0 0; text-align: right; font-size: 10.5px; }
+.pg-allday { display: flex; flex-direction: column; gap: 2px; padding: 3px; border-left: 1px solid var(--border); border-bottom: 1px solid var(--border); min-height: 8px; min-width: 0; }
+.pg-chip { display: flex; align-items: center; gap: 4px; font: inherit; font-size: 12px; text-align: left; padding: 2px 6px; border-radius: 4px; color: var(--text); min-width: 0;
+  background: color-mix(in srgb, var(--text-faint) 20%, transparent); border: 1px solid transparent; border-left: 3px solid var(--text-faint); cursor: default; }
+.pg-chip > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button.pg-chip { cursor: pointer; }
+.pg-hour { position: relative; box-sizing: border-box; }
+.pg-hour span { position: absolute; right: 6px; top: -7px; font-size: 10.5px; }
+.pg-col { position: relative; border-left: 1px solid var(--border); min-width: 0; }
+.pg-col.today { background: color-mix(in srgb, var(--accent) 4%, transparent); }
+.pg-line { position: absolute; left: 0; right: 0; border-top: 1px solid var(--border); }
 
-/* Proposed create: a dashed "ghost" in the accent colour. */
-.k-create { background: color-mix(in srgb, var(--accent) 16%, transparent); border: 1.5px dashed var(--accent); border-left-width: 1.5px; }
-/* Where a moved event used to be: faded, dashed, never mistaken for the new place. */
-.k-move-from { opacity: 0.5; background: transparent; border: 1.5px dashed var(--text-faint); border-left-width: 1.5px; }
-.k-move-from b { text-decoration: line-through; text-decoration-thickness: 1px; }
-/* Where it lands: solid accent. */
-.k-move-to { background: color-mix(in srgb, var(--accent) 32%, transparent); border: 1.5px solid var(--accent); border-left-width: 3px; z-index: 2; }
-.k-delete { background: color-mix(in srgb, var(--danger) 16%, transparent); border: 1.5px solid color-mix(in srgb, var(--danger) 70%, transparent); border-left-width: 3px; }
-.k-delete b { text-decoration: line-through; color: var(--text-muted); }
-.k-done { background: color-mix(in srgb, var(--ok) 20%, transparent); border: 1.5px solid color-mix(in srgb, var(--ok) 70%, transparent); border-left-width: 3px; z-index: 2; }
-.k-done b svg { color: var(--ok); }
-.k-failed { background: transparent; border: 1.5px dashed var(--danger); border-left-width: 1.5px; }
-.ccard-chip.k-create, .ccard-chip.k-move-to, .ccard-chip.k-done, .ccard-chip.k-delete, .ccard-chip.k-failed, .ccard-chip.k-move-from { border-width: 1px; border-left-width: 1px; }
-.conflict { outline: 2px solid var(--warn); outline-offset: -1px; }
+.pg-block {
+  position: absolute; box-sizing: border-box; display: flex; flex-direction: column; gap: 1px; overflow: hidden; z-index: 1; text-align: left;
+  font: inherit; font-size: 12px; line-height: 1.25; padding: 3px 6px; border-radius: 5px; color: var(--text); cursor: default;
+  background: color-mix(in srgb, var(--text-faint) 22%, var(--bg)); border: 1px solid color-mix(in srgb, var(--text-faint) 35%, transparent); border-left: 3px solid var(--text-faint);
+}
+button.pg-block { cursor: pointer; }
+button.pg-block:hover { filter: brightness(1.08); }
+.pg-block:focus-visible, .pg-chip:focus-visible, .pg-pickbtn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; z-index: 6; }
+.pg-title { display: flex; align-items: center; gap: 3px; font-weight: 600; font-size: 12.5px; min-width: 0; }
+.pg-title svg { flex: none; }
+.pg-title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.pg-time { color: var(--text-muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pg-tag { position: absolute; right: 4px; bottom: 3px; font-size: 10px; font-weight: 600; padding: 0 5px; border-radius: 8px; color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, var(--bg)); }
+.pg-badge { position: absolute; top: 3px; right: 4px; display: inline-flex; }
+.pg-badge.ok { color: var(--ok); }
+.pg-badge.bad { color: var(--danger); }
 
-.ccard-legend { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 10.5px; color: var(--text-faint); }
-.ccard-legend span { display: inline-flex; align-items: center; gap: 5px; }
-.ccard-legend i { width: 12px; height: 9px; border-radius: 2px; display: inline-block; background: color-mix(in srgb, var(--info) 22%, transparent); border: 1px solid var(--info); }
-.ccard-legend i.k-create { border: 1.5px dashed var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
-.ccard-legend i.k-move-from { border: 1.5px dashed var(--text-faint); background: transparent; opacity: 0.6; }
-.ccard-legend i.k-move-to { border: 1.5px solid var(--accent); background: color-mix(in srgb, var(--accent) 32%, transparent); }
-.ccard-legend i.k-delete { border: 1.5px solid var(--danger); background: color-mix(in srgb, var(--danger) 16%, transparent); }
-.ccard-legend i.k-done { border: 1.5px solid var(--ok); background: color-mix(in srgb, var(--ok) 20%, transparent); }
-.ccard-legend i.k-failed { border: 1.5px dashed var(--danger); background: transparent; }
+/* Proposed create: a dashed ghost in the accent colour. */
+.pg-block.v-new, .pg-chip.v-new { background: color-mix(in srgb, var(--accent) 14%, var(--bg)); border: 1.5px dashed var(--accent); }
+/* Where a moved event used to be: faded and dotted, never mistaken for where it lands. */
+.pg-block.v-moved-from, .pg-chip.v-moved-from { opacity: 0.55; background: transparent; border: 1.5px dotted var(--text-faint); }
+.pg-block.v-moved-from .pg-title span, .pg-chip.v-moved-from span { text-decoration: line-through; text-decoration-thickness: 1px; }
+.pg-block.v-moved-to, .pg-chip.v-moved-to { z-index: 2; background: color-mix(in srgb, var(--accent) 30%, var(--bg)); border: 1.5px solid var(--accent); border-left-width: 3px; }
+/* Edited in place: same slot, accent outline. */
+.pg-block.v-edited, .pg-chip.v-edited { z-index: 2; background: color-mix(in srgb, var(--accent) 8%, var(--bg)); border: 2px solid var(--accent); }
+.pg-block.v-delete, .pg-chip.v-delete { background: color-mix(in srgb, var(--danger) 16%, var(--bg)); border: 1.5px solid color-mix(in srgb, var(--danger) 70%, transparent); border-left-width: 3px; }
+.pg-block.v-delete .pg-title span, .pg-chip.v-delete span { text-decoration: line-through; color: var(--text-muted); }
+.pg-block.v-delete .pg-title svg { color: var(--danger); }
+.pg-block.v-done, .pg-chip.v-done { z-index: 2; background: color-mix(in srgb, var(--ok) 18%, var(--bg)); border: 1.5px solid color-mix(in srgb, var(--ok) 70%, transparent); border-left-width: 3px; }
+.pg-block.v-done .pg-title svg { color: var(--ok); }
+.pg-block.v-failed, .pg-chip.v-failed { background: transparent; border: 1.5px dashed var(--danger); }
+.pg-block.v-failed .pg-title svg { color: var(--danger); }
+.pg-block.off, .pg-chip.off { opacity: 0.4; filter: grayscale(1); border-style: dashed; }
+.pg-block.sel, .pg-chip.sel { box-shadow: 0 0 0 2px var(--focus-ring); z-index: 5; }
+.pg-block.conflict, .pg-chip.conflict { outline: 2px solid var(--warn); outline-offset: -1px; }
+.pg-block.conflict:focus-visible { outline-color: var(--focus-ring); }
+
+.pg-pick { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.pg-pickbtn { display: inline-flex; align-items: center; gap: 5px; max-width: 220px; font: inherit; font-size: 12px; padding: 3px 9px; border-radius: 14px; cursor: pointer; color: var(--text-muted); background: var(--hover); border: 1px solid transparent; }
+.pg-pickbtn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pg-pickbtn.sel { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.pg-pickbtn.op-delete svg { color: var(--danger); }
+.pg-pickbtn.op-create svg { color: var(--accent); }
+.pg-pickbtn.off { opacity: 0.5; text-decoration: line-through; }
+.pg-listtoggle { margin-left: auto; }
 
 /* ---- the change list ---- */
 .ccard-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
@@ -105,6 +137,9 @@
 .ccard-edit { display: flex; flex-wrap: wrap; gap: 6px 10px; }
 .ccard-edit label { display: flex; flex-direction: column; gap: 2px; font-size: 10.5px; color: var(--text-faint); flex: 1 1 150px; min-width: 0; }
 .ccard-edit label.wide { flex-basis: 100%; }
+.ccard-edit label.ccard-meet { flex-direction: row; align-items: center; gap: 5px; flex-basis: 100%; font-size: 12px; color: var(--text-muted); }
+.ccard-edit label.ccard-meet input { accent-color: var(--accent-solid); }
+.ccard-list.panel .ccard-row { background: color-mix(in srgb, var(--accent) 5%, var(--bg)); border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
 .ccard-edit input { font: inherit; font-size: 12px; padding: 3px 6px; border-radius: 6px; background: var(--bg-input); border: 1px solid var(--border); color: var(--text); min-width: 0; color-scheme: inherit; }
 .ccard-title:focus-visible, .ccard-edit input:focus-visible, .ccard-slot:focus-visible, .ccard-open:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 .ccard-row-head input[type='checkbox']:focus-visible, .ccard-notify input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }

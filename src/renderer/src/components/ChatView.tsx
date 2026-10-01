@@ -11,6 +11,8 @@ import PlanPanel from './PlanPanel'
 import SendToSpace from './SendToSpace'
 import { clip, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
+import { useOnboarding } from './onboarding/onboardingStore'
+import { FIRST_PROMPTS } from './onboarding/steps'
 
 function greeting(): string {
   const h = new Date().getHours()
@@ -29,7 +31,11 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   const contextOpen = useStore((s) => s.contextOpen)
   const draftProjectId = useStore((s) => s.draftProjectId)
   const project = useProject(convo?.project_id ?? draftProjectId)
-  const { toggleSidebar, toggleContext, renameChat, regenerate } = useStore()
+  const { toggleSidebar, toggleContext, renameChat, regenerate, send } = useStore()
+  const firstPrompts = useOnboarding((s) => s.firstPrompts && !conversationId)
+  const setFirstPrompts = useOnboarding((s) => s.setFirstPrompts)
+  // The chips are for the first empty chat only; once any conversation is open they are spent.
+  useEffect(() => { if (conversationId) setFirstPrompts(false) }, [conversationId, setFirstPrompts])
   const scrollRef = useRef<HTMLDivElement>(null)
   const [stick, setStick] = useState(true)
   const [editingTitle, setEditingTitle] = useState(false)
@@ -90,6 +96,11 @@ export default function ChatView({ conversationId }: { conversationId?: string }
               <div className="empty-state">
                 <h1>{greeting()}</h1>
                 {project && <p>New chat in {project.name}</p>}
+                {firstPrompts && (
+                  <div className="ob-first-prompts" role="group" aria-label="Things to try">
+                    {FIRST_PROMPTS.map((t) => <button key={t} className="ghost-btn" onClick={() => { setFirstPrompts(false); void send(t, conversationId) }}>{t}</button>)}
+                  </div>
+                )}
               </div>
             ) : (
               <div className="messages-inner">

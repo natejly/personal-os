@@ -22,8 +22,10 @@ import ProjectModal from './components/ProjectModal'
 import { moduleForView } from './shell/registry'
 import Canvas from './canvas/Canvas'
 import { useCanvas } from './canvas/store'
-import { AlertTriangle } from 'lucide-react'
-import { BackendActions, BackendBanner } from './components/BackendStatus'
+import { BackendBanner } from './components/BackendStatus'
+import BackendFailed from './components/BackendFailed'
+import Onboarding from './components/onboarding/Onboarding'
+import { useOnboarding } from './components/onboarding/onboardingStore'
 import { accentId } from './lib/accents'
 
 /** The transitions worth interrupting for: the desk has stopped and cannot go on without the user. */
@@ -109,6 +111,7 @@ export default function App(): JSX.Element {
   /* Over a document the agent floats rather than taking a third column: see .page-agent.popout. */
   const agentPopout = useStore((s) => s.view === 'docs')
   const pageAgentOpen = useStore((s) => s.pageAgentOpen)
+  const wizardOpen = useOnboarding((s) => s.open)
 
   useEffect(() => {
     void init()
@@ -117,6 +120,8 @@ export default function App(): JSX.Element {
     document.documentElement.dataset.theme = theme
     document.documentElement.dataset.accent = accentId(accent)
   }, [theme, accent])
+  // A fresh install (no key, never onboarded) opens the first-run wizard once the backend is up.
+  useEffect(() => { if (ready && !backendError) void useOnboarding.getState().check() }, [ready, backendError])
   // What the user has highlighted rides along with the next ⌘I question, whatever view they are in.
   useEffect(() => watchSelection(), [])
   // Spaces are listed in the sidebar, so the canvas store loads with the app, not on first entry.
@@ -143,23 +148,7 @@ export default function App(): JSX.Element {
   }, [inCanvas])
 
   if (!ready) return <div className="app loading" />
-  if (backendError) {
-    return (
-      <div className="app loading">
-        <div className="backend-error drag">
-          <AlertTriangle size={28} />
-          <h2>Backend not running</h2>
-          <p>Grain could not start its Python backend.</p>
-          <pre>{backendError}</pre>
-          <BackendActions />
-          <p className="muted">
-            Set it up once with <code>cd backend && uv venv && uv pip install -e .</code>, then relaunch.
-            Or run it yourself and set <code>PERSONAL_OS_BACKEND_URL</code>.
-          </p>
-        </div>
-      </div>
-    )
-  }
+  if (backendError) return <BackendFailed message={backendError} />
 
   return (
     <div className={`app ${sidebarOpen ? '' : 'sidebar-collapsed'} ${pageAgentOpen && !agentPopout ? 'page-agent-open' : ''}`}>
@@ -187,6 +176,7 @@ export default function App(): JSX.Element {
       {settingsOpen && <SettingsModal />}
       {projectModal && <ProjectModal />}
       <BackendBanner />
+      {wizardOpen && <Onboarding />}
       <DeskNotifier />
       <Toasts />
     </div>

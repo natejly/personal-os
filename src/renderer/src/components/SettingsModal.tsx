@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
-import { X, Eye, EyeOff, Plug, Cpu, Brain, Mail, Mic, Wrench, Gauge, LayoutGrid, Magnet, SlidersHorizontal, BookOpen, FileText, Database, Trash2, type LucideIcon } from 'lucide-react'
+import { X, Eye, EyeOff, Plug, Cpu, Brain, Mail, Mic, Wrench, Gauge, LayoutGrid, Magnet, SlidersHorizontal, BookOpen, FileText, Database, Trash2, RotateCcw, type LucideIcon } from 'lucide-react'
 import { useStore, type SettingsTab } from '../store'
+import { useOnboarding } from './onboarding/onboardingStore'
 import { api } from '../lib/api'
 import { HOME_MODULES, OPTIONAL_VIEWS } from '../modules'
 import { useModal } from '../lib/useModal'
@@ -63,6 +64,15 @@ export default function SettingsModal(): JSX.Element {
     const space = c.activeCanvasId ? c.canvases[c.activeCanvasId] : undefined
     return { mode: space?.snap_mode ?? 'both', grid: space?.grid_size ?? 16 }
   })
+  /** Reset the onboarding stamp, then show the wizard over the app. The modal's unsaved draft is dropped with it. */
+  const rerunSetup = async (): Promise<void> => {
+    try {
+      await useOnboarding.getState().rerun()
+      setSettingsOpen(false)
+    } catch (e) {
+      toast((e as Error).message, 'error')
+    }
+  }
   // Closing discards `draft` — Escape and the backdrop are exactly the Cancel button.
   const { titleId, backdrop, modal } = useModal(() => setSettingsOpen(false))
 
@@ -181,6 +191,10 @@ export default function SettingsModal(): JSX.Element {
               <div className="test-row">
                 <button className="ghost-btn" onClick={() => void testConnection()} disabled={test.state === 'testing'}><Plug size={14} /> {test.state === 'testing' ? 'Testing…' : 'Test connection'}</button>
                 {test.msg && <span className={`test-msg ${test.state}`}>{test.msg}</span>}
+              </div>
+              <div className="test-row">
+                <button className="ghost-btn" type="button" onClick={() => void rerunSetup()}><RotateCcw size={14} /> Run setup again</button>
+                <span className="muted small">Walks through choosing a provider and key from the start.</span>
               </div>
               <label><span>Default chat model</span>
                 <input list="model-options" value={draft.defaultModel} onChange={(e) => patch({ defaultModel: e.target.value })} placeholder="gpt-4o" spellCheck={false} />

@@ -5,7 +5,8 @@ import { useStore } from '../store'
 
 const ICONS: Record<string, JSX.Element> = {
   web_search: <Globe size={13} />, fetch_url: <Globe size={13} />, open_page: <Globe size={13} />,
-  find_files: <Laptop size={13} />, read_local_file: <Laptop size={13} />, list_shortcuts: <Zap size={13} />, run_shortcut: <Zap size={13} />,
+  find_files: <Laptop size={13} />, read_local_file: <Laptop size={13} />,
+  write_local_file: <Laptop size={13} />, move_local_file: <Laptop size={13} />, trash_local_file: <Laptop size={13} />, list_shortcuts: <Zap size={13} />, run_shortcut: <Zap size={13} />,
   search_documents: <FileSearch size={13} />, read_document: <FileSearch size={13} />, list_documents: <FileSearch size={13} />,
   search_memory: <Brain size={13} />, save_memory: <Brain size={13} />,
   graph_search: <Share2 size={13} />, graph_traverse: <Share2 size={13} />, graph_add: <Share2 size={13} />,

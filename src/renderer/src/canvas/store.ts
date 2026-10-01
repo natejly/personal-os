@@ -32,8 +32,6 @@ export interface CanvasState {
   toggleCanvas: () => Promise<void>
   /** Put a canvas the caller already created into the store; `navigate` (default) also enters it. */
   adoptSpace: (c: Canvas, navigate?: boolean) => void
-  /** The first space (in `order`) bound to this project, or null. */
-  spaceForProject: (projectId: string) => string | null
   renameSpace: (canvasId: string, name: string) => Promise<void>
   deleteSpace: (canvasId: string) => Promise<void>
   setActiveCanvas: (canvasId: string) => void
@@ -459,7 +457,6 @@ export const useCanvas = create<CanvasState>((set, get) => {
       get().setActiveCanvas(c.id)
       useStore.getState().setView('canvas')
     },
-    spaceForProject: (projectId) => get().order.find((id) => get().canvases[id]?.project_id === projectId) ?? null,
     renameSpace: async (canvasId, name) => {
       patchCanvas(canvasId, { name })
       await api.canvases.update(canvasId, { name }).catch(fail)

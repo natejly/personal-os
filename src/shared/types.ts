@@ -647,6 +647,8 @@ export interface RunInfo {
   seq: number
   started_at: number
   live: boolean
+  /** Still producing a reply. `live` outlasts it by the auto-learn tail that follows the last `done`. */
+  answering: boolean
 }
 
 /** 409 detail of POST /conversations/{id}/chat when that conversation already has a live run. */

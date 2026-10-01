@@ -194,7 +194,12 @@ CREATE INDEX IF NOT EXISTS idx_exec_run ON executed_calls(run_id, step);
 CREATE TABLE IF NOT EXISTS jobs (
   id TEXT PRIMARY KEY,
   name TEXT NOT NULL,
+  -- kind='cron': `cron` is the expression, read in `timezone`, and the job repeats forever.
+  -- kind='once': `run_at` is the single instant it fires, and `cron` is ''. A fired one-off switches itself
+  -- off (enabled=0, next_due_at=NULL) rather than being deleted, so the inbox can still show what it did.
+  kind TEXT NOT NULL DEFAULT 'cron',
   cron TEXT NOT NULL,
+  run_at REAL,
   timezone TEXT NOT NULL DEFAULT 'UTC',
   enabled INTEGER NOT NULL DEFAULT 0,
   prompt TEXT NOT NULL DEFAULT '',
@@ -265,6 +270,7 @@ class Database:
         wanted = {
             "projects": {"tools": "TEXT NOT NULL DEFAULT '{}'"},
             "messages": {"tool_events": "TEXT", "trace": "TEXT"},
+            "jobs": {"kind": "TEXT NOT NULL DEFAULT 'cron'", "run_at": "REAL"},
         }
         for table, cols in wanted.items():
             have = {r["name"] for r in c.execute(f"PRAGMA table_info({table})")}

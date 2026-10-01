@@ -30,7 +30,7 @@ export interface ToolInfo {
   name: string
   description: string
   group: string
-  danger: 'safe' | 'writes' | 'network' | 'executes' | 'external'
+  danger: 'safe' | 'writes' | 'network' | 'executes' | 'external' | 'schedules'
   available: boolean
   default_mode: ToolMode
   /** Results carry untrusted third-party content, so one call taints the rest of the reply. */
@@ -664,7 +664,12 @@ export interface RunInfo {
 export interface Job {
   id: string
   name: string
+  /** 'cron' repeats on `cron` forever; 'once' fires at `run_at` and then switches itself off. */
+  kind: 'cron' | 'once'
+  /** Empty for a one-off. */
   cron: string
+  /** The single instant a one-off runs at; null for a repeating job. */
+  run_at: number | null
   timezone: string
   enabled: boolean
   prompt: string
@@ -707,6 +712,7 @@ export interface JobRunSummary {
   status: 'running' | 'awaiting_approval' | 'done' | 'error' | 'interrupted'
   job_id: string | null
   job: string
+  kind: 'cron' | 'once'
   due_at: number | null
   fired_at: number
   late: boolean

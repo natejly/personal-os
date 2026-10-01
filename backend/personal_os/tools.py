@@ -18,6 +18,7 @@ from typing import Any, Awaitable, Callable
 
 import httpx
 
+from .jobs import local_tz_name, parse_when, valid_cron, valid_tz
 from .learn import SELF_LABELS
 from .microvm import Sandboxes
 from .repos import Documents, Graph, Memories
@@ -29,15 +30,22 @@ log = logging.getLogger(__name__)
 
 # danger levels: safe (read-only, in-app) · writes (in-app write) · network (reads the internet)
 #                executes (sandboxed code) · external (writes to systems outside the app → asks by default)
-DEFAULT_MODE = {"safe": "on", "writes": "on", "network": "on", "executes": "on", "external": "ask"}
+#                schedules (books future unattended work → asks by default)
+DEFAULT_MODE = {"safe": "on", "writes": "on", "network": "on", "executes": "on", "external": "ask", "schedules": "ask"}
 
 # Danger levels a proposal-only run (a scheduled job: app.PROPOSAL_ONLY_KINDS) may not complete. Those calls are
 # recorded as proposals before they reach call() — this is the second gate, in the module that owns the tool
 # functions, so a new call site cannot let a background run send mail by forgetting the first one.
-PROPOSAL_ONLY_DANGER = ("external",)
+# 'schedules' is here for a different reason than 'external': a job that can create jobs is a loop, and the one
+# thing this feature must not grow into is an agent that keeps itself running.
+PROPOSAL_ONLY_DANGER = ("external", "schedules")
 PROPOSAL_ONLY_REFUSED = ("{name} does something outside the app, and this is an unattended background run, so it "
                          "cannot be executed here. It is recorded as a proposal the user accepts, edits or rejects; "
                          "there is no way around that. Describe what you proposed and move on.")
+PROPOSAL_ONLY_REFUSED_SCHEDULE = ("{name} books future unattended work, and this is itself an unattended background "
+                                  "run: a scheduled run that can schedule runs is a loop nobody asked for. It is "
+                                  "recorded as a proposal the user accepts or rejects. Say what you proposed and "
+                                  "move on.")
 
 
 class ToolSpec:
@@ -97,6 +105,9 @@ ALTERNATIVE = {
     "todo_add": "list the items in your reply so the user can add them",
     "todo_delete": "todo_update(done=true)",
     "board_add_card": "todo_add",
+    "schedule_task": "todo_add with a due date, so the user is reminded and decides when to act",
+    "cancel_scheduled_task": "scheduled_tasks, then tell the user which one to switch off in the Agent inbox",
+    "scheduled_tasks": "ask the user what they have scheduled",
 }
 
 
@@ -296,9 +307,10 @@ async def guarded_request(client: httpx.AsyncClient, method: str, url: str, *, h
 
 class Toolbox:
     def __init__(self, memories: Memories, graph: Graph, documents: Documents, settings_fn: Callable[[], dict[str, Any]], todos: Any = None, google: Any = None, boards: Any = None,
-                 sandboxes: Sandboxes | None = None, docs: Any = None, activity: Any = None):
+                 sandboxes: Sandboxes | None = None, docs: Any = None, activity: Any = None, jobs: Any = None):
         self.memories, self.graph, self.documents, self.settings = memories, graph, documents, settings_fn
         self.todos, self.google, self.boards, self.sandboxes, self.docs, self.activity = todos, google, boards, sandboxes, docs, activity
+        self.jobs = jobs
         self.specs: dict[str, ToolSpec] = {}
         self._register()
         if todos is not None:
@@ -313,6 +325,8 @@ class Toolbox:
             self._register_sandbox()
         if activity is not None:
             self._register_activity()
+        if jobs is not None:
+            self._register_schedule()
 
     def _google_ok(self) -> bool:
         return bool(self.google and self.google.status()["connected"])
@@ -373,7 +387,8 @@ class Toolbox:
         if not spec:
             return tool_error(f"Unknown tool {name}.", alternative="use one of the tools listed in this request")
         if ctx.get("proposal_only") and spec.danger in PROPOSAL_ONLY_DANGER:
-            return tool_error(PROPOSAL_ONLY_REFUSED.format(name=name), alternative=ALTERNATIVE.get(name))
+            refused = PROPOSAL_ONLY_REFUSED_SCHEDULE if spec.danger == "schedules" else PROPOSAL_ONLY_REFUSED
+            return tool_error(refused.format(name=name), alternative=ALTERNATIVE.get(name))
         try:
             out = await spec.fn(ctx, **args)
         except TypeError as e:  # backstop: signature mismatch, wrong types
@@ -580,6 +595,116 @@ class Toolbox:
         async def current_time(ctx: dict[str, Any]) -> Any:
             return {"iso": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "unix": int(time.time()), "timezone": time.strftime("%Z")}
         R("current_time", ToolSpec("current_time", "Get the current local date and time.", _obj({}, []), current_time, "utility", examples=[{}]))
+
+    # ---- scheduled tasks: work the app runs later, on its own ----
+    def _register_schedule(self) -> None:
+        R = self.specs.__setitem__
+
+        def _iso(ts: float | None) -> str | None:
+            return time.strftime("%Y-%m-%dT%H:%M", time.localtime(ts)) if ts else None
+
+        def _row(j: dict[str, Any]) -> dict[str, Any]:
+            """One scheduled task as the model should see it: when it runs, not how the row is stored."""
+            return {"id": j["id"], "name": j["name"],
+                    "schedule": j["cron"] if j["kind"] == "cron" else f"once at {_iso(j['run_at'])}",
+                    "repeats": j["kind"] == "cron", "timezone": j["timezone"], "enabled": j["enabled"],
+                    "next_run": _iso(j["next_due_at"]), "last_run": _iso(j["last_fired_at"]),
+                    "last_error": j["last_error"]}
+
+        async def schedule_task(ctx: dict[str, Any], name: str, prompt: str, when: str | None = None,
+                                in_minutes: int | None = None, cron: str | None = None,
+                                timezone: str | None = None) -> Any:
+            if not (name or "").strip():
+                return tool_error("A scheduled task needs a short name.", field="name",
+                                  example={"name": "Chase the invoice", "prompt": "Check whether Acme replied…",
+                                           "when": "2026-10-01T15:00"})
+            if len(prompt or "") > 8000:
+                return tool_error("That prompt is too long to schedule (8000 characters max).", field="prompt",
+                                  expected="the instruction to run later, on its own")
+            if not (prompt or "").strip():
+                return tool_error("A scheduled task needs the prompt it should run.", field="prompt",
+                                  expected="what you want done then, written as an instruction to yourself")
+            tz = timezone or local_tz_name()
+            if not valid_tz(tz):
+                return tool_error(f"'{tz}' is not a timezone name.", field="timezone", expected="e.g. 'Europe/Berlin'")
+            given = [k for k, v in (("cron", cron), ("when", when), ("in_minutes", in_minutes)) if v]
+            if len(given) > 1:
+                return tool_error(f"Give one schedule, not {len(given)} ({', '.join(given)}).",
+                                  expected="`cron` for something repeating, or `when`/`in_minutes` for a one-off")
+            pid = ctx.get("project_id")
+            if cron:
+                if not valid_cron(cron):
+                    return tool_error(f"'{cron}' is not a cron expression I can read.", field="cron",
+                                      expected="five fields: minute hour day-of-month month day-of-week",
+                                      example={"name": "Weekly review", "prompt": "Write my weekly review…",
+                                               "cron": "0 17 * * 5"})
+                job = self.jobs.create(name.strip(), cron, prompt, kind="cron", timezone=tz, enabled=True, project_id=pid)
+            else:
+                if in_minutes is not None:
+                    run_at = time.time() + max(1, int(in_minutes)) * 60
+                else:
+                    run_at = parse_when(when or "", tz)
+                if run_at is None:
+                    return tool_error("I could not read that as a date and time.", field="when",
+                                      expected="an ISO-8601 local date and time, including the time of day — call "
+                                               "current_time first if you are unsure what today is",
+                                      example={"name": "Chase the invoice", "prompt": "Check whether Acme replied…",
+                                               "when": "2026-10-01T15:00"})
+                if run_at < time.time() - 60:
+                    return tool_error(f"{_iso(run_at)} has already passed.", field="when",
+                                      expected="a time in the future",
+                                      alternative="do it now instead of scheduling it")
+                job = self.jobs.create(name.strip(), "", prompt, kind="once", run_at=run_at, timezone=tz,
+                                       enabled=True, project_id=pid)
+            return {**_row(job), "scheduled": True,
+                    "note": "It will run on its own, with nobody watching. It can read and write inside Grain; "
+                            "anything that leaves the app (mail, calendar, Docs) comes back to the user as a "
+                            "proposal to accept instead of being sent. Tell the user when it will run."}
+        R("schedule_task", ToolSpec("schedule_task",
+            "Schedule work for YOU to do later, unattended — once at a given time, or repeatedly on a cron "
+            "expression. The prompt is what you will be asked to do then, so write it as a complete instruction "
+            "that stands on its own: a later run starts in a fresh conversation and cannot see this one. "
+            "Use it when the user asks for something to happen at a time ('tomorrow at 3pm, check whether they "
+            "replied', 'every Friday afternoon, write my weekly review'). For something the USER should do, use "
+            "todo_add instead — this schedules the assistant, not the person. One-off: `when` as an ISO-8601 local "
+            "date and time (call current_time first if you are unsure of today's date), or `in_minutes`. "
+            "Repeating: `cron`, five fields.",
+            _obj({"name": {"type": "string", "description": "Short label, shown in the Agent inbox"},
+                  "prompt": {"type": "string", "description": "The self-contained instruction to run later"},
+                  "when": {"type": "string", "description": "One-off: ISO-8601 local date and time, e.g. 2026-10-01T15:00"},
+                  "in_minutes": {"type": "integer", "description": "One-off, relative: run this many minutes from now"},
+                  "cron": {"type": "string", "description": "Repeating: five-field cron expression, e.g. '0 17 * * 5'"},
+                  "timezone": {"type": "string", "description": "IANA name; defaults to this machine's"}},
+                 ["name", "prompt"]), schedule_task, "schedule", "schedules",
+            examples=[{"name": "Chase the invoice", "prompt": "Check whether Acme has replied about invoice 2231; if not, draft a short follow-up.", "when": "2026-10-01T15:00"},
+                      {"name": "Weekly review", "prompt": "Write my weekly review from my todos, calendar and recent chats.", "cron": "0 17 * * 5"},
+                      {"name": "Check the build", "prompt": "Check whether the deploy finished and summarise what changed.", "in_minutes": 45}]))
+
+        async def scheduled_tasks(ctx: dict[str, Any], include_off: bool = False) -> Any:
+            rows = [_row(j) for j in self.jobs.list() if include_off or j["enabled"]]
+            return {"tasks": rows, "count": len(rows)}
+        R("scheduled_tasks", ToolSpec("scheduled_tasks",
+            "List the scheduled tasks: what runs on its own, when it next runs, and how the last run went. "
+            "By default only the ones that are switched on.",
+            _obj({"include_off": {"type": "boolean", "default": False}}, []), scheduled_tasks, "schedule", "safe",
+            examples=[{}, {"include_off": True}]))
+
+        async def cancel_scheduled_task(ctx: dict[str, Any], id: str) -> Any:
+            job = self.jobs.get(id)
+            if not job:
+                return tool_error(f"No scheduled task with id '{id}'.", field="id",
+                                  expected="an id from scheduled_tasks", alternative=ALTERNATIVE["cancel_scheduled_task"])
+            if not job["enabled"]:
+                return {**_row(job), "cancelled": False, "note": "That one was already switched off."}
+            off = self.jobs.update(id, {"enabled": False})
+            return {**_row(off or job), "cancelled": True,
+                    "note": "Switched off, not deleted: it stays in the Agent inbox, where the user can switch it "
+                            "back on or remove it."}
+        R("cancel_scheduled_task", ToolSpec("cancel_scheduled_task",
+            "Switch off a scheduled task so it stops running. It is kept, not deleted — the user can re-enable or "
+            "remove it in the Agent inbox. Ids come from scheduled_tasks.",
+            _obj({"id": {"type": "string"}}, ["id"]), cancel_scheduled_task, "schedule", "schedules",
+            examples=[{"id": "job_8f21ac"}]))
 
 
 def summarize_result(result: Any, limit: int = 1500) -> str:

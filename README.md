@@ -89,6 +89,19 @@ their own instructions, knowledge files, memories and graph.
   plus a one-click brief. A native todo list, a week calendar (Google events
   plus due todos, double-click to add), and kanban boards with drag and drop.
   The assistant can drive all of them through tools.
+- **Scheduled tasks and the agent inbox.** Give the assistant work to do later:
+  once at a time you pick ("tomorrow at 3pm, check whether they replied") or
+  repeatedly on a cron expression ("every Friday at 17:00, write my weekly
+  review"). Schedule it from the Agent inbox on Today, or just ask in a chat —
+  the assistant has a `schedule_task` tool, which asks before it books anything.
+  A scheduled run happens with nobody watching, so it is deliberately boxed in:
+  it runs in a fresh chat on a tighter budget, it can read and write inside
+  Grain, and anything that would leave the app — mail, calendar events, Docs —
+  comes back to the Agent inbox as a **proposal** you accept, edit or reject.
+  Accepting is what actually sends it, exactly once. A run cannot schedule
+  further runs either; that proposal is yours to accept too. If the machine was
+  asleep over a slot the task still runs, once, and is told it is late so it says
+  so in its report. A one-off retires itself after it fires.
 - **Dashboards you describe.** Register data sources (an HTTP API with an API
   key, an RSS feed, or your own todos/calendar/mail), then describe a widget in
   plain English. The model writes a self-contained HTML widget that runs in a
@@ -365,6 +378,6 @@ that survives its HTTP connection) are the shared prerequisite for the
 approval queue, the scheduled brief, scheduled tasks and the session tape.
 
 Near-term after those: budgets replacing the fixed tool-round cap, taint
-tracking and an undo journal, tool-use examples and result pagination, skills,
-an agent inbox on Today, and scheduled jobs. Later: MCP client, code mode and
-file/browser reach — after an eval harness exists.
+tracking and an undo journal, tool-use examples and result pagination, and
+skills. Later: MCP client, code mode and file/browser reach — after an eval
+harness exists.

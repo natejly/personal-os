@@ -3,7 +3,8 @@ import type {
   Memory, ModelInfo, ModelPrice, Settings, Project, UsageReport, ChatRunStarted, RunInfo,
   Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
   Doc, FullDoc, DocRevision,
-  ActivityConfig, ActivityContextFile, ActivityEvent, ActivityStatus, ActivitySummary
+  ActivityConfig, ActivityContextFile, ActivityEvent, ActivityStatus, ActivitySummary,
+  PendingSend, SendHoldConfig, Verification, Verified
 } from '@shared/types'
 
 let base = ''
@@ -54,6 +55,23 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 const json = (v: unknown): string => JSON.stringify(v)
+
+/** Human sentence for a read-back that did not prove the write (mirrors verify.summary_text). */
+export function verificationMessage(v: Verification): string {
+  if (v.status === 'mismatch' && v.reason === 'still_present') return `It may not have been deleted: ${v.what} is still there.`
+  if (v.status === 'mismatch') return `Stored differently than requested: ${v.what} disagrees on ${Object.keys(v.differences ?? {}).join(', ') || 'a field'}.`
+  if (v.reason === 'read_failed') return `Could not confirm it: reading ${v.what} back failed (${v.detail ?? 'unknown error'}).`
+  return `Could not confirm it: ${v.what} was not there after ${v.attempts} read-backs. It may not have happened at all.`
+}
+
+/** Every external write re-reads the remote state to prove it landed (backend verify.py). An
+ *  unproven write is thrown, not returned, so no caller can toast success over it by forgetting
+ *  to look — the write may still have happened, which is what the message says. */
+async function proven<T extends Verified>(p: Promise<T>): Promise<T> {
+  const r = await p
+  if (r.verification && r.verified === false) throw new Error(`${verificationMessage(r.verification)} Check Google before relying on it.`)
+  return r
+}
 /** Scope filter: 'all' = everything, 'personal' = items in no project, or a project id (that project only). */
 export type Scope = 'all' | 'personal' | string
 const scope = (s: Scope): string => `project_id=${encodeURIComponent(s)}&include_global=false`
@@ -121,14 +139,16 @@ export const api = {
     calendars: () => req<GoogleCalendar[]>('/integrations/google/calendars'),
     calendarColors: () => req<CalendarColors>('/integrations/google/calendar/colors'),
     getEvent: (id: string, calendarId = 'primary') => req<CalendarEvent>(`/integrations/google/calendar/${encodeURIComponent(id)}?calendar_id=${encodeURIComponent(calendarId)}`),
+    // The four calendar writes go through proven(): an unverified write rejects, so the callers'
+    // existing catch → error-toast path is also the "we could not confirm that" path.
     createEvent: (e: EventPayload & { summary: string; start: string }) =>
-      req<CalendarEvent>('/integrations/google/calendar', { method: 'POST', body: json(e) }),
+      proven(req<CalendarEvent>('/integrations/google/calendar', { method: 'POST', body: json(e) })),
     updateEvent: (id: string, patch: EventPayload) =>
-      req<CalendarEvent>(`/integrations/google/calendar/${encodeURIComponent(id)}`, { method: 'PATCH', body: json(patch) }),
+      proven(req<CalendarEvent>(`/integrations/google/calendar/${encodeURIComponent(id)}`, { method: 'PATCH', body: json(patch) })),
     deleteEvent: (id: string, calendarId = 'primary', sendUpdates: 'none' | 'all' | 'externalOnly' = 'none') =>
-      req<{ deleted: string }>(`/integrations/google/calendar/${encodeURIComponent(id)}?calendar_id=${encodeURIComponent(calendarId)}&send_updates=${sendUpdates}`, { method: 'DELETE' }),
+      proven(req<{ deleted: string } & Verified>(`/integrations/google/calendar/${encodeURIComponent(id)}?calendar_id=${encodeURIComponent(calendarId)}&send_updates=${sendUpdates}`, { method: 'DELETE' })),
     respondEvent: (id: string, response: 'accepted' | 'declined' | 'tentative', calendarId = 'primary') =>
-      req<CalendarEvent>(`/integrations/google/calendar/${encodeURIComponent(id)}/respond`, { method: 'POST', body: json({ response, calendar_id: calendarId }) }),
+      proven(req<CalendarEvent>(`/integrations/google/calendar/${encodeURIComponent(id)}/respond`, { method: 'POST', body: json({ response, calendar_id: calendarId }) })),
     gmail: (q = 'is:unread in:inbox newer_than:14d', maxResults = 12) => req<GmailMessage[]>(`/integrations/google/gmail?q=${encodeURIComponent(q)}&max_results=${maxResults}`),
     tasks: (showCompleted = false) => req<GoogleTask[]>(`/integrations/google/tasks?show_completed=${showCompleted}`),
     tasklists: () => req<GoogleTaskList[]>('/integrations/google/tasklists'),
@@ -140,11 +160,18 @@ export const api = {
     gmailGet: (id: string) => req<GmailFullMessage>(`/integrations/google/gmail/${id}`),
     gmailLabels: () => req<GmailLabel[]>('/integrations/google/gmail/labels'),
     gmailModify: (id: string, patch: { mark_read?: boolean; archive?: boolean; star?: boolean }) =>
-      req<{ ok: boolean }>(`/integrations/google/gmail/${id}/modify`, { method: 'POST', body: json(patch) }),
+      proven(req<{ ok: boolean } & Verified>(`/integrations/google/gmail/${id}/modify`, { method: 'POST', body: json(patch) })),
     gmailDraft: (m: { to: string; subject: string; body: string; reply_to_message_id?: string | null }) =>
-      req<{ draft_id: string }>('/integrations/google/gmail/draft', { method: 'POST', body: json(m) }),
+      proven(req<{ draft_id: string } & Verified>('/integrations/google/gmail/draft', { method: 'POST', body: json(m) })),
+    /** Queues the send behind its undo hold; it has NOT gone out when this resolves. */
     gmailSend: (m: { to: string; subject: string; body: string; reply_to_message_id?: string | null }) =>
-      req<{ sent: string }>('/integrations/google/gmail/send', { method: 'POST', body: json(m) })
+      req<PendingSend>('/integrations/google/gmail/send', { method: 'POST', body: json(m) })
+  },
+  /** Emails waiting out their undo hold (backend outbox.py). */
+  outbox: {
+    list: () => req<{ sends: PendingSend[]; config: SendHoldConfig }>('/outbox/gmail'),
+    cancel: (id: string) => req<PendingSend>(`/outbox/gmail/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
+    sendNow: (id: string) => req<PendingSend>(`/outbox/gmail/${encodeURIComponent(id)}/send-now`, { method: 'POST' })
   },
   assist: {
     complete: (p: { kind: string; before: string; after?: string; context?: string }) =>

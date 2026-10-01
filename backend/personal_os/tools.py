@@ -18,6 +18,8 @@ from typing import Any, Awaitable, Callable
 
 import httpx
 
+from . import outbox as outbox_mod
+from . import verify
 from .learn import SELF_LABELS
 from .microvm import Sandboxes
 from .repos import Documents, Graph, Memories
@@ -60,6 +62,7 @@ def _obj(props: dict[str, Any], required: list[str]) -> dict[str, Any]:
 # ---- error shaping: no tracebacks to the model, always a way forward ----
 ALTERNATIVE = {
     "gmail_send": "gmail_draft, which writes the same email without sending it",
+    "gmail_outbox": "tell the user to use the Undo button on the pending send",
     "gmail_draft": "write the email text in your reply so the user can send it",
     "gmail_modify": "gmail_read, then tell the user what you would change",
     "gmail_search": "ask the user to paste the email you need",
@@ -104,6 +107,29 @@ def tool_error(message: str, *, field: str | None = None, expected: str | None =
     if alternative:
         e["try_instead"] = alternative
     return e
+
+
+UNVERIFIED_ALTERNATIVE = ("tell the user it is unconfirmed and ask them to check; do NOT repeat the write, "
+                          "because it may well have landed")
+
+
+def unverified(name: str, out: dict[str, Any]) -> dict[str, Any]:
+    """Turn an unproven external write into a failed tool call, keeping the payload.
+
+    `error` is the only channel the chat loop treats as "this did not succeed": it is what makes the
+    UI refuse to render the row as success and what the model is handed back. So an unverified write
+    goes down it, with the ids still attached so the model can tell the user what to go and check.
+    An unverified write is still a write that may have happened — hence "do not retry".
+    """
+    v = out.get("verification")
+    return {**out, "error": verify.tool_error_text(name, v), "try_instead": UNVERIFIED_ALTERNATIVE}
+
+
+def checked(name: str, out: Any) -> Any:
+    """Pass a google.py result through, unless its read-back failed to prove the write."""
+    if not isinstance(out, dict) or out.get("error") or "verification" not in out:
+        return out
+    return out if verify.ok(out["verification"]) else unverified(name, out)
 
 
 def denied(name: str, reason: str) -> dict[str, Any]:
@@ -288,9 +314,10 @@ async def guarded_request(client: httpx.AsyncClient, method: str, url: str, *, h
 
 class Toolbox:
     def __init__(self, memories: Memories, graph: Graph, documents: Documents, settings_fn: Callable[[], dict[str, Any]], todos: Any = None, google: Any = None, boards: Any = None,
-                 sandboxes: Sandboxes | None = None, docs: Any = None, activity: Any = None):
+                 sandboxes: Sandboxes | None = None, docs: Any = None, activity: Any = None, outbox: Any = None):
         self.memories, self.graph, self.documents, self.settings = memories, graph, documents, settings_fn
         self.todos, self.google, self.boards, self.sandboxes, self.docs, self.activity = todos, google, boards, sandboxes, docs, activity
+        self.outbox = outbox  # delayed Gmail send; gmail_send queues through it when it is wired up
         self.specs: dict[str, ToolSpec] = {}
         self._register()
         if todos is not None:
@@ -376,7 +403,9 @@ class Toolbox:
             return tool_error(f"{name}: {type(e).__name__}: {_first_line(e)}", alternative=ALTERNATIVE.get(name))
         if spec.taints and not (isinstance(out, dict) and out.get("error")):
             ctx["tainted"] = True  # monotonic: never cleared for the rest of the run
-        return out
+        # One gate for every external write: a result whose read-back did not prove the write is
+        # reported as a failure, here, so no individual tool can forget to do it.
+        return checked(name, out)
 
     # ---- tool implementations ----
     def _register(self) -> None:
@@ -748,10 +777,35 @@ def _register_google(self: Toolbox) -> None:
                   {"to": "team@example.com", "subject": "Re: sprint review", "body": "Works for me.", "reply_to_message_id": "18f2c1a9b7e4d0aa"}]))
 
     async def gmail_send(ctx: dict[str, Any], to: str, subject: str, body: str) -> Any:
-        return await run(g.gmail_send, to, subject, body)
-    R("gmail_send", ToolSpec("gmail_send", "Send an email from the user's Gmail. Only when the user explicitly asked to send it.",
+        if self.outbox is None:
+            return await run(g.gmail_send, to, subject, body)
+        row = await run(self.outbox.queue, to, subject, body, None, "assistant", ctx.get("conversation_id"))
+        return outbox_mod.queued_result(row)
+    R("gmail_send", ToolSpec("gmail_send", "Queue an email to send from the user's Gmail. It is held for about a minute and a half first so the user can undo it, so it is NOT sent when this returns — say it will go out shortly, never that it is sent. Only when the user explicitly asked to send it.",
         _obj({"to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"}}, ["to", "subject", "body"]), gmail_send, "google", "external",
         examples=[{"to": "mira@example.com", "subject": "Running late", "body": "I will be 10 minutes late."}]))
+
+    async def gmail_outbox(ctx: dict[str, Any], action: str = "list", id: str | None = None) -> Any:
+        if self.outbox is None:
+            return tool_error("The send hold is not enabled, so there is no outbox.", alternative="gmail_search for what was sent")
+        if action == "cancel":
+            if not id:
+                return tool_error("cancel needs the id of a queued send.", field="id",
+                                  expected="an id from gmail_outbox(action='list')", example={"action": "cancel", "id": "a1b2c3d4"})
+            row = await run(self.outbox.cancel, id)
+            if not row:
+                return tool_error(f"Send '{id}' can no longer be cancelled — it has already gone out.", field="id",
+                                  alternative="tell the user it was sent, and offer to send a follow-up")
+            return {"cancelled": id, "to": row["to"], "subject": row["subject"], "note": "It was never sent."}
+        rows = await run(self.outbox.list)
+        waiting = [{"id": r["id"], "to": r["to"], "subject": r["subject"], "sends_in_seconds": r["seconds_left"]}
+                   for r in rows if r["status"] == "holding"]
+        return {"waiting": waiting, "count": len(waiting),
+                "recent": [{"id": r["id"], "to": r["to"], "subject": r["subject"], "status": r["status"],
+                            "verified": r["verified"], "error": r["error"]} for r in rows if r["status"] != "holding"][:10]}
+    R("gmail_outbox", ToolSpec("gmail_outbox", "The emails waiting out their undo hold before Gmail sends them: list them, or cancel one so it never goes out. Use cancel when the user changes their mind about a send you just queued. Sending cannot be hurried from here — only the user can do that.",
+        _obj({"action": {"type": "string", "enum": ["list", "cancel"], "default": "list"}, "id": {"type": "string", "description": "the queued send to cancel"}}, []), gmail_outbox, "google", "writes",
+        examples=[{}, {"action": "cancel", "id": "a1b2c3d4"}]))
 
     async def gmail_modify(ctx: dict[str, Any], message_id: str, mark_read: bool | None = None, archive: bool = False, star: bool | None = None) -> Any:
         return await run(g.gmail_modify, message_id, mark_read, archive, star)

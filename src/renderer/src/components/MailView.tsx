@@ -146,8 +146,10 @@ export default function MailView(): JSX.Element {
     if (!compose) return
     setBusy('send')
     try {
-      await api.google.gmailSend({ to: compose.to, subject: compose.subject, body: compose.body, reply_to_message_id: compose.replyTo?.id ?? null })
-      toast('Email sent.')
+      // Queued behind its undo hold, not sent: say so, and let PendingSends count it down.
+      const queued = await api.google.gmailSend({ to: compose.to, subject: compose.subject, body: compose.body, reply_to_message_id: compose.replyTo?.id ?? null })
+      if (queued.status === 'sent' && queued.verified === false) toast(queued.error ?? 'Sent, but Gmail did not confirm it. Check your Sent folder.', 'error')
+      else toast(queued.status === 'sent' ? 'Email sent.' : `Sending in ${queued.seconds_left}s — you can still undo it.`)
       setCompose(null)
       setReview(null)
     } catch (e) {

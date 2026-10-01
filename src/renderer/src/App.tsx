@@ -13,6 +13,7 @@ import BoardsView from './components/BoardsView'
 import CalendarView from './components/CalendarView'
 import MailView from './components/MailView'
 import DashboardsView from './components/DashboardsView'
+import PendingSends from './components/PendingSends'
 import SettingsModal from './components/SettingsModal'
 import ProjectModal from './components/ProjectModal'
 import Canvas from './canvas/Canvas'
@@ -23,6 +24,8 @@ function Toasts(): JSX.Element {
   const toasts = useStore((s) => s.toasts)
   return (
     <div className="toasts">
+      {/* Global, not per-view: a send the assistant queued has to be undoable from wherever you are. */}
+      <PendingSends />
       {toasts.map((t) => (
         <div key={t.id} className={`toast ${t.kind}`}>{t.text}</div>
       ))}

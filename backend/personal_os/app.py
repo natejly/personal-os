@@ -38,6 +38,7 @@ from .google import Google, GoogleNotConnected, json_safe
 from .microvm import Sandboxes
 from .notes import Notes
 from .gtasks import TasksSync
+from .outbox import Outbox, router as outbox_router
 from .presets import CanvasPresets
 from .runs import Run, RunBus
 from .todos import Todos
@@ -238,7 +239,10 @@ if not any(getattr(f, "__name__", "") == "_record_usage" for f in llm._usage_lis
     llm.on_usage(_record_usage)
 sandboxes = Sandboxes(settings)
 monitor = activity.Monitor(db, settings, llm.complete)
-toolbox = Toolbox(memories, graph, documents, settings, todos=todos, google=google, boards=boards, sandboxes=sandboxes, docs=docs, activity=monitor)
+# Every Gmail send is held here first so it can be undone (outbox.py); its own routes are included below.
+outbox = Outbox(db, google, settings)
+app.include_router(outbox_router(outbox))
+toolbox = Toolbox(memories, graph, documents, settings, todos=todos, google=google, boards=boards, sandboxes=sandboxes, docs=docs, activity=monitor, outbox=outbox)
 
 
 def sid(project_id: str | None) -> str | None:
@@ -1372,7 +1376,8 @@ def google_gmail_draft(body: GmailComposeIn) -> Any:
 
 @app.post("/integrations/google/gmail/send")
 def google_gmail_send(body: GmailComposeIn) -> Any:
-    return _gcall(google.gmail_send, body.to, body.subject, body.body, body.reply_to_message_id)
+    # Queued, not sent: the hold is what makes Undo possible (see outbox.py). The response says so.
+    return _gcall(outbox.queue, body.to, body.subject, body.body, body.reply_to_message_id, "app")
 
 
 # ---------------- assist (inline completion + draft review) ----------------
@@ -2466,3 +2471,20 @@ def instantiate_canvas_preset(pid: str, body: PresetInstantiateIn) -> dict[str, 
     if not c:
         raise HTTPException(404, "No such preset")
     return c
+
+
+# ---------------- outbox: the delayed-send worker (outbox.py) ----------------
+@app.on_event("startup")
+async def _outbox_startup() -> None:
+    """Run the hold timer. The loop's first act is resume(), which decides what a restart does with
+    sends that were still waiting — see the outbox.py docstring."""
+    app.state.outbox_task = asyncio.create_task(outbox.loop())
+
+
+@app.on_event("shutdown")
+async def _outbox_shutdown() -> None:
+    task = getattr(app.state, "outbox_task", None)
+    if task:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task

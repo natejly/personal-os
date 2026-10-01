@@ -183,6 +183,69 @@ tokens after 7 days) or is missing a permission that was unticked on the consent
 screen, Integrations shows why and offers **Reconnect** instead of failing the
 next calendar or mail call with an opaque error.
 
+### Verified writes
+
+A 200 from an API is not proof that anything was written, and a model's report
+that it wrote something is worth even less: on real tasks, agents claim
+completion they did not achieve about 45% of the time, and an independent
+read-back of the remote state cuts that to about 3%. So every external write in
+`google.py` reads itself back and compares the fields it wrote
+(`backend/personal_os/verify.py`):
+
+| Write | How it is proved |
+|---|---|
+| `calendar_create` / `calendar_update` | the event is fetched by id and the written fields compared (times as instants, since Google re-renders the offset) |
+| `calendar_delete` | the event must 404 or come back as a `cancelled` tombstone |
+| `calendar_respond` | the event is refetched and your own `responseStatus` compared |
+| Gmail send | the message is fetched by id, must carry the `SENT` label, and its thread, subject and recipients are compared |
+| `gmail_draft` | the draft is fetched by id and its subject compared |
+| `gmail_modify` | the message's labels are refetched: every added label present, every removed one gone |
+| Google Tasks insert / patch / delete | the task is fetched by id (title, notes, due, status), or must be gone |
+| Docs create / append | the document is refetched and the written text found in its body |
+| Sheets create / write | the title, or the written range's row and filled-cell counts, read back |
+
+The verdict is one of **verified**, **unverified** (the read-back could not find
+it — eventual consistency, or it never happened) or **mismatch** (it is there
+but stored differently, or still there after a delete), and it is never collapsed
+into "ok". Eventual consistency gets two quick retries, ~2 s in total (one more
+rung for mail, which files into `SENT` a beat later) and then reports
+`unverified` rather than waiting.
+
+Anything but `verified` is surfaced as a failure, not a success:
+
+- The tool result the model sees comes back with an `error` that begins
+  `UNVERIFIED` and tells it not to claim success — so it cannot say "I sent
+  that" on the strength of its own request. It also says not to retry, because
+  the write may well have landed.
+- The tool-call row in the chat shows a **verified** / **unverified** /
+  **mismatch** badge naming what was compared, and an unverified write renders as
+  an error. The verdict is stored with the row, so an old reply still shows how
+  its writes were proved.
+- The calendar and mail views reject an unverified write instead of toasting
+  success, and say to check Google.
+
+### Undo on outgoing mail
+
+Agency people will actually use is reversible, so nothing sends mail
+immediately. A send — from the compose window or from the assistant — is written
+to `pending_sends` and held for 90 s (configurable, 60–120, Settings →
+Integrations) while a countdown with an **Undo** button sits above the toasts.
+"Send now" is in that card and deliberately not a tool: the assistant can cancel
+a send it queued (`gmail_outbox`), but only you can shorten the window.
+
+The queue is in SQLite, so a restart cannot lose a send or fire one twice.
+Firing and cancelling race on one atomic `UPDATE … WHERE status='holding'`, so a
+send is cancellable right up to the instant it is claimed and never after. On
+startup the remaining hold is simply resumed; a send that came due while the
+backend was down goes out if that was less than 15 minutes ago, and otherwise is
+marked `expired` and **not** sent — a mail queued before a laptop slept for a day
+should not go out by itself once the user has had no chance to stop it, and it
+stays in the list with a Send now button so it cannot be mistaken for something
+that went out. A send interrupted mid-API-call is marked `failed` and never
+retried, because an exception can be raised after Gmail accepted the message.
+When the hold expires and the mail goes out, the verification above runs on it
+and its verdict is kept on the row.
+
 ## Keyboard shortcuts
 
 | Shortcut | Action |

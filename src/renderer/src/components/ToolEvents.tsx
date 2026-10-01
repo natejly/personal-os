@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { ChevronRight, Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, AlertCircle } from 'lucide-react'
-import type { ToolEvent } from '@shared/types'
+import { ChevronRight, Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, AlertCircle, ShieldAlert, ShieldCheck } from 'lucide-react'
+import type { ToolEvent, Verification } from '@shared/types'
 import { useStore } from '../store'
 
 const ICONS: Record<string, JSX.Element> = {
@@ -18,6 +18,32 @@ function summary(t: ToolEvent): string {
   const first = a.query ?? a.url ?? a.command ?? a.path ?? a.entity ?? a.content ?? a.document_id ?? (a.code ? String(a.code).split('\n')[0] : '') ?? ''
   const s = String(first ?? '')
   return s.length > 90 ? s.slice(0, 90) + '…' : s
+}
+
+/** The read-back verdict the backend put on the result (verify.py). It rides in result_preview,
+ *  which is also what the stored tool-event row keeps, so an old reply still shows how its writes
+ *  were proven. An unverified write already carries `error`, so this only has to label it. */
+function verdict(t: ToolEvent): Verification | null {
+  if (!t.result_preview) return null
+  try {
+    const v = (JSON.parse(t.result_preview) as { verification?: Verification }).verification
+    return v && typeof v.status === 'string' ? v : null
+  } catch {
+    return null
+  }
+}
+
+/** Badge for how an external write was proved, naming the fields that were compared. */
+function Verdict({ event }: { event: ToolEvent }): JSX.Element | null {
+  const v = verdict(event)
+  if (!v) return null
+  const tries = `${v.attempts} read-back${v.attempts === 1 ? '' : 's'}`
+  return (
+    <span className={`tag ${v.status === 'verified' ? 'verified' : 'unproven'}`}
+      title={`${v.what} · compared ${v.compared.join(', ') || 'existence'} · ${tries}`}>
+      {v.status === 'verified' ? <ShieldCheck size={11} /> : <ShieldAlert size={11} />} {v.status}
+    </span>
+  )
 }
 
 function pretty(v: unknown): string {
@@ -39,6 +65,7 @@ export default function ToolEvents({ events, conversationId }: { events: ToolEve
             <span className="tool-icon">{ICONS[t.name] ?? <Wrench size={13} />}</span>
             <span className="tool-name">{t.name.replace(/_/g, ' ')}</span>
             <span className="tool-summary">{summary(t)}</span>
+            <Verdict event={t} />
             {t.approval && t.approval !== 'allow' && <span className="tag">{t.approval === 'deny' ? 'denied' : 'approved'}</span>}
             {t.pending ? (t.needs_approval ? <span className="tag ask">needs approval</span> : <span className="thinking mini"><span /><span /><span /></span>) : t.error ? <AlertCircle size={12} /> : <span className="tool-ms">{t.duration_ms} ms</span>}
           </button>

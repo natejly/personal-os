@@ -274,5 +274,19 @@ class FreeBusyTests(Base):
         self.assertEqual([i["id"] for i in self.g.fb_queries[-1]["items"]], ["work@x.com"])
 
 
+class EditedArgsRefusedTests(unittest.TestCase):
+    def test_approval_route_refuses_arguments_until_edits_are_supported(self) -> None:
+        """An edit must never be silently dropped: the card would show the edit while the model's original ran."""
+        import importlib.util
+        from fastapi import HTTPException
+        from personal_os import app as appmod
+        if importlib.util.find_spec("personal_os.approval_edits"):
+            self.skipTest("approval_edits exists; its own tests cover the arguments field")
+        body = appmod.ApprovalIn(decision="allow", arguments={"changes": []})
+        with self.assertRaises(HTTPException) as cm:
+            asyncio.run(appmod.approve_tool_call("nope:call_0", body))
+        self.assertEqual(cm.exception.status_code, 400)
+
+
 if __name__ == "__main__":
     unittest.main()

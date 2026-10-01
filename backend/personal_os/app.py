@@ -1915,6 +1915,9 @@ class ApprovalIn(BaseModel):
     # edited values are what gets authorised.
     steps: list[dict[str, Any]] | None = None
     note: str | None = None  # one line back to the model, e.g. why a plan was rejected
+    # Human-edited call arguments (calendar_propose etc.). Only honoured once approval_edits exists; until then the
+    # endpoint refuses rather than silently running the model's original arguments under a card showing the edit.
+    arguments: dict[str, Any] | None = None
 
 
 def _patch_tool_event(message_id: str | None, call_id: str, patch: dict[str, Any]) -> None:
@@ -1959,6 +1962,11 @@ async def approve_tool_call(call_id: str, body: ApprovalIn) -> dict[str, Any]:
     is_plan = bool(pending and pending["tool"] == PLAN_TOOL)
     if body.steps is not None and not is_plan:
         raise HTTPException(400, "Only a propose_plan approval carries edited steps")
+    if body.arguments is not None:
+        try:
+            from . import approval_edits  # type: ignore[attr-defined]  # noqa: F401
+        except ImportError:
+            raise HTTPException(400, "Editing a call before approving it is not supported by this backend") from None
     try:  # shape-check the edit before anything is decided, so a bad payload leaves the row pending
         edits = parse_plan_edits(body.steps)
     except ValueError as e:

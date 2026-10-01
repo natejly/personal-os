@@ -28,7 +28,7 @@ from pydantic import AfterValidator, BaseModel, Field
 from . import activity, assist, llm, mac, mcp_eval, tools
 from .context import build_context, estimate_tokens
 from .db import Database, data_dir_from_env, new_id
-from .extract_text import extract_text
+from .extract_text import extract_structured, extract_text
 from .learn import MAX_INJECTED_SKILLS, LearnJob, LearnWorker, Skills, induce_skill, skill_block
 from .embed import Embedder
 from .retrieval import Retriever
@@ -2606,13 +2606,34 @@ def get_document(id: str) -> dict[str, Any]:
 async def upload_document(file: UploadFile = File(...), project_id: str | None = Form(None)) -> dict[str, Any]:
     data = await file.read()
     name = file.filename or "untitled"
+    digest = hashlib.sha256(data).hexdigest()
+    dup = documents.find_by_hash(wsid(project_id), digest)
+    if dup:
+        return {**dup, "duplicate": True}
     try:
         text = extract_text(name, data, file.content_type or "")
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, str(e)) from e
+    try:
+        blocks = extract_structured(name, data, file.content_type or "")
+    except Exception:  # noqa: BLE001 - the chunker falls back to the plain text
+        blocks = None
     dest = db.data_dir / "uploads" / f"{new_id()}-{Path(name).name}"
     dest.write_bytes(data)
-    return documents.create(wsid(project_id), name, file.content_type or "", len(data), str(dest), text)
+    return documents.create(wsid(project_id), name, file.content_type or "", len(data), str(dest), text, blocks=blocks, content_hash=digest)
+
+
+class ReindexIn(BaseModel):
+    id: str | None = None
+
+
+@app.post("/documents/reindex")
+def reindex_documents(body: ReindexIn | None = None) -> dict[str, Any]:
+    """Re-chunk existing documents with the current chunker, no re-upload. Vectors are re-made by embed-backfill."""
+    did = body.id if body else None
+    if did and not documents.get(did):
+        raise HTTPException(404)
+    return {"chunks": documents.reindex(did)}
 
 
 @app.post("/documents/embed-backfill")

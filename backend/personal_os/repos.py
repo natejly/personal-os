@@ -1,8 +1,10 @@
 """CRUD for projects, conversations, memories, knowledge graph, documents."""
 from __future__ import annotations
 
+import hashlib
 import json
 import re
+from pathlib import Path
 from typing import Any
 
 from .db import Database, new_id, now, row_to_dict
@@ -435,26 +437,89 @@ class Documents:
         with self.db.tx() as c:
             return row_to_dict(c.execute("SELECT * FROM documents WHERE id=?", (id,)).fetchone())
 
-    def create(self, project_id: str | None, name: str, mime: str, size: int, path: str, text: str) -> dict[str, Any]:
-        did = new_id()
-        chunks = chunk_text(text)
+    @staticmethod
+    def _build_chunks(name: str, text: str, blocks: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+        """Structure-aware chunks; plain paragraph packing if the chunker cannot cope."""
+        try:
+            from .chunker import chunk_blocks
+            from .extract_text import markdown_blocks
+
+            out = chunk_blocks(blocks if blocks else markdown_blocks(text), title=name)
+            if out:
+                return [{"text": ch.text, "heading": ch.heading_str, "page": ch.page, "ctx": ch.ctx} for ch in out]
+        except Exception:  # noqa: BLE001 - a chunker bug must not lose an upload
+            pass
+        return [{"text": ch, "heading": "", "page": None, "ctx": ch} for ch in chunk_text(text)]
+
+    def _store_chunks(self, c: Any, did: str, chunks: list[dict[str, Any]]) -> list[tuple[str, str]]:
         stored: list[tuple[str, str]] = []
+        for i, ch in enumerate(chunks):
+            cid = new_id()
+            c.execute("INSERT INTO chunks(id,document_id,idx,text,heading,page) VALUES(?,?,?,?,?,?)",
+                      (cid, did, i, ch["text"], ch["heading"], ch["page"]))
+            # FTS indexes the contextualised string (title + heading path + text); chunks.text stays the clean excerpt.
+            c.execute("INSERT INTO chunks_fts(text, chunk_id, document_id) VALUES(?,?,?)", (ch["ctx"], cid, did))
+            stored.append((cid, ch["text"]))
+        return stored
+
+    def create(self, project_id: str | None, name: str, mime: str, size: int, path: str, text: str,
+               blocks: list[dict[str, Any]] | None = None, content_hash: str | None = None) -> dict[str, Any]:
+        did = new_id()
+        chunks = self._build_chunks(name, text, blocks)
+        digest = content_hash if content_hash is not None else hashlib.sha256(text.encode("utf-8", "replace")).hexdigest()
         with self.db.tx() as c:
             c.execute(
-                "INSERT INTO documents(id,project_id,name,mime,size,path,text,chunk_count,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
-                (did, project_id, name, mime, size, path, text, len(chunks), now()),
+                "INSERT INTO documents(id,project_id,name,mime,size,path,text,chunk_count,created_at,content_hash) VALUES(?,?,?,?,?,?,?,?,?,?)",
+                (did, project_id, name, mime, size, path, text, len(chunks), now(), digest),
             )
-            for i, ch in enumerate(chunks):
-                cid = new_id()
-                c.execute("INSERT INTO chunks(id,document_id,idx,text) VALUES(?,?,?,?)", (cid, did, i, ch))
-                c.execute("INSERT INTO chunks_fts(text, chunk_id, document_id) VALUES(?,?,?)", (ch, cid, did))
-                stored.append((cid, ch))
+            stored = self._store_chunks(c, did, chunks)
         if self.on_chunks and stored:
             try:
                 self.on_chunks(did, stored)
             except Exception:  # noqa: BLE001 - indexing is best effort
                 pass
         return self.get(did)  # type: ignore[return-value]
+
+    def find_by_hash(self, project_id: str | None, content_hash: str) -> dict[str, Any] | None:
+        """An existing document with these exact bytes in exactly this scope (None = personal)."""
+        if not content_hash:
+            return None
+        where, args = ("project_id IS NULL", []) if project_id is None else ("project_id=?", [project_id])
+        with self.db.tx() as c:
+            return row_to_dict(c.execute(f"SELECT * FROM documents WHERE content_hash=? AND {where} LIMIT 1", (content_hash, *args)).fetchone())
+
+    def reindex(self, id: str | None = None) -> int:
+        """Re-chunk from the stored upload (or, without a file, the stored text read as markdown).
+        Keeps document ids; embeddings cascade away with the old chunks and are re-made by the next backfill."""
+        from .extract_text import extract_structured
+
+        with self.db.tx() as c:
+            rows = c.execute("SELECT * FROM documents" + (" WHERE id=?" if id else ""), (id,) if id else ()).fetchall()
+        total = 0
+        for d in rows:
+            blocks = None
+            digest = d["content_hash"]
+            p = Path(d["path"]) if d["path"] else None
+            if p is not None and p.is_file():
+                try:
+                    data = p.read_bytes()
+                    blocks = extract_structured(d["name"], data, d["mime"])
+                    digest = digest or hashlib.sha256(data).hexdigest()
+                except Exception:  # noqa: BLE001 - fall back to the stored text
+                    blocks = None
+            chunks = self._build_chunks(d["name"], d["text"], blocks)
+            with self.db.tx() as c:
+                c.execute("DELETE FROM chunks_fts WHERE document_id=?", (d["id"],))
+                c.execute("DELETE FROM chunks WHERE document_id=?", (d["id"],))
+                stored = self._store_chunks(c, d["id"], chunks)
+                c.execute("UPDATE documents SET chunk_count=?, content_hash=? WHERE id=?", (len(chunks), digest, d["id"]))
+            total += len(chunks)
+            if self.on_chunks and stored:
+                try:
+                    self.on_chunks(d["id"], stored)
+                except Exception:  # noqa: BLE001
+                    pass
+        return total
 
     def delete(self, id: str) -> str | None:
         with self.db.tx() as c:
@@ -470,7 +535,7 @@ class Documents:
         where, args = _scope_clause(project_id)
         with self.db.tx() as c:
             rows = c.execute(
-                f"""SELECT f.chunk_id, f.document_id, d.name, ch.idx, ch.text, bm25(chunks_fts) AS score
+                f"""SELECT f.chunk_id, f.document_id, d.name, ch.idx, ch.text, ch.heading, ch.page, bm25(chunks_fts) AS score
                     FROM chunks_fts f JOIN documents d ON d.id=f.document_id JOIN chunks ch ON ch.id=f.chunk_id
                     WHERE chunks_fts MATCH ? AND {where.replace('project_id', 'd.project_id')}
                     ORDER BY score LIMIT ?""",

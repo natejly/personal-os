@@ -12,6 +12,7 @@ from typing import Any
 
 import numpy as np
 
+from .chunker import contextualize
 from .db import Database
 from .embed import Embedder, pack, rrf, unpack  # noqa: F401 - rrf re-exported for callers
 from .repos import ALL, Documents, _scope_clause
@@ -32,7 +33,8 @@ class Retriever:
     def _pending(self, c: Any, model: str, document_id: str | None = None, limit: int = 256) -> list[Any]:
         where, args = ("AND ch.document_id=?", [document_id]) if document_id else ("", [])
         return c.execute(
-            f"""SELECT ch.id, ch.document_id, ch.text FROM chunks ch
+            f"""SELECT ch.id, ch.document_id, ch.text, ch.heading, d.name FROM chunks ch
+                JOIN documents d ON d.id=ch.document_id
                 LEFT JOIN chunk_embeddings e ON e.chunk_id=ch.id AND e.model=?
                 WHERE e.chunk_id IS NULL {where} LIMIT ?""", (model, *args, limit)).fetchall()
 
@@ -45,7 +47,7 @@ class Retriever:
                 rows = self._pending(c, model, document_id, limit)
             if not rows:
                 break
-            vecs = await self.embedder.embed(settings, [r["text"] for r in rows])
+            vecs = await self.embedder.embed(settings, [contextualize(r["name"], r["heading"], r["text"]) for r in rows])
             if vecs is None:
                 error = "embeddings unavailable"
                 break
@@ -111,7 +113,7 @@ class Retriever:
             return {}
         with self.db.tx() as c:
             rows = c.execute(
-                f"""SELECT ch.id AS chunk_id, ch.document_id, d.name, ch.idx, ch.text FROM chunks ch
+                f"""SELECT ch.id AS chunk_id, ch.document_id, d.name, ch.idx, ch.text, ch.heading, ch.page FROM chunks ch
                     JOIN documents d ON d.id=ch.document_id WHERE ch.id IN ({','.join('?' * len(ids))})""", ids).fetchall()
         return {r["chunk_id"]: dict(r) for r in rows}
 

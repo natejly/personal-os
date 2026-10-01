@@ -540,7 +540,7 @@ class Toolbox:
                 hits = await self.retriever.search(ctx["project_id"], query, self.settings(), limit=off + lim)
             else:
                 hits = self.documents.search(ctx["project_id"], query, limit=off + lim)
-            rows = [{"document_id": h["document_id"], "document": h["name"], "chunk": h["idx"], "text": h["text"]} for h in hits]
+            rows = [{"document_id": h["document_id"], "document": h["name"], "chunk": h["idx"], "section": h.get("heading") or None, "page": h.get("page"), "text": h["text"]} for h in hits]
             return page(rows, offset=off, limit=lim, key="results")
         R("search_documents", ToolSpec("search_documents", "Search (keywords and meaning) over the user's uploaded documents (project knowledge + personal documents). Returns the best matching excerpts. Use it when the user asks about something that may be in their files.",
             _obj({"query": {"type": "string", "description": "Search terms or a short question"}, "limit": {"type": "integer", "default": 8}, "offset": {"type": "integer", "default": 0}}, ["query"]), search_documents, "knowledge",

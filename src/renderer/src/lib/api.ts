@@ -1,5 +1,5 @@
 import type {
-  ChatEvent, ToolInfo, Todo, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, DriveFile, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Recap, Conversation, ConversationSettings, ContextUsed, Document, GraphData, GraphEdge, GraphNode, Message,
+  ChatEvent, ToolInfo, Todo, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, DriveFile, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Recap, Conversation, ConversationSettings, ContextUsed, Document, GraphData, GraphEdge, GraphNode, Message,
   ApprovalDecision, PlanEdit,
   Memory, ModelInfo, ModelPrice, PageContext, Settings, Project, UsageReport, ChatRunStarted, RunInfo,
   Plan, PlanStep, Skill, SkillStatus, ToolResultHandle,
@@ -150,7 +150,7 @@ export const api = {
   todos: {
     list: (s: Scope = 'all', includeDone = false, q = '') => req<Todo[]>(`/todos?project_id=${encodeURIComponent(s)}&include_done=${includeDone}&q=${encodeURIComponent(q)}`),
     create: (t: { title: string; project_id?: string | null; notes?: string; due?: string | null; priority?: number }) => req<Todo>('/todos', { method: 'POST', body: json(t) }),
-    update: (id: string, patch: { title?: string; notes?: string; due?: string | null; priority?: number; done?: boolean; project_id?: string | null; clear_due?: boolean; clear_project?: boolean; calendar_event_id?: string | null; calendar_link?: string | null }) =>
+    update: (id: string, patch: { title?: string; notes?: string; due?: string | null; priority?: number; done?: boolean; project_id?: string | null; clear_due?: boolean; clear_project?: boolean; calendar_event_id?: string | null; calendar_link?: string | null; calendar_id?: string | null }) =>
       req<Todo>(`/todos/${id}`, { method: 'PUT', body: json(patch) }),
     delete: (id: string) => req(`/todos/${id}`, { method: 'DELETE' })
   },
@@ -181,6 +181,10 @@ export const api = {
     tasksSyncConfig: (patch: { enabled?: boolean; tasklist?: string; intervalMinutes?: number }) =>
       req<TasksSyncStatus>('/integrations/google/tasks-sync', { method: 'PUT', body: json(patch) }),
     tasksSyncRun: () => req<TasksSyncStatus>('/integrations/google/tasks-sync/run', { method: 'POST' }),
+    todoCalendar: () => req<TodoCalendarStatus>('/integrations/google/todo-calendar'),
+    todoCalendarConfig: (patch: { enabled?: boolean; calendarId?: string; calendarName?: string; intervalMinutes?: number; keepCompleted?: boolean }) =>
+      req<TodoCalendarStatus>('/integrations/google/todo-calendar', { method: 'PUT', body: json(patch) }),
+    todoCalendarRun: () => req<TodoCalendarStatus>('/integrations/google/todo-calendar/run', { method: 'POST' }),
     drive: (q = '', maxResults = 20) => req<DriveFile[]>(`/integrations/google/drive?q=${encodeURIComponent(q)}&max_results=${maxResults}`),
     gmailGet: (id: string) => req<GmailFullMessage>(`/integrations/google/gmail/${id}`),
     gmailLabels: () => req<GmailLabel[]>('/integrations/google/gmail/labels'),

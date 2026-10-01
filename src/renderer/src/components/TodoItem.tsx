@@ -19,19 +19,28 @@ export const dueLabel = (due: string | null): { text: string; cls: string } => {
   return { text: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }), cls: '' }
 }
 
-/** Put a todo on Google Calendar. `start` is YYYY-MM-DD (all-day) or a local datetime. */
+/** Put a todo on Google Calendar. `start` is YYYY-MM-DD (all-day) or a local datetime.
+ *
+ * With the todo -> calendar mirror on (todocal.py) this lands on the same calendar the mirror
+ * uses, and `calendar_id` is recorded, so the next pass adopts this event — keeping the time
+ * that was picked here — instead of looking on the wrong calendar and making a second one.
+ */
 export async function scheduleTodo(todo: Todo, start?: string): Promise<Todo> {
   const when = start || todo.due || localDay()
   const app = useStore.getState()
   if (!todo.due && when.length === 10) await app.updateTodo(todo.id, { due: when })
   else if (when.length === 10 && todo.due !== when) await app.updateTodo(todo.id, { due: when })
+  const mirror = app.todoCalendar
+  const calendarId = (mirror?.config.enabled && mirror.config.calendarId) || undefined
   const ev = await api.google.createEvent({
     summary: todo.title,
     start: when,
-    description: todo.notes || undefined
+    description: todo.notes || undefined,
+    ...(calendarId ? { calendar_id: calendarId } : {})
   })
-  await app.updateTodo(todo.id, { calendar_event_id: ev.id, calendar_link: ev.link })
-  return { ...todo, due: when.length === 10 ? when : todo.due, calendar_event_id: ev.id, calendar_link: ev.link }
+  const link = { calendar_event_id: ev.id, calendar_link: ev.link, calendar_id: ev.calendar_id ?? calendarId ?? null }
+  await app.updateTodo(todo.id, link)
+  return { ...todo, due: when.length === 10 ? when : todo.due, ...link }
 }
 
 export default function TodoItem({ todo, showProject = true, compact = false }: { todo: Todo; showProject?: boolean; compact?: boolean }): JSX.Element {

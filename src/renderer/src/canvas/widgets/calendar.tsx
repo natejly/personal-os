@@ -3,7 +3,7 @@ import { Calendar as CalIcon, ChevronLeft, ChevronRight, ExternalLink, Pencil, P
 import type { CalendarEvent, DragKind, Todo } from '@shared/types'
 import { useStore } from '../../store'
 import { api } from '../../lib/api'
-import CalendarWeek, { addDays, dayKey, fmtTime, localDay, startOfWeek } from '../../components/CalendarWeek'
+import CalendarWeek, { addDays, dayKey, fmtTime, localDay, startOfWeek, withoutTodoEvents } from '../../components/CalendarWeek'
 import EventEditor, { eventColor, primeCalendarMeta, type EventDraft } from '../../components/EventEditor'
 import { scheduleTodo } from '../../components/TodoItem'
 import { hasDrag, readDrag, useDropTarget } from '../dnd'
@@ -105,6 +105,8 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
     void dropTodo(p.id, day, null)
   }
 
+  const shown = useMemo(() => withoutTodoEvents(events, todos), [events, todos])
+
   const agenda = useMemo(() => {
     if (mode !== 'agenda') return []
     const m = new Map<string, { events: CalendarEvent[]; todos: Todo[] }>()
@@ -113,11 +115,11 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
       m.set(k, cur)
       return cur
     }
-    for (const e of events) slot(e.all_day ? e.start : dayKey(new Date(e.start))).events.push(e)
+    for (const e of shown) slot(e.all_day ? e.start : dayKey(new Date(e.start))).events.push(e)
     const last = dayKey(addDays(new Date(), span - 1))
     for (const t of todos) if (t.due && !t.done && t.due <= last && t.due >= localDay()) slot(t.due).todos.push(t)
     return [...m.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1))
-  }, [mode, events, todos, span])
+  }, [mode, shown, todos, span])
 
   if (!live) {
     return (
@@ -179,7 +181,7 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
         </div>
       ) : (
         <div className="cal-scroll">
-          <CalendarWeek days={columns} events={events} todos={todos} canCreate={connected}
+          <CalendarWeek days={columns} events={shown} todos={todos} canCreate={connected}
             onOpen={setOpen} onTodo={() => setView('todos')} onTodoDrop={(id, day, hour) => void dropTodo(id, day, hour)} onCreate={create}
             onCreateFull={(day, hour, title) => setEditing({ event: null, draft: { day, hour, title } })}
             colorOf={eventColor} />

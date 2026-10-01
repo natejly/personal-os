@@ -3,7 +3,7 @@ import { ChevronLeft, ChevronRight, PanelLeftOpen, Calendar as CalIcon, External
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import SendToSpace from './SendToSpace'
-import CalendarWeek, { addDays, fmtTime, startOfWeek } from './CalendarWeek'
+import CalendarWeek, { addDays, fmtTime, startOfWeek, withoutTodoEvents } from './CalendarWeek'
 import EventEditor, { eventColor, primeCalendarMeta, type EventDraft } from './EventEditor'
 import { scheduleTodo } from './TodoItem'
 import type { CalendarEvent } from '@shared/types'
@@ -24,6 +24,7 @@ export default function CalendarView(): JSX.Element {
   const [, setMetaTick] = useState(0)
 
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(week, i)), [week])
+  const shown = useMemo(() => withoutTodoEvents(events, todos), [events, todos])
 
   const load = async (): Promise<void> => {
     if (!google?.connected) return
@@ -108,7 +109,7 @@ export default function CalendarView(): JSX.Element {
       {error && <div className="notice-bar error">{error}</div>}
 
       <div className="cal-scroll">
-        <CalendarWeek days={days} events={events} todos={todos} canCreate={!!google?.connected}
+        <CalendarWeek days={days} events={shown} todos={todos} canCreate={!!google?.connected}
           onOpen={setOpen} onTodo={() => setView('todos')} onTodoDrop={(id, day, hour) => void dropTodo(id, day, hour)} onCreate={create}
           onCreateFull={(day, hour, title) => setEditing({ event: null, draft: { day, hour, title } })}
           colorOf={eventColor} />

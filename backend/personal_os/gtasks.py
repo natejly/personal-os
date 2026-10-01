@@ -15,6 +15,7 @@ changes (todos.on_change -> poke), so edits land in Google almost immediately.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import threading
 import time
@@ -25,7 +26,7 @@ from .todos import Todos
 
 log = logging.getLogger(__name__)
 
-DEFAULT_CONFIG: dict[str, Any] = {"enabled": False, "tasklist": "@default", "intervalMinutes": 5}
+DEFAULT_CONFIG: dict[str, Any] = {"enabled": True, "tasklist": "@default", "intervalMinutes": 5}
 # A poke waits this long before syncing so a burst of edits becomes one pass.
 POKE_DEBOUNCE = 2.0
 
@@ -83,9 +84,15 @@ class TasksSync:
 
     # ---- scheduling ----
     def poke(self) -> None:
-        """Ask the loop to sync soon; safe from any thread (todo routes run in a threadpool)."""
+        """Ask the loop to sync soon; safe from any thread (todo routes run in a threadpool).
+
+        The loop reference outlives the loop itself if the backend is torn down and rebuilt in
+        one process, so a closed loop is ignored rather than raising into the caller's request.
+        """
         loop, ev = self._loop_ref, self._event
-        if loop and ev:
+        if not loop or not ev or loop.is_closed():
+            return
+        with contextlib.suppress(RuntimeError):
             loop.call_soon_threadsafe(ev.set)
 
     async def loop(self) -> None:

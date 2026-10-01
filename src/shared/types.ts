@@ -292,6 +292,10 @@ export interface Todo {
   external_id: string | null
   calendar_event_id: string | null
   calendar_link: string | null
+  /** Which Google calendar the mirrored event lives on; null means the primary one. */
+  calendar_id: string | null
+  /** Internal: todo fields as last mirrored to the calendar. */
+  calendar_sig: string | null
   created_at: number
   updated_at: number
   completed_at: number | null
@@ -470,6 +474,23 @@ export interface GoogleTaskList {
 /** Two-way todos <-> Google Tasks sync (`/integrations/google/tasks-sync`). */
 export interface TasksSyncStatus {
   config: { enabled: boolean; tasklist: string; intervalMinutes: number }
+  /** Unix seconds of the last successful pass. */
+  last_sync: number | null
+  last_error: string | null
+  last_result: Record<string, number> | null
+  syncing: boolean
+}
+
+/** One-way todos -> Google Calendar mirror (`/integrations/google/todo-calendar`). */
+export interface TodoCalendarStatus {
+  config: {
+    enabled: boolean
+    /** Empty until the first pass resolves or creates the calendar. */
+    calendarId: string
+    calendarName: string
+    intervalMinutes: number
+    keepCompleted: boolean
+  }
   /** Unix seconds of the last successful pass. */
   last_sync: number | null
   last_error: string | null

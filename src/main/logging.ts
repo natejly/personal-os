@@ -13,7 +13,8 @@ export const BACKUPS = 5
 const PATTERNS: Array<[RegExp, string]> = [
   [/(authorization|x-personal-os-token|x-api-key|api-key|proxy-authorization|cookie|set-cookie)(['"]?\s*[:=]\s*['"]?)(?:bearer\s+|basic\s+)?[^\s'",;}]+/gi, '$1$2[redacted]'],
   [/\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}/gi, '$1 [redacted]'],
-  [/(['"]?[\w-]*(?:api[_-]?key|secret|token|password|passwd|credential)[\w-]*['"]?\s*[:=]\s*)(['"]?)[^\s'",;&}\]]+/gi, '$1$2[redacted]'],
+  [/(['"]?[\w-]*(?:api[_-]?key|secret|token|password|passwd|credential)[\w-]*['"]?\s*[:=]\s*)(['"]?)(?!\d{1,7}\b)[^\s'",;&}\]]+/gi, '$1$2[redacted]'],
+  [/\b([a-z][a-z0-9+.-]*:\/\/)[^\s/@:]+:[^\s/@]+@/gi, '$1[redacted]@'],
   [/([?&](?:key|api_key|apikey|token|access_token|auth|code|client_secret)=)[^&\s'"]+/gi, '$1[redacted]'],
   [/\b(?:sk|pk|rk)-[A-Za-z0-9_-]{16,}\b/g, '[redacted]'],
   [/\b(?:ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{16,}\b/g, '[redacted]'],

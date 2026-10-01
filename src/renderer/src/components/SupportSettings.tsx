@@ -27,12 +27,16 @@ async function buildReport(): Promise<string> {
 }
 
 function Num({ label, hint, value, min, max, onChange }: { label: string; hint?: string; value: number; min: number; max: number; onChange: (v: number) => void }): JSX.Element {
+  // Typed text is held locally and clamped on blur: clamping each keystroke made "30" unenterable with a minimum of 7.
+  const [text, setText] = useState<string | null>(null)
+  const commit = (): void => {
+    const n = Number(text)
+    if (text !== null && text.trim() !== '' && Number.isFinite(n)) onChange(Math.min(max, Math.max(min, Math.round(n))))
+    setText(null)
+  }
   return (
     <label><span>{label}{hint && <> <small className="muted">({hint})</small></>}</span>
-      <input type="number" min={min} max={max} value={value} onChange={(e) => {
-        const n = Number(e.target.value)
-        if (Number.isFinite(n)) onChange(Math.min(max, Math.max(min, Math.round(n))))
-      }} />
+      <input type="number" min={min} max={max} value={text ?? value} onChange={(e) => setText(e.target.value)} onBlur={commit} />
     </label>
   )
 }

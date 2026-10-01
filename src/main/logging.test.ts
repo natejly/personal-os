@@ -30,6 +30,11 @@ test('redact leaves ordinary lines alone and masks a registered literal in any s
   assert.equal(redact('saw plain-looking-session-token here'), 'saw [redacted] here')
 })
 
+test('redact keeps token counts and strips URL credentials', () => {
+  assert.equal(redact('prompt_tokens=123 max_tokens: 4096'), 'prompt_tokens=123 max_tokens: 4096')
+  assert.ok(!redact('base http://user:hunter2pw@host:4000/x').includes('hunter2pw'))
+})
+
 test('RotatingLog rolls at the size limit and keeps a bounded number of backups', () => {
   const dir = mkdtempSync(join(tmpdir(), 'grain-log-'))
   const path = join(dir, 'main.log')

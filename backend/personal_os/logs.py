@@ -29,7 +29,9 @@ _PATTERNS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"(?i)(authorization|x-personal-os-token|x-api-key|api-key|proxy-authorization|cookie|set-cookie)(['\"]?\s*[:=]\s*['\"]?)(?:bearer\s+|basic\s+)?[^\s'\",;}]+"), r"\1\2[redacted]"),
     (re.compile(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}"), r"\1 [redacted]"),
     # key=value / "key": "value" for anything that names a secret (apiKey, googleClientSecret, access_token...).
-    (re.compile(r"(?i)(['\"]?[\w-]*(?:api[_-]?key|secret|token|password|passwd|credential)[\w-]*['\"]?\s*[:=]\s*)(['\"]?)[^\s'\",;&}\]]+"), r"\1\2[redacted]"),
+    (re.compile(r"(?i)(['\"]?[\w-]*(?:api[_-]?key|secret|token|password|passwd|credential)[\w-]*['\"]?\s*[:=]\s*)(['\"]?)(?!\d{1,7}\b)[^\s'\",;&}\]]+"), r"\1\2[redacted]"),
+    # Credentials embedded in a URL: scheme://user:pass@host.
+    (re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://)[^\s/@:]+:[^\s/@]+@"), r"\1[redacted]@"),
     # Query-string credentials in a URL.
     (re.compile(r"(?i)([?&](?:key|api_key|apikey|token|access_token|auth|code|client_secret)=)[^&\s'\"]+"), r"\1[redacted]"),
     # Well-known provider token shapes, bare in a message.

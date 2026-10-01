@@ -290,6 +290,11 @@ class Redaction(unittest.TestCase):
         self.assertNotIn("sk-abcdefghijklmnopqrstu", out)
         self.assertIn("Traceback", out)  # the traceback is kept, only the secret is not
 
+    def test_token_counts_stay_readable_but_url_credentials_go(self) -> None:
+        self.assertEqual(logs.redact("prompt_tokens=123 max_tokens: 4096"), "prompt_tokens=123 max_tokens: 4096")
+        self.assertIn("[redacted]", logs.redact("token=12345678901"))
+        self.assertNotIn("hunter2pw", logs.redact("base http://user:hunter2pw@host:4000/x"))
+
     def test_setup_logging_writes_a_rotating_redacted_file(self) -> None:
         root = logging.getLogger()
         before = list(root.handlers)

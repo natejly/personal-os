@@ -435,7 +435,50 @@ installed packages survive a relaunch. `sandbox_checkpoint` / `sandbox_restore`
 snapshot the filesystem to a local image (3 per chat) and roll back to it;
 `sandbox_reset` also drops the checkpoints. `sandboxImage` (default `python:3.12-slim`) and
 `sandboxRuntime` (default `docker`) are configurable in settings. The tools
-only appear when the runtime is actually reachable.
+only appear when the runtime is actually reachable. A container left idle for five
+minutes is stopped by a one-minute reaper (its files and installs survive and it
+restarts on next use) and every container is stopped at exit.
+
+## Host shell
+
+`shell_run(command, cwd?, timeout_s?, background?)` runs a command in `/bin/zsh` on
+this Mac, inside the desk workspace or a folder listed under `workspaceRoots`.
+It is confined by the OS, not by parsing the command: macOS Seatbelt lets it read
+the disk except secrets (ssh, gpg, aws and gcloud config, keychains, any `.env`,
+the app's own data), write only in the folder it runs in and a private temp dir
+(never a repo's `.git/hooks` or `.git/config`), and reach no network unless
+`shellNetwork` is on, in which case the reply is marked as having read untrusted
+content. The environment is an allowlist (`PATH`, `HOME`, `LANG`, `TERM=dumb`,
+`TMPDIR`), never the app's own. Output (stdout and stderr together) passes through
+credential redaction, is cut to the last 2000 lines or 50 KB, and the full text
+sits behind a result handle that `read_tool_result` pages. A foreground command ends
+at `shellTimeoutSec` (default 120, at most 600): SIGTERM to its whole process
+group, SIGKILL three seconds later.
+
+`background: true` returns a job id; `shell_poll` returns what is new and the exit
+status, `shell_kill` stops it, and the finished job's exit code and last output are
+handed to the model at its next round (or wake an idle desk) unless
+`notify_on_complete` is false. At most `shellMaxBackground` jobs run at once and 64
+are tracked; finished ones are forgotten after 30 minutes. Jobs end with the chat
+reply that started them and with the app. After a restart a survivor is listed
+as `orphaned` (kill only) and is never adopted.
+
+`shell_run` asks by default. If `sandbox-exec` is missing or refuses the profile
+nothing runs; the only way on is `unsandboxed: true`, which is a forced approval on
+every call that no "always allow" can remove. Scheduled (unattended) runs cannot use
+it at all.
+
+### Scripts that call tools
+
+`run_python(code, tools=[...])` lets a script call app tools as
+`grain_tools.call("fs_grep", pattern="TODO", root=".")` over a Unix socket that is
+the one thing the sandbox profile lets it reach. Only `fs_glob`, `fs_grep`,
+`read_local_file`, `fs_edit`, `search_documents`, `web_search` and `fetch_url` can
+be named, and only if they are on or ask for the chat. A call gets the same gate as
+the model's own: a tool in `ask` parks the script on an approval card (the script's
+clock stops while the card is open), and a run with nobody to ask refuses it. At
+most 50 calls and 300 seconds; stdout is kept as 40% head and 60% tail up to 50 KB,
+the whole text behind a handle, and stderr to 10 KB.
 
 ## Traces
 

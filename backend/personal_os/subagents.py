@@ -745,14 +745,14 @@ class Subagents:
         elif "_raw" in args:
             result = tool_error(f"{name}: the arguments were not valid JSON.", alternative=ALTERNATIVE.get(name))
         else:
-            mode = self.toolbox.gate(name, raw_mode, ch.ctx)
+            mode = self.toolbox.gate(name, raw_mode, ch.ctx, args)
             # The parent's gates, in the parent's order: a write outside the granted folders asks, then the
             # argument-pattern rules (deny and the hardline list refuse, ask cards, allow lifts a plain ask).
             # A child has no session of its own; the parent chat's session grants are the user's and still count.
             fs_ask = self.toolbox.fs_needs_ask(name, args, ch.ctx)
             if fs_ask and mode == "on":
                 mode = "ask"
-            forced = mode != raw_mode
+            forced = mode != raw_mode or (mode == "ask" and self.toolbox.forces_ask(name, args))
             perm = permrules.resolve(name, args, mode, forced, rules=self.settings().get("permissionRules"),
                                      roots=self._perm_roots(ch), conv=ch.conversation_id)
             mode, forced = perm.mode, perm.forced

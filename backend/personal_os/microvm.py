@@ -96,6 +96,10 @@ def guest_path(path: str | None) -> str:
     return posixpath.normpath(p)
 
 
+IDLE_STOP_S = 300       # a running container untouched this long is stopped (its files and installs survive)
+REAP_EVERY_S = 60
+
+
 class Sandboxes:
     """Names, creates, reuses and reaps one container per conversation."""
 
@@ -110,6 +114,9 @@ class Sandboxes:
         self._stale_checked = False          # _reap_stale runs once per app run
         # conversation id -> host path of that conversation's desk workspace, or None. Set by the app, which owns the desks.
         self.desk_workspace: Callable[[str], str | None] | None = None
+        self._busy: dict[str, int] = {}      # container name -> calls in flight (never stopped as idle mid-command)
+        self._reaper: threading.Thread | None = None
+        self._reaper_stop = threading.Event()
 
     def _bin(self) -> str:
         return str(self.settings().get("sandboxRuntime") or "docker")
@@ -150,6 +157,7 @@ class Sandboxes:
                     self._net[name] = n.returncode == 0 and n.stdout.strip() != b"none"
                     self._probe_shell(binary, name)
                 self._last[name] = time.time()
+                self._start_reaper()
                 return name
             self._reap(binary)
             cfg = self.settings()
@@ -185,6 +193,7 @@ class Sandboxes:
         self._net[name] = net
         self._probe_shell(binary, name)
         self._last[name] = time.time()
+        self._start_reaper()
 
     def _probe_shell(self, binary: str, name: str) -> None:
         p = self._run([binary, "exec", name, "sh", "-c", "command -v bash"], timeout=10)
@@ -223,6 +232,38 @@ class Sandboxes:
                 self._run([binary, "rm", "-f", n], timeout=30)
                 self._forget(n)
 
+    def stop_idle(self, now: float | None = None) -> list[str]:
+        """Stop (not remove) running sandboxes idle for IDLE_STOP_S. ensure() restarts one on its next use, so this only
+        frees the VM's memory and CPU; nothing a model wrote is lost. Returns the names stopped."""
+        t = time.time() if now is None else now
+        binary = self._bin()
+        stopped: list[str] = []
+        with self._lock:
+            try:
+                running = self._live(binary, running_only=True)
+            except Exception:  # noqa: BLE001 - a reaper pass must never raise
+                return stopped
+            for n in running:
+                if self._busy.get(n) or n not in self._last or t - self._last[n] < IDLE_STOP_S:
+                    continue
+                if self._run([binary, "stop", "-t", "3", n], timeout=30).returncode == 0:
+                    stopped.append(n)
+        return stopped
+
+    def _start_reaper(self) -> None:
+        if self._reaper is not None and self._reaper.is_alive():
+            return
+        self._reaper_stop.clear()
+
+        def loop() -> None:
+            while not self._reaper_stop.wait(REAP_EVERY_S):
+                try:
+                    self.stop_idle()
+                except Exception:  # noqa: BLE001
+                    pass
+        self._reaper = threading.Thread(target=loop, name="sandbox-reaper", daemon=True)
+        self._reaper.start()
+
     def _forget(self, name: str) -> None:
         self._last.pop(name, None)
         self._shell.pop(name, None)
@@ -240,6 +281,7 @@ class Sandboxes:
     def shutdown(self) -> None:
         """Stop (not remove) every running labeled container: /workspace and installs survive the next launch.
         _reap_stale removes the ones nobody comes back to."""
+        self._reaper_stop.set()  # the reaper's job ends with the app; the loop below stops whatever is still running
         binary = self._bin()
         if not shutil.which(binary):
             return
@@ -304,11 +346,15 @@ class Sandboxes:
         name = self.ensure(conversation_id)
         t = max(1, min(int(timeout), MAX_EXEC_S))
         shell = self._shell.get(name, "sh")
+        self._busy[name] = self._busy.get(name, 0) + 1
         try:
             p = self._run([self._bin(), "exec", "-i", "-w", WORKSPACE, name,
                            "timeout", "-k", "5", str(t), shell, "-c", command], timeout=t + 20)
         except subprocess.TimeoutExpired:
             return {"stdout": "", "stderr": f"Timed out after {t}s", "exit_code": -1, "timed_out": True}
+        finally:
+            self._busy[name] -= 1
+            self._last[name] = time.time()  # a long command counts as use up to the moment it ended
         out = {"stdout": p.stdout.decode(errors="replace")[-STDOUT_CAP:],
                "stderr": p.stderr.decode(errors="replace")[-STDERR_CAP:],
                "exit_code": p.returncode, "timed_out": p.returncode == 124}

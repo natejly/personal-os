@@ -170,6 +170,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "sandboxMountDesk": True,
     # fs_edit and an overwriting write_local_file refuse a file this conversation has not read (or that changed since).
     "requireReadBeforeWrite": True,
+    # Host shell (shell.py): shell_run runs in a Seatbelt sandbox inside the desk workspace or a workspace root.
+    "shellNetwork": False,       # a networked shell run taints the reply: whatever it prints may be third-party text
+    "shellTimeoutSec": 120,      # foreground default; a call may ask for up to 600
+    "shellMaxBackground": 4,     # live background jobs at once
     # {model: {"input": $/M tokens, "output": $/M tokens}} overrides for cost accounting (proxy prices are used otherwise)
     "modelPrices": {},
     "googleClientId": "",

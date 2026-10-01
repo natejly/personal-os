@@ -327,6 +327,29 @@ def _clean_html(text: str) -> str:
     return code
 
 
+# ---------- in-frame shim ----------
+SHIM_MARKER = "po-artifact-shim"
+# Posts the frame's content height (and title) to the panel so the window can size to it. postMessage only: no
+# network, no storage, so the shim itself never trips blocked_capabilities. The envelope is bridge.ts's, v1.
+SHIM = (
+    "<script>/*" + SHIM_MARKER + "*/(function(){var S='personal-os-artifact',last=-1;"
+    "function post(m){try{parent.postMessage(Object.assign({source:S,v:1},m),'*')}catch(e){}}"
+    "function h(){var r=document.documentElement.getBoundingClientRect().height;"
+    "r=Math.ceil(r);if(r!==last){last=r;post({type:'resize',height:r})}}"
+    "if(typeof ResizeObserver==='function'){new ResizeObserver(h).observe(document.documentElement)}"
+    "addEventListener('load',function(){h();if(document.title)post({type:'setTitle',title:document.title})});"
+    "h()})()</script>"
+)
+
+
+def inject_shim(code: str) -> str:
+    """Add the resize/title shim to a document for rendering (never to the stored version). Idempotent."""
+    if SHIM_MARKER in code:
+        return code
+    i = code.lower().rfind("</body>")
+    return code + SHIM if i < 0 else code[:i] + SHIM + code[i:]
+
+
 # ---------- lint and repair ----------
 REPAIR_ADVICE = {
     "network": "Remove all network use (fetch, XMLHttpRequest, WebSocket, EventSource, sendBeacon, dynamic import); hard-code or compute the data instead.",

@@ -984,6 +984,20 @@ export interface Widget {
   code: string; output: string; refresh_minutes: number; refreshed_at: number | null; position: number; width: number; height: number
   created_at: number; updated_at: number
 }
+/** What the render CSP would break, or an empty document (artifacts.lint). */
+export interface ArtifactLint { blocked: string[]; empty: boolean; repaired?: boolean }
+export interface Artifact {
+  id: string; project_id: string | null; title: string; kind: string; prompt: string; version: number
+  created_at: number; updated_at: number
+  /** the current document; absent from list rows */
+  code?: string
+  size?: number; version_count?: number
+  lint?: ArtifactLint
+}
+export interface ArtifactVersion {
+  id: string; artifact_id: string; version: number; prompt: string; instruction: string
+  source: 'llm' | 'user' | 'restore'; created_at: number; size?: number; code?: string
+}
 export interface Dashboard { id: string; name: string; description: string; created_at: number; widget_count?: number; widgets: Widget[] }
 export interface Recap { day: string; content: string; created_at: number; cached?: boolean }
 
@@ -1149,7 +1163,7 @@ export interface PromotionResult {
 /** Every widget a canvas window can host. Source of truth for `WIDGET_KINDS` in backend/personal_os/canvas.py. */
 export type WidgetKind =
   | 'chat' | 'todos' | 'calendar' | 'board' | 'note' | 'dashboard-widget'
-  | 'memory' | 'graph' | 'documents' | 'recap' | 'project' | 'usage' | 'activity' | 'web'
+  | 'memory' | 'graph' | 'documents' | 'recap' | 'project' | 'usage' | 'activity' | 'web' | 'artifact'
 
 export type WindowState = 'normal' | 'minimized' | 'maximized' | 'popped'
 export type SnapMode = 'off' | 'grid' | 'guides' | 'both'

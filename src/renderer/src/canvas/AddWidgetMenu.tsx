@@ -117,6 +117,12 @@ export function addWidgetEntries(opts: { canvasId: string; at?: Point }): MenuEn
     }))
   }
 
+  const artifact = async (): Promise<MenuEntry[]> => {
+    const list = (await api.artifacts.list()).slice(0, RECENT_NOTES)
+    if (!list.length) return [{ label: 'No artifacts yet. Ask the chat to make one.', disabled: true, run: noop }]
+    return list.map((a): MenuEntry => ({ label: a.title || 'Untitled', run: act(() => cv().ensureWindow(canvasId, 'artifact', a.id, undefined, at)) }))
+  }
+
   const project = (): MenuEntry[] => {
     const bound = projectOf()
     const projects = useStore.getState().projects
@@ -135,7 +141,8 @@ export function addWidgetEntries(opts: { canvasId: string; at?: Point }): MenuEn
     board,
     note,
     'dashboard-widget': widget,
-    project
+    project,
+    artifact
   }
 
   return (Object.keys(WIDGETS) as WidgetKind[]).map((kind): MenuEntry => {

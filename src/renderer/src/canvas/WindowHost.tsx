@@ -1,7 +1,7 @@
 import { useCallback, type FC } from 'react'
 import {
   Brain, Calendar, CheckSquare, FileText, KanbanSquare, LayoutDashboard, MessageSquare, Network,
-  Notebook, FolderKanban, Sparkles, Gauge, MonitorDot, Globe
+  Notebook, FolderKanban, Sparkles, Gauge, MonitorDot, Globe, AppWindow
 } from 'lucide-react'
 import type { CanvasWindow, WidgetKind } from '@shared/types'
 import { WIDGETS, type WidgetProps } from './registry'
@@ -23,7 +23,8 @@ export const KIND_LABEL: Record<WidgetKind, string> = {
   project: 'Project',
   usage: 'Usage',
   activity: 'Activity',
-  web: 'Web'
+  web: 'Web',
+  artifact: 'Artifact'
 }
 
 export const KIND_ICON: Record<WidgetKind, JSX.Element> = {
@@ -40,7 +41,8 @@ export const KIND_ICON: Record<WidgetKind, JSX.Element> = {
   project: <FolderKanban size={18} />,
   usage: <Gauge size={18} />,
   activity: <MonitorDot size={18} />,
-  web: <Globe size={18} />
+  web: <Globe size={18} />,
+  artifact: <AppWindow size={18} />
 }
 
 /** A row the backend accepted that this build has no widget for: still titled, still closable. */

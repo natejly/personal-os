@@ -166,6 +166,6 @@ def make_router(store: A.Artifacts, settings_fn: Callable[[], dict[str, Any]],
     @r.get("/artifacts/{aid}/render")
     def render(aid: str) -> HTMLResponse:
         a = need(aid)
-        return HTMLResponse(a["code"] or A.EMPTY_HTML, headers=A.render_headers())
+        return HTMLResponse(A.inject_shim(a["code"] or A.EMPTY_HTML), headers=A.render_headers())
 
     return r

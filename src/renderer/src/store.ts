@@ -1,6 +1,7 @@
 import { create } from 'zustand'
-import type { ApprovalDecision, PlanEdit, ActivityConfig, ActivityContextFile, ActivityEvent, ActivitySignal, ActivityStatus, ActivitySummary, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, Document, FullDoc, GraphData, Memory, Message, ModelInfo, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap, Job } from '@shared/types'
+import type { ApprovalDecision, PlanEdit, ActivityConfig, ActivityContextFile, ActivityEvent, ActivitySignal, ActivityStatus, ActivitySummary, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, Document, FullDoc, GraphData, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap, Job } from '@shared/types'
 import { api, chatStream, setBase, type Scope } from './lib/api'
+import { currentSelection } from './lib/pageContext'
 import { finishStatus, mergeConversation, pickEvictions, reduceStatus, settleApprovals } from './sessionStatus'
 import { viewHidden } from './modules'
 
@@ -121,6 +122,13 @@ export interface State {
   sidebarOpen: boolean
   contextOpen: boolean
   contextTab: ContextTab
+  /**
+   * The page agent (⌘I): a chat pinned to whatever view is on screen. `pageContext` is republished
+   * by the active view on every change; `pageAgentId` is the thread, created on the first send.
+   */
+  pageAgentOpen: boolean
+  pageAgentId: string | null
+  pageContext: PageContext | null
   /** Message whose execution trace the Trace tab shows (null = latest assistant reply). */
   traceMessageId: string | null
   settingsOpen: boolean
@@ -175,6 +183,13 @@ export interface State {
   openMemory: (m?: MemoryMode) => void
   toggleSidebar: () => void
   toggleContext: () => void
+  /** ⌘I. Opening focuses the panel's composer; the thread itself waits for the first message. */
+  togglePageAgent: () => void
+  closePageAgent: () => void
+  /** Drop the current thread and start a fresh one against the page on screen. */
+  resetPageAgent: () => void
+  /** Called by the active view. Passing null means "this view has nothing to say". */
+  setPageContext: (ctx: PageContext | null) => void
   setContextTab: (t: ContextTab) => void
   openTrace: (messageId: string) => void
   setSettingsOpen: (o: boolean) => void
@@ -209,6 +224,8 @@ export interface State {
   setChatSettings: (patch: Partial<ConversationSettings>, conversationId?: string) => Promise<void>
   /** `false` when the text was refused, so the caller must keep it. Never rejects. */
   send: (text: string, conversationId?: string) => Promise<boolean>
+  /** Send from the ⌘I panel: same contract as `send`, plus the page snapshot and its own thread. */
+  sendToPageAgent: (text: string) => Promise<boolean>
   regenerate: (conversationId?: string) => Promise<void>
   stop: (conversationId?: string) => Promise<void>
 
@@ -441,6 +458,7 @@ export const useStore = create<State>((set, get) => {
       } else if (action === 'settings') s.setSettingsOpen(true)
       else if (action === 'toggle-sidebar') s.toggleSidebar()
       else if (action === 'toggle-context') s.toggleContext()
+      else if (action === 'page-agent') s.togglePageAgent()
       else if (action === 'view:graph') s.openMemory('graph')
       else if (action.startsWith('view:')) s.setView(action.slice(5) as View)
       else if (action === 'upload') {
@@ -548,7 +566,7 @@ export const useStore = create<State>((set, get) => {
    * `false` means the backend never accepted `body`, so the caller still owns the text it sent.
    * Resolves on that verdict, not at the end of the run: a composer is holding a draft on it.
    */
-  const runStream = async (convId: string, body: { content?: string; model?: string }): Promise<boolean> => {
+  const runStream = async (convId: string, body: { content?: string; model?: string; page_context?: PageContext }): Promise<boolean> => {
     let run: ChatRunStarted
     try {
       run = await api.chat(convId, body)
@@ -614,6 +632,9 @@ export const useStore = create<State>((set, get) => {
     sidebarOpen: true,
     contextOpen: false,
     contextTab: 'last',
+    pageAgentOpen: false,
+    pageAgentId: null,
+    pageContext: null,
     traceMessageId: null,
     settingsOpen: false,
     projectModal: null,
@@ -704,6 +725,15 @@ export const useStore = create<State>((set, get) => {
     openMemory: (memoryMode) => set(memoryMode ? { view: 'memory', memoryMode } : { view: 'memory' }),
     toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
     toggleContext: () => set((s) => ({ contextOpen: !s.contextOpen })),
+    togglePageAgent: () => set((s) => ({ pageAgentOpen: !s.pageAgentOpen })),
+    closePageAgent: () => set({ pageAgentOpen: false }),
+    resetPageAgent: () => {
+      const id = get().pageAgentId
+      // The thread stays in the chat list — the panel is a way in, not a scratchpad that eats history.
+      if (id) get().closeSession(id)
+      set({ pageAgentId: null })
+    },
+    setPageContext: (pageContext) => set((s) => (s.pageContext === pageContext ? {} : { pageContext })),
     setContextTab: (contextTab) => set({ contextTab }),
     openTrace: (traceMessageId) => set({ traceMessageId, contextTab: 'trace', contextOpen: true }),
     setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
@@ -874,6 +904,41 @@ export const useStore = create<State>((set, get) => {
       set({ focusedConversationId: c.id, view: 'chat' })
       void get().refreshProjects()
       return runStream(c.id, { content: text })
+    },
+    sendToPageAgent: async (text) => {
+      if (!text.trim()) return false
+      const ctx = get().pageContext
+      // The selection is read at send time, not when the view published itself: the user highlights
+      // a paragraph and *then* reaches for ⌘I.
+      const selection = ctx?.selection || currentSelection()
+      const page = ctx ? { ...ctx, selection: selection || undefined } : undefined
+      let id = get().pageAgentId
+      if (id) {
+        // Mid-reply the panel steers, exactly as the composer does in a chat.
+        if (get().sessions[id]?.streaming) {
+          try {
+            await api.steer(id, text)
+            return true
+          } catch { /* the run ended in the gap */ }
+        }
+        // The thread can have been deleted from the chat list since; fall back to a fresh one.
+        if (!get().sessions[id]) await get().openSession(id).catch(() => { id = null })
+      }
+      if (!id) {
+        let c: Conversation
+        try {
+          c = await api.conversations.create(get().draftProjectId, get().settings.defaultModel)
+        } catch (e) {
+          get().toast((e as Error).message, 'error')
+          return false
+        }
+        c.messages = []
+        putSession(c)
+        id = c.id
+        set({ pageAgentId: id })
+        void get().refreshProjects()
+      }
+      return runStream(id, { content: text, page_context: page })
     },
     regenerate: async (conversationId) => {
       const id = conversationId ?? get().focusedConversationId

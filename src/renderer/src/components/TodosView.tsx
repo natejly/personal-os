@@ -6,6 +6,7 @@ import ScopeSelect from './ScopeSelect'
 import SmartTextarea from './SmartTextarea'
 import { localDay } from './CalendarWeek'
 import SendToSpace from './SendToSpace'
+import { lines, usePageContext } from '../lib/pageContext'
 
 export default function TodosView(): JSX.Element {
   const todos = useStore((s) => s.todos)
@@ -35,6 +36,22 @@ export default function TodosView(): JSX.Element {
   const upcoming = open.filter((t) => t.due && !overdue.includes(t) && !today.includes(t))
   const someday = open.filter((t) => !t.due)
   const done = todos.filter((t) => t.done)
+
+  const fmt = (t: typeof todos[number]): string =>
+    `${t.title} (\`${t.id}\`${t.due ? `, due ${t.due}` : ''}${t.priority !== 2 ? `, priority ${t.priority}` : ''})`
+  usePageContext(() => ({
+    view: 'todos',
+    label: 'Todos',
+    detail: [
+      overdue.length ? `Overdue:\n${lines(overdue, fmt)}` : '',
+      today.length ? `Due today (${todayKey}):\n${lines(today, fmt)}` : '',
+      upcoming.length ? `Upcoming:\n${lines(upcoming, fmt)}` : '',
+      someday.length ? `No date:\n${lines(someday, fmt)}` : '',
+      open.length ? '' : 'Nothing open.'
+    ].filter(Boolean).join('\n\n'),
+    refs: open.slice(0, 40).map((t) => ({ kind: 'todo', id: t.id, name: t.title })),
+    hints: ['What should I do first?', 'Reschedule the overdue ones to tomorrow', 'Break the biggest one into steps']
+  }), [todos, todayKey])
 
   const Section = ({ label, items }: { label: string; items: typeof todos }): JSX.Element | null =>
     items.length ? (

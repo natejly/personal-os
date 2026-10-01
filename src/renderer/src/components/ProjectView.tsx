@@ -6,6 +6,7 @@ import ChatPulse from './ChatPulse'
 import MemoryPanel from './MemoryPanel'
 import DocumentsView from './DocumentsView'
 import SendToSpace from './SendToSpace'
+import { lines, usePageContext } from '../lib/pageContext'
 
 type Tab = 'chats' | 'instructions' | 'knowledge' | 'memory'
 
@@ -20,6 +21,20 @@ export default function ProjectView(): JSX.Element {
 
   useEffect(() => { setPrompt(project?.system_prompt ?? '') }, [project?.id, project?.system_prompt])
   useEffect(() => { void loadScope(id) }, [id, loadScope])
+
+  usePageContext(() => (project
+    ? {
+        view: 'project',
+        label: `Project “${project.name}”`,
+        detail: [
+          `Project \`${project.id}\`${project.description ? ` — ${project.description}` : ''}.`,
+          project.system_prompt ? `Its instructions:\n${project.system_prompt.slice(0, 2000)}` : '',
+          `Chats in it:\n${lines(conversations.filter((c) => c.project_id === project.id), (c) => `${c.title} (\`${c.id}\`)`, 20)}`
+        ].filter(Boolean).join('\n\n'),
+        refs: [{ kind: 'project', id: project.id, name: project.name }],
+        hints: ['Where did this project get to?', 'Sharpen the project instructions']
+      }
+    : null), [project, conversations])
 
   if (!project) return <main className="page"><div className="page-body"><p className="muted">Project not found.</p></div></main>
   const chats = conversations.filter((c) => c.project_id === id)

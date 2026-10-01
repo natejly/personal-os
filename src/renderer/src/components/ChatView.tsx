@@ -7,6 +7,7 @@ import Composer from './Composer'
 import ContextDrawer from './ContextDrawer'
 import PlanPanel from './PlanPanel'
 import SendToSpace from './SendToSpace'
+import { clip, usePageContext } from '../lib/pageContext'
 
 function ModelPicker({ value, onChange }: { value: string; onChange: (m: string) => void }): JSX.Element {
   const models = useStore((s) => s.models)
@@ -60,6 +61,17 @@ export default function ChatView({ conversationId }: { conversationId?: string }
 
   const last = msgs[msgs.length - 1]
 
+  // Only the full-window chat is a "page"; a chat window on the canvas is one of many on screen.
+  usePageContext(() => (conversationId ? undefined : {
+    view: 'chat',
+    label: convo ? `Chat “${convo.title}”` : 'Chat',
+    detail: convo
+      ? `The user is reading this conversation (\`${convo.id}\`). Its last turns:\n\n${clip(msgs.slice(-6).map((m) => `**${m.role}**: ${m.content}`).join('\n\n'), 3000)}`
+      : 'An empty chat, nothing sent yet.',
+    refs: convo ? [{ kind: 'conversation', id: convo.id, name: convo.title }] : [],
+    hints: convo ? ['Summarise this conversation', 'What did we decide?'] : []
+  }), [conversationId, convo?.id, convo?.title, msgs.length, lastLen])
+
   return (
     <main className="chat">
       <header className="chat-header drag">
@@ -80,7 +92,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
           <SendToSpace items={[{ kind: 'chat', refId: convo?.id }]} disabled={!convo?.id} />
           <ProjectChip projectId={convo?.project_id ?? draftProjectId} />
           <ModelPicker value={model} onChange={(m) => void setChatModel(m, conversationId)} />
-          <button className={`icon-btn ${contextOpen ? 'on' : ''}`} title="Context panel (⌘I)" aria-label="Toggle context panel" aria-pressed={contextOpen} onClick={toggleContext}><SlidersHorizontal size={16} /></button>
+          <button className={`icon-btn ${contextOpen ? 'on' : ''}`} title="Context panel (⌃⌘I)" aria-label="Toggle context panel" aria-pressed={contextOpen} onClick={toggleContext}><SlidersHorizontal size={16} /></button>
         </div>
       </header>
 

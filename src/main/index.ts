@@ -171,7 +171,10 @@ function buildMenu(): void {
         { type: 'separator' },
         { label: 'Toggle Spaces', accelerator: 'CmdOrCtrl+Shift+C', click: () => sendMenu('canvas:toggle') },
         { label: 'Toggle Sidebar', accelerator: 'CmdOrCtrl+B', click: () => sendMenu('toggle-sidebar') },
-        { label: 'Toggle Context Panel', accelerator: 'CmdOrCtrl+I', click: () => sendMenu('toggle-context') },
+        // ⌘I is the Cursor reflex: ask about what is on screen. The chat's context inspector, which
+        // used to own it, moves one modifier over.
+        { label: 'Ask About This Page', accelerator: 'CmdOrCtrl+I', click: () => sendMenu('page-agent') },
+        { label: 'Toggle Context Panel', accelerator: 'Control+Command+I', click: () => sendMenu('toggle-context') },
         { type: 'separator' },
         { role: 'reload' },
         { role: 'toggleDevTools' },

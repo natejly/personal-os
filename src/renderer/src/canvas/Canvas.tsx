@@ -18,6 +18,7 @@ import { canvasFromScreen, screenFromCanvas, snapValue, visibleRect, type Point,
 import { setLiveViewport, setViewportEl, spaceLocked, useActiveCanvas, useCanvas, useWindows, viewport, viewportPoint } from './store'
 import { getDragOverlay, schedule, subscribeDragOverlay } from './useDrag'
 import '../styles/canvas.css'
+import { lines, usePageContext } from '../lib/pageContext'
 
 const MIN_ZOOM = 0.5
 const MAX_ZOOM = 2
@@ -169,6 +170,17 @@ export default function Canvas(): JSX.Element {
   // A locked space keeps the pan, the zoom and every rect it had: the plane stops taking gestures,
   // while the widgets on it stay as interactive as ever.
   const locked = !!canvas?.locked
+
+  usePageContext(() => ({
+    view: 'canvas',
+    label: canvas ? `Space “${canvas.name}”` : 'Spaces',
+    detail: windows.length
+      ? `The space has these widgets open:\n${lines(windows, (w) => `${w.kind}${w.title ? ` “${w.title}”` : ''}${w.ref_id ? ` (\`${w.ref_id}\`)` : ''}`)}`
+      : 'The space is empty.',
+    refs: windows.filter((w) => w.ref_id).slice(0, 40).map((w) => ({ kind: w.kind, id: w.ref_id as string, name: w.title })),
+    hints: ['What is on this space?', 'What should I look at first?']
+  }), [canvas?.id, canvas?.name, windows])
+
   const zoom = canvas?.zoom ?? 1
   const panX = canvas?.pan_x ?? 0
   const panY = canvas?.pan_y ?? 0

@@ -126,7 +126,9 @@ def test_events_are_persisted_and_tailable_with_since() -> None:
     row = drain(rid)
     assert row["status"] == "done" and row["conversation_id"] == cid and row["ended_at"]
     assert row["message_id"], "the assistant message id is on the row"
-    assert row["input"] == {"content": "hi", "model": None}, row["input"]
+    # What was asked is on the row. Matched by field, not whole-dict: the chat body grows new
+    # optional fields (page_context, ...) and that is not a change to what a run records.
+    assert row["input"]["content"] == "hi" and row["input"]["model"] is None, row["input"]
     tape = store.events(rid)
     assert [s for s, _, _ in tape] == list(range(1, len(tape) + 1)), "seq is dense from 1"
     assert row["last_seq"] == len(tape)

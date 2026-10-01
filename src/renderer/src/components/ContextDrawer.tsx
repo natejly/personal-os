@@ -20,7 +20,8 @@ function Toggle({ label, hint, value, onChange, icon }: { label: string; hint: s
 function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
   const { setView, openMemory, memories, setSettingsOpen } = useStore()
   const [showPrompt, setShowPrompt] = useState(false)
-  const has = ctx.memories.length + ctx.nodes.length + ctx.chunks.length + (ctx.skills?.length ?? 0) > 0 || Boolean(ctx.activity)
+  const has = ctx.memories.length + ctx.nodes.length + ctx.chunks.length + (ctx.skills?.length ?? 0) > 0
+    || Boolean(ctx.activity) || Boolean(ctx.page)
   return (
     <div className="ctx-used">
       <div className="ctx-meta">
@@ -29,6 +30,13 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
       </div>
       {showPrompt && <pre className="ctx-prompt">{ctx.system_prompt}</pre>}
       {!has && <p className="muted">Nothing from memory, graph, or documents was relevant.</p>}
+      {ctx.page && (
+        <section>
+          <h5><MonitorDot size={12} /> Page — {ctx.page.label}</h5>
+          {ctx.page.selection && <div className="chunk-preview"><b>selection:</b> {ctx.page.selection}</div>}
+          <pre className="ctx-prompt">{ctx.page.detail}</pre>
+        </section>
+      )}
       {ctx.activity && (
         <section>
           <h5><MonitorDot size={12} /> Activity <button className="link" onClick={() => setView('activity')}>manage</button></h5>

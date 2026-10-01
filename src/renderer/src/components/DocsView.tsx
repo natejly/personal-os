@@ -10,6 +10,7 @@ import MarkdownPreview from './MarkdownPreview'
 import DiffView from './DiffView'
 import ScopeSelect from './ScopeSelect'
 import DocTree from './DocTree'
+import { clip, lines, usePageContext } from '../lib/pageContext'
 import '../styles/docs.css'
 
 const fmtWhen = (ts: number): string => {
@@ -74,6 +75,23 @@ export default function DocsView(): JSX.Element {
   }, [editFrac, linked])
 
   const dirty = docDraft !== null && docDraft !== activeDoc?.content
+
+  // ⌘I over a doc answers about that doc: the text as it stands in the editor, unsaved edits and all.
+  usePageContext(() => (activeDoc
+    ? {
+        view: 'docs',
+        label: `Doc “${activeDoc.title || 'Untitled'}”`,
+        detail: `The doc is open in the editor${dirty ? ' with unsaved edits' : ''}${activeDoc.folder ? `, in the folder “${activeDoc.folder}”` : ''}. Its id is \`${activeDoc.id}\` — revise it with doc_edit, which lands as a diff the user accepts.\n\n\`\`\`markdown\n${clip(body)}\n\`\`\``,
+        refs: [{ kind: 'doc', id: activeDoc.id, name: activeDoc.title }],
+        hints: ['Summarise this doc', 'Tighten the writing', 'Pull out the action items as todos']
+      }
+    : {
+        view: 'docs',
+        label: 'Docs',
+        detail: `No doc is open. The list shows:\n${lines(docs, (d) => `“${d.title || 'Untitled'}” (\`${d.id}\`)${d.folder ? ` in ${d.folder}` : ''}`)}`,
+        refs: docs.slice(0, 40).map((d) => ({ kind: 'doc', id: d.id, name: d.title })),
+        hints: ['What have I been writing about?', 'Start a doc for this week\u2019s plan']
+      }), [activeDoc?.id, activeDoc?.title, activeDoc?.folder, body, dirty, docs])
 
   return (
     <main className="page docs-page">

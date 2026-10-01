@@ -6,6 +6,7 @@ import type { Document } from '@shared/types'
 import ProjectChip from './ProjectChip'
 import ScopeSelect from './ScopeSelect'
 import SendToSpace from './SendToSpace'
+import { lines, usePageContext } from '../lib/pageContext'
 
 const fmtSize = (n: number): string => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`)
 const ACCEPT = '.txt,.md,.markdown,.pdf,.docx,.csv,.json,.yaml,.yml,.py,.ts,.tsx,.js,.html,.css,.log,.rst,.toml'
@@ -67,6 +68,16 @@ export default function DocumentsView({ projectId, embedded = false }: { project
       )}
     </div>
   )
+  usePageContext(() => (embedded ? undefined : {
+    view: 'documents',
+    label: open ? `Document “${open.name}”` : 'Documents',
+    detail: open
+      ? `The user has this uploaded document open — id \`${open.id}\`.\n\n${open.text?.slice(0, 4000) ?? ''}`
+      : `Uploaded documents, all searchable from any chat:\n${lines(documents, (d) => `${d.name} (\`${d.id}\`, ${d.chunk_count ?? 0} chunks)`)}`,
+    refs: open ? [{ kind: 'document', id: open.id, name: open.name }] : documents.slice(0, 40).map((d) => ({ kind: 'document', id: d.id, name: d.name })),
+    hints: open ? ['Summarise this document', 'What does it say about…'] : ['What is in my library?']
+  }), [documents, open, embedded])
+
   if (embedded) return body
 
   return (

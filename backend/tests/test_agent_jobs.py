@@ -27,7 +27,8 @@ from personal_os import app as appmod  # noqa: E402
 from personal_os import llm  # noqa: E402
 from personal_os import verify  # noqa: E402
 from personal_os.jobs import (  # noqa: E402
-    LATE_GRACE_S, SEED_JOBS, Jobs, Scheduler, next_fire, prev_fire, slots_between, valid_cron, valid_tz,
+    LATE_GRACE_S, SEED_JOBS, Jobs, Scheduler, next_fire, parse_when, prev_fire, slots_between, spent, valid_cron,
+    valid_schedule, valid_tz,
 )
 
 client = TestClient(appmod.app, headers={"X-Personal-OS-Token": appmod.AUTH_TOKEN})
@@ -486,3 +487,200 @@ def test_a_failed_job_shows_up_as_a_failure_and_a_pending_approval_needs_you() -
     j("POST", f"/approvals/{hit[0]['call_id']}", {"decision": "deny"})
     wait_done(rid)
     assert all(a["call_id"] != hit[0]["call_id"] for a in j("GET", "/inbox")["needs_you"]["approvals"])
+
+
+# ---------------- one-off tasks ----------------
+def once_job(name: str, run_at: float, prompt: str = "report", *, at: float, enabled: bool = True) -> dict[str, Any]:
+    return jobs.create(f"{name} {time.time()}", "", prompt, kind="once", run_at=run_at, timezone="UTC",
+                       enabled=enabled, at=at)
+
+
+def tool(name: str, args: dict[str, Any], *, proposal_only: bool = False) -> Any:
+    ctx = {"project_id": None, "conversation_id": None, "settings": appmod.settings(),
+           "tainted": False, "taint_sources": [], "allowed_urls": set(), "proposal_only": proposal_only}
+    return asyncio.run(appmod.toolbox.call(name, args, ctx))
+
+
+def iso_in(seconds: float) -> str:
+    """A local ISO-8601 stamp that far from the real clock. The HTTP and tool layers refuse backdated times, so
+    these tests cannot use T0 for them the way the scheduler tests do."""
+    return time.strftime("%Y-%m-%dT%H:%M", time.localtime(time.time() + seconds))
+
+
+def test_parse_when_reads_an_iso_instant_and_refuses_anything_vague() -> None:
+    NOON_UTC = 1790866800.0  # 2026-10-01 15:00:00 UTC
+    assert parse_when("2026-10-01T15:00", "UTC") == NOON_UTC
+    assert parse_when("2026-10-01 15:00", "UTC") == NOON_UTC, "a space instead of a T is what people type"
+    assert parse_when("2026-10-01T15:00:30", "UTC") == NOON_UTC + 30
+    # No offset means "in this timezone", so the same wall clock in two zones is two instants.
+    assert parse_when("2026-10-01T15:00", "Europe/Berlin") == NOON_UTC - 2 * HOUR
+    assert parse_when("2026-10-01T15:00+02:00", "UTC") == NOON_UTC - 2 * HOUR, "an explicit offset wins"
+    assert parse_when("2026-10-01", "UTC") is None, "a bare date is not a time of day"
+    assert parse_when("next Tuesday", "UTC") is None and parse_when("", "UTC") is None
+    assert valid_schedule("once", None, NOON_UTC) and not valid_schedule("once", "0 * * * *", None)
+    assert valid_schedule("cron", "0 * * * *", None) and not valid_schedule("cron", "nope", None)
+
+
+def test_a_one_off_fires_at_its_instant_and_then_switches_itself_off() -> None:
+    ROUNDS.append(["done that"])
+    job = once_job("one-off", T0 + HOUR, at=T0)
+    assert job["kind"] == "once" and job["cron"] == "" and job["next_due_at"] == T0 + HOUR
+
+    assert tick(T0 + HOUR - 60) == [], "not due yet"
+    fired = tick(T0 + HOUR)
+    assert len(fired) == 1 and fired[0]["due_at"] == T0 + HOUR and fired[0]["missed_slots"] == 0
+    assert fired[0]["late"] is False and fired[0]["kind"] == "once"
+
+    row = jobs.get(job["id"])
+    assert row["enabled"] is False, "a one-off retires instead of sitting enabled with nothing to wait for"
+    assert row["next_due_at"] is None and row["last_due_at"] == T0 + HOUR and row["last_fired_at"] == T0 + HOUR
+    assert spent(row) is True
+
+    assert tick(T0 + 2 * HOUR) == [] and tick(T0 + 40 * HOUR) == [], "once means once"
+    runs = job_runs(job["id"])
+    assert len(runs) == 1 and runs[0]["kind"] == "job" and runs[0]["input"]["kind"] == "once"
+
+    entry = next(e for e in j("GET", "/inbox")["while_you_were_away"] if e["job_id"] == job["id"])
+    assert entry["kind"] == "once" and entry["late"] is False
+
+
+def test_a_one_off_missed_while_the_app_was_closed_still_runs_and_is_told_it_is_late() -> None:
+    ROUNDS.append(["sorry, late"])
+    job = once_job("missed one-off", T0 + HOUR, "check the invoice", at=T0)
+    fired = tick(T0 + 9 * HOUR)  # the lid was shut over its instant
+    assert len(fired) == 1
+    assert fired[0]["due_at"] == T0 + HOUR, "it runs for the instant it was set to, not for now"
+    assert fired[0]["late"] is True and fired[0]["late_seconds"] == 8 * HOUR
+    assert fired[0]["missed_slots"] == 0, "a one-off has no other slots to skip"
+
+    run = job_runs(job["id"])[0]
+    convo = j("GET", f"/conversations/{run['conversation_id']}")
+    first = next(m for m in convo["messages"] if m["role"] == "user")
+    assert "only starting now" in first["content"] and "check the invoice" in first["content"]
+    assert "earlier run" not in first["content"], "nothing was skipped, so it must not claim any were"
+    assert jobs.get(job["id"])["next_due_at"] is None
+
+
+def test_a_spent_one_off_is_never_re_armed_and_is_rescheduled_by_moving_its_time() -> None:
+    ROUNDS.append(["first"])
+    job = once_job("spent", T0 + HOUR, at=T0)
+    tick(T0 + HOUR)
+    assert spent(jobs.get(job["id"]))
+
+    back_on = jobs.update(job["id"], {"enabled": True}, at=T0 + 2 * HOUR)
+    assert back_on["next_due_at"] is None, "there is no instant left to wait for"
+    assert jobs.arm(T0 + 2 * HOUR) >= 0 and jobs.get(job["id"])["next_due_at"] is None, "arm() does not revive it"
+    assert tick(T0 + 3 * HOUR) == [], "switching a fired task on does not quietly run it a second time"
+    assert "already ran" in j("PATCH", f"/jobs/{job['id']}", {"enabled": True}, expect=400)["detail"]
+
+    ROUNDS.append(["again, on purpose"])
+    moved = jobs.update(job["id"], {"run_at": T0 + 10 * HOUR, "enabled": True}, at=T0 + 4 * HOUR)
+    assert moved["next_due_at"] == T0 + 10 * HOUR and spent(moved) is False
+    assert len(tick(T0 + 10 * HOUR)) == 1, "a new time is a new task"
+    assert len(job_runs(job["id"])) == 2
+
+
+def test_a_one_off_with_no_time_at_all_is_disarmed_rather_than_spun_on() -> None:
+    job = once_job("broken", T0 + HOUR, at=T0)
+    with appmod.db.tx() as c:  # a row hand-edited into nonsense
+        c.execute("UPDATE jobs SET run_at=NULL, next_due_at=? WHERE id=?", (T0, job["id"]))
+    assert tick(T0 + HOUR) == []
+    row = jobs.get(job["id"])
+    assert row["next_due_at"] is None and row["enabled"] is False and "no time to run at" in (row["last_error"] or "")
+
+
+def test_the_one_off_api_round_trips_and_refuses_a_time_that_has_passed() -> None:
+    soon = time.time() + 3 * HOUR
+    made = j("POST", "/jobs", {"name": "API one-off", "kind": "once", "run_at": soon, "prompt": "do it once"})
+    assert made["kind"] == "once" and made["cron"] == "" and made["run_at"] == soon
+    assert made["enabled"] is False and made["next_due_at"] is None
+    on = j("PATCH", f"/jobs/{made['id']}", {"enabled": True})
+    assert on["next_due_at"] == soon, "a one-off is armed to its instant, not to the next cron slot"
+
+    j("POST", "/jobs", {"name": "no time", "kind": "once", "prompt": "x"}, expect=400)
+    j("POST", "/jobs", {"name": "yesterday", "kind": "once", "run_at": time.time() - HOUR, "prompt": "x"}, expect=400)
+    j("POST", "/jobs", {"name": "no cron", "kind": "cron", "prompt": "x"}, expect=400)
+    j("POST", "/jobs", {"name": "nonsense kind", "kind": "sometimes", "run_at": soon, "prompt": "x"}, expect=400)
+    j("PATCH", f"/jobs/{made['id']}", {"run_at": time.time() - HOUR}, expect=400)
+    # Switching kind without supplying the other half of the schedule is a 400, not a crash while arming.
+    assert "needs a cron" in j("PATCH", f"/jobs/{made['id']}", {"kind": "cron"}, expect=400)["detail"]
+    cron_job = j("POST", "/jobs", {"name": "repeating", "cron": "0 9 * * *", "prompt": "x"})
+    assert "needs run_at" in j("PATCH", f"/jobs/{cron_job['id']}", {"kind": "once"}, expect=400)["detail"]
+    swapped = j("PATCH", f"/jobs/{cron_job['id']}", {"kind": "once", "run_at": soon, "enabled": True})
+    assert swapped["kind"] == "once" and swapped["cron"] == "" and swapped["next_due_at"] == soon
+    assert j("DELETE", f"/jobs/{cron_job['id']}") == {"ok": True}
+    assert j("DELETE", f"/jobs/{made['id']}") == {"ok": True}
+
+
+# ---------------- the assistant schedules its own follow-up work ----------------
+def test_schedule_task_books_a_one_off_and_a_repeating_job() -> None:
+    out = tool("schedule_task", {"name": "Chase the invoice", "prompt": "Check whether Acme replied.",
+                                 "when": iso_in(3 * HOUR)})
+    assert out.get("scheduled") is True and out["repeats"] is False and out["enabled"] is True
+    row = jobs.get(out["id"])
+    assert row["kind"] == "once" and row["prompt"] == "Check whether Acme replied."
+    assert abs(row["run_at"] - (time.time() + 3 * HOUR)) < 120
+
+    rel = tool("schedule_task", {"name": "Check the build", "prompt": "Did the deploy finish?", "in_minutes": 45})
+    assert abs(jobs.get(rel["id"])["run_at"] - (time.time() + 45 * 60)) < 5
+
+    rep = tool("schedule_task", {"name": "Weekly review", "prompt": "Write my weekly review.", "cron": "0 17 * * 5"})
+    assert rep["repeats"] is True and rep["schedule"] == "0 17 * * 5"
+    assert jobs.get(rep["id"])["kind"] == "cron" and rep["next_run"]
+
+    for bad, field in (({"name": "x", "prompt": "y", "when": "next Tuesday"}, "when"),
+                       ({"name": "x", "prompt": "y", "when": "2026-10-01"}, "when"),
+                       ({"name": "x", "prompt": "y", "when": "2020-01-01T09:00"}, "when"),
+                       ({"name": "x", "prompt": "y", "cron": "every morning"}, "cron"),
+                       ({"name": " ", "prompt": "y", "when": iso_in(HOUR)}, "name"),
+                       ({"name": "x", "prompt": " ", "when": iso_in(HOUR)}, "prompt")):
+        out = tool("schedule_task", bad)
+        assert "error" in out and out.get("field") == field, (bad, out)
+    both = tool("schedule_task", {"name": "x", "prompt": "y", "when": iso_in(HOUR), "cron": "0 9 * * *"})
+    assert "error" in both and "one schedule" in both["error"]
+
+
+def test_listing_and_cancelling_scheduled_tasks() -> None:
+    mine = tool("schedule_task", {"name": "Cancel me", "prompt": "nothing", "when": iso_in(5 * HOUR)})
+    listed = tool("scheduled_tasks", {})
+    assert [t["id"] for t in listed["tasks"]] == [mine["id"]], "only what is switched on"
+    assert listed["count"] == 1 and listed["tasks"][0]["next_run"]
+
+    off = tool("cancel_scheduled_task", {"id": mine["id"]})
+    assert off["cancelled"] is True and off["enabled"] is False
+    assert jobs.get(mine["id"])["next_due_at"] is None, "cancelling disarms it"
+    assert tool("scheduled_tasks", {})["tasks"] == []
+    assert any(t["id"] == mine["id"] for t in tool("scheduled_tasks", {"include_off": True})["tasks"])
+
+    again = tool("cancel_scheduled_task", {"id": mine["id"]})
+    assert again["cancelled"] is False and "already switched off" in again["note"]
+    assert "error" in tool("cancel_scheduled_task", {"id": "nope"})
+    assert jobs.get(mine["id"]) is not None, "cancelling keeps the row; only the user deletes it"
+
+
+def test_a_scheduled_run_cannot_schedule_more_work_and_proposes_instead() -> None:
+    """The anti-loop rule: a job that could create jobs is an agent that keeps itself alive."""
+    refused = tool("schedule_task", {"name": "loop", "prompt": "do it again", "in_minutes": 5}, proposal_only=True)
+    assert "error" in refused and "loop" in refused["error"]
+    assert not any(x["name"] == "loop" for x in jobs.list()), "nothing was booked"
+    assert "error" in tool("cancel_scheduled_task", {"id": "whatever"}, proposal_only=True)
+    assert "error" not in tool("scheduled_tasks", {}, proposal_only=True), "reading what is scheduled is fine"
+
+    # End to end: the call from a real job run becomes a proposal, and accepting it is what schedules the task.
+    args = {"name": f"Follow up {time.time()}", "prompt": "Check whether they replied.", "in_minutes": 90}
+    ROUNDS.append({"tool_calls": [call("schedule_task", args)]})
+    ROUNDS.append(["I proposed a follow-up."])
+    job = make_job("scheduler", "0 * * * *", "chase this up later", at=T0)
+    tick(T0 + HOUR)
+    run = job_runs(job["id"])[0]
+    assert run["status"] == "done"
+    assert not any(x["name"] == args["name"] for x in jobs.list()), "a background run books nothing by itself"
+
+    pending = [p for p in proposals.list("pending", run_id=run["run_id"]) if p["tool"] == "schedule_task"]
+    assert len(pending) == 1
+    res = j("POST", f"/proposals/{pending[0]['id']}/accept")
+    assert res["ok"] is True
+    booked = next(x for x in jobs.list() if x["name"] == args["name"])
+    assert booked["kind"] == "once" and booked["enabled"] is True and booked["next_due_at"] is not None
+    j("POST", f"/proposals/{pending[0]['id']}/accept", expect=409)
+

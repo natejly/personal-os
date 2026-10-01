@@ -58,6 +58,7 @@ RESERVED_TOOL_NAMES = frozenset({
     "activity_recent", "activity_pause",
     "find_files", "read_local_file", "write_local_file", "move_local_file", "trash_local_file",
     "list_shortcuts", "run_shortcut", "open_page",
+    "schedule_task", "scheduled_tasks", "cancel_scheduled_task",
 })
 
 SCHEMA = """

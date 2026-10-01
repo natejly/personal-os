@@ -36,7 +36,8 @@ from .dashboards import Dashboards, generate_recap, generate_summary, generate_w
 from .docs import Docs, unified_diff
 from . import cache as google_cache
 from .google import Google, GoogleNotConnected, json_safe
-from .jobs import PROPOSAL_STATUSES, Jobs, Proposals, Scheduler, local_tz_name, valid_cron, valid_tz
+from .jobs import (KINDS, PROPOSAL_STATUSES, Jobs, Proposals, Scheduler, local_tz_name, spent, valid_cron,
+                   valid_tz)
 from .microvm import Sandboxes
 from .notes import Notes
 from .gtasks import TasksSync
@@ -280,7 +281,7 @@ work_plans = WorkPlans(db)
 tool_results = ToolResults(db)
 skills = Skills(db)
 toolbox = Toolbox(memories, graph, documents, settings, todos=todos, google=google, boards=boards, sandboxes=sandboxes, docs=docs, activity=monitor,
-                  outbox=outbox, work_plans=work_plans, results=tool_results, skills=skills)
+                  outbox=outbox, work_plans=work_plans, results=tool_results, skills=skills, jobs=jobs)
 
 
 def sid(project_id: str | None) -> str | None:
@@ -516,7 +517,8 @@ JOB_HINT = ("## This is a scheduled background run\nNobody is watching it. Anyth
             "(sending or drafting mail, calendar writes, Google Docs/Sheets/Tasks) cannot be executed here: such a "
             "call is recorded as a proposal for the user to accept, edit or reject, and that is enforced outside your "
             "control. So propose freely, do not retry a refused call, and write a short report of what you found and "
-            "what you proposed. Reading, searching, todos, notes and memory work normally.")
+            "what you proposed. Reading, searching, todos, notes and memory work normally. You also cannot "
+            "schedule further runs from in here: that too becomes a proposal.")
 
 
 def _caps(cfg: dict[str, Any], caps: dict[str, Any]) -> dict[str, Any]:
@@ -1297,8 +1299,12 @@ scheduler = Scheduler(jobs, _launch_job)
 
 class JobIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
-    cron: str = Field(min_length=1, max_length=120)
     prompt: str = Field(min_length=1, max_length=8000)
+    # kind='cron' wants `cron`; kind='once' wants `run_at`, a unix timestamp. Neither is required by the model
+    # itself because which one is required depends on the other field; _check_schedule says so properly.
+    kind: str = "cron"
+    cron: str = Field(default="", max_length=120)
+    run_at: float | None = None
     timezone: str | None = None
     enabled: bool = False
     project_id: str | None = None
@@ -1306,18 +1312,40 @@ class JobIn(BaseModel):
 
 class JobPatch(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
-    cron: str | None = Field(default=None, min_length=1, max_length=120)
     prompt: str | None = Field(default=None, min_length=1, max_length=8000)
+    kind: str | None = None
+    cron: str | None = Field(default=None, max_length=120)
+    run_at: float | None = None
     timezone: str | None = None
     enabled: bool | None = None
     project_id: str | None = None
 
 
-def _check_schedule(expr: str | None, tz: str | None) -> None:
-    if expr is not None and not valid_cron(expr):
-        raise HTTPException(400, f"'{expr}' is not a cron expression I can read (five fields, e.g. '30 7 * * *')")
+# How far in the past a one-off may be set, on a write. The scheduler is happy to run a late task — that is the
+# catch-up rule — but a *new* task dated yesterday is a mistake, and firing it instantly is not what was meant.
+BACKDATE_GRACE_S = 120.0
+
+
+def _check_schedule(kind: str, expr: str | None, tz: str | None, run_at: float | None, *, fresh_time: bool) -> None:
+    """Reject a schedule the scheduler could not read. Always checked against the schedule the row would *end up*
+    with, so switching kind without supplying the other field is a 400 and not a crash in the arming code.
+
+    `fresh_time` also rejects a one-off set in the past, and is on only for a time this write supplies: an
+    instant that went by while the job sat disabled is a catch-up, which the scheduler handles on purpose.
+    """
+    if kind not in KINDS:
+        raise HTTPException(400, f"'{kind}' is not a schedule kind ('cron' for a repeating job, 'once' for a one-off)")
     if tz and not valid_tz(tz):
         raise HTTPException(400, f"'{tz}' is not a timezone name (e.g. 'Europe/Berlin')")
+    if kind == "cron":
+        if not valid_cron(expr or ""):
+            raise HTTPException(400, f"'{expr}' is not a cron expression I can read (five fields, e.g. '30 7 * * *')"
+                                     if expr else "A repeating job needs a cron expression (five fields, e.g. '30 7 * * *')")
+        return
+    if run_at is None:
+        raise HTTPException(400, "A one-off task needs run_at, the unix timestamp to run it at")
+    if fresh_time and run_at < time.time() - BACKDATE_GRACE_S:
+        raise HTTPException(400, f"{_stamp(run_at)} has already passed — give a time in the future")
 
 
 @app.get("/jobs")
@@ -1328,9 +1356,9 @@ def list_jobs() -> list[dict[str, Any]]:
 
 @app.post("/jobs")
 def create_job(body: JobIn) -> dict[str, Any]:
-    _check_schedule(body.cron, body.timezone)
-    return jobs.create(body.name, body.cron, body.prompt, timezone=body.timezone, enabled=body.enabled,
-                       project_id=wsid(body.project_id))
+    _check_schedule(body.kind, body.cron, body.timezone, body.run_at, fresh_time=True)
+    return jobs.create(body.name, body.cron, body.prompt, kind=body.kind, run_at=body.run_at,
+                       timezone=body.timezone, enabled=body.enabled, project_id=wsid(body.project_id))
 
 
 @app.patch("/jobs/{id}")
@@ -1341,7 +1369,14 @@ def update_job(id: str, body: JobPatch) -> dict[str, Any]:
     cur = jobs.get(id)
     if not cur:
         raise HTTPException(404, "No such job")
-    _check_schedule(patch.get("cron"), patch.get("timezone"))
+    merged = {**cur, **patch}
+    _check_schedule(merged["kind"], merged["cron"], patch.get("timezone"), merged["run_at"],
+                    fresh_time="run_at" in patch)
+    # Switching a spent one-off back on is the one re-arm that cannot work: it has no instant left to wait for,
+    # so say that instead of leaving the toggle on with nothing scheduled behind it.
+    if patch.get("enabled") and merged["kind"] == "once" and "run_at" not in patch and spent(cur):
+        raise HTTPException(400, f"That one-off already ran ({_stamp(cur['last_fired_at'])}). "
+                                 "Give it a new run_at to schedule it again.")
     job = jobs.update(id, patch)
     if not job:
         raise HTTPException(404, "No such job")
@@ -1363,7 +1398,7 @@ async def run_job_now(id: str) -> dict[str, Any]:
     if not job:
         raise HTTPException(404, "No such job")
     t = time.time()
-    fire = {"job_id": job["id"], "job": job["name"], "cron": job["cron"], "timezone": job["timezone"],
+    fire = {"job_id": job["id"], "job": job["name"], "kind": job["kind"], "cron": job["cron"], "timezone": job["timezone"],
             "due_at": t, "fired_at": t, "late_seconds": 0.0, "missed_slots": 0, "late": False, "manual": True}
     run_id = await _launch_job(job, fire)
     jobs.mark_launched(job["id"], run_id)
@@ -1447,7 +1482,7 @@ def agent_inbox(hours: float = 72.0, limit: int = 20) -> dict[str, Any]:
         mine = counts.get(r["run_id"], {})
         away.append({
             "run_id": r["run_id"], "conversation_id": r["conversation_id"], "status": r["status"],
-            "job_id": fire.get("job_id"), "job": fire.get("job") or "Scheduled job",
+            "job_id": fire.get("job_id"), "job": fire.get("job") or "Scheduled job", "kind": fire.get("kind") or "cron",
             "due_at": fire.get("due_at"), "fired_at": fire.get("fired_at") or r["started_at"],
             "late": bool(fire.get("late")), "late_seconds": fire.get("late_seconds") or 0.0,
             "missed_slots": fire.get("missed_slots") or 0, "manual": bool(fire.get("manual")),

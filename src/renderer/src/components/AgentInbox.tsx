@@ -7,7 +7,7 @@
  * its card, but no number, badge or state is read out of that text.
  */
 import { useState } from 'react'
-import { AlertTriangle, Check, ChevronDown, ChevronRight, Clock, Inbox, Pencil, Play, Timer, X } from 'lucide-react'
+import { AlertTriangle, Check, ChevronDown, ChevronRight, Clock, Inbox, Pencil, Play, Plus, Timer, Trash2, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { AgentProposal, Job, JobRunSummary } from '@shared/types'
@@ -20,6 +20,9 @@ const fmtWhen = (ts: number): string => {
   const today = new Date().toDateString() === d.toDateString()
   return today ? fmtClock(ts) : d.toLocaleDateString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })
 }
+/** A one-off's instant can be weeks out, so it carries its date where fmtWhen would only say the weekday. */
+const fmtDate = (ts: number): string =>
+  new Date(ts * 1000).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
 const fmtLate = (seconds: number): string => {
   const m = Math.round(seconds / 60)
   return m < 60 ? `${Math.max(1, m)} min late` : m < 1440 ? `${Math.round(m / 60)} h late` : `${Math.round(m / 1440)} d late`
@@ -113,19 +116,85 @@ function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
 }
 
 function JobRow({ job }: { job: Job }): JSX.Element {
-  const { setJobEnabled, runJobNow } = useStore()
+  const { setJobEnabled, runJobNow, deleteJob } = useStore()
+  const once = job.kind === 'once'
+  // A one-off that has already fired has no slot left to wait for, so it is shown as what it did rather than
+  // as a switch: the backend refuses to re-arm it, and a toggle that does nothing is worse than no toggle.
+  const spent = once && job.last_fired_at !== null && job.next_due_at === null
+
   return (
-    <li>
-      <label className="chip-check-row">
-        <input type="checkbox" checked={job.enabled} onChange={() => void setJobEnabled(job.id, !job.enabled)} />
-        <span className="ev-title">{job.name}</span>
-      </label>
-      <code className="muted small">{job.cron}</code>
-      <span className="muted small">{job.enabled && job.next_due_at ? `next ${fmtWhen(job.next_due_at)}` : 'off'}</span>
+    <li className={spent ? 'spent' : undefined}>
+      {spent ? (
+        <span className="chip-check-row ev-title">{job.name}</span>
+      ) : (
+        <label className="chip-check-row">
+          <input type="checkbox" checked={job.enabled} onChange={() => void setJobEnabled(job.id, !job.enabled)} />
+          <span className="ev-title">{job.name}</span>
+        </label>
+      )}
+      {once
+        ? <span className="muted small">{job.run_at ? fmtDate(job.run_at) : 'no time set'}</span>
+        : <code className="muted small">{job.cron}</code>}
+      <span className="muted small">
+        {spent
+          ? `ran ${fmtWhen(job.last_fired_at as number)}`
+          : job.enabled && job.next_due_at ? `next ${fmtWhen(job.next_due_at)}` : 'off'}
+      </span>
       <button className="icon-btn sm" title="Run it now" aria-label={`Run ${job.name} now`} onClick={() => void runJobNow(job.id)}>
         <Play size={12} />
       </button>
+      <button className="icon-btn sm" title="Delete" aria-label={`Delete ${job.name}`}
+        onClick={() => { if (confirm(`Delete “${job.name}”?`)) void deleteJob(job.id) }}>
+        <Trash2 size={12} />
+      </button>
     </li>
+  )
+}
+
+const BLANK = { name: '', prompt: '', when: '', cron: '', repeat: false }
+
+/** Schedule a task by hand: a one-off instant by default, a cron expression if it should repeat. */
+function NewTask({ onDone }: { onDone: () => void }): JSX.Element {
+  const createJob = useStore((s) => s.createJob)
+  const [f, setF] = useState(BLANK)
+  const [busy, setBusy] = useState(false)
+  const ready = !!f.name.trim() && !!f.prompt.trim() && (f.repeat ? !!f.cron.trim() : !!f.when)
+
+  const submit = async (e: React.FormEvent): Promise<void> => {
+    e.preventDefault()
+    if (!ready || busy) return
+    setBusy(true)
+    const common = { name: f.name.trim(), prompt: f.prompt.trim(), enabled: true }
+    // datetime-local has no zone, so Date.parse reads it as local time — which is what the user typed.
+    const ok = await createJob(f.repeat
+      ? { ...common, kind: 'cron' as const, cron: f.cron.trim() }
+      : { ...common, kind: 'once' as const, run_at: Math.round(Date.parse(f.when) / 1000) })
+    setBusy(false)
+    if (ok) {
+      setF(BLANK)
+      onDone()
+    }
+  }
+
+  return (
+    <form className="new-task" onSubmit={(e) => void submit(e)}>
+      <input placeholder="Name, e.g. Chase the invoice" value={f.name} maxLength={120}
+        onChange={(e) => setF({ ...f, name: e.target.value })} />
+      <textarea rows={2} placeholder="What should it do? It runs in a fresh chat, so write it so it stands alone."
+        value={f.prompt} maxLength={8000} onChange={(e) => setF({ ...f, prompt: e.target.value })} />
+      <div className="new-task-when">
+        <label className="chip-check-row">
+          <input type="checkbox" checked={f.repeat} onChange={(e) => setF({ ...f, repeat: e.target.checked })} />
+          <span>Repeat</span>
+        </label>
+        {f.repeat
+          ? <input type="text" placeholder="cron, e.g. 0 17 * * 5" value={f.cron} aria-label="Cron expression"
+              onChange={(e) => setF({ ...f, cron: e.target.value })} />
+          : <input type="datetime-local" value={f.when} aria-label="When it should run"
+              onChange={(e) => setF({ ...f, when: e.target.value })} />}
+        <button className="primary-btn sm" type="submit" disabled={!ready || busy}>Schedule</button>
+      </div>
+    </form>
   )
 }
 
@@ -134,6 +203,7 @@ export default function AgentInbox(): JSX.Element | null {
   const jobs = useStore((s) => s.jobs)
   const { approveTool, refreshJobs } = useStore()
   const [showJobs, setShowJobs] = useState(false)
+  const [adding, setAdding] = useState(false)
 
   if (!box) return null
   const { approvals, proposals } = box.needs_you
@@ -143,6 +213,7 @@ export default function AgentInbox(): JSX.Element | null {
   const toggleJobs = (): void => {
     setShowJobs((v) => !v)
     if (!showJobs) void refreshJobs()
+    else setAdding(false)
   }
 
   return (
@@ -152,17 +223,24 @@ export default function AgentInbox(): JSX.Element | null {
         {box.counts.needs_you > 0 && <span className="chip">{box.counts.needs_you} need you</span>}
         <span style={{ flex: 1 }} />
         {box.scheduler.next_due_at && <span className="muted small"><Timer size={11} /> next job {fmtWhen(box.scheduler.next_due_at)}</span>}
-        <button className={`icon-btn sm ${showJobs ? 'on' : ''}`} title="Scheduled jobs" aria-label="Scheduled jobs" onClick={toggleJobs}>
+        <button className={`icon-btn sm ${showJobs ? 'on' : ''}`} title="Scheduled tasks" aria-label="Scheduled tasks" onClick={toggleJobs}>
           <Clock size={13} />
         </button>
       </header>
 
       {showJobs && (
         <div className="inbox-jobs">
-          <h5>Scheduled jobs <span className="muted small">{box.scheduler.timezone}</span></h5>
+          <h5>
+            Scheduled tasks <span className="muted small">{box.scheduler.timezone}</span>
+            <span style={{ flex: 1 }} />
+            <button className={`icon-btn sm ${adding ? 'on' : ''}`} title="Schedule a task" aria-label="Schedule a task"
+              onClick={() => setAdding((v) => !v)}><Plus size={13} /></button>
+          </h5>
+          {adding && <NewTask onDone={() => setAdding(false)} />}
           {jobs.length === 0 ? <p className="muted">None yet.</p> : <ul>{jobs.map((j) => <JobRow key={j.id} job={j} />)}</ul>}
-          <p className="muted small">A job can read, search and write inside Grain. Anything that leaves the app — mail,
-            calendar, Docs — comes back here as a proposal; accepting it is what sends it.</p>
+          <p className="muted small">A scheduled task can read, search and write inside Grain. Anything that leaves the
+            app — mail, calendar, Docs — comes back here as a proposal; accepting it is what sends it. You can also just
+            ask in a chat: “tomorrow at 3pm, check whether they replied”.</p>
         </div>
       )}
 

@@ -279,6 +279,9 @@ export interface State {
   refreshRecap: (force?: boolean) => Promise<void>
   refreshAgentInbox: () => Promise<void>
   refreshJobs: () => Promise<void>
+  /** Schedule a task: a one-off (kind 'once' + run_at) or a repeating job (cron). True if it was created. */
+  createJob: (input: Parameters<typeof api.jobs.create>[0]) => Promise<boolean>
+  deleteJob: (id: string) => Promise<void>
   setJobEnabled: (id: string, enabled: boolean) => Promise<void>
   runJobNow: (id: string) => Promise<void>
   decideProposal: (id: string, accept: boolean, args?: Record<string, unknown>) => Promise<void>
@@ -1384,6 +1387,27 @@ export const useStore = create<State>((set, get) => {
     refreshJobs: async () => {
       try {
         set({ jobs: await api.jobs.list() })
+      } catch (e) {
+        get().toast(`Jobs: ${(e as Error).message}`, 'error')
+      }
+    },
+    createJob: async (input) => {
+      try {
+        const job = await api.jobs.create(input)
+        set((s) => ({ jobs: [...s.jobs, job].sort((a, b) => a.name.localeCompare(b.name)) }))
+        get().toast(`Scheduled: ${job.name}`, 'info')
+        void get().refreshAgentInbox()
+        return true
+      } catch (e) {
+        get().toast(`Jobs: ${(e as Error).message}`, 'error')
+        return false
+      }
+    },
+    deleteJob: async (id) => {
+      try {
+        await api.jobs.delete(id)
+        set((s) => ({ jobs: s.jobs.filter((j) => j.id !== id) }))
+        void get().refreshAgentInbox()
       } catch (e) {
         get().toast(`Jobs: ${(e as Error).message}`, 'error')
       }

@@ -89,6 +89,13 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Keep the system prompt identical between turns and put per-turn retrieval just before the newest
     # user message, so the provider's prefix cache survives (context.layout_messages).
     "cacheLayout": True,
+    # Context management (compaction.py). Window and thresholds are estimates (len//4), not provider counts.
+    "contextWindow": 128000,
+    "autoCompact": True,
+    "compactAt": 0.7,
+    "compactKeepRecent": 8,
+    "microKeep": 3,
+    "microAt": 0.5,
     # Per-reply budgets; 0 = unlimited. A run that hits one still writes a final answer, marked partial.
     "maxRunTokens": 200_000,
     "maxRunSeconds": 300,

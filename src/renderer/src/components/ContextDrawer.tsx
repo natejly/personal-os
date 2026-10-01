@@ -4,7 +4,7 @@ import { ToolOverrides } from './ToolPermissions'
 import TraceView from './TraceView'
 import { useStore, useProject, useConversation, useStreamingMessageId } from '../store'
 import { api } from '../lib/api'
-import type { ContextUsed, ConversationSettings } from '@shared/types'
+import type { ContextMeter, ContextUsed, ConversationSettings } from '@shared/types'
 
 function Toggle({ label, hint, value, onChange, icon }: { label: string; hint: string; value: boolean; onChange: (v: boolean) => void; icon: JSX.Element }): JSX.Element {
   return (
@@ -14,6 +14,42 @@ function Toggle({ label, hint, value, onChange, icon }: { label: string; hint: s
       <input type="checkbox" aria-label={label} checked={value} onChange={(e) => onChange(e.target.checked)} />
       <span className="switch" />
     </label>
+  )
+}
+
+/** Replayed history against the model window, with manual compaction and the summary it produced. */
+function ContextMeterView({ conversationId, refreshKey }: { conversationId: string; refreshKey: number }): JSX.Element | null {
+  const [meter, setMeter] = useState<ContextMeter | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const load = (): void => { void api.contextMeter(conversationId).then(setMeter).catch(() => setMeter(null)) }
+  useEffect(load, [conversationId, refreshKey])
+  if (!meter) return null
+  const frac = Math.min(1, meter.estimated_tokens / Math.max(1, meter.window))
+  const act = async (fn: () => Promise<unknown>): Promise<void> => {
+    setBusy(true)
+    setError(null)
+    try { await fn() } catch (e) { setError((e as Error).message) } finally { setBusy(false); load() }
+  }
+  return (
+    <section className="ctx-section">
+      <h4>Context window</h4>
+      <div className="ctx-meter" title={`${Math.round(meter.compact_at * 100)}% triggers automatic compaction`}>
+        <div className={`ctx-meter-fill ${frac >= meter.compact_at ? 'hot' : ''}`} style={{ width: `${frac * 100}%` }} />
+      </div>
+      <div className="ctx-meta">
+        <span>~{meter.estimated_tokens.toLocaleString()} of {meter.window.toLocaleString()} tokens</span>
+        <button className="link" disabled={busy} onClick={() => void act(() => api.compactConversation(conversationId))}>{busy ? 'compacting…' : 'Compact now'}</button>
+      </div>
+      {error && <p className="muted small">{error}</p>}
+      {meter.summary && (
+        <details className="ctx-summary">
+          <summary>Summary of earlier messages ({meter.summary.summarized_messages})</summary>
+          <pre>{meter.summary.summary}</pre>
+          <button className="link" disabled={busy} onClick={() => void act(() => api.discardSummary(conversationId))}>Discard summary</button>
+        </details>
+      )}
+    </section>
   )
 }
 
@@ -152,6 +188,8 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
           {project && <button className="link" onClick={() => openProject(project.id)}>open project</button>}
         </div>
       </section>
+
+      {convo && <ContextMeterView conversationId={convo.id} refreshKey={convo.messages?.length ?? 0} />}
 
       <section className="ctx-section">
         <h4>{convo ? 'This chat uses' : 'New chats use'}</h4>

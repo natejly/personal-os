@@ -367,7 +367,7 @@ export interface ToolEvent {
 /** Why a reply stopped early: a budget axis, or the repetition breaker. */
 export type PartialReason = 'rounds' | 'tokens' | 'time' | 'cost' | 'loop'
 
-export type SpanKind = 'context' | 'llm' | 'tool' | 'learn'
+export type SpanKind = 'context' | 'llm' | 'tool' | 'learn' | 'compact'
 
 /** One timed step in the execution trace of an assistant reply. */
 export interface Span {
@@ -380,6 +380,14 @@ export interface Span {
   end: number | null
   meta: Record<string, unknown>
   error: string | null
+}
+
+/** GET /conversations/{id}/context-meter: the replayed history against the model window (estimates, len/4). */
+export interface ContextMeter {
+  window: number
+  estimated_tokens: number
+  compact_at: number
+  summary: { summary: string; summarized_messages: number; tokens_before: number; tokens_after: number; updated_at: number } | null
 }
 
 export interface Message {
@@ -818,6 +826,13 @@ export interface Settings {
   maxToolRounds: number
   /** Keep the system prompt stable and put per-turn retrieval beside the newest message (prompt caching). Default on. */
   cacheLayout?: boolean
+  /** Context management (compaction.py): window in tokens, thresholds as fractions of it. */
+  contextWindow?: number
+  autoCompact?: boolean
+  compactAt?: number
+  compactKeepRecent?: number
+  microKeep?: number
+  microAt?: number
   /** Per-reply budgets; 0 means unlimited. */
   maxRunTokens?: number
   maxRunSeconds?: number

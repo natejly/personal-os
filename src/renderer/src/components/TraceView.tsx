@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Layers, Sparkles, Wrench, Wand2, AlertCircle, ChevronRight } from 'lucide-react'
+import { Layers, Sparkles, Wrench, Wand2, Shrink, AlertCircle, ChevronRight } from 'lucide-react'
 import type { Span, SpanKind } from '@shared/types'
 
 /** Waterfall view of one assistant reply's execution trace. */
@@ -20,8 +20,8 @@ export function traceSummary(spans: Span[]): { steps: number; total_ms: number; 
   }
 }
 
-const ICON: Record<SpanKind, JSX.Element> = { context: <Layers size={12} />, llm: <Sparkles size={12} />, tool: <Wrench size={12} />, learn: <Wand2 size={12} /> }
-const LABEL: Record<SpanKind, string> = { context: 'Context', llm: 'Model', tool: 'Tool', learn: 'Auto-learn' }
+const ICON: Record<SpanKind, JSX.Element> = { context: <Layers size={12} />, llm: <Sparkles size={12} />, tool: <Wrench size={12} />, learn: <Wand2 size={12} />, compact: <Shrink size={12} /> }
+const LABEL: Record<SpanKind, string> = { context: 'Context', llm: 'Model', tool: 'Tool', learn: 'Auto-learn', compact: 'Compaction' }
 
 function detail(s: Span): string {
   const m = s.meta
@@ -48,6 +48,10 @@ function detail(s: Span): string {
       const str = String(first ?? '')
       return [str.length > 70 ? str.slice(0, 70) + '…' : str, n('images') && `${n('images')} image${n('images') > 1 ? 's' : ''}`].filter(Boolean).join(' · ')
     }
+    case 'compact':
+      return m.kind === 'micro'
+        ? `cleared ${n('cleared')} old tool result${n('cleared') === 1 ? '' : 's'} · ~${n('tokens_saved').toLocaleString()} tokens`
+        : `summarized ${n('summarized')} messages · ~${n('tokens_before').toLocaleString()} → ~${n('tokens_after').toLocaleString()} tokens`
     case 'learn':
       return s.end === null ? 'extracting…' : [n('memories') && `+${n('memories')} memories`, n('entities') && `+${n('entities')} entities`, n('relations') && `+${n('relations')} relations`].filter(Boolean).join(' · ') || 'nothing new'
   }

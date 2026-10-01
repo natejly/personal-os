@@ -1,5 +1,5 @@
 import type {
-  BackgroundEvent, ChatEvent, ToolInfo, Todo, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, DriveFile, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Recap, Conversation, ConversationSettings, ContextUsed, Document, GraphData, GraphEdge, GraphNode, Message,
+  BackgroundEvent, ChatEvent, ToolInfo, Todo, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, DriveFile, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Recap, Conversation, ConversationSettings, ContextUsed, ContextMeter, Document, GraphData, GraphEdge, GraphNode, Message,
   ApprovalDecision, PlanEdit,
   Memory, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo,
   Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
@@ -299,6 +299,10 @@ export const api = {
     setPrices: (modelPrices: Record<string, { input: number; output: number }>) =>
       req<{ repriced: number; prices: Record<string, ModelPrice> }>('/usage/prices', { method: 'PUT', body: json({ modelPrices }) })
   },
+  contextMeter: (conversationId: string) => req<ContextMeter>(`/conversations/${conversationId}/context-meter`),
+  compactConversation: (conversationId: string, focus?: string) =>
+    req<{ compacted: boolean }>(`/conversations/${conversationId}/compact`, { method: 'POST', body: json({ focus: focus ?? null }) }),
+  discardSummary: (conversationId: string) => req<{ removed: boolean }>(`/conversations/${conversationId}/summary`, { method: 'DELETE' }),
   contextPreview: (projectId: string | null, query: string, convSettings?: Partial<ConversationSettings>) =>
     req<ContextUsed>('/context/preview', { method: 'POST', body: json({ project_id: projectId, query, conv_settings: convSettings ?? {} }) }),
   memories: {

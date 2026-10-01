@@ -878,6 +878,11 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .ctx-preview { padding: 10px 14px; }
 .ctx-preview input { width: 100%; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 8px 10px; outline: 0; margin-bottom: 10px; }
 .ctx-used { padding: 10px 14px; }
+.ctx-meter { height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; margin-bottom: 6px; }
+.ctx-meter-fill { height: 100%; background: var(--accent, #d97757); opacity: .7; }
+.ctx-meter-fill.hot { opacity: 1; }
+.ctx-summary { margin-top: 6px; font-size: 12px; }
+.ctx-summary pre { white-space: pre-wrap; max-height: 220px; overflow: auto; margin: 6px 0; font-size: 11px; color: var(--text-faint); }
 .ctx-meta { display: flex; justify-content: space-between; color: var(--text-faint); font-size: 11px; margin-bottom: 8px; }
 .ctx-prompt { font-size: 11px; white-space: pre-wrap; background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px; padding: 10px; max-height: 240px; overflow: auto; color: var(--text-muted); }
 .ctx-used section { margin-top: 12px; }

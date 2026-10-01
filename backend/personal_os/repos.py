@@ -190,6 +190,15 @@ class Conversations:
             ).fetchall()
         return [{"role": r["role"], "content": r["content"]} for r in rows]
 
+    def history_rows(self, conv_id: str) -> list[dict[str, Any]]:
+        """history() with the ids and timestamps compaction needs to say where a summary ends."""
+        with self.db.tx() as c:
+            rows = c.execute(
+                "SELECT id, role, content, created_at FROM messages WHERE conversation_id=? AND content != '' ORDER BY created_at, rowid",
+                (conv_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
 
 # ---------------- Memories ----------------
 class Memories:

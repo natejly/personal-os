@@ -26,6 +26,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 from pydantic import AfterValidator, BaseModel, Field
 
 from . import activity, assist, llm, mac, mcp_eval, tools
+from . import compaction
 from .context import build_context, estimate_tokens, layout_messages
 from .db import Database, data_dir_from_env, new_id
 from .extract_text import extract_text
@@ -269,6 +270,15 @@ for _m in modules:
         app.include_router(_r)
 usage = Usage(db)
 pricing = Pricing()
+compactor = compaction.Compactor(db)
+app.include_router(compaction.router(compactor, convos, lambda: settings()))
+
+
+def _int_setting(cfg: dict[str, Any], key: str, default: int) -> int:
+    try:
+        return int(cfg.get(key, default))
+    except (TypeError, ValueError):
+        return default
 
 
 def _record_usage(ev: dict[str, Any]) -> None:
@@ -1027,7 +1037,6 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     tracer = Tracer()
     llm.usage_context.set({"conversation_id": conv_id, "project_id": conv["project_id"]})
     await pricing.refresh(cfg)
-    history = convos.history(conv_id)
     project = projects.get(conv["project_id"]) if conv["project_id"] else None
     cspan = tracer.start("context", "Assemble context", {"model": model})
     system, used = build_context(
@@ -1037,8 +1046,15 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         activity=monitor, skills=skills, style=style, meetings=meeting_svc,
         page=body.page_context.model_dump() if body.page_context else None,
     )
+    # Older messages are folded into a rolling summary when the replay outgrows the window (compaction.py).
+    history, cinfo = await compaction.prepare_history(compactor, convos, cfg, str(cfg.get("extractionModel") or model), conv_id,
+                                                      used["tokens_estimate"])
     tracer.end(cspan, {"memories": len(used["memories"]), "entities": len(used["nodes"]), "excerpts": len(used["chunks"]),
                        "history_messages": len(history)})
+    compact_span: dict[str, Any] | None = None
+    if cinfo.get("compacted"):
+        compact_span = tracer.start("compact", "Compact history", {"kind": "history"})
+        tracer.end(compact_span, {k: cinfo[k] for k in ("tokens_before", "tokens_after", "summarized")})
 
     am = convos.add_message(conv_id, "assistant", "", model=model)
 
@@ -1128,6 +1144,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     used["tokens_estimate"] = estimate_tokens(system)
     yield "assistant_message", {**am, "context_used": used}
     yield "span", {"message_id": am["id"], "span": cspan}
+    if compact_span:
+        yield "span", {"message_id": am["id"], "span": compact_span}
 
     budget = Budget(_caps(cfg, JOB_BUDGET) if proposal_only(run) else cfg)
     partial: str | None = None
@@ -1229,6 +1247,13 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             budget.rounds = _round - 1  # rounds already completed: the Nth round's tool calls must still be allowed to run
             round_start = len(buf)
             end: dict[str, Any] = {}
+            # Old tool results shrink to stubs once the run has filled half the window; read_tool_result still serves them.
+            n_cleared, n_saved = compaction.microcompact(messages, _int_setting(cfg, "microKeep", 3), _int_setting(cfg, "contextWindow", 128000),
+                                                         float(cfg.get("microAt", 0.5)))
+            if n_cleared:
+                mspan = tracer.start("compact", "Clear old tool results", {"kind": "micro"})
+                tracer.end(mspan, {"cleared": n_cleared, "tokens_saved": n_saved})
+                yield "span", {"message_id": am["id"], "span": mspan}
             _reinject_plan()  # last message in the context, after the previous round's tool results
             lspan = tracer.start("llm", model, {"round": _round, "messages": len(messages), "tools": len(tool_schemas)})
             yield "span", {"message_id": am["id"], "span": lspan}

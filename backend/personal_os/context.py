@@ -58,6 +58,7 @@ def build_context(
     page: dict[str, Any] | None = None,
     style: Any = None,
     meetings: Any = None,
+    doc_hits: list[dict[str, Any]] | None = None,
 ) -> tuple[str, dict[str, Any]]:
     """Returns (system_prompt, context_used)."""
     parts: list[str] = [global_system_prompt.strip()] if global_system_prompt.strip() else []
@@ -94,7 +95,8 @@ def build_context(
             used["edges"] = [{"id": e["id"], "relation": e["relation"], "source_id": e["source_id"], "target_id": e["target_id"]} for e in sub["edges"]]
 
     if conv_settings.get("useDocuments", True):
-        hits = documents.search(project_id, query)
+        # app.py precomputes hybrid hits (this function is sync); without them it is plain BM25.
+        hits = doc_hits if doc_hits is not None else documents.search(project_id, query)
         if hits:
             blocks = [f"### {h['name']} (chunk {h['idx'] + 1})\n{h['text']}" for h in hits]
             parts.append("## Relevant document excerpts\n" + "\n\n".join(blocks))

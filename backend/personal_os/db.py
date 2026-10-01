@@ -123,6 +123,15 @@ CREATE TABLE IF NOT EXISTS chunks (
   text TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_chunk_doc ON chunks(document_id, idx);
+-- float32 little-endian, L2-normalised, so cosine = dot (see embed.py). Rows for another model are stale.
+CREATE TABLE IF NOT EXISTS chunk_embeddings (
+  chunk_id TEXT PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,
+  document_id TEXT NOT NULL,
+  model TEXT NOT NULL,
+  dim INTEGER NOT NULL,
+  vec BLOB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chunk_emb_doc ON chunk_embeddings(document_id);
 
 -- Durable runs (see runs.RunStore). A run is a row; its SSE stream is a tail on run_events.
 -- status: running | awaiting_approval | done | error | interrupted

@@ -382,6 +382,7 @@ class Toolbox:
         # autonomy is exactly the boundary of the workspace directory, and the root is derived from
         # ctx["desk_id"] inside each handler so desk A cannot address desk B's files.
         self.desks, self.workspace = desks, workspace
+        self.retriever: Any = None  # hybrid document search (retrieval.py); set by app.py
         self.specs: dict[str, ToolSpec] = {}
         self._meetings_avail: tuple[float, bool] | None = None
         self._register()
@@ -535,10 +536,13 @@ class Toolbox:
 
         async def search_documents(ctx: dict[str, Any], query: str, limit: int = 8, offset: int = 0) -> Any:
             off, lim = max(0, int(offset)), max(1, min(int(limit), 20))
-            hits = self.documents.search(ctx["project_id"], query, limit=off + lim)
+            if self.retriever is not None:
+                hits = await self.retriever.search(ctx["project_id"], query, self.settings(), limit=off + lim)
+            else:
+                hits = self.documents.search(ctx["project_id"], query, limit=off + lim)
             rows = [{"document_id": h["document_id"], "document": h["name"], "chunk": h["idx"], "text": h["text"]} for h in hits]
             return page(rows, offset=off, limit=lim, key="results")
-        R("search_documents", ToolSpec("search_documents", "Full-text search over the user's uploaded documents (project knowledge + personal documents). Returns the best matching excerpts. Use it when the user asks about something that may be in their files.",
+        R("search_documents", ToolSpec("search_documents", "Search (keywords and meaning) over the user's uploaded documents (project knowledge + personal documents). Returns the best matching excerpts. Use it when the user asks about something that may be in their files.",
             _obj({"query": {"type": "string", "description": "Search terms or a short question"}, "limit": {"type": "integer", "default": 8}, "offset": {"type": "integer", "default": 0}}, ["query"]), search_documents, "knowledge",
             examples=[{"query": "notice period"}, {"query": "Q3 revenue forecast", "limit": 5}, {"query": "onboarding checklist", "limit": 8, "offset": 8}], taints=True))
 

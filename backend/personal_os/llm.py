@@ -103,6 +103,13 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # todos -> Google Calendar mirror; defaults in todocal.DEFAULT_CONFIG, patched through
     # /integrations/google/todo-calendar.
     "googleTodoCalendar": {},
+    # Document retrieval (retrieval.py). 'bm25' forces keyword-only; hybrid falls back to it when the
+    # embedding route is unavailable. The floor only drops vector-only hits (exact keyword hits survive).
+    "retrievalMode": "hybrid",
+    "embeddingModel": "qwen3-embedding-8b",
+    "retrievalMinSimilarity": 0.25,
+    "retrievalPerDocCap": 3,
+    "retrievalCandidates": 20,
 }
 
 

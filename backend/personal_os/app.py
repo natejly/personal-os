@@ -30,6 +30,8 @@ from .context import build_context, estimate_tokens
 from .db import Database, data_dir_from_env, new_id
 from .extract_text import extract_text
 from .learn import MAX_INJECTED_SKILLS, LearnJob, LearnWorker, Skills, induce_skill, skill_block
+from .embed import Embedder
+from .retrieval import Retriever
 from .repos import ALL, Conversations, Documents, Graph, Memories, Projects
 from .boards import Boards
 from .canvas import SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
@@ -311,6 +313,12 @@ meeting_svc = MeetingService(db, settings, llm.complete, meeting_store, google=g
 toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=google, boards=boards, sandboxes=sandboxes, docs=docs, activity=monitor,
                   outbox=outbox, work_plans=work_plans, results=tool_results, skills=skills, jobs=jobs,
                   style=style, meetings=meeting_svc, desks=desks, workspace=workspace)
+# Hybrid retrieval over uploaded documents. Uploads embed in the background; with no embedding route
+# every search is the old BM25 one.
+embedder = Embedder()
+retriever = Retriever(db, documents, embedder, docs=docs)
+documents.on_chunks = lambda did, _rows: retriever.schedule(settings, did)
+toolbox.retriever = retriever
 # The insights pass proposes automations, so it is told which tools this install actually has - an
 # unwired integration must not turn into a suggestion that cannot be carried out.
 monitor.insights.tools_fn = lambda: [t["name"] for t in toolbox.list() if t.get("available")]
@@ -1028,8 +1036,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     history = convos.history(conv_id)
     project = projects.get(conv["project_id"]) if conv["project_id"] else None
     cspan = tracer.start("context", "Assemble context", {"model": model})
+    doc_hits = await _doc_hits(conv["project_id"], user_text, cfg, conv["settings"])
     system, used = build_context(
-        memories=memories, graph=graph, documents=documents,
+        memories=memories, graph=graph, documents=documents, doc_hits=doc_hits,
         project=project, project_id=conv["project_id"], query=user_text,
         settings=cfg, conv_settings=conv["settings"], global_system_prompt=cfg["systemPrompt"],
         activity=monitor, skills=skills, style=style, meetings=meeting_svc,
@@ -2332,15 +2341,27 @@ class ContextPreviewIn(BaseModel):
     conv_settings: dict[str, Any] = {}
 
 
+async def _doc_hits(project_id: str | None, query: str, cfg: dict[str, Any], conv_settings: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """Pre-computed excerpts for build_context (which is sync). None = let it fall back to BM25."""
+    if not conv_settings.get("useDocuments", True):
+        return None
+    try:
+        return await retriever.search(project_id, query, cfg)
+    except Exception:  # noqa: BLE001 - retrieval must never break a reply
+        log.exception("retrieval failed; falling back to keyword search")
+        return None
+
+
 @app.post("/context/preview")
-def context_preview(body: ContextPreviewIn) -> dict[str, Any]:
+async def context_preview(body: ContextPreviewIn) -> dict[str, Any]:
     cfg = settings()
     project = projects.get(body.project_id) if sid(body.project_id) else None
+    conv_settings = {"useMemory": True, "useGraph": True, "useDocuments": True, "useActivity": True,
+                     "useSkills": True, "useStyle": True, "useMeetings": True, **body.conv_settings}
     _, used = build_context(
-        memories=memories, graph=graph, documents=documents, project=project, project_id=sid(body.project_id),
-        query=body.query, settings=cfg,
-        conv_settings={"useMemory": True, "useGraph": True, "useDocuments": True, "useActivity": True,
-                       "useSkills": True, "useStyle": True, "useMeetings": True, **body.conv_settings},
+        memories=memories, graph=graph, documents=documents, project=project,
+        doc_hits=await _doc_hits(sid(body.project_id), body.query, cfg, conv_settings), project_id=sid(body.project_id),
+        query=body.query, settings=cfg, conv_settings=conv_settings,
         global_system_prompt=cfg["systemPrompt"], activity=monitor, skills=skills, style=style, meetings=meeting_svc,
     )
     return used
@@ -2568,6 +2589,11 @@ def list_documents(project_id: str | None = None, include_global: bool = True) -
     return documents.list(sid(project_id), include_global)
 
 
+@app.get("/documents/index-status")
+def index_status() -> dict[str, Any]:
+    return retriever.status(settings())
+
+
 @app.get("/documents/{id}")
 def get_document(id: str) -> dict[str, Any]:
     d = documents.get(id)
@@ -2587,6 +2613,12 @@ async def upload_document(file: UploadFile = File(...), project_id: str | None =
     dest = db.data_dir / "uploads" / f"{new_id()}-{Path(name).name}"
     dest.write_bytes(data)
     return documents.create(wsid(project_id), name, file.content_type or "", len(data), str(dest), text)
+
+
+@app.post("/documents/embed-backfill")
+async def embed_backfill() -> dict[str, Any]:
+    """Embed every chunk that has no vector for the current model. Idempotent."""
+    return await retriever.embed_pending(settings())
 
 
 @app.delete("/documents/{id}")

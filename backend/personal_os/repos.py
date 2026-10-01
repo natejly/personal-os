@@ -418,6 +418,9 @@ def chunk_text(text: str) -> list[str]:
 class Documents:
     def __init__(self, db: Database):
         self.db = db
+        # Called after a document's chunks are stored: (document_id, [(chunk_id, text)]). The app wires
+        # it to background embedding, so an upload never waits on (or fails because of) the model.
+        self.on_chunks: Any = None
 
     def list(self, project_id: str | None, include_global: bool = True) -> list[dict[str, Any]]:
         where, args = _scope_clause(project_id, include_global)
@@ -435,6 +438,7 @@ class Documents:
     def create(self, project_id: str | None, name: str, mime: str, size: int, path: str, text: str) -> dict[str, Any]:
         did = new_id()
         chunks = chunk_text(text)
+        stored: list[tuple[str, str]] = []
         with self.db.tx() as c:
             c.execute(
                 "INSERT INTO documents(id,project_id,name,mime,size,path,text,chunk_count,created_at) VALUES(?,?,?,?,?,?,?,?,?)",
@@ -444,6 +448,12 @@ class Documents:
                 cid = new_id()
                 c.execute("INSERT INTO chunks(id,document_id,idx,text) VALUES(?,?,?,?)", (cid, did, i, ch))
                 c.execute("INSERT INTO chunks_fts(text, chunk_id, document_id) VALUES(?,?,?)", (ch, cid, did))
+                stored.append((cid, ch))
+        if self.on_chunks and stored:
+            try:
+                self.on_chunks(did, stored)
+            except Exception:  # noqa: BLE001 - indexing is best effort
+                pass
         return self.get(did)  # type: ignore[return-value]
 
     def delete(self, id: str) -> str | None:

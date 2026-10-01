@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronRight, Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, AlertCircle, Laptop, Zap, ListChecks, PenLine, ShieldAlert, ShieldCheck,
   FolderOpen, FileText, FilePen, Trash2, PackageCheck, CircleHelp, CircleCheck,
-  Youtube, Github, Rss, Undo2, AppWindow } from 'lucide-react'
-import type { DocRevision, ToolEvent, Verification } from '@shared/types'
+  Youtube, Github, Rss, Undo2, AppWindow, Bot } from 'lucide-react'
+import type { DocRevision, RunTapeEvent, ToolEvent, Verification } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore } from '../store'
 import DiffView from './DiffView'
@@ -15,6 +15,7 @@ import '../styles/docs.css'
 
 const ICONS: Record<string, JSX.Element> = {
   propose_plan: <ListChecks size={13} />,
+  agent_spawn: <Bot size={13} />, agent_wait: <Bot size={13} />, agent_stop: <Bot size={13} />, desk_start: <FolderOpen size={13} />,
   desk_list_files: <FolderOpen size={13} />, desk_read_file: <FileText size={13} />, desk_write_file: <FilePen size={13} />,
   desk_trash_file: <Trash2 size={13} />, desk_deliver: <PackageCheck size={13} />, desk_ask: <CircleHelp size={13} />,
   desk_done: <CircleCheck size={13} />, desk_import_sandbox: <FolderOpen size={13} />,
@@ -165,6 +166,69 @@ function ArtifactCard({ preview }: { preview: string }): JSX.Element | null {
   )
 }
 
+/** The subagent ids a spawn / wait / stop result names. The preview may be cut, so this reads ids out of the text. */
+export function agentIds(preview: string): string[] {
+  const out: string[] = []
+  for (const m of preview.matchAll(/agent_id\\?"\s*:\s*\\?"(sa_[0-9a-f]+)/g)) if (!out.includes(m[1])) out.push(m[1])
+  return out
+}
+
+const AGENT_DONE = ['done', 'error', 'interrupted']
+
+/** One child run: live status while it works, then its recorded calls on expand. */
+function AgentRunCard({ id }: { id: string }): JSX.Element {
+  const [status, setStatus] = useState('running')
+  const [cost, setCost] = useState<number | null>(null)
+  const [open, setOpen] = useState(false)
+  const [tape, setTape] = useState<RunTapeEvent[] | null>(null)
+  useEffect(() => {
+    let dead = false
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const poll = async (): Promise<void> => {
+      try {
+        const r = await api.agentRun(id)
+        if (dead) return
+        setStatus(r.status)
+        setCost(typeof r.budget?.cost === 'number' ? r.budget.cost : null)
+        if (!AGENT_DONE.includes(r.status)) timer = setTimeout(() => void poll(), 2000)
+      } catch { /* the row may not exist yet; try again */ if (!dead) timer = setTimeout(() => void poll(), 3000) }
+    }
+    void poll()
+    return () => { dead = true; if (timer) clearTimeout(timer) }
+  }, [id])
+  useEffect(() => {
+    if (!open) return
+    let dead = false
+    const load = (): void => { void api.agentTape(id).then((t) => { if (!dead) setTape(t) }).catch(() => undefined) }
+    load()
+    const iv = AGENT_DONE.includes(status) ? undefined : setInterval(load, 2000)
+    return () => { dead = true; if (iv) clearInterval(iv) }
+  }, [open, id, status])
+  return (
+    <div className="tool-doc-diff agent-run">
+      <button className="tool-head" onClick={() => setOpen((o) => !o)}>
+        <ChevronRight size={12} className={open ? 'rot90' : ''} />
+        <Bot size={13} />
+        <span className="tool-name">subagent {id.slice(-4)}</span>
+        <span className={`tag ${status === 'error' ? 'unproven' : ''}`}>{status === 'awaiting_approval' ? 'needs approval' : status}</span>
+        {cost !== null && cost > 0 && <span className="tool-ms">${cost.toFixed(3)}</span>}
+      </button>
+      {open && (
+        <div className="tool-body">
+          {!tape ? <p className="muted small">Loading…</p> : tape.filter((e) => e.event === 'tool_call' || e.event === 'tool_result').length === 0
+            ? <p className="muted small">No tool calls.</p>
+            : tape.filter((e) => e.event === 'tool_call' || e.event === 'tool_result').map((e) => (
+              <div key={e.seq} className="muted small">
+                {e.event === 'tool_call' ? '→ ' : '← '}{String(e.data.name ?? '')}{' '}
+                {e.event === 'tool_call' ? JSON.stringify(e.data.arguments ?? {}).slice(0, 140) : String(e.data.error ?? e.data.result_preview ?? '').slice(0, 140)}
+              </div>
+            ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function pretty(v: unknown): string {
   if (typeof v === 'string') {
     try { return JSON.stringify(JSON.parse(v), null, 2) } catch { return v }
@@ -261,6 +325,7 @@ export default function ToolEvents({ events, conversationId }: { events: ToolEve
             <ChevronRight size={12} className={open[t.id] ? 'rot90' : ''} />
             <span className="tool-icon">{ICONS[t.name] ?? <Wrench size={13} />}</span>
             <span className="tool-name">{t.name.replace(/_/g, ' ')}</span>
+            {t.agent && <span className="tag" title="Raised by a subagent">via {t.agent}</span>}
             <span className="tool-summary">{summary(t)}</span>
             <Verdict event={t} />
             {t.plan ? (
@@ -280,6 +345,7 @@ export default function ToolEvents({ events, conversationId }: { events: ToolEve
           )}
           {!t.pending && !t.error && t.undo?.snapshot_id && <UndoButton snapshotId={t.undo.snapshot_id} />}
           {t.name === 'doc_edit' && !t.pending && !t.error && t.result_preview && <DocEditDiff preview={t.result_preview} />}
+          {t.name.startsWith('agent_') && !t.pending && t.result_preview && agentIds(t.result_preview).map((id) => <AgentRunCard key={id} id={id} />)}
           {ARTIFACT_TOOLS.includes(t.name) && !t.pending && !t.error && t.result_preview && <ArtifactCard preview={t.result_preview} />}
           {t.pending && t.needs_approval && t.name === 'propose_plan' && <PlanApproval event={t} conversationId={conversationId} />}
           {/* A question is answered, not permitted, so desk_ask gets a text box instead of Allow/Deny. */}

@@ -125,11 +125,15 @@ class RunStore:
 
     # ---- runs ----
     def create(self, run_id: str, conversation_id: str | None, kind: str = "chat", input: dict[str, Any] | None = None,
-               desk_id: str | None = None, turn: int = 0) -> None:
+               desk_id: str | None = None, turn: int = 0, parent_run_id: str | None = None) -> None:
         t = time.time()
-        self._exec("INSERT INTO agent_runs(run_id, conversation_id, kind, desk_id, turn, status, input, started_at, updated_at) "
-                   "VALUES(?,?,?,?,?,?,?,?,?)",
-                   (run_id, conversation_id, kind, desk_id, turn, "running", _dumps(input or {}), t, t))
+        self._exec("INSERT INTO agent_runs(run_id, conversation_id, kind, desk_id, turn, status, input, started_at, updated_at, parent_run_id) "
+                   "VALUES(?,?,?,?,?,?,?,?,?,?)",
+                   (run_id, conversation_id, kind, desk_id, turn, "running", _dumps(input or {}), t, t, parent_run_id))
+
+    def children(self, run_id: str) -> list[dict[str, Any]]:
+        """Runs started by `run_id` (subagents), oldest first."""
+        return [self._run_row(r) for r in self._all("SELECT * FROM agent_runs WHERE parent_run_id=? ORDER BY started_at, rowid", (run_id,))]  # type: ignore[misc]
 
     def update(self, run_id: str, **fields: Any) -> None:
         """Set any of status, message_id, budget, error, last_seq, ended_at, resumed_from. Never raises: the tape must not kill a run."""

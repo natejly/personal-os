@@ -1,7 +1,7 @@
 import type {
   BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, DriveFile, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Artifact, ArtifactVersion, Recap, Conversation, ConversationSettings, ContextUsed, ContextMeter, Document, GraphData, GraphEdge, GraphNode, Message,
   ApprovalDecision, PermissionEvaluation, PlanEdit,
-  Memory, MemoryProposal, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo,
+  Memory, MemoryProposal, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
   Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
   Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
   Desk, DeskAutonomy, DeskBudget, DeskDiff, DeskEvent, DeskFilePreview, DeskFileTree, DeskOutput,
@@ -337,6 +337,9 @@ export const api = {
   /** Injects a user message into a live run (steering). Throws a 409 when nothing is running. */
   steer: (convId: string, content: string) => req<{ ok: boolean; run_id: string; message: Message }>(`/conversations/${convId}/steer`, { method: 'POST', body: json({ content }) }),
   runs: () => req<RunInfo[]>('/runs'),
+  /** A subagent's run row (status while it works) and its recorded tape (calls, results). */
+  agentRun: (id: string) => req<{ run_id: string; status: string; budget?: Record<string, number> | null }>(`/runs/${encodeURIComponent(id)}`),
+  agentTape: (id: string) => req<RunTapeEvent[]>(`/runs/${encodeURIComponent(id)}/events`),
   /** The newest interrupted run of a conversation, with whether it can still be resumed. */
   interruptedRun: async (convId: string): Promise<{ run_id: string; resumable: boolean } | null> => {
     const rows = await req<RunInfo[]>(`/runs?conversation_id=${encodeURIComponent(convId)}&status=interrupted&limit=1`)

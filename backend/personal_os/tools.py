@@ -373,6 +373,8 @@ async def guarded_request(client: httpx.AsyncClient, method: str, url: str, *, h
 
 class Toolbox:
     web_cache: Any = None  # webread.WebCache, wired in app.py; fetch_url runs uncached without it
+    subagents: Any = None  # subagents.Subagents, wired in app.py; the agent_* tools say so without it
+    desk_starter: Any = None  # async (ctx, title, brief, mode) -> result, wired in app.py for desk_start
 
     def __init__(self, memories: Memories, graph: Graph, documents: Documents, settings_fn: Callable[[], dict[str, Any]], modules: list[Any] | None = None, google: Any = None, boards: Any = None,
                  sandboxes: Sandboxes | None = None, docs: Any = None, activity: Any = None, outbox: Any = None,
@@ -429,6 +431,8 @@ class Toolbox:
         if artifacts is not None:
             from . import artifact_tools
             artifact_tools.register(self, artifacts)
+        from . import subagents
+        subagents.register(self)
 
     def _google_ok(self) -> bool:
         return bool(self.google and self.google.status()["connected"])

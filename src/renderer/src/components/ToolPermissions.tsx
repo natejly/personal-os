@@ -1,6 +1,6 @@
 import { Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, CheckSquare, KanbanSquare, Mail } from 'lucide-react'
 import { useStore } from '../store'
-import type { ToolMode, ToolOverride } from '@shared/types'
+import type { ToolInfo, ToolMode, ToolOverride } from '@shared/types'
 
 const GROUP_ICON: Record<string, JSX.Element> = {
   knowledge: <FileSearch size={13} />, memory: <Brain size={13} />, graph: <Share2 size={13} />, web: <Globe size={13} />, code: <Terminal size={13} />,
@@ -11,6 +11,11 @@ const MODE_LABEL: Record<ToolMode, string> = { on: 'always on', ask: 'ask each t
 
 const normalize = (v: unknown, fallback: ToolMode): ToolMode => (v === true ? 'on' : v === false ? 'off' : v === 'on' || v === 'ask' || v === 'off' ? v : fallback)
 
+/** Connector tools are deliberately absent from these controls. Their permission is a grant bound to
+ *  the tool's schema, which `settings.tools` cannot express, so a dropdown here would write a value
+ *  the backend ignores. They are set in Library → Connectors instead. */
+const builtIn = (t: ToolInfo): boolean => t.group !== 'mcp'
+
 /** Tri-state overrides (inherit / on / ask / off) for a project or a chat. `effectiveBase` is what "inherit" resolves to. */
 export function ToolOverrides({ value, onChange, effectiveBase, compact = false }: {
   value: Record<string, ToolOverride>
@@ -18,7 +23,7 @@ export function ToolOverrides({ value, onChange, effectiveBase, compact = false 
   effectiveBase: Record<string, ToolMode>
   compact?: boolean
 }): JSX.Element {
-  const tools = useStore((s) => s.tools)
+  const tools = useStore((s) => s.tools.filter(builtIn))
   return (
     <div className={`tool-perms ${compact ? 'compact' : ''}`}>
       {tools.map((t) => {
@@ -45,7 +50,9 @@ export function ToolOverrides({ value, onChange, effectiveBase, compact = false 
 
 /** Global modes (Settings). Missing = the tool's default (external actions ask; everything else on). */
 export function ToolGlobalToggles({ value, onChange }: { value: Record<string, ToolMode | boolean>; onChange: (next: Record<string, ToolMode>) => void }): JSX.Element {
-  const tools = useStore((s) => s.tools)
+  const tools = useStore((s) => s.tools.filter(builtIn))
+  const connectorCount = useStore((s) => s.tools.length - s.tools.filter(builtIn).length)
+  const setView = useStore((s) => s.setView)
   const groups = [...new Set(tools.map((t) => t.group))]
   const current = (name: string, fallback: ToolMode): ToolMode => normalize(value[name], fallback)
   const set = (name: string, mode: ToolMode): void => onChange({ ...Object.fromEntries(Object.entries(value).map(([k, v]) => [k, normalize(v, 'on')])), [name]: mode })
@@ -67,6 +74,13 @@ export function ToolGlobalToggles({ value, onChange }: { value: Record<string, T
           })}
         </div>
       ))}
+      {connectorCount > 0 && (
+        <p className="muted small">
+          {connectorCount} connector tool{connectorCount === 1 ? '' : 's'} {connectorCount === 1 ? 'is' : 'are'} set in{' '}
+          <button className="link" onClick={() => setView('library')}>Library → Connectors</button>, where a permission is
+          tied to the exact tool you approved.
+        </p>
+      )}
     </div>
   )
 }

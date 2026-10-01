@@ -1461,3 +1461,84 @@ textarea:focus-visible,
     opacity: 1;
   }
 }
+
+/* ---------------- Library: skills, connectors, made ---------------- */
+.library-panel { display: flex; flex-direction: column; gap: 14px; }
+.library-panel .add-row { align-items: flex-start; }
+.library-panel .add-row .muted.small { flex: 1; line-height: 1.5; }
+.library-panel .search { flex: 1; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 7px 12px; outline: 0; }
+
+.skill-section { display: flex; flex-direction: column; gap: 6px; }
+.skill-section h4 { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.skill-section > p { margin: -2px 0 4px; }
+
+.skill-row { border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elev); overflow: hidden; }
+.skill-row.approved { border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); }
+.skill-row.rejected { opacity: 0.6; }
+.skill-head { display: flex; align-items: center; gap: 8px; padding: 9px 12px; cursor: pointer; }
+.skill-head:hover { background: var(--hover); }
+.skill-name { font-weight: 500; white-space: nowrap; }
+.skill-desc { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+.skill-actions { display: flex; align-items: center; gap: 6px; }
+.skill-actions button.small { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 4px 9px; border-radius: 7px; border: 1px solid var(--border-strong); }
+.skill-actions button.small:hover:not(:disabled) { background: var(--hover); }
+.skill-actions .primary-btn.small { border-color: transparent; }
+
+.skill-body { display: flex; flex-direction: column; gap: 10px; padding: 12px; border-top: 1px solid var(--border); }
+.skill-body.standalone { border: 1px solid var(--border-strong); border-radius: 10px; background: var(--bg-elev); }
+.skill-body label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-muted); }
+.skill-body input, .skill-body textarea {
+  background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px;
+  padding: 8px 10px; outline: 0; color: var(--text); font: inherit;
+}
+.skill-body textarea { resize: vertical; line-height: 1.55; font-family: var(--mono, ui-monospace, monospace); font-size: 12px; }
+.skill-body input:focus, .skill-body textarea:focus { border-color: var(--accent); }
+.row-actions { display: flex; align-items: center; gap: 8px; }
+.row-actions button.small { font-size: 12px; padding: 5px 11px; border-radius: 7px; border: 1px solid var(--border-strong); }
+.row-actions button.small:disabled { opacity: 0.5; }
+.row-actions .primary-btn.small { border-color: transparent; }
+
+.mcp-server { border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elev); overflow: hidden; }
+.mcp-server.error { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
+.mcp-server.ready { border-color: color-mix(in srgb, var(--ok) 40%, var(--border)); }
+.mcp-head { display: flex; align-items: center; gap: 8px; padding: 9px 12px; cursor: pointer; }
+.mcp-head:hover { background: var(--hover); }
+.mcp-name { font-weight: 500; display: flex; align-items: baseline; gap: 6px; white-space: nowrap; }
+.mcp-name small { font-size: 10px; font-weight: 400; }
+.mcp-head > .muted.small:nth-of-type(1) { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mcp-actions { display: flex; align-items: center; gap: 6px; }
+.mcp-actions .seg button { min-height: 20px; padding: 3px 8px; font-size: 11px; }
+.mcp-body { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-top: 1px solid var(--border); }
+.mcp-config code { background: var(--bg-input); border-radius: 5px; padding: 1px 5px; font-size: 11px; }
+
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); flex-shrink: 0; }
+.dot.ready { background: var(--ok); }
+.dot.error { background: var(--danger); }
+.dot.connecting { background: var(--warn); }
+.dot.disabled { background: var(--border-strong); }
+
+.mcp-tool { display: flex; align-items: center; gap: 8px; padding: 5px 0; font-size: 12px; }
+.mcp-tool.off { opacity: 0.55; }
+.mcp-tool.unavailable { opacity: 0.45; }
+.mcp-tool-name { display: flex; flex-direction: column; min-width: 150px; }
+.mcp-tool-name small { font-size: 10px; }
+.mcp-tool-desc { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mcp-tool .seg button { min-height: 20px; padding: 3px 8px; font-size: 11px; }
+
+.mcp-eval { border-radius: 8px; padding: 9px 11px; font-size: 12px; background: var(--hover); line-height: 1.5; }
+.mcp-eval.warn { background: color-mix(in srgb, var(--warn) 14%, transparent); }
+.mcp-eval.fail, .mcp-eval.error { background: color-mix(in srgb, var(--danger) 14%, transparent); }
+.mcp-eval ul { margin: 6px 0 0; padding-left: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; }
+.mcp-eval code { font-size: 11px; }
+.mcp-probe-tools { margin: 0; padding-left: 0; list-style: none; display: flex; flex-wrap: wrap; gap: 6px; font-size: 12px; }
+.mcp-log { margin: 0; padding: 9px 11px; border-radius: 8px; background: var(--bg-input); font-size: 11px; line-height: 1.5; max-height: 220px; overflow: auto; white-space: pre-wrap; }
+
+.tag.fail, .tag.error { background: color-mix(in srgb, var(--danger) 20%, transparent); color: var(--danger); }
+.tag.warn { background: color-mix(in srgb, var(--warn) 22%, transparent); color: var(--warn); }
+.tag.pass { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+
+.made-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.made-card { border-radius: 10px; padding: 11px 12px; background: var(--bg-elev); cursor: pointer; display: flex; flex-direction: column; gap: 5px; }
+.made-card:hover { background: color-mix(in srgb, var(--text) 5%, var(--bg-elev)); }
+.made-head { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.made-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }

@@ -1,6 +1,7 @@
 import type {
   ChatEvent, ToolInfo, Todo, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, DriveFile, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Recap, Conversation, ConversationSettings, ContextUsed, Document, GraphData, GraphEdge, GraphNode, Message,
-  Memory, ModelInfo, ModelPrice, Settings, Project, UsageReport, ChatRunStarted, RunInfo,
+  Memory, ModelInfo, ModelPrice, Settings, Project, UsageReport, ChatRunStarted, RunInfo, ToolMode,
+  Skill, SkillDraftResult, SkillFinding, SkillPreview, McpServer, McpTool, McpReport,
   Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
   Doc, FullDoc, DocRevision,
   ActivityConfig, ActivityContextFile, ActivityEvent, ActivityStatus, ActivitySummary
@@ -266,6 +267,49 @@ export const api = {
     accept: (revId: string) => req<FullDoc>(`/docs/revisions/${revId}/accept`, { method: 'POST' }),
     reject: (revId: string) => req<FullDoc>(`/docs/revisions/${revId}/reject`, { method: 'POST' }),
     restore: (revId: string) => req<FullDoc>(`/docs/revisions/${revId}/restore`, { method: 'POST' })
+  },
+  /** Procedural memory. `create` and `induce` both return a candidate; `update({status:'approved'})`
+   *  is the only call that lets one into a system prompt. */
+  skills: {
+    list: (status?: Skill['status'], s: Scope = 'all') =>
+      req<Skill[]>(`/skills?project_id=${encodeURIComponent(s)}${status ? `&status=${status}` : ''}`),
+    create: (sk: { name: string; description?: string; procedure?: string; project_id?: string | null }) =>
+      req<Skill>('/skills', { method: 'POST', body: json(sk) }),
+    update: (id: string, patch: { name?: string; description?: string; procedure?: string; status?: Skill['status']; project_id?: string | null }) =>
+      req<Skill>(`/skills/${id}`, { method: 'PATCH', body: json(patch) }),
+    delete: (id: string) => req(`/skills/${id}`, { method: 'DELETE' }),
+    induce: (conversationId: string) =>
+      req<{ candidate: Skill | null; reason: string }>(`/conversations/${conversationId}/skills/induce`, { method: 'POST' }),
+    /** Review a draft without saving it. `blocking` is what `update({status:'approved'})` would refuse. */
+    lint: (d: { name?: string; description?: string; procedure?: string; skill_id?: string }) =>
+      req<{ findings: SkillFinding[]; blocking: SkillFinding[] }>('/skills/lint', { method: 'POST', body: json(d) }),
+    /** Draft a procedure from a line of intent. Stores nothing — the user edits the text first. */
+    draft: (intent: string, conversationId?: string | null) =>
+      req<SkillDraftResult>('/skills/draft', { method: 'POST', body: json({ intent, conversation_id: conversationId ?? null }) }),
+    /** What a chat in this scope is actually shown. 'all' is not a scope any one chat sees. */
+    preview: (s: Scope = 'personal') => req<SkillPreview>(`/skills/preview?project_id=${encodeURIComponent(s)}`)
+  },
+  /** Connectors (MCP). Permission lives in grants, not in `settings.tools`: a grant is bound to the
+   *  tool's schema, so a server that rewrites one loses its standing approval. */
+  mcp: {
+    servers: () => req<McpServer[]>('/mcp/servers'),
+    create: (s: Partial<McpServer> & { name: string }) => req<McpServer>('/mcp/servers', { method: 'POST', body: json(s) }),
+    update: (id: string, patch: Partial<McpServer> & { secrets?: Record<string, string>; clear_secrets?: string[] }) =>
+      req<McpServer>(`/mcp/servers/${id}`, { method: 'PATCH', body: json(patch) }),
+    delete: (id: string) => req(`/mcp/servers/${id}`, { method: 'DELETE' }),
+    restart: (id: string) => req<McpServer>(`/mcp/servers/${id}/restart`, { method: 'POST' }),
+    log: (id: string) => req<{ lines: string[] }>(`/mcp/servers/${id}/log`),
+    /** Static review of what a server advertises. Filed against the server, and shown before trusting it. */
+    evaluate: (id: string) => req<McpReport>(`/mcp/servers/${id}/eval`, { method: 'POST' }),
+    /** Try a config that has not been saved, so the tools can be seen before anything is added. */
+    probe: (c: { command: string; args?: string[]; cwd?: string; env?: Record<string, string>; transport?: string }) =>
+      req<McpReport>('/mcp/probe', { method: 'POST', body: json(c) }),
+    tools: (s: Scope = 'personal', conversationId?: string) =>
+      req<McpTool[]>(`/mcp/tools?project_id=${encodeURIComponent(s)}${conversationId ? `&conversation_id=${conversationId}` : ''}`),
+    grant: (tool_slug: string, mode: ToolMode, scope: 'global' | 'project' | 'chat' = 'global', scope_id?: string | null) =>
+      req(`/mcp/grants`, { method: 'PUT', body: json({ tool_slug, mode, scope, scope_id }) }),
+    clearGrant: (tool_slug: string, scope: 'global' | 'project' | 'chat' = 'global', scope_id?: string) =>
+      req(`/mcp/grants?tool_slug=${encodeURIComponent(tool_slug)}&scope=${scope}${scope_id ? `&scope_id=${scope_id}` : ''}`, { method: 'DELETE' })
   },
   notes: {
     list: (s: Scope = 'all', q = '') => req<Note[]>(`/notes?project_id=${encodeURIComponent(s)}&q=${encodeURIComponent(q)}`),

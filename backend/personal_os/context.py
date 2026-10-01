@@ -22,10 +22,11 @@ def build_context(
     conv_settings: dict[str, Any],
     global_system_prompt: str,
     activity: Any = None,
+    skills: Any = None,
 ) -> tuple[str, dict[str, Any]]:
     """Returns (system_prompt, context_used)."""
     parts: list[str] = [global_system_prompt.strip()] if global_system_prompt.strip() else []
-    used: dict[str, Any] = {"memories": [], "nodes": [], "edges": [], "chunks": [], "project": None, "activity": None}
+    used: dict[str, Any] = {"memories": [], "nodes": [], "edges": [], "chunks": [], "project": None, "activity": None, "skills": []}
 
     if project:
         used["project"] = {"id": project["id"], "name": project["name"]}
@@ -39,6 +40,17 @@ def build_context(
             lines = [f"- {m['content']}" for m in mems]
             parts.append("## What you remember about the user\n" + "\n".join(lines))
             used["memories"] = [{"id": m["id"], "content": m["content"], "project_id": m["project_id"]} for m in mems]
+
+    # Procedural memory. Only skills the user approved by hand are ever injected, and the block says so
+    # in its own header: a skill is prose a model may have written, so it is fenced and labelled, never
+    # merged into these instructions.
+    if skills is not None and conv_settings.get("useSkills", True):
+        approved = [s for s in skills.list(status="approved", project_id=project_id) if (s["procedure"] or "").strip()]
+        if approved:
+            from .learn import MAX_INJECTED_SKILLS, skill_block
+
+            parts.append(skill_block(approved))
+            used["skills"] = [{"id": s["id"], "name": s["name"], "description": s["description"]} for s in approved[:MAX_INJECTED_SKILLS]]
 
     if conv_settings.get("useGraph", True):
         sub = graph.neighborhood(project_id, query)

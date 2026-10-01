@@ -19,6 +19,8 @@ export interface ContextUsed {
   chunks: { chunk_id: string; document_id: string; name: string; idx: number; text: string }[]
   /** The activity-monitor block, verbatim; null when the monitor is off or the chat opted out. */
   activity: string | null
+  /** Approved procedures injected this turn. Candidates never appear here — they are not injected. */
+  skills: { id: string; name: string; description: string }[]
   system_prompt: string
   tokens_estimate: number
 }
@@ -35,6 +37,139 @@ export interface ToolInfo {
   default_mode: ToolMode
   /** Results carry untrusted third-party content, so one call taints the rest of the reply. */
   taints?: boolean
+  /** Connectors only (`group: 'mcp'`): the server that offers this tool. Its permission lives in a
+   *  grant, not in `settings.tools`, so it is set in the Library rather than here. */
+  server?: string
+}
+
+/** A procedure the assistant could follow again. Inert until `status` is 'approved': only approved
+ *  rows are ever injected, and only the Library can move one there. */
+export interface Skill {
+  id: string
+  project_id: string | null
+  name: string
+  description: string
+  procedure: string
+  status: 'candidate' | 'approved' | 'rejected'
+  /** 'induced' = distilled from a chat, 'proposed' = the assistant asked, 'user' = written by hand. */
+  source: 'induced' | 'proposed' | 'user'
+  source_conversation_id: string | null
+  created_at: number
+  updated_at: number
+  approved_at: number | null
+}
+
+/** One finding from the skill lint. 'error' blocks approval — it is always text claiming authority
+ *  over the assistant's permissions. 'warn' is quality, for the author to weigh. */
+export interface SkillFinding {
+  level: 'error' | 'warn'
+  code: string
+  message: string
+  field: 'name' | 'description' | 'procedure'
+  hint?: string
+  excerpt?: string
+}
+
+export interface SkillDraft {
+  name: string
+  description: string
+  procedure: string
+}
+
+/** The result of drafting from intent. Nothing is stored: `draft` is text for the user to edit. */
+export interface SkillDraftResult {
+  draft: SkillDraft | null
+  reason?: string
+  findings?: SkillFinding[]
+}
+
+/** The real injected block, assembled by the same function the chat uses, plus what did not fit. */
+export interface SkillPreview {
+  block: string
+  tokens_estimate: number
+  included: { id: string; name: string }[]
+  omitted: { id: string; name: string }[]
+}
+
+/** One configured MCP server. `secrets` never leaves the backend; only the key names come back. */
+export interface McpServer {
+  id: string
+  slug: string
+  name: string
+  transport: 'stdio' | 'sse' | 'http'
+  command: string
+  args: string[]
+  cwd: string
+  env: Record<string, string>
+  secret_keys: string[]
+  url: string
+  headers: Record<string, string>
+  description: string
+  enabled: boolean
+  status: 'idle' | 'connecting' | 'ready' | 'error' | 'disabled'
+  status_detail: string
+  detail: string
+  last_connected_at: number | null
+  tool_count: number
+  running: boolean
+  ready: boolean
+  attempts: number
+  server_info: { name?: string; version?: string; protocol?: string; instructions?: string }
+  eval: McpEval | null
+  created_at: number
+  updated_at: number
+}
+
+/** A tool one connector advertises, plus the mode that would apply in the scope it was asked about. */
+export interface McpTool {
+  id: string
+  server_id: string
+  server_name: string
+  server_slug: string
+  /** As the server exports it. The model only ever sees `slug`. */
+  name: string
+  slug: string
+  description: string
+  parameters: Record<string, unknown>
+  schema_hash: string
+  danger: string
+  mode: ToolMode
+  /** Which grant decided `mode`: 'default' means no grant exists. */
+  source: 'default' | 'global' | 'project' | 'chat'
+  /** The approved shape is not the shape on offer, so a standing 'on' has decayed to 'ask'. */
+  stale: boolean
+  approved_hash: string
+  missing: boolean
+  connected: boolean
+  first_seen_at: number
+  last_seen_at: number
+  schema_changed_at: number | null
+  missing_since: number | null
+}
+
+export interface McpFinding {
+  code: string
+  severity: 'fail' | 'warn' | 'info'
+  where: string
+  detail: string
+  excerpt?: string
+}
+
+export interface McpEval {
+  id?: string
+  server_id?: string | null
+  status: 'pass' | 'warn' | 'fail' | 'error'
+  summary: string
+  findings: McpFinding[]
+  model?: string
+  created_at?: number
+}
+
+/** What `/mcp/probe` and `/mcp/servers/{id}/eval` return: the static verdict plus what was seen. */
+export interface McpReport extends McpEval {
+  tools: { name?: string; slug?: string; status: string; findings: McpFinding[] }[]
+  server_info: { name?: string; version?: string; protocol?: string; instructions?: string }
+  stderr: string[]
 }
 
 export interface ToolImage {
@@ -110,6 +245,8 @@ export interface ConversationSettings {
   /** Inject what the activity monitor observed. Defaults on, but only ever has an effect while the
    *  monitor is running and its own `injectContext` is left on. */
   useActivity: boolean
+  /** Inject the approved procedures from the Library. Defaults on; candidates are never injected. */
+  useSkills: boolean
   autoLearn: boolean
   useTools: boolean
   tools: Record<string, ToolOverride>

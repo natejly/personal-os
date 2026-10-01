@@ -31,7 +31,7 @@ import os
 import sys
 import tempfile
 from dataclasses import dataclass
-from typing import Any, TextIO
+from typing import Any, Callable, TextIO
 
 import anyio
 from anyio.abc import TaskGroup
@@ -198,11 +198,14 @@ class _Supervisor:
     """Owns one server's process, transport and session for the life of a connection."""
 
     def __init__(self, store: McpServers, config: _Config, *, connect_timeout: float = CONNECT_TIMEOUT,
-                 call_timeout: float = CALL_TIMEOUT):
+                 call_timeout: float = CALL_TIMEOUT, on_tools: Callable[[], None] | None = None):
         self.store = store
         self.config = config
         self.connect_timeout = connect_timeout
         self.call_timeout = call_timeout
+        # Fired after every tools/list is reconciled, so whoever publishes the tools to the model can
+        # do it when discovery actually happened rather than guessing when to look.
+        self.on_tools = on_tools
         self.status = "idle"
         self.detail = ""
         self.attempts = 0
@@ -398,6 +401,9 @@ class _Supervisor:
         exported = [tool_export(t) for t in tools]
         synced = self.store.sync_tools(self.config.id, exported)
         self.tool_slugs = sorted(synced["added"] + synced["changed"] + synced["unchanged"])
+        if self.on_tools is not None:
+            with contextlib.suppress(Exception):  # a listener must never break a connection
+                self.on_tools()
 
     def _set_status(self, status: str, detail: str = "") -> None:
         self.status, self.detail = status, detail
@@ -434,10 +440,13 @@ class McpClient:
     """
 
     def __init__(self, store: McpServers, *, connect_timeout: float = CONNECT_TIMEOUT,
-                 call_timeout: float = CALL_TIMEOUT):
+                 call_timeout: float = CALL_TIMEOUT, on_tools: Callable[[], None] | None = None):
         self.store = store
         self.connect_timeout = connect_timeout
         self.call_timeout = call_timeout
+        # Called whenever any server's tool list is reconciled. The app points it at the Toolbox, so
+        # a tool becomes callable the moment it is discovered, and stops being offered when withdrawn.
+        self.on_tools = on_tools
         self._supervisors: dict[str, _Supervisor] = {}
 
     async def start(self) -> list[dict[str, Any]]:
@@ -465,7 +474,7 @@ class McpClient:
                 sup = None
             if sup is None:
                 sup = _Supervisor(self.store, config, connect_timeout=self.connect_timeout,
-                                  call_timeout=self.call_timeout)
+                                  call_timeout=self.call_timeout, on_tools=self.on_tools)
                 self._supervisors[sid] = sup
             sup.config = config
             await sup.start()
@@ -475,6 +484,15 @@ class McpClient:
         """Wait for every supervisor to reach 'ready'. False if any is still not up in time."""
         results = await asyncio.gather(*(s.wait_ready(timeout) for s in self._supervisors.values()))
         return all(results)
+
+    async def wait_server(self, server_id: str, timeout: float = CONNECT_TIMEOUT) -> bool:
+        """Wait for one server only, so a config route can report what actually happened.
+
+        Deliberately not `wait_ready`: one sick server must not make adding an unrelated one slow.
+        False means 'not up yet', never 'broken' - the caller reports the stored status either way.
+        """
+        sup = self._supervisors.get(server_id)
+        return await sup.wait_ready(timeout) if sup else False
 
     async def restart(self, server_id: str) -> dict[str, Any] | None:
         sup = self._supervisors.pop(server_id, None)

@@ -14,10 +14,11 @@ their own instructions, knowledge files, memories and graph.
 │ Today        │  ┌ Calendar ─────┐ ┌ Todos ────────┐ │  ☑ Memory    │
 │ Todos      3 │  │ 10:00 Standup │ │ ○ Ship v0.1   │ │  ☑ Graph     │
 │ Memory    19 │  │ 14:00 1:1     │ │ ○ USB-C hub   │ │  ☑ Documents │
-│ Documents  1 │  └───────────────┘ └───────────────┘ │  ☑ Auto-learn│
-│ PROJECTS   + │  ┌ Inbox ────────┐ ┌ Projects ─────┐ │  ☑ Tools  ▾  │
-│ ■ Grain      │  │ Alice: Q4 …   │ │ ■ Grain       │ │   web search │
-│ RECENTS      │  └───────────────┘ └───────────────┘ │   run python │
+│ Documents  1 │  └───────────────┘ └───────────────┘ │  ☑ Procedures│
+│ Library    2 │  ┌ Inbox ────────┐ ┌ Projects ─────┐ │  ☑ Auto-learn│
+│ PROJECTS   + │  │ Alice: Q4 …   │ │ ■ Grain       │ │  ☑ Tools  ▾  │
+│ ■ Grain      │  └───────────────┘ └───────────────┘ │   web search │
+│ RECENTS      │                                      │   run python │
 │ · …          │                                      │   gmail send │
 │ · …          │  [Brief me]                          │  Last reply… │
 └──────────────┴──────────────────────────────────────┴──────────────┘
@@ -36,7 +37,8 @@ their own instructions, knowledge files, memories and graph.
   **ask** (pauses the reply with an inline approve/deny card) or **off**.
   In-app tools default to on; anything that acts outside the app (email,
   calendar events, Google Tasks) defaults to ask. Override globally, per
-  project, or per chat. Tool calls render inline with arguments, results and
+  project, or per chat. Third-party tools from MCP connectors join the same
+  list but keep their own, stricter permission model — see **Library** below. Tool calls render inline with arguments, results and
   timing, and every reply carries an execution trace.
 - **Projects.** Groups of chats with instructions, knowledge files, project
   memories and a project graph, layered on top of your personal ones.
@@ -56,6 +58,27 @@ their own instructions, knowledge files, memories and graph.
   *proposed*, never written straight in. Each one arrives as a diff you accept
   or reject, so you can point a model at prose you care about. See
   [docs/docs-editor.md](docs/docs-editor.md).
+- **Library.** One surface for what the assistant can learn, what it can reach,
+  and what has been made, in three tabs:
+  - *Skills* — procedural memory. Where a memory is a fact about you, a skill is
+    a method: how a task went well, written so it can go that way again. The
+    assistant can distil one from a finished chat (the ✦ button in the chat
+    header), or you can write one by hand. Either way it arrives as a
+    **candidate** and does nothing. Only a skill you approve is injected, inside
+    a labelled fence that tells the model it is reference material — it cannot
+    grant permissions or override instructions, and tool approvals still apply.
+    Revoke or edit one at any time; a per-chat *Procedures* toggle turns the
+    whole block off.
+  - *Connectors* — MCP servers, whose tools join the toolbox under namespaced
+    names (`mcp__<server>__<tool>`) that can never shadow a built-in. Test a
+    launch config before saving it: Grain connects once, lists the tools, scans
+    what the server says about itself for prompt-injection and lookalike names,
+    and shows the report. A new connector starts off, every tool defaults to
+    *ask*, and a permission you grant is bound to the exact tool you saw — if
+    the server rewrites its schema or description, the standing approval decays
+    back to *ask* rather than covering the new shape. Per-tool on/ask/off,
+    restart, and a tail of the server's stderr for when it will not start.
+  - *Made* — docs, dashboards and boards built in the app, searchable in one place.
 - **Activity monitor** (macOS, opt-in, off by default). Watches what you actually
   do — frontmost app and window, browser URLs, typing and click rhythm, the text
   you type, microphone and system audio — summarizes it every few minutes, and
@@ -66,8 +89,8 @@ their own instructions, knowledge files, memories and graph.
   is stored; raw samples expire after 48h. The raw log is browsable row by row
   and deletable. See [docs/activity-monitor.md](docs/activity-monitor.md).
 - **Context management.** Per-chat toggles for memory, graph, documents, activity,
-  auto-learn and tools; an inspector showing exactly what was injected into
-  each reply; a live preview for a draft message.
+  procedures, auto-learn and tools; an inspector showing exactly what was
+  injected into each reply; a live preview for a draft message.
 - **Charts and diagrams.** Replies can include a ```` ```chart ```` block (a small
   JSON spec rendered as a bar / line / area / pie / scatter chart, each with
   chart, data-table and source views) or a ```` ```mermaid ```` block.

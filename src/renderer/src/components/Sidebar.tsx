@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { MessageSquarePlus, Search, Settings, Trash2, PanelLeftClose, Brain, FileText, NotebookPen, Plus, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid, Mail, MonitorDot, BookOpen, Globe } from 'lucide-react'
+import { MessageSquarePlus, Search, Settings, Trash2, PanelLeftClose, Brain, FileText, NotebookPen, Plus, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid, Library, Mail, MonitorDot, BookOpen, Globe } from 'lucide-react'
 import GrainLogo from './GrainLogo'
 import { useStore, type View } from '../store'
 import { ActivityIndicator } from './ActivityView'
@@ -42,10 +42,11 @@ const NAV: NavEntry[] = [
   { label: 'Web', icon: <Globe size={15} />, kind: 'web' }
 ]
 
-// What the assistant knows: memories and uploaded documents, grouped under their own section.
+// What the assistant knows and what it can reach, grouped under their own section.
 const KNOWLEDGE: NavEntry[] = [
   { view: 'memory', label: 'Memory', icon: <Brain size={15} />, kind: 'memory' },
-  { view: 'documents', label: 'Documents', icon: <FileText size={15} />, kind: 'documents' }
+  { view: 'documents', label: 'Documents', icon: <FileText size={15} />, kind: 'documents' },
+  { view: 'library', label: 'Library', icon: <Library size={15} /> }
 ]
 
 export default function Sidebar(): JSX.Element {
@@ -58,6 +59,7 @@ export default function Sidebar(): JSX.Element {
   const settings = useStore((s) => s.settings)
   const docCount = useStore((s) => s.docs.length)
   const docsPending = useStore((s) => s.docsPending)
+  const skillCandidates = useStore((s) => s.skills.filter((x) => x.status === 'candidate').length)
   const inCanvas = useStore((s) => s.view === 'canvas')
   // One selector per action. Sidebar is mounted in every view, the canvas included, so a bare
   // useStore() here is what made App's whole subtree commit once per streamed token.
@@ -104,6 +106,7 @@ export default function Sidebar(): JSX.Element {
     if (v === 'home' || v === 'calendar' || v === 'mail' || v === 'boards' || v === 'dashboards' || v === 'activity') return null
     if (v === 'todos') return todoStats?.open ?? null
     if (v === 'docs') return docCount
+    if (v === 'library') return null  // the only number worth a badge here is unreviewed procedures, below
     const total = (key: 'memories' | 'nodes' | 'documents'): number =>
       (personalStats?.[key] ?? 0) + projects.reduce((n, p) => n + (p.stats?.[key] ?? 0), 0)
     // Memory is one panel now: memories and graph entities counted together.
@@ -118,6 +121,9 @@ export default function Sidebar(): JSX.Element {
       {n.icon}<span>{n.label}</span>
       {n.view === 'docs' && docsPending > 0 && (
         <span className="count pending" title={`${docsPending} assistant edit${docsPending === 1 ? '' : 's'} awaiting review`}>{docsPending}</span>
+      )}
+      {n.view === 'library' && skillCandidates > 0 && (
+        <span className="count pending" title={`${skillCandidates} procedure${skillCandidates === 1 ? '' : 's'} awaiting review`}>{skillCandidates}</span>
       )}
       {n.view != null && libCount(n.view) !== null && <span className="count">{libCount(n.view)}</span>}
     </button>

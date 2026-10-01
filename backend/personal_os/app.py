@@ -15,6 +15,7 @@ import shutil
 import sqlite3
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Annotated, Any, AsyncIterator
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -24,11 +25,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import AfterValidator, BaseModel, Field
 
-from . import activity, assist, llm, tools
+from . import activity, assist, llm, skillbuild, tools
 from .context import build_context, estimate_tokens
 from .db import Database, data_dir_from_env, new_id
 from .extract_text import extract_text
-from .learn import learn_from_exchange
+from .learn import MAX_INJECTED_SKILLS, Skills, induce_skill, learn_from_exchange, skill_block
+from . import mcp_eval
+from .mcp_client import McpClient
+from .mcp_servers import MODES as MCP_MODES, RESERVED_PREFIX as MCP_PREFIX, SCOPES as MCP_SCOPES, McpServers
 from .repos import ALL, Conversations, Documents, Graph, Memories, Projects
 from .boards import Boards
 from .canvas import SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
@@ -238,7 +242,53 @@ if not any(getattr(f, "__name__", "") == "_record_usage" for f in llm._usage_lis
     llm.on_usage(_record_usage)
 sandboxes = Sandboxes(settings)
 monitor = activity.Monitor(db, settings, llm.complete)
-toolbox = Toolbox(memories, graph, documents, settings, todos=todos, google=google, boards=boards, sandboxes=sandboxes, docs=docs, activity=monitor)
+# Procedural memory. Candidates can come from the model; only this table's 'approved' rows reach a prompt.
+skills = Skills(db)
+# Connectors: the store holds servers, their tools and the grants; the client owns the live processes.
+mcp_store = McpServers(db)
+mcp_client = McpClient(mcp_store)
+mcp = SimpleNamespace(store=mcp_store, client=mcp_client)
+toolbox = Toolbox(memories, graph, documents, settings, todos=todos, google=google, boards=boards, sandboxes=sandboxes, docs=docs, activity=monitor, mcp=mcp, skills=skills)
+# Discovery is asynchronous and can happen again at any time (a reconnect, a server changing its
+# list), so the tool specs are republished by the event rather than by a caller timing it right.
+mcp_client.on_tools = toolbox.refresh_mcp
+
+# How long a config route waits for a server to come up before answering. Short of the client's own
+# connect timeout: the user clicked "add", so the answer should say whether it worked, but a slow
+# server must not hold the request open for the full connect budget.
+MCP_SETTLE = 10.0
+
+
+@app.on_event("startup")
+async def _mcp_startup() -> None:
+    """Bring up whatever is enabled. A server that never connects just leaves its tools
+    unavailable; nothing here may delay or fail the app's start, so this does not wait."""
+    try:
+        await mcp_client.start()
+    except Exception:  # noqa: BLE001 - a bad connector config must not stop the backend
+        log.warning("MCP startup failed", exc_info=True)
+
+
+@app.on_event("shutdown")
+async def _mcp_shutdown() -> None:
+    """Stop every supervisor, so no server process outlives the app."""
+    with contextlib.suppress(Exception):
+        await mcp_client.stop()
+
+
+async def _mcp_resync(server_id: str | None = None) -> None:
+    """Reconcile processes with the stored config, and wait briefly on the one that just changed.
+
+    Every route that changes a server config ends here, so the processes and the stored status
+    cannot drift apart. The tool specs republish themselves through `on_tools`.
+    """
+    await mcp_client.sync()
+    if server_id and (mcp_store.server(server_id) or {}).get("enabled"):
+        with contextlib.suppress(Exception):
+            await mcp_client.wait_server(server_id, MCP_SETTLE)
+    # `on_tools` covers discovery; this covers the other direction — a connector that was deleted
+    # has no supervisor left to announce that its tools are gone.
+    toolbox.refresh_mcp()
 
 
 def sid(project_id: str | None) -> str | None:
@@ -524,7 +574,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         memories=memories, graph=graph, documents=documents,
         project=project, project_id=conv["project_id"], query=user_text,
         settings=cfg, conv_settings=conv["settings"], global_system_prompt=cfg["systemPrompt"],
-        activity=monitor,
+        activity=monitor, skills=skills,
     )
     tracer.end(cspan, {"memories": len(used["memories"]), "entities": len(used["nodes"]), "excerpts": len(used["chunks"]),
                        "history_messages": len(history)})
@@ -542,7 +592,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         "tainted": bool(conv["settings"].get("tainted")), "taint_sources": list(conv["settings"].get("taint_sources") or []),
         "allowed_urls": _urls(user_text), "settings": cfg,
     }
-    modes = toolbox.effective(cfg.get("tools") or {}, (project or {}).get("tools"), conv["settings"].get("tools")) if conv["settings"].get("useTools", True) else {}
+    modes = toolbox.effective(cfg.get("tools") or {}, (project or {}).get("tools"), conv["settings"].get("tools"),
+                              project_id=conv["project_id"], conversation_id=conv_id) if conv["settings"].get("useTools", True) else {}
     tool_schemas = toolbox.schemas(modes)
     system = "\n\n".join(p for p in (system, RENDER_HINT, TOOLS_HINT if tool_schemas else "") if p)
     used["system_prompt"] = system
@@ -718,12 +769,21 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     if forced and granted:
                         decision = "allow"  # one-shot: a tainted reply cannot buy a standing grant
                     elif decision == "always_chat":
-                        convos.update(conv_id, {"settings": {"tools": {**(conv["settings"].get("tools") or {}), c["name"]: "on"}}})
-                        conv["settings"].setdefault("tools", {})[c["name"]] = "on"
+                        # A connector's standing permission lives in the grants table, bound to the
+                        # schema it was granted for, so the same 'always' cannot cover a shape the
+                        # server swaps in later. Built-ins keep using the settings tool map.
+                        if c["name"].startswith(MCP_PREFIX):
+                            mcp_store.set_grant(c["name"], "on", scope="chat", scope_id=conv_id)
+                        else:
+                            convos.update(conv_id, {"settings": {"tools": {**(conv["settings"].get("tools") or {}), c["name"]: "on"}}})
+                            conv["settings"].setdefault("tools", {})[c["name"]] = "on"
                         modes[c["name"]] = "on"
                         decision = "allow"
                     elif decision == "always_global":
-                        db.set_settings({"tools": {**(cfg.get("tools") or {}), c["name"]: "on"}})
+                        if c["name"].startswith(MCP_PREFIX):
+                            mcp_store.set_grant(c["name"], "on", scope="global")
+                        else:
+                            db.set_settings({"tools": {**(cfg.get("tools") or {}), c["name"]: "on"}})
                         modes[c["name"]] = "on"
                         decision = "allow"
                     if granted and not forced:
@@ -932,8 +992,8 @@ def context_preview(body: ContextPreviewIn) -> dict[str, Any]:
     _, used = build_context(
         memories=memories, graph=graph, documents=documents, project=project, project_id=sid(body.project_id),
         query=body.query, settings=cfg,
-        conv_settings={"useMemory": True, "useGraph": True, "useDocuments": True, "useActivity": True, **body.conv_settings},
-        global_system_prompt=cfg["systemPrompt"], activity=monitor,
+        conv_settings={"useMemory": True, "useGraph": True, "useDocuments": True, "useActivity": True, "useSkills": True, **body.conv_settings},
+        global_system_prompt=cfg["systemPrompt"], activity=monitor, skills=skills,
     )
     return used
 
@@ -2466,3 +2526,294 @@ def instantiate_canvas_preset(pid: str, body: PresetInstantiateIn) -> dict[str, 
     if not c:
         raise HTTPException(404, "No such preset")
     return c
+
+
+# ---------------- skills: procedural memory ----------------
+class SkillIn(BaseModel):
+    name: str
+    description: str = ""
+    procedure: str = ""
+    project_id: str | None = None
+
+
+class SkillPatch(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    procedure: str | None = None
+    status: str | None = None
+    project_id: str | None = None
+
+
+@app.get("/skills")
+def list_skills(status: str | None = None, project_id: str = "all") -> list[dict[str, Any]]:
+    return skills.list(status=status, project_id="__all__" if project_id == "all" else sid(project_id))
+
+
+@app.post("/skills")
+def create_skill(body: SkillIn) -> dict[str, Any]:
+    """A skill the user writes themselves. Still created as a candidate: approval is one explicit step, always."""
+    return skills.propose(body.name, body.description, body.procedure, project_id=wsid(body.project_id), source="user")
+
+
+@app.patch("/skills/{skill_id}")
+def patch_skill(skill_id: str, body: SkillPatch) -> dict[str, Any]:
+    """Rename, edit, approve ('approved') or reject ('rejected'). Approving here is the only way a skill
+    reaches a system prompt, which is why it is a deliberate call and not a side effect of editing."""
+    patch = body.model_dump(exclude_unset=True)
+    if "project_id" in patch:
+        patch["project_id"] = wsid(patch["project_id"])
+    before = skills.get(skill_id)
+    if not before:
+        raise HTTPException(404, "No such skill")
+    # An approved skill must never *contain* text that claims authority, so an edit to a live one is
+    # checked on the same footing as an approval. Warnings never block: only the author weighs those.
+    bad = skillbuild.approval_blockers(before, patch, known_tools=_known_tools(), existing=skills.list())
+    if bad:
+        raise HTTPException(422, "This procedure cannot be approved as written. " +
+                            " ".join(f["message"] for f in bad))
+    s = skills.update(skill_id, patch)
+    if not s:
+        raise HTTPException(404, "No such skill")
+    return s
+
+
+@app.delete("/skills/{skill_id}")
+def delete_skill(skill_id: str) -> dict[str, bool]:
+    skills.delete(skill_id)
+    return {"ok": True}
+
+
+@app.post("/conversations/{id}/skills/induce")
+async def induce_conversation_skill(id: str) -> dict[str, Any]:
+    """Distil this chat into a candidate procedure. The result is inert until the user approves it."""
+    conv = convos.get(id)
+    if not conv:
+        raise HTTPException(404, "No such conversation")
+    msgs = [m for m in (conv.get("messages") or []) if m["role"] in ("user", "assistant") and (m.get("content") or "").strip()]
+    if len(msgs) < 2:
+        return {"candidate": None, "reason": "This chat is too short to learn a procedure from."}
+    transcript = "\n\n".join(f"{m['role']}: {m['content']}" for m in msgs)
+    cfg = settings()
+    cand = await induce_skill(settings=cfg, skills=skills, project_id=conv["project_id"], conversation_id=id,
+                              transcript=transcript, model=cfg["defaultModel"])
+    return {"candidate": cand, "reason": "" if cand else "Nothing in this chat was a repeatable procedure."}
+
+
+# ---------------- skills: the authoring side ----------------
+class SkillDraftIn(BaseModel):
+    name: str = ""
+    description: str = ""
+    procedure: str = ""
+    skill_id: str | None = None
+
+
+class SkillIntentIn(BaseModel):
+    intent: str
+    conversation_id: str | None = None
+    project_id: str | None = None
+
+
+def _known_tools() -> set[str]:
+    """Every tool name the assistant could actually call, so the lint can catch an invented one."""
+    return set(toolbox.specs)
+
+
+def _lint(name: str, description: str, procedure: str, skill_id: str | None = None) -> list[dict[str, Any]]:
+    return skillbuild.lint_skill(name, description, procedure, known_tools=_known_tools(),
+                                 existing=skills.list(), skill_id=skill_id)
+
+
+@app.post("/skills/lint")
+def lint_skill_draft(body: SkillDraftIn) -> dict[str, Any]:
+    """Review a draft without saving it. The review surface calls this as the user types, and
+    `skill_draft` runs the identical checks on what a model wrote."""
+    findings = _lint(body.name, body.description, body.procedure, skill_id=body.skill_id)
+    return {"findings": findings, "blocking": skillbuild.blocking(findings)}
+
+
+@app.post("/skills/draft")
+async def draft_skill_from_intent(body: SkillIntentIn) -> dict[str, Any]:
+    """Turn a line of intent into a draft procedure. Stores nothing: the user gets text to edit."""
+    cfg = settings()
+    context = ""
+    if body.conversation_id:
+        conv = convos.get(body.conversation_id)
+        msgs = [m for m in ((conv or {}).get("messages") or [])
+                if m["role"] in ("user", "assistant") and (m.get("content") or "").strip()]
+        context = "\n\n".join(f"{m['role']}: {m['content']}" for m in msgs[-12:])
+    return await skillbuild.draft_skill(settings=cfg, model=cfg["defaultModel"], intent=body.intent,
+                                        context=context, known_tools=_known_tools(), existing=skills.list())
+
+
+@app.get("/skills/preview")
+def preview_skills(project_id: str | None = None) -> dict[str, Any]:
+    """Exactly what the assistant will be shown, assembled by the same function the chat uses.
+
+    Not a rendering of it: `skill_block` is the real injected text, so the preview cannot drift from
+    what is actually sent, which is the only reason a preview of this is worth anything.
+    """
+    rows = [s for s in skills.list(status="approved", project_id=sid(project_id)) if (s["procedure"] or "").strip()]
+    block = skill_block(rows) if rows else ""
+    return {"block": block, "tokens_estimate": estimate_tokens(block),
+            "included": [{"id": s["id"], "name": s["name"]} for s in rows[:MAX_INJECTED_SKILLS]],
+            "omitted": [{"id": s["id"], "name": s["name"]} for s in rows[MAX_INJECTED_SKILLS:]]}
+
+
+# ---------------- connectors: MCP servers, their tools and their grants ----------------
+class McpServerIn(BaseModel):
+    name: str
+    transport: str = "stdio"
+    command: str = ""
+    args: list[str] = Field(default_factory=list)
+    cwd: str = ""
+    env: dict[str, str] = Field(default_factory=dict)
+    secrets: dict[str, str] = Field(default_factory=dict)
+    url: str = ""
+    headers: dict[str, str] = Field(default_factory=dict)
+    description: str = ""
+    # A new connector is off until it has been looked at: enabling it is what spawns a process.
+    enabled: bool = False
+
+
+class McpServerPatch(BaseModel):
+    name: str | None = None
+    transport: str | None = None
+    command: str | None = None
+    args: list[str] | None = None
+    cwd: str | None = None
+    env: dict[str, str] | None = None
+    secrets: dict[str, str] | None = None
+    clear_secrets: list[str] | None = None
+    url: str | None = None
+    headers: dict[str, str] | None = None
+    description: str | None = None
+    enabled: bool | None = None
+
+
+class McpGrantIn(BaseModel):
+    tool_slug: str
+    mode: str
+    scope: str = "global"
+    scope_id: str | None = None
+
+
+class McpProbeIn(BaseModel):
+    """A launch config that may not be saved yet, so it can be judged before it is trusted."""
+    transport: str = "stdio"
+    command: str = ""
+    args: list[str] = Field(default_factory=list)
+    cwd: str = ""
+    env: dict[str, str] = Field(default_factory=dict)
+
+
+def _server_view(row: dict[str, Any], live: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """One server as the UI wants it: stored config + whatever the supervisor knows right now."""
+    info = live.get(row["id"]) or {}
+    return {**row, "running": bool(info.get("running")), "ready": bool(info.get("ready")),
+            "attempts": info.get("attempts", 0), "server_info": info.get("server_info") or {},
+            "detail": info.get("detail") or row.get("status_detail") or "",
+            "eval": mcp_store.latest_eval(row["id"])}
+
+
+@app.get("/mcp/servers")
+def list_mcp_servers() -> list[dict[str, Any]]:
+    live = {i["server_id"]: i for i in mcp_client.status()}
+    return [_server_view(s, live) for s in mcp_store.servers()]
+
+
+@app.post("/mcp/servers")
+async def create_mcp_server(body: McpServerIn) -> dict[str, Any]:
+    if body.transport != "stdio":
+        raise HTTPException(400, f"{body.transport} connectors are not supported yet")
+    if not body.command.strip():
+        raise HTTPException(400, "A command is required")
+    s = mcp_store.create_server(**body.model_dump())
+    await _mcp_resync(s["id"])
+    return _server_view(mcp_store.server(s["id"]) or s, {i["server_id"]: i for i in mcp_client.status()})
+
+
+@app.patch("/mcp/servers/{server_id}")
+async def patch_mcp_server(server_id: str, body: McpServerPatch) -> dict[str, Any]:
+    if mcp_store.server(server_id) is None:
+        raise HTTPException(404, "No such connector")
+    s = mcp_store.update_server(server_id, body.model_dump(exclude_unset=True))
+    if not s:
+        raise HTTPException(404, "No such connector")
+    await _mcp_resync(server_id)  # a changed launch config restarts the process; a disabled one stops it
+    return _server_view(mcp_store.server(server_id) or s, {i["server_id"]: i for i in mcp_client.status()})
+
+
+@app.delete("/mcp/servers/{server_id}")
+async def delete_mcp_server(server_id: str) -> dict[str, bool]:
+    mcp_store.delete_server(server_id)
+    await _mcp_resync()
+    return {"ok": True}
+
+
+@app.post("/mcp/servers/{server_id}/restart")
+async def restart_mcp_server(server_id: str) -> dict[str, Any]:
+    if mcp_store.server(server_id) is None:
+        raise HTTPException(404, "No such connector")
+    await mcp_client.restart(server_id)
+    with contextlib.suppress(Exception):
+        await mcp_client.wait_server(server_id, MCP_SETTLE)
+    toolbox.refresh_mcp()
+    return _server_view(mcp_store.server(server_id) or {}, {i["server_id"]: i for i in mcp_client.status()})
+
+
+@app.get("/mcp/servers/{server_id}/log")
+def mcp_server_log(server_id: str) -> dict[str, Any]:
+    """The tail of what the server process wrote to stderr: the only way to debug a failing one."""
+    if mcp_store.server(server_id) is None:
+        raise HTTPException(404, "No such connector")
+    return {"lines": mcp_client.stderr(server_id)}
+
+
+@app.post("/mcp/servers/{server_id}/eval")
+async def eval_mcp_server(server_id: str) -> dict[str, Any]:
+    """Probe on a throwaway connection and file a report on what the server advertises."""
+    if mcp_store.server(server_id) is None:
+        raise HTTPException(404, "No such connector")
+    return await mcp_eval.evaluate_server(mcp_client, mcp_store, server_id)
+
+
+@app.post("/mcp/probe")
+async def probe_mcp_config(body: McpProbeIn) -> dict[str, Any]:
+    """Try a config that has not been saved, so the user can see the tools before adding anything."""
+    if body.transport != "stdio":
+        raise HTTPException(400, f"{body.transport} connectors are not supported yet")
+    return await mcp_eval.evaluate_config(mcp_client, body.model_dump())
+
+
+@app.get("/mcp/tools")
+def list_mcp_tools(project_id: str | None = None, conversation_id: str | None = None,
+                   include_missing: bool = False) -> list[dict[str, Any]]:
+    """Every discovered tool with the mode that would apply in this scope, and why."""
+    ready = set(mcp_client.ready_slugs())
+    by_id = {s["id"]: s for s in mcp_store.servers()}
+    out = []
+    for t in mcp_store.tools(include_missing=include_missing):
+        eff = mcp_store.effective_mode(t["slug"], sid(project_id), conversation_id)
+        srv = by_id.get(t["server_id"]) or {}
+        out.append({**t, **eff, "server_name": srv.get("name", ""), "server_slug": srv.get("slug", ""),
+                    "connected": t["slug"] in ready})
+    return out
+
+
+@app.put("/mcp/grants")
+def set_mcp_grant(body: McpGrantIn) -> dict[str, Any]:
+    """Decide how a connector tool may run. Bound to the shape on offer right now, so a server that
+    rewrites the tool later loses the standing permission and has to ask again."""
+    if body.mode not in MCP_MODES:
+        raise HTTPException(400, f"mode must be one of {', '.join(MCP_MODES)}")
+    if body.scope not in MCP_SCOPES:
+        raise HTTPException(400, f"scope must be one of {', '.join(MCP_SCOPES)}")
+    if mcp_store.tool(body.tool_slug) is None:
+        raise HTTPException(404, "No such connector tool")
+    return mcp_store.set_grant(body.tool_slug, body.mode, scope=body.scope, scope_id=body.scope_id)
+
+
+@app.delete("/mcp/grants")
+def clear_mcp_grant(tool_slug: str, scope: str = "global", scope_id: str | None = None) -> dict[str, bool]:
+    mcp_store.clear_grant(tool_slug, scope=scope, scope_id=scope_id)
+    return {"ok": True}

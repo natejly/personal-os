@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { ActivityConfig, ActivityContextFile, ActivityEvent, ActivitySignal, ActivityStatus, ActivitySummary, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocRevision, Document, FullDoc, GraphData, Memory, Message, ModelInfo, Settings, Project, RunConflict, SessionStatus, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap } from '@shared/types'
+import type { ActivityConfig, ActivityContextFile, ActivityEvent, ActivitySignal, ActivityStatus, ActivitySummary, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocRevision, Document, FullDoc, GraphData, McpServer, McpTool, Memory, Message, ModelInfo, Settings, Project, RunConflict, SessionStatus, Skill, ToolInfo, ToolMode, Todo, GoogleStatus, TasksSyncStatus, TodayDashboard, Recap } from '@shared/types'
 import { api, chatStream, setBase, type Scope } from './lib/api'
 import { finishStatus, mergeConversation, pickEvictions, reduceStatus, settleApprovals } from './sessionStatus'
 import { viewHidden } from './modules'
@@ -16,7 +16,9 @@ const withoutLegacyMode = (s: Settings): Settings => {
 }
 
 /** `'canvas'` is the spaces desktop: one destination among the views, not a separate shell. */
-export type View = 'home' | 'chat' | 'todos' | 'calendar' | 'mail' | 'boards' | 'dashboards' | 'memory' | 'documents' | 'docs' | 'activity' | 'project' | 'canvas'
+export type View = 'home' | 'chat' | 'todos' | 'calendar' | 'mail' | 'boards' | 'dashboards' | 'memory' | 'documents' | 'docs' | 'library' | 'activity' | 'project' | 'canvas'
+/** The Library's three halves: what the assistant can learn, what it can reach, and what it made. */
+export type LibraryTab = 'skills' | 'connectors' | 'made'
 /** Every view but the canvas: what ⌘⇧C and the sidebar's LayoutGrid button return to. */
 export type ClassicView = Exclude<View, 'canvas'>
 /** How the Docs editor splits its panes. */
@@ -116,6 +118,15 @@ export interface State {
   /** Editor buffer for the open doc: what the user has typed but autosave has not yet flushed. */
   docDraft: string | null
   docSaving: boolean
+  /** Library. Procedural memory — candidates and approved skills, loaded when the Library opens. */
+  skills: Skill[]
+  /** Connectors (MCP): the configured servers and every tool they advertise. */
+  mcpServers: McpServer[]
+  mcpTools: McpTool[]
+  /** A connector action (probe, restart, eval) is in flight; the tab disables its buttons. */
+  mcpBusy: string | null
+  libraryTab: LibraryTab
+
   /** Activity monitor. `null` until the first status poll lands. */
   activity: ActivityStatus | null
   activityEvents: ActivityEvent[]
@@ -209,6 +220,26 @@ export interface State {
   deleteTodo: (id: string) => Promise<void>
   uploadDocuments: (files: FileList | File[], projectId: string | null) => Promise<void>
   deleteDocument: (id: string) => Promise<void>
+
+  setLibraryTab: (t: LibraryTab) => void
+  /** Load everything the Library shows. Cheap enough to re-run whenever the view opens. */
+  refreshLibrary: () => Promise<void>
+  refreshSkills: () => Promise<void>
+  createSkill: (s: { name: string; description?: string; procedure?: string; project_id?: string | null }) => Promise<void>
+  /** Rename, edit, approve or reject. Approving is what lets a skill into the system prompt. */
+  updateSkill: (id: string, patch: Parameters<typeof api.skills.update>[1]) => Promise<boolean>
+  deleteSkill: (id: string) => Promise<void>
+  /** Ask the backend to distil a chat into a candidate skill for review. */
+  induceSkill: (conversationId: string) => Promise<void>
+
+  refreshConnectors: () => Promise<void>
+  addConnector: (s: { name: string; command: string; args?: string[]; cwd?: string; env?: Record<string, string>; description?: string }) => Promise<McpServer | null>
+  updateConnector: (id: string, patch: Parameters<typeof api.mcp.update>[1]) => Promise<void>
+  deleteConnector: (id: string) => Promise<void>
+  restartConnector: (id: string) => Promise<void>
+  evaluateConnector: (id: string) => Promise<void>
+  /** Set how one connector tool may run, globally. Scoped grants are set from the chat's context drawer. */
+  setConnectorGrant: (slug: string, mode: ToolMode) => Promise<void>
 
   refreshDocs: (q?: string) => Promise<void>
   refreshDocsPending: () => Promise<void>
@@ -528,6 +559,11 @@ export const useStore = create<State>((set, get) => {
     docMode: 'split',
     docDraft: null,
     docSaving: false,
+    skills: [],
+    mcpServers: [],
+    mcpTools: [],
+    mcpBusy: null,
+    libraryTab: 'skills',
     sidebarOpen: true,
     contextOpen: false,
     contextTab: 'last',
@@ -579,6 +615,8 @@ export const useStore = create<State>((set, get) => {
       void get().refreshTodos()
       void get().refreshRecap()
       void get().refreshDocsPending()
+      // Loaded at start, not on first Library entry: the sidebar badge counts unreviewed procedures.
+      void get().refreshSkills().catch(() => undefined)
       void get().refreshActivity()
     },
 
@@ -798,6 +836,105 @@ export const useStore = create<State>((set, get) => {
       // Aborting the fetch would only detach this window, so a stop is always a request to the run.
       if (st.messageId) await api.stop(st.messageId).catch(() => undefined)
       else await api.stopRun(id, st.runId).catch(() => undefined)
+    },
+
+    // ---- Library: skills (procedural memory) and connectors (MCP) ----
+    setLibraryTab: (libraryTab) => set({ libraryTab }),
+    refreshLibrary: async () => {
+      await Promise.all([get().refreshSkills(), get().refreshConnectors()])
+    },
+    refreshSkills: async () => set({ skills: await api.skills.list() }),
+    createSkill: async (s) => {
+      // Comes back a candidate whatever the user typed: approving is a separate, deliberate click.
+      const sk = await api.skills.create(s)
+      set((st) => ({ skills: [sk, ...st.skills] }))
+    },
+    updateSkill: async (id, patch) => {
+      // Approving (or editing a live skill) can be refused by the backend's lint, which is the only
+      // 'no' in this panel the user has not already seen inline. Surfacing it is the point.
+      try {
+        const s = await api.skills.update(id, patch)
+        set((st) => ({ skills: st.skills.map((x) => (x.id === id ? s : x)) }))
+        return true
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+        return false
+      }
+    },
+    deleteSkill: async (id) => {
+      await api.skills.delete(id)
+      set((st) => ({ skills: st.skills.filter((x) => x.id !== id) }))
+    },
+    induceSkill: async (conversationId) => {
+      try {
+        const { candidate, reason } = await api.skills.induce(conversationId)
+        if (candidate) {
+          set((st) => ({ skills: [candidate, ...st.skills] }))
+          get().toast(`Saved “${candidate.name}” as a candidate — approve it in the Library.`, 'learned')
+        } else {
+          get().toast(reason || 'Nothing here was a repeatable procedure.')
+        }
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+
+    refreshConnectors: async () => {
+      const [mcpServers, mcpTools] = await Promise.all([api.mcp.servers(), api.mcp.tools()])
+      set({ mcpServers, mcpTools })
+    },
+    addConnector: async (s) => {
+      try {
+        // Created disabled by the backend: adding a connector never spawns a process on its own.
+        const srv = await api.mcp.create(s)
+        await get().refreshConnectors()
+        return srv
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+        return null
+      }
+    },
+    updateConnector: async (id, patch) => {
+      set({ mcpBusy: id })
+      try {
+        await api.mcp.update(id, patch)
+        await get().refreshConnectors()
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      } finally {
+        set({ mcpBusy: null })
+      }
+    },
+    deleteConnector: async (id) => {
+      await api.mcp.delete(id).catch((e: Error) => get().toast(e.message, 'error'))
+      await get().refreshConnectors()
+    },
+    restartConnector: async (id) => {
+      set({ mcpBusy: id })
+      try {
+        await api.mcp.restart(id)
+        await get().refreshConnectors()
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      } finally {
+        set({ mcpBusy: null })
+      }
+    },
+    evaluateConnector: async (id) => {
+      set({ mcpBusy: id })
+      try {
+        const report = await api.mcp.evaluate(id)
+        get().toast(report.summary, report.status === 'pass' ? 'info' : 'error')
+        await get().refreshConnectors()
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      } finally {
+        set({ mcpBusy: null })
+      }
+    },
+    setConnectorGrant: async (slug, mode) => {
+      await api.mcp.grant(slug, mode).catch((e: Error) => get().toast(e.message, 'error'))
+      set({ mcpTools: await api.mcp.tools() })
     },
 
     refreshDocs: async (q = '') => set({ docs: await api.docs.list(get().dataScope, q) }),

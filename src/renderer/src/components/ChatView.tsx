@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { PanelLeftOpen, ChevronDown, RefreshCw, Pencil, SlidersHorizontal } from 'lucide-react'
+import { PanelLeftOpen, ChevronDown, RefreshCw, Pencil, SlidersHorizontal, Sparkles } from 'lucide-react'
 import { useStore, useProject, useConversation, useIsStreaming, useStreamingMessageId } from '../store'
 import ProjectChip from './ProjectChip'
 import MessageView from './Message'
@@ -39,7 +39,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   const contextOpen = useStore((s) => s.contextOpen)
   const draftProjectId = useStore((s) => s.draftProjectId)
   const project = useProject(convo?.project_id ?? draftProjectId)
-  const { toggleSidebar, toggleContext, setChatModel, renameChat, regenerate } = useStore()
+  const { toggleSidebar, toggleContext, setChatModel, renameChat, regenerate, induceSkill } = useStore()
   const scrollRef = useRef<HTMLDivElement>(null)
   const [stick, setStick] = useState(true)
   const [editingTitle, setEditingTitle] = useState(false)
@@ -79,6 +79,10 @@ export default function ChatView({ conversationId }: { conversationId?: string }
           <SendToSpace items={[{ kind: 'chat', refId: convo?.id }]} disabled={!convo?.id} />
           <ProjectChip projectId={convo?.project_id ?? draftProjectId} />
           <ModelPicker value={model} onChange={(m) => void setChatModel(m, conversationId)} />
+          {/* Distils this chat into a candidate procedure. It lands in the Library unapproved — nothing
+              about this chat reaches a later system prompt until the user says so there. */}
+          <button className="icon-btn" title="Learn a procedure from this chat" aria-label="Learn a procedure from this chat"
+            disabled={!convo?.id} onClick={() => convo && void induceSkill(convo.id)}><Sparkles size={16} /></button>
           <button className={`icon-btn ${contextOpen ? 'on' : ''}`} title="Context panel (⌘I)" aria-label="Toggle context panel" aria-pressed={contextOpen} onClick={toggleContext}><SlidersHorizontal size={16} /></button>
         </div>
       </header>

@@ -24,6 +24,7 @@ from .cowork import UNDECIDED_OUTPUTS
 from .workspace import WorkspaceError
 from . import plans
 from . import reach
+from . import webread
 from . import outbox as outbox_mod
 from . import verify
 from .jobs import local_tz_name, parse_when, valid_cron, valid_tz
@@ -365,6 +366,8 @@ async def guarded_request(client: httpx.AsyncClient, method: str, url: str, *, h
 
 
 class Toolbox:
+    web_cache: Any = None  # webread.WebCache, wired in app.py; fetch_url runs uncached without it
+
     def __init__(self, memories: Memories, graph: Graph, documents: Documents, settings_fn: Callable[[], dict[str, Any]], modules: list[Any] | None = None, google: Any = None, boards: Any = None,
                  sandboxes: Sandboxes | None = None, docs: Any = None, activity: Any = None, outbox: Any = None,
                  work_plans: Any = None, results: Any = None, skills: Any = None, jobs: Any = None,
@@ -679,14 +682,24 @@ class Toolbox:
             examples=[{"query": "EU AI Act enforcement dates"}, {"query": "best espresso machine 2026", "max_results": 10},
                       {"query": "python 3.13 release notes", "max_results": 6, "offset": 6}], taints=True))
 
-        async def fetch_url(ctx: dict[str, Any], url: str, max_chars: int = 12000) -> Any:
+        async def fetch_url(ctx: dict[str, Any], url: str, max_chars: int = 12000, focus: str = "", offset: int = 0,
+                            fresh: bool = False, links: bool = False) -> Any:
             cur, hops = url, 0
+            cfg = self.settings()
+            cache = self.web_cache
+            ttl = 0 if fresh else float(cfg.get("fetchCacheSeconds", 3600) or 0)
+            hit: dict[str, Any] | None = None
             try:
                 async with httpx.AsyncClient(timeout=25, follow_redirects=False, transport=httpx.AsyncHTTPTransport(retries=0),
                                              headers={"User-Agent": "Grain/0.1 (+desktop assistant)"}) as c:
                     while True:
-                        cur, host = _check_url(cur, ctx, self.settings(), redirect=hops > 0)
+                        cur, host = _check_url(cur, ctx, cfg, redirect=hops > 0)
                         await _resolve(host)  # validated, then reconnected by name: a DNS rebind in that window is accepted
+                        # The cache is read only here, after the taint and SSRF checks for this very URL.
+                        if cache is not None and ttl > 0 and (key := _norm_url(cur)):
+                            hit = cache.get(key, ttl)
+                            if hit:
+                                break
                         r = await c.get(cur)
                         if r.status_code not in (301, 302, 303, 307, 308) or not r.headers.get("location"):
                             break
@@ -696,39 +709,56 @@ class Toolbox:
                         cur = urllib.parse.urljoin(str(r.url), r.headers["location"])
             except UrlBlocked as e:
                 return tool_error(f"fetch_url refused {url}: {e}", field="url", alternative=e.alternative or ALTERNATIVE["fetch_url"])
-            ctype = r.headers.get("content-type", "")
-            body = r.text
-            text: str
+            if hit:
+                status, ctype, raw, final_url = hit["status"], hit["content_type"], hit["body"], hit["final_url"]
+            else:
+                status, ctype, raw, final_url = r.status_code, r.headers.get("content-type", ""), r.content, str(r.url)
+                if cache is not None and float(cfg.get("fetchCacheSeconds", 3600) or 0) > 0 and 200 <= status < 300 and (key := _norm_url(cur)):
+                    try:
+                        cache.put(key, status, ctype, raw, final_url)
+                    except Exception as e:  # noqa: BLE001 -- the cache is an optimisation, never a failure
+                        log.info("fetch cache write failed: %s", _first_line(e))
+            kind = webread.classify(ctype, final_url, raw[:512])
             try:
-                import trafilatura
-
-                text = trafilatura.extract(body, output_format="markdown", include_links=False, include_tables=True) or ""
-            except Exception:  # noqa: BLE001
-                text = ""
-            if not text:
-                text = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", body, flags=re.S | re.I)
-                text = html.unescape(re.sub(r"<[^>]+>", " ", text))
-                text = re.sub(r"[ \t]+", " ", re.sub(r"\n\s*\n+", "\n\n", text)).strip()
+                rendered = webread.render(kind, raw, webread.decode(ctype, raw) if kind not in ("pdf", "binary") else "", final_url, include_links=links)
+            except webread.Unreadable as e:
+                return tool_error(f"fetch_url: {final_url} is {ctype or 'of unknown type'}: {e}", field="url", alternative=ALTERNATIVE["fetch_url"])
+            text = rendered.text
             via = None
             # Agent Reach's web path: when our plain client is turned away, or the page is a JavaScript shell, read it
             # through Jina Reader, which renders it on Jina's side. Only ever a URL that already passed _check_url.
-            if self.settings().get("readerFallback", True) and (
-                    r.status_code in (401, 403, 429, 503) or (len(text) < 300 and "html" in ctype.lower())):
+            if kind == "html" and cfg.get("readerFallback", True) and (status in (401, 403, 429, 503) or len(text) < 300):
                 try:
-                    j = await reach.jina_read(str(r.url))
+                    j = await reach.jina_read(final_url)
                     if len(j["text"]) > len(text):
                         text, via = j["text"], "jina-reader"
                 except (reach.ReachError, httpx.HTTPError) as e:
-                    log.info("jina reader fallback failed for %s: %s", r.url, _first_line(e))
-            out = {"url": str(r.url), "status": r.status_code, "content_type": ctype, "text": text[: max(1000, min(int(max_chars), 40000))],
-                   "truncated": len(text) > max_chars, "redirects": hops}
+                    log.info("jina reader fallback failed for %s: %s", final_url, _first_line(e))
+            mc = max(1000, min(int(max_chars), 40000))
+            focused = bool(focus and focus.strip())
+            if focused:
+                text = webread.bm25_focus(text, focus, mc)
+            if links and rendered.links and via is None:
+                text += "\n\n## References\n" + webread.references(rendered.links)
+            window, total, nxt = webread.page_window(text, offset, mc)
+            # Link URLs are page content, so they are deliberately not _allow_url'd: a tainted run cannot follow them.
+            out = {"url": final_url, "status": status, "content_type": ctype, "kind": kind, "text": window, "truncated": nxt is not None,
+                   "total_chars": total, "next_offset": nxt, "cached": bool(hit), "redirects": hops}
+            if focused:
+                out["focused"] = True
+            if links:
+                out["links"] = rendered.links[: webread.LINK_CAP]
             if via:
                 out["via"] = via
             return out
-        R("fetch_url", ToolSpec("fetch_url", "Fetch a web page and return its main text as markdown. Public http(s) addresses only. "
+        R("fetch_url", ToolSpec("fetch_url", "Fetch a web page, PDF or JSON document and return its main text as markdown. Public http(s) addresses only. "
+                                "Pass focus='what you are looking for' to keep only the matching parts of a long page, offset=next_offset to read on "
+                                "when truncated, links=true for numbered link references, fresh=true to skip the 1-hour cache. "
                                 "Pages that block plain fetches or need JavaScript are retried through a reader service.",
-            _obj({"url": {"type": "string"}, "max_chars": {"type": "integer", "default": 12000}}, ["url"]), fetch_url, "web", "network",
-            examples=[{"url": "https://example.com/blog/post"}, {"url": "https://en.wikipedia.org/wiki/SQLite", "max_chars": 20000}], taints=True))
+            _obj({"url": {"type": "string"}, "max_chars": {"type": "integer", "default": 12000}, "focus": {"type": "string"},
+                  "offset": {"type": "integer", "default": 0}, "fresh": {"type": "boolean", "default": False}, "links": {"type": "boolean", "default": False}}, ["url"]), fetch_url, "web", "network",
+            examples=[{"url": "https://example.com/blog/post"}, {"url": "https://en.wikipedia.org/wiki/SQLite", "max_chars": 20000},
+                      {"url": "https://example.com/pricing", "focus": "enterprise pricing"}, {"url": "https://example.com/report.pdf", "offset": 12000}], taints=True))
 
         async def run_python_tool(ctx: dict[str, Any], code: str, timeout: int = 30) -> Any:
             return await asyncio.to_thread(run_python, code, max(1, min(int(timeout), 120)))

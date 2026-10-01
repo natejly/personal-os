@@ -83,6 +83,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "exaApiKey": "",
     # fetch_url retries a blocked or JavaScript-only page through Jina Reader (r.jina.ai), which then sees the URL.
     "readerFallback": True,
+    # fetch_url reuses a page it fetched this many seconds ago (0 = never); fresh=true on the call bypasses it.
+    "fetchCacheSeconds": 3600,
     # github_search/github_read; empty = the gh CLI's login (`gh auth token`), else unauthenticated (60 requests/h).
     "githubToken": "",
     # {model: {"input": $/M tokens, "output": $/M tokens}} overrides for cost accounting (proxy prices are used otherwise)

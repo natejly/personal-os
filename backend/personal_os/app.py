@@ -58,6 +58,7 @@ from .style import WritingStyle, learn_style_from_exchange, looks_like_prose
 from .modules import Module, ModuleContext, build_modules, get as module_get
 from .modules.todos import TodosModule
 from .tools import Toolbox, summarize_result
+from .webread import WebCache
 from .trace import Tracer, now_ms
 from .usage import Pricing, Usage
 from .working import Plans as WorkPlans, ToolResults
@@ -311,6 +312,7 @@ meeting_svc = MeetingService(db, settings, llm.complete, meeting_store, google=g
 toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=google, boards=boards, sandboxes=sandboxes, docs=docs, activity=monitor,
                   outbox=outbox, work_plans=work_plans, results=tool_results, skills=skills, jobs=jobs,
                   style=style, meetings=meeting_svc, desks=desks, workspace=workspace)
+toolbox.web_cache = WebCache(db)  # fetch_url's response cache
 # The insights pass proposes automations, so it is told which tools this install actually has - an
 # unwired integration must not turn into a suggestion that cannot be carried out.
 monitor.insights.tools_fn = lambda: [t["name"] for t in toolbox.list() if t.get("available")]

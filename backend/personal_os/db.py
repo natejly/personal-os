@@ -301,6 +301,16 @@ CREATE TABLE IF NOT EXISTS plan_steps (
 );
 CREATE INDEX IF NOT EXISTS idx_plan_steps_claim ON plan_steps(tool, args_digest, status);
 
+-- fetch_url's response cache (webread.WebCache); rows are disposable.
+CREATE TABLE IF NOT EXISTS web_cache (
+  url TEXT PRIMARY KEY,
+  fetched_at REAL NOT NULL,
+  status INTEGER,
+  content_type TEXT,
+  body BLOB,
+  final_url TEXT
+);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
   text, chunk_id UNINDEXED, document_id UNINDEXED, tokenize='porter unicode61'
 );

@@ -5,7 +5,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { Canvas, CanvasWindow } from '@shared/types'
-import { liveWindows } from './Canvas'
+import { liveWindows, renderOrder } from './Canvas'
 import { WIDGETS } from './registry'
 import { flushLayoutOnUnload, setLiveViewport, useCanvas, viewport } from './store'
 import { toUrl } from './widgets/web'
@@ -225,4 +225,32 @@ test('filtering to the active canvas is what stops it', () => {
   // The guard Canvas.tsx applies before closing anything.
   const here = new Set((s.activeCanvasId ? s.canvases[s.activeCanvasId]?.windows ?? [] : []).map((w) => w.id))
   assert.deepEqual(selected.filter((id) => here.has(id)), [])
+})
+
+// ---- why the frames are not rendered in the store's z order -------------------------
+
+test('raising a window reorders the store but never the rendered frames', () => {
+  seed(
+    canvas('c1', [
+      win({ id: 'a', z: 0, created_at: 1 }),
+      win({ id: 'b', z: 1, created_at: 2 }),
+      win({ id: 'c', z: 2, created_at: 3 })
+    ])
+  )
+  const stored = (): string[] => useCanvas.getState().canvases['c1'].windows.map((w) => w.id)
+  const rendered = (): string[] => renderOrder(useCanvas.getState().canvases['c1'].windows).map((w) => w.id)
+  assert.deepEqual(rendered(), ['a', 'b', 'c'])
+
+  // A click on the bottom window: focusWindow's raise, without the pointerup defer or the POST.
+  useCanvas.getState().patchWindow('a', { z: 3 })
+  // The store stays sorted by z -- the live cap and every topmost-first walk depend on that.
+  assert.deepEqual(stored(), ['b', 'c', 'a'])
+  // The DOM does not follow it. A reordered keyed child is re-inserted, and re-insertion restarts
+  // `win-open` and reloads any iframe or <webview> inside: that is the "reload" a click looked like.
+  assert.deepEqual(rendered(), ['a', 'b', 'c'])
+})
+
+test('a minimized window is the only one renderOrder drops', () => {
+  seed(canvas('c1', [win({ id: 'a', created_at: 1 }), win({ id: 'b', created_at: 2, state: 'minimized' })]))
+  assert.deepEqual(renderOrder(useCanvas.getState().canvases['c1'].windows).map((w) => w.id), ['a'])
 })

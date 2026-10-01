@@ -24,7 +24,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from pydantic import AfterValidator, BaseModel, Field
 
-from . import activity, assist, llm, tools
+from . import activity, assist, llm, mac, tools
 from .context import build_context, estimate_tokens
 from .db import Database, data_dir_from_env, new_id
 from .extract_text import extract_text
@@ -327,6 +327,21 @@ def list_tools() -> dict[str, Any]:
     cfg = settings()
     modes = toolbox.effective(cfg.get("tools") or {}, None, None)
     return {"tools": toolbox.list(), "modes": modes}
+
+
+class PageBridgeIn(BaseModel):
+    url: str
+    token: str
+
+
+@app.post("/bridge/page")
+def register_page_bridge(body: PageBridgeIn) -> dict[str, Any]:
+    """The Electron main process says where its offscreen page loader listens (open_page). Re-sent periodically."""
+    try:
+        mac.page_bridge.register(body.url, body.token)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return {"ok": True}
 
 
 @app.get("/projects")

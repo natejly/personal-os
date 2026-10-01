@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { ChevronRight, Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, AlertCircle } from 'lucide-react'
+import { ChevronRight, Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, AlertCircle, Laptop, Zap } from 'lucide-react'
 import type { ToolEvent } from '@shared/types'
 import { useStore } from '../store'
 
 const ICONS: Record<string, JSX.Element> = {
-  web_search: <Globe size={13} />, fetch_url: <Globe size={13} />,
+  web_search: <Globe size={13} />, fetch_url: <Globe size={13} />, open_page: <Globe size={13} />,
+  find_files: <Laptop size={13} />, read_local_file: <Laptop size={13} />, list_shortcuts: <Zap size={13} />, run_shortcut: <Zap size={13} />,
   search_documents: <FileSearch size={13} />, read_document: <FileSearch size={13} />, list_documents: <FileSearch size={13} />,
   search_memory: <Brain size={13} />, save_memory: <Brain size={13} />,
   graph_search: <Share2 size={13} />, graph_traverse: <Share2 size={13} />, graph_add: <Share2 size={13} />,
@@ -15,7 +16,7 @@ const ICONS: Record<string, JSX.Element> = {
 
 function summary(t: ToolEvent): string {
   const a = t.arguments ?? {}
-  const first = a.query ?? a.url ?? a.command ?? a.path ?? a.entity ?? a.content ?? a.document_id ?? (a.code ? String(a.code).split('\n')[0] : '') ?? ''
+  const first = a.query ?? a.url ?? a.command ?? a.path ?? a.name ?? a.entity ?? a.content ?? a.document_id ?? (a.code ? String(a.code).split('\n')[0] : '') ?? ''
   const s = String(first ?? '')
   return s.length > 90 ? s.slice(0, 90) + '…' : s
 }

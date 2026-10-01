@@ -3,6 +3,7 @@ import { ArrowUp, Square, Paperclip } from 'lucide-react'
 import PlanModeToggle from './PlanModeToggle'
 import { useStore, useIsStreaming } from '../store'
 import SmartTextarea from './SmartTextarea'
+import { COMPOSER_INSERT_EVENT, appendDraft, type ComposerInsertDetail } from '../lib/composerInsert'
 
 interface ComposerProps {
   conversationId?: string
@@ -30,6 +31,19 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   const uploadDocuments = useStore((s) => s.uploadDocuments)
 
   useEffect(() => { box.current?.querySelector('textarea')?.focus() }, [activeId])
+
+  // A tool card's slot chip asks for text in the composer of the conversation being looked at.
+  useEffect(() => {
+    const onInsert = (e: Event): void => {
+      if ((conversationId ?? activeId) !== useStore.getState().focusedConversationId) return
+      const t = (e as CustomEvent<ComposerInsertDetail>).detail?.text
+      if (!t) return
+      setText((cur) => appendDraft(cur, t))
+      box.current?.querySelector('textarea')?.focus()
+    }
+    window.addEventListener(COMPOSER_INSERT_EVENT, onInsert)
+    return () => window.removeEventListener(COMPOSER_INSERT_EVENT, onInsert)
+  }, [activeId, conversationId])
 
   /**
    * The draft is cleared optimistically and handed back if `send` refuses it. Typed text is never

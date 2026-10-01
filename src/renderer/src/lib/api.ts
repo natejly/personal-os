@@ -99,8 +99,8 @@ export const api = {
   recap: (force = false) => req<Recap>(`/recap?force=${force}`),
   // `steps` / `note` are for a propose_plan card: the steps the user is authorising (with any edited arguments,
   // whose digests the backend re-derives), and one line back to the model.
-  approve: (callId: string, decision: ApprovalDecision, opts?: { steps?: PlanEdit[] | null; note?: string }) =>
-    req(`/approvals/${callId}`, { method: 'POST', body: json({ decision, ...(opts?.steps ? { steps: opts.steps } : {}), ...(opts?.note ? { note: opts.note } : {}) }) }),
+  approve: (callId: string, decision: ApprovalDecision, opts?: { steps?: PlanEdit[] | null; note?: string; arguments?: Record<string, unknown> }) =>
+    req(`/approvals/${callId}`, { method: 'POST', body: json({ decision, ...(opts?.steps ? { steps: opts.steps } : {}), ...(opts?.note ? { note: opts.note } : {}), ...(opts?.arguments ? { arguments: opts.arguments } : {}) }) }),
   /** The Agent Inbox: pending approvals and proposals, plus what the scheduled jobs did. Built from journal rows. */
   inbox: (hours = 72) => req<AgentInbox>(`/inbox?hours=${hours}`),
   jobs: {

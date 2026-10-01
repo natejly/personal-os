@@ -1,18 +1,23 @@
 import { useEffect, useMemo, useState } from 'react'
 import { ChevronRight, Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, AlertCircle, Laptop, Zap, ListChecks, PenLine, ShieldAlert, ShieldCheck,
   FolderOpen, FileText, FilePen, Trash2, PackageCheck, CircleHelp, CircleCheck,
-  Youtube, Github, Rss } from 'lucide-react'
+  Youtube, Github, Rss, CalendarDays, CalendarClock, CalendarSearch, CalendarPlus, CalendarX } from 'lucide-react'
 import type { DocRevision, ToolEvent, Verification } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore } from '../store'
 import DiffView from './DiffView'
 import PlanApproval from './PlanApproval'
+import { TOOL_CARDS } from './toolcards/registry'
+import './toolcards' // registers every card
 // The ask card mounts inline in a chat bubble, so it needs the sheet the desk panes use.
 import '../styles/cowork.css'
 import '../styles/docs.css'
 
 const ICONS: Record<string, JSX.Element> = {
   propose_plan: <ListChecks size={13} />,
+  calendar_events: <CalendarDays size={13} />, calendar_get: <CalendarDays size={13} />, calendar_free_busy: <CalendarClock size={13} />,
+  calendar_find_time: <CalendarSearch size={13} />, calendar_propose: <CalendarDays size={13} />, calendar_create: <CalendarPlus size={13} />,
+  calendar_update: <CalendarClock size={13} />, calendar_delete: <CalendarX size={13} />,
   desk_list_files: <FolderOpen size={13} />, desk_read_file: <FileText size={13} />, desk_write_file: <FilePen size={13} />,
   desk_trash_file: <Trash2 size={13} />, desk_deliver: <PackageCheck size={13} />, desk_ask: <CircleHelp size={13} />,
   desk_done: <CircleCheck size={13} />, desk_import_sandbox: <FolderOpen size={13} />,
@@ -202,7 +207,15 @@ export default function ToolEvents({ events, conversationId }: { events: ToolEve
   const approveTool = useStore((s) => s.approveTool)
   return (
     <div className="tool-events">
-      {events.map((t) => (
+      {events.map((t) => {
+        // A registered card (toolcards/) replaces the generic row, for the approval and for the finished call alike.
+        const Card = TOOL_CARDS[t.name]
+        if (Card) {
+          const decide = (approve: boolean, edited?: Record<string, unknown>): Promise<void> =>
+            approveTool(t.id, approve ? 'allow' : 'deny', conversationId, edited ? { arguments: edited } : undefined)
+          return <div key={t.id} className="tool-event card"><Card event={t} pending={!!t.pending && !!t.needs_approval} decide={decide} /></div>
+        }
+        return (
         <div key={t.id} className={`tool-event ${t.pending ? 'pending' : ''} ${t.error ? 'error' : ''}`}>
           <button className="tool-head" onClick={() => setOpen((o) => ({ ...o, [t.id]: !o[t.id] }))}>
             <ChevronRight size={12} className={open[t.id] ? 'rot90' : ''} />
@@ -252,7 +265,8 @@ export default function ToolEvents({ events, conversationId }: { events: ToolEve
             </div>
           )}
         </div>
-      ))}
+        )
+      })}
     </div>
   )
 }

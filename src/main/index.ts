@@ -8,6 +8,7 @@ import { startPageBridge, stopPageBridge } from './pagefetch'
 import { gather, OPACITY_LEVELS, registerPopouts, restorePopouts, setFrontListener, toggleFront } from './popouts'
 import { registerShortcuts } from './shortcuts'
 import { createTray } from './tray'
+import { startUpdater } from './updater'
 
 let win: BrowserWindow | null = null
 const isMac = process.platform === 'darwin'
@@ -277,6 +278,7 @@ app.whenReady().then(async () => {
   registerShortcuts(() => win, await storedGather())
   createWindow()
   void restorePopouts()
+  startUpdater()
   app.on('activate', showMain)
 })
 

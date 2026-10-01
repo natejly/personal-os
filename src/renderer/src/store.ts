@@ -4,6 +4,7 @@ import { api, backgroundStream, chatStream, setBase, type Scope } from './lib/ap
 import { currentSelection } from './lib/pageContext'
 import { finishStatus, mergeConversation, pickEvictions, reduceStatus, settleApprovals } from './sessionStatus'
 import { viewHidden } from './modules'
+import { chainTo, folderKey, groupShutKey } from './lib/docTree'
 
 /**
  * Settings as the renderer holds them: without the legacy `mode`, which only init() reads. Kept out
@@ -169,15 +170,20 @@ export interface State {
   /** Ids of the docs open as tabs, most recent last. */
   docTabs: string[]
   docRevisions: DocRevision[]
-  /** Folders of the Docs tree, nested by path. Server-owned, so an empty folder survives a reload. */
+  /** Folders of the Files tree, nested by path inside a scope. Server-owned, so an empty one survives a reload. */
   docFolders: DocFolder[]
-  /** Paths whose children are showing. Kept in localStorage: a tree that forgets is a tree you refold every morning. */
+  /**
+   * Which rows of the Files tree are unfolded, as `folderKey`/`groupShutKey` keys. Kept in
+   * localStorage: a tree that forgets is a tree you refold every morning.
+   */
   expandedFolders: string[]
   /** Assistant edits awaiting review, across every doc — the sidebar badge. */
   docsPending: number
   docMode: DocMode
   /** Editor buffer for the open doc: what the user has typed but autosave has not yet flushed. */
   docDraft: string | null
+  /** The same for the title, which autosaves on the same debounce rather than only on blur. */
+  docTitleDraft: string | null
   docSaving: boolean
   /** Activity monitor. `null` until the first status poll lands. */
   activity: ActivityStatus | null
@@ -335,23 +341,25 @@ export interface State {
   openDoc: (id: string) => Promise<void>
   closeDocTab: (id: string) => void
   createDoc: (d?: { title?: string; content?: string; project_id?: string | null; folder?: string }) => Promise<void>
+  /** Retitle the open doc as it is typed, on the same debounce as the body. */
+  editDocTitle: (title: string) => void
   /** Type into the open doc. Buffers locally and flushes to the backend on a debounce. */
   editDoc: (content: string) => void
   /** Flush the buffer now (⌘S, switching docs, leaving the view). */
   flushDoc: () => Promise<void>
-  renameDoc: (id: string, title: string) => Promise<void>
   setDocStar: (id: string, starred: boolean) => Promise<void>
-  /** Move a doc into a folder; '' takes it out of any folder. */
-  setDocFolder: (id: string, folder: string) => Promise<void>
+  /** File a doc: which project ('' is personal) and which folder in it, in one patch. */
+  moveDoc: (id: string, scope: string, folder: string) => Promise<void>
   refreshDocFolders: () => Promise<void>
-  createDocFolder: (path: string) => Promise<void>
-  /** Rename or move: both rewrite a folder's path, and its subtree follows. */
-  renameDocFolder: (path: string, newPath: string) => Promise<void>
+  createDocFolder: (path: string, scope?: string) => Promise<void>
+  /** Rename or move within a scope: both rewrite a folder's path, and its subtree follows. */
+  renameDocFolder: (path: string, newPath: string, scope?: string) => Promise<void>
   /** Without `deleteDocs` the folder's docs move up to its parent. */
-  deleteDocFolder: (path: string, deleteDocs?: boolean) => Promise<void>
-  toggleFolder: (path: string) => void
-  /** Open every folder on the way down to `path`, so a revealed doc is actually on screen. */
-  expandTo: (path: string) => void
+  deleteDocFolder: (path: string, deleteDocs?: boolean, scope?: string) => Promise<void>
+  /** Unfold or fold one row of the tree, by its `folderKey`/`groupShutKey`. */
+  toggleFolder: (key: string) => void
+  /** Open the group and every folder down to `path`, so a revealed doc is actually on screen. */
+  expandTo: (scope: string, path: string) => void
   deleteDoc: (id: string) => Promise<void>
   setDocMode: (m: DocMode) => void
   refreshDocRevisions: (id?: string) => Promise<void>
@@ -710,6 +718,7 @@ export const useStore = create<State>((set, get) => {
     docsPending: 0,
     docMode: 'split',
     docDraft: null,
+    docTitleDraft: null,
     docSaving: false,
     sidebarOpen: true,
     contextOpen: false,
@@ -1053,7 +1062,9 @@ export const useStore = create<State>((set, get) => {
       else await api.stopRun(id, st.runId).catch(() => undefined)
     },
 
-    refreshDocs: async (q = '') => set({ docs: await api.docs.list(get().dataScope, q) }),
+    // Always every scope: the Files tree shows Personal and each project as its own group, so a doc
+    // can never be created into a scope the list is filtered away from and look like it vanished.
+    refreshDocs: async (q = '') => set({ docs: await api.docs.list('all', q) }),
     refreshDocsPending: async () => {
       try {
         set({ docsPending: (await api.docs.pending()).pending })
@@ -1065,7 +1076,7 @@ export const useStore = create<State>((set, get) => {
       try {
         const doc = await api.docs.get(id)
         // A slower fetch must not clobber a doc the user has since switched away from.
-        if (get().docTabs.includes(id)) set({ activeDoc: doc, docDraft: null })
+        if (get().docTabs.includes(id)) set({ activeDoc: doc, docDraft: null, docTitleDraft: null })
         void get().refreshDocRevisions(id)
       } catch (e) {
         get().toast((e as Error).message, 'error')
@@ -1079,15 +1090,21 @@ export const useStore = create<State>((set, get) => {
       if (st.activeDoc?.id === id) {
         const next = tabs[tabs.length - 1]
         if (next) void get().openDoc(next)
-        else set({ activeDoc: null, docDraft: null, docRevisions: [] })
+        else set({ activeDoc: null, docDraft: null, docTitleDraft: null, docRevisions: [] })
       }
     },
     createDoc: async (d = {}) => {
       try {
         const doc = await api.docs.create({ title: d.title ?? 'Untitled', content: d.content ?? '', project_id: d.project_id ?? null, folder: d.folder ?? '' })
-        await get().refreshDocs()
-        if (d.folder) get().expandTo(d.folder)
-        set((st) => ({ view: 'docs', docTabs: [...st.docTabs, doc.id], activeDoc: doc, docDraft: null }))
+        await Promise.all([get().refreshDocs(), get().refreshDocFolders()])
+        // Unfold the group and folder chain it landed in, so a new doc is always on screen.
+        get().expandTo(doc.project_id ?? '', doc.folder)
+        set((st) => ({
+          view: 'docs',
+          docTabs: st.docTabs.includes(doc.id) ? st.docTabs : [...st.docTabs, doc.id],
+          activeDoc: doc,
+          docDraft: null
+        }))
         void get().refreshDocRevisions(doc.id)
       } catch (e) {
         get().toast((e as Error).message, 'error')
@@ -1099,23 +1116,36 @@ export const useStore = create<State>((set, get) => {
       if (saveTimer) clearTimeout(saveTimer)
       saveTimer = setTimeout(() => { void get().flushDoc() }, SAVE_DEBOUNCE_MS)
     },
+    editDocTitle: (title) => {
+      if (!get().activeDoc) return
+      set({ docTitleDraft: title })
+      if (saveTimer) clearTimeout(saveTimer)
+      saveTimer = setTimeout(() => { void get().flushDoc() }, SAVE_DEBOUNCE_MS)
+    },
     flushDoc: async () => {
       if (saveTimer) {
         clearTimeout(saveTimer)
         saveTimer = null
       }
-      const { activeDoc: doc, docDraft } = get()
-      if (!doc || docDraft === null || docDraft === doc.content) return set({ docDraft: null })
+      const { activeDoc: doc, docDraft, docTitleDraft } = get()
+      if (!doc) return set({ docDraft: null, docTitleDraft: null })
+      // A title of only whitespace is a slip of the hand, not an edit: hold the saved one.
+      const title = docTitleDraft !== null && docTitleDraft.trim() && docTitleDraft !== doc.title
+        ? docTitleDraft.trim() : undefined
+      const content = docDraft !== null && docDraft !== doc.content ? docDraft : undefined
+      if (content === undefined && title === undefined) return set({ docDraft: null, docTitleDraft: null })
       set({ docSaving: true })
       try {
-        const saved = await api.docs.save(doc.id, { content: docDraft })
+        const saved = await api.docs.save(doc.id, { content, title })
         // Keep whatever was typed while the request was in flight; adopt only the server's metadata.
         set((st) => {
           if (st.activeDoc?.id !== doc.id) return { docSaving: false }
           const newer = st.docDraft !== null && st.docDraft !== docDraft
+          const newerTitle = st.docTitleDraft !== null && st.docTitleDraft !== docTitleDraft
           return {
             activeDoc: newer ? { ...saved, content: st.docDraft as string } : saved,
             docDraft: newer ? st.docDraft : null,
+            docTitleDraft: newerTitle ? st.docTitleDraft : null,
             docSaving: false
           }
         })
@@ -1126,25 +1156,20 @@ export const useStore = create<State>((set, get) => {
         get().toast(`Could not save: ${(e as Error).message}`, 'error')
       }
     },
-    renameDoc: async (id, title) => {
-      if (!title.trim()) return
-      try {
-        const d = await api.docs.patch(id, { title: title.trim() })
-        set((st) => ({ activeDoc: st.activeDoc?.id === id ? { ...st.activeDoc, title: d.title } : st.activeDoc }))
-        await get().refreshDocs()
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      }
-    },
     setDocStar: async (id, starred) => {
       await api.docs.patch(id, { starred })
       await get().refreshDocs()
     },
-    setDocFolder: async (id, folder) => {
+    moveDoc: async (id, scope, folder) => {
       try {
-        const d = await api.docs.patch(id, { folder: folder.trim() })
-        set((st) => ({ activeDoc: st.activeDoc?.id === id ? { ...st.activeDoc, folder: d.folder } : st.activeDoc }))
-        await get().refreshDocs()
+        const d = await api.docs.move(id, scope, folder.trim())
+        set((st) => ({
+          activeDoc: st.activeDoc?.id === id
+            ? { ...st.activeDoc, folder: d.folder, project_id: d.project_id }
+            : st.activeDoc
+        }))
+        await Promise.all([get().refreshDocs(), get().refreshDocFolders()])
+        get().expandTo(d.project_id ?? '', d.folder)
       } catch (e) {
         get().toast((e as Error).message, 'error')
       }
@@ -1154,29 +1179,29 @@ export const useStore = create<State>((set, get) => {
         set({ docFolders: await api.docs.folders() })
       } catch { /* the tree still renders from the docs' own paths */ }
     },
-    createDocFolder: async (path) => {
+    createDocFolder: async (path, scope = '') => {
       try {
-        set({ docFolders: await api.docs.createFolder(path) })
-        get().expandTo(path)
+        set({ docFolders: await api.docs.createFolder(path, scope) })
+        get().expandTo(scope, path)
       } catch (e) {
         get().toast((e as Error).message, 'error')
       }
     },
-    renameDocFolder: async (path, newPath) => {
+    renameDocFolder: async (path, newPath, scope = '') => {
       try {
-        set({ docFolders: await api.docs.renameFolder(path, newPath) })
+        set({ docFolders: await api.docs.renameFolder(path, newPath, scope) })
         // Every doc under it moved with it, and the open one's own folder is now stale.
         await get().refreshDocs()
         const open = get().activeDoc
         if (open) void get().openDoc(open.id)
-        get().expandTo(newPath)
+        get().expandTo(scope, newPath)
       } catch (e) {
         get().toast((e as Error).message, 'error')
       }
     },
-    deleteDocFolder: async (path, deleteDocs = false) => {
+    deleteDocFolder: async (path, deleteDocs = false, scope = '') => {
       try {
-        set({ docFolders: await api.docs.deleteFolder(path, deleteDocs) })
+        set({ docFolders: await api.docs.deleteFolder(path, deleteDocs, scope) })
         await get().refreshDocs()
         const open = get().activeDoc
         if (open && deleteDocs && !get().docs.some((d) => d.id === open.id)) get().closeDocTab(open.id)
@@ -1185,16 +1210,19 @@ export const useStore = create<State>((set, get) => {
         get().toast((e as Error).message, 'error')
       }
     },
-    toggleFolder: (path) => set((st) => ({
-      expandedFolders: writeExpanded(st.expandedFolders.includes(path)
-        ? st.expandedFolders.filter((p) => p !== path)
-        : [...st.expandedFolders, path])
+    toggleFolder: (key) => set((st) => ({
+      expandedFolders: writeExpanded(st.expandedFolders.includes(key)
+        ? st.expandedFolders.filter((p) => p !== key)
+        : [...st.expandedFolders, key])
     })),
-    expandTo: (path) => set((st) => {
-      const segs = path.split('/').filter(Boolean)
-      const chain = segs.map((_, i) => segs.slice(0, i + 1).join('/'))
-      const missing = chain.filter((p) => !st.expandedFolders.includes(p))
-      return missing.length ? { expandedFolders: writeExpanded([...st.expandedFolders, ...missing]) } : {}
+    expandTo: (scope, path) => set((st) => {
+      // A group is open unless its shut-key is present, so revealing something means dropping that
+      // key as well as adding the chain of folders down to it.
+      const want = chainTo(path).map((p) => folderKey(scope, p)).filter((k) => !st.expandedFolders.includes(k))
+      const shut = groupShutKey(scope)
+      const next = st.expandedFolders.filter((k) => k !== shut)
+      if (!want.length && next.length === st.expandedFolders.length) return {}
+      return { expandedFolders: writeExpanded([...next, ...want]) }
     }),
     deleteDoc: async (id) => {
       await api.docs.delete(id)

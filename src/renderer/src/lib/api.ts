@@ -389,17 +389,21 @@ export const api = {
     /** Autosave. Records a revision, folding a burst of keystrokes into one history entry. */
     save: (id: string, patch: { content?: string; title?: string; summary?: string }) => req<FullDoc>(`/docs/${id}`, { method: 'PUT', body: json(patch) }),
     /** Title, folder, star and project moves — metadata, so it stays out of the history. */
-    patch: (id: string, patch: { title?: string; folder?: string; starred?: boolean; project_id?: string | null; clear_project?: boolean }) =>
+    patch: (id: string, patch: { title?: string; folder?: string; starred?: boolean; project_id?: string | null; clear_project?: boolean; scope?: string }) =>
       req<FullDoc>(`/docs/${id}`, { method: 'PATCH', body: json(patch) }),
+    /** A whole drag in one patch: which tree ('' personal, else a project) and which folder in it. */
+    move: (id: string, scope: string, folder: string) =>
+      req<FullDoc>(`/docs/${id}`, { method: 'PATCH', body: json({ scope, folder }) }),
     delete: (id: string) => req(`/docs/${id}`, { method: 'DELETE' }),
     pending: () => req<{ pending: number }>('/docs/pending'),
     folders: () => req<DocFolder[]>('/docs/folders'),
-    createFolder: (path: string) => req<DocFolder[]>('/docs/folders', { method: 'POST', body: json({ path }) }),
+    createFolder: (path: string, scope = '') => req<DocFolder[]>('/docs/folders', { method: 'POST', body: json({ path, scope }) }),
     /** Rename and move are one call: both rewrite the path of a folder and everything under it. */
-    renameFolder: (path: string, newPath: string) => req<DocFolder[]>('/docs/folders', { method: 'PATCH', body: json({ path, new_path: newPath }) }),
+    renameFolder: (path: string, newPath: string, scope = '') =>
+      req<DocFolder[]>('/docs/folders', { method: 'PATCH', body: json({ path, new_path: newPath, scope }) }),
     /** Without `deleteDocs` the folder's docs move up to its parent rather than disappearing with it. */
-    deleteFolder: (path: string, deleteDocs = false) =>
-      req<DocFolder[]>(`/docs/folders?path=${encodeURIComponent(path)}&delete_docs=${deleteDocs}`, { method: 'DELETE' }),
+    deleteFolder: (path: string, deleteDocs = false, scope = '') =>
+      req<DocFolder[]>(`/docs/folders?path=${encodeURIComponent(path)}&delete_docs=${deleteDocs}&scope=${encodeURIComponent(scope)}`, { method: 'DELETE' }),
     revisions: (id: string, limit = 100) => req<DocRevision[]>(`/docs/${id}/revisions?limit=${limit}`),
     revision: (revId: string) => req<DocRevision>(`/docs/revisions/${revId}`),
     accept: (revId: string) => req<FullDoc>(`/docs/revisions/${revId}/accept`, { method: 'POST' }),

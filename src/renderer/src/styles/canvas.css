@@ -778,8 +778,6 @@
 @keyframes win-min { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(40%) scale(0.4); } }
 @keyframes guide-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes zone-in { from { opacity: 0; transform: scale(0.98); } to { opacity: 1; transform: none; } }
-@keyframes ring-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
-@keyframes ring-pulse { 0%, 100% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.18); opacity: 0.7; } }
 
 @media (prefers-reduced-motion: reduce) {
   .win,

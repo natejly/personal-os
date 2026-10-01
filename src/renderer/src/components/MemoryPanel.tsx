@@ -7,6 +7,7 @@ import StyleView from './StyleView'
 import ScopeSelect from './ScopeSelect'
 import SendToSpace from './SendToSpace'
 import { lines, usePageContext } from '../lib/pageContext'
+import AppSwitcher from './AppSwitcher'
 
 const MODES: { key: MemoryMode; label: string; icon: JSX.Element; title: string }[] = [
   { key: 'split', label: 'Split', icon: <Columns2 size={13} />, title: 'Memories and graph side by side' },
@@ -100,6 +101,7 @@ export default function MemoryPanel({ projectId, embedded = false }: { projectId
           {search}
           {modeToggle}
         </div>
+        <AppSwitcher />
       </header>
       {body}
     </main>

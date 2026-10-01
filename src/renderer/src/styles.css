@@ -291,6 +291,21 @@ kbd {
   border-radius: 6px; padding: 4px 8px; outline: 0; width: 320px;
 }
 .header-right { display: flex; align-items: center; gap: 8px; }
+/* Todos / Calendar / Mail: the last thing in every title bar, set off from the view's own controls. */
+.app-switcher {
+  display: flex; align-items: center; gap: 2px;
+  margin-left: 4px; padding-left: 8px;
+  border-left: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.app-switch { position: relative; }
+.app-badge {
+  position: absolute; top: 1px; right: 0;
+  min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px;
+  background: var(--accent); color: #fff;
+  font-size: 9px; font-weight: 600; line-height: 14px; text-align: center;
+  pointer-events: none;
+}
 .model-picker {
   position: relative;
   display: flex; align-items: center;

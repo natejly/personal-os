@@ -9,6 +9,7 @@ import ContextDrawer from './ContextDrawer'
 import PlanPanel from './PlanPanel'
 import SendToSpace from './SendToSpace'
 import { clip, usePageContext } from '../lib/pageContext'
+import AppSwitcher from './AppSwitcher'
 
 function ModelPicker({ value, onChange }: { value: string; onChange: (m: string) => void }): JSX.Element {
   const models = useStore((s) => s.models)
@@ -116,6 +117,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
           <EffortPicker value={effort} onChange={(e) => void setChatSettings({ effort: e }, conversationId)} />
           <button className={`icon-btn ${contextOpen ? 'on' : ''}`} title="Context panel (⌃⌘I)" aria-label="Toggle context panel" aria-pressed={contextOpen} onClick={toggleContext}><SlidersHorizontal size={16} /></button>
         </div>
+        <AppSwitcher />
       </header>
 
       <div className="chat-body">

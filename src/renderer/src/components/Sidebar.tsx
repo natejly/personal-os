@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { MessageSquare, MessageSquarePlus, Search, Settings, Sparkles, Trash2, PanelLeftClose, Brain, FileText, Files, Plus, Folder, FolderKanban, ChevronRight, Home, CheckSquare, Calendar, KanbanSquare, LayoutDashboard, LayoutGrid, Library, Mail, Mic, Users, MonitorDot, BookOpen, Globe } from 'lucide-react'
+import { MessageSquare, MessageSquarePlus, Search, Settings, Sparkles, Trash2, PanelLeftClose, Brain, FileText, Files, Plus, Folder, FolderKanban, ChevronRight, Home, KanbanSquare, LayoutDashboard, LayoutGrid, Library, Mic, Users, MonitorDot, BookOpen, Globe } from 'lucide-react'
 import GrainLogo from './GrainLogo'
 import { useStore, type View } from '../store'
 import { ActivityIndicator } from './ActivityView'
@@ -39,11 +39,9 @@ type ProjectRow =
   | { kind: 'chat'; id: string; title: string; at: number }
   | { kind: 'doc'; id: string; title: string; at: number }
 
+// Todos, Calendar and Mail live in the title bar instead (AppSwitcher).
 const NAV: NavEntry[] = [
   { view: 'home', label: 'Today', icon: <Home size={15} />, kind: 'recap' },
-  { view: 'todos', label: 'Todos', icon: <CheckSquare size={15} />, kind: 'todos' },
-  { view: 'calendar', label: 'Calendar', icon: <Calendar size={15} />, kind: 'calendar' },
-  { view: 'mail', label: 'Mail', icon: <Mail size={15} /> },
   { view: 'boards', label: 'Boards', icon: <KanbanSquare size={15} /> },
   { view: 'dashboards', label: 'Dashboards', icon: <LayoutDashboard size={15} /> },
   { view: 'docs', label: 'Files', icon: <Files size={15} /> },
@@ -135,14 +133,12 @@ export default function Sidebar(): JSX.Element {
     return out
   }, [conversations, query])
 
-  const todoStats = useStore((s) => s.dashboard?.todo_stats)
   const libCount = (v: View): number | null => {
-    if (v === 'home' || v === 'calendar' || v === 'mail' || v === 'boards' || v === 'dashboards' || v === 'activity') return null
+    if (v === 'home' || v === 'boards' || v === 'dashboards' || v === 'activity') return null
     // Counted off the inbox rather than `desks`, which is only loaded once Cowork has been opened:
     // the badge has to be right before you have been there.
     if (v === 'cowork') return needsYou || null
     if (v === 'library') return skillCandidates || null
-    if (v === 'todos') return todoStats?.open ?? null
     if (v === 'docs') return docCount
     // Load-bearing, not cosmetic: there is no default branch below, so without this a Meetings row
     // would fall through to `total('documents')` and show the uploaded-document count.

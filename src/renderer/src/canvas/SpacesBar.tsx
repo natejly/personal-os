@@ -5,6 +5,7 @@ import { api } from '../lib/api'
 import { useProject, useStore } from '../store'
 import { AddWidgetButton } from './AddWidgetMenu'
 import { PresetsButton } from './PresetsMenu'
+import AppSwitcher from '../components/AppSwitcher'
 import { hasDrag, readDrag } from './dnd'
 import { GRID_SIZES } from './snapping'
 import { useCanvas, useSpaceLocked } from './store'
@@ -162,6 +163,7 @@ export default function SpacesBar(): JSX.Element {
         {locked ? <Lock size={14} /> : <LockOpen size={14} />}
       </button>
       <button className={`icon-btn ghost sm${overview ? ' on' : ''}`} title="Space overview (⌥⌘↑)" onClick={() => useCanvas.getState().toggleOverview()}><LayoutGrid size={14} /></button>
+      <AppSwitcher />
     </div>
   )
 }

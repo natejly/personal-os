@@ -7,6 +7,7 @@ import ProjectChip from './ProjectChip'
 import ScopeSelect from './ScopeSelect'
 import SendToSpace from './SendToSpace'
 import { lines, usePageContext } from '../lib/pageContext'
+import AppSwitcher from './AppSwitcher'
 
 const fmtSize = (n: number): string => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`)
 const ACCEPT = '.txt,.md,.markdown,.pdf,.docx,.csv,.json,.yaml,.yml,.py,.ts,.tsx,.js,.html,.css,.log,.rst,.toml'
@@ -92,6 +93,7 @@ export default function DocumentsView({ projectId, embedded = false }: { project
           <ScopeSelect value={libraryScope} onChange={(s) => void setLibraryScope(s)} />
           {uploadBtn}
         </div>
+        <AppSwitcher />
       </header>
       {body}
     </main>

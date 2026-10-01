@@ -8,6 +8,7 @@ import EventEditor, { eventColor, primeCalendarMeta, type EventDraft } from './E
 import { scheduleTodo } from './TodoItem'
 import type { CalendarEvent } from '@shared/types'
 import { lines, usePageContext } from '../lib/pageContext'
+import AppSwitcher from './AppSwitcher'
 
 export default function CalendarView(): JSX.Element {
   const sidebarOpen = useStore((s) => s.sidebarOpen)
@@ -120,6 +121,7 @@ export default function CalendarView(): JSX.Element {
           <button className="icon-btn" aria-label="Next week" onClick={() => setWeek(addDays(week, 7))}><ChevronRight size={16} /></button>
           <button className="primary-btn" onClick={() => { newChat(null); void send('Help me plan this week. Look at my calendar for the next 7 days and my open todos, then propose a schedule.') }}>Plan my week</button>
         </div>
+        <AppSwitcher />
       </header>
 
       {!google?.connected && (

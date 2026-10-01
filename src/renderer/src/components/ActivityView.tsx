@@ -11,6 +11,7 @@ import type {
   ActivityCapability, ActivityEvent, ActivityHabit, ActivityInsights, ActivityPattern,
   ActivitySignal, ActivityStatus, ActivitySuggestion, InsightKind
 } from '@shared/types'
+import AppSwitcher from './AppSwitcher'
 
 /** The activity monitor: what it records, what it inferred, and every switch that turns it off.
  *
@@ -507,6 +508,7 @@ export default function ActivityView(): JSX.Element {
         <header className="page-header drag">
           {!sidebarOpen && <button className="icon-btn no-drag" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
           <h2><MonitorDot size={16} /> Activity</h2>
+          <AppSwitcher />
         </header>
         <div className="page-body"><p className="muted">Loading the activity monitor…</p></div>
       </main>
@@ -545,6 +547,7 @@ export default function ActivityView(): JSX.Element {
             ? <button className="ghost-btn danger" onClick={() => void stopActivity()}><EyeOff size={14} /> Turn off</button>
             : <button className="primary-btn" disabled={!st.platform_supported} onClick={() => void startActivity()}><Eye size={14} /> Turn on</button>}
         </div>
+        <AppSwitcher />
       </header>
 
       <div className="act-hero">

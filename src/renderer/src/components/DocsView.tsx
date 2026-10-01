@@ -12,6 +12,7 @@ import DocTree from './DocTree'
 import { scopeOf } from '../lib/docTree'
 import { clip, lines, usePageContext } from '../lib/pageContext'
 import '../styles/docs.css'
+import AppSwitcher from './AppSwitcher'
 
 export default function DocsView(): JSX.Element {
   const docs = useStore((s) => s.docs)
@@ -112,6 +113,7 @@ export default function DocsView(): JSX.Element {
             <Plus size={14} /> New doc
           </button>
         </div>
+        <AppSwitcher />
       </header>
 
       <div className="docs-body">

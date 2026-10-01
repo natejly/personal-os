@@ -5,6 +5,7 @@ import { api } from '../lib/api'
 import SmartTextarea from './SmartTextarea'
 import type { GmailFullMessage, GmailLabel, GmailMessage } from '@shared/types'
 import { lines, usePageContext } from '../lib/pageContext'
+import AppSwitcher from './AppSwitcher'
 
 const fromName = (s: string | null): string => (s ?? '').replace(/<.*>/, '').replace(/"/g, '').trim() || (s ?? '')
 const fmtDate = (s: string | null): string => {
@@ -218,6 +219,7 @@ export default function MailView(): JSX.Element {
           </label>
           <button className="icon-btn" title="Refresh" aria-label="Refresh mail" onClick={() => void load(true)} disabled={loading}><RefreshCw size={15} className={loading ? 'spin' : ''} /></button>
         </div>}
+        <AppSwitcher />
       </header>
 
       {/* Disconnected, the filters below have nothing to filter: one clear next step instead of a banner

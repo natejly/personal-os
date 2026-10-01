@@ -7,6 +7,7 @@ import { useModal } from '../lib/useModal'
 import type { Settings, ShortcutState } from '@shared/types'
 import { ToolGlobalToggles } from './ToolPermissions'
 import GoogleSettings from './GoogleSettings'
+import McpSettings from './McpSettings'
 import UsageView from './UsageView'
 
 export default function SettingsModal(): JSX.Element {
@@ -99,6 +100,11 @@ export default function SettingsModal(): JSX.Element {
           <h3>Integrations</h3>
           <GoogleSettings clientId={draft.googleClientId ?? ''} clientSecret={draft.googleClientSecret ?? ''} onChange={(p) => patch(p)}
             onSaveCreds={() => saveSettings({ googleClientId: draft.googleClientId, googleClientSecret: draft.googleClientSecret })} />
+        </section>
+
+        <section>
+          <h3>Connectors</h3>
+          <McpSettings />
         </section>
 
         <section>

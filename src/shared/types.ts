@@ -45,6 +45,120 @@ export interface ToolImage {
   data: string
 }
 
+/* ---- MCP connectors ---- */
+
+/** How a tool's mode was arrived at, and whether the approved shape still matches the offered one. */
+export interface McpEffective {
+  slug: string
+  mode: ToolMode
+  source: 'default' | 'global' | 'project' | 'chat'
+  /** The server changed this tool since it was approved, so an `on` has decayed back to `ask`. */
+  stale: boolean
+  approved_hash: string
+  schema_hash: string
+  missing: boolean
+  known: boolean
+}
+
+export interface McpTool {
+  id: string
+  server_id: string
+  /** The name the server exports. */
+  name: string
+  /** `mcp__<server>__<tool>`, derived by the backend and stable across reconnects. */
+  slug: string
+  description: string
+  parameters: Record<string, unknown>
+  schema_hash: string
+  danger: ToolInfo['danger']
+  first_seen_at: number
+  last_seen_at: number
+  /** Set when the advertised shape last changed. */
+  schema_changed_at: number | null
+  /** Set when the server stopped offering it; the row is kept so the slug cannot be reused. */
+  missing_since: number | null
+  effective: McpEffective
+  /** Only on /mcp/tools: its server is connected right now. */
+  ready?: boolean
+}
+
+export interface McpFinding {
+  code: string
+  severity: 'info' | 'warn' | 'fail'
+  where: string
+  detail: string
+  excerpt?: string
+}
+
+export interface McpEvalRecord {
+  id: string
+  server_id: string | null
+  tool_slug: string
+  status: 'pass' | 'warn' | 'fail' | 'error'
+  summary: string
+  findings: McpFinding[]
+  created_at: number
+}
+
+/** The full report from a check; `evaluate_config`/`evaluate_server` shape. */
+export interface McpReport {
+  status: McpEvalRecord['status']
+  summary: string
+  findings: McpFinding[]
+  /** What a static check cannot show. Always displayed with the verdict. */
+  limits: string[]
+  tools: { name: string; description: string; parameters: Record<string, unknown> }[]
+  server_info: { name?: string; version?: string; protocol?: string; instructions?: string }
+  stderr: string[]
+  eval?: McpEvalRecord
+}
+
+export interface McpServer {
+  id: string
+  /** Derived backend-side from the name; never chosen by the client. */
+  slug: string
+  name: string
+  transport: 'stdio' | 'sse' | 'http'
+  command: string
+  args: string[]
+  cwd: string
+  env: Record<string, string>
+  /** Key names only — stored secret values never leave the backend. */
+  secret_keys: string[]
+  url: string
+  headers: Record<string, string>
+  description: string
+  enabled: boolean
+  status: string
+  status_detail: string
+  last_connected_at: number | null
+  created_at: number
+  updated_at: number
+  tool_count: number
+  live: {
+    status: 'idle' | 'connecting' | 'ready' | 'error' | 'disabled' | string
+    detail: string
+    running: boolean
+    ready: boolean
+    attempts: number
+    server_info: McpReport['server_info']
+  }
+  tools: McpTool[]
+  eval: McpEvalRecord | null
+}
+
+/** A launch config, as the add form holds it and as /mcp/check takes it. */
+export interface McpServerDraft {
+  name: string
+  transport: 'stdio' | 'sse' | 'http'
+  command: string
+  args: string[]
+  cwd: string
+  env: Record<string, string>
+  secrets: Record<string, string>
+  description: string
+}
+
 export interface ToolEvent {
   id: string
   name: string

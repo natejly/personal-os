@@ -170,6 +170,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "retrievalMode": "hybrid",
     "embeddingModel": "qwen3-embedding-8b",
     "retrievalMinSimilarity": 0.25,
+    # Memories: fuse BM25 + embeddings + recency + graph (memory_index.py). Needs embeddingModel; false = keyword-only.
+    "hybridRetrieval": True,
     "retrievalPerDocCap": 3,
     "retrievalCandidates": 20,
     # Also retrieve from the user's own Docs (not just uploaded files) when a chat has useDocuments on.

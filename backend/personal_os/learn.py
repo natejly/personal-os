@@ -80,9 +80,15 @@ async def learn_from_exchange(
     model: str,
     conversation_id: str | None = None,
     message_id: str | None = None,
+    index: Any = None,
 ) -> dict[str, Any]:
     prov = {"conversation_id": conversation_id, "message_id": message_id}
-    existing = memories.for_context(project_id, user_text, limit=60)
+    qvec = await index.query_vec(settings, user_text) if index is not None else None
+    if qvec is not None:
+        # The nearest memories by meaning (plus pinned/recent), so a contradiction with an old row is seen.
+        existing = index.candidates(project_id, user_text, qvec, settings)
+    else:
+        existing = memories.for_context(project_id, user_text, limit=60)
     # Tag existing memories with short stable ids the model can reference in "updates"/"forget".
     tagged = {f"M{i + 1}": m for i, m in enumerate(existing)}
     existing_list = "\n".join(f"[{tag}] ({m['kind']}) {m['content']}" for tag, m in tagged.items()) or "(none)"
@@ -171,6 +177,12 @@ async def learn_from_exchange(
         old = _edge_by_ref(graph, project_id, f"{r.get('source') or ''}|{r.get('relation') or ''}|{r.get('target') or ''}")
         if old and graph.invalidate_edge(old["id"]):
             ended_edges.append(old)
+
+    if index is not None:
+        try:
+            await index.index(settings, [m["id"] for m in [*added_memories, *updated_memories]])
+        except Exception:  # noqa: BLE001 - vectors are an optimisation; the rows are already saved
+            log.exception("memory indexing failed")
 
     return {"memories": added_memories, "updated": updated_memories, "removed": removed_memories,
             "nodes": added_nodes, "edges": added_edges, "superseded": superseded,
@@ -408,6 +420,7 @@ class LearnWorker:
     ) -> None:
         self._consolidator = consolidator  # consolidate.Consolidator: only ever asked to *propose*
         self._since_tidy = 0
+        self.index: Any = None  # memory_index.MemoryIndex; set by app.py
         self._memories = memories
         self._graph = graph
         self._set_trace = set_trace
@@ -474,7 +487,7 @@ class LearnWorker:
                 settings=job.settings, memories=self._memories, graph=self._graph,
                 project_id=job.project_id, user_text=job.user_text,
                 assistant_text=job.assistant_text, model=job.model,
-                conversation_id=job.conversation_id, message_id=job.message_id,
+                conversation_id=job.conversation_id, message_id=job.message_id, index=self.index,
             )
             tracer.end(span, {"memories": len(learned["memories"]), "entities": len(learned["nodes"]),
                               "relations": len(learned["edges"])})

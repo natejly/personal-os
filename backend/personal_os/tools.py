@@ -372,7 +372,8 @@ class Toolbox:
     def __init__(self, memories: Memories, graph: Graph, documents: Documents, settings_fn: Callable[[], dict[str, Any]], modules: list[Any] | None = None, google: Any = None, boards: Any = None,
                  sandboxes: Sandboxes | None = None, docs: Any = None, activity: Any = None, outbox: Any = None,
                  work_plans: Any = None, results: Any = None, skills: Any = None, jobs: Any = None,
-                 style: Any = None, meetings: Any = None, desks: Any = None, workspace: Any = None):
+                 style: Any = None, meetings: Any = None, desks: Any = None, workspace: Any = None,
+                 artifacts: Any = None):
         self.memories, self.graph, self.documents, self.settings = memories, graph, documents, settings_fn
         self.modules = modules or []  # feature modules (modules/); each registers its own tools
         self.google, self.boards, self.sandboxes, self.docs, self.activity = google, boards, sandboxes, docs, activity
@@ -386,6 +387,7 @@ class Toolbox:
         # autonomy is exactly the boundary of the workspace directory, and the root is derived from
         # ctx["desk_id"] inside each handler so desk A cannot address desk B's files.
         self.desks, self.workspace = desks, workspace
+        self.artifacts = artifacts  # artifacts.py; artifact_* tools are registered only when it is wired up
         self.specs: dict[str, ToolSpec] = {}
         self._meetings_avail: tuple[float, bool] | None = None
         self._register()
@@ -396,6 +398,9 @@ class Toolbox:
             self._register_boards()
         if docs is not None:
             self._register_docs()
+        if artifacts is not None:
+            from . import artifact_tools
+            artifact_tools.register(self, artifacts)
         if google is not None:
             self._register_google()
         if sandboxes is not None:

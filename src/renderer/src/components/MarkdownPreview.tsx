@@ -9,6 +9,8 @@ import { normalizeMathBlocks } from '../lib/mathBlocks'
 import ChartBlock from './ChartBlock'
 import InteractiveBlock from './InteractiveBlock'
 import MermaidBlock from './MermaidBlock'
+import HtmlBlock, { SvgBlock } from './HtmlBlock'
+import { fenceKind } from '../lib/htmlFence'
 import 'katex/dist/katex.min.css'
 
 /**
@@ -51,14 +53,26 @@ function SafeImage({ src, alt }: React.ImgHTMLAttributes<HTMLImageElement>): JSX
 /** Renderers every markdown surface that shows model, fetched or user content must use. */
 export const SAFE_MD: Components = { a: ExternalLink, img: SafeImage }
 
+/** Flatten a highlighted code element back to its source text. rehype-highlight turns a known language (html, svg) into
+ *  nested <span>s, and String() of that would be "[object Object]". */
+function textOf(n: React.ReactNode): string {
+  if (n == null || typeof n === 'boolean') return ''
+  if (typeof n === 'string' || typeof n === 'number') return String(n)
+  if (Array.isArray(n)) return n.map(textOf).join('')
+  return textOf((n as React.ReactElement<{ children?: React.ReactNode }>).props?.children)
+}
+
 function Pre({ streaming, ...props }: React.HTMLAttributes<HTMLPreElement> & { streaming?: boolean }): JSX.Element {
   const child = props.children as React.ReactElement<{ className?: string; children?: string }> | undefined
   const lang = child?.props?.className?.replace('hljs language-', '').replace('language-', '') ?? ''
-  const code = String(child?.props?.children ?? '')
+  const code = textOf(child?.props?.children)
   // Blocks the model can use to render rich content instead of code (see RENDER_HINT in the backend).
   if (lang === 'chart') return <ChartBlock source={code} streaming={!!streaming} />
   if (lang === 'interactive') return <InteractiveBlock source={code} streaming={!!streaming} />
   if (lang === 'mermaid') return <MermaidBlock source={code} streaming={!!streaming} />
+  // Model HTML/SVG never runs in the app's origin: both render in a sandboxed srcdoc iframe (HtmlBlock).
+  if (fenceKind(lang) === 'html') return <HtmlBlock source={code} streaming={!!streaming} />
+  if (fenceKind(lang) === 'svg') return <SvgBlock source={code} streaming={!!streaming} />
   return (
     <div className="code-block">
       <div className="code-head"><span>{lang || 'text'}</span><CopyButton text={code} /></div>

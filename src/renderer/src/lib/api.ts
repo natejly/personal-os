@@ -1,6 +1,6 @@
 import type {
   BackgroundEvent, ChatEvent, ToolInfo, Todo, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, DriveFile, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Recap, Conversation, ConversationSettings, ContextUsed, Document, GraphData, GraphEdge, GraphNode, Message,
-  ApprovalDecision, PlanEdit,
+  ApprovalDecision, PlanEdit, Artifact, ArtifactVersion,
   Memory, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo,
   Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
   Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
@@ -155,6 +155,25 @@ export const api = {
     update: (id: string, patch: Record<string, unknown>) => req<DataSource>(`/sources/${id}`, { method: 'PUT', body: json(patch) }),
     delete: (id: string) => req(`/sources/${id}`, { method: 'DELETE' }),
     fetch: (id: string) => req<unknown>(`/sources/${id}/fetch`)
+  },
+  artifacts: {
+    list: (opts: { conversationId?: string; q?: string } = {}) => {
+      const p = new URLSearchParams()
+      if (opts.conversationId) p.set('conversation_id', opts.conversationId)
+      if (opts.q) p.set('q', opts.q)
+      return req<Artifact[]>(`/artifacts?${p}`)
+    },
+    get: (id: string) => req<Artifact>(`/artifacts/${id}`),
+    create: (a: { title?: string; code: string; prompt?: string; conversation_id?: string; message_id?: string }) =>
+      req<Artifact>('/artifacts', { method: 'POST', body: json(a) }),
+    update: (id: string, patch: { title?: string; code?: string; instruction?: string }) =>
+      req<Artifact>(`/artifacts/${id}`, { method: 'PUT', body: json(patch) }),
+    delete: (id: string) => req(`/artifacts/${id}`, { method: 'DELETE' }),
+    versions: (id: string) => req<ArtifactVersion[]>(`/artifacts/${id}/versions`),
+    version: (id: string, n: number) => req<ArtifactVersion>(`/artifacts/${id}/versions/${n}`),
+    restore: (id: string, n: number) => req<Artifact>(`/artifacts/${id}/restore/${n}`, { method: 'POST' }),
+    /** Absolute URL for the sandboxed iframe; `path` is the signed render_path the backend handed out. */
+    renderUrl: (path: string) => `${base}${path}`
   },
   dashboards: {
     list: () => req<Dashboard[]>('/dashboards'),

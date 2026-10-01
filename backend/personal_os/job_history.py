@@ -56,7 +56,7 @@ def summarize_run(run: dict[str, Any], event_counts: dict[str, int] | None = Non
 
 def stats(rows: Iterable[dict[str, Any]]) -> dict[str, Any]:
     """Health of a job over a set of summarised runs. Runs still going are not counted either way."""
-    done = [r for r in rows if r["status"] != "running"]
+    done = [r for r in rows if r["status"] != "running" and not r.get("dry_run")]
     ok = [r for r in done if r["status"] == "done"]
     failed = [r for r in done if r["status"] in FAILED]
     durs = [r["duration_s"] for r in done if r["duration_s"] is not None]

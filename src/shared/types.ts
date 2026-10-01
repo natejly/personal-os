@@ -1360,6 +1360,8 @@ export interface Job {
   paused_reason: string | null
   last_skip_at: number | null
   last_skip_reason: string | null
+  /** The only tools this job's runs may use. null = every tool (the default); it can only narrow, never widen. */
+  allowed_tools: string[] | null
 }
 
 /** An outward-facing call a background run recorded instead of making. Accepting it is what runs it. */

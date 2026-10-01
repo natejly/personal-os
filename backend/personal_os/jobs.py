@@ -59,14 +59,19 @@ KINDS = ("cron", "once")
 # run costs money and nobody opted in yet (the Agent Inbox offers the toggle).
 SEED_JOBS: list[dict[str, Any]] = [
     {"name": "Morning brief", "cron": "30 7 * * *",
+     "allowed_tools": ["current_time", "calendar_events", "calendar_get", "gmail_search", "gmail_read", "todo_list",
+                       "google_tasks_list"],
      "prompt": "Give me my morning brief: check my calendar for today and tomorrow, scan unread email for anything "
                "that needs a reply, list my open todos and flag the overdue ones, and end with the three things I "
                "should do first. Be concise and use headers."},
     {"name": "Scan unread and draft replies", "cron": "0 9 * * 1-5",
+     # gmail_draft is outward-facing, so a job run only ever proposes it; the allowlist just keeps it reachable.
+     "allowed_tools": ["current_time", "gmail_search", "gmail_read", "gmail_draft", "search_memory", "writing_style"],
      "prompt": "Scan my unread inbox from the last two days. For each message that genuinely needs a reply from me, "
                "draft one: short, in my voice, and specific about what happens next. Skip newsletters, receipts and "
                "notifications. Finish with a one-line list of what you drafted and what you skipped."},
     {"name": "Weekly review", "cron": "0 17 * * 5",
+     "allowed_tools": ["current_time", "todo_list", "calendar_events", "calendar_get", "google_tasks_list", "search_memory"],
      "prompt": "Write my weekly review: what moved this week (from my todos, calendar and recent chats), what slipped, "
                "and the three things that matter most next week. Be specific and short; no filler."},
 ]
@@ -207,7 +212,8 @@ def next_due_for(job: dict[str, Any], after: float) -> float | None:
 class Jobs:
     """CRUD over the `jobs` table. Every writer keeps `next_due_at` in step with the schedule and `enabled`."""
 
-    FIELDS = ("name", "kind", "cron", "run_at", "timezone", "enabled", "prompt", "project_id", "max_retries")
+    FIELDS = ("name", "kind", "cron", "run_at", "timezone", "enabled", "prompt", "project_id", "max_retries",
+              "allowed_tools")
     # Changing any of these re-arms the job: a new schedule must not inherit the old one's pending slot.
     RE_ARM = frozenset({"kind", "cron", "run_at", "timezone", "enabled"})
 
@@ -219,6 +225,12 @@ class Jobs:
         d = row_to_dict(r)
         if d is not None:
             d["enabled"] = bool(d["enabled"])
+            # NULL = inherit every tool (what every job did before this column); otherwise a JSON list of names.
+            raw = d.get("allowed_tools")
+            try:
+                d["allowed_tools"] = json.loads(raw) if raw else None
+            except ValueError:
+                d["allowed_tools"] = None
         return d
 
     def list(self) -> list[dict[str, Any]]:
@@ -232,7 +244,7 @@ class Jobs:
 
     def create(self, name: str, cron: str, prompt: str, *, kind: str = "cron", run_at: float | None = None,
                timezone: str | None = None, enabled: bool = False, project_id: str | None = None,
-               at: float | None = None, max_retries: int = 1) -> dict[str, Any]:
+               at: float | None = None, max_retries: int = 1, allowed_tools: list[str] | None = None) -> dict[str, Any]:
         tz = timezone or local_tz_name()
         t = at if at is not None else now()
         jid = new_id()
@@ -242,8 +254,9 @@ class Jobs:
         nxt = next_due_for(fresh, t) if enabled else None
         with self.db.tx() as c:
             c.execute("INSERT INTO jobs(id, name, kind, cron, run_at, timezone, enabled, prompt, project_id, next_due_at, "
-                      "created_at, updated_at, max_retries) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                      (jid, name, kind, cron, run_at, tz, int(enabled), prompt, project_id, nxt, t, t, int(max_retries)))
+                      "created_at, updated_at, max_retries, allowed_tools) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                      (jid, name, kind, cron, run_at, tz, int(enabled), prompt, project_id, nxt, t, t, int(max_retries),
+                       None if allowed_tools is None else json.dumps(list(allowed_tools))))
         return self.get(jid)  # type: ignore[return-value]
 
     def update(self, id: str, patch: dict[str, Any], at: float | None = None) -> dict[str, Any] | None:
@@ -256,6 +269,8 @@ class Jobs:
             cols["enabled"] = int(bool(cols["enabled"]))
         if cols.get("kind") == "once":
             cols["cron"] = ""
+        if "allowed_tools" in cols:
+            cols["allowed_tools"] = None if cols["allowed_tools"] is None else json.dumps(list(cols["allowed_tools"]))
         if "enabled" in cols:
             # Any explicit switch is the user acknowledging an auto-pause: the reason and the streak start over.
             cols["paused_reason"] = None
@@ -351,7 +366,7 @@ class Jobs:
         made = 0
         for s in SEED_JOBS:
             if s["name"] not in have:
-                self.create(s["name"], s["cron"], s["prompt"], enabled=False, at=at)
+                self.create(s["name"], s["cron"], s["prompt"], enabled=False, at=at, allowed_tools=s.get("allowed_tools"))
                 made += 1
         return made
 

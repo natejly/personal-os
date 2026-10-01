@@ -106,12 +106,14 @@ export const api = {
   jobs: {
     list: () => req<Job[]>('/jobs'),
     /** A repeating job passes `cron`; a one-off passes kind:'once' and `run_at` (unix seconds, must be future). */
-    create: (j: { name: string; prompt: string; kind?: 'cron' | 'once'; cron?: string; run_at?: number | null; timezone?: string; enabled?: boolean; project_id?: string | null }) =>
+    create: (j: { name: string; prompt: string; kind?: 'cron' | 'once'; cron?: string; run_at?: number | null; timezone?: string; enabled?: boolean; project_id?: string | null; allowed_tools?: string[] | null }) =>
       req<Job>('/jobs', { method: 'POST', body: json(j) }),
-    update: (id: string, patch: Partial<Pick<Job, 'name' | 'kind' | 'cron' | 'run_at' | 'prompt' | 'timezone' | 'enabled' | 'project_id' | 'max_retries'>>) =>
+    update: (id: string, patch: Partial<Pick<Job, 'name' | 'kind' | 'cron' | 'run_at' | 'prompt' | 'timezone' | 'enabled' | 'project_id' | 'max_retries' | 'allowed_tools'>>) =>
       req<Job>(`/jobs/${id}`, { method: 'PATCH', body: json(patch) }),
     delete: (id: string) => req(`/jobs/${id}`, { method: 'DELETE' }),
     /** Fire it now by hand. Still proposal-only and on the job budget; the cron schedule is untouched. */
+    /** Preview: the same prompt with every non-read-only tool off. Makes no proposals; hidden from the inbox. */
+    dryRun: (id: string) => req<{ ok: boolean; run_id: string | null; conversation_id: string | null }>(`/jobs/${id}/dry_run`, { method: 'POST' }),
     runs: (id: string, limit = 50) => req<JobRunRecord[]>(`/jobs/${id}/runs?limit=${limit}`),
     stats: (id: string, days = 30) => req<JobStats>(`/jobs/${id}/stats?days=${days}`),
     /** The run history as CSV text, fetched with the auth header (a plain link could not carry it). */

@@ -37,7 +37,7 @@ from .dashboards import Dashboards, generate_recap, generate_summary, generate_w
 from .docs import Docs, unified_diff
 from . import cache as google_cache
 from .google import Google, GoogleNotConnected, json_safe
-from . import job_history
+from . import job_history, job_tools
 from .jobs_policy import JobPolicy
 from .jobs import (KINDS, PROPOSAL_STATUSES, Jobs, Proposals, Scheduler, local_tz_name, spent, valid_cron,
                    valid_tz)
@@ -1071,6 +1071,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     modes = toolbox.effective(cfg.get("tools") or {}, (project or {}).get("tools"), conv["settings"].get("tools")) if use_tools else {}
     # MCP slugs all carry a reserved prefix no built-in may use, so the two mode maps cannot collide.
     mcp_modes, mcp_schemas = _mcp_tooling(conv["project_id"], conv_id) if use_tools else ({}, [])
+    # A job's allowlist (job_tools) writes 'off' for tools outside it into the chat's tool map; MCP modes come from
+    # mcp_grants, not that map, so the narrowing is applied to them here.
+    chat_off = {n for n, v in (conv["settings"].get("tools") or {}).items() if v == "off"}
+    if chat_off and mcp_modes:
+        mcp_modes = {k: v for k, v in mcp_modes.items() if k not in chat_off}
+        mcp_schemas = [s for s in mcp_schemas if s["function"]["name"] not in chat_off]
     modes.update(mcp_modes)
     # ---- the desk this reply belongs to, if any, read once.
     # `autonomy` is read off the desk row rather than off conv["settings"], so changing a desk's
@@ -2031,6 +2037,12 @@ LATE_NOTICE = ("[This run was scheduled for {due}, and is only starting now, at 
 PROPOSAL_STEP = -1
 
 
+def _all_tool_infos() -> list[dict[str, Any]]:
+    """Every tool a job could be given: the built-ins, and the connected-or-not MCP slugs (all of them external)."""
+    mcp_infos = [{"name": t["slug"], "group": "mcp", "danger": "external"} for t in mcp_store.tools()]
+    return toolbox.list() + mcp_infos
+
+
 def _stamp(ts: float) -> str:
     return time.strftime("%a %d %b %H:%M", time.localtime(ts))
 
@@ -2059,8 +2071,16 @@ async def _launch_job(job: dict[str, Any], fire: dict[str, Any]) -> str | None:
     cfg = settings()
     conv = convos.create(job["project_id"], f"{job['name']} · {_stamp(fire['due_at'])}", cfg.get("defaultModel") or "")
     # job_id keeps this transcript out of the sidebar's chat list; the Agent Inbox links to it instead.
-    convos.update(conv["id"], {"settings": {"useTools": True, "autoLearn": False, "job_id": job["id"]}})
-    body = ChatIn(content=_job_prompt(job, fire))
+    conv_settings: dict[str, Any] = {"useTools": True, "autoLearn": False, "job_id": job["id"]}
+    # Narrowing only: tools outside the job's allowlist (and, for a preview, everything that is not read-only) are
+    # switched off for this conversation. Tools left out of the map keep the user's own modes.
+    if fire.get("dry_run"):
+        conv_settings["tools"] = job_tools.dry_run_modes(job.get("allowed_tools"), _all_tool_infos())
+    elif job.get("allowed_tools") is not None:
+        conv_settings["tools"] = job_tools.tool_modes(job["allowed_tools"], _all_tool_infos())
+    convos.update(conv["id"], {"settings": conv_settings})
+    prompt = _job_prompt(job, fire)
+    body = ChatIn(content=(job_tools.DRY_RUN_HINT + "\n\n" + prompt) if fire.get("dry_run") else prompt)
     run = bus.start(conv["id"], lambda r: _run_chat(r, body), input={**fire, "conversation_id": conv["id"]}, kind="job")
     log.info("job %s fired for %s as run %s", job["name"], _stamp(fire["due_at"]), run.run_id)
     # Runs after _drive has ended the run, so the row the renderer then asks about is final. Ids only: the
@@ -2086,6 +2106,8 @@ class JobIn(BaseModel):
     enabled: bool = False
     project_id: str | None = None
     max_retries: int = Field(default=1, ge=0, le=5)
+    # None = every tool, as before. A list narrows the run to exactly those tools (job_tools).
+    allowed_tools: list[str] | None = None
 
 
 class JobPatch(BaseModel):
@@ -2098,6 +2120,7 @@ class JobPatch(BaseModel):
     enabled: bool | None = None
     project_id: str | None = None
     max_retries: int | None = Field(default=None, ge=0, le=5)
+    allowed_tools: list[str] | None = None  # an explicit null resets to "every tool"
 
 
 # How far in the past a one-off may be set, on a write. The scheduler is happy to run a late task — that is the
@@ -2127,6 +2150,16 @@ def _check_schedule(kind: str, expr: str | None, tz: str | None, run_at: float |
         raise HTTPException(400, f"{_stamp(run_at)} has already passed — give a time in the future")
 
 
+def _check_allowed_tools(allowed: list[str] | None) -> None:
+    if allowed is None:
+        return
+    unknown, banned = job_tools.check(allowed, _all_tool_infos())
+    if unknown:
+        raise HTTPException(400, "Unknown tool" + ("s" if len(unknown) > 1 else "") + ": " + ", ".join(unknown))
+    if banned:
+        raise HTTPException(400, ", ".join(banned) + " books future unattended work, which a scheduled run may not do")
+
+
 @app.get("/jobs")
 def list_jobs() -> list[dict[str, Any]]:
     """Every scheduled job, with the slot it is waiting for. `timezone` defaults to this machine's on create."""
@@ -2136,9 +2169,10 @@ def list_jobs() -> list[dict[str, Any]]:
 @app.post("/jobs")
 def create_job(body: JobIn) -> dict[str, Any]:
     _check_schedule(body.kind, body.cron, body.timezone, body.run_at, fresh_time=True)
+    _check_allowed_tools(body.allowed_tools)
     return jobs.create(body.name, body.cron, body.prompt, kind=body.kind, run_at=body.run_at,
                        timezone=body.timezone, enabled=body.enabled, project_id=wsid(body.project_id),
-                       max_retries=body.max_retries)
+                       max_retries=body.max_retries, allowed_tools=body.allowed_tools)
 
 
 @app.patch("/jobs/{id}")
@@ -2150,6 +2184,7 @@ def update_job(id: str, body: JobPatch) -> dict[str, Any]:
     if not cur:
         raise HTTPException(404, "No such job")
     merged = {**cur, **patch}
+    _check_allowed_tools(patch.get("allowed_tools"))
     _check_schedule(merged["kind"], merged["cron"], patch.get("timezone"), merged["run_at"],
                     fresh_time="run_at" in patch)
     # Switching a spent one-off back on is the one re-arm that cannot work: it has no instant left to wait for,
@@ -2229,6 +2264,20 @@ def job_runs_csv(id: str, limit: int = 200) -> Response:
     return Response(body, media_type="text/csv", headers={"Content-Disposition": f'attachment; filename="job-{slug}-runs.csv"'})
 
 
+@app.post("/jobs/{id}/dry_run")
+async def dry_run_job(id: str) -> dict[str, Any]:
+    """Preview a job: the same prompt on the same budget with every tool that is not read-only switched off, and a
+    line telling the model to describe rather than do. Still a job run, so proposal-only; with nothing outward
+    available it makes no proposals. Hidden from the inbox's "while you were away" and never counted as a failure."""
+    job = _known_job(id)
+    t = time.time()
+    fire = {"job_id": job["id"], "job": job["name"], "kind": job["kind"], "cron": job["cron"], "timezone": job["timezone"],
+            "due_at": t, "fired_at": t, "late_seconds": 0.0, "missed_slots": 0, "late": False, "manual": True, "dry_run": True}
+    run_id = await _launch_job(job, fire)
+    row = run_store.get(run_id) if run_id else None
+    return {"ok": bool(run_id), "run_id": run_id, "conversation_id": (row or {}).get("conversation_id")}
+
+
 class ProposalIn(BaseModel):
     args: dict[str, Any] | None = None  # the user's edit, accept only
 
@@ -2280,7 +2329,7 @@ INBOX_SUMMARY_CHARS = 1400
 
 
 @app.get("/inbox")
-def agent_inbox(hours: float = 72.0, limit: int = 20) -> dict[str, Any]:
+def agent_inbox(hours: float = 72.0, limit: int = 20, include_dry: int = 0) -> dict[str, Any]:
     """The Agent Inbox, built from rows only: agent_runs + run_events + approvals + proposals.
 
     "Needs you" is the pending approvals and the pending proposals. "While you were away" is one entry per job run,
@@ -2296,6 +2345,8 @@ def agent_inbox(hours: float = 72.0, limit: int = 20) -> dict[str, Any]:
     pending_proposals = proposals.list("pending", limit=100)
 
     runs = run_store.of_kind("job", since=cutoff, limit=limit)
+    if not include_dry:  # a preview is not something that happened while the user was away
+        runs = [r for r in runs if not (isinstance(r.get("input"), dict) and r["input"].get("dry_run"))]
     counts = proposals.counts([r["run_id"] for r in runs])
     away = []
     for r in runs:

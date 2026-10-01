@@ -73,6 +73,8 @@ class JobPolicy:
         """The job's run that is still going, from rows (a run with no end), or None."""
         for r in self.runs.of_kind("job", since=self.clock() - 86400, limit=500):
             inp = r.get("input") if isinstance(r.get("input"), dict) else {}
+            if inp.get("dry_run"):
+                continue  # a preview never blocks, or counts as, the real thing
             if inp.get("job_id") == job_id and r.get("ended_at") is None and r.get("status") in LIVE:
                 return r
         return None

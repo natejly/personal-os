@@ -34,6 +34,7 @@ from .boards import Boards
 from .canvas import SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
 from .dashboards import Dashboards, generate_recap, generate_summary, generate_widget_code
 from .docs import Docs, unified_diff
+from . import cache as google_cache
 from .google import Google, GoogleNotConnected, json_safe
 from .jobs import PROPOSAL_STATUSES, Jobs, Proposals, Scheduler, local_tz_name, valid_cron, valid_tz
 from .microvm import Sandboxes
@@ -1818,9 +1819,15 @@ def google_disconnect() -> dict[str, Any]:
     return google.status()
 
 
-def _gcall(fn, *args):  # type: ignore[no-untyped-def]
+def _gcall(fn, *args, refresh: bool = False):  # type: ignore[no-untyped-def]
+    """Call a Google method and map its failures onto HTTP.
+
+    `refresh=True` serves the call from Google rather than the read cache - what a
+    user-initiated reload should do.
+    """
     try:
-        return json_safe(fn(*args))
+        with google_cache.bypass() if refresh else contextlib.nullcontext():
+            return json_safe(fn(*args))
     except GoogleNotConnected as e:
         raise HTTPException(409, str(e)) from e
     except ValueError as e:
@@ -1830,14 +1837,26 @@ def _gcall(fn, *args):  # type: ignore[no-untyped-def]
 
 
 @app.get("/integrations/google/calendars")
-def google_calendars() -> Any:
-    return _gcall(google.calendars)
+def google_calendars(refresh: bool = False) -> Any:
+    return _gcall(google.calendars, refresh=refresh)
 
 
 @app.get("/integrations/google/calendar")
-def google_calendar(days: int = 2, start: str | None = None, calendars: str = "primary") -> Any:
+def google_calendar(days: int = 2, start: str | None = None, calendars: str = "primary", refresh: bool = False) -> Any:
     ids = None if calendars in ("", "primary") else [c.strip() for c in calendars.split(",") if c.strip()]
-    return _gcall(google.calendar_events, days, "primary", 60, start, ids)
+    return _gcall(google.calendar_events, days, "primary", 60, start, ids, refresh=refresh)
+
+
+@app.get("/integrations/google/cache")
+def google_cache_stats() -> dict[str, Any]:
+    return google.cache_stats()
+
+
+@app.post("/integrations/google/cache/clear")
+def google_cache_clear(namespace: str = "") -> dict[str, Any]:
+    """Forget cached Google reads - all of them, or one namespace (calendar, gmail, ...)."""
+    dropped = google.invalidate(*([namespace] if namespace else []))
+    return {"dropped": dropped, **google.cache_stats()}
 
 
 class AttendeeIn(BaseModel):
@@ -1930,8 +1949,8 @@ def google_calendar_respond(event_id: str, body: RespondIn) -> Any:
 
 
 @app.get("/integrations/google/gmail")
-def google_gmail(q: str = "is:unread in:inbox newer_than:14d", max_results: int = 12) -> Any:
-    return _gcall(google.gmail_search, q, max_results)
+def google_gmail(q: str = "is:unread in:inbox newer_than:14d", max_results: int = 12, refresh: bool = False) -> Any:
+    return _gcall(google.gmail_search, q, max_results, refresh=refresh)
 
 
 # Registered before the {message_id} route so "labels" is not read as a message id.
@@ -2006,8 +2025,8 @@ async def assist_mail_review(body: MailReviewIn) -> dict[str, Any]:
 
 
 @app.get("/integrations/google/tasks")
-def google_tasks(show_completed: bool = False) -> Any:
-    return _gcall(google.tasks_list, "@default", show_completed)
+def google_tasks(show_completed: bool = False, refresh: bool = False) -> Any:
+    return _gcall(google.tasks_list, "@default", show_completed, refresh=refresh)
 
 
 # ---------------- Google Tasks <-> todos sync ----------------

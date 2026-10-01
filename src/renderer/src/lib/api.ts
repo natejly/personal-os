@@ -75,6 +75,9 @@ async function proven<T extends Verified>(p: Promise<T>): Promise<T> {
   if (r.verification && r.verified === false) throw new Error(`${verificationMessage(r.verification)} Check Google before relying on it.`)
   return r
 }
+
+/** Skips the backend's short-lived Google read cache; for user-initiated reloads only. */
+const fresh = (refresh: boolean): string => (refresh ? '&refresh=true' : '')
 /** Scope filter: 'all' = everything, 'personal' = items in no project, or a project id (that project only). */
 export type Scope = 'all' | 'personal' | string
 const scope = (s: Scope): string => `project_id=${encodeURIComponent(s)}&include_global=false`
@@ -158,10 +161,11 @@ export const api = {
     status: () => req<GoogleStatus>('/integrations/google/status'),
     start: () => req<{ url: string }>('/integrations/google/auth/start', { method: 'POST' }),
     disconnect: () => req<GoogleStatus>('/integrations/google/disconnect', { method: 'POST' }),
-    calendar: (days = 2, calendars = 'primary') => req<CalendarEvent[]>(`/integrations/google/calendar?days=${days}&calendars=${encodeURIComponent(calendars)}`),
-    calendarRange: (startIso: string, days = 7, calendars = 'primary') =>
-      req<CalendarEvent[]>(`/integrations/google/calendar?days=${days}&start=${encodeURIComponent(startIso)}&calendars=${encodeURIComponent(calendars)}`),
-    calendars: () => req<GoogleCalendar[]>('/integrations/google/calendars'),
+    calendar: (days = 2, calendars = 'primary', refresh = false) =>
+      req<CalendarEvent[]>(`/integrations/google/calendar?days=${days}&calendars=${encodeURIComponent(calendars)}${fresh(refresh)}`),
+    calendarRange: (startIso: string, days = 7, calendars = 'primary', refresh = false) =>
+      req<CalendarEvent[]>(`/integrations/google/calendar?days=${days}&start=${encodeURIComponent(startIso)}&calendars=${encodeURIComponent(calendars)}${fresh(refresh)}`),
+    calendars: (refresh = false) => req<GoogleCalendar[]>(`/integrations/google/calendars${refresh ? '?refresh=true' : ''}`),
     calendarColors: () => req<CalendarColors>('/integrations/google/calendar/colors'),
     getEvent: (id: string, calendarId = 'primary') => req<CalendarEvent>(`/integrations/google/calendar/${encodeURIComponent(id)}?calendar_id=${encodeURIComponent(calendarId)}`),
     // The four calendar writes go through proven(): an unverified write rejects, so the callers'
@@ -174,8 +178,10 @@ export const api = {
       proven(req<{ deleted: string } & Verified>(`/integrations/google/calendar/${encodeURIComponent(id)}?calendar_id=${encodeURIComponent(calendarId)}&send_updates=${sendUpdates}`, { method: 'DELETE' })),
     respondEvent: (id: string, response: 'accepted' | 'declined' | 'tentative', calendarId = 'primary') =>
       proven(req<CalendarEvent>(`/integrations/google/calendar/${encodeURIComponent(id)}/respond`, { method: 'POST', body: json({ response, calendar_id: calendarId }) })),
-    gmail: (q = 'is:unread in:inbox newer_than:14d', maxResults = 12) => req<GmailMessage[]>(`/integrations/google/gmail?q=${encodeURIComponent(q)}&max_results=${maxResults}`),
-    tasks: (showCompleted = false) => req<GoogleTask[]>(`/integrations/google/tasks?show_completed=${showCompleted}`),
+    gmail: (q = 'is:unread in:inbox newer_than:14d', maxResults = 12, refresh = false) =>
+      req<GmailMessage[]>(`/integrations/google/gmail?q=${encodeURIComponent(q)}&max_results=${maxResults}${fresh(refresh)}`),
+    tasks: (showCompleted = false, refresh = false) =>
+      req<GoogleTask[]>(`/integrations/google/tasks?show_completed=${showCompleted}${fresh(refresh)}`),
     tasklists: () => req<GoogleTaskList[]>('/integrations/google/tasklists'),
     tasksSync: () => req<TasksSyncStatus>('/integrations/google/tasks-sync'),
     tasksSyncConfig: (patch: { enabled?: boolean; tasklist?: string; intervalMinutes?: number }) =>
@@ -194,7 +200,9 @@ export const api = {
       proven(req<{ draft_id: string } & Verified>('/integrations/google/gmail/draft', { method: 'POST', body: json(m) })),
     /** Queues the send behind its undo hold; it has NOT gone out when this resolves. */
     gmailSend: (m: { to: string; subject: string; body: string; reply_to_message_id?: string | null }) =>
-      req<PendingSend>('/integrations/google/gmail/send', { method: 'POST', body: json(m) })
+      req<PendingSend>('/integrations/google/gmail/send', { method: 'POST', body: json(m) }),
+    clearCache: (namespace?: string) =>
+      req<{ dropped: number }>(`/integrations/google/cache/clear${namespace ? `?namespace=${namespace}` : ''}`, { method: 'POST' })
   },
   /** Emails waiting out their undo hold (backend outbox.py). */
   outbox: {

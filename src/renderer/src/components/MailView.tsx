@@ -81,13 +81,15 @@ export default function MailView(): JSX.Element {
     return (): void => clearTimeout(t)
   }, [search])
 
-  const load = async (): Promise<void> => {
+  // `refresh` is for the Refresh button: it bypasses the backend's read cache, where a
+  // query the user just ran a moment ago would otherwise still be warm.
+  const load = async (refresh = false): Promise<void> => {
     if (!google?.connected) return
     const mine = ++seq.current
     setLoading(true)
     setError(null)
     try {
-      const out = await api.google.gmail(query, 30)
+      const out = await api.google.gmail(query, 30, refresh)
       if (seq.current === mine) setMessages(out)
     } catch (e) {
       if (seq.current === mine) setError((e as Error).message)
@@ -214,7 +216,7 @@ export default function MailView(): JSX.Element {
             <Search size={14} />
             <input placeholder="Search mail (from:, subject:, …)" value={search} onChange={(e) => setSearch(e.target.value)} />
           </label>
-          <button className="icon-btn" title="Refresh" onClick={() => void load()} disabled={loading}><RefreshCw size={15} className={loading ? 'spin' : ''} /></button>
+          <button className="icon-btn" title="Refresh" onClick={() => void load(true)} disabled={loading}><RefreshCw size={15} className={loading ? 'spin' : ''} /></button>
         </div>
       </header>
 

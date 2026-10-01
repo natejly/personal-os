@@ -123,6 +123,16 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "deskMaxTurns": 12,
     "deskMaxCost": 2.0,
     "deskMaxLive": 4,
+    # Subagents (subagents.py): how many may run at once across the app, how deep they may nest, and
+    # each one's own round and cost caps (also charged to the reply that spawned it). A child with no
+    # model or tool activity for subagentStaleSeconds, or stuck inside one tool for subagentToolSeconds,
+    # is stopped and returns what it had.
+    "subagentMaxConcurrent": 4,
+    "subagentMaxDepth": 2,
+    "subagentMaxRounds": 12,
+    "subagentMaxCost": 0.25,
+    "subagentStaleSeconds": 450,
+    "subagentToolSeconds": 1200,
     # Scheduled-job run policy (jobs_policy.py): retry backoff base in seconds (doubles per attempt, capped at
     # 30 min) and how many consecutive failed fires switch a job off.
     "jobRetryBackoffS": 120,

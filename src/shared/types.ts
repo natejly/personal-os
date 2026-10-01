@@ -380,6 +380,8 @@ export interface ToolEvent {
   proposal?: string | null
   /** Set when this call's arguments matched an approved plan step, so it ran without its own card. */
   plan?: PlanStepRef | null
+  /** Set when a subagent made this call: its card rides the parent's stream, labelled with the child. */
+  agent?: string
   /** write_local_file / move_local_file: the pre-image kept so the user can undo it (id is null when too large to keep). */
   undo?: { snapshot_id: string | null; reason?: string | null } | null
 }
@@ -986,11 +988,12 @@ export type ChatEvent =
   | { event: 'title'; data: { id: string; title: string } }
   | { event: 'delta'; data: { id: string; text: string } }
   | { event: 'reasoning'; data: { id: string; text: string } }
-  | { event: 'tool_call'; data: { message_id: string; id: string; name: string; arguments: Record<string, unknown>; needs_approval?: boolean; forced?: boolean; plan?: PlanStepRef | null } }
+  | { event: 'tool_call'; data: { message_id: string; id: string; name: string; arguments: Record<string, unknown>; needs_approval?: boolean; forced?: boolean; plan?: PlanStepRef | null; agent?: string } }
   | { event: 'tool_result'; data: ToolEvent & { message_id: string } }
   | { event: 'span'; data: { message_id: string; span: Span } }
   | { event: 'done'; data: { id: string; error: string | null; context_used: ContextUsed; tool_events: ToolEvent[]; trace: Span[]; stopped: boolean; partial?: PartialReason | null; segment?: boolean; tainted?: boolean; taint_sources?: string[]; reasoning?: string | null } }
   | { event: 'taint'; data: { message_id: string; source: string } }
+  | { event: 'subagent'; data: SubagentInfo & { message_id: string | null } }
   | { event: 'plan'; data: { conversation_id: string; steps: PlanStep[] } }
   /** propose_plan opened a card. `plan` above is the todo_write checklist — a different thing. */
   | { event: 'plan_card'; data: { message_id: string; call_id: string; plan: PlanRecord } }
@@ -1415,6 +1418,28 @@ export interface ChatRunStarted {
   run_id: string
   /** seq of the last event already produced; open the stream with ?since=<seq> */
   seq: number
+}
+
+/** A subagent's live state (backend subagents.Subagents.info). */
+export interface SubagentInfo {
+  id: string
+  parent_run_id: string
+  role: string
+  state: 'running' | 'completed' | 'partial' | 'error'
+  exit_reason: string | null
+  task: string
+  rounds: number
+  calls: number
+  cost: number
+  depth: number
+  background: boolean
+}
+
+/** One row of a subagent's recorded tape (GET /runs/{id}/events). */
+export interface RunTapeEvent {
+  seq: number
+  event: string
+  data: Record<string, unknown>
 }
 
 export interface RunInfo {

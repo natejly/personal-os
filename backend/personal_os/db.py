@@ -156,6 +156,22 @@ CREATE TABLE IF NOT EXISTS agent_runs (
 CREATE INDEX IF NOT EXISTS idx_runs_conv ON agent_runs(conversation_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_status ON agent_runs(status, started_at DESC);
 
+-- User-authored agent definitions (subagents.py). Inert until approved by hand, like skills; the
+-- built-in researcher / worker / reviewer live in code and are not rows.
+CREATE TABLE IF NOT EXISTS agent_defs (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  description TEXT NOT NULL DEFAULT '',
+  body TEXT NOT NULL DEFAULT '',
+  model TEXT,
+  steps INTEGER,
+  tools TEXT NOT NULL DEFAULT '[]',
+  hidden INTEGER NOT NULL DEFAULT 0,
+  approved INTEGER NOT NULL DEFAULT 0,
+  created_at REAL NOT NULL,
+  updated_at REAL NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS run_events (
   run_id TEXT NOT NULL REFERENCES agent_runs(run_id) ON DELETE CASCADE,
   seq INTEGER NOT NULL,
@@ -386,7 +402,7 @@ class Database:
             "action_plans": {"desk_id": "TEXT", "intent": "TEXT NOT NULL DEFAULT ''",
                              "expected_taint": "TEXT NOT NULL DEFAULT '[]'"},
             "approvals": {"desk_id": "TEXT", "danger": "TEXT NOT NULL DEFAULT 'external'"},
-            "agent_runs": {"desk_id": "TEXT", "turn": "INTEGER NOT NULL DEFAULT 0", "resumed_from": "TEXT"},
+            "agent_runs": {"desk_id": "TEXT", "turn": "INTEGER NOT NULL DEFAULT 0", "resumed_from": "TEXT", "parent_run_id": "TEXT"},
             "usage_log": {"cached_tokens": "INTEGER NOT NULL DEFAULT 0", "cache_write_tokens": "INTEGER NOT NULL DEFAULT 0",
                           "reasoning_tokens": "INTEGER NOT NULL DEFAULT 0"},
             "plan_steps": {"result_error": "TEXT", "title": "TEXT NOT NULL DEFAULT ''",
@@ -401,6 +417,7 @@ class Database:
         # executescript runs before the migration and would hit a column that is not there yet.
         c.execute("CREATE INDEX IF NOT EXISTS idx_mem_valid ON memories(project_id, invalid_at)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_runs_desk ON agent_runs(desk_id, started_at DESC)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_runs_parent ON agent_runs(parent_run_id)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_approvals_desk ON approvals(desk_id, status)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_plans_desk ON action_plans(desk_id, created_at)")
         c.commit()

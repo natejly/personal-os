@@ -65,6 +65,7 @@ from .filesnap import FileSnapshots, router as filesnap_router
 from .outbox import Outbox, router as outbox_router
 from .presets import CanvasPresets
 from . import resume
+from .subagents import AgentDefs, Subagents
 from .runs import ACTIVE, PROMOTE_STEP, STATUSES, Run, RunBus, RunStore, Topic
 from .stuck import STUCK_NUDGE, STUCK_STOP, StuckDetector
 from .style import WritingStyle, learn_style_from_exchange, looks_like_prose
@@ -357,6 +358,12 @@ async def _start_retrieval() -> None:
     retriever.schedule_docs(settings)
 toolbox.retriever = retriever
 toolbox.web_cache = WebCache(db)  # fetch_url's response cache
+# Subagents: child runs the agent_spawn tools start. Approval cards a child raises resolve through the
+# same _approvals futures a chat's do.
+agent_defs = AgentDefs(db)
+subagent_mgr = Subagents(run_store, toolbox, settings, defs=agent_defs, results=tool_results, pricing=pricing, memories=memories,
+                         projects=projects, workspace=workspace, approvals=_approvals)
+toolbox.subagents = subagent_mgr
 # The insights pass proposes automations, so it is told which tools this install actually has - an
 # unwired integration must not turn into a suggestion that cannot be carried out.
 monitor.insights.tools_fn = lambda: [t["name"] for t in toolbox.list() if t.get("available")]
@@ -501,6 +508,12 @@ NUMERIC_SETTING_RANGES: dict[str, tuple[float, float]] = {
     "maxRunTokens": (0, 10_000_000),
     "maxRunSeconds": (0, 86_400),
     "maxRunCost": (0, 1_000),
+    "subagentMaxConcurrent": (1, 20),
+    "subagentMaxDepth": (0, 3),
+    "subagentMaxRounds": (1, 60),
+    "subagentMaxCost": (0, 100),
+    "subagentStaleSeconds": (0, 86_400),
+    "subagentToolSeconds": (0, 86_400),
     "fileSnapshotMaxBytes": (0, 100_000_000),
     "fileSnapshotRetainDays": (1, 365),
     "fileSnapshotBudgetMB": (1, 20_000),
@@ -1178,6 +1191,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     # The desk tools derive their workspace root from this and never take one as an argument, so
     # desk A cannot address desk B's files.
     tool_ctx["desk_id"] = desk_id
+    # What agent_spawn needs to start a child under this reply: its live tool modes (a child never has more),
+    # the run its cards and status ride on, its stop flag, and where it sits in the spawn tree.
+    tool_ctx.update(modes=modes, run=run, stop=stop, depth=0, agent_run_id=run.run_id if run else "", model=model,
+                    effort=str(conv["settings"].get("effort") or "default"))
 
     def _schemas(withheld: bool = False) -> list[dict[str, Any]]:
         """One function, because the always_chat/always_global grant path recomputes the schemas; a
@@ -1242,6 +1259,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         yield "span", {"message_id": am["id"], "span": compact_span}
 
     budget = Budget(_caps(cfg, JOB_BUDGET) if proposal_only(run) else cfg)
+    tool_ctx["budget"] = budget  # children are charged to it
     partial: str | None = None
     last_sig: str | None = None
     repeats = 0
@@ -1413,6 +1431,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 break
             # execute tool calls, then continue the loop with their results
             messages.append(turn)
+            # Read-only agent_spawn calls of this round start together; never in plan mode or when every change cards.
+            subagent_mgr.prestart(calls, tool_ctx, start=not planning and autonomy != "ask" and not stop.is_set())
             if buf and buf[-1] and not buf[-1].endswith("\n"):
                 buf.append("\n")
                 yield "delta", {"id": am["id"], "text": "\n"}
@@ -2049,6 +2069,70 @@ async def list_runs(status: str | None = None, conversation_id: str | None = Non
         if not statuses or any(x not in STATUSES for x in statuses):
             raise HTTPException(400, f"status must be 'all' or a comma list of {', '.join(STATUSES)}")
     return bus.list(statuses, conversation_id, limit, desk_id)
+
+
+@app.get("/runs/{run_id}/children")
+async def run_children(run_id: str) -> list[dict[str, Any]]:
+    """Subagents started by this run (or by another subagent), with live state while they run."""
+    if not run_store.get(run_id):
+        raise HTTPException(404, "No such run")
+    out = []
+    for r in run_store.children(run_id):
+        live = subagent_mgr.children.get(r["run_id"])
+        out.append({**r, "agent": subagent_mgr.info(live) if live else None})
+    return out
+
+
+@app.get("/runs/{run_id}/events")
+async def run_events(run_id: str, since: int = 0, limit: int = 500) -> list[dict[str, Any]]:
+    """A run's recorded tape (a subagent's trace). The transcript event carries a whole history and is left out."""
+    if not run_store.get(run_id):
+        raise HTTPException(404, "No such run")
+    evs = [{"seq": s, "event": e, "data": d} for s, e, d in run_store.events(run_id, since) if e != "transcript"]
+    return evs[:max(1, min(limit, 2000))]
+
+
+class AgentDefIn(BaseModel):
+    text: str
+
+
+@app.get("/agents/defs")
+async def list_agent_defs() -> dict[str, Any]:
+    """The built-in agent roles and the user's own definitions (inert until approved)."""
+    from .subagents import BUILTIN_ROLES
+    return {"builtin": [{"name": r.name, "description": r.description, "tools": list(r.tools)} for r in BUILTIN_ROLES.values()],
+            "custom": agent_defs.list()}
+
+
+@app.post("/agents/defs")
+async def create_agent_def(body: AgentDefIn) -> dict[str, Any]:
+    try:
+        return agent_defs.save(body.text)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.put("/agents/defs/{def_id}")
+async def update_agent_def(def_id: str, body: AgentDefIn) -> dict[str, Any]:
+    if not agent_defs.get(def_id):
+        raise HTTPException(404, "No such agent definition")
+    try:
+        return agent_defs.save(body.text, def_id)  # editing withdraws the approval
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.post("/agents/defs/{def_id}/approve")
+async def approve_agent_def(def_id: str, approved: bool = True) -> dict[str, Any]:
+    row = agent_defs.approve(def_id, approved)
+    if not row:
+        raise HTTPException(404, "No such agent definition")
+    return row
+
+
+@app.delete("/agents/defs/{def_id}")
+async def delete_agent_def(def_id: str) -> dict[str, bool]:
+    return {"ok": agent_defs.delete(def_id)}
 
 
 @app.get("/runs/{run_id}")
@@ -5371,6 +5455,20 @@ async def create_desk(body: DeskIn) -> dict[str, Any]:
             out["run_id"], out["seq"] = run.run_id, run.seq
         out["desk"] = desks.get(desk["id"]) or desk
     return out
+
+
+async def _desk_start_tool(ctx: dict[str, Any], title: str, brief: str, mode: str) -> dict[str, Any]:
+    """desk_start: the same creation the REST route does, started at once, in plan (or tighter) autonomy."""
+    try:
+        out = await create_desk(DeskIn(brief=brief, title=title or None, project_id=ctx.get("project_id"), autonomy=mode, start=True))
+    except HTTPException as e:
+        detail = e.detail.get("message") if isinstance(e.detail, dict) else e.detail
+        return tools.tool_error(f"The desk was not started: {detail}")
+    return {"desk_id": out["desk"]["id"], "conversation_id": out["conversation_id"], "run_id": out.get("run_id"), "mode": mode,
+            "note": "The desk is planning. It will wait for the user to approve its plan before it does anything."}
+
+
+toolbox.desk_starter = _desk_start_tool
 
 
 @app.get("/cowork/desks/{id}")

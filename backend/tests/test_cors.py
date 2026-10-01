@@ -1,4 +1,4 @@
-"""CORS: only sandboxed widget iframes (opaque "null" origin) may read a data-source fetch; nothing else.
+"""CORS: the packaged renderer (file://) and sandboxed widget iframes both send Origin: null, so it must be allowed.
 
 Run: PERSONAL_OS_DATA_DIR=/tmp/x python backend/tests/test_cors.py
 """
@@ -22,19 +22,21 @@ AUTH = {"X-Personal-OS-Token": AUTH_TOKEN}
 
 
 class CorsTests(unittest.TestCase):
-    def test_null_origin_not_allowed_on_ordinary_routes(self) -> None:
+    def test_null_origin_allowed_for_packaged_renderer(self) -> None:
         r = client.get("/todos", headers={**AUTH, "Origin": "null"})
-        self.assertNotIn("access-control-allow-origin", r.headers)
-        r = client.options("/todos", headers={"Origin": "null", "Access-Control-Request-Method": "GET"})
-        self.assertNotEqual(r.headers.get("access-control-allow-origin"), "null")
-
-    def test_null_origin_allowed_for_widget_source_fetch_only(self) -> None:
-        r = client.get("/sources/nope/fetch", headers={"Origin": "null"})
         self.assertEqual(r.headers.get("access-control-allow-origin"), "null")
-        r = client.post("/sources/nope/fetch", headers={"Origin": "null"})
+        r = client.options("/todos", headers={"Origin": "null", "Access-Control-Request-Method": "GET",
+                                              "Access-Control-Request-Headers": "x-personal-os-token"})
+        self.assertEqual(r.headers.get("access-control-allow-origin"), "null")
+
+    def test_null_origin_still_needs_the_token(self) -> None:
+        self.assertEqual(client.get("/todos", headers={"Origin": "null"}).status_code, 401)
+
+    def test_foreign_origin_refused(self) -> None:
+        r = client.get("/todos", headers={**AUTH, "Origin": "https://evil.example"})
         self.assertNotIn("access-control-allow-origin", r.headers)
 
-    def test_app_origins_still_work(self) -> None:
+    def test_dev_origin_works(self) -> None:
         r = client.get("/todos", headers={**AUTH, "Origin": "http://localhost:5173"})
         self.assertEqual(r.headers.get("access-control-allow-origin"), "http://localhost:5173")
 

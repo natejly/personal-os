@@ -181,22 +181,14 @@ async def _require_token(request: Request, call_next):  # type: ignore[no-untype
 # Vite's dev server hops to 5174+ when 5173 is taken, so the default covers a small range; auth is
 # the token header either way — CORS here only decides which local origins may even ask.
 ALLOWED_ORIGINS = [o for o in (os.environ.get("PERSONAL_OS_ALLOWED_ORIGINS") or "").split(",") if o] or [
-    "file://",
+    # Chromium sends Origin: null for a page loaded via file:// (the packaged renderer) and for sandboxed widget iframes,
+    # so "null" must stay allowed or the packaged app cannot reach its own backend. Auth is the token header regardless.
+    "null", "file://",
     *(f"http://{h}:{p}" for h in ("localhost", "127.0.0.1") for p in range(5173, 5181))]
 app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_credentials=False,
                    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
                    allow_headers=["Content-Type", "X-Personal-OS-Token", "Authorization"])
 
-
-@app.middleware("http")
-async def _widget_null_origin(request: Request, call_next):  # type: ignore[no-untyped-def]
-    """Sandboxed widget iframes (no allow-same-origin) have the opaque "null" origin and read exactly one thing from the
-    backend: their data sources, authorised by the per-widget token in the query. Allow that origin on that path only."""
-    resp = await call_next(request)
-    p = request.url.path
-    if request.headers.get("origin") == "null" and request.method == "GET" and p.startswith("/sources/") and p.endswith("/fetch"):
-        resp.headers["Access-Control-Allow-Origin"] = "null"
-    return resp
 
 # Live runs, one per conversation, each owning its own task. Any number of clients may watch one.
 # Each run is also a row (agent_runs) with its event tape (run_events); the bus is the hot path over it.

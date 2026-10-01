@@ -15,6 +15,7 @@ import secrets
 import shutil
 import sqlite3
 import time
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any, AsyncIterator
 
@@ -808,6 +809,15 @@ PLAN_HINT = ("When a request needs more than a couple of tool calls, open with t
              "earlier rounds — is what keeps a long task on track.")
 
 
+def _today_hint() -> str:
+    """Local date, weekday and the week ahead. Day-granular on purpose: a clock here would change the system prompt
+    every minute and defeat the provider's prompt cache. current_time is there for the time of day."""
+    now = datetime.now().astimezone()
+    week = ", ".join(f"{d:%a} {d:%Y-%m-%d}" for d in (now + timedelta(days=i) for i in range(1, 8)))
+    return (f"## Today\nToday is {now:%A %Y-%m-%d}, time zone {now:%Z} (UTC{now:%z}). Next 7 days: {week}. "
+            "Use this for dates; do not compute weekdays in code. Calendar times are local: YYYY-MM-DDTHH:MM, no offset.")
+
+
 BUDGET_STOP = ("Out of budget ({axis}): this tool call was not executed and no further tool calls will run. "
                "Write the best final answer you can from what you already have, and say in one line what is still missing.")
 SOFT_NUDGE = ("Budget check: about {pct}% of this reply's budget is used. "
@@ -916,6 +926,15 @@ class Budget:
         return {"max_rounds": self.max_rounds, "max_tokens": self.max_tokens, "max_seconds": self.max_seconds,
                 "max_cost": self.max_cost, "rounds": self.rounds, "tokens": self.tokens, "cost": round(self.cost, 6),
                 "seconds": round(self.elapsed(), 3), "paused_seconds": round(self.paused, 3)}
+
+
+def _call_args(c: dict[str, Any]) -> dict[str, Any]:
+    """A streamed tool call's arguments as a dict: non-object JSON is {}, unparseable text rides along as _raw."""
+    try:
+        args = json.loads(c["arguments"] or "{}")
+    except ValueError:
+        return {"_raw": c["arguments"]}
+    return args if isinstance(args, dict) else {}
 
 
 # Tools whose call changes something outside the reply: each runs at most once per (run, round, tool, args).
@@ -1112,7 +1131,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     tool_schemas = _schemas()
     tools_hint = (TOOLS_HINT + ("\n" + PLAN_HINT if any(s["function"]["name"] == "todo_write" for s in tool_schemas) else "")) if tool_schemas else ""
     system = "\n\n".join(p for p in (system, RENDER_HINT, tools_hint,
-                                     JOB_HINT if proposal_only(run) else "") if p)
+                                     JOB_HINT if proposal_only(run) else "", _today_hint()) if p)
     used["system_prompt"] = system
     used["tokens_estimate"] = estimate_tokens(system)
     messages = [{"role": "system", "content": system}] + history
@@ -1267,6 +1286,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             turn = {"role": "assistant", "content": "".join(buf[round_start:]).strip() or None,
                     "tool_calls": [{"id": c["id"], "type": "function", "function": {"name": c["name"], "arguments": c["arguments"] or "{}"}} for c in calls]}
             over = budget.exceeded()
+            if over and run is not None and (plan_seen or active_plan) and plans.covers(
+                    run.run_id, [(c["name"], _call_args(c)) for c in calls], desk_id=run.desk_id):
+                # Every call here is a step the user approved. The budget that ran out was spent drafting that
+                # plan, so refusing now would turn the approval into a dead end. The next round is still checked.
+                over = None
             if over:
                 # Out of budget: never drop the pending calls silently — answer each one, then let the model close out.
                 partial = over
@@ -1284,12 +1308,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 buf.append("\n")
                 yield "delta", {"id": am["id"], "text": "\n"}
             for c in calls:
-                try:
-                    args = json.loads(c["arguments"] or "{}")
-                    if not isinstance(args, dict):
-                        args = {}
-                except ValueError:
-                    args = {"_raw": c["arguments"]}
+                args = _call_args(c)
                 sig = tools.call_key(c["name"], args)
                 repeats = repeats + 1 if sig == last_sig else 1
                 last_sig = sig

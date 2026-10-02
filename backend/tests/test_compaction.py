@@ -147,4 +147,5 @@ d = client.delete(f"/conversations/{routed}/summary", headers=H)
 check(d.json()["removed"] is True and client.get(f"/conversations/{routed}/context-meter", headers=H).json()["summary"] is None, "discard restores replay")
 check(client.post("/conversations/nope/compact", headers=H, json={}).status_code == 404, "unknown conversation 404")
 
+check("save_memory" in compaction.MEMORY_NUDGE and "\n" not in compaction.MEMORY_NUDGE, "memory nudge names the existing tool")
 print(f"test_compaction: {passed} checks passed")

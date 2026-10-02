@@ -209,6 +209,10 @@ def _stub(m: dict[str, Any], names: dict[str, str]) -> dict[str, Any] | None:
     return {"cleared": True, "tool": tool, "chars": len(content), "result_id": rid, "note": CLEARED_NOTE}
 
 
+MEMORY_NUDGE = ("Older tool results were just cleared from this context (read_tool_result still serves them). "
+                "If any holds a durable finding about the user worth keeping, save it now with save_memory.")
+
+
 def microcompact(messages: list[dict[str, Any]], keep: int, window_tokens: int, at_fraction: float) -> tuple[int, int]:
     """Replace old tool-result content in place with a stub once the context passes at_fraction of the window.
 

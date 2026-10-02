@@ -410,6 +410,22 @@ def test_an_action_item_becomes_a_todo_exactly_once() -> None:
     assert repo.dismiss_action_item(second["id"])["status"] == "dismissed"
 
 
+def test_config_validates_custom_templates_recipes_and_language() -> None:
+    _, svc = _svc(_tmp())
+    cfg = svc.set_config({"customTemplates": [{"id": "x", "name": "Brief", "instructions": "Short."}],
+                          "recipes": [{"name": "Owners", "prompt": "owners only"}],
+                          "summaryLanguage": "French"})
+    assert cfg["customTemplates"][0]["id"].startswith("c_") and cfg["recipes"][0]["id"].startswith("r_")
+    assert svc.config()["summaryLanguage"] == "French"
+    for bad in ({"customTemplates": [{"name": "a", "instructions": "x" * 1501}]},
+                {"recipes": [{"name": "a", "prompt": "x" * 301}]}):
+        try:
+            svc.set_config(bad)
+        except ValueError:
+            continue
+        raise AssertionError("over-long text was accepted")
+
+
 # ---------------------------------------------------------------- what chat sees
 
 

@@ -210,6 +210,34 @@ def test_escape_currency_keeps_prices_out_of_inline_maths() -> None:
     assert esc("```\nprice=$9\n```\nowed $9") == "```\nprice=$9\n```\nowed \\$9"
 
 
+def test_custom_template_text_reaches_the_prompt_and_a_deleted_one_falls_back() -> None:
+    custom = [{"id": "c_brief", "name": "Brief", "instructions": "Three bullets, plain words."}]
+    _, calls = _enhance(GOOD_REPLY, template="c_brief", custom=custom)
+    system = calls[0]["messages"][0]["content"]
+    assert "Three bullets, plain words." in system and "Brief" in system
+    _, calls = _enhance(GOOD_REPLY, template="c_brief", custom=[])
+    assert "General meeting" in calls[0]["messages"][0]["content"]
+
+
+def test_language_is_in_the_payload_and_the_prompt_rule() -> None:
+    _, calls = _enhance(GOOD_REPLY, language="French")
+    assert json.loads(calls[0]["messages"][1]["content"])["language"] == "French"
+    assert "Write in French" in calls[0]["messages"][0]["content"]
+    _, calls = _enhance(GOOD_REPLY)
+    assert json.loads(calls[0]["messages"][1]["content"])["language"] == "auto"
+    assert "majority language" in calls[0]["messages"][0]["content"]
+
+
+def test_summarize_recording_takes_custom_and_language() -> None:
+    fn, calls = _stub(json.dumps({"summary_markdown": "ok"}))
+    custom = [{"id": "c_x", "name": "X", "instructions": "Be terse."}]
+    asyncio.run(meeting_notes.summarize_recording(
+        complete_fn=fn, settings=dict(SETTINGS), model="m", meeting=MEETING, doc_title="t", doc_content="",
+        transcript="hi", template="c_x", custom=custom, language="German", focus="owners"))
+    assert "Be terse." in calls[0]["messages"][0]["content"]
+    assert json.loads(calls[0]["messages"][1]["content"])["language"] == "German"
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

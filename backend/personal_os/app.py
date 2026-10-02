@@ -5704,6 +5704,9 @@ class MeetingConfigIn(BaseModel):
     sttModel: str | None = None
     whisperModelPath: str | None = None
     template: str | None = None
+    customTemplates: list[dict[str, Any]] | None = None
+    recipes: list[dict[str, Any]] | None = None
+    summaryLanguage: str | None = None
     enhanceOnStop: bool | None = None
     enhanceModel: str | None = None
     maxTranscriptChars: int | None = None
@@ -5763,7 +5766,10 @@ async def meeting_preflight(force: bool = False) -> dict[str, Any]:
 def meeting_config(body: MeetingConfigIn) -> dict[str, Any]:
     """Deep-merged, and it never touches a live recording: picking a different microphone halfway
     through a call applies to the next segment instead of tearing the capture down."""
-    meeting_svc.set_config(body.model_dump(exclude_none=True))
+    try:
+        meeting_svc.set_config(body.model_dump(exclude_none=True))
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
     return meeting_svc.status()
 
 

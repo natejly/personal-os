@@ -158,7 +158,29 @@ def _when(meeting: dict[str, Any]) -> str:
     return datetime.fromtimestamp(float(ts)).strftime("%A %Y-%m-%d %H:%M")
 
 
+def resolve_template(template: str, custom: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """A built-in template, a user-authored one (prose instructions, no fixed sections), or general.
+
+    A custom id that was deleted since a recording was made lands on general rather than failing.
+    """
+    if template in TEMPLATES:
+        return TEMPLATES[template]
+    for c in custom or []:
+        if c.get("id") == template:
+            return {"label": c.get("name") or "Custom", "sections": [], "hint": c.get("instructions") or ""}
+    return TEMPLATES["general"]
+
+
+def _language_rule(language: str) -> str:
+    lang = (language or "").strip()
+    if not lang or lang.lower() == "auto":
+        return "\nWrite in the transcript's majority language.\n"
+    return f"\nWrite in {lang[:40]}, whatever language the transcript is in.\n"
+
+
 def _template_block(tpl: dict[str, Any]) -> str:
+    if not tpl.get("sections"):
+        return f"\nMeeting kind: {tpl.get('label') or 'Meeting'}\n{tpl.get('hint') or ''}\n"
     sections = "\n".join(f"- {s}" for s in (tpl.get("sections") or []))
     return (f"\nMeeting kind: {tpl.get('label') or 'Meeting'}\n{tpl.get('hint') or ''}\n\n"
             f"Sections to reach for, in this order, but only where the user's notes or the transcript\n"
@@ -206,10 +228,12 @@ async def enhance(
     notes: str,
     transcript: str,
     template: str = "general",
+    custom: list[dict[str, Any]] | None = None,
+    language: str = "auto",
     max_transcript_chars: int = 48000,
 ) -> dict[str, Any]:
     """One LLM call per meeting. Never raises: a failure comes back as degraded markdown."""
-    tpl = TEMPLATES.get(template) or TEMPLATES["general"]
+    tpl = resolve_template(template, custom)
     body = cap_transcript(transcript or "", max_transcript_chars)
     notes = notes or ""
     out: dict[str, Any] = {"markdown": "", "decisions": [], "action_items": [], "topics": [],
@@ -222,6 +246,7 @@ async def enhance(
         "attendees": _attendees(meeting),
         "notes": notes,
         "transcript": body,
+        "language": language or "auto",
     }
     if names:
         payload["speakers"] = names
@@ -229,7 +254,7 @@ async def enhance(
     try:
         raw = await complete_fn(
             settings, model,
-            [{"role": "system", "content": _system_prompt(names) + _template_block(tpl)},
+            [{"role": "system", "content": _system_prompt(names) + _template_block(tpl) + _language_rule(language)},
              {"role": "user", "content": user}],
             kind="meeting",
         )
@@ -362,6 +387,8 @@ async def summarize_recording(
     transcript: str,
     template: str = "general",
     focus: str = "",
+    custom: list[dict[str, Any]] | None = None,
+    language: str = "auto",
     max_transcript_chars: int = 48000,
 ) -> dict[str, Any]:
     """One LLM call per summary. Never raises: a failure comes back with `error` set and NO markdown.
@@ -370,7 +397,7 @@ async def summarize_recording(
     notes, which is acceptable when the result is a reviewable meeting revision and wrong for a
     doc: a doc is not tainted, so verbatim third-party speech must not be put into it by a failure.
     """
-    tpl = TEMPLATES.get(template) or TEMPLATES["general"]
+    tpl = resolve_template(template, custom)
     names = _speaker_names(meeting)
     payload: dict[str, Any] = {
         "note_title": str(doc_title or ""),
@@ -380,6 +407,7 @@ async def summarize_recording(
         "duration": _fmt_duration(meeting.get("duration_ms")),
         "transcript": cap_transcript(transcript or "", max_transcript_chars),
     }
+    payload["language"] = language or "auto"
     if focus.strip():
         payload["focus"] = focus.strip()[:300]
     if names:
@@ -388,7 +416,7 @@ async def summarize_recording(
     try:
         raw = await complete_fn(
             settings, model,
-            [{"role": "system", "content": _doc_prompt(names) + _template_block(tpl)},
+            [{"role": "system", "content": _doc_prompt(names) + _template_block(tpl) + _language_rule(language)},
              {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
             kind="doc_recording",
         )

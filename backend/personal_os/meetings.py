@@ -186,6 +186,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "sttModel": "whisper-1",
     "whisperModelPath": "",
     "template": "general",
+    "customTemplates": [],    # [{id: 'c_<slug>', name, instructions}] prose templates
+    "recipes": [],            # [{id, name, prompt}] saved focus lines for a summary
+    "summaryLanguage": "auto",  # 'auto' = the transcript's majority language, else a language name
     "enhanceOnStop": True,
     "enhanceModel": "",
     "maxTranscriptChars": 48000,
@@ -278,6 +281,30 @@ def _deep_merge(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
     out = dict(base)
     for k, v in patch.items():
         out[k] = _deep_merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
+    return out
+
+
+TEMPLATE_MAX = 1500   # chars of user-authored template prose that reach the system prompt
+RECIPE_MAX = 300      # the focus line is capped at 300 in meeting_notes.summarize_recording
+
+
+def _clean_items(raw: Any, prefix: str, body_key: str, limit: int) -> list[dict[str, str]]:
+    """Validate a saved list of {id, name, <body_key>}; an over-long body is refused, not trimmed."""
+    out: list[dict[str, str]] = []
+    for it in raw if isinstance(raw, list) else []:
+        if not isinstance(it, dict):
+            continue
+        name, body = str(it.get("name") or "").strip()[:60], str(it.get(body_key) or "").strip()
+        if not name or not body:
+            continue
+        if len(body) > limit:
+            raise ValueError(f"'{name}' is over {limit} characters")
+        iid = str(it.get("id") or "")
+        if not iid.startswith(prefix) or len(iid) > 40:
+            iid = prefix + (re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_") or "x")[:30]
+        while any(o["id"] == iid for o in out):
+            iid = iid[:36] + "_" + new_id()[:3]
+        out.append({"id": iid, "name": name, body_key: body})
     return out
 
 
@@ -657,7 +684,7 @@ class Meetings:
         mid = new_id()
         t = now()
         people = _attendee_rows(attendees)
-        tpl = template if template in meeting_notes.TEMPLATES else "general"
+        tpl = template if template in meeting_notes.TEMPLATES or str(template).startswith("c_") else "general"
         try:
             with self.db.tx() as c:
                 c.execute(
@@ -686,7 +713,8 @@ class Meetings:
             return self.get(id)
         if "title" in fields:
             fields["title"] = str(fields["title"] or "").strip()[:200]
-        if "template" in fields and fields["template"] not in meeting_notes.TEMPLATES:
+        if "template" in fields and fields["template"] not in meeting_notes.TEMPLATES \
+                and not str(fields["template"]).startswith("c_"):
             fields["template"] = "general"
         if "keep_audio" in fields:
             fields["keep_audio"] = int(bool(fields["keep_audio"]))
@@ -1287,7 +1315,11 @@ class MeetingService:
         """
         cfg = _deep_merge(self.config(), patch or {})
         cfg["sources"] = [s for s in (cfg.get("sources") or []) if s in SOURCES] or ["mic"]
-        if cfg.get("template") not in meeting_notes.TEMPLATES:
+        cfg["customTemplates"] = _clean_items(cfg.get("customTemplates"), "c_", "instructions", TEMPLATE_MAX)
+        cfg["recipes"] = _clean_items(cfg.get("recipes"), "r_", "prompt", RECIPE_MAX)
+        cfg["summaryLanguage"] = str(cfg.get("summaryLanguage") or "auto").strip()[:40] or "auto"
+        if cfg.get("template") not in meeting_notes.TEMPLATES and \
+                cfg.get("template") not in {c["id"] for c in cfg["customTemplates"]}:
             cfg["template"] = "general"
         if str(cfg.get("sttBackend") or "") not in stt.BACKENDS:
             cfg["sttBackend"] = "auto"
@@ -1768,8 +1800,6 @@ class MeetingService:
             return m["pending"] or self.meetings.last_applied(meeting_id)
         cfg = self.config()
         tpl = template or m["template"] or cfg["template"]
-        if tpl not in meeting_notes.TEMPLATES:
-            tpl = "general"
         settings = self.settings()
         model = meeting_notes.pick_model(cfg, settings)
         self._enhancing.add(meeting_id)
@@ -1779,6 +1809,7 @@ class MeetingService:
             res = await meeting_notes.enhance(
                 complete_fn=self._complete, settings=settings, model=model, meeting=m,
                 notes=m["notes"], transcript=m["transcript"], template=tpl,
+                custom=cfg["customTemplates"], language=cfg["summaryLanguage"],
                 max_transcript_chars=int(cfg["maxTranscriptChars"]))
         finally:
             self._enhancing.discard(meeting_id)
@@ -1857,8 +1888,6 @@ class MeetingService:
             return out
         cfg = self.config()
         tpl = template or m["template"] or cfg["template"]
-        if tpl not in meeting_notes.TEMPLATES:
-            tpl = "general"
         settings = self.settings()
         model = meeting_notes.pick_model(cfg, settings)
         self._summarizing.add(meeting_id)
@@ -1868,7 +1897,8 @@ class MeetingService:
             res = await meeting_notes.summarize_recording(
                 complete_fn=self._complete, settings=settings, model=model, meeting=m,
                 doc_title=doc["title"], doc_content=doc["content"], transcript=m["transcript"],
-                template=tpl, focus=focus, max_transcript_chars=int(cfg["maxTranscriptChars"]))
+                template=tpl, focus=focus, custom=cfg["customTemplates"],
+                language=cfg["summaryLanguage"], max_transcript_chars=int(cfg["maxTranscriptChars"]))
         finally:
             self._summarizing.discard(meeting_id)
             self.meetings.patch(meeting_id, {"status": "ready" if prior_status == "enhancing" else prior_status})

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { fmtDuration, modeLabel, recordingWhen, summaryCopy } from './format'
+import { applyRecipe, mergeTemplates, fmtDuration, modeLabel, recordingWhen, summaryCopy } from './format'
 
 test('fmtDuration steps from seconds to minutes to hours', () => {
   assert.equal(fmtDuration(42000), '42s')
@@ -38,4 +38,16 @@ test('summaryCopy covers each state and puts an error first', () => {
 
 test('dictation says it has no summary rather than looking broken', () => {
   assert.match(summaryCopy('none', 'dictate', 'ready', null, false).text, /no summary/)
+})
+
+test('mergeTemplates lists the built-ins then the custom ones', () => {
+  const t = mergeTemplates([{ id: 'c_brief', name: 'Brief' }])
+  assert.equal(t[0].id, 'general')
+  assert.deepEqual(t[t.length - 1], { id: 'c_brief', label: 'Brief' })
+})
+
+test('applyRecipe fills the focus line and leaves it alone for an unknown id', () => {
+  const recipes = [{ id: 'r_owners', prompt: 'owners only' }]
+  assert.equal(applyRecipe(recipes, 'r_owners'), 'owners only')
+  assert.equal(applyRecipe(recipes, 'r_gone', 'keep me'), 'keep me')
 })

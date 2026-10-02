@@ -142,9 +142,13 @@ src = call("doc_create", {"title": "Linker", "content": "See [[Paper]]\nline2\n"
 read = call("doc_read", {"doc": "Paper"})
 check(read.get("linked_from") == ["Linker"], f"doc_read lists the linking title: {read.get('linked_from')}")
 _orig_bl = docs.backlinks
-docs.backlinks = lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("backlinks scanned on a later page"))
+_bl_calls = []
+docs.backlinks = lambda *a, **k: (_bl_calls.append(a), _orig_bl(*a, **k))[1]
 try:
-    check("linked_from" not in call("doc_read", {"doc": "Paper", "from_line": 2}), "no linked_from past the first page")
+    later = call("doc_read", {"doc": "Paper", "from_line": 2})
+    check("text" in later and "linked_from" not in later and not _bl_calls, f"no backlinks scan past the first page: {_bl_calls}")
+    call("doc_read", {"doc": "Paper"})
+    check(len(_bl_calls) == 1, "first page does scan backlinks (stub counts)")
 finally:
     docs.backlinks = _orig_bl
 j("DELETE", f"/docs/{src['doc_id']}")

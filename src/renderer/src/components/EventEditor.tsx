@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ExternalLink, Plus, Trash2, Video, X } from 'lucide-react'
 import type { CalendarColors, CalendarEvent, EventPayload, GoogleCalendar } from '@shared/types'
 import { api } from '../lib/api'
+import { eventPrep } from '../lib/emailAsk'
 import { readView, writeView } from '../lib/viewCache'
 import { useStore } from '../store'
 
@@ -300,13 +301,16 @@ export default function EventEditor({ event, draft, onClose, onSaved }: EventEdi
   const showLink = full?.link || event?.link || ''
 
   const prep = (): void => {
-    const name = (title || event?.summary || 'this event').trim()
+    const name = title || event?.summary || 'this event'
     const when = allDay ? (startDay || event?.start || '') : startDt ? new Date(startDt).toLocaleString() : event ? new Date(event.start).toLocaleString() : ''
     const who = attendees.filter((a) => !a.self).map((a) => a.email)
-    const { newChat, send } = useStore.getState()
+    const { newChat, noteUntrustedUpload, send } = useStore.getState()
     onClose()
     newChat(null)
-    void send(`Prep me for "${name}"${when ? ` (${when})` : ''}.${who.length ? ` Attendees: ${who.join(', ')}.` : ''} Check my memory, documents and recent email for context on the attendees and topic, then give me a one-page brief.`)
+    void (async () => {
+      await noteUntrustedUpload(undefined, 'draft', 'calendar')
+      await send(eventPrep(name, when, who))
+    })()
   }
 
   return (

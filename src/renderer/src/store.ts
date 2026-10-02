@@ -9,6 +9,7 @@ import { applyCursor, fetchSegmentPages, needsSegmentReload } from './lib/transc
 import { viewHidden } from './moduleToggles'
 import { chainTo, folderKey, groupShutKey } from './lib/docTree'
 import { clearViews } from './lib/viewCache'
+import { emailAsk } from './lib/emailAsk'
 
 /**
  * Settings as the renderer holds them: without the legacy `mode`, which only init() reads. Kept out
@@ -142,6 +143,8 @@ export interface State {
   draftFast: boolean
   /** A file was attached before this draft had a row. `send` marks the new chat untrusted. */
   uploadTaintTarget: 'draft' | 'page' | null
+  /** Why that pending mark exists: `upload` for a file, `email` for a message someone else wrote. */
+  uploadTaintSource: string
   /** Scope filter used by the Memory / Graph / Documents library views. */
   libraryScope: Scope
   /** Scope the memories/graph/documents arrays are currently loaded for. */
@@ -318,7 +321,9 @@ export interface State {
   setChatModel: (model: string, conversationId?: string) => Promise<void>
   setChatSettings: (patch: Partial<ConversationSettings>, conversationId?: string) => Promise<void>
   /** A library file was just attached to this chat, so the next reply treats its contents as untrusted. */
-  noteUntrustedUpload: (conversationId?: string, pending?: 'draft' | 'page') => Promise<void>
+  noteUntrustedUpload: (conversationId?: string, pending?: 'draft' | 'page', source?: string) => Promise<void>
+  /** Open a new chat about an email. The subject is untrusted, so the chat starts tainted. */
+  askAboutEmail: (id: string, subject: string | null | undefined) => Promise<boolean>
   /** `false` when the text was refused, so the caller must keep it. Never rejects. */
   send: (text: string, conversationId?: string) => Promise<boolean>
   /** Send from the ⌘I panel: same contract as `send`, plus the page snapshot and its own thread. */
@@ -1125,6 +1130,7 @@ export const useStore = create<State>((set, get) => {
     draftModel: null,
     draftFast: false,
     uploadTaintTarget: null,
+    uploadTaintSource: 'upload',
     libraryScope: 'all',
     dataScope: 'all',
     docs: [],
@@ -1501,16 +1507,21 @@ export const useStore = create<State>((set, get) => {
       const c = await api.conversations.patch(id, { settings: patch })
       patchConversation(id, (cur) => ({ ...cur, settings: c.settings }))
     },
-    noteUntrustedUpload: async (conversationId, pending = 'draft') => {
+    noteUntrustedUpload: async (conversationId, pending = 'draft', source = 'upload') => {
       const id = conversationId && conversationId !== '\u0000page-agent' ? conversationId : undefined
       if (!id) {
-        set({ uploadTaintTarget: pending })
+        set({ uploadTaintTarget: pending, uploadTaintSource: source })
         return
       }
       const settings = get().sessions[id]?.conversation.settings
       const patch: Partial<ConversationSettings> = { tainted: true }
-      if (settings) patch.taint_sources = [...new Set([...(settings.taint_sources ?? []), 'upload'])]
+      if (settings) patch.taint_sources = [...new Set([...(settings.taint_sources ?? []), source])]
       await get().setChatSettings(patch, id)
+    },
+    askAboutEmail: async (id, subject) => {
+      get().newChat(null)
+      await get().noteUntrustedUpload(undefined, 'draft', 'email')
+      return get().send(emailAsk(id, subject))
     },
 
     send: async (text, conversationId) => {
@@ -1520,7 +1531,7 @@ export const useStore = create<State>((set, get) => {
         if (get().uploadTaintTarget === 'draft') {
           try {
             await get().noteUntrustedUpload(id)
-            set({ uploadTaintTarget: null })
+            set({ uploadTaintTarget: null, uploadTaintSource: 'upload' })
           } catch (e) {
             get().toast((e as Error).message, 'error')
             return false
@@ -1561,7 +1572,7 @@ export const useStore = create<State>((set, get) => {
         return false
       }
       // Effort and fast mode chosen on the draft land before the first run, so they apply to this reply.
-      const { draftEffort: effort, draftFast: fast, uploadTaintTarget } = get()
+      const { draftEffort: effort, draftFast: fast, uploadTaintTarget, uploadTaintSource } = get()
       const settings: { effort?: Effort; fast?: boolean; tainted?: boolean; taint_sources?: string[] } = {}
       // Medium is already what a new row hydrates to. Anything else, including the omit-the-field
       // choice, has to be written or the server would fill medium back in.
@@ -1570,7 +1581,7 @@ export const useStore = create<State>((set, get) => {
       const fromUpload = uploadTaintTarget === 'draft'
       if (fromUpload) {
         settings.tainted = true
-        settings.taint_sources = ['upload']
+        settings.taint_sources = [uploadTaintSource || 'upload']
       }
       if (effort !== DEFAULT_EFFORT || fast || fromUpload) {
         const patched = await api.conversations.patch(c.id, { settings }).catch(() => null)
@@ -1589,6 +1600,7 @@ export const useStore = create<State>((set, get) => {
       set((s) => ({
         focusedConversationId: c.id, view: 'chat', draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false,
         uploadTaintTarget: fromUpload ? null : uploadTaintTarget,
+        uploadTaintSource: fromUpload ? 'upload' : uploadTaintSource,
         conversations: [row as Conversation, ...s.conversations.filter((x) => x.id !== c.id)]
       }))
       void get().refreshProjects()
@@ -1621,7 +1633,7 @@ export const useStore = create<State>((set, get) => {
       if (id && get().uploadTaintTarget === 'page') {
         try {
           await get().noteUntrustedUpload(id, 'page')
-          set({ uploadTaintTarget: null })
+          set({ uploadTaintTarget: null, uploadTaintSource: 'upload' })
         } catch (e) {
           get().toast((e as Error).message, 'error')
           return false
@@ -1635,14 +1647,14 @@ export const useStore = create<State>((set, get) => {
           get().toast((e as Error).message, 'error')
           return false
         }
-        const { pageAgentEffort, pageAgentFast, uploadTaintTarget } = get()
+        const { pageAgentEffort, pageAgentFast, uploadTaintTarget, uploadTaintSource } = get()
         const pageSettings: { effort?: Effort; fast?: boolean; tainted?: boolean; taint_sources?: string[] } = {}
         if (pageAgentEffort !== DEFAULT_EFFORT) pageSettings.effort = pageAgentEffort
         if (pageAgentFast) pageSettings.fast = true
         const fromUpload = uploadTaintTarget === 'page'
         if (fromUpload) {
           pageSettings.tainted = true
-          pageSettings.taint_sources = ['upload']
+          pageSettings.taint_sources = [uploadTaintSource || 'upload']
         }
         if (pageAgentEffort !== DEFAULT_EFFORT || pageAgentFast || fromUpload) {
           const patched = await api.conversations.patch(c.id, { settings: pageSettings }).catch(() => null)
@@ -1652,7 +1664,7 @@ export const useStore = create<State>((set, get) => {
           }
           if (patched) c = patched
         }
-        if (fromUpload) set({ uploadTaintTarget: null })
+        if (fromUpload) set({ uploadTaintTarget: null, uploadTaintSource: 'upload' })
         c.messages = []
         putSession(c)
         id = c.id

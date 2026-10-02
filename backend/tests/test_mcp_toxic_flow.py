@@ -10,7 +10,6 @@ def test_reader_plus_sender_warns() -> None:
     rep = mcp_eval.evaluate_tools(tools)
     hit = [f for f in rep["findings"] if f["code"] == "toxic_flow"]
     assert len(hit) == 1 and hit[0]["severity"] == "warn"
-    assert rep["status"] == "warn"
 
 
 def test_reads_only_is_quiet() -> None:

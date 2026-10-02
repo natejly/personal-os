@@ -248,7 +248,9 @@
   color: var(--text-faint); font-size: 10.5px;
   font-variant-numeric: tabular-nums;
 }
-.md-hints { margin-left: auto; opacity: 0.75; }
+/* Counters never wrap; the shortcut reminder is the part that gives way in a narrow pane. */
+.md-status > span { white-space: nowrap; }
+.md-hints { margin-left: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; opacity: 0.75; }
 
 /* markdown tokens in the mirror */
 .tk-head { color: var(--accent); font-weight: 600; }

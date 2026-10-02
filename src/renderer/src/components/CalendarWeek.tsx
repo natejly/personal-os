@@ -371,8 +371,9 @@ export default function CalendarWeek({ days, events, todos, canCreate = false, o
         )
       })}
       <div className="cal-hours" ref={hoursRef}>
-        {Array.from({ length: hours }, (_, i) => startHour + i).map((h) => (
-          <div key={h} className="cal-hour" style={{ height: hourPx }}>{h === 0 ? '' : fmtHour(h)}</div>
+        {/* A label sits on its hour line, so the first one would be cut off by the header above it. */}
+        {Array.from({ length: hours }, (_, i) => startHour + i).map((h, i) => (
+          <div key={h} className="cal-hour" style={{ height: hourPx }}>{i === 0 ? '' : fmtHour(h)}</div>
         ))}
       </div>
       {days.map((d) => {

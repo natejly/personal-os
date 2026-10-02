@@ -214,6 +214,10 @@ export default function HomeView(): JSX.Element {
   // Until the dashboard answers, a card has nothing to count: saying "No projects yet." would be a guess.
   const pending = d === null ? <p className="muted">{settled ? 'Could not load.' : 'Loading…'}</p> : null
   const connect = (): void => openSettings('integrations')
+  // Without Google, four cards would each say the same "Connect Google" line. One strip says it once
+  // and the cards stay out of the way until they have something to show.
+  const googleOff = google !== null && !google.connected
+  const wantsGoogle = ['calendar', 'inbox', 'gtasks', 'drive'].some(on)
   /** What a Google card says instead of its rows: still loading, not connected, or its own error. */
   const googleGate = (what: string, error: string | undefined): JSX.Element | null => {
     if (!google?.connected) return (google === null && pending) || <ConnectGoogle what={what} onConnect={connect} />
@@ -289,8 +293,14 @@ export default function HomeView(): JSX.Element {
             {recapLoading && !recap?.content ? <p className="muted">Writing your recap…</p> : <div className="markdown"><ReactMarkdown remarkPlugins={[remarkGfm]} components={SAFE_MD}>{recap?.content ?? ''}</ReactMarkdown></div>}
           </section>
         )}
+        {googleOff && wantsGoogle && (
+          <section className="home-connect">
+            <p><b>Connect Google</b> to see your calendar, unread mail, tasks and recent Drive files here.</p>
+            <button className="ghost-btn" onClick={connect}>Connect Google</button>
+          </section>
+        )}
         <div className="widgets">
-          {on('calendar') && <section className="widget">
+          {on('calendar') && !googleOff && <section className="widget">
             <header><Calendar size={14} /> Calendar {google?.connected && <span className="muted small">next 48h</span>}</header>
             {googleGate('your calendar', d?.errors.calendar) ?? (events.length === 0 ? <p className="muted">Nothing scheduled.</p> : (
               <ul className="events">
@@ -309,7 +319,7 @@ export default function HomeView(): JSX.Element {
 
           {on('health') && HealthCard && <HealthCard data={d} />}
 
-          {on('inbox') && <section className="widget">
+          {on('inbox') && !googleOff && <section className="widget">
             <header><Mail size={14} /> Mail inbox {google?.connected && <span className="muted small">unread, 14 days</span>}<button className="link small" onClick={() => setView('mail')}>View all</button></header>
             {googleGate('unread mail', d?.errors.gmail) ?? ((d?.gmail?.length ?? 0) === 0 ? <p className="muted">Inbox zero.</p> : (
               <ul className="mails">
@@ -324,7 +334,7 @@ export default function HomeView(): JSX.Element {
             ))}
           </section>}
 
-          {on('gtasks') && <section className="widget">
+          {on('gtasks') && !googleOff && <section className="widget">
             <header><ListChecks size={14} /> Google Tasks</header>
             {googleGate('Google Tasks', d?.errors.tasks) ?? ((d?.tasks?.length ?? 0) === 0 ? <p className="muted">No open tasks.</p> : (
               <ul className="events">
@@ -335,7 +345,7 @@ export default function HomeView(): JSX.Element {
             ))}
           </section>}
 
-          {on('drive') && <section className="widget">
+          {on('drive') && !googleOff && <section className="widget">
             <header><HardDrive size={14} /> Drive {google?.connected && d?.drive && <span className="muted small">recently modified</span>}</header>
             {/* The scope check comes before the gate: without the scope, the backend's error is only noise. */}
             {google?.connected && google.missing_scopes.some((s) => s.includes('drive')) ? (

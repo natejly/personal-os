@@ -159,6 +159,48 @@ def test_native_sine_stops_itself_at_max_seconds() -> None:
     assert cap.restarts == 0, "a clean exit must not look like a crash"
 
 
+def test_cut_on_silence_with_no_pauses_cuts_at_the_cap_with_contiguous_offsets() -> None:
+    # A sine has no pauses, so every segment must close at segment_seconds, and the offsets the
+    # capture measured have to tile the recording clock without gaps.
+    out = _tmp()
+    seen: list[int] = []
+    cap = meeting_recorder.ChannelCapture(
+        "mic", audiocap.native_sine_input(), out, 2, 7, threading.Event(),
+        lambda c, s, p: seen.append(s), cut_on_silence=True, min_segment_seconds=1.0)
+    offsets: dict[int, tuple[float, float]] = {}
+    real = cap.on_segment
+    cap.on_segment = lambda c, s, p: (offsets.__setitem__(s, cap.offsets[s]), real(c, s, p))  # type: ignore[assignment]
+    cap.start()
+    cap.join(timeout=25)
+    assert not cap.is_alive() and cap.error == "", cap.error
+    assert len(seen) >= 2, seen
+    prev_end = 0.0
+    for seq in sorted(offsets):
+        a, b = offsets[seq]
+        assert abs(a - prev_end) < 1e-6, offsets
+        if seq <= max(offsets) - 2 or seq < 2:  # the tail near max_seconds may be short
+            assert abs((b - a) - 2.0) < 0.05, f"segment {seq} was {b - a}s, not the 2 s cap"
+        prev_end = b
+
+
+def test_the_session_reports_the_measured_offsets_when_cutting_on_silence() -> None:
+    session = meeting_recorder.RecordingSession(
+        "mtg-cut", _tmp(), {"mic": ["x"]}, settings_fn=lambda: dict(SETTINGS), config_fn=lambda: dict(CFG),
+        data_dir=_tmp(), on_segment=lambda *a: None, on_result=lambda *a: None, segment_seconds=6,
+        cut_on_silence=True)
+    cap = meeting_recorder.ChannelCapture(
+        "mic", ["x"], _tmp(), 6, 60, threading.Event(), lambda *a: None, cut_on_silence=True)
+    session.captures["mic"] = cap
+    cap.offsets[1] = (3.25, 7.5)
+    infos: list[dict] = []
+    session.on_segment = lambda c, s, p, i: infos.append(i)
+    session._segment("mic", 1, _wav(_tmp() / "mic-00001.wav", 4.25))
+    assert infos[0]["t_start"] == 3.25 and infos[0]["t_end"] == 7.5, infos[0]
+    # Without recorded offsets (the default mode) the fixed grid is what it always was.
+    session._segment("mic", 2, _wav(_tmp() / "mic-00002.wav", 1.0))
+    assert infos[1]["t_start"] == 12.0, infos[1]
+
+
 def test_channel_capture_emits_ordered_segments_and_stops_cleanly() -> None:
     if not audiocap.ffmpeg_path():
         print("  note  no ffmpeg on PATH, skipping the capture loop")

@@ -602,6 +602,15 @@ const startFailure = (e: unknown): string => {
   return first ? `${first.label}: ${first.detail}${first.fix ? ` — ${first.fix}` : ''}` : (e as Error).message
 }
 
+/**
+ * What the consent modal does once accepted, when the Record click that opened it was for a doc.
+ * `startRecording` opens the Meetings view, which a note must not do, so the doc recorder parks its
+ * own start here and `acceptMeetingConsent` runs it instead. Dismissing the modal drops it, for the
+ * same reason `consentIntent` is dropped. Module-level rather than state: a closure must not
+ * cross the IPC bus or be serialised.
+ */
+export const consentResume: { run: (() => void) | null } = { run: null }
+
 /** A 409 from `POST /chat` arrives as a `RunConflict` JSON-encoded in the error detail. */
 const runConflict = (e: unknown): RunConflict | null => {
   try {
@@ -2593,7 +2602,7 @@ export const useStore = create<State>((set, get) => {
       // Dismissing the notice drops the Record click it was gating: a recording never starts by
       // default, and a remembered intent would make the next acknowledgement record something
       // the user did not just ask for.
-      if (!open) consentIntent = undefined
+      if (!open) { consentIntent = undefined; consentResume.run = null }
       set({ meetingConsentOpen: open })
     },
     acceptMeetingConsent: async () => {
@@ -2605,6 +2614,10 @@ export const useStore = create<State>((set, get) => {
       const intent = consentIntent
       consentIntent = undefined
       set({ meetingConsentOpen: false })
+      // A doc's Record click resumes as a doc recording, not as a meeting in the Meetings view.
+      const resume = consentResume.run
+      consentResume.run = null
+      if (resume) return resume()
       await get().startRecording(intent)
     },
 

@@ -10,6 +10,7 @@ user accepts or rejects, which is what makes an LLM safe to point at prose someo
 """
 from __future__ import annotations
 
+import datetime
 import difflib
 import hashlib
 import re
@@ -45,7 +46,8 @@ CREATE TABLE IF NOT EXISTS doc_revisions (
   tool TEXT,                                 -- tool that proposed it, when author='assistant'
   status TEXT NOT NULL DEFAULT 'applied',    -- 'applied' | 'pending' | 'rejected'
   created_at REAL NOT NULL,
-  resolved_at REAL
+  resolved_at REAL,
+  append TEXT                                -- an append proposal: a section added to whatever the doc says at accept time
 );
 CREATE INDEX IF NOT EXISTS idx_rev_doc ON doc_revisions(doc_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_rev_pending ON doc_revisions(status, created_at DESC);
@@ -109,6 +111,32 @@ def doc_hit(r: Any) -> dict[str, Any]:
 COALESCE_SECONDS = 180.0
 
 
+# The folder daily notes live in (personal tree), and the shape of a wiki link: [[Title]] or [[Title|alias]].
+DAILY_FOLDER = "Daily"
+_WIKI_LINK = re.compile(r"\[\[([^\[\]|]*?)(?:\|[^\[\]]*)?\]\]")
+
+
+def _link_line(content: str, want: str) -> str | None:
+    """The first line outside a fenced code block that links to `want` (casefolded title), clipped
+    later by the caller. A link in a code sample is an example, not a reference."""
+    fence = ""
+    for line in content.split("\n"):
+        stripped = line.lstrip()
+        marker = stripped[:3] if stripped[:3] in ("```", "~~~") else ""
+        if marker:
+            if not fence:
+                fence = marker
+            elif marker == fence:
+                fence = ""
+            continue
+        if fence:
+            continue
+        for m in _WIKI_LINK.finditer(line):
+            if m.group(1).strip().casefold() == want:
+                return line.strip()
+    return None
+
+
 # A folder path is "Work/Research/2026": segments joined by a slash. Kept in the doc's own `folder`
 # column rather than a foreign key, so a doc is never orphaned by a folder row going missing.
 MAX_FOLDER_DEPTH = 8
@@ -163,6 +191,8 @@ class Docs:
         self.db = db
         # Called with a doc id whenever its chunks were rebuilt (app.py wires background embedding to it).
         self.on_chunks: Any = None
+        # Called with a doc id just before its row is hard-deleted (app.py wires linked recordings to it).
+        self.on_delete: Any = None
         with db.tx() as c:
             c.executescript(SCHEMA)
             self._migrate_folder_scope(c)
@@ -171,6 +201,10 @@ class Docs:
             for col, ddl in {"deleted_at": "REAL", "deleted_with": "TEXT"}.items():
                 if col not in have:
                     c.execute(f"ALTER TABLE docs ADD COLUMN {col} {ddl}")
+            # doc_revisions.append arrived after the first release (recording summaries), so an existing DB needs it added.
+            have_rev = {r["name"] for r in c.execute("PRAGMA table_info(doc_revisions)").fetchall()}
+            if "append" not in have_rev:
+                c.execute("ALTER TABLE doc_revisions ADD COLUMN append TEXT")
         self.backfill_chunks()
 
     @staticmethod
@@ -400,6 +434,12 @@ class Docs:
         return self.update_meta(id, {"project_id": sc or None, "folder": folder})
 
     def delete(self, id: str) -> None:
+        if self.on_delete:
+            # Before the row goes: a linked recording's FTS row and audio dir are not covered by any FK cascade.
+            try:
+                self.on_delete(id)
+            except Exception:  # noqa: BLE001 - a failing hook must not leave the doc half-purged
+                pass
         with self.db.tx() as c:
             c.execute("DELETE FROM docs WHERE id=?", (id,))
             c.execute("DELETE FROM docs_fts WHERE doc_id=?", (id,))
@@ -444,6 +484,57 @@ class Docs:
             for anc in ancestors(norm):
                 c.execute("INSERT OR IGNORE INTO doc_folders(scope, path, created_at) VALUES(?,?,?)", (sc, anc, t))
         return self.folders()
+
+    # ---- daily note + backlinks ----
+    def daily(self, date_str: str | None = None) -> tuple[dict[str, Any], bool]:
+        """Find or create the personal daily note for a date ("YYYY-MM-DD", default: today here).
+
+        The title is the date itself, so `[[2026-10-02]]` links to it. A trashed note with that title
+        does not count: `get`-style reads already hide it, so a fresh one is made rather than reviving
+        something the user threw away. Raises ValueError on a malformed date."""
+        if date_str:
+            try:
+                day = datetime.date.fromisoformat(date_str.strip())
+            except ValueError as e:
+                raise ValueError("Date must be YYYY-MM-DD") from e
+            if day.isoformat() != date_str.strip():
+                raise ValueError("Date must be YYYY-MM-DD")
+        else:
+            day = datetime.date.today()
+        title = day.isoformat()
+        with self.db.tx() as c:
+            row = c.execute(
+                "SELECT id FROM docs WHERE deleted_at IS NULL AND project_id IS NULL AND folder=? AND title=?"
+                " ORDER BY created_at LIMIT 1", (DAILY_FOLDER, title)).fetchone()
+        if row:
+            return self.get(row["id"]), False  # type: ignore[return-value]
+        self.create_folder(DAILY_FOLDER, "")
+        body = f"# {day.strftime('%A, %B')} {day.day}, {day.year}\n\n"
+        return self.create(title, body, None, DAILY_FOLDER), True
+
+    def backlinks(self, id: str) -> list[dict[str, Any]] | None:
+        """Live docs that link to this one with `[[Title]]` or `[[Title|alias]]`, newest first.
+
+        A plain scan: SQL narrows to docs containing `[[` at all, then the links are parsed in Python so
+        fenced code and case/space differences are handled in one place. None if the doc is missing."""
+        me = self.get(id)
+        if not me:
+            return None
+        want = (me["title"] or "").strip().casefold()
+        if not want:
+            return []
+        with self.db.tx() as c:
+            rows = c.execute(
+                "SELECT id, title, folder, project_id, content, updated_at FROM docs"
+                " WHERE deleted_at IS NULL AND id<>? AND content LIKE ? ESCAPE '\\' ORDER BY updated_at DESC",
+                (id, "%\\[[%")).fetchall()
+        out: list[dict[str, Any]] = []
+        for r in rows:
+            line = _link_line(r["content"], want)
+            if line is not None:
+                out.append({"id": r["id"], "title": r["title"], "folder": r["folder"], "project_id": r["project_id"],
+                            "snippet": line[:160], "updated_at": r["updated_at"]})
+        return out
 
     def rename_folder(self, path: str, new_path: str, scope: str | None = "") -> list[dict[str, Any]]:
         """Rename or move a folder within its own tree, taking its subtree and its docs along.
@@ -511,8 +602,23 @@ class Docs:
             c.execute("DELETE FROM doc_folders WHERE scope=?", (scope_key(project_id),))
 
     # ---- revisions ----
+    @staticmethod
+    def append_after(content: str, section: str) -> str:
+        """What a doc reads like once an append proposal's section is added to `content`."""
+        body = (content or "").rstrip()
+        return (body + "\n\n" if body else "") + (section or "").strip("\n") + "\n"
+
     def _rev_view(self, r: dict[str, Any], current: str | None = None) -> dict[str, Any]:
         """A revision plus what the UI needs to render it without fetching the bodies twice."""
+        if r.get("append") is not None and r["status"] == "pending":
+            # An append proposal is "this section, added to the doc as it stands", so a pending one is
+            # resolved against the live content: the diff shows only the addition and typing after the
+            # proposal does not make it stale. Applied/rejected rows keep what was stored.
+            if current is None:
+                with self.db.tx() as c:
+                    row = c.execute("SELECT content FROM docs WHERE id=?", (r["doc_id"],)).fetchone()
+                current = row["content"] if row else r["before"]
+            r = {**r, "before": current, "after": self.append_after(current, r["append"])}
         base = r["before"] if current is None else current
         return {**r, "stat": diff_stat(r["before"], r["after"]),
                 # A pending edit is reviewed against the doc as it stands now, not as it stood when
@@ -551,6 +657,27 @@ class Docs:
                 (rid, doc_id, cur["content"], after, cur["title"], title_after, summary or "Assistant edit", tool, now()))
         return self.revision(rid)
 
+    def propose_append(self, doc_id: str, section: str, summary: str = "",
+                       tool: str | None = None) -> dict[str, Any] | None:
+        """Propose adding `section` to the end of a doc, resolved against the doc at accept time.
+
+        `propose` freezes `after` as the whole new body, so anything typed between the proposal and
+        the click is overwritten. A section that is only ever added does not need the whole body:
+        the revision stores the section, and both the pending view and `accept` build the result
+        from the doc as it stands. None when the doc is missing or in the trash.
+        """
+        cur = self.get(doc_id)
+        if cur is None or not (section or "").strip():
+            return None
+        rid = new_id()
+        with self.db.tx() as c:
+            c.execute(
+                "INSERT INTO doc_revisions(id,doc_id,before,after,title_before,title_after,summary,author,tool,status,created_at,append)"
+                " VALUES(?,?,?,?,?,?,?,'assistant',?,'pending',?,?)",
+                (rid, doc_id, cur["content"], self.append_after(cur["content"], section), cur["title"], None,
+                 summary or "Assistant edit", tool, now(), section))
+        return self.revision(rid)
+
     def accept(self, rev_id: str) -> dict[str, Any] | None:
         with self.db.tx() as c:
             r = c.execute("SELECT * FROM doc_revisions WHERE id=? AND status='pending'", (rev_id,)).fetchone()
@@ -561,12 +688,14 @@ class Docs:
                 return None
             t = now()
             title = r["title_after"] or d["title"]
+            after = self.append_after(d["content"], r["append"]) if r["append"] is not None else r["after"]
             # `before` is rewritten to the content actually replaced, so "undo" after a stale accept
-            # restores what the user had rather than what the model saw.
-            c.execute("UPDATE doc_revisions SET status='applied', before=?, title_before=?, resolved_at=? WHERE id=?",
-                      (d["content"], d["title"], t, rev_id))
-            c.execute("UPDATE docs SET content=?, title=?, updated_at=? WHERE id=?", (r["after"], title, t, r["doc_id"]))
-            self._reindex(c, r["doc_id"], title, r["after"])
+            # restores what the user had rather than what the model saw. An append proposal also
+            # stores the `after` it really produced.
+            c.execute("UPDATE doc_revisions SET status='applied', before=?, after=?, title_before=?, resolved_at=? WHERE id=?",
+                      (d["content"], after, d["title"], t, rev_id))
+            c.execute("UPDATE docs SET content=?, title=?, updated_at=? WHERE id=?", (after, title, t, r["doc_id"]))
+            self._reindex(c, r["doc_id"], title, after)
             doc_id = r["doc_id"]
         return self.get(doc_id)
 

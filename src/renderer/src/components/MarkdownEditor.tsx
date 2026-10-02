@@ -1,4 +1,13 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import CaretMenu from '../features/notes/CaretMenu'
+import { measureCaret, type CaretRect } from '../features/notes/caretPosition'
+import type { MarkdownEditorHandle } from '../features/notes/handle'
+import { linkFromPaste } from '../features/notes/smartPaste'
+import { builtinCommands, detectSlash, filterCommands, type SlashCommand } from '../features/notes/slash'
+import { readingTime, wordCount } from '../features/notes/stats'
+import { diffRange, replaceInTextarea } from '../features/notes/textEdit'
+import { detectWikiTrigger, filterTargets, wikiText } from '../features/notes/wikilinks'
+import '../styles/notes.css'
 
 /**
  * The editing surface: a plain textarea over a highlighted mirror of the same text.
@@ -18,7 +27,21 @@ export interface EditorHandleProps {
   wrap?: boolean
   /** Scroll position as a 0..1 fraction, so a side-by-side preview can follow. */
   onScrollFraction?: (f: number) => void
+  /** Opt in: typing `/` at a line start or after a space opens the command menu. */
+  slash?: boolean
+  /** Commands appended after the built-in ones (Record, Dictate, ...). Only used with `slash`. */
+  extraCommands?: SlashCommand[]
+  /** Opt in: docs `[[` can link to. Also turns on the `[[...]]` tint in the highlight layer. */
+  linkTargets?: { id: string; title: string }[]
+  /** Opt in: pasting a URL over selected text makes `[selection](url)`. */
+  smartPaste?: boolean
+  /** Called with the caret's 1-based line whenever it changes (drives the outline). */
+  onCaretLine?: (line: number) => void
+  /** Opt in: reading time and the size of the selection in the status bar. */
+  richStatus?: boolean
 }
+
+export type { MarkdownEditorHandle }
 
 const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
@@ -27,7 +50,7 @@ const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;'
  * keeps it honest against the textarea: every input line produces exactly one output line, so the two
  * layers can never drift. Fenced code and maths blocks are tracked as state across lines.
  */
-function highlight(src: string): string {
+export function highlight(src: string, wikilinks = false): string {
   const out: string[] = []
   let fence: string | null = null
   let mathBlock = false
@@ -54,33 +77,35 @@ function highlight(src: string): string {
       out.push(`<span class="tk-math">${esc(line)}</span>`)
       continue
     }
-    out.push(inline(line))
+    out.push(inline(line, wikilinks))
   }
   return out.join('\n')
 }
 
-function inline(line: string): string {
+function inline(line: string, wiki: boolean): string {
   // Block-level prefixes first — they colour the whole line.
   const heading = /^(\s{0,3}#{1,6}\s)(.*)$/.exec(line)
-  if (heading) return `<span class="tk-head">${esc(heading[1])}${span(heading[2])}</span>`
+  if (heading) return `<span class="tk-head">${esc(heading[1])}${span(heading[2], wiki)}</span>`
   const quote = /^(\s*>+\s?)(.*)$/.exec(line)
-  if (quote) return `<span class="tk-punct">${esc(quote[1])}</span><span class="tk-quote">${span(quote[2])}</span>`
+  if (quote) return `<span class="tk-punct">${esc(quote[1])}</span><span class="tk-quote">${span(quote[2], wiki)}</span>`
   const rule = /^\s*([-*_])(\s*\1){2,}\s*$/.test(line)
   if (rule) return `<span class="tk-punct">${esc(line)}</span>`
   const list = /^(\s*(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?)(.*)$/.exec(line)
-  if (list) return `<span class="tk-bullet">${esc(list[1])}</span>${span(list[2])}`
+  if (list) return `<span class="tk-bullet">${esc(list[1])}</span>${span(list[2], wiki)}`
   const table = /^\s*\|/.test(line)
   if (table) return `<span class="tk-table">${esc(line)}</span>`
-  return span(line)
+  return span(line, wiki)
 }
 
 /** Inline spans: maths, code, links, emphasis. One pass, longest-delimiter-first. */
-function span(text: string): string {
+function span(text: string, wiki = false): string {
   const pattern = new RegExp(
     [
       '(\\$\\$[^$]+\\$\\$)', // block maths on one line
       '(\\$(?:\\\\.|[^$\\\\\\n])+\\$)', // inline maths
       '(`[^`\\n]+`)', // code
+      // Only when the host opted in, and before the plain link so `[[a]](b)` is not misread.
+      ...(wiki ? ['(\\[\\[[^\\[\\]\\n|]+(?:\\|[^\\[\\]\\n]+)?\\]\\])'] : []), // wikilink
       '(!?\\[[^\\]\\n]*\\]\\([^)\\n]*\\))', // link / image
       '(\\*\\*[^*\\n]+\\*\\*|__[^_\\n]+__)', // strong
       '(\\*[^*\\n]+\\*|_[^_\\n]+_)', // emphasis
@@ -92,7 +117,9 @@ function span(text: string): string {
   let last = 0
   for (let m = pattern.exec(text); m; m = pattern.exec(text)) {
     out += esc(text.slice(last, m.index))
-    const cls = m[1] || m[2] ? 'tk-math' : m[3] ? 'tk-code' : m[4] ? 'tk-link' : m[5] ? 'tk-strong' : m[6] ? 'tk-em' : 'tk-strike'
+    // With the wikilink group present every later group shifts up by one.
+    const g = wiki ? m.slice(1) : [m[1], m[2], m[3], undefined, ...m.slice(4)]
+    const cls = g[0] || g[1] ? 'tk-math' : g[2] ? 'tk-code' : g[3] ? 'tk-wikilink' : g[4] ? 'tk-link' : g[5] ? 'tk-strong' : g[6] ? 'tk-em' : 'tk-strike'
     out += `<span class="${cls}">${esc(m[0])}</span>`
     last = m.index + m[0].length
   }
@@ -137,15 +164,19 @@ function shiftLines(value: string, s: number, e: number, out: boolean): { value:
   return { value: value.slice(0, from) + next + value.slice(to), start: Math.max(from, s + firstDelta), end: e + (next.length - block.length) }
 }
 
-export default function MarkdownEditor({
-  value, onChange, onSave, placeholder, readOnly = false, wrap = true, onScrollFraction
-}: EditorHandleProps): JSX.Element {
+const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(function MarkdownEditor({
+  value, onChange, onSave, placeholder, readOnly = false, wrap = true, onScrollFraction,
+  slash = false, extraCommands, linkTargets, smartPaste = false, onCaretLine, richStatus = false
+}, ref): JSX.Element {
   const ta = useRef<HTMLTextAreaElement>(null)
   const mirror = useRef<HTMLPreElement>(null)
+  const surface = useRef<HTMLDivElement>(null)
   const gutter = useRef<HTMLDivElement>(null)
   const [caret, setCaret] = useState({ line: 1, col: 1 })
+  const [sel, setSel] = useState({ start: 0, end: 0 })
   const lineCount = useMemo(() => value.split('\n').length, [value])
-  const html = useMemo(() => highlight(value) + '\n', [value])
+  const wikiOn = !!linkTargets
+  const html = useMemo(() => highlight(value, wikiOn) + '\n', [value, wikiOn])
 
   const syncScroll = useCallback((): void => {
     const el = ta.current
@@ -169,17 +200,146 @@ export default function MarkdownEditor({
     const upto = el.value.slice(0, el.selectionStart)
     const nl = upto.lastIndexOf('\n')
     setCaret({ line: upto.split('\n').length, col: el.selectionStart - nl })
+    const start = el.selectionStart
+    const end = el.selectionEnd
+    setSel((s) => (s.start === start && s.end === end ? s : { start, end }))
   }, [])
 
-  /** Apply a computed edit through setRangeText, which keeps it on the textarea's native undo stack. */
+  const lastLine = useRef(0)
+  useEffect(() => {
+    if (caret.line === lastLine.current) return
+    lastLine.current = caret.line
+    onCaretLine?.(caret.line)
+  }, [caret.line, onCaretLine])
+
+  /**
+   * Apply a computed whole-value edit as ONE replacement of just the range that changed, through the
+   * undo-preserving insert. `setRangeText` over the whole value would make ⌘Z drop or skip the edit.
+   * The `input` event the insert fires is what reaches `onChange`.
+   */
   const apply = useCallback((next: { value: string; start: number; end: number }): void => {
     const el = ta.current
     if (!el) return
-    el.setRangeText(next.value, 0, el.value.length, 'preserve')
-    el.setSelectionRange(next.start, next.end)
-    onChange(el.value)
+    const d = diffRange(el.value, next.value)
+    if (d.start === d.end && d.text === '') el.setSelectionRange(next.start, next.end)
+    else replaceInTextarea(el, d.start, d.end, d.text, next.start, next.end)
     trackCaret()
-  }, [onChange, trackCaret])
+  }, [trackCaret])
+
+  // ---- slash menu and wikilink picker ----
+  const commands = useMemo(() => (slash ? [...builtinCommands(), ...(extraCommands ?? [])] : []), [slash, extraCommands])
+  const trigger = useMemo((): { kind: 'slash' | 'wiki'; start: number; query: string } | null => {
+    if (readOnly || sel.start !== sel.end) return null
+    if (wikiOn) {
+      const w = detectWikiTrigger(value, sel.start)
+      if (w) return { kind: 'wiki', ...w }
+    }
+    if (slash) {
+      const s = detectSlash(value, sel.start)
+      if (s) return { kind: 'slash', ...s }
+    }
+    return null
+  }, [value, sel.start, sel.end, readOnly, wikiOn, slash])
+  const menuItems = useMemo(() => {
+    if (!trigger) return []
+    if (trigger.kind === 'slash') return filterCommands(commands, trigger.query).map((c) => ({ key: c.id, label: c.label, hint: c.hint }))
+    return filterTargets(linkTargets ?? [], trigger.query).map((t) => ({ key: t.id, label: t.title || 'Untitled' }))
+  }, [trigger, commands, linkTargets])
+  const menuKey = trigger ? `${trigger.kind}:${trigger.start}` : ''
+  // Escape closes the menu for this trigger only; a new `/` or `[[` opens it again.
+  const [dismissed, setDismissed] = useState('')
+  useEffect(() => { if (!trigger) setDismissed('') }, [trigger])
+  const menuOpen = !!trigger && menuItems.length > 0 && dismissed !== menuKey
+  const [act, setAct] = useState({ key: '', i: 0 })
+  const queryKey = trigger ? `${menuKey}:${trigger.query}` : ''
+  const active = act.key === queryKey ? Math.min(act.i, Math.max(0, menuItems.length - 1)) : 0
+
+  const [anchor, setAnchor] = useState<{ rect: CaretRect; w: number; h: number } | null>(null)
+  const placeMenu = useCallback((): void => {
+    const sr = surface.current?.getBoundingClientRect()
+    if (!menuOpen || !trigger || !mirror.current || !sr) { setAnchor(null); return }
+    const r = measureCaret(mirror.current, trigger.start)
+    if (!r) { setAnchor(null); return }
+    const rect = { top: r.top - sr.top, left: r.left - sr.left, height: r.height }
+    setAnchor((cur) => (cur && cur.rect.top === rect.top && cur.rect.left === rect.left && cur.w === sr.width && cur.h === sr.height
+      ? cur : { rect, w: sr.width, h: sr.height }))
+  }, [menuOpen, trigger])
+  // After the mirror has repainted this value, so the marker position is for the text the user sees.
+  useLayoutEffect(placeMenu, [placeMenu, value, wrap])
+
+  const pick = (i: number): void => {
+    const el = ta.current
+    if (!el || !trigger) return
+    const end = el.selectionStart
+    if (trigger.kind === 'slash') {
+      const cmd = filterCommands(commands, trigger.query)[i]
+      if (!cmd) return
+      // Remove the typed `/query`, then let the command insert where it stood.
+      replaceInTextarea(el, trigger.start, end, '')
+      trackCaret()
+      cmd.run(handle)
+      return
+    }
+    const target = filterTargets(linkTargets ?? [], trigger.query)[i]
+    if (!target) return
+    // Swallow a `]]` that was already typed after the caret instead of doubling it.
+    const tail = el.value.slice(end, end + 2) === ']]' ? 2 : 0
+    replaceInTextarea(el, trigger.start, end + tail, wikiText(target.title))
+    trackCaret()
+  }
+
+  const handle: MarkdownEditorHandle = useMemo(() => ({
+    focus: () => ta.current?.focus(),
+    insertAtCaret: (text, caretOffset) => {
+      const el = ta.current
+      if (!el || el.readOnly) return
+      const s = el.selectionStart
+      replaceInTextarea(el, s, el.selectionEnd, text, caretOffset === undefined ? undefined : s + caretOffset)
+      trackCaret()
+    },
+    replaceRange: (start, end, text) => {
+      const el = ta.current
+      if (!el || el.readOnly) return
+      replaceInTextarea(el, start, end, text)
+      trackCaret()
+    },
+    getSelection: () => {
+      const el = ta.current
+      const start = el?.selectionStart ?? 0
+      const end = el?.selectionEnd ?? 0
+      return { start, end, text: el ? el.value.slice(start, end) : '' }
+    },
+    getText: () => ta.current?.value ?? '',
+    jumpToLine: (line) => {
+      const el = ta.current
+      if (!el) return
+      let at = 0
+      for (let n = 1; n < line; n++) {
+        const nl = el.value.indexOf('\n', at)
+        if (nl === -1) break
+        at = nl + 1
+      }
+      el.focus()
+      el.setSelectionRange(at, at)
+      trackCaret()
+      const r = mirror.current ? measureCaret(mirror.current, at) : null
+      if (r && mirror.current) {
+        // Mirror and textarea share a scroll offset, so the caret's content y is its viewport y plus that offset.
+        el.scrollTop = Math.max(0, r.top - mirror.current.getBoundingClientRect().top + el.scrollTop - el.clientHeight * 0.25)
+      }
+    }
+  }), [trackCaret])
+  useImperativeHandle(ref, () => handle, [handle])
+
+  const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>): void => {
+    if (!smartPaste || readOnly) return
+    const el = e.currentTarget
+    const link = linkFromPaste(el.value.slice(el.selectionStart, el.selectionEnd), e.clipboardData.getData('text/plain'))
+    if (!link) return
+    e.preventDefault()
+    replaceInTextarea(el, el.selectionStart, el.selectionEnd, link)
+    trackCaret()
+  }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
     const el = e.currentTarget
@@ -190,6 +350,24 @@ export default function MarkdownEditor({
       return
     }
     if (readOnly) return
+    if (menuOpen && !e.nativeEvent.isComposing && !mod) {
+      const n = menuItems.length
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        setAct({ key: queryKey, i: (active + (e.key === 'ArrowDown' ? 1 : n - 1)) % n })
+        return
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault()
+        return pick(active)
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        e.stopPropagation()
+        setDismissed(menuKey)
+        return
+      }
+    }
     if (mod && !e.shiftKey && e.key.toLowerCase() === 'b') {
       e.preventDefault()
       return apply(wrapSelection(el, '**'))
@@ -249,7 +427,7 @@ export default function MarkdownEditor({
           <div key={i} className={i + 1 === caret.line ? 'cur' : undefined}>{i + 1}</div>
         ))}
       </div>
-      <div className="md-surface">
+      <div className="md-surface" ref={surface}>
         <pre className="md-mirror" ref={mirror} aria-hidden dangerouslySetInnerHTML={{ __html: html }} />
         <textarea
           ref={ta}
@@ -264,15 +442,36 @@ export default function MarkdownEditor({
           onKeyUp={trackCaret}
           onClick={trackCaret}
           onSelect={trackCaret}
-          onScroll={syncScroll}
+          onPaste={onPaste}
+          onBlur={() => setDismissed(menuKey)}
+          onScroll={() => { syncScroll(); if (menuOpen) placeMenu() }}
         />
+        {menuOpen && anchor && trigger && (
+          <CaretMenu
+            items={menuItems}
+            active={active}
+            anchor={anchor.rect}
+            bounds={{ w: anchor.w, h: anchor.h }}
+            label={trigger.kind === 'slash' ? 'Commands' : 'Link to a doc'}
+            onPick={pick}
+            onHover={(i) => setAct({ key: queryKey, i })}
+          />
+        )}
       </div>
       <div className="md-status">
         <span>Ln {caret.line}, Col {caret.col}</span>
         <span>{lineCount} lines</span>
-        <span>{value.trim() ? value.trim().split(/\s+/).length : 0} words</span>
+        <span>{wordCount(value)} words</span>
+        {richStatus && readingTime(wordCount(value)) && <span>{readingTime(wordCount(value))}</span>}
+        {richStatus && sel.end > sel.start && (
+          <span className="md-sel">
+            {wordCount(value.slice(sel.start, sel.end))} words, {sel.end - sel.start} chars selected
+          </span>
+        )}
         <span className="md-hints">⌘B bold · ⇧⌘I italic · ⌘K link · ⇧⌘M maths · ⇧⌘E code · Tab indent</span>
       </div>
     </div>
   )
-}
+})
+
+export default MarkdownEditor

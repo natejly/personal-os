@@ -60,6 +60,10 @@ DEFAULT_DRAIN_SECONDS = 120.0
 WAV_BYTES_PER_SECOND = 16000 * 2
 WAV_HEADER_BYTES = 44
 
+# cut_on_silence reads the native capture in steps this long, and looks for a pause this long.
+CUT_STEP_SECONDS = 0.25
+CUT_PAUSE_SECONDS = 0.5
+
 
 def recording_dir(data_dir: Path, meeting_id: str) -> Path:
     """Where one meeting's wavs live. The value of meetings.audio_dir."""
@@ -119,7 +123,8 @@ class ChannelCapture(_RecorderThread):
 
     def __init__(self, channel: str, input_spec: list[str], out_dir: Path, segment_seconds: int,
                  max_seconds: int, halt: threading.Event,
-                 on_segment: Callable[[str, int, Path], None]):
+                 on_segment: Callable[[str, int, Path], None], *,
+                 cut_on_silence: bool = False, min_segment_seconds: float = 2.0):
         super().__init__(f"capture-{channel}", halt)
         self.channel = channel
         self.input_spec = list(input_spec)
@@ -127,6 +132,16 @@ class ChannelCapture(_RecorderThread):
         self.segment_seconds = max(1, int(segment_seconds))
         self.max_seconds = max(1, int(max_seconds))
         self.on_segment = on_segment
+        # Opt-in, native capture only: close a segment at the first pause once `min_segment_seconds`
+        # are in, with `segment_seconds` as the hard cap. The ffmpeg path below always cuts on its
+        # fixed grid and ignores both, since its segment muxer owns the boundaries.
+        self.cut_on_silence = bool(cut_on_silence)
+        self.min_segment_seconds = max(0.5, float(min_segment_seconds))
+        # seq -> (t_start, t_end) on this capture's own clock, filled only when cutting on silence
+        # (segments are then variable length, so `seq * segment_seconds` would lie). The session
+        # reads it in _segment; empty means "use the fixed grid", exactly as before.
+        self.offsets: dict[int, tuple[float, float]] = {}
+        self._pos_samples = 0
         self.proc: subprocess.Popen[bytes] | None = None
         self._native: Any = None
         self.session_start = 0.0
@@ -234,7 +249,10 @@ class ChannelCapture(_RecorderThread):
             if remaining <= 0.05:
                 break
             secs = min(float(self.segment_seconds), remaining)
-            pcm = cap.read_seconds(secs, self.halt)
+            if self.cut_on_silence:
+                pcm = self._read_until_pause(cap, secs)
+            else:
+                pcm = cap.read_seconds(secs, self.halt)
             if self.stopping or self.halt.is_set():
                 extra = cap.drain()
                 if extra:
@@ -245,19 +263,51 @@ class ChannelCapture(_RecorderThread):
             # last chunk of a real take - then keep it so the end of the meeting is not silent.
             min_pcm = 16000 * 2 // 10
             if len(pcm) < min_pcm:
+                self._pos_samples += len(pcm) // 2  # dropped audio still happened on the clock
                 if self.stopping or self.halt.is_set() or remaining <= 0.05:
                     break
                 continue
             path = self.out_dir / f"{self.channel}-{seq:05d}.wav"
             if not audiocap.write_pcm16_wav(path, pcm):
                 raise RuntimeError("could not write segment wav")
+            self._note_offsets(seq, len(pcm))
             self._emit_direct(seq, path)
             seq += 1
         extra = cap.drain()
         if extra and len(extra) >= 16000 * 2 // 10 and not self.halt.is_set():
             path = self.out_dir / f"{self.channel}-{seq:05d}.wav"
             if audiocap.write_pcm16_wav(path, extra):
+                self._note_offsets(seq, len(extra))
                 self._emit_direct(seq, path)
+
+    def _read_until_pause(self, cap: Any, cap_seconds: float) -> bytes:
+        """Read small steps until `meeting_vad.find_cut` says to close, or the audio stops coming.
+
+        A halt or stop returns whatever has accumulated, like the fixed-length read does, so the
+        final partial flush behaves the same."""
+        buf = bytearray()
+        cap_bytes = int(cap_seconds * 16000) * 2
+        while not self.halt.is_set() and not self.stopping:
+            step = min(CUT_STEP_SECONDS, (cap_bytes - len(buf)) / 32000)
+            if step <= 0:
+                break
+            chunk = cap.read_seconds(step, self.halt)
+            buf.extend(chunk)
+            if cap.error and not chunk:
+                break
+            cut = meeting_vad.find_cut(
+                bytes(buf), min_seconds=self.min_segment_seconds, max_seconds=cap_seconds,
+                pause_seconds=CUT_PAUSE_SECONDS)
+            if cut is not None:
+                return bytes(buf[:cut])
+        return bytes(buf)
+
+    def _note_offsets(self, seq: int, pcm_bytes: int) -> None:
+        """Advance the recording clock by a written segment's samples. Only when cutting on silence."""
+        start = self._pos_samples
+        self._pos_samples += pcm_bytes // 2
+        if self.cut_on_silence:
+            self.offsets[seq] = (start / 16000.0, self._pos_samples / 16000.0)
 
     def _emit_direct(self, seq: int, path: Path) -> None:
         with self._emit_lock:
@@ -574,7 +624,8 @@ class RecordingSession:
                  max_attempts: int = MAX_ATTEMPTS,
                  max_audio_bytes: int = DEFAULT_MAX_AUDIO_BYTES,
                  drain_seconds: float = DEFAULT_DRAIN_SECONDS,
-                 on_disk_check: Callable[[], int] | None = None):
+                 on_disk_check: Callable[[], int] | None = None,
+                 cut_on_silence: bool = False, min_segment_seconds: float = 2.0):
         if not channels:
             raise ValueError("a recording needs at least one channel")
         self.meeting_id = meeting_id
@@ -583,6 +634,8 @@ class RecordingSession:
         self.segment_seconds = max(1, int(segment_seconds))
         self.max_seconds = max(1, int(max_seconds))
         self.keep_audio = keep_audio
+        self.cut_on_silence = bool(cut_on_silence)
+        self.min_segment_seconds = float(min_segment_seconds)
         self.drain_seconds = float(drain_seconds)
         self.on_segment = on_segment
         self.stop_event = threading.Event()
@@ -614,7 +667,9 @@ class RecordingSession:
             self.worker.start()
             for channel, spec in self.channels.items():
                 cap = ChannelCapture(channel, spec, self.out_dir, self.segment_seconds,
-                                     self.max_seconds, self.stop_event, self._segment)
+                                     self.max_seconds, self.stop_event, self._segment,
+                                     cut_on_silence=self.cut_on_silence,
+                                     min_segment_seconds=self.min_segment_seconds)
                 self.captures[channel] = cap
                 cap.start()
         finally:
@@ -701,14 +756,20 @@ class RecordingSession:
     def _segment(self, channel: str, seq: int, path: Path) -> None:
         """A closed wav: record where it sits in the meeting, then queue it for transcription."""
         seconds = _wav_seconds(path)
-        t_start = float(seq * self.segment_seconds)
+        cap = self.captures.get(channel)
+        real = cap.offsets.pop(seq, None) if cap is not None else None
+        if real is not None:
+            # Cut on silence: segments vary in length, so the capture measured where this one sits.
+            t_start = real[0]
+        else:
+            t_start = float(seq * self.segment_seconds)
         # Read once, here, and handed to the worker on the queue: the row's state and the
         # worker's keep-or-discard decision have to be the same decision.
         paused = self.paused
         info = {
             "state": "discarded" if paused else "recorded",
             "t_start": t_start,
-            "t_end": t_start + seconds,
+            "t_end": real[1] if real is not None else t_start + seconds,
             # From the RECORDING clock, not from when transcription returned: that is the bug at
             # activity.py:866-870, where store.add is called with no ts= so ts + duration_ms
             # points into the future.
@@ -759,7 +820,9 @@ class RecorderPool:
               max_attempts: int = MAX_ATTEMPTS,
               max_audio_bytes: int = DEFAULT_MAX_AUDIO_BYTES,
               drain_seconds: float = DEFAULT_DRAIN_SECONDS,
-              on_disk_check: Callable[[], int] | None = None) -> RecordingSession:
+              on_disk_check: Callable[[], int] | None = None,
+              cut_on_silence: bool = False,
+              min_segment_seconds: float = 2.0) -> RecordingSession:
         with self._lock:
             live = self._live()
             if live is not None:
@@ -776,7 +839,8 @@ class RecorderPool:
                 on_segment=on_segment, on_result=on_result, segment_seconds=segment_seconds,
                 max_seconds=max_seconds, keep_audio=keep_audio, max_attempts=max_attempts,
                 max_audio_bytes=max_audio_bytes, drain_seconds=drain_seconds,
-                on_disk_check=on_disk_check)
+                on_disk_check=on_disk_check, cut_on_silence=cut_on_silence,
+                min_segment_seconds=min_segment_seconds)
             self.sessions[meeting_id] = session
             # start() under the SAME lock as the busy check. It only spawns threads - ffmpeg is
             # launched inside the capture thread - so the lock is held for microseconds, and

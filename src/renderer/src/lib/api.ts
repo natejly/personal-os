@@ -47,7 +47,7 @@ const auth = async (): Promise<Record<string, string>> => {
   return token ? { 'X-Personal-OS-Token': token } : {}
 }
 
-async function req<T>(path: string, init?: RequestInit): Promise<T> {
+export async function req<T>(path: string, init?: RequestInit): Promise<T> {
   // The token wait only suspends while setBase() is still resolving it. Once it is (or when there is no
   // sidecar at all, as in tests), a req() runs synchronously up to its fetch — the canvas store's
   // flush-before-space-switch depends on that.
@@ -69,7 +69,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return (await r.json()) as T
 }
 
-const json = (v: unknown): string => JSON.stringify(v)
+export const json = (v: unknown): string => JSON.stringify(v)
 
 /** Human sentence for a read-back that did not prove the write (mirrors verify.summary_text). */
 export function verificationMessage(v: Verification): string {

@@ -1202,6 +1202,8 @@ export type ChatEvent =
   | { event: 'parked'; data: { message_id: string; call_id: string; name: string } }
   /** A desk's row changed: the rail's label, its status, its counters. */
   | { event: 'desk_status'; data: Desk }
+  /** A doc recording's segment, status or summary moved; see `RecordingEvent`. */
+  | { event: 'recording'; data: RecordingEvent }
   /** This turn is handing over to another one, announced before `done` so the UI can re-attach. */
   | { event: 'desk_handoff'; data: { desk_id: string; conversation_id: string; turn: number } }
   | { event: 'learned'; data: Learned }
@@ -2203,6 +2205,30 @@ export interface Meeting {
   updated_at: number
   /** Last recorder/stt/enhance failure, shown as a banner; empty when fine. */
   error: string
+  /** The doc this recording belongs to; null for an ordinary meeting. */
+  doc_id: string | null
+  doc_mode: DocRecordingMode | null
+  /** The `doc_revisions.id` of the latest proposed summary, if one was made. */
+  summary_revision_id: string | null
+}
+
+/** How a recording relates to its doc: `record` keeps a transcript and proposes a summary,
+ *  `dictate` types what is said into the note and keeps no summary. */
+export type DocRecordingMode = 'record' | 'dictate'
+/** Where a recording's summary stands in the doc it was proposed into. */
+export type SummaryState = 'none' | 'pending' | 'applied' | 'rejected'
+/** GET /docs/{id}/recordings row. */
+export interface DocRecording extends Meeting { summary_state: SummaryState }
+/** The app-wide `recording` event: a segment settled, the recorder changed state, or a summary landed. */
+export interface RecordingEvent {
+  kind: 'segment' | 'status' | 'summary'
+  meeting_id: string
+  doc_id: string | null
+  doc_mode: DocRecordingMode | null
+  segment?: MeetingSegment
+  status?: string
+  revision_id?: string | null
+  error?: string | null
 }
 
 /** A meeting with its bodies loaded — what GET /meetings/{id} returns. */
@@ -2390,6 +2416,11 @@ export interface MeetingStatusInfo {
     paused: boolean
     channels: { channel: string; alive: boolean; error: string }[]
     error: string
+    /** Set when the live recording belongs to a doc; null for an ordinary meeting. */
+    doc_id: string | null
+    doc_mode: DocRecordingMode | null
+    /** The clip length this session was started with, so "N s behind" is per recording. */
+    segment_seconds: number
   } | null
   upcoming: MeetingCandidate[]
   /** `loopback` marks the devices that can carry system audio. */

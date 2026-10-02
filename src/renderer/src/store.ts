@@ -530,6 +530,7 @@ export interface State {
 }
 
 let toastSeq = 0
+let flushChain: Promise<void> = Promise.resolve()
 /** Autosave debounce for the doc editor: long enough to be one history entry, short enough to trust. */
 const SAVE_DEBOUNCE_MS = 1200
 let saveTimer: ReturnType<typeof setTimeout> | null = null
@@ -1843,7 +1844,9 @@ export const useStore = create<State>((set, get) => {
       if (saveTimer) clearTimeout(saveTimer)
       saveTimer = setTimeout(() => { void get().flushDoc() }, SAVE_DEBOUNCE_MS)
     },
-    flushDoc: async () => {
+    // Flushes run one after another: an overlapping one would read the base the first is about to bump.
+    flushDoc: () => {
+      const run = async (): Promise<void> => {
       if (saveTimer) {
         clearTimeout(saveTimer)
         saveTimer = null
@@ -1880,9 +1883,15 @@ export const useStore = create<State>((set, get) => {
             { label: 'Reload', run: () => { set({ docDraft: null, docTitleDraft: null }); void get().openDoc(doc.id) } })
         } else get().toast(`Could not save: ${(e as Error).message}`, 'error')
       }
+      }
+      const p = flushChain.then(run)
+      flushChain = p
+      return p
     },
     setDocStar: async (id, starred) => {
-      await api.docs.patch(id, { starred })
+      const d = await api.docs.patch(id, { starred })
+      // The PATCH bumped updated_at; keep the autosave base current or the next save 409s.
+      set((st) => ({ activeDoc: st.activeDoc?.id === id ? { ...st.activeDoc, starred: d.starred, updated_at: d.updated_at } : st.activeDoc }))
       await get().refreshDocs()
     },
     moveDoc: async (id, scope, folder) => {
@@ -1890,7 +1899,7 @@ export const useStore = create<State>((set, get) => {
         const d = await api.docs.move(id, scope, folder.trim())
         set((st) => ({
           activeDoc: st.activeDoc?.id === id
-            ? { ...st.activeDoc, folder: d.folder, project_id: d.project_id }
+            ? { ...st.activeDoc, folder: d.folder, project_id: d.project_id, updated_at: d.updated_at }
             : st.activeDoc
         }))
         await Promise.all([get().refreshDocs(), get().refreshDocFolders()])

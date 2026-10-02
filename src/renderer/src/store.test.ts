@@ -104,3 +104,75 @@ test('accept/restore: typing during the request survives an append and yields to
   const replaced = { id: 'd', content: 'a different body' } as never
   assert.deepEqual(adoptServerDoc('notes\nmore', replaced, 'notes\n', 'notes\n'), { activeDoc: replaced, docDraft: null })
 })
+
+// Doc autosave: the base each save sends is the updated_at of the last response, however it arrived.
+type Stubs = Record<string, (...a: unknown[]) => Promise<unknown>>
+const docFull = (over: Record<string, unknown>) => ({ id: 'd1', title: 't', folder: '', project_id: null, starred: 0, content: 'a', updated_at: 1, ...over })
+
+test('doc autosave: a 409 keeps the draft and offers Reload; each save and move refreshes the base', async () => {
+  const { api } = await import('./lib/api')
+  const docs = api.docs as unknown as Stubs
+  const orig = { ...docs }
+  const bases: unknown[] = []
+  let n = 1
+  docs.save = async (_id, p) => {
+    bases.push((p as { base_updated_at: number }).base_updated_at)
+    if (bases.length === 3) throw Object.assign(new Error('stale'), { status: 409 })
+    return docFull({ content: (p as { content: string }).content, updated_at: ++n })
+  }
+  docs.move = async () => docFull({ folder: 'x', updated_at: 10 })
+  docs.list = async () => []
+  docs.folders = async () => []
+  docs.revisions = async () => []
+  try {
+    useStore.setState({ activeDoc: docFull({}) as never, docDraft: 'b', docTitleDraft: null, toasts: [] })
+    await useStore.getState().flushDoc()
+    useStore.setState({ docDraft: 'c' })
+    await useStore.getState().flushDoc()
+    assert.deepEqual(bases, [1, 2], 'the second save carries the first response base')
+    await useStore.getState().moveDoc('d1', '', 'x')
+    useStore.setState({ docDraft: 'd' })
+    await useStore.getState().flushDoc()
+    assert.equal(bases[2], 10, 'a move bumps the base the next save sends')
+    assert.equal(useStore.getState().docDraft, 'd', 'a 409 keeps the draft')
+    assert.ok(useStore.getState().toasts.some((t) => t.action?.label === 'Reload'))
+  } finally {
+    Object.assign(docs, orig)
+  }
+})
+
+test('doc autosave: starring refreshes the base too', async () => {
+  const { api } = await import('./lib/api')
+  const docs = api.docs as unknown as Stubs
+  const orig = { ...docs }
+  docs.patch = async () => docFull({ starred: 1, updated_at: 7 })
+  docs.list = async () => []
+  try {
+    useStore.setState({ activeDoc: docFull({}) as never })
+    await useStore.getState().setDocStar('d1', true)
+    assert.equal(useStore.getState().activeDoc?.updated_at, 7)
+  } finally {
+    Object.assign(docs, orig)
+  }
+})
+
+test('overlapping flushes run one after another, so the second finds nothing left to save', async () => {
+  const { api } = await import('./lib/api')
+  const docs = api.docs as unknown as Stubs
+  const orig = { ...docs }
+  const bases: unknown[] = []
+  docs.save = async (_id, p) => {
+    bases.push((p as { base_updated_at: number }).base_updated_at)
+    await new Promise((r) => setTimeout(r, 10))
+    return docFull({ content: (p as { content: string }).content, updated_at: 5 })
+  }
+  docs.list = async () => []
+  docs.revisions = async () => []
+  try {
+    useStore.setState({ activeDoc: docFull({}) as never, docDraft: 'b', docTitleDraft: null })
+    await Promise.all([useStore.getState().flushDoc(), useStore.getState().flushDoc()])
+    assert.deepEqual(bases, [1])
+  } finally {
+    Object.assign(docs, orig)
+  }
+})

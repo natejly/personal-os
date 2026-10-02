@@ -24,7 +24,7 @@ _down_until = 0.0
 
 async def _route(settings: dict[str, Any], model: str, query: str, docs: list[str]) -> list[int] | None:
     async with httpx.AsyncClient(timeout=TIMEOUT) as client:
-        r = await client.post(f"{llm._base(settings)}/v1/rerank", headers=llm._headers(settings),
+        r = await client.post(llm._url(settings, "/rerank"), headers=llm._headers(settings),
                               json={"model": model, "query": query, "documents": docs})
     if r.status_code in (404, 405, 501):
         return None  # no such route: use the completion fallback

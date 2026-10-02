@@ -52,25 +52,62 @@ got = [h["chunk_id"] for h in run(retriever.search(None, "gadget", on, limit=4))
 check(calls and got == list(reversed(full))[:4], "reversed candidates trimmed to limit")
 check(len(run(retriever.search(None, "gadget", {**on, "retrievalPerDocCap": 1}, limit=10))) == 5, "cap still applies after rerank")
 
-# The real function: a failing route keeps fused order and backs off.
-fused = [("files:a", 1.0), ("files:b", 0.5)]
-by_key = {"files:a": {"text": "a"}, "files:b": {"text": "b"}}
+# The real function over a stubbed HTTP layer and completion.
+import httpx  # noqa: E402
+
+from personal_os import llm  # noqa: E402
+
+fused = [("files:a", 1.0), ("files:b", 0.5), ("files:c", 0.2)]
+by_key = {k: {"text": k} for k, _ in fused}
+fused_keys = [k for k, _ in fused]
+rs = {**on, "baseUrl": "http://rr.test", "apiKey": "k"}
+posts: list[Any] = []
+reply: dict[str, Any] = {}
+real_post, real_complete = httpx.AsyncClient.post, llm.complete
 
 
-async def down(*a: Any) -> Any:
-    raise RuntimeError("down")
+async def fake_post(self: Any, url: str, **kw: Any) -> httpx.Response:
+    posts.append((url, kw))
+    if "err" in reply:
+        raise httpx.ConnectError("boom")
+    return httpx.Response(reply["status"], json=reply.get("json", {}), request=httpx.Request("POST", url))
 
 
-retrieval_rerank._route = down
-check(run(retrieval_rerank.rerank(on, "q", fused, by_key)) == fused, "failure keeps the fused order")
+completions: list[str] = []
+completion_out = ["[2, 0, 1]"]
 
 
-async def route(*a: Any) -> list[int]:
-    return [1, 0]
+async def fake_complete(*a: Any, **kw: Any) -> str:
+    completions.append("x")
+    return completion_out[0]
 
 
-retrieval_rerank._route = route
-check(run(retrieval_rerank.rerank(on, "q", fused, by_key)) == fused, "backed off after a failure")
-retrieval_rerank._down_until = 0.0
-check([k for k, _ in run(retrieval_rerank.rerank(on, "q", fused, by_key))] == ["files:b", "files:a"], "route order applied")
+httpx.AsyncClient.post = fake_post
+llm.complete = fake_complete
+
+
+def keys() -> list[str]:
+    retrieval_rerank._down_until = 0.0
+    return [k for k, _ in run(retrieval_rerank.rerank(rs, "q", fused, by_key))]
+
+
+reply.update(status=200, json={"results": [{"index": 1, "relevance_score": 0.9}, {"index": 0, "relevance_score": 0.1}]})
+check(keys() == ["files:b", "files:a", "files:c"], "route order applied")
+check(posts[-1][0] == "http://rr.test/v1/rerank" and not completions, "posts to {base}/v1/rerank, no completion")
+check(any(k.lower() == "authorization" for k in posts[-1][1]["headers"]), "auth header sent")
+
+reply.update(status=404, json={})
+check(keys() == ["files:c", "files:a", "files:b"] and completions, "404 falls back to completion indices")
+completion_out[0] = "no idea"
+check(keys() == fused_keys, "malformed completion keeps fused order")
+
+reply.update(status=500, json={})
+check(keys() == fused_keys, "server error keeps fused order")
+n = len(posts)
+check([k for k, _ in run(retrieval_rerank.rerank(rs, "q", fused, by_key))] == fused_keys and len(posts) == n,
+      "backed off: no further request")
+reply.clear()
+reply["err"] = 1
+check(keys() == fused_keys, "network error keeps fused order")
+httpx.AsyncClient.post, llm.complete = real_post, real_complete
 print(f"test_rerank: {passed} checks passed")

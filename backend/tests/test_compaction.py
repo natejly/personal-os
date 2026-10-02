@@ -148,4 +148,9 @@ check(d.json()["removed"] is True and client.get(f"/conversations/{routed}/conte
 check(client.post("/conversations/nope/compact", headers=H, json={}).status_code == 404, "unknown conversation 404")
 
 check("save_memory" in compaction.MEMORY_NUDGE and "\n" not in compaction.MEMORY_NUDGE, "memory nudge names the existing tool")
+_sm = [{"function": {"name": "save_memory"}}]
+check(compaction.memory_nudge(0, False, _sm) is None, "no nudge when nothing was cleared")
+check(compaction.memory_nudge(2, True, _sm) is None, "no second nudge in a run")
+check(compaction.memory_nudge(2, False, [{"function": {"name": "web_search"}}]) is None, "no nudge without save_memory")
+check(compaction.memory_nudge(2, False, _sm) == compaction.MEMORY_NUDGE, "nudge when clearing and save_memory offered")
 print(f"test_compaction: {passed} checks passed")

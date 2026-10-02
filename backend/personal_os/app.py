@@ -1800,9 +1800,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 mspan = tracer.start("compact", "Clear old tool results", {"kind": "micro"}, parent=cspan)
                 tracer.end(mspan, {"cleared": n_cleared, "tokens_saved": n_saved})
                 yield "span", {"message_id": am["id"], "span": mspan}
-                if not nudged and any((t.get("function") or {}).get("name") == "save_memory" for t in tool_schemas):
+                nudge = compaction.memory_nudge(n_cleared, nudged, tool_schemas)
+                if nudge:
                     nudged = True  # once per run, ahead of the re-injected plan, so the prefix stays stable after this round
-                    messages.append({"role": "system", "content": compaction.MEMORY_NUDGE})
+                    messages.append({"role": "system", "content": nudge})
             for _note in toolbox.shell.drain_notes(conv_id):  # a background shell job finished since the last round
                 messages.append({"role": "system", "content": _note})
             _reinject_plan()  # last message in the context, after the previous round's tool results

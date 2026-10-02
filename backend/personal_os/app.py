@@ -6823,6 +6823,100 @@ def desk_file_diff(id: str, path: str) -> dict[str, Any]:
         raise HTTPException(400, str(e)) from e
 
 
+PREVIEW_PAGE = 20_000                     # characters per page of a text or document preview
+PREVIEW_MAX_BYTES = 25 * 1024 * 1024      # past this a file is named and sized, never opened
+PREVIEW_IMAGE_EDGE = 1600                 # the long edge a previewed picture is scaled down to
+PREVIEW_IMAGE_B64 = 1_500_000             # budget for the data URL's base64, so one picture cannot swamp the pane
+_PREVIEW_IMAGES = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"}
+# Formats whose bytes are not text but whose words are readable: extract_text handles each.
+_PREVIEW_DOCS = {".pdf", ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt", ".odt", ".ods", ".odp", ".rtf", ".epub"}
+_preview_doc_cache: dict[tuple[str, int, int], str] = {}   # (path, mtime_ns, size) -> extracted text; paging must not re-OCR
+
+
+def _preview_image(data: bytes) -> dict[str, Any] | None:
+    """Re-encode a picture so the pane always gets something small and safe to inline. A PNG that has
+    transparency stays a PNG (JPEG would paint it black); everything else is JPEG, with the quality
+    stepped down until the base64 fits the budget. None when Pillow cannot read it."""
+    import base64
+    import io
+
+    from PIL import Image, ImageOps
+    try:
+        img = Image.open(io.BytesIO(data))
+        img.load()
+        img = ImageOps.exif_transpose(img) or img
+    except Exception:  # noqa: BLE001 - a damaged or exotic image is "no preview", not an error page
+        return None
+    img.thumbnail((PREVIEW_IMAGE_EDGE, PREVIEW_IMAGE_EDGE))
+    alpha = img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info)
+    for quality in (85, 70, 55, 40):
+        buf = io.BytesIO()
+        if alpha:
+            img.convert("RGBA").save(buf, "PNG", optimize=True)
+        else:
+            img.convert("RGB").save(buf, "JPEG", quality=quality)
+        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+        if len(b64) <= PREVIEW_IMAGE_B64:
+            break
+        if alpha:
+            img.thumbnail((img.width * 3 // 4, img.height * 3 // 4))   # PNG has no quality knob: shrink instead
+    else:
+        return None
+    mime = "image/png" if alpha else "image/jpeg"
+    return {"kind": "image", "data_url": f"data:{mime};base64,{b64}", "width": img.width, "height": img.height, "bytes": len(data)}
+
+
+@app.get("/cowork/desks/{id}/preview")
+def desk_file_rich_preview(id: str, path: str, offset: int = 0) -> dict[str, Any]:
+    """What the Files tab shows for ANY workspace file: a scaled picture, a page of text, or a page of
+    the words extracted from a PDF/office file. It never 500s on an odd file: a file it cannot show
+    is `{kind: "none", reason}`, which the pane renders as a sentence. SVG is returned as text, never
+    rendered, because a desk's files are agent-written."""
+    _desk_or_404(id, False)
+    try:
+        p = workspace.resolve_in(id, path)
+    except WorkspaceError as e:
+        raise HTTPException(400, str(e)) from e
+    if not p.is_file():
+        raise HTTPException(404, "No such file")
+    ext = p.suffix.lower()
+    try:
+        st = p.stat()
+        if st.st_size > PREVIEW_MAX_BYTES:
+            return {"kind": "none", "reason": f"This file is {st.st_size // (1024 * 1024)} MB, too large to preview. Download it to open it."}
+        data = p.read_bytes()
+    except OSError as e:
+        return {"kind": "none", "reason": f"Could not read this file: {e.strerror or e}"}
+    if ext in _PREVIEW_IMAGES:
+        shown = _preview_image(data)
+        return shown or {"kind": "none", "reason": "This image could not be decoded."}
+    kind, note, text = "text", "", ""
+    if ext not in _PREVIEW_DOCS and b"\x00" not in data[:8192]:
+        text = data.decode("utf-8", errors="replace")
+    else:
+        kind = "document"
+        key = (str(p), st.st_mtime_ns, st.st_size)
+        if key not in _preview_doc_cache:
+            try:
+                got = extract_text(p.name, data)
+            except Exception:  # noqa: BLE001 - extraction failing is "no preview"
+                got = ""
+            if len(_preview_doc_cache) >= 4:
+                _preview_doc_cache.pop(next(iter(_preview_doc_cache)))
+            _preview_doc_cache[key] = got or ""
+        text = _preview_doc_cache[key]
+        if not text.strip():
+            return {"kind": "none", "reason": "No readable text in this file. Download it to open it."}
+        note = "Text extracted from the file; layout and images are not shown."
+    total = len(text)
+    off = max(0, min(offset, total))
+    end = min(total, off + PREVIEW_PAGE)
+    out: dict[str, Any] = {"kind": kind, "text": text[off:end], "offset": off, "next_offset": end if end < total else None, "total_chars": total}
+    if kind == "document":
+        out["note"] = note
+    return out
+
+
 @app.get("/cowork/desks/{id}/outputs")
 def desk_output_list(id: str) -> list[dict[str, Any]]:
     _desk_or_404(id, False)

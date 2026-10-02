@@ -5,21 +5,21 @@ import { retainSession, useSession, useStore } from '../store'
 import MessageView from './Message'
 import DeskPlan from './DeskPlan'
 import DeskFiles from './DeskFiles'
+import DeskBrowser from './DeskBrowser'
+import { defaultDeskTab, type DeskTab } from '../lib/deskFiles'
 import DeskReview from './DeskReview'
 import { AUTONOMY, STATUS_LABEL, deskElapsed, fmtDur, useTick } from './DeskRail'
 
-type Tab = 'activity' | 'plan' | 'files' | 'output'
+type Tab = DeskTab
 const TABS: { key: Tab; label: string }[] = [
   { key: 'activity', label: 'Activity' },
   { key: 'plan', label: 'Plan' },
   { key: 'files', label: 'Files' },
+  { key: 'browser', label: 'Browser' },
   { key: 'output', label: 'Output' }
 ]
 
-/** §7.8: the tab a desk opens on is the thing it is waiting for you to do. A plan card a desk has
- *  parked leaves it `blocked`, not `awaiting_plan`, so a pending plan counts on its own. */
-const defaultTab = (status: DeskStatus, planPending = false): Tab =>
-  (status === 'awaiting_plan' || planPending ? 'plan' : status === 'review' ? 'output' : 'activity')
+const defaultTab = defaultDeskTab
 
 /* Wider than DESK_LIVE: a desk parked on a plan, an approval or a question has no live run but is
    still something the user can call off. `review` and the terminal states are not. */
@@ -214,7 +214,7 @@ export default function DeskDetail(): JSX.Element | null {
     if (tab === 'activity') scroller.current?.scrollTo({ top: scroller.current.scrollHeight })
   }, [tab, messages.length, messages[messages.length - 1]?.content.length])
 
-  // 1–4 pick a tab, ⌘P pauses, ⌘. stops. Suppressed while a field has focus.
+  // 1–5 pick a tab, ⌘P pauses, ⌘. stops. Suppressed while a field has focus.
   useEffect(() => {
     if (!desk) return
     const onKey = (e: KeyboardEvent): void => {
@@ -395,6 +395,7 @@ export default function DeskDetail(): JSX.Element | null {
       )}
       {tab === 'plan' && <div className="desk-pane scroll"><DeskPlan desk={desk} /></div>}
       {tab === 'files' && <DeskFiles desk={desk} />}
+      {tab === 'browser' && <DeskBrowser desk={desk} />}
       {tab === 'output' && <div className="desk-pane scroll"><DeskReview desk={desk} /></div>}
     </section>
   )

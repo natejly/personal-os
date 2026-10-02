@@ -1,10 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
-import { ChevronRight, Columns2, FileText, Folder, RefreshCw } from 'lucide-react'
-import type { DeskDiff, DeskFile, FullDesk } from '@shared/types'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { ChevronRight, Columns2, FileImage, FileText, Folder, PackageCheck, RefreshCw } from 'lucide-react'
+import { DESK_LIVE, type DeskDiff, type DeskFile, type DeskRichPreview, type FullDesk } from '@shared/types'
 import { api } from '../lib/api'
 import { wordDiff, type Op, type WordPart } from '../lib/diff'
+import { deliveredPaths, deliveryLabel, fileKind, fmtAgo, fmtBytes } from '../lib/deskFiles'
 import { useStore } from '../store'
 import MarkdownPreview from './MarkdownPreview'
+import DeskChanges from './DeskChanges'
 
 /**
  * The workspace, as the user sees it: `outputs/` first because that is what the review is about,
@@ -12,11 +14,8 @@ import MarkdownPreview from './MarkdownPreview'
  * `.baseline/` snapshot, so "what did it actually change" is answerable without reading anything.
  */
 
-const fmtBytes = (n: number): string =>
-  n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`
-
-const isMarkdown = (p: string): boolean => /\.(md|markdown)$/i.test(p)
-const isImage = (p: string): boolean => /\.(png|jpe?g|gif|webp|svg|bmp|ico)$/i.test(p)
+/** While the desk works its files change under the user's eyes; this is how often the tree is re-read. Idle desks are never polled. */
+const LIVE_REFRESH_MS = 5000
 
 /** The top-level folder a path belongs to, which is the only grouping the tree needs. */
 const topOf = (p: string): string => (p.includes('/') ? p.split('/')[0] : '')
@@ -93,6 +92,94 @@ function DiffPane({ diff }: { diff: DeskDiff }): JSX.Element {
   )
 }
 
+interface Loaded {
+  key: string
+  first: DeskRichPreview
+  /** Text pages appended by "Load more", in order; the first page is `first`. */
+  more: string[]
+  next: number | null
+  loading: boolean
+}
+
+/**
+ * The rich preview of one file, paged. `stamp` changes when the file does (size + mtime from the
+ * tree), which refetches in place: the pages already loaded are fetched again so a live refresh
+ * does not collapse a long file back to its first page, and the old content stays on screen
+ * until the new arrives, so the pane and its scroll position do not flash.
+ */
+function useRichPreview(deskId: string, path: string | null, stamp: string): { data: Loaded | null; more: () => void; error: string | null } {
+  const [data, setData] = useState<Loaded | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const pages = useRef(1)
+  const key = `${deskId}:${path}`
+
+  useEffect(() => { pages.current = 1; setData(null); setError(null) }, [key])
+  useEffect(() => {
+    if (!path) return
+    let gone = false
+    void (async () => {
+      try {
+        const first = await api.cowork.desks.preview(deskId, path, 0)
+        if (first.kind !== 'text' && first.kind !== 'document') { if (!gone) setData({ key, first, more: [], next: null, loading: false }); return }
+        const more: string[] = []
+        let next = first.next_offset
+        for (let i = 1; i < pages.current && next !== null; i++) {
+          const r = await api.cowork.desks.preview(deskId, path, next)
+          if (r.kind !== 'text' && r.kind !== 'document') break
+          more.push(r.text)
+          next = r.next_offset
+        }
+        if (!gone) { setData({ key, first, more, next, loading: false }); setError(null) }
+      } catch (e) {
+        if (!gone) setError((e as Error).message)
+      }
+    })()
+    return () => { gone = true }
+  }, [deskId, path, stamp, key])
+
+  const more = (): void => {
+    if (!path || !data || data.next === null || data.loading) return
+    const at = data.next
+    setData({ ...data, loading: true })
+    api.cowork.desks.preview(deskId, path, at).then((r) => {
+      if (r.kind !== 'text' && r.kind !== 'document') return
+      pages.current += 1
+      setData((d) => (d && d.key === key ? { ...d, more: [...d.more, r.text], next: r.next_offset, loading: false } : d))
+    }).catch((e: Error) => { setError(e.message); setData((d) => (d ? { ...d, loading: false } : d)) })
+  }
+  return { data: data && data.key === key ? data : null, more, error }
+}
+
+function PreviewBody({ path, data, onMore, error }: { path: string; data: Loaded | null; onMore: () => void; error: string | null }): JSX.Element {
+  if (error && !data) return <p className="muted small">Could not load this file: {error}</p>
+  if (!data) return <p className="muted small">Loading…</p>
+  const p = data.first
+  if (p.kind === 'none') return <p className="muted small">{p.reason}</p>
+  if (p.kind === 'image') {
+    return (
+      <div className="desk-preview-image">
+        <img src={p.data_url} alt={path} />
+        <p className="muted small">{p.width} × {p.height} preview</p>
+      </div>
+    )
+  }
+  const text = [p.text, ...data.more].join('')
+  return (
+    <>
+      {p.kind === 'document' && <p className="muted small desk-preview-note">{p.note}</p>}
+      {fileKind(path, true) === 'markdown' && p.kind === 'text'
+        ? <div className="markdown desk-preview-md"><MarkdownPreview source={text} /></div>
+        : <pre className="desk-preview-text">{text}</pre>}
+      {data.next !== null && (
+        <div className="desk-preview-more">
+          <button className="ghost-btn" disabled={data.loading} onClick={onMore}>{data.loading ? 'Loading…' : 'Load more'}</button>
+          <span className="muted small">{text.length.toLocaleString()} of {p.total_chars.toLocaleString()} characters</span>
+        </div>
+      )}
+    </>
+  )
+}
+
 export default function DeskFiles({ desk }: { desk: FullDesk }): JSX.Element {
   const files = useStore((s) => s.deskFiles)
   const preview = useStore((s) => s.deskPreview)
@@ -105,6 +192,18 @@ export default function DeskFiles({ desk }: { desk: FullDesk }): JSX.Element {
   const [busy, setBusy] = useState(false)
 
   useEffect(() => { void loadDeskFiles(desk.id) }, [desk.id, loadDeskFiles])
+
+  // Live: re-read the tree on every status change and every few seconds while the desk is working.
+  // A desk at rest is never polled; `loadDeskFiles` replaces the list in place so the selection
+  // and the scroll position of both panes survive.
+  const live = DESK_LIVE.includes(desk.status)
+  useEffect(() => { void loadDeskFiles(desk.id, '', true) }, [desk.status, desk.id, loadDeskFiles])
+  useEffect(() => {
+    if (!live) return
+    const t = setInterval(() => { void loadDeskFiles(desk.id, '', true) }, LIVE_REFRESH_MS)
+    return () => clearInterval(t)
+  }, [live, desk.id, loadDeskFiles])
+  const delivered = useMemo(() => deliveredPaths(desk.outputs), [desk.outputs])
 
   const groups = useMemo(() => {
     const m = new Map<string, DeskFile[]>()
@@ -120,10 +219,12 @@ export default function DeskFiles({ desk }: { desk: FullDesk }): JSX.Element {
 
   const path = preview?.path ?? null
   const current = files.find((f) => f.path === path) ?? null
+  const { data: rich, more: loadMore, error: richError } = useRichPreview(desk.id, path, current ? `${current.bytes}:${current.modified}` : '')
 
   // The diff is per file and fetched on demand, so switching files drops the one on screen rather
   // than showing the previous file's changes under the new file's name.
-  useEffect(() => { setDiff(null) }, [path])
+  const stamp = current ? `${current.bytes}:${current.modified}` : ''
+  useEffect(() => { setDiff(null) }, [path, stamp])
   useEffect(() => {
     if (!showDiff || !path || diff) return
     let gone = false
@@ -163,14 +264,18 @@ export default function DeskFiles({ desk }: { desk: FullDesk }): JSX.Element {
                 onClick={() => open(f.path)}
                 onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(f.path) } }}
               >
-                <FileText size={12} className="desk-file-icon" />
+                {fileKind(f.path, f.is_text) === 'image' ? <FileImage size={12} className="desk-file-icon" /> : <FileText size={12} className="desk-file-icon" />}
                 <span className="desk-file-name">{g ? f.path.slice(g.length + 1) : f.path}</span>
+                {g === 'outputs' && delivered.has(f.path) && (
+                  <span className="desk-file-delivered" title="Delivered with desk_deliver"><PackageCheck size={11} />{deliveryLabel(delivered.get(f.path))}</span>
+                )}
                 {f.state !== 'unchanged' && <span className={`desk-file-state ${f.state}`}>{f.state}</span>}
                 <span className="desk-file-size">{fmtBytes(f.bytes)}</span>
               </div>
             ))}
           </section>
         ))}
+        <DeskChanges desk={desk} />
       </div>
 
       <div className="desk-preview">
@@ -181,6 +286,7 @@ export default function DeskFiles({ desk }: { desk: FullDesk }): JSX.Element {
             <div className="desk-preview-head">
               <b>{path}</b>
               {current && current.state !== 'unchanged' && <span className={`desk-file-state ${current.state}`}>{current.state}</span>}
+              {current && <span className="muted small desk-preview-meta">{fmtBytes(current.bytes)} · modified {fmtAgo(current.modified)}</span>}
               <span className="spacer" />
               <button
                 className={`ghost-btn ${showDiff ? 'on' : ''}`}
@@ -193,12 +299,8 @@ export default function DeskFiles({ desk }: { desk: FullDesk }): JSX.Element {
             </div>
             {showDiff ? (
               busy && !diff ? <p className="muted small">Reading the diff…</p> : diff ? <DiffPane diff={diff} /> : <p className="muted small">No diff available.</p>
-            ) : current && !current.is_text ? (
-              <p className="muted small">{isImage(path) ? 'An image. ' : ''}{fmtBytes(current.bytes)} of binary — nothing to show here.</p>
-            ) : isMarkdown(path) ? (
-              <div className="markdown desk-preview-md">{preview?.text ? <MarkdownPreview source={preview.text} /> : <p className="muted small">Loading…</p>}</div>
             ) : (
-              <pre className="desk-preview-text">{preview?.text ?? ''}</pre>
+              <PreviewBody path={path} data={rich} onMore={loadMore} error={richError} />
             )}
           </>
         )}

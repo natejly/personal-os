@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { MeetingSegment, MeetingStatusInfo } from '@shared/types'
-import { foldSegments, isSettled, liveDoc, needsFullReload, recordAvailability, settleDone, type SettleInput } from './segments'
+import { foldSegments, isSettled, playableSegment, liveDoc, needsFullReload, recordAvailability, settleDone, type SettleInput } from './segments'
 
 const seg = (o: Partial<MeetingSegment> & { id: string }): MeetingSegment => ({
   meeting_id: 'm', channel: 'mic', seq: 0, t_start: 0, t_end: 6, started_at: 0, duration_ms: 6000,
@@ -86,4 +86,11 @@ test('settleDone: a wanted summary ends on a proposal, a reported failure or an 
   assert.equal(settleDone(settle({ wantSummary: true, meetingError: 'Summary failed: boom' })), true)
   assert.equal(settleDone(settle({ wantSummary: true, meetingError: 'a; Nothing was said' })), true)
   assert.equal(settleDone(settle({ wantSummary: true, meetingStatus: 'failed' })), true)
+})
+
+test('playableSegment needs kept audio and a clip that still has its file', () => {
+  const segs = [{ id: 'a', wav_path: '' }, { id: 'b', wav_path: '/x/b.wav' }] as never[]
+  assert.equal(playableSegment(['a', 'b'], segs, true), 'b')
+  assert.equal(playableSegment(['a'], segs, true), null)
+  assert.equal(playableSegment(['b'], segs, false), null)
 })

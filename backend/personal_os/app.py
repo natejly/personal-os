@@ -5177,6 +5177,7 @@ class DocRecordingIn(BaseModel):
     mode: str = "record"       # 'record' captures the room and proposes a summary; 'dictate' types what you say
     template: str = "general"
     title: str | None = None
+    keep_audio: bool | None = None   # keep this recording's audio for playback; None follows the global setting
 
 
 @app.post("/docs/{doc_id}/recordings")
@@ -5193,7 +5194,7 @@ async def start_doc_recording(doc_id: str, body: DocRecordingIn) -> dict[str, An
         raise HTTPException(400, row.get("fix") or "Recording is macOS-only.")
     m = meeting_store.create(
         title=(body.title or "").strip() or d["title"], project_id=d["project_id"], template=body.template,
-        status="scheduled", doc_id=doc_id, doc_mode=body.mode)
+        status="scheduled", doc_id=doc_id, doc_mode=body.mode, keep_audio=bool(body.keep_audio))
     try:
         started = await asyncio.to_thread(meeting_svc.start, m["id"])
     except BaseException as e:
@@ -6126,6 +6127,17 @@ async def retranscribe_meeting(id: str, limit: int = 20) -> dict[str, Any]:
     # enhance pass. Let the service own it.
     settled = await asyncio.to_thread(meeting_svc.retranscribe, id, limit)
     return {"settled": settled, "meeting": meeting_store.get(id, include_hidden=False)}
+
+
+@app.get("/meetings/{id}/segments/{seg_id}/audio")
+def meeting_segment_audio(id: str, seg_id: str) -> FileResponse:
+    """One kept segment's wav, for click-to-play. 404 unless the recording keeps audio and the file is inside its audio dir."""
+    if meeting_store.is_hidden(id):
+        raise HTTPException(404)
+    p = meeting_store.kept_segment_wav(id, seg_id)
+    if not p:
+        raise HTTPException(404, "Audio was not kept")
+    return FileResponse(p, media_type="audio/wav")
 
 
 @app.delete("/meetings/{id}/audio")

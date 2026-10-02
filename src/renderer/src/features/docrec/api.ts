@@ -23,7 +23,7 @@ export interface SummarizeResult {
 export const docRecApi = {
   /** Creates a recording linked to the doc and starts it. 409 carries the blockers, and a refused
    *  start leaves no row behind. */
-  start: (docId: string, body: { mode?: DocRecordingMode; template?: string; title?: string } = {}) =>
+  start: (docId: string, body: { mode?: DocRecordingMode; template?: string; title?: string; keep_audio?: boolean } = {}) =>
     req<FullMeeting>(`/docs/${docId}/recordings`, { method: 'POST', body: json(body) }),
   list: (docId: string) => req<DocRecording[]>(`/docs/${docId}/recordings`),
   /** A linked row that is not started, as the target for an audio import. */

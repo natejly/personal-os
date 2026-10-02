@@ -57,7 +57,7 @@ interface DocRecState {
 
   load: (docId: string) => Promise<void>
   select: (docId: string, meetingId: string | null) => Promise<void>
-  start: (docId: string, mode: DocRecordingMode, opts?: { template?: string; title?: string }) => Promise<void>
+  start: (docId: string, mode: DocRecordingMode, opts?: { template?: string; title?: string; keep_audio?: boolean }) => Promise<void>
   stop: () => Promise<void>
   pause: () => Promise<void>
   resume: () => Promise<void>
@@ -278,7 +278,7 @@ export const useDocRec = create<DocRecState>((set, get) => {
       try {
         // The draft goes first so what was typed before Record is on the server, not in a buffer.
         await useStore.getState().flushDoc()
-        const m = await docRecApi.start(docId, { mode, template: opts?.template, title: opts?.title })
+        const m = await docRecApi.start(docId, { mode, template: opts?.template, title: opts?.title, keep_audio: opts?.keep_audio })
         cursors.delete(m.id)
         set((st) => ({
           segments: { ...st.segments, [m.id]: [] },

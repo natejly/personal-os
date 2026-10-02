@@ -653,7 +653,7 @@ class Meetings:
                calendar_link: str = "", conference_link: str = "", attendees: Any = None,
                scheduled_start: float | None = None, scheduled_end: float | None = None,
                status: str = "notes_only", doc_id: str | None = None,
-               doc_mode: str | None = None) -> dict[str, Any]:
+               doc_mode: str | None = None, keep_audio: bool = False) -> dict[str, Any]:
         mid = new_id()
         t = now()
         people = _attendee_rows(attendees)
@@ -663,12 +663,13 @@ class Meetings:
                 c.execute(
                     "INSERT INTO meetings(id,project_id,title,status,template,scheduled_start,scheduled_end,"
                     " calendar_event_id,calendar_id,calendar_link,conference_link,attendees,created_at,updated_at,"
-                    " doc_id,doc_mode)"
-                    " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    " doc_id,doc_mode,keep_audio)"
+                    " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (mid, project_id, (title or "").strip()[:200], status, tpl, scheduled_start, scheduled_end,
                      calendar_event_id or None, calendar_id, calendar_link, conference_link,
                      json.dumps(people), t, t, doc_id or None,
-                     (doc_mode if doc_mode in DOC_MODES else "record") if doc_id else None))
+                     (doc_mode if doc_mode in DOC_MODES else "record") if doc_id else None,
+                     int(bool(keep_audio))))
                 self._reindex(c, mid, title, "", "", "")
         except sqlite3.IntegrityError:
             # The partial unique index on calendar_event_id is the point: the 45s nudge tries to
@@ -840,6 +841,17 @@ class Meetings:
             return row_to_dict(c.execute(
                 "SELECT * FROM meeting_segments WHERE meeting_id=? AND channel=? AND seq=?",
                 (meeting_id, channel, int(seq))).fetchone(), JSON_FIELDS)
+
+    def kept_segment_wav(self, meeting_id: str, seg_id: str) -> Path | None:
+        """The segment's wav, only when this recording keeps audio and the file sits inside its audio dir."""
+        with self.db.tx() as c:
+            r = c.execute("SELECT s.wav_path, m.audio_dir, m.keep_audio FROM meeting_segments s "
+                          "JOIN meetings m ON m.id = s.meeting_id WHERE s.id=? AND s.meeting_id=?",
+                          (seg_id, meeting_id)).fetchone()
+        if not r or not r["keep_audio"] or not r["wav_path"] or not r["audio_dir"]:
+            return None
+        p = Path(r["wav_path"]).resolve()
+        return p if p.is_file() and p.is_relative_to(Path(r["audio_dir"]).resolve()) else None
 
     def segment_id(self, meeting_id: str, channel: str, seq: int) -> str:
         """The row id for a (channel, seq), since the recorder's callbacks only know those two."""
@@ -1544,11 +1556,13 @@ class MeetingService:
             segment_seconds=seg_seconds,
             cut_on_silence=cut_on_silence,
             max_seconds=int(cfg["maxMeetingSeconds"]),
-            keep_audio=bool(cfg["keepAudio"]),
+            keep_audio=bool(cfg["keepAudio"] or m.get("keep_audio")),
             max_audio_bytes=int(cfg["maxAudioBytes"]),
             drain_seconds=float(cfg["drainSeconds"]),
             on_disk_check=lambda: self.meetings.audio_bytes(meeting_id),
         )
+        if cfg["keepAudio"] and not m.get("keep_audio"):
+            self.meetings.patch(meeting_id, {"keep_audio": True})   # the wavs are kept, so the row says so (playback gates on it)
         self.meetings.mark_started(meeting_id, str(session.out_dir), list(channels), session.started_at)
         # A missing loopback device is a degradation the user has to be able to see, not an error.
         self.meetings.patch(meeting_id, {"error": "; ".join(

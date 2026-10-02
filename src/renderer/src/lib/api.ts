@@ -39,6 +39,8 @@ export const setBase = (url: string): void => {
 }
 export const getBase = (): string => base
 /** The resolved token, for callers that cannot await (keepalive writes on unload). '' until setBase() resolves it. */
+/** Route of one kept segment's audio. */
+export const audioPath = (meetingId: string, segId: string): string => `/meetings/${meetingId}/segments/${segId}/audio`
 export const getToken = (): string => token
 
 /** Sidecar shared secret. Resolved once per setBase(); every backend request carries it. */
@@ -692,6 +694,12 @@ export const api = {
       req<MeetingActionItem[]>(`/meetings/${id}/actions/add-todos`, { method: 'POST', body: json({ ids, project_id: projectId ?? null }) }),
     dismissAction: (id: string, actionId: string) => req<MeetingActionItem>(`/meetings/${id}/actions/${actionId}/dismiss`, { method: 'POST' }),
     retranscribe: (id: string, limit = 20) => req<{ settled: number; meeting: FullMeeting }>(`/meetings/${id}/retranscribe?limit=${limit}`, { method: 'POST' }),
+    /** A kept segment's wav as an object URL (the audio element cannot send the token header). */
+    segmentAudio: async (id: string, segId: string): Promise<string> => {
+      const r = await fetch(`${base}${audioPath(id, segId)}`, { headers: await auth() })
+      if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
+      return URL.createObjectURL(await r.blob())
+    },
     deleteAudio: (id: string) => req<FullMeeting>(`/meetings/${id}/audio`, { method: 'DELETE' }),
     /** Rename diarized speakers ({ S1: 'Dana' }); the transcript is rebuilt server side. A blank name clears one. */
     setSpeakers: (id: string, names: Record<string, string>) =>

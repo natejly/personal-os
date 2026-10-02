@@ -21,6 +21,7 @@ export default function DocRecordButton({ docId }: { docId: string }): JSX.Eleme
   const busy = useDocRec((s) => s.busy)
   const notice = useDocRec((s) => s.notice)
   const [menu, setMenu] = useState(false)
+  const [keepAudio, setKeepAudio] = useState(false)
   const root = useRef<HTMLDivElement>(null)
   const file = useRef<HTMLInputElement>(null)
   const avail = recordAvailability(status, docId)
@@ -34,7 +35,7 @@ export default function DocRecordButton({ docId }: { docId: string }): JSX.Eleme
     return () => { document.removeEventListener('mousedown', away); document.removeEventListener('keydown', esc) }
   }, [menu])
 
-  const start = (mode: 'record' | 'dictate'): void => { setMenu(false); void useDocRec.getState().start(docId, mode) }
+  const start = (mode: 'record' | 'dictate'): void => { setMenu(false); void useDocRec.getState().start(docId, mode, keepAudio ? { keep_audio: true } : undefined) }
 
   return (
     <div className="dr-record" ref={root}>
@@ -62,6 +63,9 @@ export default function DocRecordButton({ docId }: { docId: string }): JSX.Eleme
         <div className="dr-menu" role="menu">
           <button role="menuitem" onClick={() => start('record')}><Mic size={13} /> Record and summarize</button>
           <button role="menuitem" onClick={() => start('dictate')}><AudioLines size={13} /> Dictate into note</button>
+          <label className="dr-keep" title="Keep this recording's audio so a timestamp can play it back. Off by default: the audio stays on this Mac until you delete it.">
+            <input type="checkbox" checked={keepAudio} onChange={(e) => setKeepAudio(e.target.checked)} /> Keep audio for playback
+          </label>
           <button role="menuitem" onClick={() => { setMenu(false); file.current?.click() }}><FileAudio size={13} /> Import audio file</button>
         </div>
       )}

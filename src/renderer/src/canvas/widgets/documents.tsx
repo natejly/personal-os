@@ -6,7 +6,6 @@ import { dragProps, useDropTarget } from '../dnd'
 import type { WidgetDef, WidgetProps } from '../registry'
 
 const ACCEPTS: DragKind[] = ['file']
-const ACCEPT = '.txt,.md,.markdown,.pdf,.docx,.csv,.json,.yaml,.yml,.py,.ts,.tsx,.js,.html,.css,.log,.rst,.toml'
 
 const fmtSize = (n: number): string => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`)
 const inScope = (d: Document, s: Scope): boolean =>
@@ -58,7 +57,7 @@ export default function DocumentsWidget({ window: win, live, onConfig }: WidgetP
           <option value="personal">Personal only</option>
           {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
         </select>
-        <input ref={fileRef} type="file" multiple hidden accept={ACCEPT}
+        <input ref={fileRef} type="file" multiple hidden
           onChange={(e) => { if (e.target.files?.length) void uploadDocuments(e.target.files, targetProject); e.target.value = '' }} />
         <button className="widget-chip" title={targetProject ? 'Upload to this project' : 'Upload'} onClick={() => fileRef.current?.click()}><Upload size={11} /> Upload</button>
         <span className="spacer" />

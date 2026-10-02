@@ -53,8 +53,11 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "mode": "classic",
     "gatherShortcut": "Control+Alt+Command+Space",
     # Shell modularity: Today-screen cards ({key: bool}, missing = shown) and sidebar views the user removed.
-    "homeWidgets": {},
-    "hiddenViews": [],
+    # Library / Cowork / Meetings / Activity ship off; Settings → Modules turns them back on.
+    "homeWidgets": {"cowork": False, "meetings": False},
+    "hiddenViews": ["library", "cowork", "meetings", "activity"],
+    # Bump when the default-off set changes so existing DBs pick up the new hides once.
+    "modulesDefault": 3,
     # tools: {tool_name: bool}; missing = on
     "tools": {},
     # How doc_edit lands. "review" proposes a diff; "apply" writes it. Missing means review.
@@ -130,6 +133,32 @@ async def list_models(settings: dict[str, Any]) -> list[dict[str, str]]:
     return sorted(({"id": m["id"]} for m in data if "id" in m), key=lambda m: m["id"])
 
 
+# Kimi K3 always thinks and accepts only low, high, and max. Omitting the field is max, and
+# medium / xhigh are rejected. High is the middle of that scale, so the app's Medium lands there.
+_KIMI_K3_EFFORT = {"low": "low", "medium": "high", "high": "high", "xhigh": "max", "max": "max"}
+
+
+def _model_slug(model: str) -> str:
+    return model.rsplit("/", 1)[-1].lower()
+
+
+def effort_param(model: str, effort: str) -> str | None:
+    """The `reasoning_effort` to send, or None to leave the field off.
+
+    `'default'` always omits the field. That is a deliberate choice, not the starting level:
+    new chats start at medium (`repos.DEFAULT_EFFORT`), and for Kimi K3 that is sent as high.
+    """
+    if not effort or effort == "default":
+        return None
+    slug = _model_slug(model)
+    # K2 does not take this field. K2.7 always thinks; sending the field fails the request.
+    if slug.startswith("kimi-k2"):
+        return None
+    if slug.startswith("kimi-k3"):
+        return _KIMI_K3_EFFORT.get(effort, "high")
+    return effort
+
+
 def _reason_text(delta: dict[str, Any]) -> str:
     """Chain-of-thought from a reasoning model. It arrives beside `content`, not inside it.
 
@@ -175,9 +204,11 @@ async def stream_chat(
     "cancelled" and no tool calls, including any arguments that had only partly arrived.
     """
     body: dict[str, Any] = {"model": model, "messages": messages, "stream": True, "stream_options": {"include_usage": True}}
-    # Only sent when asked for: a model that does not support it rejects the whole request.
-    if effort and effort != "default":
-        body["reasoning_effort"] = effort
+    # Only sent when the model accepts it. A missing field is not neutral: Kimi K3 reads it as max,
+    # and a model that does not support the field rejects the whole request.
+    wired = effort_param(model, effort)
+    if wired:
+        body["reasoning_effort"] = wired
     if fast:
         body["service_tier"] = "priority"
     if tools:

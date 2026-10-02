@@ -1,9 +1,14 @@
-"""Audio plumbing: what ffmpeg can see, what argv to hand it, and whether a wav is real.
+"""Audio plumbing: devices, argv fragments, and whether a wav is real.
 
 Stateless and policy-free. Nothing here knows about meetings or the activity monitor, nothing
 here decides whether capture is allowed, and nothing here keeps a thread or a process alive -
 callers own all of that. activity.py re-exports IS_MAC, ffmpeg_path, audio_devices and
 looks_like_loopback from this module so there is exactly one copy of each helper.
+
+Capture prefers the native path in native_audio.py (AVAudioEngine / Core Audio tap). ffmpeg
+avfoundation is the fallback when that cannot start, and the seam is still an argv fragment:
+`native_mic_input()` versus `device_input(index)`. Tests keep `synthetic_input()` as a lavfi
+tone so the ffmpeg loop can be driven without a microphone.
 
 Every function degrades instead of raising, the same contract the macOS probes in activity.py
 follow: a missing binary, a device that was unplugged or a file truncated by a crash comes back
@@ -19,6 +24,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import wave
 from pathlib import Path
 
 from .db import now
@@ -41,6 +47,21 @@ def ffprobe_path() -> str:
 
 
 def _list_devices() -> list[dict[str, str]]:
+    """Audio inputs this machine can record, as [{index, name}].
+
+    Native uniqueIDs first (they survive unplug/replug); ffmpeg's avfoundation numbering
+    only when AVFoundation is missing, so a machine that still has brew ffmpeg keeps working.
+    """
+    native: list[dict[str, str]] = []
+    with contextlib.suppress(Exception):
+        from . import native_audio
+        native = native_audio.list_inputs()
+    if native:
+        return native
+    return _list_ffmpeg_devices()
+
+
+def _list_ffmpeg_devices() -> list[dict[str, str]]:
     """avfoundation audio inputs ffmpeg can see, as [{index, name}]."""
     ff = ffmpeg_path()
     if not ff or not IS_MAC:
@@ -105,7 +126,7 @@ def resolve_device(index: str, name: str = "", ttl: float = 20.0) -> tuple[str, 
     """
     devices = audio_devices(ttl)
     if not devices:
-        return "", "no audio inputs visible to ffmpeg"
+        return "", "no audio inputs visible"
     idx = str(index or "").strip()
     want = (name or "").strip().lower()
     if want:
@@ -118,22 +139,29 @@ def resolve_device(index: str, name: str = "", ttl: float = 20.0) -> tuple[str, 
     return "", f"audio input {name or idx or '(unset)'} is no longer present"
 
 
-def silence_wav(path: Path, seconds: float = 0.4) -> bool:
-    """Write a short silent 16k mono wav - real audio carrying no speech, for the stt self-test."""
-    ff = ffmpeg_path()
-    if not ff:
-        return False
+def write_pcm16_wav(path: Path, pcm: bytes, rate: int = 16000, channels: int = 1) -> bool:
+    """Write 16-bit PCM as a wav. Used by native capture and the self-test; no ffmpeg."""
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
-        r = subprocess.run(
-            [ff, "-hide_banner", "-loglevel", "error", "-f", "lavfi", "-i", "anullsrc=r=16000:cl=mono",
-             "-t", str(seconds), "-ac", "1", "-ar", "16000", "-y", str(path)],
-            capture_output=True, text=True, timeout=30,
-        )
-        return r.returncode == 0 and path.exists() and path.stat().st_size >= MIN_WAV_BYTES
+        with wave.open(str(path), "wb") as w:
+            w.setnchannels(max(1, int(channels)))
+            w.setsampwidth(2)
+            w.setframerate(max(1, int(rate)))
+            w.writeframes(pcm)
+        return path.exists() and path.stat().st_size >= MIN_WAV_BYTES
     except Exception as e:  # noqa: BLE001
-        log.debug("silence_wav failed: %s", e)
+        log.debug("write_pcm16_wav failed: %s", e)
         return False
+
+
+def silence_wav(path: Path, seconds: float = 0.4) -> bool:
+    """Write a short silent 16k mono wav - real audio carrying no speech, for the stt self-test."""
+    n = max(0, int(16000 * 2 * float(seconds)))
+    # validate_wav rejects files under MIN_WAV_BYTES; pad a too-short request rather than
+    # returning a "success" the self-test will then call empty.
+    if n + 44 < MIN_WAV_BYTES:
+        n = MIN_WAV_BYTES - 44
+    return write_pcm16_wav(path, b"\0" * n)
 
 
 def validate_wav(path: Path, repair: bool = True) -> tuple[bool, str]:
@@ -151,6 +179,10 @@ def validate_wav(path: Path, repair: bool = True) -> tuple[bool, str]:
         return False, "empty"
     if size < MIN_WAV_BYTES:
         return False, "empty"
+    # Native capture writes a finished header, so the stdlib wave module is enough and we
+    # do not need ffprobe on PATH. Garbage that is merely large still falls through.
+    if _wav_is_pcm16(path):
+        return True, ""
     if not ffprobe_path():
         # No probe available: fall back to the size check rather than discarding every segment.
         return True, "unverified"
@@ -189,8 +221,28 @@ def device_input(index: str) -> list[str]:
 
 def synthetic_input(freq: int = 440) -> list[str]:
     """A test tone instead of a device. -re paces lavfi at wall-clock speed, so segments close
-    on the same schedule a real capture would."""
+    on the same schedule a real capture would. ffmpeg path only; native tests use native_sine_input."""
     return ["-re", "-f", "lavfi", "-i", f"sine=frequency={freq}:sample_rate=16000"]
+
+
+NATIVE_MARK = "native"
+
+
+def is_native_input(spec: list[str]) -> bool:
+    return bool(spec) and spec[0] == NATIVE_MARK
+
+
+def native_mic_input(uid: str = "") -> list[str]:
+    return [NATIVE_MARK, "mic", uid]
+
+
+def native_output_input() -> list[str]:
+    return [NATIVE_MARK, "output"]
+
+
+def native_sine_input(freq: int = 440) -> list[str]:
+    """In-process 16k sine. ChannelCapture can run this with no ffmpeg and no permission grant."""
+    return [NATIVE_MARK, "sine", str(int(freq))]
 
 
 def dir_bytes(path: Path) -> int:
@@ -209,6 +261,14 @@ def dir_bytes(path: Path) -> int:
 
 
 # ---------------------------------------------------------------- internals
+
+
+def _wav_is_pcm16(path: Path) -> bool:
+    try:
+        with wave.open(str(path), "rb") as w:
+            return w.getnchannels() >= 1 and w.getsampwidth() == 2 and w.getnframes() > 0
+    except Exception:  # noqa: BLE001 - junk, truncated, or not a wav
+        return False
 
 
 def _probe_duration(path: Path) -> tuple[float, str]:

@@ -39,13 +39,16 @@ def test_loopback_and_friends_rejected():
     for u in ("http://127.0.0.1/", "http://0.0.0.0/", "http://[::1]/",
               "http://[::ffff:127.0.0.1]/", "http://[::]/", "http://169.254.169.254/latest/meta-data/",
               "http://10.0.0.5/", "http://192.168.1.1/", "http://172.16.0.1/", "http://100.64.0.1/",
-              "http://[fd00::1]/", "http://[fe80::1]/", "http://224.0.0.1/", "http://[2002:7f00:1::]/"):
+              "http://[fd00::1]/", "http://[fe80::1]/", "http://[fec0::1]/", "http://[fed0::1]/",
+              "http://[feff::1]/", "http://[::ffff:7f00:1]/", "http://[::7f00:1]/",
+              "http://[64:ff9b::7f00:1]/", "http://224.0.0.1/", "http://[2002:7f00:1::]/"):
         assert blocked(u), f"{u!r} was accepted"
 
 
 def test_public_ip_and_host_accepted():
     assert blocked("http://93.184.216.34/") is None
     assert blocked("https://example.com/a/b") is None
+    assert blocked("http://[2002:808:808::]/") is None  # 6to4 embedding a public address
 
 
 # ---- alternate encodings: _check_url lets them through as hostnames; _resolve must catch them ----
@@ -57,6 +60,12 @@ def guard(url: str, ctx: dict | None = None, settings: dict | None = None) -> st
         return None
     except UrlBlocked as e:
         return str(e)
+
+
+def test_chrome_spellings_of_loopback_are_refused_without_dns():
+    """macOS getaddrinfo('0177.0.0.1') is the public address 177.0.0.1. Chrome dials 127.0.0.1."""
+    for u in ("http://0177.0.0.1/", "http://0x7f.0.0.1/", "http://127.1/", "http://2130706433/", "http://0x7f000001/"):
+        assert blocked(u), f"{u!r} was accepted"
 
 
 def test_alt_encoded_ips_are_not_ip_literals():

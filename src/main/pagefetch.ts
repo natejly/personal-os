@@ -8,8 +8,8 @@
 import { BrowserWindow, session } from 'electron'
 import { randomBytes, timingSafeEqual } from 'crypto'
 import { createServer, IncomingMessage, Server, ServerResponse } from 'http'
-import { isIP } from 'net'
 import { backendToken, backendUrl } from './backend'
+import { hostBlocked, isPrivateHost } from './pageGuard'
 
 const PARTITION = 'persist:agent'
 const MAX_BODY = 16 * 1024
@@ -30,18 +30,13 @@ type PageResult = { url: string; title: string; text: string; truncated: boolean
 
 const isHttp = (u: URL): boolean => u.protocol === 'http:' || u.protocol === 'https:'
 
-/** Literal private / loopback / link-local hosts. Names that resolve there are caught by the backend's DNS check. */
-function privateHost(host: string): boolean {
-  const h = host.replace(/^\[|\]$/g, '').toLowerCase()
-  if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local')) return true
-  const v = isIP(h)
-  if (v === 4) {
-    const [a, b] = h.split('.').map(Number)
-    return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) ||
-      (a === 192 && b === 168) || (a === 100 && b >= 64 && b <= 127) || a >= 224
+function forbiddenNavigation(to: string): boolean {
+  try {
+    const u = new URL(to)
+    return !(isHttp(u) || u.protocol === 'ws:' || u.protocol === 'wss:') || isPrivateHost(u.hostname)
+  } catch {
+    return true
   }
-  if (v === 6) return h === '::' || h === '::1' || /^f[cd]/.test(h) || /^fe[89ab]/.test(h) || h.startsWith('::ffff:')
-  return false
 }
 
 function agentSession(): Electron.Session {
@@ -60,7 +55,12 @@ function agentSession(): Electron.Session {
       return cb({ cancel: true })
     }
     if (u.protocol === 'data:' || u.protocol === 'blob:') return cb({})
-    cb({ cancel: !(isHttp(u) || u.protocol === 'ws:' || u.protocol === 'wss:') || privateHost(u.hostname) })
+    if (!(isHttp(u) || u.protocol === 'ws:' || u.protocol === 'wss:')) return cb({ cancel: true })
+    // Redirects and subresources included. A name is resolved here: the backend only checked the first URL.
+    void hostBlocked(u.hostname).then(
+      (blocked) => cb({ cancel: blocked }),
+      () => cb({ cancel: true })
+    )
   })
   // Plain Chrome UA: some sites refuse anything that says Electron.
   ses.setUserAgent(ses.getUserAgent().replace(/\s+(Electron|grain|Grain)\/\S+/g, ''))
@@ -101,11 +101,10 @@ async function loadPage(url: string, maxChars: number, timeoutMs: number): Promi
   wc.setAudioMuted(true)
   wc.setWindowOpenHandler(() => ({ action: 'deny' }))
   wc.on('will-navigate', (e, to) => {
-    try {
-      if (!isHttp(new URL(to))) e.preventDefault()
-    } catch {
-      e.preventDefault()
-    }
+    if (forbiddenNavigation(to)) e.preventDefault()
+  })
+  wc.on('will-redirect', (e, to) => {
+    if (forbiddenNavigation(to)) e.preventDefault()
   })
   wc.on('will-attach-webview', (e) => e.preventDefault())
   try {
@@ -169,7 +168,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   }
   if (!isHttp(target)) return send(res, 400, { error: `only http(s) pages can be opened, got ${target.protocol}` })
   if (target.username || target.password) return send(res, 400, { error: 'credentials in the URL are not allowed' })
-  if (privateHost(target.hostname)) return send(res, 400, { error: `${target.hostname} is not a public address` })
+  if (await hostBlocked(target.hostname)) return send(res, 400, { error: `${target.hostname} is not a public address` })
   if (active >= MAX_ACTIVE) return send(res, 429, { error: 'the page loader is busy; try again in a moment' })
   const maxChars = Math.max(1000, Math.min(Number(body.maxChars) || 20_000, MAX_CHARS))
   const timeoutMs = Math.max(3_000, Math.min(Number(body.timeoutMs) || 20_000, MAX_TIMEOUT_MS))
@@ -220,6 +219,10 @@ export function startPageBridge(): Promise<void> {
       resolve()
     })
   })
+}
+
+export function pageBridgeUrl(): string {
+  return bridgeUrl
 }
 
 export function stopPageBridge(): void {

@@ -54,7 +54,7 @@ const SIGNAL_INFO: Record<ActivitySignal, { label: string; icon: JSX.Element; wh
   },
   outputAudio: {
     label: 'System audio', icon: <Speaker size={15} />, heavy: true,
-    what: 'Same as the microphone, for whatever your speakers played - calls, videos, music. Needs a loopback device; macOS will not record its own output otherwise.'
+    what: 'Same as the microphone, for whatever your speakers played - calls, videos, music. Uses a Core Audio tap on macOS 14.2+; older Macs still need a loopback device.'
   }
 }
 
@@ -419,29 +419,35 @@ function PatternRow({ p }: { p: ActivityPattern }): JSX.Element {
  * `devices` is deliberately the narrower `{index, name}` shape: `/meetings/status` adds a
  * `loopback` flag to its rows and `/activity/devices` does not, so the common shape is this one.
  */
-export function AudioDevicePicker({ devices, micValue, outputValue, onChange }: {
+export function AudioDevicePicker({ devices, micValue, outputValue, onChange, nativeMic, nativeSystem }: {
   devices: { index: string; name: string }[]
   micValue: string
   outputValue: string
   onChange: (patch: { micDevice?: string; outputDevice?: string }) => void
+  nativeMic?: boolean
+  nativeSystem?: boolean
 }): JSX.Element {
-  const options = devices.map((d) => <option key={d.index} value={d.index}>[{d.index}] {d.name}</option>)
+  const options = devices.map((d) => <option key={d.index} value={d.index}>{d.name}</option>)
   return (
     <>
       <label className="act-field">
-        <span><b>Microphone device</b><small>ffmpeg avfoundation input</small></span>
+        <span><b>Microphone device</b><small>{nativeMic ? 'this Mac’s microphones; blank uses the default' : 'ffmpeg avfoundation input'}</small></span>
         <select value={micValue} onChange={(e) => onChange({ micDevice: e.target.value })}>
-          <option value="">(none)</option>
+          <option value="">{nativeMic ? '(default)' : '(none)'}</option>
           {options}
         </select>
       </label>
-      <label className="act-field">
-        <span><b>System audio device</b><small>must be a loopback device such as BlackHole</small></span>
-        <select value={outputValue} onChange={(e) => onChange({ outputDevice: e.target.value })}>
-          <option value="">(none)</option>
-          {options}
-        </select>
-      </label>
+      {nativeSystem ? (
+        <p className="muted small">System audio is captured with a Core Audio tap. No loopback device to pick.</p>
+      ) : (
+        <label className="act-field">
+          <span><b>System audio device</b><small>must be a loopback device such as BlackHole</small></span>
+          <select value={outputValue} onChange={(e) => onChange({ outputDevice: e.target.value })}>
+            <option value="">(none)</option>
+            {options}
+          </select>
+        </label>
+      )}
     </>
   )
 }
@@ -522,8 +528,8 @@ export default function ActivityView(): JSX.Element {
       if (!capById.accessibility?.ok) return capById.accessibility?.fix ?? 'needs Accessibility permission'
     }
     if (s === 'apps' && !capById.pyobjc?.ok) return 'Window titles need the native bridge; app names still work.'
-    if ((s === 'micAudio' || s === 'outputAudio') && !capById.ffmpeg?.ok) return capById.ffmpeg?.fix ?? 'needs ffmpeg'
-    if (s === 'outputAudio' && !capById.loopback?.ok) return capById.loopback?.fix ?? 'needs a loopback device'
+    if ((s === 'micAudio' || s === 'outputAudio') && !capById.ffmpeg?.ok) return capById.ffmpeg?.fix ?? 'needs audio capture'
+    if (s === 'outputAudio' && !capById.loopback?.ok) return capById.loopback?.fix ?? 'needs system audio capture'
     return ''
   }
 
@@ -817,11 +823,14 @@ export default function ActivityView(): JSX.Element {
             <>
               <h4 className="act-h">Audio</h4>
               <p className="muted small">
-                Recordings are transcribed and then deleted; only text is stored. Transcription goes to
-                <code> {cfg.audio.model}</code> on your configured base URL.
+                Recordings are transcribed and then deleted; only text is stored. Auto uses on-device
+                Speech when it is granted, then whisper.cpp, then <code>{cfg.audio.model}</code> on your
+                configured base URL.
               </p>
               <AudioDevicePicker
                 devices={st.audio_devices} micValue={cfg.audio.micDevice} outputValue={cfg.audio.outputDevice}
+                nativeMic={(capById.ffmpeg?.detail ?? '').includes('AVAudioEngine')}
+                nativeSystem={(capById.loopback?.detail ?? '').includes('process tap')}
                 onChange={(p) => void setActivityConfig({ audio: { ...cfg.audio, ...p } })}
               />
               <label className="act-field">

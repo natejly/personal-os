@@ -10,7 +10,9 @@ from __future__ import annotations
 import asyncio
 import subprocess
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 from typing import Any, Callable
 
 from personal_os import microvm
@@ -277,6 +279,31 @@ class TestToolSurface(unittest.TestCase):
         self.assertEqual(out["written"], f"{WORKSPACE}/report.pdf.txt", "non-text names get a .txt suffix")
         call = next(c for c in run.calls if c["input"] is not None)
         self.assertEqual(call["input"], b"the extracted text")
+
+    def test_an_imported_document_taints_later_commands_until_reset(self) -> None:
+        run = FakeRun({"inspect": running})
+        tb = self._toolbox(run)
+        ctx: dict[str, Any] = {"conversation_id": "c1", "tainted": False, "taint_sources": []}
+        asyncio.run(tb.call("sandbox_put_document", {"document_id": "doc_1"}, ctx))
+        self.assertTrue(ctx["tainted"])
+        self.assertIn("sandbox_put_document", ctx["taint_sources"])
+        ctx["tainted"] = False
+        asyncio.run(tb.call("sandbox_exec", {"command": "cat report.pdf.txt"}, ctx))
+        self.assertTrue(ctx["tainted"], "printing the imported file taints even with network off")
+        asyncio.run(tb.call("sandbox_reset", {}, {"conversation_id": "c1"}))
+        ctx["tainted"] = False
+        asyncio.run(tb.call("sandbox_exec", {"command": "echo hi"}, ctx))
+        self.assertFalse(ctx["tainted"])
+
+    def test_import_mark_survives_a_new_manager(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            run = FakeRun()
+            first = Sandboxes(lambda: {}, runner=run, import_dir=Path(d))
+            first.note_import("c1")
+            second = Sandboxes(lambda: {}, runner=run, import_dir=Path(d))
+            self.assertTrue(second.holds_import("c1"))
+            second.reset("c1")
+            self.assertFalse(second.holds_import("c1"))
 
     def test_put_document_unknown_id_is_a_tool_error(self) -> None:
         tb = self._toolbox(FakeRun({"inspect": running}))

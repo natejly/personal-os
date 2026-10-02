@@ -240,6 +240,19 @@ class OutboxTests(unittest.TestCase):
         self.assertEqual(out["cancelled"], queued["queued"])
         self.assertEqual(self.server.messages, {})
 
+    def test_another_chat_cannot_see_or_cancel_a_queued_send(self) -> None:
+        from personal_os.tools import Toolbox
+
+        box = Toolbox(None, None, None, lambda: {}, google=self.google, outbox=self.box)  # type: ignore[arg-type]
+        queued = asyncio.run(box.call("gmail_send", {"to": "mira@example.com", "subject": "Hi", "body": "x"},
+                                      {"project_id": None, "conversation_id": "c1"}))
+        other = {"project_id": None, "conversation_id": "c2"}
+        listed = asyncio.run(box.call("gmail_outbox", {}, other))
+        self.assertEqual(listed["count"], 0)
+        denied = asyncio.run(box.call("gmail_outbox", {"action": "cancel", "id": queued["queued"]}, other))
+        self.assertIn("error", denied)
+        self.assertEqual(self.box.get(queued["queued"])["status"], "holding")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

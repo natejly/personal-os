@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ExternalLink, Plus, Trash2, Video, X } from 'lucide-react'
 import type { CalendarColors, CalendarEvent, EventPayload, GoogleCalendar } from '@shared/types'
 import { api } from '../lib/api'
+import { readView, writeView } from '../lib/viewCache'
 import { useStore } from '../store'
 
 /** Seed for create mode: the slot the user dragged out or double-clicked, or an all-day cell.
@@ -104,6 +105,8 @@ export default function EventEditor({ event, draft, onClose, onSaved }: EventEdi
   const [gSee, setGSee] = useState(true)
   const [sendUpdates, setSendUpdates] = useState<'none' | 'all' | 'externalOnly'>('none')
   const [notifyTouched, setNotifyTouched] = useState(false)
+  // A background refresh must not wipe a field the user has already changed.
+  const dirty = useRef(false)
 
   const presets = useMemo(() => rrulePresets(allDay ? startDay || toDateInput(new Date()) : (startDt || new Date().toISOString()).slice(0, 10)), [allDay, startDay, startDt])
 
@@ -136,11 +139,10 @@ export default function EventEditor({ event, draft, onClose, onSaved }: EventEdi
       return
     }
     let alive = true
+    dirty.current = false
     const cid = event.calendar_id || 'primary'
     const targetId = scope === 'all' && event.recurring_event_id ? event.recurring_event_id : event.id
-    setLoading(true)
-    api.google.getEvent(targetId, cid).then((f) => {
-      if (!alive) return
+    const apply = (f: CalendarEvent): void => {
       setFull(f)
       setTitle(f.summary === '(no title)' ? '' : f.summary)
       setCalendarId(cid); setOrigCalendarId(cid)
@@ -171,7 +173,17 @@ export default function EventEditor({ event, draft, onClose, onSaved }: EventEdi
       setGModify(f.guests_can_modify ?? false)
       setGSee(f.guests_can_see_other_guests ?? true)
       setLoading(false)
-    }).catch((e) => { if (alive) { toast((e as Error).message, 'error'); onClose() } })
+    }
+    const key = `event:${cid}:${targetId}`
+    const cached = readView<CalendarEvent>(key)
+    if (cached) apply(cached)
+    else setLoading(true)
+    api.google.getEvent(targetId, cid).then((f) => {
+      if (!alive) return
+      writeView(key, f)
+      if (!dirty.current) apply(f)
+      else setLoading(false)
+    }).catch((e) => { if (alive && !cached) { toast((e as Error).message, 'error'); onClose() } })
     return () => { alive = false }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isEdit, event?.id, scope])
@@ -299,7 +311,8 @@ export default function EventEditor({ event, draft, onClose, onSaved }: EventEdi
 
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
-      <div className="modal event-editor" onMouseDown={(e) => e.stopPropagation()}>
+      <div className="modal event-editor" onMouseDown={(e) => e.stopPropagation()}
+        onChange={() => { dirty.current = true }} onClickCapture={() => { if (!loading) dirty.current = true }}>
         <header>
           <h2>{isEdit ? 'Edit event' : 'New event'}</h2>
           <button className="icon-btn" aria-label="Close" onClick={onClose}><X size={16} /></button>

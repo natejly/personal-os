@@ -310,9 +310,9 @@ Plus, elsewhere in the same file: `TodayDashboard` (was the second `Dashboard`),
 
 | Route | Request | Response |
 |---|---|---|
-| `GET /canvases` | — | `Canvas[]`, ordered by `(position, created_at)`, each with `windows` ordered by `(z, created_at)`. Seeds `"Desk 1"` when the table is empty and returns it, so the client never handles an empty list. 2 queries, not N+1. |
+| `GET /canvases` | — | `Canvas[]`, ordered by `(position, created_at)`, each with `windows` ordered by `(z, created_at)`. Seeds `"Space 1"` when the table is empty and returns it, so the client never handles an empty list. 2 queries, not N+1. |
 | `GET /canvases/{id}` | — | `Canvas` \| 404 |
-| `POST /canvases` | `{ name?: string = "Desk", project_id?: string \| null, copy_from?: string \| null }` | `Canvas`. `position = COALESCE(MAX(position),-1)+1`. `copy_from` copies `snap_mode/grid_size/zoom/pan_x/pan_y/wallpaper` (never `locked`: a copy starts unlocked) and duplicates every window (fresh ids, same geometry and `z`, `config` copied, `state` forced `'normal'`, `popout_bounds` dropped). 404 on unknown `copy_from`. |
+| `POST /canvases` | `{ name?: string = "Space", project_id?: string \| null, copy_from?: string \| null }` | `Canvas`. `position = COALESCE(MAX(position),-1)+1`. `copy_from` copies `snap_mode/grid_size/zoom/pan_x/pan_y/wallpaper` (never `locked`: a copy starts unlocked) and duplicates every window (fresh ids, same geometry and `z`, `config` copied, `state` forced `'normal'`, `popout_bounds` dropped). 404 on unknown `copy_from`. |
 | `PUT /canvases/{id}` | `{ name?, project_id?, position?, snap_mode?, grid_size?, zoom?, pan_x?, pan_y?, wallpaper?, locked?: boolean, clear_project?: boolean }` | `Canvas` \| 404. 400 if `snap_mode ∉ SNAP_MODES`. `clear_project: true` unbinds (the `todos.py` `clear_*` convention; a bare `project_id: null` is dropped by `exclude_none`). |
 | `DELETE /canvases/{id}` | — | `{ ok: true }`, always 200. `canvas_windows` go via `ON DELETE CASCADE`. |
 | `POST /canvases/{id}/windows` | `{ kind: WidgetKind, ref_id?: string \| null, project_id?: string \| null, title?: string = "", x?: number = 0, y?: number = 0, w?: number = 520, h?: number = 640, config?: object = {} }` | `CanvasWindow`. 404 unknown canvas, 400 `kind ∉ WIDGET_KINDS`. `z = COALESCE(MAX(z),-1)+1` within that canvas. |

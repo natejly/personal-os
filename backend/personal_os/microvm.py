@@ -14,6 +14,8 @@ into that context):
   * no bind mounts — the only files inside are ones the tools put there
   * network detached by default; settings sandboxNetwork attaches it, and then every
     result that carries guest-produced bytes taints the run exactly like fetch_url
+  * library text copied in with sandbox_put_document marks the sandbox on the host;
+    later command output taints until that container is removed
   * capabilities dropped, no-new-privileges, memory / cpu / pids caps
   * commands run under coreutils `timeout` inside the guest, because killing the
     `docker exec` client does not kill the process it started in the container
@@ -26,6 +28,7 @@ import shutil
 import subprocess
 import threading
 import time
+from pathlib import Path
 from typing import Any, Callable
 
 from .sandbox import IMAGE_EXT, MAX_IMAGE_BYTES
@@ -73,14 +76,17 @@ def guest_path(path: str | None) -> str:
 class Sandboxes:
     """Names, creates, reuses and reaps one container per conversation."""
 
-    def __init__(self, settings_fn: Callable[[], dict[str, Any]], runner: Runner | None = None):
+    def __init__(self, settings_fn: Callable[[], dict[str, Any]], runner: Runner | None = None,
+                 import_dir: Path | None = None):
         self.settings = settings_fn
         self._run = runner or _run
+        self._import_dir = Path(import_dir) if import_dir else None
         self._avail: tuple[float, bool] | None = None
         self._lock = threading.Lock()   # ensure() can race between parallel runs
         self._last: dict[str, float] = {}    # container name -> last use, for LRU reaping
         self._shell: dict[str, str] = {}     # container name -> bash|sh
         self._net: dict[str, bool] = {}      # container name -> created with network
+        self._imported: set[str] = set()     # container names that hold library-file text
 
     def _bin(self) -> str:
         return str(self.settings().get("sandboxRuntime") or "docker")
@@ -154,16 +160,43 @@ class Sandboxes:
             self._run([binary, "rm", "-f", oldest], timeout=30)
             names.remove(oldest)
             self._forget(oldest)
+            self._clear_import(oldest)
 
     def _forget(self, name: str) -> None:
         self._last.pop(name, None)
         self._shell.pop(name, None)
         self._net.pop(name, None)
 
+    def note_import(self, conversation_id: str) -> None:
+        """Library text is now inside this sandbox. The guest cannot clear the mark."""
+        name = self._name(conversation_id)
+        self._imported.add(name)
+        if self._import_dir is None:
+            return
+        self._import_dir.mkdir(parents=True, exist_ok=True)
+        (self._import_dir / name).write_text("1")
+
+    def holds_import(self, conversation_id: str) -> bool:
+        name = self._name(conversation_id)
+        if name in self._imported:
+            return True
+        if self._import_dir and (self._import_dir / name).is_file():
+            self._imported.add(name)
+            return True
+        return False
+
+    def _clear_import(self, name: str) -> None:
+        self._imported.discard(name)
+        if self._import_dir:
+            (self._import_dir / name).unlink(missing_ok=True)
+
     def reset(self, conversation_id: str) -> dict[str, Any]:
         name = self._name(conversation_id)
-        self._run([self._bin(), "rm", "-f", name], timeout=30)
+        p = self._run([self._bin(), "rm", "-f", name], timeout=30)
         self._forget(name)
+        # Keep the mark if the container is still there: its files are still readable.
+        if p.returncode == 0 or b"No such" in (p.stderr or b""):
+            self._clear_import(name)
         return {"reset": True, "note": "the next sandbox tool call starts from a fresh container"}
 
     def shutdown(self) -> None:

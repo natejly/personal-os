@@ -11,7 +11,7 @@ only ever set by accepting a `meeting_revisions` row. No model writes either col
 
 Nothing here expires, and no table below carries an expiry column. An activity event has one
 and is swept on every `Monitor.loop` tick, and `POST /activity/purge` runs a bare
-`DELETE FROM activity_events` (activity.py:482-487) behind the Privacy tab. That absence is the
+`DELETE FROM activity_events` (`Store.purge` in activity.py, scopes `events` and `all`) behind the Privacy tab. That absence is the
 feature: nothing under /activity/* can reach a meeting.
 
 Two classes, split the way activity.py splits Store from Monitor: `Meetings` is the repo and
@@ -32,7 +32,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from . import audiocap, meeting_notes, meeting_recorder, redact, stt
+from . import audiocap, meeting_notes, meeting_recorder, native_audio, redact, stt
 from .db import Database, new_id, now, row_to_dict
 from .docs import diff_stat, word_count
 from .repos import fts_query
@@ -178,7 +178,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "segmentSeconds": 20,     # how far behind live the transcript runs
     "maxMeetingSeconds": 14400,
     "drainSeconds": 90,
-    "sttBackend": "auto",     # auto | proxy | local | off
+    "sttBackend": "auto",     # auto | speech | proxy | local | off
     "sttModel": "whisper-1",
     "whisperModelPath": "",
     "template": "general",
@@ -243,8 +243,9 @@ RETRANSCRIBE_MAX_ATTEMPTS = 8
 # exists because an STT route that is never fixed would otherwise keep every wav forever.
 AUDIO_RETENTION_SECONDS = 7 * 86400
 
-# Which capability rows stop a recording from starting. `loopback` and `stt_local` are optional
-# upgrades: no loopback driver means mic-only, and no whisper.cpp means the proxy backend.
+# Which capability rows stop a recording from starting. `loopback` and `stt_local` are optional:
+# no system-audio tap means mic-only, and whisper.cpp is only needed when Speech is unavailable
+# and the proxy has no transcription route. The ffmpeg row is ok when native capture works.
 BLOCKING_CAPABILITIES = ("platform", "ffmpeg", "mic", "stt")
 
 # The banners `stop` writes ABOUT THE TRANSCRIPT ITSELF, and the only ones a later settle is
@@ -652,8 +653,8 @@ class Meetings:
         payload = detail if detail is not None else {}
         if self.config().get("redactSecrets", True):
             # Credential rules ONLY, never activity.Gate.scrub: its identity rules replace every
-            # address with [email] (activity.py:126) and every phone-shaped digit run with [phone]
-            # (activity.py:132), which would erase attendee identity from inside the conversation.
+            # address with [email] and every phone-shaped digit run with [phone]
+            # (redact.py), which would erase attendee identity from inside the conversation.
             if body:
                 body = redact.scrub_secrets(body)
             # The same words arrive twice - once as `text`, once per utterance inside `detail` -
@@ -1023,21 +1024,48 @@ class MeetingService:
 
     # ---- capabilities ----
     def devices(self, refresh: bool = False) -> list[dict[str, Any]]:
-        """The audio inputs ffmpeg can see, with the loopback ones marked."""
+        """Audio inputs this machine can record, with loopback devices marked."""
         return [{"index": d["index"], "name": d["name"], "loopback": audiocap.looks_like_loopback(d["name"])}
                 for d in audiocap.audio_devices(0.0 if refresh else 20.0)]
 
     def capabilities(self) -> list[dict[str, Any]]:
         """What this machine can record right now, and how to fix what it can't.
 
-        The four audio rows are activity.capabilities()'s own, fix copy included; `pyobjc` and
-        `accessibility` are dropped because a recorder needs neither grant - ffmpeg talks to
-        avfoundation directly, and nothing here reads a window title.
+        Native capture does not need ffmpeg or a loopback driver. Those rows stay in the
+        checklist as fallbacks: ffmpeg still remuxes a truncated wav, and BlackHole still
+        covers a Mac too old for the process tap. `pyobjc` and `accessibility` are dropped
+        because a recorder needs neither grant.
         """
         cfg = self.config()
         devices = audiocap.audio_devices()
         loopbacks = [d for d in devices if audiocap.looks_like_loopback(d["name"])]
+        native_mic = native_audio.mic_available()
+        native_out = native_audio.system_available()
         ff = audiocap.ffmpeg_path()
+        capture_ok = native_mic or bool(ff)
+        if native_mic:
+            capture_detail = "AVAudioEngine records the microphone; ffmpeg is not required."
+            if ff:
+                capture_detail = f"AVAudioEngine (ffmpeg at {ff} is the fallback)."
+        elif ff:
+            capture_detail = f"ffmpeg at {ff}."
+        else:
+            capture_detail = "No native capture and ffmpeg is not on PATH."
+        if native_out:
+            loop_ok, loop_detail = True, "Core Audio process tap can record system audio without a loopback driver."
+        elif loopbacks:
+            loop_ok, loop_detail = True, f"Loopback device available: {loopbacks[0]['name']}."
+        else:
+            loop_ok, loop_detail = False, (
+                "This macOS has no process tap and no loopback device, so a meeting records "
+                "your side only.")
+        mic_ok = bool(devices) or native_mic
+        if devices:
+            mic_detail = f"{len(devices)} audio input(s) visible."
+        elif native_mic:
+            mic_detail = "Default microphone (AVAudioEngine); pick a specific input if you want one."
+        else:
+            mic_detail = "No audio inputs found."
         return [
             {
                 "id": "platform", "label": "Supported platform", "ok": audiocap.IS_MAC,
@@ -1045,22 +1073,23 @@ class MeetingService:
                 "fix": "" if audiocap.IS_MAC else "Recording is macOS-only; notes and the rest of the app still work.",
             },
             {
-                "id": "ffmpeg", "label": "ffmpeg", "ok": bool(ff),
-                "detail": f"Found at {ff}." if ff else "Not on PATH.",
-                "fix": "" if ff else "brew install ffmpeg - needed for both audio signals.",
+                "id": "ffmpeg", "label": "Audio capture", "ok": capture_ok,
+                "detail": capture_detail,
+                "fix": "" if capture_ok else
+                "Install pyobjc-framework-AVFoundation (`cd backend && uv pip install -e '.[activity]'`) "
+                "or brew install ffmpeg.",
             },
             {
-                "id": "mic", "label": "Microphone input", "ok": bool(devices),
-                "detail": f"{len(devices)} audio input(s) visible to ffmpeg." if devices else "No audio inputs found.",
-                "fix": "" if devices else "Grant Microphone permission to the app, then reopen this panel.",
+                "id": "mic", "label": "Microphone input", "ok": mic_ok,
+                "detail": mic_detail,
+                "fix": "" if mic_ok else "Grant Microphone permission to the app, then reopen this panel.",
             },
             {
-                "id": "loopback", "label": "System audio capture", "ok": bool(loopbacks),
-                "detail": (f"Loopback device available: {loopbacks[0]['name']}." if loopbacks
-                           else "macOS cannot record its own output without a loopback driver, so a "
-                                "meeting records your side only."),
-                "fix": "" if loopbacks else "Install BlackHole (brew install blackhole-2ch) or Loopback, route "
-                                            "output through it, then pick it as the output device below.",
+                "id": "loopback", "label": "System audio capture", "ok": loop_ok,
+                "detail": loop_detail,
+                "fix": "" if loop_ok else
+                "macOS 14.2+ has a process tap; on older systems install BlackHole "
+                "(brew install blackhole-2ch) and pick it as the output device below.",
             },
             *stt.capabilities(cfg, self.data_dir),
         ]
@@ -1171,6 +1200,23 @@ class MeetingService:
         channels: dict[str, list[str]] = {}
         dropped: dict[str, str] = {}
         for source in want:
+            if source == "output" and native_audio.system_available():
+                channels["output"] = audiocap.native_output_input()
+                continue
+            if source == "mic" and native_audio.mic_available():
+                uid, note = audiocap.resolve_device(
+                    str(cfg.get("micDevice") or ""), str(cfg.get("micDeviceName") or ""))
+                if note.startswith("no input named"):
+                    dropped["mic"] = note
+                    continue
+                # Empty uid is the default input: resolve_device refuses an unset index, which
+                # is right for ffmpeg (a bare `:0` after a reshuffle records the wrong room)
+                # and wrong for AVAudioEngine, which already has a default.
+                if not uid and (cfg.get("micDevice") or cfg.get("micDeviceName")):
+                    dropped["mic"] = note or "no device chosen yet"
+                    continue
+                channels["mic"] = audiocap.native_mic_input(uid)
+                continue
             key = "micDevice" if source == "mic" else "outputDevice"
             index, note = audiocap.resolve_device(str(cfg.get(key) or ""), str(cfg.get(key + "Name") or ""))
             # resolve_device falls back to the stored index when the NAME no longer matches, which

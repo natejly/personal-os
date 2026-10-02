@@ -15,11 +15,19 @@ from typing import Iterable
 # Insertion order IS the application order, and `REDACTIONS` below depends on it.
 RULES: dict[str, tuple[re.Pattern[str], str]] = {
     "private_key": (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.S), "[private-key]"),
+    # https://user:password@host and ?token= / #access_token= never match the prefixed-key rules.
+    "url_userinfo": (re.compile(r"(https?://)[^/\s:@]+:[^/\s@]+@"), r"\1[redacted]@"),
+    "url_secret_param": (re.compile(
+        r"([?#&](?:access_token|refresh_token|id_token|client_secret|api_key|apikey|password|passwd|"
+        r"secret|signature|token|auth|key|sig)=)[^&#\s]+", re.I), r"\1[redacted]"),
     "email": (re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"), "[email]"),
     "card": (re.compile(r"\b(?:\d[ -]*?){13,19}\b"), "[card-number]"),
     "ssn": (re.compile(r"\b\d{3}-\d{2}-\d{4}\b"), "[ssn]"),
     "token": (re.compile(r"\b(?:sk|pk|rk|api|key|tok|ghp|gho|ghu|ghs|ghr|xox[baprs])[-_][A-Za-z0-9_-]{12,}\b", re.I), "[token]"),
     "aws_key": (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "[aws-key]"),
+    "github_pat": (re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}\b"), "[github-pat]"),
+    "google_api": (re.compile(r"\bAIza[0-9A-Za-z_\-]{35}\b"), "[google-key]"),
+    "slack_webhook": (re.compile(r"https://hooks\.slack\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/[A-Za-z0-9]+"), "[slack-webhook]"),
     "jwt": (re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"), "[jwt]"),
     "phone": (re.compile(r"\b(?:\+?\d{1,2}[ .-]?)?\(?\d{3}\)?[ .-]?\d{3}[ .-]?\d{4}\b"), "[phone]"),
     # Long unbroken mixed-case-and-digit runs: almost never prose, often a credential.
@@ -40,10 +48,13 @@ ALL_RULES: tuple[str, ...] = tuple(RULES)
 
 # Credentials only. `email` and `phone` are deliberately absent: a meeting transcript is a
 # record of who said what to whom, and the gate's identity rules replace every address with
-# [email] (activity.py:126) and every phone-shaped run of digits with [phone]
-# (activity.py:132), which would erase attendee identity from inside the conversation.
+# [email] and every phone-shaped run of digits with [phone]
+# (redact.py), which would erase attendee identity from inside the conversation.
 # A leaked API key is a breach; a colleague's email address in their own meeting is the point.
-SECRET_RULES: tuple[str, ...] = ("private_key", "card", "ssn", "token", "aws_key", "jwt", "entropy")
+SECRET_RULES: tuple[str, ...] = (
+    "private_key", "url_userinfo", "url_secret_param", "card", "ssn", "token", "aws_key",
+    "github_pat", "google_api", "slack_webhook", "jwt", "entropy",
+)
 
 # The exact object activity.py used to define at module level, re-exported so nothing that
 # iterated it has to change.

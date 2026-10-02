@@ -3,6 +3,7 @@ import { X, Eye, EyeOff, Plug, Cpu, Brain, Mail, Mic, Wrench, Gauge, LayoutGrid,
 import { useStore, type SettingsTab } from '../store'
 import { api } from '../lib/api'
 import { HOME_MODULES, OPTIONAL_VIEWS } from '../modules'
+import { DEFAULT_HIDDEN_VIEWS, homeModuleOn } from '../moduleToggles'
 import { useModal } from '../lib/useModal'
 import { ACCENTS, accentId } from '../lib/accents'
 import type { Settings, ShortcutState, SnapMode } from '@shared/types'
@@ -112,16 +113,16 @@ export default function SettingsModal(): JSX.Element {
       }
     }
     // The active view can be removed from the sidebar; don't leave the app parked on an unreachable one.
-    if ((draft.hiddenViews ?? []).includes(view)) setView('home')
+    if ((draft.hiddenViews ?? [...DEFAULT_HIDDEN_VIEWS]).includes(view)) setView('home')
     // The reason is printed under the shortcut field, so show that tab.
     if (applied && !applied.ok) return setTab('behavior')
     setSettingsOpen(false)
   }
 
-  const hidden = draft.hiddenViews ?? []
+  const hidden = draft.hiddenViews ?? [...DEFAULT_HIDDEN_VIEWS]
   const toggleView = (v: string): void =>
     patch({ hiddenViews: hidden.includes(v) ? hidden.filter((x) => x !== v) : [...hidden, v] })
-  const homeOn = (k: string): boolean => draft.homeWidgets?.[k] !== false
+  const homeOn = (k: string): boolean => homeModuleOn(draft, k)
   const toggleHome = (k: string): void =>
     patch({ homeWidgets: { ...(draft.homeWidgets ?? {}), [k]: !homeOn(k) } })
 

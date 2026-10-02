@@ -32,6 +32,7 @@ from .learn import (
     MAX_SKILL_NAME,
     MAX_SKILL_PROCEDURE,
     _parse_json,
+    normalize_skill_text,
 )
 
 Finding = dict[str, Any]
@@ -133,7 +134,8 @@ def lint_skill(name: str, description: str, procedure: str, *,
     Pure and offline: the review surface can run it on every keystroke, and the `skill_draft` tool
     runs the identical checks on what a model wrote, so neither side has its own private standard.
     """
-    name, description, procedure = str(name or ""), str(description or ""), str(procedure or "")
+    name, description, procedure = (normalize_skill_text(name), normalize_skill_text(description),
+                                    normalize_skill_text(procedure))
     out: list[Finding] = []
 
     # ---- authority: the only blocking class ----

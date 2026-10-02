@@ -3,7 +3,7 @@ import { existsSync } from 'fs'
 import { join } from 'path'
 import { backendStatus, backendToken, backendUrl, startBackend, stopBackend } from './backend'
 import { registerBus } from './bus'
-import { guardNavigation } from './navigation'
+import { attachWidgetRenderAuth, guardNavigation, guardWebWidgetSession } from './navigation'
 import { startPageBridge, stopPageBridge } from './pagefetch'
 import { gather, OPACITY_LEVELS, registerPopouts, restorePopouts, setFrontListener, toggleFront } from './popouts'
 import { registerShortcuts } from './shortcuts'
@@ -261,6 +261,8 @@ app.whenReady().then(async () => {
   ipcMain.on('window:minimize-self', (e) => BrowserWindow.fromWebContents(e.sender)?.minimize())
   registerPopouts(() => win)
   registerBus()
+  attachWidgetRenderAuth()
+  guardWebWidgetSession()
   buildMenu()
   setFrontListener((on) => {
     const item = Menu.getApplicationMenu()?.getMenuItemById('popouts-front')

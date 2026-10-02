@@ -2,8 +2,9 @@
  * Widget bodies and the status ring. Contract §9 — canvas.css owns the window chrome and its tokens;
  * nothing here redefines them.
  *
- * The 2 px ring is painted by the *container* of a `.ring`, through `:has()`, because a widget may not
- * touch `WindowFrame`: the marker a widget renders into the title bar is what lights up its window.
+ * A minimized chat has no window border, so its dock tile gets a 2 px ring through `:has()`.
+ * The window on the plane does not. Its `::before` is the glass, and a ring painted there lifts
+ * the blur in front of the transcript. canvas.css recolors that window's own border instead.
  */
 
 :root {
@@ -57,8 +58,7 @@
   text-align: center;
 }
 
-/* One inset ring per container that holds a marker: the window, and the dock tile of a minimized one. */
-.win:has(.ring)::before,
+/* Dock tile only. A window's `::before` is the glass; painting the ring there covers the transcript with the blur. */
 .dock-tile:has(.ring)::before {
   content: '';
   position: absolute;
@@ -68,13 +68,9 @@
   border-radius: inherit;
   pointer-events: none;
 }
-.win:has(.ring.working)::before,
 .dock-tile:has(.ring.working)::before { border-color: var(--tl-yellow); }
-.win:has(.ring.done)::before,
 .dock-tile:has(.ring.done)::before { border-color: var(--tl-green); }
-.win:has(.ring.error)::before,
 .dock-tile:has(.ring.error)::before { border-color: var(--tl-red); }
-.win:has(.ring.needs-approval)::before,
 .dock-tile:has(.ring.needs-approval)::before { border-color: var(--accent); }
 .dock-tile .ring { position: absolute; top: 2px; right: 2px; z-index: 4; }
 .dock-tile .ring-badge { display: none; }
@@ -191,7 +187,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .status-glyph.working svg,
-  .win:has(.ring)::before,
   .dock-tile:has(.ring)::before,
   .widget-row {
     animation: none !important;

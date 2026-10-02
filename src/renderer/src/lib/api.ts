@@ -276,7 +276,7 @@ export const api = {
       req<Skill>(`/skills/${id}`, { method: 'PATCH', body: json(patch) }),
     delete: (id: string) => req<{ ok: boolean }>(`/skills/${id}`, { method: 'DELETE' }),
     /** Distil a conversation into a candidate for review. Never enables anything. */
-    induce: (convId: string) => req<{ candidate: Skill | null; reason: string | null }>(`/conversations/${convId}/skills/induce`, { method: 'POST' }),
+    induce: (convId: string, messageId?: string) => req<{ candidate: Skill | null; reason: string | null }>(`/conversations/${convId}/skills/induce`, { method: 'POST', body: json({ message_id: messageId ?? null }) }),
     /** Review a draft without saving it. `blocking` is what `update({status:'approved'})` would refuse. */
     lint: (d: { name?: string; description?: string; procedure?: string; skill_id?: string }) =>
       req<{ findings: SkillFinding[]; blocking: SkillFinding[] }>('/skills/lint', { method: 'POST', body: json(d) }),

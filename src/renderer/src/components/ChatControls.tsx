@@ -1,3 +1,4 @@
+import { DEFAULT_EFFORT } from '@shared/types'
 import { useStore, useConversation } from '../store'
 import ModelMenu from './ModelMenu'
 
@@ -18,7 +19,7 @@ export default function ChatControls({ conversationId }: { conversationId?: stri
   // A canvas window always names its chat; only the page's draft reads the parked values.
   const draft = !convo && !conversationId
   const model = convo?.model ?? (draft ? draftModel : null) ?? defaultModel
-  const effort = convo?.settings?.effort ?? (draft ? draftEffort : 'default')
+  const effort = convo?.settings?.effort ?? (draft ? draftEffort : DEFAULT_EFFORT)
   const fast = convo?.settings?.fast ?? (draft ? draftFast : false)
   return (
     <ModelMenu

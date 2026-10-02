@@ -1,8 +1,10 @@
 """Reach into the rest of the Mac the boring way: Spotlight, the file system, Shortcuts, and an offscreen page loader.
 
 Every path, read or written, goes through `allowed_path`: inside the home folder, outside ~/Library and
-dot-folders, symlinks resolved first. Writes never clobber silently (`mode="create"` is the default) and
-nothing is deleted outright — `trash` moves items to ~/.Trash, where the user can put them back.
+dot-folders, symlinks resolved first. `Library` is matched case-insensitively, because the home volume
+is case-insensitive and `Path.resolve()` keeps the spelling the caller used. Writes never clobber
+silently (`mode="create"` is the default) and nothing is deleted outright — `trash` moves items to
+~/.Trash, where the user can put them back.
 
 Nothing here drives the screen. `mdfind` and `shortcuts` are plain subprocesses (argv, never a shell);
 the page loader is an offscreen Electron window the main process owns, reached over a loopback bridge
@@ -12,6 +14,7 @@ grants: Spotlight needs none, and a Shortcut runs with whatever the user granted
 from __future__ import annotations
 
 import asyncio
+import errno
 import os
 import shutil
 import sys
@@ -27,10 +30,14 @@ from .extract_text import extract_text
 
 DEFAULT_ROOTS = ("~/Desktop", "~/Documents")
 BLOCKED_UNDER_HOME = ("Library",)  # app data, mail, keychains, browser profiles
+_BLOCKED_TOP = frozenset(name.casefold() for name in BLOCKED_UNDER_HOME)
 MAX_READ_BYTES = 20 * 1024 * 1024
 MAX_WRITE_CHARS = 400_000
 # Suffixes macOS will run when the user double-clicks the file. The agent writes documents, not launchers.
-BLOCKED_WRITE_SUFFIXES = frozenset({".command", ".app", ".scpt", ".applescript", ".workflow", ".terminal", ".shortcut"})
+BLOCKED_WRITE_SUFFIXES = frozenset({
+    ".command", ".app", ".scpt", ".scptd", ".applescript", ".workflow", ".terminal", ".shortcut",
+    ".inetloc", ".fileloc",  # a double-clicked internet location opens its URL with no quarantine prompt
+})
 WRITE_MODES = ("create", "overwrite", "append")
 MAX_SHORTCUT_INPUT = 100_000
 MAX_SHORTCUT_OUTPUT = 20_000
@@ -53,8 +60,29 @@ def home() -> Path:
     return Path(os.path.expanduser("~")).resolve()
 
 
+def _app_data_dir() -> Path | None:
+    """The folder that holds the app database, auth token and uploads. Same rule as db.data_dir_from_env."""
+    try:
+        from .db import data_dir_from_env
+        return data_dir_from_env()
+    except OSError:
+        return None
+
+
+def _under(path: Path, root: Path) -> bool:
+    """True when `path` is `root` or a directory inside it.
+
+    Component-wise and case-insensitive, so `GrainData` is the same folder as `graindata` and is not
+    a prefix of `GrainData-backup`.
+    """
+    pp, rp = path.parts, root.parts
+    if len(pp) < len(rp):
+        return False
+    return all(a.casefold() == b.casefold() for a, b in zip(rp, pp))
+
+
 def allowed_path(raw: str) -> Path:
-    """Resolve `raw` (symlinks included) and require it to sit under the home folder, outside dot-folders and ~/Library."""
+    """Resolve `raw` (symlinks included) and require it to sit under the home folder, outside dot-folders, ~/Library and the app's own data folder."""
     if not raw or not str(raw).strip():
         raise LocalPathError("empty path")
     p = Path(os.path.expanduser(str(raw).strip()))
@@ -67,10 +95,13 @@ def allowed_path(raw: str) -> Path:
     except ValueError:
         raise LocalPathError(f"{p} is outside your home folder") from None
     parts = rel.parts
-    if parts and parts[0] in BLOCKED_UNDER_HOME:
+    if parts and parts[0].casefold() in _BLOCKED_TOP:
         raise LocalPathError(f"~/{parts[0]} is off limits")
     if any(x.startswith(".") for x in parts):
         raise LocalPathError("hidden files and folders are off limits")
+    data = _app_data_dir()
+    if data is not None and _under(p, data):
+        raise LocalPathError("the app's own data folder is off limits")
     return p
 
 
@@ -116,6 +147,10 @@ async def mdfind(query: str, *, folders: list[str] | None = None, name_only: boo
                     continue
                 if any(seg.startswith(".") for seg in Path(p).parts):  # Spotlight indexes some dot-folders
                     continue
+                try:
+                    allowed_path(p)  # mdfind's -onlyin is a hint; the result still has to pass the file policy
+                except LocalPathError:
+                    continue
                 if len(paths) >= lim:
                     truncated = True
                     return
@@ -153,12 +188,62 @@ def read_local(path: str, offset: int = 0, length: int = 8000) -> dict[str, Any]
             "has_more": off + n < len(text)}
 
 
+def _launcher_suffix(path: Path) -> str | None:
+    """A blocked suffix on the file or any parent (Evil.app/Contents/MacOS/run is still an app bundle)."""
+    for part in path.parts:
+        suf = Path(part).suffix.lower()
+        if suf in BLOCKED_WRITE_SUFFIXES:
+            return suf
+    return None
+
+
+def _stated_path(raw: str) -> Path:
+    """The path as given, expanded but not resolved, so a symlink is still a symlink."""
+    if not raw or not str(raw).strip():
+        raise LocalPathError("empty path")
+    p = Path(os.path.expanduser(str(raw).strip()))
+    if not p.is_absolute():
+        p = home() / p
+    return p
+
+
+def _refuse_leaf_symlink(raw: str, verb: str) -> None:
+    """`allowed_path` follows links. For a write, that would edit the target and call it the link."""
+    if _stated_path(raw).is_symlink():
+        raise LocalPathError(f"refusing to {verb} through a symlink")
+
+
 def _writable_path(raw: str) -> Path:
     """`allowed_path` plus the rules that only matter when we are about to create or replace a file."""
     p = allowed_path(raw)
-    if p.suffix.lower() in BLOCKED_WRITE_SUFFIXES:
-        raise LocalPathError(f"{p.suffix} files are off limits; write a document instead")
+    if suf := _launcher_suffix(p):
+        raise LocalPathError(f"{suf} files are off limits; write a document instead")
     return p
+
+
+def _write_nofollow(path: Path, text: str, mode: str) -> None:
+    """Write `path` without following a symlink planted at the final component after the check."""
+    parent = path.parent
+    flags = os.O_RDONLY | os.O_DIRECTORY
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    flags |= nofollow
+    try:
+        dirfd = os.open(parent, flags)
+    except OSError as e:
+        raise LocalPathError(f"could not open {parent.name}") from e
+    try:
+        oflags = os.O_WRONLY | os.O_CREAT | nofollow
+        oflags |= os.O_APPEND if mode == "append" else os.O_TRUNC
+        try:
+            fd = os.open(path.name, oflags, 0o644, dir_fd=dirfd)
+        except OSError as e:
+            if e.errno == errno.ELOOP:
+                raise LocalPathError("refusing to write through a symlink") from e
+            raise
+        with os.fdopen(fd, "a" if mode == "append" else "w", encoding="utf-8") as f:
+            f.write(text)
+    finally:
+        os.close(dirfd)
 
 
 def write_local(path: str, content: str, mode: str = "create") -> dict[str, Any]:
@@ -168,6 +253,7 @@ def write_local(path: str, content: str, mode: str = "create") -> dict[str, Any]
     text = content if isinstance(content, str) else str(content)
     if len(text) > MAX_WRITE_CHARS:
         raise ValueError(f"content is {len(text)} characters; the limit is {MAX_WRITE_CHARS}")
+    _refuse_leaf_symlink(path, "write")
     p = _writable_path(path)
     if p.is_dir():
         raise LocalPathError(f"{p} is a folder")
@@ -175,13 +261,14 @@ def write_local(path: str, content: str, mode: str = "create") -> dict[str, Any]
     if existed and mode == "create":
         raise LocalPathError(f"{p.name} already exists; pass mode='overwrite' to replace it or mode='append' to add to it")
     p.parent.mkdir(parents=True, exist_ok=True)
-    with open(p, "a" if mode == "append" else "w", encoding="utf-8") as f:
-        f.write(text)
+    _write_nofollow(p, text, mode)
     return {"path": str(p), "mode": mode, "created": not existed, "chars_written": len(text), "size": p.stat().st_size}
 
 
 def move_local(path: str, to: str) -> dict[str, Any]:
     """Move or rename a file or folder inside the home folder. Never replaces something that already exists."""
+    _refuse_leaf_symlink(path, "move")
+    _refuse_leaf_symlink(to, "move")
     src = allowed_path(path)
     if not src.exists():
         raise LocalPathError(f"{src} does not exist")
@@ -199,22 +286,68 @@ def move_local(path: str, to: str) -> dict[str, Any]:
     return {"from": str(src), "path": str(dst), "kind": "folder" if dst.is_dir() else "file"}
 
 
+def _open_trash() -> tuple[int, Path]:
+    """A directory fd for ~/.Trash.
+
+    `shutil.move` follows a directory symlink, so a `~/.Trash` that points outside the home folder
+    would drop the file there while the returned path still said `~/.Trash/...`. Open the directory
+    itself (`O_NOFOLLOW`) and rename into that fd.
+    """
+    trash = home() / ".Trash"
+    if trash.is_symlink():
+        raise LocalPathError("the Trash is a symlink and is off limits")
+    if not trash.exists():
+        trash.mkdir()
+    elif not trash.is_dir():
+        raise LocalPathError("the Trash is off limits")
+    if trash.is_symlink():
+        raise LocalPathError("the Trash is a symlink and is off limits")
+    flags = os.O_RDONLY | os.O_DIRECTORY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(trash, flags)
+    except OSError as e:
+        raise LocalPathError("the Trash is off limits") from e
+    return fd, trash
+
+
+def _free_trash_name(fd: int, src: Path) -> str:
+    """The Finder's naming: `notes.txt`, then `notes 2.txt`, without following a symlink in the Trash."""
+    name = src.name
+    n = 2
+    while True:
+        try:
+            os.lstat(name, dir_fd=fd)
+        except FileNotFoundError:
+            return name
+        name = f"{src.stem} {n}{src.suffix}"
+        n += 1
+
+
 def trash_local(path: str) -> dict[str, Any]:
     """Move a file or folder to ~/.Trash, so the user can get it back from the Finder. Nothing is erased here."""
+    _refuse_leaf_symlink(path, "trash")
     p = allowed_path(path)
     if not p.exists():
         raise LocalPathError(f"{p} does not exist")
     if p == home():
         raise LocalPathError("the home folder itself cannot be trashed")
-    trash = home() / ".Trash"
-    trash.mkdir(exist_ok=True)
-    dst = trash / p.name
-    n = 2
-    while dst.exists():  # the Finder does the same thing: "notes.txt", "notes 2.txt", ...
-        dst = trash / f"{p.stem} {n}{p.suffix}"
-        n += 1
-    shutil.move(str(p), str(dst))
-    return {"path": str(p), "trashed_to": str(dst), "note": "in the Trash; the user can put it back from the Finder"}
+    fd, trash = _open_trash()
+    try:
+        name = _free_trash_name(fd, p)
+        try:
+            os.rename(os.fspath(p), name, dst_dir_fd=fd)
+        except OSError as e:
+            if e.errno != errno.EXDEV:
+                raise LocalPathError(f"could not move {p.name} to the Trash") from e
+            dest = trash / name
+            if trash.is_symlink() or dest.is_symlink():
+                raise LocalPathError("the Trash is a symlink and is off limits") from e
+            shutil.move(os.fspath(p), os.fspath(dest))
+    finally:
+        os.close(fd)
+    return {"path": str(p), "trashed_to": str(trash / name), "note": "in the Trash; the user can put it back from the Finder"}
 
 
 # ---- Shortcuts ----
@@ -234,6 +367,8 @@ async def _run(argv: list[str], *, stdin: bytes | None, timeout: float) -> tuple
 
 
 async def list_shortcuts(folder: str | None = None, timeout: float = 15.0) -> list[str]:
+    if folder and str(folder).strip().startswith("-"):
+        raise ValueError("folder cannot start with '-'")
     argv = ["shortcuts", "list"] + (["--folder-name", folder] if folder else [])
     code, out, err, timed_out = await _run(argv, stdin=None, timeout=timeout)
     if timed_out:
@@ -245,13 +380,17 @@ async def list_shortcuts(folder: str | None = None, timeout: float = 15.0) -> li
 
 async def run_shortcut(name: str, text_input: str | None = None, timeout: float = 60.0) -> dict[str, Any]:
     """`shortcuts run <name> -o <tmp>`, with the optional text piped to stdin (Shortcut Input)."""
-    if not (name or "").strip():
+    name = (name or "").strip()
+    if not name:
         raise ValueError("name is empty")
+    if any(c in name for c in "\x00\r\n"):
+        raise ValueError("name is not a shortcut name")
     if text_input is not None and len(text_input) > MAX_SHORTCUT_INPUT:
         raise ValueError(f"input is longer than {MAX_SHORTCUT_INPUT} characters")
     with tempfile.TemporaryDirectory(prefix="grain-shortcut-") as tmp:
         out_path = os.path.join(tmp, "output")
-        argv = ["shortcuts", "run", name.strip(), "--output-path", out_path]
+        # `--` ends option parsing, so a name like `--output-path=/tmp/x` is the shortcut, not a flag.
+        argv = ["shortcuts", "run", "--output-path", out_path, "--", name]
         started = time.monotonic()
         code, out, err, timed_out = await _run(argv, stdin=text_input.encode() if text_input is not None else None, timeout=timeout)
         elapsed = round(time.monotonic() - started, 2)

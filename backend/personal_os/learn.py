@@ -14,6 +14,7 @@ import contextlib
 import json
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -187,9 +188,25 @@ SKILLS_HEADER = (
 )
 
 
+def normalize_skill_text(text: Any) -> str:
+    """Drop characters a person cannot see that still change what a model, or a regex, reads.
+
+    Format characters (zero-width spaces, bidi overrides) and other non-whitespace controls
+    are how a draft hides "ignore previous instructions" from the approval check, or how an
+    approved procedure displays one thing and means another. Newlines and tabs stay.
+    """
+    out: list[str] = []
+    for ch in str(text or ""):
+        cat = unicodedata.category(ch)
+        if cat == "Cf" or (cat == "Cc" and ch not in "\n\t\r"):
+            continue
+        out.append(ch)
+    return "".join(out)
+
+
 def _fence_safe(text: Any) -> str:
     """Strip anything a candidate could use to close its own fence and speak as the prompt."""
-    return re.sub(r"[<>]{2,}", "", str(text or "")).replace("\x00", "")
+    return re.sub(r"[<>]{2,}", "", normalize_skill_text(text))
 
 
 def skill_block(skills: list[dict[str, Any]]) -> str:
@@ -272,6 +289,68 @@ class Skills:
         """The only path from this table into a prompt. A candidate or a reject can never come out of it."""
         rows = [s for s in self.list(status="approved", project_id=project_id) if (s["procedure"] or "").strip()]
         return skill_block(rows) if rows else ""
+
+
+def _one_line(value: Any, limit: int = 160) -> str:
+    text = " ".join(str(value).split())
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
+def _tool_lines(events: list[dict[str, Any]] | None) -> list[str]:
+    """The calls a reply actually made, short enough to teach a method without pasting the payload."""
+    lines: list[str] = []
+    for ev in events or []:
+        if ev.get("pending"):
+            continue
+        name = str(ev.get("name") or "tool")
+        args = ev.get("arguments") if isinstance(ev.get("arguments"), dict) else {}
+        brief: list[str] = []
+        for key, val in list(args.items())[:5]:
+            if key in ("content", "code", "procedure", "body", "text"):
+                brief.append(f"{key}=<{len(str(val))} chars>")
+            else:
+                brief.append(f"{key}={_one_line(val, 80)}")
+        status = "error: " + _one_line(ev.get("error"), 120) if ev.get("error") else "ok"
+        lines.append(f"- {name}({', '.join(brief)}) -> {status}")
+    return lines
+
+
+def run_transcript(messages: list[dict[str, Any]], message_id: str | None = None) -> tuple[str | None, str | None]:
+    """(transcript, reason). `message_id` keeps one assistant reply and the user turn before it.
+
+    Tool calls are included, because the procedure is the method, not the prose around it.
+    `reason` is set when there is nothing worth sending to the model.
+    """
+    usable = [m for m in messages if m.get("role") in ("user", "assistant")]
+    if message_id:
+        idx = next((i for i, m in enumerate(usable) if m.get("id") == message_id), None)
+        if idx is None:
+            return None, "That reply is not in this chat."
+        msg = usable[idx]
+        if msg.get("role") != "assistant":
+            return None, "Pick an assistant reply."
+        prior = next((usable[j] for j in range(idx - 1, -1, -1) if usable[j].get("role") == "user"), None)
+        chosen = [m for m in (prior, msg) if m]
+        if not (msg.get("tool_events") or (msg.get("content") or "").strip()):
+            return None, "That reply did not do anything worth saving."
+    else:
+        chosen = [m for m in usable if (m.get("content") or "").strip() or m.get("tool_events")][-24:]
+        spoken = [m for m in chosen if (m.get("content") or "").strip()]
+        if len(spoken) < 2 and not any(m.get("tool_events") for m in chosen):
+            return None, "Not enough of a conversation to learn a procedure from."
+    blocks: list[str] = []
+    for m in chosen:
+        role = str(m["role"]).upper()
+        content = (m.get("content") or "").strip()
+        if content:
+            blocks.append(f"{role}: {content[:2000]}")
+        tools = _tool_lines(m.get("tool_events"))
+        if tools:
+            blocks.append(f"{role} tools:\n" + "\n".join(tools))
+    text = "\n\n".join(blocks).strip()
+    if len(text) < 20:
+        return None, "Not enough of a conversation to learn a procedure from."
+    return text, None
 
 
 INDUCE_PROMPT = """You distill a finished conversation into one reusable procedure (a "skill") the assistant could follow next time.

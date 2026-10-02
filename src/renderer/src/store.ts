@@ -3,11 +3,12 @@ import type { ApprovalDecision, PlanEdit, PlanDecision, PlanRecord,
   Desk, DeskEvent, DeskFile, FullDesk, PromotionResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, Document, Effort, FullDoc, GraphData, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodoCalendarStatus, TodayDashboard, Recap, Job, Meeting, MeetingCandidate, MeetingCapability, MeetingConfig, MeetingPreflight, MeetingSegment, MeetingStatus, MeetingStatusInfo, MeetingStreamEvent, FullMeeting } from '@shared/types'
 import { api, backgroundStream, chatStream, meetingStream, setBase, type Scope } from './lib/api'
 import { currentSelection } from './lib/pageContext'
-import { NEEDS_YOU } from '../../shared/types'
+import { DEFAULT_EFFORT, NEEDS_YOU } from '../../shared/types'
 import { finishStatus, mergeConversation, pickEvictions, reduceStatus, settleApprovals } from './sessionStatus'
 import { applyCursor, fetchSegmentPages, needsSegmentReload } from './lib/transcript'
 import { viewHidden } from './moduleToggles'
 import { chainTo, folderKey, groupShutKey } from './lib/docTree'
+import { clearViews } from './lib/viewCache'
 
 /**
  * Settings as the renderer holds them: without the legacy `mode`, which only init() reads. Kept out
@@ -135,6 +136,8 @@ export interface State {
   /** A model picked on a draft chat. Null follows `settings.defaultModel`; picking one must not rewrite that default. */
   draftModel: string | null
   draftFast: boolean
+  /** A file was attached before this draft had a row. `send` marks the new chat untrusted. */
+  uploadTaintTarget: 'draft' | 'page' | null
   /** Scope filter used by the Memory / Graph / Documents library views. */
   libraryScope: Scope
   /** Scope the memories/graph/documents arrays are currently loaded for. */
@@ -303,6 +306,8 @@ export interface State {
   renameChat: (id: string, title: string) => Promise<void>
   setChatModel: (model: string, conversationId?: string) => Promise<void>
   setChatSettings: (patch: Partial<ConversationSettings>, conversationId?: string) => Promise<void>
+  /** A library file was just attached to this chat, so the next reply treats its contents as untrusted. */
+  noteUntrustedUpload: (conversationId?: string, pending?: 'draft' | 'page') => Promise<void>
   /** `false` when the text was refused, so the caller must keep it. Never rejects. */
   send: (text: string, conversationId?: string) => Promise<boolean>
   /** Send from the ⌘I panel: same contract as `send`, plus the page snapshot and its own thread. */
@@ -358,7 +363,7 @@ export interface State {
   updateSkill: (id: string, patch: Parameters<typeof api.skills.update>[1]) => Promise<void>
   deleteSkill: (id: string) => Promise<void>
   /** Ask the backend to distil a chat into a candidate skill for review. */
-  induceSkill: (conversationId: string) => Promise<void>
+  induceSkill: (conversationId: string, messageId?: string) => Promise<void>
 
   refreshGraph: () => Promise<void>
   refreshDocuments: () => Promise<void>
@@ -425,7 +430,7 @@ export interface State {
   addTodo: (t: { title: string; project_id?: string | null; due?: string | null; priority?: number; notes?: string }) => Promise<void>
   updateTodo: (id: string, patch: Parameters<typeof api.todos.update>[1]) => Promise<void>
   deleteTodo: (id: string) => Promise<void>
-  uploadDocuments: (files: FileList | File[], projectId: string | null) => Promise<void>
+  uploadDocuments: (files: FileList | File[], projectId: string | null) => Promise<string[]>
   deleteDocument: (id: string) => Promise<void>
 
   refreshDocs: (q?: string) => Promise<void>
@@ -1039,9 +1044,10 @@ export const useStore = create<State>((set, get) => {
     memoryMode: 'split',
     projectViewId: null,
     draftProjectId: null,
-    draftEffort: 'default',
+    draftEffort: DEFAULT_EFFORT,
     draftModel: null,
     draftFast: false,
+    uploadTaintTarget: null,
     libraryScope: 'all',
     dataScope: 'all',
     docs: [],
@@ -1081,7 +1087,7 @@ export const useStore = create<State>((set, get) => {
     pageAgentOpen: false,
     pageAgentId: null,
     pageAgentModel: null,
-    pageAgentEffort: 'default',
+    pageAgentEffort: DEFAULT_EFFORT,
     pageAgentFast: false,
     pageContext: null,
     traceMessageId: null,
@@ -1288,7 +1294,7 @@ export const useStore = create<State>((set, get) => {
     },
 
     refreshConversations: async () => set({ conversations: await api.conversations.list('all') }),
-    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, draftEffort: 'default', draftModel: null, draftFast: false, view: 'chat', settingsOpen: false }),
+    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, view: 'chat', settingsOpen: false }),
     createConversation: async (projectId) => {
       try {
         const c = await api.conversations.create(projectId, get().settings.defaultModel)
@@ -1382,11 +1388,31 @@ export const useStore = create<State>((set, get) => {
       const c = await api.conversations.patch(id, { settings: patch })
       patchConversation(id, (cur) => ({ ...cur, settings: c.settings }))
     },
+    noteUntrustedUpload: async (conversationId, pending = 'draft') => {
+      const id = conversationId && conversationId !== '\u0000page-agent' ? conversationId : undefined
+      if (!id) {
+        set({ uploadTaintTarget: pending })
+        return
+      }
+      const settings = get().sessions[id]?.conversation.settings
+      const patch: Partial<ConversationSettings> = { tainted: true }
+      if (settings) patch.taint_sources = [...new Set([...(settings.taint_sources ?? []), 'upload'])]
+      await get().setChatSettings(patch, id)
+    },
 
     send: async (text, conversationId) => {
       if (!text.trim()) return false
       const id = conversationId ?? get().focusedConversationId
       if (id) {
+        if (get().uploadTaintTarget === 'draft') {
+          try {
+            await get().noteUntrustedUpload(id)
+            set({ uploadTaintTarget: null })
+          } catch (e) {
+            get().toast((e as Error).message, 'error')
+            return false
+          }
+        }
         // Mid-reply sends steer the run: the message lands in the conversation now and the model
         // drops the completion it was writing and answers the steer. Only a run that is still
         // *answering* can take one — in its auto-learn tail the loop is over, and a steer accepted
@@ -1422,17 +1448,34 @@ export const useStore = create<State>((set, get) => {
         return false
       }
       // Effort and fast mode chosen on the draft land before the first run, so they apply to this reply.
-      const { draftEffort: effort, draftFast: fast } = get()
-      const settings: { effort?: Effort; fast?: boolean } = {}
-      if (effort !== 'default') settings.effort = effort
+      const { draftEffort: effort, draftFast: fast, uploadTaintTarget } = get()
+      const settings: { effort?: Effort; fast?: boolean; tainted?: boolean; taint_sources?: string[] } = {}
+      // Medium is already what a new row hydrates to. Anything else, including the omit-the-field
+      // choice, has to be written or the server would fill medium back in.
+      if (effort !== DEFAULT_EFFORT) settings.effort = effort
       if (fast) settings.fast = true
-      if (effort !== 'default' || fast) c = await api.conversations.patch(c.id, { settings }).catch(() => c)
+      const fromUpload = uploadTaintTarget === 'draft'
+      if (fromUpload) {
+        settings.tainted = true
+        settings.taint_sources = ['upload']
+      }
+      if (effort !== DEFAULT_EFFORT || fast || fromUpload) {
+        const patched = await api.conversations.patch(c.id, { settings }).catch(() => null)
+        if (fromUpload && !patched?.settings?.tainted) {
+          draftCreate = null
+          created(null)
+          get().toast('Could not mark this chat untrusted after the upload', 'error')
+          return false
+        }
+        if (patched) c = patched
+      }
       c.messages = []
       putSession(c)
       // Listed now, not when the reply ends: the sidebar should show the chat you are in while it streams.
       const { messages: _m, ...row } = c
       set((s) => ({
-        focusedConversationId: c.id, view: 'chat', draftEffort: 'default', draftModel: null, draftFast: false,
+        focusedConversationId: c.id, view: 'chat', draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false,
+        uploadTaintTarget: fromUpload ? null : uploadTaintTarget,
         conversations: [row as Conversation, ...s.conversations.filter((x) => x.id !== c.id)]
       }))
       void get().refreshProjects()
@@ -1462,6 +1505,15 @@ export const useStore = create<State>((set, get) => {
         // The thread can have been deleted from the chat list since; fall back to a fresh one.
         if (!get().sessions[id]) await get().openSession(id).catch(() => { id = null })
       }
+      if (id && get().uploadTaintTarget === 'page') {
+        try {
+          await get().noteUntrustedUpload(id, 'page')
+          set({ uploadTaintTarget: null })
+        } catch (e) {
+          get().toast((e as Error).message, 'error')
+          return false
+        }
+      }
       if (!id) {
         let c: Conversation
         try {
@@ -1470,10 +1522,24 @@ export const useStore = create<State>((set, get) => {
           get().toast((e as Error).message, 'error')
           return false
         }
-        const { pageAgentEffort, pageAgentFast } = get()
-        if (pageAgentEffort !== 'default' || pageAgentFast) {
-          c = await api.conversations.patch(c.id, { settings: { effort: pageAgentEffort, fast: pageAgentFast } }).catch(() => c)
+        const { pageAgentEffort, pageAgentFast, uploadTaintTarget } = get()
+        const pageSettings: { effort?: Effort; fast?: boolean; tainted?: boolean; taint_sources?: string[] } = {}
+        if (pageAgentEffort !== DEFAULT_EFFORT) pageSettings.effort = pageAgentEffort
+        if (pageAgentFast) pageSettings.fast = true
+        const fromUpload = uploadTaintTarget === 'page'
+        if (fromUpload) {
+          pageSettings.tainted = true
+          pageSettings.taint_sources = ['upload']
         }
+        if (pageAgentEffort !== DEFAULT_EFFORT || pageAgentFast || fromUpload) {
+          const patched = await api.conversations.patch(c.id, { settings: pageSettings }).catch(() => null)
+          if (fromUpload && !patched?.settings?.tainted) {
+            get().toast('Could not mark this chat untrusted after the upload', 'error')
+            return false
+          }
+          if (patched) c = patched
+        }
+        if (fromUpload) set({ uploadTaintTarget: null })
         c.messages = []
         putSession(c)
         id = c.id
@@ -1963,9 +2029,9 @@ export const useStore = create<State>((set, get) => {
       await api.skills.delete(id)
       set((st) => ({ skills: st.skills.filter((x) => x.id !== id) }))
     },
-    induceSkill: async (conversationId) => {
+    induceSkill: async (conversationId, messageId) => {
       try {
-        const { candidate, reason } = await api.skills.induce(conversationId)
+        const { candidate, reason } = await api.skills.induce(conversationId, messageId)
         if (candidate) {
           set((st) => ({ skills: [candidate, ...st.skills] }))
           get().toast(`Candidate skill “${candidate.name}” is waiting for your review`, 'learned')
@@ -2636,15 +2702,18 @@ export const useStore = create<State>((set, get) => {
       }
     },
     uploadDocuments: async (files, projectId) => {
+      const saved: string[] = []
       for (const f of Array.from(files)) {
         try {
-          await api.documents.upload(projectId, f)
-          get().toast(`Uploaded ${f.name}`)
+          const doc = await api.documents.upload(projectId, f)
+          saved.push(doc.name || f.name)
+          get().toast(`Uploaded ${doc.name || f.name}`)
         } catch (e) {
           get().toast(`${f.name}: ${(e as Error).message}`, 'error')
         }
       }
       await Promise.all([get().refreshDocuments(), get().refreshProjects()])
+      return saved
     },
     deleteDocument: async (id) => {
       await api.documents.delete(id)
@@ -2822,6 +2891,7 @@ export const useStore = create<State>((set, get) => {
           if (fresh || Date.now() - started > 180_000) {
             clearInterval(timer)
             if (fresh && st) {
+              clearViews()
               set({ google: st })
               get().toast(`Connected ${st.email ?? 'Google account'}`)
               void get().refreshDashboard()
@@ -2835,6 +2905,7 @@ export const useStore = create<State>((set, get) => {
     },
     disconnectGoogle: async () => {
       set({ google: await api.google.disconnect() })
+      clearViews()
       void get().refreshDashboard()
       void api.tools().then((t) => set({ tools: t.tools })).catch(() => undefined)
     },

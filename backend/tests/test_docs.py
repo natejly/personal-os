@@ -167,6 +167,10 @@ held = call("doc_edit", {"doc": made2["doc_id"], "edits": [{"find": "beta", "rep
             {"settings": {"docEditMode": "nope"}})
 check(held["status"] == "pending_review", "an unknown mode still asks")
 check(j("GET", f"/docs/{made2['doc_id']}")["content"] == "beta\n", "asking leaves the body alone")
+job = call("doc_edit", {"doc": made2["doc_id"], "edits": [{"find": "beta", "replace": "delta"}], "summary": "Swap"},
+           {"settings": {"docEditMode": "apply"}, "proposal_only": True})
+check(job["status"] == "pending_review", "a scheduled run does not accept-all")
+check(j("GET", f"/docs/{made2['doc_id']}")["content"] == "beta\n", "a scheduled run leaves the body alone")
 
 # ---- deletion takes the history with it ----
 j("DELETE", f"/docs/{did}")

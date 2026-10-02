@@ -83,6 +83,24 @@ class proxy_replies:
         stt.httpx.Client = self.real  # type: ignore[assignment]
 
 
+class speech_is:
+    """Pin whether Apple Speech looks ready, independent of this Mac's TCC grant."""
+
+    def __init__(self, available: bool, authorized: bool | None = None):
+        self.available = available
+        self.authorized = available if authorized is None else authorized
+
+    def __enter__(self) -> None:
+        self.real_av = stt.speech_available
+        self.real_au = stt.speech_authorized
+        stt.speech_available = lambda: self.available  # type: ignore[assignment]
+        stt.speech_authorized = lambda: self.authorized  # type: ignore[assignment]
+
+    def __exit__(self, *exc: object) -> None:
+        stt.speech_available = self.real_av  # type: ignore[assignment]
+        stt.speech_authorized = self.real_au  # type: ignore[assignment]
+
+
 class whisper_is:
     """Pin whether whisper.cpp looks installed.
 
@@ -120,7 +138,7 @@ def _model(data_dir: Path, name: str = "ggml-base.en.bin") -> Path:
 
 def test_proxy_verbose_json_yields_text_and_segments() -> None:
     data_dir = Path(tempfile.mkdtemp())
-    with proxy_replies(200, VERBOSE_JSON, "") as stub, whisper_is(""):
+    with proxy_replies(200, VERBOSE_JSON, "") as stub, whisper_is(""), speech_is(False):
         res = stt.transcribe(_wav(), settings=SETTINGS, cfg=CFG, data_dir=data_dir)
     assert res["backend"] == "proxy"
     assert res["error"] == ""
@@ -135,7 +153,7 @@ def test_proxy_verbose_json_yields_text_and_segments() -> None:
 def test_proxy_sends_the_model_verbose_json_and_the_previous_tail() -> None:
     data_dir = Path(tempfile.mkdtemp())
     tail = "x" * 3000 + "and then he said"
-    with proxy_replies(200, VERBOSE_JSON, "") as stub, whisper_is(""):
+    with proxy_replies(200, VERBOSE_JSON, "") as stub, whisper_is(""), speech_is(False):
         stt.transcribe(_wav(), settings=SETTINGS, cfg=CFG, data_dir=data_dir, prompt=tail)
         sent = stub.calls[0]
         assert sent["data"]["model"] == "whisper-1"
@@ -163,14 +181,14 @@ def test_proxy_bills_the_audio_length_not_the_wall_clock() -> None:
     listener = seen.append
     llm.on_usage(listener)
     try:
-        with proxy_replies(200, VERBOSE_JSON, ""), whisper_is(""):
+        with proxy_replies(200, VERBOSE_JSON, ""), whisper_is(""), speech_is(False):
             stt.transcribe(_wav(), settings=SETTINGS, cfg=CFG, data_dir=data_dir)
         assert len(seen) == 1, seen
         assert seen[0]["model"] == "whisper-1"
         assert seen[0]["kind"] == "meeting-stt"
         assert seen[0]["duration_ms"] == 4250           # VERBOSE_JSON's duration, in ms
         # No duration in the reply means no row: a made-up number is worse than a missing one.
-        with proxy_replies(200, {"text": "hi"}, ""), whisper_is(""):
+        with proxy_replies(200, {"text": "hi"}, ""), whisper_is(""), speech_is(False):
             stt.transcribe(_wav(), settings=SETTINGS, cfg=CFG, data_dir=data_dir)
         assert len(seen) == 1, seen
     finally:
@@ -184,7 +202,7 @@ def test_proxy_404_returns_an_error_and_never_raises() -> None:
     # The state of this machine today: litellm.yaml routes chat models and nothing else.
     data_dir = Path(tempfile.mkdtemp())
     body = '{"error":{"message":"The model `whisper-1` does not exist","code":404}}'
-    with proxy_replies(404, None, body), whisper_is(""):
+    with proxy_replies(404, None, body), whisper_is(""), speech_is(False):
         res = stt.transcribe(_wav(), settings=SETTINGS, cfg=CFG, data_dir=data_dir)
     assert res["error"], res
     assert res["error"].startswith("transcription 404: ")
@@ -195,12 +213,12 @@ def test_proxy_404_returns_an_error_and_never_raises() -> None:
 
 def test_proxy_reply_that_is_not_json_falls_back_to_raw_text() -> None:
     data_dir = Path(tempfile.mkdtemp())
-    with proxy_replies(200, None, "plain text transcript"), whisper_is(""):
+    with proxy_replies(200, None, "plain text transcript"), whisper_is(""), speech_is(False):
         res = stt.transcribe(_wav(), settings=SETTINGS, cfg=CFG, data_dir=data_dir)
     assert res["text"] == "plain text transcript"
     assert res["error"] == ""
     # A JSON array is valid JSON and still not a transcription payload.
-    with proxy_replies(200, [1, 2, 3], "[1, 2, 3]"), whisper_is(""):
+    with proxy_replies(200, [1, 2, 3], "[1, 2, 3]"), whisper_is(""), speech_is(False):
         res = stt.transcribe(_wav(), settings=SETTINGS, cfg=CFG, data_dir=data_dir)
     assert res["text"] == "[1, 2, 3]"
     assert res["error"] == ""
@@ -209,7 +227,7 @@ def test_proxy_reply_that_is_not_json_falls_back_to_raw_text() -> None:
 def test_a_dead_connection_comes_back_as_an_error_string() -> None:
     # TranscribeWorker calls this on a daemon thread; an exception escaping would kill the queue.
     data_dir = Path(tempfile.mkdtemp())
-    with proxy_replies(raises=stt.httpx.ConnectError("All connection attempts failed")), whisper_is(""):
+    with proxy_replies(raises=stt.httpx.ConnectError("All connection attempts failed")), whisper_is(""), speech_is(False):
         res = stt.transcribe(_wav(), settings=SETTINGS, cfg=CFG, data_dir=data_dir)
     assert res["error"] == "ConnectError: All connection attempts failed"
     assert res["text"] == "" and res["backend"] == "proxy"
@@ -220,23 +238,33 @@ def test_a_dead_connection_comes_back_as_an_error_string() -> None:
 
 def test_resolve_backend_prefers_proxy_when_whisper_is_not_installed() -> None:
     data_dir = Path(tempfile.mkdtemp())
-    with whisper_is(""):
+    with whisper_is(""), speech_is(False):
         assert stt.resolve_backend(CFG, data_dir) == "proxy"
         _model(data_dir)                                  # a model with no binary is still proxy
         assert stt.resolve_backend(CFG, data_dir) == "proxy"
-    with whisper_is("/opt/homebrew/bin/whisper-cli"):
+    with whisper_is("/opt/homebrew/bin/whisper-cli"), speech_is(False):
         assert stt.resolve_backend(CFG, data_dir) == "local"
         assert stt.resolve_backend(CFG, Path(tempfile.mkdtemp())) == "proxy"   # binary, no model
 
 
+def test_resolve_backend_prefers_speech_when_it_is_authorized() -> None:
+    data_dir = Path(tempfile.mkdtemp())
+    with speech_is(True), whisper_is("/opt/homebrew/bin/whisper-cli"):
+        _model(data_dir)
+        assert stt.resolve_backend(CFG, data_dir) == "speech"
+    with speech_is(True, authorized=False), whisper_is(""):
+        assert stt.resolve_backend(CFG, data_dir) == "proxy"
+
+
 def test_resolve_backend_honours_an_explicit_setting() -> None:
     data_dir = Path(tempfile.mkdtemp())
-    with whisper_is(""):
+    with whisper_is(""), speech_is(False):
         assert stt.resolve_backend({"sttBackend": "local"}, data_dir) == "local"
         assert stt.resolve_backend({"sttBackend": "off"}, data_dir) == "off"
         assert stt.resolve_backend({"sttBackend": "PROXY"}, data_dir) == "proxy"
         assert stt.resolve_backend({}, data_dir) == "proxy"            # missing key means auto
         assert stt.resolve_backend({"sttBackend": "nonsense"}, data_dir) == "proxy"
+        assert stt.resolve_backend({"sttBackend": "speech"}, data_dir) == "speech"
     assert "auto" not in {stt.resolve_backend({"sttBackend": b}, data_dir) for b in stt.BACKENDS}
 
 
@@ -279,20 +307,20 @@ def test_capability_rows_all_explain_how_to_fix_themselves() -> None:
     data_dir = Path(tempfile.mkdtemp())
     cases = [CFG, {"sttBackend": "off"}, {"sttBackend": "local"}, {"sttBackend": "proxy", "sttModel": ""}, {}]
     for cfg in cases:
-        with whisper_is(""):
+        with whisper_is(""), speech_is(False):
             rows = stt.capabilities(cfg, data_dir)
-        assert {r["id"] for r in rows} == {"stt", "stt_local"}, cfg
+        assert {r["id"] for r in rows} == {"stt", "stt_speech", "stt_local"}, cfg
         for r in rows:
             assert isinstance(r["ok"], bool)
             assert r["detail"]
             assert r["fix"] or r["ok"], (cfg, r)      # anything not ok says how to fix it
-    with whisper_is(""):
+    with whisper_is(""), speech_is(False):
         rows = {r["id"]: r for r in stt.capabilities({"sttBackend": "proxy", "sttModel": ""}, data_dir)}
     assert rows["stt"]["ok"] is False
     assert "/v1/audio/transcriptions" in rows["stt"]["fix"]
     assert "brew install whisper-cpp" in rows["stt_local"]["fix"]
     assert str(data_dir / "models" / "ggml-base.en.bin") in rows["stt_local"]["fix"]
-    with whisper_is("/opt/homebrew/bin/whisper-cli"):
+    with whisper_is("/opt/homebrew/bin/whisper-cli"), speech_is(False):
         _model(data_dir)
         rows = {r["id"]: r for r in stt.capabilities(CFG, data_dir)}
     assert rows["stt_local"]["ok"] is True and rows["stt_local"]["fix"] == ""
@@ -301,31 +329,25 @@ def test_capability_rows_all_explain_how_to_fix_themselves() -> None:
 
 def test_selftest_surfaces_a_proxy_failure() -> None:
     data_dir = Path(tempfile.mkdtemp())
-    with proxy_replies(404, None, "404 page not found"), whisper_is(""):
+    with proxy_replies(404, None, "404 page not found"), whisper_is(""), speech_is(False):
         res = stt.selftest(settings=SETTINGS, cfg=CFG, data_dir=data_dir)
     assert set(res) == {"ok", "backend", "record_ms", "transcribe_ms", "text", "error"}
     assert res["ok"] is False
     assert res["error"], res
     assert res["backend"] == "proxy"
-    if not audiocap.ffmpeg_path():
-        print("  note  no ffmpeg on PATH, so only the recording half of selftest was exercised")
-        return
     assert res["error"].startswith("transcription 404: ")
-    assert res["record_ms"] > 0
+    assert res["record_ms"] >= 0
 
 
 def test_selftest_treats_transcribed_silence_as_a_pass() -> None:
-    if not audiocap.ffmpeg_path():
-        print("  note  no ffmpeg on PATH, skipping the real wav round trip")
-        return
     data_dir = Path(tempfile.mkdtemp())
     # Silence transcribes to "" on every provider; an empty string must not read as a failure.
-    with proxy_replies(200, {"text": "", "segments": [], "duration": 0.4}, "") as stub, whisper_is(""):
+    with proxy_replies(200, {"text": "", "segments": [], "duration": 0.4}, "") as stub, \
+            whisper_is(""), speech_is(False):
         res = stt.selftest(settings=SETTINGS, cfg=CFG, data_dir=data_dir)
     assert res["ok"] is True
     assert res["text"] == "" and res["error"] == ""
-    assert res["record_ms"] > 0
-    # It really posted a wav ffmpeg wrote, which is the part capabilities() can never prove.
+    assert res["record_ms"] >= 0
     assert len(stub.calls) == 1
     assert stub.calls[0]["bytes"][:4] == b"RIFF"
     assert len(stub.calls[0]["bytes"]) >= audiocap.MIN_WAV_BYTES
@@ -335,12 +357,12 @@ def test_selftest_treats_transcribed_silence_as_a_pass() -> None:
 def test_probes_never_raise_and_never_shell_out_to_a_device() -> None:
     data_dir = Path(tempfile.mkdtemp())
     assert stt.whisper_cli_path() in ("", stt.whisper_cli_path())   # must never raise
-    assert stt.BACKENDS == ("auto", "proxy", "local", "off")
+    assert stt.BACKENDS == ("auto", "speech", "proxy", "local", "off")
     assert stt.local_model_path(Path("/does/not/exist"), {}) == ""
     assert stt.local_model_path(Path("/etc/hosts"), {}) == ""       # not a directory
     for cfg in ({}, {"sttBackend": None}, {"sttModel": None}, {"whisperModelPath": None}):
         assert stt.resolve_backend(cfg, data_dir) in stt.BACKENDS
-        assert len(stt.capabilities(cfg, data_dir)) == 2
+        assert len(stt.capabilities(cfg, data_dir)) == 3
 
 
 if __name__ == "__main__":

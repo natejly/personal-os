@@ -147,10 +147,41 @@ async def exa_search(query: str, n: int, api_key: str = "") -> list[dict[str, An
 # ---- YouTube: metadata, transcript and search via yt-dlp ----
 
 YOUTUBE_HOSTS = ("youtube.com", "youtu.be", "youtube-nocookie.com")
+# Caption tracks are a second URL, chosen by yt-dlp, and they redirect. Only these hosts may be fetched.
+CAPTION_HOSTS = YOUTUBE_HOSTS + ("googlevideo.com",)
 
 
 def is_youtube(host: str) -> bool:
     return any(host == h or host.endswith("." + h) for h in YOUTUBE_HOSTS)
+
+
+def caption_url_ok(url: str) -> bool:
+    """A caption fetch may only hit YouTube or googlevideo over https. Redirects included."""
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except ValueError:
+        return False
+    if parsed.scheme != "https" or parsed.username or parsed.password:
+        return False
+    host = (parsed.hostname or "").lower().rstrip(".")
+    return any(host == h or host.endswith("." + h) for h in CAPTION_HOSTS)
+
+
+async def _get_caption(url: str) -> httpx.Response:
+    """Follow caption redirects by hand, and refuse any hop that leaves the caption hosts."""
+    async with httpx.AsyncClient(timeout=30, follow_redirects=False, headers={"User-Agent": UA}) as client:
+        current = url
+        for _ in range(5):
+            if not caption_url_ok(current):
+                raise ReachError("caption URL is not a YouTube host")
+            response = await client.get(current)
+            if response.status_code not in (301, 302, 303, 307, 308):
+                return response
+            location = response.headers.get("location")
+            if not location:
+                raise ReachError("caption redirect had no location")
+            current = urllib.parse.urljoin(current, location)
+        raise ReachError("too many caption redirects")
 
 
 def _ydl(opts: dict[str, Any]) -> Any:
@@ -236,8 +267,7 @@ async def youtube_video(url: str, lang: str = "en") -> dict[str, Any]:
         out["transcript_note"] = "this video has no subtitles or auto captions"
         return out
     k, track, auto = picked
-    async with httpx.AsyncClient(timeout=30, follow_redirects=True, headers={"User-Agent": UA}) as c:
-        r = await c.get(track["url"])  # a googlevideo/youtube timedtext URL yt-dlp got from YouTube itself
+    r = await _get_caption(track["url"])  # googlevideo/youtube timedtext; redirects must stay on those hosts
     if r.status_code != 200:
         raise ReachError(f"YouTube refused the caption track ({r.status_code})")
     out["transcript"] = parse_json3(r.json()) if track.get("ext") == "json3" else parse_vtt(r.text)

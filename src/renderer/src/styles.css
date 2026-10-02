@@ -196,8 +196,6 @@ kbd {
      --sidebar-bg now composites over this rather than over the desktop; drop this line (and keep
      .canvas's own background) to get the frosted-desktop look back. */
   background: var(--bg);
-  /* The popout variant of the page agent anchors to the shell, so it floats over whichever view
-     is in the middle column instead of being clipped by it. */
   position: relative;
 }
 .app.sidebar-collapsed { grid-template-columns: 0 1fr; }
@@ -411,9 +409,22 @@ kbd {
 .model-picker svg { position: absolute; right: 8px; pointer-events: none; }
 
 /* Cursor-style model picker: trigger, searchable list, Edit panel for effort and Fast. */
-.model-menu { position: relative; min-width: 0; }
+.model-menu { position: relative; display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; flex: 0 1 auto; }
+.model-menu-effort {
+  display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto;
+  color: var(--text-faint); font: 12px var(--font);
+}
+.model-menu-effort .chat-control {
+  max-width: none;
+  appearance: none;
+  padding-right: 16px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='7' viewBox='0 0 10 7' fill='none' stroke='%238f8d86' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M1 1.5l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 2px center;
+  background-size: 8px 6px;
+}
 .model-menu-trigger {
-  display: inline-flex; align-items: center; gap: 4px; max-width: 100%;
+  display: inline-flex; align-items: center; gap: 4px; min-width: 0; flex: 0 1 auto; max-width: 100%;
   height: 24px; padding: 0 6px 0 8px; border: 0; border-radius: 6px;
   background: transparent; color: var(--text-muted); font: 12px var(--font); cursor: pointer;
 }
@@ -423,17 +434,19 @@ kbd {
 .model-menu-chevron { flex-shrink: 0; opacity: 0.7; }
 .model-menu-pop, .model-menu-params {
   position: fixed; z-index: 80; width: 280px;
+  max-height: calc(100vh - 16px);
   background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: 10px;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35); padding: 4px;
 }
-.model-menu-params { width: 220px; }
+.model-menu-pop { display: flex; flex-direction: column; overflow: hidden; }
+.model-menu-params { width: 220px; overflow-y: auto; }
 .model-menu-search {
   width: 100%; box-sizing: border-box; margin: 0; padding: 7px 8px;
   border: 0; border-bottom: 1px solid var(--border); border-radius: 6px 6px 0 0;
   background: transparent; color: var(--text); font: 13px var(--font); outline: 0;
 }
 .model-menu-search::placeholder { color: var(--text-faint); }
-.model-menu-list { max-height: 280px; overflow-y: auto; padding-top: 4px; }
+.model-menu-list { max-height: min(280px, calc(100vh - 72px)); overflow-y: auto; padding-top: 4px; min-height: 0; }
 .model-menu-empty, .model-menu-error { margin: 0; padding: 8px; font-size: 12px; color: var(--text-faint); }
 .model-menu-error { color: var(--danger); }
 .model-menu-row {
@@ -515,12 +528,12 @@ kbd {
 .msg.user { flex-direction: row-reverse; }
 .user-text { white-space: pre-wrap; word-break: break-word; line-height: 1.55; }
 .msg-actions {
-  display: flex; align-items: center; gap: 6px;
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
   margin-top: 4px; opacity: 0; transition: opacity 0.15s;
 }
-.msg:hover .msg-actions { opacity: 1; }
+.msg:hover .msg-actions, .msg:focus-within .msg-actions { opacity: 1; }
 .msg.user .msg-actions { justify-content: flex-end; }
-.model-tag { font-size: 11px; color: var(--text-faint); font-family: var(--mono); }
+.model-tag { font-size: 11px; color: var(--text-faint); font-family: var(--mono); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .msg-error {
   display: flex; align-items: center; gap: 6px;
   color: var(--danger); font-size: 13px; margin-top: 8px;
@@ -592,6 +605,7 @@ kbd {
 .composer-footer {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   padding: 6px 2px 0;
   min-width: 0;
@@ -1334,7 +1348,7 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .trace-summary { display: flex; flex-wrap: wrap; gap: 10px; font-size: 11px; color: var(--text-faint); margin-bottom: 4px; }
 .trace-summary b { color: var(--text); font-weight: 600; }
 .trace-summary .err { color: var(--danger); display: inline-flex; align-items: center; gap: 3px; }
-.trace-model { font-family: var(--mono); font-size: 11px; color: var(--text-faint); margin-bottom: 10px; }
+.trace-model { font-family: var(--mono); font-size: 11px; color: var(--text-faint); margin-bottom: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .trace-rows { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
 .trace-row { border-radius: 6px; background: var(--hover); padding: 4px 6px 6px; --span: var(--chart-1); }
 .trace-row.llm { --span: var(--accent); }
@@ -2173,11 +2187,11 @@ select:focus-visible {
 .skill-row { border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elev); overflow: hidden; }
 .skill-row.approved { border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); }
 .skill-row.rejected { opacity: 0.6; }
-.skill-head { display: flex; align-items: center; gap: 8px; padding: 9px 12px; cursor: pointer; }
+.skill-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 9px 12px; cursor: pointer; }
 .skill-head:hover { background: var(--hover); }
-.skill-name { font-weight: 500; white-space: nowrap; }
+.skill-name { font-weight: 500; white-space: nowrap; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .skill-desc { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.skill-actions { display: flex; align-items: center; gap: 6px; }
+.skill-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; margin-left: auto; }
 .skill-actions button.small { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; padding: 4px 9px; border-radius: 7px; border: 1px solid var(--border-strong); }
 .skill-actions button.small:hover:not(:disabled) { background: var(--hover); }
 .skill-actions .primary-btn.small { border-color: transparent; }
@@ -2224,26 +2238,3 @@ select:focus-visible {
 .page-agent-empty { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; }
 .page-agent-hint { text-align: left; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text-muted); font-size: 12px; }
 .page-agent-hint:hover { background: var(--active); color: var(--text); }
-
-/* ---------- The page agent as a popout (Docs) ----------
-   In a document the side column is the wrong shape: it takes a third of the width away from the
-   thing being written, and the Cursor reflex ⌘I borrows from is a small box floating over the
-   text, not a panel beside it. Same panel, same thread, different frame -- it anchors to .app
-   rather than to the editor so a scroll inside the doc cannot drag it off screen, and it is
-   deliberately not pinned to the caret: a textarea gives no reliable caret rectangle, and a box
-   that jumps around while typing is worse than one that stays put. */
-.page-agent.popout {
-  position: absolute;
-  top: 56px;
-  right: 20px;
-  z-index: 40;
-  width: min(var(--page-agent-w), calc(100% - var(--sidebar-w) - 40px));
-  max-height: min(70vh, 620px);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.28);
-  background: var(--bg-elev);
-}
-.app.sidebar-collapsed .page-agent.popout { width: min(var(--page-agent-w), calc(100% - 40px)); }
-/* The column draws its own left edge against the view; a floating card has a border all round. */
-.page-agent.popout > header { border-top-left-radius: 12px; border-top-right-radius: 12px; }

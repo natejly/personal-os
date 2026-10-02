@@ -114,7 +114,7 @@ def test_resolve_device_prefers_name_over_stale_index() -> None:
             "", "audio input Shure MV7 is no longer present")
     with devices_are():
         assert audiocap.resolve_device("0", MIC["name"], ttl=0) == (
-            "", "no audio inputs visible to ffmpeg")
+            "", "no audio inputs visible")
 
 
 # ---------------------------------------------------------------- wav validation
@@ -159,6 +159,7 @@ def test_validate_wav_repairs_a_bad_header() -> None:
         path = tmp / "seg.wav"
         assert audiocap.silence_wav(path, 0.4) is True
         real, calls = audiocap._probe_duration, []
+        real_wave = audiocap._wav_is_pcm16
 
         def once_broken(p: Path) -> tuple[float, str]:
             calls.append(p)
@@ -167,6 +168,7 @@ def test_validate_wav_repairs_a_bad_header() -> None:
             return real(p)
 
         audiocap._probe_duration = once_broken  # type: ignore[assignment]
+        audiocap._wav_is_pcm16 = lambda p: False  # type: ignore[assignment]
         try:
             assert audiocap.validate_wav(path) == (True, "remuxed")
             assert path.stat().st_size >= audiocap.MIN_WAV_BYTES   # replaced in place
@@ -176,12 +178,10 @@ def test_validate_wav_repairs_a_bad_header() -> None:
                 False, "Invalid data found when processing input")
         finally:
             audiocap._probe_duration = real  # type: ignore[assignment]
+            audiocap._wav_is_pcm16 = real_wave  # type: ignore[assignment]
 
 
 def test_silence_wav_round_trip() -> None:
-    if not audiocap.ffmpeg_path():
-        print("  note  no ffmpeg on PATH; skipping the real capture round trip")
-        return
     with tempfile.TemporaryDirectory() as td:
         path = Path(td) / "nested" / "silence.wav"
         assert audiocap.silence_wav(path, 0.4) is True
@@ -190,10 +190,12 @@ def test_silence_wav_round_trip() -> None:
         assert audiocap.dir_bytes(path.parent) == path.stat().st_size
 
 
-def test_silence_wav_without_ffmpeg_returns_false() -> None:
+def test_silence_wav_without_ffmpeg_still_writes() -> None:
     with tempfile.TemporaryDirectory() as td:
         with no_binary(ffmpeg=True):
-            assert audiocap.silence_wav(Path(td) / "silence.wav") is False
+            path = Path(td) / "silence.wav"
+            assert audiocap.silence_wav(path) is True
+            assert audiocap.validate_wav(path) == (True, "")
 
 
 def test_dir_bytes_ignores_everything_but_wavs() -> None:
@@ -229,8 +231,11 @@ def test_input_specs() -> None:
     assert audiocap.device_input("0") == ["-f", "avfoundation", "-i", ":0"]
     assert audiocap.synthetic_input(440) == [
         "-re", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=16000"]
-    argv = audiocap.segment_argv("ffmpeg", audiocap.device_input("1"), "/tmp/m-%05d.wav", 20, 7200)
-    assert "avfoundation" in argv and ":1" in argv
+    assert audiocap.native_mic_input("BuiltIn") == ["native", "mic", "BuiltIn"]
+    assert audiocap.native_output_input() == ["native", "output"]
+    assert audiocap.native_sine_input(440) == ["native", "sine", "440"]
+    assert audiocap.is_native_input(audiocap.native_sine_input())
+    assert not audiocap.is_native_input(audiocap.device_input("0"))
 
 
 if __name__ == "__main__":

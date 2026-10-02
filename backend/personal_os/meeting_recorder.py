@@ -1,18 +1,22 @@
-"""Meeting capture: one long-lived ffmpeg per channel, and a worker that turns wavs into text.
+"""Meeting capture: one long-lived capture per channel, and a worker that turns wavs into text.
 
 The only macOS-dependent file in the subsystem, and the only one that owns processes and threads.
 It knows nothing about the database: every row it would write leaves through an injected callable,
-which is also what lets the whole file be tested against `audiocap.synthetic_input()` with no
+which is also what lets the whole file be tested against `audiocap.native_sine_input()` with no
 microphone, no loopback driver and no permission grant.
 
-Why the segment muxer instead of AudioCollector's loop: activity.py:841-851 records for `chunk`
-seconds with subprocess.run and then blocks on a transcription that can take two minutes, so
-everything said while the previous chunk is in flight is simply never captured. Here ffmpeg runs
-continuously and closes a finished wav every `segment_seconds`; transcription happens on a second
-thread draining a queue, so falling behind costs latency instead of audio.
+Native capture (AVAudioEngine / Core Audio tap) is the default. ffmpeg avfoundation remains the
+fallback when `input_spec` is an argv fragment rather than `['native', ...]`.
 
-Teardown is `q\\n` on ffmpeg's stdin, never a signal: that exits 0 and flushes a valid final
-segment, where a kill leaves a 0-byte file that fails ffprobe outright.
+Why the segment loop instead of AudioCollector's blocking chunk: activity.py records for `chunk`
+seconds then waits on transcription, so everything said while the previous chunk is in flight is
+never captured. Here the capture runs continuously and closes a finished wav every
+`segment_seconds`; transcription happens on a second thread draining a queue, so falling behind
+costs latency instead of audio.
+
+ffmpeg teardown is `q\\n` on stdin, never a signal: that exits 0 and flushes a valid final
+segment, where a kill leaves a 0-byte file that fails the wav probe outright. Native teardown
+stops the engine and writes whatever samples are still in the ring.
 """
 from __future__ import annotations
 
@@ -77,8 +81,8 @@ class _RecorderThread(threading.Thread):
     it. `Collector.active` consults `monitor.running` and `monitor.paused` (activity.py:564-566)
     and `Monitor.set_config` calls `restart()` whenever the monitor is running
     (activity.py:1004-1006), so sharing the base class would let an unrelated Activity settings
-    change - or the `activity_pause` tool, which is registered at danger `writes` and so needs no
-    approval card - tear down a live recording in the middle of someone's call.
+    change tear down a live recording in the middle of someone's call. `activity_pause` asks first,
+    but it still pauses the monitor, so it must not share this base class.
     """
 
     def __init__(self, name_id: str, halt: threading.Event):
@@ -104,12 +108,13 @@ class _RecorderThread(threading.Thread):
 
 
 class ChannelCapture(_RecorderThread):
-    """One long-lived ffmpeg writing `channel-00000.wav`, `channel-00001.wav`, ...
+    """One long-lived capture writing `channel-00000.wav`, `channel-00001.wav`, ...
 
-    `input_spec` is an argv FRAGMENT - `audiocap.device_input(index)` for a real input or
-    `audiocap.synthetic_input()` for a test tone - never a bare device index. That is the seam:
-    with it the capture loop, the restart path and the graceful stop are all testable on a machine
-    with one microphone and no loopback driver.
+    `input_spec` is either a native descriptor (`audiocap.native_mic_input()`,
+    `native_output_input()`, `native_sine_input()`) or an ffmpeg argv fragment
+    (`audiocap.device_input(index)` / `synthetic_input()`). That is the seam: with it the
+    capture loop, the restart path and the graceful stop are all testable on a machine with one
+    microphone and no loopback driver.
     """
 
     def __init__(self, channel: str, input_spec: list[str], out_dir: Path, segment_seconds: int,
@@ -123,6 +128,7 @@ class ChannelCapture(_RecorderThread):
         self.max_seconds = max(1, int(max_seconds))
         self.on_segment = on_segment
         self.proc: subprocess.Popen[bytes] | None = None
+        self._native: Any = None
         self.session_start = 0.0
         self.stopping = False
         self.restarts = 0
@@ -136,14 +142,17 @@ class ChannelCapture(_RecorderThread):
         self._proc_lock = threading.Lock()
 
     def work(self) -> None:
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+        # Anchored once and kept across restarts: seq numbering continues, so a segment's place in
+        # the meeting stays correct even if the capture died and came back.
+        self.session_start = time.time()
+        if audiocap.is_native_input(self.input_spec):
+            self._work_native()
+            return
         ff = audiocap.ffmpeg_path()
         if not ff:
             self.error = "ffmpeg not found on PATH (brew install ffmpeg)"
             return
-        self.out_dir.mkdir(parents=True, exist_ok=True)
-        # Anchored once and kept across restarts: seq numbering continues, so a segment's place in
-        # the meeting stays correct even if ffmpeg died and came back.
-        self.session_start = time.time()
         while not self.halt.is_set() and not self.stopping:
             rc, err = self._run_once(ff)
             self._emit_ready(exited=True)
@@ -161,12 +170,103 @@ class ChannelCapture(_RecorderThread):
     def stop(self) -> None:
         """The graceful path, and the reason this class exists.
 
-        `q\\n` on stdin makes ffmpeg finish the segment it is writing and exit 0; SIGKILL leaves a
-        0-byte file that fails ffprobe, which is the last few seconds of the meeting gone.
+        Native: stop the engine and flush the ring. ffmpeg: `q\\n` on stdin finishes the
+        segment it is writing and exits 0; SIGKILL leaves a 0-byte file that fails the wav
+        probe, which is the last few seconds of the meeting gone.
         """
         self.stopping = True
+        native = self._native
+        if native is not None:
+            with contextlib.suppress(Exception):
+                native.stop()
+            return
         self._shutdown_proc()
         self._emit_ready(exited=True)
+
+    # ------------------------------------------------------------ native
+
+    def _work_native(self) -> None:
+        from .native_audio import Capture
+
+        while not self.halt.is_set() and not self.stopping:
+            try:
+                cap = Capture.from_spec(self.input_spec)
+                self._native = cap
+                cap.start()
+            except Exception as e:  # noqa: BLE001
+                self.error = f"native capture: {e}"[:200]
+                self.restarts += 1
+                if self.restarts >= MAX_RESTARTS or self.stopping or self.halt.is_set():
+                    if self.restarts >= MAX_RESTARTS:
+                        self.error = f"{self.error} (gave up after {self.restarts} restarts)"
+                    return
+                self.sleep(RESTART_GAP)
+                continue
+            try:
+                self._native_loop(cap)
+                return
+            except Exception as e:  # noqa: BLE001
+                self.error = f"native capture: {e}"[:200]
+            finally:
+                with contextlib.suppress(Exception):
+                    cap.stop()
+                self._native = None
+            if self.stopping or self.halt.is_set():
+                return
+            self.restarts += 1
+            if self.restarts >= MAX_RESTARTS:
+                self.error = f"{self.error} (gave up after {self.restarts} restarts)"
+                log.warning("meeting: %s gave up: %s", self.name_id, self.error)
+                return
+            log.warning("meeting: %s restarting after %s", self.name_id, self.error)
+            self.sleep(RESTART_GAP)
+
+    def _native_loop(self, cap: Any) -> None:
+        """Read segment-sized PCM chunks, write finished wavs, emit immediately.
+
+        Native writes a complete file before reporting it, unlike ffmpeg's segment muxer
+        which we can only trust once the next file has been opened.
+        """
+        seq = self._next
+        while not self.halt.is_set() and not self.stopping:
+            elapsed = time.time() - self.session_start
+            remaining = self.max_seconds - elapsed
+            if remaining <= 0.05:
+                break
+            secs = min(float(self.segment_seconds), remaining)
+            pcm = cap.read_seconds(secs, self.halt)
+            if self.stopping or self.halt.is_set():
+                extra = cap.drain()
+                if extra:
+                    pcm = pcm + extra
+            if cap.error and not pcm:
+                raise RuntimeError(cap.error)
+            # A halt mid-segment can leave a stub. Drop anything under ~100ms unless it is the
+            # last chunk of a real take - then keep it so the end of the meeting is not silent.
+            min_pcm = 16000 * 2 // 10
+            if len(pcm) < min_pcm:
+                if self.stopping or self.halt.is_set() or remaining <= 0.05:
+                    break
+                continue
+            path = self.out_dir / f"{self.channel}-{seq:05d}.wav"
+            if not audiocap.write_pcm16_wav(path, pcm):
+                raise RuntimeError("could not write segment wav")
+            self._emit_direct(seq, path)
+            seq += 1
+        extra = cap.drain()
+        if extra and len(extra) >= 16000 * 2 // 10 and not self.halt.is_set():
+            path = self.out_dir / f"{self.channel}-{seq:05d}.wav"
+            if audiocap.write_pcm16_wav(path, extra):
+                self._emit_direct(seq, path)
+
+    def _emit_direct(self, seq: int, path: Path) -> None:
+        with self._emit_lock:
+            self._next = seq + 1
+        try:
+            self.on_segment(self.channel, seq, path)
+        except Exception as e:  # noqa: BLE001 - a bad callback must not stop the capture
+            self.error = f"{type(e).__name__}: {e}"
+            log.warning("meeting: %s could not report seq %s: %s", self.name_id, seq, e)
 
     # ------------------------------------------------------------ internals
 

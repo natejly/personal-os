@@ -28,11 +28,11 @@ from pydantic import AfterValidator, BaseModel, Field
 from . import activity, assist, llm, mac, mcp_eval, tools
 from .context import build_context, estimate_tokens
 from .db import Database, data_dir_from_env, new_id
-from .extract_text import extract_text
-from .learn import MAX_INJECTED_SKILLS, LearnJob, LearnWorker, Skills, induce_skill, skill_block
+from .extract_text import MAX_UPLOAD_BYTES, extract_text, for_index, safe_upload_name
+from .learn import MAX_INJECTED_SKILLS, LearnJob, LearnWorker, Skills, induce_skill, run_transcript, skill_block
 from .repos import ALL, Conversations, Documents, Graph, Memories, Projects
 from .boards import Boards
-from .canvas import SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
+from .canvas import FALLBACK_NAME, SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
 from .dashboards import Dashboards, generate_recap, generate_summary, generate_widget_code
 from .docs import Docs, unified_diff
 from . import cache as google_cache
@@ -152,28 +152,6 @@ async def _validation_error(request: Request, exc: Exception) -> JSONResponse:  
 
 @app.exception_handler(sqlite3.IntegrityError)
 async def _integrity_error(request: Request, exc: Exception) -> JSONResponse:  # type: ignore[override]
-    """Safety net for the writers wsid() cannot cover (a card whose column is gone, a window whose canvas is gone).
-    A stale id from a window that has not refreshed is the client's problem to retry, not a server fault, so it gets a
-    409 and a usable message rather than a bare 500."""
-    detail = ("Something this refers to no longer exists - reload and try again."
-              if "FOREIGN KEY" in str(exc).upper() else f"That change conflicts with what is already stored ({exc})")
-    log.info("integrity error on %s %s: %s", request.method, request.url.path, exc)
-    return JSONResponse({"detail": detail}, status_code=409)
-
-
-@app.exception_handler(sqlite3.IntegrityError)
-async def _integrity_error(request: Request, exc: Exception) -> JSONResponse:  # type: ignore[override]
-    """Safety net for the writers wsid() cannot cover (a card whose column is gone, a widget whose dashboard is gone).
-    A stale id from a window that has not refreshed is the client's problem to retry, not a server fault, so it gets a
-    409 and a usable message rather than a bare 500."""
-    detail = ("Something this refers to no longer exists - reload and try again."
-              if "FOREIGN KEY" in str(exc).upper() else f"That change conflicts with what is already stored ({exc})")
-    log.info("integrity error on %s %s: %s", request.method, request.url.path, exc)
-    return JSONResponse({"detail": detail}, status_code=409)
-
-
-@app.exception_handler(sqlite3.IntegrityError)
-async def _integrity_error(request: Request, exc: Exception) -> JSONResponse:  # type: ignore[override]
     """Safety net for the writers wsid() cannot cover (a card whose column is gone, a widget whose dashboard is gone).
     A stale id from a window that has not refreshed is the client's problem to retry, not a server fault, so it gets a
     409 and a usable message rather than a bare 500."""
@@ -186,7 +164,7 @@ async def _integrity_error(request: Request, exc: Exception) -> JSONResponse:  #
 @app.middleware("http")
 async def _require_token(request: Request, call_next):  # type: ignore[no-untyped-def]
     p = request.url.path
-    if request.method == "OPTIONS" or p in PUBLIC_PATHS or (p.startswith("/widgets/") and p.endswith("/render")):
+    if request.method == "OPTIONS" or p in PUBLIC_PATHS:
         return await call_next(request)
     auth = request.headers.get("authorization", "")
     sent = request.headers.get("x-personal-os-token") or (auth[7:].strip() if auth[:7].lower() == "bearer " else "")
@@ -248,6 +226,39 @@ def _seed_settings_from_env() -> None:
 
 _seed_settings_from_env()
 
+_MODULES_DEFAULT = 3
+_DEFAULT_OFF_VIEWS = ("library", "cowork", "meetings", "activity")
+_DEFAULT_OFF_HOME = ("cowork", "meetings")
+
+
+def _seed_hidden_modules() -> None:
+    """Hide the views that ship off. A later stamp only adds the views new in that stamp, so one the user turned back on stays on."""
+    stored = db.get_settings()
+    current = stored.get("modulesDefault") or 0
+    if current == _MODULES_DEFAULT:
+        return
+    hidden = list(stored["hiddenViews"]) if isinstance(stored.get("hiddenViews"), list) else list(
+        llm.DEFAULT_SETTINGS["hiddenViews"]
+    )
+    # Stamp 1 applied Library, Cowork and Meetings. Stamp 2 added Activity.
+    # A later stamp must not put a view back that the user has since shown.
+    add = ("activity",) if current == 1 else (() if current >= 2 else _DEFAULT_OFF_VIEWS)
+    for v in add:
+        if v not in hidden:
+            hidden.append(v)
+    widgets = dict(stored["homeWidgets"]) if isinstance(stored.get("homeWidgets"), dict) else {}
+    if not current:
+        for k in _DEFAULT_OFF_HOME:
+            widgets.setdefault(k, False)
+    # Stamp 3 turns the Today cowork card off once, even if an older install had it on.
+    # The Today slider and Settings → Modules can turn it back on.
+    if current < 3:
+        widgets["cowork"] = False
+    db.set_settings({"hiddenViews": hidden, "homeWidgets": widgets, "modulesDefault": _MODULES_DEFAULT})
+
+
+_seed_hidden_modules()
+
 
 def settings() -> dict[str, Any]:
     return {**llm.DEFAULT_SETTINGS, **db.get_settings()}
@@ -257,7 +268,7 @@ jobs = Jobs(db)
 proposals = Proposals(db)
 boards = Boards(db)
 dashboards = Dashboards(db)
-google = Google(settings, db.set_settings)
+google = Google(settings, db.set_settings, cache_dir=db.data_dir)
 # sid/wsid are defined further down, so the module context looks them up late.
 modules: list[Module] = build_modules(ModuleContext(
     db=db, settings=settings, set_settings=db.set_settings, google=google,
@@ -293,7 +304,7 @@ desks = Desks(db, workspace)
 # The supervisor task per live desk: it owns the CHAIN, not the turn in flight. Cancelling one ends
 # the chain and leaves the running turn to settle cooperatively.
 _desk_tasks: dict[str, asyncio.Task[None]] = {}
-sandboxes = Sandboxes(settings)
+sandboxes = Sandboxes(settings, import_dir=db.data_dir / "sandbox-imports")
 monitor = activity.Monitor(db, settings, llm.complete)
 # Every Gmail send is held here first so it can be undone (outbox.py); its own routes are included below.
 outbox = Outbox(db, google, settings)
@@ -310,7 +321,7 @@ meeting_store = Meetings(db)
 meeting_svc = MeetingService(db, settings, llm.complete, meeting_store, google=google, todos=todos)
 toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=google, boards=boards, sandboxes=sandboxes, docs=docs, activity=monitor,
                   outbox=outbox, work_plans=work_plans, results=tool_results, skills=skills, jobs=jobs,
-                  style=style, meetings=meeting_svc, desks=desks, workspace=workspace)
+                  style=style, meetings=meeting_svc, desks=desks, workspace=workspace, conversations=convos)
 # The insights pass proposes automations, so it is told which tools this install actually has - an
 # unwired integration must not turn into a suggestion that cannot be carried out.
 monitor.insights.tools_fn = lambda: [t["name"] for t in toolbox.list() if t.get("available")]
@@ -754,7 +765,13 @@ def get_conversation(id: str) -> dict[str, Any]:
 
 @app.patch("/conversations/{id}")
 def patch_conversation(id: str, body: ConvPatch) -> dict[str, Any]:
-    c = convos.update(id, body.model_dump(exclude_none=True))
+    patch = body.model_dump(exclude_none=True)
+    settings_patch = patch.get("settings") if isinstance(patch.get("settings"), dict) else {}
+    # Clearing the banner has to drop library text that was copied into the sandbox, or the next
+    # command can print it back as if the chat were trusted again.
+    if settings_patch.get("tainted") is False and sandboxes.holds_import(id):
+        sandboxes.reset(id)
+    c = convos.update(id, patch)
     if not c:
         raise HTTPException(404)
     return c
@@ -1047,19 +1064,20 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     rbuf: list[str] = []
     error: str | None = None
     tool_events: list[dict[str, Any]] = []
-    # A meeting title is copied verbatim off a calendar invite by `adopt`, and the 45s nudge does
-    # that for any invite anyone can send the user - so the meetings block carries text an outsider
-    # chose, straight into the system prompt. Taint the turn when it is present: otherwise an
-    # external tool pinned to 'on' by a standing grant would run with no approval card in a chat
-    # that never called a meeting tool. The tool-shaped door is already gated by `taints` on the
-    # meeting_* specs; this is the context-shaped one beside it.
-    ctx_taints = [k for k in ("meetings",) if used.get(k)]
+    # Meeting titles, activity window titles, and uploaded-file excerpts are text the user did not
+    # write as an instruction. Taint the turn when any of them is in the prompt, or a standing
+    # grant would send mail with no card.
+    ctx_taints = [k for k in ("meetings", "activity", "chunks") if used.get(k)]
+    page = used.get("page") or {}
+    if isinstance(page, dict) and (page.get("detail") or page.get("selection")):
+        ctx_taints.append("page")
     tool_ctx: dict[str, Any] = {
         "project_id": conv["project_id"], "conversation_id": conv_id,
         # Taint is sticky for the whole conversation: the injected instructions live on in the replayed history, so
         # waiting one turn must not re-arm a standing 'always' grant. Only the user clears it (Context -> this chat).
-        "tainted": bool(conv["settings"].get("tainted")) or bool(ctx_taints),
-        "taint_sources": list(conv["settings"].get("taint_sources") or []) + [f"context:{k}" for k in ctx_taints],
+        "tainted": bool(conv["settings"].get("tainted")) or bool(ctx_taints) or sandboxes.holds_import(conv_id),
+        "taint_sources": list(conv["settings"].get("taint_sources") or []) + [f"context:{k}" for k in ctx_taints]
+            + (["sandbox_import"] if sandboxes.holds_import(conv_id) else []),
         "allowed_urls": _urls(user_text), "settings": cfg,
         # Set for a scheduled job: Toolbox.call refuses every outward-facing tool outright, and _call_tool has
         # already turned the call into a proposals row before it got that far.
@@ -1098,14 +1116,16 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         m = dict(modes)
         # A desk's workspace tools exist only inside a desk: elsewhere there is no root to resolve.
         if not desk_id:
-            m = {n: v for n, v in m.items() if toolbox.specs[n].group != "desk"}
+            # MCP slugs live in this map and are not built-in specs. Indexing specs[n] crashed every
+            # reply the moment a connector was connected.
+            m = {n: v for n, v in m.items() if (spec := toolbox.specs.get(n)) is None or spec.group != "desk"}
         if planning and not withheld:
             # While a plan is being drafted the model is offered reading and the plan tool, nothing
             # else. Withholding them is kinder than denying them: a tool that is not offered costs no
             # round, where one that is offered and refused costs one every time. `withheld=True` asks
             # for the full set anyway, which is what a plan has to be judged against: its steps name
-            # the tools it will use *after* approval.
-            m = {n: v for n, v in m.items() if n == PLAN_TOOL or toolbox.specs[n].danger in PLAN_SAFE_DANGER}
+            # the tools it will use *after* approval. Connectors are not reading tools, so they stay out.
+            m = {n: v for n, v in m.items() if n == PLAN_TOOL or ((spec := toolbox.specs.get(n)) is not None and spec.danger in PLAN_SAFE_DANGER)}
             m[PLAN_TOOL] = "ask"
         return toolbox.schemas(m) + mcp_schemas
 
@@ -1328,7 +1348,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         mode, forced = "ask", True
                 # A background run never waits on an approval: there is nobody at the keyboard, and the call is not
                 # going to happen either way. It becomes a proposal in _call_tool and the run carries on.
-                proposing = proposal_only(run) and toolbox.proposes(c["name"]) and mode != "off"
+                # MCP tools are external by construction but are not in Toolbox.specs, so proposes()
+                # cannot see them. A scheduled run must still record them instead of calling them.
+                proposing = proposal_only(run) and mode != "off" and (toolbox.proposes(c["name"]) or mcp_is(c["name"]))
                 if proposing:
                     mode, forced = "on", False
                 # The provider's call id is only unique within one request -- llm.stream_chat falls back
@@ -1516,7 +1538,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 elif decision != "allow":
                     result = tools.denied(c["name"], "just declined by the user")
                 elif mcp_is(c["name"]):
-                    result = await _mcp_call(c["name"], args)
+                    # The branch above only reaches here when the call was allowed. A job has nobody
+                    # to allow it, so the connector call is a proposal and the server is not contacted.
+                    result = _propose(run, c["name"], args, uid, tool_ctx) if proposal_only(run) and run is not None else await _mcp_call(c["name"], args)
                 else:
                     result = await _call_tool(run, _round, c["name"], args, tool_ctx, uid)
                 ms = int((time.time() - t0) * 1000)
@@ -1585,8 +1609,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     convos.finish_message(am["id"], text, error, used, tool_events, tracer.spans, reasoning)
     convos.touch(conv_id)
     if tool_ctx["tainted"]:
-        srcs = sorted(set(tool_ctx["taint_sources"]))
-        if not conv["settings"].get("tainted") or srcs != sorted(set(conv["settings"].get("taint_sources") or [])):
+        # Asking about the screen taints this turn only. Storing it would make Clear come back
+        # on the next question, because the screen is sent again.
+        srcs = sorted(s for s in set(tool_ctx["taint_sources"]) if s != "context:page")
+        if srcs and (not conv["settings"].get("tainted") or srcs != sorted(set(conv["settings"].get("taint_sources") or []))):
             convos.update(conv_id, {"settings": {"tainted": True, "taint_sources": srcs}})
     if run is not None:
         # What this reply spent, for whoever is supervising it. A desk turn chains on these; an
@@ -1604,7 +1630,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     # worker and the run ends here; what the worker learns arrives on the app topic (GET /events).
     # A scheduled run never writes to long-term memory either way: it is one more model call nobody
     # asked for, on text the user has not read yet. What it found belongs in its report and the inbox.
-    if not error and text and not proposal_only(run) and cfg.get("autoLearn", True) and conv["settings"].get("autoLearn", True):
+    # A tainted reply has read someone else's page or transcript. Mining it into memory would
+    # plant that text in later chats. The user can still save a memory by approving the tool.
+    if (not error and text and not proposal_only(run) and not tool_ctx["tainted"]
+            and cfg.get("autoLearn", True) and conv["settings"].get("autoLearn", True)):
         learner.submit(LearnJob(
             conversation_id=conv_id, message_id=am["id"], project_id=conv["project_id"],
             user_text=user_text, assistant_text=text, model=model, settings=cfg,
@@ -1616,7 +1645,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     # a row and stop. A failure here is as quiet as a failed memory extraction.
     # The prose check runs before the span so an ordinary short instruction leaves no trace of a step
     # that did nothing — and never leaves a span open for the UI to show as still running.
-    if not error and cfg.get("learnStyle", True) and conv["settings"].get("autoLearn", True) and looks_like_prose(user_text):
+    # Same bound as auto-learn: a message in a chat that has read someone else's page is not a
+    # sample of how the user writes. The voice profile is injected into later chats.
+    if (not error and not tool_ctx["tainted"] and cfg.get("learnStyle", True)
+            and conv["settings"].get("autoLearn", True) and looks_like_prose(user_text)):
         sspan = tracer.start("style", "Learn writing style")
         yield "span", {"message_id": am["id"], "span": sspan}
         try:
@@ -2205,8 +2237,15 @@ async def accept_proposal(pid: str, body: ProposalIn | None = None) -> dict[str,
     ctx: dict[str, Any] = {"project_id": (conv or {}).get("project_id"), "conversation_id": claimed["conversation_id"],
                            "tainted": False, "taint_sources": [], "allowed_urls": set(), "settings": settings(),
                            "proposal_only": False, "message_id": claimed["message_id"]}
+
+    async def _execute() -> Any:
+        # A connector is not a built-in. toolbox.call would report it as unknown and the accept would die.
+        if mcp_is(claimed["tool"]):
+            return await _mcp_call(claimed["tool"], claimed["args"])
+        return await toolbox.call(claimed["tool"], claimed["args"], ctx)
+
     result, replayed = await run_store.call_once(claimed["run_id"], PROPOSAL_STEP, claimed["tool"], claimed["args"],
-                                                 lambda: toolbox.call(claimed["tool"], claimed["args"], ctx), call_id=pid)
+                                                 _execute, call_id=pid)
     err = result.get("error") if isinstance(result, dict) else None
     row = proposals.record(pid, result, err)
     return {"ok": not err, "proposal": row, "replayed": replayed, "result": summarize_result(result, 2000)}
@@ -2576,17 +2615,42 @@ def get_document(id: str) -> dict[str, Any]:
     return d
 
 
+def _too_big(n: int) -> str | None:
+    if n > MAX_UPLOAD_BYTES:
+        return f"Files must be {MAX_UPLOAD_BYTES // (1024 * 1024)} MB or smaller"
+    return None
+
+
+async def _read_upload(file: UploadFile) -> bytes:
+    """Stop once the body passes the cap, so a huge upload is not copied into the library."""
+    if file.size is not None and (msg := _too_big(file.size)):
+        raise HTTPException(413, msg)
+    buf = bytearray()
+    while True:
+        block = await file.read(1 << 20)
+        if not block:
+            break
+        if msg := _too_big(len(buf) + len(block)):
+            raise HTTPException(413, msg)
+        buf.extend(block)
+    return bytes(buf)
+
+
+def _store_upload(project_id: str | None, name: str, mime: str, data: bytes) -> dict[str, Any]:
+    safe = safe_upload_name(name)
+    text = for_index(extract_text(safe, data, mime))
+    dest = db.data_dir / "uploads" / f"{new_id()}-{safe}"
+    dest.write_bytes(data)
+    return documents.create(wsid(project_id), safe, mime, len(data), str(dest), text)
+
+
 @app.post("/documents")
 async def upload_document(file: UploadFile = File(...), project_id: str | None = Form(None)) -> dict[str, Any]:
-    data = await file.read()
-    name = file.filename or "untitled"
+    data = await _read_upload(file)
     try:
-        text = extract_text(name, data, file.content_type or "")
+        return _store_upload(project_id, file.filename or "untitled", file.content_type or "", data)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, str(e)) from e
-    dest = db.data_dir / "uploads" / f"{new_id()}-{Path(name).name}"
-    dest.write_bytes(data)
-    return documents.create(wsid(project_id), name, file.content_type or "", len(data), str(dest), text)
 
 
 @app.delete("/documents/{id}")
@@ -2703,7 +2767,7 @@ def google_cache_stats() -> dict[str, Any]:
 @app.post("/integrations/google/cache/clear")
 def google_cache_clear(namespace: str = "") -> dict[str, Any]:
     """Forget cached Google reads - all of them, or one namespace (calendar, gmail, ...)."""
-    dropped = google.invalidate(*([namespace] if namespace else []))
+    dropped = google.forget(*([namespace] if namespace else []))
     return {"dropped": dropped, **google.cache_stats()}
 
 
@@ -3305,7 +3369,8 @@ def render_widget(wid: str) -> HTMLResponse:
     if not w:
         raise HTTPException(404)
     code = w["code"] or "<!doctype html><html><body style='font-family:system-ui;color:#9c9a94;padding:12px'>No code yet.</body></html>"
-    # The iframe is unauthenticated, so give it a short-lived per-widget capability for its own sources, not the app token.
+    # The iframe cannot set headers (sandbox, no same-origin). Electron attaches the app token to this
+    # URL only; the page then gets a short-lived capability for its own sources, not the app token.
     exp = int(time.time()) + WIDGET_TOKEN_TTL
     wt = _widget_fetch_token(wid, exp)
     body = re.sub(r"(/sources/[0-9a-f]+/fetch)(\?)?",
@@ -3368,7 +3433,7 @@ PositiveFinite = Annotated[float, AfterValidator(_finite), Field(gt=0)]
 
 
 class CanvasIn(BaseModel):
-    name: str = "Desk"
+    name: str = FALLBACK_NAME
     project_id: str | None = None
     copy_from: str | None = None
 
@@ -4664,16 +4729,20 @@ def preview_skills(project_id: str | None = None) -> dict[str, Any]:
             "omitted": [{"id": s["id"], "name": s["name"]} for s in rows[MAX_INJECTED_SKILLS:]]}
 
 
+class InduceIn(BaseModel):
+    """`message_id` keeps one reply (and the user turn before it). Omit it to use the whole chat."""
+    message_id: str | None = None
+
+
 @app.post("/conversations/{id}/skills/induce")
-async def induce_conversation_skill(id: str) -> dict[str, Any]:
-    """Distil this conversation into a candidate procedure for review. Never enables anything."""
+async def induce_conversation_skill(id: str, body: InduceIn | None = None) -> dict[str, Any]:
+    """Distil this conversation, or one reply, into a candidate procedure for review. Never enables anything."""
     conv = convos.get(id)
     if not conv:
         raise HTTPException(404, "Conversation not found")
-    msgs = [m for m in conv["messages"] if m["role"] in ("user", "assistant") and (m["content"] or "").strip()]
-    if len(msgs) < 2:
-        return {"candidate": None, "reason": "Not enough of a conversation to learn a procedure from."}
-    transcript = "\n\n".join(f"{m['role'].upper()}: {m['content'][:2000]}" for m in msgs[-24:])
+    transcript, reason = run_transcript(conv["messages"], (body.message_id if body else None))
+    if reason or not transcript:
+        return {"candidate": None, "reason": reason or "Not enough of a conversation to learn a procedure from."}
     cfg = settings()
     cand = await induce_skill(settings=cfg, skills=skills, project_id=conv["project_id"], conversation_id=id,
                               transcript=transcript, model=conv["model"] or cfg["defaultModel"])
@@ -5046,12 +5115,18 @@ async def _promote(desk_id: str, out: dict[str, Any], item: AcceptItem) -> dict[
         ok = bool(fresh) and fresh["after"] == after and untouched
         return {"ref": rev["id"], "verified": ok,
                 "error": None if ok else "the pending revision does not match the file"}
-    data = workspace.resolve_in(desk_id, rel).read_bytes()
-    stored = db.data_dir / "uploads" / f"{new_id()}-{Path(rel).name}"
+    src = workspace.resolve_in(desk_id, rel)
+    if msg := _too_big(src.stat().st_size):
+        return {"ref": None, "verified": False, "error": msg}
+    data = src.read_bytes()
+    if msg := _too_big(len(data)):
+        return {"ref": None, "verified": False, "error": msg}
+    safe = safe_upload_name(Path(rel).name)
+    stored = db.data_dir / "uploads" / f"{new_id()}-{safe}"
     stored.parent.mkdir(parents=True, exist_ok=True)
     stored.write_bytes(data)
     try:
-        text = extract_text(Path(rel).name, data, "")
+        text = for_index(extract_text(safe, data, ""))
     except Exception as e:  # noqa: BLE001 - an unreadable file is a failed promotion, not a 500
         return {"ref": None, "verified": False, "error": str(e)}
     doc = documents.create(wsid(item.project_id) if item.project_id else None, title, "", len(data), str(stored), text)

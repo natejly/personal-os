@@ -752,6 +752,27 @@ wheels = [
 ]
 
 [[package]]
+name = "feedparser"
+version = "6.0.14"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "feedparser-sgmllib" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/37/8a/a53da4a77352045d277978a2df322d5379369f9deb1707178899ff7e1121/feedparser-6.0.14.tar.gz", hash = "sha256:088679b0c4b543ee211a820dd544698c76a402122eae7473c04a43425f283d06", size = 286108, upload-time = "2026-07-30T14:07:40.491Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7f/61/f04912e63702e73fb2a378f9c0a1ad9eb17a334a11a6b3fe1daa593903c2/feedparser-6.0.14-py3-none-any.whl", hash = "sha256:e35e3f760151b0c3b22cac9684155cae186a233e16c49bcbc6c49e91e3131137", size = 80668, upload-time = "2026-07-30T14:07:39.175Z" },
+]
+
+[[package]]
+name = "feedparser-sgmllib"
+version = "2.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/da/df/38596299216e5c22d60ed7f97902bb2bc72cfb95f732400f4fa976fd2e62/feedparser_sgmllib-2.1.0.tar.gz", hash = "sha256:61facf2918c4389b5b00714f76c5e03431ffcd94cd1f51d657edd6cd7c396579", size = 26845, upload-time = "2026-08-02T21:27:53.891Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/85/a0/79a31f898092e145bd66e2b338fb0656979acb2bbbcae8220940fbfcd820/feedparser_sgmllib-2.1.0-py3-none-any.whl", hash = "sha256:2cab2d43b95a954f920f18aebce7a4dbbb3f539780b127e2aa114f579821e01d", size = 11652, upload-time = "2026-08-02T21:27:52.894Z" },
+]
+
+[[package]]
 name = "fonttools"
 version = "4.65.0"
 source = { registry = "https://pypi.org/simple" }
@@ -989,6 +1010,7 @@ dependencies = [
     { name = "croniter" },
     { name = "ddgs" },
     { name = "fastapi" },
+    { name = "feedparser" },
     { name = "google-api-python-client" },
     { name = "google-auth-httplib2" },
     { name = "google-auth-oauthlib" },
@@ -1002,6 +1024,7 @@ dependencies = [
     { name = "python-multipart" },
     { name = "trafilatura" },
     { name = "uvicorn", extra = ["standard"] },
+    { name = "yt-dlp" },
 ]
 
 [package.optional-dependencies]
@@ -1009,7 +1032,9 @@ activity = [
     { name = "pyobjc-framework-applicationservices", marker = "sys_platform == 'darwin'" },
     { name = "pyobjc-framework-avfoundation", marker = "sys_platform == 'darwin'" },
     { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin'" },
+    { name = "pyobjc-framework-coreaudio", marker = "sys_platform == 'darwin'" },
     { name = "pyobjc-framework-quartz", marker = "sys_platform == 'darwin'" },
+    { name = "pyobjc-framework-speech", marker = "sys_platform == 'darwin'" },
 ]
 
 [package.metadata]
@@ -1017,6 +1042,7 @@ requires-dist = [
     { name = "croniter", specifier = ">=3.0" },
     { name = "ddgs", specifier = ">=9.0" },
     { name = "fastapi", specifier = ">=0.115" },
+    { name = "feedparser", specifier = ">=6.0" },
     { name = "google-api-python-client", specifier = ">=2.140" },
     { name = "google-auth-httplib2", specifier = ">=0.2" },
     { name = "google-auth-oauthlib", specifier = ">=1.2" },
@@ -1027,12 +1053,15 @@ requires-dist = [
     { name = "pyobjc-framework-applicationservices", marker = "sys_platform == 'darwin' and extra == 'activity'", specifier = ">=10.3" },
     { name = "pyobjc-framework-avfoundation", marker = "sys_platform == 'darwin' and extra == 'activity'", specifier = ">=10.3" },
     { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin' and extra == 'activity'", specifier = ">=10.3" },
+    { name = "pyobjc-framework-coreaudio", marker = "sys_platform == 'darwin' and extra == 'activity'", specifier = ">=10.3" },
     { name = "pyobjc-framework-quartz", marker = "sys_platform == 'darwin' and extra == 'activity'", specifier = ">=10.3" },
+    { name = "pyobjc-framework-speech", marker = "sys_platform == 'darwin' and extra == 'activity'", specifier = ">=10.3" },
     { name = "pypdf", specifier = ">=4.2" },
     { name = "python-docx", specifier = ">=1.1" },
     { name = "python-multipart", specifier = ">=0.0.9" },
     { name = "trafilatura", specifier = ">=1.12" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
+    { name = "yt-dlp", specifier = ">=2025.1" },
 ]
 provides-extras = ["activity"]
 
@@ -2511,6 +2540,27 @@ wheels = [
 ]
 
 [[package]]
+name = "pyobjc-framework-speech"
+version = "12.2.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyobjc-core" },
+    { name = "pyobjc-framework-cocoa" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/73/40/c917d42f6050df8c4e11f314e8a955286a5760c4d806dc944f444ba53afc/pyobjc_framework_speech-12.2.2.tar.gz", hash = "sha256:b97cd8e5663c6ea0960d38707698b07b935cf66210aafad567971364f78206a7", size = 28000, upload-time = "2026-08-11T19:45:31.782Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/79/32/c4eaf1f1ae23c8c4c676b234c683f83fdc8c119d055c9bf6729f33ef957d/pyobjc_framework_speech-12.2.2-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:0cfc71a2af27417b84ff8a6879d17c466ea17ad1b1db83132586be6bdbbb50b7", size = 9282, upload-time = "2026-08-11T19:42:09.622Z" },
+    { url = "https://files.pythonhosted.org/packages/66/af/f0f18b1b75ede53e09d88eb1fc56d3221f1d4b31b6aca81c05227cf9163b/pyobjc_framework_speech-12.2.2-cp311-cp311-macosx_10_9_universal2.whl", hash = "sha256:18936ad5f224c52e416dcbb3a571c378c9b99ff5dc0ba618e3eabe6e12856f9f", size = 9284, upload-time = "2026-08-11T19:42:10.473Z" },
+    { url = "https://files.pythonhosted.org/packages/7e/78/ea3bd94d962986f6af614acdb49aba9555bbb720f416c8aa3981ab7c12db/pyobjc_framework_speech-12.2.2-cp312-cp312-macosx_10_13_universal2.whl", hash = "sha256:4cf89a7b60f868f321373f77908bd2ce0641b6c61e652da7b43aaf9160e4e27f", size = 9293, upload-time = "2026-08-11T19:42:11.219Z" },
+    { url = "https://files.pythonhosted.org/packages/14/a6/2e5a6a0ec4f83bd72955559d481757d1db96863609c11828226dd5f78211/pyobjc_framework_speech-12.2.2-cp313-cp313-macosx_10_13_universal2.whl", hash = "sha256:25052229b8fb694578fd56a873b02e6b319c48bce65c1fe17e79ae1a62386235", size = 9311, upload-time = "2026-08-11T19:42:12.086Z" },
+    { url = "https://files.pythonhosted.org/packages/4f/ed/f2dd30d45cd84d92367b52ddff7aec56dd259d7e6dd013c71026f2751ce2/pyobjc_framework_speech-12.2.2-cp313-cp313t-macosx_10_13_universal2.whl", hash = "sha256:aba7583063e73e67322ace9b3b6b645967740bff4d111d592abf4a546a1510a4", size = 9470, upload-time = "2026-08-11T19:42:12.992Z" },
+    { url = "https://files.pythonhosted.org/packages/11/52/ee928b509a04f5d87769b5cbcc102fde85cf70455435c78c5f72d07312bf/pyobjc_framework_speech-12.2.2-cp314-cp314-macosx_10_15_universal2.whl", hash = "sha256:33b8a3f2a69c299bcf425d4c37a0012a82f7aaad676a9cfbf0ce1112698b58f1", size = 9371, upload-time = "2026-08-11T19:42:13.7Z" },
+    { url = "https://files.pythonhosted.org/packages/28/42/91a65728ac898ea3633eabbc11266d7ab4d68a3df5778147f970cb6a3047/pyobjc_framework_speech-12.2.2-cp314-cp314t-macosx_10_15_universal2.whl", hash = "sha256:f5c6d8e7b20cb3b9cf26208d5c93c02596bf5a9ece835e4261103b48080cf5a1", size = 9529, upload-time = "2026-08-11T19:42:14.403Z" },
+    { url = "https://files.pythonhosted.org/packages/78/1d/fb3b5b7c29353ea3ff99622aab6f025f88dcc3867b94412ecc7eb597cea0/pyobjc_framework_speech-12.2.2-cp315-cp315-macosx_10_15_universal2.whl", hash = "sha256:76e0d2e61ed9245f6130b99b4169ee9f946e7ff2285121931a8cb347fdeff510", size = 9359, upload-time = "2026-08-11T19:42:15.113Z" },
+    { url = "https://files.pythonhosted.org/packages/5a/ec/f9bbebc0122f28802bb3751c10091798de9d42f336ec0630d82d183419b6/pyobjc_framework_speech-12.2.2-cp315-cp315t-macosx_10_15_universal2.whl", hash = "sha256:aee9bc433e492ce1b75341684bd14f15409da1f9caa997b3290f5943af044bc7", size = 9520, upload-time = "2026-08-11T19:42:15.82Z" },
+]
+
+[[package]]
 name = "pyparsing"
 version = "3.3.3"
 source = { registry = "https://pypi.org/simple" }
@@ -3625,4 +3675,13 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/c4/b1/37fe0c96c206b4208a072c3a74add6a72af4b8228be3f5435163c5a6d099/websockets-17.1-pp311-pypy311_pp73-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:a62d8c424383c9dc769ff3672018df822603117e32686e567d452ed035b6fb2e", size = 216608, upload-time = "2026-08-26T17:25:28.134Z" },
     { url = "https://files.pythonhosted.org/packages/be/7e/75a0a491b512412e08333b9f8412757af6186fe1c598186261002de1a793/websockets-17.1-pp311-pypy311_pp73-win_amd64.whl", hash = "sha256:8196d217eeca52b9235ee1f8a684a09885a5f953d5a31e80ef915bf2c5c94f9d", size = 217870, upload-time = "2026-08-26T17:25:29.745Z" },
     { url = "https://files.pythonhosted.org/packages/41/63/23572870e01836a98346075b9e17a8bc24a6ddd9800a3204ceee58677f3c/websockets-17.1-py3-none-any.whl", hash = "sha256:f221081107b8c48184d99f7019604486376e7ef826037e70aad6b02540732c23", size = 211134, upload-time = "2026-08-26T17:25:31.397Z" },
+]
+
+[[package]]
+name = "yt-dlp"
+version = "2026.8.19"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/1e/e0/832fa4ca334b766a06933a196066edc3dba37cdb6f14cd98d59bcc69a4b4/yt_dlp-2026.8.19.tar.gz", hash = "sha256:9e213e48cea35c66b378e4447903f118f6392a5fa380a2b6d7070ec86f4e0af1", size = 3052025, upload-time = "2026-08-19T23:48:59.291Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/69/b2/8cd1613f56eed7ceb64fbd4df3f1c01246bfb098e6f398228bafda22b80b/yt_dlp-2026.8.19-py3-none-any.whl", hash = "sha256:1d57897e94c6665a0a6f9bc54b34e584284e32c034ffab3a7df25d8f7b24eedf", size = 3185533, upload-time = "2026-08-19T23:48:56.925Z" },
 ]

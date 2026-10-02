@@ -30,7 +30,8 @@ import httpx
 
 from . import insights as insights_mod
 from . import stt
-from .audiocap import IS_MAC, LOOPBACK_HINTS, audio_devices, ffmpeg_path, looks_like_loopback  # noqa: F401
+from .audiocap import IS_MAC, LOOPBACK_HINTS, audio_devices, ffmpeg_path, looks_like_loopback, write_pcm16_wav  # noqa: F401
+from . import native_audio
 from .db import Database, new_id, now, row_to_dict
 from .redact import REDACTIONS, SECRET_ASSIGN  # noqa: F401
 
@@ -58,12 +59,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "injectContext": True,
     "redact": True,
     "excludeApps": [
-        "1Password", "Bitwarden", "Dashlane", "Enpass", "KeePassXC", "Keychain Access",
-        "LastPass", "NordPass", "Passwords", "Proton Pass", "Authy", "Secretive", "Tor Browser",
+        "1Password", "Bitwarden", "Buttercup", "Dashlane", "Enpass", "KeePass", "KeePassXC",
+        "Keychain Access", "LastPass", "MacPass", "NordPass", "Passwords", "Proton Pass",
+        "RoboForm", "Secretive", "Sticky Password", "Strongbox", "Authy", "Tor Browser",
     ],
     "excludeTitlePatterns": [
         "password", "passphrase", "sign in", "signin", "log in", "login", "2fa",
-        "one-time code", "verification code", "authenticator", "seed phrase",
+        "one-time code", "verification code", "recovery code", "backup code", "mnemonic",
+        "authenticator", "seed phrase",
         "private key", "secret key", "api key", "incognito", "private browsing",
         "bank", "wire transfer", "routing number", "ssn", "social security",
     ],
@@ -165,6 +168,31 @@ class Gate:
             out = pat.sub(repl, out)
         # Whatever follows a word like "password" is almost certainly the value itself.
         return SECRET_ASSIGN.sub("[secret]", out)
+
+
+def content_withheld(gate: "Gate", focus: dict[str, Any] | None) -> bool:
+    """Typed text and transcripts stay out of the database for an excluded window.
+
+    FocusCollector rewrites that window to app '(private)' before other collectors read
+    last_focus. Gate.excluded('(private)') is false, so a check on the rewritten name would
+    store whatever was typed in a password manager or on a sign-in page.
+    """
+    f = focus or {}
+    if f.get("private") or f.get("app") == "(private)":
+        return True
+    return gate.excluded(str(f.get("app") or ""), str(f.get("title") or ""), str(f.get("url") or ""))
+
+
+def window_withheld(gate: "Gate", focus: dict[str, Any] | None, app: str, title: str = "", url: str = "") -> bool:
+    """The same decision at keystroke time, when last_focus can be a sample behind the live app."""
+    if content_withheld(gate, focus):
+        return True
+    if not app:
+        return False
+    if app == (focus or {}).get("app"):
+        f = focus or {}
+        return gate.excluded(app, str(f.get("title") or ""), str(f.get("url") or ""))
+    return gate.excluded(app, title, url)
 
 
 # ---------------------------------------------------------------- macOS probes
@@ -710,9 +738,13 @@ def capabilities(cfg: dict[str, Any]) -> list[dict[str, Any]]:
              "Each browser is a separate grant.",
              state=permission_state("automation"), requestable=bool(browsers), optional=True,
              signals=("browserUrls",), extra=auto),
-        _cap("ffmpeg", "ffmpeg", bool(ffmpeg_path()),
-             f"Found at {ffmpeg_path()}." if ffmpeg_path() else "Not on PATH.",
-             "brew install ffmpeg - needed for both audio signals.",
+        _cap("ffmpeg", "Audio capture", native_audio.mic_available() or bool(ffmpeg_path()),
+             ("AVAudioEngine records audio; ffmpeg is not required." if native_audio.mic_available() and not ffmpeg_path()
+              else f"AVAudioEngine, with ffmpeg at {ffmpeg_path()} as fallback." if native_audio.mic_available()
+              else f"Found at {ffmpeg_path()}." if ffmpeg_path() else "No native capture and ffmpeg is not on PATH."),
+             "" if (native_audio.mic_available() or ffmpeg_path()) else
+             "Install pyobjc-framework-AVFoundation (`cd backend && uv pip install -e '.[activity]'`) "
+             "or brew install ffmpeg.",
              signals=("micAudio", "outputAudio")),
         _cap("microphone", "Microphone permission", mic_perm == GRANTED,
              {GRANTED: "Granted - the microphone signal can record.",
@@ -721,15 +753,19 @@ def capabilities(cfg: dict[str, Any]) -> list[dict[str, Any]]:
               UNKNOWN: "Could not read the state (pyobjc-framework-AVFoundation missing)."}[mic_perm],
              "Press Grant to have macOS ask, or switch the app on under Microphone in the pane.",
              state=mic_perm, requestable=True, optional=True, signals=("micAudio",)),
-        _cap("mic", "Audio inputs", bool(devices),
-             f"{len(devices)} audio input(s) visible to ffmpeg." if devices else "No audio inputs found.",
+        _cap("mic", "Audio inputs", bool(devices) or native_audio.mic_available(),
+             (f"{len(devices)} audio input(s) visible." if devices
+              else "Default microphone via AVAudioEngine." if native_audio.mic_available()
+              else "No audio inputs found."),
              "Grant Microphone permission to the app, then reopen this panel.",
              optional=True, signals=("micAudio", "outputAudio")),
-        _cap("loopback", "System audio capture", bool(loopbacks),
-             f"Loopback device available: {loopbacks[0]['name']}." if loopbacks
-             else "macOS cannot record its own output without a loopback driver.",
-             "brew install --cask blackhole-2ch (it asks for your password), route output through it, then "
-             "pick it as the output device below.",
+        _cap("loopback", "System audio capture", bool(loopbacks) or native_audio.system_available(),
+             (f"Loopback device available: {loopbacks[0]['name']}." if loopbacks
+              else "Core Audio process tap can record system audio without a loopback driver."
+              if native_audio.system_available()
+              else "macOS cannot record its own output on this machine without a loopback driver."),
+             "macOS 14.2+ has a process tap; on older systems brew install --cask blackhole-2ch, "
+             "route output through it, then pick it as the output device below.",
              optional=True, signals=("outputAudio",)),
         _cap("full_disk", "Full Disk Access", full_disk_access(),
              "Granted." if full_disk_access() else "Not granted - and no activity signal needs it.",
@@ -962,16 +998,21 @@ class FocusCollector(Collector):
             title = focused_window_title(pid) if pid else ""
             url = browser_url(app) if (cfg.get("signals") or {}).get("browserUrls") else ""
 
-            if self.m.gate.excluded(app, title, url):
+            private = self.m.gate.excluded(app, title, url)
+            if private:
                 # Keep the time, drop the content: the timeline stays honest without recording
-                # anything at all about an excluded window.
+                # anything at all about an excluded window. The flag travels with last_focus
+                # because the rewritten name '(private)' would not itself match the denylist.
+                self.m.private_mark = now()
                 app, bundle, title, url = "(private)", "", "", ""
 
             key = (app, title, url)
             if cur is None or cur["key"] != key:
                 self._close(cur)
                 cur = {"key": key, "app": app, "bundle": bundle, "title": title, "url": url, "start": now()}
-            self.m.last_focus = {"app": app, "title": title, "url": url, "since": cur["start"]}
+            self.m.last_focus = {
+                "app": app, "title": title, "url": url, "since": cur["start"], "private": private,
+            }
             self.sleep(period)
         self._close(cur)
 
@@ -986,7 +1027,8 @@ class FocusCollector(Collector):
         self.m.store.add(
             "focus", app=cur["app"], bundle=cur["bundle"],
             title=self.m.gate.scrub(cur["title"]) if cur["title"] else "",
-            url=cur["url"], duration_ms=int(dur * 1000), ts=cur["start"],
+            url=self.m.gate.scrub(cur["url"]) if cur["url"] else "",
+            duration_ms=int(dur * 1000), ts=cur["start"],
             retention_hours=cfg["retentionHours"],
         )
 
@@ -1000,7 +1042,8 @@ class InputCollector(Collector):
 
     Two modes. With `input` on it stores counts and rhythm only - how much typing, how many
     clicks, typing speed. With `text` also on it keeps the characters typed as well, after the
-    gate has scrubbed them, and it records nothing at all while macOS reports secure input.
+    gate has scrubbed them. It records nothing at all while macOS reports secure input, and
+    nothing while the frontmost window is excluded (password managers, sign-in pages).
     """
 
     name_id = "input"
@@ -1063,16 +1106,28 @@ class InputCollector(Collector):
             with contextlib.suppress(Exception):
                 q.CFRunLoopStop(self.loop_ref)
 
+    def _withheld(self) -> bool:
+        """True when the live window must not contribute keystrokes. App name is enough for the
+        password-manager denylist; the title is read only when focus has not caught that app up."""
+        focus = self.m.last_focus or {}
+        app, _, pid = frontmost_app()
+        title = focused_window_title(pid) if app and pid and app != focus.get("app") else ""
+        return window_withheld(self.m.gate, focus, app, title)
+
     # -- tap callback: stays fast, returns the event untouched (listen-only tap) --
     def _on_event(self, proxy: Any, etype: Any, event: Any, refcon: Any) -> Any:
         try:
             if not self.active:
                 return event
             q = _pyobjc["Quartz"]
+            # Outside the lock: the frontmost-app lookup must not stall the tap.
+            withheld = self._withheld()
             with self.lock:
                 if etype == q.kCGEventKeyDown:
                     if secure_input_active():
                         self.secure_blocked += 1
+                        return event
+                    if withheld:
                         return event
                     self.keys += 1
                     t = now()
@@ -1085,6 +1140,8 @@ class InputCollector(Collector):
                         ch = _unicode_for(q, event)
                         if ch:
                             self.buffer.append(ch)
+                elif withheld:
+                    return event
                 elif etype == q.kCGEventScrollWheel:
                     self.scrolls += 1
                 else:
@@ -1112,9 +1169,8 @@ class InputCollector(Collector):
         span = max(1.0, (last or now()) - (first or now()))
         wpm = round((keys / 5.0) / (span / 60.0), 1) if keys > 2 else 0.0
         app = (self.m.last_focus or {}).get("app", "")
-        title = (self.m.last_focus or {}).get("title", "")
         text = ""
-        if buf and (cfg.get("signals") or {}).get("text") and not self.m.gate.excluded(app, title):
+        if buf and (cfg.get("signals") or {}).get("text") and not content_withheld(self.m.gate, self.m.last_focus):
             text = self.m.gate.scrub(buf)[:2000]
         self.m.store.add(
             "input", app=app, text=text,
@@ -1143,10 +1199,10 @@ def _unicode_for(q: Any, event: Any) -> str:
 
 
 class AudioCollector(Collector):
-    """Records short chunks with ffmpeg, transcribes them, keeps only the text.
+    """Records short chunks, transcribes them, keeps only the text.
 
-    The wav never outlives the transcription call, and the transcription goes to the same LLM
-    base URL the app already uses for chat - no new service, no new credentials.
+    Prefers native capture (AVAudioEngine / process tap). ffmpeg avfoundation is the
+    fallback. The wav never outlives the transcription call.
     """
 
     def __init__(self, monitor: Monitor, channel: str):
@@ -1159,10 +1215,6 @@ class AudioCollector(Collector):
         return "micAudio" if self.channel == "mic" else "outputAudio"
 
     def work(self) -> None:
-        ff = ffmpeg_path()
-        if not ff:
-            self.error = "ffmpeg not found on PATH (brew install ffmpeg)"
-            return
         tmp = self.m.data_dir / "tmp" / "activity"
         tmp.mkdir(parents=True, exist_ok=True)
         while not self.halt.is_set():
@@ -1172,7 +1224,9 @@ class AudioCollector(Collector):
                 self.sleep(3)
                 continue
             device = str(audio.get("micDevice" if self.channel == "mic" else "outputDevice") or "").strip()
-            if not device:
+            native_kind = "output" if self.channel == "output" else "mic"
+            use_native = native_audio.can_capture(native_kind)
+            if not use_native and not device:
                 self.error = f"no {self.channel} device selected"
                 self.sleep(10)
                 continue
@@ -1180,19 +1234,30 @@ class AudioCollector(Collector):
             chunk = max(5, int(audio.get("chunkSeconds") or 30))
             path = tmp / f"{self.channel}-{new_id()}.wav"
             text = ""
+            mark = self.m.private_mark
             try:
-                # The row's ts must be when recording STARTED: store.add defaults to now(), which
-                # is when transcription returned, so ts + duration_ms pointed into the future.
                 started = now()
-                r = subprocess.run(
-                    [ff, "-hide_banner", "-loglevel", "error", "-f", "avfoundation", "-i", f":{device}",
-                     "-t", str(chunk), "-ac", "1", "-ar", "16000", "-y", str(path)],
-                    capture_output=True, text=True, timeout=chunk + 30,
-                )
-                if r.returncode != 0 or not path.exists() or path.stat().st_size < 2048:
-                    self.error = (r.stderr or "ffmpeg produced no audio").strip()[:200]
-                    self.sleep(5)
-                    continue
+                if use_native:
+                    pcm = native_audio.record_seconds(native_kind, float(chunk), uid=device)
+                    if len(pcm) < 2048 or not write_pcm16_wav(path, pcm):
+                        self.error = "native capture produced no audio"
+                        self.sleep(5)
+                        continue
+                else:
+                    ff = ffmpeg_path()
+                    if not ff:
+                        self.error = "ffmpeg not found on PATH (brew install ffmpeg)"
+                        self.sleep(5)
+                        continue
+                    r = subprocess.run(
+                        [ff, "-hide_banner", "-loglevel", "error", "-f", "avfoundation", "-i", f":{device}",
+                         "-t", str(chunk), "-ac", "1", "-ar", "16000", "-y", str(path)],
+                        capture_output=True, text=True, timeout=chunk + 30,
+                    )
+                    if r.returncode != 0 or not path.exists() or path.stat().st_size < 2048:
+                        self.error = (r.stderr or "ffmpeg produced no audio").strip()[:200]
+                        self.sleep(5)
+                        continue
                 text = self._transcribe(path, str(audio.get("model") or "whisper-1"))
             except subprocess.TimeoutExpired:
                 self.error = "ffmpeg timed out"
@@ -1202,24 +1267,34 @@ class AudioCollector(Collector):
                 with contextlib.suppress(Exception):
                     path.unlink(missing_ok=True)
 
-            text = (text or "").strip()
+            live_app, _, live_pid = frontmost_app()
+            live_title = focused_window_title(live_pid) if live_app and live_pid else ""
+            if window_withheld(self.m.gate, self.m.last_focus, live_app, live_title):
+                continue
+            text = self._accept_transcript((text or "").strip(), mark)
             if len(text) < int(audio.get("minChars") or 12):
                 continue
             app = (self.m.last_focus or {}).get("app", "")
-            if self.m.gate.excluded(app, (self.m.last_focus or {}).get("title", "")):
-                continue
             self.m.store.add(
-                "audio", app=app, text=self.m.gate.scrub(text)[:4000],
+                "audio", app=app, text=text,
                 meta={"channel": self.channel, "seconds": chunk},
                 duration_ms=chunk * 1000, ts=started, retention_hours=cfg["retentionHours"],
             )
 
+    def _accept_transcript(self, text: str, mark_at_start: float) -> str:
+        """Scrub a transcript, or drop it when this chunk overlapped an excluded window."""
+        if not text:
+            return ""
+        if content_withheld(self.m.gate, self.m.last_focus) or self.m.private_mark != mark_at_start:
+            return ""
+        return self.m.gate.scrub(text)[:4000]
+
     def _transcribe(self, path: Path, model: str) -> str:
         """Hand the wav to stt.py, which never raises and reports its own failure."""
-        # Pinned to the proxy backend: the monitor has always posted to the chat base URL, and a
-        # silent switch to on-device whisper is a meetings setting, not an activity one.
+        # auto: Speech if authorized, else whisper.cpp, else the chat base URL. Pinning this
+        # to proxy forever meant a working on-device recognizer sat unused.
         res = stt.transcribe(path, settings=self.m.settings(),
-                             cfg={"sttBackend": "proxy", "sttModel": model}, data_dir=self.m.data_dir)
+                             cfg={"sttBackend": "auto", "sttModel": model}, data_dir=self.m.data_dir)
         if res["error"]:
             self.error = res["error"]
         return res["text"]
@@ -1326,6 +1401,9 @@ class Monitor:
         self.pause_until = 0.0
         self.collectors: list[Collector] = []
         self.last_focus: dict[str, Any] = {}
+        # Bumped whenever an excluded window is in front, so an audio chunk that overlapped one
+        # is dropped even if the window is gone again by the time the transcript is stored.
+        self.private_mark = 0.0
         self.last_rollup = 0.0
         self.last_error = ""
         self._rollup_lock = asyncio.Lock()

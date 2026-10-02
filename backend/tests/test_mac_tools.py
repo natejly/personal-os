@@ -89,6 +89,104 @@ def test_symlink_out_of_home_is_refused(home: Path, tmp_path: Path) -> None:
         mac.allowed_path("~/Desktop/link.txt")
 
 
+def test_app_data_dir_is_off_limits_even_under_home(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The dev data dir lives on the Desktop, which the home-folder rule would otherwise allow."""
+    data = home / "Desktop" / "GrainData"
+    (data / "uploads").mkdir(parents=True)
+    (data / "personal-os.db").write_text("sentinel")
+    (data / "uploads" / "note.txt").write_text("hello")
+    monkeypatch.setenv("PERSONAL_OS_DATA_DIR", str(data))
+    for raw in (str(data / "personal-os.db"), "~/Desktop/GrainData/uploads/note.txt", "~/Desktop/GrainData"):
+        with pytest.raises(mac.LocalPathError):
+            mac.allowed_path(raw)
+    link = home / "Documents" / "notes.db"
+    link.symlink_to(data / "personal-os.db")
+    with pytest.raises(mac.LocalPathError):
+        mac.read_local("~/Documents/notes.db")
+    (home / "Documents" / "ok.txt").write_text("hi")
+    assert mac.read_local("~/Documents/ok.txt")["text"] == "hi"
+
+
+def test_library_case_is_off_limits(home: Path) -> None:
+    """APFS is case-insensitive and resolve() keeps the caller's spelling, so ~/library is ~/Library."""
+    secret = home / "Library" / "Keychains" / "login.keychain-db"
+    secret.write_text("sentinel")
+    for raw in ("~/library/Keychains/login.keychain-db", "~/LIBRARY/Keychains/login.keychain-db",
+                "~/LiBrArY/Keychains/login.keychain-db", "~/Desktop/../library/Keychains/login.keychain-db"):
+        with pytest.raises(mac.LocalPathError):
+            mac.allowed_path(raw)
+        with pytest.raises(mac.LocalPathError):
+            mac.read_local(raw)
+        with pytest.raises(mac.LocalPathError):
+            mac.write_local(raw, "x", "overwrite")
+    (home / "Desktop" / "note.txt").write_text("hi")
+    with pytest.raises(mac.LocalPathError):
+        mac.move_local("~/Desktop/note.txt", "~/library/Keychains/note.txt")
+    assert secret.read_text() == "sentinel"
+    assert (home / "Desktop" / "note.txt").read_text() == "hi"
+    (home / "Library-backup").mkdir()
+    assert mac.allowed_path("~/Library-backup") == home / "Library-backup"  # prefix of the name, not the folder
+
+
+def test_app_data_dir_case_is_off_limits(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    data = home / "Desktop" / "GrainData"
+    (data / "uploads").mkdir(parents=True)
+    (data / "personal-os.db").write_text("sentinel")
+    monkeypatch.setenv("PERSONAL_OS_DATA_DIR", str(data))
+    for raw in ("~/Desktop/graindata/personal-os.db", "~/Desktop/GRAINDATA/uploads/note.txt",
+                str(home / "Desktop" / "graindata" / "personal-os.db")):
+        with pytest.raises(mac.LocalPathError):
+            mac.read_local(raw)
+        with pytest.raises(mac.LocalPathError):
+            mac.write_local(raw, "x", "overwrite")
+    neighbor = home / "Desktop" / "GrainData-backup"
+    neighbor.mkdir()
+    (neighbor / "notes.txt").write_text("hi")
+    assert mac.read_local("~/Desktop/GrainData-backup/notes.txt")["text"] == "hi"
+    assert (data / "personal-os.db").read_text() == "sentinel"
+
+
+def test_home_prefix_is_not_a_string_prefix(home: Path) -> None:
+    """`/home-secret` starts with `/home` and is still outside the home folder."""
+    sibling = Path(str(home) + "-secret")
+    sibling.mkdir()
+    (sibling / "secret.txt").write_text("nope")
+    assert str(sibling).startswith(str(home))
+    with pytest.raises(mac.LocalPathError):
+        mac.allowed_path(str(sibling / "secret.txt"))
+    with pytest.raises(mac.LocalPathError):
+        mac.write_local(str(sibling / "secret.txt"), "x")
+    assert (sibling / "secret.txt").read_text() == "nope"
+
+
+def test_symlink_dir_cannot_read_write_move_or_escape(home: Path, tmp_path: Path) -> None:
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("nope")
+    (home / "Desktop" / "dirlink").symlink_to(outside, target_is_directory=True)
+    (home / "Desktop" / "movable.txt").write_text("stay")
+    for raw in ("~/Desktop/dirlink", "~/Desktop/dirlink/secret.txt", "~/Desktop/dirlink/new.txt"):
+        with pytest.raises(mac.LocalPathError):
+            mac.read_local(raw)
+        with pytest.raises(mac.LocalPathError):
+            mac.write_local(raw, "x")
+    with pytest.raises(mac.LocalPathError):
+        mac.move_local("~/Desktop/movable.txt", "~/Desktop/dirlink/movable.txt")
+    assert (home / "Desktop" / "movable.txt").read_text() == "stay"
+    assert not (outside / "new.txt").exists() and not (outside / "movable.txt").exists()
+
+
+def test_trash_refuses_a_symlink_outside_home(home: Path, tmp_path: Path) -> None:
+    stolen = tmp_path / "stolen"
+    stolen.mkdir()
+    (home / ".Trash").symlink_to(stolen, target_is_directory=True)
+    (home / "Desktop" / "victim.txt").write_text("keep")
+    with pytest.raises(mac.LocalPathError):
+        mac.trash_local("~/Desktop/victim.txt")
+    assert (home / "Desktop" / "victim.txt").read_text() == "keep"
+    assert list(stolen.iterdir()) == []
+
+
 # ---- mdfind ----
 def test_mdfind_scopes_to_desktop_and_documents(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     f = home / "Documents" / "lease.pdf"
@@ -108,10 +206,25 @@ def test_mdfind_name_mode_custom_folder_and_dash(home: Path, monkeypatch: pytest
 
 
 def test_mdfind_caps_results_and_stops_the_process(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    proc = FakeProc(lines=[f"/x/{i}" for i in range(50)])
+    proc = FakeProc(lines=[str(home / "Documents" / f"{i}.txt") for i in range(50)])
     fake_exec(monkeypatch, proc)
     out = asyncio.run(mac.mdfind("x", limit=5))
     assert out["count"] == 5 and out["truncated"] is True and proc.killed
+
+
+def test_mdfind_drops_paths_the_file_tools_refuse(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    data = home / "Desktop" / "GrainData"
+    data.mkdir()
+    db = data / "personal-os.db"
+    db.write_text("x")
+    ok = home / "Documents" / "lease.pdf"
+    ok.write_bytes(b"%PDF")
+    monkeypatch.setenv("PERSONAL_OS_DATA_DIR", str(data))
+    fake_exec(monkeypatch, FakeProc(lines=[
+        str(db), "/etc/passwd", str(home / "Library" / "Keychains" / "login.keychain-db"), str(ok),
+    ]))
+    out = asyncio.run(mac.mdfind("lease"))
+    assert [r["path"] for r in out["results"]] == [str(ok)]
 
 
 def test_mdfind_refuses_folders_outside_home(home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -149,7 +262,8 @@ def test_write_local_creates_without_clobbering(home: Path) -> None:
 
 
 def test_write_local_refuses_bad_paths_modes_and_launchers(home: Path) -> None:
-    for bad in ("/etc/hosts", "~/Library/x.txt", "~/.ssh/key", "~/Desktop/run.command", "~/Desktop/Thing.app"):
+    for bad in ("/etc/hosts", "~/Library/x.txt", "~/.ssh/key", "~/Desktop/run.command", "~/Desktop/Thing.app",
+                "~/Desktop/Evil.app/Contents/MacOS/run", "~/Desktop/link.inetloc", "~/Desktop/open.fileloc"):
         with pytest.raises(mac.LocalPathError):
             mac.write_local(bad, "x")
     (home / "Desktop" / "folder").mkdir()
@@ -169,6 +283,25 @@ def test_write_local_refuses_a_symlink_out_of_home(home: Path, tmp_path: Path) -
     with pytest.raises(mac.LocalPathError):
         mac.write_local("~/Desktop/link.txt", "overwritten", "overwrite")
     assert outside.read_text() == "original"
+
+
+def test_write_move_and_trash_do_not_follow_a_symlink_inside_home(home: Path) -> None:
+    """Resolving the link first would edit, move or trash the target and report the link's path."""
+    target = home / "Documents" / "important.txt"
+    target.write_text("keep")
+    link = home / "Desktop" / "link.txt"
+    link.symlink_to(target)
+    for act in (
+        lambda: mac.write_local("~/Desktop/link.txt", "overwritten", "overwrite"),
+        lambda: mac.move_local("~/Desktop/link.txt", "~/Desktop/renamed.txt"),
+        lambda: mac.trash_local("~/Desktop/link.txt"),
+    ):
+        with pytest.raises(mac.LocalPathError):
+            act()
+    assert target.read_text() == "keep"
+    assert link.is_symlink()
+    assert not (home / "Desktop" / "renamed.txt").exists()
+    assert not (home / ".Trash" / "important.txt").exists()
 
 
 def test_move_local_renames_moves_and_never_replaces(home: Path) -> None:
@@ -242,9 +375,24 @@ def test_run_shortcut_pipes_input_and_reads_output_file(monkeypatch: pytest.Monk
         return p
     calls = fake_exec(monkeypatch, make)
     out = asyncio.run(mac.run_shortcut("Add to Reading List", "https://example.com"))
-    assert calls[0][:3] == ["shortcuts", "run", "Add to Reading List"]
+    argv = calls[0]
+    assert argv[:2] == ["shortcuts", "run"]
+    assert argv[argv.index("--") + 1] == "Add to Reading List"
+    assert argv[argv.index("--output-path") + 1] != "Add to Reading List"
     assert holder["proc"].stdin_data == b"https://example.com"
     assert out["ok"] and out["output"] == "Saved." and out["exit_code"] == 0
+
+
+def test_run_shortcut_name_is_not_a_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = fake_exec(monkeypatch, FakeProc())
+    asyncio.run(mac.run_shortcut("--output-path=/tmp/pwned"))
+    argv = calls[0]
+    assert argv[argv.index("--") + 1] == "--output-path=/tmp/pwned"
+    assert "--output-path=/tmp/pwned" not in argv[:argv.index("--")]
+    with pytest.raises(ValueError):
+        asyncio.run(mac.run_shortcut("name\n--output-path=/tmp/pwned"))
+    with pytest.raises(ValueError):
+        asyncio.run(mac.list_shortcuts("--folders"))
 
 
 def test_run_shortcut_times_out_and_kills(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -302,6 +450,7 @@ def test_modes_and_reserved_names() -> None:
         assert modes[n] == "on", n
     assert set(tools.MAC_TOOLS) <= RESERVED_TOOL_NAMES
     assert tb.specs["open_page"].taints and tb.specs["read_local_file"].taints
+    assert tb.specs["run_shortcut"].taints  # a Shortcut's output is whatever that Shortcut returns
 
 
 def test_open_page_needs_the_bridge(monkeypatch: pytest.MonkeyPatch) -> None:

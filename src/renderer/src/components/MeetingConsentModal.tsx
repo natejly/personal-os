@@ -42,8 +42,8 @@ export default function MeetingConsentModal(): JSX.Element {
 
         <section className="mtg-consent">
           <p>
-            Turning this on records your microphone while a meeting is running. If you have a
-            loopback device installed it also records everything your speakers play, which on a call
+            Turning this on records your microphone while a meeting is running. If system audio
+            capture is available it also records everything your speakers play, which on a call
             means every other person in it. They will not be told by this app, and depending on
             where you are, recording them without saying so may be illegal.
           </p>
@@ -53,9 +53,9 @@ export default function MeetingConsentModal(): JSX.Element {
               one folder per meeting. Nothing is written to a temp directory that gets swept.
             </li>
             <li>
-              Each clip is uploaded to <code>{settings.baseUrl || '(no base URL configured)'}</code> to
-              be transcribed, and goes nowhere else. Whatever that proxy does with it is between you
-              and whoever runs it.
+              Each clip is transcribed on this Mac when Speech or whisper.cpp is selected. Otherwise
+              it is uploaded to <code>{settings.baseUrl || '(no base URL configured)'}</code>, and
+              goes nowhere else. Whatever that proxy does with it is between you and whoever runs it.
             </li>
             <li>
               The wavs are deleted once a clip has been transcribed, unless you switch on

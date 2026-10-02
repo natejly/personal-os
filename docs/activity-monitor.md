@@ -20,8 +20,8 @@ captures before you can enable it.
 | **Browser URLs** | Active tab URL in Safari, Chrome, Arc, Brave, Edge, Vivaldi | Automation permission, one grant per browser |
 | **Typing and clicks** | Counts and rhythm: keystrokes, clicks, scrolls, words per minute. No characters | Accessibility; Input Monitoring where it is explicitly denied |
 | **The text you type** | Every character typed, redacted. This is a keylogger | Accessibility; Input Monitoring where it is explicitly denied |
-| **Microphone** | Short recordings, transcribed, audio deleted. Text only | ffmpeg + Microphone permission |
-| **System audio** | Same, for whatever your speakers played | ffmpeg + a loopback device |
+| **Microphone** | Short recordings, transcribed, audio deleted. Text only | AVAudioEngine + Microphone permission |
+| **System audio** | Same, for whatever your speakers played | Core Audio process tap (macOS 14.2+), or a loopback device |
 
 Defaults when you first switch the monitor on: **apps** and **typing counts**.
 Everything else stays off until you choose it.
@@ -39,8 +39,8 @@ collectors ──▶ the gate ──▶ activity_events ──▶ rollup ──�
 `FocusCollector` samples the frontmost window every `sampleSeconds` and writes
 one row per stretch of attention, so a rollup can say "35 minutes in Xcode"
 instead of listing 400 samples. `InputCollector` installs a listen-only
-`CGEventTap`. `AudioCollector` shells out to ffmpeg, transcribes the chunk, and
-unlinks the wav.
+`CGEventTap`. `AudioCollector` records a chunk (native capture, ffmpeg fallback),
+transcribes it, and unlinks the wav.
 
 **The gate** (`activity.Gate`) runs before every single write:
 
@@ -234,14 +234,14 @@ rows that behave this way say so.
 ./scripts/activity-setup.sh
 ```
 
-Installs the pyobjc bridge and ffmpeg, offers the loopback driver, then prints the checklist and
-what is left for you to grant. The loopback driver is a `.pkg`, so that step asks for your password
-and cannot run unattended:
+Installs the pyobjc bridge (including Speech), then prints the checklist and
+what is left for you to grant. ffmpeg and BlackHole are optional fallbacks:
 
 ```bash
-cd backend && uv pip install -e '.[activity]'   # window titles, the keystroke tap, mic status
-brew install ffmpeg                             # both audio signals
-brew install --cask blackhole-2ch               # system audio only; asks for your password
+cd backend && uv pip install -e '.[activity]'   # window titles, the keystroke tap, native audio, Speech
+# optional:
+brew install ffmpeg                             # truncated-wav repair and the ffmpeg capture path
+brew install --cask blackhole-2ch               # system audio on macOS older than 14.2
 ```
 
 ## Palantir mode

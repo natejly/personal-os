@@ -184,10 +184,7 @@ export default function DeskReview({ desk }: { desk: FullDesk }): JSX.Element {
   if (desk.outputs.length === 0) {
     return (
       <div className="desk-review">
-        <p className="empty-hint">
-          Nothing nominated yet. A desk delivers by calling <code>desk_deliver</code> on a file under
-          <code> outputs/</code>; until then nothing it wrote can reach the app.
-        </p>
+        <p className="empty-hint">Nothing to review yet.</p>
       </div>
     )
   }

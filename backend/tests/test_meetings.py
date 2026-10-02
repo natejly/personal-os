@@ -371,7 +371,7 @@ def test_a_transcript_keeps_the_people_and_loses_the_credentials() -> None:
         seg["id"], text="ada@example.com will call +1 415 555 0134 about sk-aaaaaaaaaaaaaaaaaaaaaa",
         backend="proxy")["text"]
     # Credential rules only. activity.Gate.scrub's identity rules replace every address with
-    # [email] (activity.py:126) and every phone-shaped digit run with [phone] (activity.py:132),
+    # [email] and every phone-shaped digit run with [phone] (redact.py),
     # which would erase who was on the call from inside the record of the call.
     assert "ada@example.com" in stored
     assert "+1 415 555 0134" in stored

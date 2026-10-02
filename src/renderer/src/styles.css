@@ -68,6 +68,10 @@
   --focus-ring: #5a7d5c;
   /* Scope chips: the dark-theme blue is far too light on a light tint. */
   --info: #1c6890;
+  /* The dark theme's status colours are text on white here: #febc2e is 1.7:1. These are 5.3:1 or better. */
+  --danger: #c62a2f;
+  --ok: #2b7a3d;
+  --warn: #8a5a00;
   --user-bubble: #ebe8e2;
   --hover: rgba(0, 0, 0, 0.05);
   --active: rgba(0, 0, 0, 0.09);
@@ -93,6 +97,9 @@
     --focus-ring: #5a7d5c;
     /* Scope chips: the dark-theme blue is far too light on a light tint. */
     --info: #1c6890;
+    --danger: #c62a2f;
+    --ok: #2b7a3d;
+    --warn: #8a5a00;
     --user-bubble: #ebe8e2;
     --hover: rgba(0, 0, 0, 0.05);
     --active: rgba(0, 0, 0, 0.09);
@@ -677,7 +684,7 @@ kbd {
 .icon-btn:hover { background: var(--hover); color: var(--text); }
 .ghost-btn {
   display: inline-flex; align-items: center; gap: 6px;
-  padding: 6px 10px; border-radius: 8px; font-size: 13px;
+  padding: 6px 10px; border-radius: 8px; font-size: 13px; line-height: 1.4;
   color: var(--text-muted); border: 1px solid var(--border);
 }
 .ghost-btn:hover:not(:disabled) { background: var(--hover); color: var(--text); }

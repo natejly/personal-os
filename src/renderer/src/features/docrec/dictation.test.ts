@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { MeetingSegment } from '@shared/types'
 import {
-  dictationDrained, dictationText, dictationsFor, forgetDictation, planDictation, readyForInsert, trackDictation
+  dictationCommand, dictationDrained, dictationText, dictationsFor, forgetDictation, planDictation, readyForInsert, trackDictation
 } from './dictation'
 
 test('spacing: a space after a word, none after whitespace or an opener, none before punctuation', () => {
@@ -32,6 +32,37 @@ test('commands: only a whole utterance is a command', () => {
   assert.equal(dictationText('New paragraph!', 'text\n'), '\n')
   assert.equal(dictationText('new paragraph', 'text\n\n'), '')
   assert.equal(dictationText('start a new line here', 'text'), ' start a new line here')
+})
+
+test('spoken punctuation attaches to the previous word', () => {
+  assert.equal(dictationText('period', 'hello'), '.')
+  assert.equal(dictationText('Comma.', 'hello'), ',')
+  assert.equal(dictationText('question mark', 'is it'), '?')
+  assert.equal(dictationText('the period of time', 'in'), ' the period of time')
+})
+
+test('bullets and headings start at a line start', () => {
+  assert.equal(dictationText('bullet', 'text'), '\n- ')
+  assert.equal(dictationText('next bullet', 'text\n'), '- ')
+  assert.equal(dictationText('bullet', '- '), '')
+  assert.equal(dictationText('heading two', 'text'), '\n## ')
+  assert.equal(dictationText('heading one', ''), '# ')
+  assert.equal(dictationText('first item', '- '), 'First item')
+})
+
+test('fillers are stripped as whole words only', () => {
+  assert.equal(dictationText('um we should, uh, go', 'x.'), ' We should, go')
+  assert.equal(dictationText('the umbrella', 'x.'), ' The umbrella')
+  assert.equal(dictationText('um, new line', 'text'), '\n')
+  assert.equal(dictationText('uh', 'x'), '')
+})
+
+test('editor commands type nothing and are recognised whole-utterance only', () => {
+  assert.equal(dictationText('scratch that', 'x'), '')
+  assert.equal(dictationText('Stop dictation.', 'x'), '')
+  assert.equal(dictationCommand('scratch that'), 'scratch')
+  assert.equal(dictationCommand('Stop dictation!'), 'stop')
+  assert.equal(dictationCommand('please stop dictation now'), null)
 })
 
 test('whitespace and empty input', () => {

@@ -256,6 +256,15 @@ export default function MeetingSettings({ variant = 'page' }: { variant?: 'page'
         <input type="checkbox" checked={cfg.enhanceOnStop} onChange={(e) => patch({ enhanceOnStop: e.target.checked })} />
         <span className="switch" />
       </label>
+      <label className="toggle-row plain">
+        <span className="toggle-icon"><Sparkles size={15} /></span>
+        <span className="toggle-text">
+          <b>Tidy dictation with the model</b>
+          <small>Each dictated clip is sent to the extraction model to fix punctuation and fillers only. Off sends nothing.</small>
+        </span>
+        <input type="checkbox" checked={cfg.dictationCleanup} onChange={(e) => patch({ dictationCleanup: e.target.checked })} />
+        <span className="switch" />
+      </label>
       <label className="act-field">
         <span><b>Enhance model</b><small>blank falls back to the extraction model, then the default chat model</small></span>
         <input value={cfg.enhanceModel} onChange={(e) => patch({ enhanceModel: e.target.value })} spellCheck={false} placeholder="(default)" />

@@ -2,8 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import type { MeetingStatusInfo } from '@shared/types'
 import { useStore } from '../../store'
 import { useDocRec } from './store'
-import { dictationDrained, dictationText, dictationsFor, forgetDictation, planDictation, trackDictation } from './dictation'
+import { dictationCommand, dictationDrained, dictationText, dictationsFor, forgetDictation, planDictation, trackDictation } from './dictation'
 import { liveDoc } from './segments'
+import { api } from '../../lib/api'
+
+/** Model-tidied clip text by clip id; a clip is held back (not typed) until its entry exists. */
+const tidied = new Map<string, string>()
+const tidying = new Set<string>()
 
 /** How long after a dictation stops its last clips can still arrive and be typed. */
 const DICTATION_TAIL_MS = 120_000
@@ -58,12 +63,18 @@ export function useElapsed(active: NonNullable<MeetingStatusInfo['active']> | nu
  * when this doc's editor is available again. A clip is marked typed only after `insert` ran, and
  * never goes into a doc other than the one being dictated into.
  */
-export function useDictation(docId: string, insert: (text: string) => boolean, getBefore?: () => string): void {
+export function useDictation(
+  docId: string, insert: (text: string) => boolean, getBefore?: () => string,
+  /** Remove `text`, the last thing dictated, only if it is still right before the caret. */
+  undo?: (text: string) => void
+): void {
   const insertRef = useRef(insert)
+  const undoRef = useRef(undo)
   const beforeRef = useRef(getBefore)
   useEffect(() => {
     insertRef.current = insert
     beforeRef.current = getBefore
+    undoRef.current = undo
   })
 
   useEffect(() => {
@@ -82,8 +93,22 @@ export function useDictation(docId: string, insert: (text: string) => boolean, g
         for (const id of skip) s.typed.add(id)
         let before = beforeRef.current ? beforeRef.current() : tail
         for (const c of ready) {
-          const text = dictationText(c.text, before)
-          if (text && !insertRef.current(text)) break
+          const cmd = dictationCommand(c.text)
+          const tidy = useStore.getState().meetingStatus?.config?.dictationCleanup && !cmd && !tidied.has(c.id)
+          if (tidy) {
+            // Held until the model answers (3 s at most, the raw text on any failure); later clips wait too.
+            if (!tidying.has(c.id)) {
+              tidying.add(c.id)
+              api.assist.cleanDictation(c.text).then((r) => r.text, () => c.text).then((t) => { tidied.set(c.id, t || c.text); run() })
+            }
+            break
+          }
+          const text = dictationText(tidied.get(c.id) ?? c.text, before)
+          if (cmd === 'scratch') { undoRef.current?.(s.last); s.last = '' }
+          else if (text && !insertRef.current(text)) break
+          else if (text) s.last = text
+          tidied.delete(c.id); tidying.delete(c.id)
+          if (cmd === 'stop') void useDocRec.getState().stop()
           // Marked only now that the text is in the editor, so a refused insert is retried.
           s.typed.add(c.id)
           before = (before + text).slice(-80)

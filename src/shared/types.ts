@@ -2443,6 +2443,8 @@ export interface MeetingConfig {
   diarizeEmbeddingModel: string
   diarizeThreshold: number
   diarizeSpeakers: number
+  /** Run each dictated clip through a model that only fixes punctuation, case and fillers. */
+  dictationCleanup: boolean
 }
 
 /** One row of the capability checklist: what this machine can do, and how to fix what it can't. */

@@ -4315,6 +4315,19 @@ async def assist_mail_review(body: MailReviewIn) -> dict[str, Any]:
         raise HTTPException(502, f"Review failed: {e}") from e
 
 
+class DictationCleanIn(BaseModel):
+    text: str
+
+
+@app.post("/docs/dictation/clean")
+async def docs_dictation_clean(body: DictationCleanIn) -> dict[str, str]:
+    """Optional model pass over one committed dictation clip. Off by default: no model call is made
+    unless meetings.dictationCleanup is on. Always returns text, the input itself when anything fails."""
+    if not meeting_svc.config().get("dictationCleanup"):
+        return {"text": body.text}
+    return {"text": await assist.clean_dictation(settings(), body.text)}
+
+
 @app.get("/integrations/google/tasks")
 def google_tasks(show_completed: bool = False, refresh: bool = False) -> Any:
     return _gcall(google.tasks_list, "@default", show_completed, refresh=refresh)
@@ -5725,6 +5738,7 @@ class MeetingConfigIn(BaseModel):
     diarizeEmbeddingModel: str | None = None
     diarizeThreshold: float | None = None
     diarizeSpeakers: int | None = None
+    dictationCleanup: bool | None = None
 
 
 class MeetingSpeakersIn(BaseModel):

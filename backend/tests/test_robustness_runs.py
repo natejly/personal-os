@@ -42,7 +42,7 @@ def _stream(monkeypatch: Any, chunks: list[dict[str, Any]] | None = None, raise_
         return real(transport=httpx.MockTransport(lambda req: httpx.Response(200, stream=Body())), **k)
 
     monkeypatch.setattr(llm.httpx, "AsyncClient", client)
-    monkeypatch.setattr(llm, "_base", lambda s: "http://x")
+    monkeypatch.setattr(llm, "_url", lambda s, path, model=None: "http://x/v1" + path)
     monkeypatch.setattr(llm, "_headers", lambda s: {})
     _stream.seen = seen  # type: ignore[attr-defined]
 
@@ -63,7 +63,7 @@ def test_stream_has_idle_read_timeout_and_surfaces_it(monkeypatch: Any) -> None:
     with pytest.raises(llm.LLMError, match="stopped responding"):
         run(_end())
     t = _stream.seen["timeout"]  # type: ignore[attr-defined]
-    assert t.read == llm.STREAM_IDLE_S == 300.0
+    assert t.read == llm.DEFAULT_IDLE_S + 5 and llm.DEFAULT_IDLE_S == 300.0  # headers wait; the per-chunk idle limit is enforced in the loop
 
 
 def test_well_formed_chunked_calls_unchanged(monkeypatch: Any) -> None:

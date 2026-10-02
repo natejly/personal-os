@@ -205,8 +205,8 @@ def test_unattended_runs_refuse_instead_of_asking() -> None:
     check(not cards(ev) and not RAN, "no card was raised and nothing ran")
     check(any("unattendedApprovals" in m for m in tool_messages()), "the reason reached the model")
     cid = setup(None, mode="ask", unattendedApprovals="ask")
-    check(len(cards(drive(cid, [[sh(0, "make deploy")]], ["allow", "allow"], run=Run(cid, None, kind="job")))) == 1,
-          "with the default setting a job run still asks")
+    check(not cards(drive(cid, [[sh(0, "make deploy")], []], run=Run(cid, None, kind="job"))) and not RAN,
+          "even with 'ask', a job run never parks on a card nobody can answer")
 
 
 def test_saving_always_allow_rules_validates_and_appends() -> None:

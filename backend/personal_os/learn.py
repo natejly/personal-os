@@ -191,10 +191,9 @@ async def learn_from_exchange(
             tid = label_to_id.get(t.lower()) or graph.upsert_node(project_id, t)["id"]
             if sid == tid:
                 continue
-            added_edges.append(graph.upsert_edge(project_id, sid, tid, rel))
-        except Exception:
+            edge = graph.upsert_edge(project_id, sid, tid, rel, source_message_id=message_id)
+        except Exception:  # noqa: BLE001 - one bad relation must not lose the rest
             continue
-        edge = graph.upsert_edge(project_id, sid, tid, rel, source_message_id=message_id)
         added_edges.append(edge)
         old = _edge_by_ref(graph, project_id, r.get("replaces"))
         if old and old["id"] != edge["id"]:

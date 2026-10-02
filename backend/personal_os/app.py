@@ -706,7 +706,8 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
         d = llm.DEFAULT_SETTINGS[k]
         if isinstance(d, (int, float)) and not isinstance(d, bool):
             clean[k] = _check_numeric_setting(k, v)
-        elif isinstance(d, (dict, list, str, bool)) and not isinstance(v, type(d)):
+        elif k not in SECRET_SETTINGS and isinstance(d, (dict, list, str, bool)) and not isinstance(v, type(d)):
+            # (A secret takes null to clear it; its own check below.)
             # Stored as given, a wrong-typed value (tools: "x", systemPrompt: null) 500s every route that reads it.
             raise HTTPException(422, f"{k} must be a {type(d).__name__}")
         elif k == "permissionRules":

@@ -2277,6 +2277,7 @@ export interface Workflow {
   params: Record<string, WorkflowParam>
   created_at: number
   updated_at: number
+}
 export type WorkflowRunStatus =
   | 'awaiting_approval' | 'running' | 'waiting_approval' | 'done' | 'failed' | 'cancelled' | 'interrupted' | 'stale'
 export type WorkflowStepStatus = 'pending' | 'running' | 'waiting_approval' | 'done' | 'failed' | 'skipped' | 'blocked'
@@ -2290,6 +2291,7 @@ export interface WorkflowStepRow {
   error: string | null
   approval_call_id: string | null
   idempotency_key: string
+}
 /** One step of the expanded plan the user approves: parameters filled in, step results still shown as {{step.result}}. */
 export interface WorkflowPlanStep {
   id: string
@@ -2301,6 +2303,7 @@ export interface WorkflowPlanStep {
   agent?: Record<string, unknown>
   fan_out?: Record<string, unknown>
   when?: unknown
+}
 export interface WorkflowRun {
   id: string
   workflow_id: string | null
@@ -2319,6 +2322,7 @@ export interface WorkflowRun {
   steps: WorkflowStepRow[]
   /** Not sent in the run list. */
   plan?: WorkflowPlanStep[]
+}
 export interface Command {
   id: string
   name: string
@@ -2327,3 +2331,4 @@ export interface Command {
   subtask: boolean
   role: string | null
   text: string
+}

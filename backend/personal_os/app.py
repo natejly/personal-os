@@ -55,7 +55,7 @@ from .mcp_client import McpClient, McpError
 from .mcp_servers import MODES as MCP_MODES, RESERVED_PREFIX as MCP_PREFIX, SCOPES as MCP_SCOPES, McpServers
 from .meeting_recorder import RecorderBusy
 from .meetings import MeetingBlocked, Meetings, MeetingService
-from .cowork import (AUTONOMY, DESK_CONTINUE, DESK_HINT, DESK_RESUME, LIVE as DESK_LIVE,
+from .cowork import (AUTONOMY, DESK_CONTINUE, DESK_HINT, DESK_PLAN_HINT, DESK_RESUME, LIVE as DESK_LIVE,
                      STATUSES as DESK_STATUSES, UNDECIDED_OUTPUTS, DeskRuntime, Desks)
 from .workspace import MAX_PREVIEW, Workspace, WorkspaceError
 from .microvm import Sandboxes
@@ -1337,7 +1337,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 _counts[_n] = _counts.get(_n, 0) + 1
         tools_hint = "\n".join(p for p in (tools_hint, mcp_search.catalog_hint(_counts.items())) if p)
     artifact_hint = ARTIFACT_HINT if any(s["function"]["name"] == "create_artifact" for s in tool_schemas) else ""
-    hints = (RENDER_HINT, artifact_hint, tools_hint, JOB_HINT if proposal_only(run) else "")
+    hints = (RENDER_HINT, artifact_hint, tools_hint, JOB_HINT if proposal_only(run) else "",
+             DESK_HINT if desk else "", DESK_PLAN_HINT if planning else "")
     if cfg.get("cacheLayout", True):
         # Stable prefix first, per-turn retrieval just before the newest user message (see context.layout_messages).
         stable = "\n\n".join(p for p in (used["stable_system"], *hints) if p)

@@ -51,7 +51,7 @@ passed = 0
 
 REPORT = "# The report\n\nOne finding, written down.\n"
 
-SCRIPT: dict[str, Any] = {"turns": [], "default": {"text": "All done."}, "delay": 0.0, "tools": []}
+SCRIPT: dict[str, Any] = {"turns": [], "default": {"text": "All done."}, "delay": 0.0, "tools": [], "systems": []}
 
 
 async def _scripted_stream(settings: dict[str, Any], model: str, messages: list[dict[str, Any]],
@@ -59,6 +59,7 @@ async def _scripted_stream(settings: dict[str, Any], model: str, messages: list[
                            effort: str = "default", tool_choice: str = "auto", fast: bool = False,
                            cancel: Any = None) -> Any:
     SCRIPT["tools"].append([t["function"]["name"] for t in (tools or [])])
+    SCRIPT["systems"].append("\n".join(str(m.get("content") or "") for m in messages if m.get("role") == "system"))
     if tool_choice == "none":
         # The closing round of a budget, park or breaker stop. It never calls a tool and never
         # consumes a scripted turn: the next turn's first round is still waiting for its entry.
@@ -102,6 +103,7 @@ def script(*turns: dict[str, Any], delay: float = 0.0) -> None:
     SCRIPT["turns"] = [dict(t) for t in turns]
     SCRIPT["delay"] = delay
     SCRIPT["tools"] = []
+    SCRIPT["systems"] = []
 
 
 def settings_patch(**patch: Any) -> None:
@@ -238,6 +240,30 @@ def test_ask_as_it_goes_cards_each_change_instead_of_planning_first() -> None:
     check(hit[0]["blocked_by"] is None, "it was never blocked by planning, the way 'plan' autonomy would")
     check(hit[0]["approval"] == "allow", "and it ran because the user said so, call by call")
     check(j("GET", f"/cowork/desks/{did}/files")["files"], "the file really exists")
+
+
+def test_a_desk_is_told_it_is_a_desk_and_why_a_plan_comes_first() -> None:
+    """The desk's own instructions (outputs/ + desk_deliver, desk_ask, desk_done) reached no model at
+    all, so a planning desk saw no write or deliver tool and no reason for their absence, and
+    answered in chat with a report it had not saved."""
+    script({"calls": [propose("Write it up", step("desk_write_file", WRITE["arguments"]))]}, {"text": "Waiting."})
+    planning = make_desk("Write the note")["desk"]["id"]
+    j("POST", f"/approvals/{card(planning, PLAN_TOOL)['call_id']}", {"decision": "deny"})
+    quiet(planning)
+    first = SCRIPT["systems"][0]
+    check("## This is a cowork desk" in first and "desk_deliver" in first, "a desk's first round carries the desk hint")
+    check("## Planning first" in first and "propose_plan" in first, "and, while planning, why writes are not offered yet")
+
+    script({"calls": [call("desk_done", summary="Nothing to do.")]}, {"text": "Done."})
+    asking = make_desk("Write the note", autonomy="ask")["desk"]["id"]
+    quiet(asking)
+    check("## This is a cowork desk" in SCRIPT["systems"][0], "an 'ask' desk carries the desk hint too")
+    check("## Planning first" not in SCRIPT["systems"][0], "but is not told to plan")
+    script({"text": "Hi."})
+    cid = j("POST", "/conversations", {"title": "plain chat"})["id"]
+    j("POST", f"/conversations/{cid}/chat", {"content": "hello"})
+    wait_until(lambda: bool(SCRIPT["systems"]), "the plain chat's first round")
+    check("## This is a cowork desk" not in SCRIPT["systems"][0], "an ordinary chat is never told it is a desk")
 
 
 def test_seen_clears_the_desks_needs_you_badge() -> None:
@@ -687,6 +713,7 @@ def test_delete_keeps_the_workspace_unless_purge() -> None:
 
 
 TESTS = [test_a_desk_is_a_conversation_the_chat_list_hides,
+         test_a_desk_is_told_it_is_a_desk_and_why_a_plan_comes_first,
          test_three_desks_run_at_once,
          test_the_live_desk_cap_409s,
          test_a_double_start_makes_one_run,

@@ -135,6 +135,13 @@ under `work/`; anything the user should keep goes under `outputs/` and is nomina
 `desk_deliver`. If you need a decision only the user can make, call `desk_ask` and end your turn —
 do not guess and do not trail off. When the brief is finished, call `desk_done` with a short summary."""
 
+# Only while the plan is being drafted: the tools that write, deliver or finish are not offered yet, so a
+# model told nothing about why concludes they do not exist and answers in chat instead.
+DESK_PLAN_HINT = """## Planning first
+This desk starts in plan mode. Writing files, `desk_deliver` and `desk_done` are not offered until the user
+approves a plan, so their absence now is expected. Call `propose_plan` with the steps you will take after
+approval (including writing to `outputs/`, `desk_deliver` and `desk_done`); do not answer with the work in chat."""
+
 DESK_CONTINUE = ("Continuing this desk. The approved plan below shows what is already done. Pick up at "
                  "the first unfinished step; do not redo completed work. Files you already wrote are "
                  "still in the workspace — read them rather than regenerating them.")

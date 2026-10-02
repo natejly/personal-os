@@ -449,7 +449,9 @@ def test_a_watched_card_never_parks() -> None:
 
 def test_a_chained_turn_hands_off_before_it_ends() -> None:
     """Long autonomy is bought by chaining bounded replies, never by raising maxToolRounds."""
-    settings_patch(maxToolRounds=2)
+    # The completion gate is off here: this script finishes without delivering its files, which the gate would
+    # (rightly) refuse, and either the refusal and its nudge or the reviewer it would start adds a third run to a test about two.
+    settings_patch(maxToolRounds=2, deskDoneGate=False, deskSelfReview=False)
     try:
         second = call("desk_write_file", path="outputs/second.md", content="# Second\n")
         script({"calls": [propose("Two files", step("desk_write_file", WRITE["arguments"]),
@@ -480,7 +482,7 @@ def test_a_chained_turn_hands_off_before_it_ends() -> None:
         spent = plans.get(desk(did)["plan_id"])
         check([s["status"] for s in spent["steps"]] == ["done", "done"], "both approved steps are spent exactly once")
     finally:
-        settings_patch(maxToolRounds=25)
+        settings_patch(maxToolRounds=25, deskDoneGate=True, deskSelfReview=True)
 
 
 def test_a_turn_that_consumed_no_step_does_not_chain() -> None:

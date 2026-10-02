@@ -2160,6 +2160,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     # would block the desk on a question the user has just answered.
                     result = {"status": "answered", "answer": answer,
                               "note": "The user answered your question. Carry on with it; do not ask it again."}
+                    if answer in [str(o).strip() for o in (args.get("options") or []) if isinstance(o, str)]:
+                        result["choice"] = answer  # they picked one of the choices the question offered
                 elif mcp_is(c["name"]):
                     # The branch above only reaches here when the call was allowed. A job has nobody
                     # to allow it, so the connector call is a proposal and the server is not contacted.
@@ -2413,6 +2415,13 @@ async def _run_desk(run: Run, desk_id: str, body: ChatIn) -> dict[str, Any]:
         run.publish("desk_status", settled)
     except Exception:  # noqa: BLE001 - a rail label must never kill a run
         pass
+    if (settled or {}).get("status") in ("done", "failed", "stopped", "review") and mac.page_bridge.has("browser"):
+        # The desk is over (or waiting on a review of its files): its browser window has nothing left to do, and
+        # leaving it to the idle timer would hold one of the few sessions the app allows.
+        try:
+            await mac.page_bridge.browser("close", {"session": f"desk:{desk_id}"}, 5.0)
+        except Exception:  # noqa: BLE001 - closing a window must never change how a desk ended
+            pass
     return settled
 
 

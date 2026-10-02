@@ -312,7 +312,7 @@ def test_redaction_and_cap(env) -> None:
 
 def test_downloads_reported_relative(env) -> None:
     root = env.ws.ensure("d1")
-    env.fake.replies["act"] = page(downloads=[{"path": str(root / "work" / "downloads" / "a.pdf")}])
+    env.fake.replies["act"] = page(notes=[f"downloaded: {root / 'work' / 'downloads' / 'a.pdf'}"])
     env.fake.replies["preview"] = preview("none")
     assert env.run("browser_click", ref="e1")["downloaded"] == ["work/downloads/a.pdf"]
 

@@ -28,6 +28,7 @@ BROWSER_REDACT = ("private_key", "aws_key", "github_pat", "google_api", "slack_w
 MANAGE_ACTIONS = ("back", "forward", "reload", "tabs", "switch_tab", "close_tab", "wait", "screenshot", "dialog",
                   "upload", "handoff", "close")
 UNTYPED = "this address was not typed by you or returned by a search"
+DOWNLOADED = "downloaded:"  # the prefix of the note the desktop app adds for a finished download
 DECLINED = ("the user did not allow this. Ask them with desk_ask, or hand the page over with "
             "browser_manage(action='handoff', reason=...) and let them do it")
 
@@ -94,15 +95,20 @@ def register(tb: Any) -> None:
                                "tabs": res.get("tabs"), "snapshot": snap, "notes": notes}
         if res.get("tabList") is not None:
             out["tab_list"] = res["tabList"]
-        got = res.get("downloads")
-        if isinstance(got, list) and got:
-            files = []
-            for d in got:
-                raw = str(d.get("path") if isinstance(d, dict) else d)
-                try:
-                    files.append(os.path.relpath(raw, root) if root and os.path.isabs(raw) else raw)
-                except ValueError:
-                    files.append(raw)
+        # The desktop app reports a finished download as a note, "downloaded: <absolute path>". The model gets the path
+        # relative to the desk workspace, which is what the desk file tools take.
+        files = []
+        for i, n in enumerate(notes):
+            if not n.startswith(DOWNLOADED):
+                continue
+            raw = n[len(DOWNLOADED):].strip()
+            try:
+                rel = os.path.relpath(raw, root) if root and os.path.isabs(raw) else raw
+            except ValueError:
+                rel = raw
+            files.append(rel)
+            notes[i] = DOWNLOADED + " " + rel
+        if files:
             out["downloaded"] = files
         return out
 

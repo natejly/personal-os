@@ -63,9 +63,11 @@ READ_TOOLS = (
     "search_documents", "read_document", "list_documents", "search_memory", "graph_search", "graph_traverse",
     "web_search", "fetch_url", "read_local_file", "find_files", "fs_glob", "fs_grep", "read_tool_result", "current_time",
     "doc_list", "doc_search", "doc_read", "youtube_search", "youtube_video", "github_search", "github_read", "read_feed",
-    "desk_list_files", "desk_read_file",
+    "desk_list_files", "desk_read_file", "view_image", "doc_guide",
 )
-WRITE_TOOLS = (*FILE_WRITERS, *SHELL_TOOLS, "run_python", "desk_write_file", "desk_trash_file", "agent_spawn", "agent_wait", "agent_stop")
+# The browser stays with the parent: a desk has one browser session, and its consequential actions ask the user.
+WRITE_TOOLS = (*FILE_WRITERS, *SHELL_TOOLS, "run_python", "desk_write_file", "desk_trash_file", "desk_fetch_file",
+               "convert_document", "render_preview", "agent_spawn", "agent_wait", "agent_stop")
 
 COMMON_PROMPT = (
     "You are a subagent working for another agent. You have only the task below and the tools you were "

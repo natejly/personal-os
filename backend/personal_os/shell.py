@@ -161,7 +161,11 @@ def auto_ok(args: dict[str, Any], ctx: dict[str, Any], settings: dict[str, Any],
 # ---- environment and output shaping ----
 def scrubbed_env(tmp: str) -> dict[str, str]:
     """An allowlist, never the app's environment: API keys and tokens live there."""
-    return {"PATH": SAFE_PATH, "HOME": os.path.expanduser("~"), "LANG": "en_US.UTF-8", "TERM": "dumb",
+    from . import envs
+    # The shared work environment first, once it exists, so `python` and `pip` in a command are the ones with the
+    # document and data libraries rather than the system's.
+    path = f"{work}:{SAFE_PATH}" if (work := envs.work_bin()) else SAFE_PATH
+    return {"PATH": path, "HOME": os.path.expanduser("~"), "LANG": "en_US.UTF-8", "TERM": "dumb",
             "TMPDIR": tmp, "TMPPREFIX": f"{tmp}/zsh", "NO_COLOR": "1"}  # zsh puts here-document temp files at TMPPREFIX, not TMPDIR
 
 

@@ -837,3 +837,15 @@ if __name__ == "__main__":
             print(f"FAIL  {fn.__name__}: {type(e).__name__}: {e}")
     print(f"\n{len(fns) - failed}/{len(fns)} passed")
     sys.exit(1 if failed else 0)
+
+
+def test_vocab_prefixes_every_prompt() -> None:
+    out = _tmp()
+    with transcribes_as({"text": "hello"}, {"text": "and then"}) as stub, _Worker(out, vocab="Pricing review, Dana") as w:
+        w.feed(0, _wav(out / "mic-00000.wav"))
+        w.wait(1)
+        w.feed(1, _wav(out / "mic-00001.wav"))
+        w.wait(2)
+    assert stub.calls[0]["prompt"] == "Pricing review, Dana"
+    assert stub.calls[1]["prompt"] == "Pricing review, Dana hello"
+    assert len(stub.calls[1]["prompt"]) <= meeting_recorder.stt.MAX_PROMPT_CHARS

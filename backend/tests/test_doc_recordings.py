@@ -63,6 +63,7 @@ class World:
         self.svc = meetings.MeetingService(self.db, lambda: dict(SETTINGS), fake_complete, self.repo,
                                            docs=self.docs, publish=self.events.append)
         self.docs.on_delete = self.repo.purge_doc
+        self.svc.set_config({"minSummaryWords": 0})  # the fixtures' one-liners; the guard has its own tests
 
     def recording(self, doc: dict[str, Any], mode: str = "record", said: str = SAID,
                   status: str = "ready") -> dict[str, Any]:
@@ -512,7 +513,7 @@ def test_routes_a_refused_start_leaves_no_row_and_the_doc_routes_work() -> None:
         real_complete = meeting_svc._complete
         meeting_svc._complete = fake
         try:
-            meeting_store.finalize(mid, "[you] we should ship on the fourteenth")
+            meeting_store.finalize(mid, "[you] we should ship on the fourteenth " + "word " * 40)
             r = client.post(f"/meetings/{mid}/summarize", json={})
             assert r.status_code == 200, r.text
             body = r.json()
@@ -670,3 +671,19 @@ if __name__ == "__main__":
                 failed += 1
                 print(f"FAIL {name}: {type(e).__name__}: {e}")
     sys.exit(1 if failed else 0)
+
+
+def test_a_recording_with_too_little_speech_is_refused_without_a_model_call() -> None:
+    w = World()
+    w.svc.set_config({"minSummaryWords": 40})
+    doc = w.docs.create("Plan", "# Plan\n")
+    res = w.summarize(w.recording(doc, said="uh okay then")["id"])
+    assert "Too little was said" in res["error"] and res["revision"] is None and w.llm == []
+
+
+def test_the_section_says_how_many_words_were_heard_and_which_model_and_template() -> None:
+    w = World()
+    doc = w.docs.create("Plan", "# Plan\n")
+    rev = w.summarize(w.recording(doc)["id"])["revision"]
+    assert "words heard)" in rev["after"]
+    assert "_Model test-model, template general_" in rev["after"]

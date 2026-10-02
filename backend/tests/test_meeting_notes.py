@@ -222,3 +222,41 @@ if __name__ == "__main__":
             print(f"FAIL  {fn.__name__}: {type(e).__name__}: {e}")
     print(f"\n{len(fns) - failed}/{len(fns)} passed")
     sys.exit(1 if failed else 0)
+
+
+def test_vocab_prompt_lists_title_and_names_within_the_cap() -> None:
+    v = meeting_notes.vocab_prompt({**MEETING, "attendees": json.dumps(
+        [{"email": "nate@example.com", "name": "Nate"}, {"email": "dana.k@example.com"}, "x" * 300])})
+    assert v == "Pricing review, Nate, dana.k"
+    assert meeting_notes.vocab_prompt({}) == ""
+
+
+def test_chunks_cover_every_line_and_overlap() -> None:
+    lines = [f"[you] line {i:03d}\n" for i in range(100)]
+    chunks = meeting_notes.chunk_transcript("".join(lines), 400)
+    assert len(chunks) > 3
+    for ln in lines:
+        assert any(ln in c for c in chunks)
+    assert chunks[1].splitlines()[0] in chunks[0], "each chunk repeats the end of the one before"
+
+
+def test_long_transcript_is_mapped_per_chunk_then_reduced_once() -> None:
+    calls: list[str] = []
+
+    async def stub(settings, model, messages, kind="x"):
+        calls.append(messages[0]["content"][:20])
+        return json.dumps({"summary_markdown": "merged" if "merge" in messages[0]["content"] else "part",
+                           "headline": "h", "action_items": []})
+
+    text = "".join(f"[you] line {i:03d}\n" for i in range(200))
+    res = asyncio.run(meeting_notes.summarize_recording(
+        complete_fn=stub, settings=SETTINGS, model="m", meeting=MEETING, doc_title="t", doc_content="",
+        transcript=text, max_transcript_chars=2000))
+    n = len(meeting_notes.chunk_transcript(text, 1000))
+    assert res["markdown"] == "merged" and len(calls) == n + 1 and n > 1
+
+    calls.clear()
+    asyncio.run(meeting_notes.summarize_recording(
+        complete_fn=stub, settings=SETTINGS, model="m", meeting=MEETING, doc_title="t", doc_content="",
+        transcript="short", max_transcript_chars=1000))
+    assert len(calls) == 1

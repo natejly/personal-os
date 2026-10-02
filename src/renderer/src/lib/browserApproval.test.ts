@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { browserAllowLabel, browserSentence } from './browserApproval'
+import { browserAllowLabel, browserApprovalSentence, browserSentence, hostPath } from './browserApproval'
 
 const text = (a: Record<string, unknown>): string => { const s = browserSentence(a); return s.before + s.host + s.after }
 
@@ -25,6 +25,19 @@ test('typing, upload and hand-off read as plain sentences', () => {
 test('only a hand-off changes the primary button', () => {
   assert.equal(browserAllowLabel({ action: 'handoff' }), "I'm done")
   assert.equal(browserAllowLabel({ action: 'click' }), 'Allow')
+})
+
+test('urls shrink to host and path', () => {
+  assert.equal(hostPath('https://shop.example.com/cart?id=1#x'), 'shop.example.com/cart')
+  assert.equal(hostPath('https://example.com/'), 'example.com')
+  assert.equal(hostPath('not a url'), 'not a url')
+})
+
+test('the one-string form reads as the same sentence and takes anything', () => {
+  assert.equal(browserApprovalSentence({ action: 'click', element: 'button "Pay now"', url: 'https://a.test/checkout', risk: 'submit' }),
+    'Submit the form on a.test (button “Pay now”)')
+  assert.equal(browserApprovalSentence({ action: 'handoff', reason: 'sign in' }), 'Take over the browser: sign in')
+  assert.equal(typeof browserApprovalSentence(null), 'string')
 })
 
 test('an unparseable url still yields a host, never throws', () => {

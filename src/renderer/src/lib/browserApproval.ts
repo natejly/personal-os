@@ -71,3 +71,20 @@ export function browserSentence(args: Record<string, unknown>): Sentence {
 
 /** The primary button of a hand-off reads "I'm done": the browser window is open and the user is the one acting. */
 export const browserAllowLabel = (args: Record<string, unknown>): string => (String(args.action ?? '') === 'handoff' ? "I'm done" : 'Allow')
+
+/** The same sentence as one string, for places that do not style the host (the transcript card). */
+export function browserApprovalSentence(args: Record<string, unknown> | null | undefined): string {
+  const s = browserSentence(args ?? {})
+  return `${s.before}${s.host}${s.after}`.trim()
+}
+
+/** `https://shop.example.com/cart?id=1#x` -> `shop.example.com/cart`. Not a URL: returned as typed, clipped. */
+export function hostPath(url: string): string {
+  try {
+    const u = new URL(url)
+    const path = u.pathname === '/' ? '' : u.pathname
+    return `${u.host}${path}`
+  } catch {
+    return url.length > 80 ? url.slice(0, 79) + '…' : url
+  }
+}

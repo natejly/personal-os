@@ -6,6 +6,8 @@
  * behind a "Details" disclosure.
  */
 import type { ToolEvent } from '@shared/types'
+import { hostPath } from './browserApproval'
+import { browserLine } from './toolResult'
 
 /** What the call does, in words. `verb` is the title; `subject` is what it acts on, shown muted beside it. */
 export interface Described { verb: string; subject: string }
@@ -42,7 +44,16 @@ const VERBS: Record<string, string> = {
   desk_trash_file: 'Trash desk file', desk_deliver: 'Deliver to desk', desk_ask: 'Ask a question', desk_done: 'Finish desk task',
   desk_import_sandbox: 'Import from sandbox',
   sandbox_exec: 'Run in sandbox', sandbox_write_file: 'Write sandbox file', sandbox_read_file: 'Read sandbox file',
-  sandbox_list_files: 'List sandbox files', sandbox_put_document: 'Copy document to sandbox', sandbox_reset: 'Reset sandbox'
+  sandbox_list_files: 'List sandbox files', sandbox_put_document: 'Copy document to sandbox', sandbox_reset: 'Reset sandbox',
+  sandbox_checkpoint: 'Save sandbox checkpoint', sandbox_restore: 'Restore sandbox checkpoint',
+  shell_run: 'Run command', shell_poll: 'Check command output', shell_kill: 'Stop command', python_install: 'Install Python packages',
+  fs_glob: 'Find files by name', fs_grep: 'Search file contents', fs_edit: 'Edit file', fs_copy: 'Copy file', fs_mkdir: 'Create folder',
+  agent_spawn: 'Start subagent', agent_wait: 'Wait for subagents', agent_stop: 'Stop subagent',
+  desk_fetch_file: 'Download file to desk',
+  browser_open: 'Open in browser', browser_snapshot: 'Read browser page', browser_click: 'Click in browser', browser_type: 'Type in browser',
+  browser_select: 'Choose in browser', browser_press: 'Press key in browser', browser_scroll: 'Scroll browser', browser_manage: 'Manage browser',
+  view_image: 'Look at image', convert_document: 'Convert document', render_preview: 'Preview document pages', doc_guide: 'Read format guide',
+  browser: 'Browser approval'
 }
 
 /** The argument that best names what a call acts on, in order of preference. */
@@ -73,6 +84,34 @@ export function describeCall(name: string, args: Record<string, unknown> | null 
     }
     case 'move_local_file': return { verb, subject: str('path') && str('to') ? `${str('path')} → ${str('to')}` : str('path') }
     case 'run_python': return { verb, subject: clip(str('code').split('\n')[0] ?? '', 70) }
+    case 'shell_run': return { verb, subject: clip(str('command'), 80) }
+    case 'shell_poll':
+    case 'shell_kill': return { verb, subject: str('job_id') ? `job ${str('job_id')}` : '' }
+    case 'python_install': return { verb, subject: Array.isArray(a.packages) ? clip(a.packages.map(String).join(', '), 80) : '' }
+    case 'fs_glob':
+    case 'fs_grep': return { verb, subject: [clip(str('pattern'), 50), str('path') ? `in ${clip(str('path'), 40)}` : ''].filter(Boolean).join(' ') }
+    case 'fs_copy': return { verb, subject: str('src') && str('dst') ? `${clip(str('src'), 40)} → ${clip(str('dst'), 40)}` : clip(str('src') || str('dst'), 80) }
+    case 'agent_spawn': return { verb, subject: clip(str('task'), 80) }
+    case 'agent_stop': return { verb, subject: str('id') }
+    case 'agent_wait': return { verb, subject: Array.isArray(a.ids) && a.ids.length ? a.ids.map(String).join(', ') : 'all' }
+    case 'desk_fetch_file': return { verb, subject: hostPath(str('url')) }
+    case 'desk_ask': return { verb, subject: clip(str('question'), 80) }
+    case 'desk_done': return { verb, subject: clip(str('summary'), 80) }
+    case 'view_image': return { verb, subject: str('path') }
+    case 'convert_document': return { verb, subject: str('path') && str('to') ? `${str('path')} → ${str('to')}` : str('path') }
+    case 'render_preview': return { verb, subject: str('path') }
+    case 'doc_guide': return { verb, subject: str('format') }
+    case 'browser_open': return { verb, subject: hostPath(str('url')) }
+    case 'browser_snapshot': return { verb, subject: str('query') ? `for “${clip(str('query'), 40)}”` : '' }
+    case 'browser_click':
+    case 'browser_select':
+    case 'browser_scroll':
+    case 'browser_manage':
+    case 'browser_press':
+    case 'browser_type': {
+      const b = browserLine(name, a, null)
+      return { verb, subject: clip(name === 'browser_manage' ? `${b.action} ${b.subject}`.trim() : b.subject, 80) }
+    }
     case 'gmail_send':
     case 'gmail_draft': return { verb, subject: str('to') ? `to ${clip(str('to'), 50)}` : '' }
   }

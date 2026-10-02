@@ -82,3 +82,33 @@
 .tc-approval .tc-args { margin: 0 0 8px; }
 .tc-approval { margin-top: 0; }
 .tool-name.human { text-transform: none; }
+
+/* desk tool cards: shell, python, browser, vision, documents, desk tools */
+.tc-monowrap { display: grid; gap: 3px; margin-top: 6px; }
+.tc-monolabel { font-size: 11px; color: var(--text-faint); }
+.tc-mono { margin: 0; font-family: var(--mono); font-size: 12px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; padding: 8px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 280px; overflow: auto; }
+.tc-mono.tc-cmd { max-height: 120px; }
+.tc-monowrap .tc-more { justify-self: start; padding-left: 0; }
+.tc-meta { margin: 6px 0 0; display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12px; }
+.tc-meta > div { display: flex; gap: 6px; min-width: 0; }
+.tc-meta dt { color: var(--text-faint); }
+.tc-meta dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.tc-statusrow { display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+.tc-badge { display: inline-flex; align-items: center; font-size: 11px; padding: 2px 8px; border-radius: 10px; background: var(--hover); color: var(--text-muted); }
+.tc-badge.ok { background: rgba(70,167,88,0.15); color: var(--ok); }
+.tc-badge.warn { background: color-mix(in srgb, var(--warn) 22%, transparent); color: var(--text); }
+.tc-badge.bad { background: rgba(229,72,77,0.15); color: var(--danger); }
+.tc-badge.run { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
+.tc-chips { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.tc-chip { font-size: 12px; padding: 2px 10px; border-radius: 12px; border: 1px solid var(--border); color: var(--text-muted); }
+.tc-chip.chosen { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.tc-sentence { margin: 0; line-height: 1.45; }
+.tc-result.err.inline { margin-top: 8px; border: 1px solid var(--border); border-radius: 6px; }
+.tc-warning { display: flex; gap: 6px; align-items: flex-start; margin: 6px 0 0; }
+.tc-warning svg { margin-top: 2px; flex-shrink: 0; }
+.tc-problems { padding-left: 20px; }
+.tc-notes { margin-top: 6px; color: var(--text-muted); font-size: 12px; }
+.tc-snapshot { margin-top: 6px; font-size: 12px; }
+.tc-snapshot summary { cursor: pointer; color: var(--text-faint); }
+.tc-snapshot summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.tc-snapshot .tc-mono { max-height: 320px; margin-top: 4px; }

@@ -1,0 +1,76 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { browserLine, fmtSeconds, gateProblems, looseFields, networkLine, parseResult, shellState, snapshotLine, tailLines } from './toolResult'
+
+test('a whole preview parses; a cut one is read loosely and flagged', () => {
+  const ok = parseResult('{"exit_code":0,"output":"hi\\n","cwd":"/w"}')
+  assert.equal(ok.cut, false)
+  assert.equal(ok.data?.output, 'hi\n')
+  const big = JSON.stringify({ exit_code: 2, output: 'line one\nline "two"\nline three', truncated: true, cwd: '/w' })
+  const wrapped = JSON.stringify({ truncated: true, total_chars: 9000, shown: 40, preview: big.slice(0, 60) })
+  const cut = parseResult(wrapped)
+  assert.equal(cut.cut, true)
+  assert.equal(cut.data?.exit_code, 2)
+  assert.match(String(cut.data?.output), /^line one\nline "two/)
+  assert.deepEqual(parseResult('plain text'), { data: null, cut: false })
+  assert.deepEqual(parseResult(''), { data: null, cut: false })
+})
+
+test('a preview that ends mid-escape still decodes', () => {
+  assert.equal(looseFields('{"output": "abc\\').output, 'abc')
+  assert.equal(looseFields('{"output": "caf\\u00').output, 'caf')
+})
+
+test('output tails keep the last lines and count the rest', () => {
+  const text = Array.from({ length: 30 }, (_, i) => `l${i + 1}`).join('\n')
+  const t = tailLines(text, 12)
+  assert.equal(t.hidden, 18)
+  assert.ok(t.shown.startsWith('l19') && t.shown.endsWith('l30'))
+  assert.deepEqual(tailLines('a\nb\n', 12), { shown: 'a\nb', hidden: 0 })
+})
+
+test('network line reads reached and blocked hosts', () => {
+  assert.equal(networkLine({ mode: 'allowlist', contacted: ['pypi.org'], blocked: ['example.com'] }), 'reached pypi.org · blocked example.com')
+  assert.equal(networkLine({ mode: 'allowlist', contacted: [], blocked: [] }), 'no network contact')
+  assert.equal(networkLine(false), null)
+  assert.equal(networkLine(true), 'network allowed')
+})
+
+test('shell outcome: exit code, timeout moved to background, background job, poll', () => {
+  assert.deepEqual(shellState('shell_run', { exit_code: 0 }, false), { label: 'exit 0', tone: 'ok' })
+  assert.deepEqual(shellState('shell_run', { exit_code: 1 }, false), { label: 'exit 1', tone: 'bad' })
+  assert.equal(shellState('shell_run', { still_running: true, job_id: 'j1', exit_code: null }, false).label, 'timed out, moved to background (job j1)')
+  assert.equal(shellState('shell_run', { background: true, job_id: 'j2' }, false).label, 'running in background (job j2)')
+  assert.equal(shellState('shell_run', { timed_out: true, exit_code: -9 }, false).tone, 'bad')
+  assert.equal(shellState('shell_poll', { status: 'running', job_id: 'j2' }, false).label, 'still running (job j2)')
+  assert.equal(shellState('shell_poll', { status: 'exited', exit_code: 0 }, false).label, 'exited 0')
+  assert.equal(shellState('shell_run', null, true).tone, 'run')
+})
+
+test('durations', () => {
+  assert.equal(fmtSeconds(1.44), '1.4 s')
+  assert.equal(fmtSeconds(125), '2 min 5 s')
+  assert.equal(fmtSeconds(null), '')
+})
+
+test('typed text is shown only when the snapshot shows the field is not a secret', () => {
+  const snap = 'heading "Sign in"\ne4 textbox "Email"\ne5 textbox "Password" [password]\n'
+  assert.equal(snapshotLine(snap, 'e5'), 'e5 textbox "Password" [password]')
+  assert.equal(browserLine('browser_type', { ref: 'e4', text: 'a@b.test' }, { snapshot: snap }).subject, '“a@b.test” into e4')
+  assert.equal(browserLine('browser_type', { ref: 'e5', text: 'hunter2' }, { snapshot: snap }).subject, '7 characters into e5')
+  assert.equal(browserLine('browser_type', { ref: 'e9', text: 'hunter2', submit: true }, { snapshot: snap }).subject, '7 characters into e9 and submit')
+})
+
+test('browser lines for the other actions', () => {
+  assert.deepEqual(browserLine('browser_open', { url: 'https://a.test/p?q=1' }, null), { action: 'Open', subject: 'a.test/p' })
+  assert.deepEqual(browserLine('browser_press', { key: 'Enter', ref: 'e2' }, null), { action: 'Press', subject: 'Enter in e2' })
+  assert.deepEqual(browserLine('browser_manage', { action: 'screenshot' }, null), { action: 'Take a screenshot', subject: '' })
+})
+
+test('the completion gate refusal becomes a list of problems', () => {
+  const g = gateProblems('desk_done refused: this desk is not finished yet.\n1. Your plan has 2 open steps.\n2. outputs/ is empty.')
+  assert.equal(g?.lead, 'this desk is not finished yet')
+  assert.deepEqual(g?.problems, ['Your plan has 2 open steps.', 'outputs/ is empty.'])
+  assert.equal(gateProblems('something else'), null)
+  assert.equal(gateProblems(null), null)
+})

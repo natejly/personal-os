@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { fmtDuration, modeLabel, recordingWhen, summaryCopy } from './format'
+import { fmtDuration, modeLabel, pendingLabel, recordingWhen, summaryCopy } from './format'
 
 test('fmtDuration steps from seconds to minutes to hours', () => {
   assert.equal(fmtDuration(42000), '42s')
@@ -21,6 +21,15 @@ test('modeLabel', () => {
   assert.equal(modeLabel('dictate', true), 'Dictated')
   assert.equal(modeLabel('record', true), 'Recorded')
   assert.equal(modeLabel(null, true), 'Recorded')
+})
+
+test('pendingLabel says listening or transcribing only while recording', () => {
+  assert.equal(pendingLabel('recording', 0, 0), 'Listening')
+  assert.equal(pendingLabel('recording', 2, 0), 'Transcribing')
+  assert.equal(pendingLabel('recording', 0, 1), 'Transcribing')
+  assert.equal(pendingLabel('paused', 0, 0), '')
+  assert.equal(pendingLabel('stalled', 1, 1), '')
+  assert.equal(pendingLabel('idle', 0, 0), '')
 })
 
 test('summaryCopy covers each state and puts an error first', () => {

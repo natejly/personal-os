@@ -149,6 +149,8 @@ class ChannelCapture(_RecorderThread):
         self._pos_samples = 0
         self.proc: subprocess.Popen[bytes] | None = None
         self._native: Any = None
+        # Shared with each native Capture this channel opens, so it survives a restart.
+        self.tap_hooks: list[Any] = []
         self.session_start = 0.0
         self.stopping = False
         self.restarts = 0
@@ -211,6 +213,7 @@ class ChannelCapture(_RecorderThread):
         while not self.halt.is_set() and not self.stopping:
             try:
                 cap = Capture.from_spec(self.input_spec)
+                cap.tap_hooks = self.tap_hooks
                 self._native = cap
                 cap.start()
             except Exception as e:  # noqa: BLE001
@@ -640,7 +643,8 @@ class RecordingSession:
                  max_audio_bytes: int = DEFAULT_MAX_AUDIO_BYTES,
                  drain_seconds: float = DEFAULT_DRAIN_SECONDS,
                  on_disk_check: Callable[[], int] | None = None,
-                 cut_on_silence: bool = False, min_segment_seconds: float = 2.0):
+                 cut_on_silence: bool = False, min_segment_seconds: float = 2.0,
+                 preview: Any = None):
         if not channels:
             raise ValueError("a recording needs at least one channel")
         self.meeting_id = meeting_id
@@ -650,6 +654,8 @@ class RecordingSession:
         self.max_seconds = max(1, int(max_seconds))
         self.keep_audio = keep_audio
         self.cut_on_silence = bool(cut_on_silence)
+        # A live-preview engine (stt_stream) listening to the mic tap; it lives and dies with this session.
+        self.preview = preview
         self.min_segment_seconds = float(min_segment_seconds)
         self.drain_seconds = float(drain_seconds)
         self.on_segment = on_segment
@@ -686,7 +692,11 @@ class RecordingSession:
                                      cut_on_silence=self.cut_on_silence,
                                      min_segment_seconds=self.min_segment_seconds)
                 self.captures[channel] = cap
+                if channel == "mic" and self.preview is not None:
+                    cap.tap_hooks.append(self.preview.feed)
                 cap.start()
+            if self.preview is not None:
+                self.preview.start()
         finally:
             # Even a half-started session must stop claiming to be starting, or the pool would
             # refuse every later start for the lifetime of the process.
@@ -695,6 +705,8 @@ class RecordingSession:
     def pause(self, paused: bool) -> None:
         """Stop keeping audio without stopping ffmpeg, so seq numbering stays monotonic."""
         self.paused = bool(paused)
+        if self.preview is not None:
+            self.preview.muted = self.paused
 
     def stop(self, drain_seconds: float | None = None, *,
              join_seconds: float = WORKER_JOIN_SECONDS) -> dict[str, Any]:
@@ -708,6 +720,9 @@ class RecordingSession:
         """
         self.stopping = True
         self.starting = False
+        if self.preview is not None:
+            with contextlib.suppress(Exception):
+                self.preview.stop()
         for cap in self.captures.values():
             with contextlib.suppress(Exception):
                 cap.stop()
@@ -842,7 +857,8 @@ class RecorderPool:
               drain_seconds: float = DEFAULT_DRAIN_SECONDS,
               on_disk_check: Callable[[], int] | None = None,
               cut_on_silence: bool = False,
-              min_segment_seconds: float = 2.0) -> RecordingSession:
+              min_segment_seconds: float = 2.0,
+              preview: Any = None) -> RecordingSession:
         with self._lock:
             live = self._live()
             if live is not None:
@@ -860,7 +876,7 @@ class RecorderPool:
                 max_seconds=max_seconds, keep_audio=keep_audio, max_attempts=max_attempts,
                 max_audio_bytes=max_audio_bytes, drain_seconds=drain_seconds,
                 on_disk_check=on_disk_check, cut_on_silence=cut_on_silence,
-                min_segment_seconds=min_segment_seconds)
+                min_segment_seconds=min_segment_seconds, preview=preview)
             self.sessions[meeting_id] = session
             # start() under the SAME lock as the busy check. It only spawns threads - ffmpeg is
             # launched inside the capture thread - so the lock is held for microseconds, and

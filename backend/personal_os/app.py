@@ -5634,6 +5634,15 @@ def _recording_changed(event: dict[str, Any]) -> None:
 meeting_svc.publish = _recording_changed
 
 
+def _preview_changed(event: dict[str, Any]) -> None:
+    """Volatile/final dictation text, from the audio thread: same hand-off to the loop as above."""
+    if _loop is not None and not _loop.is_closed():
+        _loop.call_soon_threadsafe(events.publish, "preview", event)
+
+
+meeting_svc.preview_publish = _preview_changed
+
+
 class MeetingIn(BaseModel):
     """A new meeting. `status` is `scheduled` rather than the repo's `notes_only` default because
     this row was made in order to be recorded; the one the 45s tick adopts says so for itself."""
@@ -5715,6 +5724,7 @@ class MeetingConfigIn(BaseModel):
     calendarIds: list[str] | None = None
     minAttendees: int | None = None
     vadGate: bool | None = None
+    livePreview: bool | None = None
     vadMinSpeechRatio: float | None = None
     hallucinationFilter: bool | None = None
     whisperVadModelPath: str | None = None

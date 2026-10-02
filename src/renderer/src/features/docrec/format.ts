@@ -21,6 +21,15 @@ export const statusLabel = (s: MeetingStatus): string => STATUS[s] ?? s
 export const modeLabel = (mode: 'record' | 'dictate' | null, finished = false): string =>
   mode === 'dictate' ? (finished ? 'Dictated' : 'Dictation') : (finished ? 'Recorded' : 'Recording')
 
+/**
+ * The trailing placeholder in a live transcript: what is happening to the audio right now. Empty
+ * when nothing is being heard (not recording, or paused), so no row is drawn.
+ */
+export function pendingLabel(state: 'recording' | 'paused' | 'stalled' | 'idle', queued: number, segmentsPending: number): string {
+  if (state !== 'recording') return ''
+  return queued > 0 || segmentsPending > 0 ? 'Transcribing' : 'Listening'
+}
+
 export interface SummaryCopy {
   /** One short state line. */
   text: string

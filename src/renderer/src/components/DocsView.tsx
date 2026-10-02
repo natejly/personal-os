@@ -14,7 +14,7 @@ import { scopeOf } from '../lib/docTree'
 import ResizeHandle from './ResizeHandle'
 import { clip, lines, usePageContext } from '../lib/pageContext'
 import { PANEL_TABS, parsePanelState, resolveWikiDoc, type PanelState, type PanelTab } from '../lib/docPanel'
-import { DocRecordButton, DocRecorderBar, RecordingsPanel, liveDoc, useDictation, useDocRec } from '../features/docrec'
+import { DocRecordButton, DocRecorderBar, RecordingsPanel, liveDoc, useDictation, useDocRec, usePreview } from '../features/docrec'
 import Backlinks from '../features/notes/Backlinks'
 import DocOutline from '../features/notes/DocOutline'
 import ExportMenu from '../features/notes/ExportMenu'
@@ -165,6 +165,7 @@ export default function DocsView(): JSX.Element {
 
   // Dictation types into the editor, so a preview-only view has nowhere to put the words.
   const dictatingHere = liveHere?.mode === 'dictate'
+  const previewText = usePreview((s) => (dictatingHere && liveHere ? s.byId[liveHere.meetingId]?.text ?? '' : ''))
   useEffect(() => { if (dictatingHere && docMode === 'preview') setDocMode('split') }, [dictatingHere, docMode, setDocMode])
 
   // A recording that starts on THIS doc opens the Recordings tab, so the live transcript is in view.
@@ -384,6 +385,7 @@ export default function DocsView(): JSX.Element {
                   linkTargets={linkTargets}
                   smartPaste
                   richStatus
+                  previewText={previewText}
                   onCaretLine={setCaretLine}
                 />
               )}

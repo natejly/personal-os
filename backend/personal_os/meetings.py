@@ -32,7 +32,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from . import audiocap, diarize, meeting_notes, meeting_recorder, native_audio, redact, stt
+from . import audiocap, diarize, meeting_notes, meeting_recorder, native_audio, redact, stt, stt_stream
 from .db import Database, new_id, now, row_to_dict
 from .docs import diff_stat, word_count
 from .repos import fts_query
@@ -179,6 +179,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # A recording made inside a doc ends each clip at a pause in speech, so these two are ceilings:
     # the longest a clip runs when nobody stops talking. Most clips close sooner.
     "docSegmentSeconds": 10,
+    "livePreview": False,     # dictation only: show in-flight words at the caret (on-device Speech; never typed in)
     "dictationSegmentSeconds": 8,  # dictation, where the words are waiting to be typed
     "maxMeetingSeconds": 14400,
     "drainSeconds": 90,
@@ -1256,6 +1257,8 @@ class MeetingService:
         self.docs = docs
         # Called with a `recording` event dict from any thread; app.py hands it to the event loop.
         self.publish = publish
+        # Called with a `preview` event dict from any thread; app.py hands it to the event loop.
+        self.preview_publish: Callable[[dict[str, Any]], None] | None = None
         self.pool = meeting_recorder.RecorderPool(db.data_dir, settings_fn, self.config)
         self.last_error = ""
         self._preflight: tuple[float, dict[str, Any]] | None = None
@@ -1537,8 +1540,10 @@ class MeetingService:
                 "fix": "Pick an audio input in Meetings settings.",
             }])
 
+        preview = (stt_stream.make_engine(meeting_id, cfg, self.preview_publish)
+                   if m.get("doc_mode") == "dictate" and "mic" in channels else None)
         session = self.pool.start(
-            meeting_id, channels,
+            meeting_id, channels, preview=preview,
             on_segment=lambda ch, seq, path, info: self._on_segment(meeting_id, ch, seq, path, info),
             on_result=lambda ch, seq, path, res: self._on_result(meeting_id, ch, seq, path, res),
             segment_seconds=seg_seconds,

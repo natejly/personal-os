@@ -465,6 +465,7 @@ async def _start_retrieval() -> None:
     retriever.schedule_docs(settings)
 toolbox.retriever = retriever
 toolbox.memory_index = memory_index
+toolbox.plans = plans  # desk_done's gate reads the approved plan's unconsumed steps
 toolbox.web_cache = WebCache(db)  # fetch_url's response cache
 # Subagents: child runs the agent_spawn tools start. Approval cards a child raises resolve through the
 # same _approvals futures a chat's do.

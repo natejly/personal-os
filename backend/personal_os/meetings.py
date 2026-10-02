@@ -1888,7 +1888,7 @@ class MeetingService:
             items = [{**it, "text": redact.scrub_secrets(it["text"])} for it in items]
         # Stored escaped too, so the Summary tab and the doc render the same thing.
         body = meeting_notes.escape_currency(body)
-        section = f"{meeting_notes.section_heading(m)}\n\n{body.strip()}"
+        section = meeting_notes.wrap_ai(f"{meeting_notes.section_heading(m)}\n\n{body.strip()}")
         # The doc may have been trashed while the model was thinking; propose_append says so with None.
         rev = self.docs.propose_append(doc_id, section, summary="Recording summary", tool="recording_summary")
         if rev is None:

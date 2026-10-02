@@ -318,6 +318,11 @@ def section_heading(meeting: dict[str, Any]) -> str:
     return f"## Recording summary ({inside})"
 
 
+def wrap_ai(section: str) -> str:
+    """Fence an inserted section so the preview can mark it as model-written; plain text elsewhere, advisory."""
+    return f":::ai\n\n{section}\n\n:::"
+
+
 _CURRENCY = re.compile(r"(?<!\\)\$(?=\d)")
 _CODE_SPAN = re.compile(r"(`+)[^`\n]*?\1")
 

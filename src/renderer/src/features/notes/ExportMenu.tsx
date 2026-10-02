@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Check, Download } from 'lucide-react'
 import { normalizeMathBlocks } from '../../lib/mathBlocks'
-import { copyMarkdown, downloadMarkdown, printDoc } from './exportDoc'
+import { copyMarkdown, downloadMarkdown, printDoc, stripAiFences } from './exportDoc'
 import '../../styles/notes.css'
 
 /** Download the doc as .md, copy its markdown, or print it (the print dialog saves a PDF). */
@@ -25,7 +25,7 @@ export default function ExportMenu({ title, content }: { title: string; content:
   const print = (): void => {
     setOpen(false)
     // Static markup keeps this free of KaTeX and the app stylesheet: maths prints as its source.
-    const html = renderToStaticMarkup(<ReactMarkdown remarkPlugins={[remarkGfm]}>{normalizeMathBlocks(content)}</ReactMarkdown>)
+    const html = renderToStaticMarkup(<ReactMarkdown remarkPlugins={[remarkGfm]}>{normalizeMathBlocks(stripAiFences(content))}</ReactMarkdown>)
     printDoc(title || 'Untitled', `<h1>${title.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</h1>${html}`)
   }
 

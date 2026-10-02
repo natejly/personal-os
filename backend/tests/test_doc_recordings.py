@@ -173,7 +173,7 @@ def test_summarize_proposes_an_append_and_never_touches_the_doc() -> None:
     out = w.summarize(m["id"])
     rev = out["revision"]
     assert out["error"] is None and rev["status"] == "pending" and rev["tool"] == "recording_summary"
-    assert rev["after"].startswith("# Plan\n- item\n\n## Recording summary (")
+    assert rev["after"].startswith("# Plan\n- item\n\n:::ai\n\n## Recording summary (") and rev["after"].endswith("\n\n:::")
     assert "Ship the tiers on the fourteenth" in rev["after"]
     got = w.docs.get(doc["id"])
     assert got["content"] == "# Plan\n- item"                      # not applied, whatever the edit mode
@@ -199,9 +199,9 @@ def test_text_typed_after_the_proposal_survives_accept() -> None:
     view = w.docs.get(doc["id"])["pending"][0]
     # the diff shows only the addition and is not stale
     assert view["before"] == "# Plan\nTyped while the summary was thinking."
-    assert view["after"].startswith(view["before"] + "\n\n## Recording summary") and view["stale"] is False
+    assert view["after"].startswith(view["before"] + "\n\n:::ai\n\n## Recording summary") and view["stale"] is False
     got = w.docs.accept(rev["id"])
-    assert got["content"].startswith("# Plan\nTyped while the summary was thinking.\n\n## Recording summary")
+    assert got["content"].startswith("# Plan\nTyped while the summary was thinking.\n\n:::ai\n\n## Recording summary")
     applied = w.docs.revision(rev["id"])
     assert applied["status"] == "applied" and applied["after"] == got["content"]
     assert applied["before"] == "# Plan\nTyped while the summary was thinking."

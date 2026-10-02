@@ -569,6 +569,7 @@ kbd {
   margin: 0 0 12px; padding: 4px 14px;
   border-left: 3px solid var(--border-strong); color: var(--text-muted);
 }
+.markdown .ai-run { margin: 0 0 12px; padding: 2px 0 2px 14px; border-left: 3px solid var(--accent); color: var(--text-muted); }
 .markdown code {
   font-family: var(--mono); font-size: 12.5px;
   background: var(--hover); padding: 2px 5px; border-radius: 4px;

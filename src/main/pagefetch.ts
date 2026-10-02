@@ -10,9 +10,11 @@ import { randomBytes, timingSafeEqual } from 'crypto'
 import { createServer, IncomingMessage, Server, ServerResponse } from 'http'
 import { backendToken, backendUrl } from './backend'
 import { hostBlocked, isPrivateHost } from './pageGuard'
+import { closeAllAgentBrowsers, configureAgentBrowser, handleAgentDownload, routeBrowser } from './agentBrowser'
 
 const PARTITION = 'persist:agent'
 const MAX_BODY = 16 * 1024
+const MAX_BROWSER_BODY = 256 * 1024 // typed text and upload path lists are larger than a URL
 const MAX_CHARS = 60_000
 const MAX_TIMEOUT_MS = 45_000
 const SETTLE_MS = 700 // after load: let client-side rendering paint before reading
@@ -45,7 +47,8 @@ function agentSession(): Electron.Session {
   sessionReady = true
   ses.setPermissionRequestHandler((_wc, _perm, cb) => cb(false))
   ses.setPermissionCheckHandler(() => false)
-  ses.on('will-download', (e) => e.preventDefault())
+  // /page loads never download; the interactive browser may, but only when its act said so (agentBrowser decides).
+  ses.on('will-download', (e, item, wc) => handleAgentDownload(e, item, wc))
   // Subresources too: a page must not reach into the user's LAN or the app's own loopback services.
   ses.webRequest.onBeforeRequest((details, cb) => {
     let u: URL
@@ -66,6 +69,8 @@ function agentSession(): Electron.Session {
   ses.setUserAgent(ses.getUserAgent().replace(/\s+(Electron|grain|Grain)\/\S+/g, ''))
   return ses
 }
+
+configureAgentBrowser({ session: agentSession })
 
 /** Picks the densest of <main>/<article>/[role=main] when it carries most of the text, else the whole body. */
 const EXTRACT = (max: number): string => `(() => {
@@ -146,7 +151,28 @@ const authorized = (req: IncomingMessage): boolean => {
   return sent.length === want.length && timingSafeEqual(sent, want)
 }
 
+/** `/browser/*`: the interactive browser. Same loopback server and secret; the logic lives in agentBrowser.ts. */
+async function handleBrowser(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  if (!authorized(req)) return send(res, 401, { error: 'unauthorized' })
+  let raw = ''
+  for await (const chunk of req) {
+    raw += chunk
+    if (raw.length > MAX_BROWSER_BODY) return send(res, 413, { error: 'request too large' })
+  }
+  let body: unknown
+  try {
+    body = raw ? JSON.parse(raw) : {}
+  } catch {
+    return send(res, 400, { error: 'invalid JSON' })
+  }
+  agentSession()
+  const out = await routeBrowser(String(req.url), body)
+  if (!out) return send(res, 404, { error: 'not found' })
+  send(res, 200, out)
+}
+
 async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
+  if (req.method === 'POST' && String(req.url).startsWith('/browser/')) return handleBrowser(req, res)
   if (req.method !== 'POST' || req.url !== '/page') return send(res, 404, { error: 'not found' })
   if (!authorized(req)) return send(res, 401, { error: 'unauthorized' })
   let raw = ''
@@ -192,7 +218,7 @@ async function register(): Promise<void> {
     await fetch(`${base}/bridge/page`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Personal-OS-Token': token },
-      body: JSON.stringify({ url: bridgeUrl, token: secret })
+      body: JSON.stringify({ url: bridgeUrl, token: secret, capabilities: ['page', 'browser'] })
     })
   } catch {
     /* backend not up yet: the next tick retries */
@@ -226,6 +252,7 @@ export function pageBridgeUrl(): string {
 }
 
 export function stopPageBridge(): void {
+  closeAllAgentBrowsers() // every interactive session's windows die with the app
   if (timer) clearInterval(timer)
   timer = null
   server?.close()

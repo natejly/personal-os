@@ -6,6 +6,7 @@ import { registerBus } from './bus'
 import { handle, on } from './ipc'
 import { hookConsole, initLogs, logDir } from './logging'
 import { attachWidgetRenderAuth, guardNavigation, guardWebWidgetSession } from './navigation'
+import { registerAgentBrowserIpc } from './agentBrowser'
 import { startPageBridge, stopPageBridge } from './pagefetch'
 import { gather, OPACITY_LEVELS, registerPopouts, restorePopouts, setFrontListener, toggleFront } from './popouts'
 import { registerShortcuts } from './shortcuts'
@@ -265,6 +266,7 @@ process.on('unhandledRejection', (e) => console.error('[main] unhandled rejectio
 app.on('child-process-gone', (_e, d) => console.error(`[child] ${d.type} gone: ${d.reason}`))
 
 app.whenReady().then(async () => {
+  registerAgentBrowserIpc()
   handle('backend:url', () => backendUrl())
   handle('backend:status', () => backendStatus())
   handle('backend:token', () => backendToken())

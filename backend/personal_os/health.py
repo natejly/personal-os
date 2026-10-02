@@ -83,13 +83,28 @@ def _slug(label: str) -> str:
     return s[:40] or "metric"
 
 
+# Readings the user (or the assistant on their behalf) typed in. Anything else came from a connected
+# service, one row per (metric, day, source), replaced on every sync.
+MANUAL_SOURCES = ("manual", "assistant")
+
+
 def daily_value(agg: str, readings: list[dict[str, Any]]) -> float | None:
-    """One day's readings (oldest first) as the metric's daily number."""
+    """One day's readings (oldest first) as the metric's daily number.
+
+    For a summed metric, each source's readings add up within that source (the user's own entries
+    count as one source), and the day's value is the largest source total. Two descriptions of the
+    same night or the same walk (a watch, the app it uploads to, the user typing it in) must never be
+    added together; the cost is that a manual extra the watch missed does not stack on top of it."""
     if not readings:
         return None
-    vals = [float(r["value"]) for r in readings]
     if agg == "sum":
-        return sum(vals)
+        totals: dict[str, float] = {}
+        for r in readings:
+            src = r.get("source", "manual")
+            key = "manual" if src in MANUAL_SOURCES else src
+            totals[key] = totals.get(key, 0.0) + float(r["value"])
+        return max(totals.values())
+    vals = [float(r["value"]) for r in readings]
     if agg == "avg":
         return sum(vals) / len(vals)
     return vals[-1]
@@ -230,6 +245,25 @@ class Health:
                       (eid, metric, v, d, note.strip(), source, now()))
         return self.entry(eid)  # type: ignore[return-value]
 
+    def upsert_synced(self, metric: str, day: str, value: float, source: str, note: str = "") -> bool:
+        """A connected service's reading for one day: replaces that source's earlier reading for the
+        same metric and day, so re-syncing never piles up. Returns whether anything changed."""
+        if source in MANUAL_SOURCES:
+            raise HealthError(f"'{source}' is reserved for entries the user makes.")
+        m = self.metric(metric)
+        if not m:
+            raise HealthError(f"No metric '{metric}'.")
+        v = self._check_value(m, value)
+        d = parse_day(day).isoformat()
+        with self.db.tx() as c:
+            old = c.execute("SELECT value FROM health_entries WHERE metric=? AND day=? AND source=?", (metric, d, source)).fetchall()
+            if len(old) == 1 and float(old[0]["value"]) == v:
+                return False
+            c.execute("DELETE FROM health_entries WHERE metric=? AND day=? AND source=?", (metric, d, source))
+            c.execute("INSERT INTO health_entries(id,metric,value,day,note,source,created_at) VALUES(?,?,?,?,?,?,?)",
+                      (new_id(), metric, v, d, note.strip(), source, now()))
+        return True
+
     def entry(self, id: str) -> dict[str, Any] | None:
         with self.db.tx() as c:
             return row_to_dict(c.execute("SELECT * FROM health_entries WHERE id=?", (id,)).fetchone())
@@ -273,7 +307,7 @@ class Health:
     # ---- rollups ----
     def _by_day(self, since: date, until: date, metrics: list[str] | None = None) -> dict[str, dict[str, list[dict[str, Any]]]]:
         """metric -> day -> readings oldest first, for days in [since, until]."""
-        sql = "SELECT metric, value, day, created_at FROM health_entries WHERE day >= ? AND day <= ?"
+        sql = "SELECT metric, value, day, source, created_at FROM health_entries WHERE day >= ? AND day <= ?"
         args: list[Any] = [since.isoformat(), until.isoformat()]
         if metrics is not None:
             sql += f" AND metric IN ({','.join('?' * len(metrics))})"

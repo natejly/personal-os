@@ -37,6 +37,9 @@ class ModuleContext:
     # a stale project id and 400s on 'all').
     sid: Callable[[str | None], Any]
     wsid: Callable[[str | None], str | None]
+    # The MCP client (mcp_client.McpClient), looked up late because it is built after the modules.
+    # None in a context without connectors (tests).
+    mcp: Callable[[], Any] = lambda: None
 
 
 class Module:

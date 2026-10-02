@@ -115,6 +115,34 @@
 .hl-card-val.none { color: var(--text-faint); }
 .hl-card-met { margin-left: 4px; color: var(--accent); }
 
+/* ---------- Connected services ---------- */
+.hl-source { padding: 8px 2px; border-bottom: 1px solid var(--border); }
+.hl-source-head { display: flex; align-items: center; gap: 8px; min-height: 30px; }
+.hl-source-head strong { font-size: 13px; }
+.hl-source-state { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hl-source-head .check { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-muted); }
+.hl-dotstate { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); flex-shrink: 0; }
+.hl-dotstate.ok { background: var(--ok); }
+.hl-dotstate.bad { background: var(--warn); }
+.hl-plan, .hl-problems { margin: 6px 0 4px 16px; }
+.hl-plan ul, .hl-problems ul { margin: 4px 0 8px; padding-left: 18px; font-size: 12.5px; }
+.hl-plan li { margin: 2px 0; }
+.hl-plan li.off { opacity: 0.55; }
+.hl-plan code, .hl-problems code { font-family: var(--mono); font-size: 11.5px; }
+.hl-warn { display: inline-flex; align-items: center; gap: 3px; margin-left: 6px; color: var(--warn); }
+.hl-providers { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.hl-provider { border: 1px solid var(--border); border-radius: 10px; }
+.hl-provider-head { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; text-align: left; border-radius: 10px; }
+.hl-provider-head:hover { background: var(--hover); }
+.hl-provider-head strong { font-size: 13px; }
+.hl-provider-head .muted, .hl-source-head .muted { margin: 0; }
+.hl-provider-body { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 0 12px 12px 32px; }
+.hl-provider-body .muted { margin: 0; }
+.hl-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-muted); width: min(360px, 100%); }
+.hl-field select { background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 6px 8px; outline: 0; }
+.hl-cmd { margin: 0; max-width: 100%; overflow-x: auto; padding: 6px 9px; border-radius: 8px; background: var(--bg-input); border: 1px solid var(--border); font-size: 11.5px; user-select: text; white-space: pre-wrap; word-break: break-all; }
+.hl-src-note { margin: 10px 0 0; }
+
 @media (max-width: 560px) {
   .hl-tiles { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
   .hl-mrow { flex-wrap: wrap; }

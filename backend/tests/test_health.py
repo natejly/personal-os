@@ -94,6 +94,23 @@ class StoreTests(unittest.TestCase):
         with self.assertRaises(HealthError):
             self.h.log("sleep", 7, "yesterday")
 
+    def test_synced_readings_replace_and_do_not_double_count(self) -> None:
+        self.assertTrue(self.h.upsert_synced("steps", day(0), 9000, "coros"))
+        self.assertFalse(self.h.upsert_synced("steps", day(0), 9000, "coros"))  # unchanged: no write
+        self.assertTrue(self.h.upsert_synced("steps", day(0), 9500, "coros"))
+        self.h.upsert_synced("steps", day(0), 9100, "garmin")  # same walk seen twice
+        self.h.log("steps", 500, day(0))
+        self.assertEqual(len(self.h.entries("steps")), 3)
+        self.assertEqual(self.h.summary(1, TODAY.isoformat(), metric="steps")[0]["today"], 9500)  # largest source
+        self.h.log("sleep", 7.5, day(0))  # the user logged last night, then the watch synced it too
+        self.h.upsert_synced("sleep", day(0), 6.9, "garmin")
+        self.assertEqual(self.h.summary(1, TODAY.isoformat(), metric="sleep")[0]["today"], 7.5)  # never 14.4
+        self.h.log("water", 3, day(0))
+        self.h.log("water", 2, day(0))  # manual entries still add up among themselves
+        self.assertEqual(self.h.summary(1, TODAY.isoformat(), metric="water")[0]["today"], 5)
+        with self.assertRaises(HealthError):
+            self.h.upsert_synced("steps", day(0), 1, "manual")
+
     def test_custom_metrics(self) -> None:
         a = self.h.create_metric("Vitamin D", kind="check")
         b = self.h.create_metric("vitamin d", kind="check")

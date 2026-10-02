@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { Activity, Droplet, Footprints, Gauge, HeartPulse, Moon, PanelLeftOpen, Pill, Plus, Scale, Settings2, Smile, Trash2, Zap } from 'lucide-react'
+import { Activity, Droplet, Footprints, Gauge, HeartPulse, Link2, Moon, PanelLeftOpen, Pill, Plus, Scale, Settings2, Smile, Trash2, Zap } from 'lucide-react'
 import type { HealthEntry, HealthMetric, HealthSummary } from '@shared/types'
 import { useStore } from '../../store'
 import { api } from '../../lib/api'
@@ -7,6 +7,7 @@ import { lines, usePageContext } from '../../lib/pageContext'
 import { localDay } from '../../components/CalendarWeek'
 import AppSwitcher from '../../components/AppSwitcher'
 import { Sparkline, TrendChart } from './charts'
+import Sources from './Sources'
 import { dayLabel, delta, fmt, goalText, meets, progress } from './format'
 import '../../styles/health.css'
 
@@ -31,6 +32,7 @@ export default function HealthView(): JSX.Element {
   const [sel, setSel] = useState<string | null>(null)
   const [entries, setEntries] = useState<HealthEntry[]>([])
   const [manage, setManage] = useState(false)
+  const [connect, setConnect] = useState(false)
 
   // Sparklines need 14 days even when the range is a week, so fetch at least that much and slice.
   const load = useCallback(async () => {
@@ -93,6 +95,9 @@ export default function HealthView(): JSX.Element {
           <div className="seg" role="group" aria-label="Range">
             {RANGES.map((r) => <button key={r} className={days === r ? 'active' : ''} onClick={() => setDays(r)}>{r}d</button>)}
           </div>
+          <button className={`icon-btn ${connect ? 'on' : ''}`} title="Connected services (COROS, Garmin)" aria-label="Connected services" aria-pressed={connect} onClick={() => setConnect((v) => !v)}>
+            <Link2 size={15} />
+          </button>
           <button className={`icon-btn ${manage ? 'on' : ''}`} title="Choose and edit metrics" aria-label="Choose and edit metrics" aria-pressed={manage} onClick={() => setManage((v) => !v)}>
             <Settings2 size={15} />
           </button>
@@ -100,6 +105,7 @@ export default function HealthView(): JSX.Element {
         <AppSwitcher />
       </header>
       <div className="page-body hl-body">
+        {connect && <Sources onSynced={changed} onClose={() => setConnect(false)} />}
         {manage && <MetricManager onChanged={changed} onClose={() => setManage(false)} />}
         {!rows ? <p className="empty-hint big">Loading…</p> : rows.length === 0 ? (
           <div className="empty-hint big"><p>Every metric is hidden.</p><button className="ghost-btn" onClick={() => setManage(true)}>Choose metrics</button></div>
@@ -227,7 +233,7 @@ function Detail({ full, days, today, entries, onLog, onChanged }: {
               <tr key={e.id}>
                 <td>{dayLabel(e.day, today)}</td>
                 <td className="num">{fmt(m, e.value)}</td>
-                <td className="note">{e.note}{e.source === 'assistant' && <span className="hl-src" title="Logged by the assistant"> · assistant</span>}</td>
+                <td className="note">{e.note}{e.source !== 'manual' && <span className="hl-src" title={e.source === 'assistant' ? 'Logged by the assistant' : `Synced from ${e.source}`}> · {e.source === 'assistant' ? 'assistant' : e.source.toUpperCase() === 'COROS' ? 'COROS' : e.source[0].toUpperCase() + e.source.slice(1)}</span>}</td>
                 <td><button className="icon-btn" aria-label={`Delete ${fmt(m, e.value)} on ${e.day}`} title="Delete" onClick={() => void remove(e.id)}><Trash2 size={13} /></button></td>
               </tr>
             ))}

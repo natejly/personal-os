@@ -36,7 +36,9 @@ from typing import Any, TextIO
 import anyio
 from anyio.abc import TaskGroup
 from mcp import ClientSession, Implementation, StdioServerParameters, stdio_client
+from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 
+from .mcp_oauth import McpNeedsAuth, OAuthFlows, SignIn, headers_of
 from .mcp_servers import DEFAULT_DANGER, McpServers
 
 CLIENT_INFO = Implementation(name="grain", version="0.1.0")
@@ -99,9 +101,12 @@ class _Config:
     args: list[str]
     cwd: str
     env: dict[str, str]
+    url: str = ""
+    headers: dict[str, str] | None = None
 
     def signature(self) -> str:
-        return json.dumps([self.transport, self.command, self.args, self.cwd, sorted(self.env.items())], sort_keys=True)
+        return json.dumps([self.transport, self.command, self.args, self.cwd, sorted(self.env.items()),
+                           self.url, sorted((self.headers or {}).items())], sort_keys=True)
 
 
 def _config_from(store: McpServers, server_id: str) -> _Config | None:
@@ -110,7 +115,31 @@ def _config_from(store: McpServers, server_id: str) -> _Config | None:
         return None
     return _Config(id=row["id"], slug=row["slug"], name=row["name"], transport=row["transport"],
                    command=row["command"], args=[str(a) for a in (row["args"] or [])], cwd=row["cwd"] or "",
-                   env=store.launch_env(server_id))
+                   env=store.launch_env(server_id), url=row.get("url") or "", headers=headers_of(row.get("headers")))
+
+
+@contextlib.asynccontextmanager
+async def _open(config: _Config, err: "_Stderr", oauth: OAuthFlows | None, sign_in: SignIn | None = None,
+                redirect_uri: str | None = None) -> Any:
+    """The (read, write) streams for one connection, whatever the transport.
+
+    Remote servers authenticate through `oauth` when one is given: without `sign_in` the provider
+    can refresh tokens but raises McpNeedsAuth rather than open a browser."""
+    if config.transport == "stdio":
+        if not config.command.strip():
+            raise McpUnavailable("no command configured")
+        params = StdioServerParameters(command=config.command, args=config.args, env=config.env or None, cwd=config.cwd or None)
+        async with stdio_client(params, errlog=err.file) as streams:
+            yield streams
+        return
+    if config.transport != "http":
+        raise McpUnavailable(f"{config.transport} servers are not supported yet")
+    if not config.url.strip():
+        raise McpUnavailable("no URL configured")
+    auth = oauth.provider(config.id, config.url, redirect_uri, sign_in) if oauth else None
+    async with create_mcp_http_client(headers=config.headers or None, auth=auth) as http:
+        async with streamable_http_client(config.url, http_client=http) as streams:
+            yield streams
 
 
 class _Stderr:
@@ -198,9 +227,10 @@ class _Supervisor:
     """Owns one server's process, transport and session for the life of a connection."""
 
     def __init__(self, store: McpServers, config: _Config, *, connect_timeout: float = CONNECT_TIMEOUT,
-                 call_timeout: float = CALL_TIMEOUT):
+                 call_timeout: float = CALL_TIMEOUT, oauth: OAuthFlows | None = None):
         self.store = store
         self.config = config
+        self.oauth = oauth
         self.connect_timeout = connect_timeout
         self.call_timeout = call_timeout
         self.status = "idle"
@@ -255,6 +285,10 @@ class _Supervisor:
                 if isinstance(exc, asyncio.CancelledError):
                     raise
                 self.attempts += 1
+                if _needs_auth(exc):
+                    # Retrying cannot help until the user signs in; sign-in restarts this supervisor.
+                    self._set_status("error", "sign-in required")
+                    break
                 self._set_status("error", _describe(exc))
                 if _is_spawn_failure(exc) and self.attempts >= SPAWN_ATTEMPTS:
                     self._set_status("error", f"{_describe(exc)} (giving up; fix the command and restart it)")
@@ -277,16 +311,10 @@ class _Supervisor:
             self._set_status("idle")
 
     async def _cycle(self) -> None:
-        if self.config.transport != "stdio":
-            raise McpUnavailable(f"{self.config.transport} servers are not supported yet")
-        if not self.config.command.strip():
-            raise McpUnavailable("no command configured")
         err = self._err = _Stderr(self.stderr)
-        params = StdioServerParameters(command=self.config.command, args=self.config.args,
-                                       env=self.config.env or None, cwd=self.config.cwd or None)
         self._check_now = anyio.Event()
         try:
-            async with stdio_client(params, errlog=err.file) as (read, write):
+            async with _open(self.config, err, self.oauth) as (read, write):
                 async with ClientSession(read, write, read_timeout_seconds=self.call_timeout,
                                          client_info=CLIENT_INFO) as session:
                     with anyio.fail_after(self.connect_timeout):
@@ -416,6 +444,13 @@ class _Supervisor:
                 "server_info": self.server_info, "tools": list(self.tool_slugs), "stderr": self.tail_stderr()}
 
 
+def _needs_auth(exc: BaseException) -> bool:
+    inner = getattr(exc, "exceptions", None)
+    if inner:
+        return any(_needs_auth(e) for e in inner)
+    return isinstance(exc, McpNeedsAuth) or (exc.__cause__ is not None and _needs_auth(exc.__cause__))
+
+
 def _is_spawn_failure(exc: BaseException) -> bool:
     """A misconfiguration retrying cannot fix. TimeoutError is an OSError subclass, and is not one."""
     inner = getattr(exc, "exceptions", None)
@@ -434,10 +469,11 @@ class McpClient:
     """
 
     def __init__(self, store: McpServers, *, connect_timeout: float = CONNECT_TIMEOUT,
-                 call_timeout: float = CALL_TIMEOUT):
+                 call_timeout: float = CALL_TIMEOUT, oauth: OAuthFlows | None = None):
         self.store = store
         self.connect_timeout = connect_timeout
         self.call_timeout = call_timeout
+        self.oauth = oauth
         self._supervisors: dict[str, _Supervisor] = {}
 
     async def start(self) -> list[dict[str, Any]]:
@@ -465,7 +501,7 @@ class McpClient:
                 sup = None
             if sup is None:
                 sup = _Supervisor(self.store, config, connect_timeout=self.connect_timeout,
-                                  call_timeout=self.call_timeout)
+                                  call_timeout=self.call_timeout, oauth=self.oauth)
                 self._supervisors[sid] = sup
             sup.config = config
             await sup.start()
@@ -487,6 +523,30 @@ class McpClient:
     async def stop(self) -> None:
         for sid in list(self._supervisors):
             await self._supervisors.pop(sid).stop()
+        if self.oauth:
+            await self.oauth.stop()
+
+    async def sign_in(self, server_id: str, redirect_uri: str) -> dict[str, Any]:
+        """Begin (or join) a browser sign-in for a remote server. Returns the OAuth status, with
+        `auth_url` for the renderer to open while it is waiting on the user."""
+        if self.oauth is None:
+            raise McpUnavailable("OAuth is not configured")
+        config = _config_from(self.store, server_id)
+        if config is None or config.transport != "http":
+            raise McpUnavailable("only remote (http) servers sign in")
+
+        async def run(s: SignIn) -> None:
+            err = _Stderr([])
+            try:
+                async with _open(config, err, self.oauth, sign_in=s, redirect_uri=redirect_uri) as (read, write):
+                    async with ClientSession(read, write, client_info=CLIENT_INFO) as session:
+                        await session.initialize()
+            finally:
+                err.close()
+            await self.restart(server_id)  # the supervisor now connects with the stored tokens
+
+        await self.oauth.begin(server_id, run)
+        return self.oauth.status(server_id)
 
     async def call(self, tool_slug: str, arguments: dict[str, Any] | None = None,
                    timeout: float | None = None) -> dict[str, Any]:
@@ -530,19 +590,14 @@ class McpClient:
         """
         limit = float(timeout or self.connect_timeout)
         out: dict[str, Any] = {"ok": False, "error": "", "server_info": {}, "tools": [], "stderr": []}
-        transport = str(config.get("transport") or "stdio")
-        if transport != "stdio":
-            out["error"] = f"{transport} servers are not supported yet"
-            return out
-        command = str(config.get("command") or "").strip()
-        if not command:
-            out["error"] = "no command configured"
-            return out
-        params = StdioServerParameters(command=command, args=[str(a) for a in (config.get("args") or [])],
-                                       env=dict(config.get("env") or {}) or None, cwd=config.get("cwd") or None)
+        cfg = _Config(id=str(config.get("id") or ""), slug="", name="probe", transport=str(config.get("transport") or "stdio"),
+                      command=str(config.get("command") or "").strip(), args=[str(a) for a in (config.get("args") or [])],
+                      cwd=str(config.get("cwd") or ""), env=dict(config.get("env") or {}),
+                      url=str(config.get("url") or ""), headers=headers_of(config.get("headers")))
         err = _Stderr([])
         try:
-            async with stdio_client(params, errlog=err.file) as (read, write):
+            # A saved remote server probes with its stored sign-in; an unsaved one has none to use.
+            async with _open(cfg, err, self.oauth if cfg.id else None) as (read, write):
                 async with ClientSession(read, write, read_timeout_seconds=limit, client_info=CLIENT_INFO) as session:
                     with anyio.fail_after(limit):
                         init = await session.initialize()
@@ -564,8 +619,8 @@ class McpClient:
         config = _config_from(self.store, server_id)
         if config is None:
             return {"ok": False, "error": "no such server", "server_info": {}, "tools": [], "stderr": []}
-        return await self.probe({"transport": config.transport, "command": config.command, "args": config.args,
-                                 "cwd": config.cwd, "env": config.env}, timeout=timeout)
+        return await self.probe({"id": config.id, "transport": config.transport, "command": config.command, "args": config.args,
+                                 "cwd": config.cwd, "env": config.env, "url": config.url, "headers": config.headers}, timeout=timeout)
 
 
 def stub_config(mode: str = "friendly", *, python: str | None = None, args: list[str] | None = None) -> dict[str, Any]:

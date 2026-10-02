@@ -6,12 +6,17 @@ auth middleware matches public paths exactly, so these stay token-gated (test_he
 """
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import logging
+import time
 from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..health import Health, HealthError
+from ..health_sync import PROVIDERS, HealthSources
 from ..tools import ToolSpec, _obj, tool_error
 from . import Module, ModuleContext
 
@@ -48,10 +53,30 @@ class EntryIn(BaseModel):
     note: str = ""
 
 
+class SourceIn(BaseModel):
+    provider: str
+    form: dict[str, Any] = Field(default_factory=dict)
+
+
+class SourcePatch(BaseModel):
+    enabled: bool | None = None
+    days_back: int | None = None
+
+
+log = logging.getLogger(__name__)
+AUTO_SYNC_EVERY = 6 * 3600     # an approved, enabled source re-syncs this often in the background
+AUTO_SYNC_TICK = 15 * 60
+
+
 class EntryPatch(BaseModel):
     value: float | None = None
     day: str | None = None
     note: str | None = None
+
+
+def parse_day_or_none(day: str | None) -> Any:
+    from ..health import parse_day
+    return parse_day(day) if day else None
 
 
 def _fmt(m: dict[str, Any], v: float | None) -> str | None:
@@ -72,6 +97,9 @@ class HealthModule(Module):
     def __init__(self, ctx: ModuleContext) -> None:
         super().__init__(ctx)
         self.store = Health(ctx.db)
+        self.sources = HealthSources(ctx.db, self.store, ctx.mcp)
+        self._task: asyncio.Task[Any] | None = None
+        self._syncing: set[str] = set()
 
     # ---- routes ----
     def router(self) -> APIRouter:
@@ -132,7 +160,100 @@ class HealthModule(Module):
                 raise HTTPException(404)
             return {"ok": True}
 
+        # ---- connected services (COROS, Garmin, ...) over MCP ----
+        sources = self.sources
+
+        @r.get("/providers")
+        def providers() -> list[dict[str, Any]]:
+            return [{"key": p.key, "label": p.label, "needs": p.needs, "setup": p.setup,
+                     "metrics": sorted({f.metric for t in p.tools for f in t.fields})} for p in PROVIDERS.values()]
+
+        @r.get("/sources")
+        def list_sources() -> list[dict[str, Any]]:
+            return guard(sources.list)
+
+        @r.post("/sources")
+        async def create_source(body: SourceIn) -> dict[str, Any]:
+            p = PROVIDERS.get(body.provider)
+            if not p:
+                raise HTTPException(400, f"Unknown provider '{body.provider}'")
+            mcp = self.ctx.mcp()
+            if mcp is None:
+                raise HTTPException(503, "Connectors are not available")
+            cfg = p.server(body.form)
+            row = mcp.store.create_server(**cfg)
+            await mcp.sync()
+            return guard(sources.create, p.key, row["id"])
+
+        @r.get("/sources/{id}/plan")
+        def source_plan(id: str) -> dict[str, Any]:
+            return guard(sources.plan, id)
+
+        @r.post("/sources/{id}/approve")
+        def approve_source(id: str) -> dict[str, Any]:
+            return guard(sources.pin, id)
+
+        @r.put("/sources/{id}")
+        def update_source(id: str, body: SourcePatch) -> dict[str, Any]:
+            s = sources.update(id, body.model_dump(exclude_none=True))
+            if not s:
+                raise HTTPException(404)
+            return s
+
+        @r.post("/sources/{id}/sync")
+        async def sync_source(id: str, today: str | None = None) -> dict[str, Any]:
+            if id in self._syncing:
+                raise HTTPException(409, "Already syncing")
+            self._syncing.add(id)
+            try:
+                return await sources.sync(id, guard(parse_day_or_none, today))
+            except HealthError as e:
+                raise HTTPException(400, str(e)) from e
+            finally:
+                self._syncing.discard(id)
+
+        @r.delete("/sources/{id}")
+        async def delete_source(id: str, keep_data: bool = True, remove_server: bool = True) -> dict[str, bool]:
+            s = sources.get(id)
+            if not s:
+                raise HTTPException(404)
+            sources.delete(id, keep_data)
+            mcp = self.ctx.mcp()
+            if remove_server and mcp is not None and mcp.store.server(s["server_id"]):
+                mcp.store.delete_server(s["server_id"])
+                if getattr(mcp, "oauth", None):
+                    mcp.oauth.store.forget(s["server_id"])
+                await mcp.sync()
+            return {"ok": True}
+
         return r
+
+    # ---- background sync ----
+    async def start(self) -> None:
+        self._task = asyncio.create_task(self._loop(), name="health-sources")
+
+    async def stop(self) -> None:
+        task, self._task = self._task, None
+        if task:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+
+    async def _loop(self) -> None:
+        """Re-sync approved, enabled sources every few hours. A failure is recorded on the source."""
+        await asyncio.sleep(60)  # let connectors come up first
+        while True:
+            for s in self.sources.list():
+                due = not s["last_sync_at"] or time.time() - s["last_sync_at"] > AUTO_SYNC_EVERY
+                if s["enabled"] and s["pinned"] and due and s["id"] not in self._syncing:
+                    self._syncing.add(s["id"])
+                    try:
+                        await self.sources.sync(s["id"])
+                    except Exception:  # noqa: BLE001 - one source's failure must not stop the loop
+                        log.warning("health sync %s failed", s["id"], exc_info=True)
+                    finally:
+                        self._syncing.discard(s["id"])
+            await asyncio.sleep(AUTO_SYNC_TICK)
 
     # ---- agent tools ----
     def register_tools(self, box: Toolbox) -> None:

@@ -816,6 +816,52 @@ export interface HealthSummary extends HealthMetric {
   last: { value: number; day: string } | null
 }
 
+/** A fitness service Health can pull from (`/health/providers`), connected through an MCP server. */
+export interface HealthProvider {
+  key: string
+  label: string
+  /** Connect-form fields: a select when `options` is set, a password box when `secret`. */
+  needs: { key: string; label: string; options?: [string, string][]; default?: string; secret?: boolean }[]
+  setup: string
+  metrics: string[]
+}
+
+export interface HealthSyncResult {
+  from: string
+  to: string
+  written: Record<string, number>
+  unchanged: number
+  problems: { tool: string; error: string; sample?: string }[]
+}
+
+/** A connected service (`/health/sources`). `pinned` is the tools the user approved, by schema hash. */
+export interface HealthSource {
+  id: string
+  provider: string
+  label: string
+  server_id: string
+  enabled: boolean
+  pinned: Record<string, string>
+  days_back: number
+  last_sync_at: number | null
+  last_error: string
+  last_result: HealthSyncResult | Record<string, never>
+  server: { id: string; name: string; transport: string; status: string; detail: string } | null
+}
+
+export interface HealthSourcePlan {
+  source: HealthSource
+  tools: { wants: string[]; tool: string | null; metrics: string[]; description: string; pinned: boolean; changed: boolean }[]
+}
+
+/** A remote MCP server's browser sign-in (`/mcp/servers/{id}/sign-in`). */
+export interface McpSignIn {
+  signed_in: boolean
+  status: 'idle' | 'starting' | 'waiting' | 'done' | 'error'
+  error: string
+  auth_url: string
+}
+
 /** The Today card's slice of `/dashboard`. */
 export type HealthToday = Pick<HealthMetric, 'key' | 'label' | 'unit' | 'kind' | 'goal' | 'goal_dir' | 'decimals'> & { today: number | null }
 

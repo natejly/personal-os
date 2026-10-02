@@ -5994,12 +5994,12 @@ def rename_meeting_speakers(id: str, body: MeetingSpeakersIn) -> dict[str, Any]:
 class NoteMarksIn(BaseModel):
     """Lines typed during a recording: [{line, t}] with t the recording offset in seconds."""
 
-    marks: list[dict[str, Any]] = Field(default_factory=list, max_length=500)
+    marks: list[dict[str, Any]] = Field(default_factory=list)
 
 
 @app.put("/meetings/{id}/note-marks")
 def put_note_marks(id: str, body: NoteMarksIn) -> dict[str, Any]:
-    out = meeting_svc.meetings.set_note_marks(id, body.marks)
+    out = meeting_svc.meetings.set_note_marks(id, body.marks[-500:])
     if out is None:
         raise HTTPException(404)
     return {"marks": out}

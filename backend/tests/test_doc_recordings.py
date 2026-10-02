@@ -668,11 +668,10 @@ def test_note_marks_reach_the_summary_payload_only_when_present() -> None:
     marks = w.repo.set_note_marks(m["id"], [{"line": "- pricing tiers: ask about the fourteenth", "t": 271},
                                             {"line": "- gone line", "t": 300}, {"line": "- deleted", "t": 5}])
     assert len(marks) == 3 and w.repo.get(m["id"])["note_marks"][0]["t"] == 271
-    w.docs.update(doc["id"], content="# Plan\n- pricing tiers: ask about the fourteenth") if hasattr(w.docs, "update") else None
+    w.docs.save(doc["id"], content="# Plan\n- pricing tiers: ask about the fourteenth")
     w.summarize(m["id"], force=True)
     user = json.loads(w.llm[-1]["messages"][1]["content"])
-    assert user["note_timeline"][0] == {"at": "00:05" if False else user["note_timeline"][0]["at"], "line": user["note_timeline"][0]["line"]}
-    assert {"at": "04:31", "line": "- pricing tiers: ask about the fourteenth"} in user["note_timeline"]
+    assert user["note_timeline"] == [{"at": "04:31", "line": "- pricing tiers: ask about the fourteenth"}]
 
 
 def test_note_marks_merge_cap_and_ignore_dictation() -> None:

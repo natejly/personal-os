@@ -127,6 +127,14 @@ export function useNoteMarks(docId: string, body: string): void {
   const prev = useRef<{ id: string; body: string } | null>(null)
   const pending = useRef(new Map<string, number>())
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const flush = (id: string): void => {
+    if (timer.current) { clearTimeout(timer.current); timer.current = null }
+    const marks = [...pending.current].map(([line, at]) => ({ line, t: at }))
+    pending.current.clear()
+    if (marks.length) api.meetings.putNoteMarks(id, marks).catch(() => { /* marks are best effort */ })
+  }
+  // Leaving a recording (it stopped, or another doc opened) posts what is buffered and drops the map.
+  useEffect(() => () => { if (meetingId) flush(meetingId) }, [meetingId]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!meetingId) { prev.current = null; return }
     if (!prev.current || prev.current.id !== meetingId) { prev.current = { id: meetingId, body }; return }
@@ -134,11 +142,6 @@ export function useNoteMarks(docId: string, body: string): void {
     for (const line of diffTouchedLines(prev.current.body, body)) pending.current.set(line, t)
     prev.current.body = body
     if (!pending.current.size || timer.current) return
-    timer.current = setTimeout(() => {
-      timer.current = null
-      const marks = [...pending.current].map(([line, at]) => ({ line, t: at }))
-      pending.current.clear()
-      api.meetings.putNoteMarks(meetingId, marks).catch(() => { /* marks are best effort */ })
-    }, 2500)
+    timer.current = setTimeout(() => flush(meetingId), 2500)
   }, [body, meetingId])
 }

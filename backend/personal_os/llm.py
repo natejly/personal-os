@@ -143,6 +143,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "llmIdleSeconds": 300,  # a reasoning model can think a long while before its first token
     # Retention (retention.py): days of history kept in tables that only ever grow. User content is never pruned.
     "retainUsageDays": 365,
+    # Informational spend alerts across runs, $ per day / calendar month; 0 = off. Never stops a run.
+    "usageAlerts": {"dailyCost": 0, "monthlyCost": 0},
     "retainTraceDays": 60,
     "retainToolResultDays": 30,
     "retainApprovalDays": 90,

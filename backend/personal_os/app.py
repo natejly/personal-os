@@ -357,6 +357,21 @@ def _int_setting(cfg: dict[str, Any], key: str, default: int) -> int:
         return default
 
 
+_alerted: set[tuple[str, str]] = set()  # (period, day) already announced; one event each, never a timer
+
+
+def _check_usage_alert(cfg: dict[str, Any]) -> None:
+    """Evaluated only when a usage row is written. Rings the app topic once per period per day; blocks nothing."""
+    st = usage.alert_state(cfg)
+    if not st["over"]:
+        return
+    day = time.strftime("%Y-%m-%d")
+    for k in ("daily", "monthly"):
+        if st[k]["over"] and (k, day) not in _alerted:
+            _alerted.add((k, day))
+            events.publish("usage_alert", {"period": k, **st[k]})
+
+
 def _record_usage(ev: dict[str, Any]) -> None:
     """llm.on_usage listener: persist one row per model call with a best-effort cost."""
     try:
@@ -366,7 +381,9 @@ def _record_usage(ev: dict[str, Any]) -> None:
         usage.record(model=ev.get("model", ""), kind=ev.get("kind", "chat"), prompt_tokens=pt, completion_tokens=ct,
                      duration_ms=int(ev.get("duration_ms") or 0), cost=pricing.cost(cfg, ev.get("model", ""), pt, ct, cached, cwrite),
                      estimated=bool(ev.get("estimated")), conversation_id=ev.get("conversation_id"), project_id=ev.get("project_id"),
-                     cached_tokens=cached, cache_write_tokens=cwrite, reasoning_tokens=reasoning)
+                     cached_tokens=cached, cache_write_tokens=cwrite, reasoning_tokens=reasoning,
+                     tag=str(ev.get("tag") or ""), round=int(ev.get("round") or 0))
+        _check_usage_alert(cfg)
     except Exception:  # noqa: BLE001 - accounting must never break a reply
         pass
 
@@ -1421,7 +1438,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         user_text = users[-1]["content"]
 
     tracer = Tracer()
-    llm.usage_context.set({"conversation_id": conv_id, "project_id": conv["project_id"]})
+    _desk = (run.desk_id if run else None) or conv["settings"].get("deskId")
+    _job = conv["settings"].get("job_id")
+    _ucx = {"conversation_id": conv_id, "project_id": conv["project_id"], "tag": f"desk:{_desk}" if _desk else f"job:{_job}" if _job else "chat"}
+    llm.usage_context.set(_ucx)
     await pricing.refresh(cfg)
     project = projects.get(conv["project_id"]) if conv["project_id"] else None
     cspan = tracer.start("context", "Assemble context", {"model": model})
@@ -1711,6 +1731,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             if buf and buf[-1] and not buf[-1].endswith("\n"):
                 buf.append("\n")
                 yield "delta", {"id": am["id"], "text": "\n"}
+            llm.usage_context.set({**_ucx, "round": _round})
             span = tracer.start("llm", model, {"round": _round, "final": True, "messages": len(messages), "tools": len(tool_schemas)})
             yield "span", {"message_id": am["id"], "span": span}
             start, fin = len(buf), {}
@@ -1802,6 +1823,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             for _note in toolbox.shell.drain_notes(conv_id):  # a background shell job finished since the last round
                 messages.append({"role": "system", "content": _note})
             _reinject_plan()  # last message in the context, after the previous round's tool results
+            llm.usage_context.set({**_ucx, "round": _round})
             lspan = tracer.start("llm", model, {"round": _round, "messages": len(messages), "tools": len(tool_schemas)})
             round_span = lspan  # the tool calls below nest under it
             yield "span", {"message_id": am["id"], "span": lspan}
@@ -3589,7 +3611,7 @@ async def _jobs_shutdown() -> None:
 async def usage_report(days: int = 30) -> dict[str, Any]:
     cfg = settings()
     await pricing.refresh(cfg)
-    return {**usage.report(days), "prices": pricing.table(cfg)}
+    return {**usage.report(days), "alerts": usage.alert_state(cfg), "prices": pricing.table(cfg)}
 
 
 class PricesIn(BaseModel):

@@ -1135,6 +1135,8 @@ export interface Settings {
   githubToken?: string
   /** Per-model cost overrides, $ per million tokens. Proxy prices are used for models not listed. */
   modelPrices: Record<string, ModelPrice>
+  /** Informational spend alerts in $ (0 = off); never stops a run. */
+  usageAlerts?: { dailyCost: number; monthlyCost: number }
   /** Cowork desk budgets. 0 on either axis means unlimited; a desk may tighten them, never loosen. */
   deskMaxTurns?: number
   deskMaxCost?: number
@@ -1191,6 +1193,8 @@ export interface UsageReport {
   by_model: (UsageBucket & { model: string })[]
   by_kind: (UsageBucket & { kind: string })[]
   by_project: (UsageBucket & { project: string })[]
+  by_tag: (UsageBucket & { tag: string })[]
+  alerts?: { daily: { spent: number; limit: number; over: boolean }; monthly: { spent: number; limit: number; over: boolean }; over: boolean }
   prices: Record<string, ModelPrice>
 }
 
@@ -1251,6 +1255,7 @@ export type BackgroundEvent =
   | { event: 'learned'; data: Learned }
   | { event: 'learn_error'; data: { conversation_id?: string; message_id?: string; message: string } }
   | { event: 'job_finished'; data: { run_id: string; job_id: string } }
+  | { event: 'usage_alert'; data: { period: 'daily' | 'monthly'; spent: number; limit: number } }
   /** Every desk write, for desks nobody is watching: the rail, the badge and the Today card stay live. */
   | { event: 'desk_status'; data: Desk }
   /** A doc recording's segment, status or summary moved. */

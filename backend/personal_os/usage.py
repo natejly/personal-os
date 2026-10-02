@@ -84,12 +84,12 @@ class Usage:
 
     def record(self, *, model: str, kind: str, prompt_tokens: int, completion_tokens: int, duration_ms: int, cost: float | None,
                estimated: bool, conversation_id: str | None, project_id: str | None,
-               cached_tokens: int = 0, cache_write_tokens: int = 0, reasoning_tokens: int = 0) -> None:
+               cached_tokens: int = 0, cache_write_tokens: int = 0, reasoning_tokens: int = 0, tag: str = "", round: int = 0) -> None:
         with self.db.tx() as c:
             c.execute(
-                "INSERT INTO usage_log(id,created_at,model,kind,conversation_id,project_id,prompt_tokens,completion_tokens,duration_ms,cost,estimated,cached_tokens,cache_write_tokens,reasoning_tokens) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO usage_log(id,created_at,model,kind,conversation_id,project_id,prompt_tokens,completion_tokens,duration_ms,cost,estimated,cached_tokens,cache_write_tokens,reasoning_tokens,tag,round) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (new_id(), now(), model, kind, conversation_id, project_id, int(prompt_tokens), int(completion_tokens), int(duration_ms), cost, 1 if estimated else 0,
-                 int(cached_tokens), int(cache_write_tokens), int(reasoning_tokens)),
+                 int(cached_tokens), int(cache_write_tokens), int(reasoning_tokens), tag or "", int(round or 0)),
             )
 
     def reprice(self, pricing: Pricing, settings: dict[str, Any]) -> int:
@@ -102,6 +102,23 @@ class Usage:
                 c.execute("UPDATE usage_log SET cost=? WHERE id=?", (cost, r["id"]))
                 n += 1
         return n
+
+    def alert_state(self, settings: dict[str, Any]) -> dict[str, Any]:
+        """Spend today and this calendar month against settings["usageAlerts"] (0 = off). Informational only."""
+        lim = settings.get("usageAlerts") if isinstance(settings.get("usageAlerts"), dict) else {}
+        t = datetime.now()
+        starts = {"daily": t.replace(hour=0, minute=0, second=0, microsecond=0), "monthly": t.replace(day=1, hour=0, minute=0, second=0, microsecond=0)}
+        out: dict[str, Any] = {}
+        with self.db.tx() as c:
+            for k, st in starts.items():
+                spent = c.execute("SELECT COALESCE(SUM(cost),0) FROM usage_log WHERE created_at >= ?", (st.timestamp(),)).fetchone()[0]
+                try:
+                    limit = float(lim.get(k + "Cost") or 0)
+                except (TypeError, ValueError):
+                    limit = 0.0
+                out[k] = {"spent": round(spent, 6), "limit": limit, "over": limit > 0 and spent >= limit}
+        out["over"] = out["daily"]["over"] or out["monthly"]["over"]
+        return out
 
     def report(self, days: int = 30) -> dict[str, Any]:
         days = max(1, min(int(days), 365))
@@ -134,6 +151,7 @@ class Usage:
         by_model: dict[str, dict[str, Any]] = {}
         by_kind: dict[str, dict[str, Any]] = {}
         by_project: dict[str, dict[str, Any]] = {}
+        by_tag: dict[str, dict[str, Any]] = {}
         total = bucket()
         for r in rows:
             t = datetime.fromtimestamp(r["created_at"])
@@ -146,6 +164,7 @@ class Usage:
                 weekday[t.weekday()] += 1
             add(by_model.setdefault(r["model"], bucket()), r)
             add(by_kind.setdefault(r["kind"], bucket()), r)
+            add(by_tag.setdefault(r.get("tag") or "untagged", bucket()), r)
             add(by_project.setdefault(projects.get(r["project_id"], "Personal") if r["project_id"] else "Personal", bucket()), r)
 
         def finish(b: dict[str, Any]) -> dict[str, Any]:
@@ -161,6 +180,7 @@ class Usage:
             "weekday": [{"weekday": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][d], "calls": n} for d, n in weekday.items()],
             "by_model": sorted(({"model": m, **finish(b)} for m, b in by_model.items()), key=lambda x: -x["tokens"]),
             "by_kind": [{"kind": k, **finish(b)} for k, b in by_kind.items()],
+            "by_tag": sorted(({"tag": t, **finish(b)} for t, b in by_tag.items()), key=lambda x: -x["cost"]),
             "by_project": sorted(({"project": p, **finish(b)} for p, b in by_project.items()), key=lambda x: -x["tokens"]),
         }
 

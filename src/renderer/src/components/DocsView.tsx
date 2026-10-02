@@ -18,6 +18,7 @@ import { DocRecordButton, DocRecorderBar, RecordingsPanel, liveDoc, useDictation
 import Backlinks from '../features/notes/Backlinks'
 import DocOutline from '../features/notes/DocOutline'
 import ExportMenu from '../features/notes/ExportMenu'
+import { expandTemplate, userTemplates } from '../features/notes/templates'
 import NewDocMenu from '../features/notes/NewDocMenu'
 import type { MarkdownEditorHandle } from '../features/notes/handle'
 import type { SlashCommand } from '../features/notes/slash'
@@ -134,13 +135,22 @@ export default function DocsView(): JSX.Element {
   // ---- editor wiring ----
   // Slash-menu entries that need the recorder; the editor's own commands are built in. Memoised
   // because the editor re-derives its command list from this array's identity.
+  const userTpls = useMemo(() => userTemplates(docs), [docs])
   const extraCommands = useMemo((): SlashCommand[] => (docId
-    ? [
+    ? ([
         { id: 'record', label: 'Record and summarize', hint: 'mic', keywords: ['record', 'transcribe', 'meeting', 'summary'], run: () => void useDocRec.getState().start(docId, 'record') },
         { id: 'dictate', label: 'Dictate into note', hint: 'mic', keywords: ['dictate', 'speak', 'voice', 'talk'], run: () => void useDocRec.getState().start(docId, 'dictate') },
         { id: 'daily', label: 'Daily note', hint: 'today', keywords: ['today', 'journal', 'daily'], run: () => void openDailyNote() }
-      ]
-    : []), [docId, openDailyNote])
+      ] as SlashCommand[])
+    : [] as SlashCommand[]).concat(userTpls.map((t): SlashCommand => ({
+      id: `tpl-${t.id}`, label: `Template: ${t.title || 'Untitled'}`, hint: 'template', keywords: ['template', t.title],
+      run: (h) => {
+        void api.docs.get(t.id).then((full) => {
+          const x = expandTemplate(full.content ?? '', { now: new Date(), title: activeDoc?.title })
+          h.insertAtCaret(x.text, x.caret)
+        }).catch(() => {})
+      }
+    }))), [docId, openDailyNote, userTpls, activeDoc?.title])
   // A link can point at any other titled doc. The list may be narrowed by the tree's search box; that
   // only shortens the picker.
   const linkTargets = useMemo(

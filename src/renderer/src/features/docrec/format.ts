@@ -55,3 +55,6 @@ export const EMPTY_COPY =
 /** The trust line under a summary. */
 export const SUMMARY_TRUST =
   'A summary is a proposal. It goes into the note only when you accept it, and what you typed is never changed.'
+
+/** The sentence copied for pasting into a call's chat, so the others hear about the recording from the person. */
+export const HEADS_UP_MESSAGE = "I'm taking notes with a local recorder; tell me if you'd rather I didn't."

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { AlertTriangle, Mic } from 'lucide-react'
+import { AlertTriangle, Copy, Mic } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
+import { HEADS_UP_MESSAGE } from '../features/docrec/format'
 import { useModal } from '../lib/useModal'
 
 /**
@@ -88,6 +89,8 @@ export default function MeetingConsentModal(): JSX.Element {
               </ul>
             </>
           )}
+
+          <button className="ghost-btn dr-small" onClick={() => void navigator.clipboard.writeText(HEADS_UP_MESSAGE).catch(() => undefined)}><Copy size={12} /> Copy a heads-up message for the call</button>
 
           <label className="mtg-consent-ack">
             <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} />

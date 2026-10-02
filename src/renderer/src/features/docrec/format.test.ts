@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { fmtDuration, modeLabel, recordingWhen, summaryCopy } from './format'
+import { HEADS_UP_MESSAGE, fmtDuration, modeLabel, recordingWhen, summaryCopy } from './format'
 
 test('fmtDuration steps from seconds to minutes to hours', () => {
   assert.equal(fmtDuration(42000), '42s')
@@ -38,4 +38,8 @@ test('summaryCopy covers each state and puts an error first', () => {
 
 test('dictation says it has no summary rather than looking broken', () => {
   assert.match(summaryCopy('none', 'dictate', 'ready', null, false).text, /no summary/)
+})
+
+test('the heads-up message is a plain sentence', () => {
+  assert.match(HEADS_UP_MESSAGE, /tell me if you'd rather I didn't\.$/)
 })

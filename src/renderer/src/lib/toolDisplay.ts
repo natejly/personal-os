@@ -44,7 +44,7 @@ const VERBS: Record<string, string> = {
   desk_trash_file: 'Trash desk file', desk_deliver: 'Deliver to desk', desk_ask: 'Ask a question', desk_done: 'Finish desk task',
   desk_import_sandbox: 'Import from sandbox',
   sandbox_exec: 'Run in sandbox', sandbox_write_file: 'Write sandbox file', sandbox_read_file: 'Read sandbox file',
-  sandbox_list_files: 'List sandbox files', sandbox_put_document: 'Copy document to sandbox', sandbox_reset: 'Reset sandbox',
+  sandbox_list_files: 'List sandbox files', sandbox_put_document: 'Copy document to sandbox', sandbox_export_file: 'Export sandbox file', sandbox_reset: 'Reset sandbox',
   sandbox_checkpoint: 'Save sandbox checkpoint', sandbox_restore: 'Restore sandbox checkpoint',
   shell_run: 'Run command', shell_poll: 'Check command output', shell_kill: 'Stop command', python_install: 'Install Python packages',
   fs_glob: 'Find files by name', fs_grep: 'Search file contents', fs_edit: 'Edit file', fs_copy: 'Copy file', fs_mkdir: 'Create folder',

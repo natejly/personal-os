@@ -73,3 +73,14 @@ def test_edit_reindexes_and_delete_cascades(env) -> None:
     repo.delete(mid)
     with idx.db.tx() as c:
         assert c.execute("SELECT COUNT(*) FROM meeting_vectors WHERE meeting_id=?", (mid,)).fetchone()[0] == 0
+
+
+def test_semantic_respects_project_scope(env) -> None:
+    repo, idx, fake, mid = env
+    asyncio.run(idx.index(ON))
+    pid = "p-other"
+    with idx.db.tx() as c:
+        c.execute("INSERT INTO projects(id,name,created_at) VALUES(?,?,?)", (pid, "P", 0))
+        c.execute("UPDATE meetings SET project_id=? WHERE id=?", (pid, mid))
+    assert asyncio.run(idx.search(ON, "budget", pid))[0]["meeting_id"] == mid
+    assert asyncio.run(idx.search(ON, "budget", "p-none")) == []

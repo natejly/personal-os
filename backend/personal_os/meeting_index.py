@@ -104,8 +104,8 @@ class MeetingIndex:
         try:
             if not self.enabled(settings) or not self.embedder.available(settings):
                 return
-            if not self._stale(self.embedder.model(settings), meeting_ids):
-                return
+            if self._tasks or not self._stale(self.embedder.model(settings), meeting_ids):
+                return  # an index pass is already running; it covers what is stale
             task = asyncio.get_running_loop().create_task(self.index(settings, meeting_ids))
         except RuntimeError:
             return  # no running loop (sync caller)

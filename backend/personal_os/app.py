@@ -1127,7 +1127,7 @@ class ChatIn(BaseModel):
 
 RENDER_HINT = """## Rendering
 Besides normal markdown, the UI renders three fenced code blocks inline:
-- ```chart — a small JSON spec for a data chart: {"type": "bar" | "line" | "area" | "pie" | "scatter", "title": "...", "x": "<key used for the x axis / category>", "series": ["<numeric key>", ...], "data": [{"<x key>": ..., "<numeric key>": ..., ...}, ...], "stacked": false, "xLabel": "...", "yLabel": "...", "unit": ""}. `data` is an array of objects (one per x value); keep it under 200 rows. Use a chart whenever numbers would be clearer that way (comparisons, trends, breakdowns).
+- ```chart — a small JSON spec for a data chart: {"type": "bar" | "line" | "area" | "pie" | "scatter", "title": "...", "x": "<key used for the x axis / category>", "series": ["<numeric key>", ...], "data": [{"<x key>": ..., "<numeric key>": ..., ...}, ...], "stacked": false, "xLabel": "...", "yLabel": "...", "unit": "", "transforms": [{"op": "sort", "by": "<key>", "dir": "desc"}, {"op": "limit", "n": 10}]}. `data` is an array of objects (one per x value); keep it under 200 rows. `transforms` is optional (ops: sort, limit, filter {field, cmp, value}, group {by, agg: {<key>: "sum|mean|count|min|max"}}) for trimming or aggregating raw rows; ISO dates (2026-03-01) as x values get a date axis. Use a chart whenever numbers would be clearer that way (comparisons, trends, breakdowns).
 - ```interactive — a chart the user steers with sliders and other controls; it recomputes instantly as they drag, with no new request to you: {"title": "Compound growth", "type": "line", "controls": [{"id": "rate", "label": "Annual return", "type": "slider", "min": 0, "max": 15, "step": 0.25, "value": 7, "unit": "%"}, {"id": "start", "label": "Starting amount", "type": "number", "value": 5000, "unit": "$"}], "x": {"id": "year", "label": "Year", "from": 0, "to": 30, "steps": 120}, "series": [{"key": "balance", "label": "Balance", "expr": "start * pow(1 + rate/100, year)"}], "readouts": [{"label": "Final balance", "expr": "balance_last", "unit": "$"}], "unit": "$", "yLabel": "Balance"}
   - `controls` (max 12): `type` is slider (the default), number, select (needs "options": [...]), or toggle. Every `id` must be a plain name, because the formulas reference it by that name.
   - `x` is either a swept range — `from`/`to`/`steps` (max 400), each a number or a formula over the controls — or `{"id": "...", "values": [...]}` for fixed categories. To drive real rows instead, pass `"data": [{...}, ...]` and set `"x"` to the column name; formulas then also see that row's columns.
@@ -4552,6 +4552,7 @@ class WidgetIn(BaseModel):
     width: int = 1
     height: int = 280
     refresh_minutes: int = 60
+    spec: dict[str, Any] = {}    # chart/stat/table: a ready spec (e.g. inline_rows from a pinned chat chart) skips generation
 
 
 class WidgetPatch(BaseModel):
@@ -4713,7 +4714,7 @@ async def create_widget(id: str, body: WidgetIn, request: Request) -> dict[str, 
     if not dashboards.get(id):
         raise HTTPException(404)
     title = body.title.strip() or (body.prompt.strip()[:40] or "Widget")
-    w = dashboards.create_widget(id, title, body.kind, body.prompt, body.source_ids, body.code, body.output, body.width, body.height, body.refresh_minutes)
+    w = dashboards.create_widget(id, title, body.kind, body.prompt, body.source_ids, body.code, body.output, body.width, body.height, body.refresh_minutes, body.spec)
     if body.kind in ("html", "summary") + widget_spec.KINDS:
         try:
             w = await _run_widget(w, request, regenerate_code=(body.kind == "html" and not body.code))

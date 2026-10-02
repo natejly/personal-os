@@ -63,3 +63,18 @@ export const fmtDelta = (d: number | null | undefined): string => {
   const s = new Intl.NumberFormat('en-US', { maximumFractionDigits: 2 }).format(Math.abs(d))
   return d > 0 ? `+${s}` : d < 0 ? `-${s}` : '0'
 }
+
+/**
+ * A chat chart's parsed spec as a widget spec with its rows stored inline (static data, never refetched),
+ * for `POST /dashboards/{id}/widgets`. The mirror of `boundChartSource`.
+ */
+export function chartToWidgetSpec(c: {
+  type: string; title: string; x: string; series: { key: string }[]; data: Row[]; stacked: boolean; unit: string
+}): Record<string, unknown> {
+  return {
+    kind: 'chart',
+    inline_rows: c.data,
+    select: { x: c.x, y: c.series.map((s) => s.key) },
+    chart: { type: c.type, title: c.title, stacked: c.stacked, unit: c.unit }
+  }
+}

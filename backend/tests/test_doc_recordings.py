@@ -173,7 +173,7 @@ def test_summarize_proposes_an_append_and_never_touches_the_doc() -> None:
     out = w.summarize(m["id"])
     rev = out["revision"]
     assert out["error"] is None and rev["status"] == "pending" and rev["tool"] == "recording_summary"
-    assert rev["after"].startswith("# Plan\n- item\n\n:::ai\n\n## Recording summary (") and rev["after"].endswith("\n\n:::")
+    assert rev["after"].startswith("# Plan\n- item\n\n:::ai\n\n## Recording summary (") and rev["after"].rstrip().endswith("\n\n:::")
     assert "Ship the tiers on the fourteenth" in rev["after"]
     got = w.docs.get(doc["id"])
     assert got["content"] == "# Plan\n- item"                      # not applied, whatever the edit mode

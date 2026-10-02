@@ -17,6 +17,11 @@ def test_reads_only_is_quiet() -> None:
                                        {"name": "list_notes", "description": "List notes"}])
 
 
+def test_get_email_is_a_reader_not_a_writer() -> None:
+    assert "toxic_flow" not in _codes([{"name": "get_email", "description": "Get an email"},
+                                       {"name": "read_file", "description": "Read a file"}])
+
+
 def test_one_tool_is_not_a_pair() -> None:
     assert "toxic_flow" not in _codes([{"name": "send_email", "description": "Send a message"}])
 

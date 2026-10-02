@@ -288,7 +288,7 @@ def check_toxic_flow(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
         text = str(t.get("name") or "") + (" " + str(t.get("description") or "") if desc else "")
         return set(re.split(r"[^a-z0-9]+", re.sub(r"([a-z])([A-Z])", r"\1 \2", text).lower()))
     readers = [t for t in tools if toks(t, False) & _READ_VERBS and toks(t, True) & _PRIVATE_NOUNS]
-    writers = [t for t in tools if toks(t, False) & _OUTBOUND]
+    writers = [t for t in tools if toks(t, False) & _OUTBOUND and not toks(t, False) & _READ_VERBS]
     pair = next(((r, w) for r in readers for w in writers if r is not w), None)
     if not pair:
         return []

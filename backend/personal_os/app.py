@@ -41,7 +41,7 @@ from .artifact_routes import is_render_path as _is_artifact_render, make_router 
 from .artifacts import Artifacts
 from .boards import Boards
 from .canvas import FALLBACK_NAME, SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
-from .dashboards import Dashboards, generate_recap, generate_summary, generate_widget_code
+from .dashboards import Dashboards, generate_recap, generate_summary, generate_widget_code, lint_widget_html
 from .docs import Docs, unified_diff
 from . import widget_spec
 from . import cache as google_cache
@@ -4693,7 +4693,8 @@ async def _run_widget(w: dict[str, Any], request: Request, regenerate_code: bool
         if regenerate_code or not w["code"]:
             samples = await _samples(w["source_ids"])
             code = await generate_widget_code(cfg, cfg["defaultModel"], w["prompt"] or w["title"], srcs, str(request.base_url).rstrip("/"), w["width"], w["height"], samples)
-            w = dashboards.update_widget(w["id"], {"code": code, "refreshed_at": time.time()}) or w
+            left = lint_widget_html(code, str(request.base_url).rstrip("/"), bool(srcs))
+            w = dashboards.update_widget(w["id"], {"code": code, "refreshed_at": time.time(), "data_error": "; ".join(left)}) or w
     elif w["kind"] == "summary":
         data = await _samples(w["source_ids"])
         text = await generate_summary(cfg, model, w["prompt"], data)

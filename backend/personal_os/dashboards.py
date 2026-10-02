@@ -291,11 +291,42 @@ async def generate_widget_code(settings: dict[str, Any], model: str, prompt: str
             sample = sample[:1800] + "…"
         src_lines.append(f"- {s['name']} ({s['kind']}): fetch(\"{base_url}/sources/{s['id']}/fetch\")\n  description: {s.get('description') or '-'}\n  sample response: {sample}")
     user = f"Widget request: {prompt}\n\nSize: about {width * 340}px wide × {height}px tall.\n\nData sources:\n" + ("\n".join(src_lines) if src_lines else "(none: build a static or self-computed widget)")
-    code = await llm.complete(settings, model, [{"role": "system", "content": WIDGET_SYSTEM}, {"role": "user", "content": user}])
+    code = _wrap(await llm.complete(settings, model, [{"role": "system", "content": WIDGET_SYSTEM}, {"role": "user", "content": user}]))
+    issues = lint_widget_html(code, base_url, bool(sources))
+    if issues:  # one repair round, never more; a failed or no-better repair keeps the original
+        try:
+            fixed = _wrap(await llm.complete(settings, model, [
+                {"role": "system", "content": WIDGET_SYSTEM}, {"role": "user", "content": user},
+                {"role": "assistant", "content": code},
+                {"role": "user", "content": "That widget has problems:\n- " + "\n- ".join(issues) + "\nReturn the complete corrected HTML document only."}]))
+            if len(lint_widget_html(fixed, base_url, bool(sources))) < len(issues):
+                code = fixed
+        except Exception:  # noqa: BLE001
+            pass
+    return code
+
+
+def _wrap(code: str) -> str:
     code = re.sub(r"^```(?:html)?\s*|\s*```$", "", code.strip(), flags=re.I | re.M).strip()
     if "<html" not in code.lower():
         code = f"<!doctype html><html><body style='font-family:system-ui;color:#ecebe8;padding:12px'>{code}</body></html>"
     return code
+
+
+def lint_widget_html(code: str, base_url: str = "", has_sources: bool = False) -> list[str]:
+    """Problems the sandbox would turn into a blank or broken widget. Empty list = fine."""
+    issues: list[str] = []
+    remote = [u for u in re.findall(r"""(?:\bsrc\s*=|<link\b[^>]*\bhref\s*=|url\(|@import\s+)\s*["']?(https?://[^"'\s)>]+)""", code, flags=re.I)
+              if not (base_url and u.startswith(base_url + "/sources/"))]
+    if remote:
+        issues.append(f"loads a remote asset ({remote[0]}); the sandbox blocks external scripts, styles and images, so inline everything")
+    if has_sources and not re.search(r"\bfetch\s*\(", code):
+        issues.append("never calls fetch() on any of the data sources")
+    body = re.search(r"<body[^>]*>(.*?)(?:</body>|$)", code, flags=re.I | re.S)
+    inner = body.group(1) if body else code
+    if not re.search(r"<script\b", inner, flags=re.I) and not re.sub(r"<[^>]*>|\s", "", inner):
+        issues.append("the body is empty")
+    return issues
 
 
 async def generate_summary(settings: dict[str, Any], model: str, prompt: str, data: dict[str, Any]) -> str:

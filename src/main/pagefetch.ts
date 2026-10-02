@@ -89,14 +89,14 @@ const EXTRACT = (max: number, withLinks: boolean): string => `(() => {
   if (${withLinks}) {
     const roots = useBest ? document.querySelectorAll('main, article, [role="main"]') : [document.body];
     const seen = new Set();
-    for (const root of roots) for (const a of root ? root.querySelectorAll('a[href]') : []) {
+    outer: for (const root of roots) for (const a of root ? root.querySelectorAll('a[href]') : []) {
       let u; try { u = new URL(a.getAttribute('href'), location.href); } catch (e) { continue; }
       if (u.protocol !== 'http:' && u.protocol !== 'https:') continue;
       u.hash = '';
       if (seen.has(u.href)) continue;
       seen.add(u.href);
       links.push({ text: clean(a.innerText || a.getAttribute('aria-label') || '').slice(0, 120), href: u.href });
-      if (links.length >= ${MAX_LINKS}) break;
+      if (links.length >= ${MAX_LINKS}) break outer;
     }
   }
   return { title: document.title || '', url: location.href, text: text.slice(0, ${max + 1}), links };

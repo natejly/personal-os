@@ -61,6 +61,12 @@ PLAN_FOOTER = (
     "in_progress, and add steps when the work turns out to be bigger than the plan says. When every step "
     "is done, write the final answer instead of calling another tool."
 )
+# A desk never finishes by answering: it delivers and says so with desk_done.
+DESK_PLAN_FOOTER = (
+    "Keep it accurate with todo_write: mark a step done as soon as it is done, keep at most one step "
+    "in_progress, and add steps when the work turns out to be bigger than the plan says. When every step "
+    "is done, `desk_deliver` the files under outputs/ and call `desk_done`; do not just write a final answer."
+)
 
 
 def _clean(text: Any, cap: int) -> str:
@@ -105,9 +111,9 @@ def render_plan(steps: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def plan_block(steps: list[dict[str, Any]]) -> str:
+def plan_block(steps: list[dict[str, Any]], desk: bool = False) -> str:
     done = sum(1 for s in steps if s["status"] == "done")
-    return f"{PLAN_HEADER}\n\n{render_plan(steps)}\n\n{done}/{len(steps)} steps done. {PLAN_FOOTER}"
+    return f"{PLAN_HEADER}\n\n{render_plan(steps)}\n\n{done}/{len(steps)} steps done. {DESK_PLAN_FOOTER if desk else PLAN_FOOTER}"
 
 
 class Plans:
@@ -141,10 +147,10 @@ class Plans:
         with self.db.tx() as c:
             c.execute("DELETE FROM chat_plans WHERE conversation_id=?", (conversation_id,))
 
-    def block(self, conversation_id: str) -> str:
+    def block(self, conversation_id: str, desk: bool = False) -> str:
         """The prompt block for this conversation's plan, or '' when there is no plan yet."""
         plan = self.get(conversation_id)
-        return plan_block(plan["steps"]) if plan and plan["steps"] else ""
+        return plan_block(plan["steps"], desk) if plan and plan["steps"] else ""
 
 
 # ---- tool results as handles ----

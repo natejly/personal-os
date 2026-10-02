@@ -487,7 +487,7 @@ def test_a_turn_that_consumed_no_step_does_not_chain() -> None:
     settings_patch(maxToolRounds=2)
     try:
         script({"calls": [propose("One file", step("desk_write_file", WRITE["arguments"]))]},
-               {"calls": [call("current_time")]},         # a round spent on nothing the plan asked for
+               {"calls": [call("desk_read_file", path="work/missing.txt")]},         # a round spent on nothing the plan asked for, and it errors: no progress
                {"calls": [WRITE]},                        # round 3: out of rounds, never executed
                {"text": "Finished."})
         did = make_desk("Spin the wheels")["desk"]["id"]
@@ -814,7 +814,7 @@ def test_answering_a_desk_ask_card_carries_on_in_the_same_turn() -> None:
     check("Which vendor?" in desk(did)["question"], "the open card puts its question on the desk for the banner")
     j("POST", f"/approvals/{row['call_id']}", {"decision": "allow", "note": "Acme"})
     quiet(did)
-    check('"answer": "Acme"' in _tool_text(SCRIPT["messages"][-1]), "the answer goes back as the tool result")
+    check('"answer": "Acme"' in _tool_text(SCRIPT["messages"][1]), "the answer goes back as the tool result")
     state = desk(did)
     check(state["status_reason"] != "question" and not state["question"],
           f"and the desk does not block on a question already answered, got {state['status']}/{state['status_reason']}")
@@ -827,7 +827,7 @@ def test_a_message_answers_an_open_desk_ask_card() -> None:
     out = j("POST", f"/cowork/desks/{did}/message", {"content": "Q3"})
     check(out.get("answered") is True and out.get("live") is True, "the banner's answer settles the live card")
     quiet(did)
-    check('"answer": "Q3"' in _tool_text(SCRIPT["messages"][-1]), "and reaches the model as the answer")
+    check('"answer": "Q3"' in _tool_text(SCRIPT["messages"][1]), "and reaches the model as the answer")
 
 
 def test_a_pending_plan_shows_in_the_desk() -> None:
@@ -890,7 +890,37 @@ def test_chat_plan_mode_auto_turns_on_at_the_first_change() -> None:
     check("todo_add" not in SCRIPT["tools"][1], "and from the next round only reading and the plan are offered")
 
 
-TESTS += [test_a_desk_is_told_it_is_a_desk,
+def test_a_planning_desk_is_not_offered_desk_done_or_desk_start() -> None:
+    script({"calls": [propose("Write it up", step("desk_write_file", WRITE["arguments"]))]}, {"text": "Waiting."})
+    did = make_desk("Write the note")["desk"]["id"]
+    j("POST", f"/approvals/{card(did, PLAN_TOOL)['call_id']}", {"decision": "deny"})
+    quiet(did)
+    first = SCRIPT["tools"][0]
+    check("desk_done" not in first and "desk_start" not in first, f"neither is offered while planning, got {first}")
+    check(PLAN_TOOL in first, "but the plan tool is")
+    script({"calls": [call("desk_read_file", path="work/none.txt")]}, {"text": "Done."})
+    asking = make_desk("Look around", autonomy="ask")["desk"]["id"]
+    quiet(asking)
+    check("desk_done" in SCRIPT["tools"][0] and "desk_start" not in SCRIPT["tools"][0],
+          "an approved/ask desk is offered desk_done, and still never desk_start")
+
+
+def test_a_reply_that_just_ends_gets_exactly_one_nudge() -> None:
+    script({"text": "I think that is everything."}, {"text": "Still nothing."})
+    did = make_desk("Do it", autonomy="ask")["desk"]["id"]
+    quiet(did)
+    time.sleep(0.3)
+    quiet(did)
+    firsts = [m for m in SCRIPT["messages"] if m]
+    nudges = [m for m in firsts if "ended your reply without calling" in str(m[-1].get("content") or "")]
+    check(len(nudges) == 1, f"one nudge turn was started, got {len(nudges)} of {len(firsts)} rounds")
+    check(len(run_store.list(desk_id=did, statuses=None)) == 2, "and no third turn")
+    check(desk(did)["status"] in ("review", "blocked"), "a nudged turn that also just ends settles")
+
+
+TESTS += [test_a_planning_desk_is_not_offered_desk_done_or_desk_start,
+         test_a_reply_that_just_ends_gets_exactly_one_nudge,
+         test_a_desk_is_told_it_is_a_desk,
          test_a_woken_desk_sees_its_approved_plan_and_what_the_user_said,
          test_an_approved_parked_call_runs_on_the_next_turn_without_a_second_card,
          test_answering_a_desk_ask_card_carries_on_in_the_same_turn,

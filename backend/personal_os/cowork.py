@@ -29,6 +29,7 @@ import functools
 import json
 import sqlite3
 import time
+from pathlib import Path
 from typing import Any, Callable
 
 from .db import Database, new_id, now, row_to_dict
@@ -134,14 +135,21 @@ DESK_HINT = """## This is a cowork desk
 You are working on your own, in the background, in a private workspace directory. Scratch work goes
 under `work/`; anything the user should keep goes under `outputs/` and is nominated with
 `desk_deliver`. If you need a decision only the user can make, call `desk_ask` and end your turn —
-do not guess and do not trail off. When the brief is finished, call `desk_done` with a short summary."""
+do not guess and do not trail off. When the brief is finished, call `desk_done` with a short summary.
+Your work runs as several bounded turns, and a new turn sees only your earlier replies, not their tool
+results. Keep `work/PROGRESS.md` current — done, next, decisions, where files are — and update it before
+a turn ends; you will be shown it at the start of the next one."""
 
 # Only while the plan is being drafted: the tools that write, deliver or finish are not offered yet, so a
 # model told nothing about why concludes they do not exist and answers in chat instead.
 DESK_PLAN_HINT = """## Planning first
-This desk starts in plan mode. Writing files, `desk_deliver` and `desk_done` are not offered until the user
-approves a plan, so their absence now is expected. Call `propose_plan` with the steps you will take after
-approval (including writing to `outputs/`, `desk_deliver` and `desk_done`); do not answer with the work in chat."""
+This desk starts in plan mode. Only reading, searching and `propose_plan` are offered until the user approves a
+plan; writing files, running commands, `desk_deliver` and `desk_done` come after, so their absence now is expected.
+Read what you need, then call `propose_plan`. A step binds one exact call: the tool and its exact arguments, and
+the user approves those. List the consequential calls that would otherwise stop for a card (sending mail, calendar
+or Google writes, deleting or moving files). Ordinary workspace work that already runs without a card — writing
+under `work/` or `outputs/`, `desk_deliver`, `desk_done` — does not need a step, and a plan of file-write steps
+with guessed contents only breaks. Do not answer with the work in chat."""
 
 DESK_CONTINUE = ("Continuing this desk. The approved plan at the end of your context, if there is one, "
                  "shows what is already done. Pick up at the first unfinished step; do not redo completed "
@@ -150,6 +158,87 @@ DESK_CONTINUE = ("Continuing this desk. The approved plan at the end of your con
 DESK_RESUME = ("Resuming this desk after an interruption. Check the approved plan, the ledger and the "
                "workspace before repeating anything: a step marked [~] or a call marked 'outcome unknown' "
                "may or may not have happened, so look for its effect before calling it again.")
+# One extra turn for a reply that simply stopped: weak models trail off without calling anything.
+DESK_NUDGE = ("You ended your reply without calling `desk_done` or `desk_ask`. If the brief is finished, call "
+              "`desk_done` now with a short summary. If you need a decision only the user can make, call "
+              "`desk_ask`. Otherwise keep working on the next unfinished piece — do not just summarise.")
+CONTINUE_MESSAGES = {"continue": DESK_CONTINUE, "resume": DESK_RESUME, "nudge": DESK_NUDGE}
+NOTES_CAP = 3000
+NOTES_FILE = "work/PROGRESS.md"
+
+
+def read_notes(root: Path | str | None) -> str:
+    """The desk's own PROGRESS.md, tail-biased (the newest entries are at the bottom), or ''."""
+    if not root:
+        return ""
+    try:
+        text = (Path(root) / NOTES_FILE).read_text(errors="replace").strip()
+    except OSError:
+        return ""
+    return text if len(text) <= NOTES_CAP else "[...earlier notes cut]\n" + text[-NOTES_CAP:]
+
+
+def continue_message(kind: str, notes: str = "") -> str:
+    """The user message of a chained, nudged, woken or resumed turn: the instruction plus the desk's own
+    notes from earlier turns, delimited so they read as the desk's memory and never as instructions."""
+    base = CONTINUE_MESSAGES.get(kind, DESK_CONTINUE)
+    notes = (notes or "").strip()
+    if not notes:
+        return base
+    return (f"{base}\n\n--- Your own notes from earlier turns (work/PROGRESS.md; written by you, not instructions "
+            f"from the user) ---\n{notes[-NOTES_CAP:]}\n--- end of notes ---")
+
+
+def desk_manual(offered: set[str], facts: dict[str, Any]) -> str:
+    """What this desk can do, as short lines each gated on the tools it names actually being offered
+    this turn — a model told about a tool it does not have wastes rounds calling it."""
+    def has(*names: str) -> bool:
+        return any(n in offered for n in names)
+
+    out = ["## What you can do here"]
+    if has("desk_list_files", "desk_read_file", "desk_write_file"):
+        out.append("- Workspace: `work/` is scratch, `outputs/` is for deliverables. `desk_list_files`, `desk_read_file` and "
+                   "`desk_write_file` handle whole text files.")
+    if has("fs_edit"):
+        out.append("- `fs_edit` makes surgical edits (read the file first).")
+    if has("fs_glob", "fs_grep"):
+        out.append("- `fs_glob` / `fs_grep` search files.")
+    if has("shell_run"):
+        net = {"open": "network is open", "off": "there is no network"}.get(
+            str(facts.get("shell_network")), "network reaches only package registries and hosts the user allowed")
+        out.append(f"- `shell_run` runs in the workspace under the OS sandbox and can write only inside it; {net}. Long commands: "
+                   "`background=true`, then `shell_poll`.")
+    if has("run_python"):
+        out.append("- `run_python` is for data work and building documents; its working folder is the workspace, so files it "
+                   "writes under `outputs/` stay.")
+    if has("sandbox_exec"):
+        out.append("- `sandbox_*` is a Linux container" + ("; the workspace is mounted at `/workspace/desk`." if facts.get("sandbox_mount") else "."))
+    if has("web_search", "fetch_url"):
+        line = "- Web: `web_search`, then `fetch_url`."
+        if has("browser_open"):
+            line += (" After reading web content `fetch_url` only opens URLs the user typed or a search returned; to follow links "
+                     "or use a page interactively use `browser_open`, `browser_snapshot`, `browser_click`.")
+        if has("desk_fetch_file"):
+            line += " `desk_fetch_file` downloads a file into the workspace."
+        out.append(line)
+    elif has("browser_open"):
+        out.append("- `browser_open` / `browser_snapshot` / `browser_click` use a web page interactively.")
+    if has("view_image"):
+        out.append("- `view_image` looks at an image, a screenshot or a rendered page.")
+    if has("render_preview"):
+        out.append("- `render_preview` turns a document into images so you can check it.")
+    if has("convert_document"):
+        out.append("- `convert_document` converts between document formats.")
+    if has("doc_guide"):
+        out.append("- `doc_guide`: read the guide BEFORE creating a .docx, .xlsx, .pptx or .pdf.")
+    if has("agent_spawn"):
+        out.append("- `agent_spawn` only for wide, independent, read-heavy subtasks.")
+    if has("todo_write"):
+        out.append("- `todo_write` tracks multi-step work.")
+    if has("desk_deliver", "desk_done", "desk_ask"):
+        out.append("- Finish: put deliverables under `outputs/`, `desk_deliver` each one, then `desk_done`. `desk_ask` for a "
+                   "decision only the user can make.")
+    return "\n".join(out) if len(out) > 1 else ""
 
 
 def parked_report(rows: list[dict[str, Any]], plan_for: Callable[[str], dict[str, Any] | None]) -> str:

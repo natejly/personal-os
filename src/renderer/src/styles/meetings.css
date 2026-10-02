@@ -11,11 +11,13 @@
 .mtg-body {
   flex: 1;
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr);
+  grid-template-columns: var(--mtg-side-w, 240px) minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
+  position: relative;
 }
-.mtg-body:has(.mtg-enhanced) { grid-template-columns: 260px minmax(0, 1fr) 380px; }
+.mtg-body:has(.mtg-enhanced) { grid-template-columns: var(--mtg-side-w, 240px) minmax(0, 1fr) 380px; }
+.resize-handle.mtg-side-edge { left: calc(var(--mtg-side-w, 240px) - 4px); }
 /* The notepad, the transcript and the review column is three columns too many: stack the inner
    panes instead of squeezing prose into ~30 characters a line. */
 .mtg-body:has(.mtg-enhanced) .mtg-panes.with-transcript {
@@ -60,7 +62,7 @@
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .mtg-row .icon-btn.xs { opacity: 0; flex: none; }
-.mtg-row:hover .icon-btn.xs { opacity: 1; }
+.mtg-row:hover .icon-btn.xs, .mtg-row:focus-within .icon-btn.xs { opacity: 1; }
 
 /* Live and awaiting-review markers. The recording dot borrows `pulse-dot` from styles.css so the
    rail and the sidebar indicator breathe in step. */
@@ -71,8 +73,12 @@
 
 /* ---- main pane ---- */
 .mtg-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
-/* Its own scroller: `.mtg-body` is a grid, so the empty state cannot lean on `.page-body`. */
-.mtg-empty { overflow-y: auto; min-height: 0; padding: 16px 24px 40px; }
+/* Its own scroller: `.mtg-body` is a grid, so the empty state cannot lean on `.page-body`. A column,
+   so the recorder bar (when live) sits on top and the empty state centres in what is left. */
+.mtg-empty { display: flex; flex-direction: column; overflow-y: auto; min-height: 0; }
+/* What still needs setting up, as one quiet line under Record; the checklist is in Settings. */
+.empty-state .mtg-setup { margin-top: 6px; font-size: 12px; color: var(--text-muted); }
+.empty-state .mtg-setup:hover { color: var(--text); }
 
 .mtg-toolbar {
   display: flex; align-items: center; gap: 6px;
@@ -84,7 +90,6 @@
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .mtg-save-state { color: var(--text-faint); font-size: 11px; }
-.mtg-toolbar .mtg-spacer { flex: 1; }
 
 /* The banner is persistent on purpose: a recording that failed must never look like one that worked. */
 .mtg-banner {
@@ -195,7 +200,7 @@
 .mtg-consent-ack input { width: auto; margin: 2px 0 0; flex: none; }
 
 @media (max-width: 1100px) {
-  .mtg-body, .mtg-body:has(.mtg-enhanced) { grid-template-columns: 220px minmax(0, 1fr); }
+  .mtg-body, .mtg-body:has(.mtg-enhanced) { grid-template-columns: var(--mtg-side-w, 220px) minmax(0, 1fr); }
   .mtg-enhanced { display: none; }
   .mtg-panes.with-transcript {
     grid-template-columns: minmax(0, 1fr);

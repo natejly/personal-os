@@ -108,7 +108,12 @@ export default function HealthView(): JSX.Element {
         {connect && <Sources onSynced={changed} onClose={() => setConnect(false)} />}
         {manage && <MetricManager onChanged={changed} onClose={() => setManage(false)} />}
         {!rows ? <p className="empty-hint big">Loading…</p> : rows.length === 0 ? (
-          <div className="empty-hint big"><p>Every metric is hidden.</p><button className="ghost-btn" onClick={() => setManage(true)}>Choose metrics</button></div>
+          <div className="empty-state">
+            <HeartPulse size={28} />
+            <h2>Every metric is hidden</h2>
+            <p>Hidden metrics keep their history. Choose the ones to show as tiles here and on Today.</p>
+            <button className="primary-btn" onClick={() => setManage(true)}>Choose metrics</button>
+          </div>
         ) : (
           <>
             <div className="hl-tiles">

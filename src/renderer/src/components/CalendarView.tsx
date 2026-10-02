@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Check, ChevronLeft, ChevronRight, PanelLeftOpen, Calendar as CalIcon, Plus, RefreshCw } from 'lucide-react'
+import { Check, ChevronLeft, ChevronRight, PanelLeftOpen, Calendar as CalIcon, Plus, RefreshCw, Sparkles } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import SendToSpace from './SendToSpace'
@@ -10,6 +10,7 @@ import { scheduleTodo } from './TodoItem'
 import type { CalendarEvent, GoogleCalendar } from '@shared/types'
 import { lines, usePageContext } from '../lib/pageContext'
 import { calendarViewKey, readView, writeView } from '../lib/viewCache'
+import { rangeLabel } from '../lib/dates'
 import AppSwitcher from './AppSwitcher'
 
 function CalToggle({ c, on, onToggle }: { c: GoogleCalendar; on: boolean; onToggle: () => void }): JSX.Element {
@@ -186,15 +187,19 @@ export default function CalendarView(): JSX.Element {
     <main className="page cal-page">
       <header className="page-header drag">
         {!sidebarOpen && <button className="icon-btn no-drag" aria-label="Show sidebar" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
-        <h2><CalIcon size={16} /> Calendar <span className="muted">· {days[0].toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – {days[6].toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span></h2>
-        <div className="no-drag header-right">
-          {google?.connected && <button className="ghost-btn" onClick={() => setEditing({ event: null, draft: {} })}><Plus size={13} /> New event</button>}
-          <SendToSpace items={[{ kind: 'calendar' }]} />
+        <h2><CalIcon size={16} /> Calendar</h2>
+        {/* Navigation reads left to right as one phrase: where "now" is, step, and what is on screen. */}
+        <div className="no-drag cal-nav">
           <button className="ghost-btn" onClick={() => setWeek(startOfWeek(new Date()))}>Today</button>
-          {google?.connected && <button className="icon-btn" title="Refresh" onClick={() => void load(true)} disabled={loading}><RefreshCw size={15} className={loading ? 'spin' : ''} /></button>}
-          <button className="icon-btn" aria-label="Previous week" onClick={() => setWeek(addDays(week, -7))}><ChevronLeft size={16} /></button>
-          <button className="icon-btn" aria-label="Next week" onClick={() => setWeek(addDays(week, 7))}><ChevronRight size={16} /></button>
-          <button className="primary-btn" onClick={() => { newChat(null); void send('Help me plan this week. Look at my calendar for the next 7 days and my open todos, then propose a schedule.') }}>Plan my week</button>
+          <button className="icon-btn" title="Previous week" aria-label="Previous week" onClick={() => setWeek(addDays(week, -7))}><ChevronLeft size={16} /></button>
+          <button className="icon-btn" title="Next week" aria-label="Next week" onClick={() => setWeek(addDays(week, 7))}><ChevronRight size={16} /></button>
+        </div>
+        <span className="cal-range">{rangeLabel(days[0], days[6])}</span>
+        <div className="no-drag header-right">
+          <SendToSpace items={[{ kind: 'calendar' }]} />
+          {google?.connected && <button className="icon-btn" title="Refresh" aria-label="Refresh calendar" onClick={() => void load(true)} disabled={loading}><RefreshCw size={15} className={loading ? 'spin' : ''} /></button>}
+          <button className="ghost-btn" onClick={() => { newChat(null); void send('Help me plan this week. Look at my calendar for the next 7 days and my open todos, then propose a schedule.') }}><Sparkles size={14} /> Plan my week</button>
+          {google?.connected && <button className="primary-btn" onClick={() => setEditing({ event: null, draft: {} })}><Plus size={14} /> New event</button>}
         </div>
         <AppSwitcher />
       </header>

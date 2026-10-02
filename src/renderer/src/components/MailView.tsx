@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { Mail as MailIcon, PanelLeftOpen, RefreshCw, Search, Star, Archive, MailOpen, Mail, ExternalLink, MessageSquare, Paperclip, SquarePen, Reply, Sparkles, Send } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
+import { Mail as MailIcon, PanelLeftOpen, RefreshCw, Search, Star, Archive, MailOpen, Mail, ExternalLink, MessageSquare, Paperclip, SquarePen, Reply, Sparkles, Send, X } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import SmartTextarea from './SmartTextarea'
@@ -8,7 +8,10 @@ import { oneLine } from '../lib/emailAsk'
 import { lines, usePageContext } from '../lib/pageContext'
 import { readView, writeView } from '../lib/viewCache'
 import AppSwitcher from './AppSwitcher'
-import MailWatchPanel from './MailWatchPanel'
+import { MailWatchChips, MailWatchList, useMailWatch } from './MailWatchPanel'
+import { rowButton } from '../lib/rowButton'
+import { useModal } from '../lib/useModal'
+import { shortDate, shortDateTime } from '../lib/dates'
 
 const fromName = (s: string | null): string => (s ?? '').replace(/<.*>/, '').replace(/"/g, '').trim() || (s ?? '')
 const fmtDate = (s: string | null): string => {
@@ -18,7 +21,7 @@ const fmtDate = (s: string | null): string => {
   const today = new Date()
   return d.toDateString() === today.toDateString()
     ? d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
-    : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', ...(d.getFullYear() !== today.getFullYear() ? { year: 'numeric' } : {}) })
+    : shortDate(d, today)
 }
 /** Gmail's q syntax matches labels by name with spaces written as hyphens. */
 const labelQ = (name: string): string => `label:${name.replace(/\s+/g, '-')}`
@@ -44,6 +47,127 @@ const RANGES = [
   { value: '30d', label: 'Past month' }
 ]
 
+const isStarred = (m: GmailMessage): boolean => m.labels.includes('STARRED')
+
+/** The open message. Its own component so the dialog behaviour mounts and unmounts with it. */
+function MailReader({ message: m, full, onClose, onReply, onStar, onArchive, onUnread, onAsk }: {
+  message: GmailMessage
+  full: GmailFullMessage | null
+  onClose: () => void
+  onReply: () => void
+  onStar: () => void
+  onArchive: () => void
+  onUnread: () => void
+  onAsk: () => void
+}): JSX.Element {
+  const { titleId, backdrop, modal } = useModal(onClose)
+  const starred = isStarred(m)
+  return (
+    <div className="modal-backdrop" {...backdrop}>
+      <div className="modal wide mail-reader" {...modal}>
+        <header>
+          <h2 id={titleId}>{m.subject || '(no subject)'}</h2>
+          <button className="icon-btn" title="Close" aria-label="Close message" onClick={onClose}><X size={16} /></button>
+        </header>
+        <section>
+          <p className="mail-meta">
+            <strong>{fromName(m.from)}</strong> <span className="muted">{m.from?.match(/<(.*)>/)?.[1] ?? ''}</span><br />
+            {full?.to && <span className="muted">to {full.to}</span>}{full?.to && <br />}
+            <span className="muted">{m.date && !isNaN(new Date(m.date).getTime()) ? shortDateTime(new Date(m.date)) : m.date ?? ''}</span>
+          </p>
+          {full ? <pre className="doc-text mail-body">{full.body || '(no text content)'}</pre> : <p className="muted">Loading…</p>}
+        </section>
+        {/* Reply is what an open message is for, so it is the one filled button, last. The two state
+            toggles are icons on the left; everything else is a quiet button. */}
+        <footer>
+          <button className={`icon-btn ${starred ? 'starred' : ''}`} title={starred ? 'Unstar' : 'Star'} aria-label={starred ? 'Unstar' : 'Star'} aria-pressed={starred} onClick={onStar}>
+            <Star size={15} fill={starred ? 'currentColor' : 'none'} />
+          </button>
+          <button className="icon-btn" title="Mark unread" aria-label="Mark unread" onClick={onUnread}><Mail size={15} /></button>
+          <span className="spacer" />
+          <a className="ghost-btn" href={`https://mail.google.com/mail/u/0/#all/${m.thread_id}`} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Gmail</a>
+          <button className="ghost-btn" onClick={onArchive}><Archive size={14} /> Archive</button>
+          <button className="ghost-btn" onClick={onAsk}><MessageSquare size={14} /> Ask assistant</button>
+          <button className="primary-btn" onClick={onReply}><Reply size={14} /> Reply</button>
+        </footer>
+      </div>
+    </div>
+  )
+}
+
+function MailCompose({ compose, setCompose, review, setReview, busy, valid, onDiscard, onReview, onDraft, onSend }: {
+  compose: Compose
+  setCompose: Dispatch<SetStateAction<Compose | null>>
+  review: Review | null
+  setReview: (r: Review | null) => void
+  busy: 'send' | 'draft' | 'review' | null
+  valid: boolean
+  onDiscard: () => void
+  onReview: () => void
+  onDraft: () => void
+  onSend: () => void
+}): JSX.Element {
+  // Escape and a backdrop click only leave a message nobody has typed in: a half-written email
+  // leaves via Discard, draft or send, never by a stray key or a click that missed the dialog.
+  const opened = useRef(compose)
+  const untouched = compose.to === opened.current.to && compose.subject === opened.current.subject && compose.body === opened.current.body
+  const { titleId, backdrop, modal } = useModal(() => { if (untouched) onDiscard() })
+  // A reply opens as the reader closes, and the reader hands focus back to its row after autoFocus
+  // has already run: claim the field again, or the first keystroke goes nowhere.
+  useEffect(() => { modal.ref.current?.querySelector<HTMLElement>(opened.current.replyTo ? 'textarea' : 'input')?.focus() }, [])
+  return (
+    <div className="modal-backdrop" {...backdrop}>
+      <div className="modal wide mail-compose" {...modal}>
+        <header>
+          <h2 id={titleId}>{compose.replyTo ? `Reply: ${compose.replyTo.subject || '(no subject)'}` : 'New message'}</h2>
+          <button className="icon-btn" title="Discard" aria-label="Discard message"
+            onClick={() => { if (untouched || confirm('Discard this message?')) onDiscard() }}><X size={16} /></button>
+        </header>
+        <section>
+          <input placeholder="To" aria-label="To" value={compose.to} onChange={(e) => setCompose((c) => c && { ...c, to: e.target.value })} autoFocus={!compose.replyTo} />
+          <input placeholder="Subject" aria-label="Subject" value={compose.subject} onChange={(e) => setCompose((c) => c && { ...c, subject: e.target.value })} />
+          <SmartTextarea
+            kind="mail"
+            value={compose.body}
+            onChange={(body) => setCompose((c) => c && { ...c, body })}
+            context={`Email subject: ${compose.subject}${compose.replyBody ? `\nIt replies to:\n${compose.replyBody.slice(0, 1500)}` : ''}`}
+            placeholder="Write your email…"
+            sharedStyle={{ minHeight: 220 }}
+            autoFocus={!!compose.replyTo}
+          />
+          {review && (
+            <div className="mail-review">
+              <h4><Sparkles size={13} /> AI review</h4>
+              <ul>{review.feedback.map((f, i) => <li key={i}>{f}</li>)}</ul>
+              {review.revised && (
+                <>
+                  <pre className="doc-text">{review.revised}</pre>
+                  <button className="ghost-btn" onClick={() => { setCompose((c) => c && { ...c, body: review.revised }); setReview(null) }}>
+                    Use revised draft
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </section>
+        <footer>
+          <button className="ghost-btn" onClick={onDiscard}>Discard</button>
+          <span className="spacer" />
+          <button className="ghost-btn" disabled={busy !== null || !compose.body.trim()} onClick={onReview}>
+            <Sparkles size={14} /> {busy === 'review' ? 'Reviewing…' : 'AI review'}
+          </button>
+          <button className="ghost-btn" disabled={busy !== null || !valid} onClick={onDraft}>
+            {busy === 'draft' ? 'Saving…' : 'Save draft'}
+          </button>
+          <button className="primary-btn" disabled={busy !== null || !valid} onClick={onSend}>
+            <Send size={14} /> {busy === 'send' ? 'Sending…' : 'Send'}
+          </button>
+        </footer>
+      </div>
+    </div>
+  )
+}
+
 export default function MailView(): JSX.Element {
   const sidebarOpen = useStore((s) => s.sidebarOpen)
   const google = useStore((s) => s.google)
@@ -67,6 +191,7 @@ export default function MailView(): JSX.Element {
   const [busy, setBusy] = useState<'send' | 'draft' | 'review' | null>(null)
   const [painted, setPainted] = useState('')
   const seq = useRef(0)
+  const watch = useMailWatch()
 
   const query = useMemo(() => {
     const parts: string[] = []
@@ -215,7 +340,9 @@ export default function MailView(): JSX.Element {
     void askAboutEmail(m.id, m.subject)
   }
 
-  const isStarred = (m: GmailMessage): boolean => m.labels.includes('STARRED')
+  // `open` is the row as it was when clicked; the list holds what starring it since has changed.
+  const opened = open ? messages.find((x) => x.id === open.id) ?? open : null
+  const folderLabel = folder === 'inbox' ? 'Inbox' : folder === 'all' ? 'All mail' : folder
 
   usePageContext(() => ({
     view: 'mail',
@@ -233,12 +360,12 @@ export default function MailView(): JSX.Element {
         {!sidebarOpen && <button className="icon-btn no-drag" title="Show sidebar (⌘B)" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
         <h2><MailIcon size={16} /> Mail {google?.email && <span className="muted">· {google.email}</span>}</h2>
         {google?.connected && <div className="no-drag header-right">
-          <button className="ghost-btn" onClick={startCompose}><SquarePen size={14} /> Compose</button>
           <label className="search">
             <Search size={14} />
-            <input placeholder="Search mail (from:, subject:, …)" value={search} onChange={(e) => setSearch(e.target.value)} />
+            <input placeholder="Search mail (from:, subject:, …)" aria-label="Search mail" value={search} onChange={(e) => setSearch(e.target.value)} />
           </label>
           <button className="icon-btn" title="Refresh" aria-label="Refresh mail" onClick={() => void load(true)} disabled={loading}><RefreshCw size={15} className={loading ? 'spin' : ''} /></button>
+          <button className="primary-btn" onClick={startCompose}><SquarePen size={14} /> Compose</button>
         </div>}
         <AppSwitcher />
       </header>
@@ -267,27 +394,36 @@ export default function MailView(): JSX.Element {
         <label className={`chip-check ${attachments ? 'on' : ''}`}>
           <input type="checkbox" checked={attachments} onChange={() => setAttachments((v) => !v)} /><Paperclip size={12} /> Attachments
         </label>
+        {/* Not filters on the list below: each opens its own section above it. */}
+        <span className="toolbar-sep" aria-hidden />
+        <MailWatchChips watch={watch} />
         <div className="toolbar-right">
-          <select value={folder} onChange={(e) => setFolder(e.target.value)} title="Folder or label">
+          <select value={folder} onChange={(e) => setFolder(e.target.value)} title="Folder or label" aria-label="Folder or label">
             <option value="inbox">Inbox</option>
             <option value="all">All mail</option>
             {userLabels.map((l) => <option key={l.id} value={l.name}>{l.name}</option>)}
           </select>
-          <select value={range} onChange={(e) => setRange(e.target.value)} title="Time range">
+          <select value={range} onChange={(e) => setRange(e.target.value)} title="Time range" aria-label="Time range">
             {RANGES.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
           </select>
         </div>
       </div>
 
-      <MailWatchPanel />
       <div className="page-body wide">
-        {google?.connected && !loading && messages.length === 0 && !error && (
-          <div className="empty-hint big"><p>No mail matches these filters.</p></div>
+        <MailWatchList watch={watch} />
+        {watch.kind && messages.length > 0 && <h4 className="section-h">{folderLabel} <span>{messages.length}</span></h4>}
+        {!loading && messages.length === 0 && !error && (
+          <div className="empty-state">
+            <MailIcon size={28} />
+            <h2>No mail here</h2>
+            <p>Nothing in {folderLabel} matches these filters. Try a wider time range or another folder.</p>
+          </div>
         )}
         <div className="mail-list">
           {messages.map((m) => (
-            <div key={m.id} className={`mail-row ${m.unread ? 'unread' : ''}`} onClick={() => openMessage(m)} role="button" tabIndex={0}>
-              <button className={`icon-btn ghost sm star ${isStarred(m) ? 'on' : ''}`} title={isStarred(m) ? 'Unstar' : 'Star'}
+            <div key={m.id} className={`mail-row ${m.unread ? 'unread' : ''}`} {...rowButton(() => openMessage(m))}>
+              <span className="mail-row-dot" title={m.unread ? 'Unread' : undefined} />
+              <button className={`icon-btn ghost sm star ${isStarred(m) ? 'on' : ''}`} title={isStarred(m) ? 'Unstar' : 'Star'} aria-label={isStarred(m) ? 'Unstar' : 'Star'}
                 onClick={(e) => { e.stopPropagation(); void modify(m, { star: !isStarred(m) }) }}>
                 <Star size={14} fill={isStarred(m) ? 'currentColor' : 'none'} />
               </button>
@@ -297,11 +433,11 @@ export default function MailView(): JSX.Element {
                 <span className="mail-row-snippet"> — {m.snippet}</span>
               </span>
               <span className="mail-row-actions">
-                <button className="icon-btn ghost sm" title={m.unread ? 'Mark read' : 'Mark unread'}
+                <button className="icon-btn ghost sm" title={m.unread ? 'Mark read' : 'Mark unread'} aria-label={m.unread ? 'Mark read' : 'Mark unread'}
                   onClick={(e) => { e.stopPropagation(); void modify(m, { mark_read: m.unread }) }}>
                   {m.unread ? <MailOpen size={14} /> : <Mail size={14} />}
                 </button>
-                <button className="icon-btn ghost sm" title="Archive" onClick={(e) => { e.stopPropagation(); void modify(m, { archive: true }) }}><Archive size={14} /></button>
+                <button className="icon-btn ghost sm" title="Archive" aria-label="Archive" onClick={(e) => { e.stopPropagation(); void modify(m, { archive: true }) }}><Archive size={14} /></button>
               </span>
               <span className="mail-row-date">{fmtDate(m.date)}</span>
             </div>
@@ -310,82 +446,24 @@ export default function MailView(): JSX.Element {
       </div>
       </>}
 
-      {open && (
-        <div className="modal-backdrop" onMouseDown={() => setOpen(null)}>
-          <div className="modal wide" onMouseDown={(e) => e.stopPropagation()}>
-            <header>
-              <h3>{open.subject || '(no subject)'}</h3>
-            </header>
-            <section>
-              <p className="mail-meta">
-                <strong>{fromName(open.from)}</strong> <span className="muted">{open.from?.match(/<(.*)>/)?.[1] ?? ''}</span><br />
-                {full?.to && <span className="muted">to {full.to}</span>}{full?.to && <br />}
-                <span className="muted">{open.date ? new Date(open.date).toLocaleString() : ''}</span>
-              </p>
-              {full ? <pre className="doc-text">{full.body || '(no text content)'}</pre> : <p className="muted">Loading…</p>}
-            </section>
-            <footer>
-              <button className="ghost-btn" onClick={() => startReply(open)}><Reply size={14} /> Reply</button>
-              <button className="ghost-btn" onClick={() => void modify(open, { star: !isStarred(open) })}>
-                <Star size={14} fill={isStarred(open) ? 'currentColor' : 'none'} /> {isStarred(open) ? 'Unstar' : 'Star'}
-              </button>
-              <button className="ghost-btn" onClick={() => void modify(open, { archive: true })}><Archive size={14} /> Archive</button>
-              <button className="ghost-btn" onClick={() => { void modify(open, { mark_read: false }); setOpen(null) }}><Mail size={14} /> Mark unread</button>
-              <a className="ghost-btn" href={`https://mail.google.com/mail/u/0/#all/${open.thread_id}`} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Gmail</a>
-              <button className="primary-btn" onClick={() => askAssistant(open)}><MessageSquare size={14} /> Ask assistant</button>
-            </footer>
-          </div>
-        </div>
+      {opened && (
+        <MailReader
+          message={opened} full={full} onClose={() => setOpen(null)}
+          onReply={() => startReply(opened)}
+          onStar={() => void modify(opened, { star: !isStarred(opened) })}
+          onArchive={() => void modify(opened, { archive: true })}
+          onUnread={() => { void modify(opened, { mark_read: false }); setOpen(null) }}
+          onAsk={() => askAssistant(opened)}
+        />
       )}
 
       {compose && (
-        // No backdrop-click close: a half-written email should only leave via Discard, draft or send.
-        <div className="modal-backdrop">
-          <div className="modal wide mail-compose" onMouseDown={(e) => e.stopPropagation()}>
-            <header>
-              <h3>{compose.replyTo ? `Reply: ${compose.replyTo.subject || '(no subject)'}` : 'New message'}</h3>
-            </header>
-            <section>
-              <input placeholder="To" value={compose.to} onChange={(e) => setCompose((c) => c && { ...c, to: e.target.value })} autoFocus={!compose.replyTo} />
-              <input placeholder="Subject" value={compose.subject} onChange={(e) => setCompose((c) => c && { ...c, subject: e.target.value })} />
-              <SmartTextarea
-                kind="mail"
-                value={compose.body}
-                onChange={(body) => setCompose((c) => c && { ...c, body })}
-                context={`Email subject: ${compose.subject}${compose.replyBody ? `\nIt replies to:\n${compose.replyBody.slice(0, 1500)}` : ''}`}
-                placeholder="Write your email…"
-                sharedStyle={{ minHeight: 220 }}
-                autoFocus={!!compose.replyTo}
-              />
-              {review && (
-                <div className="mail-review">
-                  <h4><Sparkles size={13} /> AI review</h4>
-                  <ul>{review.feedback.map((f, i) => <li key={i}>{f}</li>)}</ul>
-                  {review.revised && (
-                    <>
-                      <pre className="doc-text">{review.revised}</pre>
-                      <button className="ghost-btn" onClick={() => { setCompose((c) => c && { ...c, body: review.revised }); setReview(null) }}>
-                        Use revised draft
-                      </button>
-                    </>
-                  )}
-                </div>
-              )}
-            </section>
-            <footer>
-              <button className="ghost-btn" onClick={() => { setCompose(null); setReview(null) }}>Discard</button>
-              <button className="ghost-btn" disabled={busy !== null || !compose.body.trim()} onClick={() => void doReview()}>
-                <Sparkles size={14} /> {busy === 'review' ? 'Reviewing…' : 'AI review'}
-              </button>
-              <button className="ghost-btn" disabled={busy !== null || !composeValid} onClick={() => void doDraft()}>
-                {busy === 'draft' ? 'Saving…' : 'Save draft'}
-              </button>
-              <button className="primary-btn" disabled={busy !== null || !composeValid} onClick={() => void doSend()}>
-                <Send size={14} /> {busy === 'send' ? 'Sending…' : 'Send'}
-              </button>
-            </footer>
-          </div>
-        </div>
+        <MailCompose
+          compose={compose} setCompose={setCompose} review={review} setReview={setReview}
+          busy={busy} valid={composeValid}
+          onDiscard={() => { setCompose(null); setReview(null) }}
+          onReview={() => void doReview()} onDraft={() => void doDraft()} onSend={() => void doSend()}
+        />
       )}
     </main>
   )

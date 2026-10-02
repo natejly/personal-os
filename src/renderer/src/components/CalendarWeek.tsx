@@ -1,12 +1,14 @@
-import { useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent as ReactMouseEvent } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type MouseEvent as ReactMouseEvent } from 'react'
 import { Plus, SlidersHorizontal } from 'lucide-react'
 import type { CalendarEvent, Todo } from '@shared/types'
 import { hasDrag, readDrag } from '../canvas/dnd'
+import { layoutDay, type Lane } from '../lib/calendarLayout'
 
 /** Tint an event block with its Google color (falls back to the stylesheet blue). */
 const colorStyle = (hex: string | null | undefined): CSSProperties | undefined =>
   hex ? { background: `${hex}38`, borderLeftColor: hex } : undefined
 
+/** The least an hour is drawn at. A cropped band shorter than its scroller stretches past this. */
 export const HOUR_PX = 44
 /** Dragging snaps to this, like Google Calendar's own quarter-hour grid. */
 export const SNAP_MIN = 15
@@ -14,6 +16,8 @@ export const SNAP_MIN = 15
 const DRAG_PX = 4
 /** Blocks shorter than this put the time after the title instead of under it. */
 const COMPACT_PX = 34
+/** No block is drawn shorter than this, however brief the event. */
+const MIN_EVENT_PX = 22
 /** The grab strip along an event's bottom edge that resizes instead of moving. */
 const RESIZE_PX = 7
 /** Nothing scheduled: show a plain working day rather than a wall of empty night hours. */
@@ -30,6 +34,12 @@ export const dayKey = (d: Date): string => `${d.getFullYear()}-${pad(d.getMonth(
 /** Local calendar date (not UTC). `toISOString().slice(0,10)` is wrong near midnight. */
 export const localDay = (d: Date = new Date()): string => dayKey(d)
 export const fmtTime = (d: Date): string => d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+/** The gutter's label for an hour, off the same locale clock as `fmtTime`, so the two never disagree. */
+export const fmtHour = (h: number): string => new Date(2000, 0, 1, h).toLocaleTimeString(undefined, { hour: 'numeric' })
+
+/** How tall an hour is drawn so `hours` of them fill `available` pixels, and never less than HOUR_PX. */
+export const hourHeight = (available: number, hours: number): number =>
+  hours > 0 && Number.isFinite(available) ? Math.max(HOUR_PX, available / hours) : HOUR_PX
 
 /** Round minutes-from-midnight onto the drag grid. */
 export const snapMin = (min: number, step = SNAP_MIN): number => Math.round(min / step) * step
@@ -121,6 +131,21 @@ export const selectionSlot = (s: Selection): Slot => ({
 /** A span of minutes inside one day. */
 export interface Span { startMin: number; endMin: number }
 
+/** The minutes an event covers on the day it starts, never less than one slot of the drag grid. */
+export function eventSpan(e: CalendarEvent): Span {
+  const s = new Date(e.start)
+  const startMin = s.getHours() * 60 + s.getMinutes()
+  return { startMin, endMin: startMin + Math.max(SNAP_MIN, Math.round((new Date(e.end).getTime() - s.getTime()) / 60_000)) }
+}
+
+/** Overlapping blocks split the column between them, 2px apart, inside the inset a lone block has. */
+const laneStyle = (lane: Lane | undefined): CSSProperties | undefined =>
+  !lane || lane.cols === 1 ? undefined : {
+    left: `calc(3px + (100% - 6px) * ${lane.col} / ${lane.cols})`,
+    width: `calc((100% - 6px) / ${lane.cols} - ${lane.col === lane.cols - 1 ? 0 : 2}px)`,
+    right: 'auto'
+  }
+
 /**
  * Where a move drag leaves a block: the same duration, snapped to the grid, and kept inside the
  * hours on screen — the band is cropped, so dropping a block outside it would hide it.
@@ -161,22 +186,25 @@ export default function CalendarWeek({ days, events, todos, canCreate = false, o
   const colRefs = useRef<Record<string, HTMLDivElement | null>>({})
   /** A drag that actually moved must not also count as a click opening the event. */
   const draggedRef = useRef(false)
+  const gridRef = useRef<HTMLDivElement>(null)
+  const hoursRef = useRef<HTMLDivElement>(null)
+  const [hourPx, setHourPx] = useState(HOUR_PX)
 
   const fitted = useMemo(() => hourWindow(events, days), [events, days])
   const { start: startHour, end: endHour } = showAll ? FULL_DAY : fitted
   const hours = endHour - startHour
-  const gridPx = hours * HOUR_PX
+  const gridPx = hours * hourPx
   const minTop = startHour * 60
   const minBottom = endHour * 60
   /** Hours are cropped, so an offset inside a column is not the hour of the day. */
   const hourAt = (clientY: number, rect: DOMRect): number =>
-    Math.min(endHour - 1, Math.max(startHour, startHour + Math.floor((clientY - rect.top) / HOUR_PX)))
-  const topOf = (hour: number): number => (hour - startHour) * HOUR_PX
+    Math.min(endHour - 1, Math.max(startHour, startHour + Math.floor((clientY - rect.top) / hourPx)))
+  const topOf = (hour: number): number => (hour - startHour) * hourPx
   const topOfMin = (min: number): number => topOf(min / 60)
   const clampMin = (min: number): number => Math.min(minBottom, Math.max(minTop, min))
   /** Minutes from midnight at a pointer position inside a column, on the drag grid. */
   const minuteAt = (clientY: number, rect: DOMRect): number =>
-    clampMin(snapMin(minTop + ((clientY - rect.top) / HOUR_PX) * 60))
+    clampMin(snapMin(minTop + ((clientY - rect.top) / hourPx) * 60))
   /** Which day column the pointer is over, so a move can cross days. */
   const dayAt = (clientX: number, fallback: string): string => {
     for (const [dk, el] of Object.entries(colRefs.current)) {
@@ -186,6 +214,25 @@ export default function CalendarWeek({ days, events, todos, canCreate = false, o
     }
     return fallback
   }
+
+  // A cropped band is usually shorter than the scroller it sits in, which left a blank strip under
+  // the grid. The hours stretch to fill what is left below the sticky header rows instead; every
+  // position on the grid (blocks, the now-line, drag snapping) reads the same `hourPx`. The all-day
+  // row grows with its chips, hence the data in the deps.
+  useLayoutEffect(() => {
+    const grid = gridRef.current
+    const hoursEl = hoursRef.current
+    const scroller = grid?.parentElement
+    if (!grid || !hoursEl || !scroller) return
+    const measure = (): void => {
+      const next = hourHeight(scroller.clientHeight - (hoursEl.offsetTop - grid.offsetTop), hours)
+      setHourPx((cur) => (Math.abs(cur - next) < 0.01 ? cur : next))
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(scroller)
+    return () => ro.disconnect()
+  }, [hours, events, todos, days])
 
   const eventsByDay = useMemo(() => {
     const m: Record<string, CalendarEvent[]> = {}
@@ -213,7 +260,7 @@ export default function CalendarWeek({ days, events, todos, canCreate = false, o
     const rect = e.currentTarget.getBoundingClientRect()
     // The slot pressed in is the anchor, so it is floored rather than rounded, and never the last
     // one: a drag that starts at the very bottom still has a slot's worth of room to cover.
-    const anchorMin = Math.min(minBottom - SNAP_MIN, clampMin(Math.floor((minTop + ((e.clientY - rect.top) / HOUR_PX) * 60) / SNAP_MIN) * SNAP_MIN))
+    const anchorMin = Math.min(minBottom - SNAP_MIN, clampMin(Math.floor((minTop + ((e.clientY - rect.top) / hourPx) * 60) / SNAP_MIN) * SNAP_MIN))
     const y0 = e.clientY
     let cur: Selection | null = null
     const onMouseMove = (m: MouseEvent): void => {
@@ -236,16 +283,14 @@ export default function CalendarWeek({ days, events, todos, canCreate = false, o
     if (!onMove || e.button !== 0) return
     e.stopPropagation()
     draggedRef.current = false
-    const s = new Date(ev.start), en = new Date(ev.end)
-    const day0 = dayKey(s)
-    const startMin0 = s.getHours() * 60 + s.getMinutes()
-    const durMin = Math.max(SNAP_MIN, Math.round((en.getTime() - s.getTime()) / 60_000))
-    const endMin0 = startMin0 + durMin
+    const day0 = dayKey(new Date(ev.start))
+    const { startMin: startMin0, endMin: endMin0 } = eventSpan(ev)
+    const durMin = endMin0 - startMin0
     const x0 = e.clientX, y0 = e.clientY
     let cur: Drag | null = null
     const onMouseMove = (m: MouseEvent): void => {
       if (!cur && Math.abs(m.clientY - y0) < DRAG_PX && Math.abs(m.clientX - x0) < DRAG_PX) return
-      const deltaMin = snapMin(((m.clientY - y0) / HOUR_PX) * 60)
+      const deltaMin = snapMin(((m.clientY - y0) / hourPx) * 60)
       const span = resize
         ? resizedSpan(startMin0, endMin0, deltaMin, minBottom)
         : movedSpan(startMin0, durMin, deltaMin, { top: minTop, bottom: minBottom })
@@ -288,7 +333,7 @@ export default function CalendarWeek({ days, events, todos, canCreate = false, o
   const nowVisible = nowHour >= startHour && nowHour <= endHour
 
   return (
-    <div className={`cal-grid ${sel || drag ? 'dragging' : ''}`} style={{ gridTemplateColumns: `56px repeat(${days.length}, 1fr)`, minWidth: days.length > 1 ? 760 : 200 }}>
+    <div ref={gridRef} className={`cal-grid ${sel || drag ? 'dragging' : ''}`} style={{ gridTemplateColumns: `56px repeat(${days.length}, 1fr)`, minWidth: days.length > 1 ? 760 : 200 }}>
       <div className="cal-corner">
         {(showAll || hours < 24) && (
           <button className="cal-hours-toggle" title={showAll ? 'Crop to the hours with events' : 'Show all 24 hours'}
@@ -325,9 +370,9 @@ export default function CalendarWeek({ days, events, todos, canCreate = false, o
           </div>
         )
       })}
-      <div className="cal-hours">
+      <div className="cal-hours" ref={hoursRef}>
         {Array.from({ length: hours }, (_, i) => startHour + i).map((h) => (
-          <div key={h} className="cal-hour" style={{ height: HOUR_PX }}>{h === 0 ? '' : `${h % 12 || 12}${h < 12 ? 'am' : 'pm'}`}</div>
+          <div key={h} className="cal-hour" style={{ height: hourPx }}>{h === 0 ? '' : fmtHour(h)}</div>
         ))}
       </div>
       {days.map((d) => {
@@ -339,6 +384,14 @@ export default function CalendarWeek({ days, events, todos, canCreate = false, o
             ? (drag.day === dk ? timed : timed.filter((e) => e.id !== drag.id))
             : (drag.day === dk ? [...timed, drag.event] : timed)
         const selSlot = sel && sel.day === dk ? selectionSlot(sel) : null
+        // Lanes come from where the blocks rest, not from the drag: the block in hand floats over the
+        // column at full width and the others hold still under it. A block is never drawn shorter than
+        // MIN_EVENT_PX, so lanes go by the drawn height, or two brief events minutes apart would collide.
+        const minMin = (MIN_EVENT_PX / hourPx) * 60
+        const lanes = layoutDay(timed.map((e) => {
+          const { startMin, endMin } = eventSpan(e)
+          return { id: e.id, startMin, endMin: Math.max(endMin, startMin + minMin) }
+        }))
         return (
           <div key={'col' + dk} ref={(el) => { if (el) colRefs.current[dk] = el; else delete colRefs.current[dk] }}
             className={`cal-col ${dk === todayKey ? 'today' : ''} ${over?.startsWith(dk + ':') ? 'drop-over' : ''}`} style={{ height: gridPx }}
@@ -351,7 +404,7 @@ export default function CalendarWeek({ days, events, todos, canCreate = false, o
             }}
             onDragLeave={() => setOver(null)}
             onDrop={(e) => dropTodo(e, dk, hourAt(e.clientY, e.currentTarget.getBoundingClientRect()))}>
-            {Array.from({ length: hours }, (_, i) => <div key={i} className="cal-line" style={{ top: i * HOUR_PX }} />)}
+            {Array.from({ length: hours }, (_, i) => <div key={i} className="cal-line" style={{ top: i * hourPx }} />)}
             {dk === todayKey && nowVisible && <div className="cal-now" style={{ top: topOf(nowHour) }} />}
             {selSlot && (
               <div className="cal-sel" style={{ top: topOfMin(selSlot.startMin), height: Math.max(12, topOfMin(selSlot.endMin) - topOfMin(selSlot.startMin)) }}>
@@ -361,21 +414,20 @@ export default function CalendarWeek({ days, events, todos, canCreate = false, o
             {shown.map((e) => {
               const dragging = drag?.id === e.id
               const s = new Date(e.start), en = new Date(e.end)
-              const startMin = dragging ? drag.startMin : s.getHours() * 60 + s.getMinutes()
-              const endMin = dragging ? drag.endMin : startMin + Math.max(SNAP_MIN, Math.round((en.getTime() - s.getTime()) / 60_000))
+              const { startMin, endMin } = dragging ? drag : eventSpan(e)
               const top = topOfMin(startMin)
-              const h = Math.max(22, topOfMin(endMin) - top - 2)
+              const h = Math.max(MIN_EVENT_PX, topOfMin(endMin) - top - 2)
               const height = Math.min(h, gridPx - top)
               // Too short for two lines: the time reads better after the title than under it.
               const compact = height < COMPACT_PX
               return (
                 <div key={e.id} className={`cal-event ${onMove ? 'movable' : ''} ${compact ? 'compact' : ''} ${dragging ? 'dragging' : ''}`}
-                  style={{ top, height, ...colorStyle(colorOf?.(e)) }}
+                  style={{ top, height, ...(dragging ? undefined : laneStyle(lanes.get(e.id))), ...colorStyle(colorOf?.(e)) }}
                   onMouseDown={(ev) => beginDrag(ev, e, false)}
                   onClick={() => { if (draggedRef.current) { draggedRef.current = false; return } onOpen(e) }}
                   title={onMove ? `${e.summary} — drag to move, drag the bottom edge to resize` : e.summary}>
                   <b>{e.summary}</b><span>{fmtMin(dk, startMin)}</span>
-                  {onMove && height >= 22 && dayKey(en) === dayKey(s) && (
+                  {onMove && height >= MIN_EVENT_PX && dayKey(en) === dayKey(s) && (
                     <div className="cal-event-grip" style={{ height: RESIZE_PX }} onMouseDown={(ev) => beginDrag(ev, e, true)} />
                   )}
                 </div>

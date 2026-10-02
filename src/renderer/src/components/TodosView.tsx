@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, CheckSquare, PanelLeftOpen, RefreshCw } from 'lucide-react'
+import { Plus, CheckSquare, ChevronDown, PanelLeftOpen, RefreshCw } from 'lucide-react'
 import type { TodoRepeat } from '@shared/types'
 import { useStore, type Scope } from '../store'
 import TodoItem from './TodoItem'
@@ -23,8 +23,10 @@ export default function TodosView(): JSX.Element {
   const [priority, setPriority] = useState(2)
   const [repeat, setRepeat] = useState<'' | TodoRepeat['unit']>('')
   const [sort, setSort] = useState<'due' | 'urgency'>('due')
+  // The store starts with no todos, which is not the same as there being none.
+  const [loaded, setLoaded] = useState(false)
 
-  useEffect(() => { void refreshTodos(scope, showDone, sort) }, [scope, showDone, sort, refreshTodos])
+  useEffect(() => { void refreshTodos(scope, showDone, sort).finally(() => setLoaded(true)) }, [scope, showDone, sort, refreshTodos])
   useEffect(() => { void refreshTasksSync() }, [refreshTasksSync])
 
   // Cleared before the request, so a second Enter (or Enter then Add) cannot post the same todo twice;
@@ -87,8 +89,13 @@ export default function TodosView(): JSX.Element {
             </button>
           )}
           <SendToSpace items={[{ kind: 'todos' }]} />
-          <select aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as 'due' | 'urgency')} title="Urgency scores due date, priority and age"><option value="due">Sort: Due</option><option value="urgency">Sort: Urgency</option></select>
-          <label className="check"><input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} /> Show done</label>
+          <label className={`chip-check ${showDone ? 'on' : ''}`}>
+            <input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} /> Show done
+          </label>
+          <label className="model-picker" title="Urgency scores due date, priority and age">
+            <select aria-label="Sort" value={sort} onChange={(e) => setSort(e.target.value as 'due' | 'urgency')}><option value="due">Sort: Due</option><option value="urgency">Sort: Urgency</option></select>
+            <ChevronDown size={14} />
+          </label>
           <ScopeSelect value={scope} onChange={setScope} />
         </div>
         <AppSwitcher />
@@ -111,7 +118,14 @@ export default function TodosView(): JSX.Element {
           <select aria-label="Repeat" value={repeat} onChange={(e) => setRepeat(e.target.value as '' | TodoRepeat['unit'])}><option value="">No repeat</option><option value="day">Daily</option><option value="week">Weekly</option><option value="month">Monthly</option><option value="year">Yearly</option></select>
           <button className="primary-btn" onClick={() => void add()} disabled={!title.trim()}><Plus size={14} /> Add</button>
         </div>
-        {todos.length === 0 && <p className="empty-hint big">No todos yet.</p>}
+        {/* No button: the add row right above is the action, and a second filled one would compete with it. */}
+        {loaded && todos.length === 0 && (
+          <div className="empty-state">
+            <CheckSquare size={28} />
+            <h2>{showDone ? 'No todos yet' : 'Nothing open'}</h2>
+            <p>Type one in the box above and press Enter, or ask the assistant to keep track of something for you.</p>
+          </div>
+        )}
         {sort === 'urgency' ? <Section label="By urgency" items={open} /> : <>
           <Section label="Overdue" items={overdue} />
           <Section label="Today" items={today} />

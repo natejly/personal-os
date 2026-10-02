@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { Users } from 'lucide-react'
 import { useStore } from '../store'
 import { homeModuleOn } from '../modules'
+import { rowButton } from '../lib/rowButton'
 import '../styles/cowork.css'
 
 /**
@@ -34,20 +35,14 @@ export default function HomeCowork(): JSX.Element | null {
       <header>
         <Users size={14} /> Cowork
         {inbox.length > 0 && <span className="muted small">{inbox.length} waiting on you</span>}
-        <button className="link small" onClick={() => setView('cowork')}>all</button>
+        <button className="link small" onClick={() => setView('cowork')}>View all</button>
       </header>
       {inbox.length === 0 ? (
         <p className="muted">No desk needs you.</p>
       ) : (
         <ul className="home-desks">
           {inbox.slice(0, 8).map((e) => (
-            <li
-              key={e.id}
-              role="button"
-              tabIndex={0}
-              onClick={() => open(e.id, e.desk_id)}
-              onKeyDown={(k) => { if (k.key === 'Enter' || k.key === ' ') { k.preventDefault(); open(e.id, e.desk_id) } }}
-            >
+            <li key={e.id} {...rowButton(() => open(e.id, e.desk_id))}>
               <span className="home-desk-title">{e.desk_title || 'Desk'}</span>
               <span className="home-desk-body">{e.body || e.kind}</span>
               <span className="home-desk-when">{ago(e.created_at)}</span>

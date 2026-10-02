@@ -24,17 +24,19 @@ function viewRow(view: View): { view: View; label: string } {
   return { view: m.view.id, label: m.label }
 }
 
+/** Each label is its card's title on Today, word for word, so the toggle and the thing it hides read the same. */
 export const HOME_MODULES: HomeModule[] = [
   { key: 'agent', label: 'Agent inbox' },
-  { key: 'cowork', label: 'Cowork desks' },
+  { key: 'cowork', label: 'Cowork' },
   { key: 'recap', label: 'Daily recap' },
   { key: 'calendar', label: 'Calendar' },
   homeRow('todos'),
   homeRow('health'),
-  { key: 'inbox', label: 'Inbox' },
+  // "Mail inbox", not "Inbox": the agent inbox is on the same list.
+  { key: 'inbox', label: 'Mail inbox' },
   { key: 'gtasks', label: 'Google Tasks' },
-  { key: 'drive', label: 'Drive files' },
-  { key: 'meetings', label: 'Upcoming meetings' },
+  { key: 'drive', label: 'Drive' },
+  { key: 'meetings', label: 'Meetings' },
   { key: 'projects', label: 'Projects' },
   { key: 'memories', label: 'Recently learned' },
   { key: 'chats', label: 'Recent chats' }

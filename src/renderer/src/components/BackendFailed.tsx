@@ -31,6 +31,7 @@ export default function BackendFailed({ message }: { message: string }): JSX.Ele
 
   return (
     <div className="app loading">
+      <div className="boot-drag drag" />
       <div className="backend-error drag" role="alert">
         <AlertTriangle size={28} />
         <h2>Grain could not start</h2>

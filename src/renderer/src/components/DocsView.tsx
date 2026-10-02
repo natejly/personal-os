@@ -132,7 +132,7 @@ export default function DocsView(): JSX.Element {
   const recs = useDocRec((s) => s.recordings[docId])
   const recordingCount = recs?.length ?? 0
   // Ids the agent can hand to meeting_read, which also answers mid-recording from the transcript so far.
-  const recList = (recs ?? []).slice(0, 5).map((r) => `\`${r.id}\` ${r.title || 'Untitled'} (${r.status}${r.headline ? `, ${r.headline}` : ''})`).join('; ')
+  const recList = (recs ?? []).slice(0, 5).map((r) => `\`${r.id}\` ${r.title || 'Untitled'} (${r.status}, summary ${r.summary_state})`).join('; ')
 
   // ---- editor wiring ----
   // Slash-menu entries that need the recorder; the editor's own commands are built in. Memoised

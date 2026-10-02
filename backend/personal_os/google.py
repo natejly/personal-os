@@ -371,7 +371,7 @@ class Google:
     def calendar_events(self, days: int = 2, calendar_id: str = "primary", max_results: int = 30, start: str | None = None, calendar_ids: list[str] | None = None) -> list[dict[str, Any]]:
         now = _parse_iso(start) if start else dt.datetime.now(dt.timezone.utc)
         if now.tzinfo is None:
-            now = now.replace(tzinfo=dt.timezone.utc)
+            now = now.astimezone()  # a naive start is the user's wall clock, same as calendar_create reads it
         end = now + dt.timedelta(days=max(1, min(int(days), 60)))
         ids = calendar_ids or [calendar_id]
         if ids == ["all"]:

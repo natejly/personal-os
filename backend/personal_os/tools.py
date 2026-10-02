@@ -6,6 +6,7 @@ Permission resolution for a tool in a chat:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import html
 import ipaddress
 import json
@@ -14,6 +15,7 @@ import re
 import socket
 import time
 import urllib.parse
+from datetime import datetime
 from typing import Any, Awaitable, Callable
 
 import httpx
@@ -813,7 +815,7 @@ class Toolbox:
                       {"code": "import matplotlib\nmatplotlib.use('Agg')\nimport matplotlib.pyplot as plt\nplt.plot([1, 4, 9])\nplt.savefig('squares.png')", "timeout": 60}]))
 
         async def current_time(ctx: dict[str, Any]) -> Any:
-            return {"iso": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "unix": int(time.time()), "timezone": time.strftime("%Z")}
+            return {"iso": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "weekday": time.strftime("%A"), "unix": int(time.time()), "timezone": time.strftime("%Z")}
         R("current_time", ToolSpec("current_time", "Get the current local date and time.", _obj({}, []), current_time, "utility", examples=[{}]))
 
         async def propose_plan(ctx: dict[str, Any], steps: Any = None, title: str = "") -> Any:
@@ -1049,10 +1051,26 @@ def _register_google(self: Toolbox) -> None:
         "send_updates": {"type": "string", "enum": ["none", "all", "externalOnly"], "description": "email the guests about this change"},
     }
 
+    def _brief_event(e: dict[str, Any]) -> dict[str, Any]:
+        """A list row the model can scan: the calendar UI keeps the full row, this drops links and empty fields
+        so a week of events stays inline instead of becoming a paged handle the model must spend rounds reading."""
+        out = {k: e.get(k) for k in ("id", "summary", "start", "end", "all_day", "location", "calendar_id", "recurring_event_id")}
+        for k in ("start", "end"):
+            if out[k] and "T" in out[k]:
+                with contextlib.suppress(ValueError):
+                    out[k] = datetime.fromisoformat(out[k].replace("Z", "+00:00")).astimezone().strftime("%Y-%m-%dT%H:%M")
+        if e.get("transparency") == "transparent":
+            out["busy"] = False
+        if e.get("attendees"):
+            out["guests"] = len(e["attendees"])
+        if e.get("description"):
+            out["description"] = e["description"][:120]
+        return {k: v for k, v in out.items() if v is not None and v != ""}
+
     async def calendar_events(ctx: dict[str, Any], days: int = 2, start: str | None = None, offset: int = 0, all_calendars: bool = False) -> Any:
         rows = await run(g.calendar_events, days, "primary", 30, start, ["all"] if all_calendars else None)
-        return page(rows, offset=offset, limit=30, key="events")
-    R("calendar_events", ToolSpec("calendar_events", "List upcoming Google Calendar events (default: next 2 days on the primary calendar). `start` is an ISO datetime to look from; all_calendars includes every calendar.",
+        return page([_brief_event(e) for e in rows], offset=offset, limit=30, key="events")
+    R("calendar_events", ToolSpec("calendar_events", "List Google Calendar events (default: the next 2 days on the primary calendar). `start` is a local YYYY-MM-DD or YYYY-MM-DDTHH:MM to look from (default now); `days` is the window length. all_calendars includes every calendar. calendar_get has an event's full details.",
         _obj({"days": {"type": "integer", "default": 2}, "start": {"type": "string"}, "offset": {"type": "integer", "default": 0}, "all_calendars": {"type": "boolean", "default": False}}, []), calendar_events, "google",
         examples=[{}, {"days": 7, "all_calendars": True}, {"days": 1, "start": "2026-10-02T09:00"}]))
 

@@ -17,6 +17,7 @@ import { PANEL_TABS, parsePanelState, resolveWikiDoc, type PanelState, type Pane
 import { DocRecordButton, DocRecorderBar, RecordingsPanel, liveDoc, useDictation, useDocRec } from '../features/docrec'
 import Backlinks from '../features/notes/Backlinks'
 import DocOutline from '../features/notes/DocOutline'
+import FormatBar from '../features/notes/FormatBar'
 import ExportMenu from '../features/notes/ExportMenu'
 import NewDocMenu from '../features/notes/NewDocMenu'
 import type { MarkdownEditorHandle } from '../features/notes/handle'
@@ -367,6 +368,7 @@ export default function DocsView(): JSX.Element {
               </div>
             )}
 
+            {docMode !== 'preview' && <FormatBar editor={editor} />}
             <div className={`doc-panes ${docMode}`}>
               {docMode === 'split' && (
                 <ResizeHandle id="doc-split" unit="%" defaultSize={50} min={20} max={80} grows="right" label="Editor and preview split" className="doc-split-edge" />

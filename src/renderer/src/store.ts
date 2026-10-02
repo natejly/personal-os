@@ -1857,7 +1857,7 @@ export const useStore = create<State>((set, get) => {
       if (content === undefined && title === undefined) return set({ docDraft: null, docTitleDraft: null })
       set({ docSaving: true })
       try {
-        const saved = await api.docs.save(doc.id, { content, title })
+        const saved = await api.docs.save(doc.id, { content, title, base_updated_at: doc.updated_at })
         // Keep whatever was typed while the request was in flight; adopt only the server's metadata.
         set((st) => {
           if (st.activeDoc?.id !== doc.id) return { docSaving: false }
@@ -1874,7 +1874,11 @@ export const useStore = create<State>((set, get) => {
         void get().refreshDocRevisions(doc.id)
       } catch (e) {
         set({ docSaving: false })
-        get().toast(`Could not save: ${(e as Error).message}`, 'error')
+        // Stale base: another window saved first. The draft stays on screen; reloading is the user's call.
+        if ((e as { status?: number }).status === 409) {
+          get().toast('This doc changed elsewhere. Your edits are kept here and not saved.', 'error',
+            { label: 'Reload', run: () => { set({ docDraft: null, docTitleDraft: null }); void get().openDoc(doc.id) } })
+        } else get().toast(`Could not save: ${(e as Error).message}`, 'error')
       }
     },
     setDocStar: async (id, starred) => {

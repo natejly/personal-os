@@ -624,7 +624,7 @@ export const api = {
     get: (id: string) => req<FullDoc>(`/docs/${id}`),
     create: (d: { title?: string; content?: string; folder?: string; project_id?: string | null }) => req<FullDoc>('/docs', { method: 'POST', body: json(d) }),
     /** Autosave. Records a revision, folding a burst of keystrokes into one history entry. */
-    save: (id: string, patch: { content?: string; title?: string; summary?: string }) => req<FullDoc>(`/docs/${id}`, { method: 'PUT', body: json(patch) }),
+    save: (id: string, patch: { content?: string; title?: string; summary?: string; base_updated_at?: number }) => req<FullDoc>(`/docs/${id}`, { method: 'PUT', body: json(patch) }),
     /** Title, folder, star and project moves — metadata, so it stays out of the history. */
     patch: (id: string, patch: { title?: string; folder?: string; starred?: boolean; project_id?: string | null; clear_project?: boolean; scope?: string }) =>
       req<FullDoc>(`/docs/${id}`, { method: 'PATCH', body: json(patch) }),

@@ -52,7 +52,10 @@ export default function DocsView(): JSX.Element {
     refreshDocs, openDoc, closeDocTab, createDoc, editDoc, editDocTitle, flushDoc, moveDoc,
     setDocMode, acceptRevision, rejectRevision, restoreRevision, toggleSidebar, openDailyNote
   } = useStore()
-  const live = useStore((s) => liveDoc(s.meetingStatus))
+  // Select the status itself, not `liveDoc(status)`: that builds a new object on every call, and a
+  // selector whose result is never identical re-renders forever the moment a recording is live.
+  const meetingStatus = useStore((s) => s.meetingStatus)
+  const live = useMemo(() => liveDoc(meetingStatus), [meetingStatus])
 
   const [query, setQuery] = useState('')
   // One tabbed panel in the right-hand column (Outline, Recordings, Links, History).
@@ -150,7 +153,8 @@ export default function DocsView(): JSX.Element {
   // the same editDoc autosave path as typing.
   useDictation(
     docId,
-    (text) => editor.current?.insertAtCaret(text),
+    // Never focuses: the user may have clicked into the chat or the title since the clip was said.
+    (text) => editor.current?.insertQuietly(text) ?? false,
     () => {
       const h = editor.current
       if (!h) return ''

@@ -103,7 +103,11 @@ overwriting a human edit.
 says plainly how far behind it is: `transcript ~20s behind · 3 queued`. A
 per-meeting SSE route and client ship (`GET /meetings/{id}/stream`,
 `meetingStream`) but nothing publishes to the meeting bus yet, so the stream opens
-and finishes immediately and the poll is what carries the pane.
+and finishes immediately and the poll is what carries the pane. Pushed updates do
+exist, but on a different channel: the service publishes `recording` events
+(segment settled, status change, summary landed) on the app-wide `GET /events`
+for every recording. Only the Docs view listens, for recordings made in a doc; the
+Meetings view still polls.
 
 **Silence gate and hallucination filter.** Before a segment is sent to STT,
 `meeting_vad.analyze` (stdlib adaptive energy VAD) measures its speech ratio; below
@@ -116,6 +120,14 @@ land in `detail.filtered`. Local whisper now runs with `-oj`, so `detail.segment
 carries start/end, and passes `--vad -vm` when `whisperVadModelPath` (or a
 `ggml-silero*.bin` in `<data_dir>/models`) exists. Switches: `vadGate`,
 `hallucinationFilter` (both default on); turning both off restores the old behaviour.
+
+**Recordings made inside a doc** are the same machinery with a `doc_id` on the
+row, a shorter clip ceiling that closes at a pause (`docSegmentSeconds`, default
+10; `dictationSegmentSeconds`, default 8; `segmentSeconds` is unchanged for
+meetings), and a summary that is proposed into the doc instead of a revision of
+your notes. See [docs-editor.md](docs-editor.md#recording-into-a-doc). They are not
+meetings of their own: `GET /meetings` and the "Recent meetings" block leave them
+out, and `meeting_list`, `meeting_search` and `meeting_read` do include them.
 
 **The calendar nudge** is a 45-second tick with no LLM in it. It lists events
 happening now across `calendarIds` with at least `minAttendees` people, upserts a
@@ -173,7 +185,7 @@ Three independent ways to stop a meeting reaching a chat:
 3. Delete the meeting.
 
 What chats actually receive is a short "## Recent meetings" block of titles and
-*accepted* notes. Raw transcript is never injected; it is reachable only through
+*accepted* notes (recordings made in a doc are not in it). Raw transcript is never injected; it is reachable only through
 `meeting_read`, by explicit tool call.
 
 ## Retention
@@ -197,6 +209,10 @@ is still there. Two things keep one:
 "keep failed wavs forever" on a machine where everything fails is a disk bomb.
 `DELETE /meetings/{id}/audio` drops the wavs now and leaves the rows, so the UI can
 say why retranscribe is no longer possible.
+
+A recording made in a doc is the one case where something other than you deletes
+a meeting row: purging the doc (not trashing it) removes its recordings, segments,
+FTS rows and audio directory. Trashing only hides them until the doc is restored.
 
 Deleting a meeting cascades its segments, revisions and action items, removes its
 FTS row by hand (the virtual table is not covered by `ON DELETE CASCADE`) and
@@ -287,6 +303,8 @@ Three tools, all read-only:
 
 - `meeting_list(limit, offset, since_days, project_id)` — previews, newest first.
   No notes body and no transcript. Finds the id when you say "the pricing call".
+  Rows for recordings made in a doc carry `doc_id` and `doc_title`; other rows have
+  `doc_id: null`.
 - `meeting_search(query, project_id, limit)` — FTS across titles, your notes,
   enhanced notes and transcripts, one row per meeting with a snippet and a
   `found_in` saying which of those matched. **Taints the run.**
@@ -294,8 +312,8 @@ Three tools, all read-only:
   `enhanced`, `notes`, `transcript` or `actions`. Paged, because a tool result is
   truncated before the model sees it. **Taints the run.**
 
-**Nothing that starts, stops, pauses, enhances, appends to or deletes a meeting is
-registered as a tool, at any tier.** That is a decision, not an omission. The
+**Nothing that starts, stops, pauses, enhances, summarizes, appends to or deletes a
+meeting is registered as a tool, at any tier.** That is a decision, not an omission. The
 precedent is `activity_pause`, registered at danger `writes`, which `DEFAULT_MODE`
 resolves to mode **on** with no approval card (tools.py:32, 978-980) — so a polite
 or prompt-injected model can switch capture off today. Add `meeting_record` beside
@@ -306,7 +324,7 @@ route, full stop.
 
 | Route | Purpose |
 | --- | --- |
-| `GET /meetings/status` | Enabled, consented, config, live session, upcoming, devices, STT, counts |
+| `GET /meetings/status` | Enabled, consented, config, live session (with `doc_id`, `doc_mode` and its `segment_seconds`), upcoming, devices, STT, counts |
 | `GET`·`POST /meetings/preflight` | Blockers, the capability checklist and the last self-test. `?force=` re-probes |
 | `PUT /meetings/config` | Deep-merged config patch; never touches a live recording. Returns the status |
 | `GET /meetings/config` | The merged config alone |
@@ -318,18 +336,19 @@ route, full stop.
 | `GET /meetings/pending` | `{"pending": n}` — enhance proposals awaiting review (the sidebar badge) |
 | `POST /meetings/revisions/{rev_id}/accept` | Write the proposal into `enhanced` |
 | `POST /meetings/revisions/{rev_id}/reject` | Discard it; `enhanced` is untouched |
-| `GET /meetings` | The rail: previews, no bodies. `?project_id=&q=&status=&since_days=&limit=` |
-| `POST /meetings` | Create one. A repeat `calendar_event_id` returns the existing row |
+| `GET /meetings` | The rail: previews, no bodies. `?project_id=&q=&status=&since_days=&limit=`. Recordings made in a doc are left out unless `include_docs=true`; `doc_id=` selects one doc's |
+| `POST /meetings` | Create one. A repeat `calendar_event_id` returns the existing row. `doc_id` and `doc_mode` (`record` or `dictate`) link it to a doc (404 for a missing or trashed doc, 400 for another mode); the row takes the doc's project |
 | `GET /meetings/{id}` | One meeting with its pending revision and action items |
 | `PUT /meetings/{id}` | Patch title, notes, enhanced, summary, template, keep_audio, project |
 | `DELETE /meetings/{id}` | Idempotent. Cascades segments, revisions, items, FTS and the wavs |
-| `POST /meetings/{id}/start` | Begin capture. 409 with `{"blockers": [...]}` when preflight fails |
+| `POST /meetings/{id}/start` | Begin capture. A doc recording starts through `POST /docs/{id}/recordings`, which calls the same service. 409 with `{"blockers": [...]}` when preflight fails |
 | `POST /meetings/{id}/stop` | Drain the backlog (up to `drainSeconds`), finalize, queue enhance |
 | `POST /meetings/{id}/pause` · `/meetings/{id}/resume` | Stop writing segments without tearing ffmpeg down |
 | `GET /meetings/{id}/segments` | The transcript rows. `?since=` is a rowid cursor; `?offset=&limit=&channel=` pages |
-| `GET /meetings/{id}/stream` | Per-meeting SSE. Ships idle: nothing publishes to the bus yet |
+| `GET /meetings/{id}/stream` | Per-meeting SSE. Ships idle: nothing publishes to the bus yet. Live pushes are `recording` events on `GET /events` |
 | `GET /meetings/{id}/transcript` | The rolled-up transcript, paged by line |
-| `POST /meetings/{id}/enhance` | Propose enhanced notes. Returns the revision. `?force=&template=` |
+| `POST /meetings/{id}/enhance` | Propose enhanced notes. Returns the revision. `?force=&template=`. 400 for a doc recording |
+| `POST /meetings/{id}/summarize` | Doc recordings only: propose a summary as a pending append revision of the doc. `{template?, focus?, force?}`. Never applied here. 400 for an ordinary meeting; a model failure is a 200 with `error` and no revision |
 | `GET /meetings/{id}/revisions` | Every proposal, newest first |
 | `GET /meetings/{id}/actions` | Proposed action items and whether each became a todo |
 | `POST /meetings/{id}/actions/add-todos` | Promote items into todos. Empty `ids` means all still proposed |
@@ -418,7 +437,8 @@ default and hideable in Settings → Modules; *recording* is a separate switch
 ```bash
 cd backend && uv run --with pytest pytest tests/test_audiocap.py tests/test_redact.py \
   tests/test_stt.py tests/test_meeting_recorder.py tests/test_meeting_notes.py \
-  tests/test_meetings.py tests/test_mcp_servers.py -q
+  tests/test_meetings.py tests/test_meeting_vad.py tests/test_doc_recordings.py \
+  tests/test_mcp_servers.py -q
 npm test            # includes src/renderer/src/lib/transcript.test.ts
 ```
 
@@ -437,6 +457,11 @@ npm test            # includes src/renderer/src/lib/transcript.test.ts
   parse of a model's reply, and the mechanical fallback when the LLM is dead.
 - `test_meetings.py` — the schema, FTS, the propose/accept/reject cycle, the
   auto-apply rule, action-item promotion, and the service lifecycle.
+- `test_meeting_vad.py` — the silence gate and `find_cut`, which decides where a
+  doc recording closes a clip.
+- `test_doc_recordings.py` — the doc link, the proposed append summary, stop-time
+  dispatch (summarize for `record`, nothing for `dictate`), trash and purge, and the
+  `/docs/{id}/recordings` routes.
 - `test_mcp_servers.py` — that `RESERVED_TOOL_NAMES` really is every built-in tool
   name, which is what stops an MCP server claiming `meeting_read`.
 - `transcript.test.ts` — the renderer's channel interleaving and cursor folding.

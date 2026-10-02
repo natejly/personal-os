@@ -13,7 +13,9 @@ from __future__ import annotations
 import datetime
 import difflib
 import hashlib
+import logging
 import re
+import threading
 from typing import Any
 
 from .chunker import chunk_blocks
@@ -186,6 +188,9 @@ def unified_diff(before: str, after: str, context: int = 3) -> str:
     )
 
 
+log = logging.getLogger("personal_os.docs")
+
+
 class Docs:
     def __init__(self, db: Database):
         self.db = db
@@ -193,6 +198,10 @@ class Docs:
         self.on_chunks: Any = None
         # Called with a doc id just before its row is hard-deleted (app.py wires linked recordings to it).
         self.on_delete: Any = None
+        # Called with (doc id, new project id or None) after a doc changed project (app.py keeps its recordings in step).
+        self.on_move: Any = None
+        # Serialises `daily`, so a double click cannot find nothing twice and create two notes.
+        self._daily_lock = threading.Lock()
         with db.tx() as c:
             c.executescript(SCHEMA)
             self._migrate_folder_scope(c)
@@ -422,6 +431,11 @@ class Docs:
             d = c.execute("SELECT title, content FROM docs WHERE id=?", (id,)).fetchone()
             if d:
                 self._reindex(c, id, d["title"], d["content"])
+        if "project_id" in fields and d and self.on_move:
+            try:
+                self.on_move(id, fields["project_id"])
+            except Exception as e:  # noqa: BLE001 - the doc already moved; a stale recording scope is not worth failing it
+                log.warning("docs: could not move recordings of doc %s: %s", id, e)
         return self.get(id)
 
     def move(self, id: str, scope: str | None, folder: str = "") -> dict[str, Any] | None:
@@ -438,8 +452,8 @@ class Docs:
             # Before the row goes: a linked recording's FTS row and audio dir are not covered by any FK cascade.
             try:
                 self.on_delete(id)
-            except Exception:  # noqa: BLE001 - a failing hook must not leave the doc half-purged
-                pass
+            except Exception as e:  # noqa: BLE001 - a failing hook must not leave the doc half-purged
+                log.warning("docs: could not purge recordings of doc %s: %s", id, e)
         with self.db.tx() as c:
             c.execute("DELETE FROM docs WHERE id=?", (id,))
             c.execute("DELETE FROM docs_fts WHERE doc_id=?", (id,))
@@ -502,15 +516,16 @@ class Docs:
         else:
             day = datetime.date.today()
         title = day.isoformat()
-        with self.db.tx() as c:
-            row = c.execute(
-                "SELECT id FROM docs WHERE deleted_at IS NULL AND project_id IS NULL AND folder=? AND title=?"
-                " ORDER BY created_at LIMIT 1", (DAILY_FOLDER, title)).fetchone()
-        if row:
-            return self.get(row["id"]), False  # type: ignore[return-value]
-        self.create_folder(DAILY_FOLDER, "")
-        body = f"# {day.strftime('%A, %B')} {day.day}, {day.year}\n\n"
-        return self.create(title, body, None, DAILY_FOLDER), True
+        with self._daily_lock:
+            with self.db.tx() as c:
+                row = c.execute(
+                    "SELECT id FROM docs WHERE deleted_at IS NULL AND project_id IS NULL AND folder=? AND title=?"
+                    " ORDER BY created_at LIMIT 1", (DAILY_FOLDER, title)).fetchone()
+            if row:
+                return self.get(row["id"]), False  # type: ignore[return-value]
+            self.create_folder(DAILY_FOLDER, "")
+            body = f"# {day.strftime('%A, %B')} {day.day}, {day.year}\n\n"
+            return self.create(title, body, None, DAILY_FOLDER), True
 
     def backlinks(self, id: str) -> list[dict[str, Any]] | None:
         """Live docs that link to this one with `[[Title]]` or `[[Title|alias]]`, newest first.

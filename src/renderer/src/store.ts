@@ -531,6 +531,28 @@ let toastSeq = 0
 /** Autosave debounce for the doc editor: long enough to be one history entry, short enough to trust. */
 const SAVE_DEBOUNCE_MS = 1200
 let saveTimer: ReturnType<typeof setTimeout> | null = null
+
+/**
+ * The state after a request that replaced the doc body (accept, restore). `sent` is the draft right
+ * before the request and `base` the body the editor showed then, so a draft that differs now was
+ * typed or dictated while the request was in flight.
+ *
+ * What happens to that text depends on what the server did. When the new body is the old one with
+ * something added after it (an accepted recording summary), the typing is kept and the addition is
+ * put back after it: keeping the draft alone would autosave over the section just accepted. When
+ * the body was replaced outright there is nothing to merge the typing into, so the server wins, as
+ * it always has.
+ */
+export function adoptServerDoc(
+  draft: string | null, doc: FullDoc, sent: string | null, base: string
+): { activeDoc: FullDoc; docDraft: string | null } {
+  const typed = draft !== null && draft !== sent
+  const stem = base.trimEnd()
+  if (!typed || !doc.content.startsWith(stem)) return { activeDoc: doc, docDraft: null }
+  const added = doc.content.slice(stem.length)
+  const kept = draft.trimEnd()
+  return { activeDoc: doc, docDraft: stem || !kept ? kept + added : `${kept}\n\n${added}` }
+}
 /** The same debounce for the meeting notepad, on its own timer: typing notes during a call must not
  *  be cancelled by, or cancel, an autosave in the Docs editor. */
 const MEETING_SAVE_DEBOUNCE_MS = 1200
@@ -1907,8 +1929,10 @@ export const useStore = create<State>((set, get) => {
       try {
         // Buffered typing is saved first, so accepting lands on top of it instead of losing it.
         await get().flushDoc()
+        const sent = get().docDraft
+        const base = sent ?? get().activeDoc?.content ?? ''
         const doc = await api.docs.accept(revId)
-        set({ activeDoc: doc, docDraft: null })
+        set((st) => adoptServerDoc(st.docDraft, doc, sent, base))
         get().toast('Revision applied')
         await Promise.all([get().refreshDocRevisions(doc.id), get().refreshDocs(), get().refreshDocsPending()])
       } catch (e) {
@@ -1927,8 +1951,10 @@ export const useStore = create<State>((set, get) => {
     restoreRevision: async (revId) => {
       try {
         await get().flushDoc()
+        const sent = get().docDraft
+        const base = sent ?? get().activeDoc?.content ?? ''
         const doc = await api.docs.restore(revId)
-        set({ activeDoc: doc, docDraft: null })
+        set((st) => adoptServerDoc(st.docDraft, doc, sent, base))
         get().toast('Document restored')
         await Promise.all([get().refreshDocRevisions(doc.id), get().refreshDocs()])
       } catch (e) {

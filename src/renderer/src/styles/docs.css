@@ -158,10 +158,13 @@
 
 .doc-toolbar {
   display: flex; align-items: center; gap: 6px;
+  /* Wrap rather than squeeze: with the side panel open the title must stay readable, so the rest
+     of the row drops to a second line before the title shrinks below its minimum. */
+  flex-wrap: wrap;
   padding: 6px 10px; border-bottom: 1px solid var(--border);
 }
 .doc-title-input {
-  flex: 0 1 auto; min-width: 8ch; max-width: 46ch;
+  flex: 0 1 auto; min-width: 20ch; max-width: 46ch;
   padding: 3px 6px; border: 1px solid transparent; border-radius: 6px;
   background: none; color: var(--text);
   font: inherit; font-size: 14px; font-weight: 600;
@@ -175,6 +178,9 @@
 /* Specific enough to beat .model-picker select, which sets its own padding and would otherwise run
    the path under the folder icon. Nested paths are longer, so the box is wider too. */
 .doc-toolbar .doc-folder-pick select { padding-left: 26px; font-size: 12px; max-width: 220px; }
+/* The pickers give way first when the row is tight. */
+.doc-toolbar .doc-folder-pick { flex: 0 1 auto; min-width: 0; }
+.doc-toolbar .doc-folder-pick select { min-width: 0; max-width: 100%; }
 
 /* `.seg` and `.icon-btn.on` come from styles.css — this view just uses them. */
 .dot-badge {

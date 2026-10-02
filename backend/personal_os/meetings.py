@@ -430,8 +430,9 @@ class Meetings:
         have = c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='docs'").fetchone()
         if not have:
             return "1=1"
-        return (f"({alias}.doc_id IS NULL OR NOT EXISTS "
-                f"(SELECT 1 FROM docs dd WHERE dd.id={alias}.doc_id AND dd.deleted_at IS NOT NULL))")
+        # A doc_id with no doc row is an orphan (a purge whose on_delete hook failed), hidden like a trashed one.
+        return (f"({alias}.doc_id IS NULL OR EXISTS "
+                f"(SELECT 1 FROM docs dd WHERE dd.id={alias}.doc_id AND dd.deleted_at IS NULL))")
 
     def list(self, project_id: str | None = "__all__", q: str = "", status: str = "",
              since_days: int = 0, limit: int = 100, doc_id: str | None = None,
@@ -508,8 +509,14 @@ class Meetings:
             "attendee_count": len(d.get("attendees") or []),
         }
 
-    def get(self, id: str) -> dict[str, Any] | None:
+    def get(self, id: str, include_hidden: bool = True) -> dict[str, Any] | None:
+        """One meeting. Internal lifecycle code (stop, the transcribe worker, recover, purge) keeps the
+        default so it still reaches a recording whose doc was trashed mid-recording; every external read
+        (routes, tools) passes include_hidden=False so such a row reads as missing, like `list` and `find`."""
         with self.db.tx() as c:
+            if not include_hidden and c.execute(
+                    f"SELECT 1 FROM meetings WHERE id=? AND NOT {self._visible(c, 'meetings')}", (id,)).fetchone():
+                return None
             d = row_to_dict(c.execute(
                 "SELECT m.*, "
                 "  (SELECT COUNT(*) FROM meeting_segments s WHERE s.meeting_id=m.id) AS segment_count "
@@ -528,6 +535,12 @@ class Meetings:
         d["pending"] = self._rev_view(pending, d["enhanced"]) if pending else None
         d["actions"] = actions
         return d
+
+    def is_hidden(self, id: str) -> bool:
+        """True when the row exists but its doc is trashed or gone (see `_visible`)."""
+        with self.db.tx() as c:
+            return c.execute(f"SELECT 1 FROM meetings WHERE id=? AND NOT {self._visible(c, 'meetings')}",
+                             (id,)).fetchone() is not None
 
     def find(self, name_or_id: str) -> dict[str, Any] | None:
         """Resolve what a model passed: an id, or a title (exact, then unique substring)."""
@@ -685,6 +698,11 @@ class Meetings:
         with self.db.tx() as c:
             return c.execute("SELECT 1 FROM meetings WHERE doc_id=? AND doc_mode='record' LIMIT 1",
                              (doc_id,)).fetchone() is not None
+
+    def move_doc(self, doc_id: str, project_id: str | None) -> int:
+        """The hook behind `Docs.on_move`: a doc's recordings follow it into its new project."""
+        with self.db.tx() as c:
+            return c.execute("UPDATE meetings SET project_id=? WHERE doc_id=?", (project_id, doc_id)).rowcount
 
     def purge_doc(self, doc_id: str) -> int:
         """Delete every recording linked to a doc: row, segments, FTS entry and audio directory.
@@ -1812,6 +1830,8 @@ class MeetingService:
             body = redact.scrub_secrets(body)
             headline = redact.scrub_secrets(headline)
             items = [{**it, "text": redact.scrub_secrets(it["text"])} for it in items]
+        # Stored escaped too, so the Summary tab and the doc render the same thing.
+        body = meeting_notes.escape_currency(body)
         section = f"{meeting_notes.section_heading(m)}\n\n{body.strip()}"
         # The doc may have been trashed while the model was thinking; propose_append says so with None.
         rev = self.docs.propose_append(doc_id, section, summary="Recording summary", tool="recording_summary")
@@ -1950,7 +1970,7 @@ class MeetingService:
 
     async def diarize(self, meeting_id: str, backend: Any = None) -> dict[str, Any]:
         """Run diarization, then re-roll the transcript (and FTS) so [S1]/[S2] lines appear."""
-        if self.meetings.get(meeting_id) is None:
+        if self.meetings.get(meeting_id, include_hidden=False) is None:
             return {"ok": False, "backend": "none", "speakers": 0, "note": "no such meeting"}
         res = await asyncio.to_thread(self.diarize_segments, meeting_id, backend)
         if res["ok"]:
@@ -1959,7 +1979,7 @@ class MeetingService:
 
     def set_speakers(self, meeting_id: str, names: dict[str, Any]) -> dict[str, Any] | None:
         """Rename diarized speakers and rebuild the transcript. ValueError on an unknown id or long name."""
-        if self.meetings.get(meeting_id) is None:
+        if self.meetings.get(meeting_id, include_hidden=False) is None:
             return None
         self.meetings.set_speaker_names(meeting_id, names)
         return self._settle_transcript(meeting_id) or self.meetings.get(meeting_id)

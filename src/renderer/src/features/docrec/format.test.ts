@@ -18,6 +18,9 @@ test('modeLabel', () => {
   assert.equal(modeLabel('dictate'), 'Dictation')
   assert.equal(modeLabel('record'), 'Recording')
   assert.equal(modeLabel(null), 'Recording')
+  assert.equal(modeLabel('dictate', true), 'Dictated')
+  assert.equal(modeLabel('record', true), 'Recorded')
+  assert.equal(modeLabel(null, true), 'Recorded')
 })
 
 test('summaryCopy covers each state and puts an error first', () => {

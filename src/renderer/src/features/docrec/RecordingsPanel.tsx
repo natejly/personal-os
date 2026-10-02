@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { AudioLines, Mic, Pencil, Trash2, Volume2 } from 'lucide-react'
 import type { DocRecording } from '@shared/types'
 import { useStore } from '../../store'
@@ -37,7 +37,9 @@ export default function RecordingsPanel({ docId }: { docId: string }): JSX.Eleme
   const summaryError = useDocRec((s) => (selectedId ? s.summaryError[selectedId] ?? null : null))
   const busy = useDocRec((s) => s.busy)
   const settling = useDocRec((s) => s.settling)
-  const live = useStore((s) => liveDoc(s.meetingStatus))
+  // The status, not `liveDoc(status)`: a selector that returns a fresh object each call never settles.
+  const meetingStatus = useStore((s) => s.meetingStatus)
+  const live = useMemo(() => liveDoc(meetingStatus), [meetingStatus])
   const [tab, setTab] = useState<Tab>('transcript')
   const [renaming, setRenaming] = useState(false)
 
@@ -78,7 +80,7 @@ export default function RecordingsPanel({ docId }: { docId: string }): JSX.Eleme
                 <span className="dr-row-main">
                   <span className="dr-row-title">{r.title}</span>
                   <span className="dr-row-meta">
-                    {fmtDate(recordingWhen(r))} · {r.duration_ms > 0 ? fmtDuration(r.duration_ms) : statusLabel(r.status)} · {modeLabel(r.doc_mode)}
+                    {fmtDate(recordingWhen(r))} · {r.duration_ms > 0 ? fmtDuration(r.duration_ms) : statusLabel(r.status)} · {modeLabel(r.doc_mode, live?.meetingId !== r.id)}
                     {chip ? ` · ${chip}` : ''}
                   </span>
                 </span>

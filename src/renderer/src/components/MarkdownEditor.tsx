@@ -5,7 +5,7 @@ import type { MarkdownEditorHandle } from '../features/notes/handle'
 import { linkFromPaste } from '../features/notes/smartPaste'
 import { builtinCommands, detectSlash, filterCommands, type SlashCommand } from '../features/notes/slash'
 import { readingTime, wordCount } from '../features/notes/stats'
-import { diffRange, replaceInTextarea } from '../features/notes/textEdit'
+import { diffRange, insertWithoutFocus, replaceInTextarea } from '../features/notes/textEdit'
 import { detectWikiTrigger, filterTargets, wikiText } from '../features/notes/wikilinks'
 import '../styles/notes.css'
 
@@ -296,6 +296,13 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
       const s = el.selectionStart
       replaceInTextarea(el, s, el.selectionEnd, text, caretOffset === undefined ? undefined : s + caretOffset)
       trackCaret()
+    },
+    insertQuietly: (text) => {
+      const el = ta.current
+      if (!el || el.readOnly) return false
+      insertWithoutFocus(el, el.selectionStart, el.selectionEnd, text)
+      trackCaret()
+      return true
     },
     replaceRange: (start, end, text) => {
       const el = ta.current

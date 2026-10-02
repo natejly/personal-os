@@ -318,6 +318,39 @@ def section_heading(meeting: dict[str, Any]) -> str:
     return f"## Recording summary ({inside})"
 
 
+_CURRENCY = re.compile(r"(?<!\\)\$(?=\d)")
+_CODE_SPAN = re.compile(r"(`+)[^`\n]*?\1")
+
+
+def escape_currency(markdown: str) -> str:
+    """Backslash-escape a `$` that opens an amount, so a summary's prices stay prices.
+
+    The doc renderer reads `$...$` as inline maths, and a spoken "$12 a month ... up to $40" in one
+    paragraph is exactly that shape: everything between the two amounts was set as a formula. Only
+    a `$` followed by a digit is touched, which is what money looks like and what maths rarely
+    does; fenced code and code spans are left alone, since a backslash would show there.
+    """
+    out: list[str] = []
+    fenced = False
+    for line in markdown.split("\n"):
+        if line.lstrip().startswith(("```", "~~~")):
+            fenced = not fenced
+            out.append(line)
+            continue
+        if fenced:
+            out.append(line)
+            continue
+        parts: list[str] = []
+        last = 0
+        for m in _CODE_SPAN.finditer(line):
+            parts.append(_CURRENCY.sub(r"\\$", line[last:m.start()]))
+            parts.append(m.group(0))
+            last = m.end()
+        parts.append(_CURRENCY.sub(r"\\$", line[last:]))
+        out.append("".join(parts))
+    return "\n".join(out)
+
+
 async def summarize_recording(
     *,
     complete_fn: Callable[..., Any],

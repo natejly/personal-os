@@ -3,6 +3,7 @@ import type { DocRecording, DocRecordingMode, FullMeeting, MeetingActionItem, Me
 import { consentResume, useStore } from '../../store'
 import { fetchSegmentPages } from '../../lib/transcript'
 import { docRecApi, type SummarizeBody } from './api'
+import { forgetDictation } from './dictation'
 import { startRefusal, type BlockerAction } from './blockers'
 import { foldSegments, isSettled, liveDoc, needsFullReload, settleDone } from './segments'
 
@@ -367,6 +368,7 @@ export const useDocRec = create<DocRecState>((set, get) => {
       try {
         await docRecApi.del(meetingId)
         cursors.delete(meetingId)
+        forgetDictation(meetingId)
         set((st) => {
           const { [meetingId]: _s, ...segments } = st.segments
           const { [meetingId]: _m, ...meetings } = st.meetings

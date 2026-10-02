@@ -17,7 +17,9 @@ const STATUS: Record<MeetingStatus, string> = {
 }
 export const statusLabel = (s: MeetingStatus): string => STATUS[s] ?? s
 
-export const modeLabel = (mode: 'record' | 'dictate' | null): string => (mode === 'dictate' ? 'Dictation' : 'Recording')
+/** Live wording by default ("Recording"); `finished` gives the past tense a stored row needs, so it does not read as still running. */
+export const modeLabel = (mode: 'record' | 'dictate' | null, finished = false): string =>
+  mode === 'dictate' ? (finished ? 'Dictated' : 'Dictation') : (finished ? 'Recorded' : 'Recording')
 
 export interface SummaryCopy {
   /** One short state line. */

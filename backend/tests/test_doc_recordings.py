@@ -550,6 +550,115 @@ def test_routes_a_refused_start_leaves_no_row_and_the_doc_routes_work() -> None:
     client.put("/meetings/config", json={"docSegmentSeconds": 10, "dictationSegmentSeconds": 8})
 
 
+def test_a_trashed_docs_recording_is_missing_to_external_reads_but_not_to_the_lifecycle() -> None:
+    w = World()
+    doc = w.docs.create("Plan", "# Plan")
+    m = w.recording(doc)
+    trash = Trash(w.db, None, w.docs)
+    trash.trash("doc", doc["id"])
+    assert w.repo.get(m["id"], include_hidden=False) is None and w.repo.is_hidden(m["id"])
+    # lifecycle code (stop, the transcribe worker, recover) still reaches the row
+    assert w.repo.get(m["id"])["id"] == m["id"]
+    w.repo.finalize(m["id"], "late", status="ready")
+    trash.restore("doc", doc["id"])
+    assert w.repo.get(m["id"], include_hidden=False)["id"] == m["id"] and not w.repo.is_hidden(m["id"])
+
+
+def test_routes_404_for_a_trashed_docs_recording() -> None:
+    from fastapi.testclient import TestClient
+
+    from personal_os.app import AUTH_TOKEN, app, docs, meeting_store
+
+    client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
+    d = docs.create("Hidden plan", "# Hidden plan")
+    m = meeting_store.create(title="Hidden plan", doc_id=d["id"], doc_mode="record", status="ready")
+    try:
+        assert client.get(f"/meetings/{m['id']}").status_code == 200
+        Trash(meeting_store.db, None, docs).trash("doc", d["id"])
+        for path in ("", "/segments", "/transcript", "/actions", "/revisions"):
+            assert client.get(f"/meetings/{m['id']}{path}").status_code == 404, path
+        assert client.post(f"/meetings/{m['id']}/summarize", json={}).status_code == 404
+    finally:
+        docs.delete(d["id"])
+
+
+def test_an_orphaned_recording_stays_hidden() -> None:
+    w = World()
+    doc = w.docs.create("Plan", "# Plan")
+    m = w.recording(doc)
+    w.docs.on_delete = None                       # a purge whose hook failed: the doc row goes, the recording stays
+    w.docs.delete(doc["id"])
+    assert w.repo.get(m["id"]) is not None
+    assert w.repo.get(m["id"], include_hidden=False) is None
+    assert w.repo.list(include_docs=True) == [] and w.repo.search("pricing") == [] and w.repo.find(m["id"]) is None
+
+
+def test_a_failing_purge_hook_is_logged_not_swallowed() -> None:
+    import logging
+
+    w = World()
+    doc = w.docs.create("Plan", "# Plan")
+
+    def boom(_id: str) -> None:
+        raise RuntimeError("hook down")
+
+    w.docs.on_delete = boom
+    records: list[logging.LogRecord] = []
+
+    class Grab(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    h = Grab()
+    lg = logging.getLogger("personal_os.docs")
+    lg.addHandler(h)
+    try:
+        w.docs.delete(doc["id"])
+    finally:
+        lg.removeHandler(h)
+    assert w.docs.get(doc["id"]) is None and any("hook down" in r.getMessage() for r in records)
+
+
+def test_daily_is_atomic_under_concurrent_calls() -> None:
+    import threading
+
+    w = World()
+    out: list[Any] = []
+    ts = [threading.Thread(target=lambda: out.append(w.docs.daily("2031-01-02"))) for _ in range(6)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert len({d["id"] for d, _ in out}) == 1 and sum(1 for _, created in out if created) == 1
+    assert len([d for d in w.docs.list() if d["title"] == "2031-01-02"]) == 1
+
+
+def test_a_recording_follows_its_doc_into_a_new_project() -> None:
+    w = World()
+    w.docs.on_move = w.repo.move_doc
+    doc = w.docs.create("Plan", "# Plan")
+    m = w.recording(doc)
+    with w.db.tx() as c:
+        c.execute("INSERT INTO projects(id,name,created_at) VALUES('p1','P One',0)")
+    w.docs.update_meta(doc["id"], {"project_id": "p1"})
+    assert w.repo.get(m["id"])["project_id"] == "p1"
+    assert [r["id"] for r in w.repo.list(project_id="p1", include_docs=True)] == [m["id"]]
+    w.docs.move(doc["id"], None, "")
+    assert w.repo.get(m["id"])["project_id"] is None
+
+
+def test_an_ordinary_revision_is_stale_after_an_append_is_accepted() -> None:
+    w = World()
+    doc = w.docs.create("Plan", "# Plan\n\nbody")
+    old = w.docs.propose(doc["id"], "# Plan\n\nrewritten", "Rewrite")
+    assert old["stale"] is False
+    app_rev = w.docs.propose_append(doc["id"], "## Summary\n\n- a point", "Summary", tool="recording_summary")
+    w.docs.accept(app_rev["id"])
+    cur = w.docs.get(doc["id"])["content"]
+    full = w.docs._rev_view(w.docs.revision(old["id"]), cur)
+    assert full["status"] == "pending" and full["stale"] is True and full["stat_vs_current"] is not None
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in list(globals().items()):

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { MeetingStatusInfo } from '@shared/types'
 import { useStore } from '../../store'
 import { useDocRec } from './store'
-import { dictationText, readyForInsert } from './dictation'
+import { dictationDrained, dictationText, dictationsFor, forgetDictation, planDictation, trackDictation } from './dictation'
 import { liveDoc } from './segments'
 
 /** How long after a dictation stops its last clips can still arrive and be typed. */
@@ -47,16 +47,18 @@ export function useElapsed(active: NonNullable<MeetingStatusInfo['active']> | nu
 /**
  * Type each finalized dictation clip at the caret, once.
  *
- * `insert` receives the text to type (already spaced and capitalised for the caret). `getBefore`
- * should return the text before the caret, a few dozen characters is enough: without it the hook
- * can only remember what it typed itself, and assumes the first clip starts a line.
+ * `insert` receives the text to type (already spaced and capitalised for the caret) and returns
+ * whether it went in; false (no editor mounted, preview-only) leaves the clip to be typed later.
+ * `getBefore` should return the text before the caret, a few dozen characters is enough: without it
+ * the hook can only remember what it typed itself, and assumes the first clip starts a line.
  *
- * Exactly once per clip, in order: events and the poll deliver the same row, so each clip id is
- * recorded as seen before it is typed. A clip is never typed past an earlier unfinished one. Clips
- * that began before the hook mounted are never typed, so opening a doc cannot replay an old
- * dictation into it.
+ * What was typed is tracked per recording outside the component (see `trackDictation`), so a clip
+ * is typed exactly once even though events and the poll deliver the same row, and clips said while
+ * another doc was open, the Docs view was closed or no editor was mounted are typed, in order,
+ * when this doc's editor is available again. A clip is marked typed only after `insert` ran, and
+ * never goes into a doc other than the one being dictated into.
  */
-export function useDictation(docId: string, insert: (text: string) => void, getBefore?: () => string): void {
+export function useDictation(docId: string, insert: (text: string) => boolean, getBefore?: () => string): void {
   const insertRef = useRef(insert)
   const beforeRef = useRef(getBefore)
   useEffect(() => {
@@ -65,42 +67,44 @@ export function useDictation(docId: string, insert: (text: string) => void, getB
   })
 
   useEffect(() => {
-    const mountedAt = Date.now()
-    const seen = new Set<string>()
-    let following: string | null = null
-    let endedAt = 0
     let tail = ''
 
     const run = (): void => {
       const live = liveDoc(useStore.getState().meetingStatus)
-      if (live && live.docId === docId && live.mode === 'dictate') {
-        following = live.meetingId
-        endedAt = 0
-      } else if (following) {
-        endedAt = endedAt || Date.now()
-        if (Date.now() - endedAt > DICTATION_TAIL_MS) following = null
+      // The recording's identity: first seen live as a dictation into some doc, remembered from then on.
+      if (live && live.mode === 'dictate') trackDictation(live.meetingId, live.docId)
+      const editorHere = useStore.getState().activeDoc?.id === docId
+      for (const [meetingId, s] of dictationsFor(docId)) {
+        const isLive = live?.meetingId === meetingId
+        s.endedAt = isLive ? 0 : s.endedAt || Date.now()
+        const segs = useDocRec.getState().segments[meetingId] ?? []
+        const { ready, skip } = planDictation(segs, s.typed, editorHere)
+        for (const id of skip) s.typed.add(id)
+        let before = beforeRef.current ? beforeRef.current() : tail
+        for (const c of ready) {
+          const text = dictationText(c.text, before)
+          if (text && !insertRef.current(text)) break
+          // Marked only now that the text is in the editor, so a refused insert is retried.
+          s.typed.add(c.id)
+          before = (before + text).slice(-80)
+        }
+        tail = before
+        // Done once it has ended, nothing is still being transcribed and everything held was typed;
+        // the tail window is the backstop for a recording whose last clips never arrive.
+        const settling = useDocRec.getState().settling?.meetingId === meetingId
+        if (!isLive && ((!settling && dictationDrained(segs, s.typed)) || Date.now() - s.endedAt > DICTATION_TAIL_MS)) {
+          forgetDictation(meetingId)
+        }
       }
-      if (!following) return
-      const segs = useDocRec.getState().segments[following] ?? []
-      // Anything that started before this mount predates the hook; a missing start counts too.
-      for (const s of segs) if (!(s.started_at * 1000 >= mountedAt)) seen.add(s.id)
-      const { ready, consumed } = readyForInsert(segs, seen)
-      // Marked seen BEFORE typing: if `insert` throws, the clip is not retyped by the next delivery.
-      for (const id of consumed) seen.add(id)
-      if (ready.length === 0) return
-      let before = beforeRef.current ? beforeRef.current() : tail
-      for (const s of ready) {
-        const text = dictationText(s.text, before)
-        if (!text) continue
-        insertRef.current(text)
-        before = (before + text).slice(-80)
-      }
-      tail = before
     }
 
     const offDoc = useDocRec.subscribe(run)
-    const offMain = useStore.subscribe((s, prev) => { if (s.meetingStatus !== prev.meetingStatus) run() })
+    const offMain = useStore.subscribe((s, prev) => {
+      if (s.meetingStatus !== prev.meetingStatus || s.activeDoc?.id !== prev.activeDoc?.id) run()
+    })
+    // The editor appearing (preview to split, a doc finishing loading) is not a store change.
+    const retry = setInterval(run, 1000)
     run()
-    return () => { offDoc(); offMain() }
+    return () => { offDoc(); offMain(); clearInterval(retry) }
   }, [docId])
 }

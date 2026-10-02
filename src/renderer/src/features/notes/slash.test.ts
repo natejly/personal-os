@@ -54,7 +54,8 @@ test('running a built-in inserts through the handle at the caret', () => {
     focus: () => {}, replaceRange: () => {}, jumpToLine: () => {},
     getText: () => 'abc\n',
     getSelection: () => ({ start: 4, end: 4, text: '' }),
-    insertAtCaret: (t: string, c?: number) => { calls.push([t, c]) }
+    insertAtCaret: (t: string, c?: number) => { calls.push([t, c]) },
+    insertQuietly: () => true
   }
   builtinCommands().find((c) => c.id === 'math')!.run(handle)
   assert.deepEqual(calls, [['$$\n\n$$', 3]])

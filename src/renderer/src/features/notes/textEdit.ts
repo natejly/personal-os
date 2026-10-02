@@ -38,3 +38,20 @@ export function replaceInTextarea(
   const s = selStart ?? start + text.length
   el.setSelectionRange(s, selEnd ?? s)
 }
+
+/**
+ * Insert at [start, end) without ever moving focus, for edits the user did not ask for at this moment
+ * (dictation). When the textarea is the active element the normal undoable path is already focus-safe.
+ * When it is not, the user is typing somewhere else, so the text goes in with `setRangeText` and a
+ * dispatched `input` event: that loses the native undo entry for this one insert, which is the price
+ * of leaving their focus and keystrokes alone. The textarea keeps its own selection while unfocused,
+ * so `start`/`end` are the last known caret.
+ */
+export function insertWithoutFocus(el: HTMLTextAreaElement, start: number, end: number, text: string): void {
+  if (document.activeElement === el) {
+    replaceInTextarea(el, start, end, text)
+    return
+  }
+  el.setRangeText(text, start, end, 'end')
+  el.dispatchEvent(new Event('input', { bubbles: true }))
+}

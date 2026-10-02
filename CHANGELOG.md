@@ -2,6 +2,43 @@
 
 All notable changes to Grain (formerly Personal OS). Dates are the days the work landed on `main`. There are no version tags yet, so everything sits under Unreleased.
 
+## Unreleased — 2026-10-02
+
+### Added
+
+- **Recording into a doc.** Any doc can be recorded from a toolbar Record control
+  (*Record and summarize*, *Dictate into note*, *Import audio file*), the `/`
+  menu, or the Recordings tab of a new side panel, which shows a live transcript
+  and a Summary tab per recording. A doc recording is a `meetings` row with
+  `doc_id` and `doc_mode`, started through the same `MeetingService.start`, so
+  consent, preflight and the one-recording-app-wide rule are unchanged. On stop a
+  summary is proposed into the doc as an *append* revision
+  (`Docs.propose_append`, `tool="recording_summary"`): it stores only the section
+  and is resolved against the doc as it stands when you accept, so text typed
+  meanwhile survives. It is never auto-applied, and a model failure proposes
+  nothing rather than pasting the transcript. Transcripts stay in the meetings
+  tables, never in the doc body or its index, so `meeting_search` and
+  `meeting_read` remain the only way in and stay tainted. Dictation types each
+  finished mic clip at the caret and proposes no summary. Doc recordings close
+  clips at a pause (`docSegmentSeconds` 10, `dictationSegmentSeconds` 8 are
+  ceilings, `meeting_vad.find_cut`), and `recording` events on `GET /events` push
+  updates, with a two-second poll as the fallback. Routes: `POST`/`GET
+  /docs/{id}/recordings` and `POST /meetings/{id}/summarize`. They are left out of
+  the Meetings rail and the "Recent meetings" context block, trashing a doc hides
+  them and purging it deletes them, and a doc with a `record` recording is not
+  banked as a writing-style sample. See
+  [docs/docs-editor.md](docs/docs-editor.md#recording-into-a-doc).
+- **Note-taking in Docs.** A `/` command menu, `[[wikilinks]]` with a picker and a
+  Links (backlinks) tab, clickable task checkboxes in the preview, an Outline tab,
+  reading time and selection counts, templates and a New menu, a daily note
+  (`POST /docs/daily`), export (download, copy, print or save as PDF), and smart
+  paste of a URL over a selection. Programmatic inserts go through one editor
+  handle that uses `insertText` so they stay on the undo stack. The History
+  view is now one tab of the side panel. Limits: transcript latency is a clip
+  length (a pause, or the ceiling), not word by word, and dictation shares it;
+  capture is macOS only; undo of inserted text depends on Chromium's `insertText`
+  and has not been run in a live build; print renders maths as source.
+
 ## Unreleased — 2026-10-01
 
 ### Added

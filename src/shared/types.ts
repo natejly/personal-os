@@ -1491,6 +1491,13 @@ export interface DeskFilePreview {
   next_offset?: number
 }
 
+/** GET /cowork/desks/{id}/preview — a scaled picture, a page of text, a page of extracted document text, or a reason. */
+export type DeskRichPreview =
+  | { kind: 'image'; data_url: string; width: number; height: number; bytes: number }
+  | { kind: 'text'; text: string; offset: number; next_offset: number | null; total_chars: number }
+  | { kind: 'document'; text: string; offset: number; next_offset: number | null; total_chars: number; note: string }
+  | { kind: 'none'; reason: string }
+
 /** GET /cowork/desks/{id}/diff — the unified diff against the pre-desk baseline. */
 export interface DeskDiff {
   path: string

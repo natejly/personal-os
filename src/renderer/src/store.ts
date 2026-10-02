@@ -362,7 +362,9 @@ export interface State {
   messageDesk: (id: string, text: string) => Promise<boolean>
   patchDesk: (id: string, patch: Parameters<typeof api.cowork.desks.patch>[1]) => Promise<void>
   deleteDesk: (id: string, purge?: boolean) => Promise<void>
-  loadDeskFiles: (id: string, path?: string) => Promise<void>
+  /** `quiet` is for the live refresh: a failed background reload must not toast every few seconds. */
+  loadDeskFiles: (id: string, path?: string, quiet?: boolean) => Promise<void>
+  /** Selects a file; the Files tab fetches the rich preview itself (pictures, pages, load-more). */
   previewDeskFile: (id: string, path: string) => Promise<void>
   /** The promotion verdicts, so the Output tab can show a verified tick or the write that failed. */
   acceptOutputs: (id: string, sel: Parameters<typeof api.cowork.desks.accept>[1]) => Promise<PromotionResult[]>
@@ -2058,25 +2060,17 @@ export const useStore = create<State>((set, get) => {
       }))
       void get().refreshConversations()
     },
-    loadDeskFiles: async (id, path = '') => {
+    loadDeskFiles: async (id, path = '', quiet = false) => {
       try {
         const { files } = await api.cowork.desks.files(id, path)
         // `desk_status` loads these for whichever desk reached review, which need not be the open one.
         if (get().activeDeskId === id) set({ deskFiles: files })
       } catch (e) {
-        get().toast((e as Error).message, 'error')
+        if (!quiet) get().toast((e as Error).message, 'error')
       }
     },
-    previewDeskFile: async (id, path) => {
+    previewDeskFile: async (_id, path) => {
       set({ deskPreview: { path, text: '' } })
-      try {
-        const f = await api.cowork.desks.file(id, path)
-        // A binary has no window to show, so it reads as its name and its size.
-        const text = f.binary ? `${f.path} — ${f.bytes} bytes` : f.text
-        if (get().deskPreview?.path === path) set({ deskPreview: { path, text } })
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      }
     },
     acceptOutputs: async (id, sel) => {
       if (!sel.length) return []

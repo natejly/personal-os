@@ -4,7 +4,7 @@ import type {
   Memory, MemoryProposal, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
   Command, Workflow, WorkflowRun, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
   Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
-  Desk, DeskAutonomy, DeskBudget, DeskDiff, DeskEvent, DeskFilePreview, DeskFileTree, DeskOutput,
+  Desk, DeskAutonomy, DeskBudget, DeskDiff, DeskEvent, DeskFilePreview, DeskFileTree, DeskOutput, DeskRichPreview,
   DeskStatus, FullDesk, PlanRecord, PromotionKind, PromotionResult,
   AgentInbox, AgentProposal, Job, JobNotifyEvent, JobRunRecord, JobStats,
   Doc, DocFolder, FullDoc, DocRevision,
@@ -443,6 +443,7 @@ export const api = {
   /** The user's Undo for a local file write or move. A 409 message is JSON `{reason, conflict}`; `force` overrides a conflict. */
   restoreFileSnapshot: (id: string, force = false) => req<{ ok: boolean; path: string }>(`/file-snapshots/${id}/restore`, { method: 'POST', body: json({ force }) }),
   /** Folder changes a reply made (whole-folder snapshots), and the user's Undo / Redo of them. */
+  runChanges: (runId: string) => req<RunChanges>(`/runs/${runId}/changes`),
   messageChanges: (messageId: string) => req<RunChanges>(`/messages/${messageId}/changes`),
   undoRun: (runId: string) => req<RunUndoResult>(`/runs/${runId}/undo`, { method: 'POST' }),
   redoRun: (runId: string) => req<RunUndoResult>(`/runs/${runId}/redo`, { method: 'POST' }),
@@ -569,6 +570,8 @@ export const api = {
       files: (id: string, path = '') => req<DeskFileTree>(`/cowork/desks/${id}/files?path=${encodeURIComponent(path)}`),
       file: (id: string, path: string, offset = 0, length = 6000) =>
         req<DeskFilePreview>(`/cowork/desks/${id}/file?path=${encodeURIComponent(path)}&offset=${offset}&length=${length}`),
+      preview: (id: string, path: string, offset = 0) =>
+        req<DeskRichPreview>(`/cowork/desks/${id}/preview?path=${encodeURIComponent(path)}&offset=${offset}`),
       diff: (id: string, path: string) => req<DeskDiff>(`/cowork/desks/${id}/diff?path=${encodeURIComponent(path)}`),
       /** Each sha re-checked against the disk, so a row the agent has since rewritten reads `stale`. */
       outputs: (id: string) => req<DeskOutput[]>(`/cowork/desks/${id}/outputs`),

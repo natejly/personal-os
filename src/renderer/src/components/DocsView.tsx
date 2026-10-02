@@ -4,7 +4,7 @@ import {
   Sparkles, Save, Link2, Link2Off, ChevronDown, Folder, FolderKanban, FolderTree
 } from 'lucide-react'
 import { useStore } from '../store'
-import { api } from '../lib/api'
+import { api, type DocHit } from '../lib/api'
 import type { Doc } from '@shared/types'
 import MarkdownEditor from './MarkdownEditor'
 import MarkdownPreview from './MarkdownPreview'
@@ -82,6 +82,16 @@ export default function DocsView(): JSX.Element {
   const previewRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => { void refreshDocs(query) }, [refreshDocs, query])
+  // Ranked hits with a snippet for the tree's search; null until the (debounced) answer arrives.
+  const [hits, setHits] = useState<DocHit[] | null>(null)
+  useEffect(() => {
+    setHits(null)
+    const q = query.trim()
+    if (!q) return
+    let stale = false
+    const t = setTimeout(() => { api.docs.search(q).then((h) => { if (!stale) setHits(h) }).catch(() => { /* keep the plain list */ }) }, 200)
+    return () => { stale = true; clearTimeout(t) }
+  }, [query])
   // Anything still buffered belongs on disk before this view goes away — and before the window does.
   useEffect(() => {
     const flush = (): void => { void flushDoc() }
@@ -241,7 +251,7 @@ export default function DocsView(): JSX.Element {
         {treeOpen && (
           <>
             <aside className="docs-side">
-              <DocTree docs={docs} activeId={activeDoc?.id ?? null} query={query} onQuery={setQuery} />
+              <DocTree hits={hits} docs={docs} activeId={activeDoc?.id ?? null} query={query} onQuery={setQuery} />
             </aside>
             <ResizeHandle id="docs-tree-w" defaultSize={240} min={170} max={480} grows="right" onCollapse={() => setTreeOpen(false)} label="File tree width" className="docs-tree-edge" />
           </>

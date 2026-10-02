@@ -449,6 +449,7 @@ meeting_store = Meetings(db)
 meeting_svc = MeetingService(db, settings, llm.complete, meeting_store, google=google, todos=todos, docs=docs)
 # A doc that is purged (not trashed) takes its recordings with it: row, FTS entry and audio directory.
 docs.on_delete = meeting_store.purge_doc
+docs.recording_search = lambda q, n: [h for h in meeting_store.search(q, limit=n) if h["doc_id"]]
 # A doc that changes project takes its recordings along, or project-scoped meeting search shows them under the old one.
 docs.on_move = meeting_store.move_doc
 toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=google, boards=boards, sandboxes=sandboxes, docs=docs, activity=monitor,
@@ -5102,6 +5103,12 @@ class DocMetaPatch(BaseModel):
 def list_docs(project_id: str | None = "all", q: str = "") -> list[dict[str, Any]]:
     scope = "__all__" if project_id in (None, "all") else sid(project_id)
     return docs.list(scope, q)
+
+
+@app.get("/docs/search")
+def search_docs(q: str = "", project_id: str | None = "all", limit: int = 20) -> list[dict[str, Any]]:
+    scope = "__all__" if project_id in (None, "all") else sid(project_id)
+    return docs.search(q, scope, max(1, min(limit, 50)))
 
 
 @app.get("/docs/pending")

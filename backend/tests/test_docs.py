@@ -172,6 +172,14 @@ job = call("doc_edit", {"doc": made2["doc_id"], "edits": [{"find": "beta", "repl
 check(job["status"] == "pending_review", "a scheduled run does not accept-all")
 check(j("GET", f"/docs/{made2['doc_id']}")["content"] == "beta\n", "a scheduled run leaves the body alone")
 
+# ---- GET /docs/search: snippets, scope, odd characters ----
+sd = j("POST", "/docs", {"title": "Searchable", "content": "the quokkafrobnitz lives here"})
+hit = j("GET", "/docs/search?q=quokkafrobnitz")
+check([h["doc_id"] for h in hit] == [sd["id"]] and "quokkafrobnitz" in hit[0]["snippet"], "search route returns a snippet")
+check(j("GET", "/docs/search?q=quokkafrobnitz&project_id=nope") == [], "search route honours the scope")
+j("GET", "/docs/search?q=%22%28%2A")
+j("DELETE", f"/docs/{sd['id']}")
+
 # ---- deletion takes the history with it ----
 j("DELETE", f"/docs/{did}")
 j("GET", f"/docs/{did}", expect=404)

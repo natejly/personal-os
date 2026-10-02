@@ -1900,6 +1900,8 @@ def _register_docs(self: Toolbox) -> None:
 
     async def doc_search(ctx: dict[str, Any], query: str, limit: int = 8) -> Any:
         hits = self.docs.search(query, limit=max(1, min(int(limit), 20)))
+        if any(h.get("via") == "recording" for h in hits):
+            ctx["tainted"] = True  # spoken words are third-party content, same rule as meeting_search
         return {"results": hits, "count": len(hits)}
     R("doc_search", ToolSpec("doc_search", "Full-text search across the bodies of the user's docs, returning a snippet per hit. Use it to find where something is written before reading or revising it.",
         _obj({"query": {"type": "string"}, "limit": {"type": "integer", "default": 8}}, ["query"]), doc_search, "docs"))

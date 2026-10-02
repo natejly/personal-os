@@ -582,6 +582,30 @@ def test_routes_404_for_a_trashed_docs_recording() -> None:
         docs.delete(d["id"])
 
 
+def test_docs_search_finds_words_only_spoken_in_a_recording() -> None:
+    from fastapi.testclient import TestClient
+
+    from personal_os.app import AUTH_TOKEN, app, docs, meeting_store, toolbox
+
+    client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
+    d = docs.create("Offsite plan", "# Agenda")
+    m = meeting_store.create(title="Offsite plan", doc_id=d["id"], doc_mode="record", status="ready")
+    meeting_store.finalize(m["id"], "Dana: the zeppelinquartz budget is approved", status="ready")
+    try:
+        hits = client.get("/docs/search?q=zeppelinquartz").json()
+        assert [(h["doc_id"], h["via"]) for h in hits] == [(d["id"], "recording")] and "zeppelinquartz" in hits[0]["snippet"]
+        ctx: dict[str, Any] = {}
+        out = asyncio.get_event_loop().run_until_complete(toolbox.specs["doc_search"].fn(ctx, "zeppelinquartz"))
+        assert out["count"] == 1 and ctx.get("tainted") is True
+        clean: dict[str, Any] = {}
+        asyncio.get_event_loop().run_until_complete(toolbox.specs["doc_search"].fn(clean, "Agenda"))
+        assert not clean.get("tainted")
+        Trash(meeting_store.db, None, docs).trash("doc", d["id"])
+        assert client.get("/docs/search?q=zeppelinquartz").json() == []
+    finally:
+        docs.delete(d["id"])
+
+
 def test_an_orphaned_recording_stays_hidden() -> None:
     w = World()
     doc = w.docs.create("Plan", "# Plan")

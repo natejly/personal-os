@@ -5,6 +5,7 @@ import {
 } from 'lucide-react'
 import type { Doc } from '@shared/types'
 import { useStore } from '../store'
+import type { DocHit } from '../lib/api'
 import {
   buildGroups, canDropDoc, canDropFolder, flattenGroups, folderKey, groupShutKey, joinPath, nameOf,
   parentOf, scopeOf, type Group, type Row, type TreeNode
@@ -42,6 +43,7 @@ const accepts = (scope: string, path: string): boolean => {
 }
 
 interface Props {
+  hits?: DocHit[] | null
   docs: Doc[]
   activeId: string | null
   query: string
@@ -53,7 +55,7 @@ interface Props {
  * any depth, the whole thing expandable and rearranged by dragging — a doc onto a folder files it
  * there, a doc onto another group's row moves it into that project, a folder onto a folder nests it.
  */
-export default function DocTree({ docs, activeId, query, onQuery }: Props): JSX.Element {
+export default function DocTree({ hits, docs, activeId, query, onQuery }: Props): JSX.Element {
   const folders = useStore((s) => s.docFolders)
   const projects = useStore((s) => s.projects)
   const expandedList = useStore((s) => s.expandedFolders)
@@ -385,7 +387,17 @@ export default function DocTree({ docs, activeId, query, onQuery }: Props): JSX.
 
       {/* A search is a flat answer, not a shape: matches come back wherever they are filed. */}
       {searching
-        ? (docs.length === 0 ? <p className="empty-hint">No matches.</p> : docs.map((d) => docRow(d, 0, true)))
+        ? (hits ? (hits.length === 0 ? <p className="empty-hint">No matches.</p> : hits.map((h) => (
+          <div key={h.doc_id} className={`doc-row ${h.doc_id === activeId ? 'active' : ''}`} role="button" tabIndex={0}
+            onClick={() => void openDoc(h.doc_id)}>
+            <FileText size={13} className="doc-row-icon" />
+            <span className="doc-row-main">
+              <span className="doc-row-title">{h.title || 'Untitled'}{h.via === 'recording' && <span className="doc-row-meta"> · heard in a recording</span>}</span>
+              <span className="doc-row-meta">{h.snippet}</span>
+            </span>
+          </div>
+        )))
+        : docs.length === 0 ? <p className="empty-hint">No matches.</p> : docs.map((d) => docRow(d, 0, true)))
         : rows.flatMap(render)}
 
       {!searching && <div className="doc-tree-tail" aria-hidden />}

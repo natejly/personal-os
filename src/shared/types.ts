@@ -1319,6 +1319,31 @@ export interface GrainApi {
   /** Closes the BrowserWindow this renderer lives in: the Cmd-W fall-through when no canvas window has focus. */
   closeSelf: () => void
   minimizeSelf: () => void
+  /** The agent's interactive browser (hidden windows owned by main). The renderer never gets the bridge secret. */
+  agentBrowser: {
+    list: () => Promise<AgentBrowserSession[]>
+    show: (session: string) => Promise<void>
+    hide: (session: string) => Promise<void>
+    /** Live JPEG frames after each action and at most every ~1.5 s while subscribed; returns the unsubscribe. */
+    subscribe: (session: string, cb: (frame: AgentBrowserFrame) => void) => () => void
+  }
+}
+
+export interface AgentBrowserSession {
+  session: string
+  url: string
+  title: string
+  tabs: number
+  /** Seconds since the agent last used the session (it is torn down after its idle limit). */
+  idleSeconds: number
+  visible: boolean
+}
+
+export interface AgentBrowserFrame {
+  dataUrl: string
+  url: string
+  title: string
+  at: number
 }
 
 export interface BoardColumn { id: string; board_id: string; name: string; position: number; wip_limit: number | null }

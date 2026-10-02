@@ -133,6 +133,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "mcpDeferAbove": 12,
     # Approved skills are inlined in the system prompt up to this many characters; past it, an index + skill_view.
     "skillsInlineBudget": 6000,
+    # Per-section token budgets for the retrieval blocks of a turn (0 = unlimited). Past a budget the
+    # lowest-ranked trailing items are dropped and the block says how many. `pinned` covers pinned documents.
+    "contextBudget": {"memories": 1500, "graph": 800, "chunks": 2000, "activity": 800, "meetings": 800, "pinned": 3000},
     # Per-reply budgets; 0 = unlimited. A run that hits one still writes a final answer, marked partial.
     "maxRunTokens": 200_000,
     "maxRunSeconds": 300,

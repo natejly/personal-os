@@ -558,7 +558,7 @@ class Documents:
         where, args = _scope_clause(project_id, include_global)
         with self.db.tx() as c:
             rows = c.execute(
-                f"SELECT id, project_id, name, mime, size, chunk_count, created_at, substr(text,1,300) AS preview FROM documents WHERE {where} AND deleted_at IS NULL ORDER BY created_at DESC",
+                f"SELECT id, project_id, name, mime, size, chunk_count, created_at, pinned, substr(text,1,300) AS preview FROM documents WHERE {where} AND deleted_at IS NULL ORDER BY created_at DESC",
                 args,
             ).fetchall()
         return [row_to_dict(r) for r in rows]  # type: ignore[misc]
@@ -566,6 +566,18 @@ class Documents:
     def get(self, id: str) -> dict[str, Any] | None:
         with self.db.tx() as c:
             return row_to_dict(c.execute("SELECT * FROM documents WHERE id=? AND deleted_at IS NULL", (id,)).fetchone())
+
+    def set_pinned(self, id: str, pinned: bool) -> dict[str, Any] | None:
+        with self.db.tx() as c:
+            c.execute("UPDATE documents SET pinned=? WHERE id=? AND deleted_at IS NULL", (int(pinned), id))
+        return self.get(id)
+
+    def pinned(self, project_id: str | None) -> list[dict[str, Any]]:
+        """Pinned documents (full text) visible in a scope: the project's own plus global ones."""
+        where, args = _scope_clause(project_id)
+        with self.db.tx() as c:
+            rows = c.execute(f"SELECT * FROM documents WHERE pinned=1 AND {where} AND deleted_at IS NULL ORDER BY created_at", args).fetchall()
+        return [row_to_dict(r) for r in rows]  # type: ignore[misc]
 
     @staticmethod
     def _build_chunks(name: str, text: str, blocks: list[dict[str, Any]] | None) -> list[dict[str, Any]]:

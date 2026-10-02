@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Upload, Trash2, FileText, PanelLeftOpen, X } from 'lucide-react'
+import { Upload, Trash2, FileText, PanelLeftOpen, Pin, X } from 'lucide-react'
 import { useStore, type Scope } from '../store'
 import { api } from '../lib/api'
 import type { Document } from '@shared/types'
@@ -15,7 +15,7 @@ export default function DocumentsView({ projectId, embedded = false }: { project
   const documents = useStore((s) => s.documents)
   const libraryScope = useStore((s) => s.libraryScope)
   const sidebarOpen = useStore((s) => s.sidebarOpen)
-  const { uploadDocuments, deleteDocument, toggleSidebar, setLibraryScope, loadScope } = useStore()
+  const { uploadDocuments, deleteDocument, pinDocument, toggleSidebar, setLibraryScope, loadScope } = useStore()
   // Embedded without a project (Settings → Knowledge base) it follows the library scope, like the page did.
   const scope: Scope = projectId ?? libraryScope
   const fileRef = useRef<HTMLInputElement>(null)
@@ -54,6 +54,9 @@ export default function DocumentsView({ projectId, embedded = false }: { project
             <div className="doc-head">
               <FileText size={16} />
               <span className="doc-name" title={d.name}>{d.name}</span>
+              <button className={`icon-btn ghost ${d.pinned ? 'active' : ''}`} aria-pressed={Boolean(d.pinned)} aria-label={`${d.pinned ? 'Unpin' : 'Pin'} ${d.name}`}
+                title={d.pinned ? 'Pinned: included in every chat here' : 'Pin into every chat here'}
+                onClick={(e) => { e.stopPropagation(); void pinDocument(d.id, !d.pinned) }}><Pin size={13} /></button>
               <button className="icon-btn ghost danger" aria-label={`Delete ${d.name}`} onClick={(e) => { e.stopPropagation(); void deleteDocument(d.id) }}><Trash2 size={13} /></button>
             </div>
             <p className="doc-preview">{d.preview || '(no text extracted)'}</p>

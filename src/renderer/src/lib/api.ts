@@ -502,6 +502,7 @@ export const api = {
   documents: {
     list: (s: Scope) => req<Document[]>(`/documents?${scope(s)}`),
     get: (id: string) => req<Document>(`/documents/${id}`),
+    pin: (id: string, pinned: boolean) => req<Document>(`/documents/${id}`, { method: 'PATCH', body: json({ pinned }) }),
     upload: (projectId: string | null, file: File) => {
       const fd = new FormData()
       fd.append('file', file)

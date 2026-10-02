@@ -57,11 +57,12 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
   const { setView, openMemory, openSettings, memories, setSettingsOpen } = useStore()
   const [showPrompt, setShowPrompt] = useState(false)
   const has = ctx.memories.length + ctx.nodes.length + ctx.chunks.length + (ctx.skills?.length ?? 0) > 0
-    || Boolean(ctx.activity) || Boolean(ctx.page) || Boolean(ctx.style) || Boolean(ctx.meetings)
+    || Boolean(ctx.activity) || Boolean(ctx.page) || Boolean(ctx.style) || Boolean(ctx.meetings) || (ctx.pinned?.length ?? 0) > 0
   return (
     <div className="ctx-used">
       <div className="ctx-meta">
         ~{ctx.tokens_estimate} tokens of context
+        {ctx.trimmed && Object.keys(ctx.trimmed).length > 0 && <span className="muted"> · trimmed {Object.entries(ctx.trimmed).map(([k, n]) => `${k} ${n}`).join(', ')}</span>}
         <button className="link" onClick={() => setShowPrompt((v) => !v)}>{showPrompt ? 'hide' : 'view full system prompt'}</button>
       </div>
       {showPrompt && <pre className="ctx-prompt">{ctx.system_prompt}</pre>}
@@ -115,6 +116,12 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
         <section>
           <h5><GraduationCap size={12} /> Skills ({ctx.skills?.length}) <button className="link" onClick={() => setSettingsOpen(true)}>review</button></h5>
           <ul>{ctx.skills?.map((s) => <li key={s.id}><b>{s.name}</b>{s.description ? ` — ${s.description}` : ''}</li>)}</ul>
+        </section>
+      )}
+      {(ctx.pinned?.length ?? 0) > 0 && (
+        <section>
+          <h5><FileText size={12} /> Pinned ({ctx.pinned!.length})</h5>
+          <ul>{ctx.pinned!.map((p) => <li key={p.document_id}><b>{p.name}</b></li>)}</ul>
         </section>
       )}
       {ctx.chunks.length > 0 && (

@@ -455,6 +455,7 @@ export interface State {
   deleteTodo: (id: string) => Promise<void>
   uploadDocuments: (files: FileList | File[], projectId: string | null) => Promise<string[]>
   deleteDocument: (id: string) => Promise<void>
+  pinDocument: (id: string, pinned: boolean) => Promise<void>
 
   refreshDocs: (q?: string) => Promise<void>
   refreshDocsPending: () => Promise<void>
@@ -2961,6 +2962,11 @@ export const useStore = create<State>((set, get) => {
       }
       await Promise.all([get().refreshDocuments(), get().refreshProjects()])
       return saved
+    },
+    pinDocument: async (id, pinned) => {
+      const flip = (v: boolean): void => set((s) => ({ documents: s.documents.map((d) => (d.id === id ? { ...d, pinned: v ? 1 : 0 } : d)) }))
+      flip(pinned)
+      try { await api.documents.pin(id, pinned) } catch (e) { flip(!pinned); get().toast((e as Error).message, 'error') }
     },
     deleteDocument: async (id) => {
       const name = get().documents.find((d) => d.id === id)?.name

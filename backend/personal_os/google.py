@@ -96,7 +96,7 @@ class Google:
         self._cache = TTLCache()
         # Built API clients and the Credentials they wrap, reused across calls; see _svc.
         self._svc_lock = threading.Lock()
-        self._svcs: dict[tuple[str, str], tuple[Any, Any]] = {}
+        self._svcs: dict[tuple[str, str, int], tuple[Any, Any]] = {}  # (api, version, thread) -> (creds, client)
         self._creds_obj: Any = None
         self._creds_key: tuple[str, str] | None = None
 
@@ -300,11 +300,16 @@ class Google:
         does it fifteen times over. Each client is remembered alongside the exact
         Credentials object it captured, so once `_creds` mints a new one (a token
         refresh, or a different account) the stale client is rebuilt rather than reused.
+
+        One client per thread: a client wraps one httplib2 connection, which is not
+        thread-safe. Shared across the worker threads that serve concurrent requests
+        (the Mail view loads its search and its labels at once), two calls interleave
+        on one socket and one of them hangs until the read times out a minute later.
         """
         from googleapiclient.discovery import build
 
         creds = self._creds()
-        key = (name, version)
+        key = (name, version, threading.get_ident())
         with self._svc_lock:
             entry = self._svcs.get(key)
             if entry is not None and entry[0] is creds:

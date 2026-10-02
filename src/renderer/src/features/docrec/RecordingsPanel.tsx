@@ -2,10 +2,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { AudioLines, Mic, Pencil, Trash2, Volume2 } from 'lucide-react'
 import type { DocRecording } from '@shared/types'
 import { useStore } from '../../store'
+import { recorderState } from '../../lib/transcript'
 import { useDocRec } from './store'
 import { useDocRecSync } from './hooks'
 import { liveDoc } from './segments'
-import { EMPTY_COPY, fmtDuration, modeLabel, recordingWhen, statusLabel } from './format'
+import { EMPTY_COPY, fmtDuration, modeLabel, pendingLabel, recordingWhen, statusLabel } from './format'
 import TranscriptView from './TranscriptView'
 import SummaryView from './SummaryView'
 import '../../styles/docrec.css'
@@ -131,6 +132,7 @@ export default function RecordingsPanel({ docId }: { docId: string }): JSX.Eleme
           {tab === 'transcript'
             ? <TranscriptView title={row.title} segments={segments ?? []} meeting={meeting} live={isLive}
                 segmentCount={row.segment_count} busy={busy}
+                pending={isLive && meetingStatus?.active ? pendingLabel(recorderState(meetingStatus.active), meetingStatus.active.queued, meetingStatus.active.segments_pending) : ''}
                 onRetranscribe={() => void useDocRec.getState().retranscribe(row.id)} />
             : <SummaryView row={row} meeting={meeting} actions={actions} summarizing={summarizing} error={summaryError}
                 onSummarize={(o) => void useDocRec.getState().summarize(row.id, o)}

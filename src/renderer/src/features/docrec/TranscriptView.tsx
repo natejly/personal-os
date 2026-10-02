@@ -23,6 +23,8 @@ export interface TranscriptViewProps {
   /** Retranscribe the failed clips; omit to hide the control. */
   onRetranscribe?: () => void
   busy?: boolean
+  /** The trailing placeholder row ('Listening' / 'Transcribing'); empty or omitted draws none. */
+  pending?: string
 }
 
 /** Within this many px of the bottom counts as "at the live edge". */
@@ -37,7 +39,7 @@ function download(name: string, body: string, mime: string): void {
   URL.revokeObjectURL(url)
 }
 
-export default function TranscriptView({ title, segments, meeting, live, segmentCount, onRetranscribe, busy }: TranscriptViewProps): JSX.Element {
+export default function TranscriptView({ title, segments, meeting, live, segmentCount, onRetranscribe, busy, pending }: TranscriptViewProps): JSX.Element {
   const scroller = useRef<HTMLDivElement>(null)
   const [stick, setStick] = useState(true)
   const [finding, setFinding] = useState(false)
@@ -56,7 +58,7 @@ export default function TranscriptView({ title, segments, meeting, live, segment
   useEffect(() => {
     const el = scroller.current
     if (el && live && stick) el.scrollTop = el.scrollHeight
-  }, [lines, live, stick])
+  }, [lines, live, stick, pending])
 
   // A new query starts from its first match.
   useEffect(() => { setActive(matches.length ? 0 : -1) }, [query, finding]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -124,7 +126,7 @@ export default function TranscriptView({ title, segments, meeting, live, segment
       {segments.length < segmentCount && <p className="dr-note">{segments.length} of {segmentCount} clips loaded</p>}
 
       <div className="dr-lines" ref={scroller} onScroll={onScroll}>
-        {lines.length === 0 && (
+        {lines.length === 0 && !pending && (
           <p className="dr-empty">
             {live ? 'Nothing transcribed yet. Clips close on a timer, so the first words take a moment.' : 'No speech was transcribed.'}
           </p>
@@ -143,6 +145,12 @@ export default function TranscriptView({ title, segments, meeting, live, segment
             </p>
           </div>
         ))}
+        {live && pending && (
+          <div className="dr-line dr-inflight" role="status">
+            <span className="dr-dot" aria-hidden />
+            <span>{pending}</span>
+          </div>
+        )}
       </div>
 
       {live && !stick && (

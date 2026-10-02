@@ -39,6 +39,8 @@ export interface EditorHandleProps {
   onCaretLine?: (line: number) => void
   /** Opt in: reading time and the size of the selection in the status bar. */
   richStatus?: boolean
+  /** In-flight dictation words, drawn in a pill at the caret. Display only: never part of `value`. */
+  previewText?: string
 }
 
 export type { MarkdownEditorHandle }
@@ -166,7 +168,7 @@ function shiftLines(value: string, s: number, e: number, out: boolean): { value:
 
 const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(function MarkdownEditor({
   value, onChange, onSave, placeholder, readOnly = false, wrap = true, onScrollFraction,
-  slash = false, extraCommands, linkTargets, smartPaste = false, onCaretLine, richStatus = false
+  slash = false, extraCommands, linkTargets, smartPaste = false, onCaretLine, richStatus = false, previewText = ''
 }, ref): JSX.Element {
   const ta = useRef<HTMLTextAreaElement>(null)
   const mirror = useRef<HTMLPreElement>(null)
@@ -266,6 +268,14 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
   }, [menuOpen, trigger])
   // After the mirror has repainted this value, so the marker position is for the text the user sees.
   useLayoutEffect(placeMenu, [placeMenu, value, wrap])
+
+  // The in-flight dictation pill: hangs below the caret, drawn here and never written into `value`.
+  const [pill, setPill] = useState<{ top: number; left: number } | null>(null)
+  useLayoutEffect(() => {
+    const sr = surface.current?.getBoundingClientRect()
+    const r = previewText && mirror.current && sr ? measureCaret(mirror.current, sel.end) : null
+    setPill(r && sr ? { top: r.top - sr.top + r.height + 4, left: Math.max(0, Math.min(r.left - sr.left, sr.width - 120)) } : null)
+  }, [previewText, sel.end, value, wrap])
 
   const pick = (i: number): void => {
     const el = ta.current
@@ -453,6 +463,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
           onBlur={() => setDismissed(menuKey)}
           onScroll={() => { syncScroll(); if (menuOpen) placeMenu() }}
         />
+        {pill && <div className="caret-pill" role="status" aria-live="off" style={pill}>{previewText}</div>}
         {menuOpen && anchor && trigger && (
           <CaretMenu
             items={menuItems}

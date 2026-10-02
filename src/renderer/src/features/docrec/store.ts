@@ -4,6 +4,7 @@ import { consentResume, useStore } from '../../store'
 import { fetchSegmentPages } from '../../lib/transcript'
 import { docRecApi, type SummarizeBody } from './api'
 import { forgetDictation } from './dictation'
+import { usePreview } from './preview'
 import { startRefusal, type BlockerAction } from './blockers'
 import { foldSegments, isSettled, liveDoc, needsFullReload, settleDone } from './segments'
 
@@ -443,6 +444,7 @@ export const useDocRec = create<DocRecState>((set, get) => {
       const docId = ev.doc_id
       if (ev.kind === 'segment' && ev.segment) {
         const seg = ev.segment
+        usePreview.getState().settle(ev.meeting_id, seg.t_end)
         set((st) => ({ segments: { ...st.segments, [ev.meeting_id]: foldSegments(st.segments[ev.meeting_id] ?? [], [seg]) } }))
         return
       }

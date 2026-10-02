@@ -135,3 +135,8 @@
 .dr-actions li.added, .dr-actions li.dismissed { color: var(--text-faint); }
 .dr-action-text { flex: 1 1 60%; min-width: 0; overflow-wrap: break-word; }
 .dr-action-meta { font-size: 11px; color: var(--text-faint); }
+
+/* The trailing "Listening" / "Transcribing" row while a clip is still being heard. */
+.dr-inflight { display: flex; align-items: center; gap: 8px; color: var(--text-faint); font-style: italic; }
+.dr-inflight .dr-dot { background: var(--danger); animation: pulse-dot 1.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .dr-inflight .dr-dot { animation: none; } }

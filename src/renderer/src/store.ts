@@ -952,6 +952,9 @@ export const useStore = create<State>((set, get) => {
             window.dispatchEvent(new Event('grain-job-finished'))
           } else if (ev.event === 'desk_status') {
             onDeskChanged(ev.data)
+          } else if (ev.event === 'preview') {
+            const data = ev.data
+            void import('./features/docrec/preview').then((m) => m.usePreview.getState().apply(data))
           } else if (ev.event === 'recording') {
             // Lazy: the docrec store imports this one, so a static import here would be a cycle.
             const data = ev.data

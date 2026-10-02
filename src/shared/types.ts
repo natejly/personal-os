@@ -1224,6 +1224,8 @@ export type ChatEvent =
   | { event: 'desk_status'; data: Desk }
   /** A doc recording's segment, status or summary moved; see `RecordingEvent`. */
   | { event: 'recording'; data: RecordingEvent }
+  /** Live dictation words, volatile until a final or the settled segment replaces them. */
+  | { event: 'preview'; data: PreviewEvent }
   /** This turn is handing over to another one, announced before `done` so the UI can re-attach. */
   | { event: 'desk_handoff'; data: { desk_id: string; conversation_id: string; turn: number } }
   | { event: 'learned'; data: Learned }
@@ -1255,6 +1257,7 @@ export type BackgroundEvent =
   | { event: 'desk_status'; data: Desk }
   /** A doc recording's segment, status or summary moved. */
   | { event: 'recording'; data: RecordingEvent }
+  | { event: 'preview'; data: PreviewEvent }
 
 export interface BackupInfo {
   name: string; kind: 'daily' | 'manual' | 'premigrate' | 'prerestore'; created_at: number; size: number
@@ -2290,6 +2293,15 @@ export interface RecordingEvent {
   error?: string | null
 }
 
+/** The app-wide `preview` event: in-flight dictation text. Never durable; the settled segment replaces it. */
+export interface PreviewEvent {
+  session: string
+  kind: 'volatile' | 'final'
+  text: string
+  t0: number
+  t1: number
+}
+
 /** A meeting with its bodies loaded — what GET /meetings/{id} returns. */
 export interface FullMeeting extends Omit<Meeting, 'notes_preview'> {
   /** What the user typed. No model ever writes this. */
@@ -2431,6 +2443,8 @@ export interface MeetingConfig {
   minAttendees: number
   /** Skip STT for segments with no speech, and drop known silence hallucinations. */
   vadGate: boolean
+  /** Dictation only: show in-flight words in a pill at the caret (on-device Speech; never typed in). */
+  livePreview: boolean
   vadMinSpeechRatio: number
   hallucinationFilter: boolean
   whisperVadModelPath: string

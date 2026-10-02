@@ -128,6 +128,8 @@ class Capture:
         self._stop = threading.Event()
         self._ready = threading.Event()
         self.sink = _PcmSink()
+        # Called with each raw AVAudioPCMBuffer from the tap (live preview). Read per buffer, so one can join mid-capture.
+        self.tap_hooks: list[Any] = []
         self._thread: threading.Thread | None = None
         self._engine: Any = None
         self._tap_block: Any = None
@@ -293,6 +295,11 @@ class Capture:
                     sink.push(pcm)
             except Exception as e:  # noqa: BLE001 - realtime callback
                 sink.error = f"{type(e).__name__}: {e}"[:160]
+            for hook in list(self.tap_hooks):
+                try:
+                    hook(buffer)
+                except Exception:  # noqa: BLE001 - a preview consumer must not break capture
+                    pass
 
         self._tap_block = tap
         node.installTapOnBus_bufferSize_format_block_(0, 4096, hw, tap)

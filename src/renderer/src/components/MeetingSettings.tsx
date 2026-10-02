@@ -303,6 +303,15 @@ export default function MeetingSettings({ variant = 'page' }: { variant?: 'page'
       <label className="toggle-row plain">
         <span className="toggle-icon"><Mic size={15} /></span>
         <span className="toggle-text">
+          <b>Show dictation as you speak</b>
+          <small>Words appear in a small pill at the cursor while you talk, then the settled text is typed in. Uses on-device Speech Recognition and needs its permission.</small>
+        </span>
+        <input type="checkbox" checked={cfg.livePreview} onChange={(e) => patch({ livePreview: e.target.checked })} />
+        <span className="switch" />
+      </label>
+      <label className="toggle-row plain">
+        <span className="toggle-icon"><Mic size={15} /></span>
+        <span className="toggle-text">
           <b>Keep the audio after transcribing</b>
           <small>Off deletes each wav once its text has landed. On keeps them, so you can re-transcribe later with a better model.</small>
         </span>

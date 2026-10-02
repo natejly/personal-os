@@ -63,4 +63,16 @@ system, _ = build("run $secret-plan")
 check("STEP-CANDIDATE" not in system, "a candidate name never injects")
 system, _ = build("weekly-review without the sigil")
 check("STEP-ONE-OK" not in system, "no sigil, no body")
+import asyncio  # noqa: E402
+
+from personal_os import app as appmod  # noqa: E402
+
+live = appmod.skills.propose("viewed-skill", "d", "VIEW-BODY")
+appmod.skills.update(live["id"], {"status": "approved"})
+cand = appmod.skills.propose("viewed-candidate", "d", "VIEW-CAND")
+out = asyncio.run(appmod.toolbox.call("skill_view", {"skill": "viewed-skill"}, {"project_id": None}))
+row = appmod.skills.get(live["id"])
+check(not out.get("error") and row["use_count"] == 1 and row["last_used_at"], "skill_view bumps use_count and last_used_at")
+out = asyncio.run(appmod.toolbox.call("skill_view", {"skill": "viewed-candidate"}, {"project_id": None}))
+check(out.get("error") and appmod.skills.get(cand["id"])["use_count"] == 0, "a candidate is refused and not bumped")
 print(f"test_skill_usage: {passed} checks passed")

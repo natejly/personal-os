@@ -231,7 +231,7 @@ export default function GraphView({ projectId: scopedProjectId, query = '', paus
     <div className="graph-body">
       <div className="graph-canvas" ref={wrapRef} onWheel={onWheel} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerLeave={onPointerUp}>
         <div className="graph-tools">
-          <input placeholder="New entity" value={newLabel} onChange={(e) => setNewLabel(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void addNode()} />
+          <input placeholder="New entity" aria-label="New entity name" value={newLabel} onChange={(e) => setNewLabel(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void addNode()} />
           <button className="icon-btn" aria-label="Add entity" title="Add entity (Enter)" onClick={() => void addNode()}><Plus size={15} /></button>
           <span className="sep" />
           <button className="icon-btn" aria-label="Reset graph view" title="Reset view" onClick={() => setView({ x: 0, y: 0, k: 1 })}><Maximize2 size={15} /></button>

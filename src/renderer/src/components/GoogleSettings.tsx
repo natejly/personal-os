@@ -121,9 +121,9 @@ export default function GoogleSettings({ clientId, clientSecret, secretSaved = f
 
       {google?.connected && (
         <div className="tasks-sync">
-          <label className="check">
-            <input type="checkbox" checked={syncEnabled} onChange={(e) => void setTasksSync({ enabled: e.target.checked })} />
-            Sync Todos with Google Tasks (two-way)
+          <label className="toggle-row plain">
+            <span className="toggle-text"><b>Sync Todos with Google Tasks</b><small>Two-way: a change on either side shows up on the other.</small></span>
+            <input type="checkbox" checked={syncEnabled} onChange={(e) => void setTasksSync({ enabled: e.target.checked })} /><span className="switch" />
           </label>
           {syncEnabled && tasksSync && (
             <div className="tasks-sync-row">
@@ -144,9 +144,9 @@ export default function GoogleSettings({ clientId, clientSecret, secretSaved = f
             </div>
           )}
 
-          <label className="check">
-            <input type="checkbox" checked={mirrorEnabled} onChange={(e) => void setTodoCalendar({ enabled: e.target.checked })} />
-            Show Todos on Google Calendar
+          <label className="toggle-row plain">
+            <span className="toggle-text"><b>Show Todos on Google Calendar</b><small>Puts each open todo with a due date on a calendar you choose.</small></span>
+            <input type="checkbox" checked={mirrorEnabled} onChange={(e) => void setTodoCalendar({ enabled: e.target.checked })} /><span className="switch" />
           </label>
           {mirrorEnabled && todoCalendar && (
             <div className="tasks-sync-row">
@@ -157,11 +157,6 @@ export default function GoogleSettings({ clientId, clientSecret, secretSaved = f
                 {calendars.filter((c) => c.access_role === 'owner' || c.access_role === 'writer')
                   .map((c) => <option key={c.id} value={c.id}>{c.summary}{c.primary ? ' (primary)' : ''}</option>)}
               </select>
-              <label className="check" title="Leave the event behind after a todo is ticked off">
-                <input type="checkbox" checked={todoCalendar.config.keepCompleted}
-                  onChange={(e) => void setTodoCalendar({ keepCompleted: e.target.checked })} />
-                Keep done
-              </label>
               <button className="ghost-btn" onClick={() => void runTodoCalendar()} disabled={todoCalendar.syncing}>
                 <RefreshCw size={13} className={todoCalendar.syncing ? 'spin' : ''} /> {todoCalendar.syncing ? 'Syncing…' : 'Sync now'}
               </button>
@@ -173,6 +168,13 @@ export default function GoogleSettings({ clientId, clientSecret, secretSaved = f
                     : 'Not synced yet — press Sync now'}
               </small>
             </div>
+          )}
+          {mirrorEnabled && todoCalendar && (
+            <label className="toggle-row plain">
+              <span className="toggle-text"><b>Keep done todos on the calendar</b><small>Leave the event behind after a todo is ticked off.</small></span>
+              <input type="checkbox" checked={todoCalendar.config.keepCompleted}
+                onChange={(e) => void setTodoCalendar({ keepCompleted: e.target.checked })} /><span className="switch" />
+            </label>
           )}
           {mirrorEnabled && (
             <small className="muted small">
@@ -226,10 +228,10 @@ export default function GoogleSettings({ clientId, clientSecret, secretSaved = f
             <input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={(e) => loadFile(e.target.files?.[0] ?? undefined)} />
           </div>
 
-          <label><span>Client ID</span>
+          <label><span className="toggle-text"><b>Client ID</b></span>
             <input ref={idRef} value={clientId} onChange={(e) => onChange({ googleClientId: e.target.value })} onPaste={onPasteMaybeJson} placeholder="…apps.googleusercontent.com — or paste the whole JSON" spellCheck={false} />
           </label>
-          <label><span>Client secret</span>
+          <label><span className="toggle-text"><b>Client secret</b></span>
             <input type="password" value={clientSecret} onChange={(e) => onChange({ googleClientSecret: e.target.value })} onPaste={onPasteMaybeJson} placeholder={secretSaved ? 'Saved. Type to replace' : 'GOCSPX-…'} spellCheck={false} />
           </label>
 

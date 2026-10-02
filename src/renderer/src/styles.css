@@ -281,7 +281,8 @@ kbd {
 .settings-btn { font-weight: 400; color: var(--text-muted); }
 .settings-btn:hover { color: var(--text); }
 .new-chat:hover, .settings-btn:hover { background: var(--hover); }
-.settings-btn.on { background: var(--active); color: var(--text); }
+/* The first row, pinned above the scroller: nav-row metrics, but full-strength text so it leads. */
+.new-chat { margin: 0 10px 2px; color: var(--text); flex-shrink: 0; }
 .new-chat kbd, .settings-btn kbd { opacity: 0; transition: opacity 0.12s; }
 .new-chat:hover kbd, .settings-btn:hover kbd,
 .new-chat:focus-visible kbd, .settings-btn:focus-visible kbd { opacity: 1; }
@@ -318,7 +319,9 @@ kbd {
 .convo-item.active { background: var(--active); }
 .convo-item .ghost { opacity: 0; }
 /* The hover-only delete must not set the row height: at 28px it made chat rows 40px tall. */
-.convo-item .icon-btn { width: 22px; height: 22px; margin: -2px -4px -2px 0; flex-shrink: 0; }
+.convo-item .icon-btn { position: relative; width: 22px; height: 22px; margin: -2px -4px -2px 0; flex-shrink: 0; }
+/* 22px to look at, 24px to hit, without the row growing to fit it. */
+.convo-item .icon-btn::before { content: ''; position: absolute; inset: -1px; }
 .convo-item .ghost:focus-visible { opacity: 1; }
 .convo-item:hover .ghost { opacity: 1; }
 /* Block, not flex: a flex container ignores text-overflow, so the title used to
@@ -802,7 +805,13 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 ::-webkit-scrollbar-thumb:hover { background: var(--text-faint); background-clip: content-box; }
 
 /* ---------- Backend error ---------- */
-.backend-error { max-width: 520px; margin: 0 auto; padding: 120px 24px; text-align: center; color: var(--text-muted); }
+/* The boot and could-not-start screens borrow the shell's box but not its sidebar grid: as a grid
+   their one child landed in the 260px sidebar column. Auto margins centre it and, unlike
+   justify-content, leave the top reachable when the window is shorter than the card. */
+.app.loading { display: flex; flex-direction: column; align-items: center; overflow-y: auto; }
+.app.loading > svg { margin: auto; }
+.boot-drag { position: absolute; top: 0; left: 0; right: 0; height: 52px; }
+.backend-error { width: 100%; max-width: 520px; margin: auto; padding: 48px 24px; text-align: center; color: var(--text-muted); }
 .backend-error h2 { color: var(--text); margin: 12px 0 4px; }
 .backend-error pre { text-align: left; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px; padding: 12px; font-size: 12px; white-space: pre-wrap; color: var(--danger); }
 .backend-error code { font-family: var(--mono); font-size: 12px; background: var(--hover); padding: 1px 5px; border-radius: 4px; }
@@ -810,7 +819,9 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .support-settings h4 { margin: 12px 0 0; font-size: 13px; color: var(--text); }
 .support-settings .button-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .support-settings .button-row button { display: inline-flex; align-items: center; gap: 6px; }
-.backend-actions { display: flex; gap: 8px; justify-content: center; -webkit-app-region: no-drag; }
+/* The card is a drag region so the window can be moved from it; its controls have to opt back out,
+   or the window manager swallows their clicks. */
+.backend-error-actions, .backend-error details { -webkit-app-region: no-drag; }
 .backend-banner { position: fixed; top: 0; left: 50%; transform: translateX(-50%); z-index: 120; display: flex; align-items: center; gap: 8px; padding: 6px 14px; font-size: 12px; background: var(--bg-elev); border: 1px solid var(--border-strong); border-top: 0; border-radius: 0 0 10px 10px; color: var(--text-muted); box-shadow: 0 8px 24px rgba(0,0,0,0.3); -webkit-app-region: no-drag; }
 
 /* ---------- Toasts ---------- */
@@ -848,21 +859,9 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .pending-actions .ghost-btn { padding: 4px 7px; font-size: 12px; gap: 4px; }
 
 /* ---------- Project switcher ---------- */
-.project-switcher { position: relative; margin: 2px 10px 6px; }
-.project-current { width: 100%; display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; background: var(--hover); font-weight: 600; }
-.project-current:hover { background: var(--active); }
-.project-current svg.rot { transform: rotate(180deg); }
-.project-current > svg { color: var(--text-muted); margin-left: auto; transition: transform 0.15s; }
-.project-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
+/* The switcher itself is gone; its popover shell is what the space and send-to menus are built on. */
 .popover-backdrop { position: fixed; inset: 0; z-index: 30; }
 .project-menu { position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 31; background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: 10px; padding: 4px; box-shadow: 0 12px 32px rgba(0,0,0,0.35); }
-.project-item { width: 100%; display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 6px; cursor: pointer; font-size: 13px; text-align: left; }
-.project-item:hover { background: var(--hover); }
-.project-item.active { background: var(--active); }
-.project-item.new { color: var(--text-muted); border-top: 1px solid var(--border); border-radius: 0 0 6px 6px; margin-top: 4px; padding-top: 9px; }
-.project-stats { font-size: 11px; color: var(--text-faint); }
-.project-item .ghost { opacity: 0; }
-.project-item:hover .ghost { opacity: 1; }
 
 /* ---------- Sidebar spaces ---------- */
 .section-actions { display: flex; gap: 2px; align-items: center; }
@@ -883,7 +882,6 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .nav-item.active { background: var(--active); color: var(--text); }
 /* --text-faint drops to 3.85:1 over the lighter .active row background. */
 .nav-item .count { margin-left: auto; font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
-.new-chat { margin-top: 4px; margin-bottom: 6px; color: var(--text); }
 /* One pressed look for every toggle button, whichever way the component marks it. */
 .icon-btn.on, .icon-btn.active, .icon-btn[aria-pressed='true'],
 .ghost-btn.on, .ghost-btn.active, .ghost-btn[aria-pressed='true'] { background: var(--active); color: var(--text); }
@@ -1037,6 +1035,14 @@ button.tag:disabled { cursor: default; }
 .color-row { display: flex; gap: 8px; }
 .swatch { width: 24px; height: 24px; border-radius: 50%; border: 2px solid transparent; }
 .swatch.on { border-color: var(--text); }
+/* The per-project tool overrides, folded behind a one-line summary of how many differ. */
+.project-tools summary { display: flex; align-items: center; gap: 6px; cursor: pointer; list-style: none; color: var(--text-faint); border-radius: 6px; }
+.project-tools summary::-webkit-details-marker { display: none; }
+.project-tools summary svg { flex-shrink: 0; transition: transform 0.15s; }
+.project-tools[open] summary svg { transform: rotate(90deg); }
+.modal .project-tools summary h3 { margin: 0; }
+.modal .project-tools summary .muted { margin: 0 0 0 auto; }
+.project-tools[open] summary { margin-bottom: 10px; }
 
 /* ---------- Graph ---------- */
 .memory-panel .page-header .search { width: 170px; }
@@ -1074,7 +1080,7 @@ button.tag:disabled { cursor: default; }
 .add-edge { display: flex; align-items: center; gap: 6px; margin-top: 8px; color: var(--text-faint); }
 .add-edge input { flex: 1; min-width: 0; padding: 5px 8px; font-size: 12px; }
 
-/* ---------- Projects (Claude-style groups of chats) ---------- */
+/* ---------- Projects (groups of chats) ---------- */
 .project-dot { width: 12px; height: 12px; border-radius: 4px; display: inline-block; flex-shrink: 0; background: var(--text-faint); }
 .project-dot.sm { width: 8px; height: 8px; border-radius: 2px; }
 .section-row { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px 2px 14px; }
@@ -1087,10 +1093,13 @@ button.tag:disabled { cursor: default; }
 .section-row .ghost { opacity: 0.6; }
 .section-row:hover .ghost { opacity: 1; }
 .project-list { padding: 0 10px; }
-.project-item { width: 100%; display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; font-size: 13px; text-align: left; }
+/* One row shape for a project header, a space row and a popover menu item. */
+.project-item { width: 100%; display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 8px; cursor: pointer; font-size: 13px; text-align: left; }
 .project-item:hover { background: var(--hover); }
 .project-item.active { background: var(--active); }
-.project-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-item .ghost { opacity: 0; }
+.project-item:hover .ghost { opacity: 1; }
+.project-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: left; }
 .project-item .count, .tabs .count { font-size: 11px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
 .search.mini { margin: 0; height: 24px; width: 110px; padding: 0 8px; font-size: 12px; }
 .project-tag { background: var(--hover); font-weight: 500; }
@@ -1228,11 +1237,16 @@ textarea.instructions:focus { border-color: var(--accent); }
 .widget { border-radius: 12px; background: var(--bg-elev); padding: 14px 16px; min-height: 120px; }
 .widget > header { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; margin-bottom: 10px; color: var(--text); }
 .widget > header .link { margin-left: auto; }
+/* A canvas window's body is also called `.widget`, and it is `height: 100%` of its window. On Today
+   that resolved against the page for a card outside the grid, which then filled the viewport. */
+.home .widget { height: auto; }
+/* A card above the grid gets the gap the grid would have given it. */
+.home .page-body > .widget { margin-bottom: 16px; }
 .widget-empty p { margin: 0 0 10px; color: var(--text-muted); font-size: 13px; line-height: 1.5; }
 .events, .mails, .proj-list, .mem-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
 .events li, .proj-list li { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; }
-.proj-list li { cursor: pointer; }
-.proj-list li:hover, .mails li:hover { background: var(--hover); }
+.proj-list li, .events li[role='button'] { cursor: pointer; }
+.proj-list li:hover, .mails li:hover, .events li[role='button']:hover { background: var(--hover); }
 .ev-time { color: var(--text-muted); font-variant-numeric: tabular-nums; width: 68px; flex-shrink: 0; font-size: 12px; }
 .ev-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ev-sep { font-size: 11px; font-weight: 600; color: var(--text-faint); padding: 8px 8px 2px !important; }
@@ -1513,16 +1527,28 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .mcp-foot svg { flex-shrink: 0; margin-top: 2px; }
 
 /* ---------- Sidebar project groups ---------- */
-/* A group reads as a header and its recent lines, the way Claude's own sidebar does: the folder
+/* A group reads as a header and its recent lines: the folder
    carries the project colour, so no dot or count competes with the name, and the rows under it are
    indented to the header's text, not to its icon. */
 /* 16px to look at, 24px to hit: the box stays small enough for a tree row, the target does not. */
 .icon-btn.xs { position: relative; width: 16px; height: 16px; margin-left: -4px; }
 .icon-btn.xs::before { content: ''; position: absolute; inset: -4px; }
-.project-item { cursor: pointer; }
 .project-group + .project-group { margin-top: 10px; }
-.project-group .project-item { gap: 8px; font-weight: 500; }
+/* The gap separates one group's rows from the next header; a folded group has no rows to separate. */
+.project-group.collapsed + .project-group { margin-top: 0; }
+.project-group .project-item { font-weight: 500; }
 .project-group .project-item svg { flex-shrink: 0; }
+/* The folder doubles as the group's disclosure. It keeps the folder's 13px box so the name column does
+   not move, and reaches 25px for the pointer. */
+.project-twist { position: relative; display: inline-flex; width: 13px; height: 13px; flex-shrink: 0; border-radius: 4px; color: var(--text-muted); }
+.project-twist::before { content: ''; position: absolute; inset: -6px; }
+.project-twist svg { transition: transform 0.15s; }
+.project-twist .rot90 { transform: rotate(90deg); }
+.project-twist .twist-chevron { display: none; }
+.project-item:hover .project-twist .twist-chevron, .project-twist:focus-visible .twist-chevron { display: block; }
+.project-item:hover .project-twist .twist-folder, .project-twist:focus-visible .twist-folder { display: none; }
+.project-twist:hover { color: var(--text); }
+.project-twist[aria-disabled='true'] { cursor: default; }
 .project-rows { padding-left: 21px; }
 .convo-item.sub { padding: 4px 8px; font-size: 12.5px; color: var(--text-muted); }
 .convo-item.sub:hover, .convo-item.sub.active { color: var(--text); }

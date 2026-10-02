@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { X, Trash2 } from 'lucide-react'
+import { ChevronRight, X, Trash2 } from 'lucide-react'
 import { useStore } from '../store'
 import { useModal } from '../lib/useModal'
 import { ToolOverrides } from './ToolPermissions'
@@ -20,6 +20,8 @@ export default function ProjectModal(): JSX.Element {
   const globalToolsRaw = useStore((s) => s.settings.tools)
   const allTools = useStore((s) => s.tools)
   const globalTools = Object.fromEntries(allTools.map((t) => { const v = globalToolsRaw?.[t.name]; return [t.name, v === true ? 'on' : v === false ? 'off' : v === 'on' || v === 'ask' || v === 'off' ? v : t.default_mode] }))
+  // Picking "inherit" again leaves the key behind with that value, so keys alone would overcount.
+  const customized = Object.values(tools).filter((v) => v !== 'inherit').length
   const [confirmDelete, setConfirmDelete] = useState(false)
   const { titleId, backdrop, modal: dialog } = useModal(() => setProjectModal(null))
 
@@ -47,9 +49,16 @@ export default function ProjectModal(): JSX.Element {
           </label>
         </section>
         <section>
-          <h3>Tools</h3>
-          <p className="muted">"Inherit" follows your global settings.</p>
-          <ToolOverrides value={tools} onChange={setTools} effectiveBase={globalTools} compact />
+          {/* Closed by default: most projects never touch these, and the full list buried Save below the fold. */}
+          <details className="project-tools">
+            <summary>
+              <ChevronRight size={12} />
+              <h3>Tools</h3>
+              <span className="muted small">{customized ? `${customized} customized` : 'Following your global settings'}</span>
+            </summary>
+            <p className="muted">"Inherit" follows your global settings.</p>
+            <ToolOverrides value={tools} onChange={setTools} effectiveBase={globalTools} compact />
+          </details>
         </section>
         <footer>
           {existing && (
@@ -57,7 +66,7 @@ export default function ProjectModal(): JSX.Element {
               ? <button className="ghost-btn danger" onClick={() => { void deleteProject(existing.id); setProjectModal(null) }}><Trash2 size={14} /> Really delete this project and its chats?</button>
               : <button className="ghost-btn danger" onClick={() => setConfirmDelete(true)}><Trash2 size={14} /> Delete project</button>
           )}
-          <span style={{ flex: 1 }} />
+          <span className="spacer" />
           <button className="ghost-btn" onClick={() => setProjectModal(null)}>Cancel</button>
           <button className="primary-btn" onClick={() => void save()} disabled={!name.trim()}>{existing ? 'Save' : 'Create'}</button>
         </footer>

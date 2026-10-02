@@ -7,6 +7,7 @@ import { useCanvas } from '../canvas/store'
 import { useDropTarget } from '../canvas/dnd'
 import { openPayload } from '../canvas/drops'
 import { PresetsButton, SavePresetForm } from '../canvas/PresetsMenu'
+import { rowButton } from '../lib/rowButton'
 
 /** A space row takes everything the plane does. A project opens a Project window; binding stays a tab gesture. */
 const ALL: DragKind[] = ['conversation', 'todo', 'document', 'memory', 'board-card', 'project', 'widget', 'note', 'file', 'nav']
@@ -121,15 +122,8 @@ export function SpaceRow({ canvasId }: { canvasId: string }): JSX.Element | null
       <div
         className={`project-item space-row${active ? ' active' : ''}${over ? ' drop-target' : ''}`}
         {...handlers}
-        role="button"
-        tabIndex={0}
+        {...rowButton(() => void useCanvas.getState().enterSpace(canvasId))}
         title={`${name}${project ? ` · ${project.name}` : ''} · ${count} window${count === 1 ? '' : 's'}${locked ? ' · locked' : ''}`}
-        onClick={() => void useCanvas.getState().enterSpace(canvasId)}
-        onKeyDown={(e) => {
-          if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
-          e.preventDefault()
-          void useCanvas.getState().enterSpace(canvasId)
-        }}
         onContextMenu={(e) => {
           e.preventDefault()
           setMenu({ x: e.clientX, y: e.clientY })
@@ -157,6 +151,8 @@ export function SpaceRow({ canvasId }: { canvasId: string }): JSX.Element | null
         <span className="count">{count}</span>
         <button
           className="icon-btn ghost xs"
+          aria-label={`Actions for ${name}`}
+          aria-haspopup="menu"
           title="Space actions"
           onClick={(e) => {
             e.stopPropagation()
@@ -189,12 +185,12 @@ export default function SidebarSpaces(): JSX.Element {
   return (
     <>
       <div className="section-row">
-        <button className="section-toggle" onClick={() => setOpen((o) => !o)}>
+        <button className="section-toggle" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
           <ChevronRight size={12} className={open ? 'rot90' : ''} /><LayoutGrid size={13} /> Spaces
         </button>
         <span className="section-actions">
           <PresetsButton canvasId={null} />
-          <button className="icon-btn ghost sm" title="New space (⌃⌘N)" onClick={() => void useCanvas.getState().newSpace()}><Plus size={14} /></button>
+          <button className="icon-btn ghost sm" aria-label="New space" title="New space (⌃⌘N)" onClick={() => void useCanvas.getState().newSpace()}><Plus size={14} /></button>
         </span>
       </div>
       {open && (

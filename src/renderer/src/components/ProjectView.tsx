@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
-import { MessageSquarePlus, Pencil, PanelLeftOpen, FileText, Brain, MessageSquare, BookOpen, Trash2 } from 'lucide-react'
+import { MessageSquarePlus, Pencil, FileText, FolderX, Brain, MessageSquare, BookOpen, Trash2 } from 'lucide-react'
 import { useStore, useProject } from '../store'
 import { dragProps } from '../canvas/dnd'
+import { rowButton } from '../lib/rowButton'
+import SidebarToggle from './SidebarToggle'
 import ChatPulse from './ChatPulse'
 import MemoryPanel from './MemoryPanel'
 import DocumentsView from './DocumentsView'
@@ -15,8 +17,7 @@ export default function ProjectView(): JSX.Element {
   const id = useStore((s) => s.projectViewId)!
   const project = useProject(id)
   const conversations = useStore((s) => s.conversations)
-  const sidebarOpen = useStore((s) => s.sidebarOpen)
-  const { toggleSidebar, newChat, selectChat, deleteChat, setProjectModal, updateProject, loadScope } = useStore()
+  const { newChat, selectChat, deleteChat, setProjectModal, updateProject, loadScope, setView } = useStore()
   const [tab, setTab] = useState<Tab>('chats')
   const [prompt, setPrompt] = useState(project?.system_prompt ?? '')
 
@@ -37,7 +38,24 @@ export default function ProjectView(): JSX.Element {
       }
     : null), [project, conversations])
 
-  if (!project) return <main className="page"><div className="page-body"><p className="muted">Project not found.</p></div></main>
+  // Keeps the title bar: without it the window had no drag region and no way back to the sidebar.
+  if (!project) {
+    return (
+      <main className="page project-page">
+        <header className="page-header drag">
+          <SidebarToggle />
+          <h2>Project</h2>
+          <AppSwitcher />
+        </header>
+        <div className="empty-state">
+          <FolderX size={28} />
+          <h2>Project not found</h2>
+          <p>It may have been deleted, or moved to the trash.</p>
+          <button className="primary-btn" onClick={() => setView('home')}>Back to Today</button>
+        </div>
+      </main>
+    )
+  }
   const chats = conversations.filter((c) => c.project_id === id)
   const st = project.stats
 
@@ -51,7 +69,7 @@ export default function ProjectView(): JSX.Element {
   return (
     <main className="page project-page">
       <header className="page-header drag">
-        {!sidebarOpen && <button className="icon-btn no-drag" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
+        <SidebarToggle />
         <h2><span className="project-dot" style={{ background: project.color }} />{project.name}</h2>
         <div className="no-drag header-right">
           <SendToSpace items={[{ kind: 'project', refId: project.id }]} />
@@ -75,19 +93,21 @@ export default function ProjectView(): JSX.Element {
       {tab === 'chats' && (
         <div className="page-body">
           {chats.length === 0 && (
-            <div className="empty-hint big">
-              <p>No chats yet.</p>
-              <button className="primary-btn" onClick={() => newChat(id)}><MessageSquarePlus size={14} /> Start one</button>
+            <div className="empty-state">
+              <MessageSquare size={28} />
+              <h2>No chats yet</h2>
+              <p>A chat started here follows this project&apos;s instructions and can use its knowledge and memory.</p>
+              <button className="primary-btn" onClick={() => newChat(id)}><MessageSquarePlus size={14} /> New chat</button>
             </div>
           )}
           <div className="chat-rows">
             {chats.map((c) => (
-              <div key={c.id} className="chat-row" onClick={() => void selectChat(c.id)} role="button" tabIndex={0}
+              <div key={c.id} className="chat-row" {...rowButton(() => void selectChat(c.id))}
                 {...dragProps({ kind: 'conversation', id: c.id, label: c.title, projectId: id })}>
                 <MessageSquare size={14} />
                 <span className="chat-row-title"><ChatPulse conversationId={c.id} />{c.title}</span>
                 <span className="muted small">{c.model} · {new Date(c.updated_at * 1000).toLocaleDateString()}</span>
-                <button className="icon-btn ghost danger" onClick={(e) => { e.stopPropagation(); void deleteChat(c.id) }}><Trash2 size={13} /></button>
+                <button className="icon-btn ghost danger" aria-label={`Delete chat: ${c.title}`} title="Delete" onClick={(e) => { e.stopPropagation(); void deleteChat(c.id) }}><Trash2 size={13} /></button>
               </div>
             ))}
           </div>

@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { useStore } from './store'
 import { watchSelection } from './lib/pageContext'
 import Sidebar from './components/Sidebar'
+import GrainLogo from './components/GrainLogo'
 import ChatView from './components/ChatView'
 import DocsView from './components/DocsView'
 import MeetingsView from './components/MeetingsView'
@@ -202,7 +203,15 @@ export default function App(): JSX.Element {
     void s.refreshTodos('all', true)
   }, [inCanvas])
 
-  if (!ready) return <div className="app loading" />
+  // The window is frameless, so even the boot screen needs a strip to move it by.
+  if (!ready) {
+    return (
+      <div className="app loading" role="status" aria-label="Starting Grain">
+        <div className="boot-drag drag" />
+        <GrainLogo size={36} />
+      </div>
+    )
+  }
   if (backendError) return <BackendFailed message={backendError} />
 
   return (

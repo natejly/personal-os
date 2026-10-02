@@ -129,7 +129,10 @@ export default function DocsView(): JSX.Element {
 
   const docId = activeDoc?.id ?? ''
   const liveHere = live && live.docId === docId ? live : null
-  const recordingCount = useDocRec((s) => s.recordings[docId]?.length ?? 0)
+  const recs = useDocRec((s) => s.recordings[docId])
+  const recordingCount = recs?.length ?? 0
+  // Ids the agent can hand to meeting_read, which also answers mid-recording from the transcript so far.
+  const recList = (recs ?? []).slice(0, 5).map((r) => `\`${r.id}\` ${r.title || 'Untitled'} (${r.status}${r.headline ? `, ${r.headline}` : ''})`).join('; ')
 
   // ---- editor wiring ----
   // Slash-menu entries that need the recorder; the editor's own commands are built in. Memoised
@@ -209,7 +212,7 @@ export default function DocsView(): JSX.Element {
     ? {
         view: 'docs',
         label: `Doc “${activeDoc.title || 'Untitled'}”`,
-        detail: `Open${dirty ? ', unsaved edits' : ''}. ${projectName ? `Project “${projectName}”` : 'Personal'}${activeDoc.folder ? ` / ${activeDoc.folder}` : ''}. Id \`${activeDoc.id}\`. ${liveHere ? `Being ${liveHere.mode === 'dictate' ? 'dictated into' : 'recorded'} now (recording \`${liveHere.meetingId}\`). ` : ''}${recordingCount ? `${recordingCount} recording${recordingCount === 1 ? '' : 's'} linked to this doc. ` : ''}Revise with doc_edit. The user reviews the diff unless document edits are set to accept all.\n\n\`\`\`markdown\n${clip(body)}\n\`\`\``,
+        detail: `Open${dirty ? ', unsaved edits' : ''}. ${projectName ? `Project “${projectName}”` : 'Personal'}${activeDoc.folder ? ` / ${activeDoc.folder}` : ''}. Id \`${activeDoc.id}\`. ${liveHere ? `Being ${liveHere.mode === 'dictate' ? 'dictated into' : 'recorded'} now (recording \`${liveHere.meetingId}\`). ` : ''}${recordingCount ? `${recordingCount} recording${recordingCount === 1 ? '' : 's'} linked to this doc${recList ? `: ${recList}` : ''}. ` : ''}Revise with doc_edit. The user reviews the diff unless document edits are set to accept all.\n\n\`\`\`markdown\n${clip(body)}\n\`\`\``,
         refs: [{ kind: 'doc', id: activeDoc.id, name: activeDoc.title }],
         hints: ['Summarise this doc', 'Tighten the writing', 'Pull out the action items as todos']
       }
@@ -219,7 +222,7 @@ export default function DocsView(): JSX.Element {
         detail: `No doc is open. Files are grouped by project — Personal plus one folder per project. The list shows:\n${lines(docs, (d) => `“${d.title || 'Untitled'}” (\`${d.id}\`)${d.project_id ? ` in project ${d.project_id}` : ' in Personal'}${d.folder ? `/${d.folder}` : ''}`)}`,
         refs: docs.slice(0, 40).map((d) => ({ kind: 'doc', id: d.id, name: d.title })),
         hints: ['What have I been writing about?', 'Start a doc for this week’s plan']
-      }), [activeDoc?.id, activeDoc?.title, activeDoc?.folder, projectName, body, dirty, docs, liveHere?.meetingId, liveHere?.mode, recordingCount])
+      }), [activeDoc?.id, activeDoc?.title, activeDoc?.folder, projectName, body, dirty, docs, liveHere?.meetingId, liveHere?.mode, recordingCount, recList])
 
   return (
     <main className="page docs-page">

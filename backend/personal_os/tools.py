@@ -2129,6 +2129,11 @@ def _register_meetings(self: Toolbox) -> None:
                     "actions": [{"text": a["text"], "owner": a["owner"] or None, "due": a["due"] or None,
                                  "status": a["status"], "todo_id": a["todo_id"]} for a in m["actions"]]}
         body, note = m[want] or "", ""
+        if want == "transcript" and not body and hasattr(_repo(), "build_transcript"):
+            # The rolled-up transcript only lands at stop; mid-recording, read the settled segments so far.
+            body = _repo().build_transcript(m["id"])
+            if body and m["status"] == "recording":
+                note = "Recording in progress: this is the transcript so far."
         if want == "enhanced" and not body:
             # The enhance pass has not run (or its proposal is still pending), and an empty body
             # reads to the model as a meeting with nothing in it. The user's own notes are the real content.

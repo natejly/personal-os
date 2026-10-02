@@ -1,6 +1,8 @@
 """Assemble the context block injected into each chat turn, and record what was used."""
 from __future__ import annotations
 
+import re
+
 from typing import Any
 
 from .repos import Documents, Graph, Memories
@@ -153,8 +155,14 @@ def build_context(
             budget = int(settings.get("skillsInlineBudget", 6000) or 0)
             if mode == "manifest" or (mode == "auto" and len(block) > budget):
                 parts.append(skill_manifest(approved))
+                # "$name" in the latest message pulls that approved body in even under the index (still approved rows only).
+                forced = [s for s in approved if re.search(rf"(?<![\w-])\${re.escape(s['name'].lower())}(?![\w-])", query.lower())]
+                if forced:
+                    volatile.append(skill_block(forced))
                 used["skills"] = [{"id": s["id"], "name": s["name"], "description": s["description"], "disclosure": "manifest"}
                                   for s in approved[:MAX_MANIFEST_SKILLS]]
+                used["skills"] += [{"id": s["id"], "name": s["name"], "description": s["description"], "disclosure": "forced"}
+                                   for s in forced]
             else:
                 parts.append(block)
                 used["skills"] = [{"id": s["id"], "name": s["name"], "description": s["description"]} for s in approved[:MAX_INJECTED_SKILLS]]

@@ -92,6 +92,8 @@ export interface Skill {
   created_at: number
   updated_at: number
   approved_at: number | null
+  use_count?: number
+  last_used_at?: number | null
 }
 
 /** A large tool result kept out of the model's context; `read_tool_result` pages it. */

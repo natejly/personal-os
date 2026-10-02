@@ -2479,6 +2479,7 @@ def _register_skills(self: Toolbox) -> None:
         row = row or next((s for s in rows if s["name"].lower() == key), None) if key else None
         if not row:
             return {"error": "not an approved procedure", "procedures": [s["name"] for s in rows][:20]}
+        self.skills.bump_use([row["id"]])
         return {"skill_id": row["id"], "name": row["name"], "description": row["description"],
                 "procedure": skill_block([row])}
     R("skill_view", ToolSpec("skill_view", (

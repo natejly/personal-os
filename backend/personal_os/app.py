@@ -1434,6 +1434,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         activity=monitor, skills=skills, style=style, meetings=meeting_svc,
         page=body.page_context.model_dump() if body.page_context else None,
     )
+    skills.bump_use([x["id"] for x in used["skills"] if x.get("disclosure") != "manifest"])
     # Older messages are folded into a rolling summary when the replay outgrows the window (compaction.py).
     history, cinfo = await compaction.prepare_history(compactor, convos, cfg, str(cfg.get("extractionModel") or model), conv_id,
                                                       used["tokens_estimate"])

@@ -450,9 +450,24 @@ def router(snaps: Snapshots, run_exists: Callable[[str], bool]) -> Any:
 
     r = APIRouter(tags=["snapshots"])
 
+    def _settle(run_id: str) -> None:
+        """The after-snapshot is normally taken when the run closes, which is after its auto-learn tail and so can
+        be minutes after the reply finished. Once the reply has said `done` it can change nothing more, so take
+        the snapshot now rather than showing "no changes" for that long. Finishing is idempotent."""
+        with snaps.db.tx() as c:
+            pend = c.execute("SELECT 1 FROM run_snapshots WHERE run_id=? AND after_tree IS NULL", (run_id,)).fetchone()
+            ev = c.execute("SELECT data FROM run_events WHERE run_id=? AND type='done' ORDER BY seq DESC LIMIT 1",
+                           (run_id,)).fetchone() if pend else None
+        if ev is not None and '"segment"' not in str(ev["data"]):
+            snaps.finish(run_id)
+
     @r.get("/messages/{message_id}/changes")
     def message_changes(message_id: str) -> dict[str, Any]:
         """The same summary, found from the reply it belongs to (the footer only knows the message)."""
+        with snaps.db.tx() as c:
+            runs = [x["run_id"] for x in c.execute("SELECT run_id FROM agent_runs WHERE message_id=?", (message_id,))]
+        for rid in runs:
+            _settle(rid)
         with snaps.db.tx() as c:
             row = c.execute("SELECT s.run_id FROM run_snapshots s JOIN agent_runs a ON a.run_id=s.run_id "
                             "WHERE a.message_id=? AND s.after_tree IS NOT NULL ORDER BY a.started_at DESC LIMIT 1",
@@ -471,11 +486,13 @@ def router(snaps: Snapshots, run_exists: Callable[[str], bool]) -> Any:
     def changes(run_id: str) -> dict[str, Any]:
         if not run_exists(run_id):
             raise HTTPException(404, "No such run")
+        _settle(run_id)
         return snaps.summary(run_id)
 
     @r.post("/runs/{run_id}/undo")
     def undo(run_id: str) -> dict[str, Any]:
         _check(run_id)
+        _settle(run_id)
         try:
             return snaps.undo(run_id)
         except SnapshotError as e:

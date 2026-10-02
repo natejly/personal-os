@@ -121,6 +121,14 @@ def test_writes_inside_succeed_and_outside_fail(tmp_path: Path, box: Box) -> Non
 
 
 @needs_seatbelt
+def test_here_documents_work_inside_the_sandbox(box: Box) -> None:
+    """zsh writes a here-document to a temp file under TMPPREFIX; it must land in the writable per-run tmp dir."""
+    r = box.run("shell_run", command="cat > made.txt <<'EOF'\nhello heredoc\nEOF\ncat made.txt")
+    assert r["exit_code"] == 0 and "hello heredoc" in r["output"], r["output"]
+    assert (box.root / "made.txt").read_text().strip() == "hello heredoc"
+
+
+@needs_seatbelt
 def test_repo_hooks_and_config_are_not_writable(box: Box) -> None:
     (box.root / ".git" / "hooks").mkdir(parents=True)
     (box.root / ".git" / "config").write_text("[core]\n")

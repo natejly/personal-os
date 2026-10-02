@@ -4,6 +4,7 @@ import { ToolOverrides } from './ToolPermissions'
 import TraceView from './TraceView'
 import { useStore, useProject, useConversation, useStreamingMessageId } from '../store'
 import { api } from '../lib/api'
+import ChunkViewer, { type ChunkRef } from './ChunkViewer'
 import { DEFAULT_EFFORT, type ContextMeter, type ContextUsed, type ConversationSettings } from '@shared/types'
 
 function Toggle({ label, hint, value, onChange, icon }: { label: string; hint: string; value: boolean; onChange: (v: boolean) => void; icon: JSX.Element }): JSX.Element {
@@ -56,6 +57,7 @@ function ContextMeterView({ conversationId, refreshKey }: { conversationId: stri
 function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
   const { setView, openMemory, openSettings, memories, setSettingsOpen } = useStore()
   const [showPrompt, setShowPrompt] = useState(false)
+  const [viewing, setViewing] = useState<ChunkRef | null>(null)
   const has = ctx.memories.length + ctx.nodes.length + ctx.chunks.length + (ctx.skills?.length ?? 0) > 0
     || Boolean(ctx.activity) || Boolean(ctx.page) || Boolean(ctx.style) || Boolean(ctx.meetings)
   return (
@@ -120,7 +122,8 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
       {ctx.chunks.length > 0 && (
         <section>
           <h5><FileText size={12} /> Documents ({ctx.chunks.length} excerpt{ctx.chunks.length === 1 ? '' : 's'}) <button className="link" onClick={() => openSettings('knowledge', 'documents')}>manage</button></h5>
-          <ul>{ctx.chunks.map((c) => <li key={c.chunk_id}><b>{c.name}</b> · chunk {c.idx + 1}<div className="chunk-preview">{c.text}</div></li>)}</ul>
+          <ul>{ctx.chunks.map((c) => <li key={c.chunk_id}><button className="link" title="Open the passage in its source" onClick={() => setViewing(c)}><b>{c.name}</b> · chunk {c.idx + 1}</button><div className="chunk-preview">{c.text}</div></li>)}</ul>
+          {viewing && <ChunkViewer chunk={viewing} onClose={() => setViewing(null)} />}
         </section>
       )}
     </div>

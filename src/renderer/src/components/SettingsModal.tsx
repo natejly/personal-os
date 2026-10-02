@@ -44,6 +44,16 @@ const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
 
 const SNAP_LABEL: Record<SnapMode, string> = { off: 'No snap', grid: 'Grid', guides: 'Guides', both: 'Grid + guides' }
 
+/** Read-only: how much of the library has vectors for the current embedding model. */
+function IndexStatusLine(): JSX.Element | null {
+  const [st, setSt] = useState<Awaited<ReturnType<typeof api.documents.indexStatus>> | null>(null)
+  useEffect(() => { api.documents.indexStatus().then(setSt).catch(() => undefined) }, [])
+  if (!st) return null
+  const total = st.chunks + (st.doc_chunks ?? 0)
+  const done = st.embedded + (st.doc_embedded ?? 0)
+  return <p className="muted small">Search index: {done} of {total} passages embedded ({st.mode}{st.model ? `, ${st.model}` : ', no embedding model'}).</p>
+}
+
 export default function SettingsModal(): JSX.Element {
   const settings = useStore((s) => s.settings)
   const models = useStore((s) => s.models)
@@ -220,7 +230,7 @@ export default function SettingsModal(): JSX.Element {
               </div>
               <p className="muted small">What the assistant knows: memories and graph relations learned from chats, and documents whose best excerpts are pulled into replies. Changes here apply immediately.</p>
               <div className="knowledge-body modal-free">
-                {knowledgeTab === 'memory' ? <MemoryPanel embedded /> : <DocumentsView embedded />}
+                {knowledgeTab === 'memory' ? <MemoryPanel embedded /> : <><IndexStatusLine /><DocumentsView embedded /></>}
               </div>
             </section>}
 

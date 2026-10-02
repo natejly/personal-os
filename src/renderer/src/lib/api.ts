@@ -508,8 +508,11 @@ export const api = {
       if (projectId) fd.append('project_id', projectId)
       return req<Document>('/documents', { method: 'POST', body: fd })
     },
-    delete: (id: string) => req(`/documents/${id}`, { method: 'DELETE' })
+    delete: (id: string) => req(`/documents/${id}`, { method: 'DELETE' }),
+    indexStatus: () => req<{ chunks: number; embedded: number; doc_chunks?: number; doc_embedded?: number; model: string | null; mode: string }>('/documents/index-status')
   },
+  /** Character span of a cited chunk in its source text (start -1 when not found verbatim). */
+  chunkSpan: (isDoc: boolean, id: string, chunkId: string) => req<{ text: string; start: number; end: number }>(`/${isDoc ? 'docs' : 'documents'}/${id}/chunks/${chunkId}`),
   activity: {
     status: () => req<ActivityStatus>('/activity/status'),
     config: (patch: Partial<ActivityConfig>) => req<ActivityStatus>('/activity/config', { method: 'PUT', body: json(patch) }),

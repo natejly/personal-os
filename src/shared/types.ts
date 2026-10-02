@@ -777,10 +777,100 @@ export interface GmailLabel {
   type: 'system' | 'user'
 }
 
+/** A tracked health metric (`/health/metrics`). `agg` turns one day's readings into the day's value. */
+export interface HealthMetric {
+  key: string
+  label: string
+  unit: string
+  /** 'scale' is 1-5; 'check' is yes (1) / no (0). */
+  kind: 'number' | 'scale' | 'check'
+  agg: 'sum' | 'last' | 'avg'
+  goal: number | null
+  goal_dir: 'at_least' | 'at_most' | null
+  decimals: number
+  builtin: boolean
+  hidden: boolean
+  position: number
+}
+
+/** One reading (`/health/entries`), filed under a local calendar day. */
+export interface HealthEntry {
+  id: string
+  metric: string
+  value: number
+  day: string
+  note: string
+  source: string
+  created_at: number
+}
+
+/** `/health/summary`: a metric with its daily series (oldest first, null where nothing was logged). */
+export interface HealthSummary extends HealthMetric {
+  today: number | null
+  series: { day: string; value: number | null }[]
+  avg: number | null
+  prev_avg: number | null
+  logged_days: number
+  met_days: number
+  streak: number
+  last: { value: number; day: string } | null
+}
+
+/** A fitness service Health can pull from (`/health/providers`), connected through an MCP server. */
+export interface HealthProvider {
+  key: string
+  label: string
+  /** Connect-form fields: a select when `options` is set, a password box when `secret`. */
+  needs: { key: string; label: string; options?: [string, string][]; default?: string; secret?: boolean }[]
+  setup: string
+  metrics: string[]
+}
+
+export interface HealthSyncResult {
+  from: string
+  to: string
+  written: Record<string, number>
+  unchanged: number
+  problems: { tool: string; error: string; sample?: string }[]
+}
+
+/** A connected service (`/health/sources`). `pinned` is the tools the user approved, by schema hash. */
+export interface HealthSource {
+  id: string
+  provider: string
+  label: string
+  server_id: string
+  enabled: boolean
+  pinned: Record<string, string>
+  days_back: number
+  last_sync_at: number | null
+  last_error: string
+  last_result: HealthSyncResult | Record<string, never>
+  server: { id: string; name: string; transport: string; status: string; detail: string } | null
+}
+
+export interface HealthSourcePlan {
+  source: HealthSource
+  tools: { wants: string[]; tool: string | null; metrics: string[]; description: string; pinned: boolean; changed: boolean }[]
+}
+
+/** A remote MCP server's browser sign-in (`/mcp/servers/{id}/sign-in`). */
+export interface McpSignIn {
+  signed_in: boolean
+  status: 'idle' | 'starting' | 'waiting' | 'done' | 'error'
+  error: string
+  auth_url: string
+}
+
+/** The Today card's slice of `/dashboard`. */
+export type HealthToday = Pick<HealthMetric, 'key' | 'label' | 'unit' | 'kind' | 'goal' | 'goal_dir' | 'decimals'> & { today: number | null }
+
 export interface TodayDashboard {
   google: GoogleStatus
   todos: Todo[]
   todo_stats: { open: number; overdue: number; today: number }
+  /** Visible health metrics with today's value; missing from a backend without the health module. */
+  health?: HealthToday[]
   projects: Project[]
   recent_memories: Memory[]
   recent_conversations: Conversation[]

@@ -41,6 +41,7 @@ from .jobs import (KINDS, PROPOSAL_STATUSES, Jobs, Proposals, Scheduler, local_t
                    valid_tz)
 from . import skillbuild
 from .mcp_client import McpClient, McpError
+from .mcp_oauth import CALLBACK_PATH as MCP_OAUTH_CALLBACK, OAuthFlows, OAuthStore
 from .mcp_servers import MODES as MCP_MODES, RESERVED_PREFIX as MCP_PREFIX, SCOPES as MCP_SCOPES, McpServers
 from .meeting_recorder import RecorderBusy
 from .meetings import MeetingBlocked, Meetings, MeetingService
@@ -93,7 +94,7 @@ def _resolve_auth_token() -> str:
 
 
 AUTH_TOKEN = _resolve_auth_token()
-PUBLIC_PATHS = ("/health", "/integrations/google/callback")
+PUBLIC_PATHS = ("/health", "/integrations/google/callback", "/mcp/oauth/callback")
 
 
 def _token_eq(sent: str, expected: str) -> bool:
@@ -261,7 +262,7 @@ google = Google(settings, db.set_settings)
 # sid/wsid are defined further down, so the module context looks them up late.
 modules: list[Module] = build_modules(ModuleContext(
     db=db, settings=settings, set_settings=db.set_settings, google=google,
-    sid=lambda p: sid(p), wsid=lambda p: wsid(p)))
+    sid=lambda p: sid(p), wsid=lambda p: wsid(p), mcp=lambda: mcp))
 _todos_module = module_get(modules, "todos", TodosModule)
 todos, tasks_sync, todo_calendar = _todos_module.store, _todos_module.tasks_sync, _todos_module.calendar_mirror
 for _m in modules:
@@ -317,7 +318,9 @@ monitor.insights.tools_fn = lambda: [t["name"] for t in toolbox.list() if t.get(
 mcp_store = McpServers(db)
 # Third-party servers are supervised, not owned by the chat loop: a wedged server must not be able
 # to hold a reply, so everything it offers goes through McpClient's bounded calls.
-mcp = McpClient(mcp_store)
+# Remote servers sign in with OAuth; tokens live in their own table, never in a server's secrets.
+mcp_oauth = OAuthFlows(OAuthStore(db))
+mcp = McpClient(mcp_store, oauth=mcp_oauth)
 
 
 def mcp_is(name: str) -> bool:
@@ -391,7 +394,8 @@ def _mcp_server_view(row: dict[str, Any]) -> dict[str, Any]:
                      "attempts": live.get("attempts", 0), "server_info": live.get("server_info") or {}},
             "tools": [{**t, "effective": mcp_store.effective_mode(t["slug"])}
                       for t in mcp_store.tools(row["id"], include_missing=True)],
-            "eval": mcp_store.latest_eval(row["id"])}
+            "eval": mcp_store.latest_eval(row["id"]),
+            "signed_in": mcp_oauth.store.signed_in(row["id"]) if row.get("transport") == "http" else None}
 
 
 def fscope(raw: str | None) -> str:
@@ -604,6 +608,7 @@ async def mcp_update_server(id: str, body: McpServerPatch) -> dict[str, Any]:
 @app.delete("/mcp/servers/{id}")
 async def mcp_delete_server(id: str) -> dict[str, bool]:
     mcp_store.delete_server(id)
+    mcp_oauth.store.forget(id)
     await mcp.sync()  # stops and reaps the child process; grants survive, keyed by slug
     return {"ok": True}
 
@@ -614,6 +619,45 @@ async def mcp_restart_server(id: str) -> dict[str, Any]:
         raise HTTPException(404, "No such MCP server")
     await mcp.restart(id)
     return _mcp_server_view(mcp_store.server(id) or {})
+
+
+@app.post("/mcp/servers/{id}/sign-in")
+async def mcp_sign_in(id: str, request: Request) -> dict[str, Any]:
+    """Start a browser sign-in for a remote server. The renderer opens `auth_url`, then polls GET."""
+    if mcp_store.server(id) is None:
+        raise HTTPException(404, "No such MCP server")
+    # The registered redirect is this backend's own loopback port, so it must be the port we listen on.
+    redirect = f"http://127.0.0.1:{request.url.port or 80}{MCP_OAUTH_CALLBACK}"
+    try:
+        return await mcp.sign_in(id, redirect)
+    except McpError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.get("/mcp/servers/{id}/sign-in")
+def mcp_sign_in_status(id: str) -> dict[str, Any]:
+    if mcp_store.server(id) is None:
+        raise HTTPException(404, "No such MCP server")
+    return mcp_oauth.status(id)
+
+
+@app.delete("/mcp/servers/{id}/sign-in")
+async def mcp_sign_out(id: str) -> dict[str, Any]:
+    if mcp_store.server(id) is None:
+        raise HTTPException(404, "No such MCP server")
+    mcp_oauth.store.forget(id)
+    await mcp.restart(id)
+    return mcp_oauth.status(id)
+
+
+@app.get(MCP_OAUTH_CALLBACK, response_class=HTMLResponse)
+def mcp_oauth_callback(state: str = "", code: str = "", error: str = "", error_description: str = "") -> str:
+    """Public (the browser has no token): it can only complete a sign-in this app started, by its state."""
+    if not mcp_oauth.complete(state, code or None, error_description or error or None):
+        return _oauth_page("Sign-in link expired", "Start the connection again from Grain.")
+    if error or not code:
+        return _oauth_page("Sign-in was not completed", html.escape(error_description or error or "No authorization code was returned."))
+    return _oauth_page("Connected ✓", "You can close this tab and return to Grain.", ok=True)
 
 
 @app.get("/mcp/servers/{id}/logs")

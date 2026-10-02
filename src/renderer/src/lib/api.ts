@@ -8,6 +8,7 @@ import type {
   DeskStatus, FullDesk, PlanRecord, PromotionKind, PromotionResult,
   AgentInbox, AgentProposal, Job,
   Doc, DocFolder, FullDoc, DocRevision,
+  HealthEntry, HealthMetric, HealthProvider, HealthSource, HealthSourcePlan, HealthSummary, HealthSyncResult, McpSignIn,
   McpEffective, McpReport, McpServer, McpServerDraft, McpTool, ToolMode,
   ActivityApplyResult, ActivityCapability, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityGrantResult,
   ActivityInsights, ActivityStatus, ActivitySuggestion, ActivitySummary, InsightStatus,
@@ -163,6 +164,31 @@ export const api = {
       req<Todo>(`/todos/${id}`, { method: 'PUT', body: json(patch) }),
     delete: (id: string) => req(`/todos/${id}`, { method: 'DELETE' })
   },
+  /** Health tracking (`/health/...`). Not `api.health`, which is the liveness probe on bare `/health`. */
+  healthLog: {
+    metrics: () => req<HealthMetric[]>('/health/metrics'),
+    createMetric: (m: { label: string; unit?: string; kind?: HealthMetric['kind']; agg?: HealthMetric['agg']; goal?: number | null; goal_dir?: HealthMetric['goal_dir']; decimals?: number }) =>
+      req<HealthMetric>('/health/metrics', { method: 'POST', body: json(m) }),
+    updateMetric: (key: string, patch: Partial<Pick<HealthMetric, 'label' | 'unit' | 'agg' | 'goal' | 'goal_dir' | 'decimals' | 'hidden' | 'position'>> & { clear_goal?: boolean }) =>
+      req<HealthMetric>(`/health/metrics/${encodeURIComponent(key)}`, { method: 'PUT', body: json(patch) }),
+    deleteMetric: (key: string) => req(`/health/metrics/${encodeURIComponent(key)}`, { method: 'DELETE' }),
+    /** `today` is the renderer's local day, so the backend never guesses the user's timezone. */
+    summary: (days: number, today: string, includeHidden = false) =>
+      req<HealthSummary[]>(`/health/summary?days=${days}&today=${today}&include_hidden=${includeHidden}`),
+    entries: (metric?: string, limit = 50) => req<HealthEntry[]>(`/health/entries?limit=${limit}${metric ? `&metric=${encodeURIComponent(metric)}` : ''}`),
+    log: (e: { metric: string; value: number; day?: string; note?: string }) => req<HealthEntry>('/health/entries', { method: 'POST', body: json(e) }),
+    updateEntry: (id: string, patch: { value?: number; day?: string; note?: string }) => req<HealthEntry>(`/health/entries/${id}`, { method: 'PUT', body: json(patch) }),
+    deleteEntry: (id: string) => req(`/health/entries/${id}`, { method: 'DELETE' }),
+    providers: () => req<HealthProvider[]>('/health/providers'),
+    sources: () => req<HealthSource[]>('/health/sources'),
+    connect: (provider: string, form: Record<string, string>) => req<HealthSource>('/health/sources', { method: 'POST', body: json({ provider, form }) }),
+    plan: (id: string) => req<HealthSourcePlan>(`/health/sources/${id}/plan`),
+    /** Approve the source's tools exactly as its server offers them now. */
+    approve: (id: string) => req<HealthSourcePlan>(`/health/sources/${id}/approve`, { method: 'POST' }),
+    sync: (id: string, today: string) => req<HealthSyncResult>(`/health/sources/${id}/sync?today=${today}`, { method: 'POST' }),
+    updateSource: (id: string, patch: { enabled?: boolean; days_back?: number }) => req<HealthSource>(`/health/sources/${id}`, { method: 'PUT', body: json(patch) }),
+    disconnect: (id: string, keepData = true) => req(`/health/sources/${id}?keep_data=${keepData}&remove_server=true`, { method: 'DELETE' })
+  },
   mcp: {
     servers: () => req<McpServer[]>('/mcp/servers'),
     create: (s: Partial<McpServerDraft> & { name: string; enabled?: boolean }) => req<McpServer>('/mcp/servers', { method: 'POST', body: json(s) }),
@@ -171,6 +197,10 @@ export const api = {
       req<McpServer>(`/mcp/servers/${id}`, { method: 'PATCH', body: json(patch) }),
     remove: (id: string) => req<{ ok: boolean }>(`/mcp/servers/${id}`, { method: 'DELETE' }),
     restart: (id: string) => req<McpServer>(`/mcp/servers/${id}/restart`, { method: 'POST' }),
+    /** Remote servers: start a browser sign-in (open `auth_url`), poll it, or forget the tokens. */
+    signIn: (id: string) => req<McpSignIn>(`/mcp/servers/${id}/sign-in`, { method: 'POST' }),
+    signInStatus: (id: string) => req<McpSignIn>(`/mcp/servers/${id}/sign-in`),
+    signOut: (id: string) => req<McpSignIn>(`/mcp/servers/${id}/sign-in`, { method: 'DELETE' }),
     logs: (id: string) => req<{ server_id: string; stderr: string[] }>(`/mcp/servers/${id}/logs`),
     /** Probe + static check of a saved server; files the report as its latest. */
     check: (id: string) => req<McpReport>(`/mcp/servers/${id}/check`, { method: 'POST' }),

@@ -31,6 +31,13 @@ export type LibraryTab = 'skills' | 'workflows' | 'connectors' | 'made' | 'artif
 export type ClassicView = Exclude<View, 'canvas'>
 /** How the Docs editor splits its panes. */
 export type DocMode = 'edit' | 'split' | 'preview'
+const DOC_MODE_KEY = 'grain.docMode'
+const readDocMode = (): DocMode => {
+  try {
+    const v = localStorage.getItem(DOC_MODE_KEY)
+    return v === 'edit' || v === 'split' || v === 'preview' ? v : 'split'
+  } catch { return 'split' }
+}
 /** How the Memory panel lays out its halves: the memory list, the knowledge graph, the voice profile. */
 export type MemoryMode = 'split' | 'list' | 'graph' | 'style'
 export type ContextTab = 'last' | 'preview' | 'trace'
@@ -1200,7 +1207,7 @@ export const useStore = create<State>((set, get) => {
     docFolders: [],
     expandedFolders: readExpanded(),
     docsPending: 0,
-    docMode: 'split',
+    docMode: readDocMode(),
     docDraft: null,
     docTitleDraft: null,
     docSaving: false,
@@ -1957,7 +1964,10 @@ export const useStore = create<State>((set, get) => {
       await Promise.all([get().refreshDocs(), get().refreshDocsPending()])
       get().offerUndo(title ? `“${title}”` : 'doc', [{ type: 'doc', id }])
     },
-    setDocMode: (docMode) => set({ docMode }),
+    setDocMode: (docMode) => {
+      try { localStorage.setItem(DOC_MODE_KEY, docMode) } catch { /* private window */ }
+      set({ docMode })
+    },
     refreshDocRevisions: async (id) => {
       const docId = id ?? get().activeDoc?.id
       if (!docId) return

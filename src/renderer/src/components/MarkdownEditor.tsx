@@ -39,6 +39,10 @@ export interface EditorHandleProps {
   onCaretLine?: (line: number) => void
   /** Opt in: reading time and the size of the selection in the status bar. */
   richStatus?: boolean
+  /** Keep the caret line at ~45% of the editor height as you type. */
+  typewriter?: boolean
+  /** Dim everything outside the current paragraph; hides the gutter and status bar. */
+  focusMode?: boolean
 }
 
 export type { MarkdownEditorHandle }
@@ -50,7 +54,24 @@ const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;'
  * keeps it honest against the textarea: every input line produces exactly one output line, so the two
  * layers can never drift. Fenced code and maths blocks are tracked as state across lines.
  */
-export function highlight(src: string, wikilinks = false): string {
+export function highlight(src: string, wikilinks = false, activeLine?: number): string {
+  const out = highlightLines(src, wikilinks)
+  if (activeLine === undefined) return out.join('\n')
+  const [a, b] = paragraphRange(src.split('\n'), activeLine - 1)
+  return out.map((h, i) => (i < a || i > b ? `<span class="dim">${h}</span>` : h)).join('\n')
+}
+
+/** Inclusive 0-based line span of the blank-line-delimited paragraph holding line `i`. */
+export function paragraphRange(lines: string[], i: number): [number, number] {
+  if (!(lines[i] ?? '').trim()) return [i, i]
+  let a = i
+  let b = i
+  while (a > 0 && lines[a - 1].trim()) a--
+  while (b < lines.length - 1 && lines[b + 1].trim()) b++
+  return [a, b]
+}
+
+function highlightLines(src: string, wikilinks: boolean): string[] {
   const out: string[] = []
   let fence: string | null = null
   let mathBlock = false
@@ -79,7 +100,7 @@ export function highlight(src: string, wikilinks = false): string {
     }
     out.push(inline(line, wikilinks))
   }
-  return out.join('\n')
+  return out
 }
 
 function inline(line: string, wiki: boolean): string {
@@ -166,7 +187,7 @@ function shiftLines(value: string, s: number, e: number, out: boolean): { value:
 
 const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(function MarkdownEditor({
   value, onChange, onSave, placeholder, readOnly = false, wrap = true, onScrollFraction,
-  slash = false, extraCommands, linkTargets, smartPaste = false, onCaretLine, richStatus = false
+  slash = false, extraCommands, linkTargets, smartPaste = false, onCaretLine, richStatus = false, typewriter = false, focusMode = false
 }, ref): JSX.Element {
   const ta = useRef<HTMLTextAreaElement>(null)
   const mirror = useRef<HTMLPreElement>(null)
@@ -176,7 +197,13 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
   const [sel, setSel] = useState({ start: 0, end: 0 })
   const lineCount = useMemo(() => value.split('\n').length, [value])
   const wikiOn = !!linkTargets
-  const html = useMemo(() => highlight(value, wikiOn) + '\n', [value, wikiOn])
+  // Keyed on the paragraph span, not the caret line, so moving within a paragraph does not re-highlight.
+  const para = useMemo(() => (focusMode ? paragraphRange(value.split('\n'), caret.line - 1).join(':') : ''), [focusMode, value, caret.line])
+  const html = useMemo(() => {
+    if (!focusMode) return highlight(value, wikiOn) + '\n'
+    return highlight(value, wikiOn, Number(para.split(':')[0]) + 1) + '\n'
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, wikiOn, focusMode, para])
 
   const syncScroll = useCallback((): void => {
     const el = ta.current
@@ -204,6 +231,17 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
     const end = el.selectionEnd
     setSel((s) => (s.start === start && s.end === end ? s : { start, end }))
   }, [])
+
+  // After the mirror repaints: put the caret line at ~45% of the height. The mirror follows via syncScroll.
+  useLayoutEffect(() => {
+    const el = ta.current
+    if (!typewriter || !el || !mirror.current || document.activeElement !== el) return
+    const r = measureCaret(mirror.current, el.selectionStart)
+    if (!r) return
+    const top = r.top - mirror.current.getBoundingClientRect().top + el.scrollTop
+    el.scrollTop = Math.max(0, top - el.clientHeight * 0.45)
+    syncScroll()
+  }, [typewriter, value, caret.line, caret.col, html, syncScroll])
 
   const lastLine = useRef(0)
   useEffect(() => {
@@ -428,7 +466,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
   }
 
   return (
-    <div className={`md-editor ${wrap ? '' : 'nowrap'}`}>
+    <div className={`md-editor ${wrap ? '' : 'nowrap'} ${focusMode ? 'focus' : ''}`}>
       <div className="md-gutter" ref={gutter} aria-hidden>
         {Array.from({ length: lineCount }, (_, i) => (
           <div key={i} className={i + 1 === caret.line ? 'cur' : undefined}>{i + 1}</div>

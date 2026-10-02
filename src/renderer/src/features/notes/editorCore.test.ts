@@ -59,3 +59,13 @@ test('without the wikilink option the output is the one the editor always produc
     '<span class="tk-strong">**b**</span> <span class="tk-em">_i_</span> <span class="tk-link">[t](u)</span> <span class="tk-math">$x$</span>'
   )
 })
+
+test('focus mode dims only lines outside the caret paragraph and keeps the line count', () => {
+  const src = 'a\nb\n\n```\nc\n\nd\n```\ne'
+  for (const active of [1, 3, 5, 9]) {
+    assert.equal(highlight(src, false, active).split('\n').length, src.split('\n').length)
+  }
+  const lines = highlight('one\ntwo\n\nthree', false, 4).split('\n')
+  assert.deepEqual(lines.map((l) => l.startsWith('<span class="dim">')), [true, true, true, false])
+  assert.ok(!highlight('x', false).includes('dim'))
+})

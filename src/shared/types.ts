@@ -2308,6 +2308,8 @@ export interface FullMeeting extends Omit<Meeting, 'notes_preview'> {
   keep_audio: boolean
   /** Display names for diarized speaker ids, e.g. { S1: 'Dana' }. */
   speaker_names: Record<string, string>
+  /** Summary line index (in `enhanced`) to the transcript segment ids it was written from. */
+  summary_evidence?: Record<string, string[]>
   /** Retained wav bytes, against the disk ceiling. */
   audio_bytes: number
   conversation_id: string | null

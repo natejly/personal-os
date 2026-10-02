@@ -41,12 +41,13 @@ export default function RecordingsPanel({ docId }: { docId: string }): JSX.Eleme
   const meetingStatus = useStore((s) => s.meetingStatus)
   const live = useMemo(() => liveDoc(meetingStatus), [meetingStatus])
   const [tab, setTab] = useState<Tab>('transcript')
+  const [cited, setCited] = useState<string[]>([])
   const [renaming, setRenaming] = useState(false)
 
   const row = rows.find((r) => r.id === selectedId) ?? null
   const isLive = !!row && live?.meetingId === row.id
   // A new selection should not inherit the previous one's half-typed title.
-  useEffect(() => { setRenaming(false) }, [selectedId])
+  useEffect(() => { setRenaming(false); setCited([]) }, [selectedId])
 
   if (rows.length === 0) {
     return (
@@ -130,11 +131,12 @@ export default function RecordingsPanel({ docId }: { docId: string }): JSX.Eleme
 
           {tab === 'transcript'
             ? <TranscriptView title={row.title} segments={segments ?? []} meeting={meeting} live={isLive}
-                segmentCount={row.segment_count} busy={busy}
+                segmentCount={row.segment_count} busy={busy} highlightIds={cited}
                 onRetranscribe={() => void useDocRec.getState().retranscribe(row.id)} />
             : <SummaryView row={row} meeting={meeting} actions={actions} summarizing={summarizing} error={summaryError}
                 onSummarize={(o) => void useDocRec.getState().summarize(row.id, o)}
-                onAddTodos={(ids) => void useDocRec.getState().addTodos(row.id, ids)} />}
+                onAddTodos={(ids) => void useDocRec.getState().addTodos(row.id, ids)}
+                onSource={(ids) => { setCited(ids); setTab('transcript') }} />}
         </div>
       )}
     </div>

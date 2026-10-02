@@ -23,6 +23,8 @@ export interface TranscriptViewProps {
   /** Retranscribe the failed clips; omit to hide the control. */
   onRetranscribe?: () => void
   busy?: boolean
+  /** Segment ids to mark and scroll to (a summary line's sources). */
+  highlightIds?: string[]
 }
 
 /** Within this many px of the bottom counts as "at the live edge". */
@@ -37,7 +39,7 @@ function download(name: string, body: string, mime: string): void {
   URL.revokeObjectURL(url)
 }
 
-export default function TranscriptView({ title, segments, meeting, live, segmentCount, onRetranscribe, busy }: TranscriptViewProps): JSX.Element {
+export default function TranscriptView({ title, segments, meeting, live, segmentCount, onRetranscribe, busy, highlightIds }: TranscriptViewProps): JSX.Element {
   const scroller = useRef<HTMLDivElement>(null)
   const [stick, setStick] = useState(true)
   const [finding, setFinding] = useState(false)
@@ -64,6 +66,11 @@ export default function TranscriptView({ title, segments, meeting, live, segment
     if (active < 0) return
     scroller.current?.querySelector('[data-active-hit="1"]')?.scrollIntoView({ block: 'center' })
   }, [active, matches.length])
+
+  const marked = useMemo(() => new Set(highlightIds ?? []), [highlightIds])
+  useEffect(() => {
+    if (marked.size) scroller.current?.querySelector('[data-cited="1"]')?.scrollIntoView({ block: 'center' })
+  }, [marked, lines.length])
 
   const onScroll = (): void => {
     const el = scroller.current
@@ -130,7 +137,8 @@ export default function TranscriptView({ title, segments, meeting, live, segment
           </p>
         )}
         {lines.map((l, i) => (
-          <div key={l.id} className={`dr-line ${l.pending ? 'pending' : ''}`}>
+          <div key={l.id} className={`dr-line ${l.pending ? 'pending' : ''} ${l.ids.some((x) => marked.has(x)) ? 'cited' : ''}`}
+            data-cited={l.ids.some((x) => marked.has(x)) ? '1' : undefined}>
             <div className="dr-line-head">
               <span className={`dr-who ${l.channel === 'mic' ? '' : 'them'}`}>{who(l)}</span>
               <span className="dr-at">{formatOffset(l.t_start)}</span>

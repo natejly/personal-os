@@ -181,6 +181,48 @@ def cap_transcript(text: str, limit: int) -> str:
     return f"{text[:head]}\n\n[... {len(text) - head - tail} characters omitted ...]\n\n{text[len(text) - tail:]}"
 
 
+def numbered_transcript(segments: list[dict[str, Any]]) -> tuple[str, dict[str, str]]:
+    """`[s3 04:31 you] text` per spoken segment, plus {"s3": real segment id}.
+
+    The short tags are what the model cites; they are mapped back to real ids so a made-up one is
+    detectable. Channel-level speakers only, as everywhere else.
+    """
+    lines: list[str] = []
+    ids: dict[str, str] = {}
+    for sg in segments:
+        text = (sg.get("text") or "").strip()
+        if sg.get("state") != "done" or not text:
+            continue
+        tag = f"s{len(ids) + 1}"
+        ids[tag] = sg["id"]
+        t = int(sg.get("t_start") or 0)
+        who = "you" if sg.get("channel") == "mic" else "them"
+        lines.append(f"[{tag} {t // 60:02d}:{t % 60:02d} {who}] {text}")
+    return "\n".join(lines), ids
+
+
+_EVIDENCE_TAG = re.compile(r"[ \t]*\{\s*(s\d+(?:\s*,\s*s\d+)*)\s*\}[ \t]*$")
+
+
+def split_evidence(markdown: str, sources: dict[str, str]) -> tuple[str, dict[str, list[str]]]:
+    """Strip trailing `{s3,s7}` tags off each line; return (clean body, {line index: real segment ids}).
+
+    Tags naming a segment that does not exist are dropped, and a line left with none gets no entry.
+    The body is tag-free whether or not any tag was valid.
+    """
+    out: list[str] = []
+    evidence: dict[str, list[str]] = {}
+    for i, line in enumerate(markdown.split("\n")):
+        m = _EVIDENCE_TAG.search(line)
+        if m:
+            line = line[:m.start()]
+            real = [sources[t] for t in dict.fromkeys(x.strip() for x in m.group(1).split(",")) if t in sources]
+            if real:
+                evidence[str(i)] = real
+        out.append(line)
+    return "\n".join(out), evidence
+
+
 def pick_model(cfg: dict[str, Any], settings: dict[str, Any]) -> str:
     return cfg.get("enhanceModel") or settings.get("extractionModel") or settings["defaultModel"]
 
@@ -298,6 +340,9 @@ Rules:
 - Speaker attribution is channel-level only: `[you]` is the user and `[them]` is everyone else who
   was heard. Never attribute a quote to a named person, however obvious the voice seems.
 - Write markdown, no preamble and no closing commentary.
+- Each transcript line starts with a tag like `[s12 04:31 you]`. End every bullet or paragraph line
+  of the summary with the tags of the lines that support it, as `{s12,s14}`. Cite only tags that
+  appear in the transcript; leave a line untagged when nothing supports it.
 """
 
 
@@ -363,6 +408,7 @@ async def summarize_recording(
     template: str = "general",
     focus: str = "",
     max_transcript_chars: int = 48000,
+    sources: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """One LLM call per summary. Never raises: a failure comes back with `error` set and NO markdown.
 
@@ -384,7 +430,8 @@ async def summarize_recording(
         payload["focus"] = focus.strip()[:300]
     if names:
         payload["speakers"] = names
-    out: dict[str, Any] = {"markdown": "", "headline": "", "action_items": [], "error": "", "model": model}
+    out: dict[str, Any] = {"markdown": "", "headline": "", "action_items": [], "error": "", "model": model,
+                           "evidence": {}}
     try:
         raw = await complete_fn(
             settings, model,
@@ -396,7 +443,8 @@ async def summarize_recording(
         markdown = str(data.get("summary_markdown") or "").strip()
         if not markdown:
             raise ValueError("no summary_markdown in the reply")
-        out["markdown"] = markdown
+        # Tags are always stripped; they only become evidence when the caller sent numbered lines.
+        out["markdown"], out["evidence"] = split_evidence(markdown, sources or {})
         out["headline"] = str(data.get("headline") or "").strip()[:120]
         out["action_items"] = _action_items(data.get("action_items"))
     except Exception as e:  # noqa: BLE001 - a dead model must not paste anything into the doc

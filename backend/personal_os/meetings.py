@@ -213,14 +213,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
 # audio_dir, sources, transcript, duration_ms - is deliberately absent: those go through
 # mark_started/finalize so a stray PATCH cannot claim a meeting recorded something it didn't.
 PATCH_FIELDS = {"title", "notes", "enhanced", "summary", "template", "project_id",
-                "keep_audio", "status", "error", "conversation_id"}
+                "keep_audio", "status", "error", "conversation_id", "summary_evidence"}
 
 # Only these three columns are in meetings_fts alongside the transcript, so a patch that changes
 # none of them skips the reindex: FTS5 has no UPDATE, so a reindex is a DELETE plus an INSERT of
 # the whole row, and the error banner is patched once per failed segment.
 INDEXED_FIELDS = {"title", "notes", "enhanced"}
 
-JSON_FIELDS = ("attendees", "sources", "decisions", "topics", "detail", "speaker_names")
+JSON_FIELDS = ("attendees", "sources", "decisions", "topics", "detail", "speaker_names", "summary_evidence")
 
 # Columns added to `meetings` after the first release, as {name: ddl}. Empty today and applied in
 # __init__ anyway: CREATE TABLE IF NOT EXISTS will not add a column, and db.py's _migrate runs
@@ -229,7 +229,9 @@ JSON_FIELDS = ("attendees", "sources", "decisions", "topics", "detail", "speaker
 # doc_id/doc_mode link a recording to a doc (plain TEXT, the cascade is code: see Docs.on_delete);
 # summary_revision_id is the doc_revisions row of the latest proposed summary.
 ADDED_COLUMNS: dict[str, str] = {"speaker_names": "TEXT NOT NULL DEFAULT '{}'",
-                                 "doc_id": "TEXT", "doc_mode": "TEXT", "summary_revision_id": "TEXT"}
+                                 "doc_id": "TEXT", "doc_mode": "TEXT", "summary_revision_id": "TEXT",
+                                 # {line index in `enhanced`: [segment ids]}: where each summary line came from
+                                 "summary_evidence": "TEXT NOT NULL DEFAULT '{}'"}
 
 DOC_MODES = ("record", "dictate")
 
@@ -692,6 +694,8 @@ class Meetings:
             fields["keep_audio"] = int(bool(fields["keep_audio"]))
         if "error" in fields:
             fields["error"] = str(fields["error"] or "")[:1000]
+        if "summary_evidence" in fields:
+            fields["summary_evidence"] = json.dumps(fields["summary_evidence"] or {})
         fields["updated_at"] = now()
         sets = ", ".join(f"{k}=?" for k in fields)
         with self.db.tx() as c:
@@ -1865,9 +1869,11 @@ class MeetingService:
         prior_status = m["status"]
         try:
             self.meetings.patch(meeting_id, {"status": "enhancing"})
+            numbered, sources = meeting_notes.numbered_transcript(self.meetings.segments(meeting_id, limit=100000))
             res = await meeting_notes.summarize_recording(
                 complete_fn=self._complete, settings=settings, model=model, meeting=m,
-                doc_title=doc["title"], doc_content=doc["content"], transcript=m["transcript"],
+                doc_title=doc["title"], doc_content=doc["content"], transcript=numbered or m["transcript"],
+                sources=sources,
                 template=tpl, focus=focus, max_transcript_chars=int(cfg["maxTranscriptChars"]))
         finally:
             self._summarizing.discard(meeting_id)
@@ -1903,7 +1909,7 @@ class MeetingService:
         self.meetings.set_summary_revision(meeting_id, rev["id"])
         if items:
             self.meetings.add_action_items(meeting_id, None, items)
-        patch: dict[str, Any] = {"enhanced": body}
+        patch: dict[str, Any] = {"enhanced": body, "summary_evidence": res["evidence"]}
         if headline:
             patch["summary"] = headline
         self.meetings.patch(meeting_id, patch)

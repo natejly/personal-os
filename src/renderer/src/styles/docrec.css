@@ -117,6 +117,10 @@
 .dr-state.ok { color: var(--ok); }
 .dr-state.bad { color: var(--danger); }
 .dr-headline { margin: 0; font-size: 13px; font-weight: 600; color: var(--text); line-height: 1.4; }
+.dr-cited { position: relative; }
+.dr-source { position: absolute; right: 0; top: 0; opacity: .6; }
+.dr-source:hover { opacity: 1; }
+.dr-line.cited { background: color-mix(in srgb, var(--accent) 18%, transparent); border-radius: 4px; outline: 1px solid var(--accent); }
 .dr-summary-body { font-size: 13px; line-height: 1.55; color: var(--text); overflow-wrap: break-word; }
 .dr-regen { display: flex; flex-direction: column; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
 .dr-regen-row { display: flex; gap: 8px; }

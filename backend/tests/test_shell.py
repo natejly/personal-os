@@ -113,7 +113,7 @@ def test_writes_inside_succeed_and_outside_fail(tmp_path: Path, box: Box) -> Non
     assert r["exit_code"] != 0 and "report.txt" in r["output"]
     assert (box.root / "report.txt").exists()
     assert not (outside / "nope").exists()
-    assert r["sandboxed"] is True and r["network"] is False
+    assert r["sandboxed"] is True and r["network"]["mode"] == "allowlist" and r["network"]["contacted"] == []  # the default: proxy only
     # the per-run tmp dir is writable, and gone afterwards
     t = box.run("shell_run", command="echo hi > $TMPDIR/t && cat $TMPDIR/t && echo $TMPDIR")
     assert t["exit_code"] == 0 and "hi" in t["output"]
@@ -153,6 +153,9 @@ def test_secrets_are_unreadable(tmp_path: Path, box: Box, monkeypatch: pytest.Mo
 
 @needs_seatbelt
 def test_network_is_off(tmp_path: Path, box: Box) -> None:
+    box.settings["shellRegistryAccess"] = False  # no registry preset and no allowed domains: the "no network" mode
+    assert box.run("shell_run", command="true")["network"] is False
+
     class H(http.server.BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802
             self.send_response(200)
@@ -236,12 +239,12 @@ def test_long_output_is_truncated_with_a_handle_and_hint(box: Box) -> None:
 def test_timeout_kills_the_whole_process_group(tmp_path: Path, box: Box) -> None:
     pidfile = tmp_path / "pid"
     t0 = time.time()
-    r = box.run("shell_run", command=f"sleep 100 & echo $! > {pidfile}; wait", timeout_s=1)
+    r = box.run("shell_run", command=f"sleep 100 & echo $! > {pidfile}; wait", timeout_s=1, on_timeout="kill")
     assert time.time() - t0 < 10
     assert r["timed_out"] is True and "process group" in r["note"]
     pid = int(pidfile.read_text()) if pidfile.exists() else None
     if pid is None:  # the pidfile is outside the root, so the sandbox may have refused it: use the root instead
-        r = box.run("shell_run", command="sleep 100 & echo $! > pid; wait", timeout_s=1)
+        r = box.run("shell_run", command="sleep 100 & echo $! > pid; wait", timeout_s=1, on_timeout="kill")
         pid = int((box.root / "pid").read_text())
     time.sleep(0.3)
     with pytest.raises(ProcessLookupError):
@@ -251,7 +254,7 @@ def test_timeout_kills_the_whole_process_group(tmp_path: Path, box: Box) -> None
 @needs_seatbelt
 def test_term_then_kill_when_term_is_ignored(box: Box) -> None:
     t0 = time.time()
-    r = box.run("shell_run", command="trap '' TERM; sleep 100", timeout_s=1)
+    r = box.run("shell_run", command="trap '' TERM; sleep 100", timeout_s=1, on_timeout="kill")
     took = time.time() - t0
     assert r["timed_out"] and 3.0 <= took < 12  # SIGTERM ignored, SIGKILL after the 3 s grace
 
@@ -407,7 +410,7 @@ def test_no_sandbox_means_refused_until_the_forced_unsandboxed_path(box: Box, mo
 
 @needs_seatbelt
 def test_a_profile_that_fails_to_apply_is_refused_then_unsandboxed_may_be_asked_for(box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(sandbox, "shell_profile", lambda writable, network=False: "(version 1) (this is not sbpl")
+    monkeypatch.setattr(sandbox, "shell_profile", lambda writable, network=False, **kw: "(version 1) (this is not sbpl")
     r = box.run("shell_run", command="echo hi")
     assert "sandbox refused to start" in r["error"] and box.tb.shell.sandbox_failed
     assert "sandbox is available" not in box.run("shell_run", command="echo ran", unsandboxed=True).get("error", "")
@@ -483,3 +486,146 @@ def test_reaper_thread_starts_once_and_shutdown_stops_it(monkeypatch: pytest.Mon
     sb.shutdown()
     th.join(2)
     assert not th.is_alive() and d.containers[sb._name("c1")]["running"] is False
+
+
+# ---- network modes, auto-approval, cwd persistence, timeout promotion (cowork shell slice) ----
+def test_profile_allows_only_the_proxy_port_in_allowlist_mode() -> None:
+    p = sandbox.shell_profile(["/tmp/w"], network=False, proxy_port=48123)
+    assert "(deny network*)" in p and "(allow network*)" not in p
+    assert p.count("network-outbound") == 1 and 'localhost:48123' in p
+    assert "network-outbound" not in sandbox.shell_profile(["/tmp/w"])
+    assert "localhost" not in sandbox.shell_profile(["/tmp/w"], network=True, proxy_port=1)  # open network needs no proxy rule
+
+
+@needs_seatbelt
+def test_allowlist_mode_env_and_only_the_proxy_is_reachable(box: Box) -> None:
+    r = box.run("shell_run", command="env | grep -i proxy | sort; echo ALL=${ALL_PROXY-unset}")
+    assert r["exit_code"] == 0
+    for k in ("HTTP_PROXY=http://grain:", "HTTPS_PROXY=http://grain:", "http_proxy=http://grain:", "https_proxy=http://grain:", "NO_PROXY="):
+        assert k in r["output"], k
+    assert "ALL=unset" in r["output"] and r["network"]["mode"] == "allowlist"
+    # a host that is not allowed: the proxy answers 403 and records it; the reply is not tainted, the note tells the way forward
+    r = box.run("shell_run", command="curl -sS -m 8 https://not-allowed.example.org/ -o /dev/null -w '%{http_code}' ; true")
+    assert r["network"]["blocked"] == ["not-allowed.example.org"] and "allow a host" in r["note"]
+    assert box.ctx["tainted"] is False
+    # a direct connection that skips the proxy is denied by the sandbox itself
+    r = box.run("shell_run", command="curl -sS -m 5 --noproxy '*' http://93.184.216.34/ ; echo rc=$?")
+    assert "rc=0" not in r["output"]
+
+
+@needs_seatbelt
+def test_an_allowed_host_that_cannot_be_reached_is_not_counted_as_contacted(box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
+    from personal_os import egress
+
+    async def fake_resolve(host: str, port: int) -> list[str]:
+        return ["93.184.216.34"]
+
+    async def fake_connect(addr: str, port: int) -> Any:
+        raise OSError("no internet in tests")
+    monkeypatch.setattr(egress, "resolve", fake_resolve)
+    monkeypatch.setattr(egress, "connect", fake_connect)
+    box.settings["shellAllowedDomains"] = ["example.com"]
+    r = box.run("shell_run", command="curl -sS -m 8 https://api.example.com/ ; true")
+    assert r["network"]["blocked"] == [] and r["network"]["contacted"] == []
+    assert box.ctx["tainted"] is False
+
+
+def test_contacted_hosts_taint_the_reply_like_open_network(box: Box) -> None:
+    ctx: dict[str, Any] = {"tainted": False, "taint_sources": []}
+    shell.taint(ctx, "shell_run:network")
+    shell.taint(ctx, "shell_run:network")
+    assert ctx["tainted"] is True and ctx["taint_sources"] == ["shell_run:network"]
+    assert "Settings" in shell.net_blocked_note(["a.com"]) and "desk_ask" in shell.net_blocked_note(["a.com"])
+
+
+def test_auto_ok_truth_table(tmp_path: Path) -> None:
+    desk = (tmp_path / "desk").resolve()
+    (desk / "work").mkdir(parents=True)
+    elsewhere = (tmp_path / "else").resolve()
+    elsewhere.mkdir()
+    ctx: dict[str, Any] = {"desk_id": "d1", "conversation_id": "cA", "tainted": False}
+    st: dict[str, Any] = {"deskShellAuto": True}
+
+    def ok(args: dict[str, Any] | None = None, c: dict[str, Any] | None = None, s: dict[str, Any] | None = None,
+           roots: list[Any] | None = None) -> bool:
+        return shell.auto_ok(args or {"command": "ls"}, c if c is not None else ctx, s if s is not None else st,
+                             [desk] if roots is None else roots)
+    assert ok()
+    assert ok({"command": "ls", "cwd": "work"}) and ok({"command": "ls", "cwd": str(desk / "work")})
+    assert not ok({"command": "ls", "cwd": str(elsewhere)}) and not ok({"command": "ls", "cwd": ".."})
+    assert not ok(c={**ctx, "desk_id": None}) and not ok(roots=[])                 # outside a desk
+    assert not ok({"command": "ls", "unsandboxed": True})
+    assert not ok(s={"deskShellAuto": False})                                       # setting off
+    assert ok(s={})                                                                 # the setting defaults on
+    assert not ok(s={**st, "tools": {"shell_run": "ask"}}) and not ok(s={**st, "tools": {"shell_run": False}})
+    assert not ok(c={**ctx, "tool_overrides": {"shell_run": "ask"}})                # a chat/project choice stands
+    assert not ok(s={**st, "shellNetwork": True})                                   # open network: the sandbox protects nothing
+    assert not ok(c={**ctx, "proposal_only": True})
+    # a reply that read untrusted text may not get a way out through the proxy without a card; with no network it may
+    assert not ok(c={**ctx, "tainted": True})
+    assert ok(c={**ctx, "tainted": True}, s={**st, "shellRegistryAccess": False})
+    # where the last command ended counts as the default folder
+    shell._remember_cwd("cA", str(desk / "work"))
+    assert ok()
+    shell._remember_cwd("cA", str(elsewhere))
+    assert not ok()
+
+
+@needs_seatbelt
+def test_cd_persists_between_calls_and_an_explicit_cwd_wins(box: Box) -> None:
+    (box.root / "a" / "b").mkdir(parents=True)
+    r = box.run("shell_run", command="cd a/b && echo in")
+    assert r["exit_code"] == 0 and r["cwd"] == str(box.root / "a" / "b")
+    r = box.run("shell_run", command="pwd")
+    assert r["output"].strip() == str(box.root / "a" / "b") and r["cwd"] == str(box.root / "a" / "b")
+    r = box.run("shell_run", command="pwd", cwd="a")
+    assert r["output"].strip() == str(box.root / "a")
+    # exit code and output are untouched by the wrapper, including when the command exits by itself
+    r = box.run("shell_run", command="echo x; exit 7")
+    assert r["exit_code"] == 7 and r["output"].strip() == "x"
+    # another conversation starts in the default folder; a cd outside every root is forgotten
+    box.ctx["conversation_id"] = "c2"
+    assert box.run("shell_run", command="pwd")["output"].strip() == str(box.root)
+    r = box.run("shell_run", command="cd /tmp && true")
+    assert r["cwd"] == str(box.root) and shell.remembered_cwd("c2") is None
+    # a remembered folder that has since gone is not used
+    box.ctx["conversation_id"] = "c1"
+    shell._remember_cwd("c1", str(box.root / "a"))
+    shutil.rmtree(box.root / "a")
+    assert box.run("shell_run", command="pwd")["output"].strip() == str(box.root)
+
+
+@needs_seatbelt
+def test_timeout_moves_the_command_to_the_background_by_default(box: Box) -> None:
+    async def go() -> None:  # one loop: the job's watcher lives on it
+        t0 = time.time()
+        r = await box.arun("shell_run", command="echo started; sleep 3; echo finished", timeout_s=1)
+        assert time.time() - t0 < 3 and r["still_running"] is True and r["exit_code"] is None and r["timed_out"] is False
+        assert "started" in r["output"] and "finished" not in r["output"] and r["job_id"] and "shell_poll" in r["note"]
+        job = box.tb.shell.jobs[r["job_id"]]
+        assert job.background and job.live()
+        await asyncio.sleep(3.5)
+        p = await box.arun("shell_poll", job_id=r["job_id"])
+        assert p["status"] == "exited" and "finished" in p["output"] and "started" not in p["output"]
+        assert "finished" in " ".join(box.tb.shell.drain_notes("c1"))  # completion notice, like any background job
+    asyncio.run(go())
+
+
+@needs_seatbelt
+def test_timeout_kills_when_asked_or_when_no_slot_is_free(box: Box) -> None:
+    r = box.run("shell_run", command="sleep 30", timeout_s=1, on_timeout="kill")
+    assert r["timed_out"] is True and "still_running" not in r
+    box.settings["shellMaxBackground"] = 1
+    first = box.run("shell_run", command="sleep 30", background=True)
+    r = box.run("shell_run", command="sleep 30", timeout_s=1)
+    assert r["timed_out"] is True and "process group" in r["note"]
+    box.run("shell_kill", job_id=first["job_id"])
+    assert "on_timeout" in box.run("shell_run", command="true", on_timeout="later")["error"]
+
+
+def test_the_tool_describes_its_network_modes_and_timeout_choice(box: Box) -> None:
+    spec = box.tb.specs["shell_run"]
+    d = spec.description
+    assert "proxy" in d and "on_timeout" in d and "environment variables do not" in d
+    assert spec.parameters["properties"]["on_timeout"]["enum"] == ["background", "kill"]
+    assert spec.default_mode == "ask"

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Check, ChevronLeft, ChevronRight, PanelLeftOpen, Calendar as CalIcon, Plus, RefreshCw, Sparkles } from 'lucide-react'
+import { Check, ChevronLeft, ChevronRight, Calendar as CalIcon, Plus, RefreshCw, Sparkles } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import SendToSpace from './SendToSpace'
@@ -12,6 +12,7 @@ import { lines, usePageContext } from '../lib/pageContext'
 import { calendarViewKey, readView, writeView } from '../lib/viewCache'
 import { rangeLabel } from '../lib/dates'
 import AppSwitcher from './AppSwitcher'
+import SidebarToggle from './SidebarToggle'
 
 function CalToggle({ c, on, onToggle }: { c: GoogleCalendar; on: boolean; onToggle: () => void }): JSX.Element {
   const color = c.color ?? 'var(--accent-solid)'
@@ -52,10 +53,9 @@ function CalendarRail({ calendars, ready, shown, toggle }: {
 }
 
 export default function CalendarView(): JSX.Element {
-  const sidebarOpen = useStore((s) => s.sidebarOpen)
   const google = useStore((s) => s.google)
   const todos = useStore((s) => s.todos)
-  const { toggleSidebar, refreshTodos, setSettingsOpen, toast, newChat, send, updateTodo, setView } = useStore()
+  const { refreshTodos, toast, newChat, send, updateTodo, setView } = useStore()
   const [week, setWeek] = useState(() => startOfWeek(new Date()))
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [loading, setLoading] = useState(false)
@@ -186,7 +186,7 @@ export default function CalendarView(): JSX.Element {
   return (
     <main className="page cal-page">
       <header className="page-header drag">
-        {!sidebarOpen && <button className="icon-btn no-drag" aria-label="Show sidebar" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
+        <SidebarToggle />
         <h2><CalIcon size={16} /> Calendar</h2>
         {/* Navigation reads left to right as one phrase: where "now" is, step, and what is on screen. */}
         <div className="no-drag cal-nav">
@@ -205,7 +205,7 @@ export default function CalendarView(): JSX.Element {
       </header>
 
       {!google?.connected && (
-        <div className="notice-bar">Showing todos only. <button className="link" onClick={() => setSettingsOpen(true)}>Connect Google</button></div>
+        <div className="notice-bar">Showing todos only. <button className="link" onClick={() => useStore.getState().openSettings('integrations')}>Connect Google</button></div>
       )}
       {error && <div className="notice-bar error">{error}</div>}
 

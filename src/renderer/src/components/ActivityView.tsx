@@ -3,7 +3,7 @@ import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
   AlertTriangle, BellOff, Brain, CalendarClock, Check, ChevronRight, Clock, Eye, EyeOff, FileText,
-  Globe, Keyboard, Lightbulb, ListPlus, MonitorDot, Mic, PanelLeftOpen, Pause, Play, RefreshCw,
+  Globe, Keyboard, Lightbulb, ListPlus, MonitorDot, Mic, Pause, Play, RefreshCw,
   Repeat, Send, Shield, Speaker, Sparkles, Trash2, TrendingUp, X, Zap
 } from 'lucide-react'
 import { useStore } from '../store'
@@ -13,6 +13,7 @@ import type {
   ActivitySignal, ActivityStatus, ActivitySuggestion, InsightKind
 } from '@shared/types'
 import AppSwitcher from './AppSwitcher'
+import SidebarToggle from './SidebarToggle'
 
 /** The activity monitor: what it records, what it inferred, and every switch that turns it off.
  *
@@ -622,9 +623,8 @@ export default function ActivityView(): JSX.Element {
   const insights = useStore((s) => s.activityInsights)
   const insightsBusy = useStore((s) => s.activityInsightsBusy)
   const busy = useStore((s) => s.activityBusy)
-  const sidebarOpen = useStore((s) => s.sidebarOpen)
   const {
-    toggleSidebar, loadActivity, refreshActivity, setActivityConfig, toggleActivitySignal,
+    loadActivity, refreshActivity, setActivityConfig, toggleActivitySignal,
     startActivity, stopActivity, pauseActivity, resumeActivity, rollupActivity,
     refreshActivityProfile, deleteActivityEvent, deleteActivitySummary, purgeActivity,
     grantActivityPermission, openActivitySettings, setPalantirMode,
@@ -654,7 +654,7 @@ export default function ActivityView(): JSX.Element {
     return (
       <main className="page">
         <header className="page-header drag">
-          {!sidebarOpen && <button className="icon-btn no-drag" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
+          <SidebarToggle />
           <h2><MonitorDot size={16} /> Activity</h2>
           <AppSwitcher />
         </header>
@@ -680,7 +680,7 @@ export default function ActivityView(): JSX.Element {
   return (
     <main className="page activity-page">
       <header className="page-header drag">
-        {!sidebarOpen && <button className="icon-btn no-drag" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
+        <SidebarToggle />
         <h2><MonitorDot size={16} /> Activity</h2>
         <div className="no-drag header-right">
           {st.running && (

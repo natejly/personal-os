@@ -11,7 +11,7 @@
 .ob-progress { display: flex; gap: 6px; margin-bottom: 18px; }
 .ob-progress span { flex: 1; height: 3px; border-radius: 2px; background: var(--border-strong); }
 .ob-progress span.on { background: var(--accent-solid); }
-.ob-lead { font-size: 15px; line-height: 1.55; margin: 0 0 12px; }
+.ob-lead { font-size: 15px; line-height: 1.5; margin: 0 0 12px; }
 .ob-privacy { display: flex; gap: 6px; align-items: flex-start; font-size: 13px; line-height: 1.5; margin: 0 0 12px; padding: 10px 12px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px; }
 .ob-privacy svg { flex: none; margin-top: 3px; color: var(--accent-solid); }
 .onboarding label { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; font-size: 13px; }
@@ -32,8 +32,6 @@
 .ob-actions { display: flex; gap: 8px; align-items: center; margin-top: 18px; flex-wrap: wrap; }
 .ob-spacer { flex: 1; }
 .ob-keys { text-align: center; margin: 14px 0 0; }
-.ob-first-prompts { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 18px; max-width: 560px; }
-.ob-first-prompts .ghost-btn { text-align: left; }
 
 /* Backend-failed screen */
 .backend-error details { text-align: left; margin-top: 16px; }

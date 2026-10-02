@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, CheckSquare, ChevronDown, PanelLeftOpen, RefreshCw } from 'lucide-react'
+import { Plus, CheckSquare, ChevronDown, RefreshCw } from 'lucide-react'
 import type { TodoRepeat } from '@shared/types'
 import { useStore, type Scope } from '../store'
 import TodoItem from './TodoItem'
@@ -10,12 +10,12 @@ import SendToSpace from './SendToSpace'
 import { lines, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
 import PlannerPanel from './PlannerPanel'
+import SidebarToggle from './SidebarToggle'
 
 export default function TodosView(): JSX.Element {
   const todos = useStore((s) => s.todos)
-  const sidebarOpen = useStore((s) => s.sidebarOpen)
   const tasksSync = useStore((s) => s.tasksSync)
-  const { refreshTodos, addTodo, toggleSidebar, refreshTasksSync, runTasksSync, toast } = useStore()
+  const { refreshTodos, addTodo, refreshTasksSync, runTasksSync, toast } = useStore()
   const [scope, setScope] = useState<Scope>('all')
   const [showDone, setShowDone] = useState(false)
   const [title, setTitle] = useState('')
@@ -79,7 +79,7 @@ export default function TodosView(): JSX.Element {
   return (
     <main className="page">
       <header className="page-header drag">
-        {!sidebarOpen && <button className="icon-btn no-drag" aria-label="Show sidebar" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
+        <SidebarToggle />
         <h2><CheckSquare size={16} /> Todos</h2>
         <div className="no-drag header-right">
           {tasksSync?.config.enabled && (

@@ -20,7 +20,7 @@
   backdrop-filter: var(--material-blur, none);
   border: 1px solid var(--border-strong);
   border-radius: var(--win-radius-sm, 10px);
-  box-shadow: var(--shadow-float, 0 0 0 0.5px rgba(0, 0, 0, 0.45), 0 12px 32px rgba(0, 0, 0, 0.34));
+  box-shadow: var(--shadow-float);
 }
 /* Section heads: the `.win-menu-head` metrics, with room between sections. */
 .preset-pop h4 { margin: 0; padding: 6px 8px 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); }

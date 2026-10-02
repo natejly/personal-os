@@ -121,8 +121,8 @@ export default function ProjectView(): JSX.Element {
           <p className="muted small">Saved when you click away.</p>
         </div>
       )}
-      {tab === 'knowledge' && <DocumentsView projectId={id} embedded />}
-      {tab === 'memory' && <MemoryPanel projectId={id} embedded />}
+      {tab === 'knowledge' && <DocumentsView projectId={id} />}
+      {tab === 'memory' && <MemoryPanel projectId={id} />}
     </main>
   )
 }

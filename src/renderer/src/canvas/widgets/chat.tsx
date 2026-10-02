@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState, type DragEvent } from 'react'
-import { Check, MessageSquare, MessagesSquare, Pencil, RefreshCw } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState, type DragEvent } from 'react'
+import { Check, MessageSquare, MessagesSquare, Pencil } from 'lucide-react'
 import type { CanvasWindow, DragKind, DragPayload } from '@shared/types'
 import MessageView from '../../components/Message'
 import Composer from '../../components/Composer'
@@ -110,6 +110,8 @@ function ChatWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
   const streamingId = useStreamingMessageId(convId)
   const { status } = useRingStatus(convId)
   const regenerate = useStore((s) => s.regenerate)
+  // Stable, so the memoised message row it is handed to does not re-render on every token.
+  const onRegenerate = useCallback(() => { void regenerate(convId) }, [regenerate, convId])
 
   // An on-screen window is not an LRU victim for as long as it is mounted.
   useEffect(() => (convId ? retainSession(convId) : undefined), [convId])
@@ -235,12 +237,10 @@ function ChatWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
       <ChatTitle convId={convId} title={convo?.title ?? ''} switcher={<ChatSwitcher win={win} convId={convId} />} />
       <div className="messages" ref={scroll} onScroll={onScroll}>
         <div className="messages-inner">
-          {msgs.map((m) => <MessageView key={m.id} message={m} streaming={streaming && streamingId === m.id} />)}
-          {!streaming && last?.role === 'assistant' && (
-            <div className="regen-row">
-              <button className="ghost-btn" onClick={() => void regenerate(convId)}><RefreshCw size={13} /> Regenerate</button>
-            </div>
-          )}
+          {msgs.map((m) => (
+            <MessageView key={m.id} message={m} streaming={streaming && streamingId === m.id}
+              onRegenerate={!streaming && m === last && m.role === 'assistant' ? onRegenerate : undefined} />
+          ))}
           {!msgs.length && <p className="widget-sub">No messages yet.</p>}
         </div>
       </div>

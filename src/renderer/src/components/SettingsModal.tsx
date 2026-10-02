@@ -472,7 +472,7 @@ export default function SettingsModal(): JSX.Element {
 
             {tab === 'meetings' && <section>
               <h3>Meetings</h3>
-              <MeetingSettings variant="modal" />
+              <MeetingSettings />
             </section>}
 
             {tab === 'usage' && <section>

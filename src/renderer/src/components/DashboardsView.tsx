@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, Trash2, PanelLeftOpen, LayoutDashboard, RefreshCw, Wand2, Database, ChevronDown, X, Sparkles, Code2, Pencil } from 'lucide-react'
+import { Plus, Trash2, LayoutDashboard, RefreshCw, Wand2, Database, ChevronDown, X, Sparkles, Code2, Pencil } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { SAFE_MD } from './Message'
@@ -12,6 +12,7 @@ import { lines, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
 import DeclarativeWidget from './DeclarativeWidget'
 import { isDeclarative } from '../lib/boundWidget'
+import SidebarToggle from './SidebarToggle'
 
 const KIND_LABEL: Record<string, string> = { http: 'HTTP API', rss: 'RSS / Atom', internal: 'Grain data' }
 
@@ -143,8 +144,7 @@ function WidgetCard({ w, sources, onChange }: { w: Widget; sources: DataSource[]
 }
 
 export default function DashboardsView(): JSX.Element {
-  const sidebarOpen = useStore((s) => s.sidebarOpen)
-  const { toggleSidebar, toast } = useStore()
+  const { toast } = useStore()
   const [list, setList] = useState<Dashboard[]>([])
   // A canvas widget window's Expand hands its dashboard over; a stale id falls back to the first one.
   const [activeId, setActiveId] = useState<string | null>(() => peekHandoff('dashboard'))
@@ -207,7 +207,7 @@ export default function DashboardsView(): JSX.Element {
   return (
     <main className="page dash-page">
       <header className="page-header drag">
-        {!sidebarOpen && <button className="icon-btn no-drag" aria-label="Show sidebar" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
+        <SidebarToggle />
         <h2><LayoutDashboard size={16} /> Dashboards</h2>
         <div className="no-drag header-right">
           <SendToSpace

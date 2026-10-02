@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Plus, Trash2, PanelLeftOpen, KanbanSquare, Calendar, X, ChevronDown } from 'lucide-react'
+import { Plus, Trash2, KanbanSquare, Calendar, X, ChevronDown } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import type { Board, BoardCard, BoardColumn } from '@shared/types'
@@ -10,6 +10,7 @@ import { lines, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
 import { rowButton } from '../lib/rowButton'
 import { dueLabel, shortDate } from '../lib/dates'
+import SidebarToggle from './SidebarToggle'
 
 const PRIO = ['', 'P1', 'P2', 'P3']
 
@@ -119,9 +120,8 @@ function Column({ col, cards, board, onChange, onOpen }: { col: BoardColumn; car
 }
 
 export default function BoardsView(): JSX.Element {
-  const sidebarOpen = useStore((s) => s.sidebarOpen)
   const projects = useStore((s) => s.projects)
-  const { toggleSidebar, toast } = useStore()
+  const { toast } = useStore()
   const [boards, setBoards] = useState<Board[]>([])
   // A canvas board window's Expand hands its board over; a stale id falls back to the first board.
   const [activeId, setActiveId] = useState<string | null>(() => peekHandoff('board'))
@@ -182,7 +182,7 @@ export default function BoardsView(): JSX.Element {
   return (
     <main className="page board-page">
       <header className="page-header drag">
-        {!sidebarOpen && <button className="icon-btn no-drag" aria-label="Show sidebar" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
+        <SidebarToggle />
         <h2><KanbanSquare size={16} /> Boards</h2>
         <div className="no-drag header-right">
           <SendToSpace items={[{ kind: 'board', refId: activeId }]} disabled={!activeId} />

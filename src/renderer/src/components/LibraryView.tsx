@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { BookOpen, FileText, KanbanSquare, LayoutDashboard, Library, Package, PanelLeftOpen, Plug, Sparkles, Workflow } from 'lucide-react'
+import { BookOpen, FileText, KanbanSquare, LayoutDashboard, Library, Package, Plug, Sparkles, Workflow } from 'lucide-react'
 import { useStore, type LibraryTab } from '../store'
 import { api } from '../lib/api'
 import { rowButton } from '../lib/rowButton'
@@ -10,6 +10,7 @@ import WorkflowsPanel from './WorkflowsPanel'
 import AppSwitcher from './AppSwitcher'
 import ArtifactsView from './ArtifactsView'
 import ArtifactViewer from './ArtifactViewer'
+import SidebarToggle from './SidebarToggle'
 
 const TABS: { key: LibraryTab; label: string; icon: JSX.Element; blurb: string }[] = [
   { key: 'skills', label: 'Skills', icon: <Sparkles size={14} />, blurb: 'Ways of doing a task the assistant may follow again' },
@@ -103,9 +104,8 @@ function MadePanel(): JSX.Element {
 
 export default function LibraryView(): JSX.Element {
   const tab = useStore((s) => s.libraryTab)
-  const sidebarOpen = useStore((s) => s.sidebarOpen)
   const candidates = useStore((s) => s.skills.filter((x) => x.status === 'candidate').length)
-  const { setLibraryTab, toggleSidebar, refreshLibrary } = useStore()
+  const { setLibraryTab, refreshLibrary } = useStore()
 
   // Cheap enough to re-run on every entry, and it is the only thing that notices a connector that
   // fell over while the view was closed.
@@ -114,7 +114,7 @@ export default function LibraryView(): JSX.Element {
   return (
     <main className="page library-page">
       <header className="page-header drag">
-        {!sidebarOpen && <button className="icon-btn no-drag" aria-label="Show sidebar" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
+        <SidebarToggle />
         <h2><Library size={16} /> Library</h2>
         <AppSwitcher />
       </header>

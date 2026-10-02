@@ -1,8 +1,8 @@
 /**
  * The one list of what the shell is made of: which cards the Today screen shows and which views the
- * sidebar offers. Both are user-toggleable (Settings → Modules, or the slider button on Today) and
+ * sidebar offers. Both are user-toggleable (Settings → Views, or the slider button on Today) and
  * persist in settings as exceptions — a missing homeWidgets key means "on". Library, Cowork,
- * Meetings and Activity ship hidden (see llm.DEFAULT_SETTINGS); Settings → Modules turns them back on.
+ * Meetings and Activity ship hidden (see llm.DEFAULT_SETTINGS); Settings → Views turns them back on.
  */
 import type { View } from './store'
 import { moduleHome, moduleForView } from './shell/registry'

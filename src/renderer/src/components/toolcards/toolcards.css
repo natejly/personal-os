@@ -14,9 +14,9 @@
 
 .tc-status { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 2px 8px; border-radius: 10px; background: var(--hover); color: var(--text-muted); white-space: nowrap; }
 .tc-status.awaiting { background: color-mix(in srgb, var(--accent) 15%, transparent); color: var(--accent); }
-.tc-status.done, .tc-status.verified { background: rgba(70,167,88,0.15); color: var(--ok); }
+.tc-status.done, .tc-status.verified { background: color-mix(in srgb, var(--ok) 15%, transparent); color: var(--ok); }
 .tc-status.denied { background: var(--hover); color: var(--text-muted); }
-.tc-status.failed, .tc-status.unverified { background: rgba(229,72,77,0.15); color: var(--danger); }
+.tc-status.failed, .tc-status.unverified { background: color-mix(in srgb, var(--danger) 15%, transparent); color: var(--danger); }
 
 .tc-body { padding: 10px 12px; }
 .tc-section { margin-top: 8px; }
@@ -39,7 +39,7 @@
 
 /* result */
 .tc-result { padding: 8px 12px; border-top: 1px solid var(--border); background: var(--bg-input); }
-.tc-result.err { display: flex; gap: 6px; align-items: flex-start; color: var(--danger); background: rgba(229,72,77,0.07); }
+.tc-result.err { display: flex; gap: 6px; align-items: flex-start; color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); }
 .tc-result.err svg { margin-top: 2px; flex-shrink: 0; }
 .tc-list { margin: 0; padding-left: 18px; display: grid; gap: 2px; }
 

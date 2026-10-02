@@ -89,7 +89,6 @@ export default function Onboarding(): JSX.Element {
 
   const finish = (): void => {
     useStore.getState().newChat()
-    useOnboarding.getState().setFirstPrompts(true)
     closeWizard()
   }
 

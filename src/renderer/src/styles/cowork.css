@@ -82,7 +82,7 @@
 .desk-autonomy { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; }
 .desk-autonomy-opt {
   display: grid; grid-template-columns: auto 1fr; gap: 2px 7px; align-items: start;
-  padding: 9px 11px; border: 1px solid var(--border); border-radius: 9px; cursor: pointer;
+  padding: 9px 11px; border: 1px solid var(--border); border-radius: 10px; cursor: pointer;
 }
 .desk-autonomy-opt.on { border-color: var(--accent); background: var(--hover); }
 .desk-autonomy-opt b { font-size: 13px; font-weight: 600; }
@@ -93,7 +93,7 @@
 .desk-head { padding: 12px 16px 0; }
 .desk-head-top { display: flex; align-items: center; gap: 8px; }
 .desk-title-input {
-  flex: 1; min-width: 0; background: none; border: 1px solid transparent; border-radius: 7px;
+  flex: 1; min-width: 0; background: none; border: 1px solid transparent; border-radius: 8px;
   padding: 3px 6px; color: var(--text); font: inherit; font-size: 16px; font-weight: 600; outline: 0;
 }
 .desk-title-input:hover { border-color: var(--border); }
@@ -123,7 +123,7 @@
 .desk-banners { flex: none; max-height: 45vh; overflow-y: auto; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
 .desk-banners:empty { display: none; }
 .desk-banner {
-  display: flex; gap: 9px; margin: 10px 16px 0; padding: 10px 12px; border-radius: 9px;
+  display: flex; gap: 9px; margin: 10px 16px 0; padding: 10px 12px; border-radius: 10px;
   font-size: 13px; background: var(--hover); border: 1px solid var(--border);
 }
 .desk-banner b { display: block; margin-bottom: 2px; }
@@ -150,7 +150,7 @@
 .desk-card .approval-args { margin: 0; max-height: 160px; overflow: auto; }
 .desk-card .approval-actions, .desk-settings .approval-actions { display: flex; gap: 6px; }
 .desk-settings { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; padding: 12px;
-  border: 1px solid var(--border); border-radius: 9px; background: var(--hover); }
+  border: 1px solid var(--border); border-radius: 10px; background: var(--hover); }
 .desk-limits { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 12.5px; }
 .desk-limits label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); }
 .desk-limits input { width: 80px; padding: 4px 6px; border-radius: 6px; border: 1px solid var(--border);
@@ -173,7 +173,7 @@
 /* ---- note row: a sentence typed in place of the button that asked for it ---- */
 .desk-note {
   display: flex; flex-direction: column; gap: 7px; padding: 10px 12px;
-  border: 1px solid var(--border-strong); border-radius: 9px; background: var(--hover);
+  border: 1px solid var(--border-strong); border-radius: 10px; background: var(--hover);
 }
 .desk-note label { display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; color: var(--text-muted); }
 .desk-note textarea {
@@ -222,7 +222,7 @@
 .desk-folder .rot90 { transform: rotate(90deg); }
 .desk-folder .count { margin-left: auto; }
 .desk-file-row {
-  display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 7px;
+  display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 8px;
   cursor: pointer; color: var(--text-muted); font-size: 12.5px;
 }
 .desk-file-row:hover { background: var(--hover); color: var(--text); }
@@ -251,8 +251,8 @@
 .desk-diff-line { display: flex; gap: 6px; padding: 0 4px; white-space: pre-wrap; word-break: break-word; }
 .desk-diff-sign { flex: none; width: 10px; color: var(--text-faint); }
 .desk-diff-text { flex: 1; min-width: 0; }
-.desk-diff .diff-add { background: rgba(48, 164, 108, 0.12); }
-.desk-diff .diff-del { background: rgba(229, 72, 77, 0.12); }
+.desk-diff .diff-add { background: color-mix(in srgb, var(--ok) 15%, transparent); }
+.desk-diff .diff-del { background: color-mix(in srgb, var(--danger) 15%, transparent); }
 
 /* ---- output tab ---- */
 .desk-review { display: flex; flex-direction: column; gap: 10px; }
@@ -268,7 +268,7 @@
 .desk-output-summary { margin: 6px 0 0; font-size: 12.5px; color: var(--text-muted); }
 .desk-output-excerpt {
   margin: 6px 0 0; max-height: 200px; overflow: auto; white-space: pre-wrap; word-break: break-word;
-  font-size: 11.5px; background: var(--bg-input); border-radius: 7px; padding: 8px;
+  font-size: 11.5px; background: var(--bg-input); border-radius: 8px; padding: 8px;
 }
 .desk-output-dest { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
 .desk-verified { display: inline-flex; align-items: center; gap: 4px; margin: 6px 0 0; font-size: 12px; color: var(--st-done); }
@@ -288,14 +288,14 @@
 .aplan-head b { font-weight: 600; }
 .aplan-count { font-size: 11px; color: var(--text-faint); }
 .aplan-status { font-size: 11px; font-weight: 600; color: var(--accent); }
-.aplan-status.approved { color: var(--chart-3, var(--text-muted)); }
+.aplan-status.approved { color: var(--ok); }
 .aplan-status.rejected, .aplan-status.superseded { color: var(--text-faint); }
 .aplan-intent { margin: 6px 0 0; font-size: 12.5px; color: var(--text-muted); line-height: 1.5; }
 .aplan-effects { margin: 6px 0 0; font-size: 12px; font-weight: 600; color: var(--text); }
 .aplan-taint {
-  display: flex; gap: 6px; margin: 8px 0 0; padding: 7px 9px; border-radius: 7px;
-  font-size: 11.5px; line-height: 1.45; color: var(--text-muted);
-  background: rgba(229, 72, 77, 0.08); border: 1px solid rgba(229, 72, 77, 0.3);
+  display: flex; gap: 6px; margin: 8px 0 0; padding: 7px 9px; border-radius: 8px;
+  font-size: 11.5px; line-height: 1.5; color: var(--text-muted);
+  background: color-mix(in srgb, var(--danger) 8%, transparent); border: 1px solid color-mix(in srgb, var(--danger) 40%, transparent);
 }
 .aplan-taint svg { flex: none; margin-top: 2px; }
 
@@ -314,12 +314,12 @@
   font-family: var(--mono); font-size: 10.5px;
   background: var(--border); color: var(--text-muted);
 }
-.aplan-tool.danger-writes { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
-.aplan-tool.danger-network { background: rgba(94, 129, 172, 0.18); color: var(--chart-7, var(--text-muted)); }
-.aplan-tool.danger-executes, .aplan-tool.danger-external { background: rgba(229, 72, 77, 0.14); color: var(--danger); }
+.aplan-tool.danger-writes { background: color-mix(in srgb, var(--warn) 15%, transparent); color: var(--warn); }
+.aplan-tool.danger-network { background: color-mix(in srgb, var(--info) 15%, transparent); color: var(--info); }
+.aplan-tool.danger-executes, .aplan-tool.danger-external { background: color-mix(in srgb, var(--danger) 15%, transparent); color: var(--danger); }
 .aplan-tool.danger-plan { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
 .aplan-drop { display: inline-flex; align-items: center; gap: 3px; margin-left: auto; font-size: 11px; color: var(--text-faint); cursor: pointer; }
-.aplan-why { margin: 2px 0 0; font-size: 12px; color: var(--text-muted); line-height: 1.45; }
+.aplan-why { margin: 2px 0 0; font-size: 12px; color: var(--text-muted); line-height: 1.5; }
 
 .aplan-args { margin: 5px 0 0; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 8px; font-size: 11.5px; }
 .aplan-args > div { display: contents; }
@@ -332,7 +332,7 @@
 .aplan-edit-toggle .rot90 { transform: rotate(90deg); }
 .aplan-edit textarea {
   width: 100%; margin-top: 5px; background: var(--bg-input); border: 1px solid var(--border);
-  border-radius: 7px; padding: 8px; color: var(--text); font-family: var(--mono); font-size: 11.5px;
+  border-radius: 8px; padding: 8px; color: var(--text); font-family: var(--mono); font-size: 11.5px;
   outline: 0; resize: vertical;
 }
 .aplan-edit textarea:focus { border-color: var(--accent); }
@@ -340,7 +340,7 @@
 
 .aplan-foot { margin-top: 10px; display: flex; flex-direction: column; gap: 7px; }
 .aplan-note, .aplan-answer {
-  width: 100%; background: var(--bg-input); border: 1px solid var(--border); border-radius: 7px;
+  width: 100%; background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px;
   padding: 6px 9px; color: var(--text); font: inherit; font-size: 12.5px; outline: 0; resize: vertical;
 }
 .aplan-note:focus, .aplan-answer:focus { border-color: var(--accent); }
@@ -352,7 +352,7 @@
 /* ---- Today card ---- */
 .home-desks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .home-desks li {
-  display: flex; align-items: baseline; gap: 8px; padding: 4px 6px; border-radius: 7px;
+  display: flex; align-items: baseline; gap: 8px; padding: 4px 6px; border-radius: 8px;
   cursor: pointer; font-size: 13px; color: var(--text-muted);
 }
 .home-desks li:hover { background: var(--hover); color: var(--text); }

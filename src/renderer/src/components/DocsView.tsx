@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  FileText, Files, Plus, PanelLeftOpen, X, History, Columns2, Eye, Pencil,
+  FileText, Files, Plus, X, History, Columns2, Eye, Pencil,
   Sparkles, Save, Link2, Link2Off, ChevronDown, Folder, FolderKanban, FolderTree
 } from 'lucide-react'
 import { useStore } from '../store'
@@ -14,6 +14,7 @@ import ResizeHandle from './ResizeHandle'
 import { clip, lines, usePageContext } from '../lib/pageContext'
 import '../styles/docs.css'
 import AppSwitcher from './AppSwitcher'
+import SidebarToggle from './SidebarToggle'
 
 const TREE_KEY = 'grain.docs.treeOpen'
 const treeWasOpen = (): boolean => {
@@ -31,10 +32,9 @@ export default function DocsView(): JSX.Element {
   const docRevisions = useStore((s) => s.docRevisions)
   const docMode = useStore((s) => s.docMode)
   const docSaving = useStore((s) => s.docSaving)
-  const sidebarOpen = useStore((s) => s.sidebarOpen)
   const {
     refreshDocs, openDoc, closeDocTab, createDoc, editDoc, editDocTitle, flushDoc, moveDoc,
-    setDocMode, acceptRevision, rejectRevision, restoreRevision, toggleSidebar
+    setDocMode, acceptRevision, rejectRevision, restoreRevision
   } = useStore()
 
   const [query, setQuery] = useState('')
@@ -117,7 +117,7 @@ export default function DocsView(): JSX.Element {
   return (
     <main className="page docs-page">
       <header className="page-header drag">
-        {!sidebarOpen && <button className="icon-btn no-drag" title="Show sidebar (⌘B)" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
+        <SidebarToggle />
         <button
           className={`icon-btn no-drag ${treeOpen ? 'on' : ''}`} title={treeOpen ? 'Hide file tree' : 'Show file tree'}
           aria-label="Toggle file tree" aria-pressed={treeOpen} onClick={() => setTreeOpen(!treeOpen)}

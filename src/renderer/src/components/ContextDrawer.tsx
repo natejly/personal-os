@@ -201,7 +201,7 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
         <Toggle icon={<Mic size={14} />} label="Meetings" hint={meetingCount ? 'Your recent meeting notes and decisions' : 'No meetings recorded yet'} value={cs.useMeetings !== false} onChange={(v) => void setChatSettings({ useMeetings: v }, conversationId)} />
         <Toggle icon={<Wand2 size={14} />} label="Auto-learn" hint={settings.autoLearn ? 'Extract memories, graph & writing style after each reply' : 'Disabled globally in settings'} value={cs.autoLearn && settings.autoLearn} onChange={(v) => void setChatSettings({ autoLearn: v }, conversationId)} />
         <Toggle icon={<Wrench size={14} />} label="Tools" hint="Web, documents, memory, graph, todos, boards, Python… External actions ask first." value={cs.useTools} onChange={(v) => void setChatSettings({ useTools: v }, conversationId)} />
-        <Toggle icon={<GraduationCap size={14} />} label="Skills" hint="Procedures you approved, injected as procedural memory. Candidates are never injected." value={cs.useSkills !== false} onChange={(v) => void setChatSettings({ useSkills: v }, conversationId)} />
+        <Toggle icon={<GraduationCap size={14} />} label="Skills" hint="Skills you approved, added to the context as steps to follow. Candidates are never added." value={cs.useSkills !== false} onChange={(v) => void setChatSettings({ useSkills: v }, conversationId)} />
         {convo && (
           <div className="ctx-tools">
             <button className="link small" onClick={() => void induceSkill(convo.id)}>Save this chat as a skill…</button>

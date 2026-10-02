@@ -18,9 +18,8 @@ const MODES: { key: MemoryMode; label: string; icon: JSX.Element; title: string 
  * `projectId` scopes it to a project (used inside ProjectView); without it the
  * panel follows the library scope. It is always hosted by another view (a project, or
  * Settings → Knowledge base), so it has a toolbar and never a page header of its own.
- * `embedded` is still accepted because ProjectView passes it; it no longer changes anything.
  */
-export default function MemoryPanel({ projectId }: { projectId?: string; embedded?: boolean }): JSX.Element {
+export default function MemoryPanel({ projectId }: { projectId?: string }): JSX.Element {
   const libraryScope = useStore((s) => s.libraryScope)
   const memories = useStore((s) => s.memories)
   const graph = useStore((s) => s.graph)

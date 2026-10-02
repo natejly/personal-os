@@ -1,7 +1,5 @@
 /* Artifacts: the chat card, the fenced html/svg preview, the viewer and the Library tab. Tokens only, so light and dark follow the app. */
 
-.tool-card-host { border: 0; background: none; }
-
 /* ---------- chat card ---------- */
 .art-card { border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elev); overflow: hidden; font-size: 12.5px; }
 .art-card.error { border-color: color-mix(in srgb, var(--danger) 45%, var(--border)); }
@@ -52,7 +50,6 @@
 .art-view-body .art-frame { flex: 1; height: 100% !important; border-top: 0; }
 .art-source { margin: 0; flex: 1; overflow: auto; padding: 12px 14px; font-family: var(--mono); font-size: 12px; line-height: 1.5; background: var(--bg-input); white-space: pre-wrap; word-break: break-word; }
 .art-warn { margin: 0; padding: 6px 14px; font-size: 12px; color: var(--warn); border-bottom: 1px solid var(--border); }
-.icon-btn.on { background: var(--active); }
 
 /* ---------- Library tab ---------- */
 .art-split { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 16px; padding: 0 4px; height: calc(100vh - 150px); min-height: 480px; }

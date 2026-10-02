@@ -26,11 +26,6 @@
   /* Hairline only: the old blurred drop shadows cast onto adjacent windows, reading as a highlight. */
   --shadow-window: 0 0 0 0.5px rgba(0, 0, 0, 0.35);
   --shadow-focused: 0 0 0 0.5px rgba(0, 0, 0, 0.5);
-  /* Floating chrome (menus, dock) still gets depth — it overlays windows, never sits beside them. */
-  --shadow-float: 0 0 0 0.5px rgba(0, 0, 0, 0.45), 0 12px 32px rgba(0, 0, 0, 0.34);
-  --tl-red: #ff5f57;
-  --tl-yellow: #febc2e;
-  --tl-green: #28c840;
   --tl-off: #565654;
   --spring: cubic-bezier(0.32, 0.72, 0, 1);
   --dur-window: 320ms;
@@ -52,7 +47,6 @@
   --win-highlight: rgba(255, 255, 255, 0.9);
   --shadow-window: 0 0 0 0.5px rgba(0, 0, 0, 0.14);
   --shadow-focused: 0 0 0 0.5px rgba(0, 0, 0, 0.22);
-  --shadow-float: 0 0 0 0.5px rgba(0, 0, 0, 0.18), 0 10px 26px rgba(0, 0, 0, 0.14);
   --tl-off: #c9c7c2;
   --grid-dot: rgba(0, 0, 0, 0.2);
   --dock-tile: rgba(255, 255, 255, 0.78);
@@ -66,7 +60,6 @@
     --win-highlight: rgba(255, 255, 255, 0.9);
     --shadow-window: 0 0 0 0.5px rgba(0, 0, 0, 0.14);
     --shadow-focused: 0 0 0 0.5px rgba(0, 0, 0, 0.22);
-    --shadow-float: 0 0 0 0.5px rgba(0, 0, 0, 0.18), 0 10px 26px rgba(0, 0, 0, 0.14);
     --tl-off: #c9c7c2;
     --grid-dot: rgba(0, 0, 0, 0.2);
     --dock-tile: rgba(255, 255, 255, 0.78);
@@ -107,11 +100,10 @@
 /* A drag that crosses an iframe must not hand the pointer stream to another document. */
 .canvas.interacting iframe { pointer-events: none; }
 
-/* Locked: the plane takes no gestures, so it offers no grab cursor and no grip hint. The windows
+/* Locked: the plane takes no gestures, so it offers no grab cursor. The windows
    themselves stay live -- only their chrome goes quiet. */
 .canvas.locked { cursor: default; }
 .canvas.locked .win-move { cursor: default; }
-.canvas.locked .win-grip-dots { opacity: 0.35; }
 
 .canvas-plane {
   position: absolute;
@@ -463,7 +455,6 @@
   text-transform: uppercase;
   color: var(--text-faint);
 }
-.win-stub-ref { font-family: var(--mono); font-size: 11px; color: var(--text-muted); word-break: break-all; }
 
 .proxy-card {
   height: 100%;
@@ -790,8 +781,6 @@
 /* ---------- motion ---------- */
 
 @keyframes win-open { from { opacity: 0; transform: scale(0.94); } to { opacity: 1; transform: none; } }
-@keyframes win-close { from { opacity: 1; transform: none; } to { opacity: 0; transform: scale(0.96); } }
-@keyframes win-min { from { opacity: 1; transform: none; } to { opacity: 0; transform: translateY(40%) scale(0.4); } }
 @keyframes guide-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes zone-in { from { opacity: 0; transform: scale(0.98); } to { opacity: 1; transform: none; } }
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  AlertTriangle, Columns2, Copy, GitCompare, ListChecks, Mic, PanelLeftOpen, RefreshCw,
+  AlertTriangle, Columns2, Copy, GitCompare, ListChecks, Mic, RefreshCw,
   Sparkles, Trash2, Search, Speaker, Upload, X
 } from 'lucide-react'
 import { useStore, type Scope } from '../store'
@@ -18,6 +18,7 @@ import '../styles/meetings.css'
 import AppSwitcher from './AppSwitcher'
 import ResizeHandle from './ResizeHandle'
 import { rowButton } from '../lib/rowButton'
+import SidebarToggle from './SidebarToggle'
 
 /**
  * Meetings: the notepad you type in during a call, the transcript beside it, and the enhanced
@@ -154,7 +155,6 @@ export default function MeetingsView(): JSX.Element {
   const meetingBusy = useStore((s) => s.meetingBusy)
   const meetingConsentOpen = useStore((s) => s.meetingConsentOpen)
   const libraryScope = useStore((s) => s.libraryScope)
-  const sidebarOpen = useStore((s) => s.sidebarOpen)
   // The search text lives in the store so the recorder bar's 5s rail refresh re-issues it instead
   // of replacing the filtered list with everything.
   const query = useStore((s) => s.meetingQuery)
@@ -162,7 +162,7 @@ export default function MeetingsView(): JSX.Element {
   const {
     refreshMeetings, openMeeting, deleteMeeting, startRecording, editMeetingNotes, flushMeetingNotes,
     enhanceMeeting, acceptMeetingRevision, rejectMeetingRevision, promoteActionItems, dismissActionItem,
-    retranscribeMeeting, deleteMeetingAudio, toggleSidebar, setLibraryScope, loadMeetingPreflight, toast
+    retranscribeMeeting, deleteMeetingAudio, setLibraryScope, loadMeetingPreflight, toast
   } = useStore()
 
   const [transcriptOpen, setTranscriptOpen] = useState(false)
@@ -236,7 +236,7 @@ export default function MeetingsView(): JSX.Element {
   return (
     <main className="page mtg-page">
       <header className="page-header drag">
-        {!sidebarOpen && <button className="icon-btn no-drag" title="Show sidebar (⌘B)" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
+        <SidebarToggle />
         <h2><Mic size={16} /> Meetings</h2>
         <div className="no-drag header-right">
           <ScopeSelect value={scope} onChange={(s) => void setLibraryScope(s)} />

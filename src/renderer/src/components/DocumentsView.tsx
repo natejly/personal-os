@@ -9,10 +9,9 @@ const fmtSize = (n: number): string => (n < 1024 ? `${n} B` : n < 1048576 ? `${(
 
 /**
  * The uploaded-document library. Always hosted by another view (a project, or Settings → Knowledge
- * base), so it is a body with no page header of its own. `embedded` is still accepted because
- * ProjectView passes it; it no longer changes anything.
+ * base), so it is a body with no page header of its own.
  */
-export default function DocumentsView({ projectId }: { projectId?: string; embedded?: boolean }): JSX.Element {
+export default function DocumentsView({ projectId }: { projectId?: string }): JSX.Element {
   const documents = useStore((s) => s.documents)
   const libraryScope = useStore((s) => s.libraryScope)
   const { uploadDocuments, deleteDocument, loadScope } = useStore()

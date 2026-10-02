@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ArrowDown, PanelLeftOpen, Pencil, SlidersHorizontal } from 'lucide-react'
+import { ArrowDown, Pencil, SlidersHorizontal } from 'lucide-react'
 import { useStore, useProject, useConversation, useIsStreaming, useStreamingMessageId } from '../store'
 import ProjectChip from './ProjectChip'
 import MessageView from './Message'
@@ -12,6 +12,7 @@ import SendToSpace from './SendToSpace'
 import { clip, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
 import { FIRST_PROMPTS } from './onboarding/steps'
+import SidebarToggle from './SidebarToggle'
 
 function greeting(): string {
   const h = new Date().getHours()
@@ -26,11 +27,10 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   const convo = useConversation(conversationId)
   const isStreamingHere = useIsStreaming(conversationId)
   const streamingMessageId = useStreamingMessageId(conversationId)
-  const sidebarOpen = useStore((s) => s.sidebarOpen)
   const contextOpen = useStore((s) => s.contextOpen)
   const draftProjectId = useStore((s) => s.draftProjectId)
   const project = useProject(convo?.project_id ?? draftProjectId)
-  const { toggleSidebar, toggleContext, renameChat, regenerate, send } = useStore()
+  const { toggleContext, renameChat, regenerate, send } = useStore()
   const scrollRef = useRef<HTMLDivElement>(null)
   const [stick, setStick] = useState(true)
   const [editingTitle, setEditingTitle] = useState(false)
@@ -67,7 +67,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   return (
     <main className="chat">
       <header className="chat-header drag">
-        {!sidebarOpen && <button className="icon-btn no-drag" title="Show sidebar (⌘B)" aria-label="Show sidebar" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
+        <SidebarToggle />
         <div className="chat-title no-drag">
           {convo && editingTitle ? (
             <input autoFocus aria-label="Chat title" defaultValue={convo.title}

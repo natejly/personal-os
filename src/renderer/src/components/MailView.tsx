@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
-import { Mail as MailIcon, PanelLeftOpen, RefreshCw, Search, Star, Archive, MailOpen, Mail, ExternalLink, MessageSquare, Paperclip, SquarePen, Reply, Sparkles, Send, X } from 'lucide-react'
+import { Mail as MailIcon, RefreshCw, Search, Star, Archive, MailOpen, Mail, ExternalLink, MessageSquare, Paperclip, SquarePen, Reply, Sparkles, Send, X } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import SmartTextarea from './SmartTextarea'
@@ -12,6 +12,7 @@ import { MailWatchChips, MailWatchList, useMailWatch } from './MailWatchPanel'
 import { rowButton } from '../lib/rowButton'
 import { useModal } from '../lib/useModal'
 import { shortDate, shortDateTime } from '../lib/dates'
+import SidebarToggle from './SidebarToggle'
 
 const fromName = (s: string | null): string => (s ?? '').replace(/<.*>/, '').replace(/"/g, '').trim() || (s ?? '')
 const fmtDate = (s: string | null): string => {
@@ -169,9 +170,8 @@ function MailCompose({ compose, setCompose, review, setReview, busy, valid, onDi
 }
 
 export default function MailView(): JSX.Element {
-  const sidebarOpen = useStore((s) => s.sidebarOpen)
   const google = useStore((s) => s.google)
-  const { toggleSidebar, setSettingsOpen, toast, askAboutEmail } = useStore()
+  const { toast, askAboutEmail } = useStore()
   const [messages, setMessages] = useState<GmailMessage[]>([])
   const [labels, setLabels] = useState<GmailLabel[]>([])
   const [loading, setLoading] = useState(false)
@@ -357,7 +357,7 @@ export default function MailView(): JSX.Element {
   return (
     <main className="page mail-page">
       <header className="page-header drag">
-        {!sidebarOpen && <button className="icon-btn no-drag" title="Show sidebar (⌘B)" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
+        <SidebarToggle />
         <h2><MailIcon size={16} /> Mail {google?.email && <span className="muted">· {google.email}</span>}</h2>
         {google?.connected && <div className="no-drag header-right">
           <label className="search">
@@ -377,7 +377,7 @@ export default function MailView(): JSX.Element {
           <MailIcon size={28} />
           <h2>Connect your inbox</h2>
           <p>Grain reads and triages Gmail once Google is connected. Nothing is sent without asking you first.</p>
-          <button className="primary-btn" onClick={() => setSettingsOpen(true)}>Connect Google</button>
+          <button className="primary-btn" onClick={() => useStore.getState().openSettings('integrations')}>Connect Google</button>
         </div>
       )}
       {error && <div className="notice-bar error">{error}</div>}

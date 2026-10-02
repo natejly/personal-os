@@ -53,6 +53,7 @@ RESERVED_TOOL_NAMES = frozenset({
     "health_summary", "health_log", "health_delete_entry",
     "mail_followups", "schedule_suggest",
     "calendar_events", "calendar_create", "calendar_get", "calendar_update", "calendar_delete", "calendar_respond",
+    "calendar_free_busy", "calendar_find_time", "calendar_propose",
     "gmail_search", "gmail_read", "gmail_draft", "gmail_send", "gmail_modify", "gmail_outbox",
     "google_tasks_list", "google_tasks_add", "google_tasks_complete",
     "google_drive_search", "google_drive_read",
@@ -223,6 +224,45 @@ class McpServers:
             for col, ddl in (("quarantined_at", "REAL"), ("reviewed_hash", "TEXT NOT NULL DEFAULT ''")):
                 if col not in have:
                     c.execute(f"ALTER TABLE mcp_tools ADD COLUMN {col} {ddl}")
+        self._migrate_secrets()
+
+    # ---------- secrets ----------
+    # The column keeps only the secret names ({name: ""}); the values live in the secret store, one JSON
+    # blob per server, so listing keys (secret_keys) still works without touching the Keychain.
+    def _secret_name(self, id: str) -> str:
+        return f"mcp:{id}"
+
+    def _load_secrets(self, id: str) -> dict[str, str]:
+        try:
+            v = json.loads(self.db.secrets.get(self._secret_name(id)) or "{}")
+        except ValueError:
+            return {}
+        return {k: str(x) for k, x in v.items()} if isinstance(v, dict) else {}
+
+    def _store_secrets(self, id: str, values: dict[str, str]) -> None:
+        if values:
+            self.db.secrets.set(self._secret_name(id), json.dumps(values))
+        else:
+            self.db.secrets.delete(self._secret_name(id))
+
+    def _migrate_secrets(self) -> None:
+        """Move plaintext values left in the secrets column into the secret store. Idempotent."""
+        with self.db.tx() as c:
+            rows = c.execute("SELECT id, secrets FROM mcp_servers").fetchall()
+        for r in rows:
+            try:
+                col = json.loads(r["secrets"] or "{}")
+            except ValueError:
+                continue
+            plain = {k: str(v) for k, v in col.items() if v}
+            if not plain:
+                continue
+            try:
+                self._store_secrets(r["id"], {**plain, **self._load_secrets(r["id"])})
+            except Exception:  # noqa: BLE001 - keep the plaintext rather than lose the key
+                continue
+            with self.db.tx() as c:
+                c.execute("UPDATE mcp_servers SET secrets=? WHERE id=?", (json.dumps({k: "" for k in col}), r["id"]))
 
     # ---------- servers ----------
     def servers(self, with_secrets: bool = False) -> list[dict[str, Any]]:
@@ -239,15 +279,14 @@ class McpServers:
             n = c.execute("SELECT COUNT(*) FROM mcp_tools WHERE server_id=? AND missing_since IS NULL", (id,)).fetchone()[0]
         return self._server_dict(r, n, with_secrets)
 
-    @staticmethod
-    def _server_dict(r: sqlite3.Row, tool_count: int, with_secrets: bool) -> dict[str, Any]:
+    def _server_dict(self, r: sqlite3.Row, tool_count: int, with_secrets: bool) -> dict[str, Any]:
         d = row_to_dict(r, SERVER_JSON) or {}
         secrets = json.loads(d.pop("secrets", "{}") or "{}")
         d["secret_keys"] = sorted(secrets)
         d["enabled"] = bool(d["enabled"])
         d["tool_count"] = tool_count
         if with_secrets:
-            d["secrets"] = secrets
+            d["secrets"] = {k: v for k, v in self._load_secrets(d["id"]).items() if k in secrets}
         return d
 
     def create_server(self, name: str, transport: str = "stdio", command: str = "", args: list[str] | None = None,
@@ -256,6 +295,7 @@ class McpServers:
                       enabled: bool = True) -> dict[str, Any]:
         sid = new_id()
         t = now()
+        plain = {k: str(v) for k, v in (secrets or {}).items() if v}
         for attempt in range(SLUG_ATTEMPTS):
             try:
                 with self.db.tx() as c:
@@ -265,13 +305,14 @@ class McpServers:
                         " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,'',?,?)",
                         (sid, slugify(name, taken), name.strip() or "MCP server",
                          transport if transport in TRANSPORTS else "stdio", command.strip(), json.dumps(args or []),
-                         cwd, json.dumps(env or {}), json.dumps(secrets or {}), url.strip(), json.dumps(headers or {}),
+                         cwd, json.dumps(env or {}), json.dumps({k: "" for k in plain}), url.strip(), json.dumps(headers or {}),
                          description, 1 if enabled else 0, "idle" if enabled else "disabled", t, t),
                     )
                 break
             except sqlite3.IntegrityError:  # two windows adding a server at once: the index decides, then retry
                 if attempt == SLUG_ATTEMPTS - 1:
                     raise
+        self._store_secrets(sid, plain)
         return self.server(sid)  # type: ignore[return-value]
 
     def update_server(self, id: str, patch: dict[str, Any]) -> dict[str, Any] | None:
@@ -295,20 +336,23 @@ class McpServers:
             if incoming or dropped:
                 row = c.execute("SELECT secrets FROM mcp_servers WHERE id=?", (id,)).fetchone()
                 if row:
-                    merged: dict[str, str] = json.loads(row["secrets"] or "{}")
+                    merged = self._load_secrets(id)
                     for k, v in (incoming or {}).items():
                         if v in (None, ""):  # an empty value means "leave it alone", as in dashboards
                             continue
                         merged[k] = str(v)
                     for k in dropped:
                         merged.pop(k, None)
-                    c.execute("UPDATE mcp_servers SET secrets=?, updated_at=? WHERE id=?", (json.dumps(merged), now(), id))
+                    self._store_secrets(id, merged)
+                    c.execute("UPDATE mcp_servers SET secrets=?, updated_at=? WHERE id=?",
+                              (json.dumps({k: "" for k in merged}), now(), id))
         return self.server(id)
 
     def delete_server(self, id: str) -> None:
         """Tools go with the server; grants stay, keyed by slug, so re-adding it restores the decisions."""
         with self.db.tx() as c:
             c.execute("DELETE FROM mcp_servers WHERE id=?", (id,))
+        self._store_secrets(id, {})
 
     def set_status(self, id: str, status: str, detail: str = "") -> None:
         with self.db.tx() as c:

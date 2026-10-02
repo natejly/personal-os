@@ -3,6 +3,8 @@ import { ArrowUp, Square, Paperclip } from 'lucide-react'
 import PlanModeToggle from './PlanModeToggle'
 import { useStore, useIsStreaming } from '../store'
 import SmartTextarea from './SmartTextarea'
+import { useOnboarding } from './onboarding/onboardingStore'
+import { COMPOSER_INSERT_EVENT, appendDraft, type ComposerInsertDetail } from '../lib/composerInsert'
 
 interface ComposerProps {
   conversationId?: string
@@ -22,14 +24,28 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   const streaming = useIsStreaming(conversationId)
   const activeId = useStore((s) => conversationId ?? s.focusedConversationId)
   const uploadTarget = useStore((s) => s.sessions[conversationId ?? s.focusedConversationId ?? '']?.conversation.project_id ?? s.draftProjectId)
-  const hasKey = useStore((s) => !!s.settings.apiKey)
+  const hasKey = useStore((s) => !!s.settings.apiKeySet || /^https?:\/\/(localhost|127\.0\.0\.1)[:/]/.test(s.settings.baseUrl ?? ''))
+  // A local endpoint (Ollama, a local proxy) needs no key, so it is not "unfinished".
   // One selector per action: a bare useStore() subscribes this textarea to every streamed token.
   const send = useStore((s) => s.send)
   const stop = useStore((s) => s.stop)
-  const setSettingsOpen = useStore((s) => s.setSettingsOpen)
+  const openWizard = useOnboarding((s) => s.openWizard)
   const uploadDocuments = useStore((s) => s.uploadDocuments)
 
   useEffect(() => { box.current?.querySelector('textarea')?.focus() }, [activeId])
+
+  // A tool card's slot chip asks for text in the composer of the conversation being looked at.
+  useEffect(() => {
+    const onInsert = (e: Event): void => {
+      if ((conversationId ?? activeId) !== useStore.getState().focusedConversationId) return
+      const t = (e as CustomEvent<ComposerInsertDetail>).detail?.text
+      if (!t) return
+      setText((cur) => appendDraft(cur, t))
+      box.current?.querySelector('textarea')?.focus()
+    }
+    window.addEventListener(COMPOSER_INSERT_EVENT, onInsert)
+    return () => window.removeEventListener(COMPOSER_INSERT_EVENT, onInsert)
+  }, [activeId, conversationId])
 
   /**
    * The draft is cleared optimistically and handed back if `send` refuses it. Typed text is never
@@ -47,7 +63,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   return (
     <div className={compact ? 'composer-wrap compact' : 'composer-wrap'}>
       {!hasKey && (
-        <div className="notice">No LiteLLM key set. <button className="link" onClick={() => setSettingsOpen(true)}>Open settings</button></div>
+        <div className="notice">Finish setup to start chatting. <button className="link" onClick={openWizard}>Finish setup</button></div>
       )}
       <div className="composer" ref={box}>
         <input ref={fileRef} type="file" multiple hidden onChange={(e) => { if (e.target.files?.length) void uploadDocuments(e.target.files, uploadTarget); e.target.value = '' }} />

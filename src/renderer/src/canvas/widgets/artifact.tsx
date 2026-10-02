@@ -137,7 +137,7 @@ export default function ArtifactWidget({ window: win, live, onConfig, onTitle }:
       )}
       <div style={{ flex: 1, minHeight: 0, overflow: fit ? 'auto' : 'hidden', display: 'flex', flexDirection: 'column' }}>
         {/* Opaque, like the dashboard iframe: a transparent frame over vibrancy reads as a hole while it loads. */}
-        <iframe ref={frame} key={art.version} title={art.title} sandbox="allow-scripts" src={renderUrl(getBase(), art.id, art.version)}
+        <iframe ref={frame} key={art.version} title={art.title} sandbox="allow-scripts" src={renderUrl(getBase(), art.render_path, art.version)}
           style={{ width: '100%', border: 0, background: '#262624', display: 'block', flex: fit && height ? `0 0 ${height}px` : 1, minHeight: fit && height ? height : 0 }} />
       </div>
       <form className="widget-bar" style={{ flex: '0 0 28px' }} onSubmit={(e) => {

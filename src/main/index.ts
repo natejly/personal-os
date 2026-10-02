@@ -1,13 +1,16 @@
-import { app, BrowserWindow, ipcMain, Menu } from 'electron'
-import { existsSync } from 'fs'
+import { app, BrowserWindow, dialog, Menu, shell } from 'electron'
+import { existsSync, statSync } from 'fs'
 import { join } from 'path'
-import { backendStatus, backendToken, backendUrl, startBackend, stopBackend } from './backend'
+import { backendInfo, backendStatus, backendToken, backendUrl, onBackendState, restartBackend, startBackend, stopBackend } from './backend'
 import { registerBus } from './bus'
+import { handle, on } from './ipc'
+import { hookConsole, initLogs, logDir } from './logging'
 import { guardNavigation } from './navigation'
 import { startPageBridge, stopPageBridge } from './pagefetch'
 import { gather, OPACITY_LEVELS, registerPopouts, restorePopouts, setFrontListener, toggleFront } from './popouts'
 import { registerShortcuts } from './shortcuts'
 import { createTray } from './tray'
+import { startUpdater } from './updater'
 
 let win: BrowserWindow | null = null
 const isMac = process.platform === 'darwin'
@@ -15,13 +18,21 @@ const isMac = process.platform === 'darwin'
 // The app was renamed from "Personal OS" to "Grain", which moves the userData directory Electron
 // derives from the app name. Existing installs keep their data: if the new location has none but a
 // legacy one does, keep using the legacy directory. Must run before anything touches userData.
-for (const legacy of ['personal-os', 'Personal OS']) {
+// GRAIN_USER_DATA points the whole app at another directory (testing a packaged build without touching real data).
+const userDataOverride = process.env.GRAIN_USER_DATA
+if (userDataOverride) app.setPath('userData', userDataOverride)
+for (const legacy of userDataOverride ? [] : ['personal-os', 'Personal OS']) {
   const legacyDir = join(app.getPath('appData'), legacy)
   if (!existsSync(join(app.getPath('userData'), 'data')) && existsSync(join(legacyDir, 'data'))) {
     app.setPath('userData', legacyDir)
     break
   }
 }
+
+// Rotating logs for this process and the backend's raw output: ~/Library/Logs/Grain when packaged,
+// <userData>/logs in dev. The backend writes its own backend.log into the same folder (PERSONAL_OS_LOG_DIR).
+initLogs(app.isPackaged ? app.getPath('logs') : join(app.getPath('userData'), 'logs'))
+hookConsole()
 
 function createWindow(): void {
   win = new BrowserWindow({
@@ -40,7 +51,7 @@ function createWindow(): void {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
       webviewTag: true // the web widget; guests are stripped in guardNavigation's will-attach-webview
     }
   })
@@ -254,11 +265,31 @@ process.on('unhandledRejection', (e) => console.error('[main] unhandled rejectio
 app.on('child-process-gone', (_e, d) => console.error(`[child] ${d.type} gone: ${d.reason}`))
 
 app.whenReady().then(async () => {
-  ipcMain.handle('backend:url', () => backendUrl())
-  ipcMain.handle('backend:status', () => backendStatus())
-  ipcMain.handle('backend:token', () => backendToken())
-  ipcMain.on('window:close-self', (e) => BrowserWindow.fromWebContents(e.sender)?.close())
-  ipcMain.on('window:minimize-self', (e) => BrowserWindow.fromWebContents(e.sender)?.minimize())
+  handle('backend:url', () => backendUrl())
+  handle('backend:status', () => backendStatus())
+  handle('backend:token', () => backendToken())
+  handle('backend:info', () => backendInfo())
+  handle('backend:restart', () => restartBackend())
+  handle('backend:open-logs', () => (logDir() ? shell.openPath(logDir()) : 'No log folder'))
+  // Every window hears the supervisor: the main window re-fetches, a pop-out re-points at a new port.
+  onBackendState((info) => {
+    for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed() && !w.webContents.isDestroyed()) w.webContents.send('backend:state', info)
+  })
+  handle('data:choose-export-path', async () => {
+    const stamp = new Date().toISOString().slice(0, 10)
+    const r = await dialog.showSaveDialog({ title: 'Export all data', defaultPath: join(app.getPath('documents'), `grain-export-${stamp}.zip`), filters: [{ name: 'Zip archive', extensions: ['zip'] }] })
+    return r.canceled || !r.filePath ? null : r.filePath
+  })
+  // Folders only: openPath on a file or .app would run it.
+  handle('data:reveal', async (_e, path: string) => {
+    const p = String(path)
+    if (!existsSync(p) || !statSync(p).isDirectory()) return false
+    return !(await shell.openPath(p))
+  })
+  // A staged restore is applied by the backend at its next start, so relaunching the whole app does it.
+  handle('data:relaunch', () => { app.relaunch(); app.quit() })
+  on('window:close-self', (e) => BrowserWindow.fromWebContents(e.sender)?.close())
+  on('window:minimize-self', (e) => BrowserWindow.fromWebContents(e.sender)?.minimize())
   registerPopouts(() => win)
   registerBus()
   buildMenu()
@@ -277,6 +308,7 @@ app.whenReady().then(async () => {
   registerShortcuts(() => win, await storedGather())
   createWindow()
   void restorePopouts()
+  startUpdater()
   app.on('activate', showMain)
 })
 

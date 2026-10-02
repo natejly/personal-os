@@ -66,7 +66,8 @@ class Todos:
             have = {r["name"] for r in c.execute("PRAGMA table_info(todos)").fetchall()}
             for col, ddl in {"calendar_event_id": "TEXT", "calendar_link": "TEXT", "synced_at": "REAL",
                              "remote_updated": "TEXT", "calendar_id": "TEXT", "calendar_sig": "TEXT",
-                             "repeat": "TEXT", "estimate_min": "INTEGER"}.items():
+                             "repeat": "TEXT", "estimate_min": "INTEGER",
+                             "deleted_at": "REAL", "deleted_with": "TEXT"}.items():  # the last two: trash.py
                 if col not in have:
                     c.execute(f"ALTER TABLE todos ADD COLUMN {col} {ddl}")
 
@@ -88,7 +89,7 @@ class Todos:
                 pass
 
     def list(self, project_id: str | None = "__all__", include_done: bool = False, q: str = "") -> list[dict[str, Any]]:
-        where, args = [], []
+        where, args = ["deleted_at IS NULL"], []
         if project_id != "__all__":
             if project_id is None:
                 where.append("project_id IS NULL")
@@ -106,7 +107,7 @@ class Todos:
 
     def get(self, id: str) -> dict[str, Any] | None:
         with self.db.tx() as c:
-            return self._out(row_to_dict(c.execute("SELECT * FROM todos WHERE id=?", (id,)).fetchone()))
+            return self._out(row_to_dict(c.execute("SELECT * FROM todos WHERE id=? AND deleted_at IS NULL", (id,)).fetchone()))
 
     def create(self, title: str, project_id: str | None = None, notes: str = "", due: str | None = None, priority: int = 2, source: str = "local", external_id: str | None = None, notify: bool = True, repeat: dict[str, Any] | None = None, estimate_min: int | None = None) -> dict[str, Any]:
         rep = todo_rules.parse_repeat(repeat)
@@ -158,22 +159,53 @@ class Todos:
         return self.create(row["title"], row.get("project_id"), row.get("notes") or "", nxt.isoformat(), row["priority"],
                            source="local", notify=False, repeat=row["repeat"], estimate_min=row.get("estimate_min"))
 
+    @staticmethod
+    def _tombstone(c: Any, t: dict[str, Any]) -> None:
+        if t.get("external_id"):
+            c.execute("INSERT OR REPLACE INTO todo_tombstones(external_id, deleted_at) VALUES(?,?)", (t["external_id"], now()))
+        if t.get("calendar_event_id"):
+            c.execute("INSERT OR REPLACE INTO todo_event_tombstones(event_id, calendar_id, deleted_at) VALUES(?,?,?)",
+                      (t["calendar_event_id"], t.get("calendar_id"), now()))
+
     def delete(self, id: str, notify: bool = True, tombstone: bool = True) -> None:
-        t = self.get(id)
+        """Erase a todo for good. The user-facing delete is `trash`; this is the purge and the sync's own."""
         with self.db.tx() as c:
-            if tombstone and t and t.get("external_id"):
-                c.execute("INSERT OR REPLACE INTO todo_tombstones(external_id, deleted_at) VALUES(?,?)", (t["external_id"], now()))
-            if tombstone and t and t.get("calendar_event_id"):
-                c.execute("INSERT OR REPLACE INTO todo_event_tombstones(event_id, calendar_id, deleted_at) VALUES(?,?,?)",
-                          (t["calendar_event_id"], t.get("calendar_id"), now()))
+            t = row_to_dict(c.execute("SELECT * FROM todos WHERE id=?", (id,)).fetchone())
+            # A trashed todo already left its tombstones (see trash), so only a live one needs them here.
+            if tombstone and t and not t.get("deleted_at"):
+                self._tombstone(c, t)
             c.execute("DELETE FROM todos WHERE id=?", (id,))
         if notify:
             self._changed()
 
+    def trash(self, id: str, deleted_with: str | None = None, notify: bool = True) -> bool:
+        """Soft delete. The remote Google task and mirrored calendar event are still deleted the way a hard
+        delete would (tombstones), and the todo forgets its links, so a restore comes back as a new task
+        instead of pointing at one that no longer exists."""
+        with self.db.tx() as c:
+            t = row_to_dict(c.execute("SELECT * FROM todos WHERE id=? AND deleted_at IS NULL", (id,)).fetchone())
+            if not t:
+                return False
+            self._tombstone(c, t)
+            c.execute("UPDATE todos SET deleted_at=?, deleted_with=?, external_id=NULL, remote_updated=NULL, synced_at=NULL,"
+                      " calendar_event_id=NULL, calendar_link=NULL, calendar_id=NULL, calendar_sig=NULL WHERE id=?",
+                      (now(), deleted_with, id))
+        if notify:
+            self._changed()
+        return True
+
+    def restore(self, id: str, notify: bool = True) -> bool:
+        with self.db.tx() as c:
+            cur = c.execute("UPDATE todos SET deleted_at=NULL, deleted_with=NULL, updated_at=? WHERE id=? AND deleted_at IS NOT NULL",
+                            (now(), id))
+        if notify and cur.rowcount:
+            self._changed()
+        return bool(cur.rowcount)
+
     # ---- sync support ----
     def all_for_sync(self) -> list[dict[str, Any]]:
         with self.db.tx() as c:
-            return [row_to_dict(r) for r in c.execute("SELECT * FROM todos").fetchall()]  # type: ignore[misc]
+            return [row_to_dict(r) for r in c.execute("SELECT * FROM todos WHERE deleted_at IS NULL").fetchall()]  # type: ignore[misc]
 
     def set_sync_state(self, id: str, external_id: str | None, remote_updated: str | None, synced_at: float | None) -> None:
         """Record where a todo stands against its Google Task; never bumps updated_at."""
@@ -206,7 +238,7 @@ class Todos:
 
     def stats(self) -> dict[str, int]:
         with self.db.tx() as c:
-            open_ = c.execute("SELECT COUNT(*) FROM todos WHERE done=0").fetchone()[0]
-            overdue = c.execute("SELECT COUNT(*) FROM todos WHERE done=0 AND due IS NOT NULL AND due < date('now')").fetchone()[0]
-            today = c.execute("SELECT COUNT(*) FROM todos WHERE done=0 AND due = date('now')").fetchone()[0]
+            open_ = c.execute("SELECT COUNT(*) FROM todos WHERE done=0 AND deleted_at IS NULL").fetchone()[0]
+            overdue = c.execute("SELECT COUNT(*) FROM todos WHERE done=0 AND deleted_at IS NULL AND due IS NOT NULL AND due < date('now')").fetchone()[0]
+            today = c.execute("SELECT COUNT(*) FROM todos WHERE done=0 AND deleted_at IS NULL AND due = date('now')").fetchone()[0]
         return {"open": open_, "overdue": overdue, "today": today}

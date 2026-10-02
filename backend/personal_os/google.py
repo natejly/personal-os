@@ -392,6 +392,37 @@ class Google:
         out.sort(key=lambda e: e["start"] or "")
         return out[: max_results if len(ids) == 1 else max_results * 2]
 
+    @cached("calendar", TTL["calendar_events"])
+    def calendar_free_busy(self, time_min: str, time_max: str, calendars: list[str] | None = None,
+                           attendees: list[str] | None = None) -> dict[str, Any]:
+        """Busy ranges from the Google freebusy API.
+
+        `calendars` defaults to every calendar the user has not hidden; `attendees` are other
+        people's emails (Google answers for those it can see, and reports the rest as errors,
+        which come back under `unreachable` rather than as silence).
+        """
+        a, b = _parse_iso(time_min), _parse_iso(time_max)
+        if a.tzinfo is None:
+            a = a.astimezone()
+        if b.tzinfo is None:
+            b = b.astimezone()
+        ids = [c for c in (calendars or []) if c]
+        if not ids or ids == ["all"]:
+            ids = [c["id"] for c in self.calendars() if not c["hidden"]][:20] or ["primary"]
+        people = [p for p in (attendees or []) if p and p not in ids]
+        items = [{"id": i} for i in [*ids, *people]]
+        res = self._svc("calendar", "v3").freebusy().query(
+            body={"timeMin": a.isoformat(), "timeMax": b.isoformat(), "timeZone": _local_tz(), "items": items}).execute()
+        out: dict[str, Any] = {}
+        unreachable: list[str] = []
+        for cid, row in (res.get("calendars") or {}).items():
+            errs = row.get("errors") or []
+            if errs:
+                unreachable.append(cid)
+            out[cid] = {"busy": [{"start": x["start"], "end": x["end"]} for x in row.get("busy", [])],
+                        **({"errors": [e.get("reason") for e in errs]} if errs else {}), "attendee": cid in people}
+        return {"time_min": a.isoformat(), "time_max": b.isoformat(), "calendars": out, "unreachable": unreachable}
+
     @cached("calendar", TTL["calendar_event"])
     def calendar_get(self, event_id: str, calendar_id: str = "primary") -> dict[str, Any]:
         e = self._svc("calendar", "v3").events().get(calendarId=calendar_id, eventId=event_id).execute()
@@ -1104,6 +1135,8 @@ def _event_out(e: dict[str, Any], calendar_id: str | None = None, full: bool = F
         "status": e.get("status"),
         # The user's own RSVP (accepted/declined/tentative/needsAction); None when not an invitee.
         "self_response": next((x.get("responseStatus") for x in e.get("attendees", []) if x.get("self")), None),
+        # Same value under the name the calendar cards read.
+        "my_response": next((a.get("responseStatus") for a in e.get("attendees", []) if a.get("self")), None),
     }
     if full:
         out.update({

@@ -9,13 +9,18 @@ import type {
   AgentInbox, AgentProposal, Job, JobNotifyEvent, JobRunRecord, JobStats,
   Doc, DocFolder, FullDoc, DocRevision,
   HealthEntry, HealthMetric, HealthProvider, HealthSource, HealthSourcePlan, HealthSummary, HealthSyncResult, McpSignIn,
+  TrashKind, TrashListing,
   McpEffective, McpReport, McpServer, McpServerDraft, McpTool, ToolMode,
   ActivityApplyResult, ActivityCapability, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityGrantResult,
   ActivityCategoryReport, ActivityCategoryRule, ActivityInsights, ActivityRedactTest, ActivityStatus, ActivitySuggestion, ActivitySummary, InsightStatus,
   PendingSend, SendHoldConfig, Verification, Verified,
   Meeting, FullMeeting, MeetingActionItem, MeetingCandidate, MeetingConfig, MeetingPreflight, MeetingRevision, MeetingSegment, MeetingStatusInfo, MeetingStreamEvent,
-  RunChanges, RunUndoResult
+  RunChanges, RunUndoResult,
+  BackupInfo, DataOverview
 } from '@shared/types'
+import type { ProviderInfo, SetupStatus, SetupTestResult } from '../components/onboarding/steps'
+
+export interface SetupBody { provider: string; baseUrl: string; apiKey: string | null; model: string }
 
 let base = ''
 let token = ''
@@ -91,9 +96,18 @@ const scope = (s: Scope): string => `project_id=${encodeURIComponent(s)}&include
 
 export const api = {
   health: () => req<{ ok: boolean; data_dir: string }>('/health'),
+  diagnostics: () => req<Record<string, unknown>>('/diagnostics'),
   settings: {
     get: () => req<Settings>('/settings'),
     set: (patch: Partial<Settings>) => req<Settings>('/settings', { method: 'PUT', body: json(patch) })
+  },
+  /** First-run setup (backend setup routes). `body` is the same for test and complete. */
+  setup: {
+    status: () => req<SetupStatus>('/setup/status'),
+    providers: () => req<{ providers: ProviderInfo[] }>('/setup/providers'),
+    test: (body: SetupBody) => req<SetupTestResult>('/setup/test', { method: 'POST', body: json(body) }),
+    complete: (body: SetupBody) => req<SetupStatus>('/setup/complete', { method: 'POST', body: json(body) }),
+    reset: () => req<SetupStatus>('/setup/reset', { method: 'POST' })
   },
   models: () => req<ModelInfo[]>('/models'),
   tools: () => req<{ tools: ToolInfo[]; enabled: Record<string, boolean> }>('/tools'),
@@ -101,8 +115,8 @@ export const api = {
   recap: (force = false) => req<Recap>(`/recap?force=${force}`),
   // `steps` / `note` are for a propose_plan card: the steps the user is authorising (with any edited arguments,
   // whose digests the backend re-derives), and one line back to the model.
-  approve: (callId: string, decision: ApprovalDecision, opts?: { steps?: PlanEdit[] | null; note?: string; rules?: string[] }) =>
-    req(`/approvals/${callId}`, { method: 'POST', body: json({ decision, ...(opts?.steps ? { steps: opts.steps } : {}), ...(opts?.note ? { note: opts.note } : {}), ...(opts?.rules ? { rules: opts.rules } : {}) }) }),
+  approve: (callId: string, decision: ApprovalDecision, opts?: { steps?: PlanEdit[] | null; note?: string; rules?: string[]; arguments?: Record<string, unknown> | null }) =>
+    req(`/approvals/${callId}`, { method: 'POST', body: json({ decision, ...(opts?.steps ? { steps: opts.steps } : {}), ...(opts?.note ? { note: opts.note } : {}), ...(opts?.rules ? { rules: opts.rules } : {}), ...(opts?.arguments ? { arguments: opts.arguments } : {}) }) }),
   /** What the saved permission rules say about one call (nothing runs). `rule` validates one rule string instead. */
   evaluatePermission: (body: { tool?: string; command?: string; args?: Record<string, unknown>; rule?: string }) =>
     req<PermissionEvaluation & { ok?: boolean; error?: string }>('/permissions/evaluate', { method: 'POST', body: json(body) }),
@@ -159,6 +173,27 @@ export const api = {
     delete: (id: string) => req(`/sources/${id}`, { method: 'DELETE' }),
     fetch: (id: string) => req<unknown>(`/sources/${id}/fetch`)
   },
+  artifacts: {
+    list: (opts: { conversationId?: string; q?: string } = {}) => {
+      const p = new URLSearchParams()
+      if (opts.conversationId) p.set('conversation_id', opts.conversationId)
+      if (opts.q) p.set('q', opts.q)
+      return req<Artifact[]>(`/artifacts?${p}`)
+    },
+    get: (id: string) => req<Artifact>(`/artifacts/${id}`),
+    create: (a: { title?: string; code: string; prompt?: string; conversation_id?: string; message_id?: string }) =>
+      req<Artifact>('/artifacts', { method: 'POST', body: json(a) }),
+    update: (id: string, patch: { title?: string; code?: string; instruction?: string }) =>
+      req<Artifact>(`/artifacts/${id}`, { method: 'PUT', body: json(patch) }),
+    delete: (id: string) => req(`/artifacts/${id}`, { method: 'DELETE' }),
+    versions: (id: string) => req<ArtifactVersion[]>(`/artifacts/${id}/versions`),
+    version: (id: string, n: number) => req<ArtifactVersion>(`/artifacts/${id}/versions/${n}`),
+    restore: (id: string, n: number) => req<Artifact>(`/artifacts/${id}/restore/${n}`, { method: 'POST' }),
+    /** Regenerate the whole document from a plain-language instruction (a model call), saved as a new version. */
+    revise: (id: string, instruction: string) => req<Artifact>(`/artifacts/${id}/revise`, { method: 'POST', body: json({ instruction }) }),
+    /** Absolute URL for the sandboxed iframe; `path` is the signed render_path the backend handed out. */
+    renderUrl: (path: string) => `${base}${path}`
+  },
   dashboards: {
     list: () => req<Dashboard[]>('/dashboards'),
     get: (id: string) => req<Dashboard>(`/dashboards/${id}`),
@@ -175,15 +210,6 @@ export const api = {
     refresh: (id: string, regenerate = false) => req<Widget>(`/widgets/${id}/refresh?regenerate=${regenerate}`, { method: 'POST' }),
     revise: (id: string, instruction: string) => req<Widget>(`/widgets/${id}/revise`, { method: 'POST', body: json({ instruction }) }),
     delete: (id: string) => req(`/widgets/${id}`, { method: 'DELETE' })
-  },
-  /** Artifacts (`/artifacts`): model-written HTML documents with version history. */
-  artifacts: {
-    list: (q = '') => req<Artifact[]>(`/artifacts?q=${encodeURIComponent(q)}`),
-    get: (id: string) => req<Artifact>(`/artifacts/${id}`),
-    versions: (id: string) => req<ArtifactVersion[]>(`/artifacts/${id}/versions`),
-    restore: (id: string, version: number) => req<Artifact>(`/artifacts/${id}/restore`, { method: 'POST', body: json({ version }) }),
-    revise: (id: string, instruction: string) => req<Artifact>(`/artifacts/${id}/revise`, { method: 'POST', body: json({ instruction }) }),
-    delete: (id: string) => req(`/artifacts/${id}`, { method: 'DELETE' })
   },
   todos: {
     list: (s: Scope = 'all', includeDone = false, q = '', sort: 'due' | 'urgency' = 'due') => req<Todo[]>(`/todos?project_id=${encodeURIComponent(s)}&include_done=${includeDone}&q=${encodeURIComponent(q)}&sort=${sort}`),
@@ -227,6 +253,13 @@ export const api = {
     refresh: () => req<{ refreshed: number }>('/mail/watch/refresh', { method: 'POST' }),
     dismiss: (id: string, dismissed = true) => req<MailWatchThread>(`/mail/watch/${encodeURIComponent(id)}`, { method: 'PUT', body: json({ dismissed }) }),
     followup: (id: string) => req<Todo>(`/mail/watch/${encodeURIComponent(id)}/followup`, { method: 'POST' })
+  },
+  /** Soft delete: every DELETE above lands here first; these restore it or erase it for good. */
+  trash: {
+    list: () => req<TrashListing>('/trash'),
+    restore: (type: TrashKind, id: string) => req<{ ok: boolean; moved_to_personal: boolean }>(`/trash/${type}/${id}/restore`, { method: 'POST' }),
+    purge: (type: TrashKind, id: string) => req<{ ok: boolean }>(`/trash/${type}/${id}`, { method: 'DELETE' }),
+    empty: () => req<{ ok: boolean; purged: number }>('/trash', { method: 'DELETE' })
   },
   mcp: {
     servers: () => req<McpServer[]>('/mcp/servers'),
@@ -299,6 +332,14 @@ export const api = {
       req<PendingSend>('/integrations/google/gmail/send', { method: 'POST', body: json(m) }),
     clearCache: (namespace?: string) =>
       req<{ dropped: number }>(`/integrations/google/cache/clear${namespace ? `?namespace=${namespace}` : ''}`, { method: 'POST' })
+  },
+  /** Backups, restore and export (backend backups.py). */
+  data: {
+    overview: () => req<DataOverview>('/data'),
+    backUp: () => req<BackupInfo>('/data/backups', { method: 'POST' }),
+    restore: (name: string) => req<{ name: string; restart_required: boolean }>(`/data/backups/${encodeURIComponent(name)}/restore`, { method: 'POST' }),
+    cancelRestore: () => req<{ ok: boolean }>('/data/restore', { method: 'DELETE' }),
+    exportTo: (dest: string) => req<{ path: string; size: number }>('/data/export', { method: 'POST', body: json({ dest }) })
   },
   /** Emails waiting out their undo hold (backend outbox.py). */
   outbox: {

@@ -31,6 +31,9 @@ from typing import Any
 
 import pytest
 
+# Tests never touch the login Keychain: secrets go to a file in each test's temp data dir (children inherit it).
+os.environ["GRAIN_SECRETS_BACKEND"] = "file"
+
 BACKEND = Path(__file__).resolve().parent
 REPO = BACKEND.parent
 CHILD = os.environ.get("PERSONAL_OS_TEST_CHILD") == "1"

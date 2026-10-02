@@ -49,7 +49,9 @@ def _snap_window(w: dict[str, Any], i: int) -> dict[str, Any]:
 
 def _exists(c: sqlite3.Connection, table: str, rid: str | None) -> bool:
     """`table` only ever comes from REF_TABLES or the literal "projects", never from input."""
-    return bool(rid) and c.execute(f"SELECT 1 FROM {table} WHERE id=?", (rid,)).fetchone() is not None
+    # A trashed project or chat is as good as gone here: restoring a preset must not pin a window to it.
+    soft = " AND deleted_at IS NULL" if table in ("projects", "conversations") else ""
+    return bool(rid) and c.execute(f"SELECT 1 FROM {table} WHERE id=?{soft}", (rid,)).fetchone() is not None
 
 
 class CanvasPresets:

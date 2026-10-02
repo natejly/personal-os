@@ -1,0 +1,44 @@
+/* First-run wizard: a full-window layer above the app shell. */
+.onboarding {
+  position: fixed; inset: 0; z-index: 200;
+  background: var(--bg); color: var(--text);
+  display: flex; align-items: flex-start; justify-content: center;
+  overflow-y: auto; padding: 56px 16px 24px;
+}
+.ob-drag { position: fixed; top: 0; left: 0; right: 0; height: 40px; }
+.ob-card { width: 100%; max-width: 480px; margin: auto 0; display: flex; flex-direction: column; gap: 4px; }
+.ob-card h1 { font-size: 26px; font-weight: 500; letter-spacing: -0.01em; margin: 10px 0 6px; outline: 0; }
+.ob-progress { display: flex; gap: 6px; margin-bottom: 18px; }
+.ob-progress span { flex: 1; height: 3px; border-radius: 2px; background: var(--border-strong); }
+.ob-progress span.on { background: var(--accent-solid); }
+.ob-lead { font-size: 15px; line-height: 1.55; margin: 0 0 12px; }
+.ob-privacy { display: flex; gap: 6px; align-items: flex-start; font-size: 13px; line-height: 1.5; margin: 0 0 12px; padding: 10px 12px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px; }
+.ob-privacy svg { flex: none; margin-top: 3px; color: var(--accent-solid); }
+.onboarding label { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; font-size: 13px; }
+.onboarding label > span { color: var(--text-muted); }
+.onboarding input { background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 9px 10px; outline: 0; width: 100%; }
+.onboarding input:focus { border-color: var(--accent); }
+.onboarding .link { display: inline-flex; align-items: center; gap: 3px; }
+.ob-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; margin-top: 4px; }
+.ob-card-opt { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; text-align: left; padding: 10px 12px; border-radius: 10px; background: var(--bg-elev); border: 1px solid var(--border); }
+.ob-card-opt:hover { border-color: var(--border-strong); }
+.ob-card-opt.on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 10%, var(--bg-elev)); }
+.ob-card-opt small { color: var(--text-muted); font-size: 12px; line-height: 1.4; }
+.ob-test { min-height: 64px; display: flex; flex-direction: column; justify-content: center; }
+.ob-test p, .onboarding .ob-ok, .ob-error { display: flex; gap: 8px; align-items: flex-start; margin: 0 0 8px; font-size: 14px; line-height: 1.5; }
+.ob-ok { color: var(--ok); }
+.ob-error { color: var(--danger); }
+.ob-hint { font-size: 12px; color: var(--text-muted); margin: 4px 0 0; }
+.ob-actions { display: flex; gap: 8px; align-items: center; margin-top: 18px; flex-wrap: wrap; }
+.ob-spacer { flex: 1; }
+.ob-keys { text-align: center; margin: 14px 0 0; }
+.ob-first-prompts { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 18px; max-width: 560px; }
+.ob-first-prompts .ghost-btn { text-align: left; }
+
+/* Backend-failed screen */
+.backend-error details { text-align: left; margin-top: 16px; }
+.backend-error summary { cursor: pointer; color: var(--text-muted); font-size: 13px; }
+.backend-error-actions { display: flex; gap: 8px; justify-content: center; margin-top: 16px; }
+
+/* The title takes focus on each step for screen readers; it is not an interactive control. */
+#ob-title:focus { outline: none; }

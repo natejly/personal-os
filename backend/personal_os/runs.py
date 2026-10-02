@@ -230,11 +230,23 @@ class RunStore:
                     danger, desk_id, time.time()))
         return self.approval(call_id) or {}
 
-    def decide(self, call_id: str, decision: str, by: str = "user", note: str | None = None) -> dict[str, Any] | None:
-        """First decision wins. None if there is no such approval or it was already decided."""
+    def decide(self, call_id: str, decision: str, by: str = "user", note: str | None = None,
+               edited_args: dict[str, Any] | None = None) -> dict[str, Any] | None:
+        """First decision wins. None if there is no such approval or it was already decided.
+
+        `note` is what the user said with the answer (a denial's reason, a desk_ask's answer).
+        `edited_args` is a human's rewrite (validated by approval_edits before it gets here). It is written in the
+        same UPDATE as the decision, so a run woken by the decision always sees it, and `args_digest` is re-bound to
+        it: the row then states the digest of what actually runs. The original stays in `args`. A deny never edits."""
         status = "denied" if decision == "deny" else "approved"
-        n = self._exec("UPDATE approvals SET status=?, decision=?, decided_by=?, decided_at=?, note=? WHERE call_id=? AND status='pending'",
-                       (status, decision, by, time.time(), (note or "").strip()[:4000] or None, call_id))
+        note = (note or "").strip()[:4000] or None
+        if edited_args is not None and status == "approved":
+            n = self._exec("UPDATE approvals SET status=?, decision=?, decided_by=?, decided_at=?, note=?, edited_args=?, edited_by='user', "
+                           "args_digest=? WHERE call_id=? AND status='pending'",
+                           (status, decision, by, time.time(), note, _dumps(edited_args), args_digest(edited_args), call_id))
+        else:
+            n = self._exec("UPDATE approvals SET status=?, decision=?, decided_by=?, decided_at=?, note=? WHERE call_id=? AND status='pending'",
+                           (status, decision, by, time.time(), note, call_id))
         return self.approval(call_id) if n else None
 
     def approval(self, call_id: str) -> dict[str, Any] | None:
@@ -242,6 +254,7 @@ class RunStore:
         if r:
             r["args"] = json.loads(r["args"])
             r["forced"] = bool(r["forced"])
+            r["edited_args"] = json.loads(r["edited_args"]) if r.get("edited_args") else None
         return r
 
     def park(self, call_id: str) -> None:

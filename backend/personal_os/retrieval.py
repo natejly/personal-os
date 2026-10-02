@@ -173,7 +173,7 @@ class Retriever:
         with self.db.tx() as c:
             rows = c.execute(
                 f"""SELECT e.chunk_id, e.vec, e.dim FROM {s['emb']} e JOIN {s['parent']} p ON p.id=e.{s['fk']}
-                    WHERE e.model=? AND {where.replace('project_id', 'p.project_id')}""", (model, *args)).fetchall()
+                    WHERE e.model=? AND p.deleted_at IS NULL AND {where.replace('project_id', 'p.project_id')}""", (model, *args)).fetchall()
         rows = [r for r in rows if r["dim"] == q.shape[0]]
         if not rows:
             return []
@@ -191,7 +191,7 @@ class Retriever:
             rows = c.execute(
                 f"""SELECT ch.id AS chunk_id, ch.{s['fk']} AS document_id, p.{s['name']} AS name, ch.idx, ch.text, ch.heading{extra}
                     FROM {s['chunks']} ch JOIN {s['parent']} p ON p.id=ch.{s['fk']}
-                    WHERE ch.id IN ({','.join('?' * len(ids))})""", ids).fetchall()
+                    WHERE p.deleted_at IS NULL AND ch.id IN ({','.join('?' * len(ids))})""", ids).fetchall()
         out = {}
         for r in rows:
             h = dict(r)

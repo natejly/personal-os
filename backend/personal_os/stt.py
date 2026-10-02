@@ -36,7 +36,7 @@ from typing import Any
 
 import httpx
 
-from . import audiocap, llm
+from . import audiocap, llm, providers
 
 log = logging.getLogger("personal_os.stt")
 
@@ -203,13 +203,13 @@ def _proxy(path: Path, settings: dict[str, Any], model: str,
     word), and the failure comes back in the return value instead of being assigned to a
     collector attribute that only the status line ever shows.
     """
-    base = str(settings.get("baseUrl") or "http://localhost:4000").rstrip("/")
+    base = str(settings.get("baseUrl") or "http://localhost:4000")
     headers = {"Authorization": f"Bearer {settings['apiKey']}"} if settings.get("apiKey") else {}
     data = {"model": model, "response_format": "verbose_json"}
     if prompt:
         data["prompt"] = prompt[-MAX_PROMPT_CHARS:]
     with httpx.Client(timeout=120) as client, path.open("rb") as fh:
-        r = client.post(f"{base}/v1/audio/transcriptions", headers=headers,
+        r = client.post(providers.endpoint(base, "/audio/transcriptions"), headers=headers,
                         files={"file": (path.name, fh, "audio/wav")}, data=data)
     if r.status_code >= 400:
         return "", {}, f"transcription {r.status_code}: {r.text[:160]}"

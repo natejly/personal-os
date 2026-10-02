@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import datetime as dt
 import html
 import ipaddress
 import json
@@ -32,7 +33,7 @@ from .learn import skill_block
 from . import webread
 from . import websearch
 from . import outbox as outbox_mod
-from . import verify
+from . import scheduling, verify
 from .jobs import local_tz_name, parse_when, valid_cron, valid_tz
 from . import audiocap, stt
 from .learn import SELF_LABELS, SKILL_STATUSES
@@ -105,6 +106,9 @@ ALTERNATIVE = {
     "calendar_create": "calendar_events to show the free slot, and let the user create it",
     "calendar_events": "ask the user what is on their calendar",
     "calendar_get": "calendar_events, whose rows carry the basics",
+    "calendar_free_busy": "calendar_events to list what is scheduled",
+    "calendar_find_time": "calendar_events, then pick the gap yourself",
+    "calendar_propose": "describe the changes in your reply and let the user make them in Google Calendar",
     "calendar_update": "calendar_get, then tell the user what you would change",
     "calendar_delete": "tell the user which event to remove in Google Calendar",
     "calendar_respond": "tell the user how to RSVP in Google Calendar",
@@ -412,7 +416,7 @@ class Toolbox:
         self.desks, self.workspace = desks, workspace
         self.memory_index: Any = None  # memory_index.MemoryIndex (hybrid memory search); set by app.py
         self.retriever: Any = None  # hybrid document search (retrieval.py); set by app.py
-        self.artifacts = artifacts  # artifact_tools.py registers create/edit/rewrite_artifact against it
+        self.artifacts = artifacts  # artifact_tools.py artifact_* tools are registered only when it is wired up
         self.fs_reads = fsx.ReadLedger()  # what each conversation has read of each file (fsx.py): the baseline for edits
         self.specs: dict[str, ToolSpec] = {}
         self._meetings_avail: tuple[float, bool] | None = None
@@ -424,6 +428,9 @@ class Toolbox:
             self._register_boards()
         if docs is not None:
             self._register_docs()
+        if artifacts is not None:
+            from . import artifact_tools
+            artifact_tools.register(self, artifacts)
         if google is not None:
             self._register_google()
         if sandboxes is not None:
@@ -1028,6 +1035,22 @@ def _register_working(self: Toolbox) -> None:
 
 
 
+def _register_approval_validators() -> None:
+    """Hold an edited calendar_propose to the same rules as one the model wrote.
+
+    approval_edits owns the registry: a validator returns an error string for the 400, or None when the edit is fine.
+    """
+    from . import approval_edits
+
+    def _validate(args: dict[str, Any]) -> str | None:
+        try:
+            scheduling.validate_changes(args.get("changes"))
+        except ValueError as e:
+            return str(e)
+        return None
+    approval_edits.register_validator("calendar_propose", _validate)
+
+
 def _register_google(self: Toolbox) -> None:
     R = self.specs.__setitem__
     g = self.google
@@ -1096,7 +1119,7 @@ def _register_google(self: Toolbox) -> None:
                            "recurrence": recurrence, "reminder_minutes": reminder_minutes, "color_id": color_id, "visibility": visibility,
                            "busy": busy, "create_meet": create_meet})
         return await run(g.calendar_create, f, calendar_id, send_updates)
-    R("calendar_create", ToolSpec("calendar_create", "Create a Google Calendar event. ISO datetimes (YYYY-MM-DDTHH:MM) in the user's local time, or YYYY-MM-DD for all-day. Supports recurrence (RRULE), reminders, guests, Meet links, color and busy/free. send_updates='all' emails the guests their invites.",
+    R("calendar_create", ToolSpec("calendar_create", "Create ONE Google Calendar event. To schedule or rearrange anything with guests or more than one event, use calendar_find_time then calendar_propose instead: the user reviews the whole change on a calendar. ISO datetimes (YYYY-MM-DDTHH:MM) in the user's local time, or YYYY-MM-DD for all-day. Supports recurrence (RRULE), reminders, guests, Meet links, color and busy/free. send_updates='all' emails the guests their invites.",
         _obj(dict(_EVENT_PROPS), ["summary", "start"]), calendar_create, "google", "external",
         examples=[{"summary": "Dentist", "start": "2026-10-07T15:00", "end": "2026-10-07T16:00", "reminder_minutes": [30]},
                   {"summary": "Sprint review", "start": "2026-10-08T10:00", "attendees": ["mira@example.com"], "location": "Room 2", "create_meet": True, "send_updates": "all"},
@@ -1111,7 +1134,7 @@ def _register_google(self: Toolbox) -> None:
                            "recurrence": recurrence, "reminder_minutes": reminder_minutes, "color_id": color_id, "visibility": visibility,
                            "busy": busy, "create_meet": create_meet, "clear_meet": clear_meet})
         return await run(g.calendar_update, event_id, f, calendar_id, send_updates)
-    R("calendar_update", ToolSpec("calendar_update", "Edit a Google Calendar event by id; only the fields you pass change. `attendees` replaces the whole guest list. For a recurring event, the instance id edits that occurrence and its recurring_event_id (from calendar_get) edits the series.",
+    R("calendar_update", ToolSpec("calendar_update", "Edit ONE Google Calendar event by id; for moving several events or rescheduling around conflicts use calendar_propose. Only the fields you pass change. `attendees` replaces the whole guest list. For a recurring event, the instance id edits that occurrence and its recurring_event_id (from calendar_get) edits the series.",
         _obj({"event_id": {"type": "string"}, "clear_meet": {"type": "boolean", "description": "remove the Meet link"}, **_EVENT_PROPS}, ["event_id"]), calendar_update, "google", "external",
         examples=[{"event_id": "7abc123def", "start": "2026-10-07T16:00", "end": "2026-10-07T17:00"},
                   {"event_id": "7abc123def", "summary": "Sprint review (moved)", "send_updates": "all"},
@@ -1128,6 +1151,140 @@ def _register_google(self: Toolbox) -> None:
     R("calendar_respond", ToolSpec("calendar_respond", "RSVP to an event the user was invited to: accepted, declined or tentative.",
         _obj({"event_id": {"type": "string"}, "response": {"type": "string", "enum": ["accepted", "declined", "tentative"]}, "calendar_id": {"type": "string", "default": "primary"}}, ["event_id", "response"]), calendar_respond, "google", "external",
         examples=[{"event_id": "7abc123def", "response": "accepted"}]))
+
+    # ---- scheduling: read-only free/busy + slot finding, and one batched, reviewable proposal ----
+    def _tz(name: str | None) -> Any:
+        if name:
+            return scheduling.get_tz(name)
+        return scheduling.get_tz(local_tz_name())
+
+    async def calendar_free_busy(ctx: dict[str, Any], time_min: str, time_max: str, calendars: list[str] | None = None,
+                                 attendees: list[str] | None = None) -> Any:
+        return await run(g.calendar_free_busy, time_min, time_max, calendars, attendees)
+    R("calendar_free_busy", ToolSpec("calendar_free_busy", "Busy ranges between two ISO datetimes from Google's free/busy service, across all the user's visible calendars (or the `calendars` ids you name) plus any `attendees` emails. Use it to see when people are busy; to find a time, use calendar_find_time.",
+        _obj({"time_min": {"type": "string"}, "time_max": {"type": "string"}, "calendars": {"type": "array", "items": {"type": "string"}, "description": "calendar ids; default all visible"},
+              "attendees": {"type": "array", "items": {"type": "string"}, "description": "other people's emails"}}, ["time_min", "time_max"]), calendar_free_busy, "google",
+        examples=[{"time_min": "2026-10-05T09:00", "time_max": "2026-10-05T18:00"}, {"time_min": "2026-10-05T00:00", "time_max": "2026-10-09T23:59", "attendees": ["mira@example.com"]}]))
+
+    async def calendar_find_time(ctx: dict[str, Any], duration_minutes: int, window_start: str, window_end: str, attendees: list[str] | None = None,
+                                 working_hours: Any = None, buffer_minutes: int = 0, max_results: int = 5, timezone: str | None = None) -> Any:
+        try:
+            dur, buf, n = int(duration_minutes), int(buffer_minutes or 0), max(1, min(int(max_results or 5), 20))
+            tz = _tz(timezone)
+            w0 = scheduling.parse_dt(window_start, tz)
+            w1 = scheduling.parse_dt(window_end, tz)
+            if scheduling.is_date_only(window_end):
+                w1 += dt.timedelta(days=1)
+            scheduling.parse_working_hours(working_hours)
+            if dur <= 0:
+                raise ValueError("duration_minutes must be positive")
+        except (ValueError, TypeError) as e:
+            return tool_error(f"calendar_find_time: {e}", expected="ISO datetimes or dates for window_start/window_end, working_hours like '9-18'",
+                              example={"duration_minutes": 30, "window_start": "2026-10-05", "window_end": "2026-10-09"})
+        now = dt.datetime.now(dt.timezone.utc)
+        w0 = max(w0, now)
+        if w1 <= w0:
+            return tool_error("calendar_find_time: the window is already over.", field="window_end", expected="a window that ends in the future")
+        if w1 - w0 > dt.timedelta(days=60):
+            w1 = w0 + dt.timedelta(days=60)
+        days = max(1, -(-int((w1 - w0).total_seconds()) // 86400))
+        events = await run(g.calendar_events, days, "primary", 250, w0.isoformat(), ["all"])
+        busy = scheduling.busy_from_events(events, tz)
+        unreachable: list[str] = []
+        if attendees:
+            fb = await run(g.calendar_free_busy, w0.isoformat(), w1.isoformat(), ["primary"], list(attendees))
+            for row in (fb.get("calendars") or {}).values():
+                if row.get("attendee"):
+                    busy = scheduling.merge([*busy, *scheduling.busy_from_ranges(row.get("busy") or [], tz)])
+            unreachable = list(fb.get("unreachable") or [])
+        slots = scheduling.find_slots(dur, w0.isoformat(), w1.isoformat(), busy, tz=tz, working_hours=working_hours, buffer_minutes=buf,
+                                      max_results=n, now=now)
+        out: dict[str, Any] = {"slots": slots, "timezone": getattr(tz, "key", "UTC"), "duration_minutes": dur, "count": len(slots),
+                               "window": {"start": scheduling.iso_local(w0, tz), "end": scheduling.iso_local(w1, tz)}}
+        if attendees:
+            out["attendees"] = list(attendees)
+        note = ""
+        if unreachable:
+            out["unreachable"] = unreachable
+            note = "Could not see the calendar of: " + ", ".join(unreachable) + ". Their availability is NOT reflected in these slots; say so. "
+        if not slots:
+            note += "No free slot fits; widen the window, shorten the meeting or loosen working_hours."
+        if note.strip():
+            out["note"] = note.strip()
+        return out
+    R("calendar_find_time", ToolSpec("calendar_find_time", "Find free slots for a meeting: ranked candidates inside working hours (default 9-18 local, weekdays) that avoid the user's events on every visible calendar (declined and 'free' events do not block) and, when given, the attendees' busy time. ALWAYS use this before proposing a time. Then call calendar_propose with the chosen slot.",
+        _obj({"duration_minutes": {"type": "integer"}, "window_start": {"type": "string", "description": "ISO datetime or date to search from"},
+              "window_end": {"type": "string", "description": "ISO datetime, or a date meaning through the end of that day"},
+              "attendees": {"type": "array", "items": {"type": "string"}, "description": "emails whose busy time must also be free"},
+              "working_hours": {"type": "string", "description": "e.g. '9-18' or '10:00-16:30'; default 9-18"},
+              "buffer_minutes": {"type": "integer", "default": 0, "description": "clear gap to keep around every other event"},
+              "max_results": {"type": "integer", "default": 5}, "timezone": {"type": "string", "description": "IANA zone; default the user's own"}},
+             ["duration_minutes", "window_start", "window_end"]), calendar_find_time, "google",
+        examples=[{"duration_minutes": 30, "window_start": "2026-10-05", "window_end": "2026-10-09"},
+                  {"duration_minutes": 60, "window_start": "2026-10-05T09:00", "window_end": "2026-10-07", "attendees": ["mira@example.com"], "buffer_minutes": 10, "max_results": 3}]))
+
+    async def _propose_one(i: int, c: dict[str, Any]) -> dict[str, Any]:
+        row: dict[str, Any] = {"i": i, "op": c["op"], "ok": False}
+        cal, upd = c["calendar_id"], c.get("send_updates", "none")
+        try:
+            if c["op"] == "create":
+                res = await run(g.calendar_create, scheduling.change_fields(c), cal, upd)
+            elif c["op"] == "update":
+                res = await run(g.calendar_update, c["event_id"], scheduling.change_fields(c), cal, upd)
+            else:
+                res = await run(g.calendar_delete, c["event_id"], cal, upd)
+        except Exception as e:  # noqa: BLE001 - one failed change must not stop the rest, or hide itself
+            if type(e).__name__ == "GoogleNotConnected":
+                raise
+            log.warning("calendar_propose change %s failed", i, exc_info=True)
+            row["err"] = f"{type(e).__name__}: {_first_line(e)}"[:160]
+            return row
+        v = res.get("verification") if isinstance(res, dict) else None
+        row["v"] = (v or {}).get("status") or "unchecked"
+        row["ok"] = bool(v) and verify.ok(v)
+        if not row["ok"]:
+            row["err"] = (verify.tool_error_text("calendar_" + c["op"], v) if v else "no read-back")[:160]
+        if c["op"] == "delete":
+            row["id"] = c["event_id"]
+        else:
+            row.update({"id": res.get("id"), "link": res.get("link"), "s": res.get("summary"), "a": res.get("start"), "b": res.get("end")})
+        row["cal"] = cal
+        return {k: val for k, val in row.items() if val is not None}
+
+    async def calendar_propose(ctx: dict[str, Any], changes: list[dict[str, Any]], note: str | None = None) -> Any:
+        """Execute a reviewed batch. By the time this runs the user approved it (possibly after editing),
+        so `changes` is whatever they approved; it is validated again here, never trusted."""
+        try:
+            todo = scheduling.validate_changes(changes, _tz(None))
+        except ValueError as e:
+            return tool_error(f"calendar_propose: {e}", field="changes",
+                              expected="a list of {op: create|update|delete, ...} objects",
+                              example={"changes": [{"op": "create", "summary": "Sync", "start": "2026-10-07T15:00", "end": "2026-10-07T15:30"}]})
+        rows = [await _propose_one(i, c) for i, c in enumerate(todo)]
+        done = sum(1 for r in rows if r["ok"])
+        failed = len(rows) - done
+        out: dict[str, Any] = {"ok": failed == 0, "applied": done, "failed": failed, "total": len(rows), "results": rows}
+        if note:
+            out["note"] = str(note)[:200]
+        if failed:
+            bad = [f"#{r['i'] + 1} {r['op']}: {r.get('err') or r.get('v') or 'failed'}" for r in rows if not r["ok"]]
+            out["error"] = (f"calendar_propose: {done} of {len(rows)} changes made; {failed} did not complete ({'; '.join(bad)[:400]}). "
+                            "Report exactly which succeeded and which did not.")
+            out["try_instead"] = ("do NOT repeat the changes that succeeded; a change marked unverified may still have landed, "
+                                  "so ask the user to check Google Calendar before retrying it")
+        return out
+    R("calendar_propose", ToolSpec("calendar_propose", "Propose a batch of calendar changes the user reviews as a whole on a calendar view, can edit or switch off per change, and approves once. Prefer this over calendar_create/update/delete whenever you schedule or rearrange (use calendar_find_time first for the times). Each change: {op: create|update|delete, event_id (update/delete), calendar_id, summary, start, end, attendees, location, description, recurrence, conference (true adds a Meet link), send_updates}. Nothing happens until the user approves; then each change is made and read back, with a per-change outcome.",
+        _obj({"changes": {"type": "array", "minItems": 1, "maxItems": scheduling.MAX_CHANGES, "items": {"type": "object", "properties": {
+                  "op": {"type": "string", "enum": ["create", "update", "delete"]}, "event_id": {"type": "string"}, "calendar_id": {"type": "string", "default": "primary"},
+                  "summary": {"type": "string"}, "start": {"type": "string"}, "end": {"type": "string"},
+                  "attendees": {"type": "array", "items": {"type": "string"}}, "location": {"type": "string"}, "description": {"type": "string"},
+                  "recurrence": {"type": "array", "items": {"type": "string"}}, "conference": {"type": "boolean"},
+                  "send_updates": {"type": "string", "enum": ["none", "all", "externalOnly"]}}, "required": ["op"]}},
+              "note": {"type": "string", "description": "one line on why, shown above the proposal"}}, ["changes"]), calendar_propose, "google", "external",
+        examples=[{"changes": [{"op": "create", "summary": "Design sync", "start": "2026-10-07T15:00", "end": "2026-10-07T15:30", "attendees": ["mira@example.com"], "conference": True}],
+                   "note": "Both of you are free then"},
+                  {"changes": [{"op": "update", "event_id": "7abc123def", "start": "2026-10-08T10:00", "end": "2026-10-08T11:00"}, {"op": "delete", "event_id": "9xyz"}]}]))
+    _register_approval_validators()
 
     async def gmail_search(ctx: dict[str, Any], query: str = "is:unread in:inbox newer_than:14d", max_results: int = 15, offset: int = 0) -> Any:
         off, n = max(0, int(offset)), max(1, min(int(max_results), 100))
@@ -1151,13 +1308,19 @@ def _register_google(self: Toolbox) -> None:
         examples=[{"to": "mira@example.com", "subject": "Invoice 42", "body": "Hi Mira,\n\nAttached is invoice 42.\n\nThanks"},
                   {"to": "team@example.com", "subject": "Re: sprint review", "body": "Works for me.", "reply_to_message_id": "18f2c1a9b7e4d0aa"}]))
 
-    async def gmail_send(ctx: dict[str, Any], to: str, subject: str, body: str) -> Any:
+    async def gmail_send(ctx: dict[str, Any], to: str, subject: str, body: str, reply_to_message_id: str | None = None,
+                         as_draft: bool = False) -> Any:
+        if as_draft:
+            # The user chose "Save as draft" on the approval card: the same email, written to Drafts and never sent.
+            # It still goes through gmail_draft's read-back, so the card can say "Saved to Drafts, verified".
+            return await run(g.gmail_draft, to, subject, body, reply_to_message_id)
         if self.outbox is None:
-            return await run(g.gmail_send, to, subject, body)
-        row = await run(self.outbox.queue, to, subject, body, None, "assistant", ctx.get("conversation_id"))
+            return await run(g.gmail_send, to, subject, body, reply_to_message_id)
+        row = await run(self.outbox.queue, to, subject, body, reply_to_message_id, "assistant", ctx.get("conversation_id"))
         return outbox_mod.queued_result(row)
-    R("gmail_send", ToolSpec("gmail_send", "Queue an email to send from the user's Gmail. It is held for about a minute and a half first so the user can undo it, so it is NOT sent when this returns — say it will go out shortly, never that it is sent. Only when the user explicitly asked to send it.",
-        _obj({"to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"}}, ["to", "subject", "body"]), gmail_send, "google", "external",
+    R("gmail_send", ToolSpec("gmail_send", "Queue an email to send from the user's Gmail. It is held for about a minute and a half first so the user can undo it, so it is NOT sent when this returns — say it will go out shortly, never that it is sent. Only when the user explicitly asked to send it. Pass reply_to_message_id to answer an existing message in its thread. Leave as_draft unset: the user sets it on the approval card.",
+        _obj({"to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"}, "reply_to_message_id": {"type": "string"},
+              "as_draft": {"type": "boolean", "default": False}}, ["to", "subject", "body"]), gmail_send, "google", "external",
         examples=[{"to": "mira@example.com", "subject": "Running late", "body": "I will be 10 minutes late."}]))
 
     async def gmail_outbox(ctx: dict[str, Any], action: str = "list", id: str | None = None) -> Any:

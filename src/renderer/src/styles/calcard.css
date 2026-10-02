@@ -1,0 +1,182 @@
+/*
+ * Calendar tool cards (toolcards/CalendarCard.tsx): a compact Google-Calendar-style preview inside a
+ * chat bubble. Every colour is a token from styles.css, so light, dark and the accent presets follow
+ * without a second palette. Classes are .ccard-* because styles.css is one flat namespace.
+ */
+
+.ccard {
+  margin: 0; padding: 10px 12px 8px; border-radius: 10px; font-size: 12.5px;
+  background: var(--bg-elev); border: 1px solid var(--border);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.ccard.awaiting { border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 6%, var(--bg-elev)); }
+.ccard.failed, .ccard.partial { border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
+.ccard.denied { opacity: 0.8; }
+.ccard-head { display: flex; align-items: center; gap: 7px; color: var(--text); }
+.ccard-head > svg { color: var(--accent); flex: none; }
+.ccard-head b { font-size: 13px; font-weight: 600; }
+.ccard-count { color: var(--text-faint); font-size: 11.5px; margin-right: auto; }
+.ccard-head .tag { margin-left: auto; }
+.ccard-count + .tag { margin-left: 0; }
+.ccard-note { margin: 0; color: var(--text-muted); line-height: 1.45; }
+.ccard-sub { margin: 0; color: var(--text-muted); font-size: 12px; }
+.ccard-muted { margin: 0; color: var(--text-faint); font-size: 11.5px; }
+.ccard-loading { display: flex; align-items: center; gap: 6px; color: var(--text-faint); font-size: 11.5px; padding: 6px 0; }
+.ccard .spin { animation: ccard-spin 0.9s linear infinite; }
+@keyframes ccard-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .ccard .spin { animation: none; } }
+
+.ccard-notice {
+  display: flex; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 8px; font-size: 12px; min-height: 0;
+  background: color-mix(in srgb, var(--warn) 12%, transparent); border: 1px solid color-mix(in srgb, var(--warn) 35%, transparent);
+  color: var(--text); line-height: 1.3;
+}
+.ccard-notice > svg { flex: none; color: var(--warn); }
+.ccard-notice .ghost-btn { flex: none; margin-left: auto; }
+.ccard-notice span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ---- the calendar grid (the card's main view) ---- */
+.pg-bar { display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; }
+.pg-week { font-size: 13px; font-weight: 600; color: var(--text); }
+.pg-legend { display: flex; flex-wrap: wrap; gap: 4px 6px; margin-right: auto; }
+.pg-chipkey { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-muted); padding: 1px 8px 1px 6px; border-radius: 10px; background: var(--hover); }
+.pg-chipkey i { width: 11px; height: 9px; border-radius: 2px; display: inline-block; box-sizing: border-box; background: color-mix(in srgb, var(--text-faint) 30%, transparent); border: 1px solid var(--text-faint); }
+.pg-chipkey.k-new i { border: 1.5px dashed var(--accent); background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.pg-chipkey.k-moved i { border: 1.5px solid var(--accent); background: color-mix(in srgb, var(--accent) 32%, transparent); }
+.pg-chipkey.k-edited i { border: 1.5px solid var(--accent); background: transparent; }
+.pg-chipkey.k-delete i { border: 1.5px solid var(--danger); background: color-mix(in srgb, var(--danger) 16%, transparent); }
+.pg-chipkey.k-done i { border: 1.5px solid var(--ok); background: color-mix(in srgb, var(--ok) 20%, transparent); }
+.pg-chipkey.k-failed i { border: 1.5px dashed var(--danger); background: transparent; }
+.pg-count { font-size: 11.5px; color: var(--text-faint); }
+
+.pg {
+  display: grid; align-items: start; border: 1px solid var(--border); border-radius: 8px; background: var(--bg);
+  max-height: 420px; overflow-y: auto; overflow-x: hidden; font-size: 12px; position: relative;
+}
+.pg-corner, .pg-dayhead { position: sticky; top: 0; z-index: 4; background: var(--bg); border-bottom: 1px solid var(--border); }
+.pg-dayhead { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 5px 4px 4px; border-left: 1px solid var(--border); color: var(--text-muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; }
+.pg-dayhead b { font-size: 15px; line-height: 1; font-weight: 500; text-transform: none; color: var(--text); width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; }
+.pg-dayhead.today { color: var(--accent); }
+.pg-dayhead.today b { background: var(--accent-solid); color: #fff; }
+.pg-gutter { color: var(--text-faint); }
+.pg-adlabel { padding: 6px 6px 0 0; text-align: right; font-size: 10.5px; }
+.pg-allday { display: flex; flex-direction: column; gap: 2px; padding: 3px; border-left: 1px solid var(--border); border-bottom: 1px solid var(--border); min-height: 8px; min-width: 0; }
+.pg-chip { display: flex; align-items: center; gap: 4px; font: inherit; font-size: 12px; text-align: left; padding: 2px 6px; border-radius: 4px; color: var(--text); min-width: 0;
+  background: color-mix(in srgb, var(--text-faint) 20%, transparent); border: 1px solid transparent; border-left: 3px solid var(--text-faint); cursor: default; }
+.pg-chip > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button.pg-chip { cursor: pointer; }
+.pg-hour { position: relative; box-sizing: border-box; }
+.pg-hour span { position: absolute; right: 6px; top: -7px; font-size: 10.5px; }
+.pg-col { position: relative; border-left: 1px solid var(--border); min-width: 0; }
+.pg-col.today { background: color-mix(in srgb, var(--accent) 4%, transparent); }
+.pg-line { position: absolute; left: 0; right: 0; border-top: 1px solid var(--border); }
+
+.pg-block {
+  position: absolute; box-sizing: border-box; display: flex; flex-direction: column; gap: 1px; overflow: hidden; z-index: 1; text-align: left;
+  font: inherit; font-size: 12px; line-height: 1.25; padding: 3px 6px; border-radius: 5px; color: var(--text); cursor: default;
+  background: color-mix(in srgb, var(--text-faint) 22%, var(--bg)); border: 1px solid color-mix(in srgb, var(--text-faint) 35%, transparent); border-left: 3px solid var(--text-faint);
+}
+button.pg-block { cursor: pointer; }
+button.pg-block:hover { filter: brightness(1.08); }
+.pg-block:focus-visible, .pg-chip:focus-visible, .pg-pickbtn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; z-index: 6; }
+.pg-title { display: flex; align-items: center; gap: 3px; font-weight: 600; font-size: 12.5px; min-width: 0; }
+.pg-title svg { flex: none; }
+.pg-title span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.pg-time { color: var(--text-muted); font-size: 11.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pg-tag { position: absolute; right: 4px; bottom: 3px; font-size: 10px; font-weight: 600; padding: 0 5px; border-radius: 8px; color: var(--accent); background: color-mix(in srgb, var(--accent) 16%, var(--bg)); }
+.pg-badge { position: absolute; top: 3px; right: 4px; display: inline-flex; }
+.pg-badge.ok { color: var(--ok); }
+.pg-badge.bad { color: var(--danger); }
+
+/* Proposed create: a dashed ghost in the accent colour. */
+.pg-block.v-new, .pg-chip.v-new { background: color-mix(in srgb, var(--accent) 14%, var(--bg)); border: 1.5px dashed var(--accent); }
+/* Where a moved event used to be: faded and dotted, never mistaken for where it lands. */
+.pg-block.v-moved-from, .pg-chip.v-moved-from { opacity: 0.55; background: transparent; border: 1.5px dotted var(--text-faint); }
+.pg-block.v-moved-from .pg-title span, .pg-chip.v-moved-from span { text-decoration: line-through; text-decoration-thickness: 1px; }
+.pg-block.v-moved-to, .pg-chip.v-moved-to { z-index: 2; background: color-mix(in srgb, var(--accent) 30%, var(--bg)); border: 1.5px solid var(--accent); border-left-width: 3px; }
+/* Edited in place: same slot, accent outline. */
+.pg-block.v-edited, .pg-chip.v-edited { z-index: 2; background: color-mix(in srgb, var(--accent) 8%, var(--bg)); border: 2px solid var(--accent); }
+.pg-block.v-delete, .pg-chip.v-delete { background: color-mix(in srgb, var(--danger) 16%, var(--bg)); border: 1.5px solid color-mix(in srgb, var(--danger) 70%, transparent); border-left-width: 3px; }
+.pg-block.v-delete .pg-title span, .pg-chip.v-delete span { text-decoration: line-through; color: var(--text-muted); }
+.pg-block.v-delete .pg-title svg { color: var(--danger); }
+.pg-block.v-done, .pg-chip.v-done { z-index: 2; background: color-mix(in srgb, var(--ok) 18%, var(--bg)); border: 1.5px solid color-mix(in srgb, var(--ok) 70%, transparent); border-left-width: 3px; }
+.pg-block.v-done .pg-title svg { color: var(--ok); }
+.pg-block.v-failed, .pg-chip.v-failed { background: transparent; border: 1.5px dashed var(--danger); }
+.pg-block.v-failed .pg-title svg { color: var(--danger); }
+.pg-block.off, .pg-chip.off { opacity: 0.4; filter: grayscale(1); border-style: dashed; }
+.pg-block.sel, .pg-chip.sel { box-shadow: 0 0 0 2px var(--focus-ring); z-index: 5; }
+.pg-block.conflict, .pg-chip.conflict { outline: 2px solid var(--warn); outline-offset: -1px; }
+.pg-block.conflict:focus-visible { outline-color: var(--focus-ring); }
+
+.pg-pick { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.pg-pickbtn { display: inline-flex; align-items: center; gap: 5px; max-width: 220px; font: inherit; font-size: 12px; padding: 3px 9px; border-radius: 14px; cursor: pointer; color: var(--text-muted); background: var(--hover); border: 1px solid transparent; }
+.pg-pickbtn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pg-pickbtn.sel { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.pg-pickbtn.op-delete svg { color: var(--danger); }
+.pg-pickbtn.op-create svg { color: var(--accent); }
+.pg-pickbtn.off { opacity: 0.5; text-decoration: line-through; }
+.pg-listtoggle { margin-left: auto; }
+
+/* ---- the change list ---- */
+.ccard-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.ccard-row { padding: 7px 9px; border-radius: 8px; background: var(--bg); border: 1px solid var(--border); display: flex; flex-direction: column; gap: 5px; }
+.ccard-row.off { opacity: 0.55; }
+.ccard-row-head { display: flex; align-items: center; gap: 7px; min-width: 0; flex-wrap: wrap; }
+.ccard-row-head input[type='checkbox'] { margin: 0; flex: none; accent-color: var(--accent-solid); }
+.ccard-status { width: 14px; display: inline-flex; flex: none; }
+.ccard-status .ok { color: var(--ok); }
+.ccard-status .bad { color: var(--danger); }
+.ccard-op { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 10px; background: var(--hover); color: var(--text-muted); flex: none; }
+.ccard-op.op-create { color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.ccard-op.op-delete { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); }
+.ccard-name { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 120px; }
+.ccard-name.struck { text-decoration: line-through; color: var(--text-muted); }
+.ccard-title { flex: 1 1 140px; min-width: 0; font: inherit; font-weight: 600; padding: 3px 7px; border-radius: 6px; background: var(--bg-input); border: 1px solid var(--border); color: var(--text); }
+.ccard-when { color: var(--text-muted); font-size: 12px; line-height: 1.45; padding-left: 2px; }
+.ccard-was, .ccard-guests { color: var(--text-faint); }
+.ccard-edit { display: flex; flex-wrap: wrap; gap: 6px 10px; }
+.ccard-edit label { display: flex; flex-direction: column; gap: 2px; font-size: 10.5px; color: var(--text-faint); flex: 1 1 150px; min-width: 0; }
+.ccard-edit label.wide { flex-basis: 100%; }
+.ccard-edit label.ccard-meet { flex-direction: row; align-items: center; gap: 5px; flex-basis: 100%; font-size: 12px; color: var(--text-muted); }
+.ccard-edit label.ccard-meet input { accent-color: var(--accent-solid); }
+.ccard-list.panel .ccard-row { background: color-mix(in srgb, var(--accent) 5%, var(--bg)); border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
+.ccard-edit input { font: inherit; font-size: 12px; padding: 3px 6px; border-radius: 6px; background: var(--bg-input); border: 1px solid var(--border); color: var(--text); min-width: 0; color-scheme: inherit; }
+.ccard-title:focus-visible, .ccard-edit input:focus-visible, .ccard-slot:focus-visible, .ccard-open:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.ccard-row-head input[type='checkbox']:focus-visible, .ccard-notify input:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.ccard-open { display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: var(--accent); text-decoration: none; margin-left: auto; padding: 1px 4px; border-radius: 5px; }
+.ccard-open:hover { background: var(--hover); text-decoration: underline; }
+.ccard-warn { display: flex; align-items: flex-start; gap: 5px; font-size: 11.5px; color: var(--text-muted); }
+.ccard-warn svg { flex: none; margin-top: 1px; color: var(--warn); }
+.ccard-warn.bad { color: var(--danger); }
+.ccard-warn.bad svg { color: var(--danger); }
+
+.ccard-foot { display: flex; flex-direction: column; gap: 7px; }
+.ccard-notify { display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 12px; }
+.ccard-notify input { margin: 0; accent-color: var(--accent-solid); }
+.ccard-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+
+.ccard-details { font-size: 11px; color: var(--text-faint); }
+.ccard-details summary { cursor: pointer; width: fit-content; padding: 1px 2px; border-radius: 4px; }
+.ccard-details summary:hover { color: var(--text-muted); }
+.ccard-details summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+.ccard-raw h6 { margin: 6px 0 2px; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em; }
+.ccard-raw pre { margin: 0; max-height: 160px; overflow: auto; white-space: pre-wrap; word-break: break-word; font-family: var(--mono); font-size: 10.5px; background: var(--bg-input); border-radius: 6px; padding: 6px 8px; }
+
+/* ---- agenda (find_time / events) ---- */
+.ccard-agday { display: flex; flex-direction: column; gap: 4px; }
+.ccard-aghead { font-size: 11px; font-weight: 600; color: var(--text-muted); }
+.ccard-slots { display: flex; flex-wrap: wrap; gap: 5px; }
+.ccard-slot {
+  font: inherit; font-size: 12px; padding: 4px 10px; border-radius: 14px; cursor: pointer; color: var(--text);
+  background: color-mix(in srgb, var(--accent) 12%, transparent); border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  font-variant-numeric: tabular-nums;
+}
+.ccard-slot:hover { background: color-mix(in srgb, var(--accent) 24%, transparent); }
+.ccard-ag { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.ccard-ag li { display: flex; align-items: baseline; gap: 8px; min-width: 0; padding: 3px 6px; border-radius: 6px; border-left: 3px solid var(--info); background: color-mix(in srgb, var(--info) 10%, transparent); }
+.ccard-agtime { flex: none; width: 62px; color: var(--text-faint); font-size: 11px; font-variant-numeric: tabular-nums; }
+.ccard-agtitle { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ccard-ag .ccard-guests { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; font-size: 11px; }
+.ccard-ag .ccard-open { margin-left: auto; }
+
+.tool-event.card { border: none; background: none; }

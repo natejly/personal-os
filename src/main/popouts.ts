@@ -2,7 +2,8 @@
  * Detached widget windows. One BrowserWindow per canvas window id, its screen bounds persisted back
  * to the backend, plus gather/scatter: centre every pop-out on the display under the cursor and undo it.
  */
-import { app, BrowserWindow, ipcMain, screen } from 'electron'
+import { app, BrowserWindow, screen } from 'electron'
+import { handle } from './ipc'
 import { join } from 'path'
 import { backendToken, backendUrl } from './backend'
 import { guardNavigation } from './navigation'
@@ -168,7 +169,7 @@ export const openPopout = (windowId: string, req: PopoutOpenRequest = {}): boole
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
       webviewTag: true // a popped web widget still needs its <webview>
     }
   })
@@ -454,18 +455,18 @@ export const restorePopouts = async (): Promise<void> => {
 
 export const registerPopouts = (mainWindow: () => BrowserWindow | null): void => {
   getMain = mainWindow
-  ipcMain.handle('popout:open', (_e, windowId: string, req?: PopoutOpenRequest) => openPopout(windowId, req ?? {}))
-  ipcMain.handle('popout:close', (_e, windowId: string) => closePopout(windowId))
-  ipcMain.handle('popout:focus', (_e, windowId: string) => focusPopout(windowId))
-  ipcMain.handle('popout:set-pinned', (_e, windowId: string, pinned: boolean) => setPopoutPinned(windowId, pinned))
-  ipcMain.handle('popout:set-opacity', (_e, windowId: string, opacity: number) => setPopoutOpacity(windowId, opacity))
-  ipcMain.handle('popout:set-min-size', (_e, windowId: string, minWidth: number, minHeight: number) =>
+  handle('popout:open', (_e, windowId: string, req?: PopoutOpenRequest) => openPopout(windowId, req ?? {}))
+  handle('popout:close', (_e, windowId: string) => closePopout(windowId))
+  handle('popout:focus', (_e, windowId: string) => focusPopout(windowId))
+  handle('popout:set-pinned', (_e, windowId: string, pinned: boolean) => setPopoutPinned(windowId, pinned))
+  handle('popout:set-opacity', (_e, windowId: string, opacity: number) => setPopoutOpacity(windowId, opacity))
+  handle('popout:set-min-size', (_e, windowId: string, minWidth: number, minHeight: number) =>
     setPopoutMinSize(windowId, minWidth, minHeight)
   )
-  ipcMain.handle('popout:list', () => listPopouts())
-  ipcMain.handle('popout:gather', () => gather())
-  ipcMain.handle('popout:scatter', () => scatter())
-  ipcMain.handle('popout:front', () => toggleFront())
+  handle('popout:list', () => listPopouts())
+  handle('popout:gather', () => gather())
+  handle('popout:scatter', () => scatter())
+  handle('popout:front', () => toggleFront())
   app.on('before-quit', () => {
     quitting = true
     for (const [, e] of popouts) if (!e.win.isDestroyed()) e.win.destroy()

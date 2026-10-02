@@ -166,6 +166,11 @@ class Docs:
         with db.tx() as c:
             c.executescript(SCHEMA)
             self._migrate_folder_scope(c)
+            # Soft delete (trash.py). docs is created here, not in db.py, so its columns are added here too.
+            have = {r["name"] for r in c.execute("PRAGMA table_info(docs)").fetchall()}
+            for col, ddl in {"deleted_at": "REAL", "deleted_with": "TEXT"}.items():
+                if col not in have:
+                    c.execute(f"ALTER TABLE docs ADD COLUMN {col} {ddl}")
         self.backfill_chunks()
 
     @staticmethod
@@ -236,14 +241,14 @@ class Docs:
             rows = c.execute(
                 f"""SELECT f.chunk_id, f.doc_id, d.title, ch.idx, ch.text, ch.heading, bm25(doc_chunks_fts) AS score
                     FROM doc_chunks_fts f JOIN docs d ON d.id=f.doc_id JOIN doc_chunks ch ON ch.id=f.chunk_id
-                    WHERE doc_chunks_fts MATCH ? AND {where.replace('project_id', 'd.project_id')}
+                    WHERE doc_chunks_fts MATCH ? AND d.deleted_at IS NULL AND {where.replace('project_id', 'd.project_id')}
                     ORDER BY score LIMIT ?""", (fq, *args, limit)).fetchall()
         return [doc_hit(r) for r in rows]
 
     # ---- reads ----
     def list(self, project_id: str | None = "__all__", q: str = "") -> list[dict[str, Any]]:
         """Docs without their bodies: a preview is enough for a list, and bodies get long."""
-        where, args = [], []
+        where, args = ["d.deleted_at IS NULL"], []
         if project_id != "__all__":
             if project_id is None:
                 where.append("d.project_id IS NULL")
@@ -271,7 +276,7 @@ class Docs:
 
     def get(self, id: str) -> dict[str, Any] | None:
         with self.db.tx() as c:
-            d = row_to_dict(c.execute("SELECT * FROM docs WHERE id=?", (id,)).fetchone())
+            d = row_to_dict(c.execute("SELECT * FROM docs WHERE id=? AND deleted_at IS NULL", (id,)).fetchone())
             if not d:
                 return None
             pending = [row_to_dict(r) for r in c.execute(
@@ -286,9 +291,9 @@ class Docs:
         if not key:
             return None
         with self.db.tx() as c:
-            r = c.execute("SELECT id FROM docs WHERE id=? OR lower(title)=lower(?)", (key, key)).fetchone()
+            r = c.execute("SELECT id FROM docs WHERE deleted_at IS NULL AND (id=? OR lower(title)=lower(?))", (key, key)).fetchone()
             if not r:
-                hits = c.execute("SELECT id FROM docs WHERE title LIKE ? COLLATE NOCASE LIMIT 2", (f"%{key}%",)).fetchall()
+                hits = c.execute("SELECT id FROM docs WHERE deleted_at IS NULL AND title LIKE ? COLLATE NOCASE LIMIT 2", (f"%{key}%",)).fetchall()
                 if len(hits) != 1:
                     return None
                 r = hits[0]
@@ -308,10 +313,10 @@ class Docs:
             except Exception:  # malformed FTS expression — fall back to LIKE
                 rows = c.execute(
                     "SELECT id AS doc_id, substr(content,1,200) AS snippet, 0 AS score FROM docs "
-                    "WHERE content LIKE ? OR title LIKE ? LIMIT ?", (f"%{q}%", f"%{q}%", max(1, limit) * 3)).fetchall()
+                    "WHERE deleted_at IS NULL AND (content LIKE ? OR title LIKE ?) LIMIT ?", (f"%{q}%", f"%{q}%", max(1, limit) * 3)).fetchall()
             out = []
             for r in rows:
-                d = c.execute("SELECT id, title, project_id FROM docs WHERE id=?", (r["doc_id"],)).fetchone()
+                d = c.execute("SELECT id, title, project_id FROM docs WHERE id=? AND deleted_at IS NULL", (r["doc_id"],)).fetchone()
                 if not d:
                     continue
                 if project_id != "__all__" and d["project_id"] != project_id:
@@ -409,7 +414,7 @@ class Docs:
             named = [(r["scope"], r["path"]) for r in c.execute("SELECT scope, path FROM doc_folders").fetchall()]
             counts = {(r["scope"], r["folder"]): int(r["n"]) for r in c.execute(
                 "SELECT COALESCE(project_id,'') AS scope, folder, COUNT(*) AS n FROM docs"
-                " WHERE folder<>'' GROUP BY scope, folder").fetchall()}
+                " WHERE folder<>'' AND deleted_at IS NULL GROUP BY scope, folder").fetchall()}
         keys: set[tuple[str, str]] = set()
         for scope, p in [*named, *counts.keys()]:
             for anc in ancestors(folder_path(p)):
@@ -471,14 +476,15 @@ class Docs:
                 moved = dst + r["path"][len(src):]
                 c.execute("DELETE FROM doc_folders WHERE scope=? AND path=?", (sc, r["path"]))
                 c.execute("INSERT OR IGNORE INTO doc_folders(scope, path, created_at) VALUES(?,?,?)", (sc, moved, t))
-            c.execute(f"UPDATE docs SET folder=? WHERE folder=? AND {proj_match}", (dst, src, *proj_args))
-            c.execute(f"UPDATE docs SET folder=? || substr(folder, ?) WHERE folder LIKE ? AND {proj_match}",
+            c.execute(f"UPDATE docs SET folder=? WHERE deleted_at IS NULL AND folder=? AND {proj_match}", (dst, src, *proj_args))
+            c.execute(f"UPDATE docs SET folder=? || substr(folder, ?) WHERE deleted_at IS NULL AND folder LIKE ? AND {proj_match}",
                       (dst, len(src) + 1, src + "/%", *proj_args))
         return self.folders()
 
     def delete_folder(self, path: str, delete_docs: bool = False, scope: str | None = "") -> list[dict[str, Any]]:
         """Remove a folder and its subfolders. Its docs move up to the parent unless asked otherwise:
-        losing a folder must not silently lose what was written in it."""
+        losing a folder must not silently lose what was written in it. With delete_docs they go to the
+        trash (each one restorable on its own) rather than being erased."""
         src = folder_path(path)
         sc = scope_key(scope)
         if not src:
@@ -488,15 +494,11 @@ class Docs:
         proj_args: tuple[Any, ...] = () if sc == "" else (sc,)
         with self.db.tx() as c:
             if delete_docs:
-                ids = [r["id"] for r in c.execute(
-                    f"SELECT id FROM docs WHERE (folder=? OR folder LIKE ?) AND {proj_match}",
-                    (src, src + "/%", *proj_args)).fetchall()]
-                for did in ids:
-                    c.execute("DELETE FROM docs WHERE id=?", (did,))
-                    c.execute("DELETE FROM docs_fts WHERE doc_id=?", (did,))
-                    c.execute("DELETE FROM doc_chunks_fts WHERE doc_id=?", (did,))
+                c.execute(
+                    f"UPDATE docs SET deleted_at=?, deleted_with=NULL WHERE deleted_at IS NULL"
+                    f" AND (folder=? OR folder LIKE ?) AND {proj_match}", (now(), src, src + "/%", *proj_args))
             else:
-                c.execute(f"UPDATE docs SET folder=? WHERE (folder=? OR folder LIKE ?) AND {proj_match}",
+                c.execute(f"UPDATE docs SET folder=? WHERE deleted_at IS NULL AND (folder=? OR folder LIKE ?) AND {proj_match}",
                           (parent, src, src + "/%", *proj_args))
             c.execute("DELETE FROM doc_folders WHERE scope=? AND (path=? OR path LIKE ?)", (sc, src, src + "/%"))
         return self.folders()
@@ -531,7 +533,9 @@ class Docs:
 
     def pending_count(self) -> int:
         with self.db.tx() as c:
-            return int(c.execute("SELECT COUNT(*) FROM doc_revisions WHERE status='pending'").fetchone()[0])
+            return int(c.execute(
+                "SELECT COUNT(*) FROM doc_revisions r JOIN docs d ON d.id=r.doc_id"
+                " WHERE r.status='pending' AND d.deleted_at IS NULL").fetchone()[0])
 
     def propose(self, doc_id: str, after: str, summary: str = "", tool: str | None = None,
                 title_after: str | None = None) -> dict[str, Any] | None:

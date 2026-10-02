@@ -412,6 +412,58 @@ export interface ToolEvent {
   agent?: string
   /** write_local_file / move_local_file: the pre-image kept so the user can undo it (id is null when too large to keep). */
   undo?: { snapshot_id: string | null; reason?: string | null } | null
+  /** Set when the user rewrote the arguments on the approval card (approval_edits.py). `arguments` is then what ran. */
+  edited_by?: 'user' | null
+  /** What the model originally asked for, kept beside the edit so a card can show what changed. */
+  original_arguments?: Record<string, unknown> | null
+  edited_arguments?: Record<string, unknown> | null
+  /** The artifact an artifact_create / artifact_update / artifact_edit call made. Persisted with the event, so the card survives a reload. */
+  artifact?: ArtifactRef | null
+}
+
+/** Which artifact a tool call made, and what it did to it. */
+export interface ArtifactRef {
+  id: string
+  title: string
+  version: number | null
+  action: 'created' | 'updated'
+}
+
+/** An AI-generated, self-contained HTML document with version history (backend/personal_os/artifacts.py). */
+export interface Artifact {
+  id: string
+  project_id: string | null
+  title: string
+  kind: 'html'
+  prompt: string
+  version: number
+  created_at: number
+  updated_at: number
+  conversation_id: string | null
+  run_id: string | null
+  message_id: string | null
+  /** Signed, expiring path for the sandboxed iframe (the iframe cannot send the app token). */
+  render_path: string
+  /** Absent from list rows. */
+  code?: string
+  size?: number
+  version_count?: number
+  /** What the render CSP will silently break in this document: network, storage, form, ... */
+  blocked?: string[]
+  lint?: ArtifactLint
+}
+
+export interface ArtifactVersion {
+  id: string
+  artifact_id: string
+  version: number
+  prompt: string
+  instruction: string
+  source: 'llm' | 'user' | 'restore'
+  created_at: number
+  size?: number
+  code?: string
+  render_path?: string
 }
 
 /** Why a reply stopped early: a budget axis, or the repetition breaker. */
@@ -985,6 +1037,13 @@ export interface TodayDashboard {
 export interface Settings {
   baseUrl: string
   apiKey: string
+  /** The backend never returns secret values: apiKey etc. arrive blank and these say whether one is saved. */
+  apiKeySet?: boolean
+  braveApiKeySet?: boolean
+  tavilyApiKeySet?: boolean
+  exaApiKeySet?: boolean
+  githubTokenSet?: boolean
+  googleClientSecretSet?: boolean
   defaultModel: string
   systemPrompt: string
   extractionModel: string
@@ -1024,6 +1083,13 @@ export interface Settings {
   maxRunTokens?: number
   maxRunSeconds?: number
   maxRunCost?: number
+  /** Provider resilience and retention (backend llm.py / retention.py); missing means the shipped default. */
+  llmRetries?: number
+  llmIdleSeconds?: number
+  retainUsageDays?: number
+  retainTraceDays?: number
+  retainToolResultDays?: number
+  retainApprovalDays?: number
   /** Hosts fetch_url may still read once the reply has seen untrusted content. */
   fetchAllowlist?: string[]
   /** Folders where fs_edit / fs_copy / fs_mkdir run without asking (absolute paths inside the home folder). */
@@ -1122,6 +1188,8 @@ export type ChatEvent =
   | { event: 'done'; data: { id: string; error: string | null; context_used: ContextUsed; tool_events: ToolEvent[]; trace: Span[]; stopped: boolean; partial?: PartialReason | null; segment?: boolean; tainted?: boolean; taint_sources?: string[]; reasoning?: string | null } }
   | { event: 'taint'; data: { message_id: string; source: string } }
   | { event: 'subagent'; data: SubagentInfo & { message_id: string | null } }
+  /** artifact_create / artifact_update landed. Also on the run tape, so a reload replays it. */
+  | { event: 'artifact'; data: ArtifactRef & { message_id: string; call_id: string; conversation_id: string } }
   | { event: 'plan'; data: { conversation_id: string; steps: PlanStep[] } }
   /** propose_plan opened a card. `plan` above is the todo_write checklist — a different thing. */
   | { event: 'plan_card'; data: { message_id: string; call_id: string; plan: PlanRecord } }
@@ -1161,10 +1229,41 @@ export type BackgroundEvent =
   /** Every desk write, for desks nobody is watching: the rail, the badge and the Today card stay live. */
   | { event: 'desk_status'; data: Desk }
 
+export interface BackupInfo {
+  name: string; kind: 'daily' | 'manual' | 'premigrate' | 'prerestore'; created_at: number; size: number
+  app_version: string | null; schema_version: number | null
+}
+export interface DataOverview {
+  data_dir: string; backups: BackupInfo[]; last_backup: number | null
+  pending_restore: { name: string } | null; schema_version: number; app_version: string
+}
+/** The sidecar's lifecycle, as the main process supervises it. */
+export type BackendState = 'starting' | 'ready' | 'restarting' | 'failed'
+export interface BackendRestart {
+  at: string
+  reason: string
+  outcome: 'restarted' | 'gave-up' | 'manual'
+}
+export interface BackendInfo {
+  state: BackendState
+  url: string
+  error: string | null
+  restarts: BackendRestart[]
+  logDir: string
+  appVersion: string
+  electron: string
+}
+
 export interface GrainApi {
   backendUrl: () => Promise<string>
   backendStatus: () => Promise<{ running: boolean; url: string; error: string | null }>
   backendToken: () => Promise<string>
+  /** Supervisor state and restart history; `restartBackend` also works from `failed`. */
+  backendInfo: () => Promise<BackendInfo>
+  restartBackend: () => Promise<BackendInfo>
+  onBackendState: (cb: (info: BackendInfo) => void) => () => void
+  /** Reveal the log folder in Finder. */
+  openLogs: () => Promise<string>
   platform: NodeJS.Platform
   onMenu: (cb: (action: string) => void) => () => void
   popout: {
@@ -1187,6 +1286,12 @@ export interface GrainApi {
     gather: () => Promise<ShortcutState>
     setGather: (accelerator: string) => Promise<ShortcutState>
     onFailure: (cb: (s: ShortcutState) => void) => () => void
+  }
+  /** Data folder helpers for Settings → Data (native dialog, Finder, restart to apply a restore). */
+  data: {
+    chooseExportPath: () => Promise<string | null>
+    reveal: (path: string) => Promise<boolean>
+    relaunch: () => Promise<void>
   }
   /** Closes the BrowserWindow this renderer lives in: the Cmd-W fall-through when no canvas window has focus. */
   closeSelf: () => void
@@ -1213,18 +1318,6 @@ export interface Widget {
 }
 /** What the render CSP would break, or an empty document (artifacts.lint). */
 export interface ArtifactLint { blocked: string[]; empty: boolean; repaired?: boolean }
-export interface Artifact {
-  id: string; project_id: string | null; title: string; kind: string; prompt: string; version: number
-  created_at: number; updated_at: number
-  /** the current document; absent from list rows */
-  code?: string
-  size?: number; version_count?: number
-  lint?: ArtifactLint
-}
-export interface ArtifactVersion {
-  id: string; artifact_id: string; version: number; prompt: string; instruction: string
-  source: 'llm' | 'user' | 'restore'; created_at: number; size?: number; code?: string
-}
 export interface Dashboard { id: string; name: string; description: string; created_at: number; widget_count?: number; widgets: Widget[] }
 export interface Recap { day: string; content: string; created_at: number; cached?: boolean }
 
@@ -1435,6 +1528,26 @@ export interface Canvas {
 export interface WindowLayout { id: string; x?: number; y?: number; w?: number; h?: number; z?: number; state?: WindowState }
 
 export interface Note { id: string; project_id: string | null; body: string; color: string; created_at: number; updated_at: number }
+
+/** One row in the trash (GET /trash). Deleting is soft: it sits here for `retention_days`, then is purged. */
+export type TrashKind = 'project' | 'conversation' | 'doc' | 'document' | 'memory' | 'todo'
+export interface TrashItem {
+  type: TrashKind
+  id: string
+  title: string
+  deleted_at: number
+  /** When the automatic purge will erase it. */
+  purge_at: number
+  project_id: string | null
+  project_name: string | null
+  /** Projects only: how many chats / memories / uploads went into the trash with it. */
+  contents?: Record<string, number>
+}
+export interface TrashListing {
+  groups: { projects: TrashItem[]; conversations: TrashItem[]; docs: TrashItem[]; documents: TrashItem[]; memories: TrashItem[]; todos: TrashItem[] }
+  total: number
+  retention_days: number
+}
 
 /**
  * A doc: long-form markdown the user writes in the Docs editor. Distinct from `Document` (a file they

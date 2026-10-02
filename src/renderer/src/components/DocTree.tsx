@@ -254,7 +254,7 @@ export default function DocTree({ docs, activeId, query, onQuery }: Props): JSX.
         <Star size={12} fill={d.starred ? 'currentColor' : 'none'} />
       </button>
       <button className="icon-btn ghost xs danger" title="Delete"
-        onClick={(e) => { e.stopPropagation(); if (confirm(`Delete “${d.title}”? Its revision history goes too.`)) void deleteDoc(d.id) }}>
+        onClick={(e) => { e.stopPropagation(); void deleteDoc(d.id) }}>
         <Trash2 size={12} />
       </button>
     </div>

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
-import type { ApprovalDecision, PlanEdit, PlanDecision, PlanRecord,
-  Desk, DeskEvent, DeskFile, FullDesk, PromotionResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, Document, Effort, FullDoc, GraphData, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodoCalendarStatus, TodayDashboard, Recap, Job, Meeting, MeetingCandidate, MeetingCapability, MeetingConfig, MeetingPreflight, MeetingSegment, MeetingStatus, MeetingStatusInfo, MeetingStreamEvent, FullMeeting } from '@shared/types'
+import type { ApprovalDecision, BackendInfo, BackendState, PlanEdit, PlanDecision, PlanRecord,
+  Desk, DeskEvent, DeskFile, FullDesk, PromotionResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, Document, Effort, TrashKind, FullDoc, GraphData, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodoCalendarStatus, TodayDashboard, Recap, Job, Meeting, MeetingCandidate, MeetingCapability, MeetingConfig, MeetingPreflight, MeetingSegment, MeetingStatus, MeetingStatusInfo, MeetingStreamEvent, FullMeeting } from '@shared/types'
 import { api, backgroundStream, chatStream, meetingStream, setBase, type Scope } from './lib/api'
 import { currentSelection } from './lib/pageContext'
 import { NEEDS_YOU } from '../../shared/types'
@@ -23,7 +23,7 @@ const withoutLegacyMode = (s: Settings): Settings => {
 /** `'canvas'` is the spaces desktop: one destination among the views, not a separate shell. */
 export type View = 'home' | 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'boards' | 'dashboards' | 'docs' | 'meetings' | 'activity' | 'library' | 'cowork' | 'project' | 'canvas'
 /** Which shelf of the Library is showing. Kept in the store so leaving and coming back lands you where you were. */
-export type LibraryTab = 'skills' | 'workflows' | 'connectors' | 'made'
+export type LibraryTab = 'skills' | 'workflows' | 'connectors' | 'made' | 'artifacts'
 /** Every view but the canvas: what ⌘⇧C and the sidebar's LayoutGrid button return to. */
 export type ClassicView = Exclude<View, 'canvas'>
 /** How the Docs editor splits its panes. */
@@ -32,7 +32,7 @@ export type DocMode = 'edit' | 'split' | 'preview'
 export type MemoryMode = 'split' | 'list' | 'graph' | 'style'
 export type ContextTab = 'last' | 'preview' | 'trace'
 /** Settings sections. 'knowledge' holds what used to be the sidebar's Knowledge Base: memory and documents. */
-export type SettingsTab = 'provider' | 'knowledge' | 'memory' | 'integrations' | 'meetings' | 'tools' | 'usage' | 'spaces' | 'modules' | 'behavior'
+export type SettingsTab = 'provider' | 'knowledge' | 'memory' | 'integrations' | 'meetings' | 'tools' | 'usage' | 'spaces' | 'modules' | 'behavior' | 'data' | 'trash'
 export type KnowledgeTab = 'memory' | 'documents'
 export type { Scope, SessionStatus }
 
@@ -61,11 +61,13 @@ export interface ChatSession {
   touchedAt: number
 }
 
-interface Toast { id: number; text: string; kind: 'info' | 'error' | 'learned' }
+interface Toast { id: number; text: string; kind: 'info' | 'error' | 'learned'; action?: { label: string; run: () => void } }
 
 /** Live sessions kept in memory at once. Beyond this the least recently touched are dropped. */
 const MAX_SESSIONS = 12
 const HOLD_MS = 6000
+/** How long an Undo toast stays up. */
+const UNDO_MS = 8000
 
 /**
  * Which folders are open in the Docs tree. localStorage rather than the backend: it is this window's
@@ -101,6 +103,8 @@ const countApprovals = (c: Conversation): number =>
 export interface State {
   ready: boolean
   backendError: string | null
+  /** The supervisor's view of the sidecar; anything but "ready" shows the reconnecting banner. */
+  backendState: BackendState
   settings: Settings
   models: ModelInfo[]
   modelsError: string | null
@@ -251,6 +255,7 @@ export interface State {
   setDeskShowArchived: (v: boolean) => Promise<void>
 
   init: () => Promise<void>
+  restartBackend: () => Promise<void>
   loadModels: () => Promise<void>
   saveSettings: (patch: Partial<Settings>) => Promise<void>
   setView: (v: View) => void
@@ -278,7 +283,10 @@ export interface State {
   openSettings: (tab: SettingsTab, knowledge?: KnowledgeTab) => void
   setKnowledgeTab: (t: KnowledgeTab) => void
   setProjectModal: (m: State['projectModal']) => void
-  toast: (text: string, kind?: Toast['kind']) => void
+  toast: (text: string, kind?: Toast['kind'], action?: Toast['action']) => void
+  /** After a soft delete: a toast with Undo (~8s) that restores it from the trash. */
+  offerUndo: (what: string, items: { type: TrashKind; id: string }[]) => void
+  restoreTrashed: (items: { type: TrashKind; id: string }[]) => Promise<void>
 
   refreshProjects: () => Promise<void>
   openProject: (id: string) => void
@@ -418,7 +426,7 @@ export interface State {
   runJobNow: (id: string) => Promise<void>
   decideProposal: (id: string, accept: boolean, args?: Record<string, unknown>) => Promise<void>
   /** `opts` carries a propose_plan card's answer: the steps being authorised (with any edits) and a note. */
-  approveTool: (callId: string, decision: ApprovalDecision, conversationId?: string, opts?: { steps?: PlanEdit[] | null; note?: string; rules?: string[] }) => Promise<void>
+  approveTool: (callId: string, decision: ApprovalDecision, conversationId?: string, opts?: { steps?: PlanEdit[] | null; note?: string; rules?: string[]; arguments?: Record<string, unknown> | null }) => Promise<void>
   refreshGoogle: () => Promise<void>
   connectGoogle: () => Promise<void>
   disconnectGoogle: () => Promise<void>
@@ -819,6 +827,41 @@ export const useStore = create<State>((set, get) => {
     void get().refreshProjects()
   }
 
+  /** True once init has loaded the app's data at least once; a recovered backend then needs a refresh, not a re-init. */
+  let loadedOnce = false
+  let backendSeen: BackendState = 'ready'
+  let watching = false
+  let stateWired = false
+
+  /**
+   * The main process supervises the sidecar and announces each state. While it restarts the UI stays up
+   * (the banner says so); when it is back the port may have moved, so the base URL is re-pointed and the
+   * data re-fetched. If the first start failed, init never loaded anything, so it runs for real now.
+   */
+  const onBackendState = (info: BackendInfo): void => {
+    const was = backendSeen
+    backendSeen = info.state
+    set({ backendState: info.state })
+    if (info.state === 'failed') {
+      set({ ready: true, backendError: info.error ?? 'The backend stopped and could not be restarted.' })
+    } else if (info.state === 'ready' && (was !== 'ready' || get().backendError)) {
+      set({ backendError: null })
+      if (!loadedOnce) {
+        inited = false
+        void get().init()
+        return
+      }
+      setBase(info.url)
+      void get().loadModels()
+      void get().loadScope('all')
+      void get().refreshDashboard()
+      void get().refreshTodos()
+      void get().refreshDocsPending()
+      void get().refreshActivity()
+      refreshAll()
+    }
+  }
+
   /**
    * Follow `/events` for the whole session. Auto-learn runs after its reply's run has ended — that
    * is the point, the chat is free again — so its results have no conversation stream left to
@@ -1052,7 +1095,8 @@ export const useStore = create<State>((set, get) => {
   return {
     ready: false,
     backendError: null,
-    settings: { baseUrl: '', apiKey: '', defaultModel: '', systemPrompt: '', extractionModel: '', autoLearn: true, learnStyle: true, theme: 'dark', accent: 'sage', gatherShortcut: '', tools: {}, maxToolRounds: 8, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {} },
+    backendState: 'ready',
+    settings: { baseUrl: '', apiKey: '', apiKeySet: false, defaultModel: '', systemPrompt: '', extractionModel: '', autoLearn: true, learnStyle: true, theme: 'dark', accent: 'sage', gatherShortcut: '', tools: {}, maxToolRounds: 8, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {} },
     models: [],
     modelsError: null,
     tools: [],
@@ -1150,12 +1194,18 @@ export const useStore = create<State>((set, get) => {
       wireMenu()
       if (inited) return
       inited = true
+      if (!stateWired && typeof window.os.onBackendState === 'function') {
+        stateWired = true
+        window.os.onBackendState(onBackendState)
+      }
       const status = await window.os.backendStatus()
-      if (!status.url) return set({ ready: true, backendError: status.error ?? 'Backend not running' })
+      // A failed start must stay retryable from the error screen's "Try again".
+      if (!status.url) { inited = false; return set({ ready: true, backendError: status.error ?? 'Backend not running' }) }
       setBase(status.url)
       try {
         await api.health()
       } catch (e) {
+        inited = false
         return set({ ready: true, backendError: status.error ?? (e as Error).message })
       }
       const [settings, projects, personalStats, conversations] = await Promise.all([
@@ -1166,7 +1216,7 @@ export const useStore = create<State>((set, get) => {
       // window writes it back; a pop-out (`?surface=widget`) never renders App and must not touch settings.
       const { mode: legacyMode } = settings
       const legacyCanvas = legacyMode === 'canvas'
-      set({ settings: withoutLegacyMode(settings), view: legacyCanvas ? 'canvas' : 'home', projects, personalStats, conversations, ready: true, settingsOpen: !settings.apiKey && conversations.length === 0 })
+      set({ settings: withoutLegacyMode(settings), view: legacyCanvas ? 'canvas' : 'home', projects, personalStats, conversations, ready: true })
       if (legacyCanvas && !isPopout()) void get().saveSettings({ mode: 'classic' }).catch(() => undefined)
       void get().loadModels()
       void get().loadScope('all')
@@ -1177,7 +1227,11 @@ export const useStore = create<State>((set, get) => {
       void get().refreshDocsPending()
       void get().refreshActivity()
       // One watcher per app: a pop-out would only duplicate every toast in another window.
-      if (!isPopout()) void watchBackgroundEvents()
+      if (!isPopout() && !watching) {
+        watching = true
+        void watchBackgroundEvents()
+      }
+      loadedOnce = true
       // The sidebar's needs-you badge and the Today card read this; without it they stay empty until
       // Cowork or Home happens to mount.
       void get().refreshDeskInbox()
@@ -1185,6 +1239,11 @@ export const useStore = create<State>((set, get) => {
       // `refreshMeetingStatus` also starts the live tick, so a meeting a crash left running is visible.
       void get().refreshMeetingsPending()
       void get().refreshMeetingStatus()
+    },
+
+    restartBackend: async () => {
+      set({ backendState: 'restarting' })
+      onBackendState(await window.os.restartBackend())
     },
 
     loadModels: async () => {
@@ -1274,10 +1333,23 @@ export const useStore = create<State>((set, get) => {
     openSettings: (settingsTab, knowledgeTab) => set(knowledgeTab ? { settingsOpen: true, settingsTab, knowledgeTab } : { settingsOpen: true, settingsTab }),
     setKnowledgeTab: (knowledgeTab) => set({ knowledgeTab }),
     setProjectModal: (projectModal) => set({ projectModal }),
-    toast: (text, kind = 'info') => {
+    toast: (text, kind = 'info', action) => {
       const id = ++toastSeq
-      set((s) => ({ toasts: [...s.toasts, { id, text, kind }] }))
-      setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), kind === 'error' ? 6000 : 3500)
+      set((s) => ({ toasts: [...s.toasts, { id, text, kind, action }] }))
+      setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), action ? UNDO_MS : kind === 'error' ? 6000 : 3500)
+    },
+    offerUndo: (what, items) => {
+      get().toast(`Deleted ${what}`, 'info', { label: 'Undo', run: () => void get().restoreTrashed(items) })
+    },
+    restoreTrashed: async (items) => {
+      try {
+        const out = await Promise.all(items.map((i) => api.trash.restore(i.type, i.id)))
+        await Promise.all([get().refreshProjects(), get().refreshConversations(), get().refreshDocs(), get().refreshDocsPending(),
+                           get().refreshMemories(), get().refreshDocuments(), get().refreshTodos(), get().refreshDashboard()])
+        if (out.some((o) => o.moved_to_personal)) get().toast('Restored to Personal: its project is still in the trash')
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
     },
 
     refreshProjects: async () => {
@@ -1297,6 +1369,7 @@ export const useStore = create<State>((set, get) => {
       await get().refreshProjects()
     },
     deleteProject: async (id) => {
+      const name = get().projects.find((p) => p.id === id)?.name
       await api.projects.delete(id)
       set((s) => {
         const sessions = Object.fromEntries(Object.entries(s.sessions).filter(([, x]) => x.conversation.project_id !== id))
@@ -1311,7 +1384,8 @@ export const useStore = create<State>((set, get) => {
           focusedConversationId: fid && s.sessions[fid] && !sessions[fid] ? null : fid
         }
       })
-      await Promise.all([get().refreshProjects(), get().refreshConversations()])
+      await Promise.all([get().refreshProjects(), get().refreshConversations(), get().refreshDocs(), get().refreshTodos()])
+      get().offerUndo(name ? `project “${name}”` : 'project', [{ type: 'project', id }])
     },
 
     setLibraryScope: async (libraryScope) => {
@@ -1387,10 +1461,12 @@ export const useStore = create<State>((set, get) => {
       })
     },
     deleteChat: async (id) => {
+      const title = get().conversations.find((c) => c.id === id)?.title
       await api.conversations.delete(id)
       get().closeSession(id)
       set((s) => ({ conversations: s.conversations.filter((c) => c.id !== id) }))
       void get().refreshProjects()
+      get().offerUndo(title ? `chat “${title}”` : 'chat', [{ type: 'conversation', id }])
     },
     renameChat: async (id, title) => {
       if (!title.trim()) return
@@ -1679,7 +1755,12 @@ export const useStore = create<State>((set, get) => {
     },
     deleteDocFolder: async (path, deleteDocs = false, scope = '') => {
       try {
+        // Which docs this takes with it, so the Undo can bring each one back.
+        const doomed = deleteDocs
+          ? get().docs.filter((d) => (d.project_id ?? '') === scope && (d.folder === path || d.folder.startsWith(path + '/')))
+          : []
         set({ docFolders: await api.docs.deleteFolder(path, deleteDocs, scope) })
+        if (doomed.length) get().offerUndo(`${doomed.length} doc${doomed.length === 1 ? '' : 's'}`, doomed.map((d) => ({ type: 'doc' as const, id: d.id })))
         await get().refreshDocs()
         const open = get().activeDoc
         if (open && deleteDocs && !get().docs.some((d) => d.id === open.id)) get().closeDocTab(open.id)
@@ -1703,9 +1784,11 @@ export const useStore = create<State>((set, get) => {
       return { expandedFolders: writeExpanded([...next, ...want]) }
     }),
     deleteDoc: async (id) => {
+      const title = get().docs.find((d) => d.id === id)?.title
       await api.docs.delete(id)
       get().closeDocTab(id)
       await Promise.all([get().refreshDocs(), get().refreshDocsPending()])
+      get().offerUndo(title ? `“${title}”` : 'doc', [{ type: 'doc', id }])
     },
     setDocMode: (docMode) => set({ docMode }),
     refreshDocRevisions: async (id) => {
@@ -2461,6 +2544,7 @@ export const useStore = create<State>((set, get) => {
       await api.memories.delete(id)
       set((s) => ({ memories: s.memories.filter((m) => m.id !== id) }))
       void get().refreshProjects()
+      get().offerUndo('memory', [{ type: 'memory', id }])
     },
 
     refreshGraph: async () => set({ graph: await api.graph.get(get().dataScope) }),
@@ -2706,9 +2790,11 @@ export const useStore = create<State>((set, get) => {
       await Promise.all([get().refreshDocuments(), get().refreshProjects()])
     },
     deleteDocument: async (id) => {
+      const name = get().documents.find((d) => d.id === id)?.name
       await api.documents.delete(id)
       set((s) => ({ documents: s.documents.filter((d) => d.id !== id) }))
       void get().refreshProjects()
+      get().offerUndo(name ? `“${name}”` : 'document', [{ type: 'document', id }])
     },
 
     refreshDashboard: async () => {
@@ -2803,7 +2889,9 @@ export const useStore = create<State>((set, get) => {
         // Mark as no longer awaiting in the UI; the tool_result event fills in the rest. The count
         // settles now rather than when the tool returns, since an external action can take seconds.
         patchSession(id, (s) => {
-          const conversation = { ...s.conversation, messages: (s.conversation.messages ?? []).map((m) => ({ ...m, tool_events: (m.tool_events ?? []).map((t) => (t.id === callId ? { ...t, needs_approval: false, approval: decision } : t)) })) }
+          const conversation = { ...s.conversation, messages: (s.conversation.messages ?? []).map((m) => ({ ...m, tool_events: (m.tool_events ?? []).map((t) => (t.id === callId
+            ? { ...t, needs_approval: false, approval: decision, ...(opts?.arguments && decision !== 'deny' ? { arguments: opts.arguments, original_arguments: t.arguments, edited_arguments: opts.arguments, edited_by: 'user' as const } : {}) }
+            : t)) })) }
           const pendingApprovals = countApprovals(conversation)
           return { ...s, conversation, pendingApprovals, status: settleApprovals(s.status, pendingApprovals) }
         })
@@ -2910,8 +2998,10 @@ export const useStore = create<State>((set, get) => {
       set((s) => ({ todos: s.todos.map((x) => (x.id === id ? t : x)), dashboard: s.dashboard && { ...s.dashboard, todos: s.dashboard.todos.map((x) => (x.id === id ? t : x)).filter((x) => !x.done) } }))
     },
     deleteTodo: async (id) => {
+      const title = get().todos.find((x) => x.id === id)?.title
       await api.todos.delete(id)
       set((s) => ({ todos: s.todos.filter((x) => x.id !== id), dashboard: s.dashboard && { ...s.dashboard, todos: s.dashboard.todos.filter((x) => x.id !== id) } }))
+      get().offerUndo(title ? `todo “${title}”` : 'todo', [{ type: 'todo', id }])
     }
   }
 })

@@ -26,10 +26,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from pydantic import AfterValidator, BaseModel, Field
 
-from . import activity, assist, llm, mac, mcp_drift, mcp_eval, mcp_search, tools
+from . import activity, approval_edits, assist, backups, llm, mac, mcp_drift, mcp_eval, mcp_search, tools
 from . import compaction, otel_export
 from .context import build_context, estimate_tokens, layout_messages
-from .db import Database, data_dir_from_env, new_id
+from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
 from .extract_text import extract_structured, extract_text
 from .consolidate import Consolidator
 from .learn import MAX_INJECTED_SKILLS, LearnJob, LearnWorker, Skills, induce_skill, skill_block
@@ -38,7 +38,6 @@ from .memory_index import MemoryIndex
 from .retrieval import Retriever
 from .repos import ALL, Conversations, Documents, Graph, Memories, Projects
 from .artifact_routes import is_render_path as _is_artifact_render, make_router as artifact_router
-from .artifact_tools import ARTIFACT_HINT
 from .artifacts import Artifacts
 from .boards import Boards
 from .canvas import SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
@@ -52,6 +51,7 @@ from .jobs_policy import JobPolicy
 from .jobs import (KINDS, PROPOSAL_STATUSES, Jobs, Proposals, Scheduler, local_tz_name, spent, valid_cron,
                    valid_tz)
 from . import meeting_import, skillbuild, skillmd
+from . import mail_edits  # noqa: F401 - mail_edits registers the gmail validators
 from .mcp_client import McpClient, McpError
 from .mcp_oauth import CALLBACK_PATH as MCP_OAUTH_CALLBACK, OAuthFlows, OAuthStore
 from .mcp_servers import MODES as MCP_MODES, RESERVED_PREFIX as MCP_PREFIX, SCOPES as MCP_SCOPES, McpServers
@@ -68,6 +68,9 @@ from .plans import (MUTATING, PLAN_BLOCKED, PLAN_SAFE_DANGER, PLAN_TOOL, PROPOSE
 from .filesnap import FileSnapshots, router as filesnap_router
 from .snapshots import Snapshots, router as snapshots_router
 from .outbox import Outbox, router as outbox_router
+from .setup import router as setup_router
+from .reliability import router as reliability_router, secret_values
+from .retention import RetentionWorker
 from .presets import CanvasPresets
 from . import resume
 from . import permrules
@@ -81,12 +84,14 @@ from .modules import Module, ModuleContext, build_modules, get as module_get
 from .modules.todos import TodosModule
 from .tools import Toolbox, summarize_result
 from .webread import WebCache
+from .trash import Trash, router as trash_router
 from .trace import Tracer, now_ms
 from .usage import Pricing, Usage
 from .working import Plans as WorkPlans, ToolResults
 
 log = logging.getLogger("personal_os")
 
+backups.apply_pending_restore(data_dir_from_env())  # a restore staged in Settings → Data swaps in before the file is opened
 db = Database(data_dir_from_env())
 projects = Projects(db)
 convos = Conversations(db)
@@ -133,6 +138,28 @@ WIDGET_CSP = ("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe
               "font-src data:; connect-src 'self'; base-uri 'none'; form-action 'none'")
 
 
+ARTIFACT_TOKEN_TTL = 24 * 3600
+
+
+def _artifact_render_token(aid: str, exp: int) -> str:
+    """Capability for one artifact's sandboxed iframe, which cannot send the app token. Binds id + expiry, signed
+    with the app secret, so a render URL cannot be edited to point at another artifact or outlive its TTL."""
+    return hmac.new(AUTH_TOKEN.encode(), f"artifact:{aid}:{exp}".encode(), "sha256").hexdigest()[:32]
+
+
+def _artifact_render_ok(aid: str, rt: str, re_: str) -> bool:
+    try:
+        exp = int(re_)
+    except (TypeError, ValueError):
+        return False
+    return bool(rt) and exp >= time.time() and _token_eq(rt, _artifact_render_token(aid, exp))
+
+
+def _artifact_render_path(aid: str) -> str:
+    exp = int(time.time()) + ARTIFACT_TOKEN_TTL
+    return f"/artifacts/{aid}/render?re={exp}&rt={_artifact_render_token(aid, exp)}"
+
+
 def _widget_fetch_token(wid: str, exp: int) -> str:
     """Capability handed to one widget's iframe: scoped to that widget's sources, and expiring, because it rides in the URL."""
     return hmac.new(AUTH_TOKEN.encode(), f"widget:{wid}:{exp}".encode(), "sha256").hexdigest()[:32]
@@ -175,29 +202,7 @@ async def _validation_error(request: Request, exc: Exception) -> JSONResponse:  
 
 @app.exception_handler(sqlite3.IntegrityError)
 async def _integrity_error(request: Request, exc: Exception) -> JSONResponse:  # type: ignore[override]
-    """Safety net for the writers wsid() cannot cover (a card whose column is gone, a window whose canvas is gone).
-    A stale id from a window that has not refreshed is the client's problem to retry, not a server fault, so it gets a
-    409 and a usable message rather than a bare 500."""
-    detail = ("Something this refers to no longer exists - reload and try again."
-              if "FOREIGN KEY" in str(exc).upper() else f"That change conflicts with what is already stored ({exc})")
-    log.info("integrity error on %s %s: %s", request.method, request.url.path, exc)
-    return JSONResponse({"detail": detail}, status_code=409)
-
-
-@app.exception_handler(sqlite3.IntegrityError)
-async def _integrity_error(request: Request, exc: Exception) -> JSONResponse:  # type: ignore[override]
-    """Safety net for the writers wsid() cannot cover (a card whose column is gone, a widget whose dashboard is gone).
-    A stale id from a window that has not refreshed is the client's problem to retry, not a server fault, so it gets a
-    409 and a usable message rather than a bare 500."""
-    detail = ("Something this refers to no longer exists - reload and try again."
-              if "FOREIGN KEY" in str(exc).upper() else f"That change conflicts with what is already stored ({exc})")
-    log.info("integrity error on %s %s: %s", request.method, request.url.path, exc)
-    return JSONResponse({"detail": detail}, status_code=409)
-
-
-@app.exception_handler(sqlite3.IntegrityError)
-async def _integrity_error(request: Request, exc: Exception) -> JSONResponse:  # type: ignore[override]
-    """Safety net for the writers wsid() cannot cover (a card whose column is gone, a widget whose dashboard is gone).
+    """Safety net for the writers wsid() cannot cover (a card whose column is gone, a window whose canvas is gone, a widget whose dashboard is gone).
     A stale id from a window that has not refreshed is the client's problem to retry, not a server fault, so it gets a
     409 and a usable message rather than a bare 500."""
     detail = ("Something this refers to no longer exists - reload and try again."
@@ -226,11 +231,14 @@ async def _require_token(request: Request, call_next):  # type: ignore[no-untype
 # Vite's dev server hops to 5174+ when 5173 is taken, so the default covers a small range; auth is
 # the token header either way — CORS here only decides which local origins may even ask.
 ALLOWED_ORIGINS = [o for o in (os.environ.get("PERSONAL_OS_ALLOWED_ORIGINS") or "").split(",") if o] or [
+    # Chromium sends Origin: null for a page loaded via file:// (the packaged renderer) and for sandboxed widget iframes,
+    # so "null" must stay allowed or the packaged app cannot reach its own backend. Auth is the token header regardless.
     "null", "file://",
     *(f"http://{h}:{p}" for h in ("localhost", "127.0.0.1") for p in range(5173, 5181))]
 app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_credentials=False,
                    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
                    allow_headers=["Content-Type", "X-Personal-OS-Token", "Authorization"])
+
 
 # Live runs, one per conversation, each owning its own task. Any number of clients may watch one.
 # Each run is also a row (agent_runs) with its event tape (run_events); the bus is the hot path over it.
@@ -263,7 +271,11 @@ ENV_SEED = {
 
 
 def _seed_settings_from_env() -> None:
-    """First launch: take provider defaults from the environment (.env) if nothing is stored yet."""
+    """First launch: take provider defaults from the environment (.env) if nothing is stored yet.
+
+    Dev only. The packaged app (Electron sets PERSONAL_OS_PACKAGED) starts empty and onboards instead."""
+    if os.environ.get("PERSONAL_OS_PACKAGED"):
+        return
     stored = db.get_settings()
     patch = {k: os.environ[v] for k, v in ENV_SEED.items() if k not in stored and os.environ.get(v)}
     if patch:
@@ -283,6 +295,7 @@ boards = Boards(db)
 dashboards = Dashboards(db)
 artifacts = Artifacts(db)
 google = Google(settings, db.set_settings)
+app.include_router(setup_router(settings, db.set_settings, lambda: google.status()["connected"]))
 # sid/wsid are defined further down, so the module context looks them up late.
 modules: list[Module] = build_modules(ModuleContext(
     db=db, settings=settings, set_settings=db.set_settings, google=google,
@@ -292,6 +305,9 @@ todos, tasks_sync, todo_calendar = _todos_module.store, _todos_module.tasks_sync
 for _m in modules:
     if (_r := _m.router()) is not None:
         app.include_router(_r)
+# Soft delete: the DELETE routes below move things here, and /trash restores or erases them (trash.py).
+trash = Trash(db, todos, docs)
+app.include_router(trash_router(trash))
 usage = Usage(db)
 pricing = Pricing()
 app.include_router(otel_export.router(db, lambda: settings()))
@@ -368,6 +384,23 @@ async def _snapshot_after(run: Run) -> None:
 
 
 bus.after_hooks.append(_snapshot_after)
+app.include_router(backups.router(db.data_dir))
+# Supportability: GET /diagnostics, POST /maintenance/sweep, and the daily retention sweep (retention.py).
+retention = RetentionWorker(db, settings)
+app.include_router(reliability_router(db, settings, retention, lambda: activity.permissions()))
+
+
+@app.on_event("startup")
+async def _reliability_startup() -> None:
+    from . import logs
+    for v in (AUTH_TOKEN, *secret_values(settings())):
+        logs.register_secret(v)
+    retention.start()
+
+
+@app.on_event("shutdown")
+async def _reliability_shutdown() -> None:
+    await retention.stop()
 # Working memory that is not the chat: the per-conversation plan, the full tool-result blobs behind
 # their handles (working.py), and procedural memory awaiting review (learn.Skills). `work_plans` is the
 # todo_write artifact and is a different thing from `plans`, the propose_plan approval record.
@@ -560,9 +593,18 @@ PRIVATE_SETTINGS = {"googleToken", "googleAuthPending"}
 SETTINGS_READ_ONLY = {"activity", "googleTasksSync", "googleTodoCalendar", "meetings"}
 
 
+def public_settings() -> dict[str, Any]:
+    """What the renderer may see: secret values are blanked and reported as <key>Set booleans instead."""
+    out = {k: v for k, v in settings().items() if k not in PRIVATE_SETTINGS}
+    for k in SECRET_SETTINGS:
+        out[f"{k}Set"] = bool(out.get(k))
+        out[k] = ""
+    return out
+
+
 @app.get("/settings")
 def get_settings() -> dict[str, Any]:
-    return {k: v for k, v in settings().items() if k not in PRIVATE_SETTINGS}
+    return public_settings()
 
 
 # Numeric settings the Budget reads. A clamp keeps a cleared or mistyped field from becoming "unlimited"
@@ -581,6 +623,12 @@ NUMERIC_SETTING_RANGES: dict[str, tuple[float, float]] = {
     "fileSnapshotMaxBytes": (0, 100_000_000),
     "fileSnapshotRetainDays": (1, 365),
     "fileSnapshotBudgetMB": (1, 20_000),
+    "llmRetries": (0, 10),
+    "llmIdleSeconds": (10, 3_600),
+    "retainUsageDays": (7, 3_650),
+    "retainTraceDays": (1, 3_650),
+    "retainToolResultDays": (1, 3_650),
+    "retainApprovalDays": (1, 3_650),
 }
 
 
@@ -633,8 +681,13 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
                     mac.allowed_path(root)
                 except mac.LocalPathError as e:
                     raise HTTPException(422, f"{root} cannot be a workspace folder: {e}") from e
+    for k in SECRET_SETTINGS:
+        if k in clean and clean[k] == "":  # blank means "unchanged" (the form never holds the saved key); null clears
+            del clean[k]
+        elif k in clean and clean[k] is not None and not isinstance(clean[k], str):
+            raise HTTPException(422, f"{k} must be a string or null")
     db.set_settings(clean)
-    return {k: v for k, v in settings().items() if k not in PRIVATE_SETTINGS}
+    return public_settings()
 
 
 @app.get("/models")
@@ -878,6 +931,18 @@ def mcp_clear_grant(slug: str, scope: str = "global", scope_id: str | None = Non
 
 
 @app.on_event("startup")
+async def _trash_startup() -> None:
+    app.state.trash_task = asyncio.create_task(trash.loop(), name="trash-purge")
+
+
+@app.on_event("shutdown")
+async def _trash_shutdown() -> None:
+    t = getattr(app.state, "trash_task", None)
+    if t:
+        t.cancel()
+
+
+@app.on_event("startup")
 async def _mcp_startup() -> None:
     """Connect whatever is enabled. A server that will not start becomes a status, not a failed boot."""
     try:
@@ -913,9 +978,7 @@ def update_project(id: str, body: ProjectPatch) -> dict[str, Any]:
 
 @app.delete("/projects/{id}")
 def delete_project(id: str) -> dict[str, bool]:
-    projects.delete(id)
-    # Its docs survive, demoted to personal; the folder rows for a tree that no longer exists do not.
-    docs.forget_scope(id)
+    trash.trash("project", id)  # its chats, memories and uploads go to the trash; docs and todos are demoted to personal
     return {"ok": True}
 
 
@@ -968,7 +1031,7 @@ def patch_conversation(id: str, body: ConvPatch) -> dict[str, Any]:
 
 @app.delete("/conversations/{id}")
 def delete_conversation(id: str) -> dict[str, bool]:
-    convos.delete(id)
+    trash.trash("conversation", id)
     return {"ok": True}
 
 
@@ -1006,6 +1069,8 @@ Besides normal markdown, the UI renders three fenced code blocks inline:
   - Formulas may use `+ - * / % ^`, comparisons, `&& || !`, `cond ? a : b`, `pi`, `e`, and only these functions: abs sqrt cbrt exp log ln log2 log10 sin cos tan asin acos atan sinh cosh tanh sign floor ceil trunc round(x[,digits]) sqr pow atan2 mod logb lerp clamp step min max hypot if(cond,a,b). There is nothing else — no assignment, no indexing, no other names.
   Reach for it when the interesting part of an answer is an assumption worth playing with (a rate, a price, a threshold, a growth curve); use ```chart for numbers that are already fixed.
 - ```mermaid — diagrams (flowchart, sequenceDiagram, gantt, mindmap, timeline, ...).
+- ```html — a self-contained HTML document or fragment (inline CSS/JS, no network, no external files). It is shown as a sandboxed live preview with a Code/Preview toggle and a "Save as artifact" button. Use it for a mock-up, a small interactive demo or a formatted layout. ```svg renders as an image.
+For anything larger or that the user will keep and revise (a calculator, a dashboard-like page, a game, a formatted report), call artifact_create with the full HTML instead; change it with artifact_edit (exact search/replace pairs) for small fixes, or artifact_update (full new HTML) when most of it changes; the chat shows it as a live card and keeps every version. Both run in a sandbox with no network, no external scripts/fonts/images (use data: URIs or inline SVG), no localStorage and no form submits.
 Only chart real values you have or computed; never invent data for decoration. Text before and after a block is shown as usual."""
 
 TOOLS_HINT = "You have tools. Use them when they would make the answer more accurate or current; otherwise answer directly. After using tools, write the final answer for the user."
@@ -1047,6 +1112,10 @@ TOOL_ERROR_LIMIT = 3
 PROPOSAL_ONLY_KINDS = ("job",)
 # Caps for an unattended run, applied on top of the user's settings and only downward (see _caps). Tighter than
 # interactive on purpose: nobody is watching, and a longer leash makes the answer worse, not better.
+# A model call that is still open after this long while writing the closing answer is abandoned.
+FINAL_ROUND_SECONDS = 90.0
+# Hard ceiling on an unattended run end to end (model, tools, everything), a backstop for a hang the budget cannot see.
+JOB_HARD_SECONDS = 1800.0
 JOB_BUDGET = {"maxToolRounds": 8, "maxRunTokens": 60_000, "maxRunSeconds": 240, "maxRunCost": 0.20}
 JOB_HINT = ("## This is a scheduled background run\nNobody is watching it. Anything that reaches outside this app "
             "(sending or drafting mail, calendar writes, Google Docs/Sheets/Tasks) cannot be executed here: such a "
@@ -1135,6 +1204,14 @@ class Budget:
 
     def exceeded(self) -> str | None:
         return next((k for k, r in self._ratios().items() if r >= 1.0), None)
+
+    def arm_deadline(self, floor: float = 5.0, cap: float | None = None) -> None:
+        """Bound the next provider stream by what is left of the wall-clock budget (llm.stream_deadline), so a hung
+        provider cannot outlive maxRunSeconds. Unlimited (0) leaves it unbounded unless `cap` says otherwise."""
+        left = self.max_seconds - self.elapsed() if self.max_seconds > 0 else None
+        if cap is not None:
+            left = cap if left is None else min(left, cap)
+        llm.stream_deadline.set(None if left is None else time.monotonic() + max(left, floor))
 
     def snapshot(self) -> dict[str, Any]:
         """What agent_runs.budget stores: the limits and how much of each the run has used."""
@@ -1232,7 +1309,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         yield "error", {"message": "Conversation not found"}
         return
     cfg = settings()
-    model = body.model or conv["model"]
+    model = body.model or conv["model"] or cfg["defaultModel"]
     if body.model and body.model != conv["model"]:
         convos.update(conv_id, {"model": body.model})
 
@@ -1318,6 +1395,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         "proposal_only": proposal_only(run), "message_id": am["id"],
         # What desk_deliver/desk_done record an output or a note against, so Accept can name the run
         # that wrote a file instead of guessing with the latest one.
+        # Where artifact_create files what it makes (artifacts.run_id), so it can be found again from the run.
         "run_id": run.run_id if run else None,
     }
     use_tools = conv["settings"].get("useTools", True)
@@ -1451,8 +1529,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 _n = _mcp_names.get(t["server_id"], "MCP")
                 _counts[_n] = _counts.get(_n, 0) + 1
         tools_hint = "\n".join(p for p in (tools_hint, mcp_search.catalog_hint(_counts.items())) if p)
-    artifact_hint = ARTIFACT_HINT if any(s["function"]["name"] == "create_artifact" for s in tool_schemas) else ""
-    hints = (RENDER_HINT, artifact_hint, tools_hint, JOB_HINT if proposal_only(run) else "",
+    hints = (RENDER_HINT, tools_hint, JOB_HINT if proposal_only(run) else "",
              DESK_HINT if desk else "", DESK_PLAN_HINT if planning and desk else "",
              CHAT_PLAN_HINT if chat_plan_mode in ("auto", "always") and tool_schemas else "", _today_hint())
     if cfg.get("cacheLayout", True):
@@ -1534,6 +1611,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         span = tracer.start("llm", model, {"round": _round, "final": True, "messages": len(messages), "tools": len(tool_schemas)})
         yield "span", {"message_id": am["id"], "span": span}
         start, fin = len(buf), {}
+        budget.arm_deadline(cap=FINAL_ROUND_SECONDS)  # the closing answer is exempt from the budget, not from a hang
         # tools are still declared, with tool_choice "none": the history holds tool_calls, and some OpenAI-compatible
         # backends reject that when no tool list is sent. "none" is the portable way to say "answer, do not call".
         async for ev in llm.stream_chat(cfg, model, messages, tool_schemas or None,
@@ -1609,6 +1687,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             round_span = lspan  # the tool calls below nest under it
             yield "span", {"message_id": am["id"], "span": lspan}
             first_token: int | None = None
+            budget.arm_deadline()
             async for ev in llm.stream_chat(cfg, model, messages, tool_schemas or None,
                                             effort=str(conv["settings"].get("effort") or "default"),
                                             fast=bool(conv["settings"].get("fast")),
@@ -1630,6 +1709,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 if steers:
                     break
             calls = [] if end.get("finish_reason") == "cancelled" else (end.get("tool_calls") or [])
+            if end.get("finish_reason") == "timeout":
+                # The provider outran maxRunSeconds mid-stream. Keep what arrived and mark the reply partial.
+                if not "".join(buf).strip():
+                    raise llm.LLMError(f"This reply hit its {int(budget.max_seconds)}s time limit before the model produced anything. Try again, or raise maxRunSeconds in Settings.")
+                partial = "time"
             u = end.get("usage") or end.get("usage_est") or {}
             pt, ct = int(u.get("prompt_tokens") or 0), int(u.get("completion_tokens") or 0)
             budget.add(pt, ct, pricing.cost(cfg, model, pt, ct))
@@ -1820,6 +1904,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 t0 = time.time()
                 decision = "allow"
                 deny_note: str | None = None
+                edit_info: dict[str, Any] = {}
                 if asks:
                     # Pause the reply until the user approves or denies this call (POST /approvals/{call_id}).
                     # The approval is a row, and it waits as long as it takes: there is no auto-deny.
@@ -1877,6 +1962,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         _approvals.pop(uid, None)
                     deny_note = _approval_notes.pop(uid, None)
                     awaiting = None
+                    if decision != "deny" and store is not None and (arow := store.approval(uid)) and arow.get("edited_args"):
+                        # The user rewrote this call on its card. approval_edits validated it in the route and the row's
+                        # digest was re-bound to it; from here on the edited arguments are THE call: they run, are
+                        # journaled, verified and queued (outbox) in place of the model's. Never read from the model's call.
+                        original_args, args = args, arow["edited_args"]
+                        edit_info = {"original_arguments": original_args, "edited_arguments": args, "edited_by": "user"}
                     if parked:
                         # The reply ends here, still owing this call an answer. The row stays pending
                         # and decidable; the desk moves from a live waiting state to `blocked`, which
@@ -2008,6 +2099,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     result["permission_note"] = hint
                 denials.record(bool(perm.refusal) or unattended or (asks and decision != "allow"))
                 ms = int((time.time() - t0) * 1000)
+                made = tool_ctx.pop("artifact", None) if decision == "allow" else None
+                if made is None and isinstance(result, dict) and result.get("artifact_id") and c["name"] in ("artifact_create", "artifact_update", "artifact_edit"):
+                    # A journal replay returns the recorded result without running the tool, so ctx carries no note.
+                    made = {"id": result["artifact_id"], "title": result.get("title", ""), "version": result.get("version"),
+                            "action": "created" if result.get("created") else "updated"}
                 # images (e.g. matplotlib figures from run_python) go to the UI, not to the model
                 images = result.pop("images", None) if isinstance(result, dict) else None
                 preview = summarize_result(result)
@@ -2023,13 +2119,15 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         yield "taint", {"message_id": am["id"], "source": c["name"]}
                     tool_ctx["taint_sources"].append(c["name"])
                 event = {"id": uid, "name": c["name"], "arguments": args, "result_preview": preview, "duration_ms": ms,
-                         "error": err, "images": images or None,
+                         "error": err, "images": images or None, **edit_info,
                          "undo": result.get("undo") if isinstance(result, dict) and isinstance(result.get("undo"), dict) else None,
                          "approval": (("plan" if claimed else decision) if mode == "ask" else None),
                          "plan": {"plan_id": claimed["plan_id"], "idx": claimed["idx"], "title": claimed["title"]} if claimed else None,
                          "forced": forced, "tainted": tainted, "blocked": c["name"] if was_blocked else None, "breaker": partial,
                          "blocked_by": "plan_mode" if blocked_reason == PLAN_BLOCKED else None,
-                         "proposal": (result.get("proposal_id") if proposing and isinstance(result, dict) else None)}
+                         "proposal": (result.get("proposal_id") if proposing and isinstance(result, dict) else None),
+                         # Persisted with the tool event, so the card finds its artifact again after a reload.
+                         "artifact": made}
                 stuck = None
                 if detector is not None and ran:
                     detector.observe(c["name"], args, result)
@@ -2049,8 +2147,14 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     plans.finish(uid, not err, err)
                 tool_events.append(event)
                 yield "tool_result", {"message_id": am["id"], **event}
+                if made and not err:
+                    yield "artifact", {"message_id": am["id"], "call_id": uid, "conversation_id": conv_id, **made}
                 yield "span", {"message_id": am["id"], "span": tspan}
                 for_model = {**result, "images_shown_to_user": [i["name"] for i in images]} if images and isinstance(result, dict) else result
+                if edit_info and isinstance(for_model, dict):
+                    # The model proposed one thing and the user ran another: say so, or it reports the wrong call as done.
+                    for_model = {**for_model, "note": "The user edited these arguments before approving; this ran with their version: "
+                                 + json.dumps(args, default=str)[:1500]}
                 # Small results go in whole; a big one is stored and replaced by a handle the model can
                 # page with read_tool_result, so nothing is silently truncated away. See working.py.
                 content = tool_results.for_model(conv_id, am["id"], c["name"], for_model)
@@ -2159,6 +2263,14 @@ async def _run_chat(run: Run, body: ChatIn) -> None:
         # already closed to steers. The task runs on to auto-learn; it is no longer replying.
         if event == "done":
             run.replied = True
+
+
+async def _run_job(run: Run, body: ChatIn) -> None:
+    """An unattended run is _run_chat under a hard ceiling, so a hung tool or provider cannot hold it open forever."""
+    try:
+        await asyncio.wait_for(_run_chat(run, body), JOB_HARD_SECONDS)
+    except asyncio.TimeoutError:
+        raise RuntimeError(f"This scheduled run was stopped after {int(JOB_HARD_SECONDS // 60)} minutes without finishing.") from None
 
 
 async def _run_desk(run: Run, desk_id: str, body: ChatIn) -> dict[str, Any]:
@@ -2683,6 +2795,9 @@ class ApprovalIn(BaseModel):
     steps: list[dict[str, Any]] | None = None
     note: str | None = None  # one line back to the model, e.g. why a plan was rejected or a call was denied
     rules: list[str] | None = None  # always_rule: the rules to save, as edited on the card (default: the suggestions)
+    # An editable tool's approval only (approval_edits.EDITABLE_TOOLS): the arguments the user wants run instead of the
+    # model's. Validated against the tool's schema; what executes, is journaled and is verified is this, not the original.
+    arguments: dict[str, Any] | None = None
 
 
 def _patch_tool_event(message_id: str | None, call_id: str, patch: dict[str, Any]) -> None:
@@ -2733,10 +2848,27 @@ async def approve_tool_call(call_id: str, body: ApprovalIn) -> dict[str, Any]:
         edits = parse_plan_edits(body.steps)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
+    edited: dict[str, Any] | None = None
+    if body.arguments is not None:
+        if body.decision == "deny":
+            raise HTTPException(400, "A denial cannot carry edited arguments")
+        if is_plan:
+            raise HTTPException(400, "A plan is edited through its steps, not arguments")
+        if pending is None or pending["status"] != "pending":
+            raise HTTPException(404, "No pending approval for that call")
+        if pending.get("decided_by") == "park":
+            # No run is waiting on a parked card and nothing reads its edit back, so "approved with edits" would be a
+            # lie: the resumed desk would not run these arguments. Decide it as it is, or deny it.
+            raise HTTPException(400, "This approval is parked and cannot take edits; approve it as proposed or deny it")
+        spec = toolbox.specs.get(pending["tool"])
+        try:
+            edited = approval_edits.validate(pending["tool"], body.arguments, spec.parameters if spec else None)
+        except approval_edits.EditError as e:
+            raise HTTPException(400, str(e)) from e
     fut = _approvals.get(call_id)
     if body.decision == "deny" and body.note and not is_plan and fut and not fut.done():
         _approval_notes[call_id] = body.note.strip()[:500]
-    row = run_store.decide(call_id, body.decision, note=None if is_plan else body.note)
+    row = run_store.decide(call_id, body.decision, note=None if is_plan else body.note, edited_args=edited)
     live = bool(fut and not fut.done())
     # Read off the row as it was BEFORE this decision: decide() overwrites `decided_by` with 'user'.
     was_parked = bool(pending and pending.get("parked_at"))
@@ -2757,6 +2889,7 @@ async def approve_tool_call(call_id: str, body: ApprovalIn) -> dict[str, Any]:
     elif row is not None:
         _patch_tool_event(row["message_id"], call_id, {
             "pending": False, "needs_approval": False, "approval": body.decision,
+            **({"arguments": edited, "original_arguments": row["args"], "edited_arguments": edited, "edited_by": "user"} if edited else {}),
             "error": "Not run: the reply was interrupted before this was answered. The decision is recorded; ask again to run it."})
     # A desk's card can outlive the run that raised it (see parking), so answering one is also how a
     # desk is woken. Nothing here resumes a chat: a chat run that died stays dead, as above.
@@ -2894,7 +3027,7 @@ async def _launch_job(job: dict[str, Any], fire: dict[str, Any]) -> str | None:
     convos.update(conv["id"], {"settings": conv_settings})
     prompt = _job_prompt(job, fire)
     body = ChatIn(content=(job_tools.DRY_RUN_HINT + "\n\n" + prompt) if fire.get("dry_run") else prompt)
-    run = bus.start(conv["id"], lambda r: _run_chat(r, body), input={**fire, "conversation_id": conv["id"]}, kind="job")
+    run = bus.start(conv["id"], lambda r: _run_job(r, body), input={**fire, "conversation_id": conv["id"]}, kind="job")
     log.info("job %s fired for %s as run %s", job["name"], _stamp(fire["due_at"]), run.run_id)
     # Runs after _drive has ended the run, so the row the renderer then asks about is final. Ids only: the
     # app topic is a doorbell, and what to notify about is decided from rows by GET /inbox/notify.
@@ -3407,7 +3540,7 @@ def update_memory(id: str, body: MemoryPatch) -> dict[str, Any]:
 
 @app.delete("/memories/{id}")
 def delete_memory(id: str) -> dict[str, bool]:
-    memories.delete(id)
+    trash.trash("memory", id)
     return {"ok": True}
 
 
@@ -3644,12 +3777,7 @@ async def embed_backfill() -> dict[str, Any]:
 
 @app.delete("/documents/{id}")
 def delete_document(id: str) -> dict[str, bool]:
-    path = documents.delete(id)
-    if path:
-        try:
-            Path(path).unlink()
-        except OSError:
-            pass
+    trash.trash("document", id)  # the uploaded file stays on disk until the trash is purged
     return {"ok": True}
 
 
@@ -4423,7 +4551,8 @@ async def recap(force: bool = False) -> dict[str, Any]:
 
 # ---------------- canvas mode: spaces, windows, notes ----------------
 canvases = Canvases(db)
-app.include_router(artifact_router(artifacts, settings, on_delete=lambda aid: canvases.delete_windows_for("artifact", aid)))
+app.include_router(artifact_router(artifacts, settings, on_delete=lambda aid: canvases.delete_windows_for("artifact", aid),
+                                   sign=_artifact_render_path, verify=_artifact_render_ok))
 notes = Notes(db)
 presets = CanvasPresets(db, canvases)
 # 'popped' rows are NOT reset here: import runs before the main process can restore them (it clears the ones it declines).
@@ -4789,7 +4918,7 @@ def patch_doc(id: str, body: DocMetaPatch) -> dict[str, Any]:
 
 @app.delete("/docs/{id}")
 def delete_doc(id: str) -> dict[str, bool]:
-    docs.delete(id)
+    trash.trash("doc", id)
     return {"ok": True}
 
 
@@ -5700,6 +5829,21 @@ async def _outbox_startup() -> None:
 @app.on_event("shutdown")
 async def _outbox_shutdown() -> None:
     task = getattr(app.state, "outbox_task", None)
+    if task:
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
+
+
+# ---------------- backups: the daily snapshot timer (backups.py) ----------------
+@app.on_event("startup")
+async def _backups_startup() -> None:
+    app.state.backups_task = asyncio.create_task(backups.Backups(db.data_dir).loop(), name="daily-backup")
+
+
+@app.on_event("shutdown")
+async def _backups_shutdown() -> None:
+    task = getattr(app.state, "backups_task", None)
     if task:
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError, Exception):

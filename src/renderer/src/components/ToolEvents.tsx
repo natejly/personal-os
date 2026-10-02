@@ -1,14 +1,17 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { ChevronRight, Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, AlertCircle, Laptop, Zap, ListChecks, PenLine, ShieldAlert, ShieldCheck,
   FolderOpen, FileText, FilePen, Trash2, PackageCheck, CircleHelp, CircleCheck,
-  Youtube, Github, Rss, Undo2, AppWindow, Bot } from 'lucide-react'
+  Youtube, Github, Rss, Undo2, AppWindow, Bot, CalendarDays, CalendarClock, CalendarSearch, CalendarPlus, CalendarX } from 'lucide-react'
 import type { DocRevision, RunTapeEvent, ToolEvent, Verification } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore } from '../store'
 import DiffView from './DiffView'
 import PlanApproval from './PlanApproval'
 import ApprovalRules from './ApprovalRules'
-import SendToSpace from './SendToSpace'
+import { describeCall } from '../lib/toolDisplay'
+import { GenericApproval, GenericBody } from './toolcards/GenericCard'
+// Importing the index registers every dedicated card (TaskCard, FileCard, and whatever other workstreams add).
+import { TOOL_CARDS } from './toolcards'
 // The ask card mounts inline in a chat bubble, so it needs the sheet the desk panes use.
 import '../styles/cowork.css'
 import '../styles/docs.css'
@@ -16,6 +19,9 @@ import '../styles/docs.css'
 const ICONS: Record<string, JSX.Element> = {
   propose_plan: <ListChecks size={13} />,
   agent_spawn: <Bot size={13} />, agent_wait: <Bot size={13} />, agent_stop: <Bot size={13} />, desk_start: <FolderOpen size={13} />,
+  calendar_events: <CalendarDays size={13} />, calendar_get: <CalendarDays size={13} />, calendar_free_busy: <CalendarClock size={13} />,
+  calendar_find_time: <CalendarSearch size={13} />, calendar_propose: <CalendarDays size={13} />, calendar_create: <CalendarPlus size={13} />,
+  calendar_update: <CalendarClock size={13} />, calendar_delete: <CalendarX size={13} />,
   desk_list_files: <FolderOpen size={13} />, desk_read_file: <FileText size={13} />, desk_write_file: <FilePen size={13} />,
   desk_trash_file: <Trash2 size={13} />, desk_deliver: <PackageCheck size={13} />, desk_ask: <CircleHelp size={13} />,
   desk_done: <CircleCheck size={13} />, desk_import_sandbox: <FolderOpen size={13} />,
@@ -27,28 +33,12 @@ const ICONS: Record<string, JSX.Element> = {
   search_documents: <FileSearch size={13} />, read_document: <FileSearch size={13} />, list_documents: <FileSearch size={13} />,
   doc_list: <PenLine size={13} />, doc_search: <PenLine size={13} />, doc_read: <PenLine size={13} />,
   doc_create: <PenLine size={13} />, doc_edit: <PenLine size={13} />,
-  create_artifact: <AppWindow size={13} />, edit_artifact: <AppWindow size={13} />, rewrite_artifact: <AppWindow size={13} />,
+  artifact_create: <AppWindow size={13} />, artifact_edit: <AppWindow size={13} />, artifact_update: <AppWindow size={13} />,
   search_memory: <Brain size={13} />, save_memory: <Brain size={13} />,
   graph_search: <Share2 size={13} />, graph_traverse: <Share2 size={13} />, graph_add: <Share2 size={13} />,
   run_python: <Terminal size={13} />, current_time: <Clock size={13} />,
   sandbox_exec: <Terminal size={13} />, sandbox_write_file: <Terminal size={13} />, sandbox_read_file: <Terminal size={13} />,
   sandbox_list_files: <Terminal size={13} />, sandbox_put_document: <Terminal size={13} />, sandbox_reset: <Terminal size={13} />
-}
-
-function summary(t: ToolEvent): string {
-  const a = t.arguments ?? {}
-  if (t.name === 'doc_edit') {
-    const s = String(a.summary || a.doc || '')
-    return s.length > 90 ? s.slice(0, 90) + '…' : s
-  }
-  if (t.name === 'propose_plan') {
-    const steps = Array.isArray(a.steps) ? a.steps : []
-    const title = typeof a.title === 'string' && a.title ? a.title : steps.map((s) => (s as { tool?: string })?.tool ?? '?').join(', ')
-    return `${steps.length} ${steps.length === 1 ? 'action' : 'actions'}${title ? ` · ${title}` : ''}`.slice(0, 90)
-  }
-  const first = a.query ?? a.url ?? a.command ?? a.path ?? a.name ?? a.entity ?? a.content ?? a.document_id ?? (a.code ? String(a.code).split('\n')[0] : '') ?? ''
-  const s = String(first ?? '')
-  return s.length > 90 ? s.slice(0, 90) + '…' : s
 }
 
 /** The read-back verdict the backend put on the result (verify.py). It rides in result_preview,
@@ -141,31 +131,6 @@ function DocEditDiff({ preview }: { preview: string }): JSX.Element | null {
   )
 }
 
-const ARTIFACT_TOOLS = ['create_artifact', 'edit_artifact', 'rewrite_artifact']
-
-/** The result of an artifact tool, as a card that puts the artifact in a space. */
-function parseArtifact(preview: string): { id: string; title: string; version: number } | null {
-  try {
-    const o = JSON.parse(preview) as { id?: unknown; title?: unknown; version?: unknown }
-    if (typeof o.id !== 'string') return null
-    return { id: o.id, title: String(o.title || 'Untitled'), version: Number(o.version) || 1 }
-  } catch {
-    return null
-  }
-}
-
-function ArtifactCard({ preview }: { preview: string }): JSX.Element | null {
-  const a = useMemo(() => parseArtifact(preview), [preview])
-  if (!a) return null
-  return (
-    <div className="tool-doc-diff" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <AppWindow size={13} />
-      <span style={{ flex: 1 }}>Artifact: <b>{a.title}</b> v{a.version}</span>
-      <SendToSpace items={[{ kind: 'artifact', refId: a.id }]} title="Open in space" />
-    </div>
-  )
-}
-
 /** The subagent ids a spawn / wait / stop result names. The preview may be cut, so this reads ids out of the text. */
 export function agentIds(preview: string): string[] {
   const out: string[] = []
@@ -227,13 +192,6 @@ function AgentRunCard({ id }: { id: string }): JSX.Element {
       )}
     </div>
   )
-}
-
-function pretty(v: unknown): string {
-  if (typeof v === 'string') {
-    try { return JSON.stringify(JSON.parse(v), null, 2) } catch { return v }
-  }
-  return JSON.stringify(v, null, 2)
 }
 
 /**
@@ -317,16 +275,32 @@ function UndoButton({ snapshotId }: { snapshotId: string }): JSX.Element {
 export default function ToolEvents({ events, conversationId }: { events: ToolEvent[]; conversationId: string }): JSX.Element {
   const [open, setOpen] = useState<Record<string, boolean>>({})
   const approveTool = useStore((s) => s.approveTool)
+  const decideFor = (t: ToolEvent) => async (approve: boolean, edited?: Record<string, unknown>): Promise<void> =>
+    approveTool(t.id, approve ? 'allow' : 'deny', conversationId, edited ? { arguments: edited } : undefined)
   return (
     <div className="tool-events">
-      {events.map((t) => (
+      {events.map((t) => {
+        // A dedicated card owns the whole call, pending and finished. It renders from the event alone, so a
+        // reload (events replayed from the persisted run) shows the same card. propose_plan / desk_ask stay special.
+        const Card = t.name !== 'propose_plan' && t.name !== 'desk_ask' ? TOOL_CARDS[t.name] : undefined
+        if (Card) {
+          return (
+            <Fragment key={t.id}>
+              <Card event={t} pending={!!t.pending && !!t.needs_approval} decide={decideFor(t)} />
+              {!t.pending && !t.error && t.undo?.snapshot_id && <UndoButton snapshotId={t.undo.snapshot_id} />}
+              {t.pending && t.needs_approval && <ApprovalRules event={t} conversationId={conversationId} />}
+            </Fragment>
+          )
+        }
+        const d = describeCall(t.name, t.arguments)
+        return (
         <div key={t.id} className={`tool-event ${t.pending ? 'pending' : ''} ${t.error ? 'error' : ''}`}>
           <button className="tool-head" onClick={() => setOpen((o) => ({ ...o, [t.id]: !o[t.id] }))}>
             <ChevronRight size={12} className={open[t.id] ? 'rot90' : ''} />
             <span className="tool-icon">{ICONS[t.name] ?? <Wrench size={13} />}</span>
-            <span className="tool-name">{t.name.replace(/_/g, ' ')}</span>
+            <span className="tool-name human">{d.verb}</span>
             {t.agent && <span className="tag" title="Raised by a subagent">via {t.agent}</span>}
-            <span className="tool-summary">{summary(t)}</span>
+            <span className="tool-summary">{d.subject}</span>
             <Verdict event={t} />
             {t.plan ? (
               <span className="tag plan" title={`Approved in the plan "${t.plan.title || 'untitled'}" (step ${t.plan.idx + 1})`}>in plan</span>
@@ -346,7 +320,6 @@ export default function ToolEvents({ events, conversationId }: { events: ToolEve
           {!t.pending && !t.error && t.undo?.snapshot_id && <UndoButton snapshotId={t.undo.snapshot_id} />}
           {t.name === 'doc_edit' && !t.pending && !t.error && t.result_preview && <DocEditDiff preview={t.result_preview} />}
           {t.name.startsWith('agent_') && !t.pending && t.result_preview && agentIds(t.result_preview).map((id) => <AgentRunCard key={id} id={id} />)}
-          {ARTIFACT_TOOLS.includes(t.name) && !t.pending && !t.error && t.result_preview && <ArtifactCard preview={t.result_preview} />}
           {t.pending && t.needs_approval && t.name === 'propose_plan' && <PlanApproval event={t} conversationId={conversationId} />}
           {/* A question is answered, not permitted, so desk_ask gets a text box instead of Allow/Deny. */}
           {t.pending && t.needs_approval && t.name === 'desk_ask' && (
@@ -355,26 +328,15 @@ export default function ToolEvents({ events, conversationId }: { events: ToolEve
               context={String((t.arguments as { context?: unknown }).context ?? '') || undefined} />
           )}
           {t.pending && t.needs_approval && t.name !== 'propose_plan' && t.name !== 'desk_ask' && (
-            <div className="approval">
-              <div className="approval-text"><b>{t.name.replace(/_/g, ' ')}</b> wants to run. This acts outside the app.</div>
-              <pre className="approval-args">{pretty(t.arguments)}</pre>
-              <div className="approval-actions">
-                <button className="primary-btn" onClick={() => void approveTool(t.id, 'allow', conversationId)}>Allow once</button>
-                <button className="ghost-btn" onClick={() => void approveTool(t.id, 'always_chat', conversationId)}>Always in this chat</button>
-                <button className="ghost-btn" onClick={() => void approveTool(t.id, 'always_global', conversationId)}>Always</button>
-                <button className="ghost-btn danger" onClick={() => void approveTool(t.id, 'deny', conversationId)}>Deny</button>
-              </div>
+            <>
+              <GenericApproval event={t} decide={async (ok) => decideFor(t)(ok)} grant={(g) => approveTool(t.id, g, conversationId)} />
               <ApprovalRules event={t} conversationId={conversationId} />
-            </div>
+            </>
           )}
-          {open[t.id] && (
-            <div className="tool-body">
-              <div className="tool-col"><h6>Arguments</h6><pre>{pretty(t.arguments)}</pre></div>
-              <div className="tool-col"><h6>{t.error ? 'Error' : 'Result'}</h6><pre>{t.pending ? 'Running…' : pretty(t.error ?? t.result_preview)}</pre></div>
-            </div>
-          )}
+          {open[t.id] && <GenericBody event={t} />}
         </div>
-      ))}
+        )
+      })}
     </div>
   )
 }

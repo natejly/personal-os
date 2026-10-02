@@ -22,7 +22,7 @@ const CONSOLE = {
 /** Opens in the real browser: the main process turns window.open into shell.openExternal. */
 const openExternal = (url: string): void => void window.open(url, '_blank')
 
-export default function GoogleSettings({ clientId, clientSecret, onChange, onSaveCreds }: { clientId: string; clientSecret: string; onChange: (p: { googleClientId?: string; googleClientSecret?: string }) => void; onSaveCreds: () => Promise<void> }): JSX.Element {
+export default function GoogleSettings({ clientId, clientSecret, secretSaved = false, onChange, onSaveCreds }: { clientId: string; clientSecret: string; secretSaved?: boolean; onChange: (p: { googleClientId?: string; googleClientSecret?: string }) => void; onSaveCreds: () => Promise<void> }): JSX.Element {
   const google = useStore((s) => s.google)
   const tasksSync = useStore((s) => s.tasksSync)
   const todoCalendar = useStore((s) => s.todoCalendar)
@@ -230,7 +230,7 @@ export default function GoogleSettings({ clientId, clientSecret, onChange, onSav
             <input ref={idRef} value={clientId} onChange={(e) => onChange({ googleClientId: e.target.value })} onPaste={onPasteMaybeJson} placeholder="…apps.googleusercontent.com — or paste the whole JSON" spellCheck={false} />
           </label>
           <label><span>Client secret</span>
-            <input type="password" value={clientSecret} onChange={(e) => onChange({ googleClientSecret: e.target.value })} onPaste={onPasteMaybeJson} placeholder="GOCSPX-…" spellCheck={false} />
+            <input type="password" value={clientSecret} onChange={(e) => onChange({ googleClientSecret: e.target.value })} onPaste={onPasteMaybeJson} placeholder={secretSaved ? 'Saved. Type to replace' : 'GOCSPX-…'} spellCheck={false} />
           </label>
 
           {draftHasClient && !google?.configured && (

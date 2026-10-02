@@ -137,7 +137,7 @@ class MemoryIndex:
         return [mid for _, mid in scored[:RANK_DEPTH]]
 
     def _recent(self, c: Any, where: str, args: list[Any]) -> list[str]:
-        rows = c.execute(f"SELECT id FROM memories WHERE {where} AND invalid_at IS NULL ORDER BY pinned DESC, updated_at DESC LIMIT ?",
+        rows = c.execute(f"SELECT id FROM memories WHERE {where} AND invalid_at IS NULL AND deleted_at IS NULL ORDER BY pinned DESC, updated_at DESC LIMIT ?",
                          (*args, RANK_DEPTH)).fetchall()
         return [r["id"] for r in rows]
 
@@ -145,7 +145,7 @@ class MemoryIndex:
         labels = [n["label"].lower() for n in self.graph.neighborhood(project_id, query)["nodes"] if len(n["label"]) > 2]
         if not labels:
             return []
-        rows = c.execute(f"SELECT id, content FROM memories WHERE {where} AND invalid_at IS NULL ORDER BY updated_at DESC", args).fetchall()
+        rows = c.execute(f"SELECT id, content FROM memories WHERE {where} AND invalid_at IS NULL AND deleted_at IS NULL ORDER BY updated_at DESC", args).fetchall()
         return [r["id"] for r in rows if any(lb in r["content"].lower() for lb in labels)][:RANK_DEPTH]
 
     def search(self, project_id: str | None, query: str, query_vec: np.ndarray | None = None, limit: int = 20,

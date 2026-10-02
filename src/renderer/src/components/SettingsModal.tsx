@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
-import { X, Eye, EyeOff, Plug, Cpu, Brain, Mail, Mic, Wrench, Gauge, LayoutGrid, Magnet, SlidersHorizontal, BookOpen, FileText, type LucideIcon } from 'lucide-react'
+import { X, Eye, EyeOff, Plug, Cpu, Brain, Mail, Mic, Wrench, Gauge, LayoutGrid, Magnet, SlidersHorizontal, BookOpen, FileText, Database, Trash2, RotateCcw, type LucideIcon } from 'lucide-react'
 import { useStore, type SettingsTab } from '../store'
+import { useOnboarding } from './onboarding/onboardingStore'
 import { api } from '../lib/api'
 import { HOME_MODULES, OPTIONAL_VIEWS } from '../modules'
 import { useModal } from '../lib/useModal'
@@ -13,11 +14,14 @@ import PermissionRules from './PermissionRules'
 import { WorkspaceRoots } from './WorkspaceRoots'
 import GoogleSettings from './GoogleSettings'
 import MeetingSettings from './MeetingSettings'
+import SupportSettings from './SupportSettings'
 import UsageView from './UsageView'
 import TraceExportSettings from './TraceExportSettings'
 import MemoryPanel from './MemoryPanel'
 import DocumentsView from './DocumentsView'
 import ScopeSelect from './ScopeSelect'
+import DataSettings from './DataSettings'
+import TrashPanel from './TrashPanel'
 
 type Tab = SettingsTab
 
@@ -31,7 +35,9 @@ const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
   { id: 'usage', label: 'Usage & cost', icon: Gauge },
   { id: 'spaces', label: 'Spaces', icon: Magnet },
   { id: 'modules', label: 'Modules', icon: LayoutGrid },
-  { id: 'behavior', label: 'Behavior', icon: SlidersHorizontal }
+  { id: 'behavior', label: 'Behavior', icon: SlidersHorizontal },
+  { id: 'data', label: 'Data', icon: Database },
+  { id: 'trash', label: 'Trash', icon: Trash2 }
 ]
 
 const SNAP_LABEL: Record<SnapMode, string> = { off: 'No snap', grid: 'Grid', guides: 'Guides', both: 'Grid + guides' }
@@ -43,6 +49,8 @@ export default function SettingsModal(): JSX.Element {
   const { saveSettings, setSettingsOpen, setView, toast } = useStore()
   const [draft, setDraft] = useState<Settings>(settings)
   const [showKey, setShowKey] = useState(false)
+  // The saved key never reaches the renderer: with one saved the field stays hidden until Replace is pressed.
+  const [replacingKey, setReplacingKey] = useState(false)
   const [test, setTest] = useState<{ state: 'idle' | 'testing' | 'ok' | 'fail'; msg?: string }>({ state: 'idle' })
   const [shortcut, setShortcut] = useState<ShortcutState | null>(null)
   const [tab, setTab] = useState<Tab>(() => useStore.getState().settingsTab)
@@ -59,6 +67,15 @@ export default function SettingsModal(): JSX.Element {
     const space = c.activeCanvasId ? c.canvases[c.activeCanvasId] : undefined
     return { mode: space?.snap_mode ?? 'both', grid: space?.grid_size ?? 16 }
   })
+  /** Reset the onboarding stamp, then show the wizard over the app. The modal's unsaved draft is dropped with it. */
+  const rerunSetup = async (): Promise<void> => {
+    try {
+      await useOnboarding.getState().rerun()
+      setSettingsOpen(false)
+    } catch (e) {
+      toast((e as Error).message, 'error')
+    }
+  }
   // Closing discards `draft` — Escape and the backdrop are exactly the Cancel button.
   const { titleId, backdrop, modal } = useModal(() => setSettingsOpen(false))
 
@@ -88,6 +105,7 @@ export default function SettingsModal(): JSX.Element {
     await saveSettings({ baseUrl: draft.baseUrl, apiKey: draft.apiKey })
     try {
       const list = await api.models()
+      setReplacingKey(false)
       setTest({ state: 'ok', msg: `Connected. ${list.length} model${list.length === 1 ? '' : 's'} available.` })
     } catch (e) {
       setTest({ state: 'fail', msg: (e as Error).message })
@@ -157,20 +175,32 @@ export default function SettingsModal(): JSX.Element {
           <div className="settings-pane" id="settings-pane" role="tabpanel" aria-labelledby={`settings-tab-${tab}`}>
             {tab === 'provider' && <section>
               <h3>Provider</h3>
-              <p className="muted">Grain talks to a <a href="https://docs.litellm.ai/" target="_blank" rel="noreferrer">LiteLLM</a> proxy, so any model LiteLLM can route to works here. Point it at your proxy and paste a virtual key.</p>
-              <label><span>LiteLLM base URL</span><input autoFocus value={draft.baseUrl} onChange={(e) => patch({ baseUrl: e.target.value })} placeholder="http://localhost:4000" spellCheck={false} /></label>
+              <p className="muted">Grain talks to any OpenAI-compatible endpoint: Fireworks, OpenAI, Anthropic, OpenRouter, a local Ollama, or your own <a href="https://docs.litellm.ai/" target="_blank" rel="noreferrer">LiteLLM</a> proxy. Run setup again to switch providers with a connection test.</p>
+              <label><span>Base URL</span><input autoFocus value={draft.baseUrl} onChange={(e) => patch({ baseUrl: e.target.value })} placeholder="https://api.fireworks.ai/inference/v1" spellCheck={false} /></label>
               <label><span>API key</span>
+                {settings.apiKeySet && !replacingKey ? (
+                  <div className="input-row">
+                    <span className="muted">Key saved ••••</span>
+                    <button className="ghost-btn" type="button" onClick={() => setReplacingKey(true)}>Replace</button>
+                    <button className="ghost-btn" type="button" onClick={() => void saveSettings({ apiKey: null } as unknown as Partial<Settings>)}>Remove</button>
+                  </div>
+                ) : (
                 <div className="input-row">
                   <input type={showKey ? 'text' : 'password'} value={draft.apiKey} onChange={(e) => patch({ apiKey: e.target.value })} placeholder="sk-…" spellCheck={false} />
                   <button className="icon-btn" type="button" aria-label={showKey ? 'Hide API key' : 'Show API key'} aria-pressed={showKey} title={showKey ? 'Hide API key' : 'Show API key'} onClick={() => setShowKey((v) => !v)}>{showKey ? <EyeOff size={14} /> : <Eye size={14} />}</button>
                 </div>
+                )}
               </label>
               <div className="test-row">
                 <button className="ghost-btn" onClick={() => void testConnection()} disabled={test.state === 'testing'}><Plug size={14} /> {test.state === 'testing' ? 'Testing…' : 'Test connection'}</button>
                 {test.msg && <span className={`test-msg ${test.state}`}>{test.msg}</span>}
               </div>
+              <div className="test-row">
+                <button className="ghost-btn" type="button" onClick={() => void rerunSetup()}><RotateCcw size={14} /> Run setup again</button>
+                <span className="muted small">Walks through choosing a provider and key from the start.</span>
+              </div>
               <label><span>Default chat model</span>
-                <input list="model-options" value={draft.defaultModel} onChange={(e) => patch({ defaultModel: e.target.value })} placeholder="gpt-4o" spellCheck={false} />
+                <input list="model-options" value={draft.defaultModel} onChange={(e) => patch({ defaultModel: e.target.value })} placeholder="Model id" spellCheck={false} />
                 <datalist id="model-options">{models.map((m) => <option key={m.id} value={m.id} />)}</datalist>
               </label>
             </section>}
@@ -203,13 +233,13 @@ export default function SettingsModal(): JSX.Element {
                 <input type="checkbox" checked={draft.learnStyle !== false} onChange={(e) => patch({ learnStyle: e.target.checked })} /><span className="switch" />
               </label>
               <label><span>Extraction model <small className="muted">(blank = same as chat model)</small></span>
-                <input list="model-options" value={draft.extractionModel} onChange={(e) => patch({ extractionModel: e.target.value })} placeholder="e.g. gpt-4o-mini" spellCheck={false} />
+                <input list="model-options" value={draft.extractionModel} onChange={(e) => patch({ extractionModel: e.target.value })} placeholder="Same as the default model" spellCheck={false} />
               </label>
             </section>}
 
             {tab === 'integrations' && <section>
               <h3>Integrations</h3>
-              <GoogleSettings clientId={draft.googleClientId ?? ''} clientSecret={draft.googleClientSecret ?? ''} onChange={(p) => patch(p)}
+              <GoogleSettings clientId={draft.googleClientId ?? ''} clientSecret={draft.googleClientSecret ?? ''} secretSaved={!!settings.googleClientSecretSet} onChange={(p) => patch(p)}
                 onSaveCreds={() => saveSettings({ googleClientId: draft.googleClientId, googleClientSecret: draft.googleClientSecret })} />
               {/* The undo window on outgoing mail. The backend clamps the number to HOLD_MIN..HOLD_MAX (outbox.py). */}
               <div className="send-hold">
@@ -260,16 +290,18 @@ export default function SettingsModal(): JSX.Element {
                 <input type="checkbox" checked={draft.sandboxMountDesk !== false} onChange={(e) => patch({ sandboxMountDesk: e.target.checked })} /><span className="switch" />
               </label>
               <label><span>Max tool rounds per reply</span><input type="number" min={1} max={60} value={draft.maxToolRounds} onChange={(e) => patch({ maxToolRounds: Number(e.target.value) })} /></label>
-              <label><span>Brave Search API key <small className="muted">(optional; without a key web search uses Exa, then DuckDuckGo)</small></span><input type="password" value={draft.braveApiKey} onChange={(e) => patch({ braveApiKey: e.target.value })} placeholder="BSA…" spellCheck={false} /></label>
-              <label><span>Tavily API key <small className="muted">(optional alternative)</small></span><input type="password" value={draft.tavilyApiKey} onChange={(e) => patch({ tavilyApiKey: e.target.value })} placeholder="tvly-…" spellCheck={false} /></label>
-              <label><span>Exa API key <small className="muted">(optional; Exa works without one, a key lifts its rate limit)</small></span><input type="password" value={draft.exaApiKey ?? ''} onChange={(e) => patch({ exaApiKey: e.target.value })} placeholder="exa key" spellCheck={false} /></label>
+              <label><span>Brave Search API key <small className="muted">(optional; without a key web search uses Exa, then DuckDuckGo)</small></span><input type="password" value={draft.braveApiKey} onChange={(e) => patch({ braveApiKey: e.target.value })} placeholder={settings.braveApiKeySet ? 'Saved. Type to replace' : 'BSA…'} spellCheck={false} /></label>
+              <label><span>Tavily API key <small className="muted">(optional alternative)</small></span><input type="password" value={draft.tavilyApiKey} onChange={(e) => patch({ tavilyApiKey: e.target.value })} placeholder={settings.tavilyApiKeySet ? 'Saved. Type to replace' : 'tvly-…'} spellCheck={false} /></label>
+              <label><span>Exa API key <small className="muted">(optional; Exa works without one, a key lifts its rate limit)</small></span><input type="password" value={draft.exaApiKey ?? ''} onChange={(e) => patch({ exaApiKey: e.target.value })} placeholder={settings.exaApiKeySet ? 'Saved. Type to replace' : 'exa key'} spellCheck={false} /></label>
               <label><span>SearXNG URL <small className="muted">(optional; your own instance, searched beside Exa. Needs <code>json</code> under search.formats)</small></span><input value={draft.searxngUrl ?? ''} onChange={(e) => patch({ searxngUrl: e.target.value })} placeholder="http://localhost:8080" spellCheck={false} /></label>
-              <label><span>GitHub token<small className="muted">(optional; GitHub tools use your <code>gh</code> login when this is empty)</small></span><input type="password" value={draft.githubToken ?? ''} onChange={(e) => patch({ githubToken: e.target.value })} placeholder="ghp_…" spellCheck={false} /></label>
+              <label><span>GitHub token <small className="muted">(optional; GitHub tools use your <code>gh</code> login when this is empty)</small></span><input type="password" value={draft.githubToken ?? ''} onChange={(e) => patch({ githubToken: e.target.value })} placeholder={settings.githubTokenSet ? 'Saved. Type to replace' : 'ghp_…'} spellCheck={false} /></label>
               <label className="check">
                 <input type="checkbox" checked={draft.readerFallback !== false} onChange={(e) => patch({ readerFallback: e.target.checked })} />
                 Retry blocked or JavaScript-only pages through Jina Reader (Jina sees the page address)
               </label>
             </section>}
+
+            {tab === 'data' && <DataSettings />}
 
             {tab === 'usage' && <section>
               <h3>Usage &amp; cost</h3>
@@ -319,6 +351,8 @@ export default function SettingsModal(): JSX.Element {
               </label>
             </section>}
 
+            {tab === 'trash' && <TrashPanel />}
+
             {tab === 'behavior' && <section>
               <h3>Behavior</h3>
               <label><span>Global system prompt</span><textarea rows={4} value={draft.systemPrompt} onChange={(e) => patch({ systemPrompt: e.target.value })} /></label>
@@ -356,6 +390,7 @@ export default function SettingsModal(): JSX.Element {
                 <p className="test-msg fail">{shortcut.message ?? `${shortcut.accelerator} could not be registered.`} The menubar icon gathers them too.</p>
               )}
               <TraceExportSettings value={draft.otelExport} onChange={(otelExport) => patch({ otelExport })} />
+              <SupportSettings draft={draft} patch={patch} />
             </section>}
           </div>
         </div>

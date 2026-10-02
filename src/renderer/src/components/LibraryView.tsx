@@ -1,31 +1,34 @@
 import { useEffect, useState } from 'react'
-import { BookOpen, FileText, KanbanSquare, LayoutDashboard, PanelLeftOpen, Plug, Sparkles, Workflow } from 'lucide-react'
+import { BookOpen, FileText, KanbanSquare, LayoutDashboard, Package, PanelLeftOpen, Plug, Sparkles, Workflow } from 'lucide-react'
 import { useStore, type LibraryTab } from '../store'
 import { api } from '../lib/api'
-import type { Board, Dashboard } from '@shared/types'
+import type { Artifact, Board, Dashboard } from '@shared/types'
 import SkillsPanel from './SkillsPanel'
 import McpSettings from './McpSettings'
 import WorkflowsPanel from './WorkflowsPanel'
 import AppSwitcher from './AppSwitcher'
+import ArtifactsView from './ArtifactsView'
+import ArtifactViewer from './ArtifactViewer'
 
 const TABS: { key: LibraryTab; label: string; icon: JSX.Element; blurb: string }[] = [
   { key: 'skills', label: 'Skills', icon: <Sparkles size={14} />, blurb: 'Procedures the assistant may follow again' },
   { key: 'workflows', label: 'Workflows', icon: <Workflow size={14} />, blurb: 'Repeatable multi-step jobs you approve once, by hash' },
   { key: 'connectors', label: 'Connectors', icon: <Plug size={14} />, blurb: 'MCP servers whose tools the assistant can call' },
+  { key: 'artifacts', label: 'Artifacts', icon: <Package size={14} />, blurb: 'Interactive pages the assistant built, with version history' },
   { key: 'made', label: 'Made', icon: <BookOpen size={14} />, blurb: 'Everything built in this app, in one place' }
 ]
 
 /** One row of the Made tab: anything with a name, a kind and a view that can open it. */
 interface Made {
   id: string
-  kind: 'doc' | 'dashboard' | 'board'
+  kind: 'doc' | 'dashboard' | 'board' | 'artifact'
   name: string
   meta: string
   at: number
 }
 
 const KIND_ICON: Record<Made['kind'], JSX.Element> = {
-  doc: <FileText size={14} />, dashboard: <LayoutDashboard size={14} />, board: <KanbanSquare size={14} />
+  doc: <FileText size={14} />, artifact: <Package size={14} />, dashboard: <LayoutDashboard size={14} />, board: <KanbanSquare size={14} />
 }
 
 function MadePanel(): JSX.Element {
@@ -34,14 +37,16 @@ function MadePanel(): JSX.Element {
   const [extra, setExtra] = useState<Made[]>([])
   const [kind, setKind] = useState<'all' | Made['kind']>('all')
   const [q, setQ] = useState('')
+  const [viewing, setViewing] = useState<string | null>(null)
 
   // Boards and dashboards live in their own views, so the Library fetches them rather than holding them.
   useEffect(() => {
     let live = true
-    void Promise.all([api.dashboards.list().catch(() => [] as Dashboard[]), api.boards.list().catch(() => [] as Board[])])
-      .then(([dashboards, boards]) => {
+    void Promise.all([api.dashboards.list().catch(() => [] as Dashboard[]), api.boards.list().catch(() => [] as Board[]), api.artifacts.list().catch(() => [] as Artifact[])])
+      .then(([dashboards, boards, arts]) => {
         if (!live) return
         setExtra([
+          ...arts.map((a) => ({ id: a.id, kind: 'artifact' as const, name: a.title || 'Untitled', meta: `artifact · v${a.version}`, at: a.updated_at })),
           ...dashboards.map((d) => ({ id: d.id, kind: 'dashboard' as const, name: d.name, meta: d.description || 'dashboard', at: d.created_at })),
           ...boards.map((b) => ({ id: b.id, kind: 'board' as const, name: b.name, meta: `${b.card_count ?? b.cards?.length ?? 0} cards`, at: b.created_at }))
         ])
@@ -58,6 +63,7 @@ function MadePanel(): JSX.Element {
 
   const open = (r: Made): void => {
     if (r.kind === 'doc') void openDoc(r.id)
+    else if (r.kind === 'artifact') setViewing(r.id)
     else setView(r.kind === 'board' ? 'boards' : 'dashboards')
   }
 
@@ -65,7 +71,7 @@ function MadePanel(): JSX.Element {
     <div className="library-panel">
       <div className="add-row">
         <div className="seg">
-          {(['all', 'doc', 'dashboard', 'board'] as const).map((k) => (
+          {(['all', 'doc', 'artifact', 'dashboard', 'board'] as const).map((k) => (
             <button key={k} className={kind === k ? 'on' : ''} onClick={() => setKind(k)}>{k === 'all' ? 'everything' : `${k}s`}</button>
           ))}
         </div>
@@ -84,6 +90,7 @@ function MadePanel(): JSX.Element {
           ))}
         </div>
       )}
+      {viewing && <ArtifactViewer id={viewing} onClose={() => setViewing(null)} />}
     </div>
   )
 }
@@ -119,6 +126,7 @@ export default function LibraryView(): JSX.Element {
         {tab === 'skills' && <SkillsPanel />}
         {tab === 'workflows' && <WorkflowsPanel />}
         {tab === 'connectors' && <div className="library-panel"><McpSettings /></div>}
+        {tab === 'artifacts' && <ArtifactsView />}
         {tab === 'made' && <MadePanel />}
       </div>
     </main>

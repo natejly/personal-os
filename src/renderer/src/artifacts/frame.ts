@@ -16,8 +16,9 @@ export function readFrameMessage(source: unknown, frameWindow: unknown, data: un
   return r.ok ? r.message : null
 }
 
-/** Where the render route lives for one artifact. `v` busts the iframe when a new version lands. */
-export const renderUrl = (base: string, id: string, version: number): string => `${base}/artifacts/${encodeURIComponent(id)}/render?v=${version}`
+/** The iframe URL for one artifact: `path` is the signed render_path the backend hands out (the iframe cannot
+ * send the app token). `v` renders that version and busts the iframe when a new one lands. */
+export const renderUrl = (base: string, path: string, version: number): string => `${base}${path}${path.includes('?') ? '&' : '?'}v=${version}`
 
 /** A download name for the .html export: the title as a slug, never empty. */
 export const downloadName = (title: string): string => {

@@ -48,12 +48,12 @@ class Projects:
 
     def list(self) -> list[dict[str, Any]]:
         with self.db.tx() as c:
-            rows = c.execute("SELECT * FROM projects ORDER BY created_at").fetchall()
+            rows = c.execute("SELECT * FROM projects WHERE deleted_at IS NULL ORDER BY created_at").fetchall()
         return [row_to_dict(r, ("tools",)) for r in rows]  # type: ignore[misc]
 
     def get(self, id: str) -> dict[str, Any] | None:
         with self.db.tx() as c:
-            return row_to_dict(c.execute("SELECT * FROM projects WHERE id=?", (id,)).fetchone(), ("tools",))
+            return row_to_dict(c.execute("SELECT * FROM projects WHERE id=? AND deleted_at IS NULL", (id,)).fetchone(), ("tools",))
 
     def create(self, name: str, description: str = "", system_prompt: str = "", color: str = "#d97757") -> dict[str, Any]:
         sid = new_id()
@@ -81,7 +81,8 @@ class Projects:
     def stats(self, project_id: str | None) -> dict[str, int]:
         where, args = _scope_clause(project_id, include_global=False)
         with self.db.tx() as c:
-            q = lambda t: c.execute(f"SELECT COUNT(*) FROM {t} WHERE {where}", args).fetchone()[0]  # noqa: E731
+            soft = ("conversations", "memories", "documents")  # the tables that can sit in the trash
+            q = lambda t: c.execute(f"SELECT COUNT(*) FROM {t} WHERE {where}" + (" AND deleted_at IS NULL" if t in soft else ""), args).fetchone()[0]  # noqa: E731
             return {"conversations": q("conversations"), "memories": q("memories"), "nodes": q("kg_nodes"), "documents": q("documents")}
 
 
@@ -104,7 +105,7 @@ class Conversations:
         chains a dozen turns would otherwise own the whole of Recent."""
         where, args = _scope_clause(project_id, include_global=False)
         with self.db.tx() as c:
-            rows = c.execute(f"SELECT * FROM conversations WHERE {where} ORDER BY updated_at DESC", args).fetchall()
+            rows = c.execute(f"SELECT * FROM conversations WHERE {where} AND deleted_at IS NULL ORDER BY updated_at DESC", args).fetchall()
         out = [self._hydrate(r) for r in rows]
         if not include_desks:
             out = [c for c in out if not c["settings"].get("deskId")]
@@ -117,7 +118,7 @@ class Conversations:
 
     def get(self, id: str, with_messages: bool = True) -> dict[str, Any] | None:
         with self.db.tx() as c:
-            r = c.execute("SELECT * FROM conversations WHERE id=?", (id,)).fetchone()
+            r = c.execute("SELECT * FROM conversations WHERE id=? AND deleted_at IS NULL", (id,)).fetchone()
             if not r:
                 return None
             d = self._hydrate(r)
@@ -218,17 +219,17 @@ class Memories:
                     return []
                 rows = c.execute(
                     f"""SELECT m.* FROM memories_fts f JOIN memories m ON m.id = f.memory_id
-                        WHERE memories_fts MATCH ? AND {where.replace('project_id', 'm.project_id')}{live.replace('invalid_at', 'm.invalid_at')}
+                        WHERE memories_fts MATCH ? AND m.deleted_at IS NULL AND {where.replace('project_id', 'm.project_id')}{live.replace('invalid_at', 'm.invalid_at')}
                         ORDER BY bm25(memories_fts) LIMIT 100""",
                     (fq, *args),
                 ).fetchall()
             else:
-                rows = c.execute(f"SELECT * FROM memories WHERE {where}{live} ORDER BY pinned DESC, updated_at DESC", args).fetchall()
+                rows = c.execute(f"SELECT * FROM memories WHERE {where} AND deleted_at IS NULL{live} ORDER BY pinned DESC, updated_at DESC", args).fetchall()
         return [row_to_dict(r) for r in rows]  # type: ignore[misc]
 
     def get(self, id: str) -> dict[str, Any] | None:
         with self.db.tx() as c:
-            return row_to_dict(c.execute("SELECT * FROM memories WHERE id=?", (id,)).fetchone())
+            return row_to_dict(c.execute("SELECT * FROM memories WHERE id=? AND deleted_at IS NULL", (id,)).fetchone())
 
     def create(self, project_id: str | None, content: str, kind: str = "fact", source: str = "user", pinned: bool = False,
                provenance: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -236,7 +237,7 @@ class Memories:
         prov = provenance or {}
         with self.db.tx() as c:
             dup = c.execute(
-                f"SELECT id FROM memories WHERE invalid_at IS NULL AND lower(content)=lower(?) AND {'project_id IS NULL' if project_id is None else 'project_id=?'}",
+                f"SELECT id FROM memories WHERE invalid_at IS NULL AND deleted_at IS NULL AND lower(content)=lower(?) AND {'project_id IS NULL' if project_id is None else 'project_id=?'}",
                 (content,) if project_id is None else (content, project_id),
             ).fetchone()
             if dup:
@@ -351,13 +352,13 @@ class Memories:
         """Pinned + recent memories, plus FTS hits for the query, deduped."""
         where, args = _scope_clause(project_id)
         with self.db.tx() as c:
-            base = c.execute(f"SELECT * FROM memories WHERE {where} AND invalid_at IS NULL ORDER BY pinned DESC, updated_at DESC LIMIT ?", (*args, limit)).fetchall()
+            base = c.execute(f"SELECT * FROM memories WHERE {where} AND invalid_at IS NULL AND deleted_at IS NULL ORDER BY pinned DESC, updated_at DESC LIMIT ?", (*args, limit)).fetchall()
             hits: list[Any] = []
             fq = fts_query(query)
             if fq:
                 hits = c.execute(
                     f"""SELECT m.* FROM memories_fts f JOIN memories m ON m.id=f.memory_id
-                        WHERE memories_fts MATCH ? AND {where.replace('project_id', 'm.project_id')} AND m.invalid_at IS NULL ORDER BY bm25(memories_fts) LIMIT 15""",
+                        WHERE memories_fts MATCH ? AND m.deleted_at IS NULL AND {where.replace('project_id', 'm.project_id')} AND m.invalid_at IS NULL ORDER BY bm25(memories_fts) LIMIT 15""",
                     (fq, *args),
                 ).fetchall()
         out: dict[str, dict[str, Any]] = {}
@@ -541,14 +542,14 @@ class Documents:
         where, args = _scope_clause(project_id, include_global)
         with self.db.tx() as c:
             rows = c.execute(
-                f"SELECT id, project_id, name, mime, size, chunk_count, created_at, substr(text,1,300) AS preview FROM documents WHERE {where} ORDER BY created_at DESC",
+                f"SELECT id, project_id, name, mime, size, chunk_count, created_at, substr(text,1,300) AS preview FROM documents WHERE {where} AND deleted_at IS NULL ORDER BY created_at DESC",
                 args,
             ).fetchall()
         return [row_to_dict(r) for r in rows]  # type: ignore[misc]
 
     def get(self, id: str) -> dict[str, Any] | None:
         with self.db.tx() as c:
-            return row_to_dict(c.execute("SELECT * FROM documents WHERE id=?", (id,)).fetchone())
+            return row_to_dict(c.execute("SELECT * FROM documents WHERE id=? AND deleted_at IS NULL", (id,)).fetchone())
 
     @staticmethod
     def _build_chunks(name: str, text: str, blocks: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
@@ -599,7 +600,7 @@ class Documents:
             return None
         where, args = ("project_id IS NULL", []) if project_id is None else ("project_id=?", [project_id])
         with self.db.tx() as c:
-            return row_to_dict(c.execute(f"SELECT * FROM documents WHERE content_hash=? AND {where} LIMIT 1", (content_hash, *args)).fetchone())
+            return row_to_dict(c.execute(f"SELECT * FROM documents WHERE content_hash=? AND deleted_at IS NULL AND {where} LIMIT 1", (content_hash, *args)).fetchone())
 
     def reindex(self, id: str | None = None) -> int:
         """Re-chunk from the stored upload (or, without a file, the stored text read as markdown).
@@ -650,7 +651,7 @@ class Documents:
             rows = c.execute(
                 f"""SELECT f.chunk_id, f.document_id, d.name, ch.idx, ch.text, ch.heading, ch.page, bm25(chunks_fts) AS score
                     FROM chunks_fts f JOIN documents d ON d.id=f.document_id JOIN chunks ch ON ch.id=f.chunk_id
-                    WHERE chunks_fts MATCH ? AND {where.replace('project_id', 'd.project_id')}
+                    WHERE chunks_fts MATCH ? AND d.deleted_at IS NULL AND {where.replace('project_id', 'd.project_id')}
                     ORDER BY score LIMIT ?""",
                 (fq, *args, limit),
             ).fetchall()

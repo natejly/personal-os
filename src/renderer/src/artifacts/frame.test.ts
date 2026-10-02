@@ -34,7 +34,8 @@ test('malformed data from the right frame is dropped, never thrown', () => {
 })
 
 test('render url and download name', () => {
-  assert.equal(renderUrl('http://127.0.0.1:1', 'a b', 3), 'http://127.0.0.1:1/artifacts/a%20b/render?v=3')
+  assert.equal(renderUrl('http://127.0.0.1:1', '/artifacts/a1/render?re=9&rt=x', 3), 'http://127.0.0.1:1/artifacts/a1/render?re=9&rt=x&v=3')
+  assert.equal(renderUrl('http://127.0.0.1:1', '/artifacts/a1/render', 3), 'http://127.0.0.1:1/artifacts/a1/render?v=3')
   assert.equal(downloadName('Tip Splitter!'), 'tip-splitter.html')
   assert.equal(downloadName('???'), 'artifact.html')
 })

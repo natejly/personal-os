@@ -778,12 +778,26 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .backend-error h2 { color: var(--text); margin: 12px 0 4px; }
 .backend-error pre { text-align: left; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 8px; padding: 12px; font-size: 12px; white-space: pre-wrap; color: var(--danger); }
 .backend-error code { font-family: var(--mono); font-size: 12px; background: var(--hover); padding: 1px 5px; border-radius: 4px; }
+.support-settings { margin-top: 24px; display: flex; flex-direction: column; gap: 10px; }
+.support-settings h4 { margin: 12px 0 0; font-size: 13px; color: var(--text); }
+.support-settings .button-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.support-settings .button-row button { display: inline-flex; align-items: center; gap: 6px; }
+.backend-actions { display: flex; gap: 8px; justify-content: center; -webkit-app-region: no-drag; }
+.backend-banner { position: fixed; top: 0; left: 50%; transform: translateX(-50%); z-index: 120; display: flex; align-items: center; gap: 8px; padding: 6px 14px; font-size: 12px; background: var(--bg-elev); border: 1px solid var(--border-strong); border-top: 0; border-radius: 0 0 10px 10px; color: var(--text-muted); box-shadow: 0 8px 24px rgba(0,0,0,0.3); -webkit-app-region: no-drag; }
 
 /* ---------- Toasts ---------- */
-.toasts { position: fixed; bottom: 16px; right: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 100; }
+.toasts { position: fixed; bottom: 16px; right: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 300; }
 .toast { background: var(--bg-elev); border: 1px solid var(--border-strong); border-radius: 10px; padding: 10px 14px; font-size: 13px; box-shadow: 0 8px 24px rgba(0,0,0,0.3); max-width: 360px; animation: slide-in 0.2s ease; }
 .toast.error { border-color: var(--danger); color: var(--danger); }
 .toast.learned { border-color: var(--accent); }
+.toast.with-action { display: flex; align-items: center; gap: 12px; }
+.toast-action { margin-left: auto; background: none; border: none; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; padding: 2px 4px; border-radius: 6px; }
+.toast-action:hover { background: var(--hover); }
+.trash-group { margin-top: 14px; }
+.trash-group h4 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-muted); }
+.trash-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.trash-row .trash-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trash-row small { color: var(--text-muted); white-space: nowrap; }
 @keyframes slide-in { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
 
 /* ---------- Pending sends (the undo window on outgoing mail) ---------- */
@@ -2309,3 +2323,9 @@ select:focus-visible {
 .workspace-roots .chip-check-row { justify-content: space-between; cursor: default; }
 .workspace-roots-add { display: flex; gap: 8px; }
 .workspace-roots-add input { flex: 1; min-width: 0; }
+/* Settings → Data */
+.data-row { margin-top: 10px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.data-row .toggle-text { display: flex; flex-direction: column; gap: 2px; font-size: 13px; min-width: 0; overflow-wrap: anywhere; }
+.data-row .toggle-text small { font-size: 12px; line-height: 1.45; color: var(--muted, inherit); }
+.data-row .ghost-btn { flex: none; white-space: nowrap; }
+.data-list { list-style: none; margin: 6px 0 0; padding: 0; max-height: 240px; overflow-y: auto; }

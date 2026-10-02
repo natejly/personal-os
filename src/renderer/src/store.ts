@@ -32,7 +32,7 @@ export type ClassicView = Exclude<View, 'canvas'>
 /** How the Docs editor splits its panes. */
 export type DocMode = 'edit' | 'split' | 'preview'
 const DOC_MODE_KEY = 'grain.docMode'
-const readDocMode = (): DocMode => {
+export const readDocMode = (): DocMode => {
   try {
     const v = localStorage.getItem(DOC_MODE_KEY)
     return v === 'edit' || v === 'split' || v === 'preview' ? v : 'split'

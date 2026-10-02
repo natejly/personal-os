@@ -221,6 +221,8 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
 
   useLayoutEffect(syncScroll, [value, syncScroll])
 
+  // A mouse click moves the caret where the reader pointed; typewriter scrolling waits for typing or keys.
+  const clicked = useRef(false)
   const trackCaret = useCallback((): void => {
     const el = ta.current
     if (!el) return
@@ -235,13 +237,13 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
   // After the mirror repaints: put the caret line at ~45% of the height. The mirror follows via syncScroll.
   useLayoutEffect(() => {
     const el = ta.current
-    if (!typewriter || !el || !mirror.current || document.activeElement !== el) return
+    if (!typewriter || !el || !mirror.current || document.activeElement !== el || clicked.current) return
     const r = measureCaret(mirror.current, el.selectionStart)
     if (!r) return
     const top = r.top - mirror.current.getBoundingClientRect().top + el.scrollTop
     el.scrollTop = Math.max(0, top - el.clientHeight * 0.45)
     syncScroll()
-  }, [typewriter, value, caret.line, caret.col, html, syncScroll])
+  }, [typewriter, value, caret.line, caret.col, syncScroll])
 
   const lastLine = useRef(0)
   useEffect(() => {
@@ -482,8 +484,9 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
           readOnly={readOnly}
           spellCheck
           wrap={wrap ? 'soft' : 'off'}
-          onChange={(e) => { onChange(e.target.value); trackCaret() }}
-          onKeyDown={onKeyDown}
+          onChange={(e) => { clicked.current = false; onChange(e.target.value); trackCaret() }}
+          onMouseDown={() => { clicked.current = true }}
+          onKeyDown={(e) => { clicked.current = false; onKeyDown(e) }}
           onKeyUp={trackCaret}
           onClick={trackCaret}
           onSelect={trackCaret}

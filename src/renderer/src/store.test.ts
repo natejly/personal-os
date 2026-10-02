@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { adoptServerDoc, applyEvent, useStore, type ChatSession } from './store'
+import { readDocMode, adoptServerDoc, applyEvent, useStore, type ChatSession } from './store'
 import type { ChatEvent, Message } from '@shared/types'
 
 /**
@@ -103,4 +103,17 @@ test('accept/restore: typing during the request survives an append and yields to
   // the body was replaced outright: nothing to merge the typing into, the server wins
   const replaced = { id: 'd', content: 'a different body' } as never
   assert.deepEqual(adoptServerDoc('notes\nmore', replaced, 'notes\n', 'notes\n'), { activeDoc: replaced, docDraft: null })
+})
+
+test('readDocMode keeps a saved mode and falls back to split on junk or blocked storage', () => {
+  const g = globalThis as { localStorage?: unknown }
+  const prev = g.localStorage
+  const stub = (get: () => string | null): void => { g.localStorage = { getItem: get } }
+  try {
+    stub(() => 'preview'); assert.equal(readDocMode(), 'preview')
+    stub(() => 'edit'); assert.equal(readDocMode(), 'edit')
+    stub(() => 'bogus'); assert.equal(readDocMode(), 'split')
+    stub(() => null); assert.equal(readDocMode(), 'split')
+    stub(() => { throw new Error('blocked') }); assert.equal(readDocMode(), 'split')
+  } finally { g.localStorage = prev }
 })

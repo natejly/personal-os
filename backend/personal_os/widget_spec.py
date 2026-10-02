@@ -3,7 +3,7 @@
 The model writes the SPEC once (which rows, which fields, which transforms); the client renders it with trusted
 components, and a refresh just re-fetches the source and re-applies the spec with no model call (a trusted-catalog rule: nothing the model writes is ever executed). A spec is checked
 against the real rows, cheap problems are fixed algorithmically, and at most ONE repair round goes back to the model
-with the problem list (VegaChat-style), after which whatever is left is reported in `data_error`.
+with the problem list, after which whatever is left is reported in `data_error`.
 
 Everything below the LLM section is pure and synchronous so test_widget_spec.py can drive it without a model.
 """

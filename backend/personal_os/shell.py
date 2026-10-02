@@ -454,8 +454,11 @@ def register(tb: Any) -> None:
                 return None
         return None
 
-    def hint() -> str:
-        extra = ", or agent_spawn a researcher to read it" if "agent_spawn" in tb.specs else ""
+    def hint(ctx: dict[str, Any]) -> str:
+        # Only point at a researcher when this caller may spawn one (a child at the depth cap may not).
+        modes = ctx.get("modes")
+        can_spawn = "agent_spawn" in tb.specs and (modes is None or modes.get("agent_spawn", "off") != "off")
+        extra = ", or agent_spawn a researcher to read it" if can_spawn else ""
         return ("Output was cut to the last 2000 lines / 50 KB. Page through all of it with read_tool_result"
                 f"(result_id, offset), search the files it wrote with fs_grep{extra}.")
 
@@ -533,7 +536,7 @@ def register(tb: Any) -> None:
         if job.status == "timed_out":
             out["note"] = f"Killed after {timeout}s (the whole process group). Use background=true for long-running work."
         if cut:
-            out["note"] = (out.get("note", "") + " " + hint()).strip()
+            out["note"] = (out.get("note", "") + " " + hint(ctx)).strip()
             if getattr(tb, "results", None) is not None and ctx.get("conversation_id"):
                 row = tb.results.store(ctx["conversation_id"], ctx.get("message_id"), "shell_run", text,
                                        {"type": "string", "chars": len(text)})

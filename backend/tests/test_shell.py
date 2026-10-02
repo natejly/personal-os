@@ -209,7 +209,15 @@ def test_long_output_is_truncated_with_a_handle_and_hint(box: Box) -> None:
     r = box.run("shell_run", command="seq 1 5000")
     assert r["truncated"] and r["output"].splitlines()[-1] == "5000"
     assert len(r["output"].splitlines()) <= 2000
-    assert "fs_grep" in r["note"] and "read_tool_result" in r["note"] and "agent_spawn" not in r["note"]
+    assert "fs_grep" in r["note"] and "read_tool_result" in r["note"]
+    # agent_spawn is suggested only to a caller that may use it
+    assert ("agent_spawn" in r["note"]) == ("agent_spawn" in box.tb.specs)
+    box.ctx["modes"] = {"agent_spawn": "off"}
+    try:
+        r2 = box.run("shell_run", command="seq 1 5000")
+    finally:
+        box.ctx.pop("modes")
+    assert "agent_spawn" not in r2["note"]
     page = box.tb.results.read("c1", r["result_id"], offset=0, limit=50)
     assert page["text"].startswith("1\n2\n3") and page["total_chars"] > 20000
     box.tb.specs["agent_spawn"] = box.tb.specs["shell_run"]  # the hint names it only when the agent has it

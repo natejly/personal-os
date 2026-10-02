@@ -38,9 +38,9 @@ export const setBase = (url: string): void => {
     })
 }
 export const getBase = (): string => base
-/** The resolved token, for callers that cannot await (keepalive writes on unload). '' until setBase() resolves it. */
 /** Route of one kept segment's audio. */
 export const audioPath = (meetingId: string, segId: string): string => `/meetings/${meetingId}/segments/${segId}/audio`
+/** The resolved token, for callers that cannot await (keepalive writes on unload). '' until setBase() resolves it. */
 export const getToken = (): string => token
 
 /** Sidecar shared secret. Resolved once per setBase(); every backend request carries it. */

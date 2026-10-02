@@ -74,6 +74,7 @@ from .retention import RetentionWorker
 from .presets import CanvasPresets
 from . import resume
 from . import permrules
+from . import shell as shell_tool
 from .subagents import AgentDefs, Subagents
 from .commands import Commands
 from .workflows import ApprovalError as WorkflowApprovalError, Engine as WorkflowEngine, Workflows
@@ -1537,6 +1538,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     # The desk tools derive their workspace root from this and never take one as an argument, so
     # desk A cannot address desk B's files.
     tool_ctx["desk_id"] = desk_id
+    # What the user set for tools at project/chat level: shell.auto_ok must not override an explicit choice.
+    tool_ctx["tool_overrides"] = {**((project or {}).get("tools") or {}), **(conv["settings"].get("tools") or {})}
     # What agent_spawn needs to start a child under this reply: its live tool modes (a child never has more),
     # the run its cards and status ride on, its stop flag, and where it sits in the spawn tree.
     tool_ctx.update(modes=modes, run=run, stop=stop, depth=0, agent_run_id=run.run_id if run else "", model=model,
@@ -1830,6 +1833,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 # untrusted content in this reply upgraded on -> ask; so does a call that may never run unasked
                 # (shell_run outside its sandbox), which no standing grant can then buy off
                 forced = mode != raw_mode or (mode == "ask" and toolbox.forces_ask(c["name"], args))
+                # A sandboxed shell_run inside this desk's own workspace needs no card when the tool is still on its default
+                # `ask` (shell.auto_ok). Everything below (plan mode, desk autonomy, permission rules, doom-loop) can still ask.
+                if (c["name"] == "shell_run" and mode == "ask" and raw_mode == "ask" and not forced and desk_id
+                        and shell_tool.auto_ok(args, tool_ctx, cfg, [workspace.desk_root(desk_id)])):
+                    mode = "on"
                 blocked_reason: str | None = None
                 # ---- plan mode, in priority order. Each rule can only ever make a call ask or stop;
                 # none of them can turn a card off, so this is a narrowing of the gate above.

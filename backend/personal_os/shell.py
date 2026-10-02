@@ -2,8 +2,9 @@
 
 `shell_run` runs one command in /bin/zsh on the user's machine under macOS Seatbelt (sandbox.shell_profile): the
 whole disk is readable except secrets, writes land only in the folder the command runs in (a desk workspace or a
-granted `workspaceRoots` entry) and a private temp dir, and the network is off unless `shellNetwork` is set. The
-sandbox is the boundary, the approval card is the courtesy: nothing here relies on parsing the command.
+granted `workspaceRoots` entry) and a private temp dir. The network has three modes: open (`shellNetwork`), off, or
+-- the default when a registry preset or allowed domains apply -- one allowlisting proxy on localhost (egress.py) and
+nothing else. The sandbox is the boundary, the approval card is the courtesy: nothing here relies on parsing the command.
 
 If the sandbox is unavailable (no sandbox-exec, another OS, or the profile fails to apply) the call is refused. The
 only way past that is `unsandboxed=true`, which Toolbox.gate turns into a forced approval no grant can buy off.
@@ -17,7 +18,9 @@ from __future__ import annotations
 import asyncio
 import codecs
 import json
+import logging
 import os
+import shlex
 import shutil
 import signal
 import subprocess
@@ -27,14 +30,17 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import redact, sandbox
+from . import egress, redact, sandbox
 from .db import new_id
+
+log = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = 120
 MAX_TIMEOUT = 600
 BACKGROUND_TIMEOUT = 600
 TERM_GRACE = 3.0                       # SIGTERM to the group, then SIGKILL after this long
 TRUNC_LINES, TRUNC_BYTES = 2000, 50_000
+CWD_FILE = "end-cwd"                   # in the run's private tmp dir: where the command's shell ended
 FG_CAPTURE = 5_000_000                 # the most one foreground command's output keeps (the spill behind the handle)
 BG_BUFFER = 200_000                    # a background job's rolling buffer
 MAX_TRACKED = 64
@@ -47,6 +53,18 @@ NO_ROOT = ("shell_run needs a folder to work in: there is no desk workspace and 
 
 class ShellError(Exception):
     pass
+
+
+def taint(ctx: dict[str, Any], src: str) -> None:
+    """Mark the reply as having read untrusted text, with the source named so an approved plan can predict it."""
+    ctx["tainted"] = True
+    if src not in ctx.setdefault("taint_sources", []):
+        ctx["taint_sources"].append(src)
+
+
+def net_blocked_note(hosts: list[str]) -> str:
+    return (f"The network proxy blocked: {', '.join(hosts[:8])}. The user can allow a host under Settings (shell allowed "
+            "domains), or ask them with desk_ask.")
 
 
 # Credential shapes only. The entropy and card rules would also eat file paths, commit hashes and build ids, which are
@@ -65,6 +83,24 @@ def _real(p: str | Path) -> Path:
 
 def _inside(p: Path, root: Path) -> bool:
     return p == root or root in p.parents
+
+
+# Where the last foreground command of a conversation ended (`cd` sticks). Per conversation, in memory: a restart goes back
+# to the default folder, which is the safe place to start from.
+_LAST_CWD: dict[str, str] = {}
+_LAST_CWD_MAX = 256
+
+
+def remembered_cwd(conversation_id: str | None) -> str | None:
+    return _LAST_CWD.get(conversation_id or "")
+
+
+def _remember_cwd(conversation_id: str | None, p: str) -> None:
+    key = conversation_id or ""
+    _LAST_CWD.pop(key, None)
+    _LAST_CWD[key] = p
+    while len(_LAST_CWD) > _LAST_CWD_MAX:
+        _LAST_CWD.pop(next(iter(_LAST_CWD)))
 
 
 def granted_roots(settings: dict[str, Any], desk_root: Path | None) -> list[Path]:
@@ -93,6 +129,33 @@ def resolve_cwd(cwd: str | None, roots: list[Path]) -> tuple[Path, Path]:
             return p, r
     raise ShellError(f"{p} is outside the folders this shell may work in ({', '.join(str(r) for r in roots)}). "
                      "Ask the user to add it under Settings (Workspace roots).")
+
+
+def auto_ok(args: dict[str, Any], ctx: dict[str, Any], settings: dict[str, Any], roots: list[Any]) -> bool:
+    """True when this shell_run call may skip its card: it is the default `ask` of the tool (the user never set one), it runs
+    in a desk, sandboxed, with its working folder inside that desk's workspace (`roots`), and `deskShellAuto` is on.
+
+    Only ever turns a card OFF for the spec default; every stricter rule (permission rules, the hardline list, doom-loop
+    cards, desk autonomy `ask`, plan mode, forced approvals) is applied by the caller afterwards and still wins. Two more
+    refusals of its own: open network (the sandbox then protects nothing from leaving) and a reply that has read untrusted
+    content while a proxy would let a command out (a card is cheap there, an exfiltration is not)."""
+    from .tools import Toolbox
+    if not ctx.get("desk_id") or not roots or ctx.get("proposal_only") or not settings.get("deskShellAuto", True):
+        return False
+    if args.get("unsandboxed") or settings.get("shellNetwork"):
+        return False
+    layers = [settings.get("tools") or {}, ctx.get("tool_overrides") or {}]
+    if any(Toolbox._norm(layer.get("shell_run")) is not None for layer in layers if isinstance(layer, dict)):
+        return False  # the user set a mode for this tool somewhere: that choice stands
+    if ctx.get("tainted") and egress.allowed_set(settings.get("shellRegistryAccess", True), settings.get("shellAllowedDomains")):
+        return False
+    real = [_real(r) for r in roots]
+    raw = str(args.get("cwd") or "").strip() or remembered_cwd(ctx.get("conversation_id")) or None
+    try:
+        where, _root = resolve_cwd(raw, real)
+    except ShellError:
+        return False
+    return any(_inside(where, r) for r in real)
 
 
 # ---- environment and output shaping ----
@@ -157,6 +220,13 @@ class Job:
         self.pump: asyncio.Task | None = None
         self.watch: asyncio.Task | None = None
         self.notified = False
+        self.want_notify = notify      # notify is only honoured for background jobs; a promoted foreground job takes it up
+        self.on_timeout = "kill"       # background | kill: what a foreground timeout does
+        self.max_background = 4
+        self.promoted = asyncio.Event()  # set when a foreground job that hit its timeout carries on in the background
+        self.egress_token: str | None = None
+        self.net: dict[str, list[str]] | None = None   # what the proxy saw, frozen when the job ends
+        self.end_cwd: str | None = None
 
     @property
     def total(self) -> int:
@@ -186,6 +256,7 @@ class ShellJobs:
         self.notes: dict[str, list[str]] = {}
         self.on_note: Any = None       # called with the conversation id when a completion note is queued (wakes an idle desk)
         self.sandbox_failed = False    # the OS refused to apply the profile once: unsandboxed may now be asked for
+        self.egress = egress.Egress()  # the allowlisting proxy; binds its port on first use
         self.state_path = state_path
         self._last_sweep = 0.0
         self._load_orphans()
@@ -259,7 +330,7 @@ class ShellJobs:
     # -- starting and finishing --
     async def start(self, argv: list[str], *, command: str, cwd: str, env: dict[str, str], tmp: str | None,
                     conversation_id: str | None, run_id: str | None, background: bool, notify: bool,
-                    timeout: float, max_background: int) -> Job:
+                    timeout: float, max_background: int, on_timeout: str = "kill", egress_token: str | None = None) -> Job:
         if background and self.running_background() >= max_background:
             raise ShellError(f"{max_background} background jobs are already running (shellMaxBackground). "
                              "shell_poll or shell_kill one first.")
@@ -267,6 +338,8 @@ class ShellJobs:
         job = Job(new_id(), command, cwd, conversation_id, run_id, background, notify and background,
                   BG_BUFFER if background else FG_CAPTURE)
         job.tmp = tmp
+        job.want_notify = notify   # a foreground job that is later promoted announces its end like a background one
+        job.on_timeout, job.max_background, job.egress_token = on_timeout, max_background, egress_token
         try:
             job.proc = await asyncio.create_subprocess_exec(
                 *argv, cwd=cwd, env=env, stdin=asyncio.subprocess.DEVNULL, stdout=asyncio.subprocess.PIPE,
@@ -299,7 +372,14 @@ class ShellJobs:
         assert job.proc
         timed_out = False
         try:
-            await asyncio.wait_for(job.proc.wait(), timeout)
+            try:
+                await asyncio.wait_for(job.proc.wait(), timeout)
+            except asyncio.TimeoutError:
+                if not self._promote(job):
+                    raise
+                # Out of foreground time with the work unfinished: it carries on as a background job for the usual
+                # background lifetime instead of losing everything it did.
+                await asyncio.wait_for(job.proc.wait(), BACKGROUND_TIMEOUT)
         except asyncio.TimeoutError:
             timed_out = True
             await self._terminate(job)
@@ -320,6 +400,7 @@ class ShellJobs:
         job.finished = time.time()
         self._cleanup(job)
         self._persist()
+        job.promoted.set()
         if job.notify and not job.notified and job.status != "killed":
             job.notified = True
             tail, _ = truncate(job.buf[-2000:])
@@ -331,6 +412,14 @@ class ShellJobs:
                     self.on_note(job.conversation_id)
                 except Exception:  # noqa: BLE001 - a wake-up that fails must not lose the note
                     pass
+
+    def _promote(self, job: Job) -> bool:
+        """Turn a foreground job that hit its timeout into a background one, if the caller allowed it and a slot is free."""
+        if job.background or job.on_timeout != "background" or self.running_background() >= job.max_background:
+            return False
+        job.background, job.notify, job.cap = True, job.want_notify, BG_BUFFER
+        job.promoted.set()
+        return True
 
     async def _terminate(self, job: Job) -> None:
         """SIGTERM to the whole group, SIGKILL after TERM_GRACE."""
@@ -345,15 +434,32 @@ class ShellJobs:
         except asyncio.TimeoutError:
             pass
 
-    @staticmethod
-    def _cleanup(job: Job) -> None:
+    def _cleanup(self, job: Job) -> None:
         if job.tmp:
+            try:  # the wrapper (shell_run) leaves the folder the command ended in here; read it before the folder goes
+                job.end_cwd = (Path(job.tmp) / CWD_FILE).read_text().strip() or None
+            except OSError:
+                pass
             shutil.rmtree(job.tmp, ignore_errors=True)
             job.tmp = None
+        if job.egress_token:  # the run is over: its proxy credentials stop working, and what it did is kept
+            job.net = self.egress.revoke(job.egress_token)
+            job.egress_token = None
+
+    def net_view(self, job: Job) -> dict[str, list[str]] | None:
+        if job.net is not None:
+            return job.net
+        return self.egress.stats(job.egress_token) if job.egress_token else None
 
     async def wait(self, job: Job) -> None:
-        if job.watch:
-            await asyncio.shield(job.watch)
+        """Until the job ends, or until it is promoted to the background (then the caller reports it as running)."""
+        if not job.watch:
+            return
+        gate = asyncio.ensure_future(job.promoted.wait())
+        try:
+            await asyncio.wait([job.watch, gate], return_when=asyncio.FIRST_COMPLETED)
+        finally:
+            gate.cancel()
 
     # -- the model's verbs --
     async def kill(self, job: Job) -> str:
@@ -413,6 +519,7 @@ class ShellJobs:
             if j.status == "killed":
                 _signal_group(j.pgid, signal.SIGKILL)
             self._cleanup(j)
+        await self.egress.close()
         self._persist()
 
     def sweep_spills(self, db: Any) -> int:
@@ -463,7 +570,8 @@ def register(tb: Any) -> None:
                 f"(result_id, offset), search the files it wrote with fs_grep{extra}.")
 
     async def shell_run(ctx: dict[str, Any], command: str, cwd: str | None = None, timeout_s: int | None = None,
-                        background: bool = False, notify_on_complete: bool = True, unsandboxed: bool = False) -> Any:
+                        background: bool = False, notify_on_complete: bool = True, unsandboxed: bool = False,
+                        on_timeout: str = "background") -> Any:
         s = cfg(ctx)
         command = str(command or "")
         if ctx.get("proposal_only"):
@@ -471,8 +579,18 @@ def register(tb: Any) -> None:
                               "run here.", alternative="describe the command in your report for the user to run")
         if not command.strip():
             return tool_error("shell_run needs a command.", field="command", example={"command": "ls -la"})
+        if on_timeout not in ("background", "kill"):
+            return tool_error("on_timeout must be 'background' or 'kill'.", field="on_timeout", example={"on_timeout": "kill"})
+        # Where it runs: an explicit cwd wins; otherwise where the last command in this conversation ended, when that is
+        # still inside a granted root (the roots may have changed since), otherwise the default folder.
+        roots = granted_roots(s, desk_root(ctx))
         try:
-            where, root = resolve_cwd(cwd, granted_roots(s, desk_root(ctx)))
+            where, root = resolve_cwd(cwd, roots)
+            if not (cwd and str(cwd).strip()) and remembered_cwd(ctx.get("conversation_id")):
+                try:
+                    where, root = resolve_cwd(remembered_cwd(ctx.get("conversation_id")), roots)
+                except ShellError:
+                    pass
         except ShellError as e:
             return tool_error(str(e))
         network = bool(s.get("shellNetwork"))
@@ -493,28 +611,58 @@ def register(tb: Any) -> None:
             jobs.sweep_spills(tb.results.db)
         tmp = os.path.realpath(tempfile.mkdtemp(prefix="pos-shell-"))
         shell_bin = "/bin/zsh" if os.path.exists("/bin/zsh") else "/bin/sh"
-        argv = [shell_bin, "-c", command]
+        # An EXIT trap records where the shell ended without touching the exit code or the output, even when the command
+        # itself calls `exit`; the next call starts there. Nothing is parsed or rewritten in the command.
+        wrapped = f"trap {shlex.quote('pwd -P >' + shlex.quote(os.path.join(tmp, CWD_FILE)) + ' 2>/dev/null')} EXIT\n{command}"
+        argv = [shell_bin, "-c", wrapped]
+        env = scrubbed_env(tmp)
+        allowed = egress.allowed_set(s.get("shellRegistryAccess", True), s.get("shellAllowedDomains"))
+        proxied = bool(allowed) and not network and not unsandboxed   # the third network mode: only the proxy is reachable
+        token: str | None = None
+        port: int | None = None
+        if proxied:
+            try:
+                port = await jobs.egress.ensure()
+            except OSError as e:
+                log.warning("egress proxy could not start: %s", e)
+                proxied = False  # no proxy means no network, which is the safe fallback
+            else:
+                token = jobs.egress.new_run(allowed)
+                env.update(jobs.egress.env(token))
         if not unsandboxed:
             writable = [str(root), tmp]
             dr = desk_root(ctx)
             if dr:
                 writable.append(str(dr))
-            argv = ["sandbox-exec", "-p", sandbox.shell_profile(writable, network=network), *argv]
+            argv = ["sandbox-exec", "-p", sandbox.shell_profile(writable, network=network, proxy_port=port if proxied else None), *argv]
         if network or unsandboxed:
             # Whatever a networked or unconfined command prints may be third-party text.
-            ctx["tainted"] = True
-            src = "shell_run:unsandboxed" if unsandboxed else "shell_run:network"
-            if src not in ctx.setdefault("taint_sources", []):
-                ctx["taint_sources"].append(src)
+            taint(ctx, "shell_run:unsandboxed" if unsandboxed else "shell_run:network")
         try:
-            job = await jobs.start(argv, command=command, cwd=str(where), env=scrubbed_env(tmp), tmp=tmp,
+            job = await jobs.start(argv, command=command, cwd=str(where), env=env, tmp=tmp,
                                    conversation_id=ctx.get("conversation_id"), run_id=ctx.get("run_id"),
                                    background=bool(background), notify=bool(notify_on_complete), timeout=timeout,
-                                   max_background=int(s.get("shellMaxBackground") or 4))
+                                   max_background=int(s.get("shellMaxBackground") or 4), on_timeout=on_timeout, egress_token=token)
         except ShellError as e:
+            jobs.egress.revoke(token)
             shutil.rmtree(tmp, ignore_errors=True)
             return tool_error(str(e))
-        base = {"cwd": str(where), "sandboxed": not unsandboxed, "network": bool(network or unsandboxed)}
+        base: dict[str, Any] = {"cwd": str(where), "sandboxed": not unsandboxed, "network": bool(network or unsandboxed)}
+        if proxied:
+            base["network"] = {"mode": "allowlist", "contacted": [], "blocked": []}
+
+        def net_report(res: dict[str, Any]) -> None:
+            """Fold what the proxy saw into the result: contacted hosts taint the reply like open network does; blocked ones
+            get a note saying how to allow them."""
+            if not proxied:
+                return
+            seen = jobs.net_view(job) or {"contacted": [], "blocked": []}
+            res["network"] = {"mode": "allowlist", **seen}
+            if seen["contacted"]:
+                taint(ctx, "shell_run:network")
+            if seen["blocked"]:
+                res["note"] = (str(res.get("note", "")) + " " + net_blocked_note(seen["blocked"])).strip()
+
         if background:
             return {"job_id": job.id, "pid": job.pid, "background": True, **base,
                     "note": "Running in the background. shell_poll(job_id) reads new output; shell_kill(job_id) stops it."
@@ -526,15 +674,38 @@ def register(tb: Any) -> None:
             await jobs.kill(job)
             raise
         text = _scrub(jobs.finished_output(job))
+        if job.background and job.live():
+            # Hit its timeout and carries on as a background job: hand back what it printed so far and how to follow it.
+            job.read_pos = job.total
+            shown, cut = truncate(text)
+            res: dict[str, Any] = {"exit_code": None, "output": shown, "truncated": cut, "timed_out": False, "still_running": True,
+                                   "job_id": job.id, "pid": job.pid, "background": True, "duration_s": round(time.time() - t0, 2),
+                                   **base,
+                                   "note": f"Still running after {timeout}s, so it carries on in the background (job_id {job.id}). "
+                                           "shell_poll(job_id) reads new output, shell_kill(job_id) stops it"
+                                           + ("; you are told when it finishes." if job.notify else ".")}
+            net_report(res)
+            return res
         if not unsandboxed and job.exit_code in (65, 71) and text.lstrip().startswith("sandbox-exec:"):
             jobs.sandbox_failed = True
             return tool_error("The OS sandbox refused to start (" + text.strip()[:200] + "), so nothing was run.",
                               alternative="retry with unsandboxed=true, which asks the user for approval on every call")
         shown, cut = truncate(text)
+        if job.end_cwd:
+            try:
+                ended, _r = resolve_cwd(job.end_cwd, roots)
+            except ShellError:
+                ended = None  # it cd'd out of every granted root: the next call starts from the default folder again
+            if ended:
+                _remember_cwd(ctx.get("conversation_id"), str(ended))
+                base["cwd"] = str(ended)
+            else:
+                _LAST_CWD.pop(ctx.get("conversation_id") or "", None)
         out: dict[str, Any] = {"exit_code": job.exit_code, "output": shown, "truncated": cut,
                                "timed_out": job.status == "timed_out", "duration_s": round(time.time() - t0, 2), **base}
         if job.status == "timed_out":
             out["note"] = f"Killed after {timeout}s (the whole process group). Use background=true for long-running work."
+        net_report(out)
         if cut:
             out["note"] = (out.get("note", "") + " " + hint(ctx)).strip()
             if getattr(tb, "results", None) is not None and ctx.get("conversation_id"):
@@ -543,16 +714,20 @@ def register(tb: Any) -> None:
                 out["result_id"] = row["id"]
         return out
     spec = ToolSpec("shell_run", "Run a shell command (zsh) on this Mac inside the working folder. It is sandboxed by the OS: the "
-                    "disk is readable except secrets, files can be written only inside the working folder, and there is no "
-                    "network unless the user enabled it. cwd must be inside the desk workspace or a workspace root (default: "
-                    "that folder). Output is stdout and stderr together, cut to the last 2000 lines / 50 KB; the rest is "
-                    "behind result_id. Default timeout 120s (max 600s), then the whole process group is killed. For "
-                    "anything long-running pass background=true, then shell_poll and shell_kill with the job_id. "
+                    "disk is readable except secrets, files can be written only inside the working folder, and the network is "
+                    "open only if the user enabled it, otherwise limited to package registries and the user's allowed domains "
+                    "through a proxy (anything else is blocked), or off. cwd must be inside the desk workspace or a workspace "
+                    "root; by default it is where the last command in this conversation ended (cd persists, environment "
+                    "variables do not), else that folder. Output is stdout and stderr together, cut to the last 2000 lines / 50 KB; the rest is "
+                    "behind result_id. Default timeout 120s (max 600s); then the command keeps running as a background job "
+                    "(on_timeout=background, the default; poll it with shell_poll) or, with on_timeout=kill, the whole process "
+                    "group is killed. For anything long-running pass background=true, then shell_poll and shell_kill with the job_id. "
                     "unsandboxed=true escapes the sandbox and always asks the user.",
                     _obj({"command": {"type": "string"}, "cwd": {"type": "string", "description": "A folder inside the working folder"},
                           "timeout_s": {"type": "integer", "default": 120}, "background": {"type": "boolean", "default": False},
                           "notify_on_complete": {"type": "boolean", "default": True},
-                          "unsandboxed": {"type": "boolean", "default": False}}, ["command"]),
+                          "unsandboxed": {"type": "boolean", "default": False},
+                          "on_timeout": {"type": "string", "enum": ["background", "kill"], "default": "background"}}, ["command"]),
                     shell_run, "shell", "executes",
                     examples=[{"command": "ls -la"}, {"command": "python3 make_report.py && ls outputs"},
                               {"command": "npm test", "cwd": "app", "timeout_s": 300},
@@ -566,7 +741,15 @@ def register(tb: Any) -> None:
         if not job:
             return tool_error(f"No shell job '{job_id}' in this conversation.", field="job_id",
                               alternative="start one with shell_run(background=true)")
-        return jobs.poll(job)
+        out = jobs.poll(job)
+        seen = jobs.net_view(job)
+        if seen is not None:
+            out["network"] = {"mode": "allowlist", **seen}
+            if seen["contacted"]:
+                taint(ctx, "shell_run:network")
+            if seen["blocked"]:
+                out["note"] = (str(out.get("note", "")) + " " + net_blocked_note(seen["blocked"])).strip()
+        return out
     R("shell_poll", ToolSpec("shell_poll", "Read the new output of a background shell job and whether it is still running "
                              "(status running | exited | timed_out | killed | orphaned, and the exit code once it ends). "
                              "Each call returns only what is new since the last one.",

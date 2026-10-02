@@ -77,17 +77,20 @@ def _paths() -> tuple[str, str, str]:
     return home, root, data
 
 
-def shell_profile(writable: list[str], network: bool = False) -> str:
+def shell_profile(writable: list[str], network: bool = False, proxy_port: int | None = None) -> str:
     """Seatbelt profile for the host shell (shell.py): blanket deny, then what a shell needs, then targeted denies.
 
     Unlike run_python's allowlist, a shell has to run whatever the user's toolchain is, so reads are open and the
     *secrets* are the denylist: ssh/gpg/aws/gcloud/keychains, any .env, the app's own data dir and database. Writes
     are confined to `writable` (the folder the command runs in, a per-run tmp dir) and never to a repo's hooks or
-    config, where a write would run later outside the sandbox. Network is off unless `network`.
+    config, where a write would run later outside the sandbox. Network is off unless `network`; with `proxy_port` (and
+    not `network`) the one thing it may connect to is the allowlisting proxy on localhost at that port (egress.py).
     """
     home, root, data = _paths()
     w = " ".join(f"(subpath {_q(os.path.realpath(p))})" for p in writable)
     net = "(allow network*)" if network else "(deny network*)"
+    if proxy_port and not network:
+        net += f'\n(allow network-outbound (remote ip "localhost:{int(proxy_port)}"))'
     return f"""(version 1)
 (deny default)
 {net}

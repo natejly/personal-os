@@ -262,6 +262,38 @@ function ListEditor({ label, hint, items, placeholder, onChange }: {
   )
 }
 
+function RuleEditor({ rules, onChange }: {
+  rules: ActivityStatus['config']['excludeRules']; onChange: (v: ActivityStatus['config']['excludeRules']) => void
+}): JSX.Element {
+  const [d, setD] = useState({ app: '', title: '', url: '' })
+  const add = (): void => {
+    const r = Object.fromEntries(Object.entries(d).map(([k, v]) => [k, v.trim()]).filter(([, v]) => v))
+    if (Object.keys(r).length) onChange([...rules, r])
+    setD({ app: '', title: '', url: '' })
+  }
+  return (
+    <div className="act-list-editor">
+      <b>Conditional exclusions</b>
+      <p className="muted small">A window is skipped only when every filled field matches. Each field is a substring or a /regex/, e.g. app Safari with title /bank|login/.</p>
+      <div className="act-tags">
+        {rules.map((r, i) => (
+          <span key={i} className="act-tag">
+            {[r.app && `app: ${r.app}`, r.title && `title: ${r.title}`, r.url && `url: ${r.url}`].filter(Boolean).join(' + ')}
+            <button className="icon-btn ghost xs" title="Remove rule" onClick={() => onChange(rules.filter((_, j) => j !== i))}><X size={11} /></button>
+          </span>
+        ))}
+      </div>
+      <div className="act-add">
+        {(['app', 'title', 'url'] as const).map((k) => (
+          <input key={k} value={d[k]} placeholder={k} onChange={(e) => setD({ ...d, [k]: e.target.value })}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add() } }} />
+        ))}
+        <button className="ghost-btn" onClick={add} disabled={!d.app.trim() && !d.title.trim() && !d.url.trim()}>Add</button>
+      </div>
+    </div>
+  )
+}
+
 const CAT_COLORS = ['var(--accent)', 'var(--info)', 'var(--warn)', 'var(--ok)', 'var(--danger)', 'var(--text-faint)']
 
 /** Time by category (stacked bar, local and model-free) plus the rule editor. */
@@ -1027,6 +1059,8 @@ export default function ActivityView(): JSX.Element {
             hint="Case-insensitive substring match against the window title and the URL. A match skips that window entirely."
             onChange={(excludeTitlePatterns) => void setActivityConfig({ excludeTitlePatterns })}
           />
+
+          <RuleEditor rules={cfg.excludeRules ?? []} onChange={(excludeRules) => void setActivityConfig({ excludeRules })} />
 
           <RedactionPanel cfg={cfg} counts={st.redactions ?? {}} setActivityConfig={setActivityConfig} />
 

@@ -77,6 +77,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "private key", "secret key", "api key", "incognito", "private browsing",
         "bank", "wire transfer", "routing number", "ssn", "social security",
     ],
+    # Conditional exclusions: {app?, title?, url?}, each a substring or /regex/. A rule drops a window
+    # only when every field it names matches.
+    "excludeRules": [],
     "audio": {
         "micDevice": "",
         "outputDevice": "",
@@ -145,6 +148,14 @@ CREATE TABLE IF NOT EXISTS activity_profile (
 # Re-exported above, so activity.REDACTIONS and activity.SECRET_ASSIGN still resolve.
 
 
+def _pat_hit(pat: Any, text: str) -> bool:
+    """A plain string is a case-insensitive substring; a compiled /regex/ is searched."""
+    if pat is None:
+        return False   # an invalid regex in a rule: that field can never match, so the rule is inert
+    text = text or ""
+    return pat.lower() in text.lower() if isinstance(pat, str) else bool(pat.search(text))
+
+
 class Gate:
     """Decides what may be recorded. Consulted by every collector before it writes."""
 
@@ -172,13 +183,18 @@ class Gate:
     def excluded(self, app: str, title: str = "", url: str = "") -> bool:
         """True when this window must not be recorded at all - not even its name."""
         c = self.cfg()
-        app_l = (app or "").lower()
-        for bad in c.get("excludeApps") or []:
-            if bad and bad.lower() in app_l:
+        for pat in redact_mod.compile_patterns(c.get("excludeApps") or []):
+            if _pat_hit(pat, app):
                 return True
-        hay = f"{title} {url}".lower()
-        for pat in c.get("excludeTitlePatterns") or []:
-            if pat and pat.lower() in hay:
+        hay = f"{title} {url}"
+        for pat in redact_mod.compile_patterns(c.get("excludeTitlePatterns") or []):
+            if _pat_hit(pat, hay):
+                return True
+        for rule in c.get("excludeRules") or []:
+            if not isinstance(rule, dict):
+                continue
+            fields = [(rule.get(k), v) for k, v in (("app", app), ("title", title), ("url", url)) if rule.get(k)]
+            if fields and all(_pat_hit(p, v) for raw, v in fields for p in redact_mod.compile_patterns([raw])[:1] or [None]):
                 return True
         return False
 
@@ -1493,7 +1509,7 @@ class Monitor:
         if cur.get("palantir") and patch.get("palantir") is not False:
             # While the mode is on these three are flattened on purpose; an edit to them is the
             # user's new baseline, so it goes into the snapshot that turning the mode off restores.
-            kept = {k: patch.pop(k) for k in ("excludeApps", "excludeTitlePatterns", "redact") if k in patch}
+            kept = {k: patch.pop(k) for k in ("excludeApps", "excludeTitlePatterns", "excludeRules", "redact") if k in patch}
             if kept:
                 patch["palantirRestore"] = {**(cur.get("palantirRestore") or {}), **kept}
         cfg = _deep_merge(cur, patch)
@@ -1532,11 +1548,12 @@ class Monitor:
                     "redact": bool(cfg.get("redact", True)),
                     "excludeApps": list(cfg.get("excludeApps") or []),
                     "excludeTitlePatterns": list(cfg.get("excludeTitlePatterns") or []),
+                    "excludeRules": list(cfg.get("excludeRules") or []),
                 }
             new = {
                 **cfg, "palantir": True, "palantirRestore": restore, "enabled": True,
                 "signals": {s: True for s in SIGNALS},
-                "redact": False, "excludeApps": [], "excludeTitlePatterns": [],
+                "redact": False, "excludeApps": [], "excludeTitlePatterns": [], "excludeRules": [],
             }
         else:
             r = cfg.get("palantirRestore") or {}
@@ -1546,6 +1563,7 @@ class Monitor:
                 "redact": bool(r.get("redact", True)),
                 "excludeApps": list(r.get("excludeApps", DEFAULT_CONFIG["excludeApps"])),
                 "excludeTitlePatterns": list(r.get("excludeTitlePatterns", DEFAULT_CONFIG["excludeTitlePatterns"])),
+                "excludeRules": list(r.get("excludeRules", [])),
             }
         self.db.set_settings({"activity": new})   # a full replace: the restore snapshot must clear
         log.info("activity: palantir mode %s", "ON - recording everything" if on else "off - previous settings back")

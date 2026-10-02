@@ -170,6 +170,17 @@ only_f = sd({"query": "zeppelin", "scope": "files"})
 check("'source': 'file'" in str(only_f) and "'source': 'doc'" not in str(only_f), "scope files returns only files")
 check("error" in str(sd({"query": "x", "scope": "nope"})).lower(), "bad scope is a readable error")
 
+# (k) queries: sub-queries fused into one ranking, deduped, limited
+d3 = j("POST", "/docs", {"title": "Ferret", "content": "The ferret hid under the sofa.", "project_id": pa})
+d4 = j("POST", "/docs", {"title": "Marmot", "content": "The marmot whistled at dawn.", "project_id": pa})
+run(retriever.embed_pending(settings()))
+rs = sd({"queries": ["ferret", "marmot", "ferret sofa"], "scope": "docs"})["results"]
+ids3 = [r["doc_id"] for r in rs]
+check(d3["id"] in ids3 and d4["id"] in ids3, "queries: each sub-query recovers its own doc in one result")
+check(len({(r["doc_id"], r["chunk"]) for r in rs}) == len(rs), "queries: no duplicate chunks")
+check(len(sd({"queries": ["ferret", "marmot"], "scope": "docs", "limit": 1})["results"]) == 1, "queries: limit respected")
+check("error" in str(sd({})).lower(), "no query and no queries is a readable error")
+
 # (c) deletes
 did = d2["id"]
 j("DELETE", f"/docs/{did}")  # to the trash; chunks stay until it is purged

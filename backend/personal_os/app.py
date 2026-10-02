@@ -61,6 +61,7 @@ from .cowork import (AUTONOMY, DESK_CONTINUE, DESK_HINT, DESK_PLAN_HINT, DESK_RE
                      STATUSES as DESK_STATUSES, UNDECIDED_OUTPUTS, DeskRuntime, Desks,
                      parked_report)
 from .workspace import MAX_PREVIEW, Workspace, WorkspaceError
+from .envs import WorkEnv
 from .microvm import Sandboxes
 from .notes import Notes
 from .plans import (MUTATING, PLAN_BLOCKED, PLAN_SAFE_DANGER, PLAN_TOOL, PROPOSE_ONLY, Plans,
@@ -375,6 +376,7 @@ if not any(getattr(f, "__name__", "") == "_record_usage" for f in llm._usage_lis
 # directory per desk under the data dir, containment-checked after symlink resolution; Desks is the
 # state machine and the timeline over it.
 workspace = Workspace(db.data_dir)
+work_env = WorkEnv(db.data_dir, lambda: settings())  # the shared work venv (envs.py); created on demand
 desks = Desks(db, workspace)
 _loop: asyncio.AbstractEventLoop | None = None
 
@@ -466,6 +468,7 @@ async def _start_retrieval() -> None:
 toolbox.retriever = retriever
 toolbox.memory_index = memory_index
 toolbox.plans = plans  # desk_done's gate reads the approved plan's unconsumed steps
+toolbox.work_env = work_env  # python_install and run_python find the shared work venv here
 toolbox.web_cache = WebCache(db)  # fetch_url's response cache
 # Subagents: child runs the agent_spawn tools start. Approval cards a child raises resolve through the
 # same _approvals futures a chat's do.
@@ -6237,6 +6240,17 @@ def _outputs_view(desk_id: str) -> list[dict[str, Any]]:
                 row["status"], row["error"] = "stale", str(e)
         rows.append(row)
     return rows
+
+
+@app.get("/cowork/env")
+async def cowork_env_status() -> dict[str, Any]:
+    return await asyncio.to_thread(work_env.status)
+
+
+@app.post("/cowork/env/setup")
+async def cowork_env_setup() -> dict[str, Any]:
+    """Build the work venv (user-triggered from Settings); a no-op once it is complete."""
+    return await asyncio.to_thread(work_env.ensure)
 
 
 @app.get("/cowork/desks")

@@ -7,11 +7,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import datetime as dt
 import html
 import ipaddress
 import json
 import logging
+import os
 import re
 import socket
 import time
@@ -933,11 +935,31 @@ class Toolbox:
                       {"url": "https://example.com/pricing", "focus": "enterprise pricing"}, {"url": "https://example.com/report.pdf", "offset": 12000}], taints=True))
 
         async def run_python_tool(ctx: dict[str, Any], code: str, timeout: int = 30, tools: list[str] | None = None) -> Any:
+            # In a desk the script runs in the desk workspace (read/write there; sandbox.py allows exactly that folder). The
+            # shared work environment's interpreter is used once it is ready, else the app's own.
+            desk_id = str(ctx.get("desk_id") or "")
+            wroot: str | None = None
+            if desk_id and self.workspace is not None:
+                try:
+                    wroot = str(self.workspace.ensure(desk_id).resolve())
+                except WorkspaceError:
+                    wroot = None
+            env = getattr(self, "work_env", None)
+            py = env.python_path() if env is not None else None
+            secs = max(1, min(int(timeout), 120))
             if tools:  # programmatic tool calling: the script drives app tools over a socket (toolbridge.py)
                 from . import toolbridge
-                return await toolbridge.run(self, ctx, code, timeout, list(tools), run_python)
-            return await asyncio.to_thread(run_python, code, max(1, min(int(timeout), 120)))
-        R("run_python", ToolSpec("run_python", "Run a Python 3 script in an isolated sandbox and return stdout/stderr. No network, no subprocesses, and writes only inside the temp working directory (CPU/memory/time limits apply). Use for calculations, data wrangling, quick prototypes. Print what you want to see. numpy and matplotlib are installed: any figure saved with plt.savefig('name.png') is shown to the user inline (prefer a ```chart block for simple bar/line/pie charts of small data; use matplotlib for anything it can't express).",
+                runner = (lambda c, t, _py, bridge: run_python(c, t, py, bridge, workspace=wroot)) if (wroot or py) else run_python
+                return await toolbridge.run(self, ctx, code, timeout, list(tools), runner)
+            out = await asyncio.to_thread(run_python, code, secs, py, None, wroot)
+            if wroot:
+                use = self.workspace.usage(desk_id)
+                if use["files"] > self.workspace.max_files or use["bytes"] > self.workspace.max_total_bytes:
+                    out["warning"] = (f"This workspace now holds {use['files']} files / {use['bytes']} bytes, over its limit of "
+                                      f"{self.workspace.max_files} files / {self.workspace.max_total_bytes} bytes. Nothing was deleted, "
+                                      "but further writes will be refused until you desk_trash_file what you no longer need.")
+            return out
+        R("run_python", ToolSpec("run_python", "Run a Python 3 script in an isolated sandbox and return stdout/stderr. No network, no subprocesses, and writes only inside the temp working directory (CPU/memory/time limits apply). In a cowork desk the script runs inside the desk workspace instead: it can read and write files there, and the result lists workspace_files it created or changed. The document and data libraries (pandas, openpyxl, python-docx, ...) are there once the work environment is set up; python_install adds more. Use for calculations, data wrangling, quick prototypes. Print what you want to see. numpy and matplotlib are installed: any figure saved with plt.savefig('name.png') is shown to the user inline (prefer a ```chart block for simple bar/line/pie charts of small data; use matplotlib for anything it can't express).",
             _obj({"code": {"type": "string"}, "timeout": {"type": "integer", "default": 30},
                   "tools": {"type": "array", "items": {"type": "string"}, "description": "App tools the script may call as grain_tools.call(name, **args) (import grain_tools). Allowed: fs_glob, fs_grep, read_local_file, fs_edit, search_documents, web_search, fetch_url. Each call is gated like your own: off tools are refused, ask tools wait for the user. At most 50 calls and 300s; only what the script prints comes back."}},
                  ["code"]), run_python_tool, "code", "executes",
@@ -2433,6 +2455,14 @@ def _register_skills(self: Toolbox) -> None:
 Toolbox._register_skills = _register_skills  # type: ignore[attr-defined]
 
 
+async def _open_pinned_stream(client: httpx.AsyncClient, url: str, host: str) -> httpx.Response:
+    """_open_pinned for a download: the same resolve-then-pin connect, but the body is left unread for the caller to stream."""
+    ips = await _resolve(host)
+    pinned, host_header, sni = _pin(url, ips[0])
+    req = client.build_request("GET", pinned, headers={"Host": host_header}, extensions={"sni_hostname": sni})
+    return await client.send(req, stream=True)
+
+
 def _register_cowork(self: Toolbox) -> None:
     """A desk's own workspace, plus the two tools that end its turn.
 
@@ -2445,6 +2475,8 @@ def _register_cowork(self: Toolbox) -> None:
     """
     R = self.specs.__setitem__
     ws, desks, sb = self.workspace, self.desks, self.sandboxes
+    from pathlib import PurePosixPath
+    from . import extract_text as xt
     NO_DESK = "This tool only works inside a cowork desk."
 
     def _id(ctx: dict[str, Any], name: str) -> Any:
@@ -2475,17 +2507,54 @@ def _register_cowork(self: Toolbox) -> None:
               "offset": {"type": "integer", "default": 0}, "limit": {"type": "integer", "default": 50}}, []),
         desk_list_files, "desk", "safe", examples=[{}, {"prefix": "outputs"}, {"prefix": "work", "offset": 50}]))
 
+    TEXT_READ_KINDS = {".pdf": "pdf", ".docx": "document", ".doc": "document", ".xlsx": "spreadsheet", ".xls": "spreadsheet",
+                       ".pptx": "slides", ".ppt": "slides", ".odt": "document", ".rtf": "document"}
+    PICTURE_EXT = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".tif", ".heic")
+
+    def _note_read(ctx: dict[str, Any], desk_id: str, path: str, out: dict[str, Any]) -> None:
+        """Record what this window showed in the read ledger, exactly as read_local_file does, so fs_edit accepts the file.
+        Only the window actually returned counts: a partial read is a baseline for the region it covers and no more."""
+        try:
+            p = ws.resolve_in(desk_id, path)
+            off = int(out["offset"])
+            self.fs_reads.note(str(ctx.get("conversation_id") or ""), p, p.stat().st_mtime_ns, off, off + len(out["text"]), int(out["chars"]))
+        except (WorkspaceError, OSError, KeyError):
+            pass
+
     async def desk_read_file(ctx: dict[str, Any], path: str, offset: int = 0, length: int = 6000) -> Any:
         desk_id = _id(ctx, "desk_read_file")
         if not isinstance(desk_id, str):
             return desk_id
         try:
-            return ws.read(desk_id, path, offset, length)
+            data = await asyncio.to_thread(ws.read_bytes, desk_id, path)
         except WorkspaceError as e:
             return _fail("desk_read_file", e)
+        suffix = PurePosixPath(path).suffix.lower()
+        if b"\x00" not in data[:8192] and suffix not in TEXT_READ_KINDS and suffix not in PICTURE_EXT:
+            try:
+                out = ws.read(desk_id, path, offset, length)
+            except WorkspaceError as e:
+                return _fail("desk_read_file", e)
+            _note_read(ctx, desk_id, path, out)
+            return out
+        # Not plain text: PDF, office files, pictures, anything with NULs. extract_text returns a marker when it
+        # cannot read a format, which is passed on rather than hidden.
+        kind = TEXT_READ_KINDS.get(suffix) or ("image" if suffix in PICTURE_EXT else "binary")
+        text = await asyncio.to_thread(xt.extract_text, PurePosixPath(path).name, data)
+        off = max(0, min(int(offset), len(text)))
+        end = min(len(text), off + max(1, min(int(length), 200_000)))
+        if end < len(text) and (cut := text.rfind("\n", off, end)) > off:
+            end = cut + 1
+        out = {"path": path, "kind": kind, "text": text[off:end], "offset": off, "chars": len(text), "bytes": len(data),
+               "truncated": end < len(text)}
+        if end < len(text):
+            out["next_offset"] = end
+        if kind == "image":
+            out["note"] = "This is a picture: use view_image to look at it. The text above is only what could be read off it."
+        return out
     # Deliberately not taints=True: the workspace holds what this agent itself wrote, and marking it
     # untrusted would force every later external step of its own approved plan back to a card.
-    R("desk_read_file", ToolSpec("desk_read_file", "Read a text file from this desk's workspace. The window is snapped to a line boundary and returns next_offset when there is more, so page through a long file rather than asking for all of it at once.",
+    R("desk_read_file", ToolSpec("desk_read_file", "Read a file from this desk's workspace. Text comes back as is; PDFs and office files (.docx, .xlsx, .pptx) come back as extracted text with a kind field; for a picture use view_image. The window is snapped to a line boundary and returns next_offset when there is more, so page through a long file rather than asking for all of it at once.",
         _obj({"path": {"type": "string", "description": "Relative to the workspace, e.g. 'work/notes.md'"},
               "offset": {"type": "integer", "default": 0}, "length": {"type": "integer", "default": 6000}}, ["path"]),
         desk_read_file, "desk", "safe",
@@ -2496,9 +2565,16 @@ def _register_cowork(self: Toolbox) -> None:
         if not isinstance(desk_id, str):
             return desk_id
         try:
-            return ws.write(desk_id, path, content, mode)
+            res = ws.write(desk_id, path, content, mode)
         except WorkspaceError as e:
             return _fail("desk_write_file", e)
+        # The agent knows this file now: it just wrote it, so fs_edit needs no separate read first.
+        try:
+            p = ws.resolve_in(desk_id, res["path"])
+            self.fs_reads.note_full(str(ctx.get("conversation_id") or ""), p, p.stat().st_mtime_ns, len(p.read_text(encoding="utf-8", errors="replace")))
+        except (WorkspaceError, OSError):
+            pass
+        return res
     R("desk_write_file", ToolSpec("desk_write_file", "Write a text file in this desk's workspace. Put finished work under outputs/ (that is what the user reviews) and everything else under work/. 'create' refuses to overwrite an existing file; pass mode='overwrite' or mode='append' deliberately.",
         _obj({"path": {"type": "string", "description": "Relative to the workspace, e.g. 'outputs/summary.md'"},
               "content": {"type": "string"},
@@ -2671,13 +2747,97 @@ def _register_cowork(self: Toolbox) -> None:
             res["note"] = ("Only the first part of the sandbox file fit in one read. Page the rest with "
                            "sandbox_read_file and desk_write_file(mode='append') before you deliver it.")
         return res
-    R("desk_import_sandbox", ToolSpec("desk_import_sandbox", "Copy a text file out of this chat's sandbox into the desk's workspace, overwriting the destination. The two deliberately share no directory, so this is how work done with sandbox_exec becomes something the user can review.",
+    R("desk_import_sandbox", ToolSpec("desk_import_sandbox", "Copy a text file out of this chat's sandbox into the desk's workspace, overwriting the destination. With sandboxMountDesk on (the default) the workspace is also mounted in the sandbox at /workspace/desk, so files written there are already in the workspace; this copies out of any other sandbox path, which is how work done with sandbox_exec becomes something the user can review.",
         _obj({"sandbox_path": {"type": "string", "description": "Path in the sandbox, relative to /workspace"},
               "path": {"type": "string", "description": "Destination in the desk workspace, e.g. 'outputs/report.md'"}},
              ["sandbox_path", "path"]),
         desk_import_sandbox, "desk", "writes",
         examples=[{"sandbox_path": "out.csv", "path": "outputs/results.csv"},
                   {"sandbox_path": "report.md", "path": "work/draft.md"}]))
+
+    # desk_fetch_file: a download into the workspace. The SSRF machinery is fetch_url's own (_check_url on every hop,
+    # taint rule included, a connect to the address _resolve accepted), only the body is streamed to disk under a cap.
+    DOWNLOAD_CAP = 50_000_000
+
+    def _download_name(url: str, disposition: str) -> str:
+        """A safe leaf name: Content-Disposition's filename, else the URL's last segment, never a path."""
+        name = ""
+        if m := re.search(r"filename\*?=(?:UTF-8\'\')?\"?([^\";]+)\"?", disposition or "", re.I):
+            name = urllib.parse.unquote(m.group(1))
+        if not name:
+            name = urllib.parse.unquote(PurePosixPath(urllib.parse.urlsplit(url).path).name)
+        name = name.replace("\\", "/").rsplit("/", 1)[-1]
+        name = re.sub(r"[^A-Za-z0-9._ -]", "_", name).strip(" .")[:100].lstrip(".")
+        return name or "download"
+
+    async def desk_fetch_file(ctx: dict[str, Any], url: str, path: str = "") -> Any:
+        desk_id = _id(ctx, "desk_fetch_file")
+        if not isinstance(desk_id, str):
+            return desk_id
+        cfg = self.settings()
+        cur, hops, tmp, tmp_ok = url, 0, None, False
+        try:
+            async with httpx.AsyncClient(timeout=30, follow_redirects=False, transport=httpx.AsyncHTTPTransport(retries=0),
+                                         headers={"User-Agent": "Grain/0.1 (+desktop assistant)"}) as c:
+                while True:
+                    cur, host = _check_url(cur, ctx, cfg, redirect=hops > 0)
+                    r = await _open_pinned_stream(c, cur, host)
+                    if r.status_code not in (301, 302, 303, 307, 308) or not r.headers.get("location"):
+                        break
+                    await r.aclose()
+                    hops += 1
+                    if hops > 5:
+                        return tool_error(f"desk_fetch_file: too many redirects (5) starting at {url}", field="url")
+                    cur = urllib.parse.urljoin(cur, r.headers["location"])
+                try:
+                    if not 200 <= r.status_code < 300:
+                        return tool_error(f"desk_fetch_file: {cur} answered HTTP {r.status_code}", field="url",
+                                          alternative="web_search for another copy of the file")
+                    ctype = r.headers.get("content-type", "")
+                    declared = r.headers.get("content-length", "")
+                    if declared.isdigit() and int(declared) > DOWNLOAD_CAP:
+                        return tool_error(f"desk_fetch_file: {cur} is {declared} bytes; the limit is {DOWNLOAD_CAP}", field="url")
+                    rel = path.strip() if isinstance(path, str) and path.strip() else \
+                        "work/downloads/" + _download_name(cur, r.headers.get("content-disposition", ""))
+                    try:
+                        dest, room = ws.reserve_file(desk_id, rel)
+                    except WorkspaceError as e:
+                        return _fail("desk_fetch_file", e)
+                    limit = min(DOWNLOAD_CAP, room)
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    tmp = dest.with_name(f".{dest.name}.part")
+                    h, n = hashlib.sha256(), 0
+                    with tmp.open("wb") as fh:
+                        async for chunk in r.aiter_bytes(65536):
+                            n += len(chunk)
+                            if n > limit:
+                                why = "the 50 MB download limit" if limit == DOWNLOAD_CAP else "this workspace's remaining space"
+                                return tool_error(f"desk_fetch_file: {cur} is larger than {why}; nothing was saved", field="url")
+                            h.update(chunk)
+                            fh.write(chunk)
+                    os.replace(tmp, dest)
+                    tmp_ok = True
+                finally:
+                    await r.aclose()
+        except UrlBlocked as e:
+            return tool_error(f"desk_fetch_file refused {url}: {e}", field="url", alternative=e.alternative or "web_search, or ask the user to download it")
+        except httpx.HTTPError as e:
+            return tool_error(f"desk_fetch_file: could not download {url} ({_first_line(e)})", field="url")
+        except OSError as e:
+            return tool_error(f"desk_fetch_file: could not save the file ({e.strerror or e.__class__.__name__})", field="path")
+        finally:
+            if tmp is not None and not tmp_ok:
+                with contextlib.suppress(OSError):
+                    tmp.unlink()
+        saved = ws._rel_of(desk_id, dest)
+        suffix = PurePosixPath(saved).suffix.lower()
+        hint = ("view_image looks at a picture" if suffix in PICTURE_EXT or ctype.startswith("image/")
+                else "desk_read_file reads it (PDFs and office files come back as extracted text)")
+        return {"path": saved, "bytes": n, "sha256": h.hexdigest(), "content_type": ctype, "url": cur, "redirects": hops, "hint": hint}
+    R("desk_fetch_file", ToolSpec("desk_fetch_file", "Download a file from a public http(s) URL into this desk's workspace (default work/downloads/<name>), at most 50 MB, never overwriting an existing file. Returns the path, size and sha256. Read it afterwards with desk_read_file (documents) or view_image (pictures). The file is untrusted third-party content.",
+        _obj({"url": {"type": "string"}, "path": {"type": "string", "description": "Destination relative to the workspace; default work/downloads/<file name from the URL>"}}, ["url"]),
+        desk_fetch_file, "desk", "network",
+        examples=[{"url": "https://example.com/report.pdf"}, {"url": "https://example.com/data.csv", "path": "work/data.csv"}], taints=True))
 
 Toolbox._register_cowork = _register_cowork  # type: ignore[attr-defined]
 Toolbox._register_meetings = _register_meetings  # type: ignore[attr-defined]

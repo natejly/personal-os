@@ -47,7 +47,8 @@ SKIP_ITEMS_REPORTED = 20
 
 # Tools that can change files in a granted root. shell_run is judged by its command (see read_only_shell).
 FILE_TOOLS = frozenset({"write_local_file", "move_local_file", "trash_local_file", "fs_edit", "fs_copy", "fs_mkdir"})
-DESK_TOOLS = frozenset({"desk_write_file", "desk_trash_file", "desk_import_sandbox"})
+# run_python and desk_fetch_file can write the workspace too (run_python only inside a desk: roots_for_call needs a desk id).
+DESK_TOOLS = frozenset({"desk_write_file", "desk_trash_file", "desk_import_sandbox", "run_python", "desk_fetch_file"})
 SHELL_TOOLS = frozenset({"shell_run"})
 PATH_KEYS = ("path", "to", "from", "src", "dst", "dest", "destination", "source")
 

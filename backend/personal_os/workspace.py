@@ -190,6 +190,50 @@ class Workspace:
             out["next_offset"] = end
         return out
 
+    def read_bytes(self, desk_id: str, rel: str, max_bytes: int = 50_000_000) -> bytes:
+        """The raw bytes of a workspace file, for the readers that handle PDFs, office files and pictures.
+        `read` refuses a NUL-bearing file on purpose (it returns text); this one leaves the judgement to the caller."""
+        p = self.resolve_in(desk_id, rel)
+        if p.is_dir():
+            raise WorkspaceError(f"{rel} is a directory, not a file")
+        if not p.is_file():
+            raise WorkspaceError(f"{rel} does not exist in this workspace")
+        try:
+            if p.stat().st_size > max_bytes:
+                raise WorkspaceError(f"{rel} is {p.stat().st_size} bytes; the limit for reading one file is {max_bytes}")
+            return p.read_bytes()
+        except OSError as e:
+            raise _oserror(rel, "read", e) from e
+
+    def reserve_file(self, desk_id: str, rel: str) -> tuple[Path, int]:
+        """Where a binary download may land, and how many bytes the quota still has room for.
+
+        `write` is text-only, so a downloader streams into a file of its own; this is the same gate in front of it:
+        reserved dirs, blocked suffixes, the file-count and byte quotas. An existing name is never overwritten
+        (Finder's `name 2.ext` rule), so a second download of the same URL cannot destroy the first.
+        """
+        root = self.ensure(desk_id).resolve()
+        p = self.resolve_in(desk_id, rel)
+        if p == root:
+            raise WorkspaceError("path must name a file, not the workspace root")
+        parts = PurePosixPath(self._rel_of(desk_id, p)).parts
+        if parts[0] in RESERVED_DIRS:
+            raise WorkspaceError(f"{parts[0]}/ is reserved for the workspace itself and is not writable")
+        suffix = _blocked(parts)
+        if suffix:
+            raise WorkspaceError(f"{suffix} files cannot be written to a workspace", usage=self.usage(desk_id))
+        if p.is_dir():
+            raise WorkspaceError(f"{rel} is a directory, not a file")
+        use = self.usage(desk_id)
+        if use["files"] + 1 > self.max_files:
+            raise WorkspaceError(f"this workspace already holds {use['files']} files and the limit is {self.max_files}. "
+                                 "Trash a file you no longer need.", usage=use)
+        room = self.max_total_bytes - use["bytes"]
+        if room <= 0:
+            raise WorkspaceError(f"this workspace already holds {use['bytes']} bytes and the limit is {self.max_total_bytes}.",
+                                 usage=use)
+        return _unique(p), room
+
     def state(self, desk_id: str, rel: str) -> str:
         """new | modified | unchanged, against `.baseline/`. No baseline means the desk made it."""
         p = self.resolve_in(desk_id, rel)

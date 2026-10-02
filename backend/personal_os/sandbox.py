@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from typing import Any
 
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
@@ -114,7 +115,7 @@ def shell_profile(writable: list[str], network: bool = False) -> str:
 """
 
 
-def _mac_profile(work: str, py: str, socket_path: str | None = None) -> str:
+def _mac_profile(work: str, py: str, socket_path: str | None = None, workspace: str | None = None) -> str:
     """Least-privilege sandbox-exec profile for one run_python call.
 
     Threat model: the script is model-written, the model's context routinely holds
@@ -125,7 +126,10 @@ def _mac_profile(work: str, py: str, socket_path: str | None = None) -> str:
     the app's own secrets (.env, personal-os.db*, .auth_token), ssh/aws/gpg keys and
     browser profiles denied outright. process-exec and mach-lookup are allowlisted too,
     so the "executes" tier cannot shell out to osascript and silently become "external".
-    Writes are confined to the run's own temp work dir, so no state survives to the next run.
+    Writes are confined to the run's own temp work dir, so no state survives to the next run - except in a cowork desk,
+    where `workspace` (the desk's own folder, symlink-resolved) is readable and writable too: that is what the desk is
+    for. The app data dir is denied below, and the workspace and the shared work venv both live inside it, so their
+    allows come after that deny; the secret-name denies are repeated after them and still win.
 
     SBPL evaluates every rule and the last match wins: blanket deny, then the allows,
     then the targeted denies.
@@ -136,6 +140,13 @@ def _mac_profile(work: str, py: str, socket_path: str | None = None) -> str:
     work = os.path.realpath(work)
     home, root, data = _paths()
     # The tool bridge's Unix socket (toolbridge.py) is the one network the script gets: connect to that path, nothing else.
+    names = r'(regex #"/\.env$") (regex #"/\.auth_token$") (regex #"/personal-os\.db")'
+    late = ""
+    if workspace:
+        wsp = os.path.realpath(workspace)
+        late = f"(allow file-read* file-write* (subpath {_q(wsp)}))\n"
+    if os.path.realpath(venv).startswith(os.path.realpath(data) + os.sep):  # the work env under <data>/envs
+        late += f"(allow file-read* (subpath {_q(os.path.realpath(venv))}))\n"
     sock = (f'(allow network-outbound (remote unix-socket (path-literal {_q(os.path.realpath(socket_path))})))\n'
             f'(allow file-read* file-write* (literal {_q(os.path.realpath(socket_path))}))\n') if socket_path else ""
     return f"""(version 1)
@@ -176,6 +187,7 @@ def _mac_profile(work: str, py: str, socket_path: str | None = None) -> str:
                  (subpath {_q(os.path.join(home, "Library", "Application Support", "Firefox"))})
                  (subpath {_q(os.path.join(home, "Library", "Safari"))})
                  (regex #"/\\.env$") (regex #"/\\.auth_token$") (regex #"/personal-os\\.db"))
+{late}(deny file-read* {names})
 """
 
 
@@ -227,8 +239,45 @@ def _limits() -> None:
 GRAIN_TOOLS_MODULE = "grain_tools.py"
 
 
-def run_python(code: str, timeout: int = 30, python: str | None = None, bridge: Any = None) -> dict[str, Any]:
-    """Run `code` in the sandbox. `bridge` (toolbridge.Bridge) lets the script call app tools over its Unix socket:
+WORKSPACE_REPORT_CAP = 50
+WORKSPACE_SKIP = (".baseline", ".trash")  # workspace bookkeeping, never reported as something the script made
+
+
+def _workspace_changes(root: str, since_ns: int) -> list[str]:
+    """Files under a desk workspace written at or after `since_ns`, relative and sorted, at most WORKSPACE_REPORT_CAP."""
+    found: list[str] = []
+    for dirpath, dirs, names in os.walk(root):
+        if dirpath == root:
+            dirs[:] = [d for d in dirs if d not in WORKSPACE_SKIP]
+        for n in names:
+            full = os.path.join(dirpath, n)
+            try:
+                if not os.path.islink(full) and os.stat(full).st_mtime_ns >= since_ns:
+                    found.append(os.path.relpath(full, root))
+            except OSError:
+                continue
+    return sorted(found)[:WORKSPACE_REPORT_CAP]
+
+
+def _limits_for(cpu_seconds: int):  # type: ignore[no-untyped-def]
+    """`_limits` with the CPU ceiling lifted to the wall-clock timeout: a desk run may legitimately compute for a while."""
+    def apply() -> None:
+        for name, soft in RLIMITS:
+            limit = getattr(resource, name, None)
+            if limit is None:
+                continue
+            try:
+                resource.setrlimit(limit, (max(soft, cpu_seconds) if name == "RLIMIT_CPU" else soft,) * 2)
+            except (ValueError, OSError):
+                pass
+    return apply
+
+
+def run_python(code: str, timeout: int = 30, python: str | None = None, bridge: Any = None,
+               workspace: str | None = None) -> dict[str, Any]:
+    """Run `code` in the sandbox. With `workspace` (a cowork desk's folder) the script runs *in* that folder, may read
+    and write it, and the result lists what it created or changed there (`workspace_files`); the script itself and the
+    scratch HOME/TMPDIR stay in the per-run temp dir, which is still deleted afterwards. `bridge` (toolbridge.Bridge) lets the script call app tools over its Unix socket:
     its client module is dropped next to the script, the socket is the one network path the profile allows, and the
     wall clock stops while the bridge is waiting on an approval card (`bridge.paused_for()`)."""
     work = tempfile.mkdtemp(prefix="pos-sandbox-")
@@ -236,6 +285,9 @@ def run_python(code: str, timeout: int = 30, python: str | None = None, bridge: 
     with open(script, "w", encoding="utf-8") as f:
         f.write(code)
     py = python or sys.executable
+    started_ns = time.time_ns()
+    cwd = os.path.realpath(workspace) if workspace else work
+    pre = _limits_for(timeout) if workspace else _limits
     cmd = [py, "-I", script]
     env = {"PATH": "/usr/bin:/bin", "HOME": work, "TMPDIR": work, "PYTHONIOENCODING": "utf-8", "MPLBACKEND": "Agg"}
     sock = None
@@ -251,13 +303,13 @@ def run_python(code: str, timeout: int = 30, python: str | None = None, bridge: 
         _warm_mpl(py)
     env["MPLCONFIGDIR"] = _seed_mpl(work)
     if sys.platform == "darwin" and shutil.which("sandbox-exec"):
-        cmd = ["sandbox-exec", "-p", _mac_profile(work, py, sock), *cmd]
+        cmd = ["sandbox-exec", "-p", _mac_profile(work, py, sock, workspace), *cmd]
     try:
         if bridge is None:
-            p = subprocess.run(cmd, cwd=work, capture_output=True, text=True, timeout=timeout, env=env, preexec_fn=_limits)
+            p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, env=env, preexec_fn=pre)
             out = {"stdout": p.stdout[-20_000:], "stderr": p.stderr[-8_000:], "exit_code": p.returncode, "timed_out": False}
         else:
-            stdout, stderr, rc, timed_out = _run_paused(cmd, work, env, timeout, bridge)
+            stdout, stderr, rc, timed_out = _run_paused(cmd, cwd, env, timeout, bridge, pre)
             out = {"stdout": stdout, "stderr": "Timed out after %ss" % timeout if timed_out else stderr[-bridge.stderr_cap:],
                    "exit_code": rc, "timed_out": timed_out}
     except subprocess.TimeoutExpired as e:
@@ -271,19 +323,24 @@ def run_python(code: str, timeout: int = 30, python: str | None = None, bridge: 
                 if n not in ("main.py", GRAIN_TOOLS_MODULE):
                     files.append(os.path.relpath(os.path.join(root, n), work))
         images = _collect_images(work, sorted(files))
+        wfiles = _workspace_changes(cwd, started_ns) if workspace else []
+        if wfiles:
+            images += _collect_images(cwd, wfiles)[: max(0, MAX_IMAGES - len(images))]
         shutil.rmtree(work, ignore_errors=True)
     out["files_created"] = files[:50]
+    if workspace:
+        out["workspace_files"] = wfiles
     if images:
         out["images"] = images
     return out
 
 
-def _run_paused(cmd: list[str], work: str, env: dict[str, str], timeout: float, bridge: Any) -> tuple[str, str, int, bool]:
+def _run_paused(cmd: list[str], work: str, env: dict[str, str], timeout: float, bridge: Any,
+                pre: Any = None) -> tuple[str, str, int, bool]:
     """subprocess.run with a clock that does not tick while the bridge waits on the user. Returns
     (stdout, stderr, exit_code, timed_out); the child is killed with its whole group on timeout."""
-    import time
     p = subprocess.Popen(cmd, cwd=work, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                         preexec_fn=_limits, start_new_session=True)
+                         preexec_fn=pre or _limits, start_new_session=True)
     t0, timed_out = time.monotonic(), False
     while True:
         try:

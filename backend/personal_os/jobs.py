@@ -289,6 +289,7 @@ class Jobs:
         if "enabled" in cols:
             # Any explicit switch is the user acknowledging an auto-pause: the reason and the streak start over.
             cols["paused_reason"] = None
+            cols["expires_at"] = None  # the expiry window restarts the next time the job is armed
             if cols["enabled"]:
                 cols["consecutive_failures"] = 0
         merged = {**job, **cols}
@@ -469,6 +470,14 @@ class Proposals:
         return self.get(id)
 
 
+def _expire_days(policy: Any) -> float:
+    """`jobExpireDays` (0 = recurring jobs never expire)."""
+    try:
+        return max(0.0, float(policy.settings().get("jobExpireDays") or 0)) if policy is not None else 0.0
+    except (TypeError, ValueError):
+        return 0.0
+
+
 class Scheduler:
     """Fires due jobs. One pass per wake; one launch per job per pass, whatever the gap.
 
@@ -515,6 +524,11 @@ class Scheduler:
         self.last_tick = at
         fired: list[dict[str, Any]] = []
         self.jobs.arm(at)
+        days = _expire_days(self.policy)
+        if days > 0:  # start the clock for recurring jobs that have none yet
+            with self.jobs.db.tx() as c:
+                c.execute("UPDATE jobs SET expires_at=? WHERE enabled=1 AND kind!='once' AND expires_at IS NULL",
+                          (at + days * 86400,))
         for job in self.jobs.due(at):
             once = job["kind"] == "once"
             if not valid_schedule(job["kind"], job["cron"], job["run_at"]):
@@ -528,6 +542,9 @@ class Scheduler:
             nxt = None if once else next_fire(job["cron"], job["timezone"], at)
             # Advance the clock bookkeeping before launching: a launch that throws must not re-fire next pass.
             self.jobs.mark_fired(job["id"], fired_at=at, due_at=fire["due_at"], next_due_at=nxt, disable=once)
+            if days > 0 and job.get("expires_at") is not None and at >= float(job["expires_at"]):
+                # One last fire (this one), then the job stops until the user switches it back on.
+                self.jobs.pause(job["id"], "expired", at)
             run_id: str | None = None
             if self.policy is not None:
                 ok, why = await self.policy.admit(job, fire)

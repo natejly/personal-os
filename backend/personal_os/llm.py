@@ -173,6 +173,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # 30 min) and how many consecutive failed fires switch a job off.
     "jobRetryBackoffS": 120,
     "jobFailureStreakLimit": 3,
+    "jobExpireDays": 0,  # recurring jobs pause (reason "expired") after one last fire this many days after arming; 0 = never
     # OS notification when an unattended job fails, is paused, or leaves proposals (only while the app is hidden).
     "notifyJobs": True,
     # A system notification when a desk needs you or finishes, while the window is not focused.

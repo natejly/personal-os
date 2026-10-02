@@ -79,14 +79,15 @@ interface Section {
 }
 
 /**
- * The triage model, as four buckets a desk belongs to exactly one of. `review` is split out of
- * NEEDS_YOU because it is the one "needs you" that is good news, and listing it twice would make the
- * first section's count a lie.
+ * The triage model, as four buckets a desk belongs to exactly one of, in the order they want
+ * attention. `review` sits with the rest of NEEDS_YOU: it is waiting on the user like the others, and
+ * the row's own status label says which kind of waiting it is. A draft or a paused desk is not
+ * working, so neither is listed as if it were.
  */
 const SECTIONS: Section[] = [
-  { key: 'needs', label: 'Needs you', has: (s) => s !== 'review' && NEEDS_YOU.includes(s) },
-  { key: 'working', label: 'Working', has: (s) => s === 'draft' || s === 'planning' || s === 'working' || s === 'paused' },
-  { key: 'review', label: 'Review', has: (s) => s === 'review' },
+  { key: 'needs', label: 'Needs you', has: (s) => NEEDS_YOU.includes(s) },
+  { key: 'working', label: 'Working', has: (s) => s === 'planning' || s === 'working' },
+  { key: 'idle', label: 'Drafts & paused', has: (s) => s === 'draft' || s === 'paused' },
   { key: 'done', label: 'Done', has: (s) => s === 'done' || s === 'failed' || s === 'stopped' }
 ]
 
@@ -100,6 +101,7 @@ export const railOrder = (desks: Desk[]): Desk[] => SECTIONS.flatMap((sec) => de
 function DeskRow({ desk, active, onOpen }: { desk: Desk; active: boolean; onOpen: () => void }): JSX.Element {
   const approvals = useStore((s) => s.sessions[desk.conversation_id]?.pendingApprovals ?? 0)
   const title = desk.title || 'Untitled desk'
+  const detail = desk.headline || desk.status_reason
   return (
     <div
       className={`desk-row ${active ? 'active' : ''}`}
@@ -110,14 +112,16 @@ function DeskRow({ desk, active, onOpen }: { desk: Desk; active: boolean; onOpen
       onClick={onOpen}
       onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() } }}
     >
-      <span className={`desk-ring desk-ring-${desk.status}`} title={STATUS_LABEL[desk.status]}>{STATUS_ICON[desk.status]}</span>
+      <span className={`desk-ring desk-ring-${desk.status}`} aria-hidden>{STATUS_ICON[desk.status]}</span>
       <span className="desk-row-main">
         <span className="desk-row-title">
           {title}
           {desk.live && <ChatPulse conversationId={desk.conversation_id} />}
         </span>
+        {/* The status in words on every row: the ring's colour and glyph are not left to carry it. */}
         <span className="desk-row-meta">
-          <span className="desk-row-head">{desk.headline || desk.status_reason || STATUS_LABEL[desk.status]}</span>
+          <span className={`desk-row-status desk-ring-${desk.status}`}>{STATUS_LABEL[desk.status]}</span>
+          {detail && <span className="desk-row-head">{detail}</span>}
           <span className="desk-row-age">{fmtDur(deskElapsed(desk))}</span>
         </span>
       </span>
@@ -135,7 +139,6 @@ export default function DeskRail({ desks, activeId, onOpen }: {
   useTick(desks.some((d) => d.live))
   return (
     <div className="desk-rail">
-      {desks.length === 0 && <p className="empty-hint">No desks yet.</p>}
       {SECTIONS.map((sec) => {
         const rows = desks.filter((d) => sec.has(d.status))
         if (rows.length === 0) return null

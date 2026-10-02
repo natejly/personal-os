@@ -151,20 +151,29 @@ export default function CoworkView(): JSX.Element {
         <AppSwitcher />
       </header>
 
-      <div className="cowork-body">
-        <aside className="cowork-side">
-          <DeskRail desks={desks} activeId={creating ? null : activeDeskId} onOpen={(id) => { setCreating(false); void openDesk(id) }} />
-        </aside>
+      {/* With nothing to list the rail is dropped, so the page says "no desks" once, not twice. */}
+      <div className={`cowork-body${desks.length === 0 ? ' solo' : ''}`}>
+        {desks.length > 0 && (
+          <aside className="cowork-side">
+            <DeskRail desks={desks} activeId={creating ? null : activeDeskId} onOpen={(id) => { setCreating(false); void openDesk(id) }} />
+          </aside>
+        )}
 
         {creating ? (
           <NewDeskCard scope={scope} onDone={() => setCreating(false)} />
         ) : activeDeskId ? (
           <DeskDetail />
         ) : (
-          <section className="cowork-empty">
+          <section className="empty-state">
             <Users size={30} />
-            <h2>No desk open</h2>
-            <p className="muted">Start one when you have a task to hand off.</p>
+            <h2>{desks.length > 0 ? 'No desk open' : showArchived ? 'No archived desks' : 'No desks yet'}</h2>
+            <p>
+              {desks.length > 0
+                ? 'Pick one from the list, or start a new one.'
+                : showArchived
+                  ? 'A desk you archive is kept here, with its conversation and files.'
+                  : 'A desk takes a task off your hands: it works in its own folder and brings the result back for you to review.'}
+            </p>
             <button className="primary-btn" onClick={() => setCreating(true)}><Plus size={14} /> New desk</button>
           </section>
         )}

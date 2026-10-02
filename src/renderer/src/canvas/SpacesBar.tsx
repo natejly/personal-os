@@ -97,8 +97,9 @@ function Tab({ canvasId, index }: { canvasId: string; index: number }): JSX.Elem
           locked space, so the trash would be a button that does nothing but toast. */}
       {locked ? <Lock size={11} className="space-lock" /> : active && (
         <button
-          className="icon-btn ghost sm danger"
+          className="icon-btn ghost danger space-del"
           title="Delete space"
+          aria-label={`Delete space ${name}`}
           onClick={(e) => {
             e.stopPropagation()
             if (count === 0 || confirm(`Delete "${name}" and its ${count} windows?`)) void useCanvas.getState().deleteSpace(canvasId)

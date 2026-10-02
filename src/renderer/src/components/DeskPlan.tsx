@@ -1,8 +1,10 @@
+import { useState } from 'react'
 import { ListChecks, Wrench } from 'lucide-react'
 import type { FullDesk, PlanStepStatus } from '@shared/types'
 import { argRows } from '../lib/planDigest'
 import { useStore } from '../store'
 import ActionPlanCard from './ActionPlanCard'
+import { NoteRow } from './DeskReview'
 
 /**
  * The Plan tab. While the plan is pending this is the approval card itself; once decided it becomes
@@ -23,12 +25,10 @@ const MARK: Record<PlanStepStatus, string> = {
 export default function DeskPlan({ desk }: { desk: FullDesk }): JSX.Element {
   const messageDesk = useStore((s) => s.messageDesk)
   const plan = desk.plan
+  const [amending, setAmending] = useState(false)
 
-  const amend = (): void => {
-    const what = prompt('What should change about the plan? This goes to the agent as a message asking it to re-plan.')
-    if (!what?.trim()) return
-    void messageDesk(desk.id, `Stop and re-plan. ${what.trim()}\n\nPropose a new plan with propose_plan; do not act on the old one.`)
-  }
+  const amend = (what: string): Promise<boolean> =>
+    messageDesk(desk.id, `Stop and re-plan. ${what}\n\nPropose a new plan with propose_plan; do not act on the old one.`)
 
   if (!plan) {
     return (
@@ -56,8 +56,17 @@ export default function DeskPlan({ desk }: { desk: FullDesk }): JSX.Element {
         <b>{plan.title || 'Plan'}</b>
         <span className="muted small">{done}/{live.length} done · {plan.status}</span>
         <span className="spacer" />
-        <button className="ghost-btn" onClick={amend}>Amend plan</button>
+        {!amending && <button className="ghost-btn sm" onClick={() => setAmending(true)}>Amend plan</button>}
       </header>
+      {amending && (
+        <NoteRow
+          label="What should change about the plan? This goes to the agent as a message asking it to re-plan."
+          placeholder="Skip the email step and save a draft instead…"
+          submitLabel="Ask for a new plan"
+          onSubmit={amend}
+          onClose={() => setAmending(false)}
+        />
+      )}
       {plan.intent && <p className="aplan-intent">{plan.intent}</p>}
       {plan.note && <p className="muted small">“{plan.note}”</p>}
       <ol className="desk-checklist">

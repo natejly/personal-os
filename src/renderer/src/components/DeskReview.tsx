@@ -52,6 +52,56 @@ async function saveDownload(deskId: string, ref: string): Promise<void> {
   URL.revokeObjectURL(url)
 }
 
+/**
+ * A note typed in place of the button that asked for it. The renderer has no `prompt()`, so every
+ * action that needs a sentence from the user (send back, reject, amend the plan) opens this row
+ * instead. ⌘↵ sends, Esc cancels; a submit that resolves `false` keeps the typed text.
+ */
+export function NoteRow({ label, placeholder, submitLabel, optional = false, onSubmit, onClose }: {
+  label: string
+  placeholder?: string
+  submitLabel: string
+  /** An empty note is still an answer (reject), rather than nothing to send (send back). */
+  optional?: boolean
+  onSubmit: (note: string) => Promise<unknown> | unknown
+  onClose: () => void
+}): JSX.Element {
+  const [text, setText] = useState('')
+  const [sending, setSending] = useState(false)
+  const ready = (optional || text.trim() !== '') && !sending
+
+  const submit = async (): Promise<void> => {
+    if (!ready) return
+    setSending(true)
+    const ok = await onSubmit(text.trim())
+    setSending(false)
+    if (ok !== false) onClose()
+  }
+
+  return (
+    <div className="desk-note">
+      <label>
+        <span>{label}</span>
+        <textarea
+          autoFocus
+          rows={2}
+          placeholder={placeholder}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void submit() }
+            if (e.key === 'Escape') { e.stopPropagation(); onClose() }
+          }}
+        />
+      </label>
+      <div className="desk-note-actions">
+        <button className="primary-btn sm" disabled={!ready} title={`${submitLabel} (⌘↵)`} onClick={() => void submit()}>{submitLabel}</button>
+        <button className="ghost-btn sm" title="Cancel (Esc)" onClick={onClose}>Cancel</button>
+      </div>
+    </div>
+  )
+}
+
 /** The first few hundred characters of the nominated file, fetched only when the row is opened. */
 function Excerpt({ deskId, path }: { deskId: string; path: string }): JSX.Element {
   const [text, setText] = useState<string | null>(null)
@@ -142,6 +192,8 @@ export default function DeskReview({ desk }: { desk: FullDesk }): JSX.Element {
   const [dest, setDest] = useState<Record<string, PromotionKind>>({})
   const [docIds, setDocIds] = useState<Record<string, string>>({})
   const [results, setResults] = useState<Record<string, PromotionResult>>({})
+  // Which of the two answers that take a note is being typed; it replaces the footer while open.
+  const [noting, setNoting] = useState<'back' | 'reject' | null>(null)
 
   // The Append-to-doc picker needs the doc list, which is otherwise only loaded by the Docs view.
   useEffect(() => { void refreshDocs() }, [refreshDocs])
@@ -175,11 +227,7 @@ export default function DeskReview({ desk }: { desk: FullDesk }): JSX.Element {
     }
   }
 
-  const sendBack = (): void => {
-    const note = prompt('What needs changing? It goes back as a message and the desk picks the work up again.')
-    if (!note?.trim()) return
-    void messageDesk(desk.id, note.trim())
-  }
+  const rejectScope = selection.length > 0 ? 'selected' : 'all'
 
   if (desk.outputs.length === 0) {
     return (
@@ -198,7 +246,7 @@ export default function DeskReview({ desk }: { desk: FullDesk }): JSX.Element {
         <span className="spacer" />
         {undecided.length > 0 && (
           <button className="link small" onClick={() => setPicked(picked.length === undecided.length ? [] : undecided.map((o) => o.id))}>
-            {picked.length === undecided.length ? 'none' : 'all'}
+            {picked.length === undecided.length ? 'Select none' : 'Select all'}
           </button>
         )}
       </header>
@@ -218,23 +266,34 @@ export default function DeskReview({ desk }: { desk: FullDesk }): JSX.Element {
         />
       ))}
 
-      <footer className="desk-review-foot">
-        <button className="primary-btn" disabled={busy || selection.length === 0 || blocked} title={blocked ? 'Pick a doc to append to' : undefined} onClick={() => void accept()}>
-          <Check size={13} /> Accept selected{selection.length > 0 ? ` (${selection.length})` : ''}
-        </button>
-        <button className="ghost-btn" onClick={sendBack}>Send back</button>
-        <button
-          className="ghost-btn danger"
-          disabled={busy || undecided.length === 0}
-          onClick={() => {
-            const note = prompt('Reject these outputs? A note is optional and goes on the desk.')
-            if (note === null) return
-            void rejectOutputs(desk.id, selection.length > 0 ? selection.map((o) => o.id) : undefined, note)
-          }}
-        >
-          <X size={13} /> Reject{selection.length > 0 ? ' selected' : ' all'}
-        </button>
-      </footer>
+      {noting === 'back' ? (
+        <NoteRow
+          label="What needs changing? It goes back as a message and the desk picks the work up again."
+          placeholder="Tighten the summary, and cite the source for each figure…"
+          submitLabel="Send back"
+          onSubmit={(note) => messageDesk(desk.id, note)}
+          onClose={() => setNoting(null)}
+        />
+      ) : noting === 'reject' ? (
+        <NoteRow
+          label={`Reject ${rejectScope === 'selected' ? `the ${selection.length} selected` : 'all undecided'} output${rejectScope === 'selected' && selection.length === 1 ? '' : 's'}? A note is optional and goes on the desk.`}
+          placeholder="Why (optional)"
+          submitLabel={`Reject ${rejectScope}`}
+          optional
+          onSubmit={(note) => rejectOutputs(desk.id, selection.length > 0 ? selection.map((o) => o.id) : undefined, note)}
+          onClose={() => setNoting(null)}
+        />
+      ) : (
+        <footer className="desk-review-foot">
+          <button className="primary-btn" disabled={busy || selection.length === 0 || blocked} title={blocked ? 'Pick a doc to append to' : undefined} onClick={() => void accept()}>
+            <Check size={13} /> Accept selected{selection.length > 0 ? ` (${selection.length})` : ''}
+          </button>
+          <button className="ghost-btn" onClick={() => setNoting('back')}>Send back</button>
+          <button className="ghost-btn" disabled={busy || undecided.length === 0} onClick={() => setNoting('reject')}>
+            <X size={13} /> Reject {rejectScope}
+          </button>
+        </footer>
+      )}
     </div>
   )
 }

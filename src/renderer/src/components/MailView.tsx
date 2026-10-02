@@ -4,6 +4,7 @@ import { useStore } from '../store'
 import { api } from '../lib/api'
 import SmartTextarea from './SmartTextarea'
 import type { GmailFullMessage, GmailLabel, GmailMessage } from '@shared/types'
+import { oneLine } from '../lib/emailAsk'
 import { lines, usePageContext } from '../lib/pageContext'
 import { readView, writeView } from '../lib/viewCache'
 import AppSwitcher from './AppSwitcher'
@@ -45,7 +46,7 @@ const RANGES = [
 export default function MailView(): JSX.Element {
   const sidebarOpen = useStore((s) => s.sidebarOpen)
   const google = useStore((s) => s.google)
-  const { toggleSidebar, setSettingsOpen, toast, newChat, send } = useStore()
+  const { toggleSidebar, setSettingsOpen, toast, askAboutEmail } = useStore()
   const [messages, setMessages] = useState<GmailMessage[]>([])
   const [labels, setLabels] = useState<GmailLabel[]>([])
   const [loading, setLoading] = useState(false)
@@ -210,18 +211,17 @@ export default function MailView(): JSX.Element {
 
   const askAssistant = (m: GmailMessage): void => {
     setOpen(null)
-    newChat(null)
-    void send(`Summarize this email and suggest a reply if one is needed. Gmail message id: ${m.id} (subject: ${m.subject})`)
+    void askAboutEmail(m.id, m.subject)
   }
 
   const isStarred = (m: GmailMessage): boolean => m.labels.includes('STARRED')
 
   usePageContext(() => ({
     view: 'mail',
-    label: open ? `Email “${open.subject || '(no subject)'}”` : `Mail · ${folder}`,
+    label: open ? `Email “${oneLine(open.subject || '') || '(no subject)'}”` : `Mail · ${folder}`,
     detail: open
-      ? `The user has this message open — Gmail id \`${open.id}\`, thread \`${open.thread_id}\`.\nFrom: ${open.from}\nSubject: ${open.subject}\nDate: ${open.date}\n\n${(full?.body ?? open.snippet).slice(0, 4000)}`
-      : `The ${folder} list is on screen${q ? ` filtered by “${q}”` : ''}:\n${lines(messages, (m) => `${m.unread ? '[unread] ' : ''}${m.from} — ${m.subject} (\`${m.id}\`)`, 25)}`,
+      ? `The user has this message open — Gmail id \`${oneLine(open.id, 80)}\`, thread \`${oneLine(open.thread_id || '', 80)}\`.\nFrom: ${oneLine(open.from || '', 120)}\nSubject: ${oneLine(open.subject || '') || '(no subject)'}\nDate: ${oneLine(open.date || '', 80)}\n\n${(full?.body ?? open.snippet).slice(0, 4000)}`
+      : `The ${folder} list is on screen${q ? ` filtered by “${q}”` : ''}:\n${lines(messages, (m) => `${m.unread ? '[unread] ' : ''}${oneLine(m.from || '', 80)} — ${oneLine(m.subject || '') || '(no subject)'} (\`${oneLine(m.id, 80)}\`)`, 25)}`,
     refs: open ? [{ kind: 'email', id: open.id, name: open.subject ?? '' }] : messages.slice(0, 25).map((m) => ({ kind: 'email', id: m.id, name: m.subject ?? '' })),
     hints: open ? ['Draft a reply', 'What is being asked of me here?'] : ['What needs a reply today?', 'Summarise this inbox']
   }), [open, full, messages, folder, q])

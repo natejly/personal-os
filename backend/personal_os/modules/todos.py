@@ -160,7 +160,13 @@ class TodosModule(Module):
             if not all_projects and ctx["project_id"] is not None:
                 items = store.list(ctx["project_id"], include_done=include_done) + store.list(None, include_done=include_done)
             rows = [{"id": t["id"], "title": t["title"], "due": t["due"], "priority": t["priority"], "done": bool(t["done"]), "notes": t["notes"][:200]} for t in items]
-            return page(rows, offset=offset, limit=50, key="todos")
+            out = page(rows, offset=offset, limit=50, key="todos")
+            # A meeting action item is speech from the room, not a task the user typed.
+            shown = {r["id"] for r in out["todos"]}
+            if any(t.get("source") == "meeting" and t["id"] in shown for t in items):
+                ctx["tainted"] = True
+                ctx.setdefault("taint_sources", []).append("todo_list")
+            return out
         R("todo_list", ToolSpec("todo_list", "List the user's todos (open by default) in this chat's scope: the project's todos plus personal ones.",
             _obj({"include_done": {"type": "boolean", "default": False}, "all_projects": {"type": "boolean", "default": False}, "offset": {"type": "integer", "default": 0}}, []), todo_list, "todos",
             examples=[{}, {"include_done": True}, {"all_projects": True, "offset": 50}]))

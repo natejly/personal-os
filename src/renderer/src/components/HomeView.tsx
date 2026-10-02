@@ -165,7 +165,7 @@ export default function HomeView(): JSX.Element {
   const d = useStore((s) => s.dashboard)
   const google = useStore((s) => s.google)
   const sidebarOpen = useStore((s) => s.sidebarOpen)
-  const { toggleSidebar, refreshDashboard, setView, newChat, send, openProject, selectChat, addTodo, setSettingsOpen, refreshRecap, openMemory } = useStore()
+  const { toggleSidebar, refreshDashboard, setView, newChat, send, askAboutEmail, openProject, selectChat, addTodo, setSettingsOpen, refreshRecap, openMemory } = useStore()
   const recap = useStore((s) => s.recap)
   const recapLoading = useStore((s) => s.recapLoading)
   const settings = useStore((s) => s.settings)
@@ -292,7 +292,7 @@ export default function HomeView(): JSX.Element {
             {!google?.connected ? <ConnectGoogle what="unread mail" onConnect={() => setSettingsOpen(true)} /> : d?.errors.gmail ? <p className="msg-error">{d.errors.gmail}</p> : (d?.gmail?.length ?? 0) === 0 ? <p className="muted">Inbox zero.</p> : (
               <ul className="mails">
                 {d!.gmail!.slice(0, 8).map((m) => (
-                  <li key={m.id} onClick={() => { newChat(null); void send(`Summarize this email and suggest a reply if one is needed. Gmail message id: ${m.id} (subject: ${m.subject})`) }} title="Ask the assistant about this email">
+                  <li key={m.id} onClick={() => void askAboutEmail(m.id, m.subject)} title="Ask the assistant about this email">
                     <span className="mail-from">{fromName(m.from)}</span>
                     <span className="mail-subject">{m.subject || '(no subject)'}</span>
                     <span className="mail-snippet">{m.snippet}</span>

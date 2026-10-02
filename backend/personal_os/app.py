@@ -57,7 +57,7 @@ from .mcp_oauth import CALLBACK_PATH as MCP_OAUTH_CALLBACK, OAuthFlows, OAuthSto
 from .mcp_servers import MODES as MCP_MODES, RESERVED_PREFIX as MCP_PREFIX, SCOPES as MCP_SCOPES, McpServers
 from .meeting_recorder import RecorderBusy
 from .meetings import MeetingBlocked, Meetings, MeetingService
-from .cowork import (AUTONOMY, DESK_CONTINUE, DESK_HINT, DESK_PLAN_HINT, DESK_RESUME, LIVE as DESK_LIVE,
+from .cowork import (AUTONOMY, DESK_HINT, DESK_NUDGE, DESK_PLAN_HINT, LIVE as DESK_LIVE, continue_message, desk_manual, read_notes,
                      STATUSES as DESK_STATUSES, UNDECIDED_OUTPUTS, DeskRuntime, Desks,
                      parked_report)
 from .workspace import MAX_PREVIEW, Workspace, WorkspaceError
@@ -1566,6 +1566,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             # the tools it will use *after* approval. Connectors are not reading tools, so they stay out.
             m = {n: v for n, v in m.items() if n == PLAN_TOOL or ((spec := toolbox.specs.get(n)) is not None and spec.danger in PLAN_SAFE_DANGER)}
             m[PLAN_TOOL] = "ask"
+            if desk_id:
+                m.pop("desk_done", None)  # `safe`, so it slips through the tier filter; finishing is for after approval
+        if desk_id:
+            m.pop("desk_start", None)  # a desk starting another desk is never offered (it would plan under its own budget)
         return toolbox.schemas(m) + offer
 
     tool_schemas = _schemas()
@@ -1577,8 +1581,16 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 _n = _mcp_names.get(t["server_id"], "MCP")
                 _counts[_n] = _counts.get(_n, 0) + 1
         tools_hint = "\n".join(p for p in (tools_hint, mcp_search.catalog_hint(_counts.items())) if p)
+    def _desk_manual_text() -> str:
+        # Only the tools actually sent this turn are described, so the manual never promises one the model lacks.
+        net = ("open" if cfg.get("shellNetwork") else
+               "allowlist" if cfg.get("shellRegistryAccess", True) or cfg.get("shellAllowedDomains") else "off")
+        text = desk_manual({s["function"]["name"] for s in tool_schemas},
+                           {"shell_network": net, "sandbox_mount": bool(cfg.get("sandboxMountDesk", True))})
+        return "\n\n" + text if text else ""
+
     hints = (RENDER_HINT, tools_hint, JOB_HINT if proposal_only(run) else "",
-             DESK_HINT if desk else "", DESK_PLAN_HINT if planning and desk else "",
+             DESK_HINT + _desk_manual_text() if desk else "", DESK_PLAN_HINT if planning and desk else "",
              CHAT_PLAN_HINT if chat_plan_mode in ("auto", "always") and tool_schemas else "", _today_hint())
     if cfg.get("cacheLayout", True):
         # Stable prefix first, per-turn retrieval just before the newest user message (see context.layout_messages).
@@ -1638,7 +1650,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         if plan_msg is not None:
             messages[:] = [m for m in messages if m is not plan_msg]
             plan_msg = None
-        block = work_plans.block(conv_id)
+        block = work_plans.block(conv_id, desk=bool(desk_id))
         if desk_id and active_plan is not None:
             # A desk's approved plan, re-read every round so each step's status is current: it is
             # what a chained or woken turn picks up from, and what tells it a step already ran.
@@ -2162,6 +2174,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 preview = summarize_result(result)
                 err = result.get("error") if isinstance(result, dict) else None
                 tool_errors[c["name"]] = tool_errors.get(c["name"], 0) + 1 if err else 0  # reset on success = consecutive
+                if ran and not err and run is not None:
+                    run.tool_ok += 1  # a desk turn's progress, beside steps_consumed (_chain_kind)
                 if tool_errors[c["name"]] >= TOOL_ERROR_LIMIT:
                     blocked.add(c["name"])
                 # An MCP result is third-party text by definition, so it taints like a web fetch does.
@@ -2357,7 +2371,7 @@ async def _run_desk(run: Run, desk_id: str, body: ChatIn) -> dict[str, Any]:
                 # the supervisor's after settle — has already counted this turn. Deciding on two
                 # different rows is how a desk ends up `working` with nothing driving it.
                 desks.charge(desk_id, run.cost, 1)
-                chain = _should_chain(desks.get(desk_id) or {}, run)
+                chain = _should_chain(desks.get(desk_id) or {}, run, err)
                 if chain:
                     # The successor is announced before this stream closes: a chained run is a new
                     # Run with a new run_id and seq restarting at 0, and no client is subscribed to
@@ -2389,19 +2403,42 @@ async def _run_desk(run: Run, desk_id: str, body: ChatIn) -> dict[str, Any]:
     return settled
 
 
-def _should_chain(desk: dict[str, Any], run: Run) -> bool:
-    """Five guards, all of which must hold. `progress` is the one that stops a desk burning twelve
-    turns re-reading the same file: a turn that consumed no plan step is not progress."""
+BUDGET_STOPS = ("rounds", "tokens", "time", "cost")  # per-reply window stops; not "loop" (stuck) or "blocked" (a card)
+
+
+def _chain_kind(desk: dict[str, Any], run: Run, error: str | None = None) -> str | None:
+    """Which turn follows this one: "continue", "nudge", or None (settle). Both decision points -
+    the run's final `done` and the supervisor after the run ends - call this on the same row, so they
+    cannot disagree.
+
+    continue: any per-reply budget stop (with or without a plan) in a turn that made progress - consumed
+    a plan step or ran a tool without error. The progress guard is what stops a desk burning turns
+    re-reading the same file. nudge: the reply simply ended (no stop, no desk_done/desk_ask); one more
+    turn tells the model to finish or ask, never two in a row. Caps hold for both."""
     caps = _desk_caps(settings(), desk.get("budget"))
     turns, cost = caps["deskMaxTurns"], caps["deskMaxCost"]
-    return (desk.get("status") == "working"
-            and run.partial == "rounds"               # only a budget-window stop chains
-            and not run.stop.is_set()
-            and bool(plans.remaining(desk.get("plan_id") or ""))
-            and run.steps_consumed > 0
+    # claim_run puts a desk with no plan into `planning` whatever its autonomy, and only a plan-autonomy desk
+    # is actually held in plan mode (see _chat_stream); an ask/propose desk works from its first turn.
+    live = desk.get("status") == "working" or (desk.get("status") == "planning" and desk.get("autonomy") != "plan")
+    if not (live and not run.stop.is_set() and not error and not run.error
             # 0 on either axis means unlimited, the same reading _caps gives it.
             and (turns <= 0 or int(desk.get("turn") or 0) + 1 < turns)
-            and (cost <= 0 or float(desk.get("cost") or 0) < cost))
+            and (cost <= 0 or float(desk.get("cost") or 0) < cost)):
+        return None
+    if run.partial in BUDGET_STOPS:
+        return "continue" if (run.steps_consumed > 0 or run.tool_ok > 0) else None
+    if run.partial is None and not str(run.input.get("content") or "").startswith(DESK_NUDGE):
+        return "nudge"
+    return None
+
+
+def _should_chain(desk: dict[str, Any], run: Run, error: str | None = None) -> bool:
+    return _chain_kind(desk, run, error) is not None
+
+
+def _desk_message(desk_id: str, kind: str) -> str:
+    """continue_message with the desk's own PROGRESS.md appended: a new turn replays assistant text, not tool results."""
+    return continue_message(kind, read_notes(workspace.ensure(desk_id)))
 
 
 def _missed_wake(desk_id: str) -> dict[str, Any] | None:
@@ -2431,14 +2468,16 @@ async def _desk_supervisor(desk_id: str, run: Run) -> None:
             # as `interrupted` instead of settling cooperatively as `stopped`.
             await (asyncio.shield(run.task) if run.task else asyncio.sleep(0))
             state = desks.get(desk_id)
-            if not state or not _should_chain(state, run):
+            kind = _chain_kind(state, run) if state else None
+            if not state or not kind:
                 # The run has really ended now, so a wake that lost the race against it can be
                 # retried here (§F5): _launch_desk refuses while a run is live on the conversation,
                 # and a run that parked a card stays live for _final_round and the learn tail.
                 state = _missed_wake(desk_id)
                 if not state:
                     return
-            body = ChatIn(content=DESK_CONTINUE)
+                kind = "continue"
+            body = ChatIn(content=_desk_message(desk_id, kind))
             run = bus.start(state["conversation_id"], lambda r, b=body: _run_desk(r, desk_id, b),
                             kind="desk", desk_id=desk_id, turn=int(state["turn"] or 0),
                             input={"content": body.content})
@@ -2496,7 +2535,7 @@ def _wake_desk(desk_id: str) -> Run | None:
     desk = desks.get(desk_id, with_outputs=False)
     if not desk or desk["status"] not in RESUME_FROM:
         return None
-    return _launch_desk(desk_id, DESK_RESUME if desk["status"] == "interrupted" else DESK_CONTINUE, RESUME_FROM)
+    return _launch_desk(desk_id, _desk_message(desk_id, "resume" if desk["status"] == "interrupted" else "continue"), RESUME_FROM)
 
 
 def _shell_wake(conversation_id: str | None) -> None:

@@ -441,6 +441,8 @@ class Run:
         self.cost = 0.0
         self.rounds = 0
         self.steps_consumed = 0
+        # Tool calls that ran and returned without an error: the other half of a desk turn's progress.
+        self.tool_ok = 0
         # What launched the run, as stored in agent_runs.input. A job fire record for kind='job'.
         self.input: dict[str, Any] = dict(input or {})
         self.message_id: str | None = None

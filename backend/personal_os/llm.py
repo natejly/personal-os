@@ -264,6 +264,12 @@ def _reason_text(delta: dict[str, Any]) -> str:
     return ""
 
 
+# Seconds the provider may send nothing at all before a reply is given up on. A reasoning model can think a
+# long while before its first token, so this is generous; it only exists so a stalled socket cannot hold a run
+# (and its cards, and the Stop button's only way out) open forever.
+STREAM_IDLE_S = 300.0
+
+
 async def _close_when(cancel: asyncio.Event, response: httpx.Response) -> None:
     """Drop the provider socket when stop or steer fires, so the read is not stuck until the next token."""
     await cancel.wait()
@@ -300,7 +306,7 @@ async def stream_chat(
     out_chars = 0
     reason_chars = 0
     cancelled = False
-    async with httpx.AsyncClient(timeout=httpx.Timeout(10, read=None)) as client:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(10, read=STREAM_IDLE_S)) as client:
         async with client.stream(
             "POST",
             f"{_base(settings)}/v1/chat/completions",
@@ -355,6 +361,10 @@ async def stream_chat(
                         finish = choice["finish_reason"]
             except asyncio.CancelledError:
                 raise
+            except httpx.ReadTimeout as e:
+                if cancel is None or not cancel.is_set():
+                    raise LLMError(f"The model sent nothing for {int(STREAM_IDLE_S)} seconds; the reply was given up on.") from e
+                cancelled = True
             except Exception:
                 if cancel is None or not cancel.is_set():
                     raise

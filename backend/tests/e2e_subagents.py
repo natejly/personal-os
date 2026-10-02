@@ -75,7 +75,7 @@ def main() -> int:
     cid = g.post("/conversations", {"title": "e2e subagents"})["id"]
     prompt = ("Use agent_spawn to start three researchers in parallel (background=true), one per topic: "
               + ", ".join(TOPICS) + f". Wait for their reports with agent_wait, then write a combined summary to {summary} "
-              "with write_local_file that has a section for each topic.")
+              "with write_local_file (or shell_run if that path is refused) that has a section for each topic.")
     run_id = g.run_chat(cid, prompt)
     run = g.get(f"/runs/{run_id}")
     check("parent run finished", run.get("status") in ("done", "completed", "succeeded"), str(run.get("status")))

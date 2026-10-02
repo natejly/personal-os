@@ -70,3 +70,7 @@
 a.wikilink { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
 a.wikilink.unknown { text-decoration-style: dashed; opacity: 0.75; }
 .task-list-item input[type='checkbox'].task-live { cursor: pointer; accent-color: var(--accent-solid); }
+
+.markdown a.rec-chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px; background: var(--surface-2, rgba(127,127,127,.15)); text-decoration: none; font-size: .92em }
+.markdown a.rec-chip.unknown { opacity: .6; cursor: default }
+.rec-chip-state { opacity: .7 }

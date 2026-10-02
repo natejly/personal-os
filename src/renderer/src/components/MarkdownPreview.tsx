@@ -1,5 +1,5 @@
 import { createContext, memo, useCallback, useContext, useMemo, useRef, useState } from 'react'
-import ReactMarkdown, { type Components } from 'react-markdown'
+import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
@@ -13,6 +13,8 @@ import HtmlBlock, { SvgBlock } from './HtmlBlock'
 import { fenceKind } from '../lib/htmlFence'
 import remarkWikilinks from '../features/notes/remarkWikilinks'
 import { WIKI_HREF, titleKey } from '../features/notes/wikilinks'
+import RecordingChip from '../features/docrec/RecordingChip'
+import { recordingIdFromHref } from '../features/docrec/recordingBlock'
 import { taskLineMap } from '../features/notes/tasks'
 import '../styles/notes.css'
 import 'katex/dist/katex.min.css'
@@ -102,6 +104,9 @@ function TaskInput({ node, ...props }: React.InputHTMLAttributes<HTMLInputElemen
   return <input type="checkbox" className="task-live" checked={!!props.checked} onChange={() => toggle(line)} />
 }
 
+/** The default transform blanks unknown schemes; recording blocks are the one extra it must keep. */
+const recUrl = (u: string): string => (recordingIdFromHref(u) ? u : defaultUrlTransform(u))
+
 const wikiTarget = (href?: string): string | null => {
   if (!href?.startsWith(WIKI_HREF)) return null
   try { return decodeURIComponent(href.slice(WIKI_HREF.length)) } catch { return null }
@@ -116,9 +121,11 @@ export interface MarkdownPreviewProps {
   knownTitles?: ReadonlySet<string>
   /** Opt in to clickable task checkboxes; called with the 1-based line in `source`. */
   onToggleTask?: (line: number) => void
+  /** Opt in to recording blocks (`grain-recording:ID` links) as live chips; called with the recording id. */
+  onRecording?: (id: string) => void
 }
 
-const MarkdownPreview = memo(function MarkdownPreview({ source, streaming = false, onWikilink, knownTitles, onToggleTask }: MarkdownPreviewProps): JSX.Element {
+const MarkdownPreview = memo(function MarkdownPreview({ source, streaming = false, onWikilink, knownTitles, onToggleTask, onRecording }: MarkdownPreviewProps): JSX.Element {
   // `$$x$$` written on one line is display maths to everyone except remark-math; see mathBlocks.ts.
   const md = useMemo(() => normalizeMathBlocks(source), [source])
   // Callers pass fresh lambdas every render; reading them through refs keeps `components` (and so every
@@ -127,6 +134,9 @@ const MarkdownPreview = memo(function MarkdownPreview({ source, streaming = fals
   wikiRef.current = onWikilink
   const taskRef = useRef(onToggleTask)
   taskRef.current = onToggleTask
+  const recRef = useRef(onRecording)
+  recRef.current = onRecording
+  const rec = !!onRecording
   const wiki = !!onWikilink
   const tasks = !!onToggleTask
   const known = useMemo(() => (knownTitles ? new Set([...knownTitles].map(titleKey)) : null), [knownTitles])
@@ -136,8 +146,10 @@ const MarkdownPreview = memo(function MarkdownPreview({ source, streaming = fals
   const remark = useMemo(() => (wiki ? [...REMARK, remarkWikilinks] : REMARK), [wiki])
   const components = useMemo((): Components => {
     const c: Components = { ...SAFE_MD, pre: (p) => <Pre {...p} streaming={streaming} /> }
-    if (wiki) {
+    if (wiki || rec) {
       c.a = (p) => {
+        const recId = rec ? recordingIdFromHref(p.href) : null
+        if (recId) return <RecordingChip id={recId} label={textOf(p.children)} onOpen={(i) => recRef.current?.(i)} />
         const target = wikiTarget(p.href)
         if (target === null) return <ExternalLink {...p} />
         const unknown = !!known && !known.has(titleKey(target))
@@ -158,10 +170,10 @@ const MarkdownPreview = memo(function MarkdownPreview({ source, streaming = fals
       }
     }
     return c
-  }, [streaming, wiki, tasks, known, lineMap])
+  }, [streaming, wiki, rec, tasks, known, lineMap])
 
   const body = (
-    <ReactMarkdown remarkPlugins={remark} rehypePlugins={REHYPE} components={components}>
+    <ReactMarkdown remarkPlugins={remark} rehypePlugins={REHYPE} components={components} urlTransform={rec ? recUrl : undefined}>
       {md}
     </ReactMarkdown>
   )

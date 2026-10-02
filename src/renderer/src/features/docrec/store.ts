@@ -5,6 +5,7 @@ import { fetchSegmentPages } from '../../lib/transcript'
 import { docRecApi, type SummarizeBody } from './api'
 import { forgetDictation } from './dictation'
 import { startRefusal, type BlockerAction } from './blockers'
+import { blockInsertText, recordingBlockLabel, recordingBlockLine } from './recordingBlock'
 import { foldSegments, isSettled, liveDoc, needsFullReload, settleDone } from './segments'
 
 /**
@@ -83,6 +84,11 @@ const cursors = new Map<string, number>()
 /** Recordings a `summary` event has been seen for. The event can land before Stop's response does,
  *  i.e. before `beginSettling`, so it is remembered here rather than only on `settling`. */
 const summaryEvents = new Set<string>()
+
+/** The open editor's way to take a line at its caret (DocsView registers it); null when none is mounted. */
+type BlockSink = (docId: string, make: (before: string, after: string) => string) => void
+let blockSink: BlockSink | null = null
+export const setRecordingBlockSink = (s: BlockSink | null): void => { blockSink = s }
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
@@ -286,6 +292,11 @@ export const useDocRec = create<DocRecState>((set, get) => {
           selectedId: { ...st.selectedId, [docId]: m.id }
         }))
         currentDoc = docId
+        // The anchor for this recording's transcript and summary; dictation types text instead.
+        if (mode === 'record') {
+          const line = recordingBlockLine(m.id, recordingBlockLabel(m))
+          blockSink?.(docId, (before, after) => blockInsertText(line, before, after))
+        }
         await Promise.all([useStore.getState().refreshMeetingStatus(), refreshList(docId)])
         get().kick()
       } catch (e) {

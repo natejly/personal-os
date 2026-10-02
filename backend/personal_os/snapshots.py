@@ -21,6 +21,7 @@ reports itself unavailable and nothing else changes.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import re
@@ -456,10 +457,15 @@ def router(snaps: Snapshots, run_exists: Callable[[str], bool]) -> Any:
         the snapshot now rather than showing "no changes" for that long. Finishing is idempotent."""
         with snaps.db.tx() as c:
             pend = c.execute("SELECT 1 FROM run_snapshots WHERE run_id=? AND after_tree IS NULL", (run_id,)).fetchone()
-            ev = c.execute("SELECT data FROM run_events WHERE run_id=? AND type='done' ORDER BY seq DESC LIMIT 1",
-                           (run_id,)).fetchone() if pend else None
-        if ev is not None and '"segment"' not in str(ev["data"]):
-            snaps.finish(run_id)
+            evs = c.execute("SELECT data FROM run_events WHERE run_id=? AND type='done'", (run_id,)).fetchall() if pend else []
+        for ev in evs:  # a `done` that only closes a steered segment does not end the reply
+            try:
+                d = json.loads(ev["data"])
+            except (TypeError, ValueError):
+                continue
+            if isinstance(d, dict) and not d.get("segment"):
+                snaps.finish(run_id)
+                break
 
     @r.get("/messages/{message_id}/changes")
     def message_changes(message_id: str) -> dict[str, Any]:

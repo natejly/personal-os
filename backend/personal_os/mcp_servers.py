@@ -72,6 +72,9 @@ RESERVED_TOOL_NAMES = frozenset({
     "desk_list_files", "desk_read_file", "desk_write_file", "desk_trash_file",
     "desk_deliver", "desk_ask", "desk_done", "desk_import_sandbox",
     "shell_run", "shell_poll", "shell_kill",
+    "browser_open", "browser_snapshot", "browser_click", "browser_type", "browser_select", "browser_press",
+    "browser_scroll", "browser_manage",
+    "view_image", "convert_document", "render_preview", "doc_guide", "python_install", "desk_fetch_file",
 })
 
 SCHEMA = """

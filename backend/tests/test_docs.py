@@ -128,7 +128,7 @@ j("POST", f"/docs/revisions/{same['id']}/restore")
 check(len(j("GET", f"/docs/{did}/revisions")) == n, "restoring the current version is a no-op")
 
 # ---- tools ----
-names = {n for n in toolbox.specs if n.startswith("doc_")}
+names = {n for n, s in toolbox.specs.items() if s.group == "docs"}  # by group: doc_guide shares the prefix, not the feature
 check(names == {"doc_list", "doc_search", "doc_read", "doc_create", "doc_edit"}, f"doc tools registered: {names}")
 check(toolbox.specs["doc_edit"].danger == "writes", "doc_edit is a write")
 check(toolbox.specs["doc_read"].danger == "safe", "doc_read is read-only")

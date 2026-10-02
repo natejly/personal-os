@@ -192,7 +192,9 @@ def test_failed_write_leaves_no_row() -> None:
     out2 = asyncio.run(tb.call("move_local_file", {"path": str(f), "to": str(HOME / "Desktop" / "moved.md")}, dict(CTX)))
     check(out2.get("undo", {}).get("snapshot_id"), "move returns undo too")
     # nothing in the tool surface can restore or delete snapshots
-    check(not [n for n in tb.specs if "snapshot" in n or "restore" in n or "undo" in n], "no model tool restores snapshots")
+    # (browser_snapshot reads a web page; it has nothing to do with file snapshots)
+    check(not [n for n, s in tb.specs.items() if s.group != "browser" and ("snapshot" in n or "restore" in n or "undo" in n)],
+          "no model tool restores snapshots")
 
 
 def test_toolbox_without_filesnap_unchanged() -> None:

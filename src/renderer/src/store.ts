@@ -246,6 +246,9 @@ export interface State {
   /** Unseen `needs_you` events across every desk: the sidebar badge and the Today card. */
   deskInbox: DeskEvent[]
   deskBusy: boolean
+  /** The rail lists archived desks instead of live ones. */
+  deskShowArchived: boolean
+  setDeskShowArchived: (v: boolean) => Promise<void>
 
   init: () => Promise<void>
   loadModels: () => Promise<void>
@@ -348,6 +351,8 @@ export interface State {
   rejectOutputs: (id: string, outputIds?: string[], note?: string) => Promise<void>
   /** Keyed by the plan card's `call_id`: a plan is decided through POST /approvals/{call_id}. */
   decidePlan: (callId: string, decision: PlanDecision, edits?: PlanEdit[], note?: string) => Promise<void>
+  /** Allow or deny one card a desk is waiting on (live or parked), from the desk pane. */
+  answerDeskCard: (callId: string, allow: boolean, note?: string) => Promise<void>
   setPlanMode: (convId: string, mode: 'off' | 'auto' | 'always') => Promise<void>
   markDeskEventSeen: (eventId: string) => Promise<void>
   /** Every unseen needs-you row of ONE desk at once — opening the desk is the acknowledgement. */
@@ -768,7 +773,10 @@ export const useStore = create<State>((set, get) => {
    */
   const putDesk = (d: Desk): void =>
     set((st) => ({
-      desks: st.desks.some((x) => x.id === d.id) ? st.desks.map((x) => (x.id === d.id ? d : x)) : st.desks,
+      // A desk archived (or unarchived) leaves the list it no longer belongs to.
+      desks: Boolean(d.archived) !== st.deskShowArchived
+        ? st.desks.filter((x) => x.id !== d.id)
+        : st.desks.some((x) => x.id === d.id) ? st.desks.map((x) => (x.id === d.id ? d : x)) : st.desks,
       activeDesk: st.activeDesk?.id === d.id ? { ...st.activeDesk, ...d } : st.activeDesk
     }))
   /** The conversation a desk owns, from whichever copy of the row is loaded. */
@@ -817,6 +825,24 @@ export const useStore = create<State>((set, get) => {
    * arrive on. The connection is re-opened for as long as the window lives, resuming from the last
    * seq so a reconnect replays rather than skips, and backing off so a dead backend is not hammered.
    */
+  /**
+   * A desk row from the app topic. The headline alone moves about once a second while a desk works,
+   * so only a status change re-reads the open desk (its plan, cards and outputs) and the inbox; the
+   * row itself is folded in every time. The inbox refresh is coalesced across a burst of desks.
+   */
+  let inboxTimer: ReturnType<typeof setTimeout> | null = null
+  const onDeskChanged = (d: Desk): void => {
+    const st = get()
+    const before = (st.activeDesk?.id === d.id ? st.activeDesk : st.desks.find((x) => x.id === d.id))?.status
+    putDesk(d)
+    if (before === d.status) return
+    if (st.activeDeskId === d.id) void get().openDesk(d.id)
+    if (d.status === 'review') void get().loadDeskFiles(d.id)
+    if (inboxTimer === null) {
+      inboxTimer = setTimeout(() => { inboxTimer = null; void get().refreshDeskInbox() }, 300)
+    }
+  }
+
   const watchBackgroundEvents = async (): Promise<void> => {
     let since = 0
     let backoff = 1000
@@ -834,6 +860,8 @@ export const useStore = create<State>((set, get) => {
           } else if (ev.event === 'job_finished') {
             void get().refreshAgentInbox()
             window.dispatchEvent(new Event('grain-job-finished'))
+          } else if (ev.event === 'desk_status') {
+            onDeskChanged(ev.data)
           }
         }
       } catch {
@@ -1083,6 +1111,7 @@ export const useStore = create<State>((set, get) => {
     deskPreview: null,
     deskInbox: [],
     deskBusy: false,
+    deskShowArchived: false,
     pageAgentOpen: false,
     pageAgentId: null,
     pageAgentModel: null,
@@ -1149,6 +1178,9 @@ export const useStore = create<State>((set, get) => {
       void get().refreshActivity()
       // One watcher per app: a pop-out would only duplicate every toast in another window.
       if (!isPopout()) void watchBackgroundEvents()
+      // The sidebar's needs-you badge and the Today card read this; without it they stay empty until
+      // Cowork or Home happens to mount.
+      void get().refreshDeskInbox()
       // Both for the sidebar: the review badge, and the indicator that says a recording is running.
       // `refreshMeetingStatus` also starts the live tick, so a meeting a crash left running is visible.
       void get().refreshMeetingsPending()
@@ -1745,10 +1777,14 @@ export const useStore = create<State>((set, get) => {
 
     refreshDesks: async () => {
       try {
-        set({ desks: await api.cowork.desks.list(get().libraryScope) })
+        set({ desks: await api.cowork.desks.list(get().libraryScope, '', get().deskShowArchived) })
       } catch (e) {
         get().toast((e as Error).message, 'error')
       }
+    },
+    setDeskShowArchived: async (v) => {
+      set({ deskShowArchived: v })
+      await get().refreshDesks()
     },
     refreshDeskInbox: async () => {
       try {
@@ -1922,6 +1958,18 @@ export const useStore = create<State>((set, get) => {
                           { steps: decision === 'edit' ? edits ?? null : null, note })
         // The card's own stream carries `plan_decision`; a desk pane that is open re-reads the desk,
         // because answering may also have woken it.
+        const open = get().activeDeskId
+        if (open) await get().openDesk(open)
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      } finally {
+        set({ deskBusy: false })
+      }
+    },
+    answerDeskCard: async (callId, allow, note) => {
+      set({ deskBusy: true })
+      try {
+        await api.approve(callId, allow ? 'allow' : 'deny', { steps: null, note })
         const open = get().activeDeskId
         if (open) await get().openDesk(open)
       } catch (e) {

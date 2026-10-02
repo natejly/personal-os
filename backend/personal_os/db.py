@@ -479,7 +479,11 @@ class Database:
                      "allowed_tools": "TEXT"},
             "action_plans": {"desk_id": "TEXT", "intent": "TEXT NOT NULL DEFAULT ''",
                              "expected_taint": "TEXT NOT NULL DEFAULT '[]'"},
-            "approvals": {"desk_id": "TEXT", "danger": "TEXT NOT NULL DEFAULT 'external'", "note": "TEXT"},
+            "approvals": {"desk_id": "TEXT", "danger": "TEXT NOT NULL DEFAULT 'external'",
+                          # A parked desk card (runs.RunStore.park): when it was let go, what the user
+                          # said with their answer, when the desk's next turn was told, and which call
+                          # spent the one-shot grant an approved parked card leaves behind.
+                          "note": "TEXT", "parked_at": "REAL", "reported_at": "REAL", "claimed_by": "TEXT"},
             "agent_runs": {"desk_id": "TEXT", "turn": "INTEGER NOT NULL DEFAULT 0", "resumed_from": "TEXT", "parent_run_id": "TEXT"},
             "usage_log": {"cached_tokens": "INTEGER NOT NULL DEFAULT 0", "cache_write_tokens": "INTEGER NOT NULL DEFAULT 0",
                           "reasoning_tokens": "INTEGER NOT NULL DEFAULT 0"},

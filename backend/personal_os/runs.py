@@ -234,7 +234,7 @@ class RunStore:
         """First decision wins. None if there is no such approval or it was already decided."""
         status = "denied" if decision == "deny" else "approved"
         n = self._exec("UPDATE approvals SET status=?, decision=?, decided_by=?, decided_at=?, note=? WHERE call_id=? AND status='pending'",
-                       (status, decision, by, time.time(), (note or "").strip()[:500] or None, call_id))
+                       (status, decision, by, time.time(), (note or "").strip()[:4000] or None, call_id))
         return self.approval(call_id) if n else None
 
     def approval(self, call_id: str) -> dict[str, Any] | None:
@@ -251,7 +251,39 @@ class RunStore:
         another window, after a restart. `decided_by='park'` is how a reader tells that no run is
         blocked on it any more, and a later decide() overwrites it with the real decider.
         """
-        self._exec("UPDATE approvals SET decided_by='park' WHERE call_id=? AND status='pending'", (call_id,))
+        self._exec("UPDATE approvals SET decided_by='park', parked_at=? WHERE call_id=? AND status='pending'",
+                   (time.time(), call_id))
+
+    def unreported(self, desk_id: str) -> list[dict[str, Any]]:
+        """Parked cards of this desk the user has since answered, which no turn has been told about.
+
+        A parked card's run is gone, so its answer has nowhere to land but the desk's next turn.
+        Read and marked in one step (`mark_reported`) by the turn that injects them, oldest first.
+        """
+        rows = self._all("SELECT call_id FROM approvals WHERE desk_id=? AND parked_at IS NOT NULL "
+                         "AND status<>'pending' AND reported_at IS NULL ORDER BY decided_at", (desk_id,))
+        return [a for a in (self.approval(r["call_id"]) for r in rows) if a]
+
+    def mark_reported(self, call_ids: Iterable[str]) -> None:
+        ids = list(call_ids)
+        if ids:
+            self._exec(f"UPDATE approvals SET reported_at=? WHERE call_id IN ({','.join('?' * len(ids))})",
+                       (time.time(), *ids))
+
+    def claim_parked(self, desk_id: str, tool: str, args: dict[str, Any], call_id: str) -> dict[str, Any] | None:
+        """Spend the one-shot grant an approved parked card left behind, or None.
+
+        The user said yes to exactly this call after its run had let go of it; the desk's next turn
+        makes the call again and it runs without a second card. Single use, bound to the desk, the
+        tool and the argument digest, so a different call - or the same one twice - still asks.
+        """
+        r = self._one("SELECT call_id FROM approvals WHERE desk_id=? AND tool=? AND args_digest=? AND status='approved' "
+                      "AND parked_at IS NOT NULL AND claimed_by IS NULL ORDER BY decided_at LIMIT 1",
+                      (desk_id, tool, args_digest(args)))
+        if r is None:
+            return None
+        n = self._exec("UPDATE approvals SET claimed_by=? WHERE call_id=? AND claimed_by IS NULL", (call_id, r["call_id"]))
+        return self.approval(r["call_id"]) if n else None
 
     def approvals(self, status: str | None = "pending", run_id: str | None = None, limit: int = 100,
                   desk_id: str | None = None) -> list[dict[str, Any]]:

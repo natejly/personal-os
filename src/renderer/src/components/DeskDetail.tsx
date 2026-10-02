@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { Archive, ChevronRight, CircleHelp, Pause, Play, Send, Square, Trash2, TriangleAlert } from 'lucide-react'
-import type { DeskStatus, PromotionKind } from '@shared/types'
+import { Archive, ArchiveRestore, Check, ChevronRight, CircleHelp, Pause, Play, Send, Settings2, ShieldQuestion, Square, Trash2, TriangleAlert, X } from 'lucide-react'
+import type { DeskAutonomy, DeskStatus, FullDesk, PendingApproval, PromotionKind } from '@shared/types'
 import { retainSession, useSession, useStore } from '../store'
 import MessageView from './Message'
 import DeskPlan from './DeskPlan'
 import DeskFiles from './DeskFiles'
 import DeskReview from './DeskReview'
-import { STATUS_LABEL, deskElapsed, fmtDur, useTick } from './DeskRail'
+import { AUTONOMY, STATUS_LABEL, deskElapsed, fmtDur, useTick } from './DeskRail'
 
 type Tab = 'activity' | 'plan' | 'files' | 'output'
 const TABS: { key: Tab; label: string }[] = [
@@ -16,8 +16,10 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'output', label: 'Output' }
 ]
 
-/** §7.8: the tab a desk opens on is the thing it is waiting for you to do. */
-const defaultTab = (status: DeskStatus): Tab => (status === 'awaiting_plan' ? 'plan' : status === 'review' ? 'output' : 'activity')
+/** §7.8: the tab a desk opens on is the thing it is waiting for you to do. A plan card a desk has
+ *  parked leaves it `blocked`, not `awaiting_plan`, so a pending plan counts on its own. */
+const defaultTab = (status: DeskStatus, planPending = false): Tab =>
+  (status === 'awaiting_plan' || planPending ? 'plan' : status === 'review' ? 'output' : 'activity')
 
 /* Wider than DESK_LIVE: a desk parked on a plan, an approval or a question has no live run but is
    still something the user can call off. `review` and the terminal states are not. */
@@ -87,6 +89,82 @@ function SteerBox({ deskId, live, disabled, placeholder }: {
   )
 }
 
+/**
+ * The cards this desk is waiting on, answered in place. A parked card's run has let go, so answering
+ * it here is also what wakes the desk; a live one resumes the run that is holding it.
+ */
+function WaitingCards({ cards }: { cards: PendingApproval[] }): JSX.Element | null {
+  const answer = useStore((s) => s.answerDeskCard)
+  const busy = useStore((s) => s.deskBusy)
+  const shown = cards.filter((a) => a.tool !== 'desk_ask')
+  if (shown.length === 0) return null
+  return (
+    <div className="desk-banner ask">
+      <ShieldQuestion size={14} />
+      <div className="desk-cards">
+        <b>{shown.length === 1 ? 'It is waiting on your approval' : `It is waiting on ${shown.length} approvals`}</b>
+        {shown.map((a) => (
+          <div key={a.call_id} className="desk-card">
+            <div className="desk-card-head">
+              <code>{a.tool.replace(/_/g, ' ')}</code>
+              {a.danger && <span className="tag">{a.danger}</span>}
+              {a.parked_at && !a.live && <span className="muted small">parked — answering wakes the desk</span>}
+            </div>
+            <pre className="approval-args">{JSON.stringify(a.args, null, 2)}</pre>
+            <div className="approval-actions">
+              <button className="primary-btn" disabled={busy} onClick={() => void answer(a.call_id, true)}><Check size={13} /> Allow</button>
+              <button className="ghost-btn danger" disabled={busy} onClick={() => void answer(a.call_id, false)}><X size={13} /> Deny</button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Autonomy and the desk's own caps, changeable after creation. The backend reads autonomy off the
+ * desk row on every turn, so a change takes effect on the next one; the caps can only be tighter
+ * than Settings (`_desk_caps`), which the hint says rather than letting a looser number look saved.
+ */
+function DeskSettings({ desk, onClose }: { desk: FullDesk; onClose: () => void }): JSX.Element {
+  const patchDesk = useStore((s) => s.patchDesk)
+  const maxTurnsDefault = useStore((s) => s.settings.deskMaxTurns ?? 12)
+  const maxCostDefault = useStore((s) => s.settings.deskMaxCost ?? 2)
+  const [autonomy, setAutonomy] = useState<DeskAutonomy>(desk.autonomy)
+  const [turns, setTurns] = useState(desk.budget.maxTurns ? String(desk.budget.maxTurns) : '')
+  const [cost, setCost] = useState(desk.budget.maxCost ? String(desk.budget.maxCost) : '')
+  const save = async (): Promise<void> => {
+    await patchDesk(desk.id, {
+      ...(autonomy !== desk.autonomy ? { autonomy } : {}),
+      budget: { maxTurns: Number(turns) > 0 ? Number(turns) : undefined, maxCost: Number(cost) > 0 ? Number(cost) : undefined }
+    })
+    onClose()
+  }
+  return (
+    <div className="desk-settings">
+      <div className="desk-autonomy">
+        {AUTONOMY.map((a) => (
+          <label key={a.value} className={`desk-autonomy-opt ${autonomy === a.value ? 'on' : ''}`}>
+            <input type="radio" name={`autonomy-${desk.id}`} checked={autonomy === a.value} onChange={() => setAutonomy(a.value)} />
+            <b>{a.label}</b>
+            <small>{a.hint}</small>
+          </label>
+        ))}
+      </div>
+      <div className="desk-limits">
+        <label>Turns <input type="number" min={1} step={1} placeholder={String(maxTurnsDefault)} value={turns} onChange={(e) => setTurns(e.target.value)} /></label>
+        <label>Spend $ <input type="number" min={0.05} step={0.05} placeholder={String(maxCostDefault)} value={cost} onChange={(e) => setCost(e.target.value)} /></label>
+        <small className="muted">Takes effect on its next turn. Limits can only be tighter than your Settings caps.</small>
+      </div>
+      <div className="approval-actions">
+        <button className="primary-btn" onClick={() => void save()}>Save</button>
+        <button className="ghost-btn" onClick={onClose}>Cancel</button>
+      </div>
+    </div>
+  )
+}
+
 export default function DeskDetail(): JSX.Element | null {
   const desk = useStore((s) => s.activeDesk)
   const maxTurns = useStore((s) => s.settings.deskMaxTurns ?? 12)
@@ -96,6 +174,7 @@ export default function DeskDetail(): JSX.Element | null {
   } = useStore()
   const [tab, setTab] = useState<Tab>('activity')
   const [titleDraft, setTitleDraft] = useState<string | null>(null)
+  const [editing, setEditing] = useState(false)
   const scroller = useRef<HTMLDivElement>(null)
 
   const deskId = desk?.id ?? null
@@ -111,10 +190,8 @@ export default function DeskDetail(): JSX.Element | null {
 
   // Opening the desk IS the acknowledgement, and this is the one pane every route into a desk goes
   // through (the rail, the Today card, `[`/`]`), so the needs-you badge clears here rather than at
-  // each call site. Keyed on desk+count rather than firing on every `unseen > 0`: POST /seen only
-  // sweeps the newest 1000 events, so a desk with older unseen rows comes back with the same count
-  // and an unguarded effect would retry it forever. A genuinely new row changes the count and does
-  // get cleared.
+  // each call site. Keyed on desk+count so a failed POST /seen is not retried on every render; a
+  // genuinely new row changes the count and does get cleared.
   const unseen = desk?.unseen ?? 0
   const seenTried = useRef('')
   useEffect(() => {
@@ -126,8 +203,12 @@ export default function DeskDetail(): JSX.Element | null {
 
   // A different desk opens on the tab its status asks for; a status CHANGE only ever pulls towards
   // Plan or Output, so a transition the user is not waiting on does not yank them off what they chose.
-  useEffect(() => { if (status) setTab(defaultTab(status)) }, [deskId])
-  useEffect(() => { if (status === 'awaiting_plan') setTab('plan'); else if (status === 'review') setTab('output') }, [deskId, status])
+  const planPending = desk?.plan?.status === 'pending'
+  useEffect(() => { if (status) setTab(defaultTab(status, planPending)) }, [deskId])
+  useEffect(() => {
+    if (status === 'awaiting_plan' || planPending) setTab('plan')
+    else if (status === 'review') setTab('output')
+  }, [deskId, status, planPending])
 
   useEffect(() => {
     if (tab === 'activity') scroller.current?.scrollTo({ top: scroller.current.scrollHeight })
@@ -161,16 +242,16 @@ export default function DeskDetail(): JSX.Element | null {
 
   if (!desk) return <section className="cowork-main"><p className="empty-hint">Opening…</p></section>
 
-  const undecided = desk.outputs.filter((o) => o.status === 'proposed' || o.status === 'stale')
+  // `promote_failed` is undecided too: its claim was released so Accept can retry it (DeskReview agrees).
+  const undecided = desk.outputs.filter((o) => o.status === 'proposed' || o.status === 'stale' || o.status === 'promote_failed')
 
   const sendBack = (): void => {
     const note = prompt('What should it do differently? This goes back as a message and wakes the desk.')
     if (!note?.trim()) return
     void messageDesk(desk.id, note.trim())
   }
-  // Seen first, then archived: the inbox query does not filter on `archived`, so an archived desk
-  // would otherwise keep the sidebar's needs-you badge lit with rows nobody can reach any more.
-  // Sequential because both calls write the desk row back, and the slower one wins.
+  // Seen first, then archived, so nothing the desk raised is left counted anywhere. Sequential
+  // because both calls write the desk row back, and the slower one wins.
   const archive = async (): Promise<void> => {
     await markDeskSeen(desk.id)
     await patchDesk(desk.id, { archived: true })
@@ -217,21 +298,33 @@ export default function DeskDetail(): JSX.Element | null {
             {(desk.status === 'review' || desk.status === 'done' || desk.status === 'failed' || desk.status === 'stopped') && !desk.archived && (
               <button className="ghost-btn" onClick={() => void archive()}><Archive size={13} /> Archive</button>
             )}
+            {desk.archived && (
+              <button className="ghost-btn" onClick={() => void patchDesk(desk.id, { archived: false })}><ArchiveRestore size={13} /> Unarchive</button>
+            )}
+            {!ENDED.includes(desk.status) && (
+              <button className={`icon-btn ghost ${editing ? 'active' : ''}`} title="Autonomy and limits" aria-pressed={editing} onClick={() => setEditing((v) => !v)}>
+                <Settings2 size={14} />
+              </button>
+            )}
             {(desk.status === 'draft' || desk.status === 'interrupted' || desk.status === 'done' || desk.status === 'failed' || desk.status === 'stopped') && (
               <button className="icon-btn ghost danger" title="Delete this desk" onClick={remove}><Trash2 size={14} /></button>
             )}
           </div>
         </div>
         <div className="desk-meter">
+          <span>{AUTONOMY.find((a) => a.value === desk.autonomy)?.label ?? desk.autonomy}</span>
           <span>turn {desk.turn}/{desk.budget.maxTurns ?? maxTurns}</span>
           <span>${desk.cost.toFixed(2)}</span>
           <span>{fmtDur(deskElapsed(desk))}</span>
           {desk.status_reason && <span className="muted">{desk.status_reason}</span>}
         </div>
         {desk.brief && <p className="desk-brief">{desk.brief}</p>}
+        {editing && <DeskSettings desk={desk} onClose={() => setEditing(false)} />}
       </header>
 
-      {desk.status === 'blocked' && desk.question && (
+      {/* Shown from the moment the desk_ask card opens, live or parked: answering here settles that
+          card (POST /message routes it onto the approval), so it is the same answer either way. */}
+      {desk.question && !ENDED.includes(desk.status) && (
         <div className="desk-banner ask">
           <CircleHelp size={14} />
           <div>
@@ -241,6 +334,17 @@ export default function DeskDetail(): JSX.Element | null {
           </div>
         </div>
       )}
+      {planPending && tab !== 'plan' && (
+        <div className="desk-banner ask">
+          <CircleHelp size={14} />
+          <div>
+            <b>A plan is waiting for you</b>
+            <p>{desk.plan?.title || 'It drafted a plan'} — nothing consequential runs until you approve it.</p>
+            <button className="ghost-btn desk-banner-action" onClick={() => setTab('plan')}>Review the plan</button>
+          </div>
+        </div>
+      )}
+      <WaitingCards cards={desk.approvals ?? []} />
       {desk.status === 'interrupted' && (
         <div className="desk-banner warn">
           <TriangleAlert size={14} />

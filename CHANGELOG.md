@@ -37,8 +37,45 @@ All notable changes to Grain (formerly Personal OS). Dates are the days the work
   always promised now exists, asserting `RESERVED_TOOL_NAMES` really is every
   built-in tool name. It was unguarded until now, and the previous commit was
   literally the fix-up for forgetting the calendar tools.
+- **Cowork: desks that pick up where they stopped.** Every round of a desk turn now
+  carries the approved plan with each step's status, and the system prompt carries
+  the desk hint (`outputs/`, `desk_deliver`, `desk_ask`, `desk_done`). Before this,
+  a turn that was woken or chained was told to "continue the plan below" with no
+  plan in front of it. Cards a desk parked and you answered later are reported to
+  its next turn: plan approved or rejected, your answer to its question, call
+  approved or declined. An approved parked call becomes a single-use grant for
+  exactly those arguments, so repeating it runs without a second card. The desk
+  pane now answers waiting cards in place, opens a pending plan on the Plan tab,
+  and lets you change autonomy and the desk's own turn and spend limits. The rail,
+  badge and Today card are live for every desk (`desk_status` on `GET /events`),
+  and archived desks are one toggle away.
+- **Plan mode in ordinary chats.** The composer's off / auto / always toggle now
+  drives the backend. *always* drafts a plan before anything consequential.
+  *auto* switches to drafting the first time a reply reaches for a write, send or
+  run. Both use the same planning gate as desks.
 
 ### Fixed
+
+- Plan-mode refusals reached the model as "turned off for this chat, do not
+  retry", because the `off` branch ran before the planning message. The model now
+  hears "put it in a plan step". This affected desks too.
+- A desk's Plan tab said "No plan yet" while its plan was waiting on you, and its
+  Approve button posted the plan id to `/approvals/{call_id}` and got a 404.
+- An answer typed into a `desk_ask` card was discarded and the desk asked again.
+  The answer is now the tool result, and the banner's box answers the same card.
+- A parked desk turn never persisted its reply or sent `done`, so the card
+  vanished on reload and a watching window kept spinning.
+- `desk_import_sandbox` always failed (`MAX_FILE_CHARS` was never imported, and
+  `ALTERNATIVE` had no `desk_*` entries), and the rail showed "waiting on your
+  plan" on todo-list updates because it watched `plan` instead of `plan_card`.
+- Pause and Stop accepted desks in review or done. The live-desk cap applied only
+  to create and start, not to resume, messages or wakes. Desk outputs were never
+  tied to the run that wrote them. A message sent during a run's closing tail got
+  a 409 instead of waiting it out.
+- `planMode` and `deskNotify` were missing from `DEFAULT_SETTINGS`, so
+  `PUT /settings` silently dropped them.
+- `tests/test_cowork.py`'s scripted stream had fallen behind `llm.stream_chat`'s
+  signature, so the whole module refused to run.
 
 - `AudioCollector` stamped each audio event with the time transcription *finished*
   rather than when the clip was recorded, because it called `store.add` with no

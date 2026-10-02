@@ -127,7 +127,26 @@
 .desk-banner.warn { background: rgba(229, 72, 77, 0.08); border-color: rgba(229, 72, 77, 0.35); }
 
 .desk-tabs { padding: 8px 16px 0; border-bottom: 1px solid var(--border); }
-.desk-tabs .dot-badge { margin-left: 2px; }
+/* .dot-badge (docs.css) is absolutely positioned for icon buttons; in a tab it sits inline. */
+.desk-tabs .dot-badge { position: static; display: inline-block; margin-left: 5px; vertical-align: 1px; }
+
+/* ---- waiting cards, desk settings, limits ---- */
+.desk-banner .desk-banner-action { margin-top: 6px; }
+.desk-cards { display: flex; flex-direction: column; gap: 8px; }
+.desk-card { display: flex; flex-direction: column; gap: 6px; }
+.desk-card + .desk-card { border-top: 1px solid var(--border); padding-top: 8px; }
+.desk-card-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.desk-card-head code { font-size: 12.5px; }
+.desk-card .approval-args { margin: 0; max-height: 160px; overflow: auto; }
+.desk-card .approval-actions, .desk-settings .approval-actions { display: flex; gap: 6px; }
+.desk-settings { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; padding: 12px;
+  border: 1px solid var(--border); border-radius: 9px; background: var(--hover); }
+.desk-limits { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-size: 12.5px; }
+.desk-limits label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-muted); }
+.desk-limits input { width: 80px; padding: 4px 6px; border-radius: 6px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--text); font: inherit; }
+.desk-limits input:focus { border-color: var(--accent); outline: none; }
+.desk-limits small { flex-basis: 100%; }
 
 .desk-pane { flex: 1; min-height: 0; padding: 12px 16px; }
 .desk-pane.scroll { overflow-y: auto; }

@@ -153,7 +153,7 @@ export default function ActionPlanCard({ plan }: { plan: PlanRecord }): JSX.Elem
     if (sending) return
     setSending(true)
     try {
-      await decidePlan(plan.plan_id, decision, decision === 'edit' ? payload : undefined, note.trim())
+      await decidePlan(plan.call_id, decision, decision === 'edit' ? payload : undefined, note.trim())
     } finally {
       setSending(false)
     }

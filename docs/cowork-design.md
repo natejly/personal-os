@@ -8,6 +8,13 @@
 > parking and the chaining guards are as described; `decide_call` as a single pure function is not —
 > its rules live next to main's gate in `_chat_stream`. Names like `ActionPlan*` and `aplans` below
 > refer to the branch's module, not to anything in the tree.
+>
+> **Update (worktree-cowork-next).** The run ledger in §3.11 was not built. A woken or chained turn
+> gets two things instead. First, `Plans.block(plan)`: the approved plan with each step's status,
+> re-sent at the end of every round. Second, `cowork.parked_report`: what the user decided on parked
+> cards. That report is read from `approvals.parked_at` / `reported_at`, and an approved parked call
+> is spent once through `RunStore.claim_parked`. `desk_ask` is answered on its approval (`note`), not
+> by a second turn. Every desk write reaches `GET /events` as `desk_status` through `Desks.on_change`.
 
 Target worktree: `/Users/natejly/Desktop/Personal OS/.claude/worktrees/cowork-planning` (branch `worktree-cowork-planning`, forked from `main` at `ebfa585`).
 Every `file:line` below was read in this tree. Where a line number is quoted, that line really is what the text says it is.

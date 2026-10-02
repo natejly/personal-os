@@ -25,6 +25,7 @@ absolute path, so moving the data directory does not strand every desk.
 """
 from __future__ import annotations
 
+import functools
 import json
 import sqlite3
 import time
@@ -142,11 +143,56 @@ This desk starts in plan mode. Writing files, `desk_deliver` and `desk_done` are
 approves a plan, so their absence now is expected. Call `propose_plan` with the steps you will take after
 approval (including writing to `outputs/`, `desk_deliver` and `desk_done`); do not answer with the work in chat."""
 
-DESK_CONTINUE = ("Continuing this desk. The approved plan below shows what is already done. Pick up at "
-                 "the first unfinished step; do not redo completed work. Files you already wrote are "
-                 "still in the workspace — read them rather than regenerating them.")
-DESK_RESUME = ("Resuming this desk after an interruption. Check the ledger and the workspace before "
-               "repeating anything: a call marked 'outcome unknown' may or may not have happened.")
+DESK_CONTINUE = ("Continuing this desk. The approved plan at the end of your context, if there is one, "
+                 "shows what is already done. Pick up at the first unfinished step; do not redo completed "
+                 "work. Files you already wrote are still in the workspace — read them rather than "
+                 "regenerating them. If there is no approved plan yet, draft one with propose_plan.")
+DESK_RESUME = ("Resuming this desk after an interruption. Check the approved plan, the ledger and the "
+               "workspace before repeating anything: a step marked [~] or a call marked 'outcome unknown' "
+               "may or may not have happened, so look for its effect before calling it again.")
+
+
+def parked_report(rows: list[dict[str, Any]], plan_for: Callable[[str], dict[str, Any] | None]) -> str:
+    """What the user decided on cards this desk let go of, as one note for its next turn.
+
+    `rows` are `RunStore.unreported(desk_id)`; `plan_for(call_id)` reads a propose_plan card's plan.
+    An approved ordinary call is told to repeat itself verbatim, because that is what spends the
+    one-shot grant (`RunStore.claim_parked`); any change to the arguments asks again.
+    """
+    lines: list[str] = []
+    for a in rows:
+        ok = a.get("status") == "approved"
+        note = (a.get("note") or "").strip()
+        if a["tool"] == "propose_plan":
+            plan = plan_for(a["call_id"]) or {}
+            title = plan.get("title") or "your plan"
+            if ok:
+                lines.append(f"- The user approved the plan \"{title}\". It is the approved plan at the end of "
+                             "your context; carry it out.")
+            else:
+                lines.append(f"- The user rejected the plan \"{title}\". Run none of its steps; draft a different "
+                             "one or ask what they want instead.")
+        elif a["tool"] == "desk_ask":
+            q = str((a.get("args") or {}).get("question") or "").strip()
+            if ok and note:
+                lines.append(f"- You asked: {q}\n  The user answered: {note}")
+            else:
+                lines.append(f"- You asked: {q}\n  The user dismissed the question without answering; use your "
+                             "best judgement and say what you assumed.")
+        else:
+            args = json.dumps(a.get("args") or {}, ensure_ascii=False, default=str)
+            if len(args) > 600:
+                args = args[:600] + "…"
+            if ok:
+                lines.append(f"- The user approved {a['tool']}({args}). Call it again with exactly these arguments "
+                             "and it runs without another card; any change asks again.")
+            else:
+                lines.append(f"- The user declined {a['tool']}({args}). Do not retry it.")
+        if note and a["tool"] != "desk_ask":
+            lines.append(f"  Their note: {note}")
+    if not lines:
+        return ""
+    return "## While this desk was waiting\nYou had stopped to wait on these; the user has since answered:\n" + "\n".join(lines)
 
 # One line per status, so the timeline reads as prose rather than as a column dump.
 _STATUS_BODY = {
@@ -177,12 +223,34 @@ def _body(status: str, reason: str, error: str | None) -> str:
     return base
 
 
+def _notifies(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """Tell `Desks.on_change` about the desk a write touched, after the write committed.
+
+    The rail is otherwise only live for a desk whose own run stream somebody is watching; this is
+    what lets every row move. A failing listener never fails the write that triggered it.
+    """
+    @functools.wraps(fn)
+    def wrapper(self: "Desks", id: str, *args: Any, **kwargs: Any) -> Any:
+        out = fn(self, id, *args, **kwargs)
+        if self.on_change is not None:
+            try:
+                row = out if isinstance(out, dict) and out.get("id") == id else self.get(id, with_outputs=False)
+                if row:
+                    self.on_change(row)
+            except Exception:  # noqa: BLE001 - a rail update must never fail a desk write
+                pass
+        return out
+    return wrapper
+
+
 class Desks:
     def __init__(self, db: Database, workspace: Workspace | None = None) -> None:
         """`workspace` is optional only so the app can keep §3.3's construction order; without it the
         desk's directory is created lazily by the first `desk_*` tool call instead of at create time."""
         self.db = db
         self.workspace = workspace
+        # Called with the desk row after any write that changes what the rail shows (see _notifies).
+        self.on_change: Callable[[dict[str, Any]], None] | None = None
         with db.tx() as c:
             c.executescript(SCHEMA)
 
@@ -277,6 +345,7 @@ class Desks:
                         data={"status": "draft"}, t=t)
             return self._one(c, did)  # type: ignore[return-value]
 
+    @_notifies
     def update(self, id: str, patch: dict[str, Any]) -> dict[str, Any] | None:
         """Whitelist {title, autonomy, project_id, archived}; `budget` merges rather than replaces."""
         fields = {k: v for k, v in patch.items() if k in UPDATE_FIELDS}
@@ -299,6 +368,7 @@ class Desks:
                 c.execute(f"UPDATE desks SET {sets} WHERE id=?", (*fields.values(), id))
             return self._one(c, id)
 
+    @_notifies
     def set_status(self, id: str, status: str, *, reason: str = "", headline: str | None = None,
                    question: str | None = None, error: str | None = None, plan_id: str | None = None,
                    run_id: str | None = None, event: bool = True) -> dict[str, Any] | None:
@@ -333,6 +403,7 @@ class Desks:
                             data={"status": status, "reason": reason, "error": error}, t=t)
             return self._one(c, id)
 
+    @_notifies
     def set_headline(self, id: str, headline: str) -> None:
         """Debounced by the caller (see DeskRuntime, §3.5). Never called from a delta."""
         with self.db.tx() as c:
@@ -344,6 +415,7 @@ class Desks:
             c.execute("UPDATE desks SET run_id=?, updated_at=? WHERE id=?", (run_id, now(), id))
             return self._one(c, id)
 
+    @_notifies
     def claim_run(self, id: str, from_statuses: tuple[str, ...]) -> dict[str, Any] | None:
         """The start lock: the UPDATE's rowcount decides, so a double Start makes one run, not two.
         None means somebody else already started this desk. A desk with no plan claims into
@@ -368,6 +440,7 @@ class Desks:
                         data={"status": row["status"], "reason": "", "error": None}, t=t)
             return self._one(c, id)
 
+    @_notifies
     def charge(self, id: str, cost: float, turn_delta: int = 1) -> dict[str, Any] | None:
         with self.db.tx() as c:
             c.execute("UPDATE desks SET cost = cost + ?, turn = turn + ?, updated_at=? WHERE id=?",
@@ -475,6 +548,7 @@ class Desks:
         with self.db.tx() as c:
             c.execute("UPDATE desk_events SET seen=1 WHERE id=?", (event_id,))
 
+    @_notifies
     def mark_desk_seen(self, desk_id: str) -> int:
         """Every unseen needs_you row of one desk, in one statement. `_unseen` counts the desk's
         rows unbounded, so sweeping a page of them would leave a badge the user cannot clear."""
@@ -501,6 +575,7 @@ class Desks:
             r = c.execute("SELECT * FROM desk_outputs WHERE id=?", (output_id,)).fetchone()
         return self._output_view(r) if r else None
 
+    @_notifies
     def declare_output(self, desk_id: str, path: str, title: str, summary: str,
                        sha256: str, bytes_: int, run_id: str | None) -> dict[str, Any]:
         """INSERT ... ON CONFLICT(desk_id, path) DO UPDATE: re-writing a file updates one row — and
@@ -608,10 +683,10 @@ _STATUS_HEADLINE = {
 }
 # Only these change what the rail says; every other event, `delta` first and foremost, is dropped
 # before anything is computed.
-_OBSERVED = ("tool_call", "tool_result", "plan", "desk_status")
+_OBSERVED = ("tool_call", "tool_result", "plan_card", "desk_status")
 # A status moved: flush now rather than up to a second late, because this is the one the user is
 # waiting to see.
-_IMMEDIATE = ("plan", "desk_status")
+_IMMEDIATE = ("plan_card", "desk_status")
 
 
 def _call_headline(data: dict[str, Any]) -> str:
@@ -648,7 +723,7 @@ class DeskRuntime:
             headline = _call_headline(d)
         elif event == "tool_result":
             headline = "thinking"
-        elif event == "plan":
+        elif event == "plan_card":
             headline = _STATUS_HEADLINE["awaiting_plan"]
         else:
             headline = _STATUS_HEADLINE.get(str(d.get("status") or ""), "")

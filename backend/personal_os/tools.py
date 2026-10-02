@@ -24,7 +24,7 @@ from . import mac
 from . import fsx
 from . import skillbuild
 from .cowork import UNDECIDED_OUTPUTS
-from .workspace import WorkspaceError
+from .workspace import MAX_FILE_CHARS, WorkspaceError
 from . import plans
 from . import reach
 from . import mcp_search
@@ -156,6 +156,14 @@ ALTERNATIVE = {
     "meeting_list": "ask the user which meeting they mean",
     "meeting_search": "meeting_list for the recent meetings, then meeting_read the likely one",
     "meeting_read": "meeting_search, whose snippets often carry the answer",
+    "desk_list_files": "desk_list_files to see what is in the workspace, then use a path from it",
+    "desk_read_file": "desk_list_files to find the right path",
+    "desk_write_file": "write to work/ instead, or desk_trash_file something you no longer need",
+    "desk_trash_file": "leave the file; nothing in a workspace is deleted anyway",
+    "desk_deliver": "desk_write_file it into outputs/ first, then deliver that path",
+    "desk_import_sandbox": "sandbox_read_file the file, then desk_write_file what you need",
+    "desk_ask": "make the most reasonable assumption, say what it was, and carry on",
+    "desk_done": "summarise what you did in your reply; the user can finish the desk",
 }
 
 

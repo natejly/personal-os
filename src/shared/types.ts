@@ -1158,6 +1158,8 @@ export type BackgroundEvent =
   | { event: 'learned'; data: Learned }
   | { event: 'learn_error'; data: { conversation_id?: string; message_id?: string; message: string } }
   | { event: 'job_finished'; data: { run_id: string; job_id: string } }
+  /** Every desk write, for desks nobody is watching: the rail, the badge and the Today card stay live. */
+  | { event: 'desk_status'; data: Desk }
 
 export interface GrainApi {
   backendUrl: () => Promise<string>
@@ -1261,7 +1263,7 @@ export interface Desk {
   status_reason: string
   /** The rail's live "now" line, debounced server-side; never written per delta. */
   headline: string
-  /** Written by `desk_ask`, cleared by the steer that answers it. */
+  /** Set while a `desk_ask` card is open (or after it ran unanswered); cleared by the answer. */
   question: string
   autonomy: DeskAutonomy
   plan_id: string | null
@@ -1289,6 +1291,8 @@ export interface FullDesk extends Desk {
   outputs: DeskOutput[]
   events: DeskEvent[]
   runs: RunInfo[]
+  /** Every non-plan card this desk is waiting on, live or parked; answered in the desk pane. */
+  approvals?: PendingApproval[]
 }
 
 export type DeskOutputStatus = 'proposed' | 'stale' | 'accepted' | 'promoted' | 'promote_failed' | 'rejected'
@@ -1735,6 +1739,11 @@ export interface PendingApproval {
   decided_by: string | null
   created_at: number
   decided_at: number | null
+  /** The tool's danger tier, copied onto the row when the card opened. */
+  danger?: string
+  desk_id?: string | null
+  /** Set when a desk's run let go of the card; it stays decidable and wakes the desk. */
+  parked_at?: number | null
   /** A run in this process is waiting on it right now. */
   live?: boolean
 }

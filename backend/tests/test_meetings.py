@@ -613,7 +613,7 @@ class _FakeGoogle:
         self.tasks: dict[str, dict] = {}
         self.n = 0
 
-    def tasks_all(self, tasklist: str = "@default") -> list[dict]:
+    def tasks_all(self, tasklist: str = "@default", updated_min: str | None = None) -> list[dict]:
         return [dict(t) for t in self.tasks.values()]
 
     def tasks_insert(self, body: dict, tasklist: str = "@default") -> dict:

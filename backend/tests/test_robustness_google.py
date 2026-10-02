@@ -41,7 +41,7 @@ class _Tasks:
         self.n = 0
         self.refuse_title: str | None = None
 
-    def tasks_all(self, tasklist: str = "@default") -> list[dict[str, Any]]:
+    def tasks_all(self, tasklist: str = "@default", updated_min: str | None = None) -> list[dict[str, Any]]:
         return [dict(t) for t in self.lists.setdefault(tasklist, {}).values()]
 
     def tasks_insert(self, body: dict[str, Any], tasklist: str = "@default") -> dict[str, Any]:

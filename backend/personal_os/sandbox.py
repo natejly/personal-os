@@ -95,6 +95,16 @@ def shell_profile(writable: list[str], network: bool = False, proxy_port: int | 
     net = "(allow network*)" if network else "(deny network*)"
     if proxy_port and not network:
         net += f'\n(allow network-outbound (remote ip "localhost:{int(proxy_port)}"))'
+    # The shared work venv lives under the app data dir, which is denied above; the shell has its bin first on PATH, so it must
+    # be able to read it (pip, python). Appended after the deny so it wins; only that folder, never the database beside it.
+    late = ""
+    try:
+        from . import envs
+        wb = envs.work_bin()
+    except Exception:  # noqa: BLE001
+        wb = None
+    if wb:
+        late = f"(allow file-read* (subpath {_q(os.path.realpath(os.path.dirname(wb)))}))\n"
     return f"""(version 1)
 (deny default)
 {net}
@@ -118,7 +128,7 @@ def shell_profile(writable: list[str], network: bool = False, proxy_port: int | 
                  (subpath {_q(os.path.join(home, ".kube"))})
                  (subpath {_q(os.path.join(home, "Library", "Keychains"))})
                  (regex #"/\\.env($|\\.)") (regex #"/\\.auth_token$") (regex #"/personal-os\\.db"))
-"""
+{late}"""
 
 
 def _mac_profile(work: str, py: str, socket_path: str | None = None, workspace: str | None = None) -> str:
@@ -167,7 +177,8 @@ def _mac_profile(work: str, py: str, socket_path: str | None = None, workspace: 
 (allow file-read* (subpath {_q(base)}) (subpath {_q(venv)}) (subpath {_q(work)})
                   (subpath "/usr/lib") (subpath "/usr/share") (subpath "/System/Library")
                   (subpath "/Library/Fonts") (subpath "/private/var/db/timezone")
-                  (literal "/private/etc/localtime") (literal "/dev/null") (literal "/dev/zero")
+                  (literal "/private/etc/localtime") (literal "/private/etc/mime.types") (literal "/private/etc/apache2/mime.types")  ; openpyxl & co. build a MimeTypes() at import
+                  (literal "/dev/null") (literal "/dev/zero")
                   (literal "/dev/random") (literal "/dev/urandom") (subpath "/dev/fd")
                   (literal "/"))                    ; dyld stats the root dir; without it python aborts at startup
 (allow file-write* (subpath {_q(work)}))

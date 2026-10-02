@@ -201,6 +201,13 @@ def _pandoc_argv(binary: str, src: Path, to: str, out: Path) -> list[str]:
         a.append("--wrap=none")
     if to == "html":
         a.append("-s")
+    if _ext(src) in ("docx", "odt", "epub") and to in ("md", "txt", "rst"):
+        # A word-processor Title is document metadata to pandoc: without --standalone it is dropped from text output, and the
+        # converted file loses its own heading. Embedded pictures are written next to the output instead of left as dangling
+        # `media/imageN.png` references (pandoc only creates the folder when there is something to extract).
+        a.append("-s")
+        if to != "txt":
+            a.append(f"--extract-media={os.path.relpath(str(out.with_suffix('')) + '_media', str(src.parent))}")  # pandoc runs in src.parent
     return a + [str(src)]
 
 

@@ -137,3 +137,10 @@ def test_python_install_tool(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) ->
     assert bad["error"] and bad["field"] == "packages"
     ok = asyncio.run(spec.fn(ctx, packages=["scipy"]))
     assert ok["installed"] == ["scipy"] and ok["ready"]
+
+
+def test_uv_venv_is_seeded_with_pip(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """`uv venv` makes a venv with no pip; the shell has this bin first on PATH, so `pip install` there must exist."""
+    env, fake = make(tmp_path, monkeypatch, uv=True)
+    env.ensure()
+    assert "--seed" in fake.calls[0]

@@ -629,3 +629,30 @@ def test_the_tool_describes_its_network_modes_and_timeout_choice(box: Box) -> No
     assert "proxy" in d and "on_timeout" in d and "environment variables do not" in d
     assert spec.parameters["properties"]["on_timeout"]["enum"] == ["background", "kill"]
     assert spec.default_mode == "ask"
+
+
+def test_package_tool_caches_live_in_the_run_dir() -> None:
+    """HOME is read-only inside the sandbox: pip's default cache would warn on every call and uv would fail."""
+    env = shell.scrubbed_env("/tmp/run1")
+    assert env["PIP_CACHE_DIR"] == "/tmp/run1/pip-cache" and env["UV_CACHE_DIR"] == "/tmp/run1/uv-cache"
+
+
+@needs_seatbelt
+def test_shell_profile_lets_the_shell_read_the_work_venv_but_not_the_rest_of_the_data_dir(tmp_path: Path) -> None:
+    from personal_os import envs
+    env = envs.WorkEnv(tmp_path, lambda: {})
+    (env.dir / "bin").mkdir(parents=True)
+    (env.dir / "bin" / "python").write_text("")
+    (env.dir / envs.MARKER).write_text('{"packages": []}')
+    prof = sandbox.shell_profile([str(tmp_path)])
+    assert f'(allow file-read* (subpath "{os.path.realpath(env.dir)}"))' in prof
+    assert prof.index("(deny file-read*") < prof.index("(allow file-read* (subpath")  # last match wins: the allow comes after the deny
+    envs._active = None
+    assert "envs/work" not in sandbox.shell_profile([str(tmp_path)])
+
+
+def test_run_python_profile_allows_the_mime_tables_python_reads_at_import() -> None:
+    """openpyxl builds a MimeTypes() on import, which reads /etc/apache2/mime.types; without the allow every office library
+    died under the profile with PermissionError."""
+    prof = sandbox._mac_profile("/tmp/w", sys.executable)
+    assert '(literal "/private/etc/apache2/mime.types")' in prof and '(literal "/private/etc/mime.types")' in prof

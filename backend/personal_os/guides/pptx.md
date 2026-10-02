@@ -6,6 +6,7 @@ Use `python-pptx`. Build slides from the template's layouts and fill placeholder
 ```python
 from pptx import Presentation
 from pptx.util import Inches, Pt
+import os
 
 prs = Presentation()                       # default 10 x 7.5 in; for 16:9 set the size first
 prs.slide_width, prs.slide_height = Inches(13.333), Inches(7.5)
@@ -23,7 +24,8 @@ for line in ["Hire two support staff", "Defer the redesign"]:
 
 s = prs.slides.add_slide(prs.slide_layouts[5])
 s.shapes.title.text = "Revenue"
-pic = s.shapes.add_picture("work/rev.png", Inches(1), Inches(1.6), width=Inches(8))   # width only keeps the aspect ratio
+if os.path.exists("work/rev.png"):                     # made as in the charts guide
+    s.shapes.add_picture("work/rev.png", Inches(1), Inches(1.6), width=Inches(8))   # width only keeps the aspect ratio
 s.notes_slide.notes_text_frame.text = "Speaker notes here."
 prs.save("outputs/deck.pptx")
 ```

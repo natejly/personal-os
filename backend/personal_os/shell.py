@@ -166,7 +166,10 @@ def scrubbed_env(tmp: str) -> dict[str, str]:
     # document and data libraries rather than the system's.
     path = f"{work}:{SAFE_PATH}" if (work := envs.work_bin()) else SAFE_PATH
     return {"PATH": path, "HOME": os.path.expanduser("~"), "LANG": "en_US.UTF-8", "TERM": "dumb",
-            "TMPDIR": tmp, "TMPPREFIX": f"{tmp}/zsh", "NO_COLOR": "1"}  # zsh puts here-document temp files at TMPPREFIX, not TMPDIR
+            "TMPDIR": tmp, "TMPPREFIX": f"{tmp}/zsh", "NO_COLOR": "1",  # zsh puts here-document temp files at TMPPREFIX, not TMPDIR
+            # HOME is the real one (read-only here), so the package tools' default caches are unwritable: pip prints a warning on
+            # every call and uv fails outright. Point them at the run's own dir instead.
+            "PIP_CACHE_DIR": f"{tmp}/pip-cache", "UV_CACHE_DIR": f"{tmp}/uv-cache", "PIP_DISABLE_PIP_VERSION_CHECK": "1"}
 
 
 def truncate(text: str) -> tuple[str, bool]:

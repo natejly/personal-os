@@ -7,6 +7,7 @@
 
 ## Skeleton: platypus (write under outputs/)
 ```python
+import os
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib.units import cm
@@ -22,7 +23,9 @@ tbl = Table([["Item", "Cost"], ["Widget", "$12.00"]], colWidths=[8*cm, 4*cm], re
 tbl.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
                          ("GRID", (0, 0), (-1, -1), 0.5, colors.grey),
                          ("ALIGN", (1, 0), (1, -1), "RIGHT")]))
-story += [Spacer(1, 12), tbl, Image("work/chart.png", width=14*cm, height=7*cm)]
+story += [Spacer(1, 12), tbl]
+if os.path.exists("work/chart.png"):                   # made as in the charts guide
+    story.append(Image("work/chart.png", width=14*cm, height=7*cm))
 
 def footer(c, d):                      # page template callback: page numbers
     c.setFont("Helvetica", 8); c.drawRightString(A4[0] - 2*cm, 1*cm, f"Page {d.page}")

@@ -659,6 +659,24 @@ def test_an_ordinary_revision_is_stale_after_an_append_is_accepted() -> None:
     assert full["status"] == "pending" and full["stale"] is True and full["stat_vs_current"] is not None
 
 
+def test_meeting_read_of_a_live_meeting_returns_the_transcript_so_far() -> None:
+    from test_mcp_servers import full_toolbox
+    w = World()
+    doc = w.docs.create(title="Live")
+    m = w.repo.create(title="Live", doc_id=doc["id"], doc_mode="record", status="scheduled")
+    w.repo.mark_started(m["id"], str(w.tmp / "rec" / m["id"]), ["mic"], started_at=time.time() - 30)
+    w.segment(m["id"], "we agreed on friday")
+    tb = full_toolbox(w.repo)
+    ctx: dict[str, Any] = {"project_id": "p1"}
+    out = asyncio.run(tb.call("meeting_read", {"meeting": m["id"], "part": "transcript"}, ctx))
+    assert "we agreed on friday" in out["text"] and "transcript so far" in out["note"]
+    assert ctx.get("tainted") is True
+    # Stopped with an empty stored transcript: same fallback, no in-progress note.
+    w.repo.finalize(m["id"], "", status="ready")
+    out = asyncio.run(tb.call("meeting_read", {"meeting": m["id"], "part": "transcript"}, {"project_id": "p1"}))
+    assert "we agreed on friday" in out["text"] and "in progress" not in out.get("note", "")
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in list(globals().items()):

@@ -4,7 +4,7 @@ import { consentResume, useStore } from '../../store'
 import { fetchSegmentPages } from '../../lib/transcript'
 import { docRecApi, type SummarizeBody } from './api'
 import { startRefusal, type BlockerAction } from './blockers'
-import { foldSegments, isSettled, liveDoc, needsFullReload } from './segments'
+import { foldSegments, isSettled, liveDoc, needsFullReload, settleDone } from './segments'
 
 /**
  * Doc recordings: the recordings of each doc, the one being read, its transcript, and the live
@@ -79,6 +79,9 @@ let timer: ReturnType<typeof setInterval> | null = null
 let ticking = false
 /** Per-recording `?since=` cursor for the cheap incremental poll. */
 const cursors = new Map<string, number>()
+/** Recordings a `summary` event has been seen for. The event can land before Stop's response does,
+ *  i.e. before `beginSettling`, so it is remembered here rather than only on `settling`. */
+const summaryEvents = new Set<string>()
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
@@ -159,7 +162,7 @@ export const useDocRec = create<DocRecState>((set, get) => {
 
   const beginSettling = (meetingId: string, docId: string, mode: DocRecordingMode | null): void => {
     const wantSummary = mode !== 'dictate' && useStore.getState().meetingStatus?.config.enhanceOnStop !== false
-    set({ settling: { meetingId, docId, until: Date.now() + SETTLE_MS, wantSummary, summarySeen: false } })
+    set({ settling: { meetingId, docId, until: Date.now() + SETTLE_MS, wantSummary, summarySeen: summaryEvents.has(meetingId) } })
     get().kick()
   }
 
@@ -193,10 +196,16 @@ export const useDocRec = create<DocRecState>((set, get) => {
         const row = get().recordings[settling.docId]?.find((r) => r.id === settling.meetingId)
         const m = await refreshMeeting(settling.meetingId)
         const held = get().segments[settling.meetingId] ?? []
-        const stillLive = live?.meetingId === settling.meetingId
-        const transcriptDone = !stillLive && held.every(isSettled) && (row ? held.length >= row.segment_count : true)
-        const summarySeen = get().settling?.summarySeen || (row !== undefined && row.summary_state !== 'none') || m?.status === 'failed'
-        if (transcriptDone && (!settling.wantSummary || summarySeen) || Date.now() > settling.until) {
+        const summarySeen = get().settling?.summarySeen || (row !== undefined && row.summary_state !== 'none')
+        if (settleDone({
+          stillLive: live?.meetingId === settling.meetingId,
+          held,
+          rowCount: row ? row.segment_count : null,
+          meetingStatus: m?.status ?? null,
+          meetingError: m?.error ?? '',
+          wantSummary: settling.wantSummary,
+          summarySeen
+        }) || Date.now() > settling.until) {
           await finishSettling(settling)
         }
       }
@@ -442,6 +451,7 @@ export const useDocRec = create<DocRecState>((set, get) => {
         return
       }
       if (ev.kind === 'summary') {
+        summaryEvents.add(ev.meeting_id)
         const cur = get().settling
         if (cur && cur.meetingId === ev.meeting_id) set({ settling: { ...cur, summarySeen: true } })
         patchMap('summaryError', ev.meeting_id, ev.error ?? null)

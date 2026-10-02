@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { ApprovalDecision, BackendInfo, BackendState, PlanEdit, PlanDecision, PlanRecord,
   Desk, DeskEvent, DeskFile, FullDesk, PromotionResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, Document, Effort, TrashKind, FullDoc, GraphData, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodoCalendarStatus, TodayDashboard, Recap, Job, Meeting, MeetingCandidate, MeetingCapability, MeetingConfig, MeetingPreflight, MeetingSegment, MeetingStatus, MeetingStatusInfo, MeetingStreamEvent, FullMeeting } from '@shared/types'
+import { daily as dailyNote } from './features/notes/api'
 import { api, backgroundStream, chatStream, meetingStream, setBase, type Scope } from './lib/api'
 import { currentSelection } from './lib/pageContext'
 import { DEFAULT_EFFORT, NEEDS_YOU } from '../../shared/types'
@@ -461,6 +462,8 @@ export interface State {
   /** Retitle the open doc as it is typed, on the same debounce as the body. */
   editDocTitle: (title: string) => void
   /** Type into the open doc. Buffers locally and flushes to the backend on a debounce. */
+  /** Today's daily note: found or created on the server, then opened. */
+  openDailyNote: () => Promise<void>
   editDoc: (content: string) => void
   /** Flush the buffer now (⌘S, switching docs, leaving the view). */
   flushDoc: () => Promise<void>
@@ -924,6 +927,10 @@ export const useStore = create<State>((set, get) => {
             window.dispatchEvent(new Event('grain-job-finished'))
           } else if (ev.event === 'desk_status') {
             onDeskChanged(ev.data)
+          } else if (ev.event === 'recording') {
+            // Lazy: the docrec store imports this one, so a static import here would be a cycle.
+            const data = ev.data
+            void import('./features/docrec/store').then((m) => m.useDocRec.getState().handleEvent(data))
           }
         }
       } catch {
@@ -1747,6 +1754,16 @@ export const useStore = create<State>((set, get) => {
           docDraft: null
         }))
         void get().refreshDocRevisions(doc.id)
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    openDailyNote: async () => {
+      try {
+        const { doc } = await dailyNote()
+        await get().refreshDocs()
+        get().expandTo(doc.project_id ?? '', doc.folder)
+        await get().openDoc(doc.id)
       } catch (e) {
         get().toast((e as Error).message, 'error')
       }

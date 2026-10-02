@@ -44,6 +44,40 @@ export function needsFullReload(held: MeetingSegment[], segmentCount: number | n
   return held.some((s) => !isSettled(s))
 }
 
+/** Banner clauses a failed or empty summary pass leaves on the row (`summarize_into_doc`). */
+const SUMMARY_FAILED = /(^|; )(Summary failed|Nothing was said)/
+
+/** What the settle check reads: everything it needs, none of it fetched here. */
+export interface SettleInput {
+  stillLive: boolean
+  held: MeetingSegment[]
+  /** The row's own clip count, null when the row is not in the list yet. */
+  rowCount: number | null
+  /** The full meeting as last read, if it has been. */
+  meetingStatus: string | null
+  meetingError: string
+  wantSummary: boolean
+  /** A `summary` event arrived, or the row's summary state moved off `none`. */
+  summarySeen: boolean
+}
+
+/**
+ * Whether a stopped (or imported) recording has nothing left to wait for. The transcript is done
+ * when the recorder let go, the meeting is not mid-capture/transcription, and every clip the row
+ * counts is held and settled. An import has no clips at first and its row stays `scheduled`/
+ * `transcribing` until the whole file is read, so an empty tail alone does not mean done. The
+ * summary is done when a proposal landed, or the pass reported it could not (a banner clause the
+ * event may have been missed for), or none was expected (dictation, summaries off). The caller
+ * still bounds all of this by a deadline: a pass that reports nothing must not hold it forever.
+ */
+export function settleDone(i: SettleInput): boolean {
+  const working = i.meetingStatus === 'recording' || i.meetingStatus === 'transcribing' || i.meetingStatus === 'stopped' ||
+    (i.meetingStatus === 'scheduled' && !i.meetingError)
+  const transcriptDone = !i.stillLive && !working && i.held.every(isSettled) && (i.rowCount === null || i.held.length >= i.rowCount)
+  const summaryDone = !i.wantSummary || i.summarySeen || i.meetingStatus === 'failed' || SUMMARY_FAILED.test(i.meetingError)
+  return transcriptDone && summaryDone
+}
+
 export interface LiveDoc { meetingId: string; docId: string; mode: 'record' | 'dictate' }
 
 /** The doc recording the recorder is running right now, if it belongs to a doc at all. */

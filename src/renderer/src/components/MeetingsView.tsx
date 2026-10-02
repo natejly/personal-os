@@ -462,16 +462,20 @@ export default function MeetingsView(): JSX.Element {
 export function MeetingIndicator(): JSX.Element | null {
   const meetingStatus = useStore((s) => s.meetingStatus)
   const setView = useStore((s) => s.setView)
+  const openDoc = useStore((s) => s.openDoc)
   const active = meetingStatus?.active ?? null
   if (!active) return null
   // Same rule as the recorder bar: pausedness comes from the flag, not from the channels, which
   // stay alive through a pause.
   const state = recorderState(active)
+  // A recording that belongs to a doc is the doc's business: go back to the note, not the Meetings page.
+  const docId = active.doc_id
   return (
-    <button className={`act-indicator ${state === 'recording' ? 'live' : 'paused'}`} onClick={() => setView('meetings')}
-      title={INDICATOR_TITLE[state]}>
+    <button className={`act-indicator ${state === 'recording' ? 'live' : 'paused'}`}
+      onClick={() => (docId ? void openDoc(docId) : setView('meetings'))}
+      title={docId ? (active.doc_mode === 'dictate' ? 'Dictating into a doc. Click to open it' : 'Recording into a doc. Click to open it') : INDICATOR_TITLE[state]}>
       <span className="act-dot" />
-      Meeting {formatOffset(active.elapsed_ms / 1000)}
+      {docId ? (active.doc_mode === 'dictate' ? 'Dictating' : 'Recording doc') : 'Meeting'} {formatOffset(active.elapsed_ms / 1000)}
     </button>
   )
 }

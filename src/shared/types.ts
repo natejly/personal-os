@@ -1233,6 +1233,8 @@ export type BackgroundEvent =
   | { event: 'job_finished'; data: { run_id: string; job_id: string } }
   /** Every desk write, for desks nobody is watching: the rail, the badge and the Today card stay live. */
   | { event: 'desk_status'; data: Desk }
+  /** A doc recording's segment, status or summary moved. */
+  | { event: 'recording'; data: RecordingEvent }
 
 export interface BackupInfo {
   name: string; kind: 'daily' | 'manual' | 'premigrate' | 'prerestore'; created_at: number; size: number
@@ -1616,6 +1618,9 @@ export interface DocRevision {
   /** Pending only: the doc moved since this was proposed, so it is reviewed against the current body. */
   stale?: boolean
   stat_vs_current?: { added: number; removed: number } | null
+  /** An append proposal (a recording summary): the section to add. While pending, `before`/`after` are
+   *  resolved against the doc as it stands, so the diff is just this section; null for ordinary edits. */
+  append?: string | null
   /** GET /docs/revisions/{id} only: a unified diff, for copying out. */
   patch?: string
 }

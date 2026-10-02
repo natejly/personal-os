@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { DocRecording, DocRecordingMode, FullMeeting, MeetingActionItem, MeetingSegment, RecordingEvent } from '@shared/types'
+import type { MeetingCandidate, DocRecording, DocRecordingMode, FullMeeting, MeetingActionItem, MeetingSegment, RecordingEvent } from '@shared/types'
 import { consentResume, useStore } from '../../store'
 import { fetchSegmentPages } from '../../lib/transcript'
 import { docRecApi, type SummarizeBody } from './api'
@@ -58,6 +58,8 @@ interface DocRecState {
   load: (docId: string) => Promise<void>
   select: (docId: string, meetingId: string | null) => Promise<void>
   start: (docId: string, mode: DocRecordingMode, opts?: { template?: string; title?: string }) => Promise<void>
+  /** Calendar 'Take notes': creates the event's doc (once) and records into it. */
+  startFromEvent: (c: MeetingCandidate) => Promise<void>
   stop: () => Promise<void>
   pause: () => Promise<void>
   resume: () => Promise<void>
@@ -293,6 +295,37 @@ export const useDocRec = create<DocRecState>((set, get) => {
         if (refusal.action === 'consent') {
           // Park the start, and let the existing consent modal resume it as a doc recording.
           consentResume.run = () => void get().start(docId, mode, opts)
+          useStore.getState().setMeetingConsentOpen(true)
+        } else {
+          set({ notice: { text: refusal.text, action: refusal.action } })
+          toast(refusal.text, 'error')
+        }
+      } finally {
+        set({ busy: false })
+      }
+    },
+
+    startFromEvent: async (c) => {
+      if (get().busy) return
+      set({ busy: true, notice: null })
+      try {
+        const start = Date.parse(c.start)
+        const r = await docRecApi.fromEvent({
+          event_id: c.event_id, title: c.title, start: Number.isNaN(start) ? null : start / 1000, attendees: c.attendees ?? [] })
+        cursors.delete(r.started.id)
+        set((st) => ({
+          segments: { ...st.segments, [r.started.id]: [] },
+          meetings: { ...st.meetings, [r.started.id]: r.started },
+          selectedId: { ...st.selectedId, [r.doc.id]: r.started.id }
+        }))
+        currentDoc = r.doc.id
+        await useStore.getState().openDoc(r.doc.id)
+        await Promise.all([useStore.getState().refreshMeetingStatus(), refreshList(r.doc.id)])
+        get().kick()
+      } catch (e) {
+        const refusal = startRefusal(message(e))
+        if (refusal.action === 'consent') {
+          consentResume.run = () => void get().startFromEvent(c)
           useStore.getState().setMeetingConsentOpen(true)
         } else {
           set({ notice: { text: refusal.text, action: refusal.action } })

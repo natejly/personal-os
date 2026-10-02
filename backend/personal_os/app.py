@@ -5179,21 +5179,19 @@ class DocRecordingIn(BaseModel):
     title: str | None = None
 
 
-@app.post("/docs/{doc_id}/recordings")
-async def start_doc_recording(doc_id: str, body: DocRecordingIn) -> dict[str, Any]:
-    """Create a recording linked to this doc and start it, through the same consent + preflight gate
-    as any meeting. If the start is refused the row made for it is deleted, so nothing is left behind."""
-    d = docs.get(doc_id)
-    if not d:
-        raise HTTPException(404)
-    if body.mode not in ("record", "dictate"):
+async def _start_doc_recording(d: dict[str, Any], mode: str, template: str, title: str | None = None,
+                               meeting_id: str | None = None, **meeting_kw: Any) -> dict[str, Any]:
+    """Create (or adopt `meeting_id`) a recording linked to doc `d` and start it, through the same
+    consent + preflight gate as any meeting. A refused start deletes the row made for it; raises
+    HTTPException, and the caller decides what else to clean up."""
+    if mode not in ("record", "dictate"):
         raise HTTPException(400, "mode must be 'record' or 'dictate'")
     if not activity.IS_MAC:
         row = next((r for r in meeting_svc.capabilities() if r["id"] == "platform"), {})
         raise HTTPException(400, row.get("fix") or "Recording is macOS-only.")
     m = meeting_store.create(
-        title=(body.title or "").strip() or d["title"], project_id=d["project_id"], template=body.template,
-        status="scheduled", doc_id=doc_id, doc_mode=body.mode)
+        title=(title or "").strip() or d["title"], project_id=d["project_id"], template=template,
+        status="scheduled", doc_id=d["id"], doc_mode=mode, **meeting_kw)
     try:
         started = await asyncio.to_thread(meeting_svc.start, m["id"])
     except BaseException as e:
@@ -5209,6 +5207,56 @@ async def start_doc_recording(doc_id: str, body: DocRecordingIn) -> dict[str, An
         meeting_store.delete(m["id"])
         raise HTTPException(404)
     return started
+
+
+@app.post("/docs/{doc_id}/recordings")
+async def start_doc_recording(doc_id: str, body: DocRecordingIn) -> dict[str, Any]:
+    d = docs.get(doc_id)
+    if not d:
+        raise HTTPException(404)
+    return await _start_doc_recording(d, body.mode, body.template, body.title)
+
+
+class DocFromEventIn(BaseModel):
+    event_id: str
+    title: str = ""
+    start: float | None = None
+    attendees: list[Any] = []
+    project_id: str | None = None
+    mode: str = "record"
+    template: str = "general"
+
+
+# Declared above /docs/{id}, like /docs/daily.
+@app.post("/docs/from-event")
+async def doc_from_event(body: DocFromEventIn) -> dict[str, Any]:
+    """Calendar 'Take notes': one doc titled from the event, with the attendees listed, and a recording
+    linked to it. Repeating the call for the same event hands back the same doc. If the start is refused
+    (consent, preflight, busy) the doc is deleted too, so a blocked click leaves nothing behind."""
+    eid = body.event_id.strip()
+    if not eid:
+        raise HTTPException(400, "event_id is required")
+    prior = meeting_store.by_event(eid)
+    if prior and prior.get("doc_id") and (d := docs.get(prior["doc_id"])):
+        return {"doc": d, "started": prior, "existing": True}
+    people = [p for p in (_attendee_label(a) for a in body.attendees) if p]
+    title = body.title.strip() or "Meeting notes"
+    head = f"# {title}\n\n" + (f"Attendees: {', '.join(people)}\n\n" if people else "")
+    d = docs.create(title, head, wsid(body.project_id))
+    try:
+        started = await _start_doc_recording(
+            d, body.mode, body.template, title, calendar_event_id=None if prior else eid, attendees=body.attendees,
+            scheduled_start=body.start)
+    except BaseException:
+        docs.delete(d["id"])
+        raise
+    return {"doc": docs.get(d["id"]), "started": started, "existing": False}
+
+
+def _attendee_label(a: Any) -> str:
+    if isinstance(a, dict):
+        return str(a.get("name") or a.get("displayName") or a.get("email") or "").strip()
+    return str(a or "").strip()
 
 
 @app.get("/docs/{doc_id}/recordings")

@@ -659,6 +659,46 @@ def test_an_ordinary_revision_is_stale_after_an_append_is_accepted() -> None:
     assert full["status"] == "pending" and full["stale"] is True and full["stat_vs_current"] is not None
 
 
+# ---------------------------------------------------------------- calendar 'Take notes'
+
+
+def _event_world(start: Any) -> tuple[World, Any]:
+    from personal_os import app as appmod
+    w = World()
+    appmod.docs, appmod.meeting_store = w.docs, w.repo
+    appmod.activity.IS_MAC = True
+    appmod.meeting_svc = SimpleNamespace(start=start, capabilities=lambda: [])
+    w.docs.on_delete = w.repo.on_doc_deleted if hasattr(w.repo, "on_doc_deleted") else w.docs.on_delete
+    return w, appmod
+
+
+def test_from_event_creates_one_doc_with_attendees_and_is_idempotent() -> None:
+    w, appmod = _event_world(lambda mid: w.repo.get(mid))
+    body = appmod.DocFromEventIn(event_id="ev1", title="Pricing sync", start=1000.0,
+                                 attendees=[{"email": "a@x.io", "name": "Ann"}, "b@x.io"])
+    out = asyncio.run(appmod.doc_from_event(body))
+    assert out["existing"] is False and out["doc"]["title"] == "Pricing sync"
+    assert "Attendees: Ann, b@x.io" in out["doc"]["content"]
+    assert out["started"]["doc_id"] == out["doc"]["id"] and out["started"]["calendar_event_id"] == "ev1"
+    again = asyncio.run(appmod.doc_from_event(body))
+    assert again["existing"] is True and again["doc"]["id"] == out["doc"]["id"]
+    assert len(w.docs.list("__all__", "")) == 1
+
+
+def test_from_event_refused_start_leaves_no_doc() -> None:
+    from personal_os.meetings import MeetingBlocked
+
+    def refuse(mid: str) -> Any:
+        raise MeetingBlocked([{"id": "consent", "label": "Consent", "ok": False}])
+    w, appmod = _event_world(refuse)
+    try:
+        asyncio.run(appmod.doc_from_event(appmod.DocFromEventIn(event_id="ev2", title="T")))
+        raise AssertionError("expected 409")
+    except appmod.HTTPException as e:
+        assert e.status_code == 409
+    assert w.docs.list("__all__", "") == [] and w.repo.by_event("ev2") is None
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in list(globals().items()):

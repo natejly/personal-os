@@ -2511,6 +2511,8 @@ export interface MeetingCandidate {
   conference_link: string
   /** Set once a meeting row exists for this event, so the nudge is not offered twice. */
   meeting_id: string | null
+  /** Invitees other than the user; local only, they become the doc header. */
+  attendees?: { email: string; name?: string }[]
 }
 
 /** One frame of the per-meeting SSE stream. */

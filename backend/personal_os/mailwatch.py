@@ -186,8 +186,8 @@ class MailWatch:
         args: list[Any] = [] if status is None else [status]
         if not include_dismissed:
             where.append("dismissed = 0")
-            where.append("(snoozed_until IS NULL OR snoozed_until <= ?)")
-            args.append((_aware(at) if at else datetime.now(timezone.utc)).timestamp())
+        where.append("(snoozed_until IS NULL OR snoozed_until <= ?)")
+        args.append((_aware(at) if at else datetime.now(timezone.utc)).timestamp())
         with self.db.tx() as c:
             rows = [dict(r) for r in c.execute(f"SELECT * FROM thread_status WHERE {' AND '.join(where)} ORDER BY last_date DESC", args).fetchall()]
         if at is not None:  # age is relative to the last message, so recompute it at read time

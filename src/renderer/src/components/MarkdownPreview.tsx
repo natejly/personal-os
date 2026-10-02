@@ -12,6 +12,7 @@ import MermaidBlock from './MermaidBlock'
 import HtmlBlock, { SvgBlock } from './HtmlBlock'
 import { fenceKind } from '../lib/htmlFence'
 import remarkWikilinks from '../features/notes/remarkWikilinks'
+import remarkAi from '../features/notes/remarkAi'
 import { WIKI_HREF, titleKey } from '../features/notes/wikilinks'
 import RecordingChip from '../features/docrec/RecordingChip'
 import { recordingIdFromHref } from '../features/docrec/recordingBlock'
@@ -87,7 +88,7 @@ function Pre({ streaming, ...props }: React.HTMLAttributes<HTMLPreElement> & { s
   )
 }
 
-const REMARK = [remarkGfm, remarkMath]
+const REMARK = [remarkGfm, remarkMath, remarkAi]
 // `strict: false` keeps an unknown macro as red source text instead of throwing the whole render away,
 // which matters while someone is mid-formula and the markup is briefly invalid.
 const REHYPE = [[rehypeKatex, { strict: false, throwOnError: false }], rehypeHighlight] as never[]

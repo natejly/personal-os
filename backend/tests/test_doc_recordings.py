@@ -659,6 +659,18 @@ def test_an_ordinary_revision_is_stale_after_an_append_is_accepted() -> None:
     assert full["status"] == "pending" and full["stale"] is True and full["stat_vs_current"] is not None
 
 
+def test_summary_evidence_reaches_the_meeting_row_and_the_stored_text_is_tag_free() -> None:
+    w = World()
+    doc = w.docs.create("Plan", "# Plan")
+    m = w.recording(doc)
+    seg_id = w.repo.segments(m["id"], limit=10)[0]["id"]
+    w.reply = json.dumps({"summary_markdown": "- Ship the tiers {s1}\n- Dana owns the deck {s7}", "headline": "h"})
+    out = w.summarize(m["id"], force=True)
+    row = w.repo.get(m["id"])
+    assert row["summary_evidence"] == {"0": [seg_id]}
+    assert "{" not in row["enhanced"] and "{" not in out["revision"]["after"]
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in list(globals().items()):

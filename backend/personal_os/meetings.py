@@ -1094,7 +1094,7 @@ class Meetings:
                       (m["enhanced"], t, rev_id))
             c.execute("UPDATE meeting_revisions SET status='superseded', resolved_at=? "
                       "WHERE meeting_id=? AND status='pending' AND id<>?", (t, r["meeting_id"], rev_id))
-            c.execute("UPDATE meetings SET enhanced=?, updated_at=? WHERE id=?", (r["after"], t, r["meeting_id"]))
+            c.execute("UPDATE meetings SET enhanced=?, summary_evidence='{}', updated_at=? WHERE id=?", (r["after"], t, r["meeting_id"]))
             self._reindex_row(c, r["meeting_id"])
             meeting_id = r["meeting_id"]
         return self.get(meeting_id)

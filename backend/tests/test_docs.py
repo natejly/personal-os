@@ -136,6 +136,19 @@ check(toolbox.specs["doc_read"].danger == "safe", "doc_read is read-only")
 read = call("doc_read", {"doc": "Paper"})
 check("   1| " in read["text"], "doc_read numbers the lines")
 
+# backlinks surface as titles on the first page only, and only when something links in
+check("linked_from" not in read, "no linked_from when nothing links in")
+src = call("doc_create", {"title": "Linker", "content": "See [[Paper]]\nline2\n"})
+read = call("doc_read", {"doc": "Paper"})
+check(read.get("linked_from") == ["Linker"], f"doc_read lists the linking title: {read.get('linked_from')}")
+_orig_bl = docs.backlinks
+docs.backlinks = lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("backlinks scanned on a later page"))
+try:
+    check("linked_from" not in call("doc_read", {"doc": "Paper", "from_line": 2}), "no linked_from past the first page")
+finally:
+    docs.backlinks = _orig_bl
+j("DELETE", f"/docs/{src['doc_id']}")
+
 made = call("doc_create", {"title": "Derivation", "content": "$$\\int_0^1 x^2\\,dx = \\tfrac13$$\n"})
 check(made["doc_id"] and made["created"] == "Derivation", "doc_create makes a doc")
 

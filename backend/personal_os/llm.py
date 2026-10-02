@@ -447,7 +447,54 @@ async def list_models(settings: dict[str, Any]) -> list[dict[str, str]]:
     if r.status_code >= 400:
         raise LLMError(f"{r.status_code}: {r.text[:300]}")
     data = r.json().get("data", [])
+    note_vision_listing(data)
     return sorted(({"id": m["id"]} for m in data if "id" in m), key=lambda m: m["id"])
+
+
+# Which models read images, as far as a provider's own model listing says so. Filled as a side effect of list_models
+# (the model picker calls it), read synchronously by vision.model_for: a reply never waits on a listing.
+_VISION_FLAGS: dict[str, bool] = {}
+
+
+def note_vision_listing(rows: Any) -> None:
+    """Remember the vision flag of each row of a /models listing, for the shapes providers use: an input-modality
+    list (`architecture.input_modalities`, `modalities`, `input_modalities`) or a boolean (`supports_vision`,
+    `capabilities.vision`). A row that says nothing leaves the model unflagged (the name fallback decides)."""
+    if not isinstance(rows, list):
+        return
+    for m in rows:
+        if not isinstance(m, dict) or not m.get("id"):
+            continue
+        arch = m.get("architecture") if isinstance(m.get("architecture"), dict) else {}
+        caps = m.get("capabilities") if isinstance(m.get("capabilities"), dict) else {}
+        mods = arch.get("input_modalities") or m.get("input_modalities") or m.get("modalities")
+        flag: bool | None = None
+        if isinstance(mods, list):
+            flag = any(str(x).lower() in ("image", "vision") for x in mods)
+        elif isinstance(m.get("supports_vision"), bool):
+            flag = m["supports_vision"]
+        elif isinstance(caps.get("vision"), bool):
+            flag = caps["vision"]
+        elif isinstance(m.get("supports_image_input"), bool):
+            flag = m["supports_image_input"]
+        if flag is not None:
+            _VISION_FLAGS[str(m["id"])] = flag
+
+
+def vision_flag(model: str) -> bool | None:
+    """True/False when a provider listing said so, None when it never did."""
+    return _VISION_FLAGS.get(model)
+
+
+def _prompt_chars(messages: list[dict[str, Any]]) -> int:
+    """Characters of prompt for the usage estimate. Image parts count as nothing: a base64 picture is megabytes of
+    characters but a few hundred tokens, and the provider's own usage figure replaces this estimate when it sends one."""
+    slim = [
+        {**m, "content": [p for p in m["content"] if not (isinstance(p, dict) and p.get("type") == "image_url")]}
+        if isinstance(m.get("content"), list) else m
+        for m in messages
+    ]
+    return len(json.dumps(slim))
 
 
 # Kimi K3 always thinks and accepts only low, high, and max. Omitting the field is max, and
@@ -633,14 +680,14 @@ async def stream_chat(
            "usage_est": {"prompt_tokens": p_chars // 4, "completion_tokens": c_chars // 4}}
 
 
-async def complete(settings: dict[str, Any], model: str, messages: list[dict[str, str]], kind: str = "learn") -> str:
-    """Non-streaming completion (used for extraction)."""
+async def complete(settings: dict[str, Any], model: str, messages: list[dict[str, Any]], kind: str = "learn") -> str:
+    """Non-streaming completion (used for extraction, and for vision: `content` may be a list of text/image_url parts)."""
     t0 = time.time()
     async with httpx.AsyncClient(timeout=httpx.Timeout(120, connect=CONNECT_TIMEOUT_S)) as client:
         r, _ = await _send_with_retry(client, settings, {"model": model, "messages": messages, "stream": False}, stream=False)
     data = r.json()
     text = data["choices"][0]["message"]["content"] or ""
-    _emit_usage(model, kind, parse_usage(data["usage"]) if isinstance(data.get("usage"), dict) else None, int((time.time() - t0) * 1000), len(json.dumps(messages)), len(text))
+    _emit_usage(model, kind, parse_usage(data["usage"]) if isinstance(data.get("usage"), dict) else None, int((time.time() - t0) * 1000), _prompt_chars(messages), len(text))
     return text
 
 

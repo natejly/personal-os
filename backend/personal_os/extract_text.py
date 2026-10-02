@@ -11,6 +11,7 @@ import re
 import unicodedata
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Any
 
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 MAX_INDEX_CHARS = 400_000
@@ -124,12 +125,10 @@ def extract_structured(name: str, data: bytes, mime: str = "") -> list[Block]:
     """Blocks in reading order: headings, paragraphs, tables and (PDF) page markers."""
     ext = Path(name).suffix.lower()
     if ext == ".pdf" or mime == "application/pdf":
-        from pypdf import PdfReader
-
         out: list[Block] = []
-        for n, p in enumerate(PdfReader(io.BytesIO(data)).pages, start=1):
+        for n, page_text in enumerate(_pdf_page_texts(data)[0], start=1):
             out.append(_blk("page", page=n))
-            for para in re.split(r"\n\s*\n", p.extract_text() or ""):
+            for para in re.split(r"\n\s*\n", page_text):
                 para = para.strip()
                 if not para:
                     continue
@@ -160,6 +159,8 @@ def extract_structured(name: str, data: bytes, mime: str = "") -> list[Block]:
                 if t:
                     out.append(_blk("table", t))
         return out
+    if ext in (".csv", ".tsv"):
+        return markdown_blocks(_cap_delimited(data.decode("utf-8", errors="replace")))
     if ext in TEXT_EXT or mime.startswith("text/"):
         return markdown_blocks(data.decode("utf-8", errors="replace"))
     return markdown_blocks(extract_text(name, data, mime))
@@ -176,6 +177,8 @@ def extract_text(name: str, data: bytes, mime: str = "") -> str:
             pass
     mime = (mime or "").split(";")[0].strip().lower()
     parsed = _parsed(ext, mime, data)
+    if parsed is None:
+        parsed = _more_parsed(name, ext, mime, data)
     if parsed is not None:
         return parsed
     if _looks_textual(data, mime, ext):
@@ -187,11 +190,11 @@ def extract_text(name: str, data: bytes, mime: str = "") -> str:
 def _parsed(ext: str, mime: str, data: bytes) -> str | None:
     try:
         if ext == ".pdf" or mime == "application/pdf":
-            from pypdf import PdfReader
-
-            reader = PdfReader(io.BytesIO(data))
-            parts = ((p.extract_text() or "") for p in reader.pages)
-            return _bounded(parts, MAX_PDF_PAGES)
+            texts, ocr = _pdf_page_texts(data)
+            body = _bounded(texts, MAX_PDF_PAGES)
+            if ocr:
+                return "[OCR text: this PDF has no text layer, so the words below were read from page images and may contain mistakes]\n\n" + body
+            return body
         if ext == ".docx" or mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
             import docx
 
@@ -236,3 +239,407 @@ def _looks_textual(data: bytes, mime: str, ext: str) -> bool:
         return False
     printable = sum(ch.isprintable() or ch in "\n\r\t" for ch in text)
     return printable / len(text) > 0.9
+
+
+# ---- more formats (spreadsheets, slides, scans, images, open documents) ----
+# Every reader here is optional-import or stdlib, bounded, and returns None on any failure so extract_text degrades to
+# its "no text could be extracted" marker instead of raising.
+IMAGE_EXT = {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff", ".bmp", ".gif"}
+SHEET_ROWS, SHEET_COLS = 200, 30        # per sheet; the output says what was cut
+DELIMITED_LINES = 2_000                 # csv/tsv kept as text, cut here
+MAX_ZIP_PART = 40 * 1024 * 1024         # one XML part inside an office zip; a bomb is refused, not inflated
+OCR_PDF_PAGES, OCR_PDF_DPI = 15, 150
+OCR_PAGE_TIMEOUT_S, OCR_TOTAL_TIMEOUT_S, OCR_IMAGE_TIMEOUT_S = 20, 120, 30
+SCAN_CHARS_PER_PAGE = 12                # fewer characters than this per page on average = no text layer
+
+
+def _which(binary: str) -> str | None:
+    import shutil
+
+    return shutil.which(binary)
+
+
+def _run(cmd: list[str], timeout: float, stdin: bytes | None = None) -> bytes:
+    """Run an external binary, bounded. Raises on a non-zero exit or a timeout. A seam for tests."""
+    import subprocess
+
+    done = subprocess.run(cmd, input=stdin, capture_output=True, timeout=timeout, check=True)
+    return done.stdout
+
+
+def _ln(el: Any) -> str:
+    return str(el.tag).rsplit("}", 1)[-1]
+
+
+def _zip_part(z: Any, name: str) -> bytes | None:
+    try:
+        info = z.getinfo(name)
+    except KeyError:
+        return None
+    if info.file_size > MAX_ZIP_PART:
+        return None
+    return z.read(name)
+
+
+def _col_index(ref: str) -> int:
+    n = 0
+    for ch in ref:
+        if not ch.isalpha():
+            break
+        n = n * 26 + (ord(ch.upper()) - 64)
+    return max(0, n - 1)
+
+
+def _fmt_cell(v: Any) -> str:
+    if v is None:
+        return ""
+    if isinstance(v, float) and v.is_integer() and abs(v) < 1e15:
+        return str(int(v))
+    return str(v)
+
+
+def _render_sheet(name: str, dims: str, rows: Iterable[list[str]]) -> str:
+    """One sheet as a heading plus a markdown table, cut at SHEET_ROWS x SHEET_COLS with a note saying so."""
+    kept: list[list[str]] = []
+    total = 0
+    widest = 0
+    for r in rows:
+        if not any(c.strip() for c in r):
+            continue
+        total += 1
+        widest = max(widest, len(r))
+        if len(kept) < SHEET_ROWS:
+            kept.append(r[:SHEET_COLS])
+    head = f"## Sheet: {name}" + (f" ({dims})" if dims else "")
+    if not kept:
+        return head + "\n\n(empty)"
+    notes = []
+    if total > len(kept):
+        notes.append(f"showing the first {len(kept)} of {total} non-empty rows")
+    if widest > SHEET_COLS:
+        notes.append(f"showing the first {SHEET_COLS} of {widest} columns")
+    body = _md_table(kept)
+    return head + "\n\n" + body + (f"\n\n[{'; '.join(notes)}]" if notes else "")
+
+
+def _xlsx_openpyxl(data: bytes) -> str | None:
+    try:
+        import openpyxl
+    except ImportError:
+        return None
+    wb = openpyxl.load_workbook(io.BytesIO(data), read_only=True, data_only=True)
+    try:
+        out = []
+        for ws in wb.worksheets:
+            try:
+                dims = ws.calculate_dimension()
+            except Exception:  # noqa: BLE001 - read-only sheets with no dimension record
+                dims = ""
+            out.append(_render_sheet(ws.title, dims, ([_fmt_cell(c) for c in row] for row in ws.iter_rows(values_only=True))))
+        return "\n\n".join(out)
+    finally:
+        wb.close()
+
+
+def _xlsx_stdlib(data: bytes) -> str | None:
+    import xml.etree.ElementTree as ET
+    import zipfile
+
+    z = zipfile.ZipFile(io.BytesIO(data))
+    wb = _zip_part(z, "xl/workbook.xml")
+    if wb is None:
+        return None
+    rels: dict[str, str] = {}
+    rel_xml = _zip_part(z, "xl/_rels/workbook.xml.rels")
+    if rel_xml:
+        for r in ET.fromstring(rel_xml):
+            rels[r.get("Id", "")] = r.get("Target", "")
+    shared: list[str] = []
+    ss = _zip_part(z, "xl/sharedStrings.xml")
+    if ss:
+        for si in ET.fromstring(ss):
+            shared.append("".join(t.text or "" for t in si.iter() if _ln(t) == "t"))
+    sheets: list[tuple[str, str]] = []
+    for i, s in enumerate(e for e in ET.fromstring(wb).iter() if _ln(e) == "sheet"):
+        rid = next((v for k, v in s.attrib.items() if k.endswith("}id")), "")
+        target = rels.get(rid) or f"worksheets/sheet{i + 1}.xml"
+        path = target.lstrip("/") if target.startswith("/") else "xl/" + target
+        sheets.append((s.get("name", f"Sheet{i + 1}"), path))
+    out = []
+    for name, path in sheets:
+        part = _zip_part(z, path)
+        if part is None:
+            continue
+        dims = ""
+        rows: list[list[str]] = []
+        for _, el in ET.iterparse(io.BytesIO(part), events=("end",)):
+            tag = _ln(el)
+            if tag == "dimension":
+                dims = el.get("ref", "")
+            elif tag == "row":
+                cells: list[str] = []
+                for c in el:
+                    if _ln(c) != "c":
+                        continue
+                    idx = _col_index(c.get("r", ""))
+                    kind = c.get("t", "n")
+                    v = next((x for x in c if _ln(x) == "v"), None)
+                    if kind == "inlineStr":
+                        text = "".join(t.text or "" for t in c.iter() if _ln(t) == "t")
+                    elif v is None or v.text is None:
+                        text = ""
+                    elif kind == "s":
+                        text = shared[int(v.text)] if v.text.isdigit() and int(v.text) < len(shared) else ""
+                    elif kind == "b":
+                        text = "TRUE" if v.text == "1" else "FALSE"
+                    else:  # n, str (a formula's cached text), e: the cached value is what the sheet shows
+                        text = v.text
+                        if kind == "n":
+                            try:
+                                text = _fmt_cell(float(text))
+                            except ValueError:
+                                pass
+                    if idx > 2000:  # a stray cell far to the right must not allocate a huge row
+                        continue
+                    cells.extend([""] * (idx - len(cells)))
+                    if idx < len(cells):
+                        cells[idx] = text
+                    else:
+                        cells.append(text)
+                rows.append(cells)
+                el.clear()
+        out.append(_render_sheet(name, dims, rows))
+    return "\n\n".join(out) if out else None
+
+
+def _xlsx_text(data: bytes) -> str | None:
+    try:
+        got = _xlsx_openpyxl(data)
+        if got is not None:
+            return got
+    except Exception:  # noqa: BLE001 - fall to the zip parser, which does not mind a file openpyxl chokes on
+        pass
+    return _xlsx_stdlib(data)
+
+
+def _pptx_text(data: bytes) -> str | None:
+    import xml.etree.ElementTree as ET
+    import zipfile
+
+    z = zipfile.ZipFile(io.BytesIO(data))
+    slides = sorted((n for n in z.namelist() if re.fullmatch(r"ppt/slides/slide\d+\.xml", n)),
+                    key=lambda n: int(re.search(r"(\d+)\.xml$", n).group(1)))  # type: ignore[union-attr]
+    if not slides:
+        return None
+
+    def paras(sp: Any) -> list[tuple[int, str]]:
+        res = []
+        for p in sp.iter():
+            if _ln(p) != "p":
+                continue
+            lvl = 0
+            text = []
+            for x in p.iter():
+                t = _ln(x)
+                if t == "pPr":
+                    lvl = int(x.get("lvl") or 0)
+                elif t == "t":
+                    text.append(x.text or "")
+                elif t == "br":
+                    text.append("\n")
+            s = "".join(text).strip()
+            if s:
+                res.append((lvl, s))
+        return res
+
+    def placeholder(sp: Any) -> str:
+        for x in sp.iter():
+            if _ln(x) == "ph":
+                return x.get("type", "body")
+        return ""
+
+    out = []
+    for n, name in enumerate(slides, start=1):
+        root = ET.fromstring(_zip_part(z, name) or b"<x/>")
+        title = ""
+        body: list[str] = []
+        for el in root.iter():
+            tag = _ln(el)
+            if tag == "sp":
+                ph = placeholder(el)
+                ps = paras(el)
+                if ph in ("title", "ctrTitle") and not title:
+                    title = " ".join(t for _, t in ps)
+                elif ph not in ("sldNum", "dt", "ftr"):
+                    body.extend("  " * lvl + "- " + t.replace("\n", " ") for lvl, t in ps)
+            elif tag == "tbl":
+                rows = [["".join(t.text or "" for t in c.iter() if _ln(t) == "t") for c in r if _ln(c) == "tc"] for r in el if _ln(r) == "tr"]
+                tb = _md_table(rows)
+                if tb:
+                    body.append(tb)
+        notes = ""
+        rel = _zip_part(z, f"ppt/slides/_rels/{name.rsplit('/', 1)[-1]}.rels")
+        if rel:
+            m = re.search(r'Target="[^"]*?(notesSlide\d+\.xml)"', rel.decode("utf-8", errors="replace"))
+            nxml = _zip_part(z, f"ppt/notesSlides/{m.group(1)}") if m else None
+            if nxml:
+                nroot = ET.fromstring(nxml)
+                notes = "\n".join(t for el in nroot.iter() if _ln(el) == "sp" and placeholder(el) == "body" for _, t in paras(el))
+        block = [f"## Slide {n}" + (f": {title}" if title else "")]
+        block.extend(body)
+        if notes.strip():
+            block.append("Notes: " + notes.strip())
+        out.append("\n\n".join([block[0], "\n".join(block[1:])]) if len(block) > 1 else block[0])
+    return "\n\n".join(out)
+
+
+def _odf_text(ext: str, data: bytes) -> str | None:
+    import xml.etree.ElementTree as ET
+    import zipfile
+
+    z = zipfile.ZipFile(io.BytesIO(data))
+    xml = _zip_part(z, "content.xml")
+    if xml is None:
+        return None
+    root = ET.fromstring(xml)
+    if ext == ".ods":
+        out = []
+        for tbl in (e for e in root.iter() if _ln(e) == "table"):
+            rows = []
+            for r in (e for e in tbl.iter() if _ln(e) == "table-row"):
+                rows.append(["".join(c.itertext()) for c in r if _ln(c) == "table-cell"])
+            out.append(_render_sheet(next((v for k, v in tbl.attrib.items() if k.endswith("}name")), "Sheet"), "", rows))
+        return "\n\n".join(out) or None
+    out = []
+    for e in root.iter():
+        tag = _ln(e)
+        if tag in ("h", "p"):
+            text = "".join(e.itertext()).strip()
+            if text:
+                out.append(("## " if tag == "h" else "") + text)
+    return "\n\n".join(out) or None
+
+
+def _rtf_text(data: bytes) -> str | None:
+    s = data.decode("latin-1", errors="replace")
+    if not s.lstrip().startswith("{\\rtf"):
+        return None
+    s = re.sub(r"\{\\\*[^{}]*\}", "", s)  # destinations such as {\*\generator ...}
+    s = re.sub(r"\{\\(?:fonttbl|colortbl|stylesheet|info)(?:[^{}]|\{[^{}]*\})*\}", "", s)
+    s = re.sub(r"\\par[d]?\b ?", "\n", s)
+    s = re.sub(r"\\'([0-9a-fA-F]{2})", lambda m: bytes.fromhex(m.group(1)).decode("cp1252", errors="replace"), s)
+    s = re.sub(r"\\[a-zA-Z]+-?\d* ?", "", s)
+    s = re.sub(r"\\([\\{}])", r"\1", s).replace("{", "").replace("}", "")
+    return re.sub(r"\n{3,}", "\n\n", s).strip() or None
+
+
+def _epub_text(data: bytes) -> str | None:
+    import html
+    import zipfile
+
+    z = zipfile.ZipFile(io.BytesIO(data))
+    names = sorted(n for n in z.namelist() if n.lower().endswith((".xhtml", ".html", ".htm")))
+
+    def chapters() -> Iterable[str]:
+        for n in names:
+            raw = (_zip_part(z, n) or b"").decode("utf-8", errors="replace")
+            raw = re.sub(r"(?is)<(script|style)\b.*?</\1>", "", raw)
+            raw = re.sub(r"(?i)</(p|div|h\d|li|tr|br)\s*>|<br\s*/?>", "\n", raw)
+            text = html.unescape(re.sub(r"<[^>]+>", "", raw))
+            yield re.sub(r"\n\s*\n+", "\n\n", text).strip()
+
+    return _bounded((c for c in chapters() if c), MAX_PDF_PAGES * 4) or None
+
+
+def _cap_delimited(text: str) -> str:
+    lines = text.splitlines()
+    if len(lines) <= DELIMITED_LINES and len(text) <= MAX_INDEX_CHARS:
+        return text
+    kept = "\n".join(lines[:DELIMITED_LINES])[:MAX_INDEX_CHARS]
+    return kept + f"\n\n[Showing the first {kept.count(chr(10)) + 1} of {len(lines)} lines. The full file is stored.]"
+
+
+def _image_text(name: str, ext: str, mime: str, data: bytes) -> str:
+    """OCR text of a picture through tesseract when it is installed, else a marker that points at view_image."""
+    kind = mime or ext
+    if _which("tesseract"):
+        try:
+            png = data
+            try:
+                from PIL import Image
+
+                buf = io.BytesIO()
+                Image.open(io.BytesIO(data)).convert("RGB").save(buf, "PNG")  # one format tesseract always reads
+                png = buf.getvalue()
+            except Exception:  # noqa: BLE001 - hand tesseract the original bytes
+                pass
+            text = _run(["tesseract", "stdin", "stdout"], OCR_IMAGE_TIMEOUT_S, png).decode("utf-8", errors="replace").strip()
+            if text:
+                return "[OCR text read from the image " + name + "]\n\n" + text
+        except Exception:  # noqa: BLE001 - OCR failing is the same as no OCR
+            pass
+    return (f"[File {name} ({kind}, {len(data)} bytes). No text could be extracted; this is an image, and view_image looks at pictures. "
+            "The file is stored and can be referred to by name.]")
+
+
+def _ocr_pdf(data: bytes, pages: int) -> list[str] | None:
+    """OCR the first OCR_PDF_PAGES pages of a PDF with no text layer (pdftoppm + tesseract), or None when either binary is
+    missing or nothing came out. Bounded per page and in total."""
+    if not (_which("pdftoppm") and _which("tesseract")):
+        return None
+    import tempfile
+    import time
+
+    t0 = time.monotonic()
+    out: list[str] = []
+    with tempfile.TemporaryDirectory(prefix="grain-ocr-") as d:
+        src = Path(d) / "in.pdf"
+        src.write_bytes(data)
+        for n in range(1, min(pages, OCR_PDF_PAGES) + 1):
+            left = OCR_TOTAL_TIMEOUT_S - (time.monotonic() - t0)
+            if left <= 1:
+                out.append("[OCR stopped: time budget used]")
+                break
+            base = str(Path(d) / f"p{n}")
+            try:
+                _run(["pdftoppm", "-r", str(OCR_PDF_DPI), "-f", str(n), "-l", str(n), "-png", "-singlefile", str(src), base], min(OCR_PAGE_TIMEOUT_S, left))
+                png = Path(base + ".png").read_bytes()
+                out.append(_run(["tesseract", "stdin", "stdout"], min(OCR_PAGE_TIMEOUT_S, max(1.0, left)), png).decode("utf-8", errors="replace").strip())
+            except Exception:  # noqa: BLE001 - one bad page does not lose the rest
+                out.append("")
+    return out if any(out) else None
+
+
+def _pdf_page_texts(data: bytes) -> tuple[list[str], bool]:
+    """(page texts, ocr). A scan with no text layer is OCRed when the binaries exist."""
+    from pypdf import PdfReader
+
+    pages = list(PdfReader(io.BytesIO(data)).pages)[:MAX_PDF_PAGES]
+    texts = [(p.extract_text() or "") for p in pages]
+    if pages and sum(len(t.strip()) for t in texts) < SCAN_CHARS_PER_PAGE * len(pages):
+        got = _ocr_pdf(data, len(pages))
+        if got:
+            return got, True
+    return texts, False
+
+
+def _more_parsed(name: str, ext: str, mime: str, data: bytes) -> str | None:
+    """The formats extract_text does not read inline. None = not mine, or it failed (the caller degrades)."""
+    try:
+        if ext in (".xlsx", ".xlsm") or mime == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+            return _xlsx_text(data)
+        if ext == ".pptx" or mime == "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+            return _pptx_text(data)
+        if ext in (".odt", ".ods", ".odp"):
+            return _odf_text(ext, data)
+        if ext == ".epub":
+            return _epub_text(data)
+        if ext == ".rtf":
+            return _rtf_text(data)
+        if ext in (".csv", ".tsv"):
+            return _cap_delimited(data.decode("utf-8", errors="replace"))
+        if ext in IMAGE_EXT or (mime.startswith("image/") and mime != "image/svg+xml"):
+            return _image_text(name, ext, mime, data)
+    except Exception:  # noqa: BLE001 - extraction never raises; a damaged file becomes the "no text" marker
+        return None
+    return None

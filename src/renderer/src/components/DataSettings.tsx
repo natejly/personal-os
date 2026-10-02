@@ -72,12 +72,16 @@ export default function DataSettings(): JSX.Element {
       </div>
 
       {info?.pending_restore && (
-        <p className="muted" role="status">
-          A restore is waiting for the next start. <button className="ghost-btn" onClick={() => void window.os.data.relaunch()}>Restart now</button>{' '}
-          <button className="ghost-btn" onClick={() => void cancelRestore()}>Cancel restore</button>
-        </p>
+        <div className="data-row pending" role="status">
+          <span className="toggle-text"><b>A restore is waiting</b><small>It is applied the next time Grain starts.</small></span>
+          <div className="button-row">
+            <button className="ghost-btn" onClick={() => void cancelRestore()}>Cancel restore</button>
+            <button className="ghost-btn" onClick={() => void window.os.data.relaunch()}>Restart now</button>
+          </div>
+        </div>
       )}
 
+      {info && info.backups.length > 0 && <h4>Backups</h4>}
       {info && info.backups.length > 0 && (
         <ul className="data-list" aria-label="Backups">
           {info.backups.map((b) => {
@@ -85,13 +89,14 @@ export default function DataSettings(): JSX.Element {
             return (
               <li key={b.name} className="data-row">
                 <span className="toggle-text"><b>{when}</b><small>{KIND_LABEL[b.kind] ?? b.kind} · {formatBytes(b.size)}</small></span>
-                <button className="ghost-btn" onClick={() => void restore(b.name, when)}><RotateCcw size={14} /> Restore…</button>
+                <button className="ghost-btn sm" onClick={() => void restore(b.name, when)}><RotateCcw size={13} /> Restore…</button>
               </li>
             )
           })}
         </ul>
       )}
 
+      <h4>Export and location</h4>
       <div className="data-row">
         <span className="toggle-text"><b>Export all data</b><small>A zip with a full database copy, your uploads, and conversations, memories and documents as readable Markdown and JSON. API keys and tokens stay in your Keychain and are not included, but the export holds everything else Grain knows, so keep it private.</small></span>
         <button className="ghost-btn" onClick={() => void exportAll()} disabled={busy !== null}><Download size={14} /> {busy === 'export' ? 'Exporting…' : 'Export all data…'}</button>

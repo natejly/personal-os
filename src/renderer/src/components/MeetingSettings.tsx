@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
-  AlertTriangle, Check, Copy, FileText, Mic, RefreshCw, Shield, Sparkles, Trash2, Zap
+  AlertTriangle, Check, Copy, FileText, Mic, RefreshCw, Shield, Sparkles, Trash2, Volume2, Zap
 } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
@@ -192,16 +192,24 @@ export default function MeetingSettings({ variant = 'page' }: { variant?: 'page'
         <input type="checkbox" checked={cfg.enabled} onChange={(e) => patch({ enabled: e.target.checked })} />
         <span className="switch" />
       </label>
-      <div className="mtg-sources">
-        <label>
-          <input type="checkbox" checked={cfg.sources.includes('mic')} onChange={() => toggleSource('mic')} />
-          Capture my microphone
-        </label>
-        <label>
-          <input type="checkbox" checked={cfg.sources.includes('output')} onChange={() => toggleSource('output')} disabled={!hasSystemAudio} />
-          Capture system audio{!hasSystemAudio && ' (needs macOS 14.2+ or a loopback device)'}
-        </label>
-      </div>
+      <label className="toggle-row plain">
+        <span className="toggle-icon"><Mic size={15} /></span>
+        <span className="toggle-text">
+          <b>Capture my microphone</b>
+          <small>Your side of the call.</small>
+        </span>
+        <input type="checkbox" checked={cfg.sources.includes('mic')} onChange={() => toggleSource('mic')} />
+        <span className="switch" />
+      </label>
+      <label className="toggle-row plain">
+        <span className="toggle-icon"><Volume2 size={15} /></span>
+        <span className="toggle-text">
+          <b>Capture system audio</b>
+          <small>{hasSystemAudio ? 'The far end of the call.' : 'Needs macOS 14.2+ or a loopback device.'}</small>
+        </span>
+        <input type="checkbox" checked={cfg.sources.includes('output')} onChange={() => toggleSource('output')} disabled={!hasSystemAudio} />
+        <span className="switch" />
+      </label>
       <AudioDevicePicker
         devices={meetingStatus.devices} micValue={cfg.micDevice} outputValue={cfg.outputDevice}
         nativeMic={nativeMic} nativeSystem={nativeSystem}

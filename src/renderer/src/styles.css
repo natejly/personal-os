@@ -782,6 +782,8 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .modal label.toggle-row .toggle-text { gap: 2px; font-size: 13px; }
 .modal label.toggle-row .toggle-text small { font-size: 12px; line-height: 1.45; }
 .modal .toggle-row input { width: 1px; padding: 0; border: 0; }
+/* A switch that cannot be flipped right now (no system audio to capture, say) reads as unavailable. */
+.toggle-row:has(input:disabled) { opacity: 0.55; cursor: default; }
 .accent-picks { display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 0 2px; }
 .accent-swatch {
   width: 28px; height: 28px; padding: 0; border-radius: 50%;
@@ -790,7 +792,6 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 }
 .accent-swatch.on { border-color: var(--text); }
 .accent-swatch:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
-.accent-name { font-size: 12px; color: var(--text-muted); }
 .input-row { display: flex; gap: 6px; align-items: center; }
 .test-row { display: flex; align-items: center; gap: 10px; margin: -4px 0 14px; font-size: 13px; }
 .test-msg.ok { color: var(--ok); }
@@ -819,9 +820,63 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .settings-tabs button.active { background: var(--hover); color: var(--text); font-weight: 500; }
 .settings-tabs button.active svg { color: var(--accent); }
 .settings-tabs button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The rail is grouped; each group opens with a small label. */
+.settings-tab-group { padding: 14px 10px 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-faint); }
+.settings-tab-group:first-child { padding-top: 2px; }
 .settings-pane { flex: 1; min-width: 0; overflow-y: auto; }
-.settings-pane section { border-bottom: 0; padding: 20px 28px; }
-.settings-modal footer { position: static; }
+/* `.settings-modal` is in the selector to outrank `.modal section`, which otherwise sets the padding. */
+.settings-modal .settings-pane > section { border-bottom: 0; padding: 20px 28px 28px; }
+/* A card inside a tab is not a tab: it keeps its own padding, not the pane's. */
+.settings-pane > section section:not(.modal-free *) { padding: 0; }
+/* One rhythm for every tab: a column with a single gap, and nothing inside brings a margin of its own.
+   The Knowledge base tab lays itself out (.knowledge-section). */
+.settings-pane > section:not(.knowledge-section),
+.settings-pane .mtg-settings, .settings-pane .usage, .settings-pane .perm-rules, .settings-pane .workspace-roots {
+  display: flex; flex-direction: column; gap: 14px;
+}
+.settings-pane > section:not(.knowledge-section) > *,
+.settings-pane > section .mtg-settings > *, .settings-pane > section .usage > *,
+.settings-pane > section .perm-rules > *, .settings-pane > section .workspace-roots > * { margin: 0; }
+/* The tab's title is a heading, so the uppercase eyebrow is left to the sections under it. */
+.settings-pane h3:not(.modal-free *) { font-size: 15px; font-weight: 600; text-transform: none; letter-spacing: 0; color: var(--text); }
+.settings-pane > section:not(.knowledge-section) > h3 { margin-bottom: -8px; }
+.settings-pane .knowledge-head h3:not(.modal-free *) { margin: 0 auto 0 0; }
+.settings-pane h4:not(.modal-free *) { margin: 12px 0 -4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-faint); }
+.settings-pane .trash-group h4 { margin: 12px 0 4px; }
+/* What a setting is, and one line about it: the same block beside a switch, above a field, left of a control. */
+.settings-pane .toggle-text:not(.modal-free *) { gap: 2px; min-width: 0; font-size: 13px; }
+.settings-pane .toggle-text:not(.modal-free *) b { font-weight: 500; color: var(--text); }
+.settings-pane .toggle-text:not(.modal-free *) small { font-size: 12px; line-height: 1.45; color: var(--text-muted); }
+.settings-pane label.toggle-row { padding: 0; }
+/* Above a field the block is only as tall as its text; `flex: 1` is for the row layouts. */
+.settings-pane label:not(.toggle-row):not(.setting-row) > .toggle-text { flex: none; }
+/* A setting with a compact control is a row: label and description left, control right at its own width. */
+.settings-pane .setting-row, .settings-pane label.setting-row { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 16px; }
+.settings-pane .setting-row > .toggle-text { flex: 1; }
+.settings-pane .setting-row > :not(.toggle-text) { flex: none; }
+.settings-pane .setting-row > input, .settings-pane .setting-row > select { width: auto; min-width: 160px; }
+.settings-pane input[type=number]:not(.modal-free *) { width: 96px; min-width: 0; font-variant-numeric: tabular-nums; }
+.num-unit { display: inline-flex; align-items: center; gap: 8px; }
+.num-unit em { font-style: normal; font-size: 12px; color: var(--text-muted); }
+.settings-pane .button-row { display: flex; flex-wrap: wrap; gap: 8px; }
+/* Short rows that belong together (the Views switches) sit in one bordered list. */
+.setting-list { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 10px; }
+.settings-pane .setting-list > label.toggle-row { margin: 0; padding: 9px 12px; }
+.setting-list > * + * { border-top: 1px solid var(--border); }
+/* The activity-style field (Meetings) is the same row here; `.modal label` had stacked it. */
+.settings-pane label.act-field { flex-direction: row; align-items: center; gap: 16px; padding: 0; border-bottom: 0; }
+.settings-pane .act-field b { color: var(--text); }
+.settings-pane .act-field small { font-size: 12px; line-height: 1.45; color: var(--text-muted); }
+.settings-pane .act-field > input, .settings-pane .act-field > select { flex: 0 1 280px; width: 280px; }
+/* A list with nothing in it yet, inside a pane or a card: one quiet line rather than a full-page empty state. */
+.empty-row { display: flex; align-items: center; gap: 8px; margin: 0; padding: 14px; border: 1px dashed var(--border-strong); border-radius: 10px; color: var(--text-muted); font-size: 13px; }
+.empty-row svg { flex-shrink: 0; color: var(--text-faint); }
+/* Focus is parked on the dialog itself after "Keep editing"; a ring around the whole window says nothing. */
+.settings-modal[tabindex]:focus-visible { outline: 0 !important; }
+.settings-modal footer { position: static; align-items: center; }
+/* "Unsaved changes", and the question asked before a draft is thrown away, sit left of the buttons. */
+.settings-modal .footer-note { margin-right: auto; font-size: 13px; color: var(--text-muted); }
+.settings-modal .footer-note.ask { color: var(--text); font-weight: 500; }
 /* The knowledge graph and the memory list need room side by side: this tab widens the dialog. */
 .modal.settings-modal.wide-pane { width: min(1240px, calc(100vw - 60px)); height: min(860px, calc(100vh - 60px)); }
 /* Knowledge base: the Memory panel and the document library, filling the pane instead of scrolling it. */
@@ -843,6 +898,10 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
   .settings-body { flex-direction: column; }
   .settings-tabs { flex: 0 0 auto; flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--border); padding: 8px 10px; }
   .settings-tabs button { flex: 0 0 auto; }
+  /* In the strip a group label is an inline marker between runs of tabs. */
+  .settings-tab-group, .settings-tab-group:first-child { flex: 0 0 auto; align-self: center; padding: 0 4px 0 12px; }
+  .settings-tab-group:first-child { padding-left: 2px; }
+  .settings-modal .settings-pane > section { padding-left: 14px; padding-right: 14px; }
 }
 
 ::-webkit-scrollbar { width: 10px; }
@@ -885,10 +944,6 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 @keyframes slide-in { from { transform: translateY(8px); opacity: 0; } to { transform: none; opacity: 1; } }
 
 /* ---------- Pending sends (the undo window on outgoing mail) ---------- */
-/* ---------- Send hold (Settings → Integrations) ---------- */
-.send-hold { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
-.send-hold label.inline { display: flex; align-items: center; gap: 8px; }
-.send-hold label.inline input { width: 80px; }
 
 /* Rendered inside .toasts, so the two share one bottom-right stack. */
 .pending-sends { display: flex; flex-direction: column; gap: 8px; }
@@ -1029,6 +1084,17 @@ button.tag:disabled { cursor: default; }
 .mem-meta { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--text-faint); }
 .mem-meta select { padding: 2px 6px; font-size: 11px; border-radius: 6px; }
 .mem-actions { display: flex; flex-direction: column; gap: 2px; }
+/* Secondary tools under the add row: history on the left, tidy-up on the right. */
+.mem-tools { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; }
+.mem-tools .muted { margin: 0; }
+/* A tidy-up suggestion is waiting on the user, so it wears the waiting border and keeps its two
+   answers under the text, where a narrow split pane still has room for them. */
+.mem-row.proposal { flex-direction: column; border: 1px dashed var(--await-border); background: var(--await-fill); }
+.mem-row.proposal .mem-actions { flex-direction: row; justify-content: flex-end; gap: 6px; }
+/* A replaced or forgotten memory stays quiet: outlined, not filled. */
+.mem-row.history { background: none; border: 1px solid var(--border); }
+.mem-row.proposal .mem-main p, .mem-row.history .mem-main p { cursor: default; }
+.mem-main p.mem-before { text-decoration: line-through; color: var(--text-muted); }
 
 /* ---------- Voice (writing style) ---------- */
 .style-body { display: flex; flex-direction: column; gap: 18px; }
@@ -1070,7 +1136,7 @@ button.tag:disabled { cursor: default; }
 .doc-head { display: flex; align-items: center; gap: 8px; color: var(--text-muted); }
 .doc-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-weight: 500; }
 .doc-card .ghost { opacity: 0; }
-.doc-card:hover .ghost { opacity: 1; }
+.doc-card:hover .ghost, .doc-card .ghost:focus-visible { opacity: 1; }
 .doc-preview { margin: 0; font-size: 12px; color: var(--text-muted); line-height: 1.45; max-height: 52px; overflow: hidden; }
 .doc-meta { font-size: 11px; color: var(--text-faint); }
 .modal.wide { width: 760px; }
@@ -1090,7 +1156,6 @@ button.tag:disabled { cursor: default; }
 .project-tools[open] summary { margin-bottom: 10px; }
 
 /* ---------- Graph ---------- */
-.memory-panel .page-header .search { width: 170px; }
 .add-inline { display: flex; align-items: center; gap: 2px; }
 .add-inline input { width: 140px; padding: 5px 10px; }
 .graph-body { flex: 1; display: flex; min-height: 0; }
@@ -1167,7 +1232,6 @@ textarea.instructions { width: 100%; background: var(--bg-input); border: 1px so
 textarea.instructions:focus { border-color: var(--accent); }
 
 /* ---------- Memory panel (memory list + knowledge graph in one panel) ---------- */
-.memory-panel .page-header .header-right { gap: 8px; }
 .memory-body { flex: 1; display: flex; min-height: 0; }
 .memory-body .graph-body { flex: 1; min-width: 0; }
 .mem-pane { display: flex; flex-direction: column; min-height: 0; overflow: hidden; background: var(--bg); }
@@ -1202,6 +1266,7 @@ textarea.instructions:focus { border-color: var(--accent); }
 /* One selected look, whichever class the component uses: a neutral raised cell. The accent fill is
    kept for primary actions, so a view switch never competes with the button beside it. */
 .seg button.active, .seg button.on, .seg button[aria-pressed='true'] { background: var(--active); color: var(--text); font-weight: 500; }
+.seg .count { font-size: 11px; font-weight: 400; color: var(--text-faint); font-variant-numeric: tabular-nums; }
 
 /* Floating graph controls, so the canvas keeps the full pane */
 .graph-tools { position: absolute; top: 10px; left: 10px; z-index: 2; display: flex; align-items: center; gap: 2px; padding: 4px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elev); box-shadow: 0 2px 8px rgba(0,0,0,0.18); }
@@ -1261,11 +1326,18 @@ textarea.instructions:focus { border-color: var(--accent); }
 /* ---------- Tool permissions ---------- */
 .tool-perms { display: flex; flex-direction: column; gap: 4px; }
 .tool-group h5 { display: flex; align-items: center; gap: 6px; margin: 10px 0 4px; font-size: 12px; font-weight: 600; color: var(--text-muted); }
+.tool-group:first-child h5 { margin-top: 0; }
 .tool-perm { display: flex; align-items: center; gap: 8px; }
+.tool-perm.row { gap: 16px; }
 .tool-perms.compact .tool-perm { padding: 3px 0; font-size: 12px; }
 .tool-perms.compact .tool-perm.off { opacity: 0.55; }
-.tool-perm-name { flex: 1; display: flex; flex-direction: column; text-transform: capitalize; }
-.tool-perm-name small { color: var(--text-faint); font-size: 10px; text-transform: none; }
+/* Names arrive already worded for a person ("Search documents"), so nothing is re-cased here. */
+.tool-perm-name { flex: 1; display: flex; flex-direction: column; }
+.tool-perm-name small { color: var(--text-faint); font-size: 10px; }
+/* The description was written for the model; two lines are enough to recognise the tool, the rest is in its title. */
+.tool-perm .clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.tool-perm .seg { flex: none; }
+.tool-perm .seg button { min-width: 40px; text-transform: capitalize; }
 .tool-perms.compact select { font-size: 11px; padding: 3px 6px; border-radius: 6px; background: var(--bg-input); border: 1px solid var(--border-strong); width: auto; }
 .tool-perm b small { font-weight: 400; }
 .ctx-tools { padding: 0 0 6px 24px; }
@@ -1374,8 +1446,10 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .integration-head > div { flex: 1; display: flex; flex-direction: column; gap: 2px; }
 .integration-head small { color: var(--text-muted); display: inline-flex; align-items: center; gap: 4px; }
 .integration-warn { display: flex; align-items: center; gap: 6px; margin: 10px 0 0; font-size: 12px; color: var(--danger); }
-.tasks-sync { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
-.tasks-sync-row { display: flex; align-items: center; gap: 8px; }
+.tasks-sync { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+/* The column's gap spaces these; the switch rows bring a bottom margin from the dialog's label rule. */
+.modal .tasks-sync label.toggle-row:not(.modal-free *) { margin: 0; }
+.tasks-sync-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .tasks-sync-row select { max-width: 180px; }
 .tasks-sync-row small { margin-left: auto; }
 .g-logo { width: 32px; height: 32px; border-radius: 8px; background: #fff; color: #4285f4; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; font-size: 18px; }
@@ -1559,6 +1633,8 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .mcp { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
 .mcp > p { margin: 0; }
 .mcp .empty { font-size: 12px; }
+/* The column aligns its children to the start; the empty line spans it like the server cards do. */
+.mcp > .empty-row { align-self: stretch; }
 .mcp-server { width: 100%; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elev); }
 .mcp-server.open { border-color: var(--border-strong); }
 .mcp-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; }
@@ -1919,10 +1995,6 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 
 /* ---------- Usage & cost (Settings) ---------- */
 .usage-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
-.usage-ranges { display: flex; gap: 4px; }
-.usage-ranges button { padding: 4px 10px; border-radius: 6px; font-size: 12px; color: var(--text-muted); background: var(--hover); }
-.usage-ranges button.active { background: var(--active); color: var(--text); font-weight: 600; }
-.usage-head .icon-btn { margin-left: auto; }
 .spin { animation: spin 0.9s linear infinite; }
 .usage-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; margin-bottom: 14px; }
 .usage-tile { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-elev); }
@@ -1930,7 +2002,6 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .usage-tile-value { font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .usage-tile-sub { font-size: 10.5px; color: var(--text-faint); }
 .usage-charts { display: flex; flex-direction: column; }
-.usage-sub { margin: 18px 0 4px; font-size: 12px; font-weight: 600; color: var(--text-faint); }
 .usage-prices { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-top: 8px; }
 .usage-prices table { width: 100%; border-collapse: collapse; font-size: 12px; }
 /* --text-faint is only 4.01:1 over the --hover header fill. */
@@ -2478,18 +2549,24 @@ select:focus-visible {
 .approval-rules form { flex-wrap: nowrap; }
 .approval-rules form input { flex: 1; min-width: 0; font-family: inherit; }
 .perm-rules { display: flex; flex-direction: column; gap: 10px; margin: 14px 0; }
-.perm-rule-group ul { list-style: none; margin: 4px 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
-.perm-rule-group li { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 12px; }
+.perm-rule-group, .perm-rule-test { display: flex; flex-direction: column; gap: 6px; }
+.perm-rule-group ul, .workspace-roots .plain-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.perm-rule-group ul:empty { display: none; }
+/* A saved rule or folder: one quiet row, its text on the left and the remove button on the right. */
+.perm-rule-group li, .workspace-roots .plain-list li { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 3px 4px 3px 10px; border-radius: 8px; background: var(--hover); font-size: 12px; }
+.perm-rule-group li code, .workspace-roots .plain-list li code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
 .perm-rule-add { display: flex; gap: 6px; align-items: center; }
-.perm-rule-test { display: flex; flex-direction: column; gap: 6px; }
+.perm-rule-test p { margin: 0; }
 .workspace-roots { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
-.workspace-roots .plain-list { list-style: none; margin: 0; padding: 0; }
-.workspace-roots .chip-check-row { justify-content: space-between; cursor: default; }
 .workspace-roots-add { display: flex; gap: 8px; }
 .workspace-roots-add input { flex: 1; min-width: 0; }
 /* Settings → Data */
-.data-row { margin-top: 10px; display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.data-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .data-row .toggle-text { display: flex; flex-direction: column; gap: 2px; font-size: 13px; min-width: 0; overflow-wrap: anywhere; }
-.data-row .toggle-text small { font-size: 12px; line-height: 1.45; color: var(--muted, inherit); }
-.data-row .ghost-btn { flex: none; white-space: nowrap; }
-.data-list { list-style: none; margin: 6px 0 0; padding: 0; max-height: 240px; overflow-y: auto; }
+.data-row .toggle-text small { font-size: 12px; line-height: 1.45; color: var(--text-muted); }
+.data-row .ghost-btn, .data-row .button-row { flex: none; white-space: nowrap; }
+/* A staged restore is waiting on the user: restart to apply it, or cancel. */
+.data-row.pending { padding: 10px 12px; border: 1px dashed var(--await-border); border-radius: 10px; background: var(--await-fill); }
+.data-list { list-style: none; margin: 0; padding: 0; max-height: 240px; overflow-y: auto; border: 1px solid var(--border); border-radius: 10px; }
+.data-list .data-row { padding: 9px 12px; }
+.data-list .data-row + .data-row { border-top: 1px solid var(--border); }

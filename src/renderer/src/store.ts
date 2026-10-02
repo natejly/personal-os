@@ -33,8 +33,9 @@ export type DocMode = 'edit' | 'split' | 'preview'
 /** How the Memory panel lays out its halves: the memory list, the knowledge graph, the voice profile. */
 export type MemoryMode = 'split' | 'list' | 'graph' | 'style'
 export type ContextTab = 'last' | 'preview' | 'trace'
-/** Settings sections. 'knowledge' holds what used to be the sidebar's Knowledge Base: memory and documents. */
-export type SettingsTab = 'provider' | 'knowledge' | 'memory' | 'integrations' | 'meetings' | 'tools' | 'usage' | 'spaces' | 'modules' | 'behavior' | 'data' | 'trash'
+/** Settings sections. 'knowledge' holds what used to be the sidebar's Knowledge Base: memory and documents.
+ *  'modules' is the tab labelled Views; the id is kept so existing callers keep working. */
+export type SettingsTab = 'provider' | 'knowledge' | 'memory' | 'integrations' | 'meetings' | 'tools' | 'usage' | 'spaces' | 'modules' | 'behavior' | 'appearance' | 'advanced' | 'data' | 'trash'
 export type KnowledgeTab = 'memory' | 'documents'
 export type { Scope, SessionStatus }
 

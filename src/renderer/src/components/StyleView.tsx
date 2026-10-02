@@ -69,7 +69,7 @@ function SampleRow({ s }: { s: StyleSample }): JSX.Element {
  * can be thrown away and relearned. Editing the text freezes auto-relearn (the backend's `edited`
  * flag) so the app never quietly overwrites wording the user chose.
  */
-export default function StyleView({ projectId, embedded = false }: { projectId?: string; embedded?: boolean }): JSX.Element {
+export default function StyleView({ projectId }: { projectId?: string }): JSX.Element {
   const style = useStore((s) => s.style)
   const samples = useStore((s) => s.styleSamples)
   const learning = useStore((s) => s.styleLearning)
@@ -95,7 +95,7 @@ export default function StyleView({ projectId, embedded = false }: { projectId?:
   }
 
   return (
-    <div className={`page-body style-body${embedded ? ' embedded' : ''}`}>
+    <div className="page-body style-body">
       {!settings.learnStyle && (
         <p className="empty-hint">
           Learning your writing style is off globally.
@@ -192,7 +192,7 @@ export default function StyleView({ projectId, embedded = false }: { projectId?:
         </p>
         <div className="add-row style-paste">
           <textarea rows={2} placeholder="Paste a piece of your own writing…" value={paste} onChange={(e) => setPaste(e.target.value)} />
-          <button className="primary-btn" onClick={() => void add()} disabled={!paste.trim()}><Plus size={14} /> Add sample</button>
+          <button className="ghost-btn" onClick={() => void add()} disabled={!paste.trim()}><Plus size={14} /> Add sample</button>
         </div>
         {samples.length === 0 && <p className="empty-hint">No samples in this scope yet.</p>}
         {samples.map((s) => <SampleRow key={s.id} s={s} />)}

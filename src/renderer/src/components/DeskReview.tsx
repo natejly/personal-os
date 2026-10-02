@@ -3,6 +3,7 @@ import { Check, ChevronRight, FileCheck2, TriangleAlert, X } from 'lucide-react'
 import type { DeskOutput, FullDesk, PromotionKind, PromotionResult } from '@shared/types'
 import { api, getBase, getToken } from '../lib/api'
 import { useStore } from '../store'
+import InlineNote from './InlineNote'
 
 /**
  * The Output tab, and the reason the feature exists: the one place a desk's work crosses into the
@@ -175,10 +176,14 @@ export default function DeskReview({ desk }: { desk: FullDesk }): JSX.Element {
     }
   }
 
-  const sendBack = (): void => {
-    const note = prompt('What needs changing? It goes back as a message and the desk picks the work up again.')
-    if (!note?.trim()) return
-    void messageDesk(desk.id, note.trim())
+  const [noting, setNoting] = useState<'back' | 'reject' | null>(null)
+  const sendBack = (note: string): void => {
+    setNoting(null)
+    void messageDesk(desk.id, note)
+  }
+  const reject = (note: string): void => {
+    setNoting(null)
+    void rejectOutputs(desk.id, selection.length > 0 ? selection.map((o) => o.id) : undefined, note)
   }
 
   if (desk.outputs.length === 0) {
@@ -218,19 +223,22 @@ export default function DeskReview({ desk }: { desk: FullDesk }): JSX.Element {
         />
       ))}
 
+      {noting === 'back' && (
+        <InlineNote placeholder="What needs changing? The desk picks the work up again." submitLabel="Send back" onSubmit={sendBack} onCancel={() => setNoting(null)} />
+      )}
+      {noting === 'reject' && (
+        <InlineNote optional danger placeholder="Why reject? A note is optional and goes on the desk." submitLabel="Reject" onSubmit={reject} onCancel={() => setNoting(null)} />
+      )}
       <footer className="desk-review-foot">
         <button className="primary-btn" disabled={busy || selection.length === 0 || blocked} title={blocked ? 'Pick a doc to append to' : undefined} onClick={() => void accept()}>
           <Check size={13} /> Accept selected{selection.length > 0 ? ` (${selection.length})` : ''}
         </button>
-        <button className="ghost-btn" onClick={sendBack}>Send back</button>
+        <button className="ghost-btn" aria-expanded={noting === 'back'} onClick={() => setNoting(noting === 'back' ? null : 'back')}>Send back</button>
         <button
           className="ghost-btn danger"
           disabled={busy || undecided.length === 0}
-          onClick={() => {
-            const note = prompt('Reject these outputs? A note is optional and goes on the desk.')
-            if (note === null) return
-            void rejectOutputs(desk.id, selection.length > 0 ? selection.map((o) => o.id) : undefined, note)
-          }}
+          aria-expanded={noting === 'reject'}
+          onClick={() => setNoting(noting === 'reject' ? null : 'reject')}
         >
           <X size={13} /> Reject{selection.length > 0 ? ' selected' : ' all'}
         </button>

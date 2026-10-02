@@ -13,6 +13,7 @@ import { useCanvas } from '../canvas/store'
 import { ToolGlobalToggles } from './ToolPermissions'
 import PermissionRules from './PermissionRules'
 import { WorkspaceRoots } from './WorkspaceRoots'
+import CoworkSettings from './CoworkSettings'
 import GoogleSettings from './GoogleSettings'
 import MeetingSettings from './MeetingSettings'
 import SupportSettings from './SupportSettings'
@@ -300,6 +301,9 @@ export default function SettingsModal(): JSX.Element {
                 <input type="checkbox" checked={draft.readerFallback !== false} onChange={(e) => patch({ readerFallback: e.target.checked })} />
                 Retry blocked or JavaScript-only pages through Jina Reader (Jina sees the page address)
               </label>
+              <h3 id="cowork-settings">Cowork</h3>
+              <p className="muted">Limits and reach for desks: the parallel sessions that work on a task in their own folder.</p>
+              <CoworkSettings draft={draft} patch={patch} />
             </section>}
 
             {tab === 'data' && <DataSettings />}

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Archive, ArchiveRestore, Check, ChevronRight, CircleHelp, Pause, Play, Send, Settings2, ShieldQuestion, Square, Trash2, TriangleAlert, X } from 'lucide-react'
-import type { DeskAutonomy, DeskStatus, FullDesk, PendingApproval, PromotionKind } from '@shared/types'
+import type { DeskAutonomy, DeskStatus, FullDesk, PendingApproval, PromotionKind, ToolEvent } from '@shared/types'
 import { retainSession, useSession, useStore } from '../store'
 import MessageView from './Message'
 import DeskPlan from './DeskPlan'
@@ -8,6 +8,8 @@ import DeskFiles from './DeskFiles'
 import DeskBrowser from './DeskBrowser'
 import { defaultDeskTab, type DeskTab } from '../lib/deskFiles'
 import DeskReview from './DeskReview'
+import DeskApprovalCard from './DeskApprovalCard'
+import InlineNote from './InlineNote'
 import { AUTONOMY, STATUS_LABEL, deskElapsed, fmtDur, useTick } from './DeskRail'
 
 type Tab = DeskTab
@@ -93,28 +95,16 @@ function SteerBox({ deskId, live, disabled, placeholder }: {
  * The cards this desk is waiting on, answered in place. A parked card's run has let go, so answering
  * it here is also what wakes the desk; a live one resumes the run that is holding it.
  */
-function WaitingCards({ cards }: { cards: PendingApproval[] }): JSX.Element | null {
-  const answer = useStore((s) => s.answerDeskCard)
-  const busy = useStore((s) => s.deskBusy)
-  const shown = cards.filter((a) => a.tool !== 'desk_ask')
-  if (shown.length === 0) return null
+function WaitingCards({ cards, conversationId, events }: { cards: PendingApproval[]; conversationId: string; events: ToolEvent[] }): JSX.Element | null {
+  if (cards.length === 0) return null
   return (
     <div className="desk-banner ask">
       <ShieldQuestion size={14} />
       <div className="desk-cards">
-        <b>{shown.length === 1 ? 'It is waiting on your approval' : `It is waiting on ${shown.length} approvals`}</b>
-        {shown.map((a) => (
+        <b>{cards.length === 1 ? 'It is waiting on you' : `It is waiting on ${cards.length} things`}</b>
+        {cards.map((a) => (
           <div key={a.call_id} className="desk-card">
-            <div className="desk-card-head">
-              <code>{a.tool.replace(/_/g, ' ')}</code>
-              {a.danger && <span className="tag">{a.danger}</span>}
-              {a.parked_at && !a.live && <span className="muted small">parked — answering wakes the desk</span>}
-            </div>
-            <pre className="approval-args">{JSON.stringify(a.args, null, 2)}</pre>
-            <div className="approval-actions">
-              <button className="primary-btn" disabled={busy} onClick={() => void answer(a.call_id, true)}><Check size={13} /> Allow</button>
-              <button className="ghost-btn danger" disabled={busy} onClick={() => void answer(a.call_id, false)}><X size={13} /> Deny</button>
-            </div>
+            <DeskApprovalCard approval={a} conversationId={conversationId} event={events.find((e) => e.id === a.call_id && e.needs_approval)} />
           </div>
         ))}
       </div>
@@ -175,6 +165,7 @@ export default function DeskDetail(): JSX.Element | null {
   const [tab, setTab] = useState<Tab>('activity')
   const [titleDraft, setTitleDraft] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
+  const [sendingBack, setSendingBack] = useState(false)
   const scroller = useRef<HTMLDivElement>(null)
 
   const deskId = desk?.id ?? null
@@ -245,10 +236,9 @@ export default function DeskDetail(): JSX.Element | null {
   // `promote_failed` is undecided too: its claim was released so Accept can retry it (DeskReview agrees).
   const undecided = desk.outputs.filter((o) => o.status === 'proposed' || o.status === 'stale' || o.status === 'promote_failed')
 
-  const sendBack = (): void => {
-    const note = prompt('What should it do differently? This goes back as a message and wakes the desk.')
-    if (!note?.trim()) return
-    void messageDesk(desk.id, note.trim())
+  const sendBack = (note: string): void => {
+    setSendingBack(false)
+    void messageDesk(desk.id, note)
   }
   // Seen first, then archived, so nothing the desk raised is left counted anywhere. Sequential
   // because both calls write the desk row back, and the slower one wins.
@@ -290,7 +280,7 @@ export default function DeskDetail(): JSX.Element | null {
             {desk.status === 'review' && (
               <>
                 <button className="primary-btn" disabled={undecided.length === 0} onClick={acceptAll}>Accept all</button>
-                <button className="ghost-btn" onClick={sendBack}>Send back</button>
+                <button className="ghost-btn" aria-expanded={sendingBack} onClick={() => setSendingBack((v) => !v)}>Send back</button>
                 <button className="ghost-btn danger" disabled={undecided.length === 0} onClick={() => void rejectOutputs(desk.id)}>Reject all</button>
               </>
             )}
@@ -320,11 +310,15 @@ export default function DeskDetail(): JSX.Element | null {
         </div>
         {desk.brief && <p className="desk-brief">{desk.brief}</p>}
         {editing && <DeskSettings desk={desk} onClose={() => setEditing(false)} />}
+        {sendingBack && (
+          <InlineNote placeholder="What should it do differently? This wakes the desk." submitLabel="Send back"
+            onSubmit={sendBack} onCancel={() => setSendingBack(false)} />
+        )}
       </header>
 
       {/* Shown from the moment the desk_ask card opens, live or parked: answering here settles that
           card (POST /message routes it onto the approval), so it is the same answer either way. */}
-      {desk.question && !ENDED.includes(desk.status) && (
+      {desk.question && !ENDED.includes(desk.status) && !(desk.approvals ?? []).some((a) => a.tool === 'desk_ask') && (
         <div className="desk-banner ask">
           <CircleHelp size={14} />
           <div>
@@ -344,7 +338,7 @@ export default function DeskDetail(): JSX.Element | null {
           </div>
         </div>
       )}
-      <WaitingCards cards={desk.approvals ?? []} />
+      <WaitingCards cards={desk.approvals ?? []} conversationId={desk.conversation_id} events={messages.flatMap((m) => m.tool_events ?? [])} />
       {desk.status === 'interrupted' && (
         <div className="desk-banner warn">
           <TriangleAlert size={14} />

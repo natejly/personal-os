@@ -47,6 +47,7 @@ const api: GrainApi = {
   },
   closeSelf: () => ipcRenderer.send('window:close-self'),
   minimizeSelf: () => ipcRenderer.send('window:minimize-self'),
+  deskNotify: (payload) => ipcRenderer.send('desk:notify', payload),
   agentBrowser: {
     list: () => ipcRenderer.invoke('agentBrowser:list'),
     show: (session: string) => ipcRenderer.invoke('agentBrowser:show', session),

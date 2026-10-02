@@ -54,6 +54,8 @@ interface Tab {
   dialog: { type: string; message: string; defaultPrompt: string } | null
   navCount: number
   failure: { code: number; desc: string } | null
+  /** Host of a main-frame navigation or redirect the guard cancelled since the last `navigate` started. */
+  blockedHost: string
 }
 
 interface Sess {
@@ -136,12 +138,23 @@ function rawSend(tab: Tab, method: string, params: Json, timeoutMs = CDP_TIMEOUT
   const timeout = new Promise<never>((_r, reject) => {
     tid = setTimeout(() => reject(new BrowserError('timeout', `the browser did not answer ${method} within ${Math.round(timeoutMs / 1000)}s`)), timeoutMs)
   })
-  return Promise.race([tab.wc.debugger.sendCommand(method, params) as Promise<Json>, timeout])
+  const sent = tab.wc.debugger.sendCommand(method, params) as Promise<Json>
+  const racers: Array<Promise<Json>> = [sent, timeout]
+  let poll: NodeJS.Timeout | undefined
+  if (method.startsWith('Input.')) {
+    // An input event that makes the page raise alert/confirm/prompt is not answered until the dialog is handled
+    // (the renderer is parked inside it), so wait for the dialog instead of the reply and let the caller report it.
+    racers.push(new Promise<Json>((resolve) => {
+      poll = setInterval(() => { if (tab.dialog) resolve({}) }, 40)
+    }))
+    sent.catch(() => undefined) // its late rejection (the dialog being dismissed, the tab closing) is not news
+  }
+  return Promise.race(racers)
     .catch((e) => {
       if (e instanceof BrowserError) throw e
       throw new BrowserError('bad_request', `${method} failed: ${msg(e)}`)
     })
-    .finally(() => clearTimeout(tid))
+    .finally(() => { clearTimeout(tid); if (poll) clearInterval(poll) })
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -211,13 +224,13 @@ function createTab(s: Sess): Tab {
   getSession() // make sure the guarded session exists before the first window uses the partition
   const win = newWindow()
   const wc = win.webContents
-  const tab: Tab = { win, wc, enabled: false, dialog: null, navCount: 0, failure: null }
+  const tab: Tab = { win, wc, enabled: false, dialog: null, navCount: 0, failure: null, blockedHost: '' }
   wc.on('will-attach-webview', (e) => e.preventDefault())
   wc.on('will-navigate', (e, to) => {
-    if (forbidden(to)) { e.preventDefault(); s.notes.push(`navigation blocked: ${safeHost(to)}`) }
+    if (forbidden(to)) { e.preventDefault(); tab.blockedHost = safeHost(to); s.notes.push(`navigation blocked: ${safeHost(to)}`) }
   })
   wc.on('will-redirect', (e, to) => {
-    if (forbidden(to)) { e.preventDefault(); s.notes.push(`redirect blocked: ${safeHost(to)}`) }
+    if (forbidden(to)) { e.preventDefault(); tab.blockedHost = safeHost(to); s.notes.push(`redirect blocked: ${safeHost(to)}`) }
   })
   wc.on('did-start-navigation', (_e, _url, isInPlace, isMainFrame) => {
     if (!isMainFrame || isInPlace) return
@@ -656,8 +669,11 @@ async function validateUrl(raw: string): Promise<string> {
 
 async function navigate(s: Sess, tab: Tab, url: string, timeoutMs: number): Promise<void> {
   tab.failure = null
+  tab.blockedHost = ''
   tab.wc.loadURL(url).catch(() => undefined) // failures arrive through did-fail-load
   await settleAndDownloads(s, tab, timeoutMs, 500)
+  // A redirect into a private address is cancelled by the guard; say so as an error, not as an empty page.
+  if (tab.blockedHost) throw new BrowserError('blocked_host', `${url ? safeHost(url) : 'the page'} redirected to ${tab.blockedHost}, which is not a public address; nothing was loaded`, { sess: s, tab })
   const f = tab.failure as Tab['failure'] // set by the did-fail-load listener while we waited
   if (f) {
     if (f.code === -20) throw new BrowserError('blocked_host', `the page at ${safeHost(url)} was blocked (it or a redirect is not a public address)`, { sess: s, tab })

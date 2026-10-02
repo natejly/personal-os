@@ -599,8 +599,16 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
             clean[k] = _check_permission_rules(v)
         elif k == "unattendedApprovals" and v not in ("ask", "deny"):
             raise HTTPException(422, "unattendedApprovals must be 'ask' or 'deny'")
-        elif k == "workspaceRoots" and not (isinstance(v, list) and all(isinstance(x, str) for x in v)):
-            raise HTTPException(422, "workspaceRoots must be a list of folders")
+        elif k == "workspaceRoots":
+            if not (isinstance(v, list) and all(isinstance(x, str) for x in v)):
+                raise HTTPException(422, "workspaceRoots must be a list of folders")
+            # The file tools only work inside the home folder and outside hidden folders and ~/Library. A root they
+            # would refuse is rejected here rather than stored and then silently ignored.
+            for root in v:
+                try:
+                    mac.allowed_path(root)
+                except mac.LocalPathError as e:
+                    raise HTTPException(422, f"{root} cannot be a workspace folder: {e}") from e
     db.set_settings(clean)
     return {k: v for k, v in settings().items() if k not in PRIVATE_SETTINGS}
 

@@ -4,11 +4,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import time
 from contextvars import ContextVar
 from typing import Any, AsyncIterator, Callable
 
 import httpx
+
+log = logging.getLogger("grain.llm")
 
 # Usage accounting. The app registers a listener; callers that know the chat/project set usage_context.
 UsageListener = Callable[[dict[str, Any]], None]
@@ -276,6 +279,38 @@ async def _close_when(cancel: asyncio.Event, response: httpx.Response) -> None:
     await response.aclose()
 
 
+# A provider that is rate limiting (429) or briefly unavailable answers before any token is sent, so the request
+# can be repeated without duplicating output. Retried a few times with backoff; past that the error surfaces.
+RETRY_STATUS = (429, 502, 503, 529)
+STREAM_RETRIES = 3
+
+
+def _retry_delay(r: httpx.Response, attempt: int) -> float:
+    try:
+        return max(0.5, min(float(r.headers.get("retry-after", "")), 20.0))
+    except ValueError:
+        return 2.0 * (2 ** attempt)
+
+
+@contextlib.asynccontextmanager
+async def _open_stream(client: httpx.AsyncClient, url: str, headers: dict[str, str], body: dict[str, Any],
+                       cancel: asyncio.Event | None = None) -> AsyncIterator[httpx.Response]:
+    attempt = 0
+    while True:
+        r = await client.send(client.build_request("POST", url, headers=headers, json=body), stream=True)
+        if r.status_code in RETRY_STATUS and attempt < STREAM_RETRIES and not (cancel is not None and cancel.is_set()):
+            await r.aclose()
+            log.info("model route answered %s, retrying (%d/%d)", r.status_code, attempt + 1, STREAM_RETRIES)
+            await asyncio.sleep(_retry_delay(r, attempt))
+            attempt += 1
+            continue
+        break
+    try:
+        yield r
+    finally:
+        await r.aclose()
+
+
 async def stream_chat(
     settings: dict[str, Any], model: str, messages: list[dict[str, Any]], tools: list[dict[str, Any]] | None = None, kind: str = "chat",
     effort: str = "default", tool_choice: str = "auto", fast: bool = False, cancel: asyncio.Event | None = None,
@@ -307,12 +342,7 @@ async def stream_chat(
     reason_chars = 0
     cancelled = False
     async with httpx.AsyncClient(timeout=httpx.Timeout(10, read=STREAM_IDLE_S)) as client:
-        async with client.stream(
-            "POST",
-            f"{_base(settings)}/v1/chat/completions",
-            headers=_headers(settings),
-            json=body,
-        ) as r:
+        async with _open_stream(client, f"{_base(settings)}/v1/chat/completions", _headers(settings), body, cancel) as r:
             if r.status_code >= 400:
                 err_body = (await r.aread()).decode("utf-8", "replace")
                 raise LLMError(f"{r.status_code} {r.reason_phrase}: {err_body[:500]}")

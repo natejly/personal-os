@@ -199,6 +199,55 @@ def test_migration_is_idempotent_on_an_old_schema() -> None:
     assert row["paused_reason"] is None and row["last_skip_at"] is None
 
 
+def test_expiry_fires_once_then_pauses_and_reenable_restarts() -> None:
+    r = Rig()
+    r.policy.settings = lambda: {**CFG, "jobExpireDays": 7}
+    jb = r.job(max_retries=0)
+
+    async def go() -> None:
+        await r.fire(T0 + 3600)  # first tick stamps the window (and fires that slot)
+        assert r.jobs.get(jb["id"])["expires_at"] == T0 + 3600 + 7 * 86400
+        r.finish("run0", "done")
+        await r.policy.drain()
+        last = T0 + 3600 + 7 * 86400 + 60
+        assert len(await r.fire(last)) == 1  # one more fire past expiry
+        got = r.jobs.get(jb["id"])
+        assert not got["enabled"] and got["paused_reason"] == "expired"
+        r.finish("run1", "done")
+        await r.policy.drain()
+        assert await r.fire(last + 7200) == [] and len(r.launched) == 2  # then nothing
+        # a real switch restarts the window; re-sending the same state keeps it
+        r.jobs.update(jb["id"], {"enabled": True}, last + 10)
+        got = r.jobs.get(jb["id"])
+        assert got["expires_at"] is None and got["paused_reason"] is None
+        await r.fire(last + 3700)
+        stamped = r.jobs.get(jb["id"])["expires_at"]
+        assert stamped == last + 3700 + 7 * 86400
+        r.jobs.update(jb["id"], {"enabled": True}, last + 3800)
+        assert r.jobs.get(jb["id"])["expires_at"] == stamped
+
+    asyncio.run(go())
+
+
+def test_expiry_off_by_default_and_migration_idempotent() -> None:
+    r = Rig()
+    jb = r.job(max_retries=0)
+
+    async def go() -> None:
+        await r.fire(T0 + 3600)
+        r.finish("run0", "done")
+        await r.policy.drain()
+        await r.fire(T0 + 400 * 86400)
+        got = r.jobs.get(jb["id"])
+        assert got["expires_at"] is None and got["enabled"] and len(r.launched) == 2
+
+    asyncio.run(go())
+    with r.db.tx() as c:
+        r.db._migrate(c)
+        r.db._migrate(c)
+    assert r.jobs.get(jb["id"])["name"] == "j"
+
+
 # ---------------- through the app ----------------
 client = TestClient(appmod.app, headers={"X-Personal-OS-Token": appmod.AUTH_TOKEN})
 
@@ -241,3 +290,11 @@ def test_max_retries_is_editable_and_bounded() -> None:
     assert client.patch(f"/jobs/{jb['id']}", json={"max_retries": 99}).status_code == 422
     assert "jobFailureStreakLimit" in client.get("/settings").json()
     client.delete(f"/jobs/{jb['id']}")
+
+
+def test_inbox_shows_expired_pause() -> None:
+    jb = appmod.jobs.create("old one", "0 * * * *", "p", timezone="UTC", enabled=True)
+    appmod.jobs.pause(jb["id"], "expired")
+    mine = [p for p in client.get("/inbox").json()["needs_you"]["paused_jobs"] if p["id"] == jb["id"]]
+    assert mine and mine[0]["reason"] == "expired"
+    appmod.jobs.delete(jb["id"])

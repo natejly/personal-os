@@ -289,7 +289,8 @@ class Jobs:
         if "enabled" in cols:
             # Any explicit switch is the user acknowledging an auto-pause: the reason and the streak start over.
             cols["paused_reason"] = None
-            cols["expires_at"] = None  # the expiry window restarts the next time the job is armed
+            if cols["enabled"] != job["enabled"]:
+                cols["expires_at"] = None  # a real switch restarts the expiry window; re-sending the same state does not
             if cols["enabled"]:
                 cols["consecutive_failures"] = 0
         merged = {**job, **cols}

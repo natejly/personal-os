@@ -40,7 +40,7 @@ function Column({ board, col, cards, onChange, onError }: ColumnProps): JSX.Elem
     <div className={`kcol ${drop.over ? 'over drop-over' : ''}`} {...drop.handlers}>
       <header>
         <span className="kcol-name">{col.name}</span>
-        <span className="count">{cards.length}{col.wip_limit ? `/${col.wip_limit}` : ''}</span>
+        <span className={`count${col.wip_limit && cards.length > col.wip_limit ? ' over-limit' : ''}`}>{cards.length}{col.wip_limit ? `/${col.wip_limit}` : ''}</span>
       </header>
       <div className="kcol-cards">
         {cards.map((c) => (

@@ -2319,3 +2319,4 @@ select:focus-visible {
 .data-row .toggle-text small { font-size: 12px; line-height: 1.45; color: var(--muted, inherit); }
 .data-row .ghost-btn { flex: none; white-space: nowrap; }
 .data-list { list-style: none; margin: 6px 0 0; padding: 0; max-height: 240px; overflow-y: auto; }
+.kcol .count.over-limit { color: var(--danger, #d33); font-weight: 600; }

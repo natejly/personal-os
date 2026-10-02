@@ -92,7 +92,7 @@ function Column({ col, cards, board, onChange, onOpen }: { col: BoardColumn; car
         ) : (
           <span className="kcol-name" onClick={() => setRenaming(true)}>{col.name}</span>
         )}
-        <span className="count">{cards.length}{col.wip_limit ? `/${col.wip_limit}` : ''}</span>
+        <span className={`count${col.wip_limit && cards.length > col.wip_limit ? ' over-limit' : ''}`}>{cards.length}{col.wip_limit ? `/${col.wip_limit}` : ''}</span>
         <button className="icon-btn ghost sm" title="Add card" aria-label={`Add card to ${col.name}`} onClick={() => setAdding(true)}><Plus size={14} /></button>
         <button className="icon-btn ghost sm danger" title="Delete column" aria-label={`Delete column ${col.name}`} onClick={() => { if (cards.length === 0 || confirm(`Delete "${col.name}" and its ${cards.length} cards?`)) void api.boards.deleteColumn(col.id).then(onChange) }}><Trash2 size={13} /></button>
       </header>

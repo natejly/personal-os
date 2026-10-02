@@ -208,6 +208,26 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "shellNetwork": False,       # a networked shell run taints the reply: whatever it prints may be third-party text
     "shellTimeoutSec": 120,      # foreground default; a call may ask for up to 600
     "shellMaxBackground": 4,     # live background jobs at once
+    # Shell network policy while shellNetwork is off: outbound connections go through a local allowlisting proxy
+    # (egress.py). shellRegistryAccess admits the package registries; shellAllowedDomains adds hosts of the user's own.
+    "shellRegistryAccess": True,
+    "shellAllowedDomains": [],
+    # In a desk, a sandboxed shell_run whose working folder is the desk's own workspace runs without a card.
+    "deskShellAuto": True,
+    # desk_done is refused while the plan has open steps or a delivered file is missing or empty (deskgate.py),
+    # and a read-only reviewer checks the result against the brief before the desk may finish.
+    "deskDoneGate": True,
+    "deskSelfReview": True,
+    # The model view_image sends pictures to. Empty = the chat model, when the provider says it reads images.
+    "visionModel": "",
+    # The agent's own browser (browser.py): interactive pages in a separate cookie jar, driven from a desk or chat.
+    "browserEnabled": True,
+    "browserMaxTabs": 4,
+    "browserIdleSeconds": 300,
+    # Hosts the agent's browser may open by typed URL once a reply has touched untrusted content.
+    "browserAllowlist": [],
+    # Extra packages installed into the shared work environment (envs.py) beside its base set.
+    "workEnvPackages": [],
     # {model: {"input": $/M tokens, "output": $/M tokens}} overrides for cost accounting (proxy prices are used otherwise)
     "modelPrices": {},
     "googleClientId": "",

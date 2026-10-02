@@ -1099,6 +1099,26 @@ export interface Settings {
   workspaceRoots?: string[]
   /** Mount the active desk's workspace at /workspace/desk in its sandbox container. Missing means on. */
   sandboxMountDesk?: boolean
+  /** Host shell. shellNetwork opens the network entirely; off, only the allowlist below is reachable. */
+  shellNetwork?: boolean
+  shellTimeoutSec?: number
+  shellMaxBackground?: number
+  shellRegistryAccess?: boolean
+  shellAllowedDomains?: string[]
+  /** In a desk, a sandboxed shell command inside the desk's own workspace runs without a card. Missing means on. */
+  deskShellAuto?: boolean
+  /** A desk may not finish with open plan steps or missing deliverables; a reviewer checks it against the brief. */
+  deskDoneGate?: boolean
+  deskSelfReview?: boolean
+  /** The model pictures are sent to. Empty = the chat model when it reads images. */
+  visionModel?: string
+  /** The agent's own browser. */
+  browserEnabled?: boolean
+  browserMaxTabs?: number
+  browserIdleSeconds?: number
+  browserAllowlist?: string[]
+  /** Extra packages for the shared work environment. */
+  workEnvPackages?: string[]
   /** fs_edit and an overwriting write refuse a file this chat has not read. Missing means on. */
   requireReadBeforeWrite?: boolean
   braveApiKey: string

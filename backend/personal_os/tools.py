@@ -565,6 +565,11 @@ class Toolbox:
         from . import commands as _commands, workflows as _workflows
         _workflows.register(self)
         _commands.register(self)
+        from . import browser, deliver, envs, vision
+        browser.register(self)  # browser_*: the agent's own interactive browser
+        vision.register(self)   # view_image
+        deliver.register(self)  # convert_document / render_preview / doc_guide
+        envs.register(self)     # python_install: the shared work environment
 
     def _google_ok(self) -> bool:
         return bool(self.google and self.google.status()["connected"])

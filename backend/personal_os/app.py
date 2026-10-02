@@ -663,6 +663,8 @@ NUMERIC_SETTING_RANGES: dict[str, tuple[float, float]] = {
     "retainTraceDays": (1, 3_650),
     "retainToolResultDays": (1, 3_650),
     "retainApprovalDays": (1, 3_650),
+    "browserMaxTabs": (1, 12),
+    "browserIdleSeconds": (30, 86_400),
 }
 
 
@@ -1495,6 +1497,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         return allowed
 
     tool_ctx["bridge_approve"] = _bridge_approve
+    # The same one-shot card, for a tool that has to ask about part of what it was called to do (a browser form
+    # submit, a host the shell may not reach). Absent in lanes with nobody to ask: a tool treats that as "no".
+    tool_ctx["approve"] = _bridge_approve
     if mcp_defer:
         _mcp_names = {s["id"]: s["name"] for s in mcp_store.servers()}
         tool_ctx["mcp_catalog"] = lambda: [{**t, "server": _mcp_names.get(t["server_id"], "MCP")}

@@ -1060,6 +1060,10 @@ export interface Settings {
   mode?: 'classic' | 'canvas'
   /** Electron accelerator for the global Gather/Scatter shortcut. */
   gatherShortcut: string
+  /** Electron accelerator for the global quick-capture window (appends to today's daily note). */
+  quickCaptureShortcut?: string
+  /** Hold-to-talk dictation chord in the Docs editor, e.g. 'Control+Alt+D'. */
+  dictationChord?: string
   /** Today-screen cards, keyed by module (see modules.ts); a missing key means shown. Cowork and meetings default off. */
   homeWidgets?: Record<string, boolean>
   /** Sidebar views the user removed. Missing means library, cowork and meetings are hidden. */
@@ -1312,6 +1316,8 @@ export interface GrainApi {
   shortcuts: {
     gather: () => Promise<ShortcutState>
     setGather: (accelerator: string) => Promise<ShortcutState>
+    capture: () => Promise<ShortcutState>
+    setCapture: (accelerator: string) => Promise<ShortcutState>
     onFailure: (cb: (s: ShortcutState) => void) => () => void
   }
   /** Data folder helpers for Settings → Data (native dialog, Finder, restart to apply a restore). */

@@ -104,6 +104,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "accent": "sage",
     "mode": "classic",
     "gatherShortcut": "Control+Alt+Command+Space",
+    # Global quick capture: a small window that appends a timestamped bullet to today's daily note.
+    "quickCaptureShortcut": "CommandOrControl+Shift+Space",
+    # Hold this in the Docs editor to dictate while held; a quick tap latches it on.
+    "dictationChord": "Control+Alt+D",
     # Shell modularity: Today-screen cards ({key: bool}, missing = shown) and sidebar views the user removed.
     # Library / Cowork / Meetings / Activity ship off; Settings → Modules turns them back on.
     "homeWidgets": {"cowork": False, "meetings": False},

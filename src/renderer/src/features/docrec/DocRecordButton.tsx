@@ -3,6 +3,7 @@ import { AudioLines, ChevronDown, FileAudio, Mic, Square, X } from 'lucide-react
 import { useStore } from '../../store'
 import MeetingConsentModal from '../../components/MeetingConsentModal'
 import { useDocRec } from './store'
+import { DEFAULT_CHORD } from './chord'
 import { useDocRecSync } from './hooks'
 import { recordAvailability } from './segments'
 import '../../styles/docrec.css'
@@ -20,6 +21,7 @@ export default function DocRecordButton({ docId }: { docId: string }): JSX.Eleme
   const consentOpen = useStore((s) => s.meetingConsentOpen)
   const busy = useDocRec((s) => s.busy)
   const notice = useDocRec((s) => s.notice)
+  const chord = useStore((s) => s.settings.dictationChord) || DEFAULT_CHORD
   const [menu, setMenu] = useState(false)
   const root = useRef<HTMLDivElement>(null)
   const file = useRef<HTMLInputElement>(null)
@@ -61,7 +63,7 @@ export default function DocRecordButton({ docId }: { docId: string }): JSX.Eleme
       {menu && (
         <div className="dr-menu" role="menu">
           <button role="menuitem" onClick={() => start('record')}><Mic size={13} /> Record and summarize</button>
-          <button role="menuitem" onClick={() => start('dictate')}><AudioLines size={13} /> Dictate into note</button>
+          <button role="menuitem" title={`Hold ${chord} to dictate while held; tap it to latch`} onClick={() => start('dictate')}><AudioLines size={13} /> Dictate into note</button>
           <button role="menuitem" onClick={() => { setMenu(false); file.current?.click() }}><FileAudio size={13} /> Import audio file</button>
         </div>
       )}

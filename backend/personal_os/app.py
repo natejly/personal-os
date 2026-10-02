@@ -5173,6 +5173,19 @@ def open_daily_doc(body: DailyIn) -> dict[str, Any]:
     return {"doc": doc, "created": created}
 
 
+class DailyAppendIn(BaseModel):
+    text: str
+    date: str | None = None
+
+
+@app.post("/docs/daily/append")
+def append_daily_doc(body: DailyAppendIn) -> dict[str, Any]:
+    try:
+        return {"doc": docs.append_daily(body.text, body.date)}
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
 class DocRecordingIn(BaseModel):
     mode: str = "record"       # 'record' captures the room and proposes a summary; 'dictate' types what you say
     template: str = "general"

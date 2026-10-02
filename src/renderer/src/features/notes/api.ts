@@ -20,3 +20,7 @@ export const daily = (date: Date | string = new Date()): Promise<{ doc: FullDoc;
   req('/docs/daily', { method: 'POST', body: json({ date: typeof date === 'string' ? date : isoDate(date) }) })
 
 export const backlinks = (id: string): Promise<Backlink[]> => req(`/docs/${encodeURIComponent(id)}/backlinks`)
+
+/** One line appended to a day's note, timestamped by the server (quick capture). */
+export const appendDaily = (text: string, date: Date | string = new Date()): Promise<{ doc: FullDoc }> =>
+  req('/docs/daily/append', { method: 'POST', body: json({ text, date: typeof date === 'string' ? date : isoDate(date) }) })

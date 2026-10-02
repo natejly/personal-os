@@ -119,11 +119,14 @@ export default function SettingsModal(): JSX.Element {
     const accel = draft.gatherShortcut.trim()
     const applied = accel === settings.gatherShortcut.trim() ? null : await window.os.shortcuts.setGather(accel)
     if (applied) setShortcut(applied)
+    const capAccel = (draft.quickCaptureShortcut ?? '').trim()
+    const capApplied = capAccel === (settings.quickCaptureShortcut ?? '').trim() ? null : await window.os.shortcuts.setCapture(capAccel)
+    if (capApplied && !capApplied.ok) return toast(capApplied.message ?? `${capApplied.accelerator} could not be registered.`, 'error')
     // A cleared or out-of-range rounds field is clamped here: 0 would mean unlimited to the backend.
     const rounds = Number.isFinite(draft.maxToolRounds) && draft.maxToolRounds >= 1
       ? Math.min(60, Math.round(draft.maxToolRounds)) : settings.maxToolRounds
     try {
-      await saveSettings({ ...draft, maxToolRounds: rounds, gatherShortcut: applied?.accelerator ?? draft.gatherShortcut })
+      await saveSettings({ ...draft, maxToolRounds: rounds, gatherShortcut: applied?.accelerator ?? draft.gatherShortcut, quickCaptureShortcut: capApplied?.accelerator ?? draft.quickCaptureShortcut })
     } catch (e) {
       // The dialog stays open with the draft intact, so nothing typed is lost.
       return toast((e as Error).message, 'error')
@@ -390,6 +393,14 @@ export default function SettingsModal(): JSX.Element {
               <label><span>Gather widgets shortcut <small className="muted">(global; brings every detached widget to the front and back again)</small></span>
                 <input value={draft.gatherShortcut} onChange={(e) => patch({ gatherShortcut: e.target.value })}
                   placeholder={shortcut?.accelerator || 'Control+Alt+Command+Space'} spellCheck={false} />
+              </label>
+              <label><span>Quick capture shortcut <small className="muted">(global; opens a small window that adds a line to today's note)</small></span>
+                <input value={draft.quickCaptureShortcut ?? ''} onChange={(e) => patch({ quickCaptureShortcut: e.target.value })}
+                  placeholder="CommandOrControl+Shift+Space" spellCheck={false} />
+              </label>
+              <label><span>Dictation chord <small className="muted">(in a doc: hold to dictate, tap to latch)</small></span>
+                <input value={draft.dictationChord ?? ''} onChange={(e) => patch({ dictationChord: e.target.value })}
+                  placeholder="Control+Alt+D" spellCheck={false} />
               </label>
               {shortcut && !shortcut.ok && (
                 <p className="test-msg fail">{shortcut.message ?? `${shortcut.accelerator} could not be registered.`} The menubar icon gathers them too.</p>

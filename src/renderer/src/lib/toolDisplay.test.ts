@@ -66,3 +66,26 @@ test('edits are detected from persisted fields and diffed by key', () => {
   assert.deepEqual(changedKeys({ title: 'a' }, { title: 'a' }), [])
   assert.deepEqual(changedKeys(null, undefined), [])
 })
+
+test('desk tools read as verbs with the argument that matters', () => {
+  assert.equal(fullTitle('shell_run', { command: 'ls -la outputs' }), 'Run command ls -la outputs')
+  assert.equal(fullTitle('shell_poll', { job_id: 'a1b2' }), 'Check command output job a1b2')
+  assert.equal(fullTitle('python_install', { packages: ['scipy', 'seaborn>=0.13'] }), 'Install Python packages scipy, seaborn>=0.13')
+  assert.equal(fullTitle('fs_grep', { pattern: 'TODO', path: 'work' }), 'Search file contents TODO in work')
+  assert.equal(fullTitle('fs_copy', { src: 'a.md', dst: 'outputs/a.md' }), 'Copy file a.md → outputs/a.md')
+  assert.equal(fullTitle('agent_spawn', { task: 'Find the notice period' }), 'Start subagent Find the notice period')
+  assert.equal(fullTitle('agent_wait', {}), 'Wait for subagents all')
+  assert.equal(fullTitle('desk_fetch_file', { url: 'https://a.test/files/x.pdf?sig=1' }), 'Download file to desk a.test/files/x.pdf')
+  assert.equal(fullTitle('desk_ask', { question: 'Which quarter?' }), 'Ask a question Which quarter?')
+  assert.equal(fullTitle('view_image', { path: 'outputs/chart.png' }), 'Look at image outputs/chart.png')
+  assert.equal(fullTitle('convert_document', { path: 'work/r.md', to: 'docx' }), 'Convert document work/r.md → docx')
+  assert.equal(fullTitle('doc_guide', { format: 'xlsx' }), 'Read format guide xlsx')
+})
+
+test('browser calls name the page or the ref, and never echo typed text', () => {
+  assert.equal(fullTitle('browser_open', { url: 'https://shop.test/cart?x=1' }), 'Open in browser shop.test/cart')
+  assert.equal(fullTitle('browser_click', { ref: 'e3' }), 'Click in browser e3')
+  assert.equal(fullTitle('browser_type', { ref: 'e5', text: 'hunter2hunter2' }), 'Type in browser 14 characters into e5')
+  assert.equal(fullTitle('browser_manage', { action: 'wait', ms: 1500 }), 'Manage browser Wait 1500 ms')
+  assert.equal(fullTitle('browser_scroll', { direction: 'down', amount: 2 }), 'Scroll browser down 2 screens')
+})

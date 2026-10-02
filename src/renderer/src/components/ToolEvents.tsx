@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react'
 import { ChevronRight, Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, AlertCircle, Laptop, Zap, ListChecks, PenLine, ShieldAlert, ShieldCheck,
   FolderOpen, FileText, FilePen, Trash2, PackageCheck, CircleHelp, CircleCheck,
-  Youtube, Github, Rss, Undo2, AppWindow, Bot, CalendarDays, CalendarClock, CalendarSearch, CalendarPlus, CalendarX } from 'lucide-react'
+  Youtube, Github, Rss, Undo2, AppWindow, Bot, Eye, FileOutput, BookOpen, Download, MousePointerClick, Keyboard, ListFilter, ArrowDownUp, MonitorCog, Package, Search, Copy, FolderPlus, OctagonX, Hourglass, ShieldQuestion, CalendarDays, CalendarClock, CalendarSearch, CalendarPlus, CalendarX } from 'lucide-react'
 import type { DocRevision, RunTapeEvent, ToolEvent, Verification } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore } from '../store'
@@ -38,7 +38,15 @@ const ICONS: Record<string, JSX.Element> = {
   graph_search: <Share2 size={13} />, graph_traverse: <Share2 size={13} />, graph_add: <Share2 size={13} />,
   run_python: <Terminal size={13} />, current_time: <Clock size={13} />,
   sandbox_exec: <Terminal size={13} />, sandbox_write_file: <Terminal size={13} />, sandbox_read_file: <Terminal size={13} />,
-  sandbox_list_files: <Terminal size={13} />, sandbox_put_document: <Terminal size={13} />, sandbox_reset: <Terminal size={13} />
+  sandbox_list_files: <Terminal size={13} />, sandbox_put_document: <Terminal size={13} />, sandbox_reset: <Terminal size={13} />,
+  sandbox_checkpoint: <Terminal size={13} />, sandbox_restore: <Terminal size={13} />,
+  shell_run: <Terminal size={13} />, shell_poll: <Hourglass size={13} />, shell_kill: <OctagonX size={13} />, python_install: <Package size={13} />,
+  fs_glob: <Search size={13} />, fs_grep: <FileSearch size={13} />, fs_edit: <FilePen size={13} />, fs_copy: <Copy size={13} />, fs_mkdir: <FolderPlus size={13} />,
+  desk_fetch_file: <Download size={13} />, todo_write: <ListChecks size={13} />,
+  browser_open: <Globe size={13} />, browser_snapshot: <BookOpen size={13} />, browser_click: <MousePointerClick size={13} />,
+  browser_type: <Keyboard size={13} />, browser_select: <ListFilter size={13} />, browser_press: <Keyboard size={13} />,
+  browser_scroll: <ArrowDownUp size={13} />, browser_manage: <MonitorCog size={13} />, browser: <ShieldQuestion size={13} />,
+  view_image: <Eye size={13} />, convert_document: <FileOutput size={13} />, render_preview: <FileOutput size={13} />, doc_guide: <BookOpen size={13} />
 }
 
 /** The read-back verdict the backend put on the result (verify.py). It rides in result_preview,
@@ -282,7 +290,8 @@ export default function ToolEvents({ events, conversationId }: { events: ToolEve
       {events.map((t) => {
         // A dedicated card owns the whole call, pending and finished. It renders from the event alone, so a
         // reload (events replayed from the persisted run) shows the same card. propose_plan / desk_ask stay special.
-        const Card = t.name !== 'propose_plan' && t.name !== 'desk_ask' ? TOOL_CARDS[t.name] : undefined
+        // A pending desk_ask keeps the answer box below; once it is answered (or running) its card shows the question and choices.
+        const Card = t.name !== 'propose_plan' && !(t.name === 'desk_ask' && t.pending && t.needs_approval) ? TOOL_CARDS[t.name] : undefined
         if (Card) {
           return (
             <Fragment key={t.id}>

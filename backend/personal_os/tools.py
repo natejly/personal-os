@@ -83,6 +83,8 @@ class ToolSpec:
         self.default: str | None = None  # overrides the danger tier's default mode (shell_run is `executes` but asks)
         # args -> True when this particular call must ask whatever the mode says (shell_run's escape from the sandbox)
         self.force_ask: Callable[[dict[str, Any]], bool] | None = None
+        # () -> False while the thing this tool needs is missing (a binary, the desktop bridge); it is then not offered
+        self.available_fn: Callable[[], bool] | None = None
 
     @property
     def default_mode(self) -> str:
@@ -614,6 +616,11 @@ class Toolbox:
             return _mac_available(name)
         if spec and spec.group == "meetings":  # no recorder and no transcriber -> nothing to read
             return self._meetings_ok()
+        if spec and spec.available_fn is not None:
+            try:
+                return bool(spec.available_fn())
+            except Exception:  # noqa: BLE001 - a probe that throws means "cannot work", not a 500
+                return False
         for m in self.modules:
             v = m.tool_available(name)
             if v is not None:

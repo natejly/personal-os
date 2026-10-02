@@ -381,7 +381,7 @@ export default function DocTree({ docs, activeId, query, onQuery }: Props): JSX.
     if (!list.length) return null
     const open = !topShut.includes(key)
     return (
-      <div className="doc-top-section" key={`top:${key}`}>
+      <div key={`top:${key}`}>
         <div className="doc-group-row">
           <button className="doc-folder-toggle" onClick={() => toggleTop(key)} aria-expanded={open}
             aria-label={`${open ? 'Collapse' : 'Expand'} ${title}`}>

@@ -184,6 +184,8 @@ check(next(r for r in j("GET", "/docs") if r["id"] == pa)["pinned"] == 0, "unpin
 j("PATCH", f"/docs/{pb}", {"pinned": True})
 j("DELETE", f"/docs/{pb}")
 check(all(r["id"] != pb for r in j("GET", "/docs")), "a deleted pinned doc is not listed")
+j("POST", f"/trash/doc/{pb}/restore")
+check(next(r for r in j("GET", "/docs") if r["id"] == pb)["pinned"] == 1, "restoring a trashed doc keeps its pin")
 
 # ---- deletion takes the history with it ----
 j("DELETE", f"/docs/{did}")

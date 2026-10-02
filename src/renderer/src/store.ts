@@ -470,6 +470,7 @@ export interface State {
   /** Flush the buffer now (⌘S, switching docs, leaving the view). */
   flushDoc: () => Promise<void>
   setDocStar: (id: string, starred: boolean) => Promise<void>
+  setDocPin: (id: string, pinned: boolean) => Promise<void>
   /** File a doc: which project ('' is personal) and which folder in it, in one patch. */
   moveDoc: (id: string, scope: string, folder: string) => Promise<void>
   refreshDocFolders: () => Promise<void>
@@ -1879,6 +1880,10 @@ export const useStore = create<State>((set, get) => {
     },
     setDocStar: async (id, starred) => {
       await api.docs.patch(id, { starred })
+      await get().refreshDocs()
+    },
+    setDocPin: async (id, pinned) => {
+      await api.docs.patch(id, { pinned })
       await get().refreshDocs()
     },
     moveDoc: async (id, scope, folder) => {

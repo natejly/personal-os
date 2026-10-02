@@ -626,7 +626,7 @@ export const api = {
     /** Autosave. Records a revision, folding a burst of keystrokes into one history entry. */
     save: (id: string, patch: { content?: string; title?: string; summary?: string }) => req<FullDoc>(`/docs/${id}`, { method: 'PUT', body: json(patch) }),
     /** Title, folder, star and project moves — metadata, so it stays out of the history. */
-    patch: (id: string, patch: { title?: string; folder?: string; starred?: boolean; project_id?: string | null; clear_project?: boolean; scope?: string }) =>
+    patch: (id: string, patch: { title?: string; folder?: string; starred?: boolean; pinned?: boolean; project_id?: string | null; clear_project?: boolean; scope?: string }) =>
       req<FullDoc>(`/docs/${id}`, { method: 'PATCH', body: json(patch) }),
     /** A whole drag in one patch: which tree ('' personal, else a project) and which folder in it. */
     move: (id: string, scope: string, folder: string) =>

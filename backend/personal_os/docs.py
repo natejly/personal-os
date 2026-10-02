@@ -207,7 +207,7 @@ class Docs:
             self._migrate_folder_scope(c)
             # Soft delete (trash.py). docs is created here, not in db.py, so its columns are added here too.
             have = {r["name"] for r in c.execute("PRAGMA table_info(docs)").fetchall()}
-            for col, ddl in {"deleted_at": "REAL", "deleted_with": "TEXT"}.items():
+            for col, ddl in {"deleted_at": "REAL", "deleted_with": "TEXT", "pinned": "INTEGER NOT NULL DEFAULT 0"}.items():
                 if col not in have:
                     c.execute(f"ALTER TABLE docs ADD COLUMN {col} {ddl}")
             # doc_revisions.append arrived after the first release (recording summaries), so an existing DB needs it added.
@@ -302,11 +302,11 @@ class Docs:
             where.append("(d.title LIKE ? OR d.content LIKE ?)")
             args += [f"%{q}%", f"%{q}%"]
         sql = (
-            "SELECT d.id, d.project_id, d.title, d.folder, d.starred, d.created_at, d.updated_at, d.content, "
+            "SELECT d.id, d.project_id, d.title, d.folder, d.starred, d.pinned, d.created_at, d.updated_at, d.content, "
             "  length(d.content) AS size, "
             "  (SELECT COUNT(*) FROM doc_revisions r WHERE r.doc_id=d.id AND r.status='pending') AS pending "
             "FROM docs d" + (" WHERE " + " AND ".join(where) if where else "") +
-            " ORDER BY d.starred DESC, d.updated_at DESC"
+            " ORDER BY d.pinned DESC, d.starred DESC, d.updated_at DESC"
         )
         with self.db.tx() as c:
             rows = c.execute(sql, args).fetchall()
@@ -416,13 +416,14 @@ class Docs:
 
     def update_meta(self, id: str, patch: dict[str, Any]) -> dict[str, Any] | None:
         """Title/folder/star/project moves that are not content edits, so they skip the history."""
-        fields = {k: v for k, v in patch.items() if k in {"title", "folder", "starred", "project_id"}}
+        fields = {k: v for k, v in patch.items() if k in {"title", "folder", "starred", "pinned", "project_id"}}
         if not fields:
             return self.get(id)
         if "title" in fields:
             fields["title"] = (str(fields["title"]).strip()[:200]) or "Untitled"
-        if "starred" in fields:
-            fields["starred"] = 1 if fields["starred"] else 0
+        for flag in ("starred", "pinned"):
+            if flag in fields:
+                fields[flag] = 1 if fields[flag] else 0
         if "folder" in fields:
             fields["folder"] = folder_path(fields["folder"])
         fields["updated_at"] = now()

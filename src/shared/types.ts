@@ -1620,6 +1620,8 @@ export interface Doc {
   title: string
   folder: string
   starred: number
+  /** Pinned docs sit in their own group above the folders; absent on older payloads. */
+  pinned?: number
   created_at: number
   updated_at: number
   words: number

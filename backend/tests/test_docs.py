@@ -172,6 +172,19 @@ job = call("doc_edit", {"doc": made2["doc_id"], "edits": [{"find": "beta", "repl
 check(job["status"] == "pending_review", "a scheduled run does not accept-all")
 check(j("GET", f"/docs/{made2['doc_id']}")["content"] == "beta\n", "a scheduled run leaves the body alone")
 
+# ---- pinning: persists, survives a title edit, sorts first, keeps through trash ----
+pa = j("POST", "/docs", {"title": "Pin A"})["id"]
+pb = j("POST", "/docs", {"title": "Pin B"})["id"]
+j("PATCH", f"/docs/{pa}", {"pinned": True})
+check(next(r for r in j("GET", "/docs") if r["id"] == pa)["pinned"] == 1, "pinned shows in the list")
+j("PATCH", f"/docs/{pa}", {"title": "Pin A2"})
+check(j("GET", "/docs")[0]["id"] == pa and j("GET", "/docs")[0]["pinned"] == 1, "a title edit keeps the pin, and pinned sorts first")
+j("PATCH", f"/docs/{pa}", {"pinned": False})
+check(next(r for r in j("GET", "/docs") if r["id"] == pa)["pinned"] == 0, "unpin clears it")
+j("PATCH", f"/docs/{pb}", {"pinned": True})
+j("DELETE", f"/docs/{pb}")
+check(all(r["id"] != pb for r in j("GET", "/docs")), "a deleted pinned doc is not listed")
+
 # ---- deletion takes the history with it ----
 j("DELETE", f"/docs/{did}")
 j("GET", f"/docs/{did}", expect=404)

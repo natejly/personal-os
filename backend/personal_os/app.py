@@ -5090,6 +5090,7 @@ class DocMetaPatch(BaseModel):
     title: str | None = None
     folder: str | None = None
     starred: bool | None = None
+    pinned: bool | None = None
     project_id: str | None = None
     clear_project: bool = False
     # Where in the Files tree this doc now lives: '' is the personal tree, otherwise a project id.

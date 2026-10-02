@@ -2020,11 +2020,17 @@ def _register_meetings(self: Toolbox) -> None:
                            project_id: str | None = None) -> Any:
         off, lim = max(0, int(offset)), max(1, min(int(limit), 50))
         rows = _repo().list("__all__" if project_id is None else project_id,
-                            since_days=max(0, int(since_days)), limit=min(off + lim, 200))
+                            since_days=max(0, int(since_days)), limit=min(off + lim, 200), include_docs=True)
+
+        def _doc_title(doc_id: str | None) -> str:
+            doc = self.docs.get(doc_id) if doc_id and getattr(self, "docs", None) is not None else None
+            return doc["title"] if doc else ""
         out = [{"meeting_id": m["id"], "title": m["title"] or "(untitled)", "when": _when(m),
                 "duration": _duration(m["duration_ms"]), "attendees": m["attendee_count"],
                 "status": m["status"], "words": m["words"], "headline": m["summary"],
-                "pending_review": m["has_pending"]} for m in rows]
+                "pending_review": m["has_pending"],
+                # a recording made inside a doc: which doc, so "what did I record in my Q3 plan" resolves
+                "doc_id": m.get("doc_id"), "doc_title": _doc_title(m.get("doc_id"))} for m in rows]
         return page(out, offset=off, limit=lim, key="meetings")
     R("meeting_list", ToolSpec("meeting_list", (
         "List the user's meetings - the notes they took on calls, plus whatever was transcribed. Newest first. "

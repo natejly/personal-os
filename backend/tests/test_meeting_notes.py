@@ -195,6 +195,21 @@ def test_parse_json_never_raises() -> None:
     assert meeting_notes._parse_json("{broken") == {}
 
 
+# ---------------------------------------------------------------- amounts in a summary
+
+
+def test_escape_currency_keeps_prices_out_of_inline_maths() -> None:
+    esc = meeting_notes.escape_currency
+    # two amounts in one paragraph are the shape the renderer reads as a formula
+    assert esc("starter stays at $12 a month, team goes to $40.") == \
+        "starter stays at \\$12 a month, team goes to \\$40."
+    # already escaped, and a `$` that is not money, are left alone
+    assert esc("costs \\$5 and $x^2$ stays maths") == "costs \\$5 and $x^2$ stays maths"
+    # code keeps its bytes: a backslash would show there
+    assert esc("run `echo $1` then pay $3") == "run `echo $1` then pay \\$3"
+    assert esc("```\nprice=$9\n```\nowed $9") == "```\nprice=$9\n```\nowed \\$9"
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

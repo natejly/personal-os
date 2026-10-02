@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { ApprovalDecision, BackendInfo, BackendState, PlanEdit, PlanDecision, PlanRecord,
   Desk, DeskEvent, DeskFile, FullDesk, PromotionResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, Document, Effort, TrashKind, FullDoc, GraphData, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodoCalendarStatus, TodayDashboard, Recap, Job, Meeting, MeetingCandidate, MeetingCapability, MeetingConfig, MeetingPreflight, MeetingSegment, MeetingStatus, MeetingStatusInfo, MeetingStreamEvent, FullMeeting } from '@shared/types'
+import { daily as dailyNote } from './features/notes/api'
 import { api, backgroundStream, chatStream, meetingStream, setBase, type Scope } from './lib/api'
 import { currentSelection } from './lib/pageContext'
 import { DEFAULT_EFFORT, NEEDS_YOU } from '../../shared/types'
@@ -461,6 +462,8 @@ export interface State {
   /** Retitle the open doc as it is typed, on the same debounce as the body. */
   editDocTitle: (title: string) => void
   /** Type into the open doc. Buffers locally and flushes to the backend on a debounce. */
+  /** Today's daily note: found or created on the server, then opened. */
+  openDailyNote: () => Promise<void>
   editDoc: (content: string) => void
   /** Flush the buffer now (⌘S, switching docs, leaving the view). */
   flushDoc: () => Promise<void>
@@ -528,6 +531,28 @@ let toastSeq = 0
 /** Autosave debounce for the doc editor: long enough to be one history entry, short enough to trust. */
 const SAVE_DEBOUNCE_MS = 1200
 let saveTimer: ReturnType<typeof setTimeout> | null = null
+
+/**
+ * The state after a request that replaced the doc body (accept, restore). `sent` is the draft right
+ * before the request and `base` the body the editor showed then, so a draft that differs now was
+ * typed or dictated while the request was in flight.
+ *
+ * What happens to that text depends on what the server did. When the new body is the old one with
+ * something added after it (an accepted recording summary), the typing is kept and the addition is
+ * put back after it: keeping the draft alone would autosave over the section just accepted. When
+ * the body was replaced outright there is nothing to merge the typing into, so the server wins, as
+ * it always has.
+ */
+export function adoptServerDoc(
+  draft: string | null, doc: FullDoc, sent: string | null, base: string
+): { activeDoc: FullDoc; docDraft: string | null } {
+  const typed = draft !== null && draft !== sent
+  const stem = base.trimEnd()
+  if (!typed || !doc.content.startsWith(stem)) return { activeDoc: doc, docDraft: null }
+  const added = doc.content.slice(stem.length)
+  const kept = draft.trimEnd()
+  return { activeDoc: doc, docDraft: stem || !kept ? kept + added : `${kept}\n\n${added}` }
+}
 /** The same debounce for the meeting notepad, on its own timer: typing notes during a call must not
  *  be cancelled by, or cancel, an autosave in the Docs editor. */
 const MEETING_SAVE_DEBOUNCE_MS = 1200
@@ -601,6 +626,15 @@ const startFailure = (e: unknown): string => {
   const first = startBlockers(e).find((b) => !b.ok)
   return first ? `${first.label}: ${first.detail}${first.fix ? ` — ${first.fix}` : ''}` : (e as Error).message
 }
+
+/**
+ * What the consent modal does once accepted, when the Record click that opened it was for a doc.
+ * `startRecording` opens the Meetings view, which a note must not do, so the doc recorder parks its
+ * own start here and `acceptMeetingConsent` runs it instead. Dismissing the modal drops it, for the
+ * same reason `consentIntent` is dropped. Module-level rather than state: a closure must not
+ * cross the IPC bus or be serialised.
+ */
+export const consentResume: { run: (() => void) | null } = { run: null }
 
 /** A 409 from `POST /chat` arrives as a `RunConflict` JSON-encoded in the error detail. */
 const runConflict = (e: unknown): RunConflict | null => {
@@ -915,6 +949,10 @@ export const useStore = create<State>((set, get) => {
             window.dispatchEvent(new Event('grain-job-finished'))
           } else if (ev.event === 'desk_status') {
             onDeskChanged(ev.data)
+          } else if (ev.event === 'recording') {
+            // Lazy: the docrec store imports this one, so a static import here would be a cycle.
+            const data = ev.data
+            void import('./features/docrec/store').then((m) => m.useDocRec.getState().handleEvent(data))
           }
         }
       } catch {
@@ -1780,6 +1818,16 @@ export const useStore = create<State>((set, get) => {
         get().toast((e as Error).message, 'error')
       }
     },
+    openDailyNote: async () => {
+      try {
+        const { doc } = await dailyNote()
+        await get().refreshDocs()
+        get().expandTo(doc.project_id ?? '', doc.folder)
+        await get().openDoc(doc.id)
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
     editDoc: (content) => {
       if (!get().activeDoc) return
       set({ docDraft: content })
@@ -1919,8 +1967,10 @@ export const useStore = create<State>((set, get) => {
       try {
         // Buffered typing is saved first, so accepting lands on top of it instead of losing it.
         await get().flushDoc()
+        const sent = get().docDraft
+        const base = sent ?? get().activeDoc?.content ?? ''
         const doc = await api.docs.accept(revId)
-        set({ activeDoc: doc, docDraft: null })
+        set((st) => adoptServerDoc(st.docDraft, doc, sent, base))
         get().toast('Revision applied')
         await Promise.all([get().refreshDocRevisions(doc.id), get().refreshDocs(), get().refreshDocsPending()])
       } catch (e) {
@@ -1939,8 +1989,10 @@ export const useStore = create<State>((set, get) => {
     restoreRevision: async (revId) => {
       try {
         await get().flushDoc()
+        const sent = get().docDraft
+        const base = sent ?? get().activeDoc?.content ?? ''
         const doc = await api.docs.restore(revId)
-        set({ activeDoc: doc, docDraft: null })
+        set((st) => adoptServerDoc(st.docDraft, doc, sent, base))
         get().toast('Document restored')
         await Promise.all([get().refreshDocRevisions(doc.id), get().refreshDocs()])
       } catch (e) {
@@ -2634,7 +2686,7 @@ export const useStore = create<State>((set, get) => {
       // Dismissing the notice drops the Record click it was gating: a recording never starts by
       // default, and a remembered intent would make the next acknowledgement record something
       // the user did not just ask for.
-      if (!open) consentIntent = undefined
+      if (!open) { consentIntent = undefined; consentResume.run = null }
       set({ meetingConsentOpen: open })
     },
     acceptMeetingConsent: async () => {
@@ -2646,6 +2698,10 @@ export const useStore = create<State>((set, get) => {
       const intent = consentIntent
       consentIntent = undefined
       set({ meetingConsentOpen: false })
+      // A doc's Record click resumes as a doc recording, not as a meeting in the Meetings view.
+      const resume = consentResume.run
+      consentResume.run = null
+      if (resume) return resume()
       await get().startRecording(intent)
     },
 

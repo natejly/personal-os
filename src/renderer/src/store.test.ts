@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { applyEvent, useStore, type ChatSession } from './store'
+import { adoptServerDoc, applyEvent, useStore, type ChatSession } from './store'
 import type { ChatEvent, Message } from '@shared/types'
 
 /**
@@ -85,4 +85,22 @@ test('a new chat defaults to no project, and only an explicit choice files it in
   // And the next plain one is personal again rather than inheriting it.
   useStore.getState().newChat()
   assert.equal(draft(), null)
+})
+
+test('accept/restore: typing during the request survives an append and yields to a replacement', () => {
+  const appended = { id: 'd', content: 'notes\n\n## Recording summary\nbody\n' } as never
+  // nothing typed since the pre-request flush: the server body wins and the draft clears
+  assert.deepEqual(adoptServerDoc(null, appended, null, 'notes\n'), { activeDoc: appended, docDraft: null })
+  assert.deepEqual(adoptServerDoc('notes\n', appended, 'notes\n', 'notes\n'), { activeDoc: appended, docDraft: null })
+  // typed (or dictated) while an append was being accepted: both the typing and the section stay,
+  // so the next autosave cannot drop the summary that was just accepted
+  const merged = adoptServerDoc('notes\nmore', appended, 'notes\n', 'notes\n')
+  assert.equal(merged.activeDoc, appended)
+  assert.equal(merged.docDraft, 'notes\nmore\n\n## Recording summary\nbody\n')
+  // an append onto an empty doc has no separator of its own
+  const first = { id: 'd', content: '## Recording summary\nbody\n' } as never
+  assert.equal(adoptServerDoc('typed', first, null, '').docDraft, 'typed\n\n## Recording summary\nbody\n')
+  // the body was replaced outright: nothing to merge the typing into, the server wins
+  const replaced = { id: 'd', content: 'a different body' } as never
+  assert.deepEqual(adoptServerDoc('notes\nmore', replaced, 'notes\n', 'notes\n'), { activeDoc: replaced, docDraft: null })
 })

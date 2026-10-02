@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import array
 import math
+import operator
 import wave
 from pathlib import Path
 from typing import Any
@@ -66,3 +67,39 @@ def analyze(path: Path | str, frame_ms: int = 30, min_speech_ms: int = 250, marg
                spans=spans, noise_floor=round(floor, 2), peak=float(max(abs(s) for s in samples)),
                ok=True)
     return out
+
+
+def find_cut(pcm: bytes, *, min_seconds: float, max_seconds: float, pause_seconds: float = 0.5,
+             rate: int = 16000, frame_ms: int = 30, margin: float = 2.5,
+             abs_floor: float = 60.0) -> int | None:
+    """Where to close a growing segment of 16-bit mono PCM, as a byte length, or None to keep reading.
+
+    The recorder uses this to end a clip at a pause instead of mid-word. A cut happens when:
+      * the buffer reached `max_seconds`: cut exactly there (the hard cap), or
+      * at least `min_seconds` are in, speech was heard, and the trailing `pause_seconds` are quiet:
+        cut at the end of the buffer.
+    "Quiet" uses the same adaptive floor as `analyze` (10th percentile of frame RMS times `margin`,
+    never below `abs_floor`). Requiring a frame above that threshold earlier in the buffer is what
+    keeps a steady tone, or a clip that is silent throughout, from reading as one long pause: both run
+    to the cap, and the silence gate downstream stores the quiet one as empty.
+    """
+    n = len(pcm) // 2
+    cap_bytes = int(max_seconds * rate) * 2
+    if n * 2 >= cap_bytes:
+        return cap_bytes
+    if n * 2 < int(min(min_seconds, max_seconds) * rate) * 2:
+        return None
+    samples = array.array("h")
+    samples.frombytes(pcm[: n * 2])
+    step = max(1, int(rate * frame_ms / 1000))
+    rms = []
+    for i in range(0, n - step + 1, step):
+        chunk = samples[i:i + step]
+        rms.append(math.sqrt(sum(map(operator.mul, chunk, chunk)) / step))
+    window = max(1, int(round(pause_seconds * rate / step)))
+    if len(rms) <= window:
+        return None
+    threshold = max(abs_floor, sorted(rms)[int(0.10 * (len(rms) - 1))] * margin)
+    if any(v > threshold for v in rms[-window:]):
+        return None
+    return n * 2 if any(v > threshold for v in rms[:-window]) else None

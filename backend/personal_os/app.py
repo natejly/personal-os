@@ -443,7 +443,11 @@ skills = Skills(db)
 # The repo first, then the service around it: both routes and the 45s tick read through one
 # instance, so a meeting's rows are never written by two Meetings objects at once.
 meeting_store = Meetings(db)
-meeting_svc = MeetingService(db, settings, llm.complete, meeting_store, google=google, todos=todos)
+meeting_svc = MeetingService(db, settings, llm.complete, meeting_store, google=google, todos=todos, docs=docs)
+# A doc that is purged (not trashed) takes its recordings with it: row, FTS entry and audio directory.
+docs.on_delete = meeting_store.purge_doc
+# A doc that changes project takes its recordings along, or project-scoped meeting search shows them under the old one.
+docs.on_move = meeting_store.move_doc
 toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=google, boards=boards, sandboxes=sandboxes, docs=docs, activity=monitor,
                   outbox=outbox, work_plans=work_plans, results=tool_results, skills=skills, jobs=jobs,
                   style=style, meetings=meeting_svc, desks=desks, workspace=workspace, filesnap=filesnap, artifacts=artifacts,
@@ -5088,6 +5092,73 @@ def create_doc(body: DocIn) -> dict[str, Any]:
     return docs.create(body.title, body.content, wsid(body.project_id), body.folder)
 
 
+class DailyIn(BaseModel):
+    date: str | None = None  # YYYY-MM-DD; absent is today on this machine
+
+
+# Declared above /docs/{id}, like /docs/pending: "daily" would otherwise be read as a doc id.
+@app.post("/docs/daily")
+def open_daily_doc(body: DailyIn) -> dict[str, Any]:
+    try:
+        doc, created = docs.daily(body.date)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return {"doc": doc, "created": created}
+
+
+class DocRecordingIn(BaseModel):
+    mode: str = "record"       # 'record' captures the room and proposes a summary; 'dictate' types what you say
+    template: str = "general"
+    title: str | None = None
+
+
+@app.post("/docs/{doc_id}/recordings")
+async def start_doc_recording(doc_id: str, body: DocRecordingIn) -> dict[str, Any]:
+    """Create a recording linked to this doc and start it, through the same consent + preflight gate
+    as any meeting. If the start is refused the row made for it is deleted, so nothing is left behind."""
+    d = docs.get(doc_id)
+    if not d:
+        raise HTTPException(404)
+    if body.mode not in ("record", "dictate"):
+        raise HTTPException(400, "mode must be 'record' or 'dictate'")
+    if not activity.IS_MAC:
+        row = next((r for r in meeting_svc.capabilities() if r["id"] == "platform"), {})
+        raise HTTPException(400, row.get("fix") or "Recording is macOS-only.")
+    m = meeting_store.create(
+        title=(body.title or "").strip() or d["title"], project_id=d["project_id"], template=body.template,
+        status="scheduled", doc_id=doc_id, doc_mode=body.mode)
+    try:
+        started = await asyncio.to_thread(meeting_svc.start, m["id"])
+    except BaseException as e:
+        meeting_store.delete(m["id"])
+        if isinstance(e, MeetingBlocked):
+            raise HTTPException(409, {"blockers": e.blockers}) from e
+        if isinstance(e, RecorderBusy):
+            raise HTTPException(409, {"meeting_id": e.meeting_id, "blockers": [{
+                "id": "busy", "label": "Already recording", "ok": False, "detail": str(e),
+                "fix": "Stop the meeting that is recording before starting another."}]}) from e
+        raise
+    if not started:
+        meeting_store.delete(m["id"])
+        raise HTTPException(404)
+    return started
+
+
+@app.get("/docs/{doc_id}/recordings")
+def doc_recordings(doc_id: str) -> list[dict[str, Any]]:
+    if not docs.get(doc_id):
+        raise HTTPException(404)
+    return meeting_store.for_doc(doc_id)
+
+
+@app.get("/docs/{doc_id}/backlinks")
+def doc_backlinks(doc_id: str) -> list[dict[str, Any]]:
+    out = docs.backlinks(doc_id)
+    if out is None:
+        raise HTTPException(404)
+    return out
+
+
 @app.get("/docs/{id}")
 def get_doc(id: str) -> dict[str, Any]:
     d = docs.get(id)
@@ -5103,7 +5174,8 @@ def save_doc(id: str, body: DocSave) -> dict[str, Any]:
         raise HTTPException(404)
     # A doc the user wrote is the best evidence of their voice there is — far better than chat. Banked
     # under a stable ref, so editing one doc for a week refreshes one sample instead of adding seven.
-    if settings().get("learnStyle", True):
+    # Not for a doc with a recording in it: its accepted summaries are other people's speech, not the user's voice.
+    if settings().get("learnStyle", True) and not meeting_store.records_doc(id):
         style.add_sample(d["project_id"], d["content"], source="doc", ref=f"doc:{id}")
     return d
 
@@ -5477,6 +5549,24 @@ async def _activity_shutdown() -> None:
 # below can be reached by it.
 
 
+def _recording_changed(event: dict[str, Any]) -> None:
+    """A recording moved (segment settled, status change, summary landed): tell every window.
+
+    Called from the recorder's worker thread as well as the event loop, and a Topic's queues belong
+    to the loop, so off-loop calls are handed to it (same shape as _desk_changed)."""
+    try:
+        running = asyncio.get_running_loop()
+    except RuntimeError:
+        running = None
+    if running is not None:
+        events.publish("recording", event)
+    elif _loop is not None and not _loop.is_closed():
+        _loop.call_soon_threadsafe(events.publish, "recording", event)
+
+
+meeting_svc.publish = _recording_changed
+
+
 class MeetingIn(BaseModel):
     """A new meeting. `status` is `scheduled` rather than the repo's `notes_only` default because
     this row was made in order to be recorded; the one the 45s tick adopts says so for itself."""
@@ -5496,6 +5586,15 @@ class MeetingIn(BaseModel):
     attendees: list[Any] = []
     scheduled_start: float | None = None
     scheduled_end: float | None = None
+    # A recording made for a doc (audio import into a doc goes through here, then import-audio).
+    doc_id: str | None = None
+    doc_mode: str | None = None
+
+
+class MeetingSummarizeIn(BaseModel):
+    template: str | None = None
+    focus: str = ""
+    force: bool = False
 
 
 class MeetingPatch(BaseModel):
@@ -5530,6 +5629,8 @@ class MeetingConfigIn(BaseModel):
     outputDeviceName: str | None = None
     sources: list[str] | None = None
     segmentSeconds: int | None = None
+    docSegmentSeconds: int | None = None
+    dictationSegmentSeconds: int | None = None
     maxMeetingSeconds: int | None = None
     drainSeconds: int | None = None
     sttBackend: str | None = None
@@ -5669,16 +5770,29 @@ def reject_meeting_revision(rev_id: str) -> dict[str, Any]:
 
 @app.get("/meetings")
 def list_meetings(project_id: str | None = "all", q: str = "", status: str = "",
-                  since_days: int = 0, limit: int = 100) -> list[dict[str, Any]]:
-    """Preview rows: counts and the first 240 characters of the notes, never a body."""
+                  since_days: int = 0, limit: int = 100, doc_id: str | None = None,
+                  include_docs: bool = False) -> list[dict[str, Any]]:
+    """Preview rows: counts and the first 240 characters of the notes, never a body.
+
+    Recordings made inside a doc are not meetings of their own: they are left out unless
+    `include_docs` is set, and `doc_id` selects one doc's."""
     scope = "__all__" if project_id in (None, "all") else sid(project_id)
-    return meeting_store.list(scope, q, status, since_days, _clamp(limit))
+    return meeting_store.list(scope, q, status, since_days, _clamp(limit), doc_id=doc_id, include_docs=include_docs)
 
 
 @app.post("/meetings")
 def create_meeting(body: MeetingIn) -> dict[str, Any]:
+    doc_project: str | None = None
+    if body.doc_id:
+        doc = docs.get(body.doc_id)  # None when missing or trashed
+        if not doc:
+            raise HTTPException(404, "That doc does not exist or is in the trash.")
+        if body.doc_mode not in (None, "record", "dictate"):
+            raise HTTPException(400, "doc_mode must be 'record' or 'dictate'")
+        doc_project = doc["project_id"]
     return meeting_store.create(
-        title=body.title, project_id=wsid(body.project_id), template=body.template,
+        doc_id=body.doc_id, doc_mode=body.doc_mode if body.doc_id else None,
+        title=body.title, project_id=doc_project if body.doc_id else wsid(body.project_id), template=body.template,
         calendar_event_id=body.calendar_event_id, calendar_id=body.calendar_id,
         calendar_link=body.calendar_link, conference_link=body.conference_link,
         attendees=body.attendees, scheduled_start=body.scheduled_start,
@@ -5687,7 +5801,7 @@ def create_meeting(body: MeetingIn) -> dict[str, Any]:
 
 @app.get("/meetings/{id}")
 def get_meeting(id: str) -> dict[str, Any]:
-    m = meeting_store.get(id)
+    m = meeting_store.get(id, include_hidden=False)
     if not m:
         raise HTTPException(404)
     return m
@@ -5786,7 +5900,7 @@ async def import_meeting_audio(id: str, file: UploadFile = File(...)) -> dict[st
             logging.getLogger("personal_os").warning("meeting import %s: %s", id, e)
 
     asyncio.ensure_future(_go())
-    return meeting_store.get(id) or {}
+    return meeting_store.get(id, include_hidden=False) or {}
 
 
 @app.post("/meetings/{id}/diarize")
@@ -5796,7 +5910,7 @@ async def diarize_meeting(id: str) -> dict[str, Any]:
     res = await meeting_svc.diarize(id)
     if res.get("note") == "no such meeting":
         raise HTTPException(404)
-    return {**res, "meeting": meeting_store.get(id)}
+    return {**res, "meeting": meeting_store.get(id, include_hidden=False)}
 
 
 @app.put("/meetings/{id}/speakers")
@@ -5833,6 +5947,8 @@ def meeting_segments(id: str, since: int = -1, offset: int = 0, limit: int = 200
                      channel: str = "") -> list[dict[str, Any]]:
     """The live transcript pane's poll. `since` is a rowid cursor and each row carries the `cursor`
     to pass back, so since=0 is the whole tail with cursors; omitting it pages by t_start."""
+    if meeting_store.is_hidden(id):
+        raise HTTPException(404)
     limit = _clamp(limit, 2000)
     if since >= 0:
         return meeting_store.since(id, since, limit)
@@ -5852,7 +5968,7 @@ async def stream_meeting(id: str, since: int = 0) -> StreamingResponse:
 def meeting_transcript(id: str, offset: int = 0, limit: int = 500) -> dict[str, Any]:
     """The rolled-up transcript, by line. An hour of speech is far more than one response should
     carry, and the column is only ever rewritten on finalize, so paging it is a pure read."""
-    m = meeting_store.get(id)
+    m = meeting_store.get(id, include_hidden=False)
     if not m:
         raise HTTPException(404)
     lines = (m["transcript"] or "").splitlines()
@@ -5870,24 +5986,40 @@ async def enhance_meeting(id: str, force: bool = False, template: str | None = N
     mechanical fallback still holds the user's notes verbatim, so there is something to accept -
     and only a pass that could write no revision at all is a 502.
     """
-    if not meeting_store.get(id):
+    m = meeting_store.get(id, include_hidden=False)
+    if not m:
         raise HTTPException(404)
+    if m.get("doc_id"):
+        raise HTTPException(400, "This is a recording of a doc: use /meetings/{id}/summarize.")
     rev = await meeting_svc.enhance(id, force, template)
     if not rev:
         raise HTTPException(502, meeting_svc.last_error or "The enhance pass produced no revision")
     return rev
 
 
+@app.post("/meetings/{id}/summarize")
+async def summarize_meeting(id: str, body: MeetingSummarizeIn) -> dict[str, Any]:
+    """Write a summary of a doc recording and PROPOSE it as a section at the end of its doc. Never
+    applied here, whatever the doc edit mode is: the user accepts it in the doc. A model failure is a
+    200 with `error` set and no revision, so the UI can offer it again."""
+    m = meeting_store.get(id, include_hidden=False)
+    if not m:
+        raise HTTPException(404)
+    if not m.get("doc_id"):
+        raise HTTPException(400, "Only a recording made in a doc can be summarized into it.")
+    return await meeting_svc.summarize_into_doc(id, template=body.template, focus=body.focus, force=body.force)
+
+
 @app.get("/meetings/{id}/revisions")
 def meeting_revisions(id: str, limit: int = 100) -> list[dict[str, Any]]:
-    if not meeting_store.get(id):
+    if not meeting_store.get(id, include_hidden=False):
         raise HTTPException(404)
     return meeting_store.revisions(id, _clamp(limit))
 
 
 @app.get("/meetings/{id}/actions")
 def meeting_actions(id: str) -> list[dict[str, Any]]:
-    if not meeting_store.get(id):
+    if not meeting_store.get(id, include_hidden=False):
         raise HTTPException(404)
     return meeting_store.action_items(id)
 
@@ -5896,7 +6028,7 @@ def meeting_actions(id: str) -> list[dict[str, Any]]:
 def meeting_actions_add_todos(id: str, body: MeetingActionsIn) -> list[dict[str, Any]]:
     """Promote proposed items into real todos. Idempotent per item - one that already carries a
     todo_id is left alone - and todos.on_change pushes each new task to Google within ~2s."""
-    if not meeting_store.get(id):
+    if not meeting_store.get(id, include_hidden=False):
         raise HTTPException(404)
     scope = wsid(body.project_id) if body.project_id else None  # None means "the meeting's own"
     want = set(body.ids)
@@ -5918,7 +6050,7 @@ def meeting_action_dismiss(id: str, action_id: str) -> dict[str, Any]:
 async def retranscribe_meeting(id: str, limit: int = 20) -> dict[str, Any]:
     """Replay the failed segments whose wav is still on disk. One HTTP request per segment, so it
     runs in a thread; a segment past its attempt ceiling is left alone."""
-    if not meeting_store.get(id):
+    if not meeting_store.get(id, include_hidden=False):
         raise HTTPException(404)
     # `retranscribe` settles every meeting it touched itself, rebuilding `transcript`, the FTS row
     # and the error column clause by clause. This route used to redo that rebuild and compute
@@ -5926,7 +6058,7 @@ async def retranscribe_meeting(id: str, limit: int = 20) -> dict[str, Any]:
     # away banners that are still true after a replay, like a dead loopback channel or a failed
     # enhance pass. Let the service own it.
     settled = await asyncio.to_thread(meeting_svc.retranscribe, id, limit)
-    return {"settled": settled, "meeting": meeting_store.get(id)}
+    return {"settled": settled, "meeting": meeting_store.get(id, include_hidden=False)}
 
 
 @app.delete("/meetings/{id}/audio")

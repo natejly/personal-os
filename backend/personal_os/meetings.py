@@ -176,6 +176,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "outputDeviceName": "",
     "sources": ["mic"],
     "segmentSeconds": 20,     # how far behind live the transcript runs
+    # A recording made inside a doc ends each clip at a pause in speech, so these two are ceilings:
+    # the longest a clip runs when nobody stops talking. Most clips close sooner.
+    "docSegmentSeconds": 10,
+    "dictationSegmentSeconds": 8,  # dictation, where the words are waiting to be typed
     "maxMeetingSeconds": 14400,
     "drainSeconds": 90,
     "sttBackend": "auto",     # auto | speech | proxy | local | off
@@ -222,7 +226,12 @@ JSON_FIELDS = ("attendees", "sources", "decisions", "topics", "detail", "speaker
 # __init__ anyway: CREATE TABLE IF NOT EXISTS will not add a column, and db.py's _migrate runs
 # inside Database.__init__, before this class exists (canvas.py:21-23). todos.py:49-53 is the shape.
 # speaker_names maps a diarized id to a display name, e.g. {'S1': 'Dana'} (see diarize.py).
-ADDED_COLUMNS: dict[str, str] = {"speaker_names": "TEXT NOT NULL DEFAULT '{}'"}
+# doc_id/doc_mode link a recording to a doc (plain TEXT, the cascade is code: see Docs.on_delete);
+# summary_revision_id is the doc_revisions row of the latest proposed summary.
+ADDED_COLUMNS: dict[str, str] = {"speaker_names": "TEXT NOT NULL DEFAULT '{}'",
+                                 "doc_id": "TEXT", "doc_mode": "TEXT", "summary_revision_id": "TEXT"}
+
+DOC_MODES = ("record", "dictate")
 
 # Channel-level attribution only: mic is the user, anything else is the room. There is no
 # diarization in this slice, so every remote participant is one speaker.
@@ -408,6 +417,8 @@ class Meetings:
             for col, ddl in ADDED_COLUMNS.items():
                 if col not in have:
                     c.execute(f"ALTER TABLE meetings ADD COLUMN {col} {ddl}")
+            # After the ALTER loop: on an upgraded DB the column does not exist until it has run.
+            c.execute("CREATE INDEX IF NOT EXISTS idx_meetings_doc ON meetings(doc_id)")
 
     # ---- indexing ----
     @staticmethod
@@ -423,10 +434,33 @@ class Meetings:
             self._reindex(c, meeting_id, r["title"], r["notes"], r["enhanced"], r["transcript"])
 
     # ---- reads ----
+    @staticmethod
+    def _visible(c: Any, alias: str = "m") -> str:
+        """SQL that hides a recording whose doc is in the trash (a trashed doc must not leak its audio text).
+
+        `docs` belongs to Docs, so a bare Meetings(db) has no such table to join against.
+        """
+        have = c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='docs'").fetchone()
+        if not have:
+            return "1=1"
+        # A doc_id with no doc row is an orphan (a purge whose on_delete hook failed), hidden like a trashed one.
+        return (f"({alias}.doc_id IS NULL OR EXISTS "
+                f"(SELECT 1 FROM docs dd WHERE dd.id={alias}.doc_id AND dd.deleted_at IS NULL))")
+
     def list(self, project_id: str | None = "__all__", q: str = "", status: str = "",
-             since_days: int = 0, limit: int = 100) -> list[dict[str, Any]]:
-        """Meetings without their bodies: notes, enhanced notes and transcripts all get long."""
+             since_days: int = 0, limit: int = 100, doc_id: str | None = None,
+             include_docs: bool = False) -> list[dict[str, Any]]:
+        """Meetings without their bodies: notes, enhanced notes and transcripts all get long.
+
+        Recordings made inside a doc are left out of the rail unless asked for: they are the doc's,
+        not a meeting of their own. `doc_id` selects one doc's recordings.
+        """
         where, args = [], []
+        if doc_id:
+            where.append("m.doc_id = ?")
+            args.append(doc_id)
+        elif not include_docs:
+            where.append("m.doc_id IS NULL")
         if project_id != "__all__":
             if project_id is None:
                 where.append("m.project_id IS NULL")
@@ -442,17 +476,33 @@ class Meetings:
         if since_days > 0:
             where.append("COALESCE(m.started_at, m.scheduled_start, m.created_at) >= ?")
             args.append(now() - int(since_days) * 86400)
-        sql = (
-            "SELECT m.*, "
-            "  (SELECT COUNT(*) FROM meeting_segments s WHERE s.meeting_id=m.id) AS segment_count, "
-            "  (SELECT COUNT(*) FROM meeting_revisions r WHERE r.meeting_id=m.id AND r.status='pending') AS pending "
-            "FROM meetings m" + (" WHERE " + " AND ".join(where) if where else "") +
-            " ORDER BY COALESCE(m.started_at, m.scheduled_start, m.created_at) DESC LIMIT ?"
-        )
         args.append(max(1, int(limit)))
         with self.db.tx() as c:
+            where.append(self._visible(c))
+            sql = (
+                "SELECT m.*, "
+                "  (SELECT COUNT(*) FROM meeting_segments s WHERE s.meeting_id=m.id) AS segment_count, "
+                "  (SELECT COUNT(*) FROM meeting_revisions r WHERE r.meeting_id=m.id AND r.status='pending') AS pending "
+                "FROM meetings m WHERE " + " AND ".join(where) +
+                " ORDER BY COALESCE(m.started_at, m.scheduled_start, m.created_at) DESC LIMIT ?"
+            )
             rows = c.execute(sql, args).fetchall()
         return [self._list_view(row_to_dict(r, JSON_FIELDS)) for r in rows]  # type: ignore[arg-type]
+
+    def for_doc(self, doc_id: str) -> list[dict[str, Any]]:
+        """One doc's recordings, newest first, each with where its proposed summary stands."""
+        rows = self.list(doc_id=doc_id, limit=500)
+        if not rows:
+            return []
+        with self.db.tx() as c:
+            status_of = {r["id"]: r["status"] for r in c.execute(
+                "SELECT id, status FROM doc_revisions WHERE doc_id=?", (doc_id,)).fetchall()} \
+                if c.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='doc_revisions'").fetchone() else {}
+        for m in rows:
+            rid = m.get("summary_revision_id")
+            m["summary_state"] = "none" if not rid else {
+                "pending": "pending", "applied": "applied"}.get(status_of.get(rid, ""), "rejected")
+        return rows
 
     @staticmethod
     def _list_view(d: dict[str, Any]) -> dict[str, Any]:
@@ -472,8 +522,14 @@ class Meetings:
             "attendee_count": len(d.get("attendees") or []),
         }
 
-    def get(self, id: str) -> dict[str, Any] | None:
+    def get(self, id: str, include_hidden: bool = True) -> dict[str, Any] | None:
+        """One meeting. Internal lifecycle code (stop, the transcribe worker, recover, purge) keeps the
+        default so it still reaches a recording whose doc was trashed mid-recording; every external read
+        (routes, tools) passes include_hidden=False so such a row reads as missing, like `list` and `find`."""
         with self.db.tx() as c:
+            if not include_hidden and c.execute(
+                    f"SELECT 1 FROM meetings WHERE id=? AND NOT {self._visible(c, 'meetings')}", (id,)).fetchone():
+                return None
             d = row_to_dict(c.execute(
                 "SELECT m.*, "
                 "  (SELECT COUNT(*) FROM meeting_segments s WHERE s.meeting_id=m.id) AS segment_count "
@@ -493,15 +549,23 @@ class Meetings:
         d["actions"] = actions
         return d
 
+    def is_hidden(self, id: str) -> bool:
+        """True when the row exists but its doc is trashed or gone (see `_visible`)."""
+        with self.db.tx() as c:
+            return c.execute(f"SELECT 1 FROM meetings WHERE id=? AND NOT {self._visible(c, 'meetings')}",
+                             (id,)).fetchone() is not None
+
     def find(self, name_or_id: str) -> dict[str, Any] | None:
         """Resolve what a model passed: an id, or a title (exact, then unique substring)."""
         key = (name_or_id or "").strip()
         if not key:
             return None
         with self.db.tx() as c:
-            r = c.execute("SELECT id FROM meetings WHERE id=? OR lower(title)=lower(?)", (key, key)).fetchone()
+            vis = self._visible(c, "meetings")
+            r = c.execute(f"SELECT id FROM meetings WHERE (id=? OR lower(title)=lower(?)) AND {vis}",
+                          (key, key)).fetchone()
             if not r:
-                hits = c.execute("SELECT id FROM meetings WHERE title LIKE ? COLLATE NOCASE LIMIT 2",
+                hits = c.execute(f"SELECT id FROM meetings WHERE title LIKE ? COLLATE NOCASE AND {vis} LIMIT 2",
                                  (f"%{key}%",)).fetchall()
                 if len(hits) != 1:
                     return None
@@ -559,8 +623,8 @@ class Meetings:
                     (f"%{q}%", f"%{q}%", f"%{q}%", f"%{q}%", want * 3)).fetchall()
             out = []
             for r in rows:
-                m = c.execute("SELECT id, title, status, project_id, started_at FROM meetings WHERE id=?",
-                              (r["meeting_id"],)).fetchone()
+                m = c.execute("SELECT id, title, status, project_id, started_at, doc_id FROM meetings "
+                              f"WHERE id=? AND {self._visible(c, 'meetings')}", (r["meeting_id"],)).fetchone()
                 if not m:
                     continue
                 if project_id != "__all__" and m["project_id"] != project_id:
@@ -576,7 +640,8 @@ class Meetings:
                 else:
                     snippet = (r["snip_notes"] or "").replace(MARK, "").strip()
                 out.append({"meeting_id": m["id"], "title": m["title"], "status": m["status"],
-                            "started_at": m["started_at"], "snippet": snippet, "field": field,
+                            "started_at": m["started_at"], "doc_id": m["doc_id"],
+                            "snippet": snippet, "field": field,
                             "score": float(r["score"] or 0.0)})
                 if len(out) >= want:
                     break
@@ -587,7 +652,8 @@ class Meetings:
                calendar_event_id: str | None = None, calendar_id: str | None = None,
                calendar_link: str = "", conference_link: str = "", attendees: Any = None,
                scheduled_start: float | None = None, scheduled_end: float | None = None,
-               status: str = "notes_only") -> dict[str, Any]:
+               status: str = "notes_only", doc_id: str | None = None,
+               doc_mode: str | None = None) -> dict[str, Any]:
         mid = new_id()
         t = now()
         people = _attendee_rows(attendees)
@@ -596,11 +662,13 @@ class Meetings:
             with self.db.tx() as c:
                 c.execute(
                     "INSERT INTO meetings(id,project_id,title,status,template,scheduled_start,scheduled_end,"
-                    " calendar_event_id,calendar_id,calendar_link,conference_link,attendees,created_at,updated_at)"
-                    " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    " calendar_event_id,calendar_id,calendar_link,conference_link,attendees,created_at,updated_at,"
+                    " doc_id,doc_mode)"
+                    " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (mid, project_id, (title or "").strip()[:200], status, tpl, scheduled_start, scheduled_end,
                      calendar_event_id or None, calendar_id, calendar_link, conference_link,
-                     json.dumps(people), t, t))
+                     json.dumps(people), t, t, doc_id or None,
+                     (doc_mode if doc_mode in DOC_MODES else "record") if doc_id else None))
                 self._reindex(c, mid, title, "", "", "")
         except sqlite3.IntegrityError:
             # The partial unique index on calendar_event_id is the point: the 45s nudge tries to
@@ -631,6 +699,41 @@ class Meetings:
             if INDEXED_FIELDS & set(fields):
                 self._reindex_row(c, id)
         return self.get(id)
+
+    def doc_link(self, id: str) -> tuple[str | None, str | None]:
+        """(doc_id, doc_mode) of a meeting, without loading its bodies. (None, None) for an ordinary one."""
+        with self.db.tx() as c:
+            r = c.execute("SELECT doc_id, doc_mode FROM meetings WHERE id=?", (id,)).fetchone()
+        return (r["doc_id"], r["doc_mode"]) if r else (None, None)
+
+    def records_doc(self, doc_id: str) -> bool:
+        """Whether any recording of this doc captured other people (`record` mode, not dictation)."""
+        with self.db.tx() as c:
+            return c.execute("SELECT 1 FROM meetings WHERE doc_id=? AND doc_mode='record' LIMIT 1",
+                             (doc_id,)).fetchone() is not None
+
+    def move_doc(self, doc_id: str, project_id: str | None) -> int:
+        """The hook behind `Docs.on_move`: a doc's recordings follow it into its new project."""
+        with self.db.tx() as c:
+            return c.execute("UPDATE meetings SET project_id=? WHERE doc_id=?", (project_id, doc_id)).rowcount
+
+    def purge_doc(self, doc_id: str) -> int:
+        """Delete every recording linked to a doc: row, segments, FTS entry and audio directory.
+
+        The hook behind `Docs.on_delete`. `doc_id` is plain TEXT with no FK, and the FTS row and the
+        wavs would not be covered by a cascade anyway. Trashed docs are not purged, only hard deletes.
+        """
+        with self.db.tx() as c:
+            ids = [r["id"] for r in c.execute("SELECT id FROM meetings WHERE doc_id=?", (doc_id,)).fetchall()]
+        for mid in ids:
+            self.delete(mid)
+        return len(ids)
+
+    def set_summary_revision(self, id: str, revision_id: str | None) -> None:
+        """Which doc revision holds this recording's latest proposed summary. Service-only, not a PATCH field."""
+        with self.db.tx() as c:
+            c.execute("UPDATE meetings SET summary_revision_id=?, updated_at=? WHERE id=?",
+                      (revision_id, now(), id))
 
     def mark_started(self, id: str, audio_dir: str, sources: list[str],
                      started_at: float | None = None) -> dict[str, Any] | None:
@@ -728,8 +831,9 @@ class Meetings:
                       " attempts=?, wav_path=?, wav_bytes=? WHERE id=?",
                       (body, json.dumps(payload), backend,
                        str(error or "")[:1000], state, int(attempts), wav_path, int(wav_bytes), seg_id))
-            return row_to_dict(c.execute("SELECT * FROM meeting_segments WHERE id=?", (seg_id,)).fetchone(),
-                               JSON_FIELDS)
+            # `cursor` is the rowid, as in `since`, so a pushed row can advance the same cursor a poll does.
+            return row_to_dict(c.execute("SELECT rowid AS cursor, * FROM meeting_segments WHERE id=?",
+                                         (seg_id,)).fetchone(), JSON_FIELDS)
 
     def segment(self, meeting_id: str, channel: str, seq: int) -> dict[str, Any] | None:
         with self.db.tx() as c:
@@ -1138,7 +1242,8 @@ class MeetingService:
 
     def __init__(self, db: Database, settings_fn: Callable[[], dict[str, Any]],
                  complete_fn: Callable[..., Any], meetings: Meetings,
-                 google: Any = None, todos: Any = None):
+                 google: Any = None, todos: Any = None, docs: Any = None,
+                 publish: Callable[[dict[str, Any]], None] | None = None):
         self.db = db
         self.data_dir = db.data_dir
         self.settings = settings_fn
@@ -1147,11 +1252,26 @@ class MeetingService:
         meetings.before_destroy = self._release_recorder
         self.google = google
         self.todos = todos
+        # The doc store, for recordings made inside a doc (their summary is proposed into it).
+        self.docs = docs
+        # Called with a `recording` event dict from any thread; app.py hands it to the event loop.
+        self.publish = publish
         self.pool = meeting_recorder.RecorderPool(db.data_dir, settings_fn, self.config)
         self.last_error = ""
         self._preflight: tuple[float, dict[str, Any]] | None = None
         self._suggest: tuple[float, list[dict[str, Any]]] = (0.0, [])
         self._enhancing: set[str] = set()
+        self._summarizing: set[str] = set()
+
+    def _emit(self, kind: str, meeting_id: str, **extra: Any) -> None:
+        """Tell the app a recording moved. Never raises: a dead listener must not cost a transcript."""
+        if self.publish is None:
+            return
+        try:
+            doc_id, doc_mode = self.meetings.doc_link(meeting_id)
+            self.publish({"kind": kind, "meeting_id": meeting_id, "doc_id": doc_id, "doc_mode": doc_mode, **extra})
+        except Exception as e:  # noqa: BLE001
+            log.warning("meetings: event %s for %s not published: %s", kind, meeting_id, e)
 
     # ---- config ----
     def config(self) -> dict[str, Any]:
@@ -1276,6 +1396,9 @@ class MeetingService:
                 "queued": s["queued"],
                 "paused": s["paused"],
                 "channels": s["channels"],
+                "doc_id": m.get("doc_id"),
+                "doc_mode": m.get("doc_mode"),
+                "segment_seconds": int(getattr(session, "segment_seconds", 0) or cfg["segmentSeconds"]),
                 "error": m.get("error") or "; ".join(f"{k}: {v}" for k, v in errors.items()),
             }
         row = next((r for r in stt.capabilities(cfg, self.data_dir) if r["id"] == "stt"), None) or {}
@@ -1332,8 +1455,14 @@ class MeetingService:
         return out
 
     # ---- lifecycle ----
-    def start(self, meeting_id: str) -> dict[str, Any] | None:
-        """Open the configured channels and start capturing. Raises MeetingBlocked if preflight fails."""
+    def start(self, meeting_id: str, segment_seconds: int | None = None,
+              sources: list[str] | None = None) -> dict[str, Any] | None:
+        """Open the configured channels and start capturing. Raises MeetingBlocked if preflight fails.
+
+        A recording made inside a doc runs on its own segment length (its transcript is on screen,
+        so a 20 s lag is too long) without touching the user's meeting setting, and dictation only
+        ever listens to the microphone: it types what the user says, never what the room says.
+        """
         m = self.meetings.get(meeting_id)
         if m is None:
             return None
@@ -1354,7 +1483,18 @@ class MeetingService:
         if not pf["ok"]:
             raise MeetingBlocked(pf["blockers"])
 
-        want = [s for s in (cfg["sources"] or []) if s in SOURCES] or ["mic"]
+        want = [s for s in ((sources if sources is not None else cfg["sources"]) or []) if s in SOURCES] or ["mic"]
+        seg_seconds = segment_seconds
+        # Only a doc recording cuts at pauses: its transcript is on screen while you talk, and a clip
+        # that ends mid-word reads as a typo there. A meeting keeps fixed clips and their fixed clock.
+        cut_on_silence = bool(m.get("doc_id"))
+        if m.get("doc_id"):
+            if m.get("doc_mode") == "dictate":
+                want = ["mic"]
+                seg_seconds = seg_seconds or int(cfg["dictationSegmentSeconds"])
+            else:
+                seg_seconds = seg_seconds or int(cfg["docSegmentSeconds"])
+        seg_seconds = int(seg_seconds or cfg["segmentSeconds"])
         channels: dict[str, list[str]] = {}
         dropped: dict[str, str] = {}
         for source in want:
@@ -1401,7 +1541,8 @@ class MeetingService:
             meeting_id, channels,
             on_segment=lambda ch, seq, path, info: self._on_segment(meeting_id, ch, seq, path, info),
             on_result=lambda ch, seq, path, res: self._on_result(meeting_id, ch, seq, path, res),
-            segment_seconds=int(cfg["segmentSeconds"]),
+            segment_seconds=seg_seconds,
+            cut_on_silence=cut_on_silence,
             max_seconds=int(cfg["maxMeetingSeconds"]),
             keep_audio=bool(cfg["keepAudio"]),
             max_audio_bytes=int(cfg["maxAudioBytes"]),
@@ -1413,6 +1554,7 @@ class MeetingService:
         self.meetings.patch(meeting_id, {"error": "; ".join(
             f"{k} not captured: {v}" for k, v in dropped.items())[:1000]})
         log.info("meetings: recording %s (%s)", meeting_id, ", ".join(channels) or "no channels")
+        self._emit("status", meeting_id, status="recording")
         return self.meetings.get(meeting_id)
 
     def _release_recorder(self, meeting_id: str, deleting: bool) -> None:
@@ -1492,6 +1634,7 @@ class MeetingService:
             notes.append(f"{pending or 'Some'} segment(s) were still transcribing when this meeting "
                          "was closed, so the transcript is incomplete. It fills in as they finish.")
         out = self.meetings.finalize(meeting_id, transcript, status="ready", error="; ".join(notes))
+        self._emit("status", meeting_id, status="ready")
         if drained and cfg.get("diarize") and cfg.get("keepAudio"):
             # Only retained audio can be diarized; a missing backend is a quiet no-op.
             with contextlib.suppress(Exception):
@@ -1573,7 +1716,18 @@ class MeetingService:
         return start or None
 
     async def _enhance_quietly(self, meeting_id: str) -> None:
+        """What happens after a recording closes: the enhance pass, or for a doc recording its own pass.
+
+        One dispatch point, because stop, the late-drain watcher and an audio import all end here.
+        A doc recording in `record` mode gets its summary PROPOSED into the doc; dictation gets
+        nothing, the words were already typed.
+        """
         try:
+            doc_id, doc_mode = self.meetings.doc_link(meeting_id)
+            if doc_id:
+                if doc_mode != "dictate":
+                    await self.summarize_into_doc(meeting_id)
+                return
             await self.enhance(meeting_id)
         except Exception as e:  # noqa: BLE001 - a queued pass has nobody to raise to
             self.last_error = f"{type(e).__name__}: {e}"
@@ -1598,7 +1752,8 @@ class MeetingService:
         `degraded: true` and the review screen already renders the warning (MeetingsView.tsx:288).
         """
         m = self.meetings.get(meeting_id)
-        if m is None:
+        if m is None or m.get("doc_id"):
+            # A doc recording has no notes of its own (the doc is the notes); see summarize_into_doc.
             return None
         if not force:
             if m["pending"]:
@@ -1649,6 +1804,114 @@ class MeetingService:
             self.meetings.accept(rev["id"])
             return self.meetings.revision(rev["id"])
         return rev
+
+    # ---- the doc summary pass ----
+    def _note(self, meeting_id: str, clause: str = "", clear: tuple[str, ...] = ()) -> None:
+        """Add one "; "-joined clause to the banner, dropping earlier clauses that start with a `clear` marker."""
+        m = self.meetings.get(meeting_id)
+        if m is None:
+            return
+        parts = [p for p in (m.get("error") or "").split("; ")
+                 if p and not any(p.startswith(c) for c in clear) and p != clause]
+        if clause:
+            parts.append(clause)
+        self.meetings.patch(meeting_id, {"error": "; ".join(parts)})
+
+    async def summarize_into_doc(self, meeting_id: str, *, template: str | None = None,
+                                 focus: str = "", force: bool = False) -> dict[str, Any]:
+        """Turn a doc recording's transcript into a section PROPOSED for the doc.
+
+        Returns {"meeting", "revision", "error"}; never raises for a model or doc failure.
+
+        NEVER auto-applied, whatever `docEditMode` says: the section is other people's speech put
+        through a model, and doc tools are not tainted, so once it is doc text it reaches every
+        chat as the user's own. It lands as a pending append revision the user accepts or rejects.
+        On a model failure there is no revision at all, and the raw transcript is not pasted
+        anywhere (the meeting enhance pass's degraded fallback does exactly that, which is why it
+        is never auto-applied either). The transcript stays in `meetings`, one click away.
+        """
+        m = self.meetings.get(meeting_id)
+        out: dict[str, Any] = {"meeting": m, "revision": None, "error": None}
+        if m is None or not m.get("doc_id"):
+            out["error"] = "That is not a recording of a doc."
+            return out
+        doc_id = m["doc_id"]
+        doc = self.docs.get(doc_id) if self.docs is not None else None
+        if doc is None:
+            out["error"] = "The doc this was recorded in is gone or in the trash."
+            self._emit("summary", meeting_id, revision_id=None, error=out["error"])
+            return out
+        if not force and not template and not focus and m.get("summary_revision_id"):
+            prev = self.docs.revision(m["summary_revision_id"])
+            if prev is not None and prev["status"] == "pending":
+                out["revision"] = prev
+                return out
+        if not (m.get("transcript") or "").strip():
+            out["error"] = "Nothing was said in this recording, so there is nothing to summarize."
+            self._note(meeting_id, "Nothing was said", clear=("Nothing was said", "Summary failed"))
+            self._emit("summary", meeting_id, revision_id=None, error=out["error"])
+            out["meeting"] = self.meetings.get(meeting_id)
+            return out
+        if meeting_id in self._summarizing:
+            out["error"] = "A summary is already being written for this recording."
+            return out
+        cfg = self.config()
+        tpl = template or m["template"] or cfg["template"]
+        if tpl not in meeting_notes.TEMPLATES:
+            tpl = "general"
+        settings = self.settings()
+        model = meeting_notes.pick_model(cfg, settings)
+        self._summarizing.add(meeting_id)
+        prior_status = m["status"]
+        try:
+            self.meetings.patch(meeting_id, {"status": "enhancing"})
+            res = await meeting_notes.summarize_recording(
+                complete_fn=self._complete, settings=settings, model=model, meeting=m,
+                doc_title=doc["title"], doc_content=doc["content"], transcript=m["transcript"],
+                template=tpl, focus=focus, max_transcript_chars=int(cfg["maxTranscriptChars"]))
+        finally:
+            self._summarizing.discard(meeting_id)
+            self.meetings.patch(meeting_id, {"status": "ready" if prior_status == "enhancing" else prior_status})
+        if res["error"] or not res["markdown"]:
+            out["error"] = f"Summary failed: {res['error'] or 'the model returned nothing'}"[:300]
+            self._note(meeting_id, out["error"], clear=("Summary failed", "Nothing was said"))
+            self._emit("summary", meeting_id, revision_id=None, error=out["error"])
+            out["meeting"] = self.meetings.get(meeting_id)
+            return out
+        body, headline = res["markdown"], res["headline"]
+        items = res["action_items"]
+        if cfg.get("redactSecrets", True):
+            # The model can echo a credential the transcript scrubber missed in a paraphrase; the
+            # same credential-only rules as finish_segment, never the identity ones.
+            body = redact.scrub_secrets(body)
+            headline = redact.scrub_secrets(headline)
+            items = [{**it, "text": redact.scrub_secrets(it["text"])} for it in items]
+        # Stored escaped too, so the Summary tab and the doc render the same thing.
+        body = meeting_notes.escape_currency(body)
+        section = f"{meeting_notes.section_heading(m)}\n\n{body.strip()}"
+        # The doc may have been trashed while the model was thinking; propose_append says so with None.
+        rev = self.docs.propose_append(doc_id, section, summary="Recording summary", tool="recording_summary")
+        if rev is None:
+            out["error"] = "The doc this was recorded in is gone or in the trash."
+            self._emit("summary", meeting_id, revision_id=None, error=out["error"])
+            return out
+        prev_id = m.get("summary_revision_id")
+        if prev_id and prev_id != rev["id"]:
+            prev = self.docs.revision(prev_id)
+            if prev is not None and prev["status"] == "pending":
+                self.docs.reject(prev_id)  # superseded: the doc never stacks two summaries of one recording
+        self.meetings.set_summary_revision(meeting_id, rev["id"])
+        if items:
+            self.meetings.add_action_items(meeting_id, None, items)
+        patch: dict[str, Any] = {"enhanced": body}
+        if headline:
+            patch["summary"] = headline
+        self.meetings.patch(meeting_id, patch)
+        self._note(meeting_id, clear=("Summary failed", "Nothing was said"))
+        out["revision"] = self.docs.revision(rev["id"])
+        out["meeting"] = self.meetings.get(meeting_id)
+        self._emit("summary", meeting_id, revision_id=rev["id"], error=None)
+        return out
 
     # ---- retranscription ----
     def retranscribe(self, meeting_id: str = "", limit: int = RETRANSCRIBE_PER_TICK) -> int:
@@ -1763,7 +2026,7 @@ class MeetingService:
 
     async def diarize(self, meeting_id: str, backend: Any = None) -> dict[str, Any]:
         """Run diarization, then re-roll the transcript (and FTS) so [S1]/[S2] lines appear."""
-        if self.meetings.get(meeting_id) is None:
+        if self.meetings.get(meeting_id, include_hidden=False) is None:
             return {"ok": False, "backend": "none", "speakers": 0, "note": "no such meeting"}
         res = await asyncio.to_thread(self.diarize_segments, meeting_id, backend)
         if res["ok"]:
@@ -1772,7 +2035,7 @@ class MeetingService:
 
     def set_speakers(self, meeting_id: str, names: dict[str, Any]) -> dict[str, Any] | None:
         """Rename diarized speakers and rebuild the transcript. ValueError on an unknown id or long name."""
-        if self.meetings.get(meeting_id) is None:
+        if self.meetings.get(meeting_id, include_hidden=False) is None:
             return None
         self.meetings.set_speaker_names(meeting_id, names)
         return self._settle_transcript(meeting_id) or self.meetings.get(meeting_id)
@@ -1905,7 +2168,7 @@ class MeetingService:
         # watcher task that died with the process. Its segments may well have settled before the
         # quit, so roll the transcript up now: `unfinished()` cannot see it (it is already
         # `ready`) and `retranscribe` will not either (those segments are not `failed`).
-        for row in self.meetings.list(status="ready", limit=200):
+        for row in self.meetings.list(status="ready", limit=200, include_docs=True):
             if "still transcribing" not in (row.get("error") or ""):
                 continue
             with contextlib.suppress(Exception):
@@ -1997,7 +2260,7 @@ class MeetingService:
         """
         swept = 0
         live = self.pool.live()
-        for m in self.meetings.list(status="ready", limit=200):
+        for m in self.meetings.list(status="ready", limit=200, include_docs=True):
             if not m["audio_dir"] or m["keep_audio"] or cfg["keepAudio"]:
                 continue
             if live is not None and live.meeting_id == m["id"]:
@@ -2027,11 +2290,16 @@ class MeetingService:
             seg_id = self.meetings.segment_id(meeting_id, channel, seq)
             if not seg_id:
                 return
-            self.meetings.finish_segment(
+            row = self.meetings.finish_segment(
                 seg_id, text=res["text"], detail=res["detail"], backend=res["backend"],
                 error=res["error"], state=res["state"], wav_path=res["wav_path"],
                 wav_bytes=int(res["wav_bytes"] or 0), attempts=int(res.get("attempts") or 0))
             if res["error"] and not res.get("evicted"):
                 self.meetings.patch(meeting_id, {"error": res["error"]})
+                self._emit("status", meeting_id, status="error", error=str(res["error"])[:300])
+            # The row finish_segment RETURNS, never `res["text"]`: the stored row is the one that
+            # went through the credential scrubber.
+            if row is not None and row.get("state") in ("done", "empty", "failed"):
+                self._emit("segment", meeting_id, segment=row)
         except Exception as e:  # noqa: BLE001
             log.warning("meetings: result %s/%s of %s not stored: %s", channel, seq, meeting_id, e)

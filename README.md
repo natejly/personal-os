@@ -64,7 +64,10 @@ their own instructions, knowledge files, memories and graph.
   markdown and LaTeX, a line-numbered editor beside a live preview, and full
   revision history. The assistant can read and revise a doc — but its edits are
   *proposed*, never written straight in. Each one arrives as a diff you accept
-  or reject, so you can point a model at prose you care about. See
+  or reject, so you can point a model at prose you care about. Notes features:
+  a `/` menu, `[[wikilinks]]` and backlinks, an outline, templates and a daily
+  note. On macOS any doc can be recorded or dictated into, with the transcript
+  kept apart from the text and a summary proposed for you to accept. See
   [docs/docs-editor.md](docs/docs-editor.md).
 - **Activity monitor** (macOS, opt-in, off by default). Watches what you actually
   do — frontmost app and window, browser URLs, typing and click rhythm, the text

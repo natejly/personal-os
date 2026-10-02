@@ -19,6 +19,7 @@ import contextlib
 import logging
 import threading
 import time
+from datetime import datetime, timezone
 from typing import Any, Callable
 
 from .google import Google, GoogleNotConnected, _parse_iso
@@ -54,6 +55,14 @@ def _is_missing(e: Exception) -> bool:
     return "404" in s or "not found" in s.lower()
 
 
+FULL_EVERY = 6 * 3600  # seconds between full listings
+OVERLAP = 120  # seconds of overlap on an incremental pull, for clock skew
+
+
+def _iso(epoch: float) -> str:
+    return datetime.fromtimestamp(epoch, tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
 class TasksSync:
     def __init__(self, todos: Todos, google: Google, get_settings: Callable[[], dict[str, Any]], set_settings: Callable[[dict[str, Any]], None]):
         self.todos = todos
@@ -68,6 +77,12 @@ class TasksSync:
         self._loop_ref: asyncio.AbstractEventLoop | None = None
         self._syncing = False
         self._skipped: list[str] = []
+        # Id map of the last full listing plus the deltas since; only ids and rows from the
+        # list calls, never reused across a conflict decision without the delta merged first.
+        self._known: dict[str, dict[str, Any]] = {}
+        self._known_list: str | None = None
+        self._pull_started = 0.0
+        self._full_at = 0.0
 
     # ---- config / status ----
     def config(self) -> dict[str, Any]:
@@ -169,7 +184,7 @@ class TasksSync:
     def _merge(self, tasklist: str) -> dict[str, int]:
         counts = {"pulled": 0, "pushed": 0, "created_local": 0, "created_remote": 0,
                   "deleted_local": 0, "deleted_remote": 0}
-        remote = {t["id"]: t for t in self.google.tasks_all(tasklist)}
+        remote = self._list_remote(tasklist)
 
         # Local deletions first: a tombstone means a synced todo was deleted here.
         for ts in self.todos.tombstones():
@@ -182,6 +197,7 @@ class TasksSync:
                     if not _is_missing(e):
                         raise
                 remote.pop(eid, None)
+                self._known.pop(eid, None)
             self.todos.clear_tombstone(eid)
 
         linked: set[str] = set()
@@ -241,6 +257,29 @@ class TasksSync:
                 continue
             counts["created_remote"] += 1
         return counts
+
+    def _list_remote(self, tasklist: str) -> dict[str, dict[str, Any]]:
+        """Full listing on the first pass, every FULL_EVERY seconds and after any failure;
+        otherwise only what changed since the last pass (2 minute overlap), merged into the map."""
+        now = time.time()
+        incremental = (self._known_list == tasklist and self._pull_started
+                       and now - self._full_at < FULL_EVERY)
+        try:
+            if incremental:
+                since = _iso(self._pull_started - OVERLAP)
+                for t in self.google.tasks_all(tasklist, updated_min=since):
+                    self._known[t["id"]] = t
+            else:
+                self._known = {t["id"]: t for t in self.google.tasks_all(tasklist)}
+                self._known_list, self._full_at = tasklist, now
+        except Exception:
+            self._pull_started = 0.0  # next pass starts over with a full listing
+            raise
+        self._pull_started = now
+        # Tombstones stay in the map for this pass (they trigger the local delete) but are dropped after.
+        remote = dict(self._known)
+        self._known = {k: v for k, v in self._known.items() if not v.get("deleted")}
+        return remote
 
     def _skip(self, td: dict[str, Any], e: Exception) -> None:
         log.warning("google tasks sync: skipped todo %s: %s", td["id"], e)

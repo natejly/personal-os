@@ -67,8 +67,11 @@ export function mergeSegments(segments: MeetingSegment[]): TranscriptLine[] {
  * more than one other attendee this deliberately says "Them" rather than guessing a name. A
  * `speaker` value is honoured when a later diarization pass fills one in.
  */
-export function speakerLabel(channel: MeetingSegment['channel'], speaker: string, attendees: MeetingAttendee[]): string {
+export function speakerLabel(channel: MeetingSegment['channel'], speaker: string, attendees: MeetingAttendee[],
+  /** The user's names for diarized ids ({ S1: 'Dana' }); an id with no name shows as itself. */
+  names: Record<string, string> = {}): string {
   const who = speaker.trim()
+  if (who && names[who]) return names[who]
   if (who && who !== 'me') {
     const match = attendees.find((a) => a.email.toLowerCase() === who.toLowerCase() || a.name.toLowerCase() === who.toLowerCase())
     return match ? match.name || match.email : who

@@ -23,7 +23,7 @@ const withoutLegacyMode = (s: Settings): Settings => {
 /** `'canvas'` is the spaces desktop: one destination among the views, not a separate shell. */
 export type View = 'home' | 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'boards' | 'dashboards' | 'docs' | 'meetings' | 'activity' | 'library' | 'cowork' | 'project' | 'canvas'
 /** Which shelf of the Library is showing. Kept in the store so leaving and coming back lands you where you were. */
-export type LibraryTab = 'skills' | 'connectors' | 'made'
+export type LibraryTab = 'skills' | 'workflows' | 'connectors' | 'made'
 /** Every view but the canvas: what ⌘⇧C and the sidebar's LayoutGrid button return to. */
 export type ClassicView = Exclude<View, 'canvas'>
 /** How the Docs editor splits its panes. */
@@ -308,6 +308,8 @@ export interface State {
   /** Send from the ⌘I panel: same contract as `send`, plus the page snapshot and its own thread. */
   sendToPageAgent: (text: string) => Promise<boolean>
   regenerate: (conversationId?: string) => Promise<void>
+  /** Continue an interrupted reply in a new run (always the user's click). Rejects with the backend's reason when it cannot. */
+  resumeRun: (conversationId: string, runId: string) => Promise<void>
   stop: (conversationId?: string) => Promise<void>
 
   refreshMemories: (q?: string) => Promise<void>
@@ -411,7 +413,7 @@ export interface State {
   runJobNow: (id: string) => Promise<void>
   decideProposal: (id: string, accept: boolean, args?: Record<string, unknown>) => Promise<void>
   /** `opts` carries a propose_plan card's answer: the steps being authorised (with any edits) and a note. */
-  approveTool: (callId: string, decision: ApprovalDecision, conversationId?: string, opts?: { steps?: PlanEdit[] | null; note?: string }) => Promise<void>
+  approveTool: (callId: string, decision: ApprovalDecision, conversationId?: string, opts?: { steps?: PlanEdit[] | null; note?: string; rules?: string[] }) => Promise<void>
   refreshGoogle: () => Promise<void>
   connectGoogle: () => Promise<void>
   disconnectGoogle: () => Promise<void>
@@ -421,8 +423,8 @@ export interface State {
   runTodoCalendar: () => Promise<void>
   setTasksSync: (patch: { enabled?: boolean; tasklist?: string; intervalMinutes?: number }) => Promise<void>
   runTasksSync: () => Promise<void>
-  refreshTodos: (scope?: Scope, includeDone?: boolean) => Promise<void>
-  addTodo: (t: { title: string; project_id?: string | null; due?: string | null; priority?: number; notes?: string }) => Promise<void>
+  refreshTodos: (scope?: Scope, includeDone?: boolean, sort?: 'due' | 'urgency') => Promise<void>
+  addTodo: (t: Parameters<typeof api.todos.create>[0]) => Promise<void>
   updateTodo: (id: string, patch: Parameters<typeof api.todos.update>[1]) => Promise<void>
   deleteTodo: (id: string) => Promise<void>
   uploadDocuments: (files: FileList | File[], projectId: string | null) => Promise<void>
@@ -658,7 +660,7 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean): Cha
     case 'reasoning':
       return mapMsg(ev.data.id, (m) => ({ ...m, reasoning: (m.reasoning ?? '') + ev.data.text }))
     case 'tool_call':
-      return mapMsg(ev.data.message_id, (m) => ({ ...m, tool_events: [...(m.tool_events ?? []), { id: ev.data.id, name: ev.data.name, arguments: ev.data.arguments, result_preview: '', duration_ms: 0, error: null, pending: true, needs_approval: !!ev.data.needs_approval, forced: !!ev.data.forced, plan: ev.data.plan ?? null }] }))
+      return mapMsg(ev.data.message_id, (m) => ({ ...m, tool_events: [...(m.tool_events ?? []), { id: ev.data.id, name: ev.data.name, arguments: ev.data.arguments, result_preview: '', duration_ms: 0, error: null, pending: true, needs_approval: !!ev.data.needs_approval, forced: !!ev.data.forced, permission: ev.data.permission ?? null, plan: ev.data.plan ?? null, agent: ev.data.agent }] }))
     case 'tool_result':
       return mapMsg(ev.data.message_id, (m) => ({ ...m, tool_events: (m.tool_events ?? []).map((t) => (t.id === ev.data.id ? { ...ev.data, pending: false } : t)) }))
     case 'span':
@@ -829,6 +831,9 @@ export const useStore = create<State>((set, get) => {
             if (memories.length + nodes.length + edges.length) refreshAll()
           } else if (ev.event === 'learn_error') {
             get().toast(`Auto-learn failed: ${ev.data.message}`, 'error')
+          } else if (ev.event === 'job_finished') {
+            void get().refreshAgentInbox()
+            window.dispatchEvent(new Event('grain-job-finished'))
           }
         }
       } catch {
@@ -1487,6 +1492,12 @@ export const useStore = create<State>((set, get) => {
       if (!id || get().sessions[id]?.streaming?.answering) return
       if (!get().sessions[id]) await get().openSession(id)
       await runStream(id, {})
+    },
+    resumeRun: async (conversationId, runId) => {
+      if (get().sessions[conversationId]?.streaming?.answering) return
+      if (!get().sessions[conversationId]) await get().openSession(conversationId)
+      const run = await api.resumeRun(runId)
+      void watchRun(conversationId, run, { messageId: null, approvals: 0, attached: false })
     },
     stop: async (conversationId) => {
       const id = conversationId ?? get().focusedConversationId
@@ -2839,13 +2850,15 @@ export const useStore = create<State>((set, get) => {
       void api.tools().then((t) => set({ tools: t.tools })).catch(() => undefined)
     },
 
-    refreshTodos: async (scope = 'all', includeDone = false) => set({ todos: await api.todos.list(scope, includeDone) }),
+    refreshTodos: async (scope = 'all', includeDone = false, sort = 'due') => set({ todos: await api.todos.list(scope, includeDone, '', sort) }),
     addTodo: async (t) => {
       await api.todos.create(t)
       await Promise.all([get().refreshTodos(), get().refreshDashboard()])
     },
     updateTodo: async (id, patch) => {
+      const recurs = patch.done === true && !!get().todos.find((x) => x.id === id)?.repeat
       const t = await api.todos.update(id, patch)
+      if (recurs) void get().refreshTodos()  // the next instance was just created server-side
       set((s) => ({ todos: s.todos.map((x) => (x.id === id ? t : x)), dashboard: s.dashboard && { ...s.dashboard, todos: s.dashboard.todos.map((x) => (x.id === id ? t : x)).filter((x) => !x.done) } }))
     },
     deleteTodo: async (id) => {

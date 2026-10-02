@@ -4,11 +4,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import time
 from contextvars import ContextVar
 from typing import Any, AsyncIterator, Callable
 
 import httpx
+
+log = logging.getLogger("grain.llm")
 
 # Usage accounting. The app registers a listener; callers that know the chat/project set usage_context.
 UsageListener = Callable[[dict[str, Any]], None]
@@ -20,12 +23,38 @@ def on_usage(fn: UsageListener) -> None:
     _usage_listeners.append(fn)
 
 
+def parse_usage(raw: dict[str, Any] | None) -> dict[str, Any]:
+    """Provider usage object -> the counts we keep, with cache and reasoning buckets normalised.
+
+    OpenAI/Fireworks/LiteLLM report prompt_tokens_details.cached_tokens; Anthropic (through LiteLLM) adds
+    cache_read_input_tokens / cache_creation_input_tokens. Reasoning tokens are already inside completion_tokens.
+    """
+    raw = raw if isinstance(raw, dict) else {}
+    out: dict[str, Any] = {k: raw[k] for k in ("prompt_tokens", "completion_tokens", "total_tokens") if raw.get(k) is not None}
+
+    def num(v: Any) -> int:
+        try:
+            return max(0, int(v or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    ptd = raw.get("prompt_tokens_details") if isinstance(raw.get("prompt_tokens_details"), dict) else {}
+    ctd = raw.get("completion_tokens_details") if isinstance(raw.get("completion_tokens_details"), dict) else {}
+    out["cached_tokens"] = num(ptd.get("cached_tokens")) or num(raw.get("cache_read_input_tokens"))
+    out["cache_write_tokens"] = num(raw.get("cache_creation_input_tokens")) or num(ptd.get("cache_creation_tokens"))
+    out["reasoning_tokens"] = num(ctd.get("reasoning_tokens"))
+    return out
+
+
 def _emit_usage(model: str, kind: str, usage: dict[str, Any] | None, duration_ms: int, prompt_chars: int, completion_chars: int) -> None:
     est = not usage or usage.get("prompt_tokens") is None
     rec = {
         "model": model, "kind": kind, "duration_ms": duration_ms, "estimated": est,
         "prompt_tokens": int((usage or {}).get("prompt_tokens") or prompt_chars // 4),
         "completion_tokens": int((usage or {}).get("completion_tokens") or completion_chars // 4),
+        "cached_tokens": 0 if est else int((usage or {}).get("cached_tokens") or 0),
+        "cache_write_tokens": 0 if est else int((usage or {}).get("cache_write_tokens") or 0),
+        "reasoning_tokens": 0 if est else int((usage or {}).get("reasoning_tokens") or 0),
         **usage_context.get(),
     }
     for fn in _usage_listeners:
@@ -44,7 +73,19 @@ DEFAULT_SETTINGS: dict[str, Any] = {
         "excerpts as context; use them when relevant and don't mention them unless asked."
     ),
     "extractionModel": "",
+    "consolidateEvery": 25,  # propose a memory tidy-up after this many new auto memories; 0 = manual only
     "autoLearn": True,
+    # Pre-image copies of local files the agent overwrites or moves, so Undo works (filesnap.py).
+    "fileSnapshots": True,
+    "fileSnapshotMaxBytes": 5_000_000,
+    "fileSnapshotRetainDays": 14,
+    "fileSnapshotBudgetMB": 200,
+    # Argument-pattern rules over the per-tool modes: {allow: [], ask: [], deny: []} of "Tool(pattern)" strings
+    # (permrules.py). Deny beats ask beats allow; a forced approval is never lifted by one.
+    "permissionRules": {"allow": [], "ask": [], "deny": []},
+    # "deny": a job run that would have to ask is refused with a recorded reason instead of waiting for someone.
+    "unattendedApprovals": "ask",
+    "stuckDetection": True,  # nudge, then stop, on ping-pong / same-result / error-cycle loops (stuck.py)
     # Bank long messages the user writes as style samples and keep their voice profile current (style.py).
     # Independent of autoLearn: wanting the app to learn facts is not the same as wanting it to copy your voice.
     "learnStyle": True,
@@ -60,6 +101,24 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # How doc_edit lands. "review" proposes a diff; "apply" writes it. Missing means review.
     "docEditMode": "review",
     "maxToolRounds": 25,
+    "snapshotsEnabled": True,
+    # Keep the system prompt identical between turns and put per-turn retrieval just before the newest
+    # user message, so the provider's prefix cache survives (context.layout_messages).
+    "cacheLayout": True,
+    # Context management (compaction.py). Window and thresholds are estimates (len//4), not provider counts.
+    "contextWindow": 128000,
+    "autoCompact": True,
+    "compactAt": 0.7,
+    "compactKeepRecent": 8,
+    "microKeep": 3,
+    "microAt": 0.5,
+    # Opt-in OpenTelemetry GenAI export (otel_export.py). Off by default; replaced whole through PUT /settings.
+    # Loopback endpoints only unless allowRemote; no message content unless includeContent.
+    "otelExport": {"enabled": False, "endpoint": "", "headers": {}, "includeContent": False, "allowRemote": False, "timeoutSeconds": 5},
+    # Offer MCP tools through mcp_tool_search once more than this many are ready (0 = always send every schema).
+    "mcpDeferAbove": 12,
+    # Approved skills are inlined in the system prompt up to this many characters; past it, an index + skill_view.
+    "skillsInlineBudget": 6000,
     # Per-reply budgets; 0 = unlimited. A run that hits one still writes a final answer, marked partial.
     "maxRunTokens": 200_000,
     "maxRunSeconds": 300,
@@ -73,6 +132,26 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "deskMaxTurns": 12,
     "deskMaxCost": 2.0,
     "deskMaxLive": 4,
+    # Subagents (subagents.py): how many may run at once across the app, how deep they may nest, and
+    # each one's own round and cost caps (also charged to the reply that spawned it). A child with no
+    # model or tool activity for subagentStaleSeconds, or stuck inside one tool for subagentToolSeconds,
+    # is stopped and returns what it had.
+    "subagentMaxConcurrent": 4,
+    "subagentMaxDepth": 2,
+    "subagentMaxRounds": 12,
+    "subagentMaxCost": 0.25,
+    "subagentStaleSeconds": 450,
+    "subagentToolSeconds": 1200,
+    # Workflows (workflows.py): the most items one fan-out step may map over, and a cost cap per run
+    # (0 = none) over every subagent the run starts.
+    "workflowMaxFanOut": 50,
+    "workflowMaxCost": 1.0,
+    # Scheduled-job run policy (jobs_policy.py): retry backoff base in seconds (doubles per attempt, capped at
+    # 30 min) and how many consecutive failed fires switch a job off.
+    "jobRetryBackoffS": 120,
+    "jobFailureStreakLimit": 3,
+    # OS notification when an unattended job fails, is paused, or leaves proposals (only while the app is hidden).
+    "notifyJobs": True,
     # Hosts fetch_url may still read once a reply has touched untrusted content (registrable-suffix match).
     "fetchAllowlist": [],
     # Undo window on outgoing mail (outbox.py). `seconds` is clamped to 60-120 on read.
@@ -81,10 +160,27 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "tavilyApiKey": "",
     # Without a Brave/Tavily key, web_search uses Exa (keyless via its hosted MCP server; a key lifts the rate limit).
     "exaApiKey": "",
+    # Base URL of your own SearXNG (needs `json` under search.formats); empty = off. It runs beside Exa and the results are merged.
+    "searxngUrl": "",
     # fetch_url retries a blocked or JavaScript-only page through Jina Reader (r.jina.ai), which then sees the URL.
     "readerFallback": True,
+    # fetch_url reuses a page it fetched this many seconds ago (0 = never); fresh=true on the call bypasses it.
+    "fetchCacheSeconds": 3600,
     # github_search/github_read; empty = the gh CLI's login (`gh auth token`), else unauthenticated (60 requests/h).
     "githubToken": "",
+    # A stopped sandbox (containers are stopped, not removed, at app quit) is deleted after this many idle days.
+    "sandboxKeepDays": 14,
+    # Folders (absolute paths inside the home folder) where fs_edit / fs_copy / fs_mkdir run without asking. A desk's
+    # own workspace is always granted; anywhere else those tools ask first.
+    "workspaceRoots": [],
+    # Mount the active desk's workspace read-write at /workspace/desk in that desk's sandbox container.
+    "sandboxMountDesk": True,
+    # fs_edit and an overwriting write_local_file refuse a file this conversation has not read (or that changed since).
+    "requireReadBeforeWrite": True,
+    # Host shell (shell.py): shell_run runs in a Seatbelt sandbox inside the desk workspace or a workspace root.
+    "shellNetwork": False,       # a networked shell run taints the reply: whatever it prints may be third-party text
+    "shellTimeoutSec": 120,      # foreground default; a call may ask for up to 600
+    "shellMaxBackground": 4,     # live background jobs at once
     # {model: {"input": $/M tokens, "output": $/M tokens}} overrides for cost accounting (proxy prices are used otherwise)
     "modelPrices": {},
     "googleClientId": "",
@@ -103,6 +199,23 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # todos -> Google Calendar mirror; defaults in todocal.DEFAULT_CONFIG, patched through
     # /integrations/google/todo-calendar.
     "googleTodoCalendar": {},
+    # Document retrieval (retrieval.py). 'bm25' forces keyword-only; hybrid falls back to it when the
+    # embedding route is unavailable. The floor only drops vector-only hits (exact keyword hits survive).
+    "retrievalMode": "hybrid",
+    "embeddingModel": "qwen3-embedding-8b",
+    "retrievalMinSimilarity": 0.25,
+    # Memories: fuse BM25 + embeddings + recency + graph (memory_index.py). Needs embeddingModel; false = keyword-only.
+    "hybridRetrieval": True,
+    "retrievalPerDocCap": 3,
+    "retrievalCandidates": 20,
+    # Also retrieve from the user's own Docs (not just uploaded files) when a chat has useDocuments on.
+    "useDocsInContext": True,
+    # Reply tracker (mailwatch.py); MailWatchModule.config() merges stored values over these defaults.
+    "mailWatch": {"enabled": True, "awaitingAfterDays": 3, "needsReplyAfterHours": 24, "useLLM": False,
+                  "query": "newer_than:14d -category:promotions -category:social", "proposeFollowups": True},
+    # Todo time-block planner (planner.py); PlannerModule.config() merges stored values over these.
+    "planner": {"workStart": "09:00", "workEnd": "17:30", "workDays": [1, 2, 3, 4, 5], "bufferMin": 10, "minBlockMin": 15,
+                "maxBlockMin": 120, "slotStepMin": 15, "lookaheadDays": 7, "calendarName": "Grain Todos"},
 }
 
 
@@ -154,10 +267,48 @@ def _reason_text(delta: dict[str, Any]) -> str:
     return ""
 
 
+# Seconds the provider may send nothing at all before a reply is given up on. A reasoning model can think a
+# long while before its first token, so this is generous; it only exists so a stalled socket cannot hold a run
+# (and its cards, and the Stop button's only way out) open forever.
+STREAM_IDLE_S = 300.0
+
+
 async def _close_when(cancel: asyncio.Event, response: httpx.Response) -> None:
     """Drop the provider socket when stop or steer fires, so the read is not stuck until the next token."""
     await cancel.wait()
     await response.aclose()
+
+
+# A provider that is rate limiting (429) or briefly unavailable answers before any token is sent, so the request
+# can be repeated without duplicating output. Retried a few times with backoff; past that the error surfaces.
+RETRY_STATUS = (429, 502, 503, 529)
+STREAM_RETRIES = 3
+
+
+def _retry_delay(r: httpx.Response, attempt: int) -> float:
+    try:
+        return max(0.5, min(float(r.headers.get("retry-after", "")), 20.0))
+    except ValueError:
+        return 2.0 * (2 ** attempt)
+
+
+@contextlib.asynccontextmanager
+async def _open_stream(client: httpx.AsyncClient, url: str, headers: dict[str, str], body: dict[str, Any],
+                       cancel: asyncio.Event | None = None) -> AsyncIterator[httpx.Response]:
+    attempt = 0
+    while True:
+        r = await client.send(client.build_request("POST", url, headers=headers, json=body), stream=True)
+        if r.status_code in RETRY_STATUS and attempt < STREAM_RETRIES and not (cancel is not None and cancel.is_set()):
+            await r.aclose()
+            log.info("model route answered %s, retrying (%d/%d)", r.status_code, attempt + 1, STREAM_RETRIES)
+            await asyncio.sleep(_retry_delay(r, attempt))
+            attempt += 1
+            continue
+        break
+    try:
+        yield r
+    finally:
+        await r.aclose()
 
 
 async def stream_chat(
@@ -190,13 +341,8 @@ async def stream_chat(
     out_chars = 0
     reason_chars = 0
     cancelled = False
-    async with httpx.AsyncClient(timeout=httpx.Timeout(10, read=None)) as client:
-        async with client.stream(
-            "POST",
-            f"{_base(settings)}/v1/chat/completions",
-            headers=_headers(settings),
-            json=body,
-        ) as r:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(10, read=STREAM_IDLE_S)) as client:
+        async with _open_stream(client, f"{_base(settings)}/v1/chat/completions", _headers(settings), body, cancel) as r:
             if r.status_code >= 400:
                 err_body = (await r.aread()).decode("utf-8", "replace")
                 raise LLMError(f"{r.status_code} {r.reason_phrase}: {err_body[:500]}")
@@ -221,7 +367,7 @@ async def stream_chat(
                         err = obj["error"]
                         raise LLMError(err.get("message") if isinstance(err, dict) else str(err))
                     if isinstance(obj.get("usage"), dict):
-                        usage = {k: obj["usage"].get(k) for k in ("prompt_tokens", "completion_tokens", "total_tokens") if obj["usage"].get(k) is not None}
+                        usage = parse_usage(obj["usage"])
                     choice = (obj.get("choices") or [{}])[0]
                     delta = choice.get("delta") or {}
                     reason = _reason_text(delta)
@@ -245,6 +391,10 @@ async def stream_chat(
                         finish = choice["finish_reason"]
             except asyncio.CancelledError:
                 raise
+            except httpx.ReadTimeout as e:
+                if cancel is None or not cancel.is_set():
+                    raise LLMError(f"The model sent nothing for {int(STREAM_IDLE_S)} seconds; the reply was given up on.") from e
+                cancelled = True
             except Exception:
                 if cancel is None or not cancel.is_set():
                     raise
@@ -279,7 +429,7 @@ async def complete(settings: dict[str, Any], model: str, messages: list[dict[str
         raise LLMError(f"{r.status_code}: {r.text[:500]}")
     data = r.json()
     text = data["choices"][0]["message"]["content"] or ""
-    _emit_usage(model, kind, data.get("usage") if isinstance(data.get("usage"), dict) else None, int((time.time() - t0) * 1000), len(json.dumps(messages)), len(text))
+    _emit_usage(model, kind, parse_usage(data["usage"]) if isinstance(data.get("usage"), dict) else None, int((time.time() - t0) * 1000), len(json.dumps(messages)), len(text))
     return text
 
 

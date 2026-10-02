@@ -1,19 +1,20 @@
 import type {
-  BackgroundEvent, ChatEvent, ToolInfo, Todo, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, DriveFile, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Recap, Conversation, ConversationSettings, ContextUsed, Document, GraphData, GraphEdge, GraphNode, Message,
-  ApprovalDecision, PlanEdit,
-  Memory, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo,
-  Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
+  BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, DriveFile, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Artifact, ArtifactVersion, Recap, Conversation, ConversationSettings, ContextUsed, ContextMeter, Document, GraphData, GraphEdge, GraphNode, Message,
+  ApprovalDecision, PermissionEvaluation, PlanEdit,
+  Memory, MemoryProposal, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
+  Command, Workflow, WorkflowRun, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
   Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
   Desk, DeskAutonomy, DeskBudget, DeskDiff, DeskEvent, DeskFilePreview, DeskFileTree, DeskOutput,
   DeskStatus, FullDesk, PlanRecord, PromotionKind, PromotionResult,
-  AgentInbox, AgentProposal, Job,
+  AgentInbox, AgentProposal, Job, JobNotifyEvent, JobRunRecord, JobStats,
   Doc, DocFolder, FullDoc, DocRevision,
   HealthEntry, HealthMetric, HealthProvider, HealthSource, HealthSourcePlan, HealthSummary, HealthSyncResult, McpSignIn,
   McpEffective, McpReport, McpServer, McpServerDraft, McpTool, ToolMode,
   ActivityApplyResult, ActivityCapability, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityGrantResult,
-  ActivityInsights, ActivityStatus, ActivitySuggestion, ActivitySummary, InsightStatus,
+  ActivityCategoryReport, ActivityCategoryRule, ActivityInsights, ActivityRedactTest, ActivityStatus, ActivitySuggestion, ActivitySummary, InsightStatus,
   PendingSend, SendHoldConfig, Verification, Verified,
-  Meeting, FullMeeting, MeetingActionItem, MeetingCandidate, MeetingConfig, MeetingPreflight, MeetingRevision, MeetingSegment, MeetingStatusInfo, MeetingStreamEvent
+  Meeting, FullMeeting, MeetingActionItem, MeetingCandidate, MeetingConfig, MeetingPreflight, MeetingRevision, MeetingSegment, MeetingStatusInfo, MeetingStreamEvent,
+  RunChanges, RunUndoResult
 } from '@shared/types'
 
 let base = ''
@@ -100,21 +101,36 @@ export const api = {
   recap: (force = false) => req<Recap>(`/recap?force=${force}`),
   // `steps` / `note` are for a propose_plan card: the steps the user is authorising (with any edited arguments,
   // whose digests the backend re-derives), and one line back to the model.
-  approve: (callId: string, decision: ApprovalDecision, opts?: { steps?: PlanEdit[] | null; note?: string }) =>
-    req(`/approvals/${callId}`, { method: 'POST', body: json({ decision, ...(opts?.steps ? { steps: opts.steps } : {}), ...(opts?.note ? { note: opts.note } : {}) }) }),
+  approve: (callId: string, decision: ApprovalDecision, opts?: { steps?: PlanEdit[] | null; note?: string; rules?: string[] }) =>
+    req(`/approvals/${callId}`, { method: 'POST', body: json({ decision, ...(opts?.steps ? { steps: opts.steps } : {}), ...(opts?.note ? { note: opts.note } : {}), ...(opts?.rules ? { rules: opts.rules } : {}) }) }),
+  /** What the saved permission rules say about one call (nothing runs). `rule` validates one rule string instead. */
+  evaluatePermission: (body: { tool?: string; command?: string; args?: Record<string, unknown>; rule?: string }) =>
+    req<PermissionEvaluation & { ok?: boolean; error?: string }>('/permissions/evaluate', { method: 'POST', body: json(body) }),
   /** The Agent Inbox: pending approvals and proposals, plus what the scheduled jobs did. Built from journal rows. */
   inbox: (hours = 72) => req<AgentInbox>(`/inbox?hours=${hours}`),
   jobs: {
     list: () => req<Job[]>('/jobs'),
     /** A repeating job passes `cron`; a one-off passes kind:'once' and `run_at` (unix seconds, must be future). */
-    create: (j: { name: string; prompt: string; kind?: 'cron' | 'once'; cron?: string; run_at?: number | null; timezone?: string; enabled?: boolean; project_id?: string | null }) =>
+    create: (j: { name: string; prompt: string; kind?: 'cron' | 'once'; cron?: string; run_at?: number | null; timezone?: string; enabled?: boolean; project_id?: string | null; allowed_tools?: string[] | null }) =>
       req<Job>('/jobs', { method: 'POST', body: json(j) }),
-    update: (id: string, patch: Partial<Pick<Job, 'name' | 'kind' | 'cron' | 'run_at' | 'prompt' | 'timezone' | 'enabled' | 'project_id'>>) =>
+    update: (id: string, patch: Partial<Pick<Job, 'name' | 'kind' | 'cron' | 'run_at' | 'prompt' | 'timezone' | 'enabled' | 'project_id' | 'max_retries' | 'allowed_tools'>>) =>
       req<Job>(`/jobs/${id}`, { method: 'PATCH', body: json(patch) }),
     delete: (id: string) => req(`/jobs/${id}`, { method: 'DELETE' }),
     /** Fire it now by hand. Still proposal-only and on the job budget; the cron schedule is untouched. */
+    /** Preview: the same prompt with every non-read-only tool off. Makes no proposals; hidden from the inbox. */
+    dryRun: (id: string) => req<{ ok: boolean; run_id: string | null; conversation_id: string | null }>(`/jobs/${id}/dry_run`, { method: 'POST' }),
+    runs: (id: string, limit = 50) => req<JobRunRecord[]>(`/jobs/${id}/runs?limit=${limit}`),
+    stats: (id: string, days = 30) => req<JobStats>(`/jobs/${id}/stats?days=${days}`),
+    /** The run history as CSV text, fetched with the auth header (a plain link could not carry it). */
+    csv: async (id: string): Promise<string> => {
+      const r = await fetch(`${base}/jobs/${id}/runs.csv`, { headers: await auth() })
+      if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
+      return r.text()
+    },
     runNow: (id: string) => req<{ ok: boolean; run_id: string | null; conversation_id: string | null }>(`/jobs/${id}/run`, { method: 'POST' })
   },
+  /** OS-notification-worthy job events newer than `since` (unix seconds). */
+  inboxNotify: (since: number) => req<JobNotifyEvent[]>(`/inbox/notify?since=${since}`),
   proposals: {
     list: (status: 'pending' | 'accepted' | 'rejected' | 'all' = 'pending') => req<AgentProposal[]>(`/proposals?status=${status}`),
     /** Executes it, as the user. `args` replaces the call's arguments first. Accepting twice is a 409, never a resend. */
@@ -152,15 +168,27 @@ export const api = {
   },
   /** AI dashboard widgets (`/widgets/{id}`). Not `api.windows`, which is a canvas window. */
   widgets: {
+    get: (id: string) => req<Widget>(`/widgets/${id}`),
+    /** A declarative widget's rows: the cache inside its refresh_minutes, a re-bind after. Never a model call. */
+    data: (id: string) => req<Widget>(`/widgets/${id}/data`),
     update: (id: string, patch: Record<string, unknown>) => req<Widget>(`/widgets/${id}`, { method: 'PUT', body: json(patch) }),
     refresh: (id: string, regenerate = false) => req<Widget>(`/widgets/${id}/refresh?regenerate=${regenerate}`, { method: 'POST' }),
     revise: (id: string, instruction: string) => req<Widget>(`/widgets/${id}/revise`, { method: 'POST', body: json({ instruction }) }),
     delete: (id: string) => req(`/widgets/${id}`, { method: 'DELETE' })
   },
+  /** Artifacts (`/artifacts`): model-written HTML documents with version history. */
+  artifacts: {
+    list: (q = '') => req<Artifact[]>(`/artifacts?q=${encodeURIComponent(q)}`),
+    get: (id: string) => req<Artifact>(`/artifacts/${id}`),
+    versions: (id: string) => req<ArtifactVersion[]>(`/artifacts/${id}/versions`),
+    restore: (id: string, version: number) => req<Artifact>(`/artifacts/${id}/restore`, { method: 'POST', body: json({ version }) }),
+    revise: (id: string, instruction: string) => req<Artifact>(`/artifacts/${id}/revise`, { method: 'POST', body: json({ instruction }) }),
+    delete: (id: string) => req(`/artifacts/${id}`, { method: 'DELETE' })
+  },
   todos: {
-    list: (s: Scope = 'all', includeDone = false, q = '') => req<Todo[]>(`/todos?project_id=${encodeURIComponent(s)}&include_done=${includeDone}&q=${encodeURIComponent(q)}`),
-    create: (t: { title: string; project_id?: string | null; notes?: string; due?: string | null; priority?: number }) => req<Todo>('/todos', { method: 'POST', body: json(t) }),
-    update: (id: string, patch: { title?: string; notes?: string; due?: string | null; priority?: number; done?: boolean; project_id?: string | null; clear_due?: boolean; clear_project?: boolean; calendar_event_id?: string | null; calendar_link?: string | null; calendar_id?: string | null }) =>
+    list: (s: Scope = 'all', includeDone = false, q = '', sort: 'due' | 'urgency' = 'due') => req<Todo[]>(`/todos?project_id=${encodeURIComponent(s)}&include_done=${includeDone}&q=${encodeURIComponent(q)}&sort=${sort}`),
+    create: (t: { title: string; project_id?: string | null; notes?: string; due?: string | null; priority?: number; repeat?: TodoRepeat | null; estimate_min?: number | null }) => req<Todo>('/todos', { method: 'POST', body: json(t) }),
+    update: (id: string, patch: { title?: string; notes?: string; due?: string | null; priority?: number; done?: boolean; project_id?: string | null; clear_due?: boolean; clear_project?: boolean; repeat?: TodoRepeat; clear_repeat?: boolean; estimate_min?: number | null; clear_estimate?: boolean; calendar_event_id?: string | null; calendar_link?: string | null; calendar_id?: string | null }) =>
       req<Todo>(`/todos/${id}`, { method: 'PUT', body: json(patch) }),
     delete: (id: string) => req(`/todos/${id}`, { method: 'DELETE' })
   },
@@ -189,6 +217,17 @@ export const api = {
     updateSource: (id: string, patch: { enabled?: boolean; days_back?: number }) => req<HealthSource>(`/health/sources/${id}`, { method: 'PUT', body: json(patch) }),
     disconnect: (id: string, keepData = true) => req(`/health/sources/${id}?keep_data=${keepData}&remove_server=true`, { method: 'DELETE' })
   },
+  planner: {
+    suggest: (days?: number) => req<PlannerSuggestion>('/planner/suggest', { method: 'POST', body: json({ days }) }),
+    /** The one write: the user pressed "Add selected to calendar". */
+    apply: (blocks: PlannerBlock[]) => req<PlannerApplyResult>('/planner/apply', { method: 'POST', body: json({ blocks }) })
+  },
+  mailWatch: {
+    list: (status?: 'to_reply' | 'awaiting_reply') => req<MailWatchList>(`/mail/watch${status ? `?status=${status}` : ''}`),
+    refresh: () => req<{ refreshed: number }>('/mail/watch/refresh', { method: 'POST' }),
+    dismiss: (id: string, dismissed = true) => req<MailWatchThread>(`/mail/watch/${encodeURIComponent(id)}`, { method: 'PUT', body: json({ dismissed }) }),
+    followup: (id: string) => req<Todo>(`/mail/watch/${encodeURIComponent(id)}/followup`, { method: 'POST' })
+  },
   mcp: {
     servers: () => req<McpServer[]>('/mcp/servers'),
     create: (s: Partial<McpServerDraft> & { name: string; enabled?: boolean }) => req<McpServer>('/mcp/servers', { method: 'POST', body: json(s) }),
@@ -209,6 +248,8 @@ export const api = {
     tools: () => req<{ tools: McpTool[] }>('/mcp/tools'),
     setGrant: (slug: string, mode: ToolMode, scope: 'global' | 'project' | 'chat' = 'global', scopeId?: string) =>
       req<McpEffective>(`/mcp/tools/${encodeURIComponent(slug)}/grant`, { method: 'PUT', body: json({ mode, scope, scope_id: scopeId ?? null }) }),
+    /** The user read the diff: releases a quarantined tool without touching its grant. */
+    acceptChange: (slug: string) => req<McpEffective>(`/mcp/tools/${encodeURIComponent(slug)}/accept`, { method: 'POST' }),
     clearGrant: (slug: string, scope: 'global' | 'project' | 'chat' = 'global') =>
       req<McpEffective>(`/mcp/tools/${encodeURIComponent(slug)}/grant?scope=${scope}`, { method: 'DELETE' })
   },
@@ -298,6 +339,28 @@ export const api = {
     list: (convId: string, limit = 20) => req<ToolResultHandle[]>(`/conversations/${convId}/tool-results?limit=${limit}`),
     read: (id: string, offset = 0, limit = 20000) => req<{ text: string; total_chars: number; offset: number; has_more: boolean }>(`/tool-results/${id}?offset=${offset}&limit=${limit}`)
   },
+  /** Saved multi-step jobs. A run starts only after its plan digest is approved; editing the workflow withdraws that. */
+  workflows: {
+    list: () => req<Workflow[]>('/workflows'),
+    validate: (text: string) => req<{ ok: boolean; errors: string[] }>('/workflows/validate', { method: 'POST', body: json({ text }) }),
+    create: (text: string) => req<Workflow>('/workflows', { method: 'POST', body: json({ text }) }),
+    update: (id: string, text: string) => req<Workflow>(`/workflows/${id}`, { method: 'PUT', body: json({ text }) }),
+    delete: (id: string) => req<{ ok: boolean }>(`/workflows/${id}`, { method: 'DELETE' }),
+    propose: (id: string, params: Record<string, unknown>) => req<WorkflowRun>(`/workflows/${id}/runs`, { method: 'POST', body: json({ params }) }),
+    runs: (workflowId?: string) => req<WorkflowRun[]>(`/workflow-runs${workflowId ? `?workflow_id=${encodeURIComponent(workflowId)}` : ''}`),
+    run: (runId: string) => req<WorkflowRun>(`/workflow-runs/${runId}`),
+    approveRun: (runId: string, planDigest: string) =>
+      req<WorkflowRun>(`/workflow-runs/${runId}/approve`, { method: 'POST', body: json({ plan_digest: planDigest }) }),
+    resumeRun: (runId: string) => req<WorkflowRun>(`/workflow-runs/${runId}/resume`, { method: 'POST' }),
+    cancelRun: (runId: string) => req<{ ok: boolean }>(`/workflow-runs/${runId}/cancel`, { method: 'POST' })
+  },
+  /** Saved prompt templates ($ARGUMENTS, $1..$n). */
+  commands: {
+    list: () => req<Command[]>('/commands'),
+    create: (text: string) => req<Command>('/commands', { method: 'POST', body: json({ text }) }),
+    update: (id: string, text: string) => req<Command>(`/commands/${id}`, { method: 'PUT', body: json({ text }) }),
+    delete: (id: string) => req<{ ok: boolean }>(`/commands/${id}`, { method: 'DELETE' })
+  },
   /** Procedural memory. Nothing here is injected until its status is 'approved'. */
   skills: {
     list: (status?: SkillStatus) => req<Skill[]>(`/skills${status ? `?status=${status}` : ''}`),
@@ -314,7 +377,11 @@ export const api = {
     draft: (intent: string, conversationId?: string | null) =>
       req<SkillDraftResult>('/skills/draft', { method: 'POST', body: json({ intent, conversation_id: conversationId ?? null }) }),
     /** What a chat in this scope is actually shown. 'all' is not a scope any one chat sees. */
-    preview: (scope: Scope = 'personal') => req<SkillPreview>(`/skills/preview?project_id=${encodeURIComponent(scope)}`)
+    preview: (scope: Scope = 'personal') => req<SkillPreview>(`/skills/preview?project_id=${encodeURIComponent(scope)}`),
+    /** Paste a SKILL.md. Always lands as a candidate; `findings` are the lint results, `warnings` what was ignored. */
+    importMd: (text: string) =>
+      req<{ skill: Skill; findings: SkillFinding[]; warnings: string[] }>('/skills/import', { method: 'POST', body: json({ text }) }),
+    exportMd: (id: string) => req<{ filename: string; text: string }>(`/skills/${id}/export`)
   },
   stop: (mid: string) => req(`/messages/${mid}/stop`, { method: 'POST' }),
   /** Starts the reply as a background task and returns at once; watch it with `chatStream(convId, seq)`. Throws a 409 carrying a `RunConflict` when that conversation already has a live run. */
@@ -322,6 +389,24 @@ export const api = {
   /** Injects a user message into a live run (steering). Throws a 409 when nothing is running. */
   steer: (convId: string, content: string) => req<{ ok: boolean; run_id: string; message: Message }>(`/conversations/${convId}/steer`, { method: 'POST', body: json({ content }) }),
   runs: () => req<RunInfo[]>('/runs'),
+  /** A subagent's run row (status while it works) and its recorded tape (calls, results). */
+  agentRun: (id: string) => req<{ run_id: string; status: string; budget?: Record<string, number> | null }>(`/runs/${encodeURIComponent(id)}`),
+  agentTape: (id: string) => req<RunTapeEvent[]>(`/runs/${encodeURIComponent(id)}/events`),
+  /** The newest interrupted run of a conversation, with whether it can still be resumed. */
+  interruptedRun: async (convId: string): Promise<{ run_id: string; resumable: boolean } | null> => {
+    const rows = await req<RunInfo[]>(`/runs?conversation_id=${encodeURIComponent(convId)}&status=interrupted&limit=1`)
+    if (!rows[0]) return null
+    const d = await req<{ run_id: string; resumable: boolean }>(`/runs/${rows[0].run_id}`)
+    return { run_id: d.run_id, resumable: d.resumable }
+  },
+  /** The user's Undo for a local file write or move. A 409 message is JSON `{reason, conflict}`; `force` overrides a conflict. */
+  restoreFileSnapshot: (id: string, force = false) => req<{ ok: boolean; path: string }>(`/file-snapshots/${id}/restore`, { method: 'POST', body: json({ force }) }),
+  /** Folder changes a reply made (whole-folder snapshots), and the user's Undo / Redo of them. */
+  messageChanges: (messageId: string) => req<RunChanges>(`/messages/${messageId}/changes`),
+  undoRun: (runId: string) => req<RunUndoResult>(`/runs/${runId}/undo`, { method: 'POST' }),
+  redoRun: (runId: string) => req<RunUndoResult>(`/runs/${runId}/redo`, { method: 'POST' }),
+  /** Starts a new run that continues an interrupted one. 409 with a reason when it cannot. */
+  resumeRun: (runId: string) => req<ChatRunStarted>(`/runs/${runId}/resume`, { method: 'POST' }),
   /** Stops a run before its assistant message exists. Detaching the stream would only drop a viewer. */
   stopRun: (convId: string, runId?: string) => req<{ ok: boolean }>(`/conversations/${convId}/stop${runId ? `?run_id=${encodeURIComponent(runId)}` : ''}`, { method: 'POST' }),
   usage: {
@@ -329,6 +414,12 @@ export const api = {
     setPrices: (modelPrices: Record<string, { input: number; output: number }>) =>
       req<{ repriced: number; prices: Record<string, ModelPrice> }>('/usage/prices', { method: 'PUT', body: json({ modelPrices }) })
   },
+  messageOtlp: (messageId: string) => req<unknown>(`/messages/${messageId}/otlp`),
+  testTraceExport: () => req<{ sent: boolean; reason?: string; status: number | null; error: string | null }>('/traces/export-test', { method: 'POST' }),
+  contextMeter: (conversationId: string) => req<ContextMeter>(`/conversations/${conversationId}/context-meter`),
+  compactConversation: (conversationId: string, focus?: string) =>
+    req<{ compacted: boolean }>(`/conversations/${conversationId}/compact`, { method: 'POST', body: json({ focus: focus ?? null }) }),
+  discardSummary: (conversationId: string) => req<{ removed: boolean }>(`/conversations/${conversationId}/summary`, { method: 'DELETE' }),
   contextPreview: (projectId: string | null, query: string, convSettings?: Partial<ConversationSettings>) =>
     req<ContextUsed>('/context/preview', { method: 'POST', body: json({ project_id: projectId, query, conv_settings: convSettings ?? {} }) }),
   memories: {
@@ -336,7 +427,14 @@ export const api = {
     create: (m: { project_id: string | null; content: string; kind?: string; pinned?: boolean }) => req<Memory>('/memories', { method: 'POST', body: json(m) }),
     update: (id: string, patch: { content?: string; kind?: string; pinned?: boolean; project_id?: string | null; move_to_global?: boolean }) =>
       req<Memory>(`/memories/${id}`, { method: 'PUT', body: json(patch) }),
-    delete: (id: string) => req(`/memories/${id}`, { method: 'DELETE' })
+    delete: (id: string) => req(`/memories/${id}`, { method: 'DELETE' }),
+    /** Every row including superseded / forgotten ones. */
+    listWithHistory: (s: Scope) => req<Memory[]>(`/memories?${scope(s)}&include_invalid=true`),
+    restore: (id: string) => req<Memory>(`/memories/${id}/restore`, { method: 'POST' }),
+    consolidate: (projectId: string | null) => req<MemoryProposal[]>('/memories/consolidate', { method: 'POST', body: json({ project_id: projectId }) }),
+    proposals: (s: Scope) => req<MemoryProposal[]>(`/memories/proposals?status=pending&${scope(s)}`),
+    applyProposal: (id: string) => req<MemoryProposal>(`/memories/proposals/${id}/apply`, { method: 'POST' }),
+    dismissProposal: (id: string) => req<MemoryProposal>(`/memories/proposals/${id}/dismiss`, { method: 'POST' })
   },
   style: {
     get: (s: Scope) => req<StyleState>(`/style?project_id=${encodeURIComponent(s === 'all' ? 'personal' : s)}`),
@@ -389,6 +487,10 @@ export const api = {
     permissions: () => req<ActivityCapability[]>('/activity/permissions'),
     requestPermission: (id: string, browser = '') => req<{ result: ActivityGrantResult; status: ActivityStatus }>('/activity/permissions/request', { method: 'POST', body: json({ id, browser }) }),
     openPermissionSettings: (id: string) => req<{ ok: boolean }>('/activity/permissions/open', { method: 'POST', body: json({ id }) }),
+    categories: () => req<{ rules: ActivityCategoryRule[]; default: boolean }>('/activity/categories'),
+    setCategories: (rules: ActivityCategoryRule[] | null) => req<{ rules: ActivityCategoryRule[]; default: boolean }>('/activity/categories', { method: 'PUT', body: json({ rules }) }),
+    categoryReport: (days = 7) => req<ActivityCategoryReport>(`/activity/categories/report?days=${days}`),
+    redactTest: (text: string) => req<ActivityRedactTest>('/activity/redact/test', { method: 'POST', body: json({ text }) }),
     palantir: (on: boolean) => req<ActivityStatus>('/activity/palantir', { method: 'POST', body: json({ on }) }),
     purge: (scope: 'expired' | 'events' | 'summaries' | 'all') => req<{ deleted: { events: number; summaries: number }; status: ActivityStatus }>('/activity/purge', { method: 'POST', body: json({ scope }) }),
     /** Habits and automation suggestions mined from the same data. */
@@ -541,7 +643,18 @@ export const api = {
       req<MeetingActionItem[]>(`/meetings/${id}/actions/add-todos`, { method: 'POST', body: json({ ids, project_id: projectId ?? null }) }),
     dismissAction: (id: string, actionId: string) => req<MeetingActionItem>(`/meetings/${id}/actions/${actionId}/dismiss`, { method: 'POST' }),
     retranscribe: (id: string, limit = 20) => req<{ settled: number; meeting: FullMeeting }>(`/meetings/${id}/retranscribe?limit=${limit}`, { method: 'POST' }),
-    deleteAudio: (id: string) => req<FullMeeting>(`/meetings/${id}/audio`, { method: 'DELETE' })
+    deleteAudio: (id: string) => req<FullMeeting>(`/meetings/${id}/audio`, { method: 'DELETE' }),
+    /** Rename diarized speakers ({ S1: 'Dana' }); the transcript is rebuilt server side. A blank name clears one. */
+    setSpeakers: (id: string, names: Record<string, string>) =>
+      req<FullMeeting>(`/meetings/${id}/speakers`, { method: 'PUT', body: json({ names }) }),
+    /** Re-run speaker separation on retained audio. ok=false with a note when nothing can run. */
+    diarize: (id: string) => req<{ ok: boolean; note: string; speakers: number; meeting: FullMeeting }>(`/meetings/${id}/diarize`, { method: 'POST' }),
+    /** Transcribe an existing recording into this meeting. 202: progress arrives through the segments poll. */
+    importAudio: (id: string, file: File) => {
+      const fd = new FormData()
+      fd.append('file', file)
+      return req<FullMeeting>(`/meetings/${id}/import-audio`, { method: 'POST', body: fd })
+    }
   },
   notes: {
     list: (s: Scope = 'all', q = '') => req<Note[]>(`/notes?project_id=${encodeURIComponent(s)}&q=${encodeURIComponent(q)}`),

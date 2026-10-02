@@ -104,6 +104,18 @@ per-meeting SSE route and client ship (`GET /meetings/{id}/stream`,
 `meetingStream`) but nothing publishes to the meeting bus yet, so the stream opens
 and finishes immediately and the poll is what carries the pane.
 
+**Silence gate and hallucination filter.** Before a segment is sent to STT,
+`meeting_vad.analyze` (stdlib adaptive energy VAD) measures its speech ratio; below
+`vadMinSpeechRatio` (0.03) the segment is stored as `empty`, its wav deleted, and no
+billed call is made. After a reply, `stt.filter_hallucinations` applies faster-whisper's
+rules per verbose_json segment (`no_speech_prob > 0.6` with `avg_logprob < -1.0`, or
+`compression_ratio > 2.4`), drops known silence phrases ("Thank you.") only when the
+segment's speech ratio is under 0.15, and collapses repetition loops; dropped phrases
+land in `detail.filtered`. Local whisper now runs with `-oj`, so `detail.segments`
+carries start/end, and passes `--vad -vm` when `whisperVadModelPath` (or a
+`ggml-silero*.bin` in `<data_dir>/models`) exists. Switches: `vadGate`,
+`hallucinationFilter` (both default on); turning both off restores the old behaviour.
+
 **The calendar nudge** is a 45-second tick with no LLM in it. It lists events
 happening now across `calendarIds` with at least `minAttendees` people, upserts a
 `scheduled` row per event, and offers a Record button on Today and in the rail. A
@@ -320,11 +332,20 @@ literal sub-paths are all registered *above* `/meetings/{id}`, or
 `/meetings/status` would resolve as a meeting id and 404 — so a new route appended
 to the bottom of the group is a silent break, not a compile error.
 
-Two things deliberately absent: there is no `POST /meetings/adopt` (a repeat
+One thing deliberately absent: there is no `POST /meetings/adopt` (a repeat
 `POST /meetings` with the same `calendar_event_id` is find-or-create, which is the
-same thing), and no `POST /meetings/{id}/import-audio` — uploading a pre-recorded
-file is the right degradation path on a machine with no loopback device and the
-schema already carries the `import` channel, but it is a later slice.
+same thing).
+
+`POST /meetings/{id}/import-audio` (multipart `file`, 202) transcribes an existing
+recording into a meeting that has no segments yet, on any platform. The upload is
+streamed to `<data_dir>/tmp` (1 GiB cap), probed (`maxImportSeconds`, default 14400,
+else 400), cut by ffmpeg into the live 20 s wav scheme and drained by the same
+`TranscribeWorker` as `import`-channel segments on the file's own clock, then the
+transcript is rolled up, the meeting goes `ready` and enhance is queued when
+`enhanceOnStop` is on. It needs the same `consentedAt` as recording (409 with the
+consent blocker), and refuses a meeting that is recording or already has segments.
+Failures behave like live ones: the wav is kept and Retranscribe replays it.
+Logic lives in `meeting_import.py`; progress is the existing segments poll.
 
 In the UI: the **Meetings** view (⌘⇧M, or the sidebar row), an **Upcoming
 meetings** card on Today, and a live-recording indicator in the sidebar visible
@@ -438,3 +459,29 @@ touching anything in `meeting_recorder.py` or `stt.py`:
 8. With a loopback device configured, repeat with `output` in the sources and
    confirm your speakers still make sound *and* the transcript carries `[them]`
    lines. This is the one step that cannot be verified without hardware setup.
+
+## Speaker turns (optional)
+
+Off by default (`diarize: false`) and dependency-free: `diarize.py` is a seam with a
+`none` backend that returns no turns, so a transcript keeps its `[you]`/`[them]` labels.
+With `pip install sherpa-onnx` (ONNX only, no torch) plus a pyannote segmentation model
+and an embedding model (paths in `diarizeSegmentationModel` / `diarizeEmbeddingModel`,
+relative paths resolve under `<data_dir>/models`; the `diarize` capability row prints the
+download hints), `diarizeBackend: auto` picks `sherpa`.
+
+It only runs on **retained** audio: an import, or a live meeting with `keepAudio` on. The
+channel's wavs are concatenated and clustered once (never per 20 s clip), turns are renamed
+`S1, S2...` in order of first appearance, and `assign_speakers` gives each whisper utterance
+(from `detail.segments`, or the whole clip) the speaker with the greatest overlap. Results
+live in `detail.utterances` and `meeting_segments.speaker` (dominant); the `mic` channel is
+never diarized and stays `[you]`. `build_transcript` then writes one line per speaker run,
+`[S1]`, or `[Dana]` once named; with no utterance speakers it is byte-identical to before.
+Imports keep their wavs until diarization has run, then drop them unless `keepAudio`.
+
+- `POST /meetings/{id}/diarize` re-runs it (`ok: false` plus a note when there is no
+  backend or no audio, never an error).
+- `PUT /meetings/{id}/speakers` `{names: {S1: "Dana"}}` renames (ids must exist, 60 chars
+  max, blank clears), rebuilds the transcript and reindexes FTS. Names live in
+  `meetings.speaker_names`.
+- The enhance prompt keeps its channel-level rule until at least one name exists; then it
+  may attribute to a speaker only when the transcript line carries that name.

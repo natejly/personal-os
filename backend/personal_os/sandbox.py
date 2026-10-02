@@ -65,7 +65,56 @@ def _q(p: str) -> str:
     return '"' + p.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def _mac_profile(work: str, py: str) -> str:
+def _paths() -> tuple[str, str, str]:
+    """(home, repo root, app data dir): the places a sandbox must never read from."""
+    home = os.path.expanduser("~")
+    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    try:
+        from .db import data_dir_from_env  # lazy: avoids an import cycle
+        data = str(data_dir_from_env())
+    except Exception:
+        data = os.path.join(root, "data")
+    return home, root, data
+
+
+def shell_profile(writable: list[str], network: bool = False) -> str:
+    """Seatbelt profile for the host shell (shell.py): blanket deny, then what a shell needs, then targeted denies.
+
+    Unlike run_python's allowlist, a shell has to run whatever the user's toolchain is, so reads are open and the
+    *secrets* are the denylist: ssh/gpg/aws/gcloud/keychains, any .env, the app's own data dir and database. Writes
+    are confined to `writable` (the folder the command runs in, a per-run tmp dir) and never to a repo's hooks or
+    config, where a write would run later outside the sandbox. Network is off unless `network`.
+    """
+    home, root, data = _paths()
+    w = " ".join(f"(subpath {_q(os.path.realpath(p))})" for p in writable)
+    net = "(allow network*)" if network else "(deny network*)"
+    return f"""(version 1)
+(deny default)
+{net}
+(allow sysctl-read)
+(allow process-fork)
+(allow process-exec)
+(allow process-info*)
+(allow signal (target same-sandbox))
+(allow file-read*)
+(allow file-write* {w})
+(allow file-write-data (literal "/dev/null") (literal "/dev/stdout") (literal "/dev/stderr") (literal "/dev/tty") (literal "/dev/dtracehelper"))
+(allow mach-lookup)
+(allow ipc-posix-shm)
+(allow pseudo-tty)
+(deny appleevent-send)
+(deny file-write* (regex #"/\\.git/hooks(/|$)") (regex #"/\\.git/config$"))
+(deny file-read* (subpath {_q(data)}) (literal {_q(os.path.join(root, ".env"))})
+                 (subpath {_q(os.path.join(root, "backend", "personal_os"))})
+                 (subpath {_q(os.path.join(home, ".ssh"))}) (subpath {_q(os.path.join(home, ".gnupg"))})
+                 (subpath {_q(os.path.join(home, ".aws"))}) (subpath {_q(os.path.join(home, ".config", "gcloud"))})
+                 (subpath {_q(os.path.join(home, ".kube"))})
+                 (subpath {_q(os.path.join(home, "Library", "Keychains"))})
+                 (regex #"/\\.env($|\\.)") (regex #"/\\.auth_token$") (regex #"/personal-os\\.db"))
+"""
+
+
+def _mac_profile(work: str, py: str, socket_path: str | None = None) -> str:
     """Least-privilege sandbox-exec profile for one run_python call.
 
     Threat model: the script is model-written, the model's context routinely holds
@@ -85,17 +134,14 @@ def _mac_profile(work: str, py: str) -> str:
     base = os.path.dirname(os.path.dirname(exe))                    # interpreter + stdlib + lib-dynload
     venv = os.path.realpath(os.path.dirname(os.path.dirname(py)))   # site-packages: numpy, matplotlib, PIL/.dylibs
     work = os.path.realpath(work)
-    home = os.path.expanduser("~")
-    root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    try:
-        from .db import data_dir_from_env  # lazy: avoids an import cycle
-        data = str(data_dir_from_env())
-    except Exception:
-        data = os.path.join(root, "data")
+    home, root, data = _paths()
+    # The tool bridge's Unix socket (toolbridge.py) is the one network the script gets: connect to that path, nothing else.
+    sock = (f'(allow network-outbound (remote unix-socket (path-literal {_q(os.path.realpath(socket_path))})))\n'
+            f'(allow file-read* file-write* (literal {_q(os.path.realpath(socket_path))}))\n') if socket_path else ""
     return f"""(version 1)
 (deny default)
 (deny network*)
-(allow sysctl-read)
+{sock}(allow sysctl-read)
 (allow process-fork)
 (allow signal (target self))
 (allow file-read-metadata)
@@ -178,25 +224,42 @@ def _limits() -> None:
             pass
 
 
-def run_python(code: str, timeout: int = 30, python: str | None = None) -> dict[str, Any]:
+GRAIN_TOOLS_MODULE = "grain_tools.py"
+
+
+def run_python(code: str, timeout: int = 30, python: str | None = None, bridge: Any = None) -> dict[str, Any]:
+    """Run `code` in the sandbox. `bridge` (toolbridge.Bridge) lets the script call app tools over its Unix socket:
+    its client module is dropped next to the script, the socket is the one network path the profile allows, and the
+    wall clock stops while the bridge is waiting on an approval card (`bridge.paused_for()`)."""
     work = tempfile.mkdtemp(prefix="pos-sandbox-")
     script = os.path.join(work, "main.py")
     with open(script, "w", encoding="utf-8") as f:
         f.write(code)
     py = python or sys.executable
     cmd = [py, "-I", script]
+    env = {"PATH": "/usr/bin:/bin", "HOME": work, "TMPDIR": work, "PYTHONIOENCODING": "utf-8", "MPLBACKEND": "Agg"}
+    sock = None
+    if bridge is not None:
+        from . import toolbridge
+        with open(os.path.join(work, GRAIN_TOOLS_MODULE), "w", encoding="utf-8") as f:
+            f.write(toolbridge.CLIENT_SOURCE)
+        sock = bridge.socket_path
+        env["GRAIN_TOOLS_SOCK"] = sock
+        # -I keeps the script's own folder off sys.path, so put it back for the client module and run main.py by path.
+        cmd = [py, "-I", "-c", "import sys, runpy; sys.path.insert(0, %r); runpy.run_path(%r, run_name='__main__')" % (work, script)]
     if any(k in code for k in ("matplotlib", "pyplot", "seaborn")):
         _warm_mpl(py)
-    mplcfg = _seed_mpl(work)
+    env["MPLCONFIGDIR"] = _seed_mpl(work)
     if sys.platform == "darwin" and shutil.which("sandbox-exec"):
-        cmd = ["sandbox-exec", "-p", _mac_profile(work, py), *cmd]
+        cmd = ["sandbox-exec", "-p", _mac_profile(work, py, sock), *cmd]
     try:
-        p = subprocess.run(
-            cmd, cwd=work, capture_output=True, text=True, timeout=timeout,
-            env={"PATH": "/usr/bin:/bin", "HOME": work, "TMPDIR": work, "PYTHONIOENCODING": "utf-8", "MPLBACKEND": "Agg", "MPLCONFIGDIR": mplcfg},
-            preexec_fn=_limits,
-        )
-        out = {"stdout": p.stdout[-20_000:], "stderr": p.stderr[-8_000:], "exit_code": p.returncode, "timed_out": False}
+        if bridge is None:
+            p = subprocess.run(cmd, cwd=work, capture_output=True, text=True, timeout=timeout, env=env, preexec_fn=_limits)
+            out = {"stdout": p.stdout[-20_000:], "stderr": p.stderr[-8_000:], "exit_code": p.returncode, "timed_out": False}
+        else:
+            stdout, stderr, rc, timed_out = _run_paused(cmd, work, env, timeout, bridge)
+            out = {"stdout": stdout, "stderr": "Timed out after %ss" % timeout if timed_out else stderr[-bridge.stderr_cap:],
+                   "exit_code": rc, "timed_out": timed_out}
     except subprocess.TimeoutExpired as e:
         out = {"stdout": (e.stdout or b"")[-20_000:].decode() if isinstance(e.stdout, bytes) else (e.stdout or "")[-20_000:],
                "stderr": "Timed out after %ss" % timeout, "exit_code": -1, "timed_out": True}
@@ -205,7 +268,7 @@ def run_python(code: str, timeout: int = 30, python: str | None = None) -> dict[
         for root, dirs, names in os.walk(work):
             dirs[:] = [d for d in dirs if os.path.join(root, d) != os.path.join(work, MPL_DIR)]
             for n in names:
-                if n != "main.py":
+                if n not in ("main.py", GRAIN_TOOLS_MODULE):
                     files.append(os.path.relpath(os.path.join(root, n), work))
         images = _collect_images(work, sorted(files))
         shutil.rmtree(work, ignore_errors=True)
@@ -213,3 +276,26 @@ def run_python(code: str, timeout: int = 30, python: str | None = None) -> dict[
     if images:
         out["images"] = images
     return out
+
+
+def _run_paused(cmd: list[str], work: str, env: dict[str, str], timeout: float, bridge: Any) -> tuple[str, str, int, bool]:
+    """subprocess.run with a clock that does not tick while the bridge waits on the user. Returns
+    (stdout, stderr, exit_code, timed_out); the child is killed with its whole group on timeout."""
+    import time
+    p = subprocess.Popen(cmd, cwd=work, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                         preexec_fn=_limits, start_new_session=True)
+    t0, timed_out = time.monotonic(), False
+    while True:
+        try:
+            stdout, stderr = p.communicate(timeout=0.2)
+            break
+        except subprocess.TimeoutExpired:
+            if time.monotonic() - t0 - bridge.paused_for() > timeout:
+                timed_out = True
+                try:
+                    os.killpg(p.pid, 9)
+                except (ProcessLookupError, PermissionError):
+                    p.kill()
+                stdout, stderr = p.communicate()
+                break
+    return bridge.shape_stdout(stdout or ""), stderr or "", (-1 if timed_out else p.returncode), timed_out

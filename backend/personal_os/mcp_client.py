@@ -27,6 +27,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import os
 import sys
 import tempfile
@@ -38,8 +39,11 @@ from anyio.abc import TaskGroup
 from mcp import ClientSession, Implementation, StdioServerParameters, stdio_client
 from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 
+from . import mcp_drift
 from .mcp_oauth import McpNeedsAuth, OAuthFlows, SignIn, headers_of
 from .mcp_servers import DEFAULT_DANGER, McpServers
+
+log = logging.getLogger(__name__)
 
 CLIENT_INFO = Implementation(name="grain", version="0.1.0")
 
@@ -425,6 +429,11 @@ class _Supervisor:
     def _register(self, tools: list[Any]) -> None:
         exported = [tool_export(t) for t in tools]
         synced = self.store.sync_tools(self.config.id, exported)
+        for slug in synced["changed"]:  # re-scan what changed; a new fail-level finding withholds the tool
+            try:
+                mcp_drift.apply_review(self.store, slug)
+            except Exception:  # noqa: BLE001 - a review failure must not stop the server from connecting
+                log.warning("MCP drift review failed for %s", slug, exc_info=True)
         self.tool_slugs = sorted(synced["added"] + synced["changed"] + synced["unchanged"])
 
     def _set_status(self, status: str, detail: str = "") -> None:

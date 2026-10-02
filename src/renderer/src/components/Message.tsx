@@ -1,7 +1,8 @@
 import { memo, useEffect, useRef, useState } from 'react'
-import { AlertCircle, User, Sparkles, Brain, Share2, FileText, Activity, ChevronRight, Lightbulb } from 'lucide-react'
-import type { Message } from '@shared/types'
+import { AlertCircle, User, Sparkles, Brain, Share2, FileText, Activity, ChevronRight, Lightbulb, RotateCw } from 'lucide-react'
+import type { Message, RunChanges } from '@shared/types'
 import { useStore } from '../store'
+import { api } from '../lib/api'
 import ToolEvents from './ToolEvents'
 import MarkdownPreview, { CopyButton } from './MarkdownPreview'
 export { SAFE_MD } from './MarkdownPreview'
@@ -24,6 +25,65 @@ function Reasoning({ text, live }: { text: string; live: boolean }): JSX.Element
         {live && <span className="thinking mini"><span /><span /><span /></span>}
       </button>
       {open && <div className="reasoning-body" ref={body}>{text}</div>}
+    </div>
+  )
+}
+
+/** Offered under a reply the backend lost mid-run, only while its newest run is still resumable. */
+function ResumeButton({ conversationId }: { conversationId: string }): JSX.Element | null {
+  const [run, setRun] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    let live = true
+    api.interruptedRun(conversationId).then((r) => { if (live && r?.resumable) setRun(r.run_id) }).catch(() => undefined)
+    return () => { live = false }
+  }, [conversationId])
+  if (!run) return null
+  return (
+    <button className="ghost-btn" disabled={busy} onClick={() => {
+      setBusy(true)
+      useStore.getState().resumeRun(conversationId, run).then(() => setRun(null)).catch((e) => { setBusy(false); useStore.getState().toast((e as Error).message, 'error') })
+    }}><RotateCw size={13} /> Resume</button>
+  )
+}
+
+// Tools that can change a granted folder; a reply without one never asks the backend for a change list.
+const FILE_CHANGING = /^(write_local_file|move_local_file|trash_local_file|shell_run|fs_edit|fs_copy|fs_mkdir|desk_write_file|desk_trash_file|desk_import_sandbox)$/
+
+/** "Files changed (n) · Undo" under a reply that changed files in a granted folder. Undo and Redo are the user's clicks. */
+function FilesChanged({ messageId }: { messageId: string }): JSX.Element | null {
+  const [ch, setCh] = useState<RunChanges | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState('')
+  useEffect(() => {
+    let live = true
+    let timer: ReturnType<typeof setTimeout> | undefined
+    // The after-snapshot lands just after the reply closes, so look again a couple of times before giving up.
+    const look = (left: number): void => {
+      api.messageChanges(messageId).then((r) => {
+        if (!live) return
+        if (r.count > 0 || left <= 0 || !r.available) setCh(r)
+        else timer = setTimeout(() => look(left - 1), 1500)
+      }).catch(() => undefined)
+    }
+    look(3)
+    return () => { live = false; if (timer) clearTimeout(timer) }
+  }, [messageId])
+  if (!ch || ch.count === 0 || !ch.run_id) return null
+  const undone = ch.state === 'undone'
+  const go = (): void => {
+    setBusy(true)
+    const run = undone ? api.redoRun(ch.run_id as string) : api.undoRun(ch.run_id as string)
+    run.then((r) => {
+      setNote(r.edited_since.length ? `${r.edited_since.length} left alone (edited since): ${r.edited_since.slice(0, 3).join(', ')}` : '')
+      setCh({ ...ch, state: undone ? 'applied' : 'undone' })
+    }).catch((e) => useStore.getState().toast((e as Error).message, 'error')).finally(() => setBusy(false))
+  }
+  return (
+    <div className="files-changed" title={ch.files.map((f) => `${f.status} ${f.path}`).slice(0, 30).join('\n')}>
+      <FileText size={12} /> Files changed ({ch.count}) ·{' '}
+      <button className="ghost-btn" disabled={busy} onClick={go}>{undone ? 'Redo' : 'Undo'}</button>
+      {note && <span className="files-changed-note">{note}</span>}
     </div>
   )
 }
@@ -54,6 +114,8 @@ const MessageView = memo(function MessageView({ message, streaming }: { message:
           </div>
         )}
         {message.error && <div className="msg-error"><AlertCircle size={14} /><span>{message.error}</span></div>}
+        {!streaming && message.role === 'assistant' && message.error?.startsWith('Interrupted:') && <ResumeButton conversationId={message.conversation_id} />}
+        {!streaming && message.role === 'assistant' && message.tool_events?.some((t) => FILE_CHANGING.test(t.name)) && <FilesChanged messageId={message.id} />}
         {!streaming && (
           <div className="msg-actions">
             {message.model && <span className="model-tag">{message.model}</span>}

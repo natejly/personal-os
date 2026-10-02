@@ -19,6 +19,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from personal_os import mcp_servers  # noqa: E402
 from personal_os.modules.health import HealthModule
+from personal_os.modules.mailwatch import MailWatchModule
+from personal_os.modules.planner import PlannerModule
 from personal_os.modules.todos import TodosModule
 from personal_os.tools import DEFAULT_MODE, Toolbox  # noqa: E402
 
@@ -62,6 +64,11 @@ def stub_health_module() -> HealthModule:
     return m
 
 
+def stub_module(cls: Any) -> Any:
+    """A feature module built without its context: registering its tools touches nothing."""
+    return cls.__new__(cls)
+
+
 def full_toolbox(meetings: Any = None) -> Toolbox:
     """A Toolbox with every optional integration present, so every tool registers.
 
@@ -71,7 +78,8 @@ def full_toolbox(meetings: Any = None) -> Toolbox:
     stop being checked.
     """
     return Toolbox(Stub(), Stub(), Stub(), lambda: {},  # type: ignore[arg-type]
-                   modules=[stub_todos_module(), stub_health_module()], google=Stub(), boards=Stub(), sandboxes=Stub(),  # type: ignore[arg-type]
+                   modules=[stub_todos_module(), stub_health_module(), stub_module(MailWatchModule),
+                            stub_module(PlannerModule)], google=Stub(), boards=Stub(), sandboxes=Stub(),  # type: ignore[arg-type]
                    docs=Stub(), activity=Stub(), outbox=Stub(), work_plans=Stub(), results=Stub(),
                    skills=Stub(), jobs=Stub(), style=Stub(), meetings=meetings or Stub(),
                    desks=Stub(), workspace=Stub())

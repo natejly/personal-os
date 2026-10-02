@@ -125,15 +125,19 @@ class RunStore:
 
     # ---- runs ----
     def create(self, run_id: str, conversation_id: str | None, kind: str = "chat", input: dict[str, Any] | None = None,
-               desk_id: str | None = None, turn: int = 0) -> None:
+               desk_id: str | None = None, turn: int = 0, parent_run_id: str | None = None) -> None:
         t = time.time()
-        self._exec("INSERT INTO agent_runs(run_id, conversation_id, kind, desk_id, turn, status, input, started_at, updated_at) "
-                   "VALUES(?,?,?,?,?,?,?,?,?)",
-                   (run_id, conversation_id, kind, desk_id, turn, "running", _dumps(input or {}), t, t))
+        self._exec("INSERT INTO agent_runs(run_id, conversation_id, kind, desk_id, turn, status, input, started_at, updated_at, parent_run_id) "
+                   "VALUES(?,?,?,?,?,?,?,?,?,?)",
+                   (run_id, conversation_id, kind, desk_id, turn, "running", _dumps(input or {}), t, t, parent_run_id))
+
+    def children(self, run_id: str) -> list[dict[str, Any]]:
+        """Runs started by `run_id` (subagents), oldest first."""
+        return [self._run_row(r) for r in self._all("SELECT * FROM agent_runs WHERE parent_run_id=? ORDER BY started_at, rowid", (run_id,))]  # type: ignore[misc]
 
     def update(self, run_id: str, **fields: Any) -> None:
-        """Set any of status, message_id, budget, error, last_seq, ended_at. Never raises: the tape must not kill a run."""
-        allowed = {"status", "message_id", "budget", "error", "last_seq", "ended_at"}
+        """Set any of status, message_id, budget, error, last_seq, ended_at, resumed_from. Never raises: the tape must not kill a run."""
+        allowed = {"status", "message_id", "budget", "error", "last_seq", "ended_at", "resumed_from"}
         cols = {k: (_dumps(v) if k == "budget" and v is not None else v) for k, v in fields.items() if k in allowed}
         if not cols:
             return
@@ -145,6 +149,14 @@ class RunStore:
 
     def get(self, run_id: str) -> dict[str, Any] | None:
         return self._run_row(self._one("SELECT * FROM agent_runs WHERE run_id=?", (run_id,)))
+
+    def set_resumed_from(self, run_id: str, prior: str) -> None:
+        self.update(run_id, resumed_from=prior)
+
+    def resumed_by(self, run_id: str) -> str | None:
+        """The run that continued this one, if any (a run is resumed at most once)."""
+        r = self._one("SELECT run_id FROM agent_runs WHERE resumed_from=? LIMIT 1", (run_id,))
+        return r["run_id"] if r else None
 
     def latest(self, conversation_id: str) -> dict[str, Any] | None:
         return self._run_row(self._one("SELECT * FROM agent_runs WHERE conversation_id=? ORDER BY started_at DESC, rowid DESC LIMIT 1",
@@ -170,6 +182,12 @@ class RunStore:
         """Runs of one kind (e.g. 'job'), newest first. What the Agent Inbox's history is built from."""
         rows = self._all("SELECT * FROM agent_runs WHERE kind=? AND started_at>=? ORDER BY started_at DESC LIMIT ?",
                          (kind, since, max(1, min(int(limit), 500))))
+        return [r for r in (self._run_row(x) for x in rows) if r]
+
+    def of_job(self, job_id: str, limit: int = 50, since: float = 0.0) -> list[dict[str, Any]]:
+        """One job's runs, newest first. Reads agent_runs.input.job_id; no table of its own, no retention change."""
+        rows = self._all("SELECT * FROM agent_runs WHERE kind='job' AND json_extract(input,'$.job_id')=? AND started_at>=? "
+                         "ORDER BY started_at DESC, rowid DESC LIMIT ?", (job_id, since, max(1, min(int(limit), 200))))
         return [r for r in (self._run_row(x) for x in rows) if r]
 
     # ---- events ----
@@ -212,11 +230,11 @@ class RunStore:
                     danger, desk_id, time.time()))
         return self.approval(call_id) or {}
 
-    def decide(self, call_id: str, decision: str, by: str = "user") -> dict[str, Any] | None:
+    def decide(self, call_id: str, decision: str, by: str = "user", note: str | None = None) -> dict[str, Any] | None:
         """First decision wins. None if there is no such approval or it was already decided."""
         status = "denied" if decision == "deny" else "approved"
-        n = self._exec("UPDATE approvals SET status=?, decision=?, decided_by=?, decided_at=? WHERE call_id=? AND status='pending'",
-                       (status, decision, by, time.time(), call_id))
+        n = self._exec("UPDATE approvals SET status=?, decision=?, decided_by=?, decided_at=?, note=? WHERE call_id=? AND status='pending'",
+                       (status, decision, by, time.time(), (note or "").strip()[:500] or None, call_id))
         return self.approval(call_id) if n else None
 
     def approval(self, call_id: str) -> dict[str, Any] | None:
@@ -252,8 +270,12 @@ class RunStore:
 
     # ---- idempotency ----
     async def call_once(self, run_id: str | None, step: int, tool: str, args: dict[str, Any],
-                        fn: Callable[[], Awaitable[Any]], call_id: str | None = None) -> tuple[Any, bool]:
+                        fn: Callable[[], Awaitable[Any]], call_id: str | None = None,
+                        inherit: str | None = None) -> tuple[Any, bool]:
         """Run fn at most once per (run_id, step, tool, args). Returns (result, replayed).
+
+        `inherit` is the run this one resumes: an identical call (any step) that run already finished is
+        replayed from its record, and one that started without an outcome is not run again.
 
         done    -> the recorded result, fn not called.
         started -> the process died mid-call last time; the outcome is unknown, so fn is NOT called again.
@@ -264,6 +286,14 @@ class RunStore:
         t = time.time()
         n = self._exec("INSERT INTO executed_calls(key, run_id, step, tool, args_digest, call_id, status, created_at) "
                        "VALUES(?,?,?,?,?,?,'started',?) ON CONFLICT(key) DO NOTHING", (key, run_id, step, tool, digest, call_id, t))
+        if n and inherit:
+            prior = self.prior_call(inherit, tool, digest)
+            if prior and prior["status"] == "done":
+                self._exec("UPDATE executed_calls SET status='done', result=?, finished_at=? WHERE key=?", (prior["result"], time.time(), key))
+                return json.loads(prior["result"]), True
+            if prior and prior["status"] == "started":
+                # our own row stays 'started', so a later identical call here is also unknown_outcome, never a re-run
+                return unknown_outcome(tool, prior["key"]), True
         if not n:
             row = self._one("SELECT status, result FROM executed_calls WHERE key=?", (key,)) or {}
             if row.get("status") == "done":
@@ -284,6 +314,11 @@ class RunStore:
         self._exec("UPDATE executed_calls SET status=?, result=?, finished_at=? WHERE key=?",
                    ("error" if failed else "done", _dumps(result), time.time(), key))
         return result, False
+
+    def prior_call(self, run_id: str, tool: str, digest: str) -> dict[str, Any] | None:
+        """The newest journal row of a run for this tool and arguments, whatever step it ran at."""
+        return self._one("SELECT key, status, result FROM executed_calls WHERE run_id=? AND tool=? AND args_digest=? "
+                         "ORDER BY created_at DESC, rowid DESC LIMIT 1", (run_id, tool, digest))
 
     def executed(self, run_id: str) -> list[dict[str, Any]]:
         rows = self._all("SELECT * FROM executed_calls WHERE run_id=? ORDER BY created_at", (run_id,))
@@ -570,6 +605,8 @@ class RunBus:
         # Runs displaced by a newer one while their auto-learn tail was still open. Only `shutdown`
         # cares: nothing routes to them any more, and the task holds what keeps them alive.
         self._retired: set[Run] = set()
+        # Awaited when a run's runner finishes, before the run is closed (the after-snapshot of a reply).
+        self.after_hooks: list[Callable[[Run], Awaitable[None]]] = []
 
     def get(self, conversation_id: str) -> Run | None:
         return self._runs.get(conversation_id)
@@ -653,6 +690,11 @@ class RunBus:
             log.exception("run %s failed", run.run_id)
             run.publish("error", {"message": str(e)})
         finally:
+            for hook in self.after_hooks:
+                try:
+                    await hook(run)
+                except BaseException:  # noqa: BLE001 - a hook must not stop the run from closing
+                    log.debug("after hook failed for run %s", run.run_id, exc_info=True)
             run.end(status)
             self._retired.discard(run)
 

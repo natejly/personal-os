@@ -123,6 +123,15 @@ CREATE TABLE IF NOT EXISTS chunks (
   text TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_chunk_doc ON chunks(document_id, idx);
+-- float32 little-endian, L2-normalised, so cosine = dot (see embed.py). Rows for another model are stale.
+CREATE TABLE IF NOT EXISTS chunk_embeddings (
+  chunk_id TEXT PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,
+  document_id TEXT NOT NULL,
+  model TEXT NOT NULL,
+  dim INTEGER NOT NULL,
+  vec BLOB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chunk_emb_doc ON chunk_embeddings(document_id);
 
 -- Durable runs (see runs.RunStore). A run is a row; its SSE stream is a tail on run_events.
 -- status: running | awaiting_approval | done | error | interrupted
@@ -146,6 +155,84 @@ CREATE TABLE IF NOT EXISTS agent_runs (
 );
 CREATE INDEX IF NOT EXISTS idx_runs_conv ON agent_runs(conversation_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_status ON agent_runs(status, started_at DESC);
+
+-- User-authored agent definitions (subagents.py). Inert until approved by hand, like skills; the
+-- built-in researcher / worker / reviewer live in code and are not rows.
+CREATE TABLE IF NOT EXISTS agent_defs (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  description TEXT NOT NULL DEFAULT '',
+  body TEXT NOT NULL DEFAULT '',
+  model TEXT,
+  steps INTEGER,
+  tools TEXT NOT NULL DEFAULT '[]',
+  hidden INTEGER NOT NULL DEFAULT 0,
+  approved INTEGER NOT NULL DEFAULT 0,
+  created_at REAL NOT NULL,
+  updated_at REAL NOT NULL
+);
+
+-- Workflows (workflows.py): a saved definition, the runs of it (each carries the exact definition and
+-- parameters it was approved with), and one row per step of a run. status of a run: awaiting_approval |
+-- running | waiting_approval | done | failed | cancelled | interrupted | stale.
+CREATE TABLE IF NOT EXISTS workflows (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  description TEXT NOT NULL DEFAULT '',
+  definition TEXT NOT NULL,
+  text TEXT NOT NULL DEFAULT '',
+  created_at REAL NOT NULL,
+  updated_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS workflow_runs (
+  id TEXT PRIMARY KEY,
+  workflow_id TEXT,
+  name TEXT NOT NULL,
+  definition TEXT NOT NULL,
+  params TEXT NOT NULL DEFAULT '{}',
+  plan_digest TEXT NOT NULL,
+  approved_digest TEXT,
+  approved_at REAL,
+  status TEXT NOT NULL DEFAULT 'awaiting_approval',
+  error TEXT,
+  result TEXT,
+  project_id TEXT,
+  conversation_id TEXT,
+  source TEXT NOT NULL DEFAULT 'user',
+  started_at REAL,
+  ended_at REAL,
+  created_at REAL NOT NULL,
+  updated_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_wfruns_wf ON workflow_runs(workflow_id, created_at DESC);
+CREATE TABLE IF NOT EXISTS workflow_steps (
+  run_id TEXT NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
+  step_id TEXT NOT NULL,
+  idx INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  result TEXT,
+  items TEXT,
+  error TEXT,
+  approval_call_id TEXT,
+  idempotency_key TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  started_at REAL,
+  ended_at REAL,
+  PRIMARY KEY (run_id, step_id)
+);
+
+-- Commands (commands.py): markdown prompt templates, the light tier beside workflows.
+CREATE TABLE IF NOT EXISTS commands (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  description TEXT NOT NULL DEFAULT '',
+  body TEXT NOT NULL DEFAULT '',
+  subtask INTEGER NOT NULL DEFAULT 0,
+  role TEXT,
+  created_at REAL NOT NULL,
+  updated_at REAL NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS run_events (
   run_id TEXT NOT NULL REFERENCES agent_runs(run_id) ON DELETE CASCADE,
@@ -176,6 +263,8 @@ CREATE TABLE IF NOT EXISTS approvals (
   status TEXT NOT NULL DEFAULT 'pending',
   decision TEXT,
   decided_by TEXT,
+  -- One line the user (or the unattended policy) gave back with a denial; the model reads it as the tool result.
+  note TEXT,
   created_at REAL NOT NULL,
   decided_at REAL
 );
@@ -198,6 +287,26 @@ CREATE TABLE IF NOT EXISTS executed_calls (
   finished_at REAL
 );
 CREATE INDEX IF NOT EXISTS idx_exec_run ON executed_calls(run_id, step);
+
+-- Pre-images of local files the agent overwrote, appended to, created or moved (see filesnap.py).
+-- op: overwrite | append | create | move | restore. status: live | restored | expired.
+CREATE TABLE IF NOT EXISTS file_snapshots (
+  snapshot_id TEXT PRIMARY KEY,
+  conversation_id TEXT,
+  message_id TEXT,
+  call_id TEXT,
+  op TEXT NOT NULL,
+  path TEXT NOT NULL,
+  from_path TEXT,
+  before_path TEXT,
+  before_digest TEXT,
+  before_existed INTEGER NOT NULL DEFAULT 0,
+  after_digest TEXT,
+  status TEXT NOT NULL DEFAULT 'live',
+  created_at REAL NOT NULL,
+  restored_at REAL
+);
+CREATE INDEX IF NOT EXISTS idx_filesnap_conv ON file_snapshots(conversation_id, created_at);
 
 -- Scheduled background work (see jobs.Jobs / jobs.Scheduler). A job fires one run with kind='job'.
 -- next_due_at is the slot the scheduler is waiting for; last_due_at is the slot the last launch was *for*,
@@ -301,11 +410,35 @@ CREATE TABLE IF NOT EXISTS plan_steps (
 );
 CREATE INDEX IF NOT EXISTS idx_plan_steps_claim ON plan_steps(tool, args_digest, status);
 
+-- fetch_url's response cache (webread.WebCache); rows are disposable.
+CREATE TABLE IF NOT EXISTS web_cache (
+  url TEXT PRIMARY KEY,
+  fetched_at REAL NOT NULL,
+  status INTEGER,
+  content_type TEXT,
+  body BLOB,
+  final_url TEXT
+);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
   text, chunk_id UNINDEXED, document_id UNINDEXED, tokenize='porter unicode61'
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
   content, memory_id UNINDEXED, tokenize='porter unicode61'
+);
+
+-- Whole-folder snapshots a run took of a granted root (snapshots.py). `files` is the ledger of what the run
+-- changed: [{status, path, before, after}] with blob ids. state: applied | undone.
+CREATE TABLE IF NOT EXISTS run_snapshots (
+  run_id TEXT NOT NULL REFERENCES agent_runs(run_id) ON DELETE CASCADE,
+  root TEXT NOT NULL,
+  before_tree TEXT,
+  after_tree TEXT,
+  files TEXT NOT NULL DEFAULT '[]',
+  skipped TEXT NOT NULL DEFAULT '[]',
+  state TEXT NOT NULL DEFAULT 'applied',
+  created_at REAL NOT NULL,
+  PRIMARY KEY (run_id, root)
 );
 """
 
@@ -333,12 +466,23 @@ class Database:
         """Add columns introduced after the first release (CREATE TABLE IF NOT EXISTS won't)."""
         wanted = {
             "projects": {"tools": "TEXT NOT NULL DEFAULT '{}'"},
+            "chunks": {"heading": "TEXT NOT NULL DEFAULT ''", "page": "INTEGER"},
+            "documents": {"content_hash": "TEXT NOT NULL DEFAULT ''"},
+            "memories": {"valid_from": "REAL", "invalid_at": "REAL", "superseded_by": "TEXT",
+                         "source_conversation_id": "TEXT", "source_message_id": "TEXT"},
+            "kg_edges": {"valid_at": "REAL", "invalid_at": "REAL", "superseded_by": "TEXT",
+                         "source_message_id": "TEXT", "fact": "TEXT NOT NULL DEFAULT ''"},
             "messages": {"tool_events": "TEXT", "trace": "TEXT", "reasoning": "TEXT"},
-            "jobs": {"kind": "TEXT NOT NULL DEFAULT 'cron'", "run_at": "REAL"},
+            "jobs": {"kind": "TEXT NOT NULL DEFAULT 'cron'", "run_at": "REAL",
+                     "max_retries": "INTEGER NOT NULL DEFAULT 1", "consecutive_failures": "INTEGER NOT NULL DEFAULT 0",
+                     "paused_reason": "TEXT", "last_skip_at": "REAL", "last_skip_reason": "TEXT",
+                     "allowed_tools": "TEXT"},
             "action_plans": {"desk_id": "TEXT", "intent": "TEXT NOT NULL DEFAULT ''",
                              "expected_taint": "TEXT NOT NULL DEFAULT '[]'"},
-            "approvals": {"desk_id": "TEXT", "danger": "TEXT NOT NULL DEFAULT 'external'"},
-            "agent_runs": {"desk_id": "TEXT", "turn": "INTEGER NOT NULL DEFAULT 0"},
+            "approvals": {"desk_id": "TEXT", "danger": "TEXT NOT NULL DEFAULT 'external'", "note": "TEXT"},
+            "agent_runs": {"desk_id": "TEXT", "turn": "INTEGER NOT NULL DEFAULT 0", "resumed_from": "TEXT", "parent_run_id": "TEXT"},
+            "usage_log": {"cached_tokens": "INTEGER NOT NULL DEFAULT 0", "cache_write_tokens": "INTEGER NOT NULL DEFAULT 0",
+                          "reasoning_tokens": "INTEGER NOT NULL DEFAULT 0"},
             "plan_steps": {"result_error": "TEXT", "title": "TEXT NOT NULL DEFAULT ''",
                            "danger": "TEXT NOT NULL DEFAULT 'safe'"},
         }
@@ -349,7 +493,9 @@ class Database:
                     c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
         # These index columns the block above may have just added, so they cannot live in SCHEMA:
         # executescript runs before the migration and would hit a column that is not there yet.
+        c.execute("CREATE INDEX IF NOT EXISTS idx_mem_valid ON memories(project_id, invalid_at)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_runs_desk ON agent_runs(desk_id, started_at DESC)")
+        c.execute("CREATE INDEX IF NOT EXISTS idx_runs_parent ON agent_runs(parent_run_id)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_approvals_desk ON approvals(desk_id, status)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_plans_desk ON action_plans(desk_id, created_at)")
         c.commit()

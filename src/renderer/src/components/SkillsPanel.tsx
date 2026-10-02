@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { Check, ChevronDown, ChevronRight, Plus, Trash2, Undo2, X } from 'lucide-react'
+import { Check, ChevronDown, ChevronRight, Download, Plus, Trash2, Undo2, Upload, X } from 'lucide-react'
 import { useStore } from '../store'
 import type { Skill } from '@shared/types'
 import ProjectChip from './ProjectChip'
+import { api } from '../lib/api'
 
 /** Why a procedure exists, in the user's terms. 'proposed' is reserved for the assistant asking directly. */
 const SOURCE_LABEL: Record<Skill['source'], string> = {
@@ -19,7 +20,7 @@ const SECTION: Record<Skill['status'], { title: string; blurb: string }> = {
 }
 
 function SkillRow({ skill }: { skill: Skill }): JSX.Element {
-  const { updateSkill, deleteSkill } = useStore()
+  const { updateSkill, deleteSkill, toast } = useStore()
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState<{ name: string; description: string; procedure: string } | null>(null)
 
@@ -28,6 +29,19 @@ function SkillRow({ skill }: { skill: Skill }): JSX.Element {
   const save = async (): Promise<void> => {
     if (dirty) await updateSkill(skill.id, draft!)
     setDraft(null)
+  }
+
+  const exportSkill = async (): Promise<void> => {
+    try {
+      const { filename, text } = await api.skills.exportMd(skill.id)
+      const a = document.createElement('a')
+      a.href = URL.createObjectURL(new Blob([text], { type: 'text/markdown' }))
+      a.download = filename.replace('/', '-')
+      a.click()
+      URL.revokeObjectURL(a.href)
+    } catch (e) {
+      toast((e as Error).message, 'error')
+    }
   }
 
   return (
@@ -51,6 +65,8 @@ function SkillRow({ skill }: { skill: Skill }): JSX.Element {
           {skill.status === 'candidate' && (
             <button className="small" title="Discard" onClick={() => void updateSkill(skill.id, { status: 'rejected' })}><X size={13} /></button>
           )}
+          <button className="icon-btn ghost" aria-label={`Export ${skill.name} as SKILL.md`} title="Export as SKILL.md"
+            onClick={() => void exportSkill()}><Download size={13} /></button>
           <button className="icon-btn ghost danger" aria-label={`Delete ${skill.name}`} onClick={() => void deleteSkill(skill.id)}><Trash2 size={13} /></button>
         </div>
       </div>
@@ -74,8 +90,10 @@ function SkillRow({ skill }: { skill: Skill }): JSX.Element {
 
 export default function SkillsPanel(): JSX.Element {
   const skills = useStore((s) => s.skills)
-  const { createSkill } = useStore()
+  const { createSkill, refreshSkills, toast } = useStore()
   const [adding, setAdding] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [mdText, setMdText] = useState('')
   const [form, setForm] = useState({ name: '', description: '', procedure: '' })
 
   const add = async (): Promise<void> => {
@@ -85,15 +103,41 @@ export default function SkillsPanel(): JSX.Element {
     setAdding(false)
   }
 
+  const importMd = async (): Promise<void> => {
+    try {
+      const r = await api.skills.importMd(mdText)
+      await refreshSkills()
+      const notes = [...r.warnings, ...r.findings.map((f) => f.message)]
+      toast(`Imported “${r.skill.name}” as a candidate.${notes.length ? ' ' + notes.join(' ') : ''}`, notes.length ? 'error' : undefined)
+      setMdText('')
+      setImporting(false)
+    } catch (e) {
+      toast((e as Error).message, 'error')
+    }
+  }
+
   return (
     <div className="library-panel">
       <div className="add-row">
         <button className="primary-btn" onClick={() => setAdding(!adding)}><Plus size={14} /> New procedure</button>
+        <button onClick={() => setImporting(!importing)}><Upload size={14} /> Import SKILL.md</button>
         <span className="muted small">
           A procedure is method, not fact: how a task went well, so it can go that way again. Approved ones are injected
           as clearly fenced reference material — they cannot grant the assistant permissions or change its instructions.
         </span>
       </div>
+      {importing && (
+        <div className="skill-body standalone">
+          <label>Paste a SKILL.md
+            <textarea rows={10} autoFocus value={mdText} placeholder={'---\nname: weekly-review\ndescription: Use when the user asks for a weekly review\n---\n\n1. Pull the done todos.'} onChange={(e) => setMdText(e.target.value)} />
+          </label>
+          <div className="row-actions">
+            <button className="primary-btn small" disabled={!mdText.trim()} onClick={() => void importMd()}>Import as candidate</button>
+            <button className="small" onClick={() => setImporting(false)}>Cancel</button>
+            <span className="muted small">Imported procedures wait for your approval; allowed-tools and bundled files are ignored.</span>
+          </div>
+        </div>
+      )}
       {adding && (
         <div className="skill-body standalone">
           <label>Name<input autoFocus value={form.name} placeholder="Weekly review" onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>

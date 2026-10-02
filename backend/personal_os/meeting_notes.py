@@ -76,6 +76,33 @@ Rules:
 - Write markdown, no preamble and no closing commentary.
 """
 
+# Swapped in for the channel-level rule above, only when the user has named at least one diarized
+# speaker. It is deliberately narrower than "name whoever you think it is".
+ATTRIBUTION_RULE = """- Speaker attribution: `[you]` is the user. A transcript line may carry a person's name in its
+  brackets, e.g. `[Dana]`; attribute to that person ONLY when the line carries that name, and the
+  `speakers` field of the input lists the names the user assigned. Unnamed speaker labels such as
+  `[S1]` stay unnamed (say "one participant", never guess who). `[them]` is channel-level: everyone
+  else on the call, so never attribute it to a named attendee."""
+_BAN_START = "- Speaker attribution is channel-level only"
+
+
+def _speaker_names(meeting: dict[str, Any]) -> dict[str, str]:
+    raw = meeting.get("speaker_names")
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw or "{}")
+        except ValueError:
+            raw = {}
+    return {str(k): str(v) for k, v in raw.items() if str(v).strip()} if isinstance(raw, dict) else {}
+
+
+def _system_prompt(names: dict[str, str]) -> str:
+    if not names:
+        return ENHANCE_PROMPT
+    start = ENHANCE_PROMPT.index(_BAN_START)
+    end = ENHANCE_PROMPT.index("\n- Write markdown", start)
+    return ENHANCE_PROMPT[:start] + ATTRIBUTION_RULE + ENHANCE_PROMPT[end:]
+
 
 def _parse_json(text: str) -> dict[str, Any]:
     m = re.search(r"\{.*\}", text or "", re.S)
@@ -187,18 +214,22 @@ async def enhance(
     notes = notes or ""
     out: dict[str, Any] = {"markdown": "", "decisions": [], "action_items": [], "topics": [],
                            "headline": "", "degraded": False, "error": "", "model": model}
-    user = json.dumps({
+    names = _speaker_names(meeting)
+    payload: dict[str, Any] = {
         "title": str(meeting.get("title") or ""),
         "when": _when(meeting),
         "duration": _fmt_duration(meeting.get("duration_ms")),
         "attendees": _attendees(meeting),
         "notes": notes,
         "transcript": body,
-    }, ensure_ascii=False)
+    }
+    if names:
+        payload["speakers"] = names
+    user = json.dumps(payload, ensure_ascii=False)
     try:
         raw = await complete_fn(
             settings, model,
-            [{"role": "system", "content": ENHANCE_PROMPT + _template_block(tpl)},
+            [{"role": "system", "content": _system_prompt(names) + _template_block(tpl)},
              {"role": "user", "content": user}],
             kind="meeting",
         )

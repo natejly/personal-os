@@ -22,43 +22,63 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from pydantic import AfterValidator, BaseModel, Field
 
-from . import activity, assist, llm, mac, mcp_eval, tools
-from .context import build_context, estimate_tokens
+from . import activity, assist, llm, mac, mcp_drift, mcp_eval, mcp_search, tools
+from . import compaction, otel_export
+from .context import build_context, estimate_tokens, layout_messages
 from .db import Database, data_dir_from_env, new_id
-from .extract_text import extract_text
+from .extract_text import extract_structured, extract_text
+from .consolidate import Consolidator
 from .learn import MAX_INJECTED_SKILLS, LearnJob, LearnWorker, Skills, induce_skill, skill_block
+from .embed import Embedder
+from .memory_index import MemoryIndex
+from .retrieval import Retriever
 from .repos import ALL, Conversations, Documents, Graph, Memories, Projects
+from .artifact_routes import is_render_path as _is_artifact_render, make_router as artifact_router
+from .artifact_tools import ARTIFACT_HINT
+from .artifacts import Artifacts
 from .boards import Boards
 from .canvas import SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
 from .dashboards import Dashboards, generate_recap, generate_summary, generate_widget_code
 from .docs import Docs, unified_diff
+from . import widget_spec
 from . import cache as google_cache
 from .google import Google, GoogleNotConnected, json_safe
+from . import job_history, job_tools
+from .jobs_policy import JobPolicy
 from .jobs import (KINDS, PROPOSAL_STATUSES, Jobs, Proposals, Scheduler, local_tz_name, spent, valid_cron,
                    valid_tz)
-from . import skillbuild
+from . import meeting_import, skillbuild, skillmd
 from .mcp_client import McpClient, McpError
 from .mcp_oauth import CALLBACK_PATH as MCP_OAUTH_CALLBACK, OAuthFlows, OAuthStore
 from .mcp_servers import MODES as MCP_MODES, RESERVED_PREFIX as MCP_PREFIX, SCOPES as MCP_SCOPES, McpServers
 from .meeting_recorder import RecorderBusy
 from .meetings import MeetingBlocked, Meetings, MeetingService
-from .cowork import (AUTONOMY, DESK_CONTINUE, DESK_HINT, DESK_RESUME, LIVE as DESK_LIVE,
+from .cowork import (AUTONOMY, DESK_CONTINUE, DESK_HINT, DESK_PLAN_HINT, DESK_RESUME, LIVE as DESK_LIVE,
                      STATUSES as DESK_STATUSES, UNDECIDED_OUTPUTS, DeskRuntime, Desks)
 from .workspace import MAX_PREVIEW, Workspace, WorkspaceError
 from .microvm import Sandboxes
 from .notes import Notes
 from .plans import (MUTATING, PLAN_BLOCKED, PLAN_SAFE_DANGER, PLAN_TOOL, PROPOSE_ONLY, Plans,
                     normalize_plan, parse_plan_edits, taint_expected)
+from .filesnap import FileSnapshots, router as filesnap_router
+from .snapshots import Snapshots, router as snapshots_router
 from .outbox import Outbox, router as outbox_router
 from .presets import CanvasPresets
+from . import resume
+from . import permrules
+from .subagents import AgentDefs, Subagents
+from .commands import Commands
+from .workflows import ApprovalError as WorkflowApprovalError, Engine as WorkflowEngine, Workflows
 from .runs import ACTIVE, PROMOTE_STEP, STATUSES, Run, RunBus, RunStore, Topic
+from .stuck import STUCK_NUDGE, STUCK_STOP, StuckDetector
 from .style import WritingStyle, learn_style_from_exchange, looks_like_prose
 from .modules import Module, ModuleContext, build_modules, get as module_get
 from .modules.todos import TodosModule
 from .tools import Toolbox, summarize_result
+from .webread import WebCache
 from .trace import Tracer, now_ms
 from .usage import Pricing, Usage
 from .working import Plans as WorkPlans, ToolResults
@@ -187,7 +207,7 @@ async def _integrity_error(request: Request, exc: Exception) -> JSONResponse:  #
 @app.middleware("http")
 async def _require_token(request: Request, call_next):  # type: ignore[no-untyped-def]
     p = request.url.path
-    if request.method == "OPTIONS" or p in PUBLIC_PATHS or (p.startswith("/widgets/") and p.endswith("/render")):
+    if request.method == "OPTIONS" or p in PUBLIC_PATHS or (p.startswith("/widgets/") and p.endswith("/render")) or _is_artifact_render(request.method, p):
         return await call_next(request)
     auth = request.headers.get("authorization", "")
     sent = request.headers.get("x-personal-os-token") or (auth[7:].strip() if auth[:7].lower() == "bearer " else "")
@@ -228,7 +248,8 @@ _active: dict[str, asyncio.Event | Run] = {}
 _approvals: dict[str, asyncio.Future] = {}
 # Background work that outlives the run that queued it, and the topic it reports on.
 events = Topic()
-learner = LearnWorker(memories=memories, graph=graph, set_trace=convos.set_trace, publish=events.publish)
+consolidator = Consolidator(db, memories, graph)
+learner = LearnWorker(memories=memories, graph=graph, set_trace=convos.set_trace, publish=events.publish, consolidator=consolidator)
 
 
 ENV_SEED = {
@@ -258,6 +279,7 @@ jobs = Jobs(db)
 proposals = Proposals(db)
 boards = Boards(db)
 dashboards = Dashboards(db)
+artifacts = Artifacts(db)
 google = Google(settings, db.set_settings)
 # sid/wsid are defined further down, so the module context looks them up late.
 modules: list[Module] = build_modules(ModuleContext(
@@ -270,6 +292,16 @@ for _m in modules:
         app.include_router(_r)
 usage = Usage(db)
 pricing = Pricing()
+app.include_router(otel_export.router(db, lambda: settings()))
+compactor = compaction.Compactor(db)
+app.include_router(compaction.router(compactor, convos, lambda: settings()))
+
+
+def _int_setting(cfg: dict[str, Any], key: str, default: int) -> int:
+    try:
+        return int(cfg.get(key, default))
+    except (TypeError, ValueError):
+        return default
 
 
 def _record_usage(ev: dict[str, Any]) -> None:
@@ -277,9 +309,11 @@ def _record_usage(ev: dict[str, Any]) -> None:
     try:
         cfg = settings()
         pt, ct = int(ev.get("prompt_tokens") or 0), int(ev.get("completion_tokens") or 0)
+        cached, cwrite, reasoning = int(ev.get("cached_tokens") or 0), int(ev.get("cache_write_tokens") or 0), int(ev.get("reasoning_tokens") or 0)
         usage.record(model=ev.get("model", ""), kind=ev.get("kind", "chat"), prompt_tokens=pt, completion_tokens=ct,
-                     duration_ms=int(ev.get("duration_ms") or 0), cost=pricing.cost(cfg, ev.get("model", ""), pt, ct),
-                     estimated=bool(ev.get("estimated")), conversation_id=ev.get("conversation_id"), project_id=ev.get("project_id"))
+                     duration_ms=int(ev.get("duration_ms") or 0), cost=pricing.cost(cfg, ev.get("model", ""), pt, ct, cached, cwrite),
+                     estimated=bool(ev.get("estimated")), conversation_id=ev.get("conversation_id"), project_id=ev.get("project_id"),
+                     cached_tokens=cached, cache_write_tokens=cwrite, reasoning_tokens=reasoning)
     except Exception:  # noqa: BLE001 - accounting must never break a reply
         pass
 
@@ -295,10 +329,25 @@ desks = Desks(db, workspace)
 # the chain and leaves the running turn to settle cooperatively.
 _desk_tasks: dict[str, asyncio.Task[None]] = {}
 sandboxes = Sandboxes(settings)
+# A desk's container sees the desk's workspace at /workspace/desk (microvm.DESK_MOUNT); other chats mount nothing.
+sandboxes.desk_workspace = lambda conv_id: (str(workspace.ensure(d["id"])) if (d := desks.by_conversation(conv_id)) else None)
 monitor = activity.Monitor(db, settings, llm.complete)
 # Every Gmail send is held here first so it can be undone (outbox.py); its own routes are included below.
 outbox = Outbox(db, google, settings)
 app.include_router(outbox_router(outbox))
+# Pre-images of local files the agent overwrites or moves; the restore route is the user's, never a tool (filesnap.py).
+filesnap = FileSnapshots(db, db.data_dir / "snapshots", settings)
+app.include_router(filesnap_router(filesnap))
+# Whole-folder snapshots per reply, so Undo can take back shell effects too (snapshots.py); user-only routes.
+snaps = Snapshots(db, db.data_dir / "snapshots", settings, workspace.desk_root)
+app.include_router(snapshots_router(snaps, lambda rid: run_store.get(rid) is not None))
+
+
+async def _snapshot_after(run: Run) -> None:
+    await asyncio.to_thread(snaps.finish, run.run_id)
+
+
+bus.after_hooks.append(_snapshot_after)
 # Working memory that is not the chat: the per-conversation plan, the full tool-result blobs behind
 # their handles (working.py), and procedural memory awaiting review (learn.Skills). `work_plans` is the
 # todo_write artifact and is a different thing from `plans`, the propose_plan approval record.
@@ -311,7 +360,37 @@ meeting_store = Meetings(db)
 meeting_svc = MeetingService(db, settings, llm.complete, meeting_store, google=google, todos=todos)
 toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=google, boards=boards, sandboxes=sandboxes, docs=docs, activity=monitor,
                   outbox=outbox, work_plans=work_plans, results=tool_results, skills=skills, jobs=jobs,
-                  style=style, meetings=meeting_svc, desks=desks, workspace=workspace)
+                  style=style, meetings=meeting_svc, desks=desks, workspace=workspace, filesnap=filesnap, artifacts=artifacts)
+# Hybrid retrieval over uploaded documents. Uploads embed in the background; with no embedding route
+# every search is the old BM25 one.
+embedder = Embedder()
+retriever = Retriever(db, documents, embedder, docs=docs)
+memory_index = MemoryIndex(db, memories, graph, embedder)
+learner.index = memory_index
+documents.on_chunks = lambda did, _rows: retriever.schedule(settings, did)
+docs.on_chunks = lambda _did: retriever.schedule_docs(settings)
+
+
+@app.on_event("startup")
+async def _start_retrieval() -> None:
+    retriever.bind_loop(asyncio.get_running_loop())
+    retriever.schedule(settings)  # embed whatever is still waiting; silent when the route is down
+    retriever.schedule_docs(settings)
+toolbox.retriever = retriever
+toolbox.memory_index = memory_index
+toolbox.web_cache = WebCache(db)  # fetch_url's response cache
+# Subagents: child runs the agent_spawn tools start. Approval cards a child raises resolve through the
+# same _approvals futures a chat's do.
+agent_defs = AgentDefs(db)
+subagent_mgr = Subagents(run_store, toolbox, settings, defs=agent_defs, results=tool_results, pricing=pricing, memories=memories,
+                         projects=projects, workspace=workspace, approvals=_approvals)
+toolbox.subagents = subagent_mgr
+subagent_mgr.snaps = snaps
+# Workflows (workflows.py) and commands (commands.py): saved definitions, approved by hash before a run starts.
+workflow_store = Workflows(db, lambda: set(toolbox.specs), lambda n: subagent_mgr.role_for(n) is not None)
+workflow_engine = WorkflowEngine(workflow_store, toolbox, subagent_mgr, run_store, settings, projects)
+command_store = Commands(db)
+toolbox.workflows, toolbox.workflow_engine, toolbox.commands = workflow_store, workflow_engine, command_store
 # The insights pass proposes automations, so it is told which tools this install actually has - an
 # unwired integration must not turn into a suggestion that cannot be carried out.
 monitor.insights.tools_fn = lambda: [t["name"] for t in toolbox.list() if t.get("available")]
@@ -341,7 +420,7 @@ def _mcp_tooling(project_id: str | None, conversation_id: str | None) -> tuple[d
     names = {s["id"]: s["name"] for s in mcp_store.servers()}
     modes: dict[str, str] = {}
     schemas: list[dict[str, Any]] = []
-    for tool in mcp_store.tools():
+    for tool in mcp_drift.offerable(mcp_store.tools()):  # a quarantined (drifted) tool is not offered
         slug = tool["slug"]
         if slug not in ready:
             continue
@@ -360,7 +439,7 @@ def _mcp_tooling(project_id: str | None, conversation_id: str | None) -> tuple[d
     return modes, schemas
 
 
-def _gate(name: str, mode: str, ctx: dict[str, Any]) -> str:
+def _gate(name: str, mode: str, ctx: dict[str, Any], args: dict[str, Any] | None = None) -> str:
     """Effective mode for one call. Untrusted content in the run forces every external tool to ask.
 
     Every MCP tool is `external` by construction (mcp_client.MCP_DANGER), so the taint rule the
@@ -368,7 +447,21 @@ def _gate(name: str, mode: str, ctx: dict[str, Any]) -> str:
     """
     if mcp_is(name):
         return "ask" if mode == "on" and ctx.get("tainted") else mode
-    return toolbox.gate(name, mode, ctx)
+    return toolbox.gate(name, mode, ctx, args)
+
+
+# The note a user typed with a denial, handed from POST /approvals to the run waiting on that call.
+_approval_notes: dict[str, str] = {}
+# Run kinds that have nobody at the keyboard; with unattendedApprovals = "deny" a call that would ask is refused.
+UNATTENDED_KINDS = ("job", "scheduled")
+
+
+def _perm_roots(cfg: dict[str, Any], desk_id: str | None) -> list[str]:
+    """Folders a shell or file call counts as inside: the granted roots plus the active desk's workspace."""
+    roots = [r for r in (cfg.get("workspaceRoots") or []) if isinstance(r, str) and r]
+    if desk_id:
+        roots.append(str(workspace.desk_root(desk_id)))
+    return roots
 
 
 async def _mcp_call(slug: str, args: dict[str, Any]) -> dict[str, Any]:
@@ -388,11 +481,12 @@ async def _mcp_call(slug: str, args: dict[str, Any]) -> dict[str, Any]:
 def _mcp_server_view(row: dict[str, Any]) -> dict[str, Any]:
     """One server as the UI wants it: stored config, live supervisor state, its tools, its last report."""
     live = (mcp.status(row["id"]) or [{}])[0]
+    every = mcp_store.tools()
     return {**row,
             "live": {"status": live.get("status", row["status"]), "detail": live.get("detail", row["status_detail"]),
                      "running": bool(live.get("running")), "ready": bool(live.get("ready")),
                      "attempts": live.get("attempts", 0), "server_info": live.get("server_info") or {}},
-            "tools": [{**t, "effective": mcp_store.effective_mode(t["slug"])}
+            "tools": [{**t, "effective": mcp_store.effective_mode(t["slug"]), "drift": mcp_drift.view(mcp_store, t, every)}
                       for t in mcp_store.tools(row["id"], include_missing=True)],
             "eval": mcp_store.latest_eval(row["id"]),
             "signed_in": mcp_oauth.store.signed_in(row["id"]) if row.get("transport") == "http" else None}
@@ -458,6 +552,15 @@ NUMERIC_SETTING_RANGES: dict[str, tuple[float, float]] = {
     "maxRunTokens": (0, 10_000_000),
     "maxRunSeconds": (0, 86_400),
     "maxRunCost": (0, 1_000),
+    "subagentMaxConcurrent": (1, 20),
+    "subagentMaxDepth": (0, 3),
+    "subagentMaxRounds": (1, 60),
+    "subagentMaxCost": (0, 100),
+    "subagentStaleSeconds": (0, 86_400),
+    "subagentToolSeconds": (0, 86_400),
+    "fileSnapshotMaxBytes": (0, 100_000_000),
+    "fileSnapshotRetainDays": (1, 365),
+    "fileSnapshotBudgetMB": (1, 20_000),
 }
 
 
@@ -472,6 +575,22 @@ def _check_numeric_setting(key: str, value: Any) -> int | float:
     return int(value) if isinstance(default, int) else float(value)
 
 
+def _check_permission_rules(v: Any) -> dict[str, list[str]]:
+    """The permissionRules setting: three lists of well-formed rule strings, nothing else."""
+    if not isinstance(v, dict):
+        raise HTTPException(422, "permissionRules must be {allow, ask, deny}")
+    out: dict[str, list[str]] = {}
+    for key in ("allow", "ask", "deny"):
+        items = v.get(key) or []
+        if not isinstance(items, list):
+            raise HTTPException(422, f"permissionRules.{key} must be a list")
+        try:
+            out[key] = list(dict.fromkeys(permrules.parse_rule(str(t)).text for t in items))
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from e
+    return out
+
+
 @app.put("/settings")
 def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
     clean = {k: v for k, v in patch.items()
@@ -480,6 +599,20 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
         d = llm.DEFAULT_SETTINGS[k]
         if isinstance(d, (int, float)) and not isinstance(d, bool):
             clean[k] = _check_numeric_setting(k, v)
+        elif k == "permissionRules":
+            clean[k] = _check_permission_rules(v)
+        elif k == "unattendedApprovals" and v not in ("ask", "deny"):
+            raise HTTPException(422, "unattendedApprovals must be 'ask' or 'deny'")
+        elif k == "workspaceRoots":
+            if not (isinstance(v, list) and all(isinstance(x, str) for x in v)):
+                raise HTTPException(422, "workspaceRoots must be a list of folders")
+            # The file tools only work inside the home folder and outside hidden folders and ~/Library. A root they
+            # would refuse is rejected here rather than stored and then silently ignored.
+            for root in v:
+                try:
+                    mac.allowed_path(root)
+                except mac.LocalPathError as e:
+                    raise HTTPException(422, f"{root} cannot be a workspace folder: {e}") from e
     db.set_settings(clean)
     return {k: v for k, v in settings().items() if k not in PRIVATE_SETTINGS}
 
@@ -691,9 +824,18 @@ def mcp_tools(project_id: str | None = None, conversation_id: str | None = None)
     ready = set(mcp.ready_slugs())
     rows = mcp_store.tools(include_missing=True)
     return {"tools": [{**t, "ready": t["slug"] in ready,
-                       "effective": mcp_store.effective_mode(t["slug"], sid(project_id), conversation_id)}
+                       "effective": mcp_store.effective_mode(t["slug"], sid(project_id), conversation_id),
+                       "drift": mcp_drift.view(mcp_store, t, rows)}
                       for t in rows],
             "grants": mcp_store.grants()}
+
+
+@app.post("/mcp/tools/{slug}/accept")
+def mcp_accept_change(slug: str) -> dict[str, Any]:
+    """The user read the diff. Releases a quarantined tool; its grant is untouched, so an 'on' stays 'ask'."""
+    if mcp_drift.accept(mcp_store, slug) is None:
+        raise HTTPException(404, "No such MCP tool")
+    return mcp_store.effective_mode(slug)
 
 
 @app.put("/mcp/tools/{slug}/grant")
@@ -830,6 +972,7 @@ class ChatIn(BaseModel):
     content: str | None = None  # None = regenerate from existing history
     model: str | None = None
     page_context: PageContextIn | None = None
+    resume_of: str | None = None  # run_id of an interrupted run this reply continues (POST /runs/{id}/resume)
 
 
 RENDER_HINT = """## Rendering
@@ -986,9 +1129,12 @@ async def _call_tool(run: Run | None, step: int, name: str, args: dict[str, Any]
     spec = toolbox.specs.get(name)
     if proposal_only(run) and toolbox.proposes(name):
         return _propose(run, name, args, call_id, ctx)  # type: ignore[arg-type]
+    if run is not None and snaps.wants(name, args, run.desk_id):
+        await asyncio.to_thread(snaps.before, run.run_id, snaps.roots_for_call(name, args, run.desk_id))
     if run is None or run.store is None or spec is None or spec.danger not in IDEMPOTENT_DANGER:
         return await toolbox.call(name, args, ctx)
-    result, replayed = await run.store.call_once(run.run_id, step, name, args, lambda: toolbox.call(name, args, ctx), call_id=call_id)
+    result, replayed = await run.store.call_once(run.run_id, step, name, args, lambda: toolbox.call(name, args, ctx), call_id=call_id,
+                                                  inherit=(run.input or {}).get("resume_of"))
     if replayed:
         if isinstance(result, dict):
             result = {**result, "replayed": True}
@@ -1054,6 +1200,13 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             title = _title_from(user_text)
             convos.update(conv_id, {"title": title})
             yield "title", {"id": conv_id, "title": title}
+    elif body.resume_of:
+        # resume: the salvaged reply of the dead run stays visible as history; this reply continues after it
+        users = [m for m in conv["messages"] if m["role"] == "user"]
+        if not users:
+            yield "error", {"message": "Nothing to resume"}
+            return
+        user_text = users[-1]["content"]
     else:
         # regenerate: drop trailing assistant message
         msgs = conv["messages"]
@@ -1069,18 +1222,26 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     tracer = Tracer()
     llm.usage_context.set({"conversation_id": conv_id, "project_id": conv["project_id"]})
     await pricing.refresh(cfg)
-    history = convos.history(conv_id)
     project = projects.get(conv["project_id"]) if conv["project_id"] else None
     cspan = tracer.start("context", "Assemble context", {"model": model})
+    doc_hits = await _doc_hits(conv["project_id"], user_text, cfg, conv["settings"])
     system, used = build_context(
-        memories=memories, graph=graph, documents=documents,
+        memories=memories, graph=graph, documents=documents, doc_hits=doc_hits,
+        memory_hits=await _memory_hits(conv["project_id"], user_text, cfg, conv["settings"]),
         project=project, project_id=conv["project_id"], query=user_text,
         settings=cfg, conv_settings=conv["settings"], global_system_prompt=cfg["systemPrompt"],
         activity=monitor, skills=skills, style=style, meetings=meeting_svc,
         page=body.page_context.model_dump() if body.page_context else None,
     )
+    # Older messages are folded into a rolling summary when the replay outgrows the window (compaction.py).
+    history, cinfo = await compaction.prepare_history(compactor, convos, cfg, str(cfg.get("extractionModel") or model), conv_id,
+                                                      used["tokens_estimate"])
     tracer.end(cspan, {"memories": len(used["memories"]), "entities": len(used["nodes"]), "excerpts": len(used["chunks"]),
                        "history_messages": len(history)})
+    compact_span: dict[str, Any] | None = None
+    if cinfo.get("compacted"):
+        compact_span = tracer.start("compact", "Compact history", {"kind": "history"}, parent=cspan)
+        tracer.end(compact_span, {k: cinfo[k] for k in ("tokens_before", "tokens_after", "summarized")})
 
     am = convos.add_message(conv_id, "assistant", "", model=model)
 
@@ -1113,7 +1274,67 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     modes = toolbox.effective(cfg.get("tools") or {}, (project or {}).get("tools"), conv["settings"].get("tools")) if use_tools else {}
     # MCP slugs all carry a reserved prefix no built-in may use, so the two mode maps cannot collide.
     mcp_modes, mcp_schemas = _mcp_tooling(conv["project_id"], conv_id) if use_tools else ({}, [])
-    modes.update(mcp_modes)
+    # A job's allowlist (job_tools) writes 'off' for tools outside it into the chat's tool map; MCP modes come from
+    # mcp_grants, not that map, so the narrowing is applied to them here.
+    chat_off = {n for n, v in (conv["settings"].get("tools") or {}).items() if v == "off"}
+    if chat_off and mcp_modes:
+        mcp_modes = {k: v for k, v in mcp_modes.items() if k not in chat_off}
+        mcp_schemas = [s for s in mcp_schemas if s["function"]["name"] not in chat_off]
+    # Past mcpDeferAbove ready tools the model gets mcp_tool_search instead of every schema. Only loaded
+    # slugs are in `modes`, so a call to an unloaded one is off -> denied, never run.
+    mcp_defer = mcp_search.should_defer(len(mcp_schemas), int(cfg.get("mcpDeferAbove", 12) or 0))
+    tool_ctx["mcp_loaded"] = set()
+    tool_ctx["modes"] = modes  # the live map: run_python's tool bridge resolves a script's calls against it
+    bridge_n = 0
+
+    async def _bridge_approve(name: str, args: dict[str, Any], forced: bool) -> bool:
+        """A card for one call a run_python script made through the tool bridge. The script waits; the reply does not
+        end. One-shot only: an 'always' answer is treated as 'allow' here, never as a standing grant."""
+        nonlocal bridge_n
+        if run is None or run.store is None:
+            return False
+        bridge_n += 1
+        uid = f"{am['id']}:bridge{bridge_n}"
+        fut: asyncio.Future = asyncio.get_event_loop().create_future()
+        _approvals[uid] = fut
+        spec = toolbox.specs.get(name)
+        run.store.open_approval(uid, run.run_id, name, args, conversation_id=conv_id, message_id=am["id"], forced=forced,
+                                desk_id=run.desk_id, danger=spec.danger if spec else "external")
+        run.publish("tool_call", {"message_id": am["id"], "id": uid, "name": name, "arguments": args,
+                                  "needs_approval": True, "forced": forced, "proposal": None, "plan": None})
+        decision = "deny"
+        try:
+            while not fut.done():
+                if stop.is_set():
+                    run.store.decide(uid, "deny", by="stop")
+                    fut.set_result("deny")
+                    break
+                try:
+                    await asyncio.wait_for(asyncio.shield(fut), timeout=2)
+                except asyncio.TimeoutError:
+                    row = run.store.approval(uid)
+                    if row and row["status"] != "pending" and not fut.done():
+                        fut.set_result(row["decision"])
+            decision = fut.result() if fut.done() else "deny"
+        finally:
+            _approvals.pop(uid, None)
+        allowed = decision in ("allow", "always_chat", "always_global")
+        run.publish("tool_result", {"message_id": am["id"], "id": uid, "name": name, "arguments": args,
+                                    "result_preview": "", "duration_ms": 0,
+                                    "error": None if allowed else "Declined by the user", "approval": "allow" if allowed else "deny",
+                                    "forced": forced})
+        return allowed
+
+    tool_ctx["bridge_approve"] = _bridge_approve
+    if mcp_defer:
+        _mcp_names = {s["id"]: s["name"] for s in mcp_store.servers()}
+        tool_ctx["mcp_catalog"] = lambda: [{**t, "server": _mcp_names.get(t["server_id"], "MCP")}
+                                           for t in mcp_store.tools() if t["slug"] in mcp_modes]
+        if use_tools:
+            modes["mcp_tool_search"] = "on"
+    else:
+        modes.pop("mcp_tool_search", None)
+        modes.update(mcp_modes)
     # ---- the desk this reply belongs to, if any, read once.
     # `autonomy` is read off the desk row rather than off conv["settings"], so changing a desk's
     # autonomy takes effect on its next turn without having to rewrite the conversation.
@@ -1129,6 +1350,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     # The desk tools derive their workspace root from this and never take one as an argument, so
     # desk A cannot address desk B's files.
     tool_ctx["desk_id"] = desk_id
+    # What agent_spawn needs to start a child under this reply: its live tool modes (a child never has more),
+    # the run its cards and status ride on, its stop flag, and where it sits in the spawn tree.
+    tool_ctx.update(modes=modes, run=run, stop=stop, depth=0, agent_run_id=run.run_id if run else "", model=model,
+                    effort=str(conv["settings"].get("effort") or "default"))
 
     def _schemas(withheld: bool = False) -> list[dict[str, Any]]:
         """One function, because the always_chat/always_global grant path recomputes the schemas; a
@@ -1137,37 +1362,73 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         each time rather than rebuilding from a stale snapshot - otherwise the user's 'Always' click
         is silently discarded on the next recompute.
         """
+        offer = mcp_search.select_schemas(mcp_schemas, tool_ctx["mcp_loaded"], mcp_defer)
         if not modes:
-            return mcp_schemas
+            return offer
         m = dict(modes)
         # A desk's workspace tools exist only inside a desk: elsewhere there is no root to resolve.
         if not desk_id:
-            m = {n: v for n, v in m.items() if toolbox.specs[n].group != "desk"}
+            m = {n: v for n, v in m.items() if n not in toolbox.specs or toolbox.specs[n].group != "desk"}
         if planning and not withheld:
             # While a plan is being drafted the model is offered reading and the plan tool, nothing
             # else. Withholding them is kinder than denying them: a tool that is not offered costs no
             # round, where one that is offered and refused costs one every time. `withheld=True` asks
             # for the full set anyway, which is what a plan has to be judged against: its steps name
             # the tools it will use *after* approval.
-            m = {n: v for n, v in m.items() if n == PLAN_TOOL or toolbox.specs[n].danger in PLAN_SAFE_DANGER}
+            m = {n: v for n, v in m.items() if n == PLAN_TOOL or (n in toolbox.specs and toolbox.specs[n].danger in PLAN_SAFE_DANGER)}
             m[PLAN_TOOL] = "ask"
-        return toolbox.schemas(m) + mcp_schemas
+        return toolbox.schemas(m) + offer
 
     tool_schemas = _schemas()
     tools_hint = (TOOLS_HINT + ("\n" + PLAN_HINT if any(s["function"]["name"] == "todo_write" for s in tool_schemas) else "")) if tool_schemas else ""
-    system = "\n\n".join(p for p in (system, RENDER_HINT, tools_hint,
-                                     JOB_HINT if proposal_only(run) else "") if p)
+    if mcp_defer:
+        _counts: dict[str, int] = {}
+        for t in mcp_store.tools():
+            if t["slug"] in mcp_modes:
+                _n = _mcp_names.get(t["server_id"], "MCP")
+                _counts[_n] = _counts.get(_n, 0) + 1
+        tools_hint = "\n".join(p for p in (tools_hint, mcp_search.catalog_hint(_counts.items())) if p)
+    artifact_hint = ARTIFACT_HINT if any(s["function"]["name"] == "create_artifact" for s in tool_schemas) else ""
+    hints = (RENDER_HINT, artifact_hint, tools_hint, JOB_HINT if proposal_only(run) else "",
+             DESK_HINT if desk else "", DESK_PLAN_HINT if planning else "")
+    if cfg.get("cacheLayout", True):
+        # Stable prefix first, per-turn retrieval just before the newest user message (see context.layout_messages).
+        stable = "\n\n".join(p for p in (used["stable_system"], *hints) if p)
+        messages = layout_messages(stable, used["volatile_blocks"], history)
+        system = "\n\n".join(p for p in (stable, *used["volatile_blocks"]) if p)
+        used["stable_hash"] = hashlib.sha256(stable.encode()).hexdigest()[:12]
+        cspan["meta"]["stable_hash"] = used["stable_hash"]
+    else:
+        system = "\n\n".join(p for p in (system, *hints) if p)
+        messages = [{"role": "system", "content": system}] + history
     used["system_prompt"] = system
     used["tokens_estimate"] = estimate_tokens(system)
-    messages = [{"role": "system", "content": system}] + history
+    if body.resume_of:
+        old = run_store.get(body.resume_of) or {}
+        old_events = run_store.events(body.resume_of)
+        messages.append({"role": "system", "content": resume.build_resume_note(
+            old, old_events, run_store.executed(body.resume_of), run_store.approvals(None, run_id=body.resume_of))})
+        # Taint is only ever added to: a resume cannot launder what the dead run read.
+        for src in resume.taint_from_tape(old_events):
+            tool_ctx["tainted"] = True
+            if src not in tool_ctx["taint_sources"]:
+                tool_ctx["taint_sources"].append(src)
     yield "assistant_message", {**am, "context_used": used}
     yield "span", {"message_id": am["id"], "span": cspan}
+    if compact_span:
+        yield "span", {"message_id": am["id"], "span": compact_span}
 
     budget = Budget(_caps(cfg, JOB_BUDGET) if proposal_only(run) else cfg)
+    tool_ctx["budget"] = budget  # children are charged to it
     partial: str | None = None
     last_sig: str | None = None
     repeats = 0
     tool_errors: dict[str, int] = {}
+    detector = StuckDetector() if cfg.get("stuckDetection", True) else None  # loop shapes REPEAT_LIMIT cannot see
+    perm_rules = permrules.load_rules(cfg.get("permissionRules"))
+    denials = permrules.DenialStreak()  # refused calls in a row; at three the next result says to stop varying them
+    stuck_hits = 0
+    stop_text: str | None = None
     blocked: set[str] = set()
     _round = 0
     awaiting: dict[str, Any] | None = None  # the tool event of a call blocked on approval, for a cancelled run to keep
@@ -1263,8 +1524,18 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             budget.rounds = _round - 1  # rounds already completed: the Nth round's tool calls must still be allowed to run
             round_start = len(buf)
             end: dict[str, Any] = {}
+            # Old tool results shrink to stubs once the run has filled half the window; read_tool_result still serves them.
+            n_cleared, n_saved = compaction.microcompact(messages, _int_setting(cfg, "microKeep", 3), _int_setting(cfg, "contextWindow", 128000),
+                                                         float(cfg.get("microAt", 0.5)))
+            if n_cleared:
+                mspan = tracer.start("compact", "Clear old tool results", {"kind": "micro"}, parent=cspan)
+                tracer.end(mspan, {"cleared": n_cleared, "tokens_saved": n_saved})
+                yield "span", {"message_id": am["id"], "span": mspan}
+            for _note in toolbox.shell.drain_notes(conv_id):  # a background shell job finished since the last round
+                messages.append({"role": "system", "content": _note})
             _reinject_plan()  # last message in the context, after the previous round's tool results
             lspan = tracer.start("llm", model, {"round": _round, "messages": len(messages), "tools": len(tool_schemas)})
+            round_span = lspan  # the tool calls below nest under it
             yield "span", {"message_id": am["id"], "span": lspan}
             first_token: int | None = None
             async for ev in llm.stream_chat(cfg, model, messages, tool_schemas or None,
@@ -1324,6 +1595,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 break
             # execute tool calls, then continue the loop with their results
             messages.append(turn)
+            # Read-only agent_spawn calls of this round start together; never in plan mode or when every change cards.
+            subagent_mgr.prestart(calls, tool_ctx, start=not planning and autonomy != "ask" and not stop.is_set())
             if buf and buf[-1] and not buf[-1].endswith("\n"):
                 buf.append("\n")
                 yield "delta", {"id": am["id"], "text": "\n"}
@@ -1340,13 +1613,19 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 if repeats >= REPEAT_LIMIT:  # before the approval gate: denying the same call forever is still a loop
                     partial = "loop"
                 if partial == "loop":  # every pending call still needs a tool message, executed or not
-                    messages.append({"role": "tool", "tool_call_id": c["id"], "content": LOOP_STOP.format(name=c["name"], n=REPEAT_LIMIT)})
+                    messages.append({"role": "tool", "tool_call_id": c["id"], "content": stop_text or LOOP_STOP.format(name=c["name"], n=REPEAT_LIMIT)})
                     continue
                 raw_mode = modes.get(c["name"], "off")
                 spec = toolbox.specs.get(c["name"])
                 danger = spec.danger if spec else "safe"
-                mode = _gate(c["name"], raw_mode, tool_ctx)
-                forced = mode != raw_mode  # untrusted content in this reply upgraded on -> ask
+                mode = _gate(c["name"], raw_mode, tool_ctx, args)
+                # A file write outside the granted folders (or in one, once the reply read untrusted content) asks.
+                fs_ask = mode != "off" and toolbox.fs_needs_ask(c["name"], args, tool_ctx)
+                if fs_ask and mode == "on":
+                    mode = "ask"
+                # untrusted content in this reply upgraded on -> ask; so does a call that may never run unasked
+                # (shell_run outside its sandbox), which no standing grant can then buy off
+                forced = mode != raw_mode or (mode == "ask" and toolbox.forces_ask(c["name"], args))
                 blocked_reason: str | None = None
                 # ---- plan mode, in priority order. Each rule can only ever make a call ask or stop;
                 # none of them can turn a card off, so this is a narrowing of the gate above.
@@ -1370,6 +1649,17 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         # one at a time. Forced, so the card cannot buy a standing grant that would
                         # quietly switch the mode back off.
                         mode, forced = "ask", True
+                # Argument-pattern rules, session grants and the doom-loop card (permrules.py). A deny refuses; a
+                # forced approval (taint, plan mode) is never downgraded; MCP tools keep their schema-bound grants.
+                perm = permrules.Resolution(mode, forced)
+                if c["name"] != PLAN_TOOL and mode != "off" and not mcp_is(c["name"]):
+                    perm = permrules.resolve(
+                        c["name"], args, mode, forced or (danger == "external" and bool(tool_ctx["tainted"])),
+                        rules=perm_rules, roots=_perm_roots(cfg, desk_id), conv=conv_id,
+                        doom=detector is not None and detector.repeat_count(c["name"], args) >= permrules.DOOM_LIMIT - 1)
+                    mode = perm.mode
+                    if perm.kind == "doom_loop":
+                        forced = True
                 # A background run never waits on an approval: there is nobody at the keyboard, and the call is not
                 # going to happen either way. It becomes a proposal in _call_tool and the run carries on.
                 proposing = proposal_only(run) and toolbox.proposes(c["name"]) and mode != "off"
@@ -1423,15 +1713,31 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         pre = tools.denied(c["name"], "part of a plan you rejected")
                 if blocked_reason and pre is None:
                     pre = tools.denied(c["name"], blocked_reason)
+                if perm.refusal and pre is None:
+                    pre = tools.denied(c["name"], perm.refusal)
+                unattended = False
+                if (mode == "ask" and claimed is None and pre is None and not proposing and run is not None
+                        and run.kind in UNATTENDED_KINDS and cfg.get("unattendedApprovals") == "deny"):
+                    # Nobody is there to answer: refuse with a recorded reason rather than park a card for later.
+                    unattended = True
+                    why = "no one is available to approve it and unattendedApprovals is set to deny"
+                    pre = tools.denied(c["name"], f"refused: {why}")
+                    if run.store is not None:
+                        run.store.open_approval(uid, run.run_id, c["name"], args, conversation_id=conv_id, message_id=am["id"],
+                                                forced=forced, desk_id=run.desk_id, danger=danger)
+                        run.store.decide(uid, "deny", by="unattended", note=why)
                 asks = mode == "ask" and claimed is None and pre is None
                 yield "tool_call", {"message_id": am["id"], "id": uid, "name": c["name"], "arguments": args,
                                     "needs_approval": asks, "forced": forced, "proposal": proposing or None,
+                                    "permission": perm.card() if asks else None,
                                     "plan": {"plan_id": claimed["plan_id"], "idx": claimed["idx"], "title": claimed["title"]} if claimed else None}
                 tspan = tracer.start("tool", c["name"], {"round": _round, "arguments": _short(args), "mode": mode, "forced": forced,
-                                                         "plan_step": f"{claimed['plan_id']}#{claimed['idx']}" if claimed else None})
+                                                         "plan_step": f"{claimed['plan_id']}#{claimed['idx']}" if claimed else None},
+                                 parent=round_span)
                 yield "span", {"message_id": am["id"], "span": tspan}
                 t0 = time.time()
                 decision = "allow"
+                deny_note: str | None = None
                 if asks:
                     # Pause the reply until the user approves or denies this call (POST /approvals/{call_id}).
                     # The approval is a row, and it waits as long as it takes: there is no auto-deny.
@@ -1483,6 +1789,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         decision = fut.result() if fut.done() else "deny"
                     finally:
                         _approvals.pop(uid, None)
+                    deny_note = _approval_notes.pop(uid, None)
                     awaiting = None
                     if parked:
                         # The reply ends here, still owing this call an answer. The row stays pending
@@ -1506,6 +1813,13 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                          if (approved_plan or {}).get("status") == "approved" else None)
                     budget.paused += time.time() - approval_t0  # a slow approval must not blow the wall clock
                     t0 = time.time()  # don't count waiting time as tool time
+                    if decision == "always_session":
+                        # Scoped to this chat and to exactly what the card named; a forced card is answered once.
+                        if not forced:
+                            permrules.SESSION.add(conv_id, perm.keys)
+                        decision = "allow"
+                    elif decision == "always_rule":
+                        decision = "allow"  # POST /approvals already saved the rules, or refused to for a forced card
                     granted = decision in ("always_chat", "always_global")
                     # A tainted reply cannot buy a standing grant, and neither can a plan card: 'always' on
                     # propose_plan would leave the plan with no approval at all.
@@ -1549,20 +1863,36 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         # sees the answer even when it was given somewhere else.
                         yield "plan_decision", {"message_id": am["id"], "call_id": uid, "plan": plan}
                 was_tainted, was_blocked = tool_ctx["tainted"], c["name"] in blocked
+                ran = False  # only a call that really executed says anything about being stuck
                 if was_blocked:
                     result: Any = tools.denied(c["name"], f"failing {TOOL_ERROR_LIMIT} times in a row and disabled for the rest of this reply")
                 elif mode == "off":
-                    result = tools.denied(c["name"], "turned off for this chat")
+                    result = tools.denied(c["name"], "not loaded; call mcp_tool_search first"
+                                          if mcp_defer and mcp_is(c["name"]) and c["name"] in mcp_modes
+                                          else "turned off for this chat")
                 elif pre is not None:
                     result = pre  # an unusable plan, or a step of a plan the user rejected
                 elif plan is not None:
                     result = plans.model_result(plan)  # the decision, and the arguments the user actually authorised
                 elif decision != "allow":
-                    result = tools.denied(c["name"], "just declined by the user")
+                    # A note typed with the denial goes back as the result and the reply carries on.
+                    result = (tools.tool_error(f"{c['name']} was declined by the user, who said: {deny_note}",
+                                               alternative="follow what the user said, or ask them what they would like instead")
+                              if deny_note else tools.denied(c["name"], "just declined by the user"))
                 elif mcp_is(c["name"]):
                     result = await _mcp_call(c["name"], args)
+                    ran = True
                 else:
-                    result = await _call_tool(run, _round, c["name"], args, tool_ctx, uid)
+                    tool_ctx["fs_outside_ok"] = fs_ask  # the user approved this write (or granted the folder)
+                    try:
+                        result = await _call_tool(run, _round, c["name"], args, tool_ctx, uid)
+                    finally:
+                        tool_ctx["fs_outside_ok"] = False
+                    ran = True
+                hint = denials.note()
+                if hint and isinstance(result, dict):
+                    result["permission_note"] = hint
+                denials.record(bool(perm.refusal) or unattended or (asks and decision != "allow"))
                 ms = int((time.time() - t0) * 1000)
                 # images (e.g. matplotlib figures from run_python) go to the UI, not to the model
                 images = result.pop("images", None) if isinstance(result, dict) else None
@@ -1580,12 +1910,25 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     tool_ctx["taint_sources"].append(c["name"])
                 event = {"id": uid, "name": c["name"], "arguments": args, "result_preview": preview, "duration_ms": ms,
                          "error": err, "images": images or None,
+                         "undo": result.get("undo") if isinstance(result, dict) and isinstance(result.get("undo"), dict) else None,
                          "approval": (("plan" if claimed else decision) if mode == "ask" else None),
                          "plan": {"plan_id": claimed["plan_id"], "idx": claimed["idx"], "title": claimed["title"]} if claimed else None,
                          "forced": forced, "tainted": tainted, "blocked": c["name"] if was_blocked else None, "breaker": partial,
                          "blocked_by": "plan_mode" if blocked_reason == PLAN_BLOCKED else None,
                          "proposal": (result.get("proposal_id") if proposing and isinstance(result, dict) else None)}
-                tracer.end(tspan, {"result_chars": len(preview), "images": len(images or [])}, error=err)
+                stuck = None
+                if detector is not None and ran:
+                    detector.observe(c["name"], args, result)
+                    stuck = detector.check()
+                    if stuck and stuck_hits == 0:
+                        stuck_hits = 1
+                        detector.obs.clear()  # the model gets a fresh run at it; the same shape again ends tool use
+                        event["breaker"] = "stuck_nudge"
+                    elif stuck:
+                        stuck_hits += 1
+                        partial, stop_text = "loop", STUCK_STOP.format(detail=stuck.detail)
+                        event["breaker"] = "stuck"
+                tracer.end(tspan, {"result_chars": len(preview), "images": len(images or []), **({"stuck": stuck.pattern} if stuck else {})}, error=err)
                 if claimed is not None:
                     # The step was spent at the gate; this records whether the call it authorised
                     # actually worked, so the plan can be read after the fact.
@@ -1596,8 +1939,17 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 for_model = {**result, "images_shown_to_user": [i["name"] for i in images]} if images and isinstance(result, dict) else result
                 # Small results go in whole; a big one is stored and replaced by a handle the model can
                 # page with read_tool_result, so nothing is silently truncated away. See working.py.
-                messages.append({"role": "tool", "tool_call_id": c["id"],
-                                 "content": tool_results.for_model(conv_id, am["id"], c["name"], for_model)})
+                content = tool_results.for_model(conv_id, am["id"], c["name"], for_model)
+                if stuck and event["breaker"] == "stuck_nudge":
+                    content = f"{content}\n\n[stuck_notice] {STUCK_NUDGE.format(detail=stuck.detail)}"
+                messages.append({"role": "tool", "tool_call_id": c["id"], "content": content})
+                if c["name"] == "mcp_tool_search":
+                    # A search loads schemas: bring their modes in (grants and ask are already resolved
+                    # in mcp_modes) and offer them from the next round.
+                    for _slug in tool_ctx["mcp_loaded"]:
+                        if _slug in mcp_modes:
+                            modes.setdefault(_slug, mcp_modes[_slug])
+                    tool_schemas = _schemas()
                 if tool_ctx.pop("plan_changed", None):
                     yield "plan", {"conversation_id": conv_id, "steps": (work_plans.get(conv_id) or {}).get("steps") or []}
             if partial == "loop":
@@ -1623,11 +1975,14 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             yield "span", {"message_id": am["id"], "span": s}
     finally:
         _active.pop(am["id"], None)
+        if not desk_id:  # a chat's background shell jobs end with its run; a desk's outlive a turn (they wake it)
+            await toolbox.shell.kill_conversation(conv_id)
 
     text = "".join(buf).strip()
     reasoning = "".join(rbuf).strip() or None
     convos.finish_message(am["id"], text, error, used, tool_events, tracer.spans, reasoning)
     convos.touch(conv_id)
+    otel_export.export_in_background(cfg, conv_id, am["id"], model, project["name"] if project else None, tracer.spans, used, text)
     if tool_ctx["tainted"]:
         srcs = sorted(set(tool_ctx["taint_sources"]))
         if not conv["settings"].get("tainted") or srcs != sorted(set(conv["settings"].get("taint_sources") or [])):
@@ -1844,6 +2199,19 @@ def _wake_desk(desk_id: str) -> Run | None:
     return _launch_desk(desk_id, DESK_RESUME if desk["status"] == "interrupted" else DESK_CONTINUE, RESUME_FROM)
 
 
+def _shell_wake(conversation_id: str | None) -> None:
+    """A background shell job finished in a desk that has no run going: wake it so it reads the result."""
+    desk = desks.by_conversation(conversation_id) if conversation_id else None
+    if not desk or bus.live(desk["conversation_id"]) or desk["status"] not in (*RESUME_FROM, "done"):
+        return
+    notes = toolbox.shell.drain_notes(conversation_id)
+    if notes:
+        _launch_desk(desk["id"], "\n\n".join(notes), (*RESUME_FROM, "done"))
+
+
+toolbox.shell.on_note = _shell_wake
+
+
 @app.post("/conversations/{id}/chat")
 async def chat(id: str, body: ChatIn) -> dict[str, Any]:
     """Start the reply as a background task. Watch it on GET /conversations/{id}/stream?since=seq."""
@@ -1933,6 +2301,213 @@ async def list_runs(status: str | None = None, conversation_id: str | None = Non
     return bus.list(statuses, conversation_id, limit, desk_id)
 
 
+@app.get("/runs/{run_id}/children")
+async def run_children(run_id: str) -> list[dict[str, Any]]:
+    """Subagents started by this run (or by another subagent), with live state while they run."""
+    if not run_store.get(run_id):
+        raise HTTPException(404, "No such run")
+    out = []
+    for r in run_store.children(run_id):
+        live = subagent_mgr.children.get(r["run_id"])
+        out.append({**r, "agent": subagent_mgr.info(live) if live else None})
+    return out
+
+
+@app.get("/runs/{run_id}/events")
+async def run_events(run_id: str, since: int = 0, limit: int = 500) -> list[dict[str, Any]]:
+    """A run's recorded tape (a subagent's trace). The transcript event carries a whole history and is left out."""
+    if not run_store.get(run_id):
+        raise HTTPException(404, "No such run")
+    evs = [{"seq": s, "event": e, "data": d} for s, e, d in run_store.events(run_id, since) if e != "transcript"]
+    return evs[:max(1, min(limit, 2000))]
+
+
+# ---------------- workflows and commands ----------------
+class WorkflowIn(BaseModel):
+    text: str
+
+
+class WorkflowRunIn(BaseModel):
+    params: dict[str, Any] = {}
+
+
+class WorkflowApproveIn(BaseModel):
+    plan_digest: str
+
+
+@app.on_event("startup")
+async def _recover_workflows() -> None:
+    """A workflow run left running died with the last process: it becomes interrupted and Resume continues it."""
+    workflow_store.recover()
+
+
+@app.post("/workflows/validate")
+def validate_workflow(body: WorkflowIn) -> dict[str, Any]:
+    """Every problem with a definition, for the editor. Never saves."""
+    try:
+        defn = _wf_parse(body.text)
+    except ValueError as e:
+        return {"ok": False, "errors": [str(e)]}
+    errs = workflow_store.check(defn)
+    return {"ok": not errs, "errors": errs}
+
+
+def _wf_parse(text: str) -> dict[str, Any]:
+    from . import workflows as _w
+    return _w.parse(text)
+
+
+@app.get("/workflows")
+def list_workflows() -> list[dict[str, Any]]:
+    return workflow_store.list()
+
+
+@app.post("/workflows")
+def create_workflow(body: WorkflowIn) -> dict[str, Any]:
+    try:
+        return workflow_store.save(body.text)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.put("/workflows/{wf_id}")
+def update_workflow(wf_id: str, body: WorkflowIn) -> dict[str, Any]:
+    if not workflow_store.get(wf_id):
+        raise HTTPException(404, "No such workflow")
+    try:  # an edit changes the digest, which is what invalidates every run still waiting on the old one
+        return workflow_store.save(body.text, wf_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.delete("/workflows/{wf_id}")
+def delete_workflow(wf_id: str) -> dict[str, bool]:
+    if not workflow_store.delete(wf_id):
+        raise HTTPException(404, "No such workflow")
+    return {"ok": True}
+
+
+@app.post("/workflows/{wf_id}/runs")
+def propose_workflow_run(wf_id: str, body: WorkflowRunIn) -> dict[str, Any]:
+    """Record a run with its expanded plan. It starts only when the user approves its digest."""
+    wf = workflow_store.get(wf_id)
+    if not wf:
+        raise HTTPException(404, "No such workflow")
+    try:
+        return workflow_store.create_run(wf, body.params, source="user")
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.get("/workflow-runs")
+def list_workflow_runs(workflow_id: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+    return workflow_store.list_runs(workflow_id, max(1, min(limit, 200)))
+
+
+@app.get("/workflow-runs/{run_id}")
+def get_workflow_run(run_id: str) -> dict[str, Any]:
+    r = workflow_store.get_run(run_id)
+    if not r:
+        raise HTTPException(404, "No such run")
+    return r
+
+
+@app.post("/workflow-runs/{run_id}/approve")
+async def approve_workflow_run(run_id: str, body: WorkflowApproveIn) -> dict[str, Any]:
+    try:
+        return workflow_engine.approve(run_id, body.plan_digest)
+    except WorkflowApprovalError as e:
+        raise HTTPException(409, str(e)) from e
+
+
+@app.post("/workflow-runs/{run_id}/resume")
+async def resume_workflow_run(run_id: str) -> dict[str, Any]:
+    try:
+        return workflow_engine.resume(run_id)
+    except WorkflowApprovalError as e:
+        raise HTTPException(409, str(e)) from e
+
+
+@app.post("/workflow-runs/{run_id}/cancel")
+async def cancel_workflow_run(run_id: str) -> dict[str, bool]:
+    if not workflow_store.get_run(run_id):
+        raise HTTPException(404, "No such run")
+    return {"ok": workflow_engine.cancel(run_id)}
+
+
+@app.get("/commands")
+def list_commands() -> list[dict[str, Any]]:
+    return command_store.list()
+
+
+@app.post("/commands")
+def create_command(body: WorkflowIn) -> dict[str, Any]:
+    try:
+        return command_store.save(body.text)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.put("/commands/{cmd_id}")
+def update_command(cmd_id: str, body: WorkflowIn) -> dict[str, Any]:
+    if not command_store.get(cmd_id):
+        raise HTTPException(404, "No such command")
+    try:
+        return command_store.save(body.text, cmd_id)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.delete("/commands/{cmd_id}")
+def delete_command(cmd_id: str) -> dict[str, bool]:
+    if not command_store.delete(cmd_id):
+        raise HTTPException(404, "No such command")
+    return {"ok": True}
+
+
+class AgentDefIn(BaseModel):
+    text: str
+
+
+@app.get("/agents/defs")
+async def list_agent_defs() -> dict[str, Any]:
+    """The built-in agent roles and the user's own definitions (inert until approved)."""
+    from .subagents import BUILTIN_ROLES
+    return {"builtin": [{"name": r.name, "description": r.description, "tools": list(r.tools)} for r in BUILTIN_ROLES.values()],
+            "custom": agent_defs.list()}
+
+
+@app.post("/agents/defs")
+async def create_agent_def(body: AgentDefIn) -> dict[str, Any]:
+    try:
+        return agent_defs.save(body.text)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.put("/agents/defs/{def_id}")
+async def update_agent_def(def_id: str, body: AgentDefIn) -> dict[str, Any]:
+    if not agent_defs.get(def_id):
+        raise HTTPException(404, "No such agent definition")
+    try:
+        return agent_defs.save(body.text, def_id)  # editing withdraws the approval
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.post("/agents/defs/{def_id}/approve")
+async def approve_agent_def(def_id: str, approved: bool = True) -> dict[str, Any]:
+    row = agent_defs.approve(def_id, approved)
+    if not row:
+        raise HTTPException(404, "No such agent definition")
+    return row
+
+
+@app.delete("/agents/defs/{def_id}")
+async def delete_agent_def(def_id: str) -> dict[str, bool]:
+    return {"ok": agent_defs.delete(def_id)}
+
+
 @app.get("/runs/{run_id}")
 async def get_run(run_id: str) -> dict[str, Any]:
     """One run row, with its approvals and its idempotency journal."""
@@ -1942,7 +2517,28 @@ async def get_run(run_id: str) -> dict[str, Any]:
     mem = bus.get(row["conversation_id"]) if row["conversation_id"] else None
     over = mem.info() if mem is not None and mem.run_id == run_id else {"seq": row["last_seq"], "live": False}
     return {**row, **over, "approvals": run_store.approvals(None, run_id=run_id), "executed_calls": run_store.executed(run_id),
-            "plans": plans.for_run(run_id)}
+            "plans": plans.for_run(run_id), "resumable": _resumable(row)[0]}
+
+
+def _resumable(row: dict[str, Any]) -> tuple[bool, str]:
+    cid = row.get("conversation_id")
+    if not cid:
+        return False, "no conversation"
+    return resume.resumable(row, run_store.latest(cid), bool(bus.answering(cid)), bool(run_store.resumed_by(row["run_id"])))
+
+
+@app.post("/runs/{run_id}/resume")
+async def resume_run(run_id: str) -> dict[str, Any]:
+    """Continue an interrupted chat reply in a new run. Always the user's click: nothing calls this on a timer."""
+    row = run_store.get(run_id)
+    if not row:
+        raise HTTPException(404, "No such run")
+    ok, reason = _resumable(row)
+    if not ok:
+        raise HTTPException(409, {"reason": reason})
+    run = bus.start(row["conversation_id"], lambda r: _run_chat(r, ChatIn(resume_of=run_id)), input={"resume_of": run_id})
+    run_store.set_resumed_from(run.run_id, run_id)
+    return {"run_id": run.run_id, "seq": run.seq}
 
 
 # async, so the run's asyncio.Event is set on the loop that owns it rather than from a threadpool.
@@ -1953,12 +2549,13 @@ async def stop_run(id: str, run_id: str | None = None) -> dict[str, bool]:
 
 
 class ApprovalIn(BaseModel):
-    decision: str  # allow | deny | always_chat | always_global
+    decision: str  # allow | deny | always_chat | always_global | always_session | always_rule
     # propose_plan only: the steps of the plan the user is authorising, as [{idx, arguments?}]. A step left out is
     # dropped (it asks again if the model calls it); replacement arguments re-derive that step's digest, so the
     # edited values are what gets authorised.
     steps: list[dict[str, Any]] | None = None
-    note: str | None = None  # one line back to the model, e.g. why a plan was rejected
+    note: str | None = None  # one line back to the model, e.g. why a plan was rejected or a call was denied
+    rules: list[str] | None = None  # always_rule: the rules to save, as edited on the card (default: the suggestions)
 
 
 def _patch_tool_event(message_id: str | None, call_id: str, patch: dict[str, Any]) -> None:
@@ -1997,10 +2594,12 @@ async def list_approvals(status: str | None = "pending", run_id: str | None = No
 async def approve_tool_call(call_id: str, body: ApprovalIn) -> dict[str, Any]:
     """Record the decision on the approval row (first decision wins), then wake the run if one is waiting in this
     process. A run that died while waiting does not resume: the decision is recorded and its card is settled."""
-    if body.decision not in ("allow", "deny", "always_chat", "always_global"):
+    if body.decision not in ("allow", "deny", "always_chat", "always_global", "always_session", "always_rule"):
         raise HTTPException(400, "Bad decision")
     pending = run_store.approval(call_id)
     is_plan = bool(pending and pending["tool"] == PLAN_TOOL)
+    if body.decision == "always_rule" and pending and not pending["forced"] and not is_plan and pending["status"] == "pending":
+        _save_allow_rules(pending, body.rules)  # validated before anything is decided
     if body.steps is not None and not is_plan:
         raise HTTPException(400, "Only a propose_plan approval carries edited steps")
     try:  # shape-check the edit before anything is decided, so a bad payload leaves the row pending
@@ -2008,7 +2607,9 @@ async def approve_tool_call(call_id: str, body: ApprovalIn) -> dict[str, Any]:
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     fut = _approvals.get(call_id)
-    row = run_store.decide(call_id, body.decision)
+    if body.decision == "deny" and body.note and not is_plan and fut and not fut.done():
+        _approval_notes[call_id] = body.note.strip()[:500]
+    row = run_store.decide(call_id, body.decision, note=None if is_plan else body.note)
     live = bool(fut and not fut.done())
     if row is None and not live:
         raise HTTPException(404, "No pending approval for that call")
@@ -2038,6 +2639,46 @@ async def approve_tool_call(call_id: str, body: ApprovalIn) -> dict[str, Any]:
         resumed = _wake_desk(desk_id) is not None
     return {"ok": True, "live": live, "resumed": resumed,
             "status": row["status"] if row else ("denied" if body.decision == "deny" else "approved")}
+
+
+def _save_allow_rules(row: dict[str, Any], texts: list[str] | None) -> list[str]:
+    """Append the rules a card offered (possibly edited) to permissionRules.allow. Raises 400 on a bad rule."""
+    cfg = settings()
+    if texts is None:
+        texts = permrules.evaluate(row["tool"], row["args"], permrules.load_rules(cfg.get("permissionRules")),
+                                   roots=_perm_roots(cfg, row.get("desk_id"))).suggestions
+    try:
+        rules = permrules.validate_saved_rules(row["tool"], row["args"], texts)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    cur = {k: list((cfg.get("permissionRules") or {}).get(k) or []) for k in ("allow", "ask", "deny")}
+    cur["allow"] += [r for r in rules if r not in cur["allow"]]
+    db.set_settings({"permissionRules": cur})
+    return rules
+
+
+class PermissionEvalIn(BaseModel):
+    tool: str = "shell_run"
+    command: str | None = None            # shorthand for tool=shell_run
+    args: dict[str, Any] = {}
+    desk_id: str | None = None
+    rule: str | None = None               # validate one rule string instead of evaluating a call
+
+
+@app.post("/permissions/evaluate")
+def evaluate_permission(body: PermissionEvalIn) -> dict[str, Any]:
+    """What the saved rules say about one call, for the Settings test box. Nothing runs."""
+    if body.rule is not None:
+        try:
+            r = permrules.parse_rule(body.rule)
+            return {"ok": True, "rule": r.text, "tool": r.tool, "pattern": r.pattern}
+        except ValueError as e:
+            return {"ok": False, "error": str(e)}
+    cfg = settings()
+    args = {"command": body.command, **body.args} if body.command is not None else body.args
+    v = permrules.evaluate(body.tool, args, permrules.load_rules(cfg.get("permissionRules")), roots=_perm_roots(cfg, body.desk_id))
+    return {"action": v.action or "none", "hardline": v.hardline, "reason": v.refusal, "rule": v.rule, "kind": v.kind,
+            "subjects": v.subjects, "suggestions": v.suggestions, "external": v.external}
 
 
 @app.on_event("startup")
@@ -2073,6 +2714,12 @@ LATE_NOTICE = ("[This run was scheduled for {due}, and is only starting now, at 
 PROPOSAL_STEP = -1
 
 
+def _all_tool_infos() -> list[dict[str, Any]]:
+    """Every tool a job could be given: the built-ins, and the connected-or-not MCP slugs (all of them external)."""
+    mcp_infos = [{"name": t["slug"], "group": "mcp", "danger": "external"} for t in mcp_store.tools()]
+    return toolbox.list() + mcp_infos
+
+
 def _stamp(ts: float) -> str:
     return time.strftime("%a %d %b %H:%M", time.localtime(ts))
 
@@ -2101,14 +2748,27 @@ async def _launch_job(job: dict[str, Any], fire: dict[str, Any]) -> str | None:
     cfg = settings()
     conv = convos.create(job["project_id"], f"{job['name']} · {_stamp(fire['due_at'])}", cfg.get("defaultModel") or "")
     # job_id keeps this transcript out of the sidebar's chat list; the Agent Inbox links to it instead.
-    convos.update(conv["id"], {"settings": {"useTools": True, "autoLearn": False, "job_id": job["id"]}})
-    body = ChatIn(content=_job_prompt(job, fire))
+    conv_settings: dict[str, Any] = {"useTools": True, "autoLearn": False, "job_id": job["id"]}
+    # Narrowing only: tools outside the job's allowlist (and, for a preview, everything that is not read-only) are
+    # switched off for this conversation. Tools left out of the map keep the user's own modes.
+    if fire.get("dry_run"):
+        conv_settings["tools"] = job_tools.dry_run_modes(job.get("allowed_tools"), _all_tool_infos())
+    elif job.get("allowed_tools") is not None:
+        conv_settings["tools"] = job_tools.tool_modes(job["allowed_tools"], _all_tool_infos())
+    convos.update(conv["id"], {"settings": conv_settings})
+    prompt = _job_prompt(job, fire)
+    body = ChatIn(content=(job_tools.DRY_RUN_HINT + "\n\n" + prompt) if fire.get("dry_run") else prompt)
     run = bus.start(conv["id"], lambda r: _run_chat(r, body), input={**fire, "conversation_id": conv["id"]}, kind="job")
     log.info("job %s fired for %s as run %s", job["name"], _stamp(fire["due_at"]), run.run_id)
+    # Runs after _drive has ended the run, so the row the renderer then asks about is final. Ids only: the
+    # app topic is a doorbell, and what to notify about is decided from rows by GET /inbox/notify.
+    if run.task is not None:
+        run.task.add_done_callback(lambda _t, rid=run.run_id, jid=job["id"]: events.publish("job_finished", {"run_id": rid, "job_id": jid}))
     return run.run_id
 
 
-scheduler = Scheduler(jobs, _launch_job)
+job_policy = JobPolicy(jobs, run_store, _launch_job, settings=settings)
+scheduler = Scheduler(jobs, _launch_job, policy=job_policy)
 
 
 class JobIn(BaseModel):
@@ -2122,6 +2782,9 @@ class JobIn(BaseModel):
     timezone: str | None = None
     enabled: bool = False
     project_id: str | None = None
+    max_retries: int = Field(default=1, ge=0, le=5)
+    # None = every tool, as before. A list narrows the run to exactly those tools (job_tools).
+    allowed_tools: list[str] | None = None
 
 
 class JobPatch(BaseModel):
@@ -2133,6 +2796,8 @@ class JobPatch(BaseModel):
     timezone: str | None = None
     enabled: bool | None = None
     project_id: str | None = None
+    max_retries: int | None = Field(default=None, ge=0, le=5)
+    allowed_tools: list[str] | None = None  # an explicit null resets to "every tool"
 
 
 # How far in the past a one-off may be set, on a write. The scheduler is happy to run a late task — that is the
@@ -2162,6 +2827,16 @@ def _check_schedule(kind: str, expr: str | None, tz: str | None, run_at: float |
         raise HTTPException(400, f"{_stamp(run_at)} has already passed — give a time in the future")
 
 
+def _check_allowed_tools(allowed: list[str] | None) -> None:
+    if allowed is None:
+        return
+    unknown, banned = job_tools.check(allowed, _all_tool_infos())
+    if unknown:
+        raise HTTPException(400, "Unknown tool" + ("s" if len(unknown) > 1 else "") + ": " + ", ".join(unknown))
+    if banned:
+        raise HTTPException(400, ", ".join(banned) + " books future unattended work, which a scheduled run may not do")
+
+
 @app.get("/jobs")
 def list_jobs() -> list[dict[str, Any]]:
     """Every scheduled job, with the slot it is waiting for. `timezone` defaults to this machine's on create."""
@@ -2171,8 +2846,10 @@ def list_jobs() -> list[dict[str, Any]]:
 @app.post("/jobs")
 def create_job(body: JobIn) -> dict[str, Any]:
     _check_schedule(body.kind, body.cron, body.timezone, body.run_at, fresh_time=True)
+    _check_allowed_tools(body.allowed_tools)
     return jobs.create(body.name, body.cron, body.prompt, kind=body.kind, run_at=body.run_at,
-                       timezone=body.timezone, enabled=body.enabled, project_id=wsid(body.project_id))
+                       timezone=body.timezone, enabled=body.enabled, project_id=wsid(body.project_id),
+                       max_retries=body.max_retries, allowed_tools=body.allowed_tools)
 
 
 @app.patch("/jobs/{id}")
@@ -2184,6 +2861,7 @@ def update_job(id: str, body: JobPatch) -> dict[str, Any]:
     if not cur:
         raise HTTPException(404, "No such job")
     merged = {**cur, **patch}
+    _check_allowed_tools(patch.get("allowed_tools"))
     _check_schedule(merged["kind"], merged["cron"], patch.get("timezone"), merged["run_at"],
                     fresh_time="run_at" in patch)
     # Switching a spent one-off back on is the one re-arm that cannot work: it has no instant left to wait for,
@@ -2214,8 +2892,65 @@ async def run_job_now(id: str) -> dict[str, Any]:
     t = time.time()
     fire = {"job_id": job["id"], "job": job["name"], "kind": job["kind"], "cron": job["cron"], "timezone": job["timezone"],
             "due_at": t, "fired_at": t, "late_seconds": 0.0, "missed_slots": 0, "late": False, "manual": True}
+    ok, why = await job_policy.admit(job, fire)
+    if not ok:
+        raise HTTPException(409, f"Not started: {why}")
     run_id = await _launch_job(job, fire)
     jobs.mark_launched(job["id"], run_id)
+    row = run_store.get(run_id) if run_id else None
+    return {"ok": bool(run_id), "run_id": run_id, "conversation_id": (row or {}).get("conversation_id")}
+
+
+def _job_run_summaries(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    counts = proposals.counts([r["run_id"] for r in rows])
+    out = []
+    for r in rows:
+        text = run_store.transcript(r["run_id"], r["message_id"])[0] if r.get("message_id") else ""
+        out.append(job_history.summarize_run(r, run_store.event_counts(r["run_id"]), counts.get(r["run_id"], {}), text))
+    return out
+
+
+def _known_job(id: str) -> dict[str, Any]:
+    job = jobs.get(id)
+    if not job:
+        raise HTTPException(404, "No such job")
+    return job
+
+
+@app.get("/jobs/{id}/runs")
+def job_runs(id: str, limit: int = 50) -> list[dict[str, Any]]:
+    """The job's last runs (50 by default, 200 at most): status incl. timed_out, duration, cost, tool and proposal counts."""
+    _known_job(id)
+    return _job_run_summaries(run_store.of_job(id, limit))
+
+
+@app.get("/jobs/{id}/stats")
+def job_stats(id: str, days: float = 30.0) -> dict[str, Any]:
+    _known_job(id)
+    since = time.time() - max(0.0, float(days)) * 86400
+    rows = [job_history.summarize_run(r, None, None) for r in run_store.of_job(id, 200, since)]
+    return job_history.stats(rows)
+
+
+@app.get("/jobs/{id}/runs.csv")
+def job_runs_csv(id: str, limit: int = 200) -> Response:
+    """The run history as a CSV download. Local only: nothing is sent anywhere."""
+    job = _known_job(id)
+    body = job_history.to_csv(_job_run_summaries(run_store.of_job(id, limit)))
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", job["name"])[:40]
+    return Response(body, media_type="text/csv", headers={"Content-Disposition": f'attachment; filename="job-{slug}-runs.csv"'})
+
+
+@app.post("/jobs/{id}/dry_run")
+async def dry_run_job(id: str) -> dict[str, Any]:
+    """Preview a job: the same prompt on the same budget with every tool that is not read-only switched off, and a
+    line telling the model to describe rather than do. Still a job run, so proposal-only; with nothing outward
+    available it makes no proposals. Hidden from the inbox's "while you were away" and never counted as a failure."""
+    job = _known_job(id)
+    t = time.time()
+    fire = {"job_id": job["id"], "job": job["name"], "kind": job["kind"], "cron": job["cron"], "timezone": job["timezone"],
+            "due_at": t, "fired_at": t, "late_seconds": 0.0, "missed_slots": 0, "late": False, "manual": True, "dry_run": True}
+    run_id = await _launch_job(job, fire)
     row = run_store.get(run_id) if run_id else None
     return {"ok": bool(run_id), "run_id": run_id, "conversation_id": (row or {}).get("conversation_id")}
 
@@ -2271,7 +3006,7 @@ INBOX_SUMMARY_CHARS = 1400
 
 
 @app.get("/inbox")
-def agent_inbox(hours: float = 72.0, limit: int = 20) -> dict[str, Any]:
+def agent_inbox(hours: float = 72.0, limit: int = 20, include_dry: int = 0) -> dict[str, Any]:
     """The Agent Inbox, built from rows only: agent_runs + run_events + approvals + proposals.
 
     "Needs you" is the pending approvals and the pending proposals. "While you were away" is one entry per job run,
@@ -2287,6 +3022,8 @@ def agent_inbox(hours: float = 72.0, limit: int = 20) -> dict[str, Any]:
     pending_proposals = proposals.list("pending", limit=100)
 
     runs = run_store.of_kind("job", since=cutoff, limit=limit)
+    if not include_dry:  # a preview is not something that happened while the user was away
+        runs = [r for r in runs if not (isinstance(r.get("input"), dict) and r["input"].get("dry_run"))]
     counts = proposals.counts([r["run_id"] for r in runs])
     away = []
     for r in runs:
@@ -2300,19 +3037,35 @@ def agent_inbox(hours: float = 72.0, limit: int = 20) -> dict[str, Any]:
             "due_at": fire.get("due_at"), "fired_at": fire.get("fired_at") or r["started_at"],
             "late": bool(fire.get("late")), "late_seconds": fire.get("late_seconds") or 0.0,
             "missed_slots": fire.get("missed_slots") or 0, "manual": bool(fire.get("manual")),
+            "attempt": int(fire.get("attempt") or 1), "retry_of": fire.get("retry_of"),
             "started_at": r["started_at"], "ended_at": r["ended_at"], "error": r["error"],
             "tool_calls": ev.get("tool_result", 0), "proposals": sum(mine.values()),
             "pending_proposals": mine.get("pending", 0),
             "summary": text[:INBOX_SUMMARY_CHARS] + ("…" if len(text) > INBOX_SUMMARY_CHARS else ""),
         })
-    return {"needs_you": {"approvals": pending_approvals, "proposals": pending_proposals},
+    paused_jobs = [{"id": jb["id"], "name": jb["name"], "reason": jb["paused_reason"], "paused_at": jb["updated_at"],
+                    "consecutive_failures": jb["consecutive_failures"]}
+                   for jb in jobs.list() if not jb["enabled"] and jb.get("paused_reason")]
+    return {"needs_you": {"approvals": pending_approvals, "proposals": pending_proposals, "paused_jobs": paused_jobs},
             "while_you_were_away": away,
-            "counts": {"needs_you": len(pending_approvals) + len(pending_proposals),
+            "counts": {"needs_you": len(pending_approvals) + len(pending_proposals) + len(paused_jobs),
+                       "paused_jobs": len(paused_jobs),
                        "approvals": len(pending_approvals), "proposals": len(pending_proposals),
                        "runs": len(away), "late": sum(1 for a in away if a["late"]),
                        "failed": sum(1 for a in away if a["status"] in ("error", "interrupted"))},
             "scheduler": {"last_tick": scheduler.last_tick, "fires": scheduler.fires,
                           "next_due_at": jobs.earliest_due(), "timezone": local_tz_name()}}
+
+
+@app.get("/inbox/notify")
+def inbox_notify(since: float = 0.0) -> list[dict[str, Any]]:
+    """Events worth an OS notification since `since` (unix seconds), at most 20. Names and counts only: never reply
+    text, which can quote mail. The renderer decides whether to show them (app hidden, notifyJobs on)."""
+    by_id = {j["id"]: j for j in jobs.list()}
+    runs = run_store.of_kind("job", since=max(0.0, since - 86400), limit=100)
+    counts = proposals.counts([r["run_id"] for r in runs])
+    rows = [job_history.summarize_run(r, None, counts.get(r["run_id"], {})) for r in runs]
+    return job_history.notify_events(rows, by_id, proposals.list("pending", limit=100), since)
 
 
 @app.on_event("startup")
@@ -2328,6 +3081,7 @@ async def _jobs_startup() -> None:
 
 @app.on_event("shutdown")
 async def _jobs_shutdown() -> None:
+    await job_policy.shutdown()
     task = getattr(app.state, "jobs_task", None)
     if task:
         task.cancel()
@@ -2376,15 +3130,44 @@ class ContextPreviewIn(BaseModel):
     conv_settings: dict[str, Any] = {}
 
 
+async def _doc_hits(project_id: str | None, query: str, cfg: dict[str, Any], conv_settings: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """Pre-computed excerpts for build_context (which is sync). None = let it fall back to BM25."""
+    if not conv_settings.get("useDocuments", True):
+        return None
+    try:
+        srcs = ("files", "docs") if cfg.get("useDocsInContext", True) else ("files",)
+        return await retriever.search(project_id, query, cfg, sources=srcs)
+    except Exception:  # noqa: BLE001 - retrieval must never break a reply
+        log.exception("retrieval failed; falling back to keyword search")
+        return None
+
+
+async def _memory_hits(project_id: str | None, query: str, cfg: dict[str, Any], conv_settings: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """Fused memory hits for build_context. None = embeddings off or unavailable: the plain pinned/recent + BM25 path."""
+    if not conv_settings.get("useMemory", True):
+        return None
+    try:
+        memory_index.schedule(cfg)  # lazily embed rows that have no vector yet
+        qvec = await memory_index.query_vec(cfg, query)
+        if qvec is None:
+            return None
+        return memory_index.search(project_id, query, qvec, limit=40, settings=cfg)
+    except Exception:  # noqa: BLE001
+        log.exception("memory retrieval failed; falling back to keyword search")
+        return None
+
+
 @app.post("/context/preview")
-def context_preview(body: ContextPreviewIn) -> dict[str, Any]:
+async def context_preview(body: ContextPreviewIn) -> dict[str, Any]:
     cfg = settings()
     project = projects.get(body.project_id) if sid(body.project_id) else None
+    conv_settings = {"useMemory": True, "useGraph": True, "useDocuments": True, "useActivity": True,
+                     "useSkills": True, "useStyle": True, "useMeetings": True, **body.conv_settings}
     _, used = build_context(
-        memories=memories, graph=graph, documents=documents, project=project, project_id=sid(body.project_id),
-        query=body.query, settings=cfg,
-        conv_settings={"useMemory": True, "useGraph": True, "useDocuments": True, "useActivity": True,
-                       "useSkills": True, "useStyle": True, "useMeetings": True, **body.conv_settings},
+        memories=memories, graph=graph, documents=documents, project=project,
+        doc_hits=await _doc_hits(sid(body.project_id), body.query, cfg, conv_settings), project_id=sid(body.project_id),
+        memory_hits=await _memory_hits(sid(body.project_id), body.query, cfg, conv_settings),
+        query=body.query, settings=cfg, conv_settings=conv_settings,
         global_system_prompt=cfg["systemPrompt"], activity=monitor, skills=skills, style=style, meetings=meeting_svc,
     )
     return used
@@ -2407,8 +3190,63 @@ class MemoryPatch(BaseModel):
 
 
 @app.get("/memories")
-def list_memories(project_id: str | None = None, q: str = "", include_global: bool = True) -> list[dict[str, Any]]:
-    return memories.list(sid(project_id), q, include_global)
+def list_memories(project_id: str | None = None, q: str = "", include_global: bool = True, include_invalid: bool = False) -> list[dict[str, Any]]:
+    return memories.list(sid(project_id), q, include_global, include_invalid)
+
+
+class ConsolidateIn(BaseModel):
+    project_id: str | None = None
+    model: str | None = None
+
+
+@app.post("/memories/consolidate")
+async def consolidate_memories(body: ConsolidateIn) -> list[dict[str, Any]]:
+    """Manual 'Tidy up': proposes only. Nothing changes until a proposal is applied by hand."""
+    cfg = settings()
+    return await consolidator.propose(cfg, sid(body.project_id), body.model or cfg["defaultModel"])
+
+
+@app.post("/memories/reindex")
+async def reindex_memories() -> dict[str, Any]:
+    """Embed every live memory that has no current vector (200 per call; call again while `pending` > 0)."""
+    cfg = settings()
+    embedder.reset()  # an explicit retry, so an earlier back-off does not apply
+    n = await memory_index.index(cfg)
+    return {"indexed": n, "pending": memory_index.pending_count(embedder.model(cfg)) if memory_index.enabled(cfg) else 0}
+
+
+@app.get("/memories/proposals")
+def list_memory_proposals(status: str = "pending", project_id: str | None = "all") -> list[dict[str, Any]]:
+    return consolidator.list(status or None, sid(project_id))
+
+
+@app.post("/memories/proposals/{id}/apply")
+def apply_memory_proposal(id: str) -> dict[str, Any]:
+    p = consolidator.apply(id)
+    if not p:
+        raise HTTPException(404)
+    return p
+
+
+@app.post("/memories/proposals/{id}/dismiss")
+def dismiss_memory_proposal(id: str) -> dict[str, Any]:
+    p = consolidator.dismiss(id)
+    if not p:
+        raise HTTPException(404)
+    return p
+
+
+@app.post("/memories/{id}/restore")
+def restore_memory(id: str) -> dict[str, Any]:
+    m = memories.restore(id)
+    if not m:
+        raise HTTPException(404)
+    return m
+
+
+@app.get("/memories/{id}/history")
+def memory_history(id: str) -> list[dict[str, Any]]:
+    return memories.history(id)
 
 
 @app.post("/memories")
@@ -2558,8 +3396,8 @@ class EdgePatch(BaseModel):
 
 
 @app.get("/graph")
-def get_graph(project_id: str | None = None, include_global: bool = True) -> dict[str, Any]:
-    return graph.get(sid(project_id), include_global)
+def get_graph(project_id: str | None = None, include_global: bool = True, include_invalid: bool = False) -> dict[str, Any]:
+    return graph.get(sid(project_id), include_global, include_invalid)
 
 
 @app.post("/graph/nodes")
@@ -2612,6 +3450,11 @@ def list_documents(project_id: str | None = None, include_global: bool = True) -
     return documents.list(sid(project_id), include_global)
 
 
+@app.get("/documents/index-status")
+def index_status() -> dict[str, Any]:
+    return retriever.status(settings())
+
+
 @app.get("/documents/{id}")
 def get_document(id: str) -> dict[str, Any]:
     d = documents.get(id)
@@ -2624,13 +3467,43 @@ def get_document(id: str) -> dict[str, Any]:
 async def upload_document(file: UploadFile = File(...), project_id: str | None = Form(None)) -> dict[str, Any]:
     data = await file.read()
     name = file.filename or "untitled"
+    digest = hashlib.sha256(data).hexdigest()
+    dup = documents.find_by_hash(wsid(project_id), digest)
+    if dup:
+        return {**dup, "duplicate": True}
     try:
         text = extract_text(name, data, file.content_type or "")
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, str(e)) from e
+    try:
+        blocks = extract_structured(name, data, file.content_type or "")
+    except Exception:  # noqa: BLE001 - the chunker falls back to the plain text
+        blocks = None
     dest = db.data_dir / "uploads" / f"{new_id()}-{Path(name).name}"
     dest.write_bytes(data)
-    return documents.create(wsid(project_id), name, file.content_type or "", len(data), str(dest), text)
+    return documents.create(wsid(project_id), name, file.content_type or "", len(data), str(dest), text, blocks=blocks, content_hash=digest)
+
+
+class ReindexIn(BaseModel):
+    id: str | None = None
+
+
+@app.post("/documents/reindex")
+def reindex_documents(body: ReindexIn | None = None) -> dict[str, Any]:
+    """Re-chunk existing documents with the current chunker, no re-upload. Vectors are re-made by embed-backfill."""
+    did = body.id if body else None
+    if did and not documents.get(did):
+        raise HTTPException(404)
+    return {"chunks": documents.reindex(did)}
+
+
+@app.post("/documents/embed-backfill")
+async def embed_backfill() -> dict[str, Any]:
+    """Chunk any never-indexed Docs, then embed every chunk (files and Docs) that has no vector for the
+    current model. Idempotent."""
+    docs.backfill_chunks()
+    embedder.reset()  # the user asked for it now, so a back-off from an earlier failure does not apply
+    return await retriever.embed_pending(settings())
 
 
 @app.delete("/documents/{id}")
@@ -2659,6 +3532,7 @@ async def _shutdown() -> None:
     await meeting_bus.shutdown()
     shutil.rmtree(db.data_dir / "tmp", ignore_errors=True)
     await asyncio.to_thread(sandboxes.shutdown)  # after the runs: a live sandbox_exec would just see its container vanish
+    await toolbox.shell.shutdown()  # host shell jobs: SIGTERM then SIGKILL to each group
 
 
 # ---------------- Google integration ----------------
@@ -3132,7 +4006,7 @@ class DashboardIn(BaseModel):
 
 class WidgetIn(BaseModel):
     title: str = ""
-    kind: str = "html"           # html | summary | markdown
+    kind: str = "html"           # html | summary | markdown | chart | stat | table
     prompt: str = ""
     source_ids: list[str] = []
     code: str = ""
@@ -3152,6 +4026,7 @@ class WidgetPatch(BaseModel):
     height: int | None = None
     position: int | None = None
     refresh_minutes: int | None = None
+    spec: dict[str, Any] | None = None
 
 
 async def _internal_data() -> dict[str, Any]:
@@ -3283,7 +4158,14 @@ async def _run_widget(w: dict[str, Any], request: Request, regenerate_code: bool
         data = await _samples(w["source_ids"])
         text = await generate_summary(cfg, model, w["prompt"], data)
         w = dashboards.update_widget(w["id"], {"output": text, "refreshed_at": time.time()}) or w
+    elif w["kind"] in widget_spec.KINDS:
+        w = await widget_spec.run_widget(dashboards, w, cfg, model, _widget_fetch, regenerate=regenerate_code)
     return w
+
+
+async def _widget_fetch(source_id: str) -> Any:
+    internal = await _internal_data() if (dashboards.source(source_id) or {}).get("kind") == "internal" else None
+    return await dashboards.fetch_source(source_id, internal)
 
 
 @app.post("/dashboards/{id}/widgets")
@@ -3292,12 +4174,29 @@ async def create_widget(id: str, body: WidgetIn, request: Request) -> dict[str, 
         raise HTTPException(404)
     title = body.title.strip() or (body.prompt.strip()[:40] or "Widget")
     w = dashboards.create_widget(id, title, body.kind, body.prompt, body.source_ids, body.code, body.output, body.width, body.height, body.refresh_minutes)
-    if body.kind in ("html", "summary"):
+    if body.kind in ("html", "summary") + widget_spec.KINDS:
         try:
             w = await _run_widget(w, request, regenerate_code=(body.kind == "html" and not body.code))
         except Exception as e:  # noqa: BLE001
-            w = dashboards.update_widget(w["id"], {"output": f"Generation failed: {e}"}) or w
+            w = dashboards.update_widget(w["id"], {"output": f"Generation failed: {e}", "data_error": f"Generation failed: {e}"}) or w
     return w
+
+
+@app.get("/widgets/{wid}")
+def get_widget(wid: str) -> dict[str, Any]:
+    w = dashboards.widget(wid)
+    if not w:
+        raise HTTPException(404)
+    return w
+
+
+@app.get("/widgets/{wid}/data")
+async def widget_data(wid: str) -> dict[str, Any]:
+    """A declarative widget's bound rows: cached inside its refresh_minutes TTL, otherwise re-bound. Never calls the model."""
+    w = dashboards.widget(wid)
+    if not w or w["kind"] not in widget_spec.KINDS:
+        raise HTTPException(404)
+    return await widget_spec.widget_data(dashboards, w, _widget_fetch)
 
 
 @app.put("/widgets/{wid}")
@@ -3388,6 +4287,7 @@ async def recap(force: bool = False) -> dict[str, Any]:
 
 # ---------------- canvas mode: spaces, windows, notes ----------------
 canvases = Canvases(db)
+app.include_router(artifact_router(artifacts, settings, on_delete=lambda aid: canvases.delete_windows_for("artifact", aid)))
 notes = Notes(db)
 presets = CanvasPresets(db, canvases)
 # 'popped' rows are NOT reset here: import runs before the main process can restore them (it clears the ones it declines).
@@ -3818,6 +4718,10 @@ class ActivityConfigIn(BaseModel):
     redact: bool | None = None
     excludeApps: list[str] | None = None
     excludeTitlePatterns: list[str] | None = None
+    redactAllow: list[str] | None = None
+    redactDeny: list[str] | None = None
+    redactThreshold: float | None = None
+    categories: list[dict[str, Any]] | None = None
     audio: dict[str, Any] | None = None
     summaryModel: str | None = None
     profileEveryHours: float | None = None
@@ -3849,6 +4753,42 @@ def activity_config(body: ActivityConfigIn) -> dict[str, Any]:
     if palantir is not None and bool(palantir) != bool(monitor.config().get("palantir")):
         monitor.set_palantir(bool(palantir))
     return monitor.status()
+
+
+@app.get("/activity/categories")
+def activity_categories_get() -> dict[str, Any]:
+    from . import activity_categories as cats
+    return cats.effective(monitor.config())
+
+
+class CategoriesIn(BaseModel):
+    rules: list[dict[str, Any]] | None = None   # null resets to the default tree
+
+
+@app.put("/activity/categories")
+def activity_categories_put(body: CategoriesIn) -> dict[str, Any]:
+    from . import activity_categories as cats
+    try:
+        return cats.save(monitor, body.rules)
+    except ValueError as e:
+        msg, idx = e.args
+        raise HTTPException(400, {"error": msg, "index": idx})
+
+
+@app.get("/activity/categories/report")
+def activity_categories_report(days: int = 7) -> dict[str, Any]:
+    from . import activity_categories as cats
+    return cats.report_for(monitor, max(1, min(90, days)))
+
+
+class RedactTestIn(BaseModel):
+    text: str = ""
+
+
+@app.post("/activity/redact/test")
+def activity_redact_test(body: RedactTestIn) -> dict[str, Any]:
+    """Run a string through the current redaction config. In memory only: not stored, not logged."""
+    return activity.redact_preview(monitor.config(), body.text)
 
 
 class PalantirIn(BaseModel):
@@ -4134,6 +5074,23 @@ class MeetingConfigIn(BaseModel):
     autoStopGraceSeconds: int | None = None
     calendarIds: list[str] | None = None
     minAttendees: int | None = None
+    vadGate: bool | None = None
+    vadMinSpeechRatio: float | None = None
+    hallucinationFilter: bool | None = None
+    whisperVadModelPath: str | None = None
+    maxImportSeconds: int | None = None
+    diarize: bool | None = None
+    diarizeBackend: str | None = None
+    diarizeSegmentationModel: str | None = None
+    diarizeEmbeddingModel: str | None = None
+    diarizeThreshold: float | None = None
+    diarizeSpeakers: int | None = None
+
+
+class MeetingSpeakersIn(BaseModel):
+    """Display names for diarized speaker ids, e.g. {"S1": "Dana"}. A blank name clears one."""
+
+    names: dict[str, str]
 
 
 class MeetingActionsIn(BaseModel):
@@ -4314,6 +5271,68 @@ async def stop_meeting(id: str) -> dict[str, Any]:
     """Captures down, queue drained (up to drainSeconds), transcript rolled up. The enhance pass is
     queued rather than awaited, so a slow model does not hold the stop request open."""
     m = await meeting_svc.stop(id)
+    if not m:
+        raise HTTPException(404)
+    return m
+
+
+@app.post("/meetings/{id}/import-audio", status_code=202)
+async def import_meeting_audio(id: str, file: UploadFile = File(...)) -> dict[str, Any]:
+    """Transcribe an existing recording into this meeting. 202: the work runs in the background and
+    the existing /meetings/{id}/segments poll carries progress."""
+    try:
+        meeting_import.check(meeting_svc, id)
+    except LookupError as e:
+        raise HTTPException(404) from e
+    except MeetingBlocked as e:
+        raise HTTPException(409, {"blockers": e.blockers}) from e
+    except meeting_import.ImportRefused as e:
+        raise HTTPException(409, str(e)) from e
+    tmp = db.data_dir / "tmp"
+    tmp.mkdir(parents=True, exist_ok=True)
+    dest = tmp / f"import-{new_id()}-{meeting_import.safe_name(file.filename or '')}"
+    size, cap = 0, 1 << 30
+    try:
+        with dest.open("wb") as out:
+            while chunk := await file.read(1 << 20):
+                size += len(chunk)
+                if size > cap:
+                    raise HTTPException(413, "That file is over the 1 GiB import limit.")
+                out.write(chunk)
+        await asyncio.to_thread(meeting_import.probe, dest, meeting_svc.config())
+    except ValueError as e:
+        dest.unlink(missing_ok=True)
+        raise HTTPException(400, str(e)) from e
+    except BaseException:
+        dest.unlink(missing_ok=True)
+        raise
+
+    async def _go() -> None:
+        try:
+            await meeting_import.run(meeting_svc, id, dest, cleanup_src=True)
+        except Exception as e:  # noqa: BLE001 - the run already put the reason on the meeting
+            logging.getLogger("personal_os").warning("meeting import %s: %s", id, e)
+
+    asyncio.ensure_future(_go())
+    return meeting_store.get(id) or {}
+
+
+@app.post("/meetings/{id}/diarize")
+async def diarize_meeting(id: str) -> dict[str, Any]:
+    """(Re)run speaker separation on retained audio. With no backend it answers ok=false and a note,
+    never an error: the transcript simply keeps its channel labels."""
+    res = await meeting_svc.diarize(id)
+    if res.get("note") == "no such meeting":
+        raise HTTPException(404)
+    return {**res, "meeting": meeting_store.get(id)}
+
+
+@app.put("/meetings/{id}/speakers")
+def rename_meeting_speakers(id: str, body: MeetingSpeakersIn) -> dict[str, Any]:
+    try:
+        m = meeting_svc.set_speakers(id, body.names)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
     if not m:
         raise HTTPException(404)
     return m
@@ -4536,6 +5555,10 @@ async def _outbox_startup() -> None:
     """Run the hold timer. The loop's first act is resume(), which decides what a restart does with
     sends that were still waiting — see the outbox.py docstring."""
     app.state.outbox_task = asyncio.create_task(outbox.loop())
+    with contextlib.suppress(Exception):
+        await asyncio.to_thread(filesnap.prune)  # snapshots past their age or byte budget
+    with contextlib.suppress(Exception):
+        await asyncio.to_thread(snaps.prune)  # folder snapshots: gc once a day, evict past the byte budget
 
 
 @app.on_event("shutdown")
@@ -4670,6 +5693,28 @@ def _known_tools() -> set[str]:
 def _lint_skill(name: str, description: str, procedure: str, skill_id: str | None = None) -> list[dict[str, Any]]:
     return skillbuild.lint_skill(name, description, procedure, known_tools=_known_tools(),
                                  existing=skills.list(), skill_id=skill_id)
+
+
+class SkillImportIn(BaseModel):
+    text: str
+    project_id: str | None = None
+
+
+@app.post("/skills/import")
+def import_skill_md(body: SkillImportIn) -> dict[str, Any]:
+    """Paste a SKILL.md. It becomes a candidate, never an approved skill: approval stays the PATCH above."""
+    try:
+        return skillmd.import_text(skills, _lint_skill, body.text, project_id=None if sid(body.project_id) == ALL else sid(body.project_id))
+    except skillmd.ImportError_ as e:
+        raise HTTPException(422, "; ".join(e.errors))
+
+
+@app.get("/skills/{skill_id}/export")
+def export_skill_md(skill_id: str) -> dict[str, str]:
+    s = skills.get(skill_id)
+    if not s:
+        raise HTTPException(404, "No such skill")
+    return {"filename": f"{skillmd.slug(s['name'])}/SKILL.md", "text": skillmd.render(s)}
 
 
 @app.post("/skills/lint")
@@ -4856,6 +5901,20 @@ async def create_desk(body: DeskIn) -> dict[str, Any]:
             out["run_id"], out["seq"] = run.run_id, run.seq
         out["desk"] = desks.get(desk["id"]) or desk
     return out
+
+
+async def _desk_start_tool(ctx: dict[str, Any], title: str, brief: str, mode: str) -> dict[str, Any]:
+    """desk_start: the same creation the REST route does, started at once, in plan (or tighter) autonomy."""
+    try:
+        out = await create_desk(DeskIn(brief=brief, title=title or None, project_id=ctx.get("project_id"), autonomy=mode, start=True))
+    except HTTPException as e:
+        detail = e.detail.get("message") if isinstance(e.detail, dict) else e.detail
+        return tools.tool_error(f"The desk was not started: {detail}")
+    return {"desk_id": out["desk"]["id"], "conversation_id": out["conversation_id"], "run_id": out.get("run_id"), "mode": mode,
+            "note": "The desk is planning. It will wait for the user to approve its plan before it does anything."}
+
+
+toolbox.desk_starter = _desk_start_tool
 
 
 @app.get("/cowork/desks/{id}")

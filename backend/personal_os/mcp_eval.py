@@ -212,6 +212,65 @@ def check_name(name: str, where: str) -> list[dict[str, Any]]:
     return out
 
 
+# Words a tool might be called without meaning another tool: a bare-name mention of these is just English.
+COMMON_NAMES = frozenset({
+    "search", "create", "delete", "update", "write", "fetch", "query", "email", "message", "messages", "files",
+    "issue", "issues", "browse", "upload", "download", "status", "report", "export", "import", "lookup",
+    "execute", "convert", "summary", "document", "content", "project", "comment", "record", "records",
+})
+MIN_BARE_NAME = 5
+# What turns a mention of another tool into steering: the instruction patterns above, plus ordering words.
+_DIRECTIVE = re.compile(
+    r"(?:^|[.\s])(?:you must|you should always|always (?:call|use)|first call|before (?:calling|using|invoking|running)|"
+    r"after (?:calling|using)|from now on|instead of|rather than|do not use|don't use|never use)\b", re.I)
+
+
+def _mentions(text: str, needle: str) -> bool:
+    return bool(needle) and re.search(r"(?<![a-z0-9_])" + re.escape(needle.lower()) + r"(?![a-z0-9_])", text.lower()) is not None
+
+
+def check_shadowing(tool: dict[str, Any], other_tools: list[dict[str, Any]], where: str) -> list[dict[str, Any]]:
+    """Text in one server's tool that names another server's tool, or tells the model what to do about it.
+
+    A mention alone is a warning (`references_other_tool`); a mention inside an instruction is a fail
+    (`shadows_other_tool`), because that is how one connector steers calls to another. Same-server
+    mentions are ignored. `tool` needs `slug`/`server_slug`; others need `slug`, `name`, `server_slug`.
+    """
+    mine = str(tool.get("server_slug") or (str(tool.get("slug") or "").split("__") + ["", ""])[1])
+    texts = [("description", str(tool.get("description") or ""))]
+    props = (tool.get("parameters") or {}).get("properties") if isinstance(tool.get("parameters"), dict) else None
+    for arg, spec in (props or {}).items():
+        if isinstance(spec, dict) and spec.get("description"):
+            texts.append((f"arguments.{arg}", str(spec["description"])))
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for other in other_tools:
+        if str(other.get("server_slug") or "") == mine or other.get("slug") == tool.get("slug"):
+            continue
+        names = [str(other.get("slug") or "")]
+        bare = str(other.get("name") or "")
+        if len(bare) >= MIN_BARE_NAME and bare.lower() not in COMMON_NAMES:
+            names.append(bare)
+        srv = str(other.get("server_slug") or "")
+        if len(srv) >= MIN_BARE_NAME and srv.lower() not in COMMON_NAMES:
+            names.append(srv)
+        for field, text in texts:
+            hit = next((n for n in names if _mentions(text, n)), None)
+            key = (str(other.get("slug")), field)
+            if not hit or key in seen:
+                continue
+            seen.add(key)
+            m = re.search(re.escape(hit), text, re.I)
+            excerpt = text[max(0, m.start() - 40):m.end() + 60] if m else text
+            if _DIRECTIVE.search(text):
+                out.append(_finding("shadows_other_tool", "fail", f"{where}.{field}",
+                                    f"tells the model what to do about {other.get('slug')}, a tool from another server", excerpt))
+            else:
+                out.append(_finding("references_other_tool", "warn", f"{where}.{field}",
+                                    f"mentions {other.get('slug')}, a tool from another server", excerpt))
+    return out
+
+
 def status_for(findings: Iterable[dict[str, Any]]) -> str:
     severities = {f.get("severity") for f in findings}
     if "fail" in severities:

@@ -63,6 +63,7 @@ CREATE TABLE IF NOT EXISTS activity_day_stats (
   hosts TEXT NOT NULL DEFAULT '{}',   -- browser host -> visits
   hours TEXT NOT NULL DEFAULT '{}',   -- local hour "0".."23" -> focused seconds
   typing TEXT NOT NULL DEFAULT '{}',  -- app -> keystrokes
+  cats TEXT NOT NULL DEFAULT '{}',    -- category path ("Work/Coding", every ancestor too) -> focused seconds
   switches INTEGER NOT NULL DEFAULT 0,
   keys INTEGER NOT NULL DEFAULT 0,
   clicks INTEGER NOT NULL DEFAULT 0,
@@ -222,12 +223,15 @@ class DayStats:
     """
 
     NUM = ("switches", "keys", "clicks", "scrolls", "focus_seconds", "idle_seconds")
-    MAPS = ("apps", "hosts", "hours", "typing")
+    MAPS = ("apps", "hosts", "hours", "typing", "cats")
 
     def __init__(self, db: Database):
         self.db = db
         with db.tx() as c:
             c.executescript(SCHEMA)
+            # Tables made before categories existed lack the column; the CREATE above skips them.
+            if "cats" not in {r["name"] for r in c.execute("PRAGMA table_info(activity_day_stats)").fetchall()}:
+                c.execute("ALTER TABLE activity_day_stats ADD COLUMN cats TEXT NOT NULL DEFAULT '{}'")
 
     def merge(self, day: str, stats: dict[str, Any]) -> None:
         cur = self.get(day) or {}
@@ -242,15 +246,15 @@ class DayStats:
         out["last_ts"] = max(float(stats.get("last_ts") or 0), float(cur.get("last_ts") or 0))
         with self.db.tx() as c:
             c.execute(
-                """INSERT INTO activity_day_stats(day,apps,hosts,hours,typing,switches,keys,clicks,scrolls,
+                """INSERT INTO activity_day_stats(day,apps,hosts,hours,typing,cats,switches,keys,clicks,scrolls,
                                                   focus_seconds,idle_seconds,first_ts,last_ts,updated_at)
-                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(day) DO UPDATE SET apps=excluded.apps, hosts=excluded.hosts, hours=excluded.hours,
-                     typing=excluded.typing, switches=excluded.switches, keys=excluded.keys, clicks=excluded.clicks,
+                     typing=excluded.typing, cats=excluded.cats, switches=excluded.switches, keys=excluded.keys, clicks=excluded.clicks,
                      scrolls=excluded.scrolls, focus_seconds=excluded.focus_seconds, idle_seconds=excluded.idle_seconds,
                      first_ts=excluded.first_ts, last_ts=excluded.last_ts, updated_at=excluded.updated_at""",
                 (day, json.dumps(out["apps"]), json.dumps(out["hosts"]), json.dumps(out["hours"]),
-                 json.dumps(out["typing"]), int(out["switches"]), int(out["keys"]), int(out["clicks"]),
+                 json.dumps(out["typing"]), json.dumps(out["cats"]), int(out["switches"]), int(out["keys"]), int(out["clicks"]),
                  int(out["scrolls"]), out["focus_seconds"], out["idle_seconds"], out["first_ts"],
                  out["last_ts"], now()),
             )
@@ -273,14 +277,21 @@ class DayStats:
             return max(0, c.execute("DELETE FROM activity_day_stats WHERE day < ?", (cutoff,)).rowcount)
 
 
-def day_stats_from_events(events: Iterable[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """Fold raw events into one aggregate per local day. Counts only; no titles, no URLs, no text."""
+def day_stats_from_events(events: Iterable[dict[str, Any]], engine: Any = None) -> dict[str, dict[str, Any]]:
+    """Fold raw events into one aggregate per local day. Counts only; no titles, no URLs, no text.
+
+    `engine` is an activity_categories.CategoryEngine; titles and URLs are classified and then
+    dropped - only the category path and its seconds are kept.
+    """
+    if engine is None:
+        from .activity_categories import engine_for
+        engine = engine_for(None)
     out: dict[str, dict[str, Any]] = {}
     last_app_by_day: dict[str, str] = {}
     for e in sorted(events, key=lambda x: x["ts"]):
         day = _day_of(e["ts"])
-        d = out.setdefault(day, {"apps": {}, "hosts": {}, "hours": {}, "typing": {}, "switches": 0,
-                                 "keys": 0, "clicks": 0, "scrolls": 0, "focus_seconds": 0.0,
+        d = out.setdefault(day, {"apps": {}, "hosts": {}, "hours": {}, "typing": {}, "cats": {},
+                                 "switches": 0, "keys": 0, "clicks": 0, "scrolls": 0, "focus_seconds": 0.0,
                                  "idle_seconds": 0.0, "first_ts": 0.0, "last_ts": 0.0})
         d["first_ts"] = min(d["first_ts"], e["ts"]) if d["first_ts"] else e["ts"]
         d["last_ts"] = max(d["last_ts"], e["ts"] + e.get("duration_ms", 0) / 1000.0)
@@ -291,6 +302,10 @@ def day_stats_from_events(events: Iterable[dict[str, Any]]) -> dict[str, dict[st
             d["apps"][app] = d["apps"].get(app, 0.0) + secs
             d["hours"][str(_hour_of(e["ts"]))] = d["hours"].get(str(_hour_of(e["ts"])), 0.0) + secs
             d["focus_seconds"] += secs
+            path = engine.classify(app, e.get("title") or "", e.get("url") or "")
+            for i in range(1, len(path) + 1):
+                ck = "/".join(path[:i])
+                d["cats"][ck] = d["cats"].get(ck, 0.0) + secs
             host = _host(e.get("url") or "")
             if host:
                 d["hosts"][host] = d["hosts"].get(host, 0.0) + 1
@@ -335,9 +350,17 @@ def _focus_runs(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return runs
 
 
+def _cat_leaves(cats: dict[str, float]) -> dict[str, float]:
+    """The seconds counted once: drop the ancestor rows a rollup added."""
+    return {k: v for k, v in cats.items() if not any(o.startswith(k + "/") for o in cats if o != k)}
+
+
 def mine(*, events: list[dict[str, Any]], days: list[dict[str, Any]],
-         summaries: list[dict[str, Any]], min_days: int = 2) -> dict[str, Any]:
+         summaries: list[dict[str, Any]], min_days: int = 2, engine: Any = None) -> dict[str, Any]:
     """Everything deterministic we can say about how this person works. No model involved."""
+    if engine is None:
+        from .activity_categories import engine_for
+        engine = engine_for(None)
     window = max(1, len(days))
     apps_total: dict[str, float] = {}
     hosts_total: dict[str, float] = {}
@@ -349,8 +372,13 @@ def mine(*, events: list[dict[str, Any]], days: list[dict[str, Any]],
     starts: list[float] = []
     ends: list[float] = []
     focus_per_day: list[float] = []
+    cats_total: dict[str, float] = {}
+    cat_days: dict[str, int] = {}
 
     for d in days:
+        for cat, secs in (d.get("cats") or {}).items():
+            cats_total[cat] = cats_total.get(cat, 0.0) + float(secs)
+            cat_days[cat] = cat_days.get(cat, 0) + 1
         for app, secs in (d.get("apps") or {}).items():
             apps_total[app] = apps_total.get(app, 0.0) + float(secs)
             app_days[app] = app_days.get(app, 0) + 1
@@ -541,6 +569,49 @@ def mine(*, events: list[dict[str, Any]], days: list[dict[str, Any]],
                 evidence={"switches_per_hour": round(rate, 1)},
             ))
 
+    # 11. where the time goes by category, and the evenings that drift to the negative ones
+    top_total = sum(v for k, v in cats_total.items() if "/" not in k)
+    for cat, secs in _top({k: v for k, v in cats_total.items() if "/" not in k and k != "Uncategorized"}, 6):
+        nd = cat_days.get(cat, 0)
+        if nd < min_days or top_total <= 0 or secs / top_total < 0.2:
+            continue
+        share = secs / top_total
+        patterns.append(_pattern(
+            "category_share", f"{cat} is {share * 100:.0f}% of focus time",
+            f"{cat} {share * 100:.0f}% of focus time, {secs / 3600.0 / nd:.1f}h/day.",
+            support=int(secs // 60), days=nd, window=window,
+            evidence={"category": cat, "share": round(share, 2), "hours_per_day": round(secs / 3600.0 / nd, 1),
+                      "days": nd},
+        ))
+    drift_days: list[dict[str, Any]] = []
+    drift_cats: dict[str, float] = {}
+    for d in days:
+        leaves = _cat_leaves({k: float(v) for k, v in (d.get("cats") or {}).items()})
+        tot = sum(leaves.values())
+        if tot < 600:
+            continue
+        bad = {k: v for k, v in leaves.items() if engine.score_of(k) < 0}
+        weighted = sum(v * min(1.0, -engine.score_of(k) / 2.0) for k, v in bad.items()) / tot
+        if weighted > 0.30:
+            drift_days.append(d)
+            for k, v in bad.items():
+                drift_cats[k] = drift_cats.get(k, 0.0) + v
+    if len(drift_days) >= max(1, min_days):
+        hrs: dict[int, float] = {}
+        for d in drift_days:
+            for h, v in (d.get("hours") or {}).items():
+                hrs[int(h)] = hrs.get(int(h), 0.0) + float(v)
+        band = _band(hrs)
+        names = ", ".join(k for k, _ in _top(drift_cats, 2))
+        when = f", mostly {band[0]:02d}:00-{(band[1] + 1) % 24:02d}:00" if band else ""
+        patterns.append(_pattern(
+            "distraction_drift", f"Drifts to {names} on {len(drift_days)} days",
+            f"On {len(drift_days)} of {window} days over 30% of focus time went to {names}{when}.",
+            support=int(sum(drift_cats.values()) // 60), days=len(drift_days), window=window,
+            evidence={"categories": [k for k, _ in _top(drift_cats, 3)], "days": len(drift_days),
+                      "band": list(band) if band else None},
+        ))
+
     patterns.sort(key=lambda p: -(p["confidence"] * (1 + min(3.0, p["support"] / 20.0))))
     return {
         "generated_at": now(),
@@ -550,6 +621,8 @@ def mine(*, events: list[dict[str, Any]], days: list[dict[str, Any]],
         "apps": [{"app": a, "seconds": round(s), "days": app_days.get(a, 0)} for a, s in _top(apps_total, 10)],
         "hosts": [{"host": h, "visits": int(v), "days": host_days.get(h, 0)} for h, v in _top(hosts_total, 10)],
         "hours": [{"hour": h, "seconds": round(hours_total.get(h, 0.0))} for h in range(24)],
+        "categories": [{"path": k, "seconds": round(v), "days": cat_days.get(k, 0),
+                        "score": engine.score_of(k)} for k, v in _top(cats_total, 12)],
         "patterns": patterns[:24],
     }
 
@@ -570,6 +643,9 @@ def digest(pat: dict[str, Any]) -> str:
     apps = ", ".join(f"{a['app']} {_mins(a['seconds'])}" for a in (pat.get("apps") or [])[:8])
     if apps:
         lines += ["", f"Time by app: {apps}"]
+    cats = ", ".join(f"{c['path']} {_mins(c['seconds'])}" for c in (pat.get("categories") or []) if "/" not in c["path"])
+    if cats:
+        lines.append(f"Time by category: {cats}")
     hosts = ", ".join(f"{h['host']} x{h['visits']}" for h in (pat.get("hosts") or [])[:8])
     if hosts:
         lines.append(f"Sites (host only): {hosts}")
@@ -704,6 +780,27 @@ def fallback(pat: dict[str, Any], taken: set[str]) -> dict[str, Any]:
                            "statement": f"User does their longest uninterrupted work between {b0:02d}:00 and "
                                         f"{(b1 + 1) % 24:02d}:00; schedule demanding work there and meetings elsewhere.",
                            "confidence": p["confidence"], "evidence": [p["id"]], "supersedes": ""})
+        elif k == "category_share":
+            habits.append({"key": _slug(f"habit-category-{ev.get('category', '')}"), "kind": "fact",
+                           "statement": f"About {int((ev.get('share') or 0) * 100)}% of the user's focused screen "
+                                        f"time goes to {ev.get('category')}.",
+                           "confidence": p["confidence"], "evidence": [p["id"]], "supersedes": ""})
+        elif k == "distraction_drift":
+            band = ev.get("band")
+            when = f"{band[0]:02d}:00-{(band[1] + 1) % 24:02d}:00" if band else "the evening"
+            out.append({
+                "key": "sug-guard-drift", "kind": "hygiene",
+                "title": f"Guard {when} against drifting",
+                "detail": f"Over a third of focus time slides to {', '.join(ev.get('categories') or [])} around "
+                          f"then. Decide the plan for that window ahead of time - a calendar block, or a todo "
+                          f"picked in advance - so the default is not the feed.",
+                "why": f"{ev.get('days')} days where the low-value categories passed 30% of focus time.",
+                "impact": "gets back the part of the day that leaks", "effort": "low",
+                "confidence": p["confidence"], "evidence": [p["id"]],
+                "action": {"type": "prompt",
+                           "prompt": f"I tend to drift into distractions around {when}. Pick the one todo I should "
+                                     f"start with at that time and put a calendar block on it."},
+            })
         elif k == "topic":
             topic = ev.get("topic", "")
             out.append({
@@ -809,13 +906,15 @@ class Insights:
         cfg = self.cfg()
         retention = float((self.config_fn() or {}).get("retentionHours") or 48)
         events = self.store.recent(limit=20000, since=now() - retention * 3600)
-        for day, stats in day_stats_from_events(events).items():
+        from .activity_categories import engine_for
+        engine = engine_for((self.config_fn() or {}).get("categories"))
+        for day, stats in day_stats_from_events(events, engine).items():
             self.days.merge(day, stats)
         pat = mine(
             events=events,
             days=self.days.recent(int(cfg["lookbackDays"])),
             summaries=self.store.summaries(since=now() - int(cfg["lookbackDays"]) * 86400, limit=400),
-            min_days=int(cfg["minDays"]),
+            min_days=int(cfg["minDays"]), engine=engine,
         )
         self._save_patterns(pat)
         return pat

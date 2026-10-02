@@ -210,20 +210,6 @@ def test_escape_currency_keeps_prices_out_of_inline_maths() -> None:
     assert esc("```\nprice=$9\n```\nowed $9") == "```\nprice=$9\n```\nowed \\$9"
 
 
-if __name__ == "__main__":
-    fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
-    failed = 0
-    for fn in fns:
-        try:
-            fn()
-            print(f"  ok  {fn.__name__}")
-        except Exception as e:  # noqa: BLE001
-            failed += 1
-            print(f"FAIL  {fn.__name__}: {type(e).__name__}: {e}")
-    print(f"\n{len(fns) - failed}/{len(fns)} passed")
-    sys.exit(1 if failed else 0)
-
-
 def test_vocab_prompt_lists_title_and_names_within_the_cap() -> None:
     v = meeting_notes.vocab_prompt({**MEETING, "attendees": json.dumps(
         [{"email": "nate@example.com", "name": "Nate"}, {"email": "dana.k@example.com"}, "x" * 300])})
@@ -260,3 +246,42 @@ def test_long_transcript_is_mapped_per_chunk_then_reduced_once() -> None:
         complete_fn=stub, settings=SETTINGS, model="m", meeting=MEETING, doc_title="t", doc_content="",
         transcript="short", max_transcript_chars=1000))
     assert len(calls) == 1
+
+
+def test_a_failed_chunk_or_reduce_leaves_no_partial_summary() -> None:
+    text = "".join(f"[you] line {i:03d}\n" for i in range(200))
+    good = json.dumps({"summary_markdown": "part", "headline": "h", "action_items": []})
+
+    def run(stub):
+        return asyncio.run(meeting_notes.summarize_recording(
+            complete_fn=stub, settings=SETTINGS, model="m", meeting=MEETING, doc_title="t", doc_content="",
+            transcript=text, max_transcript_chars=2000))
+
+    n = {"i": 0}
+
+    async def chunk_raises(settings, model, messages, kind="x"):
+        n["i"] += 1
+        if n["i"] == 2:
+            raise RuntimeError("proxy down")
+        return good
+
+    async def reduce_is_junk(settings, model, messages, kind="x"):
+        return "not json" if "merge" in messages[0]["content"] else good
+
+    for stub in (chunk_raises, reduce_is_junk):
+        res = run(stub)
+        assert res["error"] and res["markdown"] == ""
+
+
+if __name__ == "__main__":
+    fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
+    failed = 0
+    for fn in fns:
+        try:
+            fn()
+            print(f"  ok  {fn.__name__}")
+        except Exception as e:  # noqa: BLE001
+            failed += 1
+            print(f"FAIL  {fn.__name__}: {type(e).__name__}: {e}")
+    print(f"\n{len(fns) - failed}/{len(fns)} passed")
+    sys.exit(1 if failed else 0)

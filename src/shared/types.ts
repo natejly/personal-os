@@ -2416,6 +2416,10 @@ export interface MeetingConfig {
   enhanceModel: string
   /** Head-and-tail cap on the transcript sent to the model; decisions land at the end. */
   maxTranscriptChars: number
+  /** A recording with fewer spoken words than this is not summarised. */
+  minSummaryWords?: number
+  /** Seed the speech model with the meeting title and attendee names. */
+  vocabularyPrompt?: boolean
   keepAudio: boolean
   /** Disk ceiling for retained wavs, oldest failed segment evicted first. */
   maxAudioBytes: number

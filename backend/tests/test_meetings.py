@@ -916,6 +916,33 @@ def test_a_degraded_pass_is_never_auto_applied() -> None:
     assert asyncio.run(svc2.enhance(mid2))["status"] == "applied"
 
 
+def test_start_seeds_the_recorder_with_title_and_names_unless_switched_off() -> None:
+    repo, svc = _svc(_tmp())
+    seen: list[dict] = []
+
+    class _Pool:
+        sessions: dict = {}
+
+        def start(self, meeting_id, channels, **kw):
+            seen.append(kw)
+            return type("S", (), {"out_dir": Path("/nowhere"), "started_at": time.time()})()
+
+    svc.pool = _Pool()  # type: ignore[assignment]
+    svc.preflight = lambda **k: {"ok": True, "blockers": []}  # type: ignore[method-assign]
+    real = (meetings.native_audio.mic_available, meetings.native_audio.system_available)
+    meetings.native_audio.mic_available = lambda: True  # type: ignore[assignment]
+    meetings.native_audio.system_available = lambda: False  # type: ignore[assignment]
+    try:
+        for flag in (True, False):
+            svc.set_config({"vocabularyPrompt": flag})
+            mid = repo.create(title="Pricing review", attendees=[{"email": "dana.k@example.com", "name": "Dana"}])["id"]
+            svc.start(mid, sources=["mic"])
+            vocab = seen[-1]["vocab"]
+            assert ("Pricing review" in vocab and "Dana" in vocab) if flag else vocab == ""
+    finally:
+        meetings.native_audio.mic_available, meetings.native_audio.system_available = real  # type: ignore[assignment]
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

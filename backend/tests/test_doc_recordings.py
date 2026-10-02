@@ -660,19 +660,6 @@ def test_an_ordinary_revision_is_stale_after_an_append_is_accepted() -> None:
     assert full["status"] == "pending" and full["stale"] is True and full["stat_vs_current"] is not None
 
 
-if __name__ == "__main__":
-    failed = 0
-    for name, fn in list(globals().items()):
-        if name.startswith("test_") and callable(fn):
-            try:
-                fn()
-                print(f"ok   {name}")
-            except Exception as e:  # noqa: BLE001
-                failed += 1
-                print(f"FAIL {name}: {type(e).__name__}: {e}")
-    sys.exit(1 if failed else 0)
-
-
 def test_a_recording_with_too_little_speech_is_refused_without_a_model_call() -> None:
     w = World()
     w.svc.set_config({"minSummaryWords": 40})
@@ -687,3 +674,16 @@ def test_the_section_says_how_many_words_were_heard_and_which_model_and_template
     rev = w.summarize(w.recording(doc)["id"])["revision"]
     assert "words heard)" in rev["after"]
     assert "_Model test-model, template general_" in rev["after"]
+
+
+if __name__ == "__main__":
+    failed = 0
+    for name, fn in list(globals().items()):
+        if name.startswith("test_") and callable(fn):
+            try:
+                fn()
+                print(f"ok   {name}")
+            except Exception as e:  # noqa: BLE001
+                failed += 1
+                print(f"FAIL {name}: {type(e).__name__}: {e}")
+    sys.exit(1 if failed else 0)

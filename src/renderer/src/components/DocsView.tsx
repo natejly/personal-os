@@ -14,7 +14,7 @@ import { scopeOf } from '../lib/docTree'
 import ResizeHandle from './ResizeHandle'
 import { clip, lines, usePageContext } from '../lib/pageContext'
 import { PANEL_TABS, parsePanelState, resolveWikiDoc, type PanelState, type PanelTab } from '../lib/docPanel'
-import { DocRecordButton, DocRecorderBar, RecordingsPanel, liveDoc, useDictation, useDocRec, usePreview } from '../features/docrec'
+import { DocRecordButton, DocRecorderBar, liveDoc, RecordingsPanel, setRecordingBlockSink, useDictation, useDocRec, usePreview } from '../features/docrec'
 import Backlinks from '../features/notes/Backlinks'
 import DocOutline from '../features/notes/DocOutline'
 import ExportMenu from '../features/notes/ExportMenu'
@@ -141,6 +141,17 @@ export default function DocsView(): JSX.Element {
         { id: 'daily', label: 'Daily note', hint: 'today', keywords: ['today', 'journal', 'daily'], run: () => void openDailyNote() }
       ]
     : []), [docId, openDailyNote])
+  // Starting a recording writes its block at the caret, through the editor's own undo-safe insert.
+  useEffect(() => {
+    setRecordingBlockSink((id, make) => {
+      const h = editor.current
+      if (id !== docId || !h) return
+      const t = h.getText()
+      const { start, end } = h.getSelection()
+      h.insertQuietly(make(t.slice(0, start), t.slice(end)))
+    })
+    return () => setRecordingBlockSink(null)
+  }, [docId])
   // A link can point at any other titled doc. The list may be narrowed by the tree's search box; that
   // only shortens the picker.
   const linkTargets = useMemo(
@@ -397,6 +408,7 @@ export default function DocsView(): JSX.Element {
                         source={body}
                         knownTitles={knownTitles}
                         onWikilink={(t) => void openWikilink(t)}
+                        onRecording={(id) => { setPanel({ open: true, tab: 'recordings' }); void useDocRec.getState().select(docId, id) }}
                         onToggleTask={(line) => {
                           const next = toggleTaskAt(body, line)
                           if (next !== null) editDoc(next)

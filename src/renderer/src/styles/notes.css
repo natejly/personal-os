@@ -81,3 +81,6 @@ a.wikilink.unknown { text-decoration-style: dashed; opacity: 0.75; }
   font-family: var(--font); font-size: 12px; font-style: italic; color: var(--text-faint);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+.markdown a.rec-chip { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px; background: var(--surface-2, rgba(127,127,127,.15)); text-decoration: none; font-size: .92em }
+.markdown a.rec-chip.unknown { opacity: .6; cursor: default }
+.rec-chip-state { opacity: .7 }

@@ -15,6 +15,8 @@ import type { Viewport } from './snapping'
 interface Call { url: string; method: string; keepalive: boolean; body: { windows?: { id: string; x: number }[] } | null }
 const calls: Call[] = []
 let failNext = new Set<string>()
+/** When set, the next layout PUT waits on it before answering, so a test can act mid-request. */
+let holdLayout: Promise<void> | null = null
 
 const g = globalThis as unknown as { window?: unknown; fetch: unknown }
 g.window = { innerWidth: 1440, innerHeight: 900, addEventListener: () => undefined, os: {} }
@@ -23,6 +25,11 @@ g.fetch = async (url: string, init?: { method?: string; body?: string; keepalive
   const body = init?.body ? JSON.parse(init.body) : null
   calls.push({ url, method, keepalive: !!init?.keepalive, body })
   const key = `${method} ${url}`
+  if (holdLayout && key.startsWith('PUT') && url.includes('/layout')) {
+    const h = holdLayout
+    holdLayout = null
+    await h
+  }
   if (failNext.has(key)) {
     failNext.delete(key)
     return { ok: false, status: 500, statusText: 'boom', json: async () => ({ detail: 'boom' }) }
@@ -169,6 +176,24 @@ test('a failed layout PUT leaves its ids dirty for the next flush', async () => 
   // And a success really does clear them.
   await st.flushLayout()
   assert.equal(layoutPuts().length, 2)
+})
+
+test('a move made while a layout PUT is in flight is still written afterwards', async () => {
+  seed(canvas('c1', [win({ id: 'w1' })]))
+  const st = useCanvas.getState()
+  st.patchWindow('w1', { x: 200 })
+  st.markLayoutDirty(['w1'])
+  let release = (): void => undefined
+  holdLayout = new Promise<void>((r) => { release = r })
+  const first = st.flushLayout()
+  st.patchWindow('w1', { x: 300 })
+  st.markLayoutDirty(['w1'])
+  release()
+  await first
+  await st.flushLayout()
+  const puts = layoutPuts()
+  assert.equal(puts.length, 2)
+  assert.equal(puts[1].body?.windows?.[0].x, 300)
 })
 
 test('a space switch flushes the layout before the active canvas moves', async () => {

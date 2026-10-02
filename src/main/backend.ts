@@ -129,7 +129,7 @@ export async function startBackend(): Promise<string> {
 
   child = spawn(py, ['-m', 'personal_os', '--port', String(port), '--data-dir', dataDir], {
     cwd: dir,
-    env: { ...loadDotEnv(), ...process.env, PYTHONUNBUFFERED: '1', PERSONAL_OS_AUTH_TOKEN: token },
+    env: { ...loadDotEnv(), ...process.env, PYTHONUNBUFFERED: '1', PERSONAL_OS_AUTH_TOKEN: token, PERSONAL_OS_PARENT_WATCH: '1' },
     stdio: ['ignore', 'pipe', 'pipe']
   })
   child.stdout?.on('data', (d) => process.stdout.write(`[backend] ${d}`))
@@ -149,8 +149,19 @@ export async function startBackend(): Promise<string> {
   return url
 }
 
-export function stopBackend(): void {
-  if (child && child.exitCode === null) child.kill()
+/** `sync` is for process exit, where no timer will ever fire: kill outright instead of a grace period. */
+export function stopBackend(sync = false): void {
+  const c = child
+  if (c && c.exitCode === null) {
+    if (sync) c.kill('SIGKILL')
+    else {
+      c.kill()
+      // A backend stuck in shutdown would keep its port and the database; escalate after a grace period.
+      const t = setTimeout(() => { if (c.exitCode === null) c.kill('SIGKILL') }, 3000)
+      t.unref?.()
+      c.once('exit', () => clearTimeout(t))
+    }
+  }
   child = null
   token = ''
 }

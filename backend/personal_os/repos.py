@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+from pathlib import Path
 from typing import Any
 
 from .db import Database, new_id, now, row_to_dict
@@ -72,9 +73,20 @@ class Projects:
                 c.execute(f"UPDATE projects SET {sets} WHERE id=?", (*allowed.values(), id))
         return self.get(id)
 
-    def delete(self, id: str) -> None:
+    def delete(self, id: str) -> list[str]:
+        """Delete a project. The FK cascade drops its documents/memories rows but not their FTS rows
+        or the uploaded files, so those are cleared here (files after the commit). Returns the paths."""
         with self.db.tx() as c:
+            paths = [r["path"] for r in c.execute("SELECT path FROM documents WHERE project_id=?", (id,)).fetchall() if r["path"]]
+            c.execute("DELETE FROM chunks_fts WHERE document_id IN (SELECT id FROM documents WHERE project_id=?)", (id,))
+            c.execute("DELETE FROM memories_fts WHERE memory_id IN (SELECT id FROM memories WHERE project_id=?)", (id,))
             c.execute("DELETE FROM projects WHERE id=?", (id,))
+        for p in paths:
+            try:
+                Path(p).unlink()
+            except OSError:
+                pass
+        return paths
 
     def stats(self, project_id: str | None) -> dict[str, int]:
         where, args = _scope_clause(project_id, include_global=False)
@@ -86,9 +98,9 @@ class Projects:
 # ---------------- Conversations ----------------
 # useActivity/useMeetings are listed even though context.py reads them with a `.get(..., True)`
 # fallback: without them the toggles never appear in a stored conversation's settings.
-# New chats start at medium. The stored value "default" is a separate choice: it omits
+# New chats start at low. The stored value "default" is a separate choice: it omits
 # reasoning_effort, which on Kimi K3 means the model's own max. See llm.effort_param.
-DEFAULT_EFFORT = "medium"
+DEFAULT_EFFORT = "low"
 DEFAULT_CONV_SETTINGS = {"effort": DEFAULT_EFFORT, "fast": False, "useMemory": True, "useGraph": True, "useDocuments": True, "useActivity": True,
                          "useStyle": True, "useMeetings": True, "autoLearn": True, "useTools": True, "tools": {}}
 
@@ -241,6 +253,8 @@ class Memories:
     def update(self, id: str, patch: dict[str, Any]) -> dict[str, Any] | None:
         with self.db.tx() as c:
             if "content" in patch and patch["content"] is not None:
+                if not str(patch["content"]).strip():
+                    raise ValueError("Memory content cannot be empty")
                 c.execute("UPDATE memories SET content=?, updated_at=? WHERE id=?", (patch["content"].strip(), now(), id))
                 c.execute("DELETE FROM memories_fts WHERE memory_id=?", (id,))
                 c.execute("INSERT INTO memories_fts(content, memory_id) VALUES(?,?)", (patch["content"].strip(), id))

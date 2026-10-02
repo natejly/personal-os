@@ -109,6 +109,11 @@ DEFAULT_SETTINGS: dict[str, Any] = {
 }
 
 
+# Longest the provider may go without sending a byte before the stream is given up on. Generous
+# because a reasoning model can think silently for minutes; a dead socket must still end the run.
+STREAM_IDLE_S = 300.0
+
+
 class LLMError(Exception):
     pass
 
@@ -146,7 +151,7 @@ def effort_param(model: str, effort: str) -> str | None:
     """The `reasoning_effort` to send, or None to leave the field off.
 
     `'default'` always omits the field. That is a deliberate choice, not the starting level:
-    new chats start at medium (`repos.DEFAULT_EFFORT`), and for Kimi K3 that is sent as high.
+    new chats start at low (`repos.DEFAULT_EFFORT`), and for Kimi K3 that is sent as low.
     """
     if not effort or effort == "default":
         return None
@@ -215,13 +220,14 @@ async def stream_chat(
         body["tools"] = tools
         body["tool_choice"] = tool_choice
     calls: dict[int, dict[str, Any]] = {}
+    last_idx = 0
     finish: str | None = None
     usage: dict[str, Any] | None = None
     t0 = time.time()
     out_chars = 0
     reason_chars = 0
     cancelled = False
-    async with httpx.AsyncClient(timeout=httpx.Timeout(10, read=None)) as client:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(10, read=STREAM_IDLE_S)) as client:
         async with client.stream(
             "POST",
             f"{_base(settings)}/v1/chat/completions",
@@ -263,7 +269,8 @@ async def stream_chat(
                         out_chars += len(delta["content"])
                         yield {"type": "delta", "text": delta["content"]}
                     for tc in delta.get("tool_calls") or []:
-                        idx = tc.get("index", 0)
+                        idx = _slot(calls, tc, last_idx)
+                        last_idx = idx
                         cur = calls.setdefault(idx, {"id": tc.get("id") or f"call_{idx}", "name": "", "arguments": ""})
                         if tc.get("id"):
                             cur["id"] = tc["id"]
@@ -276,6 +283,10 @@ async def stream_chat(
                         finish = choice["finish_reason"]
             except asyncio.CancelledError:
                 raise
+            except httpx.ReadTimeout:
+                if cancel is None or not cancel.is_set():
+                    raise LLMError(f"The model provider stopped responding for {int(STREAM_IDLE_S)} seconds, so the request was abandoned.") from None
+                cancelled = True
             except Exception:
                 if cancel is None or not cancel.is_set():
                     raise
@@ -295,6 +306,33 @@ async def stream_chat(
     # usage_est is always present: this route often omits `usage` on streamed replies, and a budget cannot run on None.
     yield {"type": "end", "finish_reason": finish, "tool_calls": [calls[i] for i in sorted(calls)], "usage": usage,
            "usage_est": {"prompt_tokens": p_chars // 4, "completion_tokens": c_chars // 4}}
+
+
+def _is_other_call(cur: dict[str, Any], key: int, cid: Any) -> bool:
+    # An id we invented ourselves (`call_<n>`) was never the provider's, so a real one arriving later is not a new call.
+    return bool(cid and cur["name"] and cur["id"] != cid and cur["id"] != f"call_{key}")
+
+
+def _slot(calls: dict[int, dict[str, Any]], tc: dict[str, Any], last: int) -> int:
+    """Which call a streamed tool-call fragment belongs to.
+
+    Providers usually send an int `index`, but some send null or omit it on parallel calls. Without one,
+    a fragment carrying a new `id` opens a new call and anything else continues the latest. An indexed
+    fragment whose id differs from a named call already in that slot is also a new call.
+    """
+    try:
+        idx = int(tc["index"]) if tc.get("index") is not None else None
+    except (TypeError, ValueError):
+        idx = None
+    cid = tc.get("id")
+    if idx is None:
+        if calls and _is_other_call(calls[last], last, cid):
+            return max(calls) + 1
+        return last if calls else 0
+    cur = calls.get(idx)
+    if cur is not None and _is_other_call(cur, idx, cid):
+        return max(calls) + 1
+    return idx
 
 
 async def complete(settings: dict[str, Any], model: str, messages: list[dict[str, str]], kind: str = "learn") -> str:

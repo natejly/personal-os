@@ -6,9 +6,19 @@ import { useStore } from '../store'
 export const clip = (text: string, limit = 4000): string =>
   text.length <= limit ? text : `${text.slice(0, limit)}\n\n…(truncated)`
 
+/** Someone else's text, inside a fence it cannot close. */
+export const fenced = (text: string, limit = 4000): string => {
+  const body = clip((text || '').replace(/```/g, "'''"), limit)
+  return '```\n' + body + '\n```'
+}
+
+/** One list row. A title from a calendar invite or a todo cannot open a second line. */
+const oneRow = (text: string): string =>
+  text.replace(/[\u0000-\u001f\u007f\u2028\u2029]/g, ' ').replace(/ {2,}/g, ' ').trim().slice(0, 400)
+
 /** Render a list of rows as the markdown lines the page block carries. `max` rows, then a count. */
 export const lines = <T,>(items: T[], fmt: (item: T) => string, max = 40): string => {
-  const shown = items.slice(0, max).map((i) => `- ${fmt(i)}`)
+  const shown = items.slice(0, max).map((i) => oneRow(fmt(i))).filter(Boolean).map((row) => `- ${row}`)
   if (items.length > max) shown.push(`- …and ${items.length - max} more`)
   return shown.join('\n')
 }

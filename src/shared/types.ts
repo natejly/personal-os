@@ -402,7 +402,7 @@ export interface Message {
 export type Effort = 'default' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 /** What a new chat starts on. `'default'` is a different choice: it omits `reasoning_effort`. */
-export const DEFAULT_EFFORT: Effort = 'medium'
+export const DEFAULT_EFFORT: Effort = 'low'
 
 export interface ConversationSettings {
   /** Reasoning effort passed through as `reasoning_effort`. 'default' sends nothing; 'xhigh' and 'max' are the rungs above high. */

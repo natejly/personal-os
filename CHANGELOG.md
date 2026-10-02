@@ -96,6 +96,7 @@ All notable changes to Grain (formerly Personal OS). Dates are the days the work
 
 ### Changed
 
+- New chats start at low reasoning effort. Existing chats keep the level they were saved with.
 - Chat widget reworked; every canvas window mounts up front instead of on demand.
 - Google sign-in button always starts OAuth rather than looking like a no-op.
 - UI copy stripped of filler. Accessibility pass on labels and contrast.

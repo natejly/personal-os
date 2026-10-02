@@ -168,12 +168,22 @@ def parse_plan_edits(raw: Any) -> dict[int, dict[str, Any] | None] | None:
     return out
 
 
+# A pre-approved plan must not fire these after untrusted content it did not predict.
+# network is included because the fetch address or search query can carry what was just read.
+TAINT_VOIDS = ("external", "network", "schedules")
+
+
+def plan_voided_by_taint(danger: str, tainted: bool, expected: bool) -> bool:
+    """True when this call has to ask again: the reply read something the plan did not name."""
+    return bool(tainted) and not expected and danger in TAINT_VOIDS
+
+
 def taint_expected(plan: dict[str, Any] | None, sources: Iterable[str]) -> bool:
     """Is every taint source in this reply one the approved plan predicted?
 
     Either the tool is on the plan's expected_taint list - the card said so before the user approved
     - or it is a tool that actually claimed a step of this plan, which is the same promise kept. An
-    off-plan fetch makes this False, and every external call goes back to asking.
+    off-plan fetch makes this False, and external, network, and scheduled calls go back to asking.
     """
     srcs = [s for s in sources if s]
     if not srcs:

@@ -22,7 +22,7 @@ import base64
 import contextlib
 import datetime as dt
 import email.mime.text
-from email.utils import parsedate_to_datetime
+from email.utils import formataddr, getaddresses, parsedate_to_datetime
 import json
 import logging
 import os
@@ -95,6 +95,9 @@ class GoogleNotConnected(Exception):
 _CAL_FULL_AFTER = 6 * 3600
 _CAL_OVERLAP = dt.timedelta(minutes=2)
 _GMAIL_META_CAP = 800
+# Saved message bodies: plain mail text on disk, and the whole store is rewritten on each
+# save, so keep only the recently opened ones.
+_GMAIL_BODY_CAP = 200
 
 
 class Google:
@@ -297,14 +300,18 @@ class Google:
             try:
                 creds.refresh(Request())
             except Exception as e:  # noqa: BLE001
+                log.warning("Google token refresh failed: %s", e)
+                if not _refresh_rejected(e):
+                    # Offline, DNS, a 5xx: the sign-in is fine and the next call will retry.
+                    # Flagging these told the user to reconnect after every wake from sleep.
+                    raise
                 # invalid_grant: the refresh token was revoked, expired (testing-mode consent
                 # screens expire them in 7 days) or belongs to a different OAuth client.
-                log.warning("Google token refresh failed: %s", e)
-                self.set_settings({"googleToken": {**tok, "needs_reauth": True}})
+                self._save_token(tok, {"needs_reauth": True})
                 raise GoogleNotConnected(
                     "Google sign-in expired or was revoked. Open Settings → Integrations and sign in again."
                 ) from e
-            self.set_settings({"googleToken": {**tok, "token": creds.token, "expiry": creds.expiry.isoformat() if creds.expiry else None, "needs_reauth": False}})
+            self._save_token(tok, {"token": creds.token, "expiry": creds.expiry.isoformat() if creds.expiry else None, "needs_reauth": False})
         with self._svc_lock:
             self._creds_obj = creds
             self._creds_key = key
@@ -312,6 +319,17 @@ class Google:
             self._cache.clear()
             self._reads.clear()
         return creds
+
+    def _save_token(self, tok: dict[str, Any], patch: dict[str, Any]) -> None:
+        """Write refresh results back, unless the sign-in changed while the refresh ran.
+
+        `tok` was read before a network call. Writing it back blind undid a disconnect
+        (or a switch of account) that happened in the meantime.
+        """
+        cur = self.get_settings().get("googleToken") or {}
+        if cur.get("refresh_token") != tok.get("refresh_token"):
+            return
+        self.set_settings({"googleToken": {**cur, **patch}})
 
     def _svc(self, name: str, version: str):  # type: ignore[no-untyped-def]
         """A built API client, reused per (api, version).
@@ -435,7 +453,7 @@ class Google:
             if end > covered_end + dt.timedelta(hours=1):
                 # The far edge has slid by more than a clock tick. Unmodified events that
                 # just entered the window are not in an updatedMin result, so list that sliver.
-                sliver = _list_events(svc, cid, covered_end, end, None, max_results, paginate=False)
+                sliver = _list_events(svc, cid, covered_end, end, None, max(max_results, 250), paginate=True)
                 _merge_events(stored, sliver, cid)
             window_start, window_end = covered_start, max(covered_end, end)
         else:
@@ -444,7 +462,10 @@ class Google:
             if w1 - w0 > dt.timedelta(days=120):
                 w0, w1 = start, end
             stored = {eid: ev for eid, ev in stored.items() if not _overlaps(ev, w0, w1)}
-            items = _list_events(svc, cid, w0, w1, None, max_results, paginate=False)
+            # Listed in full, not just the first `max_results`: the snapshot is recorded as
+            # covering this window, and later reads only ask for what changed since. A list
+            # cut at the display limit left every later event missing until the snapshot aged out.
+            items = _list_events(svc, cid, w0, w1, None, max(max_results, 250), paginate=True)
             listed = [_event_out(e, cid) for e in items if e.get("status") != "cancelled"]
             for ev in listed:
                 if ev.get("id"):
@@ -462,6 +483,22 @@ class Google:
         if listed is not None and window_start == start and window_end == end:
             return listed
         return [ev for ev in stored.values() if _overlaps(ev, start, end)]
+
+    def _drop_saved_event(self, calendar_id: str, event_id: str) -> None:
+        """Take an event we are about to change out of the saved window.
+
+        The next read asks Google only for rows changed since the snapshot, inside the
+        window it covers. An event moved out of that window (or to another calendar) is
+        not in that answer, so its old copy stayed on the grid for hours. Dropped here, it
+        comes back from that same read if it still belongs. A series id drops its instances.
+        """
+        snap = self._reads.get("calendar", calendar_id)
+        if not isinstance(snap, dict) or not isinstance(snap.get("events"), dict):
+            return
+        events = {eid: ev for eid, ev in snap["events"].items()
+                  if eid != event_id and not eid.startswith(f"{event_id}_")}
+        if len(events) != len(snap["events"]):
+            self._reads.put("calendar", calendar_id, {**snap, "events": events})
 
     @cached("calendar", TTL["calendar_event"])
     def calendar_get(self, event_id: str, calendar_id: str = "primary") -> dict[str, Any]:
@@ -488,10 +525,17 @@ class Google:
         """
         svc = self._svc("calendar", "v3").events()
         updates = _send_updates(send_updates)
+        self._drop_saved_event(calendar_id, event_id)
         dest = event.get("move_to_calendar_id")
         if dest and dest != calendar_id:
             svc.move(calendarId=calendar_id, eventId=event_id, destination=dest, sendUpdates=updates).execute()
             calendar_id = dest
+        if event.get("start") and not event.get("end"):
+            # Only the start moved. Without an end the body below falls back to one hour
+            # (or one day), which silently shortened a longer event.
+            end = _end_keeping_length(svc, calendar_id, event_id, str(event["start"]))
+            if end:
+                event = {**event, "end": end}
         body = self._event_body(event, patch=True)
         kwargs: dict[str, Any] = {"calendarId": calendar_id, "eventId": event_id, "body": body, "sendUpdates": updates}
         if event.get("create_meet"):
@@ -509,6 +553,7 @@ class Google:
     @invalidates("calendar")
     def calendar_delete(self, event_id: str, calendar_id: str = "primary", send_updates: str = "none") -> dict[str, Any]:
         self._svc("calendar", "v3").events().delete(calendarId=calendar_id, eventId=event_id, sendUpdates=_send_updates(send_updates)).execute()
+        self._drop_saved_event(calendar_id, event_id)
         return verify.attach({"deleted": event_id, "calendar_id": calendar_id},
                              self._verify_event_gone(calendar_id, event_id))
 
@@ -722,7 +767,7 @@ class Google:
         h = {x["name"].lower(): x["value"] for x in msg.get("payload", {}).get("headers", [])}
         body = _extract_body(msg.get("payload", {}))
         out = {"id": message_id, "thread_id": msg.get("threadId"), "from": h.get("from"), "to": h.get("to"), "subject": h.get("subject"), "date": _rfc2822_iso(h.get("date")), "body": body[:max_chars]}
-        self._reads.put("gmail-body", key, out)
+        self._reads.put("gmail-body", key, out, cap=_GMAIL_BODY_CAP)
         return out
 
     def _reply_headers(self, reply_to_message_id: str) -> tuple[str | None, dict[str, str]]:
@@ -1233,6 +1278,33 @@ def _overlaps(ev: dict[str, Any], start: dt.datetime, end: dt.datetime) -> bool:
     return es < end and ee > start
 
 
+def _end_keeping_length(svc: Any, calendar_id: str, event_id: str, start: str) -> str | None:
+    """The end that keeps an event as long as it is now, given a new start. None to use the default."""
+    try:
+        cur = svc.get(calendarId=calendar_id, eventId=event_id).execute()
+        was_start, was_end = cur.get("start") or {}, cur.get("end") or {}
+        if len(start) == 10:
+            if not (was_start.get("date") and was_end.get("date")):
+                return None  # timed -> all-day: there is no length to carry over
+            days = dt.date.fromisoformat(was_end["date"]) - dt.date.fromisoformat(was_start["date"])
+            return (dt.date.fromisoformat(start) + days).isoformat()
+        if not (was_start.get("dateTime") and was_end.get("dateTime")):
+            return None
+        length = _parse_iso(was_end["dateTime"]) - _parse_iso(was_start["dateTime"])
+        if length <= dt.timedelta(0):
+            return None
+        return (_parse_iso(start) + length).isoformat()
+    except Exception:  # noqa: BLE001 - the default length is a fair fallback
+        return None
+
+
+def _refresh_rejected(e: Exception) -> bool:
+    """True when Google refused the refresh token itself, rather than the call failing in transit."""
+    from google.auth.exceptions import RefreshError
+
+    return isinstance(e, RefreshError) and not getattr(e, "retryable", False)
+
+
 def _list_events(svc: Any, cid: str, time_min: dt.datetime, time_max: dt.datetime, updated_min: dt.datetime | None, max_results: int, paginate: bool) -> list[dict[str, Any]]:
     kwargs: dict[str, Any] = {
         "calendarId": cid, "timeMin": time_min.isoformat(), "timeMax": time_max.isoformat(),
@@ -1408,9 +1480,20 @@ def _local_tz() -> str:
     return "UTC"
 
 
+def _address_header(value: str) -> str:
+    """A recipient list with only the display names encoded.
+
+    Assigning "Zoë <a@b.com>" to a header encodes the whole value, address included, as one
+    opaque word, and no mail server can read a recipient out of that.
+    """
+    if value.isascii():
+        return value
+    return ", ".join(formataddr((name, addr)) for name, addr in getaddresses([value]) if addr)
+
+
 def _raw_message(to: str, subject: str, body: str, in_reply_to: str | None = None, references: str | None = None) -> str:
     msg = email.mime.text.MIMEText(body)
-    msg["to"], msg["subject"] = to, subject
+    msg["to"], msg["subject"] = _address_header(to), subject
     if in_reply_to:
         msg["In-Reply-To"] = in_reply_to
     if references:

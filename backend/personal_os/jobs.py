@@ -34,7 +34,7 @@ from datetime import datetime, timezone as _utc
 from typing import Any, Awaitable, Callable, Iterable
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from croniter import CroniterBadCronError, croniter
+from croniter import CroniterBadCronError, CroniterBadDateError, croniter
 
 from .db import Database, new_id, now, row_to_dict
 from .runs import args_digest
@@ -118,16 +118,31 @@ def valid_tz(tz: str) -> bool:
 
 
 def valid_cron(expr: str) -> bool:
+    # Exactly five fields: croniter also takes a sixth (seconds), which would mean one run per second.
+    if len((expr or "").split()) != 5:
+        return False
     try:
-        croniter(expr)
+        # One real next slot, so a never-matching date like "0 0 30 2 *" is refused here and not
+        # discovered later as an unhandled error when the job is enabled.
+        croniter(expr, datetime.now(_utc.utc)).get_next(datetime)
         return True
-    except (CroniterBadCronError, ValueError, KeyError, TypeError):
+    except (CroniterBadCronError, CroniterBadDateError, ValueError, KeyError, TypeError):
         return False
 
 
 def next_fire(expr: str, tz: str, after: float) -> float:
     """The first slot strictly after `after`, as a unix timestamp. Read in `tz`, so DST moves with the wall clock."""
-    return float(croniter(expr, _local(after, tz)).get_next(datetime).timestamp())
+    it = croniter(expr, _local(after, tz))
+    while True:
+        cand = it.get_next(datetime)
+        ts = float(cand.timestamp())
+        # On the fall-back day a wall time happens twice. The second pass (fold=1) of a slot whose first
+        # pass is already behind `after` is the same slot again, so skip it: one fire per wall-clock slot.
+        wall = cand.replace(tzinfo=None)
+        first = float(wall.replace(tzinfo=_zone(tz), fold=0).timestamp())
+        if first != ts and first <= after:
+            continue
+        return ts
 
 
 def prev_fire(expr: str, tz: str, at_or_before: float) -> float | None:

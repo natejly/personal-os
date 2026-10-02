@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ExternalLink, Plus, Trash2, Video, X } from 'lucide-react'
 import type { CalendarColors, CalendarEvent, EventPayload, GoogleCalendar } from '@shared/types'
 import { api } from '../lib/api'
@@ -194,11 +194,20 @@ export default function EventEditor({ event, draft, onClose, onSaved }: EventEdi
     if (!notifyTouched) setSendUpdates(attendees.length > 0 ? 'all' : 'none')
   }, [attendees.length, notifyTouched])
 
+  // Escape and a stray backdrop click are the accidental ways out, so they ask before throwing away
+  // edits; the Cancel and X buttons are deliberate and close straight away.
+  // `dirty` also flips on a plain click inside the form, so it cannot be what asks: only a field that
+  // actually changed does.
+  const edited = useRef(false)
+  const requestClose = useCallback((): void => {
+    if (edited.current && !window.confirm('Discard your changes to this event?')) return
+    onClose()
+  }, [onClose])
   useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
+    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') requestClose() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose])
+  }, [requestClose])
 
   const writableCalendars = (meta?.calendars ?? []).filter((c) => c.primary || c.access_role === 'owner' || c.access_role === 'writer')
   const isRecurring = !!(event?.recurring_event_id || (full?.recurrence?.length ?? 0) > 0)
@@ -222,6 +231,7 @@ export default function EventEditor({ event, draft, onClose, onSaved }: EventEdi
   const save = async (): Promise<void> => {
     if (!title.trim()) { toast('The event needs a title', 'error'); return }
     if (allDay ? !startDay : !startDt) { toast('The event needs a start', 'error'); return }
+    if (!allDay && (Number.isNaN(Date.parse(startDt)) || (endDt && Number.isNaN(Date.parse(endDt))))) { toast('The start or end is not a valid date and time', 'error'); return }
     const payload: EventPayload = {
       summary: title.trim(),
       start: allDay ? startDay : `${startDt}:00`,
@@ -314,9 +324,9 @@ export default function EventEditor({ event, draft, onClose, onSaved }: EventEdi
   }
 
   return (
-    <div className="modal-backdrop" onMouseDown={onClose}>
+    <div className="modal-backdrop" onMouseDown={requestClose}>
       <div className="modal event-editor" onMouseDown={(e) => e.stopPropagation()}
-        onChange={() => { dirty.current = true }} onClickCapture={() => { if (!loading) dirty.current = true }}>
+        onChange={() => { dirty.current = true; edited.current = true }} onClickCapture={() => { if (!loading) dirty.current = true }}>
         <header>
           <h2>{isEdit ? 'Edit event' : 'New event'}</h2>
           <button className="icon-btn" aria-label="Close" onClick={onClose}><X size={16} /></button>
@@ -378,6 +388,8 @@ export default function EventEditor({ event, draft, onClose, onSaved }: EventEdi
                   <>
                     <label className="grow"><span>Start</span><input type="datetime-local" value={startDt} onChange={(e) => {
                       const v = e.target.value
+                      // A half-cleared field reads as '': keep the last good start rather than derive an end from NaN.
+                      if (!v || Number.isNaN(Date.parse(v))) return
                       // Keep the duration when the start moves, like Google does.
                       if (startDt && endDt) {
                         const dur = new Date(endDt).getTime() - new Date(startDt).getTime()

@@ -97,15 +97,31 @@ class Boards:
             if "wip_limit" in patch:
                 c.execute("UPDATE board_columns SET wip_limit=? WHERE id=?", (patch["wip_limit"], id))
 
-    def delete_column(self, id: str) -> None:
+    def delete_column(self, id: str) -> int:
+        """Delete a column and (by cascade) its cards; returns how many cards went with it."""
         with self.db.tx() as c:
+            n = c.execute("SELECT COUNT(*) FROM cards WHERE column_id=?", (id,)).fetchone()[0]
             c.execute("DELETE FROM board_columns WHERE id=?", (id,))
+        return n
+
+    @staticmethod
+    def _check_column(c: Any, board_id: str, column_id: str) -> None:
+        """A card may only sit in a column of its own board, or it vanishes from the board view."""
+        col = c.execute("SELECT board_id FROM board_columns WHERE id=?", (column_id,)).fetchone()
+        if not col:
+            raise KeyError(f"Unknown column: {column_id}")
+        if col["board_id"] != board_id:
+            raise ValueError("Column belongs to a different board")
 
     # cards
     def add_card(self, board_id: str, column_id: str | None, title: str, description: str = "", due: str | None = None, priority: int = 2, labels: list[str] | None = None) -> dict[str, Any]:
         import json
 
         with self.db.tx() as c:
+            if not c.execute("SELECT 1 FROM boards WHERE id=?", (board_id,)).fetchone():
+                raise KeyError(f"Unknown board: {board_id}")
+            if column_id:
+                self._check_column(c, board_id, column_id)
             if not column_id:
                 col = c.execute("SELECT id FROM board_columns WHERE board_id=? ORDER BY position LIMIT 1", (board_id,)).fetchone()
                 if not col:
@@ -130,11 +146,20 @@ class Boards:
             return None
         fields["updated_at"] = now()
         with self.db.tx() as c:
+            card = c.execute("SELECT board_id FROM cards WHERE id=?", (id,)).fetchone()
+            if not card:
+                raise KeyError(f"Unknown card: {id}")
+            if fields.get("column_id"):
+                self._check_column(c, card["board_id"], fields["column_id"])
             c.execute(f"UPDATE cards SET {', '.join(f'{k}=?' for k in fields)} WHERE id=?", (*fields.values(), id))
             return row_to_dict(c.execute("SELECT * FROM cards WHERE id=?", (id,)).fetchone(), ("labels",))
 
     def move_card(self, id: str, column_id: str, before_card_id: str | None = None) -> dict[str, Any] | None:
         with self.db.tx() as c:
+            card = c.execute("SELECT board_id FROM cards WHERE id=?", (id,)).fetchone()
+            if not card:
+                raise KeyError(f"Unknown card: {id}")
+            self._check_column(c, card["board_id"], column_id)
             if before_card_id:
                 b = c.execute("SELECT position FROM cards WHERE id=?", (before_card_id,)).fetchone()
                 prev = c.execute("SELECT MAX(position) FROM cards WHERE column_id=? AND position < ?", (column_id, b["position"])).fetchone()[0] if b else None

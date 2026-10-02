@@ -66,6 +66,11 @@ def recording_dir(data_dir: Path, meeting_id: str) -> Path:
     return data_dir / RECORDINGS_DIRNAME / meeting_id
 
 
+# Consecutive empty native reads before the channel reports that nothing is arriving.
+EMPTY_READS_BEFORE_WARNING = 3
+NO_AUDIO = "no audio is arriving from the capture device"
+
+
 class RecorderBusy(RuntimeError):
     """Something is already recording. The route turns this into a 409."""
 
@@ -228,6 +233,7 @@ class ChannelCapture(_RecorderThread):
         which we can only trust once the next file has been opened.
         """
         seq = self._next
+        empty_reads = 0
         while not self.halt.is_set() and not self.stopping:
             elapsed = time.time() - self.session_start
             remaining = self.max_seconds - elapsed
@@ -247,7 +253,16 @@ class ChannelCapture(_RecorderThread):
             if len(pcm) < min_pcm:
                 if self.stopping or self.halt.is_set() or remaining <= 0.05:
                     break
+                # A device that vanished mid-capture returns empty reads forever with no error.
+                # Say so in the status, but keep reading: tearing the channel down here would also
+                # end a recording whose source simply had nothing to deliver for a while.
+                empty_reads += 1
+                if empty_reads >= EMPTY_READS_BEFORE_WARNING and not self.error:
+                    self.error = NO_AUDIO
                 continue
+            empty_reads = 0
+            if self.error == NO_AUDIO:
+                self.error = ""
             path = self.out_dir / f"{self.channel}-{seq:05d}.wav"
             if not audiocap.write_pcm16_wav(path, pcm):
                 raise RuntimeError("could not write segment wav")
@@ -653,6 +668,11 @@ class RecordingSession:
         # coming up there is no thread to see, but the microphone is already claimed.
         return (self.starting or any(c.is_alive() for c in self.captures.values())
                 or self.worker.is_alive())
+
+    def captures_dead(self) -> bool:
+        """True once every channel thread has exited on its own (gave up), not because of a stop."""
+        return (not self.starting and not self.stopping and bool(self.captures)
+                and not any(c.is_alive() for c in self.captures.values()))
 
     @property
     def pending(self) -> int:

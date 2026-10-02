@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronLeft, ChevronRight, PanelLeftOpen, Calendar as CalIcon, Plus, RefreshCw } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
@@ -8,6 +8,7 @@ import EventEditor, { eventColor, primeCalendarMeta, type EventDraft } from './E
 import { useVisibleCalendars } from './useVisibleCalendars'
 import { scheduleTodo } from './TodoItem'
 import type { CalendarEvent, GoogleCalendar } from '@shared/types'
+import { oneLine } from '../lib/emailAsk'
 import { lines, usePageContext } from '../lib/pageContext'
 import { calendarViewKey, readView, writeView } from '../lib/viewCache'
 import AppSwitcher from './AppSwitcher'
@@ -88,31 +89,38 @@ export default function CalendarView(): JSX.Element {
 
   // The week on screen is the saved copy until this returns. `refresh` is the Refresh
   // button: it still only asks Google for what changed, and the grid stays up meanwhile.
+  // Every fetch takes a number and only the newest may paint, so a slow Refresh that lands after
+  // "Next week" cannot put the previous week's events over the current one.
+  const seq = useRef(0)
   const load = async (refresh = false): Promise<void> => {
     if (!google?.connected || query == null) return
     if (!query) { setEvents([]); return }
     const key = calendarViewKey(week.toISOString(), 7, query)
+    const mine = ++seq.current
     if (refresh) setLoading(true)
     setError(null)
     try {
       const list = await api.google.calendarRange(week.toISOString(), 7, query, refresh)
       writeView(key, list)
+      if (seq.current !== mine) return
       setEvents(list)
+      setError(null)
     } catch (e) {
-      setError((e as Error).message)
+      if (seq.current === mine) setError((e as Error).message)
     } finally {
-      setLoading(false)
+      if (seq.current === mine) setLoading(false)
     }
   }
   useEffect(() => {
+    const mine = ++seq.current
     if (!google?.connected || query == null) return
     if (!query) return
     const key = calendarViewKey(week.toISOString(), 7, query)
     let alive = true
     api.google.calendarRange(week.toISOString(), 7, query)
-      .then((list) => { if (alive) { writeView(key, list); setEvents(list) } })
-      .catch((e) => { if (alive) setError((e as Error).message) })
-      .finally(() => { if (alive) setLoading(false) })
+      .then((list) => { writeView(key, list); if (alive && seq.current === mine) { setEvents(list); setError(null) } })
+      .catch((e) => { if (alive && seq.current === mine) setError((e as Error).message) })
+      .finally(() => { if (alive && seq.current === mine) setLoading(false) })
     return () => { alive = false }
   }, [week, google?.connected, query])
   useEffect(() => { void refreshTodos('all', false) }, [refreshTodos])
@@ -166,15 +174,19 @@ export default function CalendarView(): JSX.Element {
   }
 
   const focus = editing?.event ?? null
-  const fmtEvent = (e: CalendarEvent): string =>
-    `${e.all_day ? e.start : new Date(e.start).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })} — ${e.summary || '(no title)'} (\`${e.id}\`)${e.location ? ` at ${e.location}` : ''}`
+  const fmtEvent = (e: CalendarEvent): string => {
+    const when = e.all_day ? e.start : new Date(e.start).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })
+    const title = oneLine(e.summary || '') || '(no title)'
+    const loc = e.location ? ` at ${oneLine(e.location, 80)}` : ''
+    return `${when} — ${title} (\`${oneLine(e.id, 80)}\`)${loc}`
+  }
   const span = `${days[0].toDateString()} – ${days[6].toDateString()}`
   usePageContext(() => ({
     view: 'calendar',
-    label: focus ? `Event “${focus.summary || 'untitled'}”` : `Calendar · ${span}`,
+    label: focus ? `Event “${oneLine(focus.summary || '') || 'untitled'}”` : `Calendar · ${span}`,
     detail: [
       `The week of ${span} is on screen.`,
-      focus ? `The user is editing this event: ${fmtEvent(focus)}${focus.description ? `\n\n${focus.description}` : ''}` : '',
+      focus ? `The user is editing this event: ${fmtEvent(focus)}${focus.description ? `\n\n${oneLine(focus.description, 400)}` : ''}` : '',
       events.length ? `Events that week:\n${lines(events, fmtEvent)}` : 'No events that week.',
       todos.some((t) => !t.done && t.due) ? `Todos with dates:\n${lines(todos.filter((t) => !t.done && t.due), (t) => `${t.due} — ${t.title} (\`${t.id}\`)`)}` : ''
     ].filter(Boolean).join('\n\n'),

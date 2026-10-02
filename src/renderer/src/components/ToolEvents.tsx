@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ChevronRight, Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, AlertCircle, Laptop, Zap, ListChecks, PenLine, ShieldAlert, ShieldCheck,
   FolderOpen, FileText, FilePen, Trash2, PackageCheck, CircleHelp, CircleCheck,
   Youtube, Github, Rss } from 'lucide-react'
-import type { DocRevision, ToolEvent, Verification } from '@shared/types'
+import type { ApprovalDecision, DocRevision, ToolEvent, Verification } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore } from '../store'
 import DiffView from './DiffView'
@@ -200,6 +200,17 @@ function AskAnswer({ callId, question, context, conversationId }: {
 export default function ToolEvents({ events, conversationId }: { events: ToolEvent[]; conversationId: string }): JSX.Element {
   const [open, setOpen] = useState<Record<string, boolean>>({})
   const approveTool = useStore((s) => s.approveTool)
+  // Calls with an answer in flight: a second click would 404 against the first one's claim.
+  const [busy, setBusy] = useState<Record<string, boolean>>({})
+  const answer = async (id: string, decision: ApprovalDecision): Promise<void> => {
+    if (busy[id]) return
+    setBusy((b) => ({ ...b, [id]: true }))
+    try {
+      await approveTool(id, decision, conversationId)
+    } finally {
+      setBusy((b) => ({ ...b, [id]: false }))
+    }
+  }
   return (
     <div className="tool-events">
       {events.map((t) => (
@@ -230,18 +241,18 @@ export default function ToolEvents({ events, conversationId }: { events: ToolEve
           {/* A question is answered, not permitted, so desk_ask gets a text box instead of Allow/Deny. */}
           {t.pending && t.needs_approval && t.name === 'desk_ask' && (
             <AskAnswer callId={t.id} conversationId={conversationId}
-              question={String((t.arguments as { question?: unknown }).question ?? '')}
-              context={String((t.arguments as { context?: unknown }).context ?? '') || undefined} />
+              question={String(((t.arguments ?? {}) as { question?: unknown }).question ?? '')}
+              context={String(((t.arguments ?? {}) as { context?: unknown }).context ?? '') || undefined} />
           )}
           {t.pending && t.needs_approval && t.name !== 'propose_plan' && t.name !== 'desk_ask' && (
             <div className="approval">
               <div className="approval-text"><b>{t.name.replace(/_/g, ' ')}</b> wants to run. This acts outside the app.</div>
               <pre className="approval-args">{pretty(t.arguments)}</pre>
               <div className="approval-actions">
-                <button className="primary-btn" onClick={() => void approveTool(t.id, 'allow', conversationId)}>Allow once</button>
-                <button className="ghost-btn" onClick={() => void approveTool(t.id, 'always_chat', conversationId)}>Always in this chat</button>
-                <button className="ghost-btn" onClick={() => void approveTool(t.id, 'always_global', conversationId)}>Always</button>
-                <button className="ghost-btn danger" onClick={() => void approveTool(t.id, 'deny', conversationId)}>Deny</button>
+                <button className="primary-btn" disabled={!!busy[t.id]} onClick={() => void answer(t.id, 'allow')}>Allow once</button>
+                <button className="ghost-btn" disabled={!!busy[t.id]} onClick={() => void answer(t.id, 'always_chat')}>Always in this chat</button>
+                <button className="ghost-btn" disabled={!!busy[t.id]} onClick={() => void answer(t.id, 'always_global')}>Always</button>
+                <button className="ghost-btn danger" disabled={!!busy[t.id]} onClick={() => void answer(t.id, 'deny')}>Deny</button>
               </div>
             </div>
           )}

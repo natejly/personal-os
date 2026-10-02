@@ -211,6 +211,27 @@ def test_read_tool_result_tool_pages_the_handle() -> None:
     check("error" in bad and handle["result_id"] in str(bad), "an unknown id is a shaped error that names the live handles")
 
 
+def test_paging_an_untrusted_handle_taints_again() -> None:
+    cid = new_conv()
+    result = big_result()
+    handle = json.loads(appmod.tool_results.for_model(cid, "msg1", "gmail_read", result, untrusted=True))
+    check(handle["shape"].get("untrusted") is True, "the stored shape remembers that the blob is untrusted")
+    ctx: dict[str, Any] = {"project_id": None, "conversation_id": cid, "tainted": False}
+
+    async def go() -> Any:
+        return await appmod.toolbox.call("read_tool_result", {"result_id": handle["result_id"], "offset": 0, "limit": 200}, ctx)
+
+    ok = asyncio.run(go())
+    check("error" not in ok, "the page comes back")
+    check(ctx.get("tainted") is True, "reading the stored mail taints the run again")
+    check("read_tool_result" in ctx.get("taint_sources", []), "the source is named")
+    check(appmod.toolbox.gate("gmail_send", "on", ctx) == "ask", "mail asks after the page")
+    clean: dict[str, Any] = {"project_id": None, "conversation_id": cid, "tainted": False}
+    plain = json.loads(appmod.tool_results.for_model(cid, "msg1", "current_time", result))
+    asyncio.run(appmod.toolbox.call("read_tool_result", {"result_id": plain["result_id"], "offset": 0, "limit": 50}, clean))
+    check(clean.get("tainted") is not True, "a handle that was not untrusted stays clean")
+
+
 def test_chat_loop_hands_the_model_a_handle_not_a_truncation() -> None:
     cid = new_conv()
     SEEN.clear()
@@ -220,8 +241,10 @@ def test_chat_loop_hands_the_model_a_handle_not_a_truncation() -> None:
     tool_msgs = [m for m in SEEN[1] if m["role"] == "tool"]
     check(len(tool_msgs) == 1, "the tool answered into the context")
     src = (Path(__file__).resolve().parents[1] / "personal_os" / "app.py").read_text()
-    check("tool_results.for_model(conv_id, am[\"id\"], c[\"name\"], for_model)" in src,
-          "the tool-result append site goes through the handle store")
+    check("tool_results.for_model(conv_id, am[\"id\"], c[\"name\"], for_model, untrusted=brought_untrusted)" in src,
+          "the tool-result append site goes through the handle store and marks untrusted blobs")
+    check("brought_untrusted = bool(tool_ctx.get(\"tainted\"))" in src,
+          "a blob saved during an already-tainted run is marked, not only the call that first tainted it")
     check("summarize_result(for_model, 24000)" not in src, "the 24k truncation of model-facing results is gone")
 
 

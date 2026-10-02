@@ -47,6 +47,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
 POKE_DEBOUNCE = 2.0
 
 
+class _TargetGone(Exception):
+    """The calendar the mirror writes to no longer exists; carries its id."""
+
+
 def _is_missing(e: Exception) -> bool:
     s = str(e)
     return "404" in s or "410" in s or "not found" in s.lower() or "deleted" in s.lower()
@@ -93,6 +97,7 @@ class TodoCalendarMirror:
         self._event: asyncio.Event | None = None
         self._loop_ref: asyncio.AbstractEventLoop | None = None
         self._syncing = False
+        self._skipped: list[str] = []
 
     # ---- config / status ----
     def config(self) -> dict[str, Any]:
@@ -155,9 +160,26 @@ class TodoCalendarMirror:
         with self._lock:
             self._syncing = True
             try:
-                counts = self._mirror()
+                self._skipped = []
+                try:
+                    counts = self._mirror()
+                except _TargetGone as gone:
+                    # The remembered calendar was deleted in Google, or belongs to an account
+                    # that is no longer signed in. Forget it and start over on a fresh one,
+                    # once: without this every pass failed the same way until the id was
+                    # cleared by hand.
+                    cfg = self.config()
+                    if str(cfg["calendarId"] or "") != str(gone):
+                        raise
+                    log.warning("todo calendar mirror: calendar %s is gone, re-creating", gone)
+                    self._forget_all()
+                    self.set_settings({"googleTodoCalendar": {**cfg, "calendarId": ""}})
+                    self._skipped = []
+                    counts = self._mirror()
                 self.last_sync = time.time()
-                self.last_error = None
+                # A todo Google refused is reported, but it no longer stops the rest mirroring.
+                self.last_error = (f"{len(self._skipped)} todo(s) could not be mirrored: {self._skipped[0]}"
+                                   if self._skipped else None)
                 self.last_result = counts
                 return counts
             except Exception as e:  # noqa: BLE001
@@ -206,32 +228,39 @@ class TodoCalendarMirror:
             counts["removed"] += 1
 
         for td in rows:
-            eid = td.get("calendar_event_id")
-            cal = td.get("calendar_id") or (target if eid is None else "primary")
-            if not self._wanted(td, keep_completed):
-                if eid:
-                    self._delete_event(eid, cal)
-                    self.todos.set_calendar_state(td["id"], None, None, None, None)
-                    counts["removed"] += 1
+            try:
+                outcome = self._mirror_one(td, target, keep_completed)
+            except (GoogleNotConnected, _TargetGone):
+                raise
+            except Exception as e:  # noqa: BLE001 - one refused todo must not block the rest
+                log.warning("todo calendar mirror: skipped todo %s: %s", td["id"], e)
+                self._skipped.append(f"{(td.get('title') or '(untitled)')[:60]}: {str(e)[:160] or type(e).__name__}")
                 continue
-            if not eid:
-                self._create(td, target)
-                counts["created"] += 1
-                continue
-            sig = _read_sig(td.get("calendar_sig"))
-            if sig is None:
-                # An event someone made by hand (per-todo button, drag onto the week grid).
-                # Record where it stands; do not rewrite what they chose.
-                if self._adopt(td, eid, cal):
-                    counts["adopted"] += 1
-                else:
-                    self._create(td, target)
-                    counts["created"] += 1
-                continue
-            outcome = self._update(td, eid, cal, sig, target)
             if outcome != "unchanged":
                 counts[outcome] += 1
         return counts
+
+    def _mirror_one(self, td: dict[str, Any], target: str, keep_completed: bool) -> str:
+        eid = td.get("calendar_event_id")
+        cal = td.get("calendar_id") or (target if eid is None else "primary")
+        if not self._wanted(td, keep_completed):
+            if not eid:
+                return "unchanged"
+            self._delete_event(eid, cal)
+            self.todos.set_calendar_state(td["id"], None, None, None, None)
+            return "removed"
+        if not eid:
+            self._create(td, target)
+            return "created"
+        sig = _read_sig(td.get("calendar_sig"))
+        if sig is None:
+            # An event someone made by hand (per-todo button, drag onto the week grid).
+            # Record where it stands; do not rewrite what they chose.
+            if self._adopt(td, eid, cal):
+                return "adopted"
+            self._create(td, target)
+            return "created"
+        return self._update(td, eid, cal, sig, target)
 
     def _body(self, td: dict[str, Any], clock: str | None) -> dict[str, Any]:
         return {
@@ -243,7 +272,13 @@ class TodoCalendarMirror:
         }
 
     def _create(self, td: dict[str, Any], calendar_id: str) -> None:
-        ev = self.google.calendar_create(self._body(td, None), calendar_id)
+        try:
+            ev = self.google.calendar_create(self._body(td, None), calendar_id)
+        except Exception as e:  # noqa: BLE001
+            # An insert only 404s when the calendar itself is gone.
+            if _is_missing(e):
+                raise _TargetGone(calendar_id) from e
+            raise
         self.todos.set_calendar_state(td["id"], ev["id"], ev.get("link"), calendar_id, _sig(td, None))
 
     def _adopt(self, td: dict[str, Any], event_id: str, calendar_id: str) -> bool:

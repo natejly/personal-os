@@ -15,6 +15,8 @@ export default function DashboardWidget({ window: win, live, onTitle }: WidgetPr
   const [widget, setWidget] = useState<Widget | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // Bumped by Retry to re-run the load effect.
+  const [attempt, setAttempt] = useState(0)
 
   // There is no `GET /widgets/{id}` (contract §6), so the widget is picked out of its dashboard — and
   // only while the window is live, so an off-screen window issues no request at all.
@@ -31,7 +33,7 @@ export default function DashboardWidget({ window: win, live, onTitle }: WidgetPr
       })
       .catch((e: Error) => { if (ok) setError(e.message) })
     return () => { ok = false }
-  }, [live, dashboardId, refId])
+  }, [live, dashboardId, refId, attempt])
 
   useEffect(() => {
     if (widget && !win.title) onTitle(widget.title)
@@ -53,11 +55,20 @@ export default function DashboardWidget({ window: win, live, onTitle }: WidgetPr
   if (!dashboardId || !refId) return <div className="widget"><div className="widget-error">No dashboard widget bound to this window.</div></div>
   // The iframe is the single most expensive thing on the plane; `live` is what unmounts it.
   if (!live) return <div className="widget"><div className="widget-empty">{widget?.title || 'Widget'} · paused</div></div>
-  if (error) return <div className="widget"><div className="widget-error">{error}</div></div>
+  if (!widget && error) {
+    return (
+      <div className="widget">
+        <div className="widget-error">{error}</div>
+        <button className="ghost-btn" onClick={() => { setError(null); setAttempt((n) => n + 1) }}><RefreshCw size={12} /> Retry</button>
+      </div>
+    )
+  }
   if (!widget) return <div className="widget"><div className="widget-empty">Loading…</div></div>
 
   return (
     <div className="widget">
+      {/* A failed refresh must not take away the widget that is already loaded. */}
+      {error && <div className="widget-error" role="alert">{error}</div>}
       <div className="widget-bar">
         <span className="widget-title">{widget.title}</span>
         <span className="spacer" />

@@ -15,10 +15,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import sqlite3
 from typing import Any, Iterable
 
 from .db import Database, new_id, now, row_to_dict
+
+log = logging.getLogger(__name__)
+MAX_DESCRIPTION_CHARS = 4000  # a description is read by the model on every turn; a server does not get unlimited prompt space
 
 # Mirrors DEFAULT_MODE / ToolSpec.danger in tools.py, which owns the built-in permission model.
 DANGER_LEVELS = ("safe", "writes", "network", "executes", "external")  # "plan" is built-in only: see plans.py
@@ -334,10 +338,14 @@ class McpServers:
                 name = str(spec.get("name") or "").strip()
                 if not name:
                     continue
+                if name in seen:  # UNIQUE(server_id, name): keep the first, or registration raises forever
+                    log.warning("MCP server %s listed tool %r twice; keeping the first", srv["slug"], name)
+                    continue
                 params = spec.get("parameters")
                 if params is None:
                     params = spec.get("inputSchema") or {}
-                desc = str(spec.get("description") or "")
+                # Capped before hashing so the hash always describes what is stored and forwarded.
+                desc = str(spec.get("description") or "")[:MAX_DESCRIPTION_CHARS]
                 danger = spec.get("danger") if spec.get("danger") in DANGER_LEVELS else DEFAULT_DANGER
                 h = schema_hash(name, desc, params)
                 seen.add(name)

@@ -530,6 +530,10 @@ class Topic:
 
     async def subscribe(self, since: int = 0) -> AsyncIterator[str]:
         """Replay the ring past `since`, then follow forever — until the client goes away."""
+        # seq lives in memory and restarts at 0 with the backend; a cursor ahead of it came from the
+        # previous process, and honouring it would drop every event until the counter caught up.
+        if since > self.seq:
+            since = 0
         sub = _Sub()
         self._subs.add(sub)
         getter: asyncio.Task[RunEvent | None] | None = None

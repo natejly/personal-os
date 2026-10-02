@@ -16,7 +16,7 @@ from typing import Iterable
 RULES: dict[str, tuple[re.Pattern[str], str]] = {
     "private_key": (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.S), "[private-key]"),
     # https://user:password@host and ?token= / #access_token= never match the prefixed-key rules.
-    "url_userinfo": (re.compile(r"(https?://)[^/\s:@]+:[^/\s@]+@"), r"\1[redacted]@"),
+    "url_userinfo": (re.compile(r"(https?://)[^/\s:@]+:[^/\s@]+@", re.I), r"\1[redacted]@"),
     "url_secret_param": (re.compile(
         r"([?#&](?:access_token|refresh_token|id_token|client_secret|api_key|apikey|password|passwd|"
         r"secret|signature|token|auth|key|sig)=)[^&#\s]+", re.I), r"\1[redacted]"),

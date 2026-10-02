@@ -1053,6 +1053,7 @@ class InputCollector(Collector):
         super().__init__(monitor)
         self.lock = threading.Lock()
         self.loop_ref: Any = None
+        self.tap: Any = None
         self.secure_blocked = 0
         self.reset()
 
@@ -1091,6 +1092,7 @@ class InputCollector(Collector):
         if not tap:
             self.error = "the system refused the event tap (check Accessibility / Input Monitoring)"
             return
+        self.tap = tap
         source = q.CFMachPortCreateRunLoopSource(None, tap, 0)
         self.loop_ref = q.CFRunLoopGetCurrent()
         q.CFRunLoopAddSource(self.loop_ref, source, q.kCFRunLoopCommonModes)
@@ -1117,9 +1119,15 @@ class InputCollector(Collector):
     # -- tap callback: stays fast, returns the event untouched (listen-only tap) --
     def _on_event(self, proxy: Any, etype: Any, event: Any, refcon: Any) -> Any:
         try:
+            q = _pyobjc["Quartz"]
+            if etype in (0xFFFFFFFE, 0xFFFFFFFF):
+                # kCGEventTapDisabledByTimeout / ByUserInput: macOS switched the tap off. Turn it
+                # back on and count nothing, or capture silently stops with no error shown.
+                if self.tap is not None:
+                    q.CGEventTapEnable(self.tap, True)
+                return event
             if not self.active:
                 return event
-            q = _pyobjc["Quartz"]
             # Outside the lock: the frontmost-app lookup must not stall the tap.
             withheld = self._withheld()
             with self.lock:
@@ -1258,11 +1266,18 @@ class AudioCollector(Collector):
                         self.error = (r.stderr or "ffmpeg produced no audio").strip()[:200]
                         self.sleep(5)
                         continue
+                # Pause/Stop can land during the capture; the chunk must not then reach an STT
+                # service or the store ("nothing is written while paused").
+                if not self.active:
+                    continue
                 text = self._transcribe(path, str(audio.get("model") or "whisper-1"))
             except subprocess.TimeoutExpired:
                 self.error = "ffmpeg timed out"
             except Exception as e:  # noqa: BLE001
                 self.error = f"{type(e).__name__}: {e}"
+                # A capture that fails fast (permission denied) would otherwise retry in a hot loop.
+                self.sleep(5)
+                continue
             finally:
                 with contextlib.suppress(Exception):
                     path.unlink(missing_ok=True)
@@ -1272,7 +1287,7 @@ class AudioCollector(Collector):
             if window_withheld(self.m.gate, self.m.last_focus, live_app, live_title):
                 continue
             text = self._accept_transcript((text or "").strip(), mark)
-            if len(text) < int(audio.get("minChars") or 12):
+            if len(text) < int(audio.get("minChars") or 12) or not self.active:
                 continue
             app = (self.m.last_focus or {}).get("app", "")
             self.m.store.add(
@@ -1414,7 +1429,15 @@ class Monitor:
         return _deep_merge(DEFAULT_CONFIG, stored if isinstance(stored, dict) else {})
 
     def set_config(self, patch: dict[str, Any]) -> dict[str, Any]:
-        cfg = _deep_merge(self.config(), patch or {})
+        cur = self.config()
+        patch = dict(patch or {})
+        if cur.get("palantir") and patch.get("palantir") is not False:
+            # While the mode is on these three are flattened on purpose; an edit to them is the
+            # user's new baseline, so it goes into the snapshot that turning the mode off restores.
+            kept = {k: patch.pop(k) for k in ("excludeApps", "excludeTitlePatterns", "redact") if k in patch}
+            if kept:
+                patch["palantirRestore"] = {**(cur.get("palantirRestore") or {}), **kept}
+        cfg = _deep_merge(cur, patch)
         cfg["signals"] = {k: bool(v) for k, v in (cfg.get("signals") or {}).items() if k in SIGNALS}
         self.db.set_settings({"activity": cfg})
         if not cfg.get("enabled"):
@@ -1571,8 +1594,12 @@ class Monitor:
         return f"In {where} for {held}."
 
     # ---- rollup ----
-    def _digest(self, events: list[dict[str, Any]]) -> tuple[str, list[str]]:
-        """Fold raw events into a compact text digest plus the app ranking."""
+    def _digest(self, events: list[dict[str, Any]], *, content: bool = True) -> tuple[str, list[str]]:
+        """Fold raw events into a compact text digest plus the app ranking.
+
+        `content=False` leaves out window titles, URLs, typed fragments and heard text: counts and
+        app names only, for a fallback that is stored for months and written into activity.md.
+        """
         by_app: dict[str, float] = {}
         titles: dict[str, set[str]] = {}
         urls: set[str] = set()
@@ -1588,9 +1615,9 @@ class Monitor:
             if e["kind"] == "focus":
                 secs = e["duration_ms"] / 1000.0
                 by_app[e["app"]] = by_app.get(e["app"], 0.0) + secs
-                if e["title"]:
+                if e["title"] and content:
                     titles.setdefault(e["app"], set()).add(e["title"][:120])
-                if e["url"]:
+                if e["url"] and content:
                     urls.add(e["url"][:200])
             elif e["kind"] == "input":
                 keys += int(meta.get("keys") or 0)
@@ -1599,9 +1626,9 @@ class Monitor:
                 secure_skipped += int(meta.get("secure_skipped") or 0)
                 if meta.get("wpm"):
                     wpms.append(float(meta["wpm"]))
-                if e["text"]:
+                if e["text"] and content:
                     typed.append(e["text"])
-            elif e["kind"] == "audio":
+            elif e["kind"] == "audio" and content:
                 heard.append(f"[{meta.get('channel', '?')}] {e['text']}")
             elif e["kind"] == "idle":
                 idle_total += float(meta.get("since_seconds") or 0)
@@ -1654,6 +1681,12 @@ class Monitor:
                 data = _parse_json(raw)
                 head = str(data.get("headline") or "").strip()[:120]
                 body = str(data.get("summary") or "").strip()
+                if not head and not body:
+                    # Not JSON, or JSON with nothing in it: storing that would erase the period
+                    # and mark every event rolled up. Leave them pending for the next pass.
+                    self.last_error = "rollup failed: the model returned no summary"
+                    log.warning("activity: %s", self.last_error)
+                    return None
                 extras = [str(s) for s in (data.get("signals") or []) if str(s).strip()][:6]
                 topics = [str(t) for t in (data.get("topics") or []) if str(t).strip()][:10]
                 if topics:
@@ -1665,7 +1698,10 @@ class Monitor:
                 self.last_error = f"rollup failed: {type(e).__name__}: {e}"
                 log.warning("activity: %s", self.last_error)
                 head = head or f"{_fmt_minutes(sum(e['duration_ms'] / 1000 for e in events))} of activity"
-                body = body or f"Summary unavailable ({e}). Raw digest:\n\n{digest[:1500]}"
+                # Counts and app names only: this text lives for the summary retention and is
+                # written into activity.md, so it must not carry typed or heard content.
+                safe_digest = self._digest(events, content=False)[0]
+                body = body or f"Summary unavailable ({type(e).__name__}). Digest:\n\n{safe_digest[:1500]}"
 
             summary = self.store.add_summary(_day_of(start), start, end, head, body, ranked, len(events))
             self.store.mark_rolled([e["id"] for e in events])
@@ -1760,6 +1796,11 @@ class Monitor:
         cfg = self.config()
         out = self.store.purge(scope, float(cfg["retentionHours"]), float(cfg["summaryRetentionDays"]))
         derived = self.insights.purge(everything=scope == "all", keep_days=float(cfg["summaryRetentionDays"]))
+        # The pattern snapshot carries raw window titles, so it goes with the events it came from.
+        if scope == "events":
+            self.insights.purge_patterns()
+        elif scope == "expired":
+            self.insights.purge_patterns(float(cfg["retentionHours"]) * 3600)
         self.write_markdown()
         return {**out, **{f"insight_{k}": v for k, v in derived.items()}}
 
@@ -1806,6 +1847,7 @@ class Monitor:
                 self._check_pause()
                 self.store.purge("expired", float(cfg["retentionHours"]), float(cfg["summaryRetentionDays"]))
                 self.insights.days.purge(float(cfg["summaryRetentionDays"]))
+                self.insights.purge_patterns(float(cfg["retentionHours"]) * 3600)
                 if self.running:
                     await self.rollup_once()
                     hours = float(cfg.get("profileEveryHours") or 6)

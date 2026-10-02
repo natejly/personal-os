@@ -86,7 +86,10 @@ class TodosModule(Module):
         def create_todo(body: TodoIn) -> dict[str, Any]:
             if not body.title.strip():
                 raise HTTPException(400, "Empty title")
-            return store.create(body.title, ctx.wsid(body.project_id), body.notes, body.due, body.priority)
+            try:
+                return store.create(body.title, ctx.wsid(body.project_id), body.notes, body.due, body.priority)
+            except ValueError as e:
+                raise HTTPException(400, str(e)) from e
 
         @r.put("/todos/{id}")
         def update_todo(id: str, body: TodoPatch) -> dict[str, Any]:
@@ -97,7 +100,10 @@ class TodosModule(Module):
                 patch["project_id"] = None
             elif "project_id" in patch:
                 patch["project_id"] = ctx.wsid(patch["project_id"])
-            t = store.update(id, patch)
+            try:
+                t = store.update(id, patch)
+            except ValueError as e:
+                raise HTTPException(400, str(e)) from e
             if not t:
                 raise HTTPException(404)
             return t

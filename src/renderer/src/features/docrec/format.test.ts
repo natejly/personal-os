@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { fmtDuration, modeLabel, recordingWhen, summaryCopy } from './format'
+import { fmtDuration, headlineTitle, isUntitled, modeLabel, recordingWhen, summaryCopy } from './format'
 
 test('fmtDuration steps from seconds to minutes to hours', () => {
   assert.equal(fmtDuration(42000), '42s')
@@ -38,4 +38,16 @@ test('summaryCopy covers each state and puts an error first', () => {
 
 test('dictation says it has no summary rather than looking broken', () => {
   assert.match(summaryCopy('none', 'dictate', 'ready', null, false).text, /no summary/)
+})
+
+test('isUntitled is true only for blank or placeholder titles', () => {
+  assert.equal(isUntitled(''), true)
+  assert.equal(isUntitled('  Untitled '), true)
+  assert.equal(isUntitled(undefined), true)
+  assert.equal(isUntitled('Q3 plan'), false)
+})
+
+test('headlineTitle clips to 80 characters on one line', () => {
+  assert.equal(headlineTitle('a\n b'), 'a b')
+  assert.equal(headlineTitle('x'.repeat(200)).length, 80)
 })

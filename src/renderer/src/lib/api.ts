@@ -2,7 +2,7 @@ import type {
   BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, DriveFile, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Artifact, ArtifactVersion, Recap, Conversation, ConversationSettings, ContextUsed, ContextMeter, Document, GraphData, GraphEdge, GraphNode, Message,
   ApprovalDecision, PermissionEvaluation, PlanEdit,
   Memory, MemoryProposal, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
-  Command, Workflow, WorkflowRun, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
+  Command, AgentDef, BuiltinAgent, Workflow, WorkflowRun, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
   Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
   Desk, DeskAutonomy, DeskBudget, DeskDiff, DeskEvent, DeskFilePreview, DeskFileTree, DeskOutput, DeskRichPreview,
   DeskStatus, FullDesk, PlanRecord, PromotionKind, PromotionResult,
@@ -401,6 +401,14 @@ export const api = {
     create: (text: string) => req<Command>('/commands', { method: 'POST', body: json({ text }) }),
     update: (id: string, text: string) => req<Command>(`/commands/${id}`, { method: 'PUT', body: json({ text }) }),
     delete: (id: string) => req<{ ok: boolean }>(`/commands/${id}`, { method: 'DELETE' })
+  },
+  /** Agent definitions: built-in roles plus the user's own, which cannot be spawned until approved. */
+  agentDefs: {
+    list: () => req<{ builtin: BuiltinAgent[]; custom: AgentDef[] }>('/agents/defs'),
+    create: (text: string) => req<AgentDef>('/agents/defs', { method: 'POST', body: json({ text }) }),
+    update: (id: string, text: string) => req<AgentDef>(`/agents/defs/${id}`, { method: 'PUT', body: json({ text }) }),
+    approve: (id: string, approved: boolean) => req<AgentDef>(`/agents/defs/${id}/approve?approved=${approved}`, { method: 'POST' }),
+    delete: (id: string) => req<{ ok: boolean }>(`/agents/defs/${id}`, { method: 'DELETE' })
   },
   /** Procedural memory. Nothing here is injected until its status is 'approved'. */
   skills: {

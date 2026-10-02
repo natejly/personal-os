@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
-import { BookOpen, FileText, KanbanSquare, LayoutDashboard, Package, PanelLeftOpen, Plug, Sparkles, Workflow } from 'lucide-react'
+import { BookOpen, FileText, KanbanSquare, LayoutDashboard, Package, PanelLeftOpen, Plug, Sparkles, Terminal, Users, Workflow } from 'lucide-react'
 import { useStore, type LibraryTab } from '../store'
 import { api } from '../lib/api'
 import type { Artifact, Board, Dashboard } from '@shared/types'
 import SkillsPanel from './SkillsPanel'
 import McpSettings from './McpSettings'
 import WorkflowsPanel from './WorkflowsPanel'
+import { AgentsPanel, CommandsPanel } from './DefsPanels'
 import AppSwitcher from './AppSwitcher'
 import ArtifactsView from './ArtifactsView'
 import ArtifactViewer from './ArtifactViewer'
@@ -13,6 +14,8 @@ import ArtifactViewer from './ArtifactViewer'
 const TABS: { key: LibraryTab; label: string; icon: JSX.Element; blurb: string }[] = [
   { key: 'skills', label: 'Skills', icon: <Sparkles size={14} />, blurb: 'Procedures the assistant may follow again' },
   { key: 'workflows', label: 'Workflows', icon: <Workflow size={14} />, blurb: 'Repeatable multi-step jobs you approve once, by hash' },
+  { key: 'agents', label: 'Agents', icon: <Users size={14} />, blurb: 'Agent roles you write; they cannot be spawned until you approve them' },
+  { key: 'commands', label: 'Commands', icon: <Terminal size={14} />, blurb: 'Saved prompt templates with $ARGUMENTS' },
   { key: 'connectors', label: 'Connectors', icon: <Plug size={14} />, blurb: 'MCP servers whose tools the assistant can call' },
   { key: 'artifacts', label: 'Artifacts', icon: <Package size={14} />, blurb: 'Interactive pages the assistant built, with version history' },
   { key: 'made', label: 'Made', icon: <BookOpen size={14} />, blurb: 'Everything built in this app, in one place' }
@@ -125,6 +128,8 @@ export default function LibraryView(): JSX.Element {
       <div className="page-body">
         {tab === 'skills' && <SkillsPanel />}
         {tab === 'workflows' && <WorkflowsPanel />}
+        {tab === 'agents' && <AgentsPanel />}
+        {tab === 'commands' && <CommandsPanel />}
         {tab === 'connectors' && <div className="library-panel"><McpSettings /></div>}
         {tab === 'artifacts' && <ArtifactsView />}
         {tab === 'made' && <MadePanel />}

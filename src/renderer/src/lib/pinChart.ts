@@ -12,5 +12,6 @@ export async function pinChart(spec: Spec): Promise<void> {
   // `spec` is a ready widget spec, so the backend binds the stored rows and makes no model call
   const w = await api.dashboards.addWidget(d.id, { kind: 'chart', title: spec.title || `${spec.type} chart`, spec: chartToWidgetSpec(spec) })
   const cv = useCanvas.getState()
-  if (cv.activeCanvasId) await cv.openWindow('dashboard-widget', w.id, undefined, { dashboard_id: d.id }, cv.activeCanvasId)
+  if (!cv.activeCanvasId) throw new Error('Saved to the Pinned charts dashboard, but no space is open to show it in')
+  await cv.openWindow('dashboard-widget', w.id, undefined, { dashboard_id: d.id }, cv.activeCanvasId)
 }

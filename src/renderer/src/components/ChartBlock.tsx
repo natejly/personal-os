@@ -201,6 +201,7 @@ export default function ChartBlock({ source, streaming }: { source: string; stre
   const [view, setView] = useState<'chart' | 'table' | 'source'>('chart')
   const [copied, setCopied] = useState(false)
   const [pinned, setPinned] = useState<'' | 'busy' | 'done' | 'err'>('')
+  const [pinErr, setPinErr] = useState('')
   const parsed = useMemo<{ spec: Spec } | { error: string }>(() => {
     try { return { spec: parseSpec(source) } } catch (e) { return { error: (e as Error).message } }
   }, [source])
@@ -224,7 +225,8 @@ export default function ChartBlock({ source, streaming }: { source: string; stre
           <button className={`icon-btn ghost ${view === 'chart' ? 'on' : ''}`} title="Chart" onClick={() => setView('chart')}><BarChart3 size={13} /></button>
           <button className={`icon-btn ghost ${view === 'table' ? 'on' : ''}`} title="Data table" onClick={() => setView('table')}><Table2 size={13} /></button>
           <button className={`icon-btn ghost ${view === 'source' ? 'on' : ''}`} title="Spec source" onClick={() => setView('source')}><Code2 size={13} /></button>
-          {!streaming && <button className="icon-btn ghost" title={pinned === 'done' ? 'Pinned (static data, does not refresh)' : pinned === 'err' ? 'Pin failed' : 'Pin to the space as a widget (static data, does not refresh)'} disabled={pinned === 'busy'} onClick={() => { setPinned('busy'); pinChart(spec).then(() => setPinned('done'), () => setPinned('err')) }}>{pinned === 'done' ? <Check size={13} /> : <Pin size={13} />}</button>}
+          {!streaming && <button className="icon-btn ghost" title={pinned === 'done' ? 'Pinned (static data, does not refresh)' : pinned === 'err' ? pinErr || 'Pin failed' : 'Pin to the space as a widget (static data, does not refresh)'} disabled={pinned === 'busy'} onClick={() => { setPinned('busy'); pinChart(spec).then(() => setPinned('done'), (e) => { setPinErr((e as Error).message); setPinned('err') }) }}>{pinned === 'done' ? <Check size={13} /> : <Pin size={13} />}</button>}
+          {pinned === 'err' && <span role="alert" className="muted small">{pinErr || 'Pin failed'}</span>}
           <button className="icon-btn ghost" title="Copy spec" onClick={copy}>{copied ? <Check size={13} /> : <Copy size={13} />}</button>
         </div>
       </div>

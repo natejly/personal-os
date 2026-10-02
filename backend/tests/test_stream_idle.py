@@ -22,9 +22,8 @@ async def _run() -> str:
 
     server = await asyncio.start_server(silent, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
-    llm.STREAM_IDLE_S = 0.5
     try:
-        async for _ in llm.stream_chat({"baseUrl": f"http://127.0.0.1:{port}", "apiKey": "x"}, "m",
+        async for _ in llm.stream_chat({"baseUrl": f"http://127.0.0.1:{port}", "apiKey": "x", "llmIdleSeconds": 0.5}, "m",
                                        [{"role": "user", "content": "hi"}], cancel=asyncio.Event()):
             pass
     except llm.LLMError as e:
@@ -36,7 +35,7 @@ async def _run() -> str:
 
 def test_silent_stream_gives_up_with_an_error() -> None:
     msg = asyncio.run(asyncio.wait_for(_run(), 15))
-    assert "sent nothing" in msg
+    assert "stopped responding" in msg, msg
 
 
 if __name__ == "__main__":

@@ -126,9 +126,13 @@ def box(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> Toolbox:
     Net.calls, Net.routes = [], {}
     monkeypatch.setattr(httpx, "AsyncClient", FakeClient)
 
-    async def ok(host: str) -> None:
-        return None
+    async def ok(host: str) -> list[str]:
+        return ["93.184.216.34"]
     monkeypatch.setattr(tools, "_resolve", ok)
+
+    async def by_name(client: Any, method: str, url: str, host: str, **_: Any) -> Any:
+        return await client.get(url)  # address pinning is test_ssrf's business; these tests are about the cache
+    monkeypatch.setattr(tools, "_open_pinned", by_name)
     s = {**llm.DEFAULT_SETTINGS, "readerFallback": False}
     tb = Toolbox(None, None, None, lambda: s)  # type: ignore[arg-type]
     tb.web_cache = webread.WebCache(Database(tmp_path))

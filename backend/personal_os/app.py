@@ -1780,10 +1780,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             turn = {"role": "assistant", "content": "".join(buf[round_start:]).strip() or None,
                     "tool_calls": [{"id": c["id"], "type": "function", "function": {"name": c["name"], "arguments": c["arguments"] or "{}"}} for c in calls]}
             over = budget.exceeded()
-            if over and run is not None and (plan_seen or active_plan) and plans.covers(
-                    run.run_id, [(c["name"], _call_args(c)) for c in calls], desk_id=run.desk_id):
+            if (over and run is not None and run.desk_id is None and (plan_seen or active_plan)
+                    and plans.covers(run.run_id, [(c["name"], _call_args(c)) for c in calls], desk_id=run.desk_id)):
                 # Every call here is a step the user approved. The budget that ran out was spent drafting that
                 # plan, so refusing now would turn the approval into a dead end. The next round is still checked.
+                # Never a desk: a desk carries its remaining steps into a chained turn instead (_should_chain).
                 over = None
             if over:
                 # Out of budget: never drop the pending calls silently — answer each one, then let the model close out.

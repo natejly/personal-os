@@ -158,7 +158,8 @@ out = run(toolbox.call("search_documents", {"query": "automobile repair"}, {"pro
 check("garage.txt" in str(out), "tool uses hybrid search")
 
 # (g) delete removes embeddings
-client.delete(f"/documents/{big['id']}")
+client.delete(f"/documents/{big['id']}")  # to the trash
+client.delete(f"/trash/document/{big['id']}")
 with db.tx() as c:
     n = c.execute("SELECT COUNT(*) AS n FROM chunk_embeddings WHERE document_id=?", (big["id"],)).fetchone()["n"]
 check(n == 0, "embeddings cascade on delete")

@@ -172,14 +172,17 @@ check("error" in str(sd({"query": "x", "scope": "nope"})).lower(), "bad scope is
 
 # (c) deletes
 did = d2["id"]
-j("DELETE", f"/docs/{did}")
+j("DELETE", f"/docs/{did}")  # to the trash; chunks stay until it is purged
+j("DELETE", f"/trash/doc/{did}")
 check(not chunk_rows(did) and fts_n(did) == 0, "delete removes chunks and FTS")
 with db.tx() as c:
     check(c.execute("SELECT COUNT(*) AS n FROM doc_chunk_embeddings WHERE doc_id=?", (did,)).fetchone()["n"] == 0, "delete removes vectors")
 fd = j("POST", "/docs", {"title": "In folder", "content": "The narwhal lives in a folder.", "project_id": None, "folder": "Tmp"})
 j("POST", "/docs/folders", {"path": "Tmp"})
 j("DELETE", "/docs/folders?path=Tmp&delete_docs=true")
-check(fts_n(fd["id"]) == 0 and not chunk_rows(fd["id"]) and not docs.chunk_search("narwhal", None), "delete_folder(delete_docs) removes chunks")
+check(not docs.chunk_search("narwhal", None), "a doc trashed with its folder drops out of chunk search")
+j("DELETE", f"/trash/doc/{fd['id']}")
+check(fts_n(fd["id"]) == 0 and not chunk_rows(fd["id"]), "purging it removes chunks and FTS")
 
 # (i) backfill for a doc inserted behind our back
 with db.tx() as c:

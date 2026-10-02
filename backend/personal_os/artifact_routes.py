@@ -194,9 +194,9 @@ def make_router(store: A.Artifacts, settings_fn: Callable[[], dict[str, Any]],
 
     @r.get("/artifacts/{aid}/render")
     def render(aid: str, rt: str = "", re: str = "", v: int | None = None) -> HTMLResponse:
-        # Same 404 for a missing artifact and a bad token, so ids cannot be probed.
+        # A bad token is refused before the id is looked up, so ids cannot be probed through this route.
         if verify is not None and not verify(aid, rt, re):
-            raise HTTPException(404)
+            raise HTTPException(401, "Unauthorized")
         a = need(aid)
         code = a["code"]
         if v is not None and v != a["version"]:

@@ -275,7 +275,7 @@ RETRY_CAP_S = 30.0
 # A Retry-After longer than this is not worth holding a reply open for; say so instead.
 RETRY_AFTER_MAX_S = 60.0
 CONNECT_TIMEOUT_S = 10.0
-DEFAULT_IDLE_S = 90.0
+DEFAULT_IDLE_S = 300.0  # matches DEFAULT_SETTINGS["llmIdleSeconds"]
 
 
 def parse_retry_after(value: str | None, now: float | None = None) -> float | None:

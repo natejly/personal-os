@@ -67,7 +67,7 @@ def test_shim() -> None:
     check(A.inject_shim("<p>fragment</p>").endswith("</script>"), "a document with no body still gets it")
     check("fetch" not in A.SHIM and "localStorage" not in A.SHIM, "postMessage only")
     art = j("POST", "/artifacts", {"code": DOC})
-    r = client.get(f"/artifacts/{art['id']}/render")
+    r = client.get(art["render_path"])
     check(r.text.count(A.SHIM_MARKER) == 1 and "connect-src 'none'" in r.headers["content-security-policy"], "render route injects the shim under the CSP")
     check(A.SHIM_MARKER not in j("GET", f"/artifacts/{art['id']}")["code"], "the stored version never carries the shim")
 

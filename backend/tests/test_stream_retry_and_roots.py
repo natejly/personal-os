@@ -61,8 +61,9 @@ def main() -> None:
     text = "".join(e.get("text", "") for e in events if e.get("type") == "delta")
     assert calls == 3 and text == "hi", f"two refusals then a stream: retried and streamed once ({calls}, {events})"
     events, calls = run_stream([429] * 10)
-    assert calls == llm.STREAM_RETRIES + 1 and events[0]["type"] == "error" and "429" in events[0]["text"], \
-        f"a route that keeps refusing surfaces the error after {llm.STREAM_RETRIES} retries ({calls}, {events})"
+    retries = llm.DEFAULT_SETTINGS["llmRetries"]
+    assert calls == retries + 1 and events[0]["type"] == "error" and "429" in events[0]["text"], \
+        f"a route that keeps refusing surfaces the error after {retries} retries ({calls}, {events})"
     events, calls = run_stream([400])
     assert calls == 1 and events[0]["type"] == "error", "a 400 is not retried"
 

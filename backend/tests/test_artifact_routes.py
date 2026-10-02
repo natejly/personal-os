@@ -67,11 +67,14 @@ def test_create_edit_restore_render() -> None:
 
 
 def test_render_headers_and_auth() -> None:
-    r = bare.get(f"/artifacts/{fx['id']}/render")
-    check(r.status_code == 200, "render needs no token")
+    check(bare.get(f"/artifacts/{fx['id']}/render").status_code == 401, "render without its signed token is refused")
+    signed = j("GET", f"/artifacts/{fx['id']}")["render_path"]
+    check(bare.get(signed.replace("rt=", "rt=0")).status_code == 401, "a tampered token is refused")
+    r = bare.get(signed)
+    check(r.status_code == 200, "the signed render path needs no app token")
     csp = r.headers["content-security-policy"]
     check("connect-src 'none'" in csp and "sandbox allow-scripts" in csp, "strict CSP on render")
-    check(bare.get("/artifacts/nope/render").status_code == 404, "render of unknown id is 404")
+    check(bare.get("/artifacts/nope/render").status_code == 401, "render of an unknown id is refused like a bad token")
     check(bare.get(f"/artifacts/{fx['id']}").status_code == 401, "the JSON route still needs the token")
     check(bare.get(f"/artifacts/{fx['id']}/versions").status_code == 401, "so do the other sub-routes")
     check(bare.post(f"/artifacts/{fx['id']}/render").status_code == 401, "render exemption is GET only")
@@ -117,22 +120,15 @@ def test_delete_sweeps_windows() -> None:
 
 def test_tools() -> None:
     names = {t["name"]: t for t in toolbox.list()}
-    check(all(n in names and names[n]["danger"] == "writes" for n in ("create_artifact", "edit_artifact", "rewrite_artifact")), "three tools, local writes")
+    check(all(n in names and names[n]["danger"] == "writes" for n in ("artifact_create", "artifact_edit", "artifact_update")), "three tools, local writes")
     ctx: dict[str, Any] = {"project_id": None}
-    REPLIES[:] = [GOOD]
-    out = asyncio.run(toolbox.call("create_artifact", {"title": "Tip", "prompt": "tip splitter"}, ctx))
-    check(out["version"] == 1 and out["lint"]["blocked"] == [], "create_artifact returns id/version/lint")
-    again = asyncio.run(toolbox.call("edit_artifact", {"artifact_id": out["id"], "edits": [{"search": "Tip splitter", "replace": "X"}]}, ctx))
-    check("error" in again and "One artifact tool per turn" in again["error"], "second artifact tool in the same run is refused")
-    ctx2: dict[str, Any] = {"project_id": None}
-    ok = asyncio.run(toolbox.call("edit_artifact", {"artifact_id": out["id"], "edits": [{"search": "Tip splitter", "replace": "X"}]}, ctx2))
-    check(ok["version"] == 2, "a new run may edit")
-    bad = asyncio.run(toolbox.call("edit_artifact", {"artifact_id": out["id"], "edits": [{"search": "zzz", "replace": "X"}]}, {"project_id": None}))
+    out = asyncio.run(toolbox.call("artifact_create", {"title": "Tip", "html": GOOD}, ctx))
+    check(out["version"] == 1 and ctx["artifact"]["action"] == "created", "artifact_create returns id/version and notes the card")
+    ok = asyncio.run(toolbox.call("artifact_edit", {"artifact_id": out["artifact_id"], "edits": [{"search": "Tip splitter", "replace": "X"}]}, {"project_id": None}))
+    check(ok["version"] == 2, "artifact_edit saves a version")
+    bad = asyncio.run(toolbox.call("artifact_edit", {"artifact_id": out["artifact_id"], "edits": [{"search": "zzz", "replace": "X"}]}, {"project_id": None}))
     check("error" in bad and "nothing was changed" in bad["error"], "a failed patch is a tool error")
-    REPLIES[:] = [GOOD]
-    rw = asyncio.run(toolbox.call("rewrite_artifact", {"artifact_id": out["id"], "instruction": "dark"}, {"project_id": None}))
-    check(rw["version"] == 3, "rewrite_artifact saves a version")
-    miss = asyncio.run(toolbox.call("edit_artifact", {"artifact_id": "nope", "edits": []}, {"project_id": None}))
+    miss = asyncio.run(toolbox.call("artifact_edit", {"artifact_id": "nope", "edits": []}, {"project_id": None}))
     check("error" in miss, "unknown id is an error")
 
 

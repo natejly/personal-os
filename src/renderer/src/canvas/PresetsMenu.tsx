@@ -103,7 +103,7 @@ export function SavePresetForm({ canvasId, onDone }: { canvasId: string; onDone:
           onDone()
         }}
       />
-      <button type="submit" className="primary-btn" disabled={busy}>Save</button>
+      <button type="submit" className="primary-btn sm" disabled={busy}>Save</button>
     </form>
   )
 }

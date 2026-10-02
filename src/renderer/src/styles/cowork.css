@@ -16,12 +16,8 @@
 }
 .cowork-side { border-right: 1px solid var(--border); overflow-y: auto; padding: 8px; min-height: 0; }
 .cowork-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
-.cowork-empty {
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 10px; padding: 40px; text-align: center; color: var(--text-faint);
-}
-.cowork-empty h2 { margin: 0; font-size: 17px; color: var(--text); }
-.cowork-empty p { margin: 0; max-width: 46ch; }
+/* No desks: no rail, and the shared .empty-state takes the whole body. */
+.cowork-body.solo { grid-template-columns: minmax(0, 1fr); }
 
 /* ---- the rail ---- */
 .desk-rail { display: flex; flex-direction: column; gap: 10px; }
@@ -44,32 +40,32 @@
   font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .desk-row-meta { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: var(--text-faint); min-width: 0; }
+/* The status in words. Mixed towards --text so the amber and the pastel accent stay readable as
+   10px type in both themes; the ring beside it carries the pure colour. */
+.desk-row-status { flex: none; font-weight: 600; color: color-mix(in srgb, var(--ring, var(--text-faint)) 70%, var(--text)); }
 .desk-row-head { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.desk-row-age { flex: none; font-variant-numeric: tabular-nums; }
+.desk-row-age { flex: none; margin-left: auto; font-variant-numeric: tabular-nums; }
 
 .desk-badge {
   flex: none; min-width: 16px; padding: 0 4px; border-radius: 8px;
   background: var(--border); color: var(--text-muted);
   font-size: 10px; line-height: 16px; text-align: center; font-variant-numeric: tabular-nums;
 }
-.desk-badge.ask { background: rgba(217, 119, 87, 0.18); color: var(--accent); }
+.desk-badge.ask { background: color-mix(in srgb, var(--st-needs-you) 16%, transparent); color: var(--st-needs-you); }
 
-/* ---- status ring: one colour per status, shared by the rail dot and the detail pill ---- */
+/* ---- status ring: the app-wide --st-* vocabulary, shared by the rail ring, the row's status
+   label and the detail pill. Working is amber, anything waiting on you is the accent. ---- */
 .desk-ring {
   flex: none; display: inline-flex; align-items: center; justify-content: center;
   width: 22px; height: 22px; border-radius: 50%;
   border: 1px solid var(--ring, var(--border-strong)); color: var(--ring, var(--text-muted));
   background: color-mix(in srgb, var(--ring, var(--border)) 12%, transparent);
 }
-.desk-ring-draft { --ring: var(--text-faint); }
-.desk-ring-planning, .desk-ring-awaiting_plan { --ring: var(--chart-7, var(--accent)); }
-.desk-ring-working { --ring: var(--accent); }
-.desk-ring-needs_approval, .desk-ring-blocked { --ring: var(--warn); }
-.desk-ring-paused { --ring: var(--text-faint); }
-.desk-ring-interrupted, .desk-ring-failed { --ring: var(--danger); }
-.desk-ring-review { --ring: var(--chart-4, var(--accent)); }
-.desk-ring-done { --ring: var(--chart-3, var(--text-muted)); }
-.desk-ring-stopped { --ring: var(--text-faint); }
+.desk-ring-draft, .desk-ring-paused, .desk-ring-stopped { --ring: var(--st-idle); }
+.desk-ring-planning, .desk-ring-working { --ring: var(--st-working); }
+.desk-ring-awaiting_plan, .desk-ring-needs_approval, .desk-ring-blocked, .desk-ring-review { --ring: var(--st-needs-you); }
+.desk-ring-interrupted, .desk-ring-failed { --ring: var(--st-failed); }
+.desk-ring-done { --ring: var(--st-done); }
 
 /* ---- new desk ---- */
 .desk-new { padding: 20px 24px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; max-width: 720px; }
@@ -93,7 +89,8 @@
 .desk-autonomy-opt small { grid-column: 2; color: var(--text-faint); font-size: 11px; line-height: 1.4; }
 
 /* ---- detail header ---- */
-.desk-head { padding: 12px 16px 0; border-bottom: 1px solid var(--border); }
+/* No rule under the header: the tab strip follows it directly and draws the one line for both. */
+.desk-head { padding: 12px 16px 0; }
 .desk-head-top { display: flex; align-items: center; gap: 8px; }
 .desk-title-input {
   flex: 1; min-width: 0; background: none; border: 1px solid transparent; border-radius: 7px;
@@ -103,7 +100,8 @@
 .desk-title-input:focus { border-color: var(--accent); background: var(--bg-input); }
 .desk-pill {
   flex: none; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600;
-  border: 1px solid var(--ring, var(--border-strong)); color: var(--ring, var(--text-muted));
+  border: 1px solid var(--ring, var(--border-strong));
+  color: color-mix(in srgb, var(--ring, var(--text-muted)) 70%, var(--text));
   background: color-mix(in srgb, var(--ring, var(--border)) 12%, transparent);
 }
 .desk-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
@@ -112,10 +110,18 @@
   font-size: 11.5px; color: var(--text-faint); font-variant-numeric: tabular-nums;
 }
 .desk-brief {
-  margin: 6px 6px 10px; font-size: 12.5px; color: var(--text-muted); line-height: 1.5;
+  margin: 6px 6px 0; font-size: 12.5px; color: var(--text-muted); line-height: 1.5;
   max-height: 3.2em; overflow: hidden; text-overflow: ellipsis;
 }
 
+.desk-tabs { flex: none; padding: 6px 16px 0; border-bottom: 1px solid var(--border); }
+/* .dot-badge (docs.css) is absolutely positioned for icon buttons; in a tab it sits inline. */
+.desk-tabs .dot-badge { position: static; display: inline-block; margin-left: 5px; vertical-align: 1px; }
+
+/* What the desk is waiting on, in a band under the tabs. It scrolls on its own so a long approval
+   never pushes the transcript off screen, and collapses to nothing when there is nothing to say. */
+.desk-banners { flex: none; max-height: 45vh; overflow-y: auto; padding-bottom: 10px; border-bottom: 1px solid var(--border); }
+.desk-banners:empty { display: none; }
 .desk-banner {
   display: flex; gap: 9px; margin: 10px 16px 0; padding: 10px 12px; border-radius: 9px;
   font-size: 13px; background: var(--hover); border: 1px solid var(--border);
@@ -123,12 +129,16 @@
 .desk-banner b { display: block; margin-bottom: 2px; }
 .desk-banner p { margin: 0; color: var(--text-muted); }
 .desk-banner > div { flex: 1; min-width: 0; }
-.desk-banner.ask { background: rgba(217, 119, 87, 0.08); border-color: rgba(217, 119, 87, 0.4); }
-.desk-banner.warn { background: rgba(229, 72, 77, 0.08); border-color: rgba(229, 72, 77, 0.35); }
-
-.desk-tabs { padding: 8px 16px 0; border-bottom: 1px solid var(--border); }
-/* .dot-badge (docs.css) is absolutely positioned for icon buttons; in a tab it sits inline. */
-.desk-tabs .dot-badge { position: static; display: inline-block; margin-left: 5px; vertical-align: 1px; }
+.desk-banner > svg { flex: none; margin-top: 2px; }
+.desk-banner.ask { background: var(--await-fill); border-color: var(--await-border); }
+.desk-banner.ask > svg { color: var(--st-needs-you); }
+.desk-banner.warn {
+  background: color-mix(in srgb, var(--st-failed) 8%, transparent);
+  border-color: color-mix(in srgb, var(--st-failed) 35%, transparent);
+}
+.desk-banner.warn > svg { color: var(--st-failed); }
+/* The answer box inside a banner is a field, not a second composer bar. */
+.desk-banner .desk-steer { padding: 8px 0 0; border-top: 0; }
 
 /* ---- waiting cards, desk settings, limits ---- */
 .desk-banner .desk-banner-action { margin-top: 6px; }
@@ -160,10 +170,23 @@
 .desk-steer textarea:focus { border-color: var(--accent); }
 .desk-steer textarea:disabled { opacity: 0.5; }
 
+/* ---- note row: a sentence typed in place of the button that asked for it ---- */
+.desk-note {
+  display: flex; flex-direction: column; gap: 7px; padding: 10px 12px;
+  border: 1px solid var(--border-strong); border-radius: 9px; background: var(--hover);
+}
+.desk-note label { display: flex; flex-direction: column; gap: 5px; font-size: 12.5px; color: var(--text-muted); }
+.desk-note textarea {
+  width: 100%; background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px;
+  padding: 7px 9px; color: var(--text); font: inherit; font-size: 13px; outline: 0; resize: vertical; min-height: 38px;
+}
+.desk-note textarea:focus { border-color: var(--accent); }
+.desk-note-actions { display: flex; align-items: center; gap: 6px; }
+
 /* ---- timeline ---- */
 .desk-timeline { margin-bottom: 10px; }
 .desk-timeline-head {
-  display: flex; align-items: center; gap: 5px; padding: 3px 0;
+  display: flex; align-items: center; gap: 5px; min-height: 24px; padding: 3px 0;
   font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint);
 }
 .desk-timeline-head .rot90 { transform: rotate(90deg); }
@@ -181,9 +204,9 @@
 .desk-checklist li { display: flex; gap: 8px; }
 .desk-checklist li.dropped, .desk-checklist li.rejected { opacity: 0.5; }
 .desk-mark { flex: none; font-family: var(--mono); font-size: 12px; color: var(--text-faint); padding-top: 1px; }
-.desk-checklist li.done .desk-mark { color: var(--chart-3, var(--text-muted)); }
-.desk-checklist li.consumed .desk-mark { color: var(--accent); }
-.desk-checklist li.failed .desk-mark { color: var(--danger); }
+.desk-checklist li.done .desk-mark { color: var(--st-done); }
+.desk-checklist li.consumed .desk-mark { color: var(--st-working); }
+.desk-checklist li.failed .desk-mark { color: var(--st-failed); }
 .desk-check-main { flex: 1; min-width: 0; }
 .desk-check-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 13px; }
 
@@ -192,7 +215,7 @@
 .desk-tree { border-right: 1px solid var(--border); overflow-y: auto; padding: 8px; min-height: 0; }
 .desk-tree-head { display: flex; align-items: center; gap: 6px; padding: 0 4px 6px; }
 .desk-folder {
-  display: flex; align-items: center; gap: 4px; width: 100%; padding: 4px 6px;
+  display: flex; align-items: center; gap: 4px; width: 100%; min-height: 24px; padding: 4px 6px;
   background: none; border: 0; cursor: pointer; color: var(--text-faint); font: inherit; font-size: 11px;
   text-transform: uppercase; letter-spacing: 0.04em;
 }
@@ -211,8 +234,8 @@
   flex: none; padding: 0 5px; border-radius: 6px; font-size: 10px; font-weight: 600;
   background: var(--border); color: var(--text-muted);
 }
-.desk-file-state.new { background: rgba(48, 164, 108, 0.16); color: var(--chart-3, var(--text)); }
-.desk-file-state.modified { background: rgba(217, 119, 87, 0.16); color: var(--accent); }
+.desk-file-state.new { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+.desk-file-state.modified { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
 
 .desk-preview { overflow-y: auto; padding: 12px 16px; min-height: 0; }
 .desk-preview-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 13px; }
@@ -234,6 +257,8 @@
 /* ---- output tab ---- */
 .desk-review { display: flex; flex-direction: column; gap: 10px; }
 .desk-review-head { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+/* 11px of underlined text is the label; the target is the 24px box around it. */
+.desk-review-head .link.small { display: inline-flex; align-items: center; min-height: 24px; padding: 0 4px; }
 .desk-review-foot { display: flex; gap: 8px; flex-wrap: wrap; padding-top: 4px; }
 .desk-output { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--bg-elev); }
 .desk-output.rejected, .desk-output.promoted { opacity: 0.75; }
@@ -246,8 +271,8 @@
   font-size: 11.5px; background: var(--bg-input); border-radius: 7px; padding: 8px;
 }
 .desk-output-dest { display: flex; align-items: center; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
-.desk-verified { display: inline-flex; align-items: center; gap: 4px; margin: 6px 0 0; font-size: 12px; color: var(--chart-3, var(--text-muted)); }
-.desk-unverified { display: inline-flex; align-items: center; gap: 4px; margin: 6px 0 0; font-size: 12px; color: var(--danger); }
+.desk-verified { display: inline-flex; align-items: center; gap: 4px; margin: 6px 0 0; font-size: 12px; color: var(--st-done); }
+.desk-unverified { display: inline-flex; align-items: center; gap: 4px; margin: 6px 0 0; font-size: 12px; color: var(--st-failed); }
 
 /* ---- action plan card: same recipe as .approval (the Approvals section of styles.css), different
    namespace ----

@@ -32,10 +32,11 @@
   gap: 3px;
   height: 14px;
 }
-.ring.working { color: var(--tl-yellow); }
-.ring.done { color: var(--tl-green); }
-.ring.error { color: var(--tl-red); }
-.ring.needs-approval { color: var(--accent); }
+/* The app-wide status vocabulary (styles.css), so a window, a desk and an inbox row agree. */
+.ring.working { color: var(--st-working); }
+.ring.done { color: var(--st-done); }
+.ring.error { color: var(--st-failed); }
+.ring.needs-approval { color: var(--st-needs-you); }
 
 .status-glyph {
   display: grid;
@@ -68,10 +69,10 @@
   border-radius: inherit;
   pointer-events: none;
 }
-.dock-tile:has(.ring.working)::before { border-color: var(--tl-yellow); }
-.dock-tile:has(.ring.done)::before { border-color: var(--tl-green); }
-.dock-tile:has(.ring.error)::before { border-color: var(--tl-red); }
-.dock-tile:has(.ring.needs-approval)::before { border-color: var(--accent); }
+.dock-tile:has(.ring.working)::before { border-color: var(--st-working); }
+.dock-tile:has(.ring.done)::before { border-color: var(--st-done); }
+.dock-tile:has(.ring.error)::before { border-color: var(--st-failed); }
+.dock-tile:has(.ring.needs-approval)::before { border-color: var(--st-needs-you); }
 .dock-tile .ring { position: absolute; top: 2px; right: 2px; z-index: 4; }
 .dock-tile .ring-badge { display: none; }
 
@@ -87,6 +88,16 @@
   min-height: 0;
   font-size: 13px;
 }
+/* `.widget` is also the Today card in styles.css (padding, an opaque --bg-elev fill, rounded corners,
+   a 120px floor), and that rule is global. Inside a window it put an inset opaque slab under the
+   glass, so the card look is undone here rather than left to stylesheet order. */
+.win-body .widget,
+.popout-body .widget {
+  min-height: 0;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+}
 
 /* 24 px strip for a widget's own controls — the chat window's ModelPicker lives here (contract §6). */
 .widget-bar {
@@ -99,7 +110,6 @@
   color: var(--text-muted);
   font-size: 11px;
 }
-.widget-bar .spacer { flex: 1; }
 
 .widget-scroll {
   flex: 1;
@@ -131,7 +141,10 @@
 .widget-sub { font-size: 11px; color: var(--text-muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .widget-meta { font-size: 10px; color: var(--text-faint); font-family: var(--mono); white-space: nowrap; }
 
+/* 19px to look at, so it fits the 24px bar; the ::before makes it 25px to hit. (A <select> chip has
+   no pseudo-element, and opens on a click anywhere in its own box anyway.) */
 .widget-chip {
+  position: relative;
   height: 19px;
   padding: 0 7px;
   border: 1px solid var(--border);
@@ -141,6 +154,7 @@
   font-size: 11px;
   white-space: nowrap;
 }
+.widget-chip::before { content: ''; position: absolute; inset: -3px -1px; }
 .widget-chip.on { border-color: var(--accent); color: var(--text); }
 
 .widget-input {
@@ -244,8 +258,9 @@
 .chat-switch { position: relative; flex: none; }
 .chat-switch select { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; }
 
-/* The bound conversation was deleted: offer a fresh start or a re-bind in place. */
-.chat-gone {
+/* The bound conversation was deleted: offer a fresh start or a re-bind in place. Two classes, so its
+   padding outranks the in-window reset on `.widget` above. */
+.widget.chat-gone {
   align-items: center;
   justify-content: center;
   gap: 10px;

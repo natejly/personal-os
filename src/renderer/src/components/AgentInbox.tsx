@@ -10,7 +10,7 @@ import { useEffect, useState } from 'react'
 import { AlertTriangle, Check, ChevronDown, ChevronRight, Clock, Eye, History, Inbox, Pencil, Play, Plus, Timer, Trash2, Wrench, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { AgentProposal, Job, JobRunRecord, JobRunSummary, JobStats } from '@shared/types'
+import type { AgentInbox as AgentInboxData, AgentProposal, Job, JobRunRecord, JobRunSummary, JobStats } from '@shared/types'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import { SAFE_MD } from './Message'
@@ -34,13 +34,57 @@ const argText = (args: Record<string, unknown>): string =>
   TEXT_KEYS.filter((k) => typeof args[k] === 'string' && args[k])
     .map((k) => `${k}: ${args[k] as string}`)
     .join('\n') || JSON.stringify(args)
+/** The same arguments on one line, for the collapsed row. */
+const argLine = (args: Record<string, unknown>): string => argText(args).replace(/\s*\n\s*/g, ' · ').replace(/\s+/g, ' ').slice(0, 240)
+/** A run's report as one plain line: enough to tell runs apart without opening them. */
+const oneLine = (text: string): string => text.replace(/[#*_`>|]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 240)
+
+/** The app-wide status vocabulary (`--st-*`), as the dot that leads every row. */
+type Tone = 'needs-you' | 'working' | 'done' | 'failed' | 'idle'
+const Dot = ({ tone, label }: { tone: Tone; label: string }): JSX.Element =>
+  <span className={`inbox-dot ${tone}`} role="img" aria-label={label} title={label} />
+
+/** The row's disclosure: everything past the one line (arguments, the report) sits behind it. */
+const Disclosure = ({ open, what, onToggle }: { open: boolean; what: string; onToggle: () => void }): JSX.Element => (
+  <button className="icon-btn sm" aria-expanded={open} aria-label={`${open ? 'Hide' : 'Show'} ${what}`} title={`${open ? 'Hide' : 'Show'} ${what}`} onClick={onToggle}>
+    {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+  </button>
+)
+
+function ApprovalRow({ a }: { a: AgentInboxData['needs_you']['approvals'][number] }): JSX.Element {
+  const approveTool = useStore((s) => s.approveTool)
+  const [open, setOpen] = useState(false)
+  const line = argLine(a.args)
+
+  return (
+    <li className="inbox-item">
+      <div className="inbox-row">
+        <Dot tone="needs-you" label="Waiting on your approval" />
+        <span className="inbox-tool">{a.tool}</span>
+        <span className="inbox-line" title={line}>{line}</span>
+        {a.forced && <span className="chip warn">untrusted content in that chat</span>}
+        <span className="muted small inbox-when">{a.job ? `${a.job} · ` : ''}asked {fmtWhen(a.created_at)}</span>
+        <button className="primary-btn sm" onClick={() => void approveTool(a.call_id, 'allow', a.conversation_id ?? undefined)}>
+          <Check size={13} /> Approve
+        </button>
+        <button className="ghost-btn sm" onClick={() => void approveTool(a.call_id, 'deny', a.conversation_id ?? undefined)}>
+          <X size={13} /> Deny
+        </button>
+        <Disclosure open={open} what="the arguments" onToggle={() => setOpen((v) => !v)} />
+      </div>
+      {open && <pre className="inbox-args">{argText(a.args)}</pre>}
+    </li>
+  )
+}
 
 function ProposalCard({ p }: { p: AgentProposal }): JSX.Element {
   const decideProposal = useStore((s) => s.decideProposal)
+  const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
   const editable = TEXT_KEYS.filter((k) => typeof p.args[k] === 'string')
+  const line = argLine(p.args)
 
   const decide = async (accept: boolean): Promise<void> => {
     setBusy(true)
@@ -48,19 +92,24 @@ function ProposalCard({ p }: { p: AgentProposal }): JSX.Element {
     await decideProposal(p.id, accept, args)
     setBusy(false)
   }
+  // Closing the row ends the edit too: Accept must never send text from boxes that are not on screen.
+  const toggle = (): void => {
+    if (open) setEditing(false)
+    setOpen(!open)
+  }
 
   return (
     <li className="inbox-item">
-      <div className="inbox-item-head">
+      <div className="inbox-row">
+        <Dot tone="needs-you" label="Waiting on you" />
         <span className="inbox-tool">{p.tool}</span>
-        <span className="muted small">proposed {fmtWhen(p.created_at)}</span>
-        <span style={{ flex: 1 }} />
-        <button className="icon-btn sm" title={editing ? 'Stop editing' : 'Edit before accepting'} disabled={!editable.length || busy}
-          onClick={() => setEditing((v) => !v)}><Pencil size={13} /></button>
-        <button className="ghost-btn sm" disabled={busy} onClick={() => void decide(false)}><X size={13} /> Reject</button>
+        <span className="inbox-line" title={line}>{line}</span>
+        <span className="muted small inbox-when">proposed {fmtWhen(p.created_at)}</span>
         <button className="primary-btn sm" disabled={busy} onClick={() => void decide(true)}><Check size={13} /> Accept</button>
+        <button className="ghost-btn sm" disabled={busy} onClick={() => void decide(false)}><X size={13} /> Reject</button>
+        <Disclosure open={open} what="the details" onToggle={toggle} />
       </div>
-      {editing ? (
+      {open && (editing ? (
         <div className="inbox-edit">
           {editable.map((k) => (
             <label key={k}>
@@ -69,27 +118,39 @@ function ProposalCard({ p }: { p: AgentProposal }): JSX.Element {
                 onChange={(e) => setDraft((d) => ({ ...d, [k]: e.target.value }))} />
             </label>
           ))}
-          <p className="muted small">Accept sends exactly what is in these boxes.</p>
+          <div className="inbox-edit-foot">
+            <p className="muted small">Accept sends exactly what is in these boxes.</p>
+            <button className="ghost-btn sm" disabled={busy} onClick={() => setEditing(false)}>Stop editing</button>
+          </div>
         </div>
       ) : (
-        <pre className="inbox-args">{argText(p.args)}</pre>
-      )}
+        <>
+          <pre className="inbox-args">{argText(p.args)}</pre>
+          {editable.length > 0 && (
+            <button className="ghost-btn sm inbox-edit-btn" disabled={busy} onClick={() => setEditing(true)}><Pencil size={12} /> Edit before accepting</button>
+          )}
+        </>
+      ))}
     </li>
   )
 }
 
 function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
   const selectChat = useStore((s) => s.selectChat)
-  const [open, setOpen] = useState(r.late || r.status === 'error' || r.pending_proposals > 0)
+  const [open, setOpen] = useState(false)
   const failed = r.status === 'error' || r.status === 'interrupted'
+  const tone: Tone = failed ? 'failed' : r.pending_proposals > 0 || r.status === 'awaiting_approval' ? 'needs-you' : r.status === 'running' ? 'working' : 'done'
+  const toneLabel = failed
+    ? (r.status === 'interrupted' ? 'Interrupted' : 'Failed')
+    : tone === 'needs-you' ? 'Waiting on you' : tone === 'working' ? 'Running' : 'Done'
+  const line = r.error ? oneLine(r.error) : r.summary ? oneLine(r.summary) : `It wrote nothing. ${r.tool_calls} tool call${r.tool_calls === 1 ? '' : 's'}.`
 
   return (
     <li className="inbox-item">
-      <div className="inbox-item-head">
-        <button className="icon-btn sm" aria-label={open ? 'Collapse' : 'Expand'} onClick={() => setOpen((v) => !v)}>
-          {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-        </button>
+      <div className="inbox-row">
+        <Dot tone={tone} label={toneLabel} />
         <span className="inbox-job">{r.job}</span>
+        <span className="inbox-line" title={line}>{line}</span>
         {r.manual && <span className="chip">by hand</span>}
         {r.attempt > 1 && <span className="chip warn" title="Re-launched after the earlier run ended in an error">retry {r.attempt}</span>}
         {r.late && (
@@ -98,10 +159,10 @@ function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
           </span>
         )}
         {failed && <span className="chip bad"><AlertTriangle size={11} /> {r.status === 'interrupted' ? 'interrupted' : 'failed'}</span>}
-        {r.pending_proposals > 0 && <span className="chip">{r.pending_proposals} waiting on you</span>}
-        <span style={{ flex: 1 }} />
-        <span className="muted small">{fmtWhen(r.fired_at)}</span>
-        {r.conversation_id && <button className="link small" onClick={() => void selectChat(r.conversation_id as string)}>open</button>}
+        {r.pending_proposals > 0 && <span className="chip needs">{r.pending_proposals} waiting on you</span>}
+        <span className="muted small inbox-when">{fmtWhen(r.fired_at)}</span>
+        {r.conversation_id && <button className="link small" onClick={() => void selectChat(r.conversation_id as string)}>Open</button>}
+        <Disclosure open={open} what="the report" onToggle={() => setOpen((v) => !v)} />
       </div>
       {open && (
         <>
@@ -120,6 +181,10 @@ function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
 const fmtDur = (s: number | null): string => (s === null ? '' : s < 90 ? `${Math.round(s)}s` : `${Math.round(s / 60)} min`)
 const STATUS_LABEL: Record<JobRunRecord['status'], string> = {
   running: 'running', done: 'done', error: 'failed', interrupted: 'interrupted', timed_out: 'timed out'
+}
+/** Every outcome gets a colour, success included: an unmarked chip read as "no status". */
+const STATUS_CHIP: Record<JobRunRecord['status'], string> = {
+  running: 'working', done: 'ok', error: 'bad', interrupted: 'bad', timed_out: 'bad'
 }
 
 /** A job's last 50 runs from rows: a success-rate strip, then one line per run with a link to its transcript. */
@@ -159,14 +224,14 @@ function JobHistory({ job }: { job: Job }): JSX.Element {
           {` · ${stats.runs} run${stats.runs === 1 ? '' : 's'}`}
           {stats.median_duration_s !== null && ` · median ${fmtDur(stats.median_duration_s)}`}
           {stats.total_cost > 0 && ` · $${stats.total_cost.toFixed(2)}`}
-          <span style={{ flex: 1 }} />
+          <span className="spacer" />
           <button className="link small" onClick={() => void exportCsv()}>Export CSV</button>
         </div>
       )}
       {runs && runs.length === 0 && <p className="muted small">Not run yet.</p>}
       {runs && runs.map((r) => (
         <div key={r.run_id} className="job-history-run small">
-          <span className={`chip ${r.status === 'done' ? '' : r.status === 'running' ? 'warn' : 'bad'}`}>{STATUS_LABEL[r.status]}</span>
+          <span className={`chip ${STATUS_CHIP[r.status]}`}>{STATUS_LABEL[r.status]}</span>
           <span>{fmtDate(r.started_at)}</span>
           <span className="muted">{fmtDur(r.duration_s)}</span>
           {r.attempt > 1 && <span className="chip warn">retry {r.attempt}</span>}
@@ -175,8 +240,8 @@ function JobHistory({ job }: { job: Job }): JSX.Element {
           {r.proposals.pending + r.proposals.accepted + r.proposals.rejected > 0 && (
             <span className="muted">{r.proposals.accepted}/{r.proposals.pending + r.proposals.accepted + r.proposals.rejected} proposals accepted</span>
           )}
-          <span style={{ flex: 1 }} />
-          {r.conversation_id && <button className="link small" onClick={() => void selectChat(r.conversation_id as string)}>open</button>}
+          <span className="spacer" />
+          {r.conversation_id && <button className="link small" onClick={() => void selectChat(r.conversation_id as string)}>Open</button>}
         </div>
       ))}
     </li>
@@ -236,15 +301,14 @@ function JobRow({ job }: { job: Job }): JSX.Element {
 
   return (
     <>
-    <li className={spent ? 'spent' : undefined}>
-      {spent ? (
-        <span className="chip-check-row ev-title">{job.name}</span>
-      ) : (
-        <label className="chip-check-row">
-          <input type="checkbox" checked={job.enabled} onChange={() => void setJobEnabled(job.id, !job.enabled)} />
-          <span className="ev-title">{job.name}</span>
+    <li className={`job-row${spent ? ' spent' : ''}`}>
+      {spent ? <span className="job-switch-gap" /> : (
+        <label className="switch-wrap" title={job.enabled ? 'Turn this task off' : 'Turn this task on'}>
+          <input type="checkbox" checked={job.enabled} aria-label={`${job.name} enabled`} onChange={() => void setJobEnabled(job.id, !job.enabled)} />
+          <span className="switch" />
         </label>
       )}
+      <span className="job-name ev-title" title={job.name}>{job.name}</span>
       {once
         ? <span className="muted small">{job.run_at ? fmtDate(job.run_at) : 'no time set'}</span>
         : <code className="muted small">{job.cron}</code>}
@@ -256,24 +320,28 @@ function JobRow({ job }: { job: Job }): JSX.Element {
       {job.last_skip_reason && job.last_skip_at && (
         <span className="muted small" title={`Slot at ${fmtWhen(job.last_skip_at)} was skipped`}>skipped: {job.last_skip_reason.replace('previous run still running', 'still running')}</span>
       )}
-      <button className={`icon-btn sm ${toolsOpen ? 'on' : ''}`} title={job.allowed_tools ? `${job.allowed_tools.length} tools allowed` : 'All tools'}
-        aria-label={`Tools for ${job.name}`} onClick={() => setToolsOpen((v) => !v)}>
-        <Wrench size={12} />
-      </button>
-      <button className="icon-btn sm" title="Preview: run it read-only, nothing is proposed or changed" aria-label={`Preview ${job.name}`}
-        onClick={() => void preview()}>
-        <Eye size={12} />
-      </button>
+      {/* Run and History are the two a row is opened for, so they stay put. The rest appear when the
+          row is hovered or holds focus; they keep their space, so nothing shifts when they do. */}
+      <span className="job-more">
+        <button className={`icon-btn sm ${toolsOpen ? 'on' : ''}`} title={job.allowed_tools ? `${job.allowed_tools.length} tools allowed` : 'All tools'}
+          aria-label={`Tools for ${job.name}`} aria-expanded={toolsOpen} onClick={() => setToolsOpen((v) => !v)}>
+          <Wrench size={12} />
+        </button>
+        <button className="icon-btn sm" title="Preview: run it read-only, nothing is proposed or changed" aria-label={`Preview ${job.name}`}
+          onClick={() => void preview()}>
+          <Eye size={12} />
+        </button>
+        <button className="icon-btn sm danger" title="Delete" aria-label={`Delete ${job.name}`}
+          onClick={() => { if (confirm(`Delete “${job.name}”?`)) void deleteJob(job.id) }}>
+          <Trash2 size={12} />
+        </button>
+      </span>
       <button className={`icon-btn sm ${history ? 'on' : ''}`} title="Run history" aria-label={`History of ${job.name}`}
-        onClick={() => setHistory((v) => !v)}>
+        aria-expanded={history} onClick={() => setHistory((v) => !v)}>
         <History size={12} />
       </button>
       <button className="icon-btn sm" title="Run it now" aria-label={`Run ${job.name} now`} onClick={() => void runJobNow(job.id)}>
         <Play size={12} />
-      </button>
-      <button className="icon-btn sm" title="Delete" aria-label={`Delete ${job.name}`}
-        onClick={() => { if (confirm(`Delete “${job.name}”?`)) void deleteJob(job.id) }}>
-        <Trash2 size={12} />
       </button>
     </li>
     {toolsOpen && (
@@ -351,7 +419,7 @@ function NewTask({ onDone }: { onDone: () => void }): JSX.Element {
 export default function AgentInbox(): JSX.Element | null {
   const box = useStore((s) => s.agentInbox)
   const jobs = useStore((s) => s.jobs)
-  const { approveTool, refreshJobs, setJobEnabled } = useStore()
+  const { refreshJobs, setJobEnabled } = useStore()
   const [showJobs, setShowJobs] = useState(false)
   const [adding, setAdding] = useState(false)
 
@@ -371,8 +439,8 @@ export default function AgentInbox(): JSX.Element | null {
     <section className="agent-inbox">
       <header>
         <Inbox size={14} /> Agent inbox
-        {box.counts.needs_you > 0 && <span className="chip">{box.counts.needs_you} need you</span>}
-        <span style={{ flex: 1 }} />
+        {box.counts.needs_you > 0 && <span className="chip needs">{box.counts.needs_you} need{box.counts.needs_you === 1 ? 's' : ''} you</span>}
+        <span className="spacer" />
         {box.scheduler.next_due_at && <span className="muted small"><Timer size={11} /> next job {fmtWhen(box.scheduler.next_due_at)}</span>}
         <button className={`icon-btn sm ${showJobs ? 'on' : ''}`} title="Scheduled tasks" aria-label="Scheduled tasks" onClick={toggleJobs}>
           <Clock size={13} />
@@ -383,7 +451,7 @@ export default function AgentInbox(): JSX.Element | null {
         <div className="inbox-jobs">
           <h5>
             Scheduled tasks <span className="muted small">{box.scheduler.timezone}</span>
-            <span style={{ flex: 1 }} />
+            <span className="spacer" />
             <button className={`icon-btn sm ${adding ? 'on' : ''}`} title="Schedule a task" aria-label="Schedule a task"
               onClick={() => setAdding((v) => !v)}><Plus size={13} /></button>
           </h5>
@@ -401,29 +469,13 @@ export default function AgentInbox(): JSX.Element | null {
         <div className="inbox-group">
           <h5>Needs you</h5>
           <ul className="inbox-list">
-            {approvals.map((a) => (
-              <li className="inbox-item" key={a.call_id}>
-                <div className="inbox-item-head">
-                  <span className="inbox-tool">{a.tool}</span>
-                  <span className="muted small">{a.job ? `${a.job} · ` : ''}asked {fmtWhen(a.created_at)}</span>
-                  {a.forced && <span className="chip warn">untrusted content in that chat</span>}
-                  <span style={{ flex: 1 }} />
-                  <button className="ghost-btn sm" onClick={() => void approveTool(a.call_id, 'deny', a.conversation_id ?? undefined)}>
-                    <X size={13} /> Deny
-                  </button>
-                  <button className="primary-btn sm" onClick={() => void approveTool(a.call_id, 'allow', a.conversation_id ?? undefined)}>
-                    <Check size={13} /> Allow
-                  </button>
-                </div>
-                <pre className="inbox-args">{argText(a.args)}</pre>
-              </li>
-            ))}
+            {approvals.map((a) => <ApprovalRow key={a.call_id} a={a} />)}
             {paused.map((p) => (
               <li className="inbox-item" key={p.id}>
-                <div className="inbox-item-head">
+                <div className="inbox-row">
+                  <Dot tone="failed" label="Paused after failing" />
                   <span className="inbox-job">{p.name}</span>
-                  <span className="chip bad"><AlertTriangle size={11} /> Paused: {p.reason}</span>
-                  <span style={{ flex: 1 }} />
+                  <span className="inbox-line" title={p.reason}>Paused: {p.reason}</span>
                   <button className="primary-btn sm" onClick={() => void setJobEnabled(p.id, true)}><Play size={13} /> Resume</button>
                 </div>
               </li>

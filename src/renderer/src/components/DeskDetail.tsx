@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { Archive, ArchiveRestore, Check, ChevronRight, CircleHelp, Pause, Play, Send, Settings2, ShieldQuestion, Square, Trash2, TriangleAlert, X } from 'lucide-react'
-import type { DeskAutonomy, DeskStatus, FullDesk, PendingApproval, PromotionKind } from '@shared/types'
+import { Archive, ArchiveRestore, Check, ChevronRight, CircleHelp, FileCheck2, Pause, Play, Send, Settings2, ShieldQuestion, Square, Trash2, TriangleAlert, X } from 'lucide-react'
+import type { DeskAutonomy, DeskStatus, FullDesk, PendingApproval } from '@shared/types'
 import { retainSession, useSession, useStore } from '../store'
 import MessageView from './Message'
 import DeskPlan from './DeskPlan'
@@ -112,8 +112,8 @@ function WaitingCards({ cards }: { cards: PendingApproval[] }): JSX.Element | nu
             </div>
             <pre className="approval-args">{JSON.stringify(a.args, null, 2)}</pre>
             <div className="approval-actions">
-              <button className="primary-btn" disabled={busy} onClick={() => void answer(a.call_id, true)}><Check size={13} /> Allow</button>
-              <button className="ghost-btn danger" disabled={busy} onClick={() => void answer(a.call_id, false)}><X size={13} /> Deny</button>
+              <button className="primary-btn" disabled={busy} onClick={() => void answer(a.call_id, true)}><Check size={13} /> Approve</button>
+              <button className="ghost-btn" disabled={busy} onClick={() => void answer(a.call_id, false)}><X size={13} /> Deny</button>
             </div>
           </div>
         ))}
@@ -168,10 +168,7 @@ function DeskSettings({ desk, onClose }: { desk: FullDesk; onClose: () => void }
 export default function DeskDetail(): JSX.Element | null {
   const desk = useStore((s) => s.activeDesk)
   const maxTurns = useStore((s) => s.settings.deskMaxTurns ?? 12)
-  const {
-    startDesk, resumeDesk, pauseDesk, stopDesk, patchDesk, deleteDesk, acceptOutputs, rejectOutputs, messageDesk,
-    markDeskSeen
-  } = useStore()
+  const { startDesk, resumeDesk, pauseDesk, stopDesk, patchDesk, deleteDesk, markDeskSeen } = useStore()
   const [tab, setTab] = useState<Tab>('activity')
   const [titleDraft, setTitleDraft] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
@@ -245,11 +242,6 @@ export default function DeskDetail(): JSX.Element | null {
   // `promote_failed` is undecided too: its claim was released so Accept can retry it (DeskReview agrees).
   const undecided = desk.outputs.filter((o) => o.status === 'proposed' || o.status === 'stale' || o.status === 'promote_failed')
 
-  const sendBack = (): void => {
-    const note = prompt('What should it do differently? This goes back as a message and wakes the desk.')
-    if (!note?.trim()) return
-    void messageDesk(desk.id, note.trim())
-  }
   // Seen first, then archived, so nothing the desk raised is left counted anywhere. Sequential
   // because both calls write the desk row back, and the slower one wins.
   const archive = async (): Promise<void> => {
@@ -260,9 +252,6 @@ export default function DeskDetail(): JSX.Element | null {
     if (!confirm(`Delete “${desk.title || 'this desk'}”? Its conversation, plan and timeline go with it.`)) return
     const purge = confirm(`Also delete the workspace files at ${desk.workspace}? Cancel keeps them on disk — they are the one thing you cannot regenerate.`)
     void deleteDesk(desk.id, purge)
-  }
-  const acceptAll = (): void => {
-    void acceptOutputs(desk.id, undecided.map((o) => ({ output_id: o.id, destination: 'doc' as PromotionKind, title: o.title || o.path })))
   }
 
   return (
@@ -287,12 +276,12 @@ export default function DeskDetail(): JSX.Element | null {
             {(desk.status === 'blocked' || desk.status === 'paused' || desk.status === 'interrupted') && (
               <button className="primary-btn" onClick={() => void resumeDesk(desk.id)}><Play size={13} /> Resume</button>
             )}
-            {desk.status === 'review' && (
-              <>
-                <button className="primary-btn" disabled={undecided.length === 0} onClick={acceptAll}>Accept all</button>
-                <button className="ghost-btn" onClick={sendBack}>Send back</button>
-                <button className="ghost-btn danger" disabled={undecided.length === 0} onClick={() => void rejectOutputs(desk.id)}>Reject all</button>
-              </>
+            {/* Accepting, sending back and rejecting all live on the Output tab, where each output
+                has its destination; the header only takes you there. */}
+            {desk.status === 'review' && tab !== 'output' && (
+              <button className="primary-btn" onClick={() => setTab('output')}>
+                <FileCheck2 size={13} /> Review outputs{undecided.length > 0 ? ` (${undecided.length})` : ''}
+              </button>
             )}
             {STOPPABLE.includes(desk.status) && <button className="ghost-btn danger" title="Stop (⌘.)" onClick={() => void stopDesk(desk.id)}><Square size={13} /> Stop</button>}
             {(desk.status === 'review' || desk.status === 'done' || desk.status === 'failed' || desk.status === 'stopped') && !desk.archived && (
@@ -322,44 +311,6 @@ export default function DeskDetail(): JSX.Element | null {
         {editing && <DeskSettings desk={desk} onClose={() => setEditing(false)} />}
       </header>
 
-      {/* Shown from the moment the desk_ask card opens, live or parked: answering here settles that
-          card (POST /message routes it onto the approval), so it is the same answer either way. */}
-      {desk.question && !ENDED.includes(desk.status) && (
-        <div className="desk-banner ask">
-          <CircleHelp size={14} />
-          <div>
-            <b>It needs an answer</b>
-            <p>{desk.question}</p>
-            <SteerBox deskId={desk.id} live={false} disabled={false} placeholder="Answer it… (⌘↵)" />
-          </div>
-        </div>
-      )}
-      {planPending && tab !== 'plan' && (
-        <div className="desk-banner ask">
-          <CircleHelp size={14} />
-          <div>
-            <b>A plan is waiting for you</b>
-            <p>{desk.plan?.title || 'It drafted a plan'} — nothing consequential runs until you approve it.</p>
-            <button className="ghost-btn desk-banner-action" onClick={() => setTab('plan')}>Review the plan</button>
-          </div>
-        </div>
-      )}
-      <WaitingCards cards={desk.approvals ?? []} />
-      {desk.status === 'interrupted' && (
-        <div className="desk-banner warn">
-          <TriangleAlert size={14} />
-          <div>
-            <b>Interrupted by a restart</b>
-            <p>
-              Nothing was auto-resumed. {desk.status_reason || 'Whatever was mid-flight is recorded as unknown in the run log — check the files before you resume.'}
-            </p>
-          </div>
-        </div>
-      )}
-      {desk.last_error && desk.status !== 'interrupted' && (
-        <div className="desk-banner warn"><TriangleAlert size={14} /><div><b>Last error</b><p>{desk.last_error}</p></div></div>
-      )}
-
       <div className="desk-tabs tabs">
         {TABS.map((t, i) => (
           <button key={t.key} className={tab === t.key ? 'active' : ''} title={`${t.label} (${i + 1})`} onClick={() => setTab(t.key)}>
@@ -368,6 +319,48 @@ export default function DeskDetail(): JSX.Element | null {
             {t.key === 'plan' && desk.plan?.status === 'pending' && <span className="dot-badge">1</span>}
           </button>
         ))}
+      </div>
+
+      {/* Below the tabs, so a banner arriving or leaving never moves the tab strip. The band holds
+          whatever the desk is waiting on and is the same on every tab; empty, it takes no room. */}
+      <div className="desk-banners">
+        {/* Shown from the moment the desk_ask card opens, live or parked: answering here settles that
+            card (POST /message routes it onto the approval), so it is the same answer either way. */}
+        {desk.question && !ENDED.includes(desk.status) && (
+          <div className="desk-banner ask">
+            <CircleHelp size={14} />
+            <div>
+              <b>It needs an answer</b>
+              <p>{desk.question}</p>
+              <SteerBox deskId={desk.id} live={false} disabled={false} placeholder="Answer it… (⌘↵)" />
+            </div>
+          </div>
+        )}
+        {planPending && tab !== 'plan' && (
+          <div className="desk-banner ask">
+            <CircleHelp size={14} />
+            <div>
+              <b>A plan is waiting for you</b>
+              <p>{desk.plan?.title || 'It drafted a plan'} — nothing consequential runs until you approve it.</p>
+              <button className="primary-btn sm desk-banner-action" onClick={() => setTab('plan')}>Review the plan</button>
+            </div>
+          </div>
+        )}
+        <WaitingCards cards={desk.approvals ?? []} />
+        {desk.status === 'interrupted' && (
+          <div className="desk-banner warn">
+            <TriangleAlert size={14} />
+            <div>
+              <b>Interrupted by a restart</b>
+              <p>
+                Nothing was auto-resumed. {desk.status_reason || 'Whatever was mid-flight is recorded as unknown in the run log — check the files before you resume.'}
+              </p>
+            </div>
+          </div>
+        )}
+        {desk.last_error && desk.status !== 'interrupted' && (
+          <div className="desk-banner warn"><TriangleAlert size={14} /><div><b>Last error</b><p>{desk.last_error}</p></div></div>
+        )}
       </div>
 
       {tab === 'activity' && (

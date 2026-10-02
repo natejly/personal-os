@@ -12,16 +12,20 @@
   max-width: 300px;
   max-height: calc(100vh - 16px);
   overflow-y: auto;
-  padding: 6px;
-  background: var(--bg-elev);
+  /* The `.win-menu` material, padding and shadow (canvas.css): this popover opens from the button
+     next to the one that opens that menu, and the two used to look like different apps. The tokens
+     carry fallbacks because the classic shell can show this before canvas.css has ever loaded. */
+  padding: 4px;
+  background: var(--material-thick, var(--bg-elev));
+  backdrop-filter: var(--material-blur, none);
   border: 1px solid var(--border-strong);
-  border-radius: 10px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  border-radius: var(--win-radius-sm, 10px);
+  box-shadow: var(--shadow-float, 0 0 0 0.5px rgba(0, 0, 0, 0.45), 0 12px 32px rgba(0, 0, 0, 0.34));
 }
-/* Same as `.home-customize h4`, with room between sections. */
-.preset-pop h4 { margin: 0 0 6px; padding: 4px 4px 0; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-faint); }
-.preset-pop h4 ~ h4 { margin-top: 10px; }
-.preset-pop .empty-hint { padding: 4px 4px 6px; font-size: 12px; margin: 0; }
+/* Section heads: the `.win-menu-head` metrics, with room between sections. */
+.preset-pop h4 { margin: 0; padding: 6px 8px 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-faint); }
+.preset-pop h4 ~ h4 { margin-top: 6px; }
+.preset-pop .empty-hint { padding: 2px 8px 6px; font-size: 12px; margin: 0; }
 
 /* Rows: the `.project-item` metrics, with the actions revealed on hover. */
 .preset-row, .send-row {
@@ -48,7 +52,7 @@
 .send-row.new:only-of-type { border-top: 0; margin-top: 0; }
 
 /* Save form: a small modal-style input + Save. */
-.preset-form { display: flex; gap: 6px; padding: 0 2px 2px; }
+.preset-form { display: flex; gap: 6px; padding: 0 4px 4px; }
 .preset-form input {
   flex: 1;
   min-width: 0;
@@ -61,8 +65,6 @@
   outline: 0;
 }
 .preset-form input:focus { border-color: var(--accent); }
-.preset-form .primary-btn { padding: 4px 10px; font-size: 12px; }
-.preset-form .primary-btn:disabled { opacity: 0.6; cursor: default; }
 /* The sidebar row menu swaps its items for the form. */
 .space-menu .preset-form { width: 240px; padding: 2px; }
 

@@ -99,7 +99,7 @@ def resolve_cwd(cwd: str | None, roots: list[Path]) -> tuple[Path, Path]:
 def scrubbed_env(tmp: str) -> dict[str, str]:
     """An allowlist, never the app's environment: API keys and tokens live there."""
     return {"PATH": SAFE_PATH, "HOME": os.path.expanduser("~"), "LANG": "en_US.UTF-8", "TERM": "dumb",
-            "TMPDIR": tmp, "NO_COLOR": "1"}
+            "TMPDIR": tmp, "TMPPREFIX": f"{tmp}/zsh", "NO_COLOR": "1"}  # zsh puts here-document temp files at TMPPREFIX, not TMPDIR
 
 
 def truncate(text: str) -> tuple[str, bool]:

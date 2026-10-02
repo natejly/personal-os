@@ -38,6 +38,7 @@ log = logging.getLogger(__name__)
 RESULT_CHARS = 6000
 MAX_TASK_CHARS = 20_000
 ROUND_PARALLEL = 8
+PARENT_RESERVE = 0.6  # share of the parent run's tokens / cost / time children may use up
 GROUP = "agents"
 
 # ---- what a child may ever hold ------------------------------------------------------------------
@@ -600,6 +601,16 @@ class Subagents:
         finally:
             await self._finish(ch)
 
+    @staticmethod
+    def _parent_spent(b: Any) -> bool:
+        """Children are charged to the parent's budget; they stop once PARENT_RESERVE of it is used so the parent
+        keeps room to read their reports and finish the job instead of being cut off the moment they return."""
+        try:
+            ratios = b._ratios()
+        except Exception:  # noqa: BLE001 - a budget without ratios only has the hard cap
+            return False
+        return any(ratios.get(k, 0.0) >= PARENT_RESERVE for k in ("cost", "tokens", "time"))
+
     def _check(self, ch: Child) -> None:
         if ch.halt_reason:
             raise _Halt(ch.halt_reason)
@@ -611,7 +622,7 @@ class Subagents:
         if cap > 0 and ch.meter.cost >= cap:
             raise _Halt("cost_cap")
         b = ch.ctx.get("budget_parent")
-        if b is not None and b.exceeded() in ("cost", "tokens", "time"):
+        if b is not None and (b.exceeded() in ("cost", "tokens", "time") or self._parent_spent(b)):
             raise _Halt("cost_cap")
 
     async def _model_round(self, ch: Child, schemas: list[dict[str, Any]], final: bool = False) -> tuple[str, dict[str, Any]]:

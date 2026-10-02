@@ -177,8 +177,8 @@ function SendStatus({ id, immediate }: { id: string | null; immediate: Record<st
     case 'holding':
       return <Status tone="pending" icon={<Send size={14} />} text={<>Sending in <b className="mc-count">{clock(row.seconds_left)}</b></>}
         right={<>
-          <button className="mc-btn danger" disabled={busy} onClick={() => void act('cancel')}><Undo2 size={12} /> Undo</button>
-          <button className="mc-btn" disabled={busy} onClick={() => void act('sendNow')}>Send now</button>
+          <button className="ghost-btn sm" disabled={busy} onClick={() => void act('cancel')}><Undo2 size={12} /> Undo</button>
+          <button className="ghost-btn sm" disabled={busy} onClick={() => void act('sendNow')}>Send now</button>
         </>} />
     case 'sending':
       return <Status tone="pending" icon={<Send size={14} />} text="Sending…" />
@@ -195,7 +195,7 @@ function SendStatus({ id, immediate }: { id: string | null; immediate: Record<st
       return <Status tone="bad" icon={<AlertTriangle size={14} />} text="Send failed" why={row.error ?? undefined} />
     default:
       return <Status tone="bad" icon={<AlertTriangle size={14} />} text="Never sent" why={row.error ?? 'The app closed before the hold ran out.'}
-        right={<button className="mc-btn" disabled={busy} onClick={() => void act('sendNow')}>Send now</button>} />
+        right={<button className="ghost-btn sm" disabled={busy} onClick={() => void act('sendNow')}>Send now</button>} />
   }
 }
 
@@ -222,7 +222,7 @@ function Status({ tone, icon, text, badge, right, why }: {
 
 // ---------------------------------------------------------------- the compose card
 
-function ComposeCard({ event, pending, decide }: ToolCardProps): JSX.Element {
+function ComposeCard({ event, pending, decide, rules }: ToolCardProps): JSX.Element {
   const isSend = event.name === 'gmail_send'
   const original = event.arguments
   const account = useStore((s) => s.google?.email ?? null)
@@ -322,18 +322,19 @@ function ComposeCard({ event, pending, decide }: ToolCardProps): JSX.Element {
       {problem && (to.length > 0 || bad.length > 0 || changed.length > 0) && <div className="mc-problem" role="alert">{problem}</div>}
       {event.forced && <div className="mc-hint">Approval is required because this chat read content from outside.</div>}
       <footer className="mc-foot">
-        <button type="button" className="mc-send" disabled={!!problem || off} onClick={() => void go(isSend ? 'send' : 'draft')}
+        <button type="button" className="primary-btn sm" disabled={!!problem || off} onClick={() => void go(isSend ? 'send' : 'draft')}
           title={problem ?? (isSend ? 'Send (⌘↵)' : 'Save to Drafts (⌘↵)')}>
-          {isSend ? <><Send size={13} /> {busy === 'send' ? 'Sending…' : 'Send'}</> : <><FileText size={13} /> {busy === 'draft' ? 'Saving…' : 'Save draft'}</>}
+          {isSend ? <><Send size={12} /> {busy === 'send' ? 'Sending…' : 'Send'}</> : <><FileText size={12} /> {busy === 'draft' ? 'Saving…' : 'Save draft'}</>}
         </button>
         {isSend && (
-          <button type="button" className="mc-btn" disabled={!!problem || off} onClick={() => void go('draft')} title="Write it to Drafts without sending">
+          <button type="button" className="ghost-btn sm" disabled={!!problem || off} onClick={() => void go('draft')} title="Write it to Drafts without sending">
             <FileText size={12} /> {busy === 'draft' ? 'Saving…' : 'Save as draft'}
           </button>
         )}
-        <button type="button" className="mc-btn danger" disabled={off} onClick={() => void discard()}><Trash2 size={12} /> Discard</button>
+        <button type="button" className="ghost-btn sm" disabled={off} onClick={() => void discard()}><Trash2 size={12} /> Discard</button>
         <span className="mc-kbd">⌘↵ {isSend ? 'send' : 'save'}</span>
       </footer>
+      {rules}
       <Details event={event} />
     </section>
   )
@@ -434,7 +435,7 @@ function ReadMessage({ m, link }: { m: { from: string; to: string; subject: stri
   )
 }
 
-function SearchCard({ event }: ToolCardProps): JSX.Element {
+function SearchCard({ event, rules }: ToolCardProps): JSX.Element {
   const { rows, more } = useMemo(() => parseMailRows(event.result_preview), [event.result_preview])
   const [openRow, setOpenRow] = useState<MailRow | null>(null)
   const [full, setFull] = useState<ReturnType<typeof parseMailMessage>>(null)
@@ -461,12 +462,13 @@ function SearchCard({ event }: ToolCardProps): JSX.Element {
         : event.error ? <p className="mc-problem">{event.error}</p>
         : openRow && full ? <ReadMessage m={full} link={gmailLink('message', openRow.id)} />
         : <MailRows rows={rows} more={more} open={setOpenRow} />}
+      {rules}
       <Details event={event} />
     </section>
   )
 }
 
-function ReadCard({ event }: ToolCardProps): JSX.Element {
+function ReadCard({ event, rules }: ToolCardProps): JSX.Element {
   const m = useMemo(() => parseMailMessage(event.result_preview), [event.result_preview])
   return (
     <section className="mc mc-results" aria-label="Email">
@@ -475,6 +477,7 @@ function ReadCard({ event }: ToolCardProps): JSX.Element {
         : event.error ? <p className="mc-problem">{event.error}</p>
         : m ? <ReadMessage m={m} link={m.id ? gmailLink('message', m.id) : null} />
         : <p className="mc-empty">Nothing to show.</p>}
+      {rules}
       <Details event={event} />
     </section>
   )
@@ -482,7 +485,7 @@ function ReadCard({ event }: ToolCardProps): JSX.Element {
 
 // ---------------------------------------------------------------- outbox tool
 
-function OutboxCard({ event }: ToolCardProps): JSX.Element {
+function OutboxCard({ event, rules }: ToolCardProps): JSX.Element {
   const result = useMemo(() => readPreview(event.result_preview), [event.result_preview])
   const cancelled = result && typeof result.cancelled === 'string' ? result : null
   const waiting = result && Array.isArray(result.waiting) ? (result.waiting as { id: string; to: string; subject: string; sends_in_seconds: number }[]) : []
@@ -496,6 +499,7 @@ function OutboxCard({ event }: ToolCardProps): JSX.Element {
         : <ul className="mc-list">{waiting.map((w) => (
             <li key={w.id} className="mc-queue-row"><Send size={12} /> <b>{w.subject || '(no subject)'}</b> <span className="mc-faint">to {w.to} · in {clock(w.sends_in_seconds)}</span></li>
           ))}</ul>}
+      {rules}
       <Details event={event} />
     </section>
   )

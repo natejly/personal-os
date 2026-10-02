@@ -26,7 +26,7 @@ import 'katex/dist/katex.min.css'
 function CopyButton({ text }: { text: string }): JSX.Element {
   const [ok, setOk] = useState(false)
   return (
-    <button className="icon-btn ghost" title="Copy" onClick={() => { void navigator.clipboard.writeText(text); setOk(true); setTimeout(() => setOk(false), 1200) }}>
+    <button className="icon-btn ghost" title="Copy" aria-label={ok ? 'Copied' : 'Copy'} onClick={() => { void navigator.clipboard.writeText(text); setOk(true); setTimeout(() => setOk(false), 1200) }}>
       {ok ? <Check size={13} /> : <Copy size={13} />}
     </button>
   )

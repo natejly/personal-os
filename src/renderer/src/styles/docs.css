@@ -283,13 +283,13 @@
 
 /* ---- diff card ---- */
 .diff-card {
-  border: 1px solid var(--border); border-radius: 9px;
+  border: 1px solid var(--border); border-radius: 10px;
   background: var(--bg-elev); margin-bottom: 10px; overflow: hidden;
 }
-.diff-card.pending { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); }
+.diff-card.pending { border-color: var(--await-border); }
 .diff-card > header, .diff-card > footer {
   display: flex; align-items: center; gap: 7px;
-  padding: 6px 8px; font-size: 11px;
+  padding: 6px 8px 6px 12px; font-size: 11px;
 }
 .diff-card > header { border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .diff-card > footer { border-top: 1px solid var(--border); }

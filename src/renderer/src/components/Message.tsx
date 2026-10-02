@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from 'react'
-import { AlertCircle, User, Sparkles, Brain, Share2, FileText, Activity, ChevronRight, Lightbulb, RotateCw, GraduationCap } from 'lucide-react'
+import { AlertCircle, Sparkles, Brain, Share2, FileText, Activity, ChevronRight, Lightbulb, RotateCw, RefreshCw, GraduationCap } from 'lucide-react'
 import type { Message, RunChanges } from '@shared/types'
 import { useStore } from '../store'
 import { api } from '../lib/api'
@@ -103,7 +103,7 @@ function FilesChanged({ messageId }: { messageId: string }): JSX.Element | null 
   return (
     <div className="files-changed" title={ch.files.map((f) => `${f.status} ${f.path}`).slice(0, 30).join('\n')}>
       <FileText size={12} /> Files changed ({ch.count}) ·{' '}
-      <button className="ghost-btn" disabled={busy} onClick={go}>{undone ? 'Redo' : 'Undo'}</button>
+      <button className="ghost-btn sm" disabled={busy} onClick={go}>{undone ? 'Redo' : 'Undo'}</button>
       {note && <span className="files-changed-note">{note}</span>}
     </div>
   )
@@ -111,57 +111,65 @@ function FilesChanged({ messageId }: { messageId: string }): JSX.Element | null 
 
 // The store is read imperatively inside the handlers: any subscription here defeats the memo, and a
 // streamed token would re-render every message in every mounted transcript.
-const MessageView = memo(function MessageView({ message, streaming }: { message: Message; streaming: boolean }): JSX.Element {
+// `onRegenerate` is handed to the newest assistant reply only, so every other row keeps its memo.
+const MessageView = memo(function MessageView({ message, streaming, onRegenerate }: { message: Message; streaming: boolean; onRegenerate?: () => void }): JSX.Element {
   const isUser = message.role === 'user'
   const ctx = message.context_used
   const ctxCount = ctx ? ctx.memories.length + ctx.nodes.length + ctx.chunks.length : 0
   const trace = message.trace && message.trace.length > 0 ? traceSummary(message.trace) : null
   return (
     <div className={`msg ${message.role}`}>
-      <div className="avatar">{isUser ? <User size={14} /> : <Sparkles size={14} />}</div>
+      {/* The tinted, right-aligned bubble already says "you"; only the assistant gets a mark. */}
+      {!isUser && <div className="avatar"><Sparkles size={14} /></div>}
       <div className="bubble">
         {isUser ? (
           <div className="user-bubble"><div className="user-text">{message.content}</div></div>
         ) : (
-          <div className="markdown">
+          <div className="msg-body">
             {message.reasoning && <Reasoning text={message.reasoning} live={streaming && !message.content} />}
             {message.tool_events && message.tool_events.length > 0 && <ToolEvents events={message.tool_events} conversationId={message.conversation_id} />}
+            {/* Only the rendered text lives in .markdown: its element rules (p, ul, li) out-rank the
+                single-class rules the cards above are styled with. */}
             {message.content ? (
-              <MarkdownPreview source={message.content} streaming={streaming} />
+              <div className={streaming ? 'markdown streaming' : 'markdown'}>
+                <MarkdownPreview source={message.content} streaming={streaming} />
+              </div>
             ) : streaming && !message.reasoning && !message.tool_events?.some((t) => t.pending) ? (
               <span className="thinking"><span /><span /><span /></span>
             ) : null}
-            {streaming && message.content && <span className="cursor" />}
           </div>
         )}
         {message.error && <div className="msg-error"><AlertCircle size={14} /><span>{message.error}</span></div>}
         {!streaming && message.role === 'assistant' && message.error?.startsWith('Interrupted:') && <ResumeButton conversationId={message.conversation_id} />}
         {!streaming && message.role === 'assistant' && message.tool_events?.some((t) => FILE_CHANGING.test(t.name)) && <FilesChanged messageId={message.id} />}
-        {!streaming && (
-          <div className="msg-actions">
-            {message.model && (
-              <span className="model-tag" title={message.model === modelLabel(message.model) ? undefined : message.model}>
-                {modelLabel(message.model)}
-              </span>
-            )}
-            {ctx && ctxCount > 0 && (
-              <button className="ctx-chip" title="Context used for this reply" onClick={() => { const s = useStore.getState(); if (!s.contextOpen) s.toggleContext() }}>
-                {ctx.memories.length > 0 && <span><Brain size={11} />{ctx.memories.length}</span>}
-                {ctx.nodes.length > 0 && <span><Share2 size={11} />{ctx.nodes.length}</span>}
-                {ctx.chunks.length > 0 && <span><FileText size={11} />{ctx.chunks.length}</span>}
-              </button>
-            )}
-            {!isUser && (message.tool_events?.length ?? 0) > 0 && (
-              <SaveSkill conversationId={message.conversation_id} messageId={message.id} />
-            )}
-            {trace && (
-              <button className="ctx-chip" title="Execution trace: LLM rounds, tool calls, timings and tokens" onClick={() => useStore.getState().openTrace(message.id)}>
-                <span><Activity size={11} />{trace.steps} step{trace.steps === 1 ? '' : 's'} · {fmtMs(trace.total_ms)}{trace.tokens ? ` · ${trace.tokens.toLocaleString()} tok` : ''}</span>
-              </button>
-            )}
-            <CopyButton text={message.content} />
-          </div>
-        )}
+        {/* Always mounted and only hidden while the reply streams: the row's height is reserved, so
+            nothing lands below the fold when the stream ends. */}
+        <div className={streaming ? 'msg-actions streaming' : 'msg-actions'} aria-hidden={streaming || undefined}>
+          <CopyButton text={message.content} />
+          {onRegenerate && (
+            <button className="icon-btn" title="Regenerate" aria-label="Regenerate" onClick={onRegenerate}><RefreshCw size={13} /></button>
+          )}
+          {ctx && ctxCount > 0 && (
+            <button className="ctx-chip" title="Context used for this reply" onClick={() => { const s = useStore.getState(); if (!s.contextOpen) s.toggleContext() }}>
+              {ctx.memories.length > 0 && <span><Brain size={11} />{ctx.memories.length}</span>}
+              {ctx.nodes.length > 0 && <span><Share2 size={11} />{ctx.nodes.length}</span>}
+              {ctx.chunks.length > 0 && <span><FileText size={11} />{ctx.chunks.length}</span>}
+            </button>
+          )}
+          {!isUser && (message.tool_events?.length ?? 0) > 0 && (
+            <SaveSkill conversationId={message.conversation_id} messageId={message.id} />
+          )}
+          {trace && (
+            <button className="ctx-chip" title="Execution trace: LLM rounds, tool calls, timings and tokens" onClick={() => useStore.getState().openTrace(message.id)}>
+              <span><Activity size={11} />{trace.steps} step{trace.steps === 1 ? '' : 's'} · {fmtMs(trace.total_ms)}{trace.tokens ? ` · ${trace.tokens.toLocaleString()} tok` : ''}</span>
+            </button>
+          )}
+          {message.model && (
+            <span className="model-tag" title={message.model === modelLabel(message.model) ? undefined : message.model}>
+              {modelLabel(message.model)}
+            </span>
+          )}
+        </div>
       </div>
     </div>
   )

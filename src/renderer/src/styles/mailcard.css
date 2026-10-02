@@ -2,12 +2,14 @@
    the app's tokens so light, dark and every accent follow along. */
 .tool-card-slot { margin: 2px 0; }
 .mc {
-  border: 1px solid var(--border-strong); border-radius: 12px; background: var(--bg-elev);
+  border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elev);
   font-size: 13px; color: var(--text); overflow: hidden; max-width: 640px;
 }
-.mc button { font: inherit; color: inherit; }
+/* The draft is waiting on the user: the same edge and wash as every other pending card. */
+.mc-compose { border-color: var(--await-border); background-image: linear-gradient(var(--await-fill), var(--await-fill)); }
 .mc-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--hover); border-bottom: 1px solid var(--border); min-height: 34px; }
 .mc-head svg { color: var(--text-muted); flex-shrink: 0; }
+.mc-head b { font-size: 13px; font-weight: 600; }
 .mc-tag { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 1px 8px; border-radius: 10px; background: var(--hover); color: var(--text-muted); }
 .mc-tag.ask { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--text); margin-left: auto; }
 .mc-tag.edited { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--text); }
@@ -53,20 +55,8 @@
 .mc-problem { margin: 0 12px 8px; font-size: 12px; color: var(--danger); }
 p.mc-problem { margin: 8px 12px; }
 
+/* The buttons are the app's own .primary-btn.sm / .ghost-btn.sm: Send first, the rest plain. */
 .mc-foot { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-top: 1px solid var(--border); flex-wrap: wrap; }
-.mc-send {
-  display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 8px; font-weight: 600;
-  background: var(--accent-solid); color: var(--on-accent); cursor: pointer;
-}
-.mc-send:hover:not(:disabled) { background: var(--accent-solid-hover); }
-.mc-send:disabled { opacity: 0.5; cursor: default; }
-.mc-btn {
-  display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px; border-radius: 8px; font-size: 12px;
-  border: 1px solid var(--border-strong); color: var(--text-muted); cursor: pointer; background: transparent;
-}
-.mc-btn:hover:not(:disabled) { background: var(--hover); color: var(--text); }
-.mc-btn:disabled { opacity: 0.5; cursor: default; }
-.mc-btn.danger:hover:not(:disabled) { color: var(--danger); border-color: var(--danger); }
 .mc-kbd { margin-left: auto; font-size: 11px; color: var(--text-faint); }
 
 /* resolved */

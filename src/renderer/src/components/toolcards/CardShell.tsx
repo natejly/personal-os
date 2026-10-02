@@ -8,12 +8,13 @@ import './toolcards.css'
 
 /**
  * The chrome every dedicated card shares: header (icon, title, subject, status), the card's own body, the result,
- * a Details disclosure for the raw call, and Approve / Deny while the call waits.
+ * a Details disclosure for the raw call, and Approve / Deny while the call waits, with the standing grants
+ * (`rules`) as a quieter line under them.
  *
  * Approve is also ⌘↵ / Ctrl↵ from anywhere inside a pending card. Deny is never a shortcut: a stray key must
  * not be able to refuse (or grant) an outward action on its own, so Deny is a click.
  */
-export default function CardShell({ event, pending, decide, icon, title, subject, children, getEdited, invalid, approveLabel = 'Approve', hideResult = false, tone }: ToolCardProps & {
+export default function CardShell({ event, pending, decide, rules, icon, title, subject, children, getEdited, invalid, approveLabel = 'Approve', hideResult = false, tone }: ToolCardProps & {
   icon: ReactNode
   title: string
   subject?: string
@@ -72,10 +73,11 @@ export default function CardShell({ event, pending, decide, icon, title, subject
           <button type="button" className="primary-btn sm" disabled={busy || !!invalid} title={invalid ?? 'Approve (⌘↵)'} onClick={() => void send(true)}>
             {approveLabel}
           </button>
-          <button type="button" className="ghost-btn sm danger" disabled={busy} onClick={() => void send(false)}>Deny</button>
+          <button type="button" className="ghost-btn sm" disabled={busy} onClick={() => void send(false)}>Deny</button>
           {invalid ? <span className="tc-hint err">{invalid}</span> : <span className="tc-hint">⌘↵ to approve</span>}
         </footer>
       ) : null}
+      {pending && rules}
       <RawDetails event={event as ToolEvent} />
     </div>
   )

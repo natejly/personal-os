@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { AlertCircle, Check, ChevronRight, Code2, Copy, Download, Maximize2, Package, X } from 'lucide-react'
+import { AlertCircle, Check, ChevronRight, Code2, Copy, Download, Maximize2, Package } from 'lucide-react'
 import type { ArtifactRef, ArtifactVersion } from '@shared/types'
 import { api } from '../../lib/api'
 import ArtifactFrame from '../ArtifactFrame'
@@ -26,7 +26,7 @@ function shortArgs(a: Record<string, unknown>): string {
   return JSON.stringify(o, null, 2)
 }
 
-export default function ArtifactCard({ event, pending, decide }: ToolCardProps): JSX.Element {
+export default function ArtifactCard({ event, pending, decide, rules }: ToolCardProps): JSX.Element {
   const ref = artifactOf(event)
   const [expanded, setExpanded] = useState(false)
   const [open, setOpen] = useState(false)
@@ -55,7 +55,7 @@ export default function ArtifactCard({ event, pending, decide }: ToolCardProps):
   }
 
   return (
-    <div className={`art-card ${pending ? 'pending' : ''} ${event.error ? 'error' : ''}`}>
+    <div className={`art-card ${pending ? 'pending' : ''} ${pending && event.needs_approval ? 'awaiting' : ''} ${event.error ? 'error' : ''}`}>
       <header className="art-card-head">
         <Package size={14} />
         <b className="art-card-title" title={title}>{pending ? `${verb} “${title}”…` : title}</b>
@@ -69,7 +69,7 @@ export default function ArtifactCard({ event, pending, decide }: ToolCardProps):
               </select>
             )}
             <button className="icon-btn ghost" title="Taller preview" aria-label={expanded ? 'Shorter preview' : 'Taller preview'} aria-pressed={expanded} onClick={() => setExpanded((v) => !v)}><Maximize2 size={13} /></button>
-            <button className="ghost-btn" onClick={() => setOpen(true)}>Open</button>
+            <button className="ghost-btn sm" onClick={() => setOpen(true)}>Open</button>
             <button className="icon-btn ghost" title="Download HTML" aria-label="Download HTML" onClick={() => void code().then((c) => downloadHtml(title, c))}><Download size={13} /></button>
             <CopyButtonLazy get={code} />
           </div>
@@ -79,8 +79,11 @@ export default function ArtifactCard({ event, pending, decide }: ToolCardProps):
       {pending && event.needs_approval && (
         <div className="art-card-approve">
           <span>The assistant wants to {event.name === 'artifact_create' ? 'create' : 'update'} this artifact.</span>
-          <button className="primary-btn" onClick={() => void decide(true)}><Check size={12} /> Allow</button>
-          <button className="ghost-btn danger" onClick={() => void decide(false)}><X size={12} /> Deny</button>
+          <div className="art-card-approve-actions">
+            <button className="primary-btn sm" onClick={() => void decide(true)}>Approve</button>
+            <button className="ghost-btn sm" onClick={() => void decide(false)}>Deny</button>
+          </div>
+          {rules}
         </div>
       )}
       {pending && !event.needs_approval && <div className="art-frame-empty" style={{ height: 120 }}><span className="thinking mini"><span /><span /><span /></span></div>}

@@ -1,14 +1,14 @@
 /* Tool cards: compact, native-feeling cards inside a chat bubble. Colours come from the app's variables only,
    so light and dark both work with no overrides. */
 .tc-card { overflow: hidden; font-size: 13px; color: var(--text); }
-.tc-card.awaiting { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent); }
+/* The waiting edge and wash come from .tool-event.awaiting (styles.css), shared with every pending card. */
 .tc-card.warn.awaiting { border-color: color-mix(in srgb, var(--warn) 60%, var(--border)); }
 .tc-card:focus-within { border-color: var(--border-strong); }
 .tc-card.awaiting:focus-within { border-color: var(--accent); }
 
 .tc-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .tc-icon { display: inline-flex; color: var(--accent); flex-shrink: 0; }
-.tc-title { font-weight: 600; }
+.tc-title { font-size: 13px; font-weight: 600; }
 .tc-subject { color: var(--text-muted); min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tc-edited { background: color-mix(in srgb, var(--info) 16%, transparent); color: var(--info); }
 
@@ -30,7 +30,9 @@
 .tc-was { color: var(--text-faint); font-size: 11px; text-decoration: line-through; }
 .tc-long { white-space: pre-wrap; overflow-wrap: anywhere; }
 .tc-long.mono, .mono { font-family: var(--mono); font-size: 12px; }
-.tc-more { background: none; border: 0; padding: 0 0 0 6px; color: var(--accent); font-size: 11px; cursor: pointer; }
+/* Inline with the text it expands, so the 24px target is an invisible expander, not a taller line. */
+.tc-more { position: relative; background: none; border: 0; padding: 0 0 0 6px; color: var(--accent); font-size: 11px; cursor: pointer; }
+.tc-more::before { content: ''; position: absolute; inset: -6px -4px; }
 .tc-more:hover { text-decoration: underline; }
 .tc-muted { color: var(--text-faint); font-size: 11px; font-style: normal; }
 @media (max-width: 520px) { .tc-arg { grid-template-columns: 1fr; gap: 2px; } }
@@ -63,7 +65,7 @@
 
 /* raw call */
 .tc-details { border-top: 1px solid var(--border); font-size: 12px; }
-.tc-details summary { cursor: pointer; padding: 6px 12px; color: var(--text-faint); list-style: none; }
+.tc-details summary { cursor: pointer; min-height: 24px; padding: 6px 12px; color: var(--text-faint); list-style: none; }
 .tc-details summary::-webkit-details-marker { display: none; }
 .tc-details summary::before { content: '▸'; display: inline-block; width: 12px; transition: transform 0.12s; }
 .tc-details[open] summary::before { transform: rotate(90deg); }

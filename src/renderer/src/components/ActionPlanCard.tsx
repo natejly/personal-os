@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Check, ChevronRight, Pencil, ShieldAlert, Wrench, X } from 'lucide-react'
+import { ChevronRight, Pencil, ShieldAlert, Wrench } from 'lucide-react'
 import type { PlanRecord, PlanRecordStep, ToolDanger } from '@shared/types'
 import { argRows, edited as reallyEdited, editPayload, invalid } from '../lib/planDigest'
 import { useStore } from '../store'
@@ -233,20 +233,20 @@ export default function ActionPlanCard({ plan }: { plan: PlanRecord }): JSX.Elem
           />
           <div className="aplan-actions">
             <button
-              className="primary-btn"
+              className="primary-btn sm"
               disabled={sending || broken || changed}
               title={changed ? 'You changed the plan — use “Approve with changes”' : 'Approve and run (⌘⇧A)'}
               onClick={() => void decide('approve')}
             >
-              <Check size={13} /> Approve &amp; run
+              Approve &amp; run
             </button>
             {changed && (
-              <button className="primary-btn" disabled={sending || broken} title="Approve the plan as you edited it (⌘⇧A)" onClick={() => void decide('edit')}>
-                <Check size={13} /> Approve with changes
+              <button className="primary-btn sm" disabled={sending || broken} title="Approve the plan as you edited it (⌘⇧A)" onClick={() => void decide('edit')}>
+                Approve with changes
               </button>
             )}
-            <button className="ghost-btn danger" disabled={sending} title="Reject and ask for a different plan (⌘⇧D)" onClick={() => void decide('reject')}>
-              <X size={13} /> Reject
+            <button className="ghost-btn sm" disabled={sending} title="Reject and ask for a different plan (⌘⇧D)" onClick={() => void decide('reject')}>
+              Reject
             </button>
           </div>
         </div>

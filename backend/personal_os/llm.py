@@ -255,6 +255,12 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "hybridRetrieval": True,
     "retrievalPerDocCap": 3,
     "retrievalCandidates": 20,
+    # Off by default, one model call per chunk: embed-backfill writes a short blurb situating each chunk in
+    # its document, which is then indexed and embedded with the chunk. Rerank: reorder the fused candidates
+    # with a rerank model (/v1/rerank, else one completion) before trimming; blank model = off.
+    "contextualChunks": False,
+    "retrievalRerank": False,
+    "retrievalRerankModel": "",
     # Also retrieve from the user's own Docs (not just uploaded files) when a chat has useDocuments on.
     "useDocsInContext": True,
     # Reply tracker (mailwatch.py); MailWatchModule.config() merges stored values over these defaults.

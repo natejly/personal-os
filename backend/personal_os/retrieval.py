@@ -13,10 +13,12 @@ from typing import Any
 
 import numpy as np
 
+from . import llm
 from .chunker import contextualize
 from .db import Database
 from .embed import Embedder, pack, rrf, unpack  # noqa: F401 - rrf re-exported for callers
 from .repos import Documents, _scope_clause
+from .retrieval_rerank import rerank
 
 log = logging.getLogger("grain.retrieval")
 
@@ -42,6 +44,8 @@ class Retriever:
         self._tasks: set[asyncio.Task[Any]] = set()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._docs_pending = False
+        self.complete: Any = llm.complete  # tests stub this
+        self.rerank_fn: Any = None  # tests stub this; None = retrieval_rerank.rerank
 
     def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         """Remember the server loop so edits made on worker threads can still schedule embedding."""
@@ -52,7 +56,7 @@ class Retriever:
         s = _STORE[store]
         where, args = (f"AND ch.{s['fk']}=?", [parent_id]) if parent_id else ("", [])
         return c.execute(
-            f"""SELECT ch.id, ch.{s['fk']} AS parent_id, ch.text, ch.heading, p.{s['name']} AS name FROM {s['chunks']} ch
+            f"""SELECT ch.id, ch.{s['fk']} AS parent_id, ch.text, ch.heading, ch.blurb, p.{s['name']} AS name FROM {s['chunks']} ch
                 JOIN {s['parent']} p ON p.id=ch.{s['fk']}
                 LEFT JOIN {s['emb']} e ON e.chunk_id=ch.id AND e.model=?
                 WHERE e.chunk_id IS NULL {where} LIMIT ?""", (model, *args, limit)).fetchall()
@@ -65,7 +69,7 @@ class Retriever:
                 rows = self._pending(c, store, model, parent_id, limit)
             if not rows:
                 break
-            vecs = await self.embedder.embed(settings, [contextualize(r["name"], r["heading"], r["text"]) for r in rows])
+            vecs = await self.embedder.embed(settings, [contextualize(r["name"], r["heading"], r["text"], r["blurb"]) for r in rows])
             if vecs is None:
                 return embedded, "embeddings unavailable"
             with self.db.tx() as c:
@@ -78,6 +82,52 @@ class Retriever:
             if len(rows) < limit:
                 break
         return embedded, None
+
+    async def contextualize_pending(self, settings: dict[str, Any], limit: int = 64) -> int:
+        """Write a model-made blurb for up to `limit` chunks per store that have none, re-index it with the
+        chunk and drop the chunk's vector so embed_pending re-makes it. Off unless contextualChunks; a model
+        error stops the pass and leaves the chunk as it was. Returns blurbs written. Never raises."""
+        model = settings.get("defaultModel")
+        if not settings.get("contextualChunks") or not model:
+            return 0
+        done = 0
+        for store in ALL_SOURCES:
+            if store == "docs" and self.docs is None:
+                continue
+            s = _STORE[store]
+            with self.db.tx() as c:
+                rows = c.execute(
+                    f"""SELECT ch.id, ch.{s['fk']} AS parent_id, ch.text, ch.heading, p.{s['name']} AS name FROM {s['chunks']} ch
+                        JOIN {s['parent']} p ON p.id=ch.{s['fk']} WHERE ch.blurb='' AND p.deleted_at IS NULL
+                        ORDER BY ch.{s['fk']}, ch.idx LIMIT ?""", (limit,)).fetchall()
+            docs_text: dict[str, str] = {}
+            for r in rows:
+                try:
+                    if r["parent_id"] not in docs_text:
+                        with self.db.tx() as c:
+                            docs_text[r["parent_id"]] = "\n".join(x["text"] for x in c.execute(
+                                f"SELECT text FROM {s['chunks']} WHERE {s['fk']}=? ORDER BY idx", (r["parent_id"],)))[:6000]
+                    # Document first, chunk last: the shared prefix is what a prompt cache can reuse.
+                    blurb = (await self.complete(settings, str(model), [{"role": "user", "content": (
+                        f"<document>\n{docs_text[r['parent_id']]}\n</document>\n<chunk>\n{r['text']}\n</chunk>\n"
+                        "Write one or two sentences (under 80 words) that situate this chunk within the document "
+                        "to improve search retrieval. Answer with only that context.")}], "contextualize")).strip()
+                except Exception:  # noqa: BLE001 - leave the chunk as it was
+                    log.warning("chunk contextualisation failed; stopping this pass", exc_info=True)
+                    return done
+                if not blurb:
+                    continue
+                with self.db.tx() as c:
+                    if not c.execute(f"SELECT 1 FROM {s['chunks']} WHERE id=?", (r["id"],)).fetchone():
+                        continue
+                    fts = "chunks_fts" if store == "files" else "doc_chunks_fts"
+                    c.execute(f"UPDATE {s['chunks']} SET blurb=? WHERE id=?", (blurb, r["id"]))
+                    c.execute(f"DELETE FROM {fts} WHERE chunk_id=?", (r["id"],))
+                    c.execute(f"INSERT INTO {fts}(text, chunk_id, {s['fk']}) VALUES(?,?,?)",
+                              (contextualize(r["name"], r["heading"], r["text"], blurb), r["id"], r["parent_id"]))
+                    c.execute(f"DELETE FROM {s['emb']} WHERE chunk_id=?", (r["id"],))
+                done += 1
+        return done
 
     async def embed_pending(self, settings: dict[str, Any], document_id: str | None = None, limit: int = 256,
                             stores: tuple[str, ...] = ALL_SOURCES) -> dict[str, Any]:
@@ -240,6 +290,8 @@ class Retriever:
             # No vectors: bm25 only. One store keeps its own order; several interleave by rank (rrf).
             fused = rrf(bm25_lists, [1.0] * len(bm25_lists), k=RRF_K) if len(bm25_lists) > 1 else \
                 [(k, -float(by_key[k].get("score") or 0.0)) for k in (bm25_lists[0] if bm25_lists else [])]
+        if settings.get("retrievalRerank") and settings.get("retrievalRerankModel") and len(fused) > 1:
+            fused = await (self.rerank_fn or rerank)(settings, query, fused, by_key)
         floor = float(settings.get("retrievalMinSimilarity") or 0.0)
         cap = int(settings.get("retrievalPerDocCap") or 0)
         per_doc: dict[tuple[str, str], int] = {}

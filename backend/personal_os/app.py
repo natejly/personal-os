@@ -4033,6 +4033,7 @@ async def embed_backfill() -> dict[str, Any]:
     current model. Idempotent."""
     docs.backfill_chunks()
     embedder.reset()  # the user asked for it now, so a back-off from an earlier failure does not apply
+    await retriever.contextualize_pending(settings())  # no-op unless contextualChunks; never raises
     return await retriever.embed_pending(settings())
 
 

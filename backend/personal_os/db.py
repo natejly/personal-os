@@ -532,7 +532,7 @@ class Database:
             "memories": {"deleted_at": "REAL", "deleted_with": "TEXT", "valid_from": "REAL", "invalid_at": "REAL", "superseded_by": "TEXT",
                          "source_conversation_id": "TEXT", "source_message_id": "TEXT"},
             "documents": {"deleted_at": "REAL", "deleted_with": "TEXT", "content_hash": "TEXT NOT NULL DEFAULT ''"},
-            "chunks": {"heading": "TEXT NOT NULL DEFAULT ''", "page": "INTEGER"},
+            "chunks": {"heading": "TEXT NOT NULL DEFAULT ''", "page": "INTEGER", "blurb": "TEXT NOT NULL DEFAULT ''"},
             "kg_edges": {"valid_at": "REAL", "invalid_at": "REAL", "superseded_by": "TEXT",
                          "source_message_id": "TEXT", "fact": "TEXT NOT NULL DEFAULT ''"},
             "messages": {"tool_events": "TEXT", "trace": "TEXT", "reasoning": "TEXT"},

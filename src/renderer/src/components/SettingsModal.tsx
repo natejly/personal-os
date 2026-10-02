@@ -219,6 +219,10 @@ export default function SettingsModal(): JSX.Element {
                 </div>
               </div>
               <p className="muted small">What the assistant knows: memories and graph relations learned from chats, and documents whose best excerpts are pulled into replies. Changes here apply immediately.</p>
+              {knowledgeTab === 'documents' && <label className="toggle-row plain modal-free">
+                <span className="toggle-text"><b>Contextual chunks</b><small>When you run the embedding backfill, ask the model to write one sentence situating each chunk in its document, and index it with the chunk. Costs one model call per chunk. Off by default.</small></span>
+                <input type="checkbox" checked={draft.contextualChunks === true} onChange={(e) => patch({ contextualChunks: e.target.checked })} /><span className="switch" />
+              </label>}
               <div className="knowledge-body modal-free">
                 {knowledgeTab === 'memory' ? <MemoryPanel embedded /> : <DocumentsView embedded />}
               </div>

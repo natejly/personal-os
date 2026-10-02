@@ -1470,7 +1470,7 @@ def _event_out(e: dict[str, Any], calendar_id: str | None = None, full: bool = F
             "reminders": e.get("reminders"),
             "organizer": (e.get("organizer") or {}).get("email"),
             "attendee_details": [
-                {"email": a.get("email"), "optional": bool(a.get("optional")), "response": a.get("responseStatus"),
+                {"email": a.get("email"), "name": a.get("displayName") or "", "optional": bool(a.get("optional")), "response": a.get("responseStatus"),
                  "organizer": bool(a.get("organizer")), "self": bool(a.get("self"))}
                 for a in e.get("attendees", [])
             ][:60],

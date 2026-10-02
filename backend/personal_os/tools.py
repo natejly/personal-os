@@ -1311,6 +1311,32 @@ def _register_google(self: Toolbox) -> None:
         _obj({"event_id": {"type": "string"}, "calendar_id": {"type": "string", "default": "primary"}}, ["event_id"]), calendar_get, "google",
         examples=[{"event_id": "7abc123def"}], taints=True))
 
+    async def meeting_brief(ctx: dict[str, Any], event_id: str, calendar_id: str = "primary") -> Any:
+        e = await run(g.calendar_get, event_id, calendar_id)
+        guests = [a for a in e.get("attendee_details") or [] if not a.get("self") and a.get("email")]
+        repo = getattr(self.meetings, "meetings", self.meetings)
+        people = []
+        for a in guests:
+            mail = a["email"]
+            name = a.get("name") or ""
+            terms = [mail] + ([name] if name else [])
+            seen: dict[str, str] = {}
+            for t in terms:
+                for m in self.memories.list(ctx["project_id"], t)[:5]:
+                    seen.setdefault(m["id"], m["content"])
+            past = []
+            if repo is not None:
+                with repo.db.tx() as c:
+                    rows = c.execute("SELECT id, title, COALESCE(started_at, scheduled_start, created_at) AS at FROM meetings "
+                                     "WHERE attendees LIKE ? AND COALESCE(calendar_event_id,'') != ? ORDER BY at DESC LIMIT 3",
+                                     (f"%{mail}%", event_id)).fetchall()
+                past = [{"meeting_id": r["id"], "title": r["title"], "at": r["at"]} for r in rows]
+            people.append({"email": mail, "name": name, "notes": list(seen.values())[:5], "past_meetings": past})
+        return {"event": {k: e.get(k) for k in ("summary", "start", "end", "location", "description")}, "people": people}
+    R("meeting_brief", ToolSpec("meeting_brief", "Pre-meeting brief for one calendar event: for each guest, what long-term memory holds about them and the last meetings you recorded with them. Read-only. Use before a meeting, or when asked who someone on the invite is.",
+        _obj({"event_id": {"type": "string"}, "calendar_id": {"type": "string", "default": "primary"}}, ["event_id"]), meeting_brief, "google",
+        examples=[{"event_id": "7abc123def"}], taints=True))
+
     async def calendar_create(ctx: dict[str, Any], summary: str, start: str, end: str | None = None, description: str | None = None, location: str | None = None,
                               attendees: list[str] | None = None, recurrence: list[str] | None = None, reminder_minutes: list[int] | None = None,
                               color_id: str | None = None, visibility: str | None = None, busy: bool | None = None, create_meet: bool | None = None,

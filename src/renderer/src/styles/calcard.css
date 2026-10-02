@@ -9,7 +9,7 @@
   background: var(--bg-elev); border: 1px solid var(--border);
   display: flex; flex-direction: column; gap: 8px;
 }
-.ccard.awaiting { border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: color-mix(in srgb, var(--accent) 6%, var(--bg-elev)); }
+.ccard.awaiting { border-color: var(--await-border); background-image: linear-gradient(var(--await-fill), var(--await-fill)); }
 .ccard.failed, .ccard.partial { border-color: color-mix(in srgb, var(--danger) 45%, transparent); }
 .ccard.denied { opacity: 0.8; }
 .ccard-head { display: flex; align-items: center; gap: 7px; color: var(--text); }
@@ -151,6 +151,7 @@ button.pg-block:hover { filter: brightness(1.08); }
 .ccard-warn.bad svg { color: var(--danger); }
 
 .ccard-foot { display: flex; flex-direction: column; gap: 7px; }
+.ccard-foot .approval-rules { margin-top: 0; }
 .ccard-notify { display: flex; align-items: center; gap: 6px; color: var(--text-muted); font-size: 12px; }
 .ccard-notify input { margin: 0; accent-color: var(--accent-solid); }
 .ccard-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }

@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import { PanelLeftOpen, RefreshCw, Pencil, SlidersHorizontal } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { ArrowDown, PanelLeftOpen, Pencil, SlidersHorizontal } from 'lucide-react'
 import { useStore, useProject, useConversation, useIsStreaming, useStreamingMessageId } from '../store'
 import ProjectChip from './ProjectChip'
 import MessageView from './Message'
@@ -11,7 +11,6 @@ import PlanPanel from './PlanPanel'
 import SendToSpace from './SendToSpace'
 import { clip, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
-import { useOnboarding } from './onboarding/onboardingStore'
 import { FIRST_PROMPTS } from './onboarding/steps'
 
 function greeting(): string {
@@ -32,10 +31,6 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   const draftProjectId = useStore((s) => s.draftProjectId)
   const project = useProject(convo?.project_id ?? draftProjectId)
   const { toggleSidebar, toggleContext, renameChat, regenerate, send } = useStore()
-  const firstPrompts = useOnboarding((s) => s.firstPrompts && !conversationId)
-  const setFirstPrompts = useOnboarding((s) => s.setFirstPrompts)
-  // The chips are for the first empty chat only; once any conversation is open they are spent.
-  useEffect(() => { if (conversationId) setFirstPrompts(false) }, [conversationId, setFirstPrompts])
   const scrollRef = useRef<HTMLDivElement>(null)
   const [stick, setStick] = useState(true)
   const [editingTitle, setEditingTitle] = useState(false)
@@ -43,9 +38,11 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   const msgs = convo?.messages ?? []
   const lastLen = msgs[msgs.length - 1]?.content.length ?? 0
 
+  // `isStreamingHere` is a dependency because the end of a stream can add rows under the reply
+  // (Resume, Files changed) without changing its length.
   useEffect(() => {
     if (stick) scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
-  }, [lastLen, convo?.id, msgs.length, stick])
+  }, [lastLen, convo?.id, msgs.length, stick, isStreamingHere])
 
   const onScroll = (): void => {
     const el = scrollRef.current
@@ -53,6 +50,8 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   }
 
   const last = msgs[msgs.length - 1]
+  // Stable, so the memoised message row it is handed to does not re-render on every token.
+  const onRegenerate = useCallback(() => { void regenerate(conversationId) }, [regenerate, conversationId])
 
   // Only the full-window chat is a "page"; a chat window on the canvas is one of many on screen.
   usePageContext(() => (conversationId ? undefined : {
@@ -93,26 +92,34 @@ export default function ChatView({ conversationId }: { conversationId?: string }
         <div className="chat-main">
           <div className="messages" ref={scrollRef} onScroll={onScroll}>
             {!convo ? (
-              <div className="empty-state">
+              <div className="chat-empty">
                 <h1>{greeting()}</h1>
                 {project && <p>New chat in {project.name}</p>}
-                {firstPrompts && (
-                  <div className="ob-first-prompts" role="group" aria-label="Things to try">
-                    {FIRST_PROMPTS.map((t) => <button key={t} className="ghost-btn" onClick={() => { setFirstPrompts(false); void send(t, conversationId) }}>{t}</button>)}
+                {!conversationId && (
+                  <div className="chat-starters" role="group" aria-label="Things to try">
+                    {FIRST_PROMPTS.map((t) => <button key={t} className="ghost-btn" onClick={() => void send(t, conversationId)}>{t}</button>)}
                   </div>
                 )}
               </div>
             ) : (
               <div className="messages-inner">
-                {msgs.map((m) => <MessageView key={m.id} message={m} streaming={isStreamingHere && streamingMessageId === m.id} />)}
-                {!isStreamingHere && last?.role === 'assistant' && (
-                  <div className="regen-row">
-                    <button className="ghost-btn" onClick={() => void regenerate(conversationId)}><RefreshCw size={13} /> Regenerate</button>
-                  </div>
-                )}
+                {msgs.map((m) => (
+                  <MessageView key={m.id} message={m} streaming={isStreamingHere && streamingMessageId === m.id}
+                    onRegenerate={!isStreamingHere && m === last && m.role === 'assistant' ? onRegenerate : undefined} />
+                ))}
               </div>
             )}
           </div>
+          {/* Zero-height anchor between the transcript and the composer, so the button floats over
+              the bottom of the transcript without changing either one's layout. */}
+          {convo && !stick && (
+            <div className="jump-latest">
+              <button className="icon-btn" title="Jump to latest" aria-label="Jump to latest"
+                onClick={() => { scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }); setStick(true) }}>
+                <ArrowDown size={15} />
+              </button>
+            </div>
+          )}
           <PlanPanel conversationId={conversationId} />
           <Composer conversationId={conversationId} footer={<ChatControls conversationId={conversationId} />} />
         </div>

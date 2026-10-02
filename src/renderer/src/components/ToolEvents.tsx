@@ -9,6 +9,7 @@ import DiffView from './DiffView'
 import PlanApproval from './PlanApproval'
 import ApprovalRules from './ApprovalRules'
 import { describeCall } from '../lib/toolDisplay'
+import { fmtMs } from './TraceView'
 import { GenericApproval, GenericBody } from './toolcards/GenericCard'
 // Importing the index registers every dedicated card (TaskCard, FileCard, and whatever other workstreams add).
 import { TOOL_CARDS } from './toolcards'
@@ -240,7 +241,7 @@ function AskAnswer({ callId, question, context, conversationId }: {
           onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void submit() } }}
         />
         <div className="aplan-actions">
-          <button className="primary-btn" disabled={!text.trim() || sending} onClick={() => void submit()}>Answer</button>
+          <button className="primary-btn sm" disabled={!text.trim() || sending} onClick={() => void submit()}>Answer</button>
         </div>
       </div>
     </div>
@@ -268,8 +269,8 @@ function UndoButton({ snapshotId }: { snapshotId: string }): JSX.Element {
     }
   }
   return state === 'restored'
-    ? <span className="tag">Restored</span>
-    : <button className="ghost-btn" disabled={state === 'busy'} onClick={() => void go(false)}><Undo2 size={12} /> Undo</button>
+    ? <span className="tag tool-undo">Restored</span>
+    : <button className="ghost-btn sm tool-undo" disabled={state === 'busy'} onClick={() => void go(false)}><Undo2 size={12} /> Undo</button>
 }
 
 export default function ToolEvents({ events, conversationId }: { events: ToolEvent[]; conversationId: string }): JSX.Element {
@@ -283,18 +284,19 @@ export default function ToolEvents({ events, conversationId }: { events: ToolEve
         // A dedicated card owns the whole call, pending and finished. It renders from the event alone, so a
         // reload (events replayed from the persisted run) shows the same card. propose_plan / desk_ask stay special.
         const Card = t.name !== 'propose_plan' && t.name !== 'desk_ask' ? TOOL_CARDS[t.name] : undefined
+        const asking = !!t.pending && !!t.needs_approval
         if (Card) {
           return (
             <Fragment key={t.id}>
-              <Card event={t} pending={!!t.pending && !!t.needs_approval} decide={decideFor(t)} />
+              <Card event={t} pending={asking} decide={decideFor(t)}
+                rules={asking ? <ApprovalRules event={t} conversationId={conversationId} /> : undefined} />
               {!t.pending && !t.error && t.undo?.snapshot_id && <UndoButton snapshotId={t.undo.snapshot_id} />}
-              {t.pending && t.needs_approval && <ApprovalRules event={t} conversationId={conversationId} />}
             </Fragment>
           )
         }
         const d = describeCall(t.name, t.arguments)
         return (
-        <div key={t.id} className={`tool-event ${t.pending ? 'pending' : ''} ${t.error ? 'error' : ''}`}>
+        <div key={t.id} className={`tool-event ${t.pending ? 'pending' : ''} ${asking ? 'awaiting' : ''} ${t.error ? 'error' : ''}`}>
           <button className="tool-head" onClick={() => setOpen((o) => ({ ...o, [t.id]: !o[t.id] }))}>
             <ChevronRight size={12} className={open[t.id] ? 'rot90' : ''} />
             <span className="tool-icon">{ICONS[t.name] ?? <Wrench size={13} />}</span>
@@ -305,7 +307,7 @@ export default function ToolEvents({ events, conversationId }: { events: ToolEve
             {t.plan ? (
               <span className="tag plan" title={`Approved in the plan "${t.plan.title || 'untitled'}" (step ${t.plan.idx + 1})`}>in plan</span>
             ) : t.approval && t.approval !== 'allow' && <span className="tag">{t.approval === 'deny' ? 'denied' : 'approved'}</span>}
-            {t.pending ? (t.needs_approval ? <span className="tag ask">needs approval</span> : <span className="thinking mini"><span /><span /><span /></span>) : t.error ? <AlertCircle size={12} /> : <span className="tool-ms">{t.duration_ms} ms</span>}
+            {t.pending ? (t.needs_approval ? <span className="tag ask">needs approval</span> : <span className="thinking mini"><span /><span /><span /></span>) : t.error ? <AlertCircle size={12} className="tool-err" aria-label="Failed" /> : <span className="tool-ms">{fmtMs(t.duration_ms ?? 0)}</span>}
           </button>
           {t.images && t.images.length > 0 && (
             <div className="tool-images">
@@ -327,11 +329,10 @@ export default function ToolEvents({ events, conversationId }: { events: ToolEve
               question={String((t.arguments as { question?: unknown }).question ?? '')}
               context={String((t.arguments as { context?: unknown }).context ?? '') || undefined} />
           )}
-          {t.pending && t.needs_approval && t.name !== 'propose_plan' && t.name !== 'desk_ask' && (
-            <>
-              <GenericApproval event={t} decide={async (ok) => decideFor(t)(ok)} grant={(g) => approveTool(t.id, g, conversationId)} />
-              <ApprovalRules event={t} conversationId={conversationId} />
-            </>
+          {asking && t.name !== 'propose_plan' && t.name !== 'desk_ask' && (
+            <GenericApproval event={t} decide={async (ok) => decideFor(t)(ok)}>
+              <ApprovalRules event={t} conversationId={conversationId} grant={(g) => approveTool(t.id, g, conversationId)} />
+            </GenericApproval>
           )}
           {open[t.id] && <GenericBody event={t} />}
         </div>

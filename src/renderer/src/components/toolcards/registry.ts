@@ -1,4 +1,4 @@
-import type { ComponentType } from 'react'
+import type { ComponentType, ReactNode } from 'react'
 import type { ToolEvent } from '@shared/types'
 
 /**
@@ -16,6 +16,12 @@ export interface ToolCardProps {
    * exactly those arguments; a Deny never carries an edit.
    */
   decide: (approve: boolean, editedArgs?: Record<string, unknown>) => Promise<void>
+  /**
+   * The quieter second line of a pending approval (standing grants, "Deny with a note"), built by the transcript.
+   * Present only while `pending`. A card renders it inside its own box, under its buttons, so the whole question
+   * is answered in one place; a card that drops it leaves the user with no way to deny with a note.
+   */
+  rules?: ReactNode
 }
 
 /** Tool name -> card. A registered card replaces the generic row and ask card for that tool, pending and finished. */

@@ -18,7 +18,7 @@ interface ComposerProps {
   placeholder?: string
 }
 
-export default function Composer({ conversationId, footer, compact = false, onSend, placeholder }: ComposerProps): JSX.Element {
+export default function Composer({ conversationId, footer, compact = false, onSend, placeholder = 'Ask anything' }: ComposerProps): JSX.Element {
   const [text, setText] = useState('')
   const box = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -87,7 +87,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
         onDrop={(e) => { if (!e.dataTransfer.files.length) return; e.preventDefault(); void attach(e.dataTransfer.files) }}
       >
         <input ref={fileRef} type="file" multiple hidden onChange={(e) => { if (e.target.files?.length) void attach(e.target.files); e.target.value = '' }} />
-        <button className="icon-btn" title="Add files to this chat" onClick={() => fileRef.current?.click()}><Paperclip size={16} /></button>
+        <button className="icon-btn" title="Add files to this chat" aria-label="Add files to this chat" onClick={() => fileRef.current?.click()}><Paperclip size={16} /></button>
         <SmartTextarea
           kind="chat"
           variant="bare"
@@ -100,20 +100,21 @@ export default function Composer({ conversationId, footer, compact = false, onSe
           placeholder={streaming ? 'Steer the reply…' : placeholder}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void submit() } }}
         />
+        {/* Send keeps its slot for the whole reply (disabled until there is text to steer with), so
+            typing mid-reply never changes the width of the text box; Stop sits beside it. */}
         <div className="composer-actions">
           {streaming && (
             <button className="send stop" title="Stop" aria-label="Stop" onClick={() => void stop(conversationId)}><Square size={14} /></button>
           )}
-          {(!streaming || text.trim()) && (
-            <button className="send" title={streaming ? 'Steer the reply' : 'Send'} aria-label={streaming ? 'Steer the reply' : 'Send'} disabled={!text.trim()} onClick={() => void submit()}><ArrowUp size={16} /></button>
-          )}
+          <button className="send" title={streaming ? 'Steer the reply' : 'Send'} aria-label={streaming ? 'Steer the reply' : 'Send'} disabled={!text.trim()} onClick={() => void submit()}><ArrowUp size={16} /></button>
         </div>
       </div>
       {/* Always rendered: the plan-mode toggle belongs to every composer, and it binds ⌘⇧P itself —
-          only for the focused conversation, so several mounted chat widgets do not all cycle at once. */}
+          only for the focused conversation, so several mounted chat widgets do not all cycle at once.
+          It comes last because its label grows with the mode, and nothing sits after it to be pushed. */}
       <div className="composer-footer">
-        <PlanModeToggle conversationId={conversationId} />
         {footer}
+        <PlanModeToggle conversationId={conversationId} />
       </div>
     </div>
   )

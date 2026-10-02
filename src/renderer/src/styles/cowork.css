@@ -249,16 +249,18 @@
 .desk-verified { display: inline-flex; align-items: center; gap: 4px; margin: 6px 0 0; font-size: 12px; color: var(--chart-3, var(--text-muted)); }
 .desk-unverified { display: inline-flex; align-items: center; gap: 4px; margin: 6px 0 0; font-size: 12px; color: var(--danger); }
 
-/* ---- action plan card: same recipe as .approval (styles.css:989-995), different namespace ----
+/* ---- action plan card: same recipe as .approval (the Approvals section of styles.css), different
+   namespace ----
    It mounts inline in a streaming assistant bubble as well as in the Plan tab, which is why this
    sheet is imported by ActionPlanCard.tsx and not only by CoworkView.tsx. */
 .aplan {
-  margin: 0 0 10px; padding: 10px 12px; border-radius: 9px;
-  background: rgba(217, 119, 87, 0.08); border: 1px solid rgba(217, 119, 87, 0.4);
+  margin: 0 0 10px; padding: 10px 12px; border-radius: 10px;
+  background: var(--await-fill); border: 1px solid var(--await-border);
 }
 .aplan.approved { background: var(--hover); border-color: var(--border); }
 .aplan.rejected, .aplan.superseded { background: var(--hover); border-color: var(--border); opacity: 0.8; }
 .aplan-head { display: flex; align-items: center; gap: 7px; font-size: 13px; }
+.aplan-head b { font-weight: 600; }
 .aplan-count { font-size: 11px; color: var(--text-faint); }
 .aplan-status { font-size: 11px; font-weight: 600; color: var(--accent); }
 .aplan-status.approved { color: var(--chart-3, var(--text-muted)); }
@@ -287,10 +289,10 @@
   font-family: var(--mono); font-size: 10.5px;
   background: var(--border); color: var(--text-muted);
 }
-.aplan-tool.danger-writes { background: rgba(217, 119, 87, 0.16); color: var(--accent); }
+.aplan-tool.danger-writes { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
 .aplan-tool.danger-network { background: rgba(94, 129, 172, 0.18); color: var(--chart-7, var(--text-muted)); }
 .aplan-tool.danger-executes, .aplan-tool.danger-external { background: rgba(229, 72, 77, 0.14); color: var(--danger); }
-.aplan-tool.danger-plan { background: rgba(217, 119, 87, 0.12); color: var(--accent); }
+.aplan-tool.danger-plan { background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); }
 .aplan-drop { display: inline-flex; align-items: center; gap: 3px; margin-left: auto; font-size: 11px; color: var(--text-faint); cursor: pointer; }
 .aplan-why { margin: 2px 0 0; font-size: 12px; color: var(--text-muted); line-height: 1.45; }
 

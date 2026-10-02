@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { ToolEvent } from '@shared/types'
 import { argRows, changedKeys, describeCall, wasEdited } from '../../lib/toolDisplay'
 import { ArgList, RawDetails, ResultBlock } from './parts'
@@ -22,13 +22,13 @@ export function GenericBody({ event }: { event: ToolEvent }): JSX.Element {
 
 /**
  * The approval for a call with no dedicated card: a plain-language statement of what will happen, the arguments
- * as a list, and Approve / Deny, with the standing grants the old modal had. A forced approval (untrusted content
- * in this reply) offers no standing grant: the backend would downgrade it to one-shot anyway.
+ * as a list, and Approve / Deny. `children` is the quieter second line (ApprovalRules: the standing grants and
+ * "Deny with a note"), kept inside the same box so one question has one place to answer it.
  */
-export function GenericApproval({ event, decide, grant }: {
+export function GenericApproval({ event, decide, children }: {
   event: ToolEvent
   decide: (approve: boolean) => Promise<void>
-  grant: (d: 'always_chat' | 'always_global') => Promise<void>
+  children?: ReactNode
 }): JSX.Element {
   const [busy, setBusy] = useState(false)
   const d = describeCall(event.name, event.arguments)
@@ -51,15 +51,10 @@ export function GenericApproval({ event, decide, grant }: {
       </div>
       <ArgList rows={argRows(event.arguments)} />
       <div className="approval-actions">
-        <button type="button" className="primary-btn" disabled={busy} title="Approve (⌘↵)" onClick={() => void run(() => decide(true))()}>Approve</button>
-        <button type="button" className="ghost-btn danger" disabled={busy} onClick={() => void run(() => decide(false))()}>Deny</button>
-        {!event.forced && (
-          <>
-            <button type="button" className="ghost-btn" disabled={busy} onClick={() => void run(() => grant('always_chat'))()}>Always in this chat</button>
-            <button type="button" className="ghost-btn" disabled={busy} onClick={() => void run(() => grant('always_global'))()}>Always</button>
-          </>
-        )}
+        <button type="button" className="primary-btn sm" disabled={busy} title="Approve (⌘↵)" onClick={() => void run(() => decide(true))()}>Approve</button>
+        <button type="button" className="ghost-btn sm" disabled={busy} onClick={() => void run(() => decide(false))()}>Deny</button>
       </div>
+      {children}
     </div>
   )
 }

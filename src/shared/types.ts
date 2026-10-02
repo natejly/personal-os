@@ -521,10 +521,13 @@ export interface Message {
   partial?: PartialReason | null
 }
 
-export type Effort = 'default' | 'low' | 'medium' | 'high'
+export type Effort = 'default' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+
+/** What a new chat starts on. `'default'` is a different choice: it omits `reasoning_effort`. */
+export const DEFAULT_EFFORT: Effort = 'medium'
 
 export interface ConversationSettings {
-  /** Reasoning effort passed through as `reasoning_effort`; 'default' sends nothing. */
+  /** Reasoning effort passed through as `reasoning_effort`. 'default' sends nothing; 'xhigh' and 'max' are the rungs above high. */
   effort: Effort
   /** Priority processing (`service_tier: priority`). Off sends nothing, so a model that rejects it is unaffected. */
   fast?: boolean
@@ -1057,9 +1060,9 @@ export interface Settings {
   mode?: 'classic' | 'canvas'
   /** Electron accelerator for the global Gather/Scatter shortcut. */
   gatherShortcut: string
-  /** Today-screen cards, keyed by module (see modules.ts); a missing key means shown. */
+  /** Today-screen cards, keyed by module (see modules.ts); a missing key means shown. Cowork and meetings default off. */
   homeWidgets?: Record<string, boolean>
-  /** Sidebar views the user removed. */
+  /** Sidebar views the user removed. Missing means library, cowork and meetings are hidden. */
   hiddenViews?: string[]
   tools: Record<string, ToolMode | boolean>
   /** How assistant edits to docs land. Missing means review: show the diff and wait. */
@@ -2301,23 +2304,23 @@ export interface MeetingConfig {
   autoRecord: boolean
   /** How early a calendar event is offered as a candidate. */
   nudgeSeconds: number
-  /** ffmpeg avfoundation device index, as a string. Empty means "not chosen yet". */
+  /** AVFoundation uniqueID, or ffmpeg avfoundation index as a string. Empty means default / not chosen. */
   micDevice: string
   /** The name that index had when it was chosen, so a reshuffled device list is refused rather than recorded. */
   micDeviceName: string
-  /** A loopback device (BlackHole/Loopback) - macOS cannot record its own output without one. */
+  /** Loopback device when the Core Audio tap is unavailable. Empty when the tap is used. */
   outputDevice: string
   outputDeviceName: string
   /** Channels to capture; validated against meetings.SOURCES ('mic', 'output'). */
   sources: string[]
   /** Segment-muxer length: how far behind live the transcript runs. */
   segmentSeconds: number
-  /** Hard cap handed to ffmpeg as -t, so no capture can run unbounded. */
+  /** Hard cap so no capture can run unbounded. */
   maxMeetingSeconds: number
   /** How long stop() waits for the transcription queue to drain. */
   drainSeconds: number
   /** 'off' blocks Start outright rather than recording audio nothing will read. */
-  sttBackend: 'auto' | 'proxy' | 'local' | 'off'
+  sttBackend: 'auto' | 'speech' | 'proxy' | 'local' | 'off'
   /** Speech-to-text model on the configured LLM base URL. */
   sttModel: string
   /** whisper.cpp ggml model file, for the local backend. */
@@ -2382,7 +2385,7 @@ export interface MeetingStatusInfo {
     segments_pending: number
     /** Waiting on the transcription queue, for the honest "~20s behind · N queued" line. */
     queued: number
-    /** Pause keeps ffmpeg running and throws the audio away, so `channels[].alive` stays true while
+    /** Pause keeps capture running and throws the audio away, so `channels[].alive` stays true while
      *  paused. This flag is the only honest source of pausedness; never infer it from the channels. */
     paused: boolean
     channels: { channel: string; alive: boolean; error: string }[]

@@ -129,6 +129,9 @@ export default function MeetingSettings({ variant = 'page' }: { variant?: 'page'
   const caps = meetingPreflight?.capabilities ?? []
   const blockers = meetingPreflight?.blockers ?? []
   const hasLoopback = meetingStatus.devices.some((d) => d.loopback)
+  const nativeSystem = (caps.find((c) => c.id === 'loopback')?.detail ?? '').includes('process tap')
+  const nativeMic = (caps.find((c) => c.id === 'ffmpeg')?.detail ?? '').includes('AVAudioEngine')
+  const hasSystemAudio = nativeSystem || hasLoopback
 
   return (
     <div className="mtg-settings">
@@ -159,8 +162,8 @@ export default function MeetingSettings({ variant = 'page' }: { variant?: 'page'
 
       <h4 className="act-h">What this machine can do</h4>
       <p className="muted small">
-        A row that is not ok blocks Start rather than degrading quietly. {!hasLoopback && (
-          'No loopback device is installed, so only your own microphone can be captured — the far end of a call will not be in the transcript.'
+        A row that is not ok blocks Start rather than degrading quietly. {!hasSystemAudio && (
+          'System audio is unavailable, so only your own microphone can be captured — the far end of a call will not be in the transcript.'
         )}
       </p>
       <section className="act-card">
@@ -195,18 +198,19 @@ export default function MeetingSettings({ variant = 'page' }: { variant?: 'page'
           Capture my microphone
         </label>
         <label>
-          <input type="checkbox" checked={cfg.sources.includes('output')} onChange={() => toggleSource('output')} disabled={!hasLoopback} />
-          Capture system audio{!hasLoopback && ' (needs a loopback device)'}
+          <input type="checkbox" checked={cfg.sources.includes('output')} onChange={() => toggleSource('output')} disabled={!hasSystemAudio} />
+          Capture system audio{!hasSystemAudio && ' (needs macOS 14.2+ or a loopback device)'}
         </label>
       </div>
       <AudioDevicePicker
         devices={meetingStatus.devices} micValue={cfg.micDevice} outputValue={cfg.outputDevice}
+        nativeMic={nativeMic} nativeSystem={nativeSystem}
         onChange={pickDevice}
       />
       <NumberField label="Clip length" hint="How far behind live the transcript runs; longer clips transcribe better"
         value={cfg.segmentSeconds} min={5} max={120} step={5} suffix="seconds"
         onCommit={(v) => patch({ segmentSeconds: v })} />
-      <NumberField label="Hard cap per meeting" hint="Handed to ffmpeg as -t, so no capture can run unbounded"
+      <NumberField label="Hard cap per meeting" hint="Stops capture even if the app is killed mid-call"
         value={cfg.maxMeetingSeconds} min={300} max={28800} step={300} suffix="seconds"
         onCommit={(v) => patch({ maxMeetingSeconds: v })} />
       <NumberField label="Drain on stop" hint="How long Stop waits for the transcription queue to finish"
@@ -220,7 +224,8 @@ export default function MeetingSettings({ variant = 'page' }: { variant?: 'page'
       <label className="act-field">
         <span><b>Backend</b><small>“off” blocks Start rather than recording audio nothing will read</small></span>
         <select value={cfg.sttBackend} onChange={(e) => patch({ sttBackend: e.target.value as MeetingConfig['sttBackend'] })}>
-          <option value="auto">Auto — proxy, then local whisper.cpp</option>
+          <option value="auto">Auto — Speech, then whisper.cpp, then proxy</option>
+          <option value="speech">On-device Speech</option>
           <option value="proxy">Proxy only</option>
           <option value="local">Local whisper.cpp only</option>
           <option value="off">Off</option>

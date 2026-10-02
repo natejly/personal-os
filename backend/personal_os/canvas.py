@@ -15,7 +15,11 @@ WIDGET_KINDS = (
 WINDOW_STATES = ("normal", "minimized", "maximized", "popped")
 SNAP_MODES = ("off", "grid", "guides", "both")
 
-DEFAULT_NAME = "Desk 1"
+DEFAULT_NAME = "Space 1"
+# Blank names (a new space, a cleared rename) land here. The first space is numbered; later ones are not.
+FALLBACK_NAME = "Space"
+# Exact old defaults, rewritten once so an existing install matches the new wording.
+_RENAMED_DEFAULTS = (("Desk 1", DEFAULT_NAME), ("Desk", FALLBACK_NAME))
 WINDOW_JSON = ("restore_bounds", "popout_bounds", "config")
 
 # These tables are owned here, not by db.py: Database._migrate runs inside Database.__init__,
@@ -95,6 +99,8 @@ class Canvases:
                 for col, ddl in cols.items():
                     if col not in have:
                         c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {ddl}")
+            for old, new in _RENAMED_DEFAULTS:
+                c.execute("UPDATE canvases SET name=? WHERE name=?", (new, old))
 
     @staticmethod
     def _seed(c: sqlite3.Connection) -> None:
@@ -124,7 +130,7 @@ class Canvases:
             wins = c.execute("SELECT * FROM canvas_windows WHERE canvas_id=? ORDER BY z, created_at", (id,)).fetchall()
         return {**row_to_dict(r), "windows": [row_to_dict(w, WINDOW_JSON) for w in wins]}  # type: ignore[dict-item]
 
-    def create(self, name: str = "Desk", project_id: str | None = None, copy_from: str | None = None) -> dict[str, Any] | None:
+    def create(self, name: str = FALLBACK_NAME, project_id: str | None = None, copy_from: str | None = None) -> dict[str, Any] | None:
         """None means `copy_from` does not exist."""
         src = self.get(copy_from) if copy_from else None
         if copy_from and not src:
@@ -135,7 +141,7 @@ class Canvases:
             pos = c.execute("SELECT COALESCE(MAX(position),-1)+1 FROM canvases").fetchone()[0]
             c.execute(
                 "INSERT INTO canvases(id,name,project_id,position,snap_mode,grid_size,zoom,pan_x,pan_y,wallpaper,locked,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (cid, name.strip() or "Desk", project_id, pos,
+                (cid, name.strip() or FALLBACK_NAME, project_id, pos,
                  src["snap_mode"] if src else "both", src["grid_size"] if src else 16,
                  src["zoom"] if src else 1.0, src["pan_x"] if src else 0.0, src["pan_y"] if src else 0.0,
                  # A copy starts unlocked: the lock guards the space you are looking at, not the template.
@@ -155,7 +161,7 @@ class Canvases:
         if not fields:
             return self.get(id)
         if "name" in fields:
-            fields["name"] = str(fields["name"]).strip() or "Desk"
+            fields["name"] = str(fields["name"]).strip() or FALLBACK_NAME
         if "locked" in fields:
             fields["locked"] = 1 if fields["locked"] else 0
         fields["updated_at"] = now()

@@ -58,7 +58,7 @@ their own instructions, knowledge files, memories and graph.
     for its replies to you. Every guideline is editable and every sample
     deletable; editing one stops auto-relearn overwriting it. Projects can have
     their own voice. See [docs/writing-style.md](docs/writing-style.md).
-- **Documents.** Upload `.txt/.md/.pdf/.docx` and code files. Chunked,
+- **Documents.** Upload any file up to 20 MB. Text, PDF, and Word are read; other files are kept by name. Chunked,
   full-text indexed, best excerpts pulled into replies.
 - **Docs.** Writing of your own, in an editor rather than an upload box:
   markdown and LaTeX, a line-numbered editor beside a live preview, and full
@@ -88,16 +88,17 @@ their own instructions, knowledge files, memories and graph.
   are proposals: the common action opens a chat pre-loaded with the request rather
   than acting, "not now" hides one for a week, and dismissing one is permanent.
 - **Meetings** (macOS, opt-in, off by default). A notepad that listens: type
-  during a call while one long-lived ffmpeg per channel records it, segments
+  during a call while the recorder captures it natively (AVAudioEngine and, on
+  macOS 14.2+, a Core Audio tap for the far side of the call), segments
   transcribe in the background, and afterwards the enhance pass proposes your
   outline with the transcript filled in around it — as a diff you accept or
   reject. Your typed notes live in their own column and no model ever writes
   them. Calendar events happening now offer a Record button; action items become
   todos on a click. Nothing is recorded until you acknowledge a modal naming the
-  exact directory the audio lands in and the exact URL it is uploaded to, and
-  transcription can run entirely on-device through whisper.cpp. Meetings never
-  expire, are unreachable from the activity monitor's purge, and never reach
-  auto-learn. See [docs/meetings.md](docs/meetings.md).
+  exact directory the audio lands in. Transcription prefers on-device Speech,
+  then whisper.cpp, then your LLM proxy. Meetings never expire, are unreachable
+  from the activity monitor's purge, and never reach auto-learn. See
+  [docs/meetings.md](docs/meetings.md).
 - **Cowork desks.** A desk is a task you hand over: its own conversation, its own
   folder, and one plan you approve before it acts. Several run at once. Long
   autonomy is bought by chaining bounded replies, never by a longer leash — each
@@ -178,6 +179,37 @@ their own instructions, knowledge files, memories and graph.
   connected OpenAI account — a Plus or Pro subscription is not itself a pool of
   API credits — so the flow has to name the account being charged before the
   first call.
+- **Private inference.** *(Planned — not shipped yet.)* Chat can stay on the
+  cloud model in the picker. Jobs that read the sensitive store go to a local
+  model you run on this machine (Ollama, llama.cpp, or MLX, wired through
+  LiteLLM's `ollama/` route): activity summaries, meeting enhance, auto-learn
+  over mail and keystrokes, voice extraction from your docs. If that model is
+  down, those jobs skip or fail closed instead of forwarding the payload to
+  Fireworks. That is the air-gap switch a Palantir-style deploy would use:
+  private data stays on the box; only ordinary chat hits a remote API.
+  `extractionModel` today is just a cheaper LiteLLM name, not an on-device
+  guarantee. Audio already has a local path (whisper.cpp); this is the same
+  idea for text.
+- **Cloud worker.** *(Planned — not shipped yet.)* A scheduled task only fires
+  while this Mac is awake, and a missed slot is caught up once, late. The cloud
+  piece is a second process on a machine that stays up — a VPS you control, to
+  start — and it owns only the jobs that are useless with the lid closed:
+  scheduled tasks, the morning brief, and watches whose result is a proposal in
+  the Agent inbox. Chat stays in the desktop app. Activity, meetings, the Python
+  sandbox, cowork folders and the macOS tools stay here; they need this machine,
+  and raw keystrokes and call audio are never uploaded. A task has one home,
+  local or cloud, so a late catch-up and a cloud run cannot both fire. The
+  worker keeps its own database for the stores those jobs read, synced per
+  domain the way [docs/sources-of-truth.md](docs/sources-of-truth.md) already
+  describes, rather than a network copy of the desktop SQLite file. Signing the
+  desktop into the worker replaces the loopback sidecar token, and Google
+  sign-in on the worker is a web OAuth client with a fixed redirect, not the
+  Desktop client the app ships now. Its tool box is the scheduled-run box, drawn
+  tighter: read Grain, propose anything that would leave the app, and no view of
+  your filesystem, the activity log, or meeting audio. Private inference still
+  wins for a job that reads the sensitive store — with that switch on, the
+  worker does not receive it. A browser that replaces the desktop app, and a
+  multi-tenant host, are a later product.
 - **RLHF on company data.** *(Planned — enterprise, later.)* Once Grain is
   running on an organisation's own mail, docs, tickets and accepted/rejected
   drafts, those preference signals (approve vs deny on tool cards, accept vs
@@ -526,18 +558,21 @@ Full design, privacy model, API and limits:
 
 Also off by default, and a separate switch from the activity monitor. Open the
 **Meetings** view (⌘⇧M), pick a microphone, and press **Test** before you rely on
-it — a default `litellm.yaml` has nothing behind `/v1/audio/transcriptions`, so
-the self-test is what tells you transcription works, and a failing one blocks
-Record rather than warning:
+it. On-device Speech is the default when macOS has granted it; otherwise a
+default `litellm.yaml` has nothing behind `/v1/audio/transcriptions`, so the
+self-test is what tells you transcription works, and a failing one blocks
+Record rather than warning.
+
+ffmpeg, whisper.cpp and BlackHole are optional fallbacks, not a setup tax:
 
 ```bash
-brew install ffmpeg                             # capture and segmenting
-brew install whisper-cpp                        # on-device transcription, no cloud
-brew install blackhole-2ch                      # the other side of the call
+cd backend && uv pip install -e '.[activity]'   # AVAudioEngine, process tap, Speech
+# only if you want the fallbacks:
+brew install ffmpeg                             # truncated-wav repair
+brew install whisper-cpp                        # instead of Apple Speech
+brew install blackhole-2ch                      # system audio on macOS older than 14.2
 ```
 
-A loopback device also needs a Multi-Output Device built by hand in Audio MIDI
-Setup, or your speakers go silent; without one a meeting records mic-only.
 Attribution is channel-level — you versus them — not per person.
 
 Full design, pipeline, privacy model, the Audio MIDI Setup recipe, API and limits:
@@ -547,8 +582,9 @@ Full design, pipeline, privacy model, the Audio MIDI Setup recipe, API and limit
 
 `run_python` executes scripts with `python -I` in a throwaway directory, with
 CPU, memory and wall-clock limits, wrapped in macOS `sandbox-exec` with a
-profile that denies network and writes outside the work directory. Reads are
-allowed so scripts can analyse your local files.
+profile that denies network, writes outside the work directory, and reads of
+local files. A script may read the interpreter, its libraries, and that
+throwaway directory.
 
 ## Layout
 
@@ -562,7 +598,7 @@ backend/personal_os app.py routes · repos.py storage · context.py · learn.py
                     docs.py · dashboards.py · usage.py · trace.py · llm.py
                     activity.py collectors, privacy gate, rollup, activity.md
                     meetings.py repo + service · meeting_notes.py templates/enhance
-                    meeting_recorder.py capture threads · stt.py · audiocap.py · redact.py
+                    meeting_recorder.py capture threads · stt.py · audiocap.py · native_audio.py · redact.py
 scripts/dev.sh      LiteLLM + backend + Electron
 scripts/litellm.sh  LiteLLM proxy alone
 litellm.yaml        Model routing (Fireworks by default)

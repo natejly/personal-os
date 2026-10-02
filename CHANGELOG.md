@@ -6,33 +6,36 @@ All notable changes to Grain (formerly Personal OS). Dates are the days the work
 
 ### Added
 
-- **Meetings** (macOS, opt-in, off by default). A notepad that listens: one
-  long-lived ffmpeg per channel records a call with the segment muxer, closed wavs
-  transcribe on a worker thread, and afterwards the enhance pass proposes your
-  typed outline with the transcript filled in around it as a diff you accept or
-  reject. Your notes and the enhanced notes are separate columns, so no model ever
-  writes what you typed. Includes six note templates, channel-level attribution
-  (you versus them), FTS5 search over titles/notes/enhanced/transcripts, action
-  items promotable into todos, a 45-second calendar nudge that offers a Record
-  button on live events, a **Meetings** view on ⌘⇧M with a live recorder bar, an
-  **Upcoming meetings** card on Today, and the three read-only tools
-  `meeting_list`, `meeting_search` and `meeting_read` (the last two taint the run,
-  because a transcript is other people's speech). Nothing that starts, stops,
-  pauses, enhances or deletes a meeting is a tool at any tier. Recording requires a
-  one-time acknowledgement of a modal naming the exact directory the audio is
-  written to and the exact base URL it is uploaded to; meetings carry no
+- **Meetings** (macOS, opt-in, off by default). A notepad that listens: native
+  capture (AVAudioEngine, and a Core Audio process tap for the far side of the
+  call on macOS 14.2+) records a call in short wavs, those transcribe on a worker
+  thread, and afterwards the enhance pass proposes your typed outline with the
+  transcript filled in around it as a diff you accept or reject. ffmpeg,
+  whisper.cpp and BlackHole are fallbacks, not a setup tax. Your notes and the
+  enhanced notes are separate columns, so no model ever writes what you typed.
+  Includes six note templates, channel-level attribution (you versus them), FTS5
+  search over titles/notes/enhanced/transcripts, action items promotable into
+  todos, a 45-second calendar nudge that offers a Record button on live events, a
+  **Meetings** view on ⌘⇧M with a live recorder bar, an **Upcoming meetings** card
+  on Today, and the three read-only tools `meeting_list`, `meeting_search` and
+  `meeting_read` (the last two taint the run, because a transcript is other
+  people's speech). Nothing that starts, stops, pauses, enhances or deletes a
+  meeting is a tool at any tier. Recording requires a one-time acknowledgement of
+  a modal naming the exact directory the audio is written to; meetings carry no
   `expires_at`, are unreachable from `POST /activity/purge`, and never reach
   auto-learn. See [docs/meetings.md](docs/meetings.md).
-- `stt.py`: swappable speech to text — the LLM proxy, a local whisper.cpp, or off,
-  with `auto` resolution — plus `POST /meetings/selftest`, which writes a real wav
-  and does a real round trip. A failing self-test *blocks* Record rather than
-  warning. A default `litellm.yaml` still has nothing behind
-  `/v1/audio/transcriptions`; it now ships a commented block showing how to add
-  one, and the on-device backend needs no provider at all.
-- `audiocap.py` and `redact.py`: the ffmpeg/device layer and the named redaction
-  rules, lifted out of `activity.py` so both features share one copy. Meetings use
-  the credential rules only — the gate's `email` and `phone` rules would replace
-  every attendee with `[email]` and erase identity from inside a conversation.
+- `stt.py`: swappable speech to text — on-device Speech, the LLM proxy, a local
+  whisper.cpp, or off, with `auto` preferring Speech when it is granted — plus
+  `POST /meetings/selftest`, which writes a real wav (no ffmpeg) and does a real
+  round trip. A failing self-test *blocks* Record rather than warning. A default
+  `litellm.yaml` still has nothing behind `/v1/audio/transcriptions`; it now ships
+  a commented block showing how to add one.
+- `audiocap.py`, `native_audio.py` and `redact.py`: capture prefers AVAudioEngine
+  and a Core Audio process tap; ffmpeg avfoundation and BlackHole are fallbacks.
+  The named redaction rules were lifted out of `activity.py` so both features
+  share one copy. Meetings use the credential rules only — the gate's `email` and
+  `phone` rules would replace every attendee with `[email]` and erase identity
+  from inside a conversation.
 - `backend/tests/test_mcp_servers.py`: the guard `mcp_servers.py`'s comment has
   always promised now exists, asserting `RESERVED_TOOL_NAMES` really is every
   built-in tool name. It was unguarded until now, and the previous commit was

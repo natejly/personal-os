@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { MessageSquare, MessageSquarePlus, Search, Settings, Sparkles, Trash2, PanelLeftClose, Brain, FileText, Files, Plus, Folder, FolderKanban, ChevronRight, Home, KanbanSquare, LayoutDashboard, LayoutGrid, Library, Mic, Users, MonitorDot, BookOpen, Globe } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import GrainLogo from './GrainLogo'
@@ -105,8 +105,13 @@ export default function Sidebar(): JSX.Element {
   // to a space stays the drag gesture (and ⌘N / the dock for a new chat window).
   const openConversation = (id: string): void => void selectChat(id)
   const [query, setQuery] = useState('')
+  const [searching, setSearching] = useState(false)
+  const searchRef = useRef<HTMLInputElement>(null)
   const [projectsOpen, setProjectsOpen] = useState(true)
   const [recentsOpen, setRecentsOpen] = useState(true)
+  useEffect(() => {
+    if (searching) searchRef.current?.focus()
+  }, [searching])
   // Project groups list docs beside chats, but `docs` in the store is the Docs view's result set:
   // narrowed by its scope picker and its search box. The sidebar keeps its own unfiltered copy so a
   // search over there cannot empty the groups over here. Debounced, because `docs` changes per keystroke.
@@ -179,11 +184,7 @@ export default function Sidebar(): JSX.Element {
         <button className="icon-btn no-drag" aria-label="Hide sidebar" title="Hide sidebar (⌘B)" onClick={toggleSidebar}><PanelLeftClose size={16} /></button>
       </div>
 
-      <button className="new-chat" onClick={() => (inCanvas ? void useCanvas.getState().newChatWindow() : newChat(null))}>
-        <MessageSquarePlus size={16} /><span>New chat</span><kbd>⌘N</kbd>
-      </button>
-
-      {/* One scroller for everything between New chat and the footer. Recents used to be the only part
+      {/* One scroller for nav, projects, and chats. Recents used to be the only part
           that scrolled, so with a few projects open it was squeezed to a sliver at the bottom. */}
       <div className="sidebar-scroll">
       <nav className="nav">
@@ -236,12 +237,38 @@ export default function Sidebar(): JSX.Element {
         <button className="section-toggle" onClick={() => setRecentsOpen((o) => !o)}>
           <ChevronRight size={12} className={recentsOpen ? 'rot90' : ''} /><MessageSquare size={13} /> Recents
         </button>
+        <button
+          className={`icon-btn sm${searching ? ' on' : ''}`}
+          aria-label="Search recents"
+          aria-expanded={searching}
+          title="Search recents"
+          onClick={() => {
+            setRecentsOpen(true)
+            setSearching((on) => {
+              if (on) setQuery('')
+              return !on
+            })
+          }}
+        >
+          <Search size={13} />
+        </button>
       </div>
+      <button className="new-chat" onClick={() => (inCanvas ? void useCanvas.getState().newChatWindow() : newChat(null))}>
+        <MessageSquarePlus size={16} /><span>New chat</span><kbd>⌘N</kbd>
+      </button>
       {recentsOpen && (<>
-      <label className="search">
-        <Search size={14} />
-        <input placeholder="Search" value={query} onChange={(e) => setQuery(e.target.value)} />
-      </label>
+      {searching && (
+        <label className="search">
+          <input
+            ref={searchRef}
+            placeholder="Search"
+            aria-label="Search recents"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Escape') { setQuery(''); setSearching(false) } }}
+          />
+        </label>
+      )}
       <div className="convo-list">
         {groups.length === 0 && <p className="empty-hint">{query ? 'No matches.' : 'No personal chats yet.'}</p>}
         {groups.map((g) => (

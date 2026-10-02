@@ -14,8 +14,10 @@ Three rules keep it honest:
 * **Bypassable.** `with bypass():` serves a request straight from the API, which
   is what a user-initiated "refresh" should do.
 
-Nothing here is persisted: a backend restart starts cold on purpose, since a
-cache that outlives the process is a cache no one can clear by restarting.
+Nothing here is persisted: a backend restart starts this layer cold on purpose.
+Snapshots of calendar rows and mail headers live in google_store.py instead, so
+the next read can ask Google for what changed. Disconnect and Google.forget drop
+those too.
 """
 from __future__ import annotations
 

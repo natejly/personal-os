@@ -5,7 +5,7 @@ import json
 import sqlite3
 from typing import Any
 
-from .canvas import _INSERT_WINDOW, WIDGET_KINDS, Canvases, clamp_opacity
+from .canvas import _INSERT_WINDOW, _RENAMED_DEFAULTS, FALLBACK_NAME, WIDGET_KINDS, Canvases, clamp_opacity
 from .db import Database, new_id, now, row_to_dict
 
 # Owned here, like canvas.py's tables: CREATE TABLE IF NOT EXISTS in the constructor covers existing databases.
@@ -60,6 +60,8 @@ class CanvasPresets:
         self.canvases = canvases
         with db.tx() as c:
             c.executescript(SCHEMA)
+            for old, new in _RENAMED_DEFAULTS:
+                c.execute("UPDATE canvas_presets SET name=? WHERE name=?", (new, old))
 
     def list(self) -> list[dict[str, Any]]:
         with self.db.tx() as c:
@@ -81,7 +83,7 @@ class CanvasPresets:
             c.execute(
                 "INSERT INTO canvas_presets(id,name,project_id,snap_mode,grid_size,zoom,pan_x,pan_y,wallpaper,windows,created_at,updated_at)"
                 " VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-                (pid, name.strip() or src["name"] or "Desk", src["project_id"], src["snap_mode"], src["grid_size"],
+                (pid, name.strip() or src["name"] or FALLBACK_NAME, src["project_id"], src["snap_mode"], src["grid_size"],
                  src["zoom"], src["pan_x"], src["pan_y"], src["wallpaper"], json.dumps(windows), t, t),
             )
         return self.get(pid)
@@ -114,7 +116,7 @@ class CanvasPresets:
             pos = c.execute("SELECT COALESCE(MAX(position),-1)+1 FROM canvases").fetchone()[0]
             c.execute(
                 "INSERT INTO canvases(id,name,project_id,position,snap_mode,grid_size,zoom,pan_x,pan_y,wallpaper,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-                (cid, (name or "").strip() or preset["name"] or "Desk", project_id, pos, preset["snap_mode"], preset["grid_size"],
+                (cid, (name or "").strip() or preset["name"] or FALLBACK_NAME, project_id, pos, preset["snap_mode"], preset["grid_size"],
                  preset["zoom"], preset["pan_x"], preset["pan_y"], preset["wallpaper"], t, t),
             )
             for w in preset["windows"] or []:

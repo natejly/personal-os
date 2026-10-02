@@ -135,7 +135,7 @@ export default function DeskRail({ desks, activeId, onOpen }: {
   useTick(desks.some((d) => d.live))
   return (
     <div className="desk-rail">
-      {desks.length === 0 && <p className="empty-hint">No desks yet. Start one with a task brief and leave it to work.</p>}
+      {desks.length === 0 && <p className="empty-hint">No desks yet.</p>}
       {SECTIONS.map((sec) => {
         const rows = desks.filter((d) => sec.has(d.status))
         if (rows.length === 0) return null

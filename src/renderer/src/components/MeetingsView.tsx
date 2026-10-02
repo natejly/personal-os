@@ -111,7 +111,7 @@ function MeetingList({ meetings, activeId, liveId, query, onQuery, onOpen, onDel
                 </span>
               </span>
               {/* The live row stays undeletable: deleting it drops the row the recorder bar — the
-                  only Stop in the app — is mounted on, leaving ffmpeg capturing with no control. */}
+                  only Stop in the app — is mounted on, leaving capture running with no control. */}
               <button className="icon-btn ghost xs danger" disabled={m.id === liveId}
                 title={m.id === liveId ? 'Stop the recording before deleting this meeting' : 'Delete'}
                 onClick={(e) => { e.stopPropagation(); if (confirm(`Delete “${m.title || 'Untitled meeting'}”? Its transcript, audio and enhanced notes go too.`)) onDelete(m.id) }}>

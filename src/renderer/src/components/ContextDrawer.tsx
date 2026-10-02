@@ -4,7 +4,7 @@ import { ToolOverrides } from './ToolPermissions'
 import TraceView from './TraceView'
 import { useStore, useProject, useConversation, useStreamingMessageId } from '../store'
 import { api } from '../lib/api'
-import type { ContextMeter, ContextUsed, ConversationSettings } from '@shared/types'
+import { DEFAULT_EFFORT, type ContextMeter, type ContextUsed, type ConversationSettings } from '@shared/types'
 
 function Toggle({ label, hint, value, onChange, icon }: { label: string; hint: string; value: boolean; onChange: (v: boolean) => void; icon: JSX.Element }): JSX.Element {
   return (
@@ -143,7 +143,7 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
   const activityRunning = useStore((s) => Boolean(s.activity?.running && !s.activity.paused))
   const hasStyle = useStore((s) => Boolean(s.style?.effective))
   const meetingCount = useStore((s) => s.meetings.length)
-  const cs: ConversationSettings = convo?.settings ?? { effort: 'default', useMemory: true, useGraph: true, useDocuments: true, useActivity: true, useStyle: true, useMeetings: true, autoLearn: true, useTools: true, tools: {} }
+  const cs: ConversationSettings = convo?.settings ?? { effort: DEFAULT_EFFORT, useMemory: true, useGraph: true, useDocuments: true, useActivity: true, useStyle: true, useMeetings: true, autoLearn: true, useTools: true, tools: {} }
   const [toolsOpen, setToolsOpen] = useState(false)
   const allTools = useStore((s) => s.tools)
   const norm = (v: unknown, fb: 'on' | 'ask' | 'off'): 'on' | 'ask' | 'off' => (v === true ? 'on' : v === false ? 'off' : v === 'on' || v === 'ask' || v === 'off' ? v : fb)
@@ -204,8 +204,8 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
         <Toggle icon={<GraduationCap size={14} />} label="Skills" hint="Procedures you approved, injected as procedural memory. Candidates are never injected." value={cs.useSkills !== false} onChange={(v) => void setChatSettings({ useSkills: v }, conversationId)} />
         {convo && (
           <div className="ctx-tools">
-            <button className="link small" onClick={() => void induceSkill(convo.id)}>propose a skill from this chat…</button>
-            <span className="muted small"> it lands in Library → Skills as a candidate for you to review.</span>
+            <button className="link small" onClick={() => void induceSkill(convo.id)}>Save this chat as a skill…</button>
+            <span className="muted small"> A single reply has the same button. Either way it waits in Library → Skills until you approve it.</span>
           </div>
         )}
         {cs.useTools && (
@@ -218,9 +218,8 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
           <div className="muted small" style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 0 4px 24px' }}>
             <ShieldAlert size={14} style={{ flexShrink: 0, marginTop: 2 }} />
             <span>
-              This chat has read untrusted content{cs.taint_sources?.length ? ` (${cs.taint_sources.join(', ')})` : ''}. External
-              actions ask every time, and fetch_url only reads links you or a web search supplied.
-              <button className="link small" onClick={() => void setChatSettings({ tainted: false, taint_sources: [] })}>clear</button>
+              This chat has read untrusted content{cs.taint_sources?.length ? ` (${cs.taint_sources.join(', ')})` : ''}. Mail and saving memories ask first. Auto-learn and the writing voice stay off until you clear this. Clear also stops activity, meeting notes, and document excerpts in this chat until you turn them back on. If a library file was copied into the sandbox, clear resets that sandbox too.
+              <button className="link small" onClick={() => void setChatSettings({ tainted: false, taint_sources: [], useActivity: false, useMeetings: false, useDocuments: false })}>clear</button>
             </span>
           </div>
         )}

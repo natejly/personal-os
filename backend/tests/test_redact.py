@@ -69,6 +69,12 @@ def test_secret_assign() -> None:
 def test_other_rules() -> None:
     assert redact.scrub("ssn 123-45-6789") == "ssn [ssn]"
     assert "[aws-key]" in redact.scrub_secrets("AKIAIOSFODNN7EXAMPLE is the id")
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    assert pat not in redact.scrub_secrets(pat) and "[github-pat]" in redact.scrub_secrets(pat)
+    gkey = "AIzaSyA1234567890abcdefGHIJKLMNOPQRSTUV"  # 39 chars, the real key length
+    assert gkey not in redact.scrub_secrets(gkey) and "[google-key]" in redact.scrub_secrets(gkey)
+    hook = "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX"
+    assert "hooks.slack.com" not in redact.scrub_secrets(hook)
     assert "[card-number]" in redact.scrub_secrets("4111 1111 1111 1111")
     jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NSJ9.dBjftJeZ4CVPmB92K27uhbUJU1p1r_wW1g"
     assert "[jwt]" in redact.scrub_secrets(jwt)
@@ -78,7 +84,8 @@ def test_other_rules() -> None:
 def test_rule_order_is_the_contract() -> None:
     """activity.Gate.scrub applies REDACTIONS positionally, so the dict order IS behaviour."""
     assert redact.ALL_RULES == (
-        "private_key", "email", "card", "ssn", "token", "aws_key", "jwt", "phone", "entropy",
+        "private_key", "url_userinfo", "url_secret_param", "email", "card", "ssn", "token", "aws_key",
+        "github_pat", "google_api", "slack_webhook", "jwt", "phone", "entropy",
     )
     assert redact.REDACTIONS == [redact.RULES[k] for k in redact.ALL_RULES]
     assert tuple(redact.RULES.values()) == tuple(redact.REDACTIONS)
@@ -110,6 +117,17 @@ def test_empty_and_unknown_rules() -> None:
     # A stale rule name out of settings must not take a collector down.
     assert redact.scrub(f"{EMAIL} ok", ("nope", "email")) == "[email] ok"
     assert redact.scrub(f"{EMAIL} ok", ()) == f"{EMAIL} ok"
+
+
+def test_url_userinfo_and_query_secrets_are_scrubbed() -> None:
+    url = "https://ada:hunter2@bank.example/login?token=abc123&ok=1"
+    out = redact.scrub_secrets(url)
+    assert "hunter2" not in out
+    assert "abc123" not in out
+    assert "bank.example" in out
+    frag = "https://app.example/cb#access_token=supersecretvalue"
+    assert "supersecretvalue" not in redact.scrub(frag)
+    assert "app.example" in redact.scrub(frag)
 
 
 if __name__ == "__main__":

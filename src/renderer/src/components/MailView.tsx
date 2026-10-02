@@ -5,6 +5,7 @@ import { api } from '../lib/api'
 import SmartTextarea from './SmartTextarea'
 import type { GmailFullMessage, GmailLabel, GmailMessage } from '@shared/types'
 import { lines, usePageContext } from '../lib/pageContext'
+import { readView, writeView } from '../lib/viewCache'
 import AppSwitcher from './AppSwitcher'
 import MailWatchPanel from './MailWatchPanel'
 
@@ -63,6 +64,7 @@ export default function MailView(): JSX.Element {
   const [compose, setCompose] = useState<Compose | null>(null)
   const [review, setReview] = useState<Review | null>(null)
   const [busy, setBusy] = useState<'send' | 'draft' | 'review' | null>(null)
+  const [painted, setPainted] = useState('')
   const seq = useRef(0)
 
   const query = useMemo(() => {
@@ -83,16 +85,32 @@ export default function MailView(): JSX.Element {
     return (): void => clearTimeout(t)
   }, [search])
 
-  // `refresh` is for the Refresh button: it bypasses the backend's read cache, where a
-  // query the user just ran a moment ago would otherwise still be warm.
+  const cacheKey = google?.connected ? `mail:${query}` : ''
+  // Show the saved list for this filter before the sync returns, including when the
+  // filter changes, so the previous folder does not sit on screen under a spinner.
+  if (cacheKey !== painted) {
+    setPainted(cacheKey)
+    if (cacheKey) {
+      const cached = readView<GmailMessage[]>(cacheKey)
+      setMessages(cached ?? [])
+      setLoading(cached == null)
+      setError(null)
+    }
+  }
+
+  // `refresh` is the Refresh button. Either way the request reuses saved headers and
+  // only downloads messages that are new or changed.
   const load = async (refresh = false): Promise<void> => {
     if (!google?.connected) return
+    const key = `mail:${query}`
     const mine = ++seq.current
-    setLoading(true)
+    if (refresh) setLoading(true)
     setError(null)
     try {
       const out = await api.google.gmail(query, 30, refresh)
-      if (seq.current === mine) setMessages(out)
+      if (seq.current !== mine) return
+      writeView(key, out)
+      setMessages(out)
     } catch (e) {
       if (seq.current === mine) setError((e as Error).message)
     } finally {
@@ -126,8 +144,10 @@ export default function MailView(): JSX.Element {
 
   const openMessage = (m: GmailMessage): void => {
     setOpen(m)
-    setFull(null)
-    api.google.gmailGet(m.id).then(setFull).catch((e) => toast((e as Error).message, 'error'))
+    const key = `mailbody:${m.id}`
+    const cached = readView<GmailFullMessage>(key)
+    setFull(cached)
+    api.google.gmailGet(m.id).then((full) => { writeView(key, full); setFull(full) }).catch((e) => toast((e as Error).message, 'error'))
     if (m.unread) void modify(m, { mark_read: true })
   }
 

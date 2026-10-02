@@ -52,7 +52,7 @@ export default function MeetingRecorderBar(): JSX.Element | null {
 
   if (!active) return null
 
-  // Read off the flag the recorder emits, never off the channels: pause deliberately leaves ffmpeg
+  // Read off the flag the recorder emits, never off the channels: pause deliberately leaves capture
   // running and only discards the clips, so every channel stays `alive` through a pause. The dots
   // below still show per-channel liveness, which is a different question.
   const state = recorderState(active)
@@ -97,7 +97,7 @@ export default function MeetingRecorderBar(): JSX.Element | null {
 
       <div className="mtg-bar-actions">
         {/* No Resume when the captures are dead: resuming only clears the flag, and cannot respawn
-            an ffmpeg that exited, so the button would do nothing. Stop is the way out of that. */}
+            a capture that exited, so the button would do nothing. Stop is the way out of that. */}
         {state === 'recording' && (
           <button className="ghost-btn" disabled={meetingBusy} onClick={() => void pauseMeeting()}><Pause size={13} /> Pause</button>
         )}

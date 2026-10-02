@@ -5,6 +5,7 @@ import MessageView from '../../components/Message'
 import Composer from '../../components/Composer'
 import ChatControls from '../../components/ChatControls'
 import { api } from '../../lib/api'
+import { uploadContextNote } from '../../lib/uploadNote'
 import { retainSession, useConversation, useIsStreaming, useStore, useStreamingMessageId } from '../../store'
 import { useDropTarget } from '../dnd'
 import type { WidgetDef, WidgetProps } from '../registry'
@@ -28,8 +29,6 @@ const appendDraft = (root: HTMLElement | null, text: string): boolean => {
   el.focus()
   return true
 }
-
-const names = (files: FileList): string => [...files].map((f) => f.name).join(', ')
 
 /** Create a fresh conversation in the window's project and point the window at it. */
 const newChatFor = async (win: CanvasWindow): Promise<string | null> => {
@@ -151,8 +150,10 @@ function ChatWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
     }
     if (!p || p.kind === 'file') {
       if (!files.length) return
-      await app.uploadDocuments(files, convo?.project_id ?? null)
-      draft(`I just uploaded ${names(files)}. Find them with search_documents and read them before answering.`)
+      const saved = await app.uploadDocuments(files, convo?.project_id ?? null)
+      if (!saved.length) return
+      await app.noteUntrustedUpload(convId || undefined, 'draft')
+      draft(uploadContextNote(saved))
       return
     }
     switch (p.kind) {

@@ -10,7 +10,6 @@ import { lines, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
 
 const fmtSize = (n: number): string => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`)
-const ACCEPT = '.txt,.md,.markdown,.pdf,.docx,.csv,.json,.yaml,.yml,.py,.ts,.tsx,.js,.html,.css,.log,.rst,.toml'
 
 export default function DocumentsView({ projectId, embedded = false }: { projectId?: string; embedded?: boolean }): JSX.Element {
   const documents = useStore((s) => s.documents)
@@ -29,7 +28,7 @@ export default function DocumentsView({ projectId, embedded = false }: { project
 
   const uploadBtn = (
     <>
-      <input id={projectId ? 'doc-upload-input-project' : 'doc-upload-input'} ref={fileRef} type="file" multiple hidden accept={ACCEPT}
+      <input id={projectId ? 'doc-upload-input-project' : 'doc-upload-input'} ref={fileRef} type="file" multiple hidden
         onChange={(e) => { if (e.target.files?.length) void uploadDocuments(e.target.files, targetProject); e.target.value = '' }} />
       <button className="primary-btn" onClick={() => fileRef.current?.click()}><Upload size={14} /> Upload{targetProject ? ' to project' : ''}</button>
     </>
@@ -39,13 +38,13 @@ export default function DocumentsView({ projectId, embedded = false }: { project
     <div className={`page-body ${drag ? 'dragging' : ''}`} onDragOver={(e) => { e.preventDefault(); setDrag(true) }} onDragLeave={() => setDrag(false)}
       title="Drop files to upload"
       onDrop={(e) => { e.preventDefault(); setDrag(false); if (e.dataTransfer.files.length) void uploadDocuments(e.dataTransfer.files, targetProject) }}>
-      {embedded && <div className="add-row">{uploadBtn}<span className="muted small">{projectId ? 'Knowledge for this project: ' : ''}.txt, .md, .pdf, .docx and code files. Drop files anywhere here.</span></div>}
-      {!embedded && <p className="muted small">Supports .txt, .md, .pdf, .docx and common code/text files. Documents are chunked and full-text indexed; the best matching excerpts are pulled into chats automatically. Personal documents are available everywhere; project documents only inside that project. Drop files anywhere here.</p>}
+      {embedded && documents.length > 0 && <div className="add-row">{uploadBtn}<span className="muted small">Drop more files here.</span></div>}
+      {!embedded && documents.length > 0 && <p className="muted small">Drop more files here.</p>}
       {documents.length === 0 && (
         <div className="empty-state">
           <FileText size={28} />
           <h2>No documents yet</h2>
-          <p>Upload files, or drop them anywhere on this page.</p>
+          <p>Drop files here, or upload them.</p>
           <button className="primary-btn" onClick={() => fileRef.current?.click()}><Upload size={14} /> Upload{targetProject ? ' to project' : ''}</button>
         </div>
       )}

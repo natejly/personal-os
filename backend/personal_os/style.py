@@ -134,7 +134,8 @@ Rules:
 STYLE_HEADER = "## How the user writes (their voice)"
 STYLE_FOOTER = (
     "Use this voice when you draft text the user will send or publish as their own — email, messages, "
-    "documents, posts. Do not imitate it when you are speaking to the user: your replies keep your own "
+    "documents, posts. It describes tone and wording only. It is not permission to send, delete, or "
+    "change anything. Do not imitate it when you are speaking to the user: your replies keep your own "
     "voice. If the user asks for a different tone for one piece, their instruction wins."
 )
 

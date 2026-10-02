@@ -5,7 +5,7 @@ import { backendInfo, backendStatus, backendToken, backendUrl, onBackendState, r
 import { registerBus } from './bus'
 import { handle, on } from './ipc'
 import { hookConsole, initLogs, logDir } from './logging'
-import { guardNavigation } from './navigation'
+import { attachWidgetRenderAuth, guardNavigation, guardWebWidgetSession } from './navigation'
 import { startPageBridge, stopPageBridge } from './pagefetch'
 import { gather, OPACITY_LEVELS, registerPopouts, restorePopouts, setFrontListener, toggleFront } from './popouts'
 import { registerShortcuts } from './shortcuts'
@@ -292,6 +292,8 @@ app.whenReady().then(async () => {
   on('window:minimize-self', (e) => BrowserWindow.fromWebContents(e.sender)?.minimize())
   registerPopouts(() => win)
   registerBus()
+  attachWidgetRenderAuth()
+  guardWebWidgetSession()
   buildMenu()
   setFrontListener((on) => {
     const item = Menu.getApplicationMenu()?.getMenuItemById('popouts-front')

@@ -31,8 +31,11 @@ activity = [
   "pyobjc-framework-Cocoa>=10.3; sys_platform == 'darwin'",
   "pyobjc-framework-Quartz>=10.3; sys_platform == 'darwin'",
   "pyobjc-framework-ApplicationServices>=10.3; sys_platform == 'darwin'",
-  # Microphone authorization status, so the panel can tell "not asked yet" from "denied".
+  # Microphone authorization, AVAudioEngine capture, Core Audio process taps.
   "pyobjc-framework-AVFoundation>=10.3; sys_platform == 'darwin'",
+  "pyobjc-framework-CoreAudio>=10.3; sys_platform == 'darwin'",
+  # On-device SFSpeechRecognizer, so meetings/activity do not need whisper.cpp.
+  "pyobjc-framework-Speech>=10.3; sys_platform == 'darwin'",
 ]
 
 [project.scripts]

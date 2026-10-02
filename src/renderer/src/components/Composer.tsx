@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ArrowUp, Square, Paperclip } from 'lucide-react'
 import PlanModeToggle from './PlanModeToggle'
+import { uploadContextNote } from '../lib/uploadNote'
 import { useStore, useIsStreaming } from '../store'
 import SmartTextarea from './SmartTextarea'
 import { useOnboarding } from './onboarding/onboardingStore'
@@ -31,6 +32,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   const stop = useStore((s) => s.stop)
   const openWizard = useOnboarding((s) => s.openWizard)
   const uploadDocuments = useStore((s) => s.uploadDocuments)
+  const noteUntrustedUpload = useStore((s) => s.noteUntrustedUpload)
 
   useEffect(() => { box.current?.querySelector('textarea')?.focus() }, [activeId])
 
@@ -52,6 +54,19 @@ export default function Composer({ conversationId, footer, compact = false, onSe
    * dropped: a draft written since goes after the returned one. Mid-reply, `send` steers the live
    * run instead of refusing, so the composer stays open while the assistant works.
    */
+  const attach = async (files: FileList | File[]): Promise<void> => {
+    const list = Array.from(files)
+    if (!list.length) return
+    const saved = await uploadDocuments(list, uploadTarget)
+    if (!saved.length) return
+    const real = conversationId && conversationId !== '\u0000page-agent' ? conversationId : undefined
+    await noteUntrustedUpload(real, onSend ? 'page' : 'draft').catch((e: unknown) => {
+      useStore.getState().toast((e as Error).message, 'error')
+    })
+    const note = uploadContextNote(saved)
+    setText((cur) => (cur.trim() ? `${cur}\n\n${note}` : note))
+  }
+
   const submit = async (): Promise<void> => {
     if (!text.trim()) return
     const t = text
@@ -65,9 +80,14 @@ export default function Composer({ conversationId, footer, compact = false, onSe
       {!hasKey && (
         <div className="notice">Finish setup to start chatting. <button className="link" onClick={openWizard}>Finish setup</button></div>
       )}
-      <div className="composer" ref={box}>
-        <input ref={fileRef} type="file" multiple hidden onChange={(e) => { if (e.target.files?.length) void uploadDocuments(e.target.files, uploadTarget); e.target.value = '' }} />
-        <button className="icon-btn" title={uploadTarget ? "Add a document to this project" : "Add a personal document"} onClick={() => fileRef.current?.click()}><Paperclip size={16} /></button>
+      <div
+        className="composer"
+        ref={box}
+        onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) e.preventDefault() }}
+        onDrop={(e) => { if (!e.dataTransfer.files.length) return; e.preventDefault(); void attach(e.dataTransfer.files) }}
+      >
+        <input ref={fileRef} type="file" multiple hidden onChange={(e) => { if (e.target.files?.length) void attach(e.target.files); e.target.value = '' }} />
+        <button className="icon-btn" title="Add files to this chat" onClick={() => fileRef.current?.click()}><Paperclip size={16} /></button>
         <SmartTextarea
           kind="chat"
           variant="bare"

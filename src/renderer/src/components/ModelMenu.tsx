@@ -1,22 +1,22 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { Check, ChevronDown, RotateCcw } from 'lucide-react'
-import type { Effort } from '@shared/types'
+import { DEFAULT_EFFORT, type Effort } from '@shared/types'
+import { modelChoices, modelLabel } from '../lib/modelLabel'
 import { useStore } from '../store'
 
 const EFFORTS: { id: Effort; label: string }[] = [
-  { id: 'default', label: 'Default' },
+  { id: 'default', label: 'Model default' },
   { id: 'low', label: 'Low' },
   { id: 'medium', label: 'Medium' },
-  { id: 'high', label: 'High' }
+  { id: 'high', label: 'High' },
+  { id: 'xhigh', label: 'Extra high' },
+  { id: 'max', label: 'Max' }
 ]
 
-/** What the trigger shows after the model name: only the parameters that are not at their default. */
-export function variantSuffix(effort: Effort, fast: boolean): string {
-  const parts: string[] = []
-  if (effort !== 'default') parts.push(EFFORTS.find((e) => e.id === effort)?.label ?? effort)
-  if (fast) parts.push('Fast')
-  return parts.join(' · ')
+/** What the trigger shows after the model name. Effort has its own dropdown, so only Fast lands here. */
+export function variantSuffix(fast: boolean): string {
+  return fast ? 'Fast' : ''
 }
 
 interface ModelMenuProps {
@@ -31,9 +31,8 @@ interface ModelMenuProps {
 }
 
 /**
- * Model, reasoning effort, and fast mode in one control, laid out the way Cursor's picker is:
- * a trigger with the model and its variant, a searchable model list, and an Edit panel for
- * the effort choices and the Fast switch.
+ * Model, reasoning level, and fast mode. The model list shows the model name, not the
+ * provider path. Reasoning is the dropdown beside the model. Edit still holds effort and Fast.
  */
 export default function ModelMenu({ model, effort, fast, onModel, onEffort, onFast, placement = 'up' }: ModelMenuProps): JSX.Element {
   const models = useStore((s) => s.models)
@@ -49,13 +48,13 @@ export default function ModelMenu({ model, effort, fast, onModel, onEffort, onFa
   const searchRef = useRef<HTMLInputElement>(null)
 
   const options = useMemo(() => {
-    const list = models.some((m) => m.id === model) || !model ? models : [{ id: model }, ...models]
-    const q = query.trim().toLowerCase()
-    return q ? list.filter((m) => m.id.toLowerCase().includes(q)) : list
+    const ids = models.map((m) => m.id)
+    if (model && !ids.includes(model)) ids.unshift(model)
+    return modelChoices(ids, query, model).map((id) => ({ id, label: modelLabel(id) }))
   }, [models, model, query])
 
-  const suffix = variantSuffix(effort, fast)
-  const dirty = effort !== 'default' || fast
+  const suffix = variantSuffix(fast)
+  const dirty = effort !== DEFAULT_EFFORT || fast
 
   useEffect(() => {
     if (!open) return
@@ -70,6 +69,17 @@ export default function ModelMenu({ model, effort, fast, onModel, onEffort, onFa
     const i = options.findIndex((m) => m.id === model)
     setHi(i < 0 ? 0 : i)
   }, [open, query, model, options])
+
+  useEffect(() => {
+    if (!open) return
+    const row = popRef.current?.querySelectorAll<HTMLElement>('.model-menu-row')[hi]
+    const list = row?.parentElement
+    if (!row || !list) return
+    const top = row.offsetTop - list.offsetTop
+    const bottom = top + row.offsetHeight
+    if (top < list.scrollTop) list.scrollTop = top
+    else if (bottom > list.scrollTop + list.clientHeight) list.scrollTop = bottom - list.clientHeight
+  }, [open, hi, options])
 
   useEffect(() => {
     if (!open) return
@@ -97,15 +107,20 @@ export default function ModelMenu({ model, effort, fast, onModel, onEffort, onFa
       const tr = t.getBoundingClientRect()
       const pr = p.getBoundingClientRect()
       const gap = 6
+      const margin = 8
       let top = placement === 'up' ? tr.top - gap - pr.height : tr.bottom + gap
-      if (top < 8) top = tr.bottom + gap
-      if (top + pr.height > window.innerHeight - 8) top = Math.max(8, tr.top - gap - pr.height)
+      if (top < margin) top = tr.bottom + gap
+      if (top + pr.height > window.innerHeight - margin) top = Math.max(margin, tr.top - gap - pr.height)
+      if (top < margin) top = margin
       let left = tr.left
-      if (left + pr.width > window.innerWidth - 8) left = Math.max(8, window.innerWidth - 8 - pr.width)
+      if (left + pr.width > window.innerWidth - margin) left = Math.max(margin, window.innerWidth - margin - pr.width)
       const subW = 220
       let subLeft = left + pr.width + gap
-      if (subLeft + subW > window.innerWidth - 8) subLeft = Math.max(8, left - gap - subW)
-      const next = { top, left, subLeft, subTop: top }
+      if (subLeft + subW > window.innerWidth - margin) subLeft = Math.max(margin, left - gap - subW)
+      const subH = subRef.current?.getBoundingClientRect().height ?? 0
+      let subTop = top
+      if (subH > 0 && subTop + subH > window.innerHeight - margin) subTop = Math.max(margin, window.innerHeight - margin - subH)
+      const next = { top, left, subLeft, subTop }
       setBox((prev) => prev && prev.top === next.top && prev.left === next.left && prev.subLeft === next.subLeft && prev.subTop === next.subTop ? prev : next)
     }
     place()
@@ -137,7 +152,8 @@ export default function ModelMenu({ model, effort, fast, onModel, onEffort, onFa
     }
   }
 
-  const label = suffix ? `${model}, ${suffix}` : model
+  const shown = model ? modelLabel(model) : 'Select model'
+  const label = suffix ? `${shown}, ${suffix}` : shown
 
   return (
     <div className="model-menu">
@@ -148,13 +164,25 @@ export default function ModelMenu({ model, effort, fast, onModel, onEffort, onFa
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={`Model ${label}`}
-        title={modelsError ?? label}
+        title={modelsError ?? (model && model !== shown ? `${label} — ${model}` : label)}
         onClick={() => setOpen((v) => !v)}
       >
-        <span className="model-menu-name">{model ? model.split('/').pop() : 'Select model'}</span>
+        <span className="model-menu-name">{shown}</span>
         {suffix && <span className="model-menu-suffix">{suffix}</span>}
         <ChevronDown size={12} className="model-menu-chevron" />
       </button>
+      <label className="model-menu-effort">
+        <span>Reasoning</span>
+        <select
+          className="chat-control"
+          aria-label="Reasoning level"
+          title="Reasoning level"
+          value={effort}
+          onChange={(e) => onEffort(e.target.value as Effort)}
+        >
+          {EFFORTS.map((e) => <option key={e.id} value={e.id}>{e.label}</option>)}
+        </select>
+      </label>
       {open && createPortal(
         <>
           <div
@@ -188,13 +216,13 @@ export default function ModelMenu({ model, effort, fast, onModel, onEffort, onFa
                     onMouseEnter={() => setHi(i)}
                     onClick={() => pick(m.id)}
                   >
-                    <span className="model-menu-row-name">{m.id}</span>
+                    <span className="model-menu-row-name" title={m.id === m.label ? undefined : m.id}>{m.label}</span>
                     <span className="model-menu-row-end">
                       {selected && <Check size={14} className="model-menu-check" aria-hidden />}
                       <button
                         type="button"
                         className="model-menu-edit"
-                        aria-label={`Edit parameters for ${m.id}`}
+                        aria-label={`Edit parameters for ${m.label}`}
                         aria-expanded={on}
                         onClick={(e) => { e.stopPropagation(); setEditing(on ? null : m.id) }}
                       >
@@ -214,8 +242,8 @@ export default function ModelMenu({ model, effort, fast, onModel, onEffort, onFa
               aria-label={`${editing} parameters`}
               style={{ top: box?.subTop ?? -9999, left: box?.subLeft ?? 0, visibility: box ? 'visible' : 'hidden' }}
             >
-              <div className="model-menu-param-title">{editing}</div>
-              <div className="model-menu-section">Effort</div>
+              <div className="model-menu-param-title">{modelLabel(editing)}</div>
+              <div className="model-menu-section">Reasoning</div>
               {EFFORTS.map((e) => (
                 <button
                   key={e.id}
@@ -245,7 +273,7 @@ export default function ModelMenu({ model, effort, fast, onModel, onEffort, onFa
                 <button
                   type="button"
                   className="model-menu-reset"
-                  onClick={() => applyTo(editing, () => { onEffort('default'); onFast(false) })}
+                  onClick={() => applyTo(editing, () => { onEffort(DEFAULT_EFFORT); onFast(false) })}
                 >
                   <RotateCcw size={13} /> Restore defaults
                 </button>

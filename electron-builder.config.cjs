@@ -30,6 +30,10 @@ module.exports = {
     extendInfo: {
       NSMicrophoneUsageDescription:
         'Grain records audio for meeting notes and voice input. Audio is transcribed with the provider you configure.',
+      NSSpeechRecognitionUsageDescription:
+        'Grain transcribes meeting and activity audio on this Mac so the recording never has to leave the machine.',
+      NSAudioCaptureUsageDescription:
+        'Grain captures system audio for meeting notes and the activity monitor when you enable that source.',
       NSAppleEventsUsageDescription:
         'Grain uses AppleScript and Shortcuts to read the frontmost app and to run actions you ask for.',
       NSScreenCaptureUsageDescription:

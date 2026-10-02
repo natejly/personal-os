@@ -175,7 +175,7 @@ export default function DeskFiles({ desk }: { desk: FullDesk }): JSX.Element {
 
       <div className="desk-preview">
         {!path ? (
-          <p className="empty-hint">Pick a file to read it. Changed files can be shown as a diff against what was there before the desk started.</p>
+          <p className="empty-hint">Pick a file to read it.</p>
         ) : (
           <>
             <div className="desk-preview-head">

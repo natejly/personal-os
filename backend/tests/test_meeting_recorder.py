@@ -118,6 +118,47 @@ class _Worker:
 # ---------------------------------------------------------------- the capture loop
 
 
+def test_native_sine_emits_ordered_segments_and_stops_cleanly() -> None:
+    out = _tmp()
+    seen: list[tuple[str, int, Path]] = []
+    halt = threading.Event()
+    cap = meeting_recorder.ChannelCapture(
+        "mic", audiocap.native_sine_input(), out, 1, 4, halt,
+        lambda c, s, p: seen.append((c, s, p)))
+    cap.start()
+    end = time.time() + 20
+    while time.time() < end and len(seen) < 3:
+        time.sleep(0.1)
+    time.sleep(0.3)
+    cap.stop()
+    cap.join(timeout=10)
+
+    assert len(seen) >= 3, f"only {len(seen)} segments: {seen}"
+    assert [s for _, s, _ in seen] == list(range(len(seen))), seen
+    assert all(c == "mic" for c, _, _ in seen)
+    for _, seq, path in seen:
+        assert path.name == f"mic-{seq:05d}.wav"
+        ok, note = audiocap.validate_wav(path)
+        assert ok, f"{path.name} did not validate: {note}"
+    assert cap.proc is None
+    assert cap.error == "", cap.error
+    assert not cap.is_alive()
+
+
+def test_native_sine_stops_itself_at_max_seconds() -> None:
+    out = _tmp()
+    seen: list[int] = []
+    cap = meeting_recorder.ChannelCapture(
+        "mic", audiocap.native_sine_input(), out, 1, 3, threading.Event(),
+        lambda c, s, p: seen.append(s))
+    cap.start()
+    cap.join(timeout=20)
+    assert not cap.is_alive(), "the capture outlived its own ceiling"
+    assert cap.error == "", cap.error
+    assert len(seen) >= 2, seen
+    assert cap.restarts == 0, "a clean exit must not look like a crash"
+
+
 def test_channel_capture_emits_ordered_segments_and_stops_cleanly() -> None:
     if not audiocap.ffmpeg_path():
         print("  note  no ffmpeg on PATH, skipping the capture loop")
@@ -230,15 +271,12 @@ def test_a_second_run_never_reports_or_overwrites_the_first_runs_wavs() -> None:
     sizes = [p.stat().st_size for p in leftovers]
     seen: list[int] = []
     cap = meeting_recorder.ChannelCapture(
-        "mic", audiocap.synthetic_input(), out, 1, 3, threading.Event(),
+        "mic", audiocap.native_sine_input(), out, 1, 3, threading.Event(),
         lambda c, s, p: seen.append(s))
     assert cap._next == 6, f"numbering restarted over 6 wavs already on disk: {cap._next}"
     cap._emit_ready(exited=True)
     assert seen == [], f"a previous run's wavs were reported as this run's segments: {seen}"
 
-    if not audiocap.ffmpeg_path():
-        print("  note  no ffmpeg on PATH, skipping the overwrite half")
-        return
     cap.start()
     cap.join(timeout=20)
     assert seen and seen[0] == 6, seen
@@ -535,22 +573,19 @@ def test_a_halted_worker_abandons_its_backlog_instead_of_transcribing_it() -> No
 
 
 def test_a_session_records_transcribes_and_reports_stats() -> None:
-    if not audiocap.ffmpeg_path():
-        print("  note  no ffmpeg on PATH, skipping the session")
-        return
     data_dir = _tmp()
     segments: list[dict] = []
     results: list[dict] = []
     pool = meeting_recorder.RecorderPool(data_dir, lambda: dict(SETTINGS), lambda: dict(CFG))
     with transcribes_as({"text": "a tone"}):
         session = pool.start(
-            "mtg-1", {"mic": audiocap.synthetic_input()},
+            "mtg-1", {"mic": audiocap.native_sine_input()},
             on_segment=lambda c, s, p, i: segments.append({"channel": c, "seq": s, **i}),
             on_result=lambda c, s, p, r: results.append({"channel": c, "seq": s, **r}),
             segment_seconds=1, max_seconds=4, drain_seconds=20)
         assert pool.live() is session
         try:
-            pool.start("mtg-2", {"mic": audiocap.synthetic_input()},
+            pool.start("mtg-2", {"mic": audiocap.native_sine_input()},
                        on_segment=lambda *a: None, on_result=lambda *a: None)
             raise AssertionError("two meetings recorded at once")
         except meeting_recorder.RecorderBusy as e:
@@ -558,7 +593,7 @@ def test_a_session_records_transcribes_and_reports_stats() -> None:
         end = time.time() + 20
         while time.time() < end and len(segments) < 3:
             time.sleep(0.1)
-        time.sleep(0.6)   # see the capture-loop test: the open segment needs some samples in it
+        time.sleep(0.3)
         stopped = pool.stop("mtg-1")
 
     # The stop contract: the caller finalizes the meeting the moment this returns, so it has to

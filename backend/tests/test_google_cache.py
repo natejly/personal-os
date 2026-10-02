@@ -4,7 +4,9 @@ Run: python backend/tests/test_google_cache.py
 """
 from __future__ import annotations
 
+import datetime as dt
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from typing import Any
@@ -13,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from personal_os import cache  # noqa: E402
 from personal_os.google import Google  # noqa: E402
+from personal_os.google_store import ReadStore  # noqa: E402
 
 
 class _Req:
@@ -269,6 +272,180 @@ class ClientReuseTests(unittest.TestCase):
         self.assertEqual(g.cache_stats()["entries"], 0)
         g.calendar_events(days=7)
         self.assertEqual(events.counts["list"], 2)
+
+
+def _soon(hours: int = 1) -> str:
+    return (dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=hours)).replace(microsecond=0).isoformat()
+
+
+class _RecordingEvents(_Events):
+    """list() keeps the kwargs, and can go quiet after the first page."""
+
+    def __init__(self, items: list[dict[str, Any]]):
+        super().__init__(items)
+        self.calls: list[dict[str, Any]] = []
+
+    def list(self, **kw: Any) -> _Req:
+        self._bump("list")
+        self.calls.append(kw)
+        if kw.get("updatedMin") and self.counts["list"] > 1:
+            return _Req({"items": []})
+        return _Req({"items": self.items})
+
+
+class _MsgReq:
+    def __init__(self, mid: str):
+        self.mid = mid
+
+
+class _GmailBatch:
+    def __init__(self, callback: Any, messages: dict[str, dict[str, Any]]):
+        self._callback = callback
+        self._messages = messages
+        self._ids: list[str] = []
+
+    def add(self, req: _MsgReq) -> None:
+        self._ids.append(req.mid)
+
+    def execute(self) -> None:
+        for i, mid in enumerate(self._ids):
+            self._callback(str(i), self._messages[mid], None)
+
+
+def _mail(mid: str, subject: str) -> dict[str, Any]:
+    return {
+        "id": mid, "threadId": "t", "snippet": subject, "labelIds": ["INBOX", "UNREAD"],
+        "payload": {"headers": [
+            {"name": "From", "value": "Ada <ada@example.com>"},
+            {"name": "Subject", "value": subject},
+            {"name": "Date", "value": "Thu, 1 Oct 2026 12:00:00 +0000"},
+        ]},
+    }
+
+
+class _Gmail:
+    def __init__(self) -> None:
+        self.ids = ["a", "b"]
+        self.rows = {"a": _mail("a", "Hello"), "b": _mail("b", "Invoice"), "c": _mail("c", "New")}
+        self.gets: list[str] = []
+        self.records: list[dict[str, Any]] = []
+        self.history_id = "5"
+
+    def users(self) -> _Gmail:
+        return self
+
+    def messages(self) -> _Gmail:
+        return self
+
+    def history(self) -> _Gmail:
+        return self
+
+    def list(self, **kw: Any) -> _Req:
+        if "startHistoryId" in kw:
+            return _Req({"historyId": "9", "history": self.records})
+        return _Req({"messages": [{"id": i} for i in self.ids], "historyId": self.history_id})
+
+    def get(self, **kw: Any) -> _MsgReq:
+        self.gets.append(kw["id"])
+        return _MsgReq(kw["id"])
+
+    def new_batch_http_request(self, callback: Any) -> _GmailBatch:
+        return _GmailBatch(callback, self.rows)
+
+
+class IncrementalTests(unittest.TestCase):
+    def test_a_second_calendar_read_asks_only_for_changes_and_keeps_the_rest(self) -> None:
+        start = _soon(1)
+        end = _soon(2)
+        event = {"id": "e1", "summary": "Standup", "start": {"dateTime": start}, "end": {"dateTime": end}}
+        events = _RecordingEvents([event])
+        g = _google(events)
+        first = g.calendar_events(days=7)
+        self.assertEqual([e["id"] for e in first], ["e1"])
+        self.assertNotIn("updatedMin", events.calls[0])
+        g.invalidate("calendar")
+        second = g.calendar_events(days=7)
+        self.assertEqual([e["id"] for e in second], ["e1"])
+        self.assertIn("updatedMin", events.calls[-1])
+        # The quiet second page must not have been a per-event refetch.
+        self.assertEqual(events.counts.get("get", 0), 0)
+
+    def test_saved_events_survive_a_new_process(self) -> None:
+        start = _soon(1)
+        end = _soon(2)
+        event = {"id": "e1", "summary": "Standup", "start": {"dateTime": start}, "end": {"dateTime": end}}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "google-reads.json"
+            events = _RecordingEvents([event])
+            g = _google(events)
+            g._reads = ReadStore(path)
+            self.assertEqual([e["id"] for e in g.calendar_events(days=7)], ["e1"])
+
+            quiet = _RecordingEvents([])
+
+            class _Svc:
+                def events(self) -> _RecordingEvents:
+                    return quiet
+
+                def calendarList(self) -> _CalendarList:
+                    return _CalendarList([])
+
+            again = Google(dict, lambda _s: None)
+            again._reads = ReadStore(path)
+            again._svc = lambda _name, _version: _Svc()  # type: ignore[method-assign]
+            got = again.calendar_events(days=7)
+            self.assertEqual([e["id"] for e in got], ["e1"])
+            self.assertIn("updatedMin", quiet.calls[-1])
+
+    def test_disconnect_forgets_the_saved_snapshot(self) -> None:
+        start = _soon(1)
+        end = _soon(2)
+        event = {"id": "e1", "summary": "Standup", "start": {"dateTime": start}, "end": {"dateTime": end}}
+        events = _RecordingEvents([event])
+        g = _google(events)
+        g.calendar_events(days=7)
+        g.disconnect()
+        g.calendar_events(days=7)
+        self.assertNotIn("updatedMin", events.calls[-1])
+
+    def test_gmail_refetches_only_new_or_changed_messages(self) -> None:
+        svc = _Gmail()
+        g = Google(dict, lambda _s: None)
+        g._svc = lambda name, version: svc  # type: ignore[method-assign]
+        first = g.gmail_search("in:inbox", 10)
+        self.assertEqual([m["id"] for m in first], ["a", "b"])
+        self.assertEqual(svc.gets, ["a", "b"])
+        g.invalidate("gmail")
+        second = g.gmail_search("in:inbox", 10)
+        self.assertEqual([m["id"] for m in second], ["a", "b"])
+        self.assertEqual(svc.gets, ["a", "b"])  # nothing new, so no metadata get
+        svc.ids = ["a", "c"]
+        svc.records = [{"id": "8", "messagesAdded": [{"message": {"id": "c"}}], "messagesDeleted": [{"message": {"id": "b"}}]}]
+        g.invalidate("gmail")
+        third = g.gmail_search("in:inbox", 10)
+        self.assertEqual([m["id"] for m in third], ["a", "c"])
+        self.assertEqual(svc.gets, ["a", "b", "c"])
+
+    def test_a_saved_message_body_is_not_fetched_again(self) -> None:
+        svc = _Gmail()
+        body = {"id": "a", "threadId": "t", "payload": {"mimeType": "text/plain", "headers": [{"name": "Subject", "value": "Hello"}], "body": {"data": "aGk="}}, "snippet": "hi"}
+
+        class _Full(_Gmail):
+            def __init__(self) -> None:
+                super().__init__()
+                self.full_gets = 0
+
+            def get(self, **kw: Any) -> _Req:
+                self.full_gets += 1
+                return _Req(body)
+
+        full = _Full()
+        g = Google(dict, lambda _s: None)
+        g._svc = lambda name, version: full  # type: ignore[method-assign]
+        self.assertEqual(g.gmail_get("a")["subject"], "Hello")
+        g.invalidate("gmail")
+        self.assertEqual(g.gmail_get("a")["subject"], "Hello")
+        self.assertEqual(full.full_gets, 1)
 
 
 if __name__ == "__main__":

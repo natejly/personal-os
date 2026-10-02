@@ -163,15 +163,8 @@ export default function CoworkView(): JSX.Element {
         ) : (
           <section className="cowork-empty">
             <Users size={30} />
-            <h2>Nothing open</h2>
-            <p className="muted">
-              A desk is a task you hand over: it gets its own conversation, its own folder, and one plan you approve
-              before it acts. Several can run at once.
-            </p>
-            <p className="muted small">
-              Nothing a desk writes reaches the app until you accept it on the Output tab — it works in
-              <code> cowork/&lt;desk&gt;/</code> and nominates files for review.
-            </p>
+            <h2>No desk open</h2>
+            <p className="muted">Start one when you have a task to hand off.</p>
             <button className="primary-btn" onClick={() => setCreating(true)}><Plus size={14} /> New desk</button>
           </section>
         )}

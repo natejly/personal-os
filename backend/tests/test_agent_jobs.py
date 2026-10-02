@@ -340,6 +340,44 @@ def test_an_external_write_in_a_job_run_becomes_a_proposal_and_never_reaches_the
     assert store.approvals(None, run_id=run["run_id"]) == [], "a background run never waits on an approval"
 
 
+def test_an_mcp_tool_in_a_job_run_is_proposed_and_never_called() -> None:
+    """Connectors are external but not in the built-in toolbox, so a job used to call them for real."""
+    called: list[str] = []
+
+    async def boom(slug: str, args: dict[str, Any]) -> dict[str, Any]:
+        called.append(slug)
+        return {"ok": True, "wrote": args}
+
+    def tooling(project_id: str | None, conversation_id: str | None) -> tuple[dict[str, str], list[dict[str, Any]]]:
+        return {"mcp__files__write": "on"}, []
+
+    real_tooling, real_call = appmod._mcp_tooling, appmod._mcp_call
+    appmod._mcp_tooling, appmod._mcp_call = tooling, boom
+    try:
+        args = {"path": "notes.md", "content": "hello"}
+        ROUNDS.append({"tool_calls": [call("mcp__files__write", args)]})
+        ROUNDS.append(["I left that for you to approve."])
+        job = make_job("connector", "0 * * * *", "save the notes", at=T0)
+        tick(T0 + HOUR)
+    finally:
+        appmod._mcp_tooling, appmod._mcp_call = real_tooling, real_call
+
+    assert called == [], "the connector was contacted"
+    run = job_runs(job["id"])[0]
+    assert run["status"] == "done"
+    mine = proposals.list("pending", run_id=run["run_id"])
+    assert len(mine) == 1 and mine[0]["tool"] == "mcp__files__write" and mine[0]["args"] == args
+    assert store.approvals(None, run_id=run["run_id"]) == []
+
+    appmod._mcp_call = boom
+    try:
+        res = j("POST", f"/proposals/{mine[0]['id']}/accept")
+    finally:
+        appmod._mcp_call = real_call
+    assert called == ["mcp__files__write"]
+    assert res["ok"] is True and res["proposal"]["status"] == "accepted"
+
+
 def test_the_toolbox_refuses_an_external_tool_whenever_the_context_says_proposal_only() -> None:
     """The second gate, in the module that owns the tool functions: even a caller that forgot the first one is safe."""
     ctx = {"project_id": None, "conversation_id": None, "settings": appmod.settings(), "proposal_only": True}

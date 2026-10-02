@@ -27,6 +27,15 @@ def call(tb: Toolbox, name: str, ctx: dict[str, Any] | None = None, **kw: Any) -
     return run(tb.specs[name].fn(ctx if ctx is not None else {}, **kw))
 
 
+def test_caption_urls_stay_on_youtube_hosts() -> None:
+    assert reach.caption_url_ok("https://www.youtube.com/api/timedtext?v=1")
+    assert reach.caption_url_ok("https://manifest.googlevideo.com/api/timedtext?v=1")
+    assert not reach.caption_url_ok("http://www.youtube.com/api/timedtext")
+    assert not reach.caption_url_ok("https://0177.0.0.1/api/timedtext")
+    assert not reach.caption_url_ok("https://evil.example/redirect")
+    assert not reach.caption_url_ok("https://user:pass@www.youtube.com/api/timedtext")
+
+
 # ---- parsers ----
 EXA_BLOB = """Title: Write-Ahead Logging
 URL: https://www.sqlite.org/wal.html
@@ -189,8 +198,8 @@ def test_read_feed_applies_the_taint_rule() -> None:
 def test_fetch_url_falls_back_to_jina_for_js_shells(monkeypatch: pytest.MonkeyPatch) -> None:
     import httpx
 
-    async def fake_resolve(host: str) -> None:
-        return None
+    async def fake_resolve(host: str) -> list[str]:
+        return ["93.184.216.34"]
     monkeypatch.setattr(tools, "_resolve", fake_resolve)
 
     def handler(req: httpx.Request) -> httpx.Response:

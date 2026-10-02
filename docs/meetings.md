@@ -28,10 +28,10 @@ Two capture channels, each a separate switch:
 
 | Channel | What it captures | Needs |
 | --- | --- | --- |
-| **mic** | You and whoever is in the room | ffmpeg + Microphone permission |
-| **output** | Whatever your speakers played — i.e. everyone else on the call | ffmpeg + a loopback device |
+| **mic** | You and whoever is in the room | AVAudioEngine + Microphone permission |
+| **output** | Whatever your speakers played — i.e. everyone else on the call | Core Audio process tap (macOS 14.2+), or a loopback device on older Macs |
 
-Default sources: **mic** only. Without a loopback driver the `output` channel is
+Default sources: **mic** only. Without a process tap or loopback driver the `output` channel is
 reported as unavailable in the checklist and the meeting records one-sided, which
 is a degradation and not a failure.
 
@@ -39,9 +39,8 @@ is a degradation and not a failure.
 
 ```
 ChannelCapture ×N ──▶ segment files ──▶ queue ──▶ TranscribeWorker ──▶ meeting_segments
-  one ffmpeg per        wav, closed        in-        stt.py: proxy |          one row per
-  channel, segment      every 20s        memory        local | off         closed segment
-  muxer, -t capped                                                             │
+  native AVAudioEngine    wav, closed        in-        stt.py: speech |        one row per
+  or ffmpeg fallback      every 20s        memory        local | proxy | off    closed segment
   ┌────────────────────────────────────────────────────────────────────────────┘
   ▼
 finalize ──▶ transcript ──▶ enhance ──▶ pending revision ──▶ accept
@@ -49,22 +48,23 @@ finalize ──▶ transcript ──▶ enhance ──▶ pending revision ─�
  stop)        rollup)                        by DiffView)         of `enhanced`)
 ```
 
-**ChannelCapture** (`meeting_recorder.py`) is one long-lived ffmpeg per channel,
-using the segment muxer, so it closes a finished wav every `segmentSeconds` and
-keeps recording while the previous one is in flight. That is the difference from
-the activity monitor's `AudioCollector`, which records for *n* seconds with
-`subprocess.run` and then blocks on a transcription that can take two minutes
-(activity.py:841-851) — everything said during that block is simply never
-captured. Here, falling behind costs latency, not audio. The run is capped with
-`-t maxMeetingSeconds` and teardown writes `q\n` to ffmpeg's stdin rather than
-sending a signal: that exits 0 and flushes a *valid* final segment, where a kill
-leaves a 0-byte file. Every closed segment is checked with `ffprobe` and a
-`-c copy` remux is attempted before it is written off, because file size says
-nothing about whether the samples are readable.
+**ChannelCapture** (`meeting_recorder.py`) is one long-lived capture per channel.
+Native mic uses AVAudioEngine; system audio uses a Core Audio process tap on
+macOS 14.2+ so a BlackHole loopback is not required. ffmpeg avfoundation is the
+fallback when the native path cannot start. It closes a finished wav every
+`segmentSeconds` and keeps recording while the previous one is in flight. That is
+the difference from the activity monitor's `AudioCollector`, which records for *n*
+seconds and then blocks on transcription — everything said during that block is
+simply never captured. Here, falling behind costs latency, not audio. Native
+teardown stops the engine and flushes the ring; the ffmpeg fallback writes `q\n`
+to stdin rather than sending a signal. Every closed segment is checked as a real
+wav (the stdlib `wave` module, then ffprobe if the header is truncated).
 
 **TranscribeWorker** drains a queue on a second thread and calls `stt.py`, which
-has three backends resolved by `sttBackend`:
+has four backends resolved by `sttBackend`:
 
+- `speech` — Apple's on-device Speech framework. Audio never leaves the machine.
+  Needs Speech Recognition granted to the app (macOS asks on the first transcribe).
 - `proxy` — POSTs the wav to `/v1/audio/transcriptions` on your configured base
   URL. **A default `litellm.yaml` has no model behind that path**, so this fails
   until you add one (see `litellm.yaml`'s commented block).
@@ -72,7 +72,8 @@ has three backends resolved by `sttBackend`:
   never leaves the machine.
 - `off` — keep the notes, produce no transcript. A legitimate choice, not a
   failure state.
-- `auto` — `local` if the binary and a model are both present, else `proxy`.
+- `auto` — `speech` if the recognizer is authorized, else `local` if the binary
+  and a model are both present, else `proxy`.
 
 A transcription failure is a row of data, not an exception: the segment gets an
 `error` string, keeps its wav, and is retried by the 45-second tick (three per
@@ -144,8 +145,8 @@ anything is missing. Meetings have no exclusion list.
 **Credential-only redaction.** `redact.scrub_secrets` keeps the rules that catch
 private keys, cards, SSNs, tokens, AWS keys, JWTs and high-entropy runs, and drops
 the two the gate applies that destroy a conversation: `email` replaces every
-address with `[email]` (activity.py:126) and `phone` every phone-shaped run of
-digits with `[phone]` (activity.py:132). A leaked API key is a breach; a
+address with `[email]` and `phone` every phone-shaped run of
+digits with `[phone]` (both in `redact.py`). A leaked API key is a breach; a
 colleague's email address inside their own meeting is the point. Switch it off
 entirely with `redactSecrets: false`.
 
@@ -180,7 +181,7 @@ What chats actually receive is a short "## Recent meetings" block of titles and
 **Durable by design.** There is no `expires_at` column anywhere in
 `meetings.py`, and that absence is the feature. An `activity_events` row carries
 one and is swept on every `Monitor.loop` tick, and `POST /activity/purge` runs a
-bare `DELETE FROM activity_events` behind the Privacy tab (activity.py:482-487).
+bare `DELETE FROM activity_events` behind the Privacy tab (`Store.purge` in activity.py, scopes `events` and `all`).
 Nothing under `/activity/*` can reach a meeting. A meeting goes away when you
 delete it, and only then.
 
@@ -205,22 +206,31 @@ record that this meeting produced the item.
 
 ## Permissions
 
+Microphone permission is required. In System Settings → Privacy & Security →
+**Microphone**, enable the app. macOS attributes the grant to the bundle, so it
+is **Grain** in a packaged build and **Electron** in development, and a grant
+made after launch does not take until the app restarts.
+
+On-device transcription uses **Speech Recognition** in the same pane. The first
+time you press Test or Record with the Speech backend, macOS asks. Packaged
+builds include the usage string in Info.plist; in development the grant still
+lands on Electron.
+
+Capture itself is native (AVAudioEngine / Core Audio tap). ffmpeg is optional:
+it remuxes a truncated wav and is the fallback on a Mac where pyobjc is missing.
+
 ```bash
-# Capture, segmenting and wav validation. Required for anything to record.
-brew install ffmpeg
+# Optional fallbacks, not required on macOS 14.2+ with the activity extras installed:
+brew install ffmpeg          # truncated-wav repair and the ffmpeg capture path
+brew install whisper-cpp     # if you prefer whisper.cpp over Apple Speech
 ```
 
-Then System Settings → Privacy & Security → **Microphone**, and enable the app.
-macOS attributes the grant to the bundle, so it is **Personal OS** in a packaged
-build and **Electron** in development, and a grant made after launch does not take
-until the app restarts.
+### System audio
 
-### System audio (the main onboarding wall)
-
-macOS has no native way to record its own output, so the `output` channel needs a
-loopback driver. Installing one is not enough — a loopback device has no speakers,
-so routing your output to it alone makes the Mac go silent. You need a
-Multi-Output Device that feeds both your speakers and the loopback at once:
+macOS 14.2+ can record its own output with a Core Audio process tap. Grain uses
+that when `CATapDescription` is present, so you do not need BlackHole or a
+Multi-Output Device. On older macOS the `output` channel still needs a loopback
+driver:
 
 ```bash
 brew install blackhole-2ch
@@ -256,20 +266,20 @@ curl -L -o "$DATA/models/ggml-base.en.bin" \
   https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
 ```
 
-`sttBackend: auto` picks this up as soon as both exist, and audio then never
-leaves the machine. The Meetings panel's `stt_local` row prints those two commands
-with *your* data directory already substituted, so it is one copy away — and
-`whisperModelPath` overrides the location if you keep models elsewhere.
+`sttBackend: auto` picks Speech when it is granted, then this whisper.cpp path as
+soon as both the binary and a model exist, and audio then never leaves the
+machine. The Meetings panel's `stt_speech` and `stt_local` rows print the exact
+next step with *your* data directory already substituted. `whisperModelPath`
+overrides the location if you keep models elsewhere.
 
-The panel's capability checklist probes `platform`, `ffmpeg`, `mic`, `loopback`,
-`stt` and `stt_local`, prints the exact fix for anything missing, and never
-triggers a permission prompt. On top of that, **Test** (`POST /meetings/selftest`)
-synthesizes a short wav and does a *real* round trip, because a capability probe
-cannot tell you whether transcription actually works — the activity monitor's
-`transcription` row only checks that the model string is non-empty
-(activity.py:404-408) and so reports ok on every machine while every call fails.
-A failing self-test **blocks** Start rather than warning, and the blocker is
-listed in the 409.
+The panel's capability checklist probes `platform`, `ffmpeg` (now “Audio capture”:
+native or ffmpeg), `mic`, `loopback`, `stt`, `stt_speech` and `stt_local`, prints
+the exact fix for anything missing, and never triggers a permission prompt. On
+top of that, **Test** (`POST /meetings/selftest`) writes a short wav and does a
+*real* round trip, because a capability probe cannot tell you whether
+transcription actually works. A failing self-test **blocks** Start rather than
+warning, and the blocker is cached for ten minutes so a panel poll cannot fire a
+120-second POST. A 409 on Start lists the same blockers.
 
 ## Tools
 
@@ -356,14 +366,14 @@ default and hideable in Settings → Modules; *recording* is a separate switch
 
 ## Limits
 
-- **macOS only.** Capture is ffmpeg against avfoundation. `POST /meetings/{id}/start`
-  returns 400 elsewhere with the platform row's own fix string, the way
-  `POST /activity/start` does. Everything else — notes, templates, enhance,
-  search, the tools — works on any platform.
-- **System audio needs a loopback driver the app cannot install for you.** There
-  is no native way to capture macOS output, `brew install blackhole-2ch` needs an
-  admin password, and the Multi-Output Device above has to be built by hand or your
-  speakers go silent. Without it a meeting records mic-only, which is honest in the
+- **macOS only.** Capture is AVAudioEngine / a Core Audio tap, with ffmpeg as
+  fallback. `POST /meetings/{id}/start` returns 400 elsewhere with the platform
+  row's own fix string, the way `POST /activity/start` does. Everything else —
+  notes, templates, enhance, search, the tools — works on any platform.
+- **System audio on older macOS still needs a loopback driver.** macOS 14.2+ has
+  a process tap and Grain uses it. Before that, `brew install blackhole-2ch` needs
+  an admin password and a Multi-Output Device built by hand or your speakers go
+  silent. Without either path a meeting records mic-only, which is honest in the
   checklist and still useful — you get your half plus whoever is in the room.
 - **Speaker attribution is channel-level, not per person.** mic is you, output is
   everyone else. docs/activity-monitor.md:180 already says transcription is not
@@ -371,12 +381,9 @@ default and hideable in Settings → Modules; *recording* is a separate switch
   a later diarization pass is open with no migration needed —
   `meeting_segments.speaker` exists and is empty, and `detail` holds the
   `verbose_json` utterances such a pass would read.
-- **The Microphone grant lands on the bundle, not on Grain.** In development that
-  is **Electron**, not Personal OS, and a grant made after launch does not take
-  until the app restarts (docs/activity-monitor.md:119-124). `capabilities()` never
-  probes the mic directly either — it infers it from whether ffmpeg can see any
-  input (activity.py:392-394) — so a denial presents as an ffmpeg failure rather
-  than as a permission row.
+- **The Microphone and Speech Recognition grants land on the bundle, not on Grain.**
+  In development that is **Electron**, not Grain, and a grant made after launch
+  does not take until the app restarts. `capabilities()` never prompts.
 - **A crash loses the tail of the segment being written.** ffmpeg flushes WAV
   output in 256 KiB blocks: measured on this machine, a realtime 16 kHz mono
   16-bit capture sat at 0 bytes for seven seconds, jumped to exactly 262144 at

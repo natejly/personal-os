@@ -30,10 +30,12 @@ import re
 import secrets
 import threading
 import time
+from pathlib import Path
 from typing import Any, Callable
 
 from . import verify
-from .cache import TTLCache, cached, invalidates
+from .cache import TTLCache, bypassing, cached, invalidates
+from .google_store import ReadStore
 
 # Google lists the scopes it actually granted in the token response, and that set rarely
 # matches the request byte for byte (openid aliases, scopes granted to this client earlier).
@@ -70,9 +72,9 @@ SCOPES = [
 TTL = {
     "calendar_list": 10 * 60,   # calendars are added/removed rarely
     "calendar_colors": 24 * 3600,  # Google's fixed palette
-    "calendar_events": 60,      # the week grid: refetched on every mount and week step
+    "calendar_events": 60,      # repeat views of the same week; after this, only changes are fetched
     "calendar_event": 30,       # one event, opened in the editor
-    "gmail_list": 60,           # a thread list costs 1 + N batched gets
+    "gmail_list": 60,           # repeat of the same query; after this, only new or changed messages are fetched
     "gmail_threads": 120,       # recent threads for the reply tracker: 1 + N batched gets
     "gmail_message": 15 * 60,   # a fetched body never changes
     "gmail_labels": 10 * 60,
@@ -89,12 +91,21 @@ class GoogleNotConnected(Exception):
     pass
 
 
+# A saved calendar window older than this is listed again in full. Younger than this,
+# events.list is called with updatedMin, so unchanged events stay in the snapshot.
+_CAL_FULL_AFTER = 6 * 3600
+_CAL_OVERLAP = dt.timedelta(minutes=2)
+_GMAIL_META_CAP = 800
+
+
 class Google:
-    def __init__(self, get_settings: Callable[[], dict[str, Any]], set_settings: Callable[[dict[str, Any]], None]):
+    def __init__(self, get_settings: Callable[[], dict[str, Any]], set_settings: Callable[[dict[str, Any]], None], cache_dir: str | Path | None = None):
         self.get_settings = get_settings
         self.set_settings = set_settings
         self._pending: dict[str, Any] = {}  # state -> flow
         self._cache = TTLCache()
+        # Survives the minute-scale TTL and a process restart. See google_store.py.
+        self._reads = ReadStore(Path(cache_dir) / "google-reads.json" if cache_dir else None)
         # Built API clients and the Credentials they wrap, reused across calls; see _svc.
         self._svc_lock = threading.Lock()
         self._svcs: dict[tuple[str, str, int], tuple[Any, Any]] = {}  # (api, version, thread) -> (creds, client)
@@ -115,6 +126,15 @@ class Google:
             self._creds_obj = None
             self._creds_key = None
         self._cache.clear()
+        self._reads.clear()
+
+    def forget(self, *namespaces: str) -> int:
+        """Drop the short TTL cache and the saved snapshots. A write does not call this:
+        the next read asks Google for what changed and merges it into the snapshot.
+        """
+        n = self._cache.invalidate(*namespaces)
+        self._reads.clear(*namespaces)
+        return n
 
     # ---------- status / auth ----------
     def _client(self) -> tuple[str | None, str | None, str | None]:
@@ -291,6 +311,7 @@ class Google:
             self._creds_key = key
         if changed_account:
             self._cache.clear()
+            self._reads.clear()
         return creds
 
     def _svc(self, name: str, version: str):  # type: ignore[no-untyped-def]
@@ -378,17 +399,16 @@ class Google:
             ids = [c["id"] for c in self.calendars() if not c["hidden"]][:15]
         svc = self._svc("calendar", "v3")
         out: list[dict[str, Any]] = []
-        for cid in ids:
-            try:
-                res = svc.events().list(
-                    calendarId=cid, timeMin=now.isoformat(), timeMax=end.isoformat(), singleEvents=True, orderBy="startTime", maxResults=max_results
-                ).execute()
-            except Exception as e:  # noqa: BLE001  # one broken subscription should not empty the whole grid
-                if len(ids) == 1:
-                    raise
-                log.warning("calendar %s skipped: %s", cid, e)
-                continue
-            out.extend(_event_out(e, cid) for e in res.get("items", []) if e.get("status") != "cancelled")
+        try:
+            for cid in ids:
+                try:
+                    out.extend(self._sync_calendar(svc, cid, now, end, max_results))
+                except Exception as e:  # noqa: BLE001  # one broken subscription should not empty the whole grid
+                    if len(ids) == 1:
+                        raise
+                    log.warning("calendar %s skipped: %s", cid, e)
+        finally:
+            self._reads.flush()
         out.sort(key=lambda e: e["start"] or "")
         return out[: max_results if len(ids) == 1 else max_results * 2]
 
@@ -422,6 +442,62 @@ class Google:
             out[cid] = {"busy": [{"start": x["start"], "end": x["end"]} for x in row.get("busy", [])],
                         **({"errors": [e.get("reason") for e in errs]} if errs else {}), "attendee": cid in people}
         return {"time_min": a.isoformat(), "time_max": b.isoformat(), "calendars": out, "unreachable": unreachable}
+    def _sync_calendar(self, svc: Any, cid: str, start: dt.datetime, end: dt.datetime, max_results: int) -> list[dict[str, Any]]:
+        """Events in [start, end) for one calendar.
+
+        The first time a window is seen it is listed in full and saved. Later reads of a
+        window we already cover ask only for rows changed since that save (updatedMin),
+        and merge them in. A snapshot older than `_CAL_FULL_AFTER` is listed again, so an
+        event moved out of the window cannot linger forever.
+        """
+        snap = self._reads.get("calendar", cid) or {}
+        stored: dict[str, dict[str, Any]] = dict(snap.get("events") or {})
+        covered_start, covered_end = _parse_opt(snap.get("start")), _parse_opt(snap.get("end"))
+        synced_at = _parse_opt(snap.get("synced_at"))
+        slack = dt.timedelta(seconds=2)
+        fresh = synced_at is not None and (dt.datetime.now(dt.timezone.utc) - synced_at).total_seconds() < _CAL_FULL_AFTER
+        # A window that starts inside what we saved and does not jump more than a day past it
+        # (the agenda's "now" sliding forward) is an incremental read. A week we have never
+        # opened still lists in full.
+        near = bool(
+            fresh and covered_start and covered_end and synced_at
+            and start >= covered_start - slack and start <= covered_end
+            and end <= covered_end + dt.timedelta(days=1)
+        )
+        listed: list[dict[str, Any]] | None = None
+        if near and covered_start and covered_end and synced_at:
+            changed = _list_events(svc, cid, covered_start, max(covered_end, end), synced_at - _CAL_OVERLAP, max(max_results, 250), paginate=True)
+            _merge_events(stored, changed, cid)
+            if end > covered_end + dt.timedelta(hours=1):
+                # The far edge has slid by more than a clock tick. Unmodified events that
+                # just entered the window are not in an updatedMin result, so list that sliver.
+                sliver = _list_events(svc, cid, covered_end, end, None, max_results, paginate=False)
+                _merge_events(stored, sliver, cid)
+            window_start, window_end = covered_start, max(covered_end, end)
+        else:
+            w0 = min(start, covered_start) if covered_start else start
+            w1 = max(end, covered_end) if covered_end else end
+            if w1 - w0 > dt.timedelta(days=120):
+                w0, w1 = start, end
+            stored = {eid: ev for eid, ev in stored.items() if not _overlaps(ev, w0, w1)}
+            items = _list_events(svc, cid, w0, w1, None, max_results, paginate=False)
+            listed = [_event_out(e, cid) for e in items if e.get("status") != "cancelled"]
+            for ev in listed:
+                if ev.get("id"):
+                    stored[str(ev["id"])] = ev
+            window_start, window_end = w0, w1
+        if len(stored) > 1500:
+            stored = {eid: ev for eid, ev in stored.items() if _overlaps(ev, start, end)}
+        self._reads.put("calendar", cid, {
+            "start": window_start.isoformat(), "end": window_end.isoformat(),
+            "synced_at": dt.datetime.now(dt.timezone.utc).isoformat(), "events": stored,
+        }, flush=False)
+        # A full list of exactly this window is returned as Google sent it. A wider saved
+        # window, or an incremental merge, is sliced locally so unchanged rows are not
+        # downloaded again to answer a smaller question.
+        if listed is not None and window_start == start and window_end == end:
+            return listed
+        return [ev for ev in stored.values() if _overlaps(ev, start, end)]
 
     @cached("calendar", TTL["calendar_event"])
     def calendar_get(self, event_id: str, calendar_id: str = "primary") -> dict[str, Any]:
@@ -584,11 +660,56 @@ class Google:
     # ---------- Gmail ----------
     @cached("gmail", TTL["gmail_list"])
     def gmail_search(self, query: str = "is:unread in:inbox newer_than:14d", max_results: int = 15) -> list[dict[str, Any]]:
+        """Headers for a query. Message ids come from messages.list every time; the
+        metadata get runs only for ids we have never stored, or that history says changed.
+        """
         svc = self._svc("gmail", "v1")
         res = svc.users().messages().list(userId="me", q=query, maxResults=max(1, min(int(max_results), 50))).execute()
         ids = [m["id"] for m in res.get("messages") or []]
         if not ids:
             return []
+        snap = self._reads.get("gmail", "meta") or {}
+        by_id: dict[str, dict[str, Any]] = dict(snap.get("by_id") or {})
+        cursor = snap.get("history_id") if isinstance(snap.get("history_id"), str) else None
+        listed_history = res.get("historyId") if isinstance(res.get("historyId"), str) else None
+        changed: set[str] = set()
+        history_id = cursor
+        if cursor:
+            try:
+                changed, deleted, latest = _gmail_history(svc, cursor)
+            except Exception as e:  # noqa: BLE001
+                if verify.is_missing(e):
+                    # The cursor is older than Gmail keeps. The saved headers are no longer a base.
+                    by_id.clear()
+                    changed = set(ids)
+                    history_id = listed_history
+                else:
+                    log.warning("gmail history skipped: %s", e)
+                    # Keep the cursor so the next read retries this gap. A refresh still
+                    # re-reads the page on screen; an ordinary load does not re-get every row.
+                    changed = set(ids) if bypassing() else set()
+            else:
+                for mid in deleted:
+                    by_id.pop(mid, None)
+                # A change outside this page must not stay cached under a cursor that has moved past it.
+                for mid in changed:
+                    if mid not in ids:
+                        by_id.pop(mid, None)
+                history_id = latest or cursor
+        else:
+            changed = set(ids)
+            history_id = listed_history
+        need = [i for i in ids if i not in by_id or i in changed]
+        if need:
+            by_id.update(self._gmail_batch_meta(svc, need))
+        protect = set(ids)
+        extras = [k for k in by_id if k not in protect]
+        while len(by_id) > _GMAIL_META_CAP and extras:
+            by_id.pop(extras.pop(0))
+        self._reads.put("gmail", "meta", {"history_id": history_id, "by_id": by_id})
+        return [by_id[i] for i in ids if i in by_id]
+
+    def _gmail_batch_meta(self, svc: Any, ids: list[str]) -> dict[str, dict[str, Any]]:
         by_id: dict[str, dict[str, Any]] = {}
 
         def _cb(_request_id: str, response: Any, exception: Exception | None) -> None:
@@ -604,7 +725,24 @@ class Google:
         for mid in ids:
             batch.add(svc.users().messages().get(userId="me", id=mid, format="metadata", metadataHeaders=["From", "Subject", "Date"]))
         batch.execute()
-        return [by_id[i] for i in ids if i in by_id]
+        return by_id
+
+    def _note_gmail_labels(self, message_id: str, add: list[str], rem: list[str]) -> None:
+        """Keep the saved header in step with a label change we just made, so the next
+        list does not paint the old unread/star state while history catches up."""
+        snap = self._reads.get("gmail", "meta")
+        if not isinstance(snap, dict):
+            return
+        by_id = dict(snap.get("by_id") or {})
+        row = by_id.get(message_id)
+        if not isinstance(row, dict):
+            return
+        labels = [l for l in (row.get("labels") or []) if l not in rem]
+        for label in add:
+            if label not in labels:
+                labels.append(label)
+        by_id[message_id] = {**row, "labels": labels, "unread": "UNREAD" in labels}
+        self._reads.put("gmail", "meta", {**snap, "by_id": by_id})
 
     def _me(self) -> str | None:
         """The connected address, from the token settings already held (no API call)."""
@@ -636,11 +774,20 @@ class Google:
 
     @cached("gmail", TTL["gmail_message"])
     def gmail_get(self, message_id: str, max_chars: int = 8000) -> dict[str, Any]:
+        # A message body does not change once it is stored. Serve the saved copy so opening
+        # a message again is not another full get. A bypass (explicit refresh) still fetches.
+        key = f"{message_id}:{max_chars}"
+        if not bypassing():
+            hit = self._reads.get("gmail-body", key)
+            if isinstance(hit, dict) and hit.get("id") == message_id:
+                return hit
         svc = self._svc("gmail", "v1")
         msg = svc.users().messages().get(userId="me", id=message_id, format="full").execute()
         h = {x["name"].lower(): x["value"] for x in msg.get("payload", {}).get("headers", [])}
         body = _extract_body(msg.get("payload", {}))
-        return {"id": message_id, "thread_id": msg.get("threadId"), "from": h.get("from"), "to": h.get("to"), "subject": h.get("subject"), "date": _rfc2822_iso(h.get("date")), "body": body[:max_chars]}
+        out = {"id": message_id, "thread_id": msg.get("threadId"), "from": h.get("from"), "to": h.get("to"), "subject": h.get("subject"), "date": _rfc2822_iso(h.get("date")), "body": body[:max_chars]}
+        self._reads.put("gmail-body", key, out)
+        return out
 
     def _reply_headers(self, reply_to_message_id: str) -> tuple[str | None, dict[str, str]]:
         """Thread id plus In-Reply-To/References headers so mail clients thread the reply."""
@@ -743,6 +890,7 @@ class Google:
         if star is False:
             rem.append("STARRED")
         self._svc("gmail", "v1").users().messages().modify(userId="me", id=message_id, body={"addLabelIds": add, "removeLabelIds": rem}).execute()
+        self._note_gmail_labels(message_id, add, rem)
         return verify.attach({"ok": True, "added": add, "removed": rem}, self._verify_labels(message_id, add, rem))
 
     def _verify_labels(self, message_id: str, add: list[str], rem: list[str]) -> dict[str, Any]:
@@ -1114,6 +1262,110 @@ def _collapse(text: str) -> str:
 def _addresses(to: str) -> list[str]:
     """The bare email addresses in a To header, lowercased."""
     return [a.lower() for a in re.findall(r"[\w.!#$%&'*+/=?^`{|}~-]+@[\w-]+(?:\.[\w-]+)+", to or "")]
+
+
+def _parse_opt(value: Any) -> dt.datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        t = _parse_iso(value)
+    except ValueError:
+        return None
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=dt.timezone.utc)
+    return t
+
+
+def _overlaps(ev: dict[str, Any], start: dt.datetime, end: dt.datetime) -> bool:
+    """True when an event's span meets [start, end). Unparseable times are kept."""
+    sraw, eraw = ev.get("start") or "", ev.get("end") or ""
+    if not isinstance(sraw, str) or not sraw:
+        return True
+    try:
+        if len(sraw) == 10:
+            es = dt.datetime.fromisoformat(sraw).replace(tzinfo=dt.timezone.utc)
+            ee = dt.datetime.fromisoformat(eraw).replace(tzinfo=dt.timezone.utc) if isinstance(eraw, str) and len(eraw) == 10 else es + dt.timedelta(days=1)
+        else:
+            es = _parse_iso(sraw)
+            ee = _parse_iso(eraw) if isinstance(eraw, str) and eraw else es
+            if es.tzinfo is None:
+                es = es.replace(tzinfo=dt.timezone.utc)
+            if ee.tzinfo is None:
+                ee = ee.replace(tzinfo=dt.timezone.utc)
+    except ValueError:
+        return True
+    return es < end and ee > start
+
+
+def _list_events(svc: Any, cid: str, time_min: dt.datetime, time_max: dt.datetime, updated_min: dt.datetime | None, max_results: int, paginate: bool) -> list[dict[str, Any]]:
+    kwargs: dict[str, Any] = {
+        "calendarId": cid, "timeMin": time_min.isoformat(), "timeMax": time_max.isoformat(),
+        "singleEvents": True, "maxResults": max_results,
+    }
+    if updated_min is None:
+        kwargs["orderBy"] = "startTime"
+    else:
+        # orderBy is rejected together with updatedMin. showDeleted is what brings
+        # removals back, so a cancelled event can be dropped from the snapshot.
+        kwargs["updatedMin"] = updated_min.isoformat()
+        kwargs["showDeleted"] = True
+    items: list[dict[str, Any]] = []
+    token: str | None = None
+    for _ in range(8 if paginate else 1):
+        if token:
+            kwargs["pageToken"] = token
+        res = svc.events().list(**kwargs).execute()
+        items.extend(res.get("items") or [])
+        token = res.get("nextPageToken")
+        if not token or not paginate:
+            break
+    return items
+
+
+def _merge_events(stored: dict[str, dict[str, Any]], items: list[dict[str, Any]], cid: str) -> None:
+    for e in items:
+        eid = e.get("id")
+        if not eid:
+            continue
+        if e.get("status") == "cancelled":
+            stored.pop(eid, None)
+        else:
+            stored[eid] = _event_out(e, cid)
+
+
+def _gmail_history(svc: Any, start_history_id: str) -> tuple[set[str], set[str], str | None]:
+    """Ids added or relabelled, ids deleted, and the latest history id Gmail reported."""
+    changed: set[str] = set()
+    deleted: set[str] = set()
+    latest: str | None = None
+    token: str | None = None
+    for _ in range(5):
+        kwargs: dict[str, Any] = {
+            "userId": "me", "startHistoryId": start_history_id,
+            "historyTypes": ["messageAdded", "messageDeleted", "labelAdded", "labelRemoved"],
+        }
+        if token:
+            kwargs["pageToken"] = token
+        res = svc.users().history().list(**kwargs).execute()
+        if isinstance(res.get("historyId"), str):
+            latest = res["historyId"]
+        for record in res.get("history") or []:
+            if isinstance(record.get("id"), str):
+                latest = record["id"]
+            for item in record.get("messagesDeleted") or []:
+                mid = (item.get("message") or {}).get("id")
+                if mid:
+                    deleted.add(mid)
+            for key in ("messagesAdded", "labelsAdded", "labelsRemoved"):
+                for item in record.get(key) or []:
+                    mid = (item.get("message") or {}).get("id")
+                    if mid:
+                        changed.add(mid)
+        token = res.get("nextPageToken")
+        if not token:
+            break
+    changed -= deleted
+    return changed, deleted, latest
 
 
 def _event_out(e: dict[str, Any], calendar_id: str | None = None, full: bool = False) -> dict[str, Any]:

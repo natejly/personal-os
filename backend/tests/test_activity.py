@@ -62,8 +62,12 @@ def test_gate_excludes_password_managers_and_sensitive_titles() -> None:
     g = m.gate
     assert g.excluded("1Password 8", "vault") is True
     assert g.excluded("Bitwarden", "") is True
+    assert g.excluded("KeePass 2", "vault") is True   # "KeePassXC" does not contain this name
+    assert g.excluded("MacPass", "") is True
+    assert g.excluded("Strongbox", "vault") is True
     assert g.excluded("Safari", "Chase — Sign in") is True           # title pattern
     assert g.excluded("Safari", "Docs", "https://x.com/login") is True  # url pattern
+    assert g.excluded("Safari", "account recovery code") is True
     assert g.excluded("Cursor", "activity.py — Personal OS") is False
 
 
@@ -98,6 +102,63 @@ def test_gate_redaction_can_be_turned_off() -> None:
     m = _monitor(Path(tempfile.mkdtemp()))
     m.set_config({"redact": False})
     assert "nate@example.com" in m.gate.scrub("mail nate@example.com")
+
+
+def test_excluded_window_withholds_text_after_it_is_renamed_private() -> None:
+    """FocusCollector stores an excluded window as '(private)'. That name does not match the
+    denylist, so keystrokes and transcripts have to honour the flag or a password manager's
+    text is written down."""
+    m = _monitor(Path(tempfile.mkdtemp()))
+    m.set_config({"signals": {"text": True}})
+    focus = {"app": "Cursor", "title": "activity.py", "url": ""}
+    assert activity.window_withheld(m.gate, focus, "1Password", "") is True
+    assert activity.window_withheld(m.gate, focus, "Safari", "Chase — Sign in") is True
+    assert activity.window_withheld(m.gate, focus, "Cursor", "activity.py") is False
+    assert activity.content_withheld(m.gate, {"app": "(private)", "title": "", "private": True}) is True
+
+    typed = activity.InputCollector(m)
+    m.last_focus = {"app": "Cursor", "title": "notes", "private": False}
+    typed.buffer = list("hello from cursor")
+    typed.keys = 4
+    typed.first_key = time.time() - 2
+    typed.last_key = time.time()
+    typed._flush()
+    assert "hello from cursor" in m.store.recent(kinds=["input"])[0]["text"]
+
+    m.last_focus = {"app": "(private)", "title": "", "url": "", "private": True}
+    typed.buffer = list("hunter2")
+    typed.keys = 7
+    typed.first_key = time.time() - 2
+    typed.last_key = time.time()
+    typed._flush()
+    row = m.store.recent(kinds=["input"])[0]
+    assert row["text"] == ""
+    assert row["app"] == "(private)"
+    assert "hunter2" not in str(row["meta"])
+
+    heard = activity.AudioCollector(m, "mic")
+    assert heard._accept_transcript("the vault password is hunter2", m.private_mark) == ""
+    m.last_focus = {"app": "Cursor", "title": "notes", "private": False}
+    kept = heard._accept_transcript("the vault password is hunter2", m.private_mark)
+    assert "hunter2" not in kept
+    mark = m.private_mark
+    m.private_mark = time.time()
+    assert heard._accept_transcript("said while 1Password was open", mark) == ""
+
+
+def test_focus_url_is_scrubbed_before_it_is_stored() -> None:
+    m = _monitor(Path(tempfile.mkdtemp()))
+    activity.FocusCollector(m)._close({
+        "app": "Safari", "bundle": "com.apple.Safari", "title": "Inbox nate@example.com",
+        "url": "https://mail.test/box?user=nate@example.com&token=sk-abcdefghijklmnopqrstuvwxyz",
+        "start": time.time() - 5,
+    })
+    ev = m.store.recent(kinds=["focus"])[0]
+    assert "nate@example.com" not in ev["title"]
+    assert "nate@example.com" not in ev["url"]
+    assert "sk-abcdefghijklmnopqrstuvwxyz" not in ev["url"]
+    assert "[email]" in ev["title"]
+    assert "mail.test" in ev["url"]
 
 
 # ---------------------------------------------------------------- config

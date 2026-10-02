@@ -102,7 +102,7 @@ export default function DocsView(): JSX.Element {
     ? {
         view: 'docs',
         label: `Doc “${activeDoc.title || 'Untitled'}”`,
-        detail: `The doc is open in the editor${dirty ? ' with unsaved edits' : ''}. It is filed under ${projectName ? `the project “${projectName}”` : 'Personal'}${activeDoc.folder ? `, in the folder “${activeDoc.folder}”` : ''}. Its id is \`${activeDoc.id}\` — revise it with doc_edit. The user sees the diff in the chat; it is applied only when document edits are set to accept all.\n\n\`\`\`markdown\n${clip(body)}\n\`\`\``,
+        detail: `Open${dirty ? ', unsaved edits' : ''}. ${projectName ? `Project “${projectName}”` : 'Personal'}${activeDoc.folder ? ` / ${activeDoc.folder}` : ''}. Id \`${activeDoc.id}\`. Revise with doc_edit. The user reviews the diff unless document edits are set to accept all.\n\n\`\`\`markdown\n${clip(body)}\n\`\`\``,
         refs: [{ kind: 'doc', id: activeDoc.id, name: activeDoc.title }],
         hints: ['Summarise this doc', 'Tighten the writing', 'Pull out the action items as todos']
       }
@@ -149,12 +149,7 @@ export default function DocsView(): JSX.Element {
           <section className="docs-empty">
             <FileText size={30} />
             <h2>Nothing open</h2>
-            <p className="muted">Pick a file on the left, or start a new one. Write markdown; wrap maths in <code>$…$</code> or <code>$$…$$</code>.</p>
-            <p className="muted small">
-              Everything is filed under Personal or a project — every project gets its own folder, and dragging a
-              doc between them is how you reassign it. In a chat, the assistant revises these with <code>doc_edit</code>.
-              You see every change as a diff. Ask, the default, waits for you; Accept all in Settings writes it.
-            </p>
+            <p className="muted">Pick a file on the left, or start a new one.</p>
             <button className="primary-btn" onClick={() => void createDoc({})}><Plus size={14} /> New doc</button>
           </section>
         ) : (

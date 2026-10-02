@@ -1,8 +1,47 @@
-import { shell } from 'electron'
-import { backendUrl } from './backend'
+import { session, shell } from 'electron'
+import { backendToken, backendUrl } from './backend'
+import { frameNavigationAllowed, shouldAttachWidgetToken, webviewNavigationBlocked, webviewRequestBlocked } from './navPolicy'
+import { pageBridgeUrl } from './pagefetch'
 
 const openExternal = (url: string): void => {
   if (/^https?:\/\//i.test(url)) void shell.openExternal(url)
+}
+
+/**
+ * Widget iframes load `/widgets/{id}/render` and cannot send the app token themselves.
+ * Attach it on that one path, and only when the renderer opened the frame. A request the
+ * widget document starts — including a navigation to another widget — does not get the token.
+ */
+function localServices(): string[] {
+  return [backendUrl(), pageBridgeUrl()].filter((url): url is string => Boolean(url))
+}
+
+export function attachWidgetRenderAuth(): void {
+  session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
+    const headers = { ...details.requestHeaders }
+    try {
+      const base = backendUrl()
+      const token = backendToken()
+      if (token && base && shouldAttachWidgetToken({
+        url: details.url,
+        referrer: details.referrer,
+        frameUrl: details.frame?.url,
+        resourceType: details.resourceType,
+        backendUrl: base,
+        rendererUrl: process.env.ELECTRON_RENDERER_URL
+      })) headers['X-Personal-OS-Token'] = token
+    } catch {
+      /* leave the request unchanged */
+    }
+    callback({ requestHeaders: headers })
+  })
+}
+
+/** The web widget's session is not the app's. It still must not dial the sidecar or the page loader. */
+export function guardWebWidgetSession(): void {
+  session.fromPartition('persist:web-widget').webRequest.onBeforeRequest((details, callback) => {
+    callback({ cancel: webviewRequestBlocked(details.url, localServices()) })
+  })
 }
 
 /**
@@ -13,20 +52,21 @@ const openExternal = (url: string): void => {
  * Top-level navigation is not covered by CSP, so it is blocked here and handed to the system browser.
  */
 export function guardNavigation(contents: Electron.WebContents): void {
-  const local = (url: string, frame: boolean): boolean => {
+  const local = (url: string): boolean => {
     if (url === 'about:blank' || url.startsWith('file://')) return true
     const dev = process.env.ELECTRON_RENDERER_URL
-    if (dev && url.startsWith(dev)) return true
-    const base = backendUrl()
-    return frame && !!base && url.startsWith(`${base}/`) // widget iframes are served by the sidecar
+    if (!dev) return false
+    if (url === dev) return true
+    return url.startsWith(dev.endsWith('/') ? dev : `${dev}/`)
   }
   contents.on('will-navigate', (e, url) => {
-    if (local(url, false)) return
+    if (local(url)) return
     e.preventDefault()
     openExternal(url)
   })
   contents.on('will-frame-navigate', (details) => {
-    if (details.isMainFrame || local(details.url, true)) return // the main frame is handled by will-navigate
+    if (details.isMainFrame) return // the main frame is handled by will-navigate
+    if (frameNavigationAllowed(details.url, backendUrl(), process.env.ELECTRON_RENDERER_URL)) return
     details.preventDefault()
   })
   contents.setWindowOpenHandler(({ url }) => {
@@ -47,11 +87,15 @@ function guardWebviews(contents: Electron.WebContents): void {
     delete webPreferences.preload
     webPreferences.nodeIntegration = false
     webPreferences.contextIsolation = true
-    if (!/^https?:\/\//i.test(params.src ?? '')) e.preventDefault()
+    const src = params.src ?? ''
+    if (!/^https?:\/\//i.test(src) || webviewNavigationBlocked(src, localServices())) e.preventDefault()
   })
   contents.on('did-attach-webview', (_e, guest) => {
+    const blocked = (url: string): boolean => webviewNavigationBlocked(url, localServices())
+    guest.on('will-navigate', (e, url) => { if (blocked(url)) e.preventDefault() })
+    guest.on('will-redirect', (e, url) => { if (blocked(url)) e.preventDefault() })
     guest.setWindowOpenHandler(({ url }) => {
-      if (/^https?:\/\//i.test(url)) void guest.loadURL(url)
+      if (/^https?:\/\//i.test(url) && !blocked(url)) void guest.loadURL(url)
       return { action: 'deny' }
     })
   })

@@ -8,6 +8,7 @@ import EventEditor, { eventColor, primeCalendarMeta, type EventDraft } from '../
 import { useVisibleCalendars } from '../../components/useVisibleCalendars'
 import { scheduleTodo } from '../../components/TodoItem'
 import { hasDrag, readDrag, useDropTarget } from '../dnd'
+import { calendarViewKey, readView, writeView } from '../../lib/viewCache'
 import type { WidgetDef, WidgetProps } from '../registry'
 
 type CalMode = 'agenda' | 'day' | 'week'
@@ -38,6 +39,13 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
   const span = mode === 'week' ? 7 : mode === 'day' ? 1 : days
   const columns = useMemo(() => (mode === 'agenda' ? [] : Array.from({ length: span }, (_, i) => addDays(anchor, i))), [mode, span, anchor])
   const startIso = anchor.toISOString()
+  const cacheKey = connected && query ? calendarViewKey(mode === 'agenda' ? 'now' : startIso, span, query) : ''
+  const [painted, setPainted] = useState(cacheKey)
+  if (cacheKey !== painted) {
+    setPainted(cacheKey)
+    if (!query) setEvents([])
+    else setEvents(readView<CalendarEvent[]>(cacheKey) ?? [])
+  }
 
   useEffect(() => {
     if (!live) return
@@ -49,10 +57,14 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
     if (!live || !connected || query == null) return
     if (!query) { setEvents([]); return }
     let alive = true
+    const key = calendarViewKey(mode === 'agenda' ? 'now' : startIso, span, query)
     const pull = async (): Promise<void> => {
       try {
         const list = mode === 'agenda' ? await api.google.calendar(span, query) : await api.google.calendarRange(startIso, span, query)
-        if (alive) { setEvents(list); setError(null) }
+        if (!alive) return
+        writeView(key, list)
+        setEvents(list)
+        setError(null)
       } catch (e) {
         if (alive) setError((e as Error).message)
       }
@@ -65,7 +77,9 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
 
   const reload = async (): Promise<void> => {
     if (!query) { setEvents([]); return }
-    setEvents(mode === 'agenda' ? await api.google.calendar(span, query) : await api.google.calendarRange(startIso, span, query))
+    const list = mode === 'agenda' ? await api.google.calendar(span, query) : await api.google.calendarRange(startIso, span, query)
+    writeView(calendarViewKey(mode === 'agenda' ? 'now' : startIso, span, query), list)
+    setEvents(list)
   }
 
   const dropTodo = async (todoId: string, day: string, hour: number | null): Promise<void> => {

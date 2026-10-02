@@ -9,6 +9,7 @@ import { useVisibleCalendars } from './useVisibleCalendars'
 import { scheduleTodo } from './TodoItem'
 import type { CalendarEvent, GoogleCalendar } from '@shared/types'
 import { lines, usePageContext } from '../lib/pageContext'
+import { calendarViewKey, readView, writeView } from '../lib/viewCache'
 import AppSwitcher from './AppSwitcher'
 
 function CalToggle({ c, on, onToggle }: { c: GoogleCalendar; on: boolean; onToggle: () => void }): JSX.Element {
@@ -64,6 +65,20 @@ export default function CalendarView(): JSX.Element {
   const { calendars, visibleIds, query, ready, shown: calendarOn, toggle } = useVisibleCalendars()
 
   const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(week, i)), [week])
+  const cacheKey = google?.connected && query ? calendarViewKey(week.toISOString(), 7, query) : ''
+  // Paint the saved week in this render, before the sync request returns, so stepping
+  // back to a week already opened does not flash "Loading…".
+  const [painted, setPainted] = useState(cacheKey)
+  if (cacheKey !== painted) {
+    setPainted(cacheKey)
+    if (!query) { setEvents([]); setLoading(false) }
+    else {
+      const cached = readView<CalendarEvent[]>(cacheKey)
+      setEvents(cached ?? [])
+      setLoading(cached == null)
+      setError(null)
+    }
+  }
   const shown = useMemo(() => {
     const base = withoutTodoEvents(events, todos)
     if (!ready || calendars.length === 0) return base
@@ -71,14 +86,18 @@ export default function CalendarView(): JSX.Element {
     return base.filter((e) => !e.calendar_id || ids.has(e.calendar_id))
   }, [events, todos, ready, calendars.length, visibleIds])
 
-  // Stepping between weeks is served from the backend's read cache; `refresh` is the
-  // Refresh button, for picking up an edit made in Google Calendar itself.
+  // The week on screen is the saved copy until this returns. `refresh` is the Refresh
+  // button: it still only asks Google for what changed, and the grid stays up meanwhile.
   const load = async (refresh = false): Promise<void> => {
     if (!google?.connected || query == null) return
     if (!query) { setEvents([]); return }
-    setLoading(true); setError(null)
+    const key = calendarViewKey(week.toISOString(), 7, query)
+    if (refresh) setLoading(true)
+    setError(null)
     try {
-      setEvents(await api.google.calendarRange(week.toISOString(), 7, query, refresh))
+      const list = await api.google.calendarRange(week.toISOString(), 7, query, refresh)
+      writeView(key, list)
+      setEvents(list)
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -87,11 +106,11 @@ export default function CalendarView(): JSX.Element {
   }
   useEffect(() => {
     if (!google?.connected || query == null) return
-    if (!query) { setEvents([]); return }
+    if (!query) return
+    const key = calendarViewKey(week.toISOString(), 7, query)
     let alive = true
-    setLoading(true); setError(null)
     api.google.calendarRange(week.toISOString(), 7, query)
-      .then((list) => { if (alive) setEvents(list) })
+      .then((list) => { if (alive) { writeView(key, list); setEvents(list) } })
       .catch((e) => { if (alive) setError((e as Error).message) })
       .finally(() => { if (alive) setLoading(false) })
     return () => { alive = false }
@@ -196,7 +215,7 @@ export default function CalendarView(): JSX.Element {
             colorOf={eventColor} />
         </div>
       </div>
-      {loading && <div className="cal-loading">Loading…</div>}
+      {loading && events.length === 0 && <div className="cal-loading">Loading…</div>}
 
       {editing && (
         <EventEditor key={editing.event?.id ?? `new:${editing.draft?.day ?? ''}:${editing.draft?.hour ?? ''}:${editing.draft?.start ?? ''}:${editing.draft?.end ?? ''}:${editing.draft?.allDay ? 'day' : ''}`}

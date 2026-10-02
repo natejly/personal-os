@@ -13,7 +13,7 @@ from typing import Any
 
 from personal_os.context import build_context
 from personal_os.db import Database
-from personal_os.learn import MAX_SKILL_PROCEDURE, SKILLS_HEADER, Skills, skill_block
+from personal_os.learn import MAX_SKILL_PROCEDURE, SKILLS_HEADER, Skills, run_transcript, skill_block
 from personal_os.repos import Documents, Graph, Memories, Projects
 
 
@@ -123,6 +123,26 @@ class SkillsTestCase(unittest.TestCase):
         )
         self.assertEqual(system, "You are Grain.")
         self.assertEqual(used["skills"], [])
+
+    def test_a_run_transcript_keeps_one_reply_and_the_tools_it_called(self) -> None:
+        messages = [
+            {"id": "u1", "role": "user", "content": "File the lease notes."},
+            {"id": "a1", "role": "assistant", "content": "Done.", "tool_events": [
+                {"name": "doc_edit", "arguments": {"doc": "Lease", "content": "x" * 500}, "error": None},
+                {"name": "todo_add", "arguments": {"title": "Send the lease"}, "error": "no list"},
+            ]},
+            {"id": "u2", "role": "user", "content": "Thanks."},
+        ]
+        text, reason = run_transcript(messages, "a1")
+        self.assertIsNone(reason)
+        assert text is not None
+        self.assertIn("USER: File the lease notes.", text)
+        self.assertIn("doc_edit(doc=Lease, content=<500 chars>) -> ok", text)
+        self.assertIn("todo_add(title=Send the lease) -> error: no list", text)
+        self.assertNotIn("Thanks.", text)
+        missing, why = run_transcript(messages, "nope")
+        self.assertIsNone(missing)
+        self.assertEqual(why, "That reply is not in this chat.")
 
 
 if __name__ == "__main__":

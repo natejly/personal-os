@@ -191,7 +191,7 @@ Cross-cutting: the winners act on your data on a schedule; every scheduler that 
 | L14 | Resurfacing digest for saved links, memories, and old notes | S | |
 | L15 | Health and finance tiles with an anomaly one-liner | M | |
 | L16 | Meeting recap from local transcription | L | |
-| L17 | Keychain token storage, per-source model routing to a local model, full export | M | |
+| L17 | Keychain token storage, per-source model routing to a local model, full export | M | scoped in README as Private inference: local LLM for activity / meetings enhance / auto-learn / voice; fail closed if it is down. Not shipped. |
 
 Suggested order: L1, L2, L3, L4, L5, L6, L7, L8, L9, L10, L11, L12, L13, L14, L17, L15, L16. Approval and undo first, because everything after writes through them.
 

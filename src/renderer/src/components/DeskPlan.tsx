@@ -33,9 +33,7 @@ export default function DeskPlan({ desk }: { desk: FullDesk }): JSX.Element {
   if (!plan) {
     return (
       <div className="desk-plan">
-        <p className="empty-hint">
-          No plan yet. {desk.status === 'draft' ? 'Start the desk and it drafts one before it touches anything.' : 'It is still working one out.'}
-        </p>
+        <p className="empty-hint">{desk.status === 'draft' ? 'No plan yet. Start the desk to get one.' : 'No plan yet.'}</p>
       </div>
     )
   }

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -26,21 +27,32 @@ class FakeClient:
         self.script = script or {}
         self.calls: list[dict] = []
 
-    async def request(self, method, url, headers=None, params=None, content=None):
-        self.calls.append({"method": method, "url": url, "headers": dict(headers or {}),
-                           "params": params, "content": content})
-        status, location = self.script.get(url, (200, None))
-        return FakeResponse(url, status, location)
+    async def request(self, method, url, headers=None, params=None, content=None, extensions=None):
+        headers = dict(headers or {})
+        logical = _logical(url, headers)
+        self.calls.append({"method": method, "url": logical, "pinned": url, "headers": headers,
+                           "params": params, "content": content, "extensions": dict(extensions or {})})
+        status, location = self.script.get(logical, (200, None))
+        return FakeResponse(logical, status, location)
+
+
+def _logical(url: str, headers: dict) -> str:
+    """The URL a caller asked for, recovered from the Host header when the socket was pinned to an address."""
+    host = next((v for k, v in headers.items() if k.lower() == "host" and v), "")
+    if not host:
+        return url
+    u = urllib.parse.urlsplit(url)
+    return urllib.parse.urlunsplit((u.scheme, host, u.path, u.query, ""))
 
 
 def _public_resolver(mapping: dict[str, str] | None = None):
     """Stub _resolve so no DNS happens: every host resolves to a public address unless mapped otherwise."""
-    async def fake_resolve(host: str) -> None:
-        ip = (mapping or {}).get(host)
-        if ip is None:
-            return  # treat as public
-        if reason := tools._ip_reason(tools._as_ip(ip)):
+    async def fake_resolve(host: str) -> list[str]:
+        ip = (mapping or {}).get(host, "93.184.216.34")
+        parsed = tools._as_ip(ip)
+        if parsed is not None and (reason := tools._ip_reason(parsed)):
             raise UrlBlocked(f"{host} resolves to {ip}, which is {reason}")
+        return [ip]
     return fake_resolve
 
 
@@ -89,6 +101,16 @@ def test_public_url_is_fetched():
     assert [x["url"] for x in c.calls] == ["https://example.com/data.json"]
 
 
+def test_the_connection_is_pinned_to_the_resolved_address():
+    """A second lookup of the name must not be what the socket opens. That is the DNS-rebind window."""
+    c = FakeClient()
+    _with_resolver(_public_resolver(), lambda: run(guarded_request(c, "GET", "https://example.com/data.json")))
+    call = c.calls[0]
+    assert urllib.parse.urlsplit(call["pinned"]).hostname == "93.184.216.34"
+    assert call["headers"]["Host"] == "example.com"
+    assert call["extensions"]["sni_hostname"] == "example.com"
+
+
 # ---- the bug: a public host redirecting inward ----
 def test_redirect_into_loopback_is_refused():
     c = FakeClient({"https://example.com/start": (302, "http://127.0.0.1:8791/health")})
@@ -96,6 +118,22 @@ def test_redirect_into_loopback_is_refused():
         lambda: run(guarded_request(c, "GET", "https://example.com/start"))))
     assert msg and "loopback" in msg, msg
     assert [x["url"] for x in c.calls] == ["https://example.com/start"], "the loopback hop must not be connected"
+
+
+def test_redirect_into_sixtofour_loopback_is_refused():
+    c = FakeClient({"https://example.com/start": (302, "http://[2002:7f00:1::]/")})
+    msg = _with_resolver(_public_resolver(), lambda: blocked(
+        lambda: run(guarded_request(c, "GET", "https://example.com/start"))))
+    assert msg and "loopback" in msg, msg
+    assert [x["url"] for x in c.calls] == ["https://example.com/start"]
+
+
+def test_redirect_into_site_local_is_refused():
+    c = FakeClient({"https://example.com/start": (302, "http://[fec0::1]/secret")})
+    msg = _with_resolver(_public_resolver(), lambda: blocked(
+        lambda: run(guarded_request(c, "GET", "https://example.com/start"))))
+    assert msg and "private" in msg, msg
+    assert [x["url"] for x in c.calls] == ["https://example.com/start"], "the site-local hop must not be connected"
 
 
 def test_redirect_into_metadata_range_is_refused():
@@ -151,7 +189,8 @@ def test_cookie_and_api_key_headers_are_dropped_off_host():
     c = FakeClient({"https://api.example.com/v1": (302, "https://other.example.net/x")})
     hdrs = {"Cookie": "session=abc", "X-API-Key": "k", "Proxy-Authorization": "p"}
     _with_resolver(_public_resolver(), lambda: run(guarded_request(c, "GET", "https://api.example.com/v1", headers=hdrs)))
-    assert c.calls[1]["headers"] == {}, c.calls[1]["headers"]
+    leftover = {k: v for k, v in c.calls[1]["headers"].items() if k.lower() != "host"}
+    assert leftover == {}, c.calls[1]["headers"]
 
 
 # ---- request shape across hops ----

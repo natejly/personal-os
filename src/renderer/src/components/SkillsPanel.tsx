@@ -121,10 +121,7 @@ export default function SkillsPanel(): JSX.Element {
       <div className="add-row">
         <button className="primary-btn" onClick={() => setAdding(!adding)}><Plus size={14} /> New procedure</button>
         <button onClick={() => setImporting(!importing)}><Upload size={14} /> Import SKILL.md</button>
-        <span className="muted small">
-          A procedure is method, not fact: how a task went well, so it can go that way again. Approved ones are injected
-          as clearly fenced reference material — they cannot grant the assistant permissions or change its instructions.
-        </span>
+        <span className="muted small">A way of doing a task. It stays off until you approve it.</span>
       </div>
       {importing && (
         <div className="skill-body standalone">
@@ -146,14 +143,14 @@ export default function SkillsPanel(): JSX.Element {
           <div className="row-actions">
             <button className="primary-btn small" disabled={!form.name.trim()} onClick={() => void add()}>Add as candidate</button>
             <button className="small" onClick={() => setAdding(false)}>Cancel</button>
-            <span className="muted small">Saved unapproved, like everything else here — one more click turns it on.</span>
+            <span className="muted small">It stays off until you approve it.</span>
           </div>
         </div>
       )}
       {skills.length === 0 && !adding && (
         <div className="empty-hint big">
           <p>No procedures yet.</p>
-          <p className="muted small">Finish something worth repeating in a chat, then use “Learn a procedure” in that chat’s menu — or write one here.</p>
+          <p className="muted small">Write one here, or save a reply that used tools.</p>
         </div>
       )}
       {ORDER.map((status) => {

@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from 'react'
-import { AlertCircle, User, Sparkles, Brain, Share2, FileText, Activity, ChevronRight, Lightbulb, RotateCw } from 'lucide-react'
+import { AlertCircle, User, Sparkles, Brain, Share2, FileText, Activity, ChevronRight, Lightbulb, RotateCw, GraduationCap } from 'lucide-react'
 import type { Message, RunChanges } from '@shared/types'
 import { useStore } from '../store'
 import { api } from '../lib/api'
@@ -7,8 +7,29 @@ import ToolEvents from './ToolEvents'
 import MarkdownPreview, { CopyButton } from './MarkdownPreview'
 export { SAFE_MD } from './MarkdownPreview'
 import { traceSummary, fmtMs } from './TraceView'
+import { modelLabel } from '../lib/modelLabel'
+
+/** A reply that called tools can be turned into a candidate skill. The id sent is this message, not the whole chat. */
+function SaveSkill({ conversationId, messageId }: { conversationId: string; messageId: string }): JSX.Element {
+  const [busy, setBusy] = useState(false)
+  return (
+    <button
+      type="button"
+      className="ctx-chip"
+      disabled={busy}
+      title="Turn this run into a skill for you to review. It is not used until you approve it."
+      onClick={() => {
+        setBusy(true)
+        void useStore.getState().induceSkill(conversationId, messageId).finally(() => setBusy(false))
+      }}
+    >
+      <GraduationCap size={11} /> {busy ? 'Saving…' : 'Save as skill'}
+    </button>
+  )
+}
 
 /** Chain-of-thought from a reasoning model. Open while it is the only thing happening, collapsed once the answer starts. */
+
 function Reasoning({ text, live }: { text: string; live: boolean }): JSX.Element {
   const [manual, setManual] = useState<boolean | null>(null)
   const open = manual ?? live
@@ -118,13 +139,20 @@ const MessageView = memo(function MessageView({ message, streaming }: { message:
         {!streaming && message.role === 'assistant' && message.tool_events?.some((t) => FILE_CHANGING.test(t.name)) && <FilesChanged messageId={message.id} />}
         {!streaming && (
           <div className="msg-actions">
-            {message.model && <span className="model-tag">{message.model}</span>}
+            {message.model && (
+              <span className="model-tag" title={message.model === modelLabel(message.model) ? undefined : message.model}>
+                {modelLabel(message.model)}
+              </span>
+            )}
             {ctx && ctxCount > 0 && (
               <button className="ctx-chip" title="Context used for this reply" onClick={() => { const s = useStore.getState(); if (!s.contextOpen) s.toggleContext() }}>
                 {ctx.memories.length > 0 && <span><Brain size={11} />{ctx.memories.length}</span>}
                 {ctx.nodes.length > 0 && <span><Share2 size={11} />{ctx.nodes.length}</span>}
                 {ctx.chunks.length > 0 && <span><FileText size={11} />{ctx.chunks.length}</span>}
               </button>
+            )}
+            {!isUser && (message.tool_events?.length ?? 0) > 0 && (
+              <SaveSkill conversationId={message.conversation_id} messageId={message.id} />
             )}
             {trace && (
               <button className="ctx-chip" title="Execution trace: LLM rounds, tool calls, timings and tokens" onClick={() => useStore.getState().openTrace(message.id)}>

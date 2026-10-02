@@ -165,8 +165,6 @@ export default function App(): JSX.Element {
   const theme = useStore((s) => s.settings.theme)
   const accent = useStore((s) => s.settings.accent)
   const inCanvas = useStore((s) => s.view === 'canvas')
-  /* Over a document the agent floats rather than taking a third column: see .page-agent.popout. */
-  const agentPopout = useStore((s) => s.view === 'docs')
   const pageAgentOpen = useStore((s) => s.pageAgentOpen)
   const wizardOpen = useOnboarding((s) => s.open)
 
@@ -208,7 +206,7 @@ export default function App(): JSX.Element {
   if (backendError) return <BackendFailed message={backendError} />
 
   return (
-    <div className={`app ${sidebarOpen ? '' : 'sidebar-collapsed'} ${pageAgentOpen && !agentPopout ? 'page-agent-open' : ''}`}>
+    <div className={`app ${sidebarOpen ? '' : 'sidebar-collapsed'} ${pageAgentOpen ? 'page-agent-open' : ''}`}>
       <Sidebar />
       {inCanvas ? (
         <Canvas />
@@ -229,7 +227,7 @@ export default function App(): JSX.Element {
           {view === 'project' && <ProjectView />}
         </>
       )}
-      {pageAgentOpen && <PageAgentPanel popout={agentPopout} />}
+      {pageAgentOpen && <PageAgentPanel />}
       {settingsOpen && <SettingsModal />}
       {projectModal && <ProjectModal />}
       <BackendBanner />

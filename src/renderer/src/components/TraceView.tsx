@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Layers, Sparkles, Wrench, Wand2, Shrink, AlertCircle, ChevronRight } from 'lucide-react'
 import { api } from '../lib/api'
 import type { Span, SpanKind } from '@shared/types'
+import { modelLabel } from '../lib/modelLabel'
 
 /** Waterfall view of one assistant reply's execution trace. */
 
@@ -96,7 +97,7 @@ export default function TraceView({ spans, live, model, messageId }: { spans: Sp
         {sum.tokens > 0 && <span><b>{sum.tokens.toLocaleString()}</b> tokens</span>}
         {sum.errors > 0 && <span className="err"><AlertCircle size={11} /> {sum.errors} failed</span>}
       </div>
-      {model && <div className="trace-model">{model}</div>}
+      {model && <div className="trace-model" title={model === modelLabel(model) ? undefined : model}>{modelLabel(model)}</div>}
       {messageId && !live && <button className="link small" onClick={() => void downloadOtlp(messageId)}>Export OTLP JSON</button>}
       <ol className="trace-rows">
         {sorted.map((s) => {

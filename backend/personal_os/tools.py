@@ -521,6 +521,7 @@ class Toolbox:
         self.desks, self.workspace = desks, workspace
         self.memory_index: Any = None  # memory_index.MemoryIndex (hybrid memory search); set by app.py
         self.retriever: Any = None  # hybrid document search (retrieval.py); set by app.py
+        self.plans: Any = None  # plans.Plans (approved plan records); desk_done's gate reads the unconsumed steps; set by app.py
         self.artifacts = artifacts  # artifact_tools.py artifact_* tools are registered only when it is wired up
         self.fs_reads = fsx.ReadLedger()  # what each conversation has read of each file (fsx.py): the baseline for edits
         self.conversations = conversations  # past replies, so skill_from_run can read one run
@@ -2537,14 +2538,24 @@ def _register_cowork(self: Toolbox) -> None:
                                   expected="a file you have already written",
                                   alternative=ALTERNATIVE["desk_list_files"])
             digest, size = ws.sha(desk_id, rel), p.stat().st_size
+            if size == 0:
+                return tool_error(f"{rel} is empty (0 bytes), so there is nothing to review.", field="path",
+                                  expected="a file with its real contents",
+                                  alternative="write the content with desk_write_file (mode='overwrite'), then deliver it")
+            from . import deskgate  # noqa: PLC0415 - deskgate imports this module
+            marks = deskgate.placeholders(deskgate.read_text(p) or "")
         except WorkspaceError as e:
             return _fail("desk_deliver", e)
         row = desks.declare_output(desk_id, rel, title.strip() or rel, summary, digest, size, ctx.get("run_id"))
-        return {"status": "awaiting_review", "output_id": row["id"], "path": rel, "title": row["title"],
-                "bytes": size,
-                "note": "Nominated, not promoted: the user reviews it in the desk's Files tab and decides "
-                        "where it goes. You never promote anything yourself. Deliver each finished file once, "
-                        "then keep working or call desk_done."}
+        out = {"status": "awaiting_review", "output_id": row["id"], "path": rel, "title": row["title"],
+               "bytes": size,
+               "note": "Nominated, not promoted: the user reviews it in the desk's Files tab and decides "
+                       "where it goes. You never promote anything yourself. Deliver each finished file once, "
+                       "then keep working or call desk_done."}
+        if marks:  # delivered anyway (a quoted TODO can be legitimate), but the agent is told what a reviewer will see
+            out["warning"] = ("The file still contains placeholder text: " + ", ".join(marks)
+                              + ". If these are unfinished, fix them and deliver again.")
+        return out
     R("desk_deliver", ToolSpec("desk_deliver", "Nominate a file under outputs/ as a deliverable. It is queued for the user's review with its current contents recorded, and rewriting the file afterwards sends it back for review. This proposes, it does not promote: the user chooses whether it becomes a doc, a document or a download.",
         _obj({"path": {"type": "string", "description": "A path under outputs/"},
               "title": {"type": "string", "description": "What the user will see this called"},
@@ -2554,7 +2565,7 @@ def _register_cowork(self: Toolbox) -> None:
         examples=[{"path": "outputs/comparison.md", "title": "Acme vs us - pricing",
                    "summary": "Per-seat pricing for both, with the tiers I judged comparable."}]))
 
-    async def desk_ask(ctx: dict[str, Any], question: str, context: str = "") -> Any:
+    async def desk_ask(ctx: dict[str, Any], question: str, context: str = "", options: Any = None) -> Any:
         desk_id = _id(ctx, "desk_ask")
         if not isinstance(desk_id, str):
             return desk_id
@@ -2563,19 +2574,42 @@ def _register_cowork(self: Toolbox) -> None:
             return tool_error("desk_ask needs a question.", field="question",
                               expected="one specific question the user can answer in a sentence",
                               example={"question": "Which of the two vendors should I price against?"})
+        opts: list[str] = []
+        if options is not None:
+            if (not isinstance(options, list) or not 2 <= len(options) <= 4
+                    or not all(isinstance(o, str) and 0 < len(o.strip()) <= 80 for o in options)):
+                return tool_error("options must be 2 to 4 short choices (each a non-empty string of at most 80 characters).",
+                                  field="options", expected="a list like ['Dana only', 'The whole team']",
+                                  example={"question": "Who should get the summary?", "options": ["Dana only", "The whole team"]})
+            opts = [o.strip() for o in options]
+        note = str(ctx.get("ask_note") or "").strip()  # an answer the loop already holds for this call, when it passes one
+        if note:
+            return {"status": "answered", "answer": note, **({"choice": note} if note in opts else {}),
+                    "note": "The user answered your question. Carry on with it; do not ask it again."}
+        if (ctx.get("modes") or {}).get("desk_ask") == "ask":
+            # The tool is gated by a card, so reaching this body in "ask" mode means the card was approved and
+            # no answer came with it (an answer is returned by the loop before the body runs). Blocking the
+            # desk here would park it on a question the user has just looked at while the run kept streaming.
+            return {"status": "no_answer",
+                    "note": "The user saw your question and approved it without typing an answer. Do not ask again: proceed on your best "
+                            "judgement, state the assumption you made in your reply, and keep going."}
         # One question column, one answer box: `context` is folded into the question rather than
         # dropped, because the user reads and answers the whole thing in one place.
         if context.strip():
             q = f"{q}\n\n{context.strip()}"
         if desks.set_status(desk_id, "blocked", reason="question", question=q) is None:
             return tool_error(f"No desk with id '{desk_id}'.")
-        return {"status": "waiting_for_user", "question": question.strip(),
+        return {"status": "waiting_for_user", "question": question.strip(), **({"options": opts} if opts else {}),
                 "note": "Stop here and end your turn. The desk is in Needs you; the user's answer starts the next turn."}
     R("desk_ask", ToolSpec("desk_ask", "Ask the user one question and stop. Use it when a decision is genuinely theirs and guessing would waste the rest of the work. The desk moves to Needs you, you end your turn, and their answer starts the next one - so ask the whole question, including whatever you already found that they need in order to decide.",
         _obj({"question": {"type": "string", "description": "One specific question"},
-              "context": {"type": "string", "description": "What you found that makes the question necessary"}}, ["question"]),
+              "context": {"type": "string", "description": "What you found that makes the question necessary"},
+              "options": {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 4,
+                          "description": "Optional 2-4 short choices the user can pick with one click; they may still type their own answer"}},
+             ["question"]),
         desk_ask, "desk", "plan",
         examples=[{"question": "Should the summary go to the whole team or just to Dana?"},
+                  {"question": "Who should get the summary?", "options": ["Dana only", "The whole team"]},
                   {"question": "Which quarter should I compare against?",
                    "context": "The file has Q1 and Q3 but no Q2, so a year-on-year read is not possible."}]))
 
@@ -2583,10 +2617,16 @@ def _register_cowork(self: Toolbox) -> None:
         desk_id = _id(ctx, "desk_done")
         if not isinstance(desk_id, str):
             return desk_id
+        from . import deskgate  # noqa: PLC0415 - deskgate imports this module
+        refused, extra = await deskgate.gate(self, ctx, desk_id, summary)
+        if refused is not None:
+            return refused
         pending = [o for o in desks.outputs(desk_id) if o["status"] in UNDECIDED_OUTPUTS]
         body = summary.strip()
         if next_steps.strip():
             body = f"{body}\n\nNext: {next_steps.strip()}".strip()
+        if extra:  # what the gate let through, said where the user reads it
+            body = f"{body}\n\n{extra}".strip()
         if body:  # the summary belongs on the timeline, not only in a reply the user may never open
             desks.event(desk_id, "note", body, run_id=ctx.get("run_id"))
         status = "review" if pending else "done"

@@ -543,18 +543,11 @@ def test_desk_ask_moves_the_desk_to_needs_you() -> None:
     j("POST", f"/approvals/{row['call_id']}", {"decision": "allow"})
     quiet(did)
 
+    # Approving the card without typing an answer is "seen, no answer": the tool tells the model to go on
+    # with its best judgement instead of parking the desk on a question that was just looked at.
     state = desk(did)
-    check(state["status"] == "blocked" and state["status_reason"] == "question",
-          f"the desk waits on the user, got {state['status']}/{state['status_reason']}")
-    check("Which vendor" in (state["question"] or ""), "with the question on the row the steer box answers")
-    inbox = [e for e in j("GET", "/cowork/inbox") if e["desk_id"] == did]
-    check(inbox and inbox[0]["needs_you"] is True, "and it is in the Today inbox")
-    check(inbox[0]["desk_title"], "inbox rows name their desk without a second fetch")
-
-    answered = j("POST", f"/cowork/desks/{did}/message", {"content": "Price against Acme."})
-    check(answered["steered"] is False, "answering an asleep desk starts its next turn")
-    quiet(did)
-    check(not desk(did)["question"], "and clears the question either way")
+    check(state["status_reason"] != "question" and not state["question"],
+          f"an approval with no answer does not park the desk on the question, got {state['status']}/{state['status_reason']}")
 
 
 def test_a_steer_does_not_double_charge_the_turn() -> None:

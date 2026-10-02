@@ -277,7 +277,7 @@ def test_budget_rollup_and_cost_cap() -> None:
 
 
 def test_children_leave_the_parent_headroom() -> None:
-    """Children are charged to the parent, so they stop at 80% of its budget rather than 100%: the parent must still
+    """Children are charged to the parent, so they stop at 60% of its budget rather than 100%: the parent must still
     have room to read their reports and finish."""
     reset()
     pctx = mkctx(new_conv())
@@ -285,7 +285,7 @@ def test_children_leave_the_parent_headroom() -> None:
     SCRIPTS["hog"] = [{"text": "partial notes", "calls": [call("c1", "current_time", {})], "usage": {"prompt_tokens": 700, "completion_tokens": 150}},
                       {"text": "never", "calls": [call("c2", "current_time", {})]}]
     out = run(appmod.toolbox.call("agent_spawn", {"task": "hog"}, pctx))
-    check(out["exit_reason"] == "cost_cap" and out["state"] == "partial", "a child stops once it has used 80% of the parent's tokens")
+    check(out["exit_reason"] == "cost_cap" and out["state"] == "partial", "a child stops once it has used 60% of the parent's tokens")
     check(pctx["budget"].exceeded() is None and pctx["budget"].tokens == 850, "the parent is left under its hard cap with room to answer")
     check("partial notes" in out["report"], "its partial report still comes back")
 

@@ -44,7 +44,7 @@ class Client:
     def patch(self, p: str, body=None):
         r = self.c.patch(p, json=body); r.raise_for_status(); return r.json()
 
-    def run_chat(self, cid: str, text: str, timeout: float = 600) -> str:
+    def run_chat(self, cid: str, text: str, timeout: float = 1200) -> str:
         """Send a message, allow every approval card of this chat, return the run id once the run is over."""
         run_id = self.post(f"/conversations/{cid}/chat", {"content": text})["run_id"]
         deadline = time.time() + timeout

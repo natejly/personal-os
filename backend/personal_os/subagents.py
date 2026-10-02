@@ -38,7 +38,7 @@ log = logging.getLogger(__name__)
 RESULT_CHARS = 6000
 MAX_TASK_CHARS = 20_000
 ROUND_PARALLEL = 8
-PARENT_RESERVE = 0.8  # share of the parent run's tokens / cost / time children may use up
+PARENT_RESERVE = 0.6  # share of the parent run's tokens / cost / time children may use up
 GROUP = "agents"
 
 # ---- what a child may ever hold ------------------------------------------------------------------

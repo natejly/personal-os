@@ -992,9 +992,13 @@ export const useStore = create<State>((set, get) => {
     // is not the end of the desk's work and the pane re-attaches rather than going idle.
     let handoff: { desk_id: string; conversation_id: string; turn: number } | null = null
     clearHold(convId)
+    // Set when the stream kept closing without ever delivering an ending: what is stored is then the truth.
+    let gaveUp = false
     patchSession(convId, (s) => ({ ...s, streaming: { messageId: from.messageId, runId: run.run_id, abort, answering: true }, status: settleApprovals('working', from.approvals), finishedAt: null, pendingApprovals: from.approvals, touchedAt: Date.now() }))
     try {
-      for await (const ev of chatStream(convId, run.seq, abort.signal, run.run_id)) {
+      for await (const ev of chatStream(convId, run.seq, abort.signal, run.run_id, () => { gaveUp = true })) {
+        // A frame with no usable body has nothing to apply; ignoring it beats throwing inside the loop.
+        if (!ev || !isRecord(ev.data)) continue
         const focused = get().focusedConversationId === convId
         patchSession(convId, (s) => {
           const next = applyEvent(s, ev, focused)
@@ -1054,7 +1058,7 @@ export const useStore = create<State>((set, get) => {
     } finally {
       patchSession(convId, (s) => (s.streaming?.abort === abort ? { ...s, streaming: null, status: finishStatus(s.status) } : s))
       // An attached run wrote deltas this window never saw; the persisted message is the whole reply.
-      if (attached) void get().openSession(convId)
+      if (attached || gaveUp) void get().openSession(convId).catch(() => undefined)
       // A chained desk turn is a *new* run on this same conversation, and the stream for the old one
       // closes before the bus has registered it. Poll a few times rather than leave the pane dead.
       // `attachSession` is shared and this dedupes on run_id, so every extra attempt is a no-op.
@@ -1100,6 +1104,21 @@ export const useStore = create<State>((set, get) => {
     // Synchronous up to its first await, so `streaming` is set before this returns.
     void watchRun(convId, run, { messageId: null, approvals: 0, attached: false })
     return true
+  }
+
+  const patchChatSettings = async (patch: Partial<ConversationSettings>, conversationId?: string): Promise<void> => {
+    const id = conversationId ?? get().focusedConversationId
+    if (!id) {
+      // No conversation to PATCH yet. Effort and fast mode are the settings a draft can still carry,
+      // so park them and let `send` apply them to the conversation it is about to create.
+      set((s) => ({
+        draftEffort: patch.effort ?? s.draftEffort,
+        draftFast: patch.fast ?? s.draftFast
+      }))
+      return
+    }
+    const c = await api.conversations.patch(id, { settings: patch })
+    patchConversation(id, (cur) => ({ ...cur, settings: c.settings }))
   }
 
   return {
@@ -1220,9 +1239,16 @@ export const useStore = create<State>((set, get) => {
         inited = false
         return set({ ready: true, backendError: status.error ?? (e as Error).message })
       }
-      const [settings, projects, personalStats, conversations] = await Promise.all([
-        api.settings.get(), api.projects.list(), api.projects.globalStats(), api.conversations.list('all')
-      ])
+      let settings: Settings, projects: Project[], personalStats: Project['stats'], conversations: Conversation[]
+      try {
+        ;[settings, projects, personalStats, conversations] = await Promise.all([
+          api.settings.get(), api.projects.list(), api.projects.globalStats(), api.conversations.list('all')
+        ])
+      } catch (e) {
+        // Release the guard so a retry can run, and surface the failure instead of an empty window.
+        inited = false
+        return set({ ready: true, backendError: (e as Error).message })
+      }
       // One-shot migration of the pre-spaces global mode: a user who left the app in canvas mode lands
       // in the canvas once, and the setting is reset so later launches open on Today. Only the main
       // window writes it back; a pop-out (`?surface=widget`) never renders App and must not touch settings.
@@ -1324,8 +1350,12 @@ export const useStore = create<State>((set, get) => {
       set({ pageAgentModel: model })
       const id = get().pageAgentId
       if (!id) return
-      await api.conversations.patch(id, { model })
-      patchConversation(id, (c) => ({ ...c, model }))
+      try {
+        await api.conversations.patch(id, { model })
+        patchConversation(id, (c) => ({ ...c, model }))
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
     },
     setPageAgentParams: async (patch) => {
       set((s) => ({
@@ -1482,30 +1512,33 @@ export const useStore = create<State>((set, get) => {
     },
     renameChat: async (id, title) => {
       if (!title.trim()) return
-      await api.conversations.patch(id, { title: title.trim() })
-      patchConversation(id, (c) => ({ ...c, title: title.trim() }))
-      await get().refreshConversations()
+      try {
+        await api.conversations.patch(id, { title: title.trim() })
+        patchConversation(id, (c) => ({ ...c, title: title.trim() }))
+        await get().refreshConversations()
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
     },
     setChatModel: async (model, conversationId) => {
       const id = conversationId ?? get().focusedConversationId
       // A draft has no row yet: park the choice for `send`, as effort does, instead of changing the default.
       if (!id) return void set({ draftModel: model })
-      await api.conversations.patch(id, { model })
-      patchConversation(id, (c) => ({ ...c, model }))
-    },
-    setChatSettings: async (patch, conversationId) => {
-      const id = conversationId ?? get().focusedConversationId
-      if (!id) {
-        // No conversation to PATCH yet. Effort and fast mode are the settings a draft can still carry,
-        // so park them and let `send` apply them to the conversation it is about to create.
-        set((s) => ({
-          draftEffort: patch.effort ?? s.draftEffort,
-          draftFast: patch.fast ?? s.draftFast
-        }))
-        return
+      try {
+        await api.conversations.patch(id, { model })
+        patchConversation(id, (c) => ({ ...c, model }))
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
       }
-      const c = await api.conversations.patch(id, { settings: patch })
-      patchConversation(id, (cur) => ({ ...cur, settings: c.settings }))
+    },
+    // Picker and toggle callers fire and forget, so a failure has to surface here. The two callers that
+    // act on the outcome (a taint mark, plan mode) use `patchChatSettings` and handle the rejection.
+    setChatSettings: async (patch, conversationId) => {
+      try {
+        await patchChatSettings(patch, conversationId)
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
     },
     noteUntrustedUpload: async (conversationId, pending = 'draft', source = 'upload') => {
       const id = conversationId && conversationId !== '\u0000page-agent' ? conversationId : undefined
@@ -1516,7 +1549,7 @@ export const useStore = create<State>((set, get) => {
       const settings = get().sessions[id]?.conversation.settings
       const patch: Partial<ConversationSettings> = { tainted: true }
       if (settings) patch.taint_sources = [...new Set([...(settings.taint_sources ?? []), source])]
-      await get().setChatSettings(patch, id)
+      await patchChatSettings(patch, id)
     },
     askAboutEmail: async (id, subject) => {
       get().newChat(null)
@@ -1574,8 +1607,8 @@ export const useStore = create<State>((set, get) => {
       // Effort and fast mode chosen on the draft land before the first run, so they apply to this reply.
       const { draftEffort: effort, draftFast: fast, uploadTaintTarget, uploadTaintSource } = get()
       const settings: { effort?: Effort; fast?: boolean; tainted?: boolean; taint_sources?: string[] } = {}
-      // Medium is already what a new row hydrates to. Anything else, including the omit-the-field
-      // choice, has to be written or the server would fill medium back in.
+      // Low is already what a new row hydrates to. Anything else, including the omit-the-field
+      // choice, has to be written or the server would fill low back in.
       if (effort !== DEFAULT_EFFORT) settings.effort = effort
       if (fast) settings.fast = true
       const fromUpload = uploadTaintTarget === 'draft'
@@ -1690,8 +1723,13 @@ export const useStore = create<State>((set, get) => {
       const st = id && get().sessions[id]?.streaming
       if (!id || !st) return
       // Aborting the fetch would only detach this window, so a stop is always a request to the run.
-      if (st.messageId) await api.stop(st.messageId).catch(() => undefined)
-      else await api.stopRun(id, st.runId).catch(() => undefined)
+      try {
+        if (st.messageId) await api.stop(st.messageId)
+        else await api.stopRun(id, st.runId)
+      } catch (e) {
+        // A 404 is a run that had already finished; anything else means Stop did not take.
+        if ((e as { status?: number }).status !== 404) get().toast(`Could not stop: ${(e as Error).message}`, 'error')
+      }
     },
 
     // Always every scope: the Files tree shows Personal and each project as its own group, so a doc
@@ -1917,9 +1955,12 @@ export const useStore = create<State>((set, get) => {
     setPlanSteps: async (conversationId, steps) => {
       // Optimistic: ticking a step off must feel like a checkbox, and the model reads the stored plan
       // at the top of its next round either way.
+      const before = get().plans[conversationId]
       set((s) => ({ plans: { ...s.plans, [conversationId]: steps } }))
       const plan = await api.plan.set(conversationId, steps).catch((e: Error) => {
         get().toast(e.message, 'error')
+        // Roll the checkbox back: the stored plan is what the model will read.
+        if (before) set((s) => ({ plans: { ...s.plans, [conversationId]: before } }))
         return null
       })
       if (plan) set((s) => ({ plans: { ...s.plans, [conversationId]: plan.steps } }))
@@ -2141,7 +2182,7 @@ export const useStore = create<State>((set, get) => {
     },
     setPlanMode: async (convId, mode) => {
       try {
-        await get().setChatSettings({ planMode: mode }, convId)
+        await patchChatSettings({ planMode: mode }, convId)
       } catch (e) {
         get().toast((e as Error).message, 'error')
       }
@@ -2965,19 +3006,24 @@ export const useStore = create<State>((set, get) => {
     approveTool: async (callId, decision, conversationId, opts) => {
       const id = conversationId ?? get().focusedConversationId
       if (!id) return
-      try {
-        await api.approve(callId, decision, opts)
-        // Mark as no longer awaiting in the UI; the tool_result event fills in the rest. The count
-        // settles now rather than when the tool returns, since an external action can take seconds.
+      // Clears the card's pending state. The tool_result event fills in the rest, and the count settles
+      // now rather than when the tool returns, since an external action can take seconds.
+      const clear = (approval?: ApprovalDecision): void =>
         patchSession(id, (s) => {
           const conversation = { ...s.conversation, messages: (s.conversation.messages ?? []).map((m) => ({ ...m, tool_events: (m.tool_events ?? []).map((t) => (t.id === callId
-            ? { ...t, needs_approval: false, approval: decision, ...(opts?.arguments && decision !== 'deny' ? { arguments: opts.arguments, original_arguments: t.arguments, edited_arguments: opts.arguments, edited_by: 'user' as const } : {}) }
+            ? { ...t, needs_approval: false, ...(approval ? { approval } : {}), ...(approval && opts?.arguments && approval !== 'deny' ? { arguments: opts.arguments, original_arguments: t.arguments, edited_arguments: opts.arguments, edited_by: 'user' as const } : {}) }
             : t)) })) }
           const pendingApprovals = countApprovals(conversation)
           return { ...s, conversation, pendingApprovals, status: settleApprovals(s.status, pendingApprovals) }
         })
+      try {
+        await api.approve(callId, decision, opts)
+        clear(decision)
       } catch (e) {
-        get().toast((e as Error).message, 'error')
+        // A 404 means the approval is already answered (a double click, another window) or its run is
+        // gone: the card is stale, so drop its buttons quietly instead of toasting an error per click.
+        if ((e as { status?: number }).status === 404) clear()
+        else get().toast((e as Error).message, 'error')
       }
     },
     refreshGoogle: async () => {

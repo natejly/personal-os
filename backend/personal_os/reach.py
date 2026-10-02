@@ -45,6 +45,33 @@ def _clip(s: str, n: int) -> str:
     return s if len(s) <= n else s[: n - 1].rstrip() + "…"
 
 
+# ---- bounded reads: a response is never buffered whole ----
+
+MAX_BODY = 5_000_000   # bytes kept from any one response
+BODY_DEADLINE_S = 45.0  # wall-clock for a whole request; httpx's timeout is per read, so a trickle never trips it
+
+
+async def read_capped(r: httpx.Response, cap: int = MAX_BODY) -> httpx.Response:
+    """Read a streamed response up to `cap` bytes, close it, and leave the bytes on r.content.
+
+    `r.extensions["body_truncated"]` says whether the rest was dropped.
+    """
+    chunks: list[bytes] = []
+    n, truncated = 0, False
+    try:
+        async for chunk in r.aiter_bytes():
+            chunks.append(chunk)
+            n += len(chunk)
+            if n > cap:
+                truncated = True
+                break
+    finally:
+        await r.aclose()
+    r._content = b"".join(chunks)[:cap]  # httpx's own cache slot: makes .content/.text work on a closed stream
+    r.extensions["body_truncated"] = truncated
+    return r
+
+
 # ---- Jina Reader: any URL -> markdown, rendered on Jina's side ----
 
 JINA = "https://r.jina.ai/"
@@ -59,10 +86,16 @@ async def jina_read(url: str, *, timeout: float = 30.0) -> dict[str, Any]:
     with JavaScript, usually still comes back as text. The cost is that Jina sees the URL -- which is why fetch_url
     only reaches for it as a fallback, and the user can switch that off (settings.readerFallback).
     """
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as c:
-        # An honest UA: Jina forwards it, and a fake browser string gets refused by sites (Wikipedia: 403) that
-        # are happy to serve a named client.
-        r = await c.get(JINA + url, headers={"User-Agent": "Grain/0.1 (+desktop assistant)", "Accept": "text/plain"})
+    async def _get() -> httpx.Response:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as c:
+            # An honest UA: Jina forwards it, and a fake browser string gets refused by sites (Wikipedia: 403) that
+            # are happy to serve a named client.
+            async with c.stream("GET", JINA + url, headers={"User-Agent": "Grain/0.1 (+desktop assistant)", "Accept": "text/plain"}) as resp:
+                return await read_capped(resp)
+    try:
+        r = await asyncio.wait_for(_get(), BODY_DEADLINE_S)
+    except asyncio.TimeoutError:
+        raise ReachError("Jina Reader took too long") from None
     if r.status_code != 200:
         raise ReachError(f"Jina Reader answered {r.status_code}")
     body = r.text

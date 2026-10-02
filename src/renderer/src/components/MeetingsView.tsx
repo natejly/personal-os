@@ -205,8 +205,18 @@ export default function MeetingsView(): JSX.Element {
 
   const scope: Scope = libraryScope
   useEffect(() => { void refreshMeetings(query) }, [refreshMeetings, query, scope])
-  // Anything still buffered belongs on disk before this view goes away.
-  useEffect(() => () => { void flushMeetingNotes() }, [flushMeetingNotes])
+  // Anything still buffered belongs on disk before this view goes away -- and before the window does,
+  // since the save is debounced and a quit or a switch-away right after typing would lose the tail.
+  useEffect(() => {
+    const flush = (): void => { void flushMeetingNotes() }
+    window.addEventListener('pagehide', flush)
+    window.addEventListener('blur', flush)
+    return () => {
+      window.removeEventListener('pagehide', flush)
+      window.removeEventListener('blur', flush)
+      flush()
+    }
+  }, [flushMeetingNotes])
 
   const m = activeMeeting
   // The editor shows the buffer while typing and the saved notes otherwise.

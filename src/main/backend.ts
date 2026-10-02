@@ -222,6 +222,8 @@ async function spawnAndWait(reuse: boolean): Promise<void> {
     PYTHONUNBUFFERED: '1',
     ...(bundled ? { PYTHONDONTWRITEBYTECODE: '1', PYTHONNOUSERSITE: '1' } : {}),
     PERSONAL_OS_AUTH_TOKEN: token,
+    // The backend exits when this process goes away, even if it was killed without a chance to stop it.
+    PERSONAL_OS_PARENT_WATCH: '1',
     PERSONAL_OS_APP_VERSION: app.getVersion(),
     ...(app.isPackaged ? { PERSONAL_OS_PACKAGED: '1' } : {}),
     ...(logDir() ? { PERSONAL_OS_LOG_DIR: logDir() } : {})
@@ -255,10 +257,19 @@ async function spawnAndWait(reuse: boolean): Promise<void> {
   await waitHealthy(url, 30_000)
 }
 
-function killChild(): void {
+/** `sync` is for process exit, where no timer will ever fire: kill outright instead of a grace period. */
+function killChild(sync = false): void {
   const c = child
   child = null
-  if (c && c.exitCode === null) c.kill()
+  if (!c || c.exitCode !== null) return
+  if (sync) c.kill('SIGKILL')
+  else {
+    c.kill()
+    // A backend stuck in shutdown would keep its port and the database; escalate after a grace period.
+    const t = setTimeout(() => { if (c.exitCode === null) c.kill('SIGKILL') }, 3000)
+    t.unref?.()
+    c.once('exit', () => clearTimeout(t))
+  }
 }
 
 /** The backend died on its own: restart it with backoff, or give up after too many exits in a short time. */
@@ -320,9 +331,9 @@ export async function restartBackend(): Promise<BackendInfo> {
   return backendInfo()
 }
 
-export function stopBackend(): void {
+export function stopBackend(sync = false): void {
   stopping = true
   epoch++
-  killChild()
+  killChild(sync)
   token = ''
 }

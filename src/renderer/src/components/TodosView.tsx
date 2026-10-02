@@ -66,7 +66,9 @@ export default function TodosView(): JSX.Element {
     hints: ['What should I do first?', 'Reschedule the overdue ones to tomorrow', 'Break the biggest one into steps']
   }), [todos, todayKey])
 
-  const Section = ({ label, items }: { label: string; items: typeof todos }): JSX.Element | null =>
+  // A plain function, not a component: a component declared here would be a new type every render and
+  // remount every TodoItem, losing an open title edit or date picker whenever the list refreshes.
+  const section = (label: string, items: typeof todos): JSX.Element | null =>
     items.length ? (
       <section className="todo-section">
         <h4 className="section-h">{label} <span>{items.length}</span></h4>
@@ -112,13 +114,13 @@ export default function TodosView(): JSX.Element {
           <button className="primary-btn" onClick={() => void add()} disabled={!title.trim()}><Plus size={14} /> Add</button>
         </div>
         {todos.length === 0 && <p className="empty-hint big">No todos yet.</p>}
-        {sort === 'urgency' ? <Section label="By urgency" items={open} /> : <>
-          <Section label="Overdue" items={overdue} />
-          <Section label="Today" items={today} />
-          <Section label="Upcoming" items={upcoming} />
-          <Section label="Someday" items={someday} />
+        {sort === 'urgency' ? section('By urgency', open) : <>
+          {section('Overdue', overdue)}
+          {section('Today', today)}
+          {section('Upcoming', upcoming)}
+          {section('Someday', someday)}
         </>}
-        {showDone && <Section label="Done" items={done} />}
+        {showDone && section('Done', done)}
       </div>
     </main>
   )

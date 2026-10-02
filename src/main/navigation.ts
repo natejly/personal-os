@@ -39,9 +39,15 @@ export function attachWidgetRenderAuth(): void {
 
 /** The web widget's session is not the app's. It still must not dial the sidecar or the page loader. */
 export function guardWebWidgetSession(): void {
-  session.fromPartition('persist:web-widget').webRequest.onBeforeRequest((details, callback) => {
+  const ses = session.fromPartition('persist:web-widget')
+  ses.webRequest.onBeforeRequest((details, callback) => {
     callback({ cancel: webviewRequestBlocked(details.url, localServices()) })
   })
+  // With no handler Electron grants every request (geolocation, notifications, clipboard read, media),
+  // so any page opened in a web widget would get them silently. Allow only the harmless few.
+  const harmless = new Set(['fullscreen', 'clipboard-sanitized-write'])
+  ses.setPermissionRequestHandler((_wc, perm, cb) => cb(harmless.has(perm)))
+  ses.setPermissionCheckHandler((_wc, perm) => harmless.has(perm))
 }
 
 /**

@@ -41,9 +41,14 @@ class ReadStore:
                 return None
             return copy.deepcopy(bucket[key])
 
-    def put(self, namespace: str, key: str, value: Any, *, flush: bool = True) -> None:
+    def put(self, namespace: str, key: str, value: Any, *, flush: bool = True, cap: int | None = None) -> None:
+        """Save one value. With `cap`, the namespace keeps only its `cap` most recently saved keys."""
         with self._lock:
-            self._data.setdefault(namespace, {})[key] = copy.deepcopy(value)
+            bucket = self._data.setdefault(namespace, {})
+            bucket.pop(key, None)  # re-saving moves the key to the young end
+            bucket[key] = copy.deepcopy(value)
+            while cap is not None and len(bucket) > max(1, cap):
+                del bucket[next(iter(bucket))]
             self._dirty = True
             if flush:
                 self._flush()

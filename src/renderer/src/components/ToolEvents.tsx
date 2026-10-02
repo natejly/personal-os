@@ -324,8 +324,8 @@ export default function ToolEvents({ events, conversationId }: { events: ToolEve
           {/* A question is answered, not permitted, so desk_ask gets a text box instead of Allow/Deny. */}
           {t.pending && t.needs_approval && t.name === 'desk_ask' && (
             <AskAnswer callId={t.id} conversationId={conversationId}
-              question={String((t.arguments as { question?: unknown }).question ?? '')}
-              context={String((t.arguments as { context?: unknown }).context ?? '') || undefined} />
+              question={String(((t.arguments ?? {}) as { question?: unknown }).question ?? '')}
+              context={String(((t.arguments ?? {}) as { context?: unknown }).context ?? '') || undefined} />
           )}
           {t.pending && t.needs_approval && t.name !== 'propose_plan' && t.name !== 'desk_ask' && (
             <>

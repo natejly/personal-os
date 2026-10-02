@@ -63,7 +63,8 @@ PROPOSAL_ONLY_DANGER = ("external", "schedules")
 PROMPT_WRITES = frozenset({
     "save_memory", "graph_add", "save_writing_sample",
     "doc_create", "doc_edit",
-    "todo_delete", "todo_update", "board_move_card",
+    "todo_add", "todo_delete", "todo_update",
+    "board_add_card", "board_create", "board_move_card",
     "skill_draft", "skill_revise", "skill_from_run",
 })
 PROPOSAL_ONLY_REFUSED = ("{name} does something outside the app, and this is an unattended background run, so it "
@@ -436,11 +437,28 @@ async def _open_pinned(client: httpx.AsyncClient, method: str, url: str, host: s
                        content: Any = None) -> httpx.Response:
     """Connect to an address `_resolve` already accepted. A later lookup of `host` is never consulted."""
     ips = await _resolve(host)
-    pinned, host_header, sni = _pin(url, ips[0])
-    send = {k: v for k, v in (headers or {}).items() if k.lower() != "host"}
-    send["Host"] = host_header
-    return await client.request(method, pinned, headers=send, params=params, content=content,
-                                extensions={"sni_hostname": sni})
+    last: Exception | None = None
+
+    async def _once(ip: str) -> httpx.Response:
+        pinned, host_header, sni = _pin(url, ip)
+        send = {k: v for k, v in (headers or {}).items() if k.lower() != "host"}
+        send["Host"] = host_header
+        if not hasattr(client, "build_request"):  # a scripted stand-in client (tests) has only request()
+            return await client.request(method, pinned, headers=send, params=params, content=content,
+                                        extensions={"sni_hostname": sni})
+        req = client.build_request(method, pinned, headers=send, params=params, content=content,
+                                   extensions={"sni_hostname": sni})
+        # Streamed and capped: a multi-GB or endless body must not be buffered whole.
+        return await reach.read_capped(await client.send(req, stream=True))
+
+    for ip in ips:  # every address was validated, so falling back to the next one never widens the guard
+        try:
+            return await asyncio.wait_for(_once(ip), reach.BODY_DEADLINE_S)
+        except (httpx.ConnectError, httpx.ConnectTimeout) as e:
+            last = e
+        except asyncio.TimeoutError:
+            raise httpx.ReadTimeout(f"{host} took longer than {int(reach.BODY_DEADLINE_S)}s to answer") from None
+    raise last or httpx.ConnectError(f"could not connect to {host}")
 
 
 def _allow_url(ctx: dict[str, Any], url: str | None) -> None:
@@ -460,6 +478,15 @@ CREDENTIAL_HEADERS = ("authorization", "proxy-authorization", "cookie", "x-api-k
 
 async def guarded_request(client: httpx.AsyncClient, method: str, url: str, *, headers: dict[str, str] | None = None,
                           params: dict[str, Any] | None = None, content: Any = None, max_hops: int = 5) -> httpx.Response:
+    try:  # one deadline for the whole redirect chain, on top of each hop's own
+        return await asyncio.wait_for(_guarded_request(client, method, url, headers=headers, params=params,
+                                                       content=content, max_hops=max_hops), reach.BODY_DEADLINE_S * 2)
+    except asyncio.TimeoutError:
+        raise httpx.ReadTimeout(f"{url} did not finish within {int(reach.BODY_DEADLINE_S * 2)}s") from None
+
+
+async def _guarded_request(client: httpx.AsyncClient, method: str, url: str, *, headers: dict[str, str] | None = None,
+                           params: dict[str, Any] | None = None, content: Any = None, max_hops: int = 5) -> httpx.Response:
     """Issue a request with the SSRF guard applied to *every* hop.
 
     httpx's own follow_redirects only validates the URL it was handed, so a public host may redirect the connection
@@ -659,10 +686,26 @@ class Toolbox:
         spec = self.specs.get(name)
         return bool(spec and spec.force_ask and spec.force_ask(args))
 
+    def _networked_sandbox_call(self, spec: ToolSpec, ctx: dict[str, Any]) -> bool:
+        """True for a sandbox_* tool whose sandbox can reach the internet (or will, once created)."""
+        sb = self.sandboxes
+        if not sb or spec.group != "sandbox" or spec.danger != "executes":
+            return False
+        try:
+            return bool(sb.networked(ctx.get("conversation_id") or "") or sb.settings().get("sandboxNetwork"))
+        except Exception:  # noqa: BLE001 - unknown means assume it can reach out
+            return True
+
     def gate(self, name: str, mode: str, ctx: dict[str, Any], args: dict[str, Any] | None = None) -> str:
-        """Effective mode for one call. Untrusted content forces external tools, and anything that writes lasting text, to ask."""
+        """Effective mode for one call. Untrusted content forces external tools, and anything that writes lasting text, to ask.
+
+        A tainted run also asks before a web fetch or search (the address or query can carry what was
+        just read), before booking unattended work, and before running code in a networked sandbox.
+        """
         spec = self.specs.get(name)
-        if spec and mode == "on" and ctx.get("tainted") and (spec.danger == "external" or name in PROMPT_WRITES):
+        if spec and mode == "on" and ctx.get("tainted") and (
+                spec.danger in ("external", "network", "schedules") or name in PROMPT_WRITES
+                or self._networked_sandbox_call(spec, ctx)):
             return "ask"
         if mode == "on" and args is not None and self.forces_ask(name, args):
             return "ask"
@@ -675,6 +718,10 @@ class Toolbox:
         if ctx.get("proposal_only") and spec.danger in PROPOSAL_ONLY_DANGER:
             refused = PROPOSAL_ONLY_REFUSED_SCHEDULE if spec.danger == "schedules" else PROPOSAL_ONLY_REFUSED
             return tool_error(refused.format(name=name), alternative=ALTERNATIVE.get(name))
+        if ctx.get("proposal_only") and self._networked_sandbox_call(spec, ctx):
+            return tool_error(f"{name} would run code in a sandbox that has network access, and this is an unattended "
+                              "background run, so it is refused: code could send data out with nobody watching.",
+                              alternative="run_python, which has no network")
         try:
             out = await spec.fn(ctx, **args)
         except TypeError as e:  # backstop: signature mismatch, wrong types
@@ -849,34 +896,46 @@ class Toolbox:
             cache = self.web_cache
             ttl = 0 if fresh else float(cfg.get("fetchCacheSeconds", 3600) or 0)
             hit: dict[str, Any] | None = None
+
+            async def _follow(c: httpx.AsyncClient) -> Any:
+                """The response, a cache hit (None, with `hit` set), or the redirect-limit error dict."""
+                nonlocal cur, hops, hit
+                while True:
+                    cur, host = _check_url(cur, ctx, cfg, redirect=hops > 0)
+                    # The cache is read only here, after the taint and SSRF checks for this very URL.
+                    if cache is not None and ttl > 0 and (key := _norm_url(cur)):
+                        hit = cache.get(key, ttl)
+                        if hit:
+                            return None
+                    r = await _open_pinned(c, "GET", cur, host)  # connects to the address just checked, never a fresh lookup
+                    if r.status_code not in (301, 302, 303, 307, 308) or not r.headers.get("location"):
+                        return r
+                    hops += 1
+                    if hops > 5:
+                        return tool_error(f"fetch_url: too many redirects (5) starting at {url}", field="url", alternative=ALTERNATIVE["fetch_url"])
+                    cur = urllib.parse.urljoin(cur, r.headers["location"])
             try:
                 async with httpx.AsyncClient(timeout=25, follow_redirects=False, transport=httpx.AsyncHTTPTransport(retries=0),
                                              headers={"User-Agent": "Grain/0.1 (+desktop assistant)"}) as c:
-                    while True:
-                        cur, host = _check_url(cur, ctx, cfg, redirect=hops > 0)
-                        # The cache is read only here, after the taint and SSRF checks for this very URL.
-                        if cache is not None and ttl > 0 and (key := _norm_url(cur)):
-                            hit = cache.get(key, ttl)
-                            if hit:
-                                break
-                        r = await _open_pinned(c, "GET", cur, host)  # connects to the address just checked, never a fresh lookup
-                        if r.status_code not in (301, 302, 303, 307, 308) or not r.headers.get("location"):
-                            break
-                        hops += 1
-                        if hops > 5:
-                            return tool_error(f"fetch_url: too many redirects (5) starting at {url}", field="url", alternative=ALTERNATIVE["fetch_url"])
-                        cur = urllib.parse.urljoin(cur, r.headers["location"])
+                    # One deadline for the whole redirect chain; httpx's timeout only bounds each read.
+                    r = await asyncio.wait_for(_follow(c), reach.BODY_DEADLINE_S * 2)
             except UrlBlocked as e:
                 return tool_error(f"fetch_url refused {url}: {e}", field="url", alternative=e.alternative or ALTERNATIVE["fetch_url"])
+            except asyncio.TimeoutError:
+                return tool_error(f"fetch_url: {url} did not finish within {int(reach.BODY_DEADLINE_S * 2)}s", field="url", alternative=ALTERNATIVE["fetch_url"])
+            if isinstance(r, dict):  # the redirect-limit error
+                return r
             if hit:
                 status, ctype, raw, final_url = hit["status"], hit["content_type"], hit["body"], hit["final_url"]
             else:
                 status, ctype, raw, final_url = r.status_code, r.headers.get("content-type", ""), r.content, cur  # not r.url: its host is the pinned address
-                if cache is not None and float(cfg.get("fetchCacheSeconds", 3600) or 0) > 0 and 200 <= status < 300 and (key := _norm_url(cur)):
+                if cache is not None and float(cfg.get("fetchCacheSeconds", 3600) or 0) > 0 and 200 <= status < 300 and (key := _norm_url(cur)) \
+                        and not getattr(r, "extensions", {}).get("body_truncated"):
                     try:
                         cache.put(key, status, ctype, raw, final_url)
                     except Exception as e:  # noqa: BLE001 -- the cache is an optimisation, never a failure
                         log.info("fetch cache write failed: %s", _first_line(e))
+            body_truncated = bool(not hit and r is not None and getattr(r, "extensions", {}).get("body_truncated"))
             kind = webread.classify(ctype, final_url, raw[:512])
             try:
                 rendered = webread.render(kind, raw, webread.decode(ctype, raw) if kind not in ("pdf", "binary") else "", final_url, include_links=links)
@@ -901,7 +960,7 @@ class Toolbox:
                 text += "\n\n## References\n" + webread.references(rendered.links)
             window, total, nxt = webread.page_window(text, offset, mc)
             # Link URLs are page content, so they are deliberately not _allow_url'd: a tainted run cannot follow them.
-            out = {"url": final_url, "status": status, "content_type": ctype, "kind": kind, "text": window, "truncated": nxt is not None,
+            out = {"url": final_url, "status": status, "content_type": ctype, "kind": kind, "text": window, "truncated": nxt is not None or body_truncated,
                    "total_chars": total, "next_offset": nxt, "cached": bool(hit), "redirects": hops}
             if focused:
                 out["focused"] = True
@@ -1126,6 +1185,9 @@ def _register_working(self: Toolbox) -> None:
                                   expected="the result_id from a tool result that came back as a handle",
                                   example={"result_id": recent[0] if recent else "tr_9f1c2a84", "offset": 0},
                                   alternative="call the tool again with a narrower query, or page the handle you do have: " + (", ".join(recent) or "none yet"))
+            if isinstance(out.get("shape"), dict) and out["shape"].get("untrusted"):
+                ctx["tainted"] = True
+                ctx.setdefault("taint_sources", []).append("read_tool_result")
             return out
         R("read_tool_result", ToolSpec("read_tool_result", (
             "Read part of a large tool result that was stored instead of put in your context. When a tool answered with "
@@ -1469,7 +1531,7 @@ def _register_google(self: Toolbox) -> None:
         return page(rows, offset=offset, limit=50, key="tasks")
     R("google_tasks_list", ToolSpec("google_tasks_list", "List the user's Google Tasks (default list).",
         _obj({"show_completed": {"type": "boolean", "default": False}, "offset": {"type": "integer", "default": 0}}, []), gtasks_list, "google",
-        examples=[{}, {"show_completed": True}, {"offset": 50}]))
+        examples=[{}, {"show_completed": True}, {"offset": 50}], taints=True))
 
     async def gtasks_add(ctx: dict[str, Any], title: str, notes: str = "", due: str | None = None) -> Any:
         return await run(g.tasks_add, title, notes, due)

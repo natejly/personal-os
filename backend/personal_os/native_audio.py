@@ -189,6 +189,10 @@ class Capture:
             if chunk:
                 got.extend(chunk)
                 continue
+            # A tap-callback failure lands on the sink, not on `self.error`; surface it so the
+            # caller's error check (and restart path) sees a dead tap instead of silent reads.
+            if self.sink.error and not self.error:
+                self.error = self.sink.error
             if self.error:
                 break
             if time.time() >= deadline:

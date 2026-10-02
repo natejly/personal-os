@@ -104,66 +104,95 @@ async def learn_from_exchange(
     raw = await llm.complete(settings, extraction_model, messages)
     data = _parse_json(raw)
 
+    def _list(v: Any) -> list[Any]:
+        return v if isinstance(v, list) else []
+
+    def _s(v: Any) -> str:
+        """Model output is untrusted: only a string is text, anything else is treated as absent."""
+        return v.strip() if isinstance(v, str) else ""
+
     updated_memories = []
     superseded: list[dict[str, str]] = []
-    for u in data.get("updates") or []:
+    for u in _list(data.get("updates")):
         if not isinstance(u, dict):
             continue
-        target = tagged.get(str(u.get("id") or "").strip())
-        content = (u.get("content") or "").strip()
+        target = tagged.get(_s(u.get("id")))
+        content = _s(u.get("content"))
         if not target or len(content) < 6 or content == target["content"]:
+            continue
+        # The snapshot predates the model call: re-read so a memory the user pinned or reworded
+        # in the meantime is not overwritten, and a deleted one is not resurrected.
+        fresh = memories.get(target["id"])
+        if not fresh or fresh["pinned"] or fresh["content"] != target["content"]:
             continue
         patch: dict[str, Any] = {"content": content}
         if u.get("kind") in KINDS:
             patch["kind"] = u["kind"]
         # The old wording stays as history (superseded); a pinned row is rewritten in place by supersede().
-        mem = memories.supersede(target["id"], content, kind=patch.get("kind"), source="auto", provenance=prov)
+        try:
+            mem = memories.supersede(target["id"], content, kind=patch.get("kind"), source="auto", provenance=prov)
+        except Exception:  # noqa: BLE001 - one bad row must not lose the rest of the extraction
+            continue
         if mem:
             updated_memories.append(mem)
             if mem["id"] != target["id"]:
                 superseded.append({"old_id": target["id"], "new_id": mem["id"]})
 
     removed_memories = []
-    for fid in data.get("forget") or []:
-        target = tagged.get(str(fid).strip())
+    for fid in _list(data.get("forget")):
+        target = tagged.get(_s(fid))
+        if not target:
+            continue
         # Pinned memories are user-curated; the extractor may rewrite but never drop them.
-        if target and not target["pinned"] and memories.invalidate(target["id"]):
+        fresh = memories.get(target["id"])  # re-read: the user may have pinned it since the extraction began
+        if fresh and not fresh["pinned"] and memories.invalidate(target["id"]):
             removed_memories.append(target)
 
     added_memories = []
-    for m in data.get("memories") or []:
-        content = (m.get("content") if isinstance(m, dict) else str(m)) or ""
-        if len(content.strip()) < 6:
+    for m in _list(data.get("memories")):
+        content = _s(m.get("content")) if isinstance(m, dict) else _s(m)
+        if len(content) < 6:
             continue
         kind = m.get("kind", "fact") if isinstance(m, dict) else "fact"
         if kind not in KINDS:
             kind = "fact"
-        before = {x["id"] for x in memories.list(project_id, include_global=False)}
-        mem = memories.create(project_id, content, kind=kind, source="auto", provenance=prov)
+        try:
+            before = {x["id"] for x in memories.list(project_id, include_global=False)}
+            mem = memories.create(project_id, content, kind=kind, source="auto", provenance=prov)
+        except Exception:  # noqa: BLE001
+            continue
         if mem["id"] not in before:
             added_memories.append(mem)
 
     label_to_id: dict[str, str] = {}
     added_nodes = []
-    for e in data.get("entities") or []:
-        label = (e.get("label") if isinstance(e, dict) else str(e)) or ""
-        if not label.strip() or label.strip().lower() in SELF_LABELS:
+    for e in _list(data.get("entities")):
+        label = _s(e.get("label")) if isinstance(e, dict) else _s(e)
+        if not label or label.lower() in SELF_LABELS:
             continue
-        node = graph.upsert_node(project_id, label, type=(e.get("type") if isinstance(e, dict) else "entity") or "entity")
-        label_to_id[label.strip().lower()] = node["id"]
+        etype = _s(e.get("type")) if isinstance(e, dict) else ""
+        try:
+            node = graph.upsert_node(project_id, label, type=etype or "entity")
+        except Exception:
+            continue
+        label_to_id[label.lower()] = node["id"]
         added_nodes.append(node)
 
     added_edges = []
     ended_edges: list[dict[str, Any]] = []
-    for r in data.get("relations") or []:
+    for r in _list(data.get("relations")):
         if not isinstance(r, dict):
             continue
-        s, t, rel = (r.get("source") or "").strip(), (r.get("target") or "").strip(), (r.get("relation") or "").strip()
+        s, t, rel = _s(r.get("source")), _s(r.get("target")), _s(r.get("relation"))
         if not (s and t and rel) or s.lower() in SELF_LABELS or t.lower() in SELF_LABELS:
             continue
-        sid = label_to_id.get(s.lower()) or graph.upsert_node(project_id, s)["id"]
-        tid = label_to_id.get(t.lower()) or graph.upsert_node(project_id, t)["id"]
-        if sid == tid:
+        try:
+            sid = label_to_id.get(s.lower()) or graph.upsert_node(project_id, s)["id"]
+            tid = label_to_id.get(t.lower()) or graph.upsert_node(project_id, t)["id"]
+            if sid == tid:
+                continue
+            added_edges.append(graph.upsert_edge(project_id, sid, tid, rel))
+        except Exception:
             continue
         edge = graph.upsert_edge(project_id, sid, tid, rel, source_message_id=message_id)
         added_edges.append(edge)
@@ -172,7 +201,7 @@ async def learn_from_exchange(
             graph.invalidate_edge(old["id"], superseded_by=edge["id"])
             ended_edges.append(old)
 
-    for r in data.get("ended") or []:
+    for r in _list(data.get("ended")):
         if not isinstance(r, dict):
             continue
         old = _edge_by_ref(graph, project_id, f"{r.get('source') or ''}|{r.get('relation') or ''}|{r.get('target') or ''}")

@@ -244,9 +244,13 @@ def _write_nofollow(path: Path, text: str, mode: str) -> None:
     try:
         oflags = os.O_WRONLY | os.O_CREAT | nofollow
         oflags |= os.O_APPEND if mode == "append" else os.O_TRUNC
+        if mode == "create":
+            oflags |= os.O_EXCL  # the exists() check before this can lose a race; the kernel cannot
         try:
             fd = os.open(path.name, oflags, 0o644, dir_fd=dirfd)
         except OSError as e:
+            if e.errno == errno.EEXIST:
+                raise LocalPathError(f"{path.name} already exists; pass mode='overwrite' to replace it or mode='append' to add to it") from e
             if e.errno == errno.ELOOP:
                 raise LocalPathError("refusing to write through a symlink") from e
             raise
@@ -260,7 +264,9 @@ def write_local(path: str, content: str, mode: str = "create") -> dict[str, Any]
     """Write a text file under the home folder. 'create' refuses to replace a file that is already there."""
     if mode not in WRITE_MODES:
         raise ValueError(f"mode must be one of {', '.join(WRITE_MODES)}")
-    text = content if isinstance(content, str) else str(content)
+    if not isinstance(content, str):  # str(None) would silently overwrite the file with the word "None"
+        raise ValueError("content must be a string")
+    text = content
     if len(text) > MAX_WRITE_CHARS:
         raise ValueError(f"content is {len(text)} characters; the limit is {MAX_WRITE_CHARS}")
     _refuse_leaf_symlink(path, "write")
@@ -283,6 +289,11 @@ def move_local(path: str, to: str) -> dict[str, Any]:
     if not src.exists():
         raise LocalPathError(f"{src} does not exist")
     dst = _writable_path(to)
+    into_folder = to.rstrip().endswith(("/", os.sep))  # Path drops the slash; it still means "this folder"
+    if into_folder and not dst.exists():
+        dst.mkdir(parents=True)
+    if into_folder and not dst.is_dir():
+        raise LocalPathError(f"{dst} is a file, not a folder")
     if dst.is_dir():
         dst = dst / src.name
         if dst.suffix.lower() in BLOCKED_WRITE_SUFFIXES:

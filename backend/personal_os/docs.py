@@ -467,8 +467,8 @@ class Docs:
         with self.db.tx() as c:
             if c.execute("SELECT 1 FROM doc_folders WHERE scope=? AND path=?", (sc, dst)).fetchone():
                 raise ValueError(f'"{dst}" already exists')
-            rows = c.execute("SELECT path FROM doc_folders WHERE scope=? AND (path=? OR path LIKE ?)",
-                             (sc, src, src + "/%")).fetchall()
+            rows = c.execute("SELECT path FROM doc_folders WHERE scope=? AND (path=? OR substr(path, 1, ?) = ?)",
+                             (sc, src, len(src) + 1, src + "/")).fetchall()
             t = now()
             for anc in ancestors(dst):
                 c.execute("INSERT OR IGNORE INTO doc_folders(scope, path, created_at) VALUES(?,?,?)", (sc, anc, t))
@@ -477,8 +477,8 @@ class Docs:
                 c.execute("DELETE FROM doc_folders WHERE scope=? AND path=?", (sc, r["path"]))
                 c.execute("INSERT OR IGNORE INTO doc_folders(scope, path, created_at) VALUES(?,?,?)", (sc, moved, t))
             c.execute(f"UPDATE docs SET folder=? WHERE deleted_at IS NULL AND folder=? AND {proj_match}", (dst, src, *proj_args))
-            c.execute(f"UPDATE docs SET folder=? || substr(folder, ?) WHERE deleted_at IS NULL AND folder LIKE ? AND {proj_match}",
-                      (dst, len(src) + 1, src + "/%", *proj_args))
+            c.execute(f"UPDATE docs SET folder=? || substr(folder, ?) WHERE deleted_at IS NULL AND substr(folder, 1, ?) = ? AND {proj_match}",
+                      (dst, len(src) + 1, len(src) + 1, src + "/", *proj_args))
         return self.folders()
 
     def delete_folder(self, path: str, delete_docs: bool = False, scope: str | None = "") -> list[dict[str, Any]]:
@@ -496,11 +496,12 @@ class Docs:
             if delete_docs:
                 c.execute(
                     f"UPDATE docs SET deleted_at=?, deleted_with=NULL WHERE deleted_at IS NULL"
-                    f" AND (folder=? OR folder LIKE ?) AND {proj_match}", (now(), src, src + "/%", *proj_args))
+                    f" AND (folder=? OR substr(folder, 1, ?) = ?) AND {proj_match}", (now(), src, len(src) + 1, src + "/", *proj_args))
             else:
-                c.execute(f"UPDATE docs SET folder=? WHERE deleted_at IS NULL AND (folder=? OR folder LIKE ?) AND {proj_match}",
-                          (parent, src, src + "/%", *proj_args))
-            c.execute("DELETE FROM doc_folders WHERE scope=? AND (path=? OR path LIKE ?)", (sc, src, src + "/%"))
+                c.execute(f"UPDATE docs SET folder=? WHERE deleted_at IS NULL AND (folder=? OR substr(folder, 1, ?) = ?) AND {proj_match}",
+                          (parent, src, len(src) + 1, src + "/", *proj_args))
+            c.execute("DELETE FROM doc_folders WHERE scope=? AND (path=? OR substr(path, 1, ?) = ?)",
+                      (sc, src, len(src) + 1, src + "/"))
         return self.folders()
 
     def forget_scope(self, project_id: str) -> None:
@@ -523,7 +524,7 @@ class Docs:
     def revisions(self, doc_id: str, limit: int = 100) -> list[dict[str, Any]]:
         with self.db.tx() as c:
             rows = [row_to_dict(r) for r in c.execute(
-                "SELECT * FROM doc_revisions WHERE doc_id=? ORDER BY created_at DESC LIMIT ?", (doc_id, limit)).fetchall()]
+                "SELECT * FROM doc_revisions WHERE doc_id=? ORDER BY created_at DESC LIMIT ?", (doc_id, max(1, min(int(limit), 200)))).fetchall()]
         return [self._rev_view(r) for r in rows]  # type: ignore[arg-type]
 
     def revision(self, rev_id: str) -> dict[str, Any] | None:

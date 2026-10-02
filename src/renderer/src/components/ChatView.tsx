@@ -9,7 +9,7 @@ import ContextDrawer from './ContextDrawer'
 import ResizeHandle from './ResizeHandle'
 import PlanPanel from './PlanPanel'
 import SendToSpace from './SendToSpace'
-import { clip, usePageContext } from '../lib/pageContext'
+import { fenced, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
 import { useOnboarding } from './onboarding/onboardingStore'
 import { FIRST_PROMPTS } from './onboarding/steps'
@@ -59,7 +59,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
     view: 'chat',
     label: convo ? `Chat “${convo.title}”` : 'Chat',
     detail: convo
-      ? `The user is reading this conversation (\`${convo.id}\`). Its last turns:\n\n${clip(msgs.slice(-6).map((m) => `**${m.role}**: ${m.content}`).join('\n\n'), 3000)}`
+      ? `The user is reading this conversation (\`${convo.id}\`). Its last turns:\n\n${fenced(msgs.slice(-6).map((m) => `**${m.role}**: ${m.content}`).join('\n\n'), 3000)}`
       : 'An empty chat, nothing sent yet.',
     refs: convo ? [{ kind: 'conversation', id: convo.id, name: convo.title }] : [],
     hints: convo ? ['Summarise this conversation', 'What did we decide?'] : []

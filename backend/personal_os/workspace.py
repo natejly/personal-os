@@ -209,7 +209,7 @@ class Workspace:
         for dirpath, dirnames, filenames in os.walk(base):
             here = Path(dirpath)
             if here == root:
-                dirnames[:] = [d for d in dirnames if d not in RESERVED_DIRS]
+                dirnames[:] = [d for d in dirnames if d.casefold() not in RESERVED_DIRS]
             dirnames.sort()
             for name in dirnames + sorted(filenames):
                 p = here / name
@@ -294,7 +294,7 @@ class Workspace:
             raise WorkspaceError("path must name a file, not the workspace root")
         rel = self._rel_of(desk_id, p)
         parts = PurePosixPath(rel).parts
-        if parts[0] in RESERVED_DIRS:
+        if parts[0].casefold() in RESERVED_DIRS:  # APFS is case-insensitive: .BASELINE is the same folder
             raise WorkspaceError(f"{parts[0]}/ is reserved for the workspace itself and is not writable")
         suffix = _blocked(parts)
         if suffix:
@@ -356,9 +356,9 @@ class Workspace:
             raise WorkspaceError("the workspace root cannot be trashed")
         rel = self._rel_of(desk_id, p)
         head = PurePosixPath(rel).parts[0]
-        if head == TRASH_DIR:
+        if head.casefold() == TRASH_DIR:
             raise WorkspaceError(f"{rel} is already in the trash")
-        if head in RESERVED_DIRS:
+        if head.casefold() in RESERVED_DIRS:
             # write() refuses these for the same reason: moving .baseline/ away would destroy the
             # only before-copy the review diff is computed against.
             raise WorkspaceError(f"{head}/ is reserved for the workspace itself and cannot be trashed")

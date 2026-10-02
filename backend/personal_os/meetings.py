@@ -310,6 +310,16 @@ def _mmss(seconds: float) -> str:
     return f"{total // 60:02d}:{total % 60:02d}"
 
 
+def _due_or_none(due: Any) -> str | None:
+    """An action item's due date as the todo list accepts it; a date the model made up is dropped."""
+    from .todos import clean_due
+
+    try:
+        return clean_due(due)
+    except ValueError:
+        return None
+
+
 def _epoch(iso: Any) -> float:
     """Google's ISO timestamp as unix seconds. 0.0 when it is absent or a bare date."""
     s = str(iso or "").strip()
@@ -389,6 +399,9 @@ class Meetings:
     def __init__(self, db: Database, config_fn: Callable[[], dict[str, Any]] | None = None):
         self.db = db
         self.config = config_fn or (lambda: config_for(db))
+        # Set by MeetingService: the routes call this repo directly, so the recorder pool has to
+        # be reachable from here or a delete would pull the wav directory out from under a live capture.
+        self.before_destroy: Callable[[str, bool], None] | None = None
         with db.tx() as c:
             c.executescript(SCHEMA)
             have = {r["name"] for r in c.execute("PRAGMA table_info(meetings)").fetchall()}
@@ -659,6 +672,9 @@ class Meetings:
 
     def delete(self, id: str) -> None:
         """Idempotent. Segments, revisions and action items CASCADE; the FTS row and the wavs don't."""
+        if self.before_destroy is not None:
+            with contextlib.suppress(Exception):
+                self.before_destroy(id, True)
         with self.db.tx() as c:
             r = c.execute("SELECT audio_dir FROM meetings WHERE id=?", (id,)).fetchone()
             audio_dir = (r["audio_dir"] if r else "") or ""
@@ -745,6 +761,21 @@ class Meetings:
             rows = c.execute("SELECT rowid AS cursor, * FROM meeting_segments WHERE meeting_id=? AND rowid > ? "
                              "ORDER BY rowid LIMIT ?", (meeting_id, int(cursor), max(1, int(limit)))).fetchall()
         return [row_to_dict(r, JSON_FIELDS) for r in rows]  # type: ignore[misc]
+
+    def interrupt_pending(self, meeting_id: str) -> int:
+        """Flip segments a crash left in recorded/transcribing to `failed`, when their wav survived.
+
+        `retranscribe` only replays `failed` rows and the audio sweep only keeps wavs a failed row
+        points at, so without this the untranscribed tail of a crashed meeting is deleted unheard.
+        """
+        with self.db.tx() as c:
+            rows = c.execute("SELECT id, wav_path FROM meeting_segments WHERE meeting_id=? "
+                             "AND state IN ('recorded','transcribing')", (meeting_id,)).fetchall()
+            ids = [r["id"] for r in rows if r["wav_path"] and Path(r["wav_path"]).exists()]
+            for sid in ids:
+                c.execute("UPDATE meeting_segments SET state='failed', error=? WHERE id=?",
+                          ("interrupted: the app quit before this segment was transcribed", sid))
+        return len(ids)
 
     def pending_segments(self, meeting_id: str = "") -> list[dict[str, Any]]:
         sql = "SELECT * FROM meeting_segments WHERE state IN ('recorded','transcribing')"
@@ -1049,7 +1080,7 @@ class Meetings:
         title = (m["title"] if m else "") or "Untitled meeting"
         todo = todos.create(
             title=item["text"], project_id=project_id if project_id is not None else (m["project_id"] if m else None),
-            notes=f"From meeting: {title}", due=item["due"] or None, priority=2,
+            notes=f"From meeting: {title}", due=_due_or_none(item["due"]), priority=2,
             source="meeting")
         with self.db.tx() as c:
             c.execute("UPDATE meeting_action_items SET status='added', todo_id=? WHERE id=?", (todo["id"], item_id))
@@ -1084,6 +1115,10 @@ class Meetings:
         m = self.get(meeting_id)
         if not m:
             return None
+        if self.before_destroy is not None:
+            with contextlib.suppress(Exception):
+                self.before_destroy(meeting_id, False)
+            m = self.get(meeting_id) or m
         if m["audio_dir"]:
             shutil.rmtree(m["audio_dir"], ignore_errors=True)
         with self.db.tx() as c:
@@ -1109,6 +1144,7 @@ class MeetingService:
         self.settings = settings_fn
         self._complete = complete_fn
         self.meetings = meetings
+        meetings.before_destroy = self._release_recorder
         self.google = google
         self.todos = todos
         self.pool = meeting_recorder.RecorderPool(db.data_dir, settings_fn, self.config)
@@ -1379,6 +1415,19 @@ class MeetingService:
         log.info("meetings: recording %s (%s)", meeting_id, ", ".join(channels) or "no channels")
         return self.meetings.get(meeting_id)
 
+    def _release_recorder(self, meeting_id: str, deleting: bool) -> None:
+        """Stop a live capture (no drain) before its meeting or its audio is removed.
+
+        Runs on whatever thread the delete came in on. A meeting whose audio alone is going is
+        closed out as `ready` so it does not sit in `recording` with no recorder behind it.
+        """
+        if self.pool.get(meeting_id) is None:
+            return
+        self.pool.stop(meeting_id, 0)
+        if not deleting:
+            self.meetings.finalize(meeting_id, self.meetings.build_transcript(meeting_id), status="ready",
+                                   error="Recording stopped because its audio was deleted.")
+
     def pause(self, meeting_id: str) -> dict[str, Any] | None:
         """Keep ffmpeg running and throw the audio away, so segment numbering stays monotonic."""
         session = self.pool.get(meeting_id)
@@ -1411,7 +1460,14 @@ class MeetingService:
         """
         m = self.meetings.get(meeting_id)
         if m is None:
+            # Deleted while recording: the captures and the microphone still need releasing.
+            if self.pool.get(meeting_id) is not None:
+                await asyncio.to_thread(self.pool.stop, meeting_id, 0)
             return None
+        if self.pool.get(meeting_id) is None and m["status"] not in ("recording", "transcribing"):
+            # Already finished (double click, or auto-stop racing the user): finalize would
+            # restamp ended_at to now and inflate the duration, or turn a scheduled row into ready.
+            return m
         cfg = self.config()
         drained, pending = True, 0
         if self.pool.get(meeting_id) is not None:
@@ -1834,6 +1890,8 @@ class MeetingService:
         """
         out: list[str] = []
         for m in self.meetings.unfinished():
+            with contextlib.suppress(Exception):
+                self.meetings.interrupt_pending(m["id"])
             note = ("The enhance pass was interrupted when the app quit; your notes and the "
                     "transcript are untouched. Run it again when you like."
                     if m["status"] == "enhancing" else
@@ -1914,6 +1972,14 @@ class MeetingService:
             return
         m = self.meetings.get(session.meeting_id)
         if m is None:
+            return
+        if getattr(session, "captures_dead", lambda: False)():
+            # Every channel gave up, so only the transcribe worker is keeping the session "alive":
+            # close it with the capture error rather than sit empty until the length cap.
+            why = "; ".join(f"{k}: {v}" for k, v in session.errors().items() if k != "transcribe")
+            self.meetings.patch(m["id"], {"error": why or "Every capture channel stopped."})
+            log.info("meetings: closing %s, all captures died (%s)", m["id"], why)
+            await self.stop(m["id"])
             return
         grace = float(cfg["autoStopGraceSeconds"] or 0)
         elapsed = now() - (session.started_at or now())

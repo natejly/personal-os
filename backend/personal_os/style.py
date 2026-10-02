@@ -253,7 +253,7 @@ class WritingStyle:
         with self.db.tx() as c:
             rows = c.execute(
                 "SELECT * FROM style_samples WHERE IFNULL(project_id,'')=IFNULL(?,'') ORDER BY created_at DESC LIMIT ?",
-                (project_id, limit),
+                (project_id, max(1, min(int(limit), 500))),
             ).fetchall()
         return [row_to_dict(r) for r in rows]  # type: ignore[misc]
 
@@ -373,8 +373,12 @@ class WritingStyle:
         clean = clean_profile(_parse_json(raw))
         if not clean["summary"] and not clean["guidelines"]:
             return None  # a failed read must not blank a working profile
+        # The model call took seconds: a hand edit saved meanwhile must not be overwritten by it.
+        now_p = self.profile(project_id)
+        if not force and now_p and now_p["edited"]:
+            return None
         profile = self.save_profile(project_id, {
-            **clean, "enabled": (self.profile(project_id) or {}).get("enabled", 1),
+            **clean, "enabled": (now_p or {}).get("enabled", 1),
             "edited": 0, "sample_count": len(used), "sample_chars": sum(r["chars"] for r in used),
             "model": extraction_model,
         })

@@ -61,7 +61,9 @@ SPAWN_ATTEMPTS = 4         # a command that cannot be spawned is a config error,
 
 STDERR_LINES = 200
 STDERR_LINE_CHARS = 400
-STDERR_MAX_BYTES = 1 << 20
+STDERR_MAX_BYTES = 1 << 20   # the file is truncated past this, read or not
+STDERR_TRIM_BYTES = 64 << 10  # ...and once fully read past this
+STDERR_DRAIN_BYTES = 256 << 10  # most one drain reads, so the event loop is never held long
 MAX_RESULT_CHARS = 20_000
 
 # Every discovered tool gets the strictest danger level there is, whatever the server says about
@@ -147,36 +149,59 @@ async def _open(config: _Config, err: "_Stderr", oauth: OAuthFlows | None, sign_
 
 
 class _Stderr:
-    """Bounded ring buffer over a server's stderr.
+    """Bounded tail over a server's stderr, on disk and in memory.
 
     `stdio_client` hands `errlog` to the subprocess, so it has to be a real file - an in-memory
-    sink has no fileno. The file is unlinked at once and tailed into a bounded list, so a chatty server
-    cannot grow memory without bound, and tailing stops at STDERR_MAX_BYTES so it cannot grow the
-    disk forever either.
+    sink has no fileno. It is opened in append mode and unlinked at once. Each drain reads at most
+    DRAIN_MAX_BYTES in bounded chunks, keeps the last STDERR_LINES lines, and once the file has
+    been read through (or has outgrown STDERR_MAX_BYTES unread) truncates it. Append mode is what
+    makes that safe: the child's writes always land at the new end, never at its old offset.
+    A chatty child can still write between two drains, but the file cannot stay large for long.
     """
 
     def __init__(self, lines: list[str]):
         self.lines = lines
         fd, path = tempfile.mkstemp(prefix="pos-mcp-stderr-")
-        self.file: TextIO = os.fdopen(fd, "w", buffering=1, encoding="utf-8", errors="replace")
-        self._reader: TextIO = open(path, "r", encoding="utf-8", errors="replace")
-        self._capped = False
+        os.close(fd)
+        # O_APPEND on the child's copy of the descriptor: it shares the file offset with this one.
+        self.file: TextIO = open(path, "a", buffering=1, encoding="utf-8", errors="replace")
+        self._reader = open(path, "rb")
+        self._carry = b""
+        self._dropped = False
         try:
             os.unlink(path)  # POSIX: both handles stay valid, nothing is left behind on a crash
         except OSError:
             pass
 
     def drain(self) -> None:
-        if self._capped:
-            return
-        if self._reader.tell() > STDERR_MAX_BYTES:
-            self._capped = True
-            self._append("[stderr capped]")
-            return
-        for raw in self._reader.readlines():
-            line = raw.rstrip("\n")
-            if line:
-                self._append(line)
+        try:
+            self._drain()
+        except (OSError, ValueError):
+            pass  # closed or truncated under us; stderr is a convenience, never a failure
+
+    def _drain(self) -> None:
+        budget = STDERR_DRAIN_BYTES
+        while budget > 0:
+            chunk = self._reader.read(min(65536, budget))
+            if not chunk:
+                break
+            budget -= len(chunk)
+            data = self._carry + chunk
+            *complete, self._carry = data.split(b"\n")
+            self._carry = self._carry[:STDERR_LINE_CHARS * 4]  # a newline-free flood stays small
+            for raw in complete:
+                line = raw.decode("utf-8", errors="replace").strip("\r")
+                if line:
+                    self._append(line)
+        size = os.fstat(self.file.fileno()).st_size
+        at_end = self._reader.tell() >= size
+        if size > STDERR_MAX_BYTES or (at_end and size > STDERR_TRIM_BYTES):
+            if not at_end and not self._dropped:
+                self._dropped = True
+                self._append("[stderr skipped: server wrote faster than it was read]")
+            os.ftruncate(self.file.fileno(), 0)
+            self._reader.seek(0)
+            self._carry = b""
 
     def _append(self, line: str) -> None:
         self.lines.append(line[:STDERR_LINE_CHARS])
@@ -354,6 +379,8 @@ class _Supervisor:
             err.drain()
             with anyio.fail_after(PING_TIMEOUT):
                 await session.send_ping()
+            if self.status == "ready" and self.detail:
+                self._set_status("ready")  # the server answered: clear the last-call note
 
     async def _dispatch(self, session: ClientSession, call: _Call) -> None:
         if call.future.done():  # the caller already gave up while we were reconnecting
@@ -366,7 +393,10 @@ class _Supervisor:
             # The call is abandoned, not waited on: the caller gets an error now. Whether the
             # server itself is wedged is a separate question, answered by an immediate ping.
             self._settle(call, exc=McpTimeout(f"{call.name} did not answer within {call.timeout:.0f}s"))
-            self._set_status("error", f"{call.name} timed out after {call.timeout:.0f}s")
+            # One slow tool is not a dead connection: the status stays "ready" so the rest of the
+            # server's tools stay offered. A dead one fails the ping below and goes to reconnect.
+            self.detail = f"last call: {call.name} timed out after {call.timeout:.0f}s"
+            self.store.set_status(self.config.id, self.status, self.detail)
             self._check_now.set()
         except anyio.get_cancelled_exc_class():
             self._settle(call, exc=McpUnavailable(f"{self.config.name} disconnected mid-call"))
@@ -402,6 +432,12 @@ class _Supervisor:
             return await asyncio.wait_for(asyncio.shield(call.future), limit + CALL_GRACE)
         except asyncio.TimeoutError:
             raise McpTimeout(f"{name} did not answer within {limit:.0f}s") from None
+        finally:
+            # The caller has been told the outcome (or cancelled). A call still queued must not be
+            # sent later: cancelling the future is what _dispatch's "caller gave up" check sees.
+            # One already sent cannot be recalled; its late result is simply dropped by _settle.
+            if not call.future.done():
+                call.future.cancel()
 
     def _settle(self, call: _Call, *, value: dict[str, Any] | None = None, exc: BaseException | None = None) -> None:
         if call.future.done():
@@ -484,12 +520,17 @@ class McpClient:
         self.call_timeout = call_timeout
         self.oauth = oauth
         self._supervisors: dict[str, _Supervisor] = {}
+        self._sync_lock = asyncio.Lock()  # overlapping syncs would each build a supervisor for one server
 
     async def start(self) -> list[dict[str, Any]]:
         return await self.sync()
 
     async def sync(self) -> list[dict[str, Any]]:
         """Start what should run, stop what should not, restart what was reconfigured."""
+        async with self._sync_lock:
+            return await self._sync()
+
+    async def _sync(self) -> list[dict[str, Any]]:
         rows = {r["id"]: r for r in self.store.servers()}
         for sid in list(self._supervisors):
             if sid not in rows:
@@ -522,10 +563,11 @@ class McpClient:
         return all(results)
 
     async def restart(self, server_id: str) -> dict[str, Any] | None:
-        sup = self._supervisors.pop(server_id, None)
-        if sup:
-            await sup.stop()
-        await self.sync()
+        async with self._sync_lock:
+            sup = self._supervisors.pop(server_id, None)
+            if sup:
+                await sup.stop()
+            await self._sync()
         sup = self._supervisors.get(server_id)
         return sup.info() if sup else None
 

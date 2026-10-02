@@ -476,7 +476,14 @@ export const useCanvas = create<CanvasState>((set, get) => {
     deleteSpace: async (canvasId) => {
       // A lock that let the whole space be thrown away would not be much of a lock.
       if (blocked(canvasId)) return
-      await api.canvases.delete(canvasId).catch(fail)
+      // Only drop the space once the backend has: a failed delete must not leave a phantom that the next
+      // load brings back.
+      try {
+        await api.canvases.delete(canvasId)
+      } catch (e) {
+        fail(e)
+        return
+      }
       set((s) => {
         const canvases = { ...s.canvases }
         delete canvases[canvasId]
@@ -612,7 +619,14 @@ export const useCanvas = create<CanvasState>((set, get) => {
       if (w.state === 'popped') void window.os.popout.close(windowId)
       putWindows(w.canvas_id, (ws) => ws.filter((x) => x.id !== windowId))
       set((s) => (s.focusedWindowId === windowId ? { focusedWindowId: null } : {}))
-      await api.windows.delete(windowId).catch(fail)
+      try {
+        await api.windows.delete(windowId)
+      } catch (e) {
+        // Keep the instant close, but put the row back when the backend refused it.
+        const back = get().canvases[w.canvas_id]
+        if (back && !back.windows.some((x) => x.id === windowId)) putWindows(w.canvas_id, (ws) => [...ws, w])
+        fail(e)
+      }
     },
     focusWindow: (windowId, opts) => {
       const s = get()
@@ -738,7 +752,13 @@ export const useCanvas = create<CanvasState>((set, get) => {
           api.canvases
             .layout(cid, rows)
             .then(() => {
-              for (const r of rows) dirty.delete(r.id)
+              // A move made while this PUT was in flight re-dirtied its id with newer geometry; only an
+              // id still matching what was sent is clean, or the later move would never be written.
+              const now = get()
+              for (const r of rows) {
+                const w = findWin(now, r.id)
+                if (!w || (w.x === r.x && w.y === r.y && w.w === r.w && w.h === r.h && w.z === r.z && w.state === r.state)) dirty.delete(r.id)
+              }
             })
             .catch(fail)
         )

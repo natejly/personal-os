@@ -90,7 +90,8 @@ async function storedGather(): Promise<string | undefined> {
   const base = backendUrl()
   if (!base) return undefined
   try {
-    const r = await fetch(`${base}/settings`)
+    const token = backendToken()
+    const r = await fetch(`${base}/settings`, { headers: token ? { 'X-Personal-OS-Token': token } : {} })
     if (!r.ok) return undefined
     const s = (await r.json()) as { gatherShortcut?: string }
     return s.gatherShortcut?.trim() || undefined
@@ -264,7 +265,15 @@ process.on('unhandledRejection', (e) => console.error('[main] unhandled rejectio
 
 app.on('child-process-gone', (_e, d) => console.error(`[child] ${d.type} gone: ${d.reason}`))
 
-app.whenReady().then(async () => {
+// A second full instance would start a second backend on the same SQLite directory (two schedulers,
+// and its startup recovery would mark the first one's live runs interrupted). Hand focus to the first.
+// An instance pointed at an external backend (PERSONAL_OS_BACKEND_URL: the dev and test setup) spawns
+// none of its own, so it may run beside the main app and does not take the lock.
+const gotLock = !!process.env.PERSONAL_OS_BACKEND_URL || app.requestSingleInstanceLock()
+if (!gotLock) app.quit()
+else app.on('second-instance', () => { if (app.isReady()) showMain() })
+
+if (gotLock) app.whenReady().then(async () => {
   handle('backend:url', () => backendUrl())
   handle('backend:status', () => backendStatus())
   handle('backend:token', () => backendToken())
@@ -319,5 +328,10 @@ app.on('window-all-closed', () => {
 })
 app.on('before-quit', () => {
   stopPageBridge()
-  stopBackend()
 })
+// will-quit fires after every before-quit handler, so pop-outs have persisted their last bounds
+// (which needs the backend's token) before the backend goes away.
+app.on('will-quit', () => stopBackend())
+// A crash or Ctrl-C of the dev run skips before-quit; the backend must not outlive us.
+process.on('exit', () => stopBackend(true))
+for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => { stopBackend(true); app.exit(0) })

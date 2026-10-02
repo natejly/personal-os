@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from 'react'
+import { Component, memo, useEffect, useRef, useState, type ReactNode } from 'react'
 import { AlertCircle, User, Sparkles, Brain, Share2, FileText, Activity, ChevronRight, Lightbulb, RotateCw, GraduationCap } from 'lucide-react'
 import type { Message, RunChanges } from '@shared/types'
 import { useStore } from '../store'
@@ -8,6 +8,23 @@ import MarkdownPreview, { CopyButton } from './MarkdownPreview'
 export { SAFE_MD } from './MarkdownPreview'
 import { traceSummary, fmtMs } from './TraceView'
 import { modelLabel } from '../lib/modelLabel'
+
+/**
+ * One message's body, fenced: a render error in its markdown or tool cards (a null field, a bad
+ * table) would otherwise unmount the whole app, since nothing above the chat catches it.
+ */
+class BodyBoundary extends Component<{ resetKey: string; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false }
+  static getDerivedStateFromError(): { failed: boolean } {
+    return { failed: true }
+  }
+  componentDidUpdate(prev: { resetKey: string }): void {
+    if (prev.resetKey !== this.props.resetKey && this.state.failed) this.setState({ failed: false })
+  }
+  render(): ReactNode {
+    return this.state.failed ? <div className="msg-error"><AlertCircle size={14} /><span>Could not render this message.</span></div> : this.props.children
+  }
+}
 
 /** A reply that called tools can be turned into a candidate skill. The id sent is this message, not the whole chat. */
 function SaveSkill({ conversationId, messageId }: { conversationId: string; messageId: string }): JSX.Element {
@@ -125,12 +142,14 @@ const MessageView = memo(function MessageView({ message, streaming }: { message:
         ) : (
           <div className="markdown">
             {message.reasoning && <Reasoning text={message.reasoning} live={streaming && !message.content} />}
-            {message.tool_events && message.tool_events.length > 0 && <ToolEvents events={message.tool_events} conversationId={message.conversation_id} />}
-            {message.content ? (
-              <MarkdownPreview source={message.content} streaming={streaming} />
-            ) : streaming && !message.reasoning && !message.tool_events?.some((t) => t.pending) ? (
-              <span className="thinking"><span /><span /><span /></span>
-            ) : null}
+            <BodyBoundary resetKey={message.id}>
+              {message.tool_events && message.tool_events.length > 0 && <ToolEvents events={message.tool_events} conversationId={message.conversation_id} />}
+              {message.content ? (
+                <MarkdownPreview source={message.content} streaming={streaming} />
+              ) : streaming && !message.reasoning && !message.tool_events?.some((t) => t.pending) ? (
+                <span className="thinking"><span /><span /><span /></span>
+              ) : null}
+            </BodyBoundary>
             {streaming && message.content && <span className="cursor" />}
           </div>
         )}

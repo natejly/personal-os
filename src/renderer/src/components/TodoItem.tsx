@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Check, Trash2, Calendar, CalendarPlus, ExternalLink, Repeat } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
@@ -50,11 +50,14 @@ export default function TodoItem({ todo, showProject = true, compact = false }: 
   const google = useStore((s) => s.google)
   const [editing, setEditing] = useState(false)
   const [title, setTitle] = useState(todo.title)
+  // The title as it was when editing began: a rename that lands meanwhile (sync, the agent) is not
+  // something this edit changed, so it is neither overwritten nor reverted by a no-op commit.
+  const startTitle = useRef(todo.title)
+  const beginEdit = (): void => { startTitle.current = todo.title; setTitle(todo.title); setEditing(true) }
   const due = dueLabel(todo.due)
   const commit = (): void => {
     setEditing(false)
-    if (title.trim() && title !== todo.title) void updateTodo(todo.id, { title: title.trim() })
-    else setTitle(todo.title)
+    if (title.trim() && title !== startTitle.current) void updateTodo(todo.id, { title: title.trim() })
   }
   const toCalendar = async (): Promise<void> => {
     try {
@@ -74,9 +77,9 @@ export default function TodoItem({ todo, showProject = true, compact = false }: 
       </button>
       <div className="todo-main">
         {editing ? (
-          <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') { setTitle(todo.title); setEditing(false) } }} />
+          <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} onBlur={commit} onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') { setTitle(startTitle.current); setEditing(false) } }} />
         ) : (
-          <span className="todo-title" role="button" tabIndex={0} onClick={() => setEditing(true)} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setEditing(true) } }}>{todo.title}</span>
+          <span className="todo-title" role="button" tabIndex={0} onClick={beginEdit} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); beginEdit() } }}>{todo.title}</span>
         )}
         {!compact && todo.notes && <span className="todo-notes">{todo.notes}</span>}
       </div>

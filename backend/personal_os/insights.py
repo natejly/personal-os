@@ -118,6 +118,19 @@ CREATE TABLE IF NOT EXISTS activity_patterns (
 
 # ---------------------------------------------------------------- small helpers
 
+def _model_conf(value: Any, default: float = 0.5) -> float:
+    """A model-supplied confidence, clamped to 0..1; a word like "high" falls back to `default`."""
+    try:
+        return max(0.0, min(1.0, float(value if value is not None else default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _items(value: Any, cap: int) -> list[dict[str, Any]]:
+    """The dict items of a model-supplied list. Anything else in there is skipped, not fatal."""
+    return [x for x in value if isinstance(x, dict)][:cap] if isinstance(value, list) else []
+
+
 def _day_of(ts: float) -> str:
     return datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
 
@@ -964,10 +977,14 @@ class Insights:
         if not (data.get("suggestions") or data.get("habits")):
             data = fallback(pat, taken)
 
-        habits = self._persist_habits(data.get("habits") or [], bool(cfg["autoMemory"]),
-                                     float(cfg["memoryConfidence"]))
-        sugs = self._persist_suggestions(data.get("suggestions") or [], int(cfg["maxSuggestions"]))
-        self.last_run = now()
+        try:
+            habits = self._persist_habits(data.get("habits") or [], bool(cfg["autoMemory"]),
+                                         float(cfg["memoryConfidence"]))
+            sugs = self._persist_suggestions(data.get("suggestions") or [], int(cfg["maxSuggestions"]))
+        finally:
+            # Even when persisting blows up: otherwise maybe_refresh retries (and bills an LLM
+            # call) on every pass of the loop.
+            self.last_run = now()
         log.info("insights: %d patterns, %d habits, %d suggestions", len(pat.get("patterns") or []),
                  len(habits), len(sugs))
         return {"ok": True, "new_habits": habits, "new_suggestions": sugs, **self.overview()}
@@ -1021,41 +1038,50 @@ class Insights:
         """
         out: list[dict[str, Any]] = []
         existing = {h["key"]: h for h in self.list_habits()}
-        for raw in items[:10]:
+        seen: set[str] = set()
+        for raw in _items(items, 10):
             key = _slug(str(raw.get("key") or raw.get("statement") or ""), "habit-" if not str(raw.get("key") or "").startswith("habit") else "")
             statement = str(raw.get("statement") or "").strip()
-            if not key or len(statement) < 8:
+            if not key or len(statement) < 8 or key in seen:
                 continue
+            seen.add(key)
             kind = str(raw.get("kind") or "preference")
             kind = kind if kind in ("fact", "preference", "goal", "note") else "preference"
-            conf = max(0.0, min(1.0, float(raw.get("confidence") or 0.5)))
-            ev = [str(x) for x in (raw.get("evidence") or [])][:6]
+            conf = _model_conf(raw.get("confidence"))
+            ev = [str(x) for x in (raw.get("evidence") if isinstance(raw.get("evidence"), list) else [])][:6]
             prev = existing.get(key)
             mem_id = prev["memory_id"] if prev else ""
 
+            created_mem = ""
             if auto_memory and conf >= min_conf:
                 if mem_id and self.memories.get(mem_id):
                     self.memories.update(mem_id, {"content": statement, "kind": kind})
                 else:
-                    mem_id = self.memories.create(None, statement, kind=kind, source=MEMORY_SOURCE)["id"]
+                    mem_id = created_mem = self.memories.create(None, statement, kind=kind, source=MEMORY_SOURCE)["id"]
             elif mem_id and not auto_memory:
                 self._drop_memory(mem_id)
                 mem_id = ""
 
             t = now()
-            with self.db.tx() as c:
-                if prev:
-                    c.execute(
-                        "UPDATE activity_habits SET statement=?,kind=?,confidence=?,support=support+1,"
-                        "evidence=?,memory_id=?,last_seen=? WHERE key=?",
-                        (statement, kind, conf, json.dumps(ev), mem_id, t, key),
-                    )
-                else:
-                    c.execute(
-                        "INSERT INTO activity_habits(id,key,statement,kind,confidence,support,evidence,"
-                        "memory_id,first_seen,last_seen) VALUES(?,?,?,?,?,1,?,?,?,?)",
-                        (new_id(), key, statement, kind, conf, json.dumps(ev), mem_id, t, t),
-                    )
+            try:
+                with self.db.tx() as c:
+                    if prev:
+                        c.execute(
+                            "UPDATE activity_habits SET statement=?,kind=?,confidence=?,support=support+1,"
+                            "evidence=?,memory_id=?,last_seen=? WHERE key=?",
+                            (statement, kind, conf, json.dumps(ev), mem_id, t, key),
+                        )
+                    else:
+                        c.execute(
+                            "INSERT INTO activity_habits(id,key,statement,kind,confidence,support,evidence,"
+                            "memory_id,first_seen,last_seen) VALUES(?,?,?,?,?,1,?,?,?,?)",
+                            (new_id(), key, statement, kind, conf, json.dumps(ev), mem_id, t, t),
+                        )
+            except Exception:
+                # A memory no habit owns could never be forgotten from the habit panel.
+                if created_mem:
+                    self._drop_memory(created_mem)
+                raise
             sup = str(raw.get("supersedes") or "").strip()
             if sup and sup != key and sup in existing:
                 self.forget_habit(existing[sup]["id"], drop_memory=True)
@@ -1101,11 +1127,15 @@ class Insights:
         """Upsert by key. A status the user set wins over anything a refresh produces."""
         out: list[dict[str, Any]] = []
         existing = {r["key"]: r for r in self.list_suggestions(include_all=True)}
-        for raw in items[: max(1, cap)]:
+        seen: set[str] = set()
+        for raw in _items(items, max(1, cap)):
             title = str(raw.get("title") or "").strip()[:120]
             if not title:
                 continue
             key = _slug(str(raw.get("key") or title), "sug-" if not str(raw.get("key") or "").startswith("sug") else "")
+            if key in seen:
+                continue
+            seen.add(key)
             kind = str(raw.get("kind") or "automation")
             kind = kind if kind in ("automation", "platform", "hygiene") else "automation"
             action = raw.get("action") if isinstance(raw.get("action"), dict) else {}
@@ -1117,8 +1147,8 @@ class Insights:
                 kind, title, str(raw.get("detail") or "")[:1200], str(raw.get("why") or "")[:600],
                 str(raw.get("impact") or "")[:200],
                 (str(raw.get("effort") or "low") if str(raw.get("effort") or "low") in ("low", "medium", "high") else "low"),
-                json.dumps(action), json.dumps([str(x) for x in (raw.get("evidence") or [])][:8]),
-                max(0.0, min(1.0, float(raw.get("confidence") or 0.5))),
+                json.dumps(action), json.dumps([str(x) for x in (raw.get("evidence") if isinstance(raw.get("evidence"), list) else [])][:8]),
+                _model_conf(raw.get("confidence")),
             )
             prev = existing.get(key)
             with self.db.tx() as c:
@@ -1197,6 +1227,16 @@ class Insights:
     def delete(self, sid: str) -> None:
         with self.db.tx() as c:
             c.execute("DELETE FROM activity_suggestions WHERE id=?", (sid,))
+
+    def purge_patterns(self, older_than_seconds: float = 0.0) -> None:
+        """Drop the stored pattern snapshot. It holds raw window titles (the recurring-window
+        pattern), so it must not outlive the events it was mined from: 0 clears it now, a positive
+        value clears it once the snapshot is that old."""
+        with self.db.tx() as c:
+            if older_than_seconds <= 0:
+                c.execute("DELETE FROM activity_patterns")
+            else:
+                c.execute("DELETE FROM activity_patterns WHERE updated_at < ?", (now() - older_than_seconds,))
 
     def purge(self, *, everything: bool = False, keep_days: float = 90.0) -> dict[str, int]:
         """Part of the activity purge, so 'delete everything' really does mean everything."""

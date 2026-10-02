@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertTriangle, Check, Send, Undo2, X } from 'lucide-react'
 import { api, verificationMessage } from '../lib/api'
 import { useStore } from '../store'
@@ -16,12 +16,25 @@ export default function PendingSends(): JSX.Element | null {
   const toast = useStore((s) => s.toast)
   const googleConnected = useStore((s) => s.google?.connected ?? false)
 
-  const refresh = useCallback(async (): Promise<void> => {
+  // `issued` numbers each request and `applied` is the newest one shown, so a slow older response
+  // cannot overwrite a newer one; `inflight` lets the 1s tick skip rather than stack requests.
+  const issued = useRef(0)
+  const applied = useRef(0)
+  const inflight = useRef(0)
+  const refresh = useCallback(async (opts: { tick?: boolean } = {}): Promise<void> => {
+    if (opts.tick && inflight.current > 0) return
+    const mine = ++issued.current
+    inflight.current++
     try {
       const r = await api.outbox.list()
-      setSends(r.sends)
+      if (mine > applied.current) {
+        applied.current = mine
+        setSends(r.sends)
+      }
     } catch {
       /* a missing outbox is not worth a toast */
+    } finally {
+      inflight.current--
     }
   }, [])
 
@@ -37,7 +50,7 @@ export default function PendingSends(): JSX.Element | null {
     if (!live) return
     const t = setInterval(() => {
       setSends((rows) => rows.map((r) => (r.status === 'holding' ? { ...r, seconds_left: Math.max(0, r.seconds_left - 1) } : r)))
-      void refresh()
+      void refresh({ tick: true })
     }, 1000)
     return (): void => clearInterval(t)
   }, [live, refresh])

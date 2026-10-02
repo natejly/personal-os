@@ -22,6 +22,8 @@ DEFAULT_COEFFS: dict[str, Any] = {
     "age_max_days": 365,
     "notes": 1.0 * 0.8,
     "project": 1.0,
+    "blocked": -5.0,   # waiting on an open todo: not actionable yet
+    "blocking": 1.5,   # others wait on this one
 }
 
 
@@ -94,11 +96,16 @@ def _due_ramp(days_until: int) -> float:
     return 0.2 + 0.8 * (14 - days_until) / 21
 
 
+def urgency_of(todo: dict[str, Any], today: date) -> float:
+    """urgency() with the dependency counts the store attached to the row."""
+    return urgency(todo, today, todo.get("blocked_count") or 0, todo.get("blocking_count") or 0)
+
+
 def urgency(todo: dict[str, Any], today: date, blocked_count: int = 0, blocking_count: int = 0,
             coeffs: dict[str, Any] | None = None) -> float:
     """Explainable priority number; higher means do it sooner. Done todos score 0.
 
-    blocked_count / blocking_count are accepted for when dependencies exist; they carry no weight yet.
+    A todo waiting on an open one (blocked_count) is pushed down; one that others wait on (blocking_count) is pulled up.
     """
     c = coeffs or DEFAULT_COEFFS
     if todo.get("done"):
@@ -115,4 +122,8 @@ def urgency(todo: dict[str, Any], today: date, blocked_count: int = 0, blocking_
         x += c["notes"]
     if todo.get("project_id"):
         x += c["project"]
+    if blocked_count:
+        x += c["blocked"]
+    if blocking_count:
+        x += c["blocking"]
     return round(x, 3)

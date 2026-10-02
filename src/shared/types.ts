@@ -683,6 +683,14 @@ export interface TodoRepeat {
   mode: 'from_due' | 'from_completion'
 }
 
+export interface TodoFilter {
+  id: string
+  name: string
+  tag?: string
+  q?: string
+  project_id?: string
+}
+
 export interface Todo {
   id: string
   project_id: string | null
@@ -704,6 +712,14 @@ export interface Todo {
   estimate_min?: number | null
   /** Weighted urgency score; only present on `?sort=urgency` lists. */
   urgency?: number
+  /** Lowercase labels; filter with `?tag=`. */
+  tags?: string[]
+  /** Set on a subtask; the list nests it under this todo. */
+  parent_id?: string | null
+  /** Ids of open todos this one waits on. */
+  depends_on?: string[]
+  blocked_count?: number
+  blocking_count?: number
   created_at: number
   updated_at: number
   completed_at: number | null

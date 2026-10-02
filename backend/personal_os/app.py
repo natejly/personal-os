@@ -1738,6 +1738,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
 
             async def run_one(name: str, args: dict[str, Any], ctx: dict[str, Any]) -> Any:
                 async with sem:
+                    if stop.is_set():  # Stop pressed while this waited its turn: the read never starts
+                        return {"error": "Stopped by the user before this call ran; it was not executed."}
                     return await toolbox.call(name, args, ctx)
 
             for c, args in seg:
@@ -2399,6 +2401,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     tool_schemas = _schemas()
                 if tool_ctx.pop("plan_changed", None):
                     yield "plan", {"conversation_id": conv_id, "steps": (work_plans.get(conv_id) or {}).get("steps") or []}
+            # Warmed reads nobody consumed (Stop, a loop break) are cancelled and reaped now, not at run end.
+            pending = [t for t in warm_tasks if not t.done()]
+            for t in pending:
+                t.cancel()
+            await asyncio.gather(*warm_tasks, return_exceptions=True)
+            warm_tasks.clear()
             if partial == "loop":
                 async for chunk in _final_round():
                     yield chunk

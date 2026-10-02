@@ -5708,6 +5708,7 @@ class MeetingConfigIn(BaseModel):
     enhanceModel: str | None = None
     maxTranscriptChars: int | None = None
     keepAudio: bool | None = None
+    silencePauseMinutes: int | None = None
     maxAudioBytes: int | None = None
     redactSecrets: bool | None = None
     injectContext: bool | None = None

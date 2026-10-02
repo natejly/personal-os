@@ -659,19 +659,6 @@ def test_an_ordinary_revision_is_stale_after_an_append_is_accepted() -> None:
     assert full["status"] == "pending" and full["stale"] is True and full["stat_vs_current"] is not None
 
 
-if __name__ == "__main__":
-    failed = 0
-    for name, fn in list(globals().items()):
-        if name.startswith("test_") and callable(fn):
-            try:
-                fn()
-                print(f"ok   {name}")
-            except Exception as e:  # noqa: BLE001
-                failed += 1
-                print(f"FAIL {name}: {type(e).__name__}: {e}")
-    sys.exit(1 if failed else 0)
-
-
 # ---------------------------------------------------------------- silence notice and auto-pause
 
 
@@ -717,3 +704,21 @@ def test_silent_for_and_the_silence_pause_use_the_clock_and_only_pause() -> None
         assert not sess.paused                                               # 0 disables
     finally:
         meetings.now = real                                                  # type: ignore[assignment]
+
+
+def test_the_config_route_model_keeps_silence_pause_minutes() -> None:
+    from personal_os.app import MeetingConfigIn
+    assert MeetingConfigIn(silencePauseMinutes=3).model_dump(exclude_none=True) == {"silencePauseMinutes": 3}
+
+
+if __name__ == "__main__":
+    failed = 0
+    for name, fn in list(globals().items()):
+        if name.startswith("test_") and callable(fn):
+            try:
+                fn()
+                print(f"ok   {name}")
+            except Exception as e:  # noqa: BLE001
+                failed += 1
+                print(f"FAIL {name}: {type(e).__name__}: {e}")
+    sys.exit(1 if failed else 0)

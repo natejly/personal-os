@@ -2333,7 +2333,8 @@ class MeetingService:
                 self._emit("status", meeting_id, status="error", error=str(res["error"])[:300])
             # The row finish_segment RETURNS, never `res["text"]`: the stored row is the one that
             # went through the credential scrubber.
-            if res["state"] == "done" and (res["text"] or "").strip():
+            # A failed clip is not silence: the user may be talking while transcription lags.
+            if (res["state"] == "done" and (res["text"] or "").strip()) or (res["error"] and not res.get("evicted")):
                 self._heard.setdefault(meeting_id, {})[channel] = now()
             if row is not None and row.get("state") in ("done", "empty", "failed"):
                 self._emit("segment", meeting_id, segment=row)

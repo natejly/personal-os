@@ -211,7 +211,8 @@ test('the held tail knows when it is behind the row', () => {
 const row = (id: string, status: MeetingStatus): Meeting => ({
   id, title: id, project_id: null, status, template: 'general', notes_preview: '', words: 0,
   segment_count: 0, has_pending: false, duration_ms: 0, attendee_count: 2, started_at: null,
-  scheduled_start: null, ended_at: null, updated_at: 1700000000, error: ''
+  scheduled_start: null, ended_at: null, updated_at: 1700000000, error: '',
+  doc_id: null, doc_mode: null, summary_revision_id: null
 })
 const candidate = (eventId: string, meetingId: string | null): MeetingCandidate => ({
   event_id: eventId, calendar_id: 'primary', title: eventId, start: '2026-10-01T10:00:00Z',

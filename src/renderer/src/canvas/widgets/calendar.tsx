@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type DragEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react'
 import { Calendar as CalIcon, ChevronLeft, ChevronRight, Plus } from 'lucide-react'
 import type { CalendarEvent, DragKind, Todo } from '@shared/types'
 import { useStore } from '../../store'
@@ -47,6 +47,10 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
     else setEvents(readView<CalendarEvent[]>(cacheKey) ?? [])
   }
 
+  // Newest reload wins: one started for a range the widget has since left must not paint (the
+  // poller effect below bumps it whenever the range changes).
+  const reloadSeq = useRef(0)
+
   useEffect(() => {
     if (!live) return
     void useStore.getState().refreshTodos('all', false)
@@ -54,6 +58,7 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
 
   // Off-screen, minimized or zoomed out: stop the poller so a hidden window does not hit Google.
   useEffect(() => {
+    reloadSeq.current++
     if (!live || !connected || query == null) return
     if (!query) { setEvents([]); return }
     let alive = true
@@ -77,9 +82,10 @@ const CalendarWidget = ({ window: win, live, onConfig }: WidgetProps): JSX.Eleme
 
   const reload = async (): Promise<void> => {
     if (!query) { setEvents([]); return }
+    const mine = ++reloadSeq.current
     const list = mode === 'agenda' ? await api.google.calendar(span, query) : await api.google.calendarRange(startIso, span, query)
     writeView(calendarViewKey(mode === 'agenda' ? 'now' : startIso, span, query), list)
-    setEvents(list)
+    if (reloadSeq.current === mine) setEvents(list)
   }
 
   const dropTodo = async (todoId: string, day: string, hour: number | null): Promise<void> => {

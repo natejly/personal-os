@@ -33,7 +33,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from .sandbox import IMAGE_EXT, MAX_IMAGE_BYTES
+from .sandbox import IMAGE_EXT, MAX_IMAGE_BYTES, capped_run
 
 WORKSPACE = "/workspace"
 DESK_MOUNT = "/workspace/desk"  # where an active desk's own workspace appears inside its container
@@ -55,8 +55,19 @@ class SandboxError(Exception):
     """A clean, single-line failure for the tool error envelope."""
 
 
-def _run(argv: list[str], *, input: bytes | None = None, timeout: float = 60) -> subprocess.CompletedProcess[bytes]:
-    return subprocess.run(argv, input=input, capture_output=True, timeout=timeout)
+EXEC_HARD_CAP = 4_000_000   # a command that prints more than this is killed (`yes` with a 600s timeout)
+READ_HARD_CAP = 8_000_000   # file reads: above the largest image sandbox_read_file will show
+
+
+def _run(argv: list[str], *, input: bytes | None = None, timeout: float = 60,
+         hard_cap: int = READ_HARD_CAP, keep: int | None = None) -> subprocess.CompletedProcess[bytes]:
+    """subprocess.run, but the pipes are read through a byte cap instead of buffered whole."""
+    r = capped_run(argv, input=input, timeout=timeout, hard_cap=hard_cap, keep=keep)
+    if r.timed_out:
+        raise subprocess.TimeoutExpired(argv, timeout, output=r.stdout, stderr=r.stderr)
+    cp = subprocess.CompletedProcess(argv, r.returncode if r.returncode is not None else -1, r.stdout, r.stderr)
+    cp.truncated = r.truncated  # type: ignore[attr-defined]
+    return cp
 
 
 def _line(b: bytes, cap: int = 300) -> str:
@@ -123,6 +134,10 @@ class Sandboxes:
         self._reaper: threading.Thread | None = None
         self._reaper_stop = threading.Event()
         self._imported: set[str] = set()     # container names that hold library-file text
+
+    def _cap_kw(self) -> dict[str, Any]:
+        """exec's tighter output cap; an injected test runner takes no such arguments."""
+        return {"hard_cap": EXEC_HARD_CAP, "keep": 4 * STDOUT_CAP} if self._run is _run else {}
 
     def _bin(self) -> str:
         return str(self.settings().get("sandboxRuntime") or "docker")
@@ -382,7 +397,8 @@ class Sandboxes:
         self._busy[name] = self._busy.get(name, 0) + 1
         try:
             p = self._run([self._bin(), "exec", "-i", "-w", WORKSPACE, name,
-                           "timeout", "-k", "5", str(t), shell, "-c", command], timeout=t + 20)
+                           "timeout", "-k", "5", str(t), shell, "-c", command], timeout=t + 20,
+                           **self._cap_kw())
         except subprocess.TimeoutExpired:
             return {"stdout": "", "stderr": f"Timed out after {t}s", "exit_code": -1, "timed_out": True}
         finally:
@@ -393,6 +409,10 @@ class Sandboxes:
                "exit_code": p.returncode, "timed_out": p.returncode == 124}
         if p.returncode == 124:
             out["stderr"] = (out["stderr"] + f"\nTimed out after {t}s").strip()
+        if getattr(p, "truncated", False):
+            out["truncated"] = True
+            out["stderr"] = (out["stderr"] + f"\nOutput passed {EXEC_HARD_CAP // 1_000_000} MB and the command was "
+                                             "stopped; only the end is shown.").strip()
         if self._net.get(name):
             out["network"] = True
         return out

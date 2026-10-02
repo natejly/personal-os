@@ -21,7 +21,7 @@ from typing import Any
 os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="planmode-"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from personal_os.plans import (MUTATING, PLAN_SAFE_DANGER, PLAN_TOOL,  # noqa: E402
+from personal_os.plans import (MUTATING, PLAN_SAFE_DANGER, PLAN_TOOL, plan_voided_by_taint,  # noqa: E402
                                taint_expected)
 
 passed = 0
@@ -61,6 +61,15 @@ def test_an_unknown_tier_is_treated_as_consequential() -> None:
 
 
 # ---------------------------------------------------------------- taint_expected
+
+
+def test_unexpected_taint_voids_a_web_fetch_as_well_as_mail() -> None:
+    check(plan_voided_by_taint("network", True, False) is True, "an unplanned fetch asks again")
+    check(plan_voided_by_taint("external", True, False) is True, "an unplanned send asks again")
+    check(plan_voided_by_taint("schedules", True, False) is True, "an unplanned schedule asks again")
+    check(plan_voided_by_taint("network", True, True) is False, "a fetch the plan predicted still stands")
+    check(plan_voided_by_taint("network", False, False) is False, "a clean reply does not void the plan")
+    check(plan_voided_by_taint("safe", True, False) is False, "a plain read is not what the plan was authorising")
 
 
 def test_a_reply_that_read_nothing_untrusted_keeps_its_pre_approval() -> None:

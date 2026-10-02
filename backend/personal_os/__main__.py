@@ -26,8 +26,26 @@ def load_dotenv() -> None:
         break
 
 
+def watch_parent() -> None:
+    """Exit when the launching process dies, so a force-quit or crash cannot orphan the backend."""
+    import threading
+    import time
+
+    parent = os.getppid()
+
+    def loop() -> None:
+        while True:
+            time.sleep(1.5)
+            if os.getppid() != parent:
+                os._exit(0)
+
+    threading.Thread(target=loop, name="parent-watchdog", daemon=True).start()
+
+
 def main() -> None:
     load_dotenv()
+    if os.environ.get("PERSONAL_OS_PARENT_WATCH") == "1":
+        watch_parent()
     p = argparse.ArgumentParser(description="Grain backend")
     p.add_argument("--port", type=int, default=int(os.environ.get("PERSONAL_OS_PORT", "8765")))
     p.add_argument("--host", default="127.0.0.1")

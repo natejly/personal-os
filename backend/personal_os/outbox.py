@@ -43,6 +43,12 @@ from . import verify
 
 log = logging.getLogger(__name__)
 
+
+def _first_line(e: BaseException) -> str:
+    """First line of an exception's message; the type name when the message is empty."""
+    lines = str(e).strip().splitlines()
+    return lines[0] if lines else type(e).__name__
+
 # The user can tune the hold, but not out of the range that makes it useful: shorter than a
 # minute is not enough time to notice a mistake, longer than two feels broken.
 HOLD_MIN, HOLD_MAX = 60, 120
@@ -201,11 +207,21 @@ class Outbox:
         return {"expired": expired, "interrupted": interrupted, "holding": int(held)}
 
     def _claim_due(self) -> list[dict[str, Any]]:
-        """Take ownership of every due row. The UPDATE is the handshake with cancel()."""
+        """Take ownership of the oldest due row that is not stale. The UPDATE is the handshake with cancel().
+
+        One row per call: a delivery can take seconds (read-back retries), and every row claimed
+        up front would already be past its Undo while it waits its turn.
+        """
         claimed: list[dict[str, Any]] = []
+        now = self.clock()
         with self.db.tx() as c:
-            due = c.execute("SELECT id FROM pending_sends WHERE status = ? AND send_after <= ? ORDER BY send_after",
-                            (HOLDING, self.clock())).fetchall()
+            # A laptop that slept past the staleness window must not fire the mail hours later; the
+            # same rule resume() applies at startup, now applied on every tick.
+            c.execute("UPDATE pending_sends SET status = ?, error = ? WHERE status = ? AND send_after < ?",
+                      (EXPIRED, "This was due while the computer was asleep or the backend was not running, and it "
+                                "was too old to send unattended. Nothing was sent.", HOLDING, now - STALE_AFTER))
+            due = c.execute("SELECT id FROM pending_sends WHERE status = ? AND send_after <= ? ORDER BY send_after LIMIT 1",
+                            (HOLDING, now)).fetchall()
             for r in due:
                 if c.execute("UPDATE pending_sends SET status = ? WHERE id = ? AND status = ?",
                              (SENDING, r["id"], HOLDING)).rowcount:
@@ -214,10 +230,13 @@ class Outbox:
         return claimed
 
     async def run_due(self) -> int:
-        rows = await asyncio.to_thread(self._claim_due)
-        for row in rows:
-            await asyncio.to_thread(self._deliver, row)
-        return len(rows)
+        n = 0
+        while True:
+            rows = await asyncio.to_thread(self._claim_due)
+            if not rows:
+                return n
+            await asyncio.to_thread(self._deliver, rows[0])
+            n += 1
 
     def _deliver(self, row: dict[str, Any]) -> None:
         try:
@@ -226,7 +245,7 @@ class Outbox:
             log.warning("outbox: send %s failed: %s", row["id"], e)
             with self.db.tx() as c:
                 c.execute("UPDATE pending_sends SET status = ?, resolved_at = ?, error = ? WHERE id = ?",
-                          (FAILED, self.clock(), f"{type(e).__name__}: {str(e).splitlines()[0][:300]}", row["id"]))
+                          (FAILED, self.clock(), f"{type(e).__name__}: {_first_line(e)[:300]}", row["id"]))
             return
         v = out.get("verification")
         with self.db.tx() as c:

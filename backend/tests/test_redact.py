@@ -128,6 +128,10 @@ def test_url_userinfo_and_query_secrets_are_scrubbed() -> None:
     frag = "https://app.example/cb#access_token=supersecretvalue"
     assert "supersecretvalue" not in redact.scrub(frag)
     assert "app.example" in redact.scrub(frag)
+    upper = redact.scrub_secrets("HTTPS://ada:hunter2@bank.example/login?TOKEN=abc123")
+    assert "hunter2" not in upper
+    assert "abc123" not in upper
+    assert "bank.example" in upper
 
 
 if __name__ == "__main__":

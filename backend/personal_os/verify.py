@@ -55,8 +55,8 @@ class NotVisible(Exception):
 def is_missing(e: BaseException) -> bool:
     """True when a Google client error means "no such object" rather than "call failed"."""
     status = getattr(getattr(e, "resp", None), "status", None)
-    if status in (404, 410):
-        return True
+    if status is not None:
+        return status in (404, 410)  # a real status decides; a 5xx whose text mentions "410" is not "gone"
     s = str(e)
     return "404" in s or "410" in s or "not found" in s.lower()
 
@@ -144,7 +144,7 @@ def check(what: str, read_back: Callable[[], Any], *, compare: Callable[[Any], d
         except NotVisible as e:
             present, last_error, last_reason = False, str(e), "not_visible"
         except Exception as e:  # noqa: BLE001 - a failed read is a failed proof, not a crash
-            present, last_error = False, f"{type(e).__name__}: {str(e).splitlines()[0][:200]}"
+            present, last_error = False, f"{type(e).__name__}: {(str(e).strip().splitlines() or [type(e).__name__])[0][:200]}"
             last_reason = "not_visible" if is_missing(e) else "read_failed"
             if last_reason == "read_failed":
                 continue  # transient: retry, and report read_failed if it persists

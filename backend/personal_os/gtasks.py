@@ -27,6 +27,8 @@ from .todos import Todos
 log = logging.getLogger(__name__)
 
 DEFAULT_CONFIG: dict[str, Any] = {"enabled": True, "tasklist": "@default", "intervalMinutes": 5}
+# Which account and task list the todos' links were made against.
+BINDING_KEY = "googleTasksSyncBound"
 # A poke waits this long before syncing so a burst of edits becomes one pass.
 POKE_DEBOUNCE = 2.0
 
@@ -65,6 +67,7 @@ class TasksSync:
         self._event: asyncio.Event | None = None
         self._loop_ref: asyncio.AbstractEventLoop | None = None
         self._syncing = False
+        self._skipped: list[str] = []
 
     # ---- config / status ----
     def config(self) -> dict[str, Any]:
@@ -124,9 +127,14 @@ class TasksSync:
         with self._lock:
             self._syncing = True
             try:
-                counts = self._merge(self.config().get("tasklist") or "@default")
+                tasklist = self.config().get("tasklist") or "@default"
+                self._rebind(tasklist)
+                self._skipped = []
+                counts = self._merge(tasklist)
                 self.last_sync = time.time()
-                self.last_error = None
+                # A todo Google refused is reported, but it no longer stops the rest syncing.
+                self.last_error = (f"{len(self._skipped)} todo(s) could not sync: {self._skipped[0]}"
+                                   if self._skipped else None)
                 self.last_result = counts
                 return counts
             except Exception as e:  # noqa: BLE001
@@ -134,6 +142,29 @@ class TasksSync:
                 raise
             finally:
                 self._syncing = False
+
+    def _rebind(self, tasklist: str) -> None:
+        """Unlink every todo when the sync target is no longer the one the links belong to.
+
+        A linked todo whose Google Task is missing is deleted locally. Pointed at another
+        task list, or at another Google account, every link is "missing" - so without this
+        the first pass after the change wiped the whole local list.
+        """
+        account = str((self.get_settings().get("googleToken") or {}).get("email") or "")
+        target = {"account": account, "tasklist": tasklist}
+        bound = self.get_settings().get(BINDING_KEY) or {}
+        if bound == target:
+            return
+        moved = bool(bound) and (
+            bound.get("tasklist") != tasklist
+            # An unknown address on either side proves nothing: userinfo is best effort.
+            or bool(account and bound.get("account") and bound["account"] != account)
+        )
+        if moved:
+            n = self.todos.forget_sync_links()
+            log.info("google tasks sync: target changed, unlinked %d todo(s)", n)
+        if moved or not bound or (account and not bound.get("account")):
+            self.set_settings({BINDING_KEY: target})
 
     def _merge(self, tasklist: str) -> dict[str, int]:
         counts = {"pulled": 0, "pushed": 0, "created_local": 0, "created_remote": 0,
@@ -170,7 +201,13 @@ class TasksSync:
             if remote_changed and (not local_changed or _remote_wins(rt, td)):
                 counts["pulled"] += self._pull(td, rt)
             elif local_changed:
-                self._push(td, eid, tasklist)
+                try:
+                    self._push(td, eid, tasklist)
+                except GoogleNotConnected:
+                    raise
+                except Exception as e:  # noqa: BLE001 - one refused todo must not block the rest
+                    self._skip(td, e)
+                    continue
                 counts["pushed"] += 1
 
         # Remote tasks nothing points at yet -> new local todos. Untitled ones are usually
@@ -189,10 +226,25 @@ class TasksSync:
         for td in self.todos.all_for_sync():
             if td.get("external_id"):
                 continue
-            rt = self.google.tasks_insert(_remote_body(td), tasklist)
-            self.todos.set_sync_state(td["id"], rt["id"], rt.get("updated"), td["updated_at"])
+            try:
+                rt = self.google.tasks_insert(_remote_body(td), tasklist)
+            except GoogleNotConnected:
+                raise
+            except Exception as e:  # noqa: BLE001 - one refused todo must not block the rest
+                self._skip(td, e)
+                continue
+            if not self.todos.set_sync_state(td["id"], rt["id"], rt.get("updated"), td["updated_at"]):
+                # Deleted here while the insert was in flight. Left alone, the new task would
+                # come back on the next pass as a todo the user had already removed.
+                with contextlib.suppress(Exception):
+                    self.google.tasks_delete(rt["id"], tasklist)
+                continue
             counts["created_remote"] += 1
         return counts
+
+    def _skip(self, td: dict[str, Any], e: Exception) -> None:
+        log.warning("google tasks sync: skipped todo %s: %s", td["id"], e)
+        self._skipped.append(f"{(td.get('title') or '(untitled)')[:60]}: {str(e)[:160] or type(e).__name__}")
 
     def _pull(self, td: dict[str, Any], rt: dict[str, Any]) -> int:
         patch: dict[str, Any] = {}

@@ -15,10 +15,13 @@ import mimetypes
 import os
 import resource
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
+from collections import deque
 from typing import Any
 
 IMAGE_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
@@ -239,6 +242,104 @@ def _limits() -> None:
             pass
 
 
+HARD_CAP = 4_000_000   # bytes of output after which a run is killed: `yes` must not grow the backend by gigabytes
+TAIL_KEEP = 64_000     # bytes kept per stream; the callers show the last ~20k characters
+
+
+class CappedRun:
+    """What capped_run saw: raw bytes (the tail of each stream), the exit code and why it stopped."""
+    def __init__(self) -> None:
+        self.stdout = b""
+        self.stderr = b""
+        self.returncode: int | None = None
+        self.timed_out = False
+        self.truncated = False   # output went past the cap and the child was killed
+
+
+def capped_run(cmd: list[str], *, input: bytes | None = None, timeout: float, hard_cap: int = HARD_CAP,
+               keep: int | None = None, **popen: Any) -> CappedRun:
+    """Run `cmd`, reading both pipes through a byte-capped ring buffer instead of buffering everything.
+
+    Only the last `keep` bytes of each stream are held. Once the two streams together pass `hard_cap` the child
+    (and its process group) is killed and `truncated` is set. On timeout the child is killed too and `timed_out`
+    is set. Never decodes: callers decode with errors="replace".
+    """
+    keep = hard_cap if keep is None else keep
+    res = CappedRun()
+    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE if input is not None else subprocess.DEVNULL,
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True, **popen)
+
+    def kill() -> None:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            try:
+                proc.kill()
+            except OSError:
+                pass
+
+    lock = threading.Lock()
+    total = [0]
+    rings: dict[str, deque[bytes]] = {"out": deque(), "err": deque()}
+    sizes = {"out": 0, "err": 0}
+
+    def pump(name: str, stream: Any) -> None:
+        fd = stream.fileno()
+        while True:
+            try:
+                chunk = os.read(fd, 65536)
+            except OSError:
+                break
+            if not chunk:
+                break
+            with lock:
+                ring = rings[name]
+                ring.append(chunk)
+                sizes[name] += len(chunk)
+                while sizes[name] - len(ring[0]) >= keep:  # drop whole old chunks; the slice below trims the rest
+                    sizes[name] -= len(ring.popleft())
+                total[0] += len(chunk)
+                over = total[0] > hard_cap
+                if over:
+                    res.truncated = True
+            if over:
+                kill()
+                # keep draining so the child is not blocked on a full pipe while it dies
+
+    def feed() -> None:
+        try:
+            assert proc.stdin is not None
+            proc.stdin.write(input or b"")
+            proc.stdin.close()
+        except (OSError, ValueError):
+            pass
+
+    threads = [threading.Thread(target=pump, args=("out", proc.stdout), daemon=True),
+               threading.Thread(target=pump, args=("err", proc.stderr), daemon=True)]
+    if input is not None:
+        threads.append(threading.Thread(target=feed, daemon=True))
+    for t in threads:
+        t.start()
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        res.timed_out = True
+        kill()
+        proc.wait()
+    # A grandchild that kept the pipe open must not hold us here once the leader is gone.
+    for t in threads:
+        t.join(5)
+    for s_ in (proc.stdout, proc.stderr):
+        try:
+            s_.close()
+        except OSError:
+            pass
+    res.returncode = proc.returncode
+    res.stdout = b"".join(rings["out"])[-keep:]
+    res.stderr = b"".join(rings["err"])[-keep:]
+    return res
+
+
 GRAIN_TOOLS_MODULE = "grain_tools.py"
 
 
@@ -309,8 +410,17 @@ def run_python(code: str, timeout: int = 30, python: str | None = None, bridge: 
         cmd = ["sandbox-exec", "-p", _mac_profile(work, py, sock, workspace), *cmd]
     try:
         if bridge is None:
-            p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, timeout=timeout, env=env, preexec_fn=pre)
-            out = {"stdout": p.stdout[-20_000:], "stderr": p.stderr[-8_000:], "exit_code": p.returncode, "timed_out": False}
+            # Byte-capped: `yes` must not grow the backend by gigabytes (capped_run).
+            p = capped_run(cmd, timeout=timeout, keep=TAIL_KEEP, cwd=cwd, env=env, preexec_fn=pre)
+            stdout = p.stdout.decode("utf-8", errors="replace")[-20_000:]
+            stderr = p.stderr.decode("utf-8", errors="replace")[-8_000:]
+            if p.timed_out:
+                out = {"stdout": stdout, "stderr": "Timed out after %ss" % timeout, "exit_code": -1, "timed_out": True}
+            else:
+                out = {"stdout": stdout, "stderr": stderr, "exit_code": p.returncode, "timed_out": False}
+            if p.truncated:
+                out["truncated"] = True
+                out["stderr"] = (out["stderr"] + "\nOutput passed %d MB and the script was stopped; only the end is shown." % (HARD_CAP // 1_000_000)).strip()
         else:
             stdout, stderr, rc, timed_out = _run_paused(cmd, cwd, env, timeout, bridge, pre)
             out = {"stdout": stdout, "stderr": "Timed out after %ss" % timeout if timed_out else stderr[-bridge.stderr_cap:],

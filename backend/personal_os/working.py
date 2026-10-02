@@ -212,7 +212,7 @@ class ToolResults:
             )
         return {"id": rid, "total_chars": total}
 
-    def for_model(self, conversation_id: str, message_id: str | None, tool: str, result: Any) -> str:
+    def for_model(self, conversation_id: str, message_id: str | None, tool: str, result: Any, untrusted: bool = False) -> str:
         """The tool message's content: the result itself when small, a handle when not."""
         from .tools import summarize_result  # local: tools.py imports nothing from here
 
@@ -220,6 +220,9 @@ class ToolResults:
         if len(blob) <= INLINE_CHARS:
             return blob
         shape = shape_of(result)
+        if untrusted:
+            # Reading this blob later has to taint again. Clearing the chat banner does not delete it.
+            shape["untrusted"] = True
         row = self.store(conversation_id, message_id, tool, blob, shape)
         return _dumps({
             "result_id": row["id"], "tool": tool, "total_chars": row["total_chars"], "shape": shape,

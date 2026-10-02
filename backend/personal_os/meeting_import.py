@@ -152,7 +152,12 @@ async def run(svc: Any, meeting_id: str, src_path: Path | str, *, cleanup_src: b
                     "The notes are untouched - fix the transcription route and retry.")
         out = svc.meetings.finalize(meeting_id, transcript, ended_at=started + total,
                                     status="ready", error=note)
+        emit = getattr(svc, "_emit", None)
+        if emit:
+            emit("status", meeting_id, status="ready")
         if cfg.get("enhanceOnStop"):
+            # For a doc-linked row `_enhance_quietly` proposes the summary into the doc instead
+            # (and does nothing for dictation), same as `stop`.
             await svc._enhance_quietly(meeting_id)
         return out
     finally:

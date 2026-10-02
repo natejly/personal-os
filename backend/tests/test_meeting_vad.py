@@ -148,6 +148,49 @@ def test_local_whisper_returns_segment_offsets_and_cleans_up() -> None:
         stt.subprocess.run, stt.whisper_cli_path = real_run, real_cli
 
 
+def _pcm(samples: list[int]) -> bytes:
+    return struct.pack(f"<{len(samples)}h", *samples)
+
+
+def _cut(samples: list[int], **kw: float) -> int | None:
+    args = {"min_seconds": 1.0, "max_seconds": 6.0}
+    args.update(kw)
+    return meeting_vad.find_cut(_pcm(samples), **args)  # type: ignore[arg-type]
+
+
+def test_find_cut_closes_at_a_pause_after_speech() -> None:
+    buf = _tone(RATE * 2) + [0] * int(RATE * 0.6)
+    assert _cut(buf) == len(buf) * 2
+
+
+def test_find_cut_runs_continuous_speech_to_the_cap() -> None:
+    assert _cut(_tone(RATE * 5)) is None
+    assert _cut(_tone(RATE * 6)) == RATE * 6 * 2
+    # An over-long buffer is still cut exactly at the cap, never past it.
+    assert _cut(_tone(RATE * 7)) == RATE * 6 * 2
+
+
+def test_find_cut_ignores_a_pause_shorter_than_the_window() -> None:
+    buf = _tone(RATE * 2) + [0] * int(RATE * 0.3)
+    assert _cut(buf) is None
+
+
+def test_find_cut_waits_for_the_minimum_length() -> None:
+    buf = _tone(RATE) + [0] * int(RATE * 0.6)  # a clean pause, but only 1.6 s in
+    assert _cut(buf, min_seconds=2.0) is None
+    assert _cut(buf, min_seconds=1.0) == len(buf) * 2
+
+
+def test_find_cut_does_not_treat_silence_or_a_steady_hum_as_a_pause() -> None:
+    assert _cut([0] * RATE * 3) is None
+    assert _cut(_noise(RATE * 3, 40)) is None
+
+
+def test_find_cut_a_quiet_room_still_has_pauses() -> None:
+    buf = _noise(RATE, 30) + _tone(RATE * 2, 6000) + _noise(int(RATE * 0.6), 30, seed=2)
+    assert _cut(buf) == len(buf) * 2
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

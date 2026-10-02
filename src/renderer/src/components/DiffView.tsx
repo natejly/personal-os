@@ -122,14 +122,17 @@ export default function DiffView({
     setTimeout(() => setCopied(false), 1200)
   }
 
+  const who = revision.author === 'assistant' ? (revision.tool === 'recording_summary' ? 'Recording summary' : 'Assistant') : 'You'
+
   return (
     <div className={`diff-card ${pending ? 'pending' : ''}`}>
       <header>
         <span className={`diff-who ${revision.author}`} title={revision.author === 'assistant' ? `Proposed by the assistant${revision.tool ? ` via ${revision.tool}` : ''}` : 'Your edit'}>
           {revision.author === 'assistant' ? <Sparkles size={12} /> : <User size={12} />}
-          {revision.author === 'assistant' ? 'Assistant' : 'You'}
+          {who}
         </span>
-        <span className="diff-summary" title={revision.summary}>{revision.summary || 'Edit'}</span>
+        {/* A summary that only repeats the author label adds nothing; say it once. */}
+        {revision.summary !== who && <span className="diff-summary" title={revision.summary}>{revision.summary || 'Edit'}</span>}
         <span className="diff-stat">
           {stat.added > 0 && <span className="plus">+{stat.added}</span>}
           {stat.removed > 0 && <span className="minus">−{stat.removed}</span>}

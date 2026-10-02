@@ -66,7 +66,9 @@ export default function WindowHost({ win, focused, live }: { win: CanvasWindow; 
   const Body = resolveWidget(win.kind)
   // The ring lives in the title bar's `.win-status`, filled by Canvas: a body may never render chrome.
   return (
-    <WidgetBoundary label={win.title || KIND_LABEL[win.kind] || win.kind}>
+    // Keyed on what the window shows, so a caught error does not outlive a re-point at another referent.
+    // This is the boundary's key, not the frame's: a raise never changes it.
+    <WidgetBoundary key={win.ref_id ?? win.id} label={win.title || KIND_LABEL[win.kind] || win.kind}>
       <Body window={win} focused={focused} live={live} onConfig={onConfig} onTitle={onTitle} />
     </WidgetBoundary>
   )

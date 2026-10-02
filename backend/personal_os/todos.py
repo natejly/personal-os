@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 from datetime import date
+import datetime as dt
 from typing import Any, Callable
 
 from . import todo_rules
@@ -54,6 +55,23 @@ CREATE TABLE IF NOT EXISTS todo_event_tombstones (
   deleted_at REAL NOT NULL
 );
 """
+
+
+
+def clean_due(due: Any) -> str | None:
+    """A due date as YYYY-MM-DD, or None for no date.
+
+    Both syncs build API bodies from this string, so anything else ("tomorrow", a bad
+    month) used to be stored as given and then fail every pass. An ISO datetime keeps
+    its date part. Raises ValueError for anything that is not a date.
+    """
+    if due is None or not str(due).strip():
+        return None
+    text = str(due).strip()
+    try:
+        return dt.date.fromisoformat(text[:10]).isoformat()
+    except ValueError:
+        raise ValueError(f"due must be a date as YYYY-MM-DD, got {text[:40]!r}") from None
 
 
 class Todos:
@@ -113,6 +131,7 @@ class Todos:
         rep = todo_rules.parse_repeat(repeat)
         tid = new_id()
         t = now()
+        due = clean_due(due)
         with self.db.tx() as c:
             c.execute(
                 "INSERT INTO todos(id,project_id,title,notes,due,priority,done,source,external_id,created_at,updated_at,repeat,estimate_min) VALUES(?,?,?,?,?,?,0,?,?,?,?,?,?)",
@@ -129,6 +148,8 @@ class Todos:
         fields = {k: v for k, v in patch.items() if k in {"title", "notes", "due", "priority", "done", "project_id", "calendar_event_id", "calendar_link", "calendar_id", "repeat", "estimate_min"}}
         if not fields:
             return self.get(id)
+        if "due" in fields:
+            fields["due"] = clean_due(fields["due"])
         if "repeat" in fields:
             rep = todo_rules.parse_repeat(fields["repeat"])
             fields["repeat"] = json.dumps(rep) if rep else None
@@ -207,11 +228,26 @@ class Todos:
         with self.db.tx() as c:
             return [row_to_dict(r) for r in c.execute("SELECT * FROM todos WHERE deleted_at IS NULL").fetchall()]  # type: ignore[misc]
 
-    def set_sync_state(self, id: str, external_id: str | None, remote_updated: str | None, synced_at: float | None) -> None:
-        """Record where a todo stands against its Google Task; never bumps updated_at."""
+    def set_sync_state(self, id: str, external_id: str | None, remote_updated: str | None, synced_at: float | None) -> bool:
+        """Record where a todo stands against its Google Task; never bumps updated_at.
+
+        False when the todo no longer exists (deleted while the sync was talking to Google).
+        """
         with self.db.tx() as c:
-            c.execute("UPDATE todos SET external_id=?, remote_updated=?, synced_at=? WHERE id=?",
-                      (external_id, remote_updated, synced_at, id))
+            cur = c.execute("UPDATE todos SET external_id=?, remote_updated=?, synced_at=? WHERE id=?",
+                            (external_id, remote_updated, synced_at, id))
+            return cur.rowcount > 0
+
+    def forget_sync_links(self) -> int:
+        """Unlink every todo from its Google Task without deleting either side.
+
+        Used when the sync target changes (another task list or another account): the old
+        ids mean nothing there, and a linked todo whose task is missing is deleted locally.
+        """
+        with self.db.tx() as c:
+            cur = c.execute("UPDATE todos SET external_id=NULL, remote_updated=NULL, synced_at=NULL WHERE external_id IS NOT NULL")
+            c.execute("DELETE FROM todo_tombstones")
+            return cur.rowcount
 
     def tombstones(self) -> list[dict[str, Any]]:
         with self.db.tx() as c:

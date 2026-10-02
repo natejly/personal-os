@@ -55,6 +55,8 @@ function NoteWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
       .then((n) => {
         if (!alive) return
         setNote(n)
+        // Typing started before this returned: the loaded body is older than what is on screen.
+        if (pending.current !== null) return
         setBody(n.body)
         derived.current = firstLine(n.body)
       })

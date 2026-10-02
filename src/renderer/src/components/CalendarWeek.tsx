@@ -239,7 +239,9 @@ export default function CalendarWeek({ days, events, todos, canCreate = false, o
     const s = new Date(ev.start), en = new Date(ev.end)
     const day0 = dayKey(s)
     const startMin0 = s.getHours() * 60 + s.getMinutes()
-    const durMin = Math.max(SNAP_MIN, Math.round((en.getTime() - s.getTime()) / 60_000))
+    // A move keeps the true length (a 5-minute event stays 5); the snap minimum only bounds a resize.
+    const trueDur = Math.max(1, Math.round((en.getTime() - s.getTime()) / 60_000))
+    const durMin = resize ? Math.max(SNAP_MIN, trueDur) : trueDur
     const endMin0 = startMin0 + durMin
     const x0 = e.clientX, y0 = e.clientY
     let cur: Drag | null = null

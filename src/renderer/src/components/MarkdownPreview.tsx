@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from 'react'
+import { createContext, memo, useCallback, useContext, useMemo, useRef, useState } from 'react'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
@@ -11,6 +11,10 @@ import InteractiveBlock from './InteractiveBlock'
 import MermaidBlock from './MermaidBlock'
 import HtmlBlock, { SvgBlock } from './HtmlBlock'
 import { fenceKind } from '../lib/htmlFence'
+import remarkWikilinks from '../features/notes/remarkWikilinks'
+import { WIKI_HREF, titleKey } from '../features/notes/wikilinks'
+import { taskLineMap } from '../features/notes/tasks'
+import '../styles/notes.css'
 import 'katex/dist/katex.min.css'
 
 /**
@@ -86,14 +90,82 @@ const REMARK = [remarkGfm, remarkMath]
 // which matters while someone is mid-formula and the markup is briefly invalid.
 const REHYPE = [[rehypeKatex, { strict: false, throwOnError: false }], rehypeHighlight] as never[]
 
-const MarkdownPreview = memo(function MarkdownPreview({ source, streaming = false }: { source: string; streaming?: boolean }): JSX.Element {
+/** Which source line a rendered task checkbox belongs to (set by its `li`, read by its `input`). */
+const TaskLine = createContext<number | null>(null)
+const TaskToggle = createContext<((line: number) => void) | null>(null)
+
+function TaskInput({ node, ...props }: React.InputHTMLAttributes<HTMLInputElement> & { node?: unknown }): JSX.Element {
+  void node
+  const line = useContext(TaskLine)
+  const toggle = useContext(TaskToggle)
+  if (props.type !== 'checkbox' || line === null || !toggle) return <input {...props} />
+  return <input type="checkbox" className="task-live" checked={!!props.checked} onChange={() => toggle(line)} />
+}
+
+const wikiTarget = (href?: string): string | null => {
+  if (!href?.startsWith(WIKI_HREF)) return null
+  try { return decodeURIComponent(href.slice(WIKI_HREF.length)) } catch { return null }
+}
+
+export interface MarkdownPreviewProps {
+  source: string
+  streaming?: boolean
+  /** Opt in to `[[Title]]` / `[[Title|alias]]` as internal links; called with the target title. */
+  onWikilink?: (title: string) => void
+  /** Titles that exist. A link to anything else gets the "create" look. Omit to treat every link as known. */
+  knownTitles?: ReadonlySet<string>
+  /** Opt in to clickable task checkboxes; called with the 1-based line in `source`. */
+  onToggleTask?: (line: number) => void
+}
+
+const MarkdownPreview = memo(function MarkdownPreview({ source, streaming = false, onWikilink, knownTitles, onToggleTask }: MarkdownPreviewProps): JSX.Element {
   // `$$x$$` written on one line is display maths to everyone except remark-math; see mathBlocks.ts.
   const md = useMemo(() => normalizeMathBlocks(source), [source])
-  return (
-    <ReactMarkdown remarkPlugins={REMARK} rehypePlugins={REHYPE} components={{ ...SAFE_MD, pre: (p) => <Pre {...p} streaming={streaming} /> }}>
+  // Callers pass fresh lambdas every render; reading them through refs keeps `components` (and so every
+  // chart and frame under it) from remounting each time.
+  const wikiRef = useRef(onWikilink)
+  wikiRef.current = onWikilink
+  const taskRef = useRef(onToggleTask)
+  taskRef.current = onToggleTask
+  const wiki = !!onWikilink
+  const tasks = !!onToggleTask
+  const known = useMemo(() => (knownTitles ? new Set([...knownTitles].map(titleKey)) : null), [knownTitles])
+  const lineMap = useMemo(() => (tasks ? taskLineMap(source, md) : null), [tasks, source, md])
+  const toggle = useCallback((line: number) => taskRef.current?.(line), [])
+
+  const remark = useMemo(() => (wiki ? [...REMARK, remarkWikilinks] : REMARK), [wiki])
+  const components = useMemo((): Components => {
+    const c: Components = { ...SAFE_MD, pre: (p) => <Pre {...p} streaming={streaming} /> }
+    if (wiki) {
+      c.a = (p) => {
+        const target = wikiTarget(p.href)
+        if (target === null) return <ExternalLink {...p} />
+        const unknown = !!known && !known.has(titleKey(target))
+        return (
+          <a className={`wikilink${unknown ? ' unknown' : ''}`} href="#" title={unknown ? `Create "${target}"` : target}
+            onClick={(e) => { e.preventDefault(); wikiRef.current?.(target) }}>{p.children}</a>
+        )
+      }
+    }
+    if (tasks) {
+      c.input = TaskInput as Components['input']
+      c.li = ({ node, children, ...rest }) => {
+        const isTask = typeof rest.className === 'string' && rest.className.includes('task-list-item')
+        const li = <li {...rest}>{children}</li>
+        if (!isTask) return li
+        const line = lineMap?.get(node?.position?.start.line ?? -1) ?? null
+        return <TaskLine.Provider value={line}>{li}</TaskLine.Provider>
+      }
+    }
+    return c
+  }, [streaming, wiki, tasks, known, lineMap])
+
+  const body = (
+    <ReactMarkdown remarkPlugins={remark} rehypePlugins={REHYPE} components={components}>
       {md}
     </ReactMarkdown>
   )
+  return tasks ? <TaskToggle.Provider value={toggle}>{body}</TaskToggle.Provider> : body
 })
 
 export default MarkdownPreview

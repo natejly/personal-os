@@ -52,7 +52,7 @@ from .jobs import (KINDS, PROPOSAL_STATUSES, Jobs, Proposals, Scheduler, local_t
                    valid_tz)
 from . import meeting_import, skillbuild, skillmd
 from . import mail_edits  # noqa: F401 - mail_edits registers the gmail validators
-from .mcp_client import McpClient, McpError
+from .mcp_client import MCP_DANGER, McpClient, McpError
 from .mcp_oauth import CALLBACK_PATH as MCP_OAUTH_CALLBACK, OAuthFlows, OAuthStore
 from .mcp_servers import MODES as MCP_MODES, RESERVED_PREFIX as MCP_PREFIX, SCOPES as MCP_SCOPES, McpServers
 from .meeting_recorder import RecorderBusy
@@ -65,7 +65,7 @@ from .envs import WorkEnv
 from .microvm import Sandboxes
 from .notes import Notes
 from .plans import (MUTATING, PLAN_BLOCKED, PLAN_SAFE_DANGER, PLAN_TOOL, PROPOSE_ONLY, Plans,
-                    normalize_plan, parse_plan_edits, taint_expected)
+                    normalize_plan, parse_plan_edits, plan_voided_by_taint, taint_expected)
 from .filesnap import FileSnapshots, router as filesnap_router
 from .snapshots import Snapshots, router as snapshots_router
 from .outbox import Outbox, router as outbox_router
@@ -446,7 +446,11 @@ skills = Skills(db)
 # The repo first, then the service around it: both routes and the 45s tick read through one
 # instance, so a meeting's rows are never written by two Meetings objects at once.
 meeting_store = Meetings(db)
-meeting_svc = MeetingService(db, settings, llm.complete, meeting_store, google=google, todos=todos)
+meeting_svc = MeetingService(db, settings, llm.complete, meeting_store, google=google, todos=todos, docs=docs)
+# A doc that is purged (not trashed) takes its recordings with it: row, FTS entry and audio directory.
+docs.on_delete = meeting_store.purge_doc
+# A doc that changes project takes its recordings along, or project-scoped meeting search shows them under the old one.
+docs.on_move = meeting_store.move_doc
 toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=google, boards=boards, sandboxes=sandboxes, docs=docs, activity=monitor,
                   outbox=outbox, work_plans=work_plans, results=tool_results, skills=skills, jobs=jobs,
                   style=style, meetings=meeting_svc, desks=desks, workspace=workspace, filesnap=filesnap, artifacts=artifacts,
@@ -615,6 +619,11 @@ def wsid(project_id: str | None) -> str | None:
     return s
 
 
+def _clamp(limit: int, hi: int = 500) -> int:
+    """A list route's LIMIT. SQLite reads a negative one as 'no limit', so it is bounded here, not trusted."""
+    return max(1, min(int(limit), hi))
+
+
 def sse(event: str, data: Any) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
@@ -708,6 +717,10 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
         d = llm.DEFAULT_SETTINGS[k]
         if isinstance(d, (int, float)) and not isinstance(d, bool):
             clean[k] = _check_numeric_setting(k, v)
+        elif k not in SECRET_SETTINGS and isinstance(d, (dict, list, str, bool)) and not isinstance(v, type(d)):
+            # (A secret takes null to clear it; its own check below.)
+            # Stored as given, a wrong-typed value (tools: "x", systemPrompt: null) 500s every route that reads it.
+            raise HTTPException(422, f"{k} must be a {type(d).__name__}")
         elif k == "permissionRules":
             clean[k] = _check_permission_rules(v)
         elif k == "unattendedApprovals" and v not in ("ask", "deny"):
@@ -1021,6 +1034,7 @@ def update_project(id: str, body: ProjectPatch) -> dict[str, Any]:
 @app.delete("/projects/{id}")
 def delete_project(id: str) -> dict[str, bool]:
     trash.trash("project", id)  # its chats, memories and uploads go to the trash; docs and todos are demoted to personal
+    canvases.delete_windows_for("project", id)  # ref_id has no foreign key: a deleted referent's windows are swept here
     return {"ok": True}
 
 
@@ -1080,11 +1094,16 @@ def patch_conversation(id: str, body: ConvPatch) -> dict[str, Any]:
 @app.delete("/conversations/{id}")
 def delete_conversation(id: str) -> dict[str, bool]:
     trash.trash("conversation", id)
+    canvases.delete_windows_for("chat", id)
     return {"ok": True}
 
 
 @app.delete("/conversations/{id}/messages/{mid}")
 def delete_message(id: str, mid: str) -> dict[str, bool]:
+    # The path's conversation must own the message: this used to delete it from whichever conversation held it.
+    conv = convos.get(id)
+    if not conv or not any(m["id"] == mid for m in conv["messages"]):
+        raise HTTPException(404, "No such message in this conversation")
     convos.delete_message(mid)
     return {"ok": True}
 
@@ -1330,6 +1349,16 @@ def _title_from(text: str) -> str:
     return (t[:48].rstrip() + "…") if len(t) > 48 else (t or "New chat")
 
 
+def _replay_args(raw: str | None) -> str:
+    """Arguments to echo back in the assistant tool_calls turn. A provider validates this string as JSON, so a
+    truncated one (finish_reason=length) must not be replayed or the next round dies with a 400."""
+    try:
+        args = json.loads(raw or "{}")
+    except ValueError:
+        return "{}"
+    return raw or "{}" if isinstance(args, dict) else "{}"
+
+
 def _bind_stop(message_id: str, stop: asyncio.Event, run: Run | None) -> None:
     _active[message_id] = run if run is not None else stop
 
@@ -1415,293 +1444,315 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         compact_span = tracer.start("compact", "Compact history", {"kind": "history"}, parent=cspan)
         tracer.end(compact_span, {k: cinfo[k] for k in ("tokens_before", "tokens_after", "summarized")})
 
-    am = convos.add_message(conv_id, "assistant", "", model=model)
+    # Everything between creating the assistant row and the reply loop can raise (connector lookup, schemas, plans,
+    # budget). Without this the row stays blank with no error and its _active entry leaks.
+    am: dict[str, Any] = {}
+    try:
+        am = convos.add_message(conv_id, "assistant", "", model=model)
 
-    _bind_stop(am["id"], stop, run)
-    buf: list[str] = []
-    # Chain-of-thought from reasoning models. Kept out of `buf` so it never becomes the reply, and
-    # never goes back to the model: history() reads content only.
-    rbuf: list[str] = []
-    error: str | None = None
-    tool_events: list[dict[str, Any]] = []
-    # Meeting titles, activity window titles, and uploaded-file excerpts are text the user did not
-    # write as an instruction. Taint the turn when any of them is in the prompt, or a standing
-    # grant would send mail with no card.
-    ctx_taints = [k for k in ("meetings", "activity", "chunks") if used.get(k)]
-    page = used.get("page") or {}
-    if isinstance(page, dict) and (page.get("detail") or page.get("selection")):
-        ctx_taints.append("page")
-    tool_ctx: dict[str, Any] = {
-        "project_id": conv["project_id"], "conversation_id": conv_id,
-        # Taint is sticky for the whole conversation: the injected instructions live on in the replayed history, so
-        # waiting one turn must not re-arm a standing 'always' grant. Only the user clears it (Context -> this chat).
-        "tainted": bool(conv["settings"].get("tainted")) or bool(ctx_taints) or sandboxes.holds_import(conv_id),
-        "taint_sources": list(conv["settings"].get("taint_sources") or []) + [f"context:{k}" for k in ctx_taints]
-            + (["sandbox_import"] if sandboxes.holds_import(conv_id) else []),
-        "allowed_urls": _urls(user_text), "settings": cfg,
-        # Set for a scheduled job: Toolbox.call refuses every outward-facing tool outright, and _call_tool has
-        # already turned the call into a proposals row before it got that far.
-        "proposal_only": proposal_only(run), "message_id": am["id"],
-        # What desk_deliver/desk_done record an output or a note against, so Accept can name the run
-        # that wrote a file instead of guessing with the latest one.
-        # Where artifact_create files what it makes (artifacts.run_id), so it can be found again from the run.
-        "run_id": run.run_id if run else None,
-    }
-    use_tools = conv["settings"].get("useTools", True)
-    modes = toolbox.effective(cfg.get("tools") or {}, (project or {}).get("tools"), conv["settings"].get("tools")) if use_tools else {}
-    # MCP slugs all carry a reserved prefix no built-in may use, so the two mode maps cannot collide.
-    mcp_modes, mcp_schemas = _mcp_tooling(conv["project_id"], conv_id) if use_tools else ({}, [])
-    # A job's allowlist (job_tools) writes 'off' for tools outside it into the chat's tool map; MCP modes come from
-    # mcp_grants, not that map, so the narrowing is applied to them here.
-    chat_off = {n for n, v in (conv["settings"].get("tools") or {}).items() if v == "off"}
-    if chat_off and mcp_modes:
-        mcp_modes = {k: v for k, v in mcp_modes.items() if k not in chat_off}
-        mcp_schemas = [s for s in mcp_schemas if s["function"]["name"] not in chat_off]
-    # Past mcpDeferAbove ready tools the model gets mcp_tool_search instead of every schema. Only loaded
-    # slugs are in `modes`, so a call to an unloaded one is off -> denied, never run.
-    mcp_defer = mcp_search.should_defer(len(mcp_schemas), int(cfg.get("mcpDeferAbove", 12) or 0))
-    tool_ctx["mcp_loaded"] = set()
-    tool_ctx["modes"] = modes  # the live map: run_python's tool bridge resolves a script's calls against it
-    bridge_n = 0
+        _bind_stop(am["id"], stop, run)
+        buf: list[str] = []
+        # Chain-of-thought from reasoning models. Kept out of `buf` so it never becomes the reply, and
+        # never goes back to the model: history() reads content only.
+        rbuf: list[str] = []
+        error: str | None = None
+        tool_events: list[dict[str, Any]] = []
+        # Meeting titles, activity window titles, and uploaded-file excerpts are text the user did not
+        # write as an instruction. Taint the turn when any of them is in the prompt, or a standing
+        # grant would send mail with no card.
+        ctx_taints = [k for k in ("meetings", "activity", "chunks") if used.get(k)]
+        page = used.get("page") or {}
+        if isinstance(page, dict) and (page.get("detail") or page.get("selection")):
+            ctx_taints.append("page")
+        tool_ctx: dict[str, Any] = {
+            "project_id": conv["project_id"], "conversation_id": conv_id,
+            # Taint is sticky for the whole conversation: the injected instructions live on in the replayed history, so
+            # waiting one turn must not re-arm a standing 'always' grant. Only the user clears it (Context -> this chat).
+            "tainted": bool(conv["settings"].get("tainted")) or bool(ctx_taints) or sandboxes.holds_import(conv_id),
+            "taint_sources": list(conv["settings"].get("taint_sources") or []) + [f"context:{k}" for k in ctx_taints]
+                + (["sandbox_import"] if sandboxes.holds_import(conv_id) else []),
+            "allowed_urls": _urls(user_text), "settings": cfg,
+            # Set for a scheduled job: Toolbox.call refuses every outward-facing tool outright, and _call_tool has
+            # already turned the call into a proposals row before it got that far.
+            "proposal_only": proposal_only(run), "message_id": am["id"],
+            # What desk_deliver/desk_done record an output or a note against, so Accept can name the run
+            # that wrote a file instead of guessing with the latest one.
+            # Where artifact_create files what it makes (artifacts.run_id), so it can be found again from the run.
+            "run_id": run.run_id if run else None,
+        }
+        use_tools = conv["settings"].get("useTools", True)
+        modes = toolbox.effective(cfg.get("tools") or {}, (project or {}).get("tools"), conv["settings"].get("tools")) if use_tools else {}
+        # MCP slugs all carry a reserved prefix no built-in may use, so the two mode maps cannot collide.
+        mcp_modes, mcp_schemas = _mcp_tooling(conv["project_id"], conv_id) if use_tools else ({}, [])
+        # A job's allowlist (job_tools) writes 'off' for tools outside it into the chat's tool map; MCP modes come from
+        # mcp_grants, not that map, so the narrowing is applied to them here.
+        chat_off = {n for n, v in (conv["settings"].get("tools") or {}).items() if v == "off"}
+        if chat_off and mcp_modes:
+            mcp_modes = {k: v for k, v in mcp_modes.items() if k not in chat_off}
+            mcp_schemas = [s for s in mcp_schemas if s["function"]["name"] not in chat_off]
+        # Past mcpDeferAbove ready tools the model gets mcp_tool_search instead of every schema. Only loaded
+        # slugs are in `modes`, so a call to an unloaded one is off -> denied, never run.
+        mcp_defer = mcp_search.should_defer(len(mcp_schemas), int(cfg.get("mcpDeferAbove", 12) or 0))
+        tool_ctx["mcp_loaded"] = set()
+        tool_ctx["modes"] = modes  # the live map: run_python's tool bridge resolves a script's calls against it
+        bridge_n = 0
 
-    async def _bridge_approve(name: str, args: dict[str, Any], forced: bool) -> bool:
-        """A card for one call a run_python script made through the tool bridge. The script waits; the reply does not
-        end. One-shot only: an 'always' answer is treated as 'allow' here, never as a standing grant."""
-        nonlocal bridge_n
-        if run is None or run.store is None:
-            return False
-        bridge_n += 1
-        uid = f"{am['id']}:bridge{bridge_n}"
-        fut: asyncio.Future = asyncio.get_event_loop().create_future()
-        _approvals[uid] = fut
-        spec = toolbox.specs.get(name)
-        run.store.open_approval(uid, run.run_id, name, args, conversation_id=conv_id, message_id=am["id"], forced=forced,
-                                desk_id=run.desk_id, danger=spec.danger if spec else "external")
-        run.publish("tool_call", {"message_id": am["id"], "id": uid, "name": name, "arguments": args,
-                                  "needs_approval": True, "forced": forced, "proposal": None, "plan": None})
-        decision = "deny"
-        try:
-            while not fut.done():
-                if stop.is_set():
-                    run.store.decide(uid, "deny", by="stop")
-                    fut.set_result("deny")
-                    break
-                try:
-                    await asyncio.wait_for(asyncio.shield(fut), timeout=2)
-                except asyncio.TimeoutError:
-                    row = run.store.approval(uid)
-                    if row and row["status"] != "pending" and not fut.done():
-                        fut.set_result(row["decision"])
-            decision = fut.result() if fut.done() else "deny"
-        finally:
-            _approvals.pop(uid, None)
-        allowed = decision in ("allow", "always_chat", "always_global")
-        run.publish("tool_result", {"message_id": am["id"], "id": uid, "name": name, "arguments": args,
-                                    "result_preview": "", "duration_ms": 0,
-                                    "error": None if allowed else "Declined by the user", "approval": "allow" if allowed else "deny",
-                                    "forced": forced})
-        return allowed
+        async def _bridge_approve(name: str, args: dict[str, Any], forced: bool) -> bool:
+            """A card for one call a run_python script made through the tool bridge. The script waits; the reply does not
+            end. One-shot only: an 'always' answer is treated as 'allow' here, never as a standing grant."""
+            nonlocal bridge_n
+            if run is None or run.store is None:
+                return False
+            bridge_n += 1
+            uid = f"{am['id']}:bridge{bridge_n}"
+            fut: asyncio.Future = asyncio.get_event_loop().create_future()
+            _approvals[uid] = fut
+            spec = toolbox.specs.get(name)
+            run.store.open_approval(uid, run.run_id, name, args, conversation_id=conv_id, message_id=am["id"], forced=forced,
+                                    desk_id=run.desk_id, danger=spec.danger if spec else "external")
+            run.publish("tool_call", {"message_id": am["id"], "id": uid, "name": name, "arguments": args,
+                                      "needs_approval": True, "forced": forced, "proposal": None, "plan": None})
+            decision = "deny"
+            try:
+                while not fut.done():
+                    if stop.is_set():
+                        run.store.decide(uid, "deny", by="stop")
+                        fut.set_result("deny")
+                        break
+                    try:
+                        await asyncio.wait_for(asyncio.shield(fut), timeout=2)
+                    except asyncio.TimeoutError:
+                        row = run.store.approval(uid)
+                        if row and row["status"] != "pending" and not fut.done():
+                            fut.set_result(row["decision"])
+                decision = fut.result() if fut.done() else "deny"
+            finally:
+                _approvals.pop(uid, None)
+            allowed = decision in ("allow", "always_chat", "always_global")
+            run.publish("tool_result", {"message_id": am["id"], "id": uid, "name": name, "arguments": args,
+                                        "result_preview": "", "duration_ms": 0,
+                                        "error": None if allowed else "Declined by the user", "approval": "allow" if allowed else "deny",
+                                        "forced": forced})
+            return allowed
 
-    tool_ctx["bridge_approve"] = _bridge_approve
-    # The same one-shot card, for a tool that has to ask about part of what it was called to do (a browser form
-    # submit, a host the shell may not reach). Absent in lanes with nobody to ask: a tool treats that as "no".
-    tool_ctx["approve"] = _bridge_approve
-    if mcp_defer:
-        _mcp_names = {s["id"]: s["name"] for s in mcp_store.servers()}
-        tool_ctx["mcp_catalog"] = lambda: [{**t, "server": _mcp_names.get(t["server_id"], "MCP")}
-                                           for t in mcp_store.tools() if t["slug"] in mcp_modes]
-        if use_tools:
-            modes["mcp_tool_search"] = "on"
-    else:
-        modes.pop("mcp_tool_search", None)
-        modes.update(mcp_modes)
-    # ---- the desk this reply belongs to, if any, read once.
-    # `autonomy` is read off the desk row rather than off conv["settings"], so changing a desk's
-    # autonomy takes effect on its next turn without having to rewrite the conversation.
-    desk_id = (run.desk_id if run else None) or conv["settings"].get("deskId")
-    desk = desks.get(desk_id, with_outputs=False) if desk_id else None
-    autonomy = str((desk or {}).get("autonomy") or "")
-    # The plan already approved for this desk, with its steps: what a later turn binds against. A
-    # chat has none - its plan, if any, is proposed and bound inside one reply.
-    active_plan = plans.for_desk(desk_id) if desk_id else None
-    # True while a plan is being drafted and nothing consequential may run. 'plan' autonomy starts a
-    # desk here; an approved plan ends it, which is why `active_plan` turns it off.
-    planning = bool(desk) and autonomy == "plan" and active_plan is None
-    # Plan mode in an ordinary chat: the toggle's setting, the chat's own over the global default.
-    # 'always' drafts from the first round; 'auto' flips `planning` on at the first consequential call
-    # (see the gate). Either way a plan approved in this reply ends it, as it does for a desk.
-    chat_plan_mode = "" if desk else str(conv["settings"].get("planMode") or cfg.get("planMode") or "off")
-    if chat_plan_mode == "always":
-        planning = True
-    # Cards this desk let go of and the user has since answered: told to this turn once, then marked.
-    parked_note = ""
-    if desk_id:
-        answered = run_store.unreported(desk_id)
-        if answered:
-            parked_note = parked_report(answered, plans.by_call)
-            run_store.mark_reported(a["call_id"] for a in answered)
-    # The desk tools derive their workspace root from this and never take one as an argument, so
-    # desk A cannot address desk B's files.
-    tool_ctx["desk_id"] = desk_id
-    # What the user set for tools at project/chat level: shell.auto_ok must not override an explicit choice.
-    tool_ctx["tool_overrides"] = {**((project or {}).get("tools") or {}), **(conv["settings"].get("tools") or {})}
-    # What agent_spawn needs to start a child under this reply: its live tool modes (a child never has more),
-    # the run its cards and status ride on, its stop flag, and where it sits in the spawn tree.
-    tool_ctx.update(modes=modes, run=run, stop=stop, depth=0, agent_run_id=run.run_id if run else "", model=model,
-                    effort=str(conv["settings"].get("effort") or "default"))
-
-    def _schemas(withheld: bool = False) -> list[dict[str, Any]]:
-        """One function, because the always_chat/always_global grant path recomputes the schemas; a
-        filter applied at only one of the two sites lets a granted write tool reappear mid-plan.
-        `modes` is mutated in place by that grant path, so this filters a copy and reads it fresh
-        each time rather than rebuilding from a stale snapshot - otherwise the user's 'Always' click
-        is silently discarded on the next recompute.
-        """
-        offer = mcp_search.select_schemas(mcp_schemas, tool_ctx["mcp_loaded"], mcp_defer)
-        if not modes:
-            return offer
-        m = dict(modes)
-        # A desk's workspace tools exist only inside a desk: elsewhere there is no root to resolve.
-        if not desk_id:
-            # MCP slugs live in this map and are not built-in specs. Indexing specs[n] crashed every
-            # reply the moment a connector was connected.
-            m = {n: v for n, v in m.items() if (spec := toolbox.specs.get(n)) is None or spec.group != "desk"}
-        if planning and not withheld:
-            # While a plan is being drafted the model is offered reading and the plan tool, nothing
-            # else. Withholding them is kinder than denying them: a tool that is not offered costs no
-            # round, where one that is offered and refused costs one every time. `withheld=True` asks
-            # for the full set anyway, which is what a plan has to be judged against: its steps name
-            # the tools it will use *after* approval. Connectors are not reading tools, so they stay out.
-            m = {n: v for n, v in m.items() if n == PLAN_TOOL or ((spec := toolbox.specs.get(n)) is not None and spec.danger in PLAN_SAFE_DANGER)}
-            m[PLAN_TOOL] = "ask"
-            if desk_id:
-                m.pop("desk_done", None)  # `safe`, so it slips through the tier filter; finishing is for after approval
+        tool_ctx["bridge_approve"] = _bridge_approve
+        # The same one-shot card, for a tool that has to ask about part of what it was called to do (a browser form
+        # submit, a host the shell may not reach). Absent in lanes with nobody to ask: a tool treats that as "no".
+        tool_ctx["approve"] = _bridge_approve
+        if mcp_defer:
+            _mcp_names = {s["id"]: s["name"] for s in mcp_store.servers()}
+            tool_ctx["mcp_catalog"] = lambda: [{**t, "server": _mcp_names.get(t["server_id"], "MCP")}
+                                               for t in mcp_store.tools() if t["slug"] in mcp_modes]
+            if use_tools:
+                modes["mcp_tool_search"] = "on"
+        else:
+            modes.pop("mcp_tool_search", None)
+            modes.update(mcp_modes)
+        # ---- the desk this reply belongs to, if any, read once.
+        # `autonomy` is read off the desk row rather than off conv["settings"], so changing a desk's
+        # autonomy takes effect on its next turn without having to rewrite the conversation.
+        desk_id = (run.desk_id if run else None) or conv["settings"].get("deskId")
+        desk = desks.get(desk_id, with_outputs=False) if desk_id else None
+        autonomy = str((desk or {}).get("autonomy") or "")
+        # The plan already approved for this desk, with its steps: what a later turn binds against. A
+        # chat has none - its plan, if any, is proposed and bound inside one reply.
+        active_plan = plans.for_desk(desk_id) if desk_id else None
+        # True while a plan is being drafted and nothing consequential may run. 'plan' autonomy starts a
+        # desk here; an approved plan ends it, which is why `active_plan` turns it off.
+        planning = bool(desk) and autonomy == "plan" and active_plan is None
+        # Plan mode in an ordinary chat: the toggle's setting, the chat's own over the global default.
+        # 'always' drafts from the first round; 'auto' flips `planning` on at the first consequential call
+        # (see the gate). Either way a plan approved in this reply ends it, as it does for a desk.
+        chat_plan_mode = "" if desk else str(conv["settings"].get("planMode") or cfg.get("planMode") or "off")
+        if chat_plan_mode == "always":
+            planning = True
+        # Cards this desk let go of and the user has since answered: told to this turn once, then marked.
+        parked_note = ""
         if desk_id:
-            m.pop("desk_start", None)  # a desk starting another desk is never offered (it would plan under its own budget)
-        return toolbox.schemas(m) + offer
+            answered = run_store.unreported(desk_id)
+            if answered:
+                parked_note = parked_report(answered, plans.by_call)
+                run_store.mark_reported(a["call_id"] for a in answered)
+        # The desk tools derive their workspace root from this and never take one as an argument, so
+        # desk A cannot address desk B's files.
+        tool_ctx["desk_id"] = desk_id
+        # What the user set for tools at project/chat level: shell.auto_ok must not override an explicit choice.
+        tool_ctx["tool_overrides"] = {**((project or {}).get("tools") or {}), **(conv["settings"].get("tools") or {})}
+        # What agent_spawn needs to start a child under this reply: its live tool modes (a child never has more),
+        # the run its cards and status ride on, its stop flag, and where it sits in the spawn tree.
+        tool_ctx.update(modes=modes, run=run, stop=stop, depth=0, agent_run_id=run.run_id if run else "", model=model,
+                        effort=str(conv["settings"].get("effort") or "default"))
 
-    tool_schemas = _schemas()
-    tools_hint = (TOOLS_HINT + ("\n" + PLAN_HINT if any(s["function"]["name"] == "todo_write" for s in tool_schemas) else "")) if tool_schemas else ""
-    if mcp_defer:
-        _counts: dict[str, int] = {}
-        for t in mcp_store.tools():
-            if t["slug"] in mcp_modes:
-                _n = _mcp_names.get(t["server_id"], "MCP")
-                _counts[_n] = _counts.get(_n, 0) + 1
-        tools_hint = "\n".join(p for p in (tools_hint, mcp_search.catalog_hint(_counts.items())) if p)
-    def _desk_manual_text() -> str:
-        # Only the tools actually sent this turn are described, so the manual never promises one the model lacks.
-        net = ("open" if cfg.get("shellNetwork") else
-               "allowlist" if cfg.get("shellRegistryAccess", True) or cfg.get("shellAllowedDomains") else "off")
-        text = desk_manual({s["function"]["name"] for s in tool_schemas},
-                           {"shell_network": net, "sandbox_mount": bool(cfg.get("sandboxMountDesk", True))})
-        return "\n\n" + text if text else ""
+        def _schemas(withheld: bool = False) -> list[dict[str, Any]]:
+            """One function, because the always_chat/always_global grant path recomputes the schemas; a
+            filter applied at only one of the two sites lets a granted write tool reappear mid-plan.
+            `modes` is mutated in place by that grant path, so this filters a copy and reads it fresh
+            each time rather than rebuilding from a stale snapshot - otherwise the user's 'Always' click
+            is silently discarded on the next recompute.
+            """
+            # Connectors are external, not reading tools: not offered while a plan is being drafted.
+            offer = [] if planning and not withheld else mcp_search.select_schemas(mcp_schemas, tool_ctx["mcp_loaded"], mcp_defer)
+            if not modes:
+                return offer
+            m = dict(modes)
+            # A desk's workspace tools exist only inside a desk: elsewhere there is no root to resolve.
+            if not desk_id:
+                # MCP slugs live in this map and are not built-in specs. Indexing specs[n] crashed every
+                # reply the moment a connector was connected.
+                m = {n: v for n, v in m.items() if (spec := toolbox.specs.get(n)) is None or spec.group != "desk"}
+            if planning and not withheld:
+                # While a plan is being drafted the model is offered reading and the plan tool, nothing
+                # else. Withholding them is kinder than denying them: a tool that is not offered costs no
+                # round, where one that is offered and refused costs one every time. `withheld=True` asks
+                # for the full set anyway, which is what a plan has to be judged against: its steps name
+                # the tools it will use *after* approval. Connectors are not reading tools, so they stay out.
+                m = {n: v for n, v in m.items() if n == PLAN_TOOL or ((spec := toolbox.specs.get(n)) is not None and spec.danger in PLAN_SAFE_DANGER)}
+                m[PLAN_TOOL] = "ask"
+                if desk_id:
+                    m.pop("desk_done", None)  # `safe`, so it slips through the tier filter; finishing is for after approval
+            if desk_id:
+                m.pop("desk_start", None)  # a desk starting another desk is never offered (it would plan under its own budget)
+            return toolbox.schemas(m) + offer
 
-    hints = (RENDER_HINT, tools_hint, JOB_HINT if proposal_only(run) else "",
-             DESK_HINT + _desk_manual_text() if desk else "", DESK_PLAN_HINT if planning and desk else "",
-             CHAT_PLAN_HINT if chat_plan_mode in ("auto", "always") and tool_schemas else "", _today_hint())
-    if cfg.get("cacheLayout", True):
-        # Stable prefix first, per-turn retrieval just before the newest user message (see context.layout_messages).
-        stable = "\n\n".join(p for p in (used["stable_system"], *hints) if p)
-        messages = layout_messages(stable, used["volatile_blocks"], history)
-        system = "\n\n".join(p for p in (stable, *used["volatile_blocks"]) if p)
-        used["stable_hash"] = hashlib.sha256(stable.encode()).hexdigest()[:12]
-        cspan["meta"]["stable_hash"] = used["stable_hash"]
-    else:
-        system = "\n\n".join(p for p in (system, *hints) if p)
-        messages = [{"role": "system", "content": system}] + history
-    used["system_prompt"] = system
-    used["tokens_estimate"] = estimate_tokens(system)
-    if parked_note:
-        messages.append({"role": "system", "content": parked_note})
-    if body.resume_of:
-        old = run_store.get(body.resume_of) or {}
-        old_events = run_store.events(body.resume_of)
-        messages.append({"role": "system", "content": resume.build_resume_note(
-            old, old_events, run_store.executed(body.resume_of), run_store.approvals(None, run_id=body.resume_of))})
-        # Taint is only ever added to: a resume cannot launder what the dead run read.
-        for src in resume.taint_from_tape(old_events):
-            tool_ctx["tainted"] = True
-            if src not in tool_ctx["taint_sources"]:
-                tool_ctx["taint_sources"].append(src)
-    yield "assistant_message", {**am, "context_used": used}
-    yield "span", {"message_id": am["id"], "span": cspan}
-    if compact_span:
-        yield "span", {"message_id": am["id"], "span": compact_span}
+        tool_schemas = _schemas()
 
-    budget = Budget(_caps(cfg, JOB_BUDGET) if proposal_only(run) else cfg)
-    tool_ctx["budget"] = budget  # children are charged to it
-    partial: str | None = None
-    last_sig: str | None = None
-    repeats = 0
-    tool_errors: dict[str, int] = {}
-    detector = StuckDetector() if cfg.get("stuckDetection", True) else None  # loop shapes REPEAT_LIMIT cannot see
-    perm_rules = permrules.load_rules(cfg.get("permissionRules"))
-    denials = permrules.DenialStreak()  # refused calls in a row; at three the next result says to stop varying them
-    stuck_hits = 0
-    stop_text: str | None = None
-    blocked: set[str] = set()
-    _round = 0
-    awaiting: dict[str, Any] | None = None  # the tool event of a call blocked on approval, for a cancelled run to keep
-    # The call this reply let go of rather than keep waiting on. Set once, and the reply ends there.
-    parked: str | None = None
-    # Whether this chat has any plan at all. One query per reply, so the plan lookups below stay off the hot path
-    # of a chat that never proposed one.
-    plan_seen = plans.any_in(conv_id)
-    # The plan artifact (working.py) rides at the very end of the context, re-sent before every model
-    # call rather than remembered: after a round of long tool results the task itself is the first
-    # thing to fall out of attention. One slot, moved, never accumulated.
-    plan_msg: dict[str, Any] | None = None
+        def _desk_manual_text() -> str:
+            # Only the tools actually sent this turn are described, so the manual never promises one the model lacks.
+            net = ("open" if cfg.get("shellNetwork") else
+                   "allowlist" if cfg.get("shellRegistryAccess", True) or cfg.get("shellAllowedDomains") else "off")
+            text = desk_manual({s["function"]["name"] for s in tool_schemas},
+                               {"shell_network": net, "sandbox_mount": bool(cfg.get("sandboxMountDesk", True))})
+            return "\n\n" + text if text else ""
 
-    def _reinject_plan() -> None:
-        nonlocal plan_msg
-        if plan_msg is not None:
-            messages[:] = [m for m in messages if m is not plan_msg]
-            plan_msg = None
-        block = work_plans.block(conv_id, desk=bool(desk_id))
-        if desk_id and active_plan is not None:
-            # A desk's approved plan, re-read every round so each step's status is current: it is
-            # what a chained or woken turn picks up from, and what tells it a step already ran.
-            approved = plans.block(plans.get(active_plan["plan_id"]) or active_plan)
-            block = "\n\n".join(b for b in (approved, block) if b)
-        if block:
-            plan_msg = {"role": "system", "content": block}
-            messages.append(plan_msg)
+        tools_hint = (TOOLS_HINT + ("\n" + PLAN_HINT if any(s["function"]["name"] == "todo_write" for s in tool_schemas) else "")) if tool_schemas else ""
+        if mcp_defer:
+            _counts: dict[str, int] = {}
+            for t in mcp_store.tools():
+                if t["slug"] in mcp_modes:
+                    _n = _mcp_names.get(t["server_id"], "MCP")
+                    _counts[_n] = _counts.get(_n, 0) + 1
+            tools_hint = "\n".join(p for p in (tools_hint, mcp_search.catalog_hint(_counts.items())) if p)
+        hints = (RENDER_HINT, tools_hint, JOB_HINT if proposal_only(run) else "",
+                 DESK_HINT + _desk_manual_text() if desk else "", DESK_PLAN_HINT if planning and desk else "",
+                 CHAT_PLAN_HINT if chat_plan_mode in ("auto", "always") and tool_schemas else "", _today_hint())
+        if cfg.get("cacheLayout", True):
+            # Stable prefix first, per-turn retrieval just before the newest user message (see context.layout_messages).
+            stable = "\n\n".join(p for p in (used["stable_system"], *hints) if p)
+            messages = layout_messages(stable, used["volatile_blocks"], history)
+            system = "\n\n".join(p for p in (stable, *used["volatile_blocks"]) if p)
+            used["stable_hash"] = hashlib.sha256(stable.encode()).hexdigest()[:12]
+            cspan["meta"]["stable_hash"] = used["stable_hash"]
+        else:
+            system = "\n\n".join(p for p in (system, *hints) if p)
+            messages = [{"role": "system", "content": system}] + history
+        used["system_prompt"] = system
+        used["tokens_estimate"] = estimate_tokens(system)
+        if parked_note:
+            messages.append({"role": "system", "content": parked_note})
+        if body.resume_of:
+            old = run_store.get(body.resume_of) or {}
+            old_events = run_store.events(body.resume_of)
+            messages.append({"role": "system", "content": resume.build_resume_note(
+                old, old_events, run_store.executed(body.resume_of), run_store.approvals(None, run_id=body.resume_of))})
+            # Taint is only ever added to: a resume cannot launder what the dead run read.
+            for src in resume.taint_from_tape(old_events):
+                tool_ctx["tainted"] = True
+                if src not in tool_ctx["taint_sources"]:
+                    tool_ctx["taint_sources"].append(src)
+        yield "assistant_message", {**am, "context_used": used}
+        yield "span", {"message_id": am["id"], "span": cspan}
+        if compact_span:
+            yield "span", {"message_id": am["id"], "span": compact_span}
 
-    async def _final_round() -> AsyncIterator[tuple[str, Any]]:
-        """Closing answer after a budget or breaker stop: one tool-free call, itself exempt from the budget."""
-        _reinject_plan()
-        # One newline, not a blank line: the transcript renders as markdown, where a blank line opens a
-        # new paragraph and reads as an empty line dropped into the middle of the reply.
-        if buf and buf[-1] and not buf[-1].endswith("\n"):
-            buf.append("\n")
-            yield "delta", {"id": am["id"], "text": "\n"}
-        span = tracer.start("llm", model, {"round": _round, "final": True, "messages": len(messages), "tools": len(tool_schemas)})
-        yield "span", {"message_id": am["id"], "span": span}
-        start, fin = len(buf), {}
-        budget.arm_deadline(cap=FINAL_ROUND_SECONDS)  # the closing answer is exempt from the budget, not from a hang
-        # tools are still declared, with tool_choice "none": the history holds tool_calls, and some OpenAI-compatible
-        # backends reject that when no tool list is sent. "none" is the portable way to say "answer, do not call".
-        async for ev in llm.stream_chat(cfg, model, messages, tool_schemas or None,
-                                        effort=str(conv["settings"].get("effort") or "default"), tool_choice="none",
-                                        fast=bool(conv["settings"].get("fast")),
-                                        cancel=_stream_cancel(stop, steers, run)):
-            if stop.is_set():
-                break
-            if ev["type"] == "reasoning":
-                rbuf.append(ev["text"])
-                yield "reasoning", {"id": am["id"], "text": ev["text"]}
-            elif ev["type"] == "delta":
-                buf.append(ev["text"])
-                yield "delta", {"id": am["id"], "text": ev["text"]}
-            else:
-                fin = ev
-            if steers:
-                break
-        tracer.end(span, {"finish_reason": fin.get("finish_reason"), "usage": fin.get("usage"),
-                          "output_chars": len("".join(buf[start:]))},
-                   error="Stopped by user" if stop.is_set() else None)
-        yield "span", {"message_id": am["id"], "span": span}
+        budget = Budget(_caps(cfg, JOB_BUDGET) if proposal_only(run) else cfg)
+        tool_ctx["budget"] = budget  # children are charged to it
+        partial: str | None = None
+        last_sig: str | None = None
+        repeats = 0
+        tool_errors: dict[str, int] = {}
+        detector = StuckDetector() if cfg.get("stuckDetection", True) else None  # loop shapes REPEAT_LIMIT cannot see
+        perm_rules = permrules.load_rules(cfg.get("permissionRules"))
+        denials = permrules.DenialStreak()  # refused calls in a row; at three the next result says to stop varying them
+        stuck_hits = 0
+        stop_text: str | None = None
+        blocked: set[str] = set()
+        _round = 0
+        awaiting: dict[str, Any] | None = None  # the tool event of a call blocked on approval, for a cancelled run to keep
+        # The call this reply let go of rather than keep waiting on. Set once, and the reply ends there.
+        parked: str | None = None
+        # Whether this chat has any plan at all. One query per reply, so the plan lookups below stay off the hot path
+        # of a chat that never proposed one.
+        plan_seen = plans.any_in(conv_id)
+        # The plan artifact (working.py) rides at the very end of the context, re-sent before every model
+        # call rather than remembered: after a round of long tool results the task itself is the first
+        # thing to fall out of attention. One slot, moved, never accumulated.
+        plan_msg: dict[str, Any] | None = None
+
+        def _reinject_plan() -> None:
+            nonlocal plan_msg
+            if plan_msg is not None:
+                messages[:] = [m for m in messages if m is not plan_msg]
+                plan_msg = None
+            block = work_plans.block(conv_id, desk=bool(desk_id))
+            if desk_id and active_plan is not None:
+                # A desk's approved plan, re-read every round so each step's status is current: it is
+                # what a chained or woken turn picks up from, and what tells it a step already ran.
+                approved = plans.block(plans.get(active_plan["plan_id"]) or active_plan)
+                block = "\n\n".join(b for b in (approved, block) if b)
+            if block:
+                plan_msg = {"role": "system", "content": block}
+                messages.append(plan_msg)
+
+        async def _final_round() -> AsyncIterator[tuple[str, Any]]:
+            """Closing answer after a budget or breaker stop: one tool-free call, itself exempt from the budget."""
+            _reinject_plan()
+            # One newline, not a blank line: the transcript renders as markdown, where a blank line opens a
+            # new paragraph and reads as an empty line dropped into the middle of the reply.
+            if buf and buf[-1] and not buf[-1].endswith("\n"):
+                buf.append("\n")
+                yield "delta", {"id": am["id"], "text": "\n"}
+            span = tracer.start("llm", model, {"round": _round, "final": True, "messages": len(messages), "tools": len(tool_schemas)})
+            yield "span", {"message_id": am["id"], "span": span}
+            start, fin = len(buf), {}
+            budget.arm_deadline(cap=FINAL_ROUND_SECONDS)  # the closing answer is exempt from the budget, not from a hang
+            # tools are still declared, with tool_choice "none": the history holds tool_calls, and some OpenAI-compatible
+            # backends reject that when no tool list is sent. "none" is the portable way to say "answer, do not call".
+            async for ev in llm.stream_chat(cfg, model, messages, tool_schemas or None,
+                                            effort=str(conv["settings"].get("effort") or "default"), tool_choice="none",
+                                            fast=bool(conv["settings"].get("fast")),
+                                            cancel=_stream_cancel(stop, steers, run)):
+                if stop.is_set():
+                    break
+                if ev["type"] == "reasoning":
+                    rbuf.append(ev["text"])
+                    yield "reasoning", {"id": am["id"], "text": ev["text"]}
+                elif ev["type"] == "delta":
+                    buf.append(ev["text"])
+                    yield "delta", {"id": am["id"], "text": ev["text"]}
+                else:
+                    fin = ev
+                if steers:
+                    break
+            tracer.end(span, {"finish_reason": fin.get("finish_reason"), "usage": fin.get("usage"),
+                              "output_chars": len("".join(buf[start:]))},
+                       error="Stopped by user" if stop.is_set() else None)
+            yield "span", {"message_id": am["id"], "span": span}
+    except asyncio.CancelledError:
+        if am:
+            _active.pop(am["id"], None)
+            convos.finish_message(am["id"], "", "Cancelled", used, [], tracer.spans, None)
+            convos.touch(conv_id)
+        raise
+    except Exception as e:  # noqa: BLE001
+        log.exception("chat setup failed for %s", conv_id)
+        if am:
+            _active.pop(am["id"], None)
+            convos.finish_message(am["id"], "", str(e), used, [], tracer.spans, None)
+            convos.touch(conv_id)
+        yield "done", {"id": am.get("id"), "error": str(e), "context_used": used, "tool_events": [], "trace": tracer.spans,
+                       "stopped": False, "partial": None, "segment": False, "tainted": False, "taint_sources": [],
+                       "reasoning": None}
+        return
 
     try:
         while True:
@@ -1803,7 +1854,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     continue
                 break
             turn = {"role": "assistant", "content": "".join(buf[round_start:]).strip() or None,
-                    "tool_calls": [{"id": c["id"], "type": "function", "function": {"name": c["name"], "arguments": c["arguments"] or "{}"}} for c in calls]}
+                    "tool_calls": [{"id": c["id"], "type": "function", "function": {"name": c["name"], "arguments": _replay_args(c["arguments"])}} for c in calls]}
             over = budget.exceeded()
             if (over and run is not None and run.desk_id is None and (plan_seen or active_plan)
                     and plans.covers(run.run_id, [(c["name"], _call_args(c)) for c in calls], desk_id=run.desk_id)):
@@ -1830,6 +1881,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 buf.append("\n")
                 yield "delta", {"id": am["id"], "text": "\n"}
             for c in calls:
+                if stop.is_set():
+                    # Stop means the rest of this round's calls do not run either. The provider still needs a tool
+                    # message per call, and nothing was journaled as started, so nothing replays.
+                    messages.append({"role": "tool", "tool_call_id": c["id"], "content": json.dumps({"error": "Stopped by the user before this call ran; it was not executed."})})
+                    continue
                 args = _call_args(c)
                 sig = tools.call_key(c["name"], args)
                 repeats = repeats + 1 if sig == last_sig else 1
@@ -1841,7 +1897,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     continue
                 raw_mode = modes.get(c["name"], "off")
                 spec = toolbox.specs.get(c["name"])
-                danger = spec.danger if spec else "safe"
+                # Connector tools are not in toolbox.specs but are external by construction; "safe" here would
+                # let them through plan mode, propose-only desks and the unexpected-taint rule.
+                danger = spec.danger if spec else (MCP_DANGER if mcp_is(c["name"]) else "safe")
                 mode = _gate(c["name"], raw_mode, tool_ctx, args)
                 # A file write outside the granted folders (or in one, once the reply read untrusted content) asks.
                 fs_ask = mode != "off" and toolbox.fs_needs_ask(c["name"], args, tool_ctx)
@@ -1874,10 +1932,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     elif autonomy == "propose" and danger == "external":
                         # A propose-only desk may plan an external action, never perform one.
                         mode, forced, blocked_reason = "off", True, PROPOSE_ONLY
-                    elif (danger == "external" and tool_ctx["tainted"]
-                          and not taint_expected(active_plan, tool_ctx["taint_sources"])):
+                    elif plan_voided_by_taint(danger, bool(tool_ctx["tainted"]),
+                                              taint_expected(active_plan, tool_ctx["taint_sources"])):
                         # Taint the approved plan did not predict voids the pre-approval: ask, and
-                        # consume nothing. Checked before any claim, because a step burnt on a call the
+                        # consume nothing. A web fetch is included: its address can carry what was read.
+                        # Checked before any claim, because a step burnt on a call the
                         # user then denies can never be reclaimed.
                         mode, forced = "ask", True
                     elif autonomy == "ask" and danger in MUTATING:
@@ -1922,7 +1981,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     # being withheld while it is drafted is the normal case, not an unusable plan.
                     offered = {s["function"]["name"] for s in _schemas(withheld=True)}
                     args, pre = normalize_plan(args, {n: (m if n in offered else "off") for n, m in modes.items()},
-                                               specs={n: sp.danger for n, sp in toolbox.specs.items()},
+                                               specs={**{n: sp.danger for n, sp in toolbox.specs.items()},
+                                                      **{n: MCP_DANGER for n in modes if mcp_is(n)}},
                                                taints={n for n in modes if toolbox.taints(n) or mcp_is(n)})
                     if pre is None:
                         plan = plans.open(uid, args, run_id=run.run_id if run else None, conversation_id=conv_id,
@@ -1964,6 +2024,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         run.store.open_approval(uid, run.run_id, c["name"], args, conversation_id=conv_id, message_id=am["id"],
                                                 forced=forced, desk_id=run.desk_id, danger=danger)
                         run.store.decide(uid, "deny", by="unattended", note=why)
+                if proposal_only(run) and mode == "ask" and claimed is None and pre is None:
+                    # A background run has nobody to answer a card, and only external calls can become proposals.
+                    # Opening one here would park the run forever (and every later fire behind it).
+                    pre = tools.denied(c["name"], "not available in a background run: it needs an approval and nobody is watching")
                 asks = mode == "ask" and claimed is None and pre is None
                 if asks and desk_id and c["name"] != PLAN_TOOL and run_store.claim_parked(desk_id, c["name"], args, uid):
                     # The user already said yes to exactly this call on a card an earlier turn let go
@@ -2037,7 +2101,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     finally:
                         _approvals.pop(uid, None)
                     deny_note = _approval_notes.pop(uid, None)
-                    awaiting = None
+                    pending_card, awaiting = awaiting, None
                     if decision != "deny" and store is not None and (arow := store.approval(uid)) and arow.get("edited_args"):
                         # The user rewrote this call on its card. approval_edits validated it in the route and the row's
                         # digest was re-bound to it; from here on the edited arguments are THE call: they run, are
@@ -2053,6 +2117,14 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                              reason="plan" if plan is not None else
                                              ("question" if c["name"] == "desk_ask" else "approval"),
                                              run_id=None)
+                        # The reply ends here, but what it streamed so far is the user's to keep: finish the row
+                        # (the card stays on it as pending) and record what this turn spent, as the normal end does.
+                        kept = tool_events + ([pending_card] if pending_card else [])
+                        convos.finish_message(am["id"], "".join(buf).strip(), None, used, kept, tracer.spans,
+                                              "".join(rbuf).strip() or None)
+                        convos.touch(conv_id)
+                        if run is not None:
+                            run.partial, run.cost, run.rounds = partial, budget.cost, budget.rounds
                         yield "parked", {"message_id": am["id"], "call_id": uid, "name": c["name"]}
                         # Persist the reply with its card still pending, so the transcript keeps a
                         # card the user can answer after a reload; then end like any other reply,
@@ -2104,7 +2176,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         if mcp_is(c["name"]):
                             mcp_store.set_grant(c["name"], "on", "chat", conv_id)
                         else:
-                            convos.update(conv_id, {"settings": {"tools": {**(conv["settings"].get("tools") or {}), c["name"]: "on"}}})
+                            # Re-read: the approval may have waited for hours, and a tool switched off in the meantime
+                            # must stay off. Merge into the current map, never the one read at the start of the reply.
+                            fresh = (convos.get(conv_id) or conv)["settings"].get("tools") or {}
+                            convos.update(conv_id, {"settings": {"tools": {**fresh, c["name"]: "on"}}})
                             conv["settings"].setdefault("tools", {})[c["name"]] = "on"
                         modes[c["name"]] = "on"
                         decision = "allow"
@@ -2112,7 +2187,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         if mcp_is(c["name"]):
                             mcp_store.set_grant(c["name"], "on", "global")
                         else:
-                            db.set_settings({"tools": {**(cfg.get("tools") or {}), c["name"]: "on"}})
+                            # Re-read for the same reason: the Settings page may have changed the map during the wait.
+                            db.set_settings({"tools": {**(settings().get("tools") or {}), c["name"]: "on"}})
                         modes[c["name"]] = "on"
                         decision = "allow"
                     if standing:
@@ -2136,6 +2212,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         yield "plan_decision", {"message_id": am["id"], "call_id": uid, "plan": plan}
                 was_tainted, was_blocked = tool_ctx["tainted"], c["name"] in blocked
                 ran = False  # only a call that really executed says anything about being stuck
+                mcp_ran = False  # the connector was actually contacted: whatever it said, error or not, is third-party text
                 if was_blocked:
                     result: Any = tools.denied(c["name"], f"failing {TOOL_ERROR_LIMIT} times in a row and disabled for the rest of this reply")
                 elif pre is not None:
@@ -2165,7 +2242,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 elif mcp_is(c["name"]):
                     # The branch above only reaches here when the call was allowed. A job has nobody
                     # to allow it, so the connector call is a proposal and the server is not contacted.
-                    result = _propose(run, c["name"], args, uid, tool_ctx) if proposal_only(run) and run is not None else await _mcp_call(c["name"], args)
+                    if proposal_only(run) and run is not None:
+                        result = _propose(run, c["name"], args, uid, tool_ctx)
+                    else:
+                        result = await _mcp_call(c["name"], args)
+                        mcp_ran = True
                     ran = True
                 else:
                     tool_ctx["fs_outside_ok"] = fs_ask  # the user approved this write (or granted the folder)
@@ -2194,7 +2275,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 if tool_errors[c["name"]] >= TOOL_ERROR_LIMIT:
                     blocked.add(c["name"])
                 # An MCP result is third-party text by definition, so it taints like a web fetch does.
-                tainted = decision == "allow" and not err and (toolbox.taints(c["name"]) or mcp_is(c["name"]))
+                # A connector's error text is as untrusted as its output, so it taints either way.
+                tainted = decision == "allow" and (mcp_ran or (not err and toolbox.taints(c["name"])))
                 if tainted:
                     tool_ctx["tainted"] = True  # Toolbox.call sets this for built-ins; _mcp_call cannot reach ctx
                     if not was_tainted:
@@ -2239,7 +2321,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                  + json.dumps(args, default=str)[:1500]}
                 # Small results go in whole; a big one is stored and replaced by a handle the model can
                 # page with read_tool_result, so nothing is silently truncated away. See working.py.
-                content = tool_results.for_model(conv_id, am["id"], c["name"], for_model)
+                # Anything saved while this run is tainted can carry that text, including a script
+                # that prints it. Paging the handle later has to taint again, even after the banner is cleared.
+                brought_untrusted = bool(tool_ctx.get("tainted"))
+                content = tool_results.for_model(conv_id, am["id"], c["name"], for_model, untrusted=brought_untrusted)
                 if stuck and event["breaker"] == "stuck_nudge":
                     content = f"{content}\n\n[stuck_notice] {STUCK_NUDGE.format(detail=stuck.detail)}"
                 messages.append({"role": "tool", "tool_call_id": c["id"], "content": content})
@@ -2377,6 +2462,10 @@ async def _run_desk(run: Run, desk_id: str, body: ChatIn) -> dict[str, Any]:
         async for event, data in _chat_stream(run.conversation_id, body, run.stop, run.steers, run=run):
             if event == "assistant_message":
                 run.message_id = data.get("id")
+            if event == "parked":
+                # A parked turn returns without a `done`, but it did spend: count it, or a desk that keeps
+                # parking never runs out of budget.
+                desks.charge(desk_id, run.cost, 1)
             if event == "done" and not data.get("segment"):
                 # A steered reply closes its current segment with its own `done` and keeps going;
                 # only the run's real final `done` ends the turn, so only it may charge one.
@@ -2659,7 +2748,7 @@ async def list_runs(status: str | None = None, conversation_id: str | None = Non
         statuses = tuple(x for x in status.split(",") if x)
         if not statuses or any(x not in STATUSES for x in statuses):
             raise HTTPException(400, f"status must be 'all' or a comma list of {', '.join(STATUSES)}")
-    return bus.list(statuses, conversation_id, limit, desk_id)
+    return bus.list(statuses, conversation_id, _clamp(limit), desk_id)
 
 
 @app.get("/runs/{run_id}/children")
@@ -2945,7 +3034,7 @@ async def list_approvals(status: str | None = "pending", run_id: str | None = No
     `live` says whether a run in this process is waiting on it."""
     if status not in (None, "", "all", "pending", "approved", "denied"):
         raise HTTPException(400, "status must be pending, approved, denied or all")
-    rows = run_store.approvals(None if status in (None, "", "all") else status, run_id, limit, desk_id)
+    rows = run_store.approvals(None if status in (None, "", "all") else status, run_id, _clamp(limit), desk_id)
     # A plan card is read back through its plan, not through the approval row: action_plans stays the
     # one place a plan lives, and the row carries only the id that gets you there.
     return [{**a, "live": a["call_id"] in _approvals,
@@ -3136,6 +3225,11 @@ async def _launch_job(job: dict[str, Any], fire: dict[str, Any]) -> str | None:
     Fresh each time on purpose. A morning brief that replayed its own back catalogue every day would get slower,
     dearer and worse at the actual job; one fire, one transcript, one tight budget.
     """
+    # The previous fire still running (a card nobody can answer, a long job) must not stack another run behind it.
+    prev = job.get("last_run_id")
+    if prev and prev in bus.live_ids() and not fire.get("manual"):
+        log.warning("job %s skipped: its previous run %s is still live", job["name"], prev)
+        return prev  # handed back so the scheduler's mark_launched keeps pointing at the live run, not at nothing
     cfg = settings()
     conv = convos.create(job["project_id"], f"{job['name']} · {_stamp(fire['due_at'])}", cfg.get("defaultModel") or "")
     # job_id keeps this transcript out of the sidebar's chat list; the Agent Inbox links to it instead.
@@ -3355,7 +3449,7 @@ def list_proposals(status: str | None = "pending", run_id: str | None = None, li
     """Outward-facing calls a background run recorded instead of making. Pending by default."""
     if status not in (None, "", "all", *PROPOSAL_STATUSES):
         raise HTTPException(400, "status must be pending, accepted, rejected or all")
-    return proposals.list(None if status in (None, "", "all") else status, run_id, limit)
+    return proposals.list(None if status in (None, "", "all") else status, run_id, _clamp(limit))
 
 
 @app.post("/proposals/{pid}/accept")
@@ -3382,7 +3476,10 @@ async def accept_proposal(pid: str, body: ProposalIn | None = None) -> dict[str,
             return await _mcp_call(claimed["tool"], claimed["args"])
         return await toolbox.call(claimed["tool"], claimed["args"], ctx)
 
-    result, replayed = await run_store.call_once(claimed["run_id"], PROPOSAL_STEP, claimed["tool"], claimed["args"],
+    # call_id is not part of the journal key, so two identical proposals from one run would share it and the second
+    # accept would "replay" the first's result without running. A step derived from the proposal id keeps them apart.
+    step = PROPOSAL_STEP - 1 - int(hashlib.sha256(pid.encode()).hexdigest()[:12], 16)
+    result, replayed = await run_store.call_once(claimed["run_id"], step, claimed["tool"], claimed["args"],
                                                  _execute, call_id=pid)
     err = result.get("error") if isinstance(result, dict) else None
     row = proposals.record(pid, result, err)
@@ -3419,7 +3516,7 @@ def agent_inbox(hours: float = 72.0, limit: int = 20, include_dry: int = 0) -> d
                                   "job": ((row or {}).get("input") or {}).get("job")})
     pending_proposals = proposals.list("pending", limit=100)
 
-    runs = run_store.of_kind("job", since=cutoff, limit=limit)
+    runs = run_store.of_kind("job", since=cutoff, limit=_clamp(limit))
     if not include_dry:  # a preview is not something that happened while the user was away
         runs = [r for r in runs if not (isinstance(r.get("input"), dict) and r["input"].get("dry_run"))]
     counts = proposals.counts([r["run_id"] for r in runs])
@@ -3883,9 +3980,13 @@ async def _read_upload(file: UploadFile) -> bytes:
 
 
 def _store_upload(project_id: str | None, name: str, mime: str, data: bytes) -> dict[str, Any]:
+    # The project is resolved first so an upload for a deleted project leaves no file behind, and the file is
+    # removed if anything after the write fails. Runs in a worker thread (see upload_document): parsing a 20 MB
+    # PDF on the event loop would stall every SSE stream.
+    pid = wsid(project_id)
     safe = safe_upload_name(name)
     digest = hashlib.sha256(data).hexdigest()
-    dup = documents.find_by_hash(wsid(project_id), digest)
+    dup = documents.find_by_hash(pid, digest)
     if dup:
         return {**dup, "duplicate": True}
     text = for_index(extract_text(safe, data, mime))
@@ -3895,14 +3996,20 @@ def _store_upload(project_id: str | None, name: str, mime: str, data: bytes) -> 
         blocks = None
     dest = db.data_dir / "uploads" / f"{new_id()}-{safe}"
     dest.write_bytes(data)
-    return documents.create(wsid(project_id), safe, mime, len(data), str(dest), text, blocks=blocks, content_hash=digest)
+    try:
+        return documents.create(pid, safe, mime, len(data), str(dest), text, blocks=blocks, content_hash=digest)
+    except BaseException:
+        dest.unlink(missing_ok=True)
+        raise
 
 
 @app.post("/documents")
 async def upload_document(file: UploadFile = File(...), project_id: str | None = Form(None)) -> dict[str, Any]:
     data = await _read_upload(file)
     try:
-        return _store_upload(project_id, file.filename or "untitled", file.content_type or "", data)
+        return await asyncio.to_thread(_store_upload, project_id, file.filename or "untitled", file.content_type or "", data)
+    except HTTPException:
+        raise
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, str(e)) from e
 
@@ -4344,20 +4451,33 @@ def update_board(id: str, body: BoardPatch) -> dict[str, Any]:
     return b
 
 
+def _board_op(fn: Any, *a: Any) -> Any:
+    """A board write with a bad id or an empty board is the caller's mistake (400/404), never a 500."""
+    try:
+        return fn(*a)
+    except KeyError as e:
+        raise HTTPException(404, str(e.args[0]) if e.args else "Not found") from e
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    except sqlite3.IntegrityError as e:  # an id that matches no row, caught by the foreign key
+        raise HTTPException(404, "No such board, column or card") from e
+
+
 @app.delete("/boards/{id}")
 def delete_board(id: str) -> dict[str, bool]:
     boards.delete(id)
+    canvases.delete_windows_for("board", id)
     return {"ok": True}
 
 
 @app.post("/boards/{id}/columns")
 def add_column(id: str, body: ColumnIn) -> dict[str, Any]:
-    return boards.add_column(id, body.name)
+    return _board_op(boards.add_column, id, body.name)
 
 
 @app.put("/boards/columns/{cid}")
 def update_column(cid: str, body: ColumnPatch) -> dict[str, bool]:
-    boards.update_column(cid, body.model_dump(exclude_none=True))
+    _board_op(boards.update_column, cid, body.model_dump(exclude_none=True))
     return {"ok": True}
 
 
@@ -4371,7 +4491,7 @@ def delete_column(cid: str) -> dict[str, bool]:
 def add_card(id: str, body: CardIn) -> dict[str, Any]:
     if not body.title.strip():
         raise HTTPException(400, "Empty title")
-    return boards.add_card(id, body.column_id, body.title, body.description, body.due, body.priority, body.labels)
+    return _board_op(boards.add_card, id, body.column_id, body.title, body.description, body.due, body.priority, body.labels)
 
 
 @app.put("/boards/cards/{cid}")
@@ -4379,7 +4499,7 @@ def update_card(cid: str, body: CardPatch) -> dict[str, Any]:
     patch = body.model_dump(exclude_none=True, exclude={"clear_due"})
     if body.clear_due:
         patch["due"] = None
-    c = boards.update_card(cid, patch)
+    c = _board_op(boards.update_card, cid, patch)
     if not c:
         raise HTTPException(404)
     return c
@@ -4387,7 +4507,7 @@ def update_card(cid: str, body: CardPatch) -> dict[str, Any]:
 
 @app.post("/boards/cards/{cid}/move")
 def move_card(cid: str, body: MoveIn) -> dict[str, Any]:
-    c = boards.move_card(cid, body.column_id, body.before_card_id)
+    c = _board_op(boards.move_card, cid, body.column_id, body.before_card_id)
     if not c:
         raise HTTPException(404)
     return c
@@ -4545,6 +4665,8 @@ def update_dashboard(id: str, body: DashboardIn) -> dict[str, Any]:
 
 @app.delete("/dashboards/{id}")
 def delete_dashboard(id: str) -> dict[str, bool]:
+    for w in (dashboards.get(id) or {}).get("widgets") or []:
+        canvases.delete_windows_for("dashboard-widget", w["id"])
     dashboards.delete(id)
     return {"ok": True}
 
@@ -4657,6 +4779,7 @@ async def revise_widget(wid: str, body: dict[str, str], request: Request) -> dic
 @app.delete("/widgets/{wid}")
 def delete_widget(wid: str) -> dict[str, bool]:
     dashboards.delete_widget(wid)
+    canvases.delete_windows_for("dashboard-widget", wid)
     return {"ok": True}
 
 
@@ -5033,7 +5156,74 @@ def delete_doc_folder(path: str, delete_docs: bool = False, scope: str = "") -> 
 
 @app.post("/docs")
 def create_doc(body: DocIn) -> dict[str, Any]:
-    return docs.create(body.title, body.content, sid(body.project_id), body.folder)
+    return docs.create(body.title, body.content, wsid(body.project_id), body.folder)
+
+
+class DailyIn(BaseModel):
+    date: str | None = None  # YYYY-MM-DD; absent is today on this machine
+
+
+# Declared above /docs/{id}, like /docs/pending: "daily" would otherwise be read as a doc id.
+@app.post("/docs/daily")
+def open_daily_doc(body: DailyIn) -> dict[str, Any]:
+    try:
+        doc, created = docs.daily(body.date)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return {"doc": doc, "created": created}
+
+
+class DocRecordingIn(BaseModel):
+    mode: str = "record"       # 'record' captures the room and proposes a summary; 'dictate' types what you say
+    template: str = "general"
+    title: str | None = None
+
+
+@app.post("/docs/{doc_id}/recordings")
+async def start_doc_recording(doc_id: str, body: DocRecordingIn) -> dict[str, Any]:
+    """Create a recording linked to this doc and start it, through the same consent + preflight gate
+    as any meeting. If the start is refused the row made for it is deleted, so nothing is left behind."""
+    d = docs.get(doc_id)
+    if not d:
+        raise HTTPException(404)
+    if body.mode not in ("record", "dictate"):
+        raise HTTPException(400, "mode must be 'record' or 'dictate'")
+    if not activity.IS_MAC:
+        row = next((r for r in meeting_svc.capabilities() if r["id"] == "platform"), {})
+        raise HTTPException(400, row.get("fix") or "Recording is macOS-only.")
+    m = meeting_store.create(
+        title=(body.title or "").strip() or d["title"], project_id=d["project_id"], template=body.template,
+        status="scheduled", doc_id=doc_id, doc_mode=body.mode)
+    try:
+        started = await asyncio.to_thread(meeting_svc.start, m["id"])
+    except BaseException as e:
+        meeting_store.delete(m["id"])
+        if isinstance(e, MeetingBlocked):
+            raise HTTPException(409, {"blockers": e.blockers}) from e
+        if isinstance(e, RecorderBusy):
+            raise HTTPException(409, {"meeting_id": e.meeting_id, "blockers": [{
+                "id": "busy", "label": "Already recording", "ok": False, "detail": str(e),
+                "fix": "Stop the meeting that is recording before starting another."}]}) from e
+        raise
+    if not started:
+        meeting_store.delete(m["id"])
+        raise HTTPException(404)
+    return started
+
+
+@app.get("/docs/{doc_id}/recordings")
+def doc_recordings(doc_id: str) -> list[dict[str, Any]]:
+    if not docs.get(doc_id):
+        raise HTTPException(404)
+    return meeting_store.for_doc(doc_id)
+
+
+@app.get("/docs/{doc_id}/backlinks")
+def doc_backlinks(doc_id: str) -> list[dict[str, Any]]:
+    out = docs.backlinks(doc_id)
+    if out is None:
+        raise HTTPException(404)
+    return out
 
 
 @app.get("/docs/{id}")
@@ -5051,7 +5241,8 @@ def save_doc(id: str, body: DocSave) -> dict[str, Any]:
         raise HTTPException(404)
     # A doc the user wrote is the best evidence of their voice there is — far better than chat. Banked
     # under a stable ref, so editing one doc for a week refreshes one sample instead of adding seven.
-    if settings().get("learnStyle", True):
+    # Not for a doc with a recording in it: its accepted summaries are other people's speech, not the user's voice.
+    if settings().get("learnStyle", True) and not meeting_store.records_doc(id):
         style.add_sample(d["project_id"], d["content"], source="doc", ref=f"doc:{id}")
     return d
 
@@ -5060,11 +5251,11 @@ def save_doc(id: str, body: DocSave) -> dict[str, Any]:
 def patch_doc(id: str, body: DocMetaPatch) -> dict[str, Any]:
     patch = body.model_dump(exclude_none=True, exclude={"clear_project", "scope"})
     if body.scope is not None:
-        patch["project_id"] = fscope(body.scope) or None
+        patch["project_id"] = (wsid(fscope(body.scope)) if fscope(body.scope) else None)
     elif body.clear_project:
         patch["project_id"] = None
     elif "project_id" in patch:
-        patch["project_id"] = sid(patch["project_id"])
+        patch["project_id"] = wsid(patch["project_id"])
     d = docs.update_meta(id, patch)
     if not d:
         raise HTTPException(404)
@@ -5081,7 +5272,7 @@ def delete_doc(id: str) -> dict[str, bool]:
 def doc_revisions(id: str, limit: int = 100) -> list[dict[str, Any]]:
     if not docs.get(id):
         raise HTTPException(404)
-    return docs.revisions(id, limit)
+    return docs.revisions(id, _clamp(limit))
 
 
 @app.get("/docs/revisions/{rev_id}")
@@ -5425,6 +5616,24 @@ async def _activity_shutdown() -> None:
 # below can be reached by it.
 
 
+def _recording_changed(event: dict[str, Any]) -> None:
+    """A recording moved (segment settled, status change, summary landed): tell every window.
+
+    Called from the recorder's worker thread as well as the event loop, and a Topic's queues belong
+    to the loop, so off-loop calls are handed to it (same shape as _desk_changed)."""
+    try:
+        running = asyncio.get_running_loop()
+    except RuntimeError:
+        running = None
+    if running is not None:
+        events.publish("recording", event)
+    elif _loop is not None and not _loop.is_closed():
+        _loop.call_soon_threadsafe(events.publish, "recording", event)
+
+
+meeting_svc.publish = _recording_changed
+
+
 class MeetingIn(BaseModel):
     """A new meeting. `status` is `scheduled` rather than the repo's `notes_only` default because
     this row was made in order to be recorded; the one the 45s tick adopts says so for itself."""
@@ -5444,6 +5653,15 @@ class MeetingIn(BaseModel):
     attendees: list[Any] = []
     scheduled_start: float | None = None
     scheduled_end: float | None = None
+    # A recording made for a doc (audio import into a doc goes through here, then import-audio).
+    doc_id: str | None = None
+    doc_mode: str | None = None
+
+
+class MeetingSummarizeIn(BaseModel):
+    template: str | None = None
+    focus: str = ""
+    force: bool = False
 
 
 class MeetingPatch(BaseModel):
@@ -5478,6 +5696,8 @@ class MeetingConfigIn(BaseModel):
     outputDeviceName: str | None = None
     sources: list[str] | None = None
     segmentSeconds: int | None = None
+    docSegmentSeconds: int | None = None
+    dictationSegmentSeconds: int | None = None
     maxMeetingSeconds: int | None = None
     drainSeconds: int | None = None
     sttBackend: str | None = None
@@ -5589,7 +5809,7 @@ async def meeting_suggest() -> list[dict[str, Any]]:
 def search_meetings(q: str, project_id: str | None = "all", limit: int = 10) -> list[dict[str, Any]]:
     """FTS over titles, notes, enhanced notes and transcripts. Each hit's `field` says which one."""
     scope = "__all__" if project_id in (None, "all") else sid(project_id)
-    return meeting_store.search(q, scope, limit)
+    return meeting_store.search(q, scope, _clamp(limit))
 
 
 @app.get("/meetings/pending")
@@ -5617,16 +5837,29 @@ def reject_meeting_revision(rev_id: str) -> dict[str, Any]:
 
 @app.get("/meetings")
 def list_meetings(project_id: str | None = "all", q: str = "", status: str = "",
-                  since_days: int = 0, limit: int = 100) -> list[dict[str, Any]]:
-    """Preview rows: counts and the first 240 characters of the notes, never a body."""
+                  since_days: int = 0, limit: int = 100, doc_id: str | None = None,
+                  include_docs: bool = False) -> list[dict[str, Any]]:
+    """Preview rows: counts and the first 240 characters of the notes, never a body.
+
+    Recordings made inside a doc are not meetings of their own: they are left out unless
+    `include_docs` is set, and `doc_id` selects one doc's."""
     scope = "__all__" if project_id in (None, "all") else sid(project_id)
-    return meeting_store.list(scope, q, status, since_days, limit)
+    return meeting_store.list(scope, q, status, since_days, _clamp(limit), doc_id=doc_id, include_docs=include_docs)
 
 
 @app.post("/meetings")
 def create_meeting(body: MeetingIn) -> dict[str, Any]:
+    doc_project: str | None = None
+    if body.doc_id:
+        doc = docs.get(body.doc_id)  # None when missing or trashed
+        if not doc:
+            raise HTTPException(404, "That doc does not exist or is in the trash.")
+        if body.doc_mode not in (None, "record", "dictate"):
+            raise HTTPException(400, "doc_mode must be 'record' or 'dictate'")
+        doc_project = doc["project_id"]
     return meeting_store.create(
-        title=body.title, project_id=wsid(body.project_id), template=body.template,
+        doc_id=body.doc_id, doc_mode=body.doc_mode if body.doc_id else None,
+        title=body.title, project_id=doc_project if body.doc_id else wsid(body.project_id), template=body.template,
         calendar_event_id=body.calendar_event_id, calendar_id=body.calendar_id,
         calendar_link=body.calendar_link, conference_link=body.conference_link,
         attendees=body.attendees, scheduled_start=body.scheduled_start,
@@ -5635,7 +5868,7 @@ def create_meeting(body: MeetingIn) -> dict[str, Any]:
 
 @app.get("/meetings/{id}")
 def get_meeting(id: str) -> dict[str, Any]:
-    m = meeting_store.get(id)
+    m = meeting_store.get(id, include_hidden=False)
     if not m:
         raise HTTPException(404)
     return m
@@ -5734,7 +5967,7 @@ async def import_meeting_audio(id: str, file: UploadFile = File(...)) -> dict[st
             logging.getLogger("personal_os").warning("meeting import %s: %s", id, e)
 
     asyncio.ensure_future(_go())
-    return meeting_store.get(id) or {}
+    return meeting_store.get(id, include_hidden=False) or {}
 
 
 @app.post("/meetings/{id}/diarize")
@@ -5744,7 +5977,7 @@ async def diarize_meeting(id: str) -> dict[str, Any]:
     res = await meeting_svc.diarize(id)
     if res.get("note") == "no such meeting":
         raise HTTPException(404)
-    return {**res, "meeting": meeting_store.get(id)}
+    return {**res, "meeting": meeting_store.get(id, include_hidden=False)}
 
 
 @app.put("/meetings/{id}/speakers")
@@ -5781,9 +6014,12 @@ def meeting_segments(id: str, since: int = -1, offset: int = 0, limit: int = 200
                      channel: str = "") -> list[dict[str, Any]]:
     """The live transcript pane's poll. `since` is a rowid cursor and each row carries the `cursor`
     to pass back, so since=0 is the whole tail with cursors; omitting it pages by t_start."""
+    if meeting_store.is_hidden(id):
+        raise HTTPException(404)
+    limit = _clamp(limit, 2000)
     if since >= 0:
         return meeting_store.since(id, since, limit)
-    return meeting_store.segments(id, offset, limit, channel)
+    return meeting_store.segments(id, max(0, offset), limit, channel)
 
 
 @app.get("/meetings/{id}/stream")
@@ -5799,7 +6035,7 @@ async def stream_meeting(id: str, since: int = 0) -> StreamingResponse:
 def meeting_transcript(id: str, offset: int = 0, limit: int = 500) -> dict[str, Any]:
     """The rolled-up transcript, by line. An hour of speech is far more than one response should
     carry, and the column is only ever rewritten on finalize, so paging it is a pure read."""
-    m = meeting_store.get(id)
+    m = meeting_store.get(id, include_hidden=False)
     if not m:
         raise HTTPException(404)
     lines = (m["transcript"] or "").splitlines()
@@ -5817,24 +6053,40 @@ async def enhance_meeting(id: str, force: bool = False, template: str | None = N
     mechanical fallback still holds the user's notes verbatim, so there is something to accept -
     and only a pass that could write no revision at all is a 502.
     """
-    if not meeting_store.get(id):
+    m = meeting_store.get(id, include_hidden=False)
+    if not m:
         raise HTTPException(404)
+    if m.get("doc_id"):
+        raise HTTPException(400, "This is a recording of a doc: use /meetings/{id}/summarize.")
     rev = await meeting_svc.enhance(id, force, template)
     if not rev:
         raise HTTPException(502, meeting_svc.last_error or "The enhance pass produced no revision")
     return rev
 
 
+@app.post("/meetings/{id}/summarize")
+async def summarize_meeting(id: str, body: MeetingSummarizeIn) -> dict[str, Any]:
+    """Write a summary of a doc recording and PROPOSE it as a section at the end of its doc. Never
+    applied here, whatever the doc edit mode is: the user accepts it in the doc. A model failure is a
+    200 with `error` set and no revision, so the UI can offer it again."""
+    m = meeting_store.get(id, include_hidden=False)
+    if not m:
+        raise HTTPException(404)
+    if not m.get("doc_id"):
+        raise HTTPException(400, "Only a recording made in a doc can be summarized into it.")
+    return await meeting_svc.summarize_into_doc(id, template=body.template, focus=body.focus, force=body.force)
+
+
 @app.get("/meetings/{id}/revisions")
 def meeting_revisions(id: str, limit: int = 100) -> list[dict[str, Any]]:
-    if not meeting_store.get(id):
+    if not meeting_store.get(id, include_hidden=False):
         raise HTTPException(404)
-    return meeting_store.revisions(id, limit)
+    return meeting_store.revisions(id, _clamp(limit))
 
 
 @app.get("/meetings/{id}/actions")
 def meeting_actions(id: str) -> list[dict[str, Any]]:
-    if not meeting_store.get(id):
+    if not meeting_store.get(id, include_hidden=False):
         raise HTTPException(404)
     return meeting_store.action_items(id)
 
@@ -5843,7 +6095,7 @@ def meeting_actions(id: str) -> list[dict[str, Any]]:
 def meeting_actions_add_todos(id: str, body: MeetingActionsIn) -> list[dict[str, Any]]:
     """Promote proposed items into real todos. Idempotent per item - one that already carries a
     todo_id is left alone - and todos.on_change pushes each new task to Google within ~2s."""
-    if not meeting_store.get(id):
+    if not meeting_store.get(id, include_hidden=False):
         raise HTTPException(404)
     scope = wsid(body.project_id) if body.project_id else None  # None means "the meeting's own"
     want = set(body.ids)
@@ -5865,7 +6117,7 @@ def meeting_action_dismiss(id: str, action_id: str) -> dict[str, Any]:
 async def retranscribe_meeting(id: str, limit: int = 20) -> dict[str, Any]:
     """Replay the failed segments whose wav is still on disk. One HTTP request per segment, so it
     runs in a thread; a segment past its attempt ceiling is left alone."""
-    if not meeting_store.get(id):
+    if not meeting_store.get(id, include_hidden=False):
         raise HTTPException(404)
     # `retranscribe` settles every meeting it touched itself, rebuilding `transcript`, the FTS row
     # and the error column clause by clause. This route used to redo that rebuild and compute
@@ -5873,7 +6125,7 @@ async def retranscribe_meeting(id: str, limit: int = 20) -> dict[str, Any]:
     # away banners that are still true after a replay, like a dead loopback channel or a failed
     # enhance pass. Let the service own it.
     settled = await asyncio.to_thread(meeting_svc.retranscribe, id, limit)
-    return {"settled": settled, "meeting": meeting_store.get(id)}
+    return {"settled": settled, "meeting": meeting_store.get(id, include_hidden=False)}
 
 
 @app.delete("/meetings/{id}/audio")
@@ -6040,7 +6292,7 @@ def delete_plan(id: str) -> dict[str, bool]:
 @app.get("/conversations/{id}/tool-results")
 def list_tool_results(id: str, limit: int = 20) -> list[dict[str, Any]]:
     """The handles this conversation produced: what was stored instead of inlined."""
-    return tool_results.list(id, limit)
+    return tool_results.list(id, _clamp(limit))
 
 
 @app.get("/tool-results/{rid}")
@@ -6048,7 +6300,7 @@ def read_tool_result_blob(rid: str, offset: int = 0, limit: int = 20000) -> dict
     row = tool_results.get(rid)
     if not row:
         raise HTTPException(404, "No such tool result")
-    out = tool_results.read(row["conversation_id"], rid, offset, limit)
+    out = tool_results.read(row["conversation_id"], rid, max(0, offset), _clamp(limit, 200000))
     return out or {}
 
 
@@ -6511,7 +6763,7 @@ async def stop_desk(id: str) -> dict[str, Any]:
 @app.get("/cowork/desks/{id}/events")
 def desk_event_list(id: str, limit: int = 200) -> list[dict[str, Any]]:
     _desk_or_404(id, False)
-    return desks.events(id, limit)
+    return desks.events(id, _clamp(limit))
 
 
 @app.post("/cowork/desks/{id}/seen")
@@ -6632,14 +6884,21 @@ async def _promote(desk_id: str, out: dict[str, Any], item: AcceptItem) -> dict[
     if msg := _too_big(len(data)):
         return {"ref": None, "verified": False, "error": msg}
     safe = safe_upload_name(Path(rel).name)
+    # Resolve the project and extract before anything is written, in a thread (a big PDF must not stall the
+    # loop), and drop the stored file if the row cannot be created, so a failure leaves no orphan upload.
+    pid = wsid(item.project_id) if item.project_id else None
+    try:
+        text = for_index(await asyncio.to_thread(extract_text, safe, data, ""))
+    except Exception as e:  # noqa: BLE001 - an unreadable file is a failed promotion, not a 500
+        return {"ref": None, "verified": False, "error": str(e)}
     stored = db.data_dir / "uploads" / f"{new_id()}-{safe}"
     stored.parent.mkdir(parents=True, exist_ok=True)
     stored.write_bytes(data)
     try:
-        text = for_index(extract_text(safe, data, ""))
-    except Exception as e:  # noqa: BLE001 - an unreadable file is a failed promotion, not a 500
-        return {"ref": None, "verified": False, "error": str(e)}
-    doc = documents.create(wsid(item.project_id) if item.project_id else None, title, "", len(data), str(stored), text)
+        doc = documents.create(pid, title, "", len(data), str(stored), text)
+    except BaseException:
+        stored.unlink(missing_ok=True)
+        raise
     # Compared against the STORED UPLOAD FILE, not the chunk text: the chunks are a derived,
     # normalised representation, and comparing to them would report a failure on every upload.
     ok = stored.is_file() and hashlib.sha256(stored.read_bytes()).hexdigest() == hashlib.sha256(data).hexdigest()
@@ -6721,7 +6980,7 @@ def _close_review(desk_id: str) -> dict[str, Any] | None:
 
 @app.get("/cowork/inbox")
 def cowork_inbox(limit: int = 40) -> list[dict[str, Any]]:
-    return desks.inbox(limit)
+    return desks.inbox(_clamp(limit))
 
 
 @app.post("/cowork/inbox/{event_id}/seen")

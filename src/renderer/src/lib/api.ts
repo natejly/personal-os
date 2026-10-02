@@ -47,7 +47,7 @@ const auth = async (): Promise<Record<string, string>> => {
   return token ? { 'X-Personal-OS-Token': token } : {}
 }
 
-async function req<T>(path: string, init?: RequestInit): Promise<T> {
+export async function req<T>(path: string, init?: RequestInit): Promise<T> {
   // The token wait only suspends while setBase() is still resolving it. Once it is (or when there is no
   // sidecar at all, as in tests), a req() runs synchronously up to its fetch — the canvas store's
   // flush-before-space-switch depends on that.
@@ -64,12 +64,12 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       /* ignore */
     }
-    throw new Error(msg)
+    throw Object.assign(new Error(msg), { status: r.status })
   }
   return (await r.json()) as T
 }
 
-const json = (v: unknown): string => JSON.stringify(v)
+export const json = (v: unknown): string => JSON.stringify(v)
 
 /** Human sentence for a read-back that did not prove the write (mirrors verify.summary_text). */
 export function verificationMessage(v: Verification): string {
@@ -742,7 +742,18 @@ async function* sseStream(path: string, signal?: AbortSignal): AsyncGenerator<{ 
         else if (line.startsWith('data:')) data += line.slice(5).trim()
         else if (line.startsWith('id:')) id = line.slice(3).trim()
       }
-      if (data) yield { event, data: JSON.parse(data), seq: id ? Number(id) : null }
+      if (!data) continue
+      const seq = id ? Number(id) : null
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(data)
+      } catch {
+        // A frame that is not JSON would throw before the caller's cursor moves, so every retry would
+        // fetch the same frame again. Skip it, but still hand the seq over so the cursor passes it.
+        yield { event: 'malformed', data: null, seq }
+        continue
+      }
+      yield { event, data: parsed, seq }
     }
   }
 }
@@ -752,18 +763,34 @@ async function* sseStream(path: string, signal?: AbortSignal): AsyncGenerator<{ 
  * The stream is a tail on the run's stored tape, and every event carries its seq (`id:`), so with a `runId` a
  * dropped connection (a backend restart, the Mac waking up) reconnects from the last seq it saw instead of failing.
  */
-export async function* chatStream(convId: string, since = 0, signal?: AbortSignal, runId?: string): AsyncGenerator<ChatEvent> {
+export async function* chatStream(convId: string, since = 0, signal?: AbortSignal, runId?: string, onGiveUp?: () => void): AsyncGenerator<ChatEvent> {
   let last = since
   let failures = 0
+  // The events that end a turn. The server also closes a stream cleanly when this subscriber's queue
+  // overflowed, which is not an ending: without one of these, an EOF means "reconnect from `last`".
+  let terminal = false
+  let idle = 0
   while (true) {
+    let got = 0
     try {
       const q = `since=${last}${runId ? `&run_id=${encodeURIComponent(runId)}` : ''}`
       for await (const { event, data, seq } of sseStream(`/conversations/${convId}/stream?${q}`, signal)) {
         failures = 0
+        got++
         if (seq !== null && Number.isFinite(seq)) last = seq
+        if (event === 'malformed') continue
+        if (event === 'done' || event === 'error' || event === 'parked') terminal = true
         yield { event, data } as ChatEvent
       }
-      return
+      if (terminal || !runId || signal?.aborted) return
+      // Bounded: a run that really ended without a terminal event would otherwise be re-asked forever.
+      idle = got ? 0 : idle + 1
+      if (idle > 3) {
+        onGiveUp?.()
+        return
+      }
+      await new Promise((res) => setTimeout(res, Math.min(2000, 300 * 2 ** idle)))
+      continue
     } catch (e) {
       if (signal?.aborted || !runId || ++failures > STREAM_RETRIES) throw e
       await new Promise((res) => setTimeout(res, Math.min(5000, 500 * 2 ** (failures - 1))))

@@ -16,6 +16,8 @@ from typing import Any
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 MAX_INDEX_CHARS = 400_000
 MAX_PDF_PAGES = 80
+# A zip's declared uncompressed size, summed. A 180 KB docx can inflate to hundreds of MB of XML.
+MAX_UNZIPPED_BYTES = 50 * 1024 * 1024
 _TRUNCATED = "\n\n[Extract truncated. The full file is stored.]"
 
 TEXT_EXT = {
@@ -198,12 +200,23 @@ def _parsed(ext: str, mime: str, data: bytes) -> str | None:
         if ext == ".docx" or mime == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
             import docx
 
+            _check_zip(data)
             d = docx.Document(io.BytesIO(data))
             parts = (p.text for p in d.paragraphs if p.text.strip())
             return _bounded(parts, MAX_PDF_PAGES)
     except Exception:
         return None
     return None
+
+
+def _check_zip(data: bytes) -> None:
+    """Refuse a zip-based document that is not a zip or would expand past the cap. The caller
+    treats the raise like any unreadable format: the file is stored with a note instead."""
+    import zipfile
+
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        if sum(i.file_size for i in z.infolist()) > MAX_UNZIPPED_BYTES:
+            raise ValueError("Archive expands too large to extract")
 
 
 def _bounded(parts: Iterable[str], limit: int) -> str:

@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { ApprovalDecision, BackendInfo, BackendState, PlanEdit, PlanDecision, PlanRecord,
   Desk, DeskEvent, DeskFile, FullDesk, PromotionResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, Document, Effort, TrashKind, FullDoc, GraphData, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodoCalendarStatus, TodayDashboard, Recap, Job, Meeting, MeetingCandidate, MeetingCapability, MeetingConfig, MeetingPreflight, MeetingSegment, MeetingStatus, MeetingStatusInfo, MeetingStreamEvent, FullMeeting } from '@shared/types'
+import { daily as dailyNote } from './features/notes/api'
 import { api, backgroundStream, chatStream, meetingStream, setBase, type Scope } from './lib/api'
 import { currentSelection } from './lib/pageContext'
 import { DEFAULT_EFFORT, NEEDS_YOU } from '../../shared/types'
@@ -461,6 +462,8 @@ export interface State {
   /** Retitle the open doc as it is typed, on the same debounce as the body. */
   editDocTitle: (title: string) => void
   /** Type into the open doc. Buffers locally and flushes to the backend on a debounce. */
+  /** Today's daily note: found or created on the server, then opened. */
+  openDailyNote: () => Promise<void>
   editDoc: (content: string) => void
   /** Flush the buffer now (⌘S, switching docs, leaving the view). */
   flushDoc: () => Promise<void>
@@ -528,6 +531,28 @@ let toastSeq = 0
 /** Autosave debounce for the doc editor: long enough to be one history entry, short enough to trust. */
 const SAVE_DEBOUNCE_MS = 1200
 let saveTimer: ReturnType<typeof setTimeout> | null = null
+
+/**
+ * The state after a request that replaced the doc body (accept, restore). `sent` is the draft right
+ * before the request and `base` the body the editor showed then, so a draft that differs now was
+ * typed or dictated while the request was in flight.
+ *
+ * What happens to that text depends on what the server did. When the new body is the old one with
+ * something added after it (an accepted recording summary), the typing is kept and the addition is
+ * put back after it: keeping the draft alone would autosave over the section just accepted. When
+ * the body was replaced outright there is nothing to merge the typing into, so the server wins, as
+ * it always has.
+ */
+export function adoptServerDoc(
+  draft: string | null, doc: FullDoc, sent: string | null, base: string
+): { activeDoc: FullDoc; docDraft: string | null } {
+  const typed = draft !== null && draft !== sent
+  const stem = base.trimEnd()
+  if (!typed || !doc.content.startsWith(stem)) return { activeDoc: doc, docDraft: null }
+  const added = doc.content.slice(stem.length)
+  const kept = draft.trimEnd()
+  return { activeDoc: doc, docDraft: stem || !kept ? kept + added : `${kept}\n\n${added}` }
+}
 /** The same debounce for the meeting notepad, on its own timer: typing notes during a call must not
  *  be cancelled by, or cancel, an autosave in the Docs editor. */
 const MEETING_SAVE_DEBOUNCE_MS = 1200
@@ -601,6 +626,15 @@ const startFailure = (e: unknown): string => {
   const first = startBlockers(e).find((b) => !b.ok)
   return first ? `${first.label}: ${first.detail}${first.fix ? ` — ${first.fix}` : ''}` : (e as Error).message
 }
+
+/**
+ * What the consent modal does once accepted, when the Record click that opened it was for a doc.
+ * `startRecording` opens the Meetings view, which a note must not do, so the doc recorder parks its
+ * own start here and `acceptMeetingConsent` runs it instead. Dismissing the modal drops it, for the
+ * same reason `consentIntent` is dropped. Module-level rather than state: a closure must not
+ * cross the IPC bus or be serialised.
+ */
+export const consentResume: { run: (() => void) | null } = { run: null }
 
 /** A 409 from `POST /chat` arrives as a `RunConflict` JSON-encoded in the error detail. */
 const runConflict = (e: unknown): RunConflict | null => {
@@ -915,6 +949,10 @@ export const useStore = create<State>((set, get) => {
             window.dispatchEvent(new Event('grain-job-finished'))
           } else if (ev.event === 'desk_status') {
             onDeskChanged(ev.data)
+          } else if (ev.event === 'recording') {
+            // Lazy: the docrec store imports this one, so a static import here would be a cycle.
+            const data = ev.data
+            void import('./features/docrec/store').then((m) => m.useDocRec.getState().handleEvent(data))
           }
         }
       } catch {
@@ -992,9 +1030,13 @@ export const useStore = create<State>((set, get) => {
     // is not the end of the desk's work and the pane re-attaches rather than going idle.
     let handoff: { desk_id: string; conversation_id: string; turn: number } | null = null
     clearHold(convId)
+    // Set when the stream kept closing without ever delivering an ending: what is stored is then the truth.
+    let gaveUp = false
     patchSession(convId, (s) => ({ ...s, streaming: { messageId: from.messageId, runId: run.run_id, abort, answering: true }, status: settleApprovals('working', from.approvals), finishedAt: null, pendingApprovals: from.approvals, touchedAt: Date.now() }))
     try {
-      for await (const ev of chatStream(convId, run.seq, abort.signal, run.run_id)) {
+      for await (const ev of chatStream(convId, run.seq, abort.signal, run.run_id, () => { gaveUp = true })) {
+        // A frame with no usable body has nothing to apply; ignoring it beats throwing inside the loop.
+        if (!ev || !isRecord(ev.data)) continue
         const focused = get().focusedConversationId === convId
         patchSession(convId, (s) => {
           const next = applyEvent(s, ev, focused)
@@ -1054,7 +1096,7 @@ export const useStore = create<State>((set, get) => {
     } finally {
       patchSession(convId, (s) => (s.streaming?.abort === abort ? { ...s, streaming: null, status: finishStatus(s.status) } : s))
       // An attached run wrote deltas this window never saw; the persisted message is the whole reply.
-      if (attached) void get().openSession(convId)
+      if (attached || gaveUp) void get().openSession(convId).catch(() => undefined)
       // A chained desk turn is a *new* run on this same conversation, and the stream for the old one
       // closes before the bus has registered it. Poll a few times rather than leave the pane dead.
       // `attachSession` is shared and this dedupes on run_id, so every extra attempt is a no-op.
@@ -1100,6 +1142,21 @@ export const useStore = create<State>((set, get) => {
     // Synchronous up to its first await, so `streaming` is set before this returns.
     void watchRun(convId, run, { messageId: null, approvals: 0, attached: false })
     return true
+  }
+
+  const patchChatSettings = async (patch: Partial<ConversationSettings>, conversationId?: string): Promise<void> => {
+    const id = conversationId ?? get().focusedConversationId
+    if (!id) {
+      // No conversation to PATCH yet. Effort and fast mode are the settings a draft can still carry,
+      // so park them and let `send` apply them to the conversation it is about to create.
+      set((s) => ({
+        draftEffort: patch.effort ?? s.draftEffort,
+        draftFast: patch.fast ?? s.draftFast
+      }))
+      return
+    }
+    const c = await api.conversations.patch(id, { settings: patch })
+    patchConversation(id, (cur) => ({ ...cur, settings: c.settings }))
   }
 
   return {
@@ -1220,9 +1277,16 @@ export const useStore = create<State>((set, get) => {
         inited = false
         return set({ ready: true, backendError: status.error ?? (e as Error).message })
       }
-      const [settings, projects, personalStats, conversations] = await Promise.all([
-        api.settings.get(), api.projects.list(), api.projects.globalStats(), api.conversations.list('all')
-      ])
+      let settings: Settings, projects: Project[], personalStats: Project['stats'], conversations: Conversation[]
+      try {
+        ;[settings, projects, personalStats, conversations] = await Promise.all([
+          api.settings.get(), api.projects.list(), api.projects.globalStats(), api.conversations.list('all')
+        ])
+      } catch (e) {
+        // Release the guard so a retry can run, and surface the failure instead of an empty window.
+        inited = false
+        return set({ ready: true, backendError: (e as Error).message })
+      }
       // One-shot migration of the pre-spaces global mode: a user who left the app in canvas mode lands
       // in the canvas once, and the setting is reset so later launches open on Today. Only the main
       // window writes it back; a pop-out (`?surface=widget`) never renders App and must not touch settings.
@@ -1324,8 +1388,12 @@ export const useStore = create<State>((set, get) => {
       set({ pageAgentModel: model })
       const id = get().pageAgentId
       if (!id) return
-      await api.conversations.patch(id, { model })
-      patchConversation(id, (c) => ({ ...c, model }))
+      try {
+        await api.conversations.patch(id, { model })
+        patchConversation(id, (c) => ({ ...c, model }))
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
     },
     setPageAgentParams: async (patch) => {
       set((s) => ({
@@ -1482,30 +1550,33 @@ export const useStore = create<State>((set, get) => {
     },
     renameChat: async (id, title) => {
       if (!title.trim()) return
-      await api.conversations.patch(id, { title: title.trim() })
-      patchConversation(id, (c) => ({ ...c, title: title.trim() }))
-      await get().refreshConversations()
+      try {
+        await api.conversations.patch(id, { title: title.trim() })
+        patchConversation(id, (c) => ({ ...c, title: title.trim() }))
+        await get().refreshConversations()
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
     },
     setChatModel: async (model, conversationId) => {
       const id = conversationId ?? get().focusedConversationId
       // A draft has no row yet: park the choice for `send`, as effort does, instead of changing the default.
       if (!id) return void set({ draftModel: model })
-      await api.conversations.patch(id, { model })
-      patchConversation(id, (c) => ({ ...c, model }))
-    },
-    setChatSettings: async (patch, conversationId) => {
-      const id = conversationId ?? get().focusedConversationId
-      if (!id) {
-        // No conversation to PATCH yet. Effort and fast mode are the settings a draft can still carry,
-        // so park them and let `send` apply them to the conversation it is about to create.
-        set((s) => ({
-          draftEffort: patch.effort ?? s.draftEffort,
-          draftFast: patch.fast ?? s.draftFast
-        }))
-        return
+      try {
+        await api.conversations.patch(id, { model })
+        patchConversation(id, (c) => ({ ...c, model }))
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
       }
-      const c = await api.conversations.patch(id, { settings: patch })
-      patchConversation(id, (cur) => ({ ...cur, settings: c.settings }))
+    },
+    // Picker and toggle callers fire and forget, so a failure has to surface here. The two callers that
+    // act on the outcome (a taint mark, plan mode) use `patchChatSettings` and handle the rejection.
+    setChatSettings: async (patch, conversationId) => {
+      try {
+        await patchChatSettings(patch, conversationId)
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
     },
     noteUntrustedUpload: async (conversationId, pending = 'draft', source = 'upload') => {
       const id = conversationId && conversationId !== '\u0000page-agent' ? conversationId : undefined
@@ -1516,7 +1587,7 @@ export const useStore = create<State>((set, get) => {
       const settings = get().sessions[id]?.conversation.settings
       const patch: Partial<ConversationSettings> = { tainted: true }
       if (settings) patch.taint_sources = [...new Set([...(settings.taint_sources ?? []), source])]
-      await get().setChatSettings(patch, id)
+      await patchChatSettings(patch, id)
     },
     askAboutEmail: async (id, subject) => {
       get().newChat(null)
@@ -1574,8 +1645,8 @@ export const useStore = create<State>((set, get) => {
       // Effort and fast mode chosen on the draft land before the first run, so they apply to this reply.
       const { draftEffort: effort, draftFast: fast, uploadTaintTarget, uploadTaintSource } = get()
       const settings: { effort?: Effort; fast?: boolean; tainted?: boolean; taint_sources?: string[] } = {}
-      // Medium is already what a new row hydrates to. Anything else, including the omit-the-field
-      // choice, has to be written or the server would fill medium back in.
+      // Low is already what a new row hydrates to. Anything else, including the omit-the-field
+      // choice, has to be written or the server would fill low back in.
       if (effort !== DEFAULT_EFFORT) settings.effort = effort
       if (fast) settings.fast = true
       const fromUpload = uploadTaintTarget === 'draft'
@@ -1690,8 +1761,13 @@ export const useStore = create<State>((set, get) => {
       const st = id && get().sessions[id]?.streaming
       if (!id || !st) return
       // Aborting the fetch would only detach this window, so a stop is always a request to the run.
-      if (st.messageId) await api.stop(st.messageId).catch(() => undefined)
-      else await api.stopRun(id, st.runId).catch(() => undefined)
+      try {
+        if (st.messageId) await api.stop(st.messageId)
+        else await api.stopRun(id, st.runId)
+      } catch (e) {
+        // A 404 is a run that had already finished; anything else means Stop did not take.
+        if ((e as { status?: number }).status !== 404) get().toast(`Could not stop: ${(e as Error).message}`, 'error')
+      }
     },
 
     // Always every scope: the Files tree shows Personal and each project as its own group, so a doc
@@ -1738,6 +1814,16 @@ export const useStore = create<State>((set, get) => {
           docDraft: null
         }))
         void get().refreshDocRevisions(doc.id)
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    openDailyNote: async () => {
+      try {
+        const { doc } = await dailyNote()
+        await get().refreshDocs()
+        get().expandTo(doc.project_id ?? '', doc.folder)
+        await get().openDoc(doc.id)
       } catch (e) {
         get().toast((e as Error).message, 'error')
       }
@@ -1881,8 +1967,10 @@ export const useStore = create<State>((set, get) => {
       try {
         // Buffered typing is saved first, so accepting lands on top of it instead of losing it.
         await get().flushDoc()
+        const sent = get().docDraft
+        const base = sent ?? get().activeDoc?.content ?? ''
         const doc = await api.docs.accept(revId)
-        set({ activeDoc: doc, docDraft: null })
+        set((st) => adoptServerDoc(st.docDraft, doc, sent, base))
         get().toast('Revision applied')
         await Promise.all([get().refreshDocRevisions(doc.id), get().refreshDocs(), get().refreshDocsPending()])
       } catch (e) {
@@ -1901,8 +1989,10 @@ export const useStore = create<State>((set, get) => {
     restoreRevision: async (revId) => {
       try {
         await get().flushDoc()
+        const sent = get().docDraft
+        const base = sent ?? get().activeDoc?.content ?? ''
         const doc = await api.docs.restore(revId)
-        set({ activeDoc: doc, docDraft: null })
+        set((st) => adoptServerDoc(st.docDraft, doc, sent, base))
         get().toast('Document restored')
         await Promise.all([get().refreshDocRevisions(doc.id), get().refreshDocs()])
       } catch (e) {
@@ -1917,9 +2007,12 @@ export const useStore = create<State>((set, get) => {
     setPlanSteps: async (conversationId, steps) => {
       // Optimistic: ticking a step off must feel like a checkbox, and the model reads the stored plan
       // at the top of its next round either way.
+      const before = get().plans[conversationId]
       set((s) => ({ plans: { ...s.plans, [conversationId]: steps } }))
       const plan = await api.plan.set(conversationId, steps).catch((e: Error) => {
         get().toast(e.message, 'error')
+        // Roll the checkbox back: the stored plan is what the model will read.
+        if (before) set((s) => ({ plans: { ...s.plans, [conversationId]: before } }))
         return null
       })
       if (plan) set((s) => ({ plans: { ...s.plans, [conversationId]: plan.steps } }))
@@ -2141,7 +2234,7 @@ export const useStore = create<State>((set, get) => {
     },
     setPlanMode: async (convId, mode) => {
       try {
-        await get().setChatSettings({ planMode: mode }, convId)
+        await patchChatSettings({ planMode: mode }, convId)
       } catch (e) {
         get().toast((e as Error).message, 'error')
       }
@@ -2593,7 +2686,7 @@ export const useStore = create<State>((set, get) => {
       // Dismissing the notice drops the Record click it was gating: a recording never starts by
       // default, and a remembered intent would make the next acknowledgement record something
       // the user did not just ask for.
-      if (!open) consentIntent = undefined
+      if (!open) { consentIntent = undefined; consentResume.run = null }
       set({ meetingConsentOpen: open })
     },
     acceptMeetingConsent: async () => {
@@ -2605,6 +2698,10 @@ export const useStore = create<State>((set, get) => {
       const intent = consentIntent
       consentIntent = undefined
       set({ meetingConsentOpen: false })
+      // A doc's Record click resumes as a doc recording, not as a meeting in the Meetings view.
+      const resume = consentResume.run
+      consentResume.run = null
+      if (resume) return resume()
       await get().startRecording(intent)
     },
 
@@ -2965,19 +3062,24 @@ export const useStore = create<State>((set, get) => {
     approveTool: async (callId, decision, conversationId, opts) => {
       const id = conversationId ?? get().focusedConversationId
       if (!id) return
-      try {
-        await api.approve(callId, decision, opts)
-        // Mark as no longer awaiting in the UI; the tool_result event fills in the rest. The count
-        // settles now rather than when the tool returns, since an external action can take seconds.
+      // Clears the card's pending state. The tool_result event fills in the rest, and the count settles
+      // now rather than when the tool returns, since an external action can take seconds.
+      const clear = (approval?: ApprovalDecision): void =>
         patchSession(id, (s) => {
           const conversation = { ...s.conversation, messages: (s.conversation.messages ?? []).map((m) => ({ ...m, tool_events: (m.tool_events ?? []).map((t) => (t.id === callId
-            ? { ...t, needs_approval: false, approval: decision, ...(opts?.arguments && decision !== 'deny' ? { arguments: opts.arguments, original_arguments: t.arguments, edited_arguments: opts.arguments, edited_by: 'user' as const } : {}) }
+            ? { ...t, needs_approval: false, ...(approval ? { approval } : {}), ...(approval && opts?.arguments && approval !== 'deny' ? { arguments: opts.arguments, original_arguments: t.arguments, edited_arguments: opts.arguments, edited_by: 'user' as const } : {}) }
             : t)) })) }
           const pendingApprovals = countApprovals(conversation)
           return { ...s, conversation, pendingApprovals, status: settleApprovals(s.status, pendingApprovals) }
         })
+      try {
+        await api.approve(callId, decision, opts)
+        clear(decision)
       } catch (e) {
-        get().toast((e as Error).message, 'error')
+        // A 404 means the approval is already answered (a double click, another window) or its run is
+        // gone: the card is stale, so drop its buttons quietly instead of toasting an error per click.
+        if ((e as { status?: number }).status === 404) clear()
+        else get().toast((e as Error).message, 'error')
       }
     },
     refreshGoogle: async () => {

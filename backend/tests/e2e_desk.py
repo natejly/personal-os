@@ -70,8 +70,8 @@ def drive(c: C, desk_id: str, conv_id: str, timeout: float = 600) -> dict:
 
 def main() -> int:
     port = int(sys.argv[1])
-    c = C(port, sys.argv[2] if len(sys.argv) > 2 else None)
-    for mode in ("plan", "ask"):
+    c = C(port, sys.argv[2] if len(sys.argv) > 2 and sys.argv[2] != "-" else None)
+    for mode in (sys.argv[3:] or ("plan", "ask")):   # optional: rerun just one mode
         print(f"== autonomy={mode}")
         out = c.req("POST", "/cowork/desks", {"brief": BRIEF, "autonomy": mode, "title": f"e2e {mode}"})
         did, cid = out["desk"]["id"], out["conversation_id"]

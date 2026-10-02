@@ -257,13 +257,16 @@ class ReadLedger:
         with self._lock:
             self._seen.pop((conv or "", str(path)), None)
 
-    def check(self, conv: str, path: Path | str, mtime_ns: int, regions: list[tuple[int, int]] | None) -> str | None:
-        """None when the file may be changed. `regions=None` demands a full read (an overwrite)."""
+    def check(self, conv: str, path: Path | str, mtime_ns: int, regions: list[tuple[int, int]] | None,
+              in_desk: bool = False) -> str | None:
+        """None when the file may be changed. `regions=None` demands a full read (an overwrite). `in_desk` names the
+        reader that works on a workspace path: read_local_file refuses the workspace, so pointing there is a dead end."""
         with self._lock:
             e = self._seen.get((conv or "", str(path)))
         name = Path(path).name
         if e is None:
-            return f"{name} has not been read in this conversation; read it first (read_local_file or fs_grep) so the change is based on what is there"
+            how = "desk_read_file or fs_grep" if in_desk else "read_local_file or fs_grep"
+            return f"{name} has not been read in this conversation; read it first ({how}) so the change is based on what is there"
         if e["mtime"] != mtime_ns:
             return f"{name} changed since you last read it; read it again before changing it"
         have = e["ranges"]
@@ -864,7 +867,7 @@ def register(box: Any) -> None:
                 raise FsError(str(e)) from None
             conv = conv_of(ctx)
             if need_reads():
-                why = ledger.check(conv, p, st.st_mtime_ns, regions)
+                why = ledger.check(conv, p, st.st_mtime_ns, regions, in_desk=g.in_desk(p))
                 if why:
                     raise FsError(why)
             snap = await asyncio.to_thread(snapshot, ctx, p)

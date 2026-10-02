@@ -6,6 +6,7 @@ Use `python-docx` for reports, letters, memos. For prose you already have as mar
 ```python
 from docx import Document
 from docx.shared import Inches, Pt
+import os
 
 doc = Document()
 st = doc.styles["Normal"]; st.font.name = "Calibri"; st.font.size = Pt(11)
@@ -24,7 +25,8 @@ for c, h in zip(t.rows[0].cells, ["Item", "Qty", "Cost"]):
     c.paragraphs[0].runs[0].bold = True
 row = t.add_row().cells; row[0].text, row[1].text, row[2].text = "Widget", "4", "$12.00"
 
-doc.add_picture("work/chart.png", width=Inches(6))  # width only: height keeps the aspect ratio
+if os.path.exists("work/chart.png"):                # made as in the charts guide
+    doc.add_picture("work/chart.png", width=Inches(6))  # width only: height keeps the aspect ratio
 doc.add_page_break()
 doc.save("outputs/report.docx")
 ```

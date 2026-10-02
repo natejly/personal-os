@@ -104,7 +104,8 @@ class WorkEnv:
     # ---- commands (separate so tests can read the exact line) ----
     def _venv_cmd(self) -> list[str]:
         if self.installer() == "uv":
-            return ["uv", "venv", str(self.dir), "--python", sys.executable]
+            # --seed puts pip in the venv: the shell has this bin first on PATH, and `pip install` there must not fall through to nothing.
+            return ["uv", "venv", str(self.dir), "--seed", "--python", sys.executable]
         return [sys.executable, "-m", "venv", str(self.dir)]
 
     def _install_cmd(self, packages: list[str]) -> list[str]:

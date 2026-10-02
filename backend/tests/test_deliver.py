@@ -392,3 +392,25 @@ def test_real_pdftoppm_renders_a_tiny_pdf(tmp_path: Path, monkeypatch: pytest.Mo
     assert out["total_pages"] == 2 and [p["page"] for p in out["pages"]] == [1, 2], out
     assert (out["pages"][0]["width"], out["pages"][0]["height"]) == (300, 200)
     assert (root / "work" / "previews" / "t-p2.png").read_bytes()[:4] == b"\x89PNG"
+
+
+def test_docx_to_md_keeps_the_title_and_extracts_pictures_beside_the_output(env: Any) -> None:
+    """A word-processor Title is metadata to pandoc (dropped without --standalone), and embedded pictures would otherwise be
+    left as `media/imageN.png` references to files that were never written."""
+    (env.root / "work" / "a.docx").write_bytes(b"x")
+    env.call("convert_document", path="work/a.docx", to="md")
+    argv = env.fake.calls[0]
+    assert "-s" in argv and "--extract-media=a_media" in argv
+    (env.root / "work" / "b.docx").write_bytes(b"x")
+    env.call("convert_document", path="work/b.docx", to="txt")
+    assert "-s" in env.fake.calls[1] and not any(x.startswith("--extract-media") for x in env.fake.calls[1])
+    (env.root / "work" / "c.md").write_bytes(b"x")
+    env.call("convert_document", path="work/c.md", to="docx")
+    assert "-s" not in env.fake.calls[2]
+
+
+@pytest.mark.parametrize("fmt", ["docx", "pptx", "pdf"])
+def test_guide_skeletons_do_not_require_a_chart_that_may_not_exist(fmt: str) -> None:
+    """The skeletons run as written; the picture step only runs once the charts guide has produced the file."""
+    text = deliver.load_guide(fmt) or ""
+    assert "import os" in text and 'os.path.exists("work/' in text

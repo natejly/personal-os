@@ -178,6 +178,8 @@ class TasksSync:
         if moved:
             n = self.todos.forget_sync_links()
             log.info("google tasks sync: target changed, unlinked %d todo(s)", n)
+            # The cached id map and cursor describe the old target; start over with a full listing.
+            self._known, self._known_list, self._pull_started = {}, None, 0.0
         if moved or not bound or (account and not bound.get("account")):
             self.set_settings({BINDING_KEY: target})
 

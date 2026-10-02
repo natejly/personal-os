@@ -160,12 +160,14 @@ export default function DashboardsView(): JSX.Element {
   const [picked, setPicked] = useState<string[]>([])
   const [width, setWidth] = useState(1)
   const [generating, setGenerating] = useState(false)
+  // Until the list has answered, "no dashboards" is not known: nothing is shown rather than the empty state.
+  const [loaded, setLoaded] = useState(false)
 
   const loadList = async (): Promise<void> => { const l = await api.dashboards.list(); setList(l); if (l.length && (!activeId || !l.some((d) => d.id === activeId))) setActiveId(l[0].id) }
   const loadDash = async (): Promise<void> => { if (activeId) setDash(await api.dashboards.get(activeId)) }
   const loadSources = async (): Promise<void> => { const r = await api.sources.list(); setSources(r.sources); setInternal(r.internal) }
   useEffect(() => { clearHandoff('dashboard') }, [])
-  useEffect(() => { void loadList(); void loadSources() }, [])
+  useEffect(() => { void loadList().finally(() => setLoaded(true)); void loadSources() }, [])
   useEffect(() => { void loadDash() }, [activeId])
 
   const create = async (): Promise<void> => {
@@ -216,13 +218,13 @@ export default function DashboardsView(): JSX.Element {
             <label className="model-picker"><select aria-label="Active dashboard" value={activeId ?? ''} onChange={(e) => setActiveId(e.target.value)}>{list.map((d) => <option key={d.id} value={d.id}>{d.name} ({d.widget_count})</option>)}</select><ChevronDown size={14} /></label>
           )}
           <button className="ghost-btn" onClick={() => setShowSources(true)}><Database size={14} /> Sources <span className="count">{sources.length}</span></button>
+          {dash && <button className="icon-btn danger" title="Delete dashboard" aria-label={`Delete dashboard ${dash.name}`} onClick={() => { if (confirm(`Delete "${dash.name}"?`)) void api.dashboards.delete(dash.id).then(() => { setActiveId(null); setDash(null); void loadList() }) }}><Trash2 size={15} /></button>}
           {creating ? (
             <div className="add-inline"><input autoFocus aria-label="Dashboard name" placeholder="Dashboard name" value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void create(); if (e.key === 'Escape') setCreating(false) }} /><button className="primary-btn" onClick={() => void create()}>Create</button></div>
           ) : (
             <button className="ghost-btn" onClick={() => setCreating(true)}><Plus size={14} /> New dashboard</button>
           )}
           {dash && <button className="primary-btn" onClick={() => setComposer((v) => !v)}><Wand2 size={14} /> Add widget</button>}
-          {dash && <button className="icon-btn danger" title="Delete dashboard" aria-label={`Delete dashboard ${dash.name}`} onClick={() => { if (confirm(`Delete "${dash.name}"?`)) void api.dashboards.delete(dash.id).then(() => { setActiveId(null); setDash(null); void loadList() }) }}><Trash2 size={15} /></button>}
         </div>
         <AppSwitcher />
       </header>
@@ -249,19 +251,22 @@ export default function DashboardsView(): JSX.Element {
       )}
 
       {!dash ? (
-        <div className="page-body">
+        // Also the frame between picking a dashboard and it arriving, which must not read as "none".
+        loaded && list.length === 0 ? (
           <div className="empty-state">
             <LayoutDashboard size={28} />
             <h2>No dashboards yet</h2>
             <p>Add a data source (an API URL and key, an RSS feed, or your own todos and calendar), then describe the widget you want.</p>
             <button className="primary-btn" onClick={() => setCreating(true)}><Plus size={14} /> New dashboard</button>
           </div>
-        </div>
+        ) : null
       ) : (
         <div className="page-body wide">
           {dash.widgets.length === 0 && (
-            <div className="empty-hint big">
-              <p>Empty dashboard. Describe what you want to see and it gets built for you.</p>
+            <div className="empty-state">
+              <Wand2 size={28} />
+              <h2>Nothing on this dashboard yet</h2>
+              <p>Describe what you want to see and a widget is built for you from your data sources.</p>
               <button className="primary-btn" onClick={() => setComposer(true)}><Wand2 size={14} /> Add widget</button>
             </div>
           )}

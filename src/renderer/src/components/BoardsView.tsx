@@ -8,17 +8,19 @@ import SendToSpace from './SendToSpace'
 import { clearHandoff, peekHandoff } from '../lib/handoff'
 import { lines, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
+import { rowButton } from '../lib/rowButton'
+import { dueLabel, shortDate } from '../lib/dates'
 
 const PRIO = ['', 'P1', 'P2', 'P3']
 
 function Card({ card, onOpen, onDragStart }: { card: BoardCard; onOpen: () => void; onDragStart: (e: React.DragEvent) => void }): JSX.Element {
-  const overdue = card.due && new Date(card.due + 'T00:00:00') < new Date(new Date().toDateString())
+  const due = dueLabel(card.due)
   return (
-    <div className={`kcard p${card.priority}`} draggable onDragStart={onDragStart} onClick={onOpen}>
+    <div className={`kcard p${card.priority}`} draggable onDragStart={onDragStart} {...rowButton(onOpen)}>
       <div className="kcard-title">{card.title}</div>
       {(card.due || card.labels.length > 0) && (
         <div className="kcard-meta">
-          {card.due && <span className={`tag ${overdue ? 'overdue' : ''}`}><Calendar size={10} />{new Date(card.due + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>}
+          {card.due && <span className={`tag ${due.cls}`}><Calendar size={10} />{due.text}</span>}
           {card.labels.map((l) => <span key={l} className="tag">{l}</span>)}
           {card.priority === 1 && <span className="tag p1">P1</span>}
         </div>
@@ -51,7 +53,7 @@ function CardModal({ card, board, onClose, onChange }: { card: BoardCard; board:
             <label><span>Column</span><select value={card.column_id} onChange={(e) => void api.boards.moveCard(card.id, e.target.value).then(onChange)}>{board.columns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
           </div>
           <label><span>Labels <small className="muted">(comma separated)</small></span><input value={labels} onChange={(e) => setLabels(e.target.value)} placeholder="design, blocked, v0.1" /></label>
-          <p className="muted small">In {col?.name} · created {new Date(card.created_at * 1000).toLocaleDateString()}</p>
+          <p className="muted small">In {col?.name} · created {shortDate(new Date(card.created_at * 1000))}</p>
         </section>
         <footer>
           <button className="ghost-btn danger" onClick={() => void api.boards.deleteCard(card.id).then(() => { onChange(); onClose() })}><Trash2 size={14} /> Delete</button>
@@ -88,9 +90,9 @@ function Column({ col, cards, board, onChange, onOpen }: { col: BoardColumn; car
     <div className={`kcol ${over ? 'over' : ''}`} onDragOver={(e) => { e.preventDefault(); setOver(true) }} onDragLeave={() => setOver(false)} onDrop={(e) => void onDrop(e)}>
       <header>
         {renaming ? (
-          <input autoFocus defaultValue={col.name} onBlur={(e) => { void api.boards.updateColumn(col.id, { name: e.target.value }).then(onChange); setRenaming(false) }} onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()} />
+          <input autoFocus aria-label="Column name" defaultValue={col.name} onBlur={(e) => { void api.boards.updateColumn(col.id, { name: e.target.value }).then(onChange); setRenaming(false) }} onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()} />
         ) : (
-          <span className="kcol-name" onClick={() => setRenaming(true)}>{col.name}</span>
+          <span className="kcol-name" title="Click to rename" {...rowButton(() => setRenaming(true))}>{col.name}</span>
         )}
         <span className="count">{cards.length}{col.wip_limit ? `/${col.wip_limit}` : ''}</span>
         <button className="icon-btn ghost sm" title="Add card" aria-label={`Add card to ${col.name}`} onClick={() => setAdding(true)}><Plus size={14} /></button>
@@ -128,6 +130,8 @@ export default function BoardsView(): JSX.Element {
   const [newName, setNewName] = useState('')
   const [creating, setCreating] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
+  // Until the list has answered, "no boards" is not known: nothing is shown rather than the empty state.
+  const [loaded, setLoaded] = useState(false)
   const colName = useRef<HTMLInputElement>(null)
 
   const loadList = async (): Promise<void> => {
@@ -137,7 +141,7 @@ export default function BoardsView(): JSX.Element {
   }
   const loadBoard = async (): Promise<void> => { if (activeId) setBoard(await api.boards.get(activeId)) }
   useEffect(() => { clearHandoff('board') }, [])
-  useEffect(() => { void loadList() }, [])
+  useEffect(() => { void loadList().finally(() => setLoaded(true)) }, [])
   useEffect(() => { setConfirmDelete(false); void loadBoard() }, [activeId])
 
   const create = async (): Promise<void> => {
@@ -182,11 +186,6 @@ export default function BoardsView(): JSX.Element {
         <h2><KanbanSquare size={16} /> Boards</h2>
         <div className="no-drag header-right">
           <SendToSpace items={[{ kind: 'board', refId: activeId }]} disabled={!activeId} />
-          {/* Delete sits at the far end from "New board", and takes two clicks (same pattern as ProjectModal). */}
-          {board && (confirmDelete
-            ? <button className="ghost-btn danger" onClick={() => void api.boards.delete(board.id).then(() => { setConfirmDelete(false); setActiveId(null); setBoard(null); void loadList() })}><Trash2 size={14} /> Really delete this board and its cards</button>
-            : <button className="icon-btn danger" title="Delete board" aria-label={`Delete board ${board.name}`} onClick={() => setConfirmDelete(true)}><Trash2 size={15} /></button>
-          )}
           {boards.length > 0 && (
             <label className="model-picker">
               <select aria-label="Active board" value={activeId ?? ''} onChange={(e) => setActiveId(e.target.value)}>{boards.map((b) => <option key={b.id} value={b.id}>{b.name} ({b.card_count})</option>)}</select>
@@ -201,6 +200,20 @@ export default function BoardsView(): JSX.Element {
               <ChevronDown size={14} />
             </label>
           )}
+          {/* Delete takes two clicks (same pattern as ProjectModal). It is one button that changes its
+              label, next to the last control, so arming it moves nothing a pointer is resting on, and
+              it disarms as soon as focus leaves. */}
+          {board && (
+            <button className={confirmDelete ? 'ghost-btn danger' : 'icon-btn danger'}
+              title={confirmDelete ? 'Deletes this board and its cards' : 'Delete board'} aria-label={confirmDelete ? `Confirm deleting board ${board.name}` : `Delete board ${board.name}`}
+              onBlur={() => setConfirmDelete(false)}
+              onClick={() => {
+                if (!confirmDelete) return setConfirmDelete(true)
+                void api.boards.delete(board.id).then(() => { setConfirmDelete(false); setActiveId(null); setBoard(null); void loadList() })
+              }}>
+              <Trash2 size={confirmDelete ? 14 : 15} />{confirmDelete && ' Delete board?'}
+            </button>
+          )}
           {creating ? (
             <div className="add-inline"><input autoFocus aria-label="Board name" placeholder="Board name" value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void create(); if (e.key === 'Escape') setCreating(false) }} /><button className="primary-btn" onClick={() => void create()}>Create</button></div>
           ) : (
@@ -210,12 +223,15 @@ export default function BoardsView(): JSX.Element {
         <AppSwitcher />
       </header>
       {!board ? (
-        <div className="page-body">
-          <div className="empty-hint big">
-            <p>No boards yet. Create one, or ask the assistant: “make a board for my apartment move”.</p>
+        // Also the frame between picking a board and it arriving, which must not read as "none".
+        loaded && boards.length === 0 ? (
+          <div className="empty-state">
+            <KanbanSquare size={28} />
+            <h2>No boards yet</h2>
+            <p>A board tracks work as cards moving across columns. Create one, or ask the assistant: “make a board for my apartment move”.</p>
             <button className="primary-btn" onClick={() => setCreating(true)}><Plus size={14} /> New board</button>
           </div>
-        </div>
+        ) : null
       ) : (
         <div className="kanban">
           {board.columns.map((col) => <Column key={col.id} col={col} cards={byCol[col.id] ?? []} board={board} onChange={() => void loadBoard()} onOpen={setOpen} />)}

@@ -146,10 +146,10 @@ export default function DocsView(): JSX.Element {
         )}
 
         {!activeDoc ? (
-          <section className="docs-empty">
-            <FileText size={30} />
+          <section className="empty-state">
+            <FileText size={28} />
             <h2>Nothing open</h2>
-            <p className="muted">Pick a file on the left, or start a new one.</p>
+            <p>{treeOpen ? 'Pick a file on the left, or start a new one.' : 'Show the file tree to pick a file, or start a new one.'}</p>
             <button className="primary-btn" onClick={() => void createDoc({})}><Plus size={14} /> New doc</button>
           </section>
         ) : (
@@ -159,7 +159,7 @@ export default function DocsView(): JSX.Element {
                 {tabDocs.map((d) => (
                   <button key={d.id} className={`doc-tab ${d.id === activeDoc.id ? 'active' : ''}`} onClick={() => void openDoc(d.id)}>
                     <FileText size={11} />{d.title || 'Untitled'}
-                    <span className="tab-x" role="button" title="Close" onClick={(e) => { e.stopPropagation(); closeDocTab(d.id) }}><X size={10} /></span>
+                    <span className="tab-x" role="button" title="Close tab" aria-label={`Close ${d.title || 'Untitled'}`} onClick={(e) => { e.stopPropagation(); closeDocTab(d.id) }}><X size={11} /></span>
                   </button>
                 ))}
               </div>
@@ -168,6 +168,7 @@ export default function DocsView(): JSX.Element {
             <div className="doc-toolbar">
               <input
                 className="doc-title-input"
+                aria-label="Title"
                 value={title}
                 placeholder="Untitled"
                 onChange={(e) => editDocTitle(e.target.value)}
@@ -279,7 +280,7 @@ export default function DocsView(): JSX.Element {
 
         {activeDoc && historyOpen && (
           <aside className="docs-history">
-            <header><h3>History</h3><button className="icon-btn ghost" onClick={() => setHistoryOpen(false)}><X size={14} /></button></header>
+            <header><h3>History</h3><button className="icon-btn ghost" title="Close history" aria-label="Close history" onClick={() => setHistoryOpen(false)}><X size={14} /></button></header>
             <p className="muted small pad">
               Every save is a revision. Assistant edits sit at the top until you accept them.
             </p>

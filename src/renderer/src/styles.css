@@ -1335,22 +1335,29 @@ textarea.instructions:focus { border-color: var(--accent); }
 .todo-check:hover { background: var(--hover); }
 .todo-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .todo-title { cursor: text; line-height: 1.4; }
-.todo-main input { background: var(--bg-input); border: 1px solid var(--accent); border-radius: 6px; padding: 3px 6px; outline: 0; font: inherit; }
+/* The edit field's border and padding are pulled back out with negative margins, and it keeps the
+   title's line height, so the text stays exactly where it was and the row does not grow. */
+.todo-main input { background: var(--bg-input); border: 1px solid var(--accent); border-radius: 6px; padding: 3px 6px; margin: -4px -7px; min-width: 0; outline: 0; font: inherit; line-height: 1.4; }
 .todo-notes { font-size: 12px; color: var(--text-muted); }
 .todo-meta { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-.todo-due { position: relative; display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-faint); padding: 2px 6px; border-radius: 8px; cursor: pointer; }
+.todo-due { position: relative; display: inline-flex; align-items: center; gap: 4px; min-height: 24px; font-size: 11px; color: var(--text-faint); padding: 2px 7px; border-radius: 8px; cursor: pointer; white-space: nowrap; }
 .todo-due:hover { background: var(--hover); color: var(--text); }
-.todo-due.today { color: var(--accent); }
-.todo-est { width: 52px; font-size: 11px; padding: 2px 4px; }
+/* The chip is coloured by urgency: due today in the accent, overdue in red, anything later plain. */
+.todo-due.today { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.todo-est { width: 52px; min-height: 24px; font-size: 11px; padding: 2px 6px; border-radius: 6px; background: var(--bg-input); border: 1px solid var(--border); outline: 0; }
 .planner-panel { margin-bottom: 12px; }
 .planner-panel .planner-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; }
 .planner-panel .planner-when { color: var(--text-faint); font-size: 12px; }
 .todo-repeat, .todo-urgency { display: inline-flex; align-items: center; font-size: 11px; color: var(--text-faint); }
-.todo-due.overdue { color: var(--danger); }
+.todo-due.overdue { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, transparent); }
 .todo-due input[type=date] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; }
-.todo-prio { font-size: 11px; padding: 2px 4px; border-radius: 6px; background: var(--bg-input); border: 1px solid var(--border); }
+.todo-prio { min-height: 24px; font-size: 11px; padding: 2px 6px; border-radius: 6px; background: var(--bg-input); border: 1px solid var(--border); }
 .todo .ghost { opacity: 0; }
-.todo:hover .ghost { opacity: 1; }
+.todo:hover .ghost, .todo:focus-within .ghost { opacity: 1; }
+/* A control with nothing set (no date, no estimate, the default priority) stays out of the way until
+   the row is hovered or focused. Opacity rather than display: its space is kept, so nothing reflows. */
+.todo .quiet { opacity: 0; transition: opacity 0.12s; }
+.todo:hover .quiet, .todo:focus-within .quiet { opacity: 1; }
 .todo-section { margin-bottom: 10px; }
 /* The title input is the flexible one; the date field is fixed. Both selectors above
    (.add-row > input) also match the date field, hence the explicit flex reset here. */
@@ -1705,8 +1712,9 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .kcol { width: 272px; flex-shrink: 0; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; display: flex; flex-direction: column; max-height: 100%; }
 .kcol.over { border-color: var(--accent); }
 .kcol > header { display: flex; align-items: center; gap: 6px; padding: 10px 10px 6px 12px; font-weight: 600; font-size: 13px; }
-.kcol-name { flex: 1; cursor: text; }
-.kcol > header input { flex: 1; background: var(--bg-input); border: 1px solid var(--accent); border-radius: 6px; padding: 2px 6px; outline: 0; font: inherit; }
+.kcol-name { flex: 1; min-width: 0; cursor: text; line-height: 1.4; }
+/* Same as .todo-main input: the field sits exactly over the name it replaces. */
+.kcol > header input { flex: 1; min-width: 0; background: var(--bg-input); border: 1px solid var(--accent); border-radius: 6px; padding: 2px 6px; margin: -3px 0 -3px -7px; outline: 0; font: inherit; line-height: 1.4; }
 .kcol > header .ghost { opacity: 0; }
 .kcol:hover > header .ghost { opacity: 1; }
 .kcol-cards { padding: 4px 8px 8px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; min-height: 40px; }
@@ -1717,6 +1725,7 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .kcard.p3 { opacity: 0.85; }
 .kcard-title { line-height: 1.4; }
 .kcard-meta { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 6px; }
+.kcard .tag.today { color: var(--accent); }
 .kcard-add textarea { width: 100%; background: var(--bg-input); border: 1px solid var(--accent); border-radius: 8px; padding: 8px; outline: 0; font: inherit; resize: none; }
 .kcard-add .row { display: flex; gap: 6px; margin-top: 6px; }
 .kcol-addbtn { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 6px; color: var(--text-faint); font-size: 12px; }
@@ -1729,6 +1738,12 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 
 /* ---------- Calendar ---------- */
 .cal-page { overflow: hidden; }
+/* Title, the navigation, then the range it moves through: the range takes the stretch the h2 has on
+   other pages, and clips with an ellipsis rather than mid-word. */
+.cal-page .page-header h2 { flex: none; }
+.cal-nav { display: flex; align-items: center; gap: 2px; }
+.cal-nav .ghost-btn { margin-right: 4px; }
+.cal-range { flex: 1; min-width: 0; font-size: 13.5px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 .cal-body { flex: 1; min-height: 0; display: flex; }
 .cal-cals {
   width: 196px; flex: 0 0 196px; overflow: auto;
@@ -1774,7 +1789,9 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .cal-chip.todo { background: var(--hover); color: var(--text-muted); }
 .cal-chip.todo.p1 { color: var(--danger); }
 .cal-corner { display: flex; align-items: flex-end; justify-content: center; padding-bottom: 4px; }
-.cal-hours-toggle { font-size: 9.5px; letter-spacing: 0.03em; color: var(--text-faint); background: none; border: 1px solid var(--border); border-radius: 4px; padding: 1px 5px; cursor: pointer; }
+.cal-hours-toggle { position: relative; min-width: 28px; min-height: 22px; font-size: 10px; letter-spacing: 0.03em; color: var(--text-faint); background: none; border: 1px solid var(--border); border-radius: 5px; padding: 0 6px; cursor: pointer; }
+/* A 22px box with a 24px target, like .todo-check. */
+.cal-hours-toggle::before { content: ''; position: absolute; inset: -2px; }
 .cal-hours-toggle:hover { color: var(--text); background: var(--hover); }
 .cal-hours { position: relative; }
 .cal-hour { font-size: 10px; color: var(--text-faint); text-align: right; padding-right: 6px; transform: translateY(-6px); }
@@ -1786,7 +1803,8 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .cal-line { position: absolute; left: 0; right: 0; border-top: 1px solid var(--border); }
 .cal-now { position: absolute; left: 0; right: 0; border-top: 2px solid var(--accent); z-index: 1; }
 .cal-now::before { content: ''; position: absolute; left: -4px; top: -5px; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
-.cal-event { position: absolute; left: 3px; right: 3px; background: rgba(59,158,219,0.28); border-left: 3px solid #3b9edb; border-radius: 5px; padding: 3px 6px; font-size: 11.5px; overflow: hidden; cursor: pointer; display: flex; flex-direction: column; z-index: 1; }
+/* `left`/`right` are the lone-block case; overlapping blocks get an inline left and width (calendarLayout.ts). */
+.cal-event { position: absolute; left: 3px; right: 3px; min-width: 0; background: rgba(59,158,219,0.28); border-left: 3px solid #3b9edb; border-radius: 5px; padding: 3px 6px; font-size: 11.5px; overflow: hidden; cursor: pointer; display: flex; flex-direction: column; z-index: 1; }
 .cal-event b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cal-event span { color: var(--text-muted); font-size: 10.5px; }
 .cal-event:hover { background: rgba(59,158,219,0.4); }
@@ -1825,10 +1843,12 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .ev-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: -4px 0 12px; }
 .ev-chip {
   display: inline-flex; align-items: center; gap: 6px; font-size: 12px;
-  background: var(--hover); border: 1px solid var(--border); border-radius: 999px; padding: 3px 6px 3px 10px;
+  background: var(--hover); border: 1px solid var(--border); border-radius: 999px; padding: 1px 3px 1px 10px;
 }
 .ev-chip.optional { opacity: 0.7; }
-.ev-chip button { display: inline-flex; align-items: center; font-size: 10px; color: var(--text-faint); border-radius: 999px; padding: 1px 5px; }
+/* 22px boxes with a 24px target; the chip's own padding shrinks so it does not grow around them. */
+.ev-chip button { position: relative; display: inline-flex; align-items: center; justify-content: center; min-width: 22px; min-height: 22px; font-size: 11px; color: var(--text-faint); border-radius: 999px; padding: 0 6px; }
+.ev-chip button::before { content: ''; position: absolute; inset: -1px; }
 .ev-chip button:hover { background: var(--active); color: var(--text); }
 .ev-meet { display: flex; align-items: center; gap: 8px; margin: 2px 0 12px; font-size: 13px; color: var(--text-muted); }
 .ev-meet a { color: var(--accent); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
@@ -1840,17 +1860,16 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .ev-reminders .ghost-btn { align-self: flex-start; }
 .ev-colors { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 0; }
 .ev-swatch {
+  position: relative;
   width: 22px; height: 22px; border-radius: 50%; border: 2px solid transparent;
   display: inline-flex; align-items: center; justify-content: center; color: #fff; flex: 0 0 auto;
 }
+.ev-swatch::before { content: ''; position: absolute; inset: -3px; border-radius: 50%; }
 .ev-swatch.on { border-color: var(--text); }
 .ev-dot { width: 10px; height: 10px; border-radius: 50%; flex: 0 0 auto; }
 .ev-scope, .ev-rsvp { display: flex; align-items: center; gap: 10px; }
 .ev-scope .muted.small, .ev-rsvp .muted.small { margin: 0; }
-.ev-seg { display: inline-flex; border: 1px solid var(--border-strong); border-radius: 8px; overflow: hidden; }
-.ev-seg button { padding: 5px 12px; font-size: 12px; color: var(--text-muted); }
-.ev-seg button + button { border-left: 1px solid var(--border-strong); }
-.ev-seg button.on { background: var(--active); color: var(--text); }
+.ev-scope .seg button, .ev-rsvp .seg button { padding-inline: 12px; }
 .ev-notify { width: auto !important; font-size: 12px; }
 .modal footer .ev-notify {
   background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 7px 8px; outline: 0;
@@ -1955,11 +1974,25 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .mail-toolbar { display: flex; align-items: center; gap: 8px; padding: 10px 24px; border-bottom: 1px solid var(--border); flex-shrink: 0; flex-wrap: wrap; }
 .mail-toolbar .toolbar-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 .mail-toolbar select { background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 5px 8px; font-size: 12px; outline: 0; max-width: 180px; }
-.mail-list { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
-.mail-row { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; background: var(--bg-elev); cursor: pointer; color: var(--text-muted); min-width: 0; }
+.mail-toolbar .toolbar-sep { width: 1px; height: 16px; margin: 0 2px; background: var(--border-strong); }
+/* One joined group with hairlines between rows, the same idiom as a todo section. */
+.mail-list { display: flex; flex-direction: column; font-size: 13px; }
+.mail-row { display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 7px 10px; background: var(--bg-elev); cursor: pointer; color: var(--text-muted); min-width: 0; }
+.mail-row:first-child { border-radius: 10px 10px 0 0; }
+.mail-row:last-child { border-radius: 0 0 10px 10px; }
+.mail-row:first-child:last-child { border-radius: 10px; }
+.mail-row + .mail-row { box-shadow: inset 0 0.5px 0 var(--border); }
 .mail-row:hover { background: color-mix(in srgb, var(--text) 5%, var(--bg-elev)); }
-.mail-row.unread { box-shadow: inset 2.5px 0 0 var(--accent); }
-.mail-row.unread .mail-row-from, .mail-row.unread .mail-row-subject { color: var(--text); font-weight: 600; }
+/* Inside the group a ring 2px out would be painted over by the next row. */
+.mail-list .mail-row:focus-visible { outline-offset: -2px; }
+/* A row that only holds its own buttons (Needs reply): nothing to open, so no pointer. */
+.mail-row.static { cursor: default; }
+/* Unread is a heavier sender and a dot. The dot's slot is always there, so read and unread rows line
+   up; `-lead` is the same width as dot + star for rows that have neither. */
+.mail-row-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.mail-row.unread .mail-row-dot { background: var(--accent); }
+.mail-row.unread .mail-row-from { color: var(--text); font-weight: 600; }
+.mail-row-lead { width: 41px; flex-shrink: 0; }
 .mail-row-from { width: 170px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mail-row-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mail-row-subject { color: var(--text); }
@@ -1967,9 +2000,20 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .mail-row-date { flex-shrink: 0; font-size: 12px; color: var(--text-faint); font-variant-numeric: tabular-nums; width: 64px; text-align: right; }
 .mail-row-actions { display: flex; gap: 2px; flex-shrink: 0; }
 .mail-row .ghost { opacity: 0; }
-.mail-row:hover .ghost, .mail-row .star.on { opacity: 1; }
+.mail-row:hover .ghost, .mail-row:focus-within .ghost, .mail-row .star.on { opacity: 1; }
+/* A starred star is a state of the message, not a pressed button: accent, and no filled cell at rest. */
 .mail-row .star.on { color: var(--accent); }
-.mail-meta { margin: 0 0 12px; font-size: 13px; line-height: 1.6; }
+.mail-row .star.on:not(:hover) { background: none; }
+.mail-watch { margin-bottom: 6px; }
+.mail-watch .section-h { margin-top: 2px; }
+.mail-meta { margin: 0 0 14px; font-size: 13px; line-height: 1.6; }
+/* The subject is the dialog's title: it wraps rather than pushing the close button off the edge. */
+.mail-reader header, .mail-compose header { align-items: flex-start; gap: 12px; }
+.mail-reader header h2, .mail-compose header h2 { min-width: 0; line-height: 1.35; overflow-wrap: anywhere; }
+.mail-reader header .icon-btn, .mail-compose header .icon-btn { flex: none; margin: -3px -6px -3px 0; }
+/* The message is a reading column: no inner box, a size meant for reading, lines of about 72 characters. */
+.doc-text.mail-body { padding: 0; max-width: 72ch; font-size: 13.5px; line-height: 1.55; overflow-wrap: anywhere; }
+.mail-reader footer .starred, .mail-reader footer .starred:hover { color: var(--accent); }
 .modal footer a.ghost-btn { text-decoration: none; }
 
 /* ---------- Smart textarea (AI ghost-text completion) ---------- */

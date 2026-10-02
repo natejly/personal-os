@@ -14,7 +14,7 @@ import { scopeOf } from '../lib/docTree'
 import ResizeHandle from './ResizeHandle'
 import { clip, lines, usePageContext } from '../lib/pageContext'
 import { PANEL_TABS, parsePanelState, resolveWikiDoc, type PanelState, type PanelTab } from '../lib/docPanel'
-import { DocRecordButton, DocRecorderBar, RecordingsPanel, liveDoc, useDictation, useDocRec } from '../features/docrec'
+import { DocRecordButton, DocRecorderBar, RecordingsPanel, liveDoc, useDictation, useDocRec, useNoteMarks } from '../features/docrec'
 import Backlinks from '../features/notes/Backlinks'
 import DocOutline from '../features/notes/DocOutline'
 import ExportMenu from '../features/notes/ExportMenu'
@@ -96,6 +96,7 @@ export default function DocsView(): JSX.Element {
 
   // The editor shows the buffer while typing and the saved body otherwise.
   const body = docDraft ?? activeDoc?.content ?? ''
+  useNoteMarks(activeDoc?.id ?? '', body)
   const title = docTitleDraft ?? activeDoc?.title ?? ''
   const pending = activeDoc?.pending ?? []
   const applied = useMemo(() => docRevisions.filter((r) => r.status !== 'pending'), [docRevisions])

@@ -4,6 +4,8 @@ import { useStore } from '../../store'
 import { useDocRec } from './store'
 import { dictationDrained, dictationText, dictationsFor, forgetDictation, planDictation, trackDictation } from './dictation'
 import { liveDoc } from './segments'
+import { diffTouchedLines } from './noteMarks'
+import { api } from '../../lib/api'
 
 /** How long after a dictation stops its last clips can still arrive and be typed. */
 const DICTATION_TAIL_MS = 120_000
@@ -107,4 +109,36 @@ export function useDictation(docId: string, insert: (text: string) => boolean, g
     run()
     return () => { offDoc(); offMain(); clearInterval(retry) }
   }, [docId])
+}
+
+/**
+ * While a record-mode recording of this doc is live, post when each typed line was written (see
+ * `diffTouchedLines`), debounced. Dictation and idle docs post nothing. The first body seen for a
+ * recording is the baseline, so opening a doc never marks its existing lines.
+ */
+export function useNoteMarks(docId: string, body: string): void {
+  const status = useStore((s) => s.meetingStatus)
+  const a = status?.active
+  const here = a && a.doc_id === docId && (a.doc_mode ?? 'record') === 'record' ? a : null
+  const elapsed = useElapsed(here)
+  const elapsedRef = useRef(0)
+  elapsedRef.current = elapsed
+  const meetingId = here?.meeting_id ?? ''
+  const prev = useRef<{ id: string; body: string } | null>(null)
+  const pending = useRef(new Map<string, number>())
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (!meetingId) { prev.current = null; return }
+    if (!prev.current || prev.current.id !== meetingId) { prev.current = { id: meetingId, body }; return }
+    const t = Math.round(elapsedRef.current * 10) / 10
+    for (const line of diffTouchedLines(prev.current.body, body)) pending.current.set(line, t)
+    prev.current.body = body
+    if (!pending.current.size || timer.current) return
+    timer.current = setTimeout(() => {
+      timer.current = null
+      const marks = [...pending.current].map(([line, at]) => ({ line, t: at }))
+      pending.current.clear()
+      api.meetings.putNoteMarks(meetingId, marks).catch(() => { /* marks are best effort */ })
+    }, 2500)
+  }, [body, meetingId])
 }

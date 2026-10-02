@@ -693,6 +693,9 @@ export const api = {
     dismissAction: (id: string, actionId: string) => req<MeetingActionItem>(`/meetings/${id}/actions/${actionId}/dismiss`, { method: 'POST' }),
     retranscribe: (id: string, limit = 20) => req<{ settled: number; meeting: FullMeeting }>(`/meetings/${id}/retranscribe?limit=${limit}`, { method: 'POST' }),
     deleteAudio: (id: string) => req<FullMeeting>(`/meetings/${id}/audio`, { method: 'DELETE' }),
+    /** Typed-line marks for a doc recording: `line` is the line's first characters, `t` the recording offset in seconds. */
+    putNoteMarks: (id: string, marks: { line: string; t: number }[]) =>
+      req<{ marks: { line: string; t: number }[] }>(`/meetings/${id}/note-marks`, { method: 'PUT', body: json({ marks }) }),
     /** Rename diarized speakers ({ S1: 'Dana' }); the transcript is rebuilt server side. A blank name clears one. */
     setSpeakers: (id: string, names: Record<string, string>) =>
       req<FullMeeting>(`/meetings/${id}/speakers`, { method: 'PUT', body: json({ names }) }),

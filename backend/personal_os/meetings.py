@@ -220,7 +220,7 @@ PATCH_FIELDS = {"title", "notes", "enhanced", "summary", "template", "project_id
 # the whole row, and the error banner is patched once per failed segment.
 INDEXED_FIELDS = {"title", "notes", "enhanced"}
 
-JSON_FIELDS = ("attendees", "sources", "decisions", "topics", "detail", "speaker_names")
+JSON_FIELDS = ("attendees", "sources", "decisions", "topics", "detail", "speaker_names", "note_marks")
 
 # Columns added to `meetings` after the first release, as {name: ddl}. Empty today and applied in
 # __init__ anyway: CREATE TABLE IF NOT EXISTS will not add a column, and db.py's _migrate runs
@@ -229,7 +229,12 @@ JSON_FIELDS = ("attendees", "sources", "decisions", "topics", "detail", "speaker
 # doc_id/doc_mode link a recording to a doc (plain TEXT, the cascade is code: see Docs.on_delete);
 # summary_revision_id is the doc_revisions row of the latest proposed summary.
 ADDED_COLUMNS: dict[str, str] = {"speaker_names": "TEXT NOT NULL DEFAULT '{}'",
-                                 "doc_id": "TEXT", "doc_mode": "TEXT", "summary_revision_id": "TEXT"}
+                                 "doc_id": "TEXT", "doc_mode": "TEXT", "summary_revision_id": "TEXT",
+                                 # [{line, t}]: the first NOTE_MARK_CHARS of a line typed during a recording and
+                                 # the recording offset in seconds. Kept out of the doc body on purpose.
+                                 "note_marks": "TEXT NOT NULL DEFAULT '[]'"}
+MAX_NOTE_MARKS = 500
+NOTE_MARK_CHARS = 40
 
 DOC_MODES = ("record", "dictate")
 
@@ -1002,6 +1007,29 @@ class Meetings:
         with self.db.tx() as c:
             c.execute("UPDATE meetings SET speaker_names=?, updated_at=? WHERE id=?",
                       (json.dumps(out), now(), meeting_id))
+        return out
+
+    def set_note_marks(self, meeting_id: str, marks: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
+        """Merge typed-line marks into a doc recording: a repeated line keeps its latest offset, the
+        newest MAX_NOTE_MARKS survive. None if the meeting is missing, [] stored for non-record rows."""
+        cur = self.get(meeting_id)
+        if cur is None:
+            return None
+        if cur.get("doc_mode") != "record":
+            return []
+        by_line = {m["line"]: m for m in (cur.get("note_marks") or []) if isinstance(m, dict) and m.get("line")}
+        for m in marks or []:
+            line = str(m.get("line") or "").strip()[:NOTE_MARK_CHARS]
+            try:
+                t = max(0.0, float(m.get("t")))
+            except (TypeError, ValueError):
+                continue
+            if line:
+                by_line.pop(line, None)
+                by_line[line] = {"line": line, "t": round(t, 1)}
+        out = list(by_line.values())[-MAX_NOTE_MARKS:]
+        with self.db.tx() as c:
+            c.execute("UPDATE meetings SET note_marks=? WHERE id=?", (json.dumps(out), meeting_id))
         return out
 
     def _rev_view(self, r: dict[str, Any], current: str | None = None) -> dict[str, Any]:

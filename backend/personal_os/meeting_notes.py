@@ -351,6 +351,22 @@ def escape_currency(markdown: str) -> str:
     return "\n".join(out)
 
 
+def _note_timeline(marks: Any, doc_content: str) -> list[dict[str, str]]:
+    """When each still-present typed line was written, as [{at:'04:31', line}], oldest first."""
+    if not isinstance(marks, list):
+        return []
+    lines = [ln.strip() for ln in (doc_content or "").splitlines()]
+    out = []
+    for m in sorted((m for m in marks if isinstance(m, dict)), key=lambda m: float(m.get("t") or 0)):
+        snip = str(m.get("line") or "")
+        full = next((ln for ln in lines if snip and ln.startswith(snip)), None)
+        if full is None:
+            continue
+        secs = int(float(m.get("t") or 0))
+        out.append({"at": f"{secs // 60:02d}:{secs % 60:02d}", "line": full[:200]})
+    return out
+
+
 async def summarize_recording(
     *,
     complete_fn: Callable[..., Any],
@@ -384,6 +400,9 @@ async def summarize_recording(
         payload["focus"] = focus.strip()[:300]
     if names:
         payload["speakers"] = names
+    timeline = _note_timeline(meeting.get("note_marks"), doc_content)
+    if timeline:
+        payload["note_timeline"] = timeline
     out: dict[str, Any] = {"markdown": "", "headline": "", "action_items": [], "error": "", "model": model}
     try:
         raw = await complete_fn(

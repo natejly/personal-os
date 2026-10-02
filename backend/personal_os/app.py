@@ -5991,6 +5991,20 @@ def rename_meeting_speakers(id: str, body: MeetingSpeakersIn) -> dict[str, Any]:
     return m
 
 
+class NoteMarksIn(BaseModel):
+    """Lines typed during a recording: [{line, t}] with t the recording offset in seconds."""
+
+    marks: list[dict[str, Any]] = Field(default_factory=list, max_length=500)
+
+
+@app.put("/meetings/{id}/note-marks")
+def put_note_marks(id: str, body: NoteMarksIn) -> dict[str, Any]:
+    out = meeting_svc.meetings.set_note_marks(id, body.marks)
+    if out is None:
+        raise HTTPException(404)
+    return {"marks": out}
+
+
 @app.post("/meetings/{id}/pause")
 def pause_meeting(id: str) -> dict[str, Any]:
     """ffmpeg keeps running so segment numbering stays monotonic; the worker discards the audio.

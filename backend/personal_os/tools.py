@@ -2320,16 +2320,16 @@ def _register_mac(self: Toolbox) -> None:
         examples=[{"name": "Log Water"}, {"name": "Add to Reading List", "input": "https://example.com/article"}],
         taints=True))
 
-    async def open_page(ctx: dict[str, Any], url: str, max_chars: int = 20000) -> Any:
+    async def open_page(ctx: dict[str, Any], url: str, max_chars: int = 20000, wait_for: str = "", links: bool = False) -> Any:
         try:
             cur, host = _check_url(url, ctx, self.settings())
             await _resolve(host)
         except UrlBlocked as e:
             return tool_error(f"open_page refused {url}: {str(e).replace('fetch_url', 'open_page')}", field="url",
                               alternative=e.alternative or ALTERNATIVE["open_page"])
-        return await mac.page_bridge.open_page(cur, max_chars=max_chars)
-    R("open_page", ToolSpec("open_page", "Load a web page in an offscreen browser (its own cookies, separate from the user's) and return its title and visible text. Use it when a page needs JavaScript and fetch_url came back empty. Read-only: it never clicks or fills in forms.",
-        _obj({"url": {"type": "string"}, "max_chars": {"type": "integer", "default": 20000}}, ["url"]), open_page, "web", "network",
+        return await mac.page_bridge.open_page(cur, max_chars=max_chars, wait_for=wait_for, links=links)
+    R("open_page", ToolSpec("open_page", "Load a web page in an offscreen browser (its own cookies, separate from the user's) and return its title and visible text. Use it when a page needs JavaScript and fetch_url came back empty. Read-only: it never clicks or fills in forms. wait_for='css selector' waits for that element to appear (lazy pages); links=true also returns up to 40 page links.",
+        _obj({"url": {"type": "string"}, "max_chars": {"type": "integer", "default": 20000}, "wait_for": {"type": "string"}, "links": {"type": "boolean", "default": False}}, ["url"]), open_page, "web", "network",
         examples=[{"url": "https://example.com/app/pricing"}], taints=True))
 
 

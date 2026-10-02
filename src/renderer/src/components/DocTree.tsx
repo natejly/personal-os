@@ -361,6 +361,9 @@ export default function DocTree({ docs, activeId, query, onQuery }: Props): JSX.
   }
 
   const searching = query.trim().length > 0
+  // The chips come from the unfiltered list; while a #tag is searched `docs` is already narrowed, so keep the last full set.
+  const allTags = useRef<string[]>([])
+  if (!searching) allTags.current = [...new Set(docs.flatMap((d) => d.tags ?? []))].sort()
 
   /** The draft row belongs directly under the row it was started from, at its children's indent. */
   const render = (row: Row): JSX.Element[] => {
@@ -382,6 +385,15 @@ export default function DocTree({ docs, activeId, query, onQuery }: Props): JSX.
         <button className="icon-btn ghost" title="New folder in Personal" aria-label="New folder in Personal"
           onClick={() => newFolder('', '')}><FolderPlus size={14} /></button>
       </div>
+
+      {allTags.current.length > 0 && (
+        <div className="doc-tag-chips">
+          {allTags.current.map((t) => (
+            <button key={t} className={`doc-tag-chip${query.trim().toLowerCase() === '#' + t ? ' on' : ''}`}
+              onClick={() => onQuery(query.trim().toLowerCase() === '#' + t ? '' : '#' + t)}>#{t}</button>
+          ))}
+        </div>
+      )}
 
       {/* A search is a flat answer, not a shape: matches come back wherever they are filed. */}
       {searching

@@ -6,6 +6,7 @@ import { linkFromPaste } from '../features/notes/smartPaste'
 import { builtinCommands, detectSlash, filterCommands, type SlashCommand } from '../features/notes/slash'
 import { readingTime, wordCount } from '../features/notes/stats'
 import { diffRange, insertWithoutFocus, replaceInTextarea } from '../features/notes/textEdit'
+import { TAG_BODY } from '../features/notes/tags'
 import { detectWikiTrigger, filterTargets, wikiText } from '../features/notes/wikilinks'
 import '../styles/notes.css'
 
@@ -85,7 +86,7 @@ export function highlight(src: string, wikilinks = false): string {
 function inline(line: string, wiki: boolean): string {
   // Block-level prefixes first — they colour the whole line.
   const heading = /^(\s{0,3}#{1,6}\s)(.*)$/.exec(line)
-  if (heading) return `<span class="tk-head">${esc(heading[1])}${span(heading[2], wiki)}</span>`
+  if (heading) return `<span class="tk-head">${esc(heading[1])}${span(heading[2], wiki, false)}</span>`
   const quote = /^(\s*>+\s?)(.*)$/.exec(line)
   if (quote) return `<span class="tk-punct">${esc(quote[1])}</span><span class="tk-quote">${span(quote[2], wiki)}</span>`
   const rule = /^\s*([-*_])(\s*\1){2,}\s*$/.test(line)
@@ -98,28 +99,29 @@ function inline(line: string, wiki: boolean): string {
 }
 
 /** Inline spans: maths, code, links, emphasis. One pass, longest-delimiter-first. */
-function span(text: string, wiki = false): string {
+function span(text: string, wiki = false, tags = wiki): string {
   const pattern = new RegExp(
     [
-      '(\\$\\$[^$]+\\$\\$)', // block maths on one line
-      '(\\$(?:\\\\.|[^$\\\\\\n])+\\$)', // inline maths
-      '(`[^`\\n]+`)', // code
+      '(?<m1>\\$\\$[^$]+\\$\\$)', // block maths on one line
+      '(?<m2>\\$(?:\\\\.|[^$\\\\\\n])+\\$)', // inline maths
+      '(?<code>`[^`\\n]+`)', // code
       // Only when the host opted in, and before the plain link so `[[a]](b)` is not misread.
-      ...(wiki ? ['(\\[\\[[^\\[\\]\\n|]+(?:\\|[^\\[\\]\\n]+)?\\]\\])'] : []), // wikilink
-      '(!?\\[[^\\]\\n]*\\]\\([^)\\n]*\\))', // link / image
-      '(\\*\\*[^*\\n]+\\*\\*|__[^_\\n]+__)', // strong
-      '(\\*[^*\\n]+\\*|_[^_\\n]+_)', // emphasis
-      '(~~[^~\\n]+~~)' // strike
+      ...(wiki ? ['(?<wiki>\\[\\[[^\\[\\]\\n|]+(?:\\|[^\\[\\]\\n]+)?\\]\\])'] : []), // wikilink
+      '(?<link>!?\\[[^\\]\\n]*\\]\\([^)\\n]*\\))', // link / image
+      '(?<strong>\\*\\*[^*\\n]+\\*\\*|__[^_\\n]+__)', // strong
+      '(?<em>\\*[^*\\n]+\\*|_[^_\\n]+_)', // emphasis
+      '(?<strike>~~[^~\\n]+~~)', // strike
+      ...(tags ? [`(?<tag>(?<=^|\\s)#${TAG_BODY})`] : []) // #tag (docs only)
     ].join('|'),
-    'g'
+    'gu'
   )
   let out = ''
   let last = 0
   for (let m = pattern.exec(text); m; m = pattern.exec(text)) {
     out += esc(text.slice(last, m.index))
-    // With the wikilink group present every later group shifts up by one.
-    const g = wiki ? m.slice(1) : [m[1], m[2], m[3], undefined, ...m.slice(4)]
-    const cls = g[0] || g[1] ? 'tk-math' : g[2] ? 'tk-code' : g[3] ? 'tk-wikilink' : g[4] ? 'tk-link' : g[5] ? 'tk-strong' : g[6] ? 'tk-em' : 'tk-strike'
+    // Named groups, so adding one never shifts the others.
+    const g = m.groups ?? {}
+    const cls = g.m1 || g.m2 ? 'tk-math' : g.code ? 'tk-code' : g.wiki ? 'tk-wikilink' : g.link ? 'tk-link' : g.strong ? 'tk-strong' : g.em ? 'tk-em' : g.tag ? 'tk-tag' : 'tk-strike'
     out += `<span class="${cls}">${esc(m[0])}</span>`
     last = m.index + m[0].length
   }

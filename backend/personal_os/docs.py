@@ -68,6 +68,14 @@ CREATE TABLE IF NOT EXISTS doc_folders (
   PRIMARY KEY (scope, path)
 );
 
+-- `#tag` tokens in a doc's body, rebuilt on every reindex (create, save, accept, restore, move).
+CREATE TABLE IF NOT EXISTS doc_tags (
+  doc_id TEXT NOT NULL REFERENCES docs(id) ON DELETE CASCADE,
+  tag TEXT NOT NULL,
+  PRIMARY KEY (doc_id, tag)
+);
+CREATE INDEX IF NOT EXISTS idx_doc_tags_tag ON doc_tags(tag);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
   title, content, doc_id UNINDEXED, tokenize='porter unicode61'
 );
@@ -145,6 +153,39 @@ MAX_FOLDER_DEPTH = 8
 MAX_SEGMENT = 60
 
 
+_TAG_RE = re.compile(r"(?:^|\s)#([^\W\d_][\w/-]*)")
+
+
+def extract_tags(src: str) -> list[str]:
+    """Distinct lowercase `#tag`s, first-seen order. Mirrors features/notes/tags.ts: fences, `$$`
+    blocks, headings and inline code are skipped."""
+    seen: dict[str, None] = {}
+    fence: str | None = None
+    math = False
+    for line in (src or "").split("\n"):
+        if fence is not None:
+            if line.lstrip().startswith(fence):
+                fence = None
+            continue
+        m = re.match(r"\s*(```+|~~~+)", line)
+        if m:
+            fence = m.group(1)[:3]
+            continue
+        if math:
+            math = "$$" not in line
+            continue
+        if re.fullmatch(r"\s*\$\$\s*", line):
+            math = True
+            continue
+        if re.match(r"\s{0,3}#{1,6}(\s|$)", line):
+            continue
+        for t in _TAG_RE.findall(re.sub(r"`[^`\n]*`", " ", line)):
+            t = t.rstrip("-/").lower()
+            if t:
+                seen[t] = None
+    return list(seen)
+
+
 def folder_path(raw: str | None) -> str:
     """Normalise whatever the UI or a model passed into a storable path. '' is the root."""
     segs = []
@@ -215,6 +256,13 @@ class Docs:
             if "append" not in have_rev:
                 c.execute("ALTER TABLE doc_revisions ADD COLUMN append TEXT")
         self.backfill_chunks()
+        self._backfill_tags()
+
+    def _backfill_tags(self) -> None:
+        """Tag docs that predate doc_tags. Cheap: only docs with no tag row are scanned."""
+        with self.db.tx() as c:
+            for r in c.execute("SELECT id, content FROM docs WHERE id NOT IN (SELECT doc_id FROM doc_tags)").fetchall():
+                c.executemany("INSERT INTO doc_tags(doc_id, tag) VALUES(?,?)", [(r["id"], t) for t in extract_tags(r["content"])])
 
     @staticmethod
     def _migrate_folder_scope(c: Any) -> None:
@@ -238,6 +286,8 @@ class Docs:
     def _reindex(self, c: Any, doc_id: str, title: str, content: str) -> None:
         c.execute("DELETE FROM docs_fts WHERE doc_id=?", (doc_id,))
         c.execute("INSERT INTO docs_fts(title, content, doc_id) VALUES(?,?,?)", (title, content, doc_id))
+        c.execute("DELETE FROM doc_tags WHERE doc_id=?", (doc_id,))
+        c.executemany("INSERT INTO doc_tags(doc_id, tag) VALUES(?,?)", [(doc_id, t) for t in extract_tags(content)])
         self._index_chunks(c, doc_id, title, content)
 
     def _index_chunks(self, c: Any, doc_id: str, title: str, content: str) -> bool:
@@ -298,12 +348,17 @@ class Docs:
             else:
                 where.append("d.project_id = ?")
                 args.append(project_id)
-        if q.strip():
+        tag = extract_tags(f" {q.strip()}")[:1] if q.strip().startswith("#") else []
+        if tag:  # `#tag` searches by tag; a nested `#a/b` also matches under `#a`
+            where.append("EXISTS (SELECT 1 FROM doc_tags t WHERE t.doc_id=d.id AND (t.tag=? OR t.tag LIKE ? ESCAPE '\\'))")
+            args += [tag[0], tag[0].replace("_", "\\_").replace("%", "\\%") + "/%"]
+        elif q.strip():
             where.append("(d.title LIKE ? OR d.content LIKE ?)")
             args += [f"%{q}%", f"%{q}%"]
         sql = (
             "SELECT d.id, d.project_id, d.title, d.folder, d.starred, d.created_at, d.updated_at, d.content, "
             "  length(d.content) AS size, "
+            "  (SELECT group_concat(tag, char(10)) FROM doc_tags t WHERE t.doc_id=d.id) AS tag_list, "
             "  (SELECT COUNT(*) FROM doc_revisions r WHERE r.doc_id=d.id AND r.status='pending') AS pending "
             "FROM docs d" + (" WHERE " + " AND ".join(where) if where else "") +
             " ORDER BY d.starred DESC, d.updated_at DESC"
@@ -313,6 +368,8 @@ class Docs:
         out = []
         for r in rows:
             d = dict(r)
+            tl = d.pop("tag_list")
+            d["tags"] = sorted(tl.split("\n")) if tl else []
             body = d.pop("content") or ""  # the list shows a preview; bodies stay out of the payload
             out.append({**d, "preview": body[:240], "words": word_count(body)})
         return out

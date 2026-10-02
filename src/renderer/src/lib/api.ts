@@ -585,6 +585,11 @@ export const api = {
     plans: {
       get: (planId: string) => req<PlanRecord>(`/cowork/plans/${planId}`)
     },
+    /** The shared Python environment desks run code in. `setup` builds it and takes minutes. */
+    env: {
+      status: () => req<{ ready: boolean; python: string | null; packages: string[]; installer: string; error: string | null }>('/cowork/env'),
+      setup: () => req<{ ready: boolean; python: string | null; packages: string[]; installer: string; error: string | null }>('/cowork/env/setup', { method: 'POST' })
+    },
     inbox: {
       list: (limit = 40) => req<DeskEvent[]>(`/cowork/inbox?limit=${limit}`),
       seen: (eventId: string) => req<{ ok: boolean }>(`/cowork/inbox/${eventId}/seen`, { method: 'POST' })

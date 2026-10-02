@@ -776,6 +776,7 @@ export const useStore = create<State>((set, get) => {
       else if (action === 'view:graph') s.openMemory('graph')
       else if (action === 'view:memory') s.openMemory()
       else if (action === 'view:documents') s.openSettings('knowledge', 'documents')
+      else if (action.startsWith('desk:')) { s.setView('cowork'); void s.openDesk(action.slice(5)) }
       else if (action.startsWith('view:')) s.setView(action.slice(5) as View)
       else if (action === 'upload') {
         s.openSettings('knowledge', 'documents')
@@ -2976,6 +2977,10 @@ export const useStore = create<State>((set, get) => {
           const pendingApprovals = countApprovals(conversation)
           return { ...s, conversation, pendingApprovals, status: settleApprovals(s.status, pendingApprovals) }
         })
+        // A card answered from a desk pane is also in that desk's `approvals`; re-read the desk so it leaves the list
+        // (answerDeskCard does the same for the old banner path).
+        const open = get().activeDeskId
+        if (open && get().activeDesk?.approvals?.some((a) => a.call_id === callId)) void get().openDesk(open)
       } catch (e) {
         get().toast((e as Error).message, 'error')
       }

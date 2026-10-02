@@ -7,6 +7,7 @@ import { handle, on } from './ipc'
 import { hookConsole, initLogs, logDir } from './logging'
 import { attachWidgetRenderAuth, guardNavigation, guardWebWidgetSession } from './navigation'
 import { registerAgentBrowserIpc } from './agentBrowser'
+import { registerDeskNotify } from './deskNotify'
 import { startPageBridge, stopPageBridge } from './pagefetch'
 import { gather, OPACITY_LEVELS, registerPopouts, restorePopouts, setFrontListener, toggleFront } from './popouts'
 import { registerShortcuts } from './shortcuts'
@@ -267,6 +268,7 @@ app.on('child-process-gone', (_e, d) => console.error(`[child] ${d.type} gone: $
 
 app.whenReady().then(async () => {
   registerAgentBrowserIpc()
+  registerDeskNotify(() => win, showMain, sendMenu)
   handle('backend:url', () => backendUrl())
   handle('backend:status', () => backendStatus())
   handle('backend:token', () => backendToken())

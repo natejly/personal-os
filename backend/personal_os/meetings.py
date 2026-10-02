@@ -190,6 +190,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "enhanceModel": "",
     "maxTranscriptChars": 48000,
     "keepAudio": False,
+    "silencePauseMinutes": 10,   # doc recordings pause after this long with no speech; 0 never pauses
     "maxAudioBytes": 2147483648,
     "redactSecrets": True,
     "injectContext": True,
@@ -1256,6 +1257,8 @@ class MeetingService:
         self.docs = docs
         # Called with a `recording` event dict from any thread; app.py hands it to the event loop.
         self.publish = publish
+        self._heard: dict[str, dict[str, float]] = {}   # meeting -> channel -> wall time of last speech
+        self._auto_paused: set[str] = set()
         self.pool = meeting_recorder.RecorderPool(db.data_dir, settings_fn, self.config)
         self.last_error = ""
         self._preflight: tuple[float, dict[str, Any]] | None = None
@@ -1386,6 +1389,7 @@ class MeetingService:
             m = self.meetings.get(session.meeting_id) or {}
             s = session.stats()
             errors = session.errors()
+            quiet = {c["channel"]: self._silent_for(session, c["channel"]) for c in s["channels"]}
             active = {
                 "meeting_id": session.meeting_id,
                 "status": m.get("status") or "recording",
@@ -1395,7 +1399,8 @@ class MeetingService:
                 "segments_pending": s["segments_pending"],
                 "queued": s["queued"],
                 "paused": s["paused"],
-                "channels": s["channels"],
+                "channels": [{**c, "silent_for_s": quiet[c["channel"]]} for c in s["channels"]],
+                "auto_paused": session.meeting_id in self._auto_paused,
                 "doc_id": m.get("doc_id"),
                 "doc_mode": m.get("doc_mode"),
                 "segment_seconds": int(getattr(session, "segment_seconds", 0) or cfg["segmentSeconds"]),
@@ -1583,7 +1588,34 @@ class MeetingService:
         if session is None:
             return None
         session.pause(False)
+        self._auto_paused.discard(meeting_id)
+        # The silence clock restarts: time spent paused is not time the mic was quiet.
+        self._heard[meeting_id] = {c: now() for c in getattr(session, "captures", {})}
         return self.status()
+
+    def _silent_for(self, session: Any, channel: str) -> int:
+        """Seconds since this channel last produced speech (a segment with text), or since start/resume.
+
+        ponytail: segment-granular, not a live level, so it lags by up to one clip; a real meter
+        needs a capture-side tap.
+        """
+        since = self._heard.get(session.meeting_id, {}).get(channel) or session.started_at
+        return max(0, int(now() - since))
+
+    def _check_silence(self, cfg: dict[str, Any]) -> None:
+        """Pause (never stop) a doc recording whose every channel has been quiet for the configured minutes."""
+        minutes = float(cfg.get("silencePauseMinutes") or 0)
+        session = self.pool.live()
+        if minutes <= 0 or session is None or session.paused:
+            return
+        m = self.meetings.get(session.meeting_id) or {}
+        chans = list(getattr(session, "captures", {}))
+        if not m.get("doc_id") or not chans:
+            return
+        if all(self._silent_for(session, c) >= minutes * 60 for c in chans):
+            self.pause(session.meeting_id)
+            self._auto_paused.add(session.meeting_id)
+            self._note(session.meeting_id, f"Paused after {minutes:g} minutes of silence")
 
     async def stop(self, meeting_id: str) -> dict[str, Any] | None:
         """Captures down, queue drained, transcript rolled up - then enhance is QUEUED, not awaited.
@@ -1614,6 +1646,8 @@ class MeetingService:
         drained, pending = True, 0
         if self.pool.get(meeting_id) is not None:
             self.meetings.patch(meeting_id, {"status": "transcribing"})
+            self._heard.pop(meeting_id, None)
+            self._auto_paused.discard(meeting_id)
             res = await asyncio.to_thread(self.pool.stop, meeting_id) or {}
             # Absent keys mean a pool that predates the contract; the old behaviour was to assume
             # the drain finished, so that is what a missing `drained` still means.
@@ -2190,9 +2224,8 @@ class MeetingService:
     async def loop(self) -> None:
         """One tick every 45 seconds. No LLM in here: a nudge must not cost a model call.
 
-        Auto-stop is purely TIME-based. Nothing in this design measures amplitude - there is no
-        voice-activity detection anywhere in the codebase - so a "stopped after 90s of silence"
-        rule would be a lie about what is being observed.
+        Auto-stop is purely TIME-based. The silence pause only reads which finished clips had
+        speech in them, and it pauses, never stops.
         """
         while True:
             try:
@@ -2202,6 +2235,7 @@ class MeetingService:
                     continue
                 await self._nudge(cfg)
                 await self._auto_stop(cfg)
+                self._check_silence(cfg)
                 await asyncio.to_thread(self.retranscribe, "", RETRANSCRIBE_PER_TICK)
                 await asyncio.to_thread(self._sweep_audio, cfg)
             except asyncio.CancelledError:
@@ -2299,6 +2333,8 @@ class MeetingService:
                 self._emit("status", meeting_id, status="error", error=str(res["error"])[:300])
             # The row finish_segment RETURNS, never `res["text"]`: the stored row is the one that
             # went through the credential scrubber.
+            if res["state"] == "done" and (res["text"] or "").strip():
+                self._heard.setdefault(meeting_id, {})[channel] = now()
             if row is not None and row.get("state") in ("done", "empty", "failed"):
                 self._emit("segment", meeting_id, segment=row)
         except Exception as e:  # noqa: BLE001

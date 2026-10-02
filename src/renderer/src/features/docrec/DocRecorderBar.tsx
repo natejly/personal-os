@@ -3,7 +3,7 @@ import { useStore } from '../../store'
 import { formatOffset, recorderState } from '../../lib/transcript'
 import { useDocRec } from './store'
 import { useDocRecSync, useElapsed } from './hooks'
-import { behindLabel } from './behind'
+import { behindLabel, silentLabel } from './behind'
 import { modeLabel } from './format'
 import '../../styles/docrec.css'
 
@@ -40,6 +40,8 @@ export default function DocRecorderBar({ docId }: { docId: string }): JSX.Elemen
   const warning = active.error
     || (broken ? `${broken.channel === 'mic' ? 'Microphone' : broken.channel === 'output' ? 'System audio' : broken.channel} is not capturing${broken.error ? `: ${broken.error}` : ''}` : '')
     || (active.channels.length === 0 ? 'Nothing is capturing' : '')
+  const mic = active.channels.find((c) => c.channel === 'mic')
+  const silent = state === 'recording' ? silentLabel(mic?.silent_for_s) : ''
   const lag = behindLabel(active.segment_seconds, active.queued, state === 'paused')
 
   return (
@@ -48,6 +50,8 @@ export default function DocRecorderBar({ docId }: { docId: string }): JSX.Elemen
       <span className="dr-bar-mode">{state === 'paused' ? 'Paused' : state === 'stalled' ? 'Capture stopped' : dictating ? 'Dictating' : modeLabel(active.doc_mode)}</span>
       <span className="dr-clock">{formatOffset(elapsed)}</span>
       {lag && <span className="dr-lag">{lag}</span>}
+      {silent && !warning && <span className="dr-warn" title={silent}><AlertTriangle size={12} /> {silent}</span>}
+      {active.auto_paused && state === 'paused' && <span className="dr-warn">Still recording?</span>}
       {warning && <span className="dr-warn" title={warning}><AlertTriangle size={12} /> {warning}</span>}
       <span className="dr-bar-actions">
         {state === 'recording' && (

@@ -2417,6 +2417,8 @@ export interface MeetingConfig {
   /** Head-and-tail cap on the transcript sent to the model; decisions land at the end. */
   maxTranscriptChars: number
   keepAudio: boolean
+  /** Doc recordings pause after this many silent minutes; 0 never pauses. */
+  silencePauseMinutes: number
   /** Disk ceiling for retained wavs, oldest failed segment evicted first. */
   maxAudioBytes: number
   /** Scrub credential-shaped strings before anything is stored. Never activity's identity rules, which
@@ -2473,7 +2475,9 @@ export interface MeetingStatusInfo {
     /** Pause keeps capture running and throws the audio away, so `channels[].alive` stays true while
      *  paused. This flag is the only honest source of pausedness; never infer it from the channels. */
     paused: boolean
-    channels: { channel: string; alive: boolean; error: string }[]
+    channels: { channel: string; alive: boolean; error: string; silent_for_s?: number }[]
+    /** The recorder paused itself after a long silence; the bar asks "Still recording?". */
+    auto_paused?: boolean
     error: string
     /** Set when the live recording belongs to a doc; null for an ordinary meeting. */
     doc_id: string | null

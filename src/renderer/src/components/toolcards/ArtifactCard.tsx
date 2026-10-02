@@ -3,6 +3,9 @@ import { AlertCircle, Check, ChevronRight, Code2, Copy, Download, Maximize2, Pac
 import type { ArtifactRef, ArtifactVersion } from '@shared/types'
 import { api } from '../../lib/api'
 import ArtifactFrame from '../ArtifactFrame'
+import { openInSpaceArgs } from '../../artifacts/openExport'
+import { useCanvas } from '../../canvas/store'
+import { useStore } from '../../store'
 import ArtifactViewer, { downloadHtml } from '../ArtifactViewer'
 import { registerToolCard, type ToolCardProps } from './registry'
 import '../../styles/artifacts.css'
@@ -49,6 +52,15 @@ export default function ArtifactCard({ event, pending, decide }: ToolCardProps):
     : event.error ? 'failed' : (ref?.action ?? 'created')
   const version = shown ?? made
 
+  const toast = useStore((s) => s.toast)
+  const openInSpace = async (): Promise<void> => {
+    if (!ref) return
+    const { activeCanvasId, ensureWindow } = useCanvas.getState()
+    if (!activeCanvasId) return toast('No space is open', 'info')
+    // ensureWindow focuses an existing window for this artifact instead of adding a second one.
+    await ensureWindow(activeCanvasId, openInSpaceArgs(ref).kind, ref.id)
+  }
+
   const code = async (): Promise<string> => {
     if (!ref) return ''
     return version ? (await api.artifacts.version(ref.id, version)).code ?? '' : (await api.artifacts.get(ref.id)).code ?? ''
@@ -70,6 +82,7 @@ export default function ArtifactCard({ event, pending, decide }: ToolCardProps):
             )}
             <button className="icon-btn ghost" title="Taller preview" aria-label={expanded ? 'Shorter preview' : 'Taller preview'} aria-pressed={expanded} onClick={() => setExpanded((v) => !v)}><Maximize2 size={13} /></button>
             <button className="ghost-btn" onClick={() => setOpen(true)}>Open</button>
+            <button className="ghost-btn" onClick={() => void openInSpace()}>Open in space</button>
             <button className="icon-btn ghost" title="Download HTML" aria-label="Download HTML" onClick={() => void code().then((c) => downloadHtml(title, c))}><Download size={13} /></button>
             <CopyButtonLazy get={code} />
           </div>

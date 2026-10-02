@@ -38,6 +38,7 @@
 .art-backdrop { z-index: 60; }
 .art-view { display: flex; flex-direction: column; background: var(--bg-elev); min-height: 0; }
 .art-view.full { width: min(1200px, calc(100vw - 48px)); height: calc(100vh - 48px); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4); overflow: hidden; }
+.art-view.full.fs { width: 100vw; height: 100vh; border: 0; border-radius: 0; }
 .art-view.inline { height: 100%; min-height: 480px; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
 .art-view-head { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
 .art-view-head h2 { margin: 0; font-size: 15px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

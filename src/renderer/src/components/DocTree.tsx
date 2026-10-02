@@ -1,13 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  ChevronRight, FileText, Folder, FolderOpen, FolderPlus, MoreHorizontal, Plus, Search, Sparkles, Star,
+  ChevronRight, FileText, Folder, FolderOpen, FolderPlus, MoreHorizontal, Pin, Plus, Search, Sparkles, Star,
   Trash2, User
 } from 'lucide-react'
 import type { Doc } from '@shared/types'
 import { useStore } from '../store'
 import {
   buildGroups, canDropDoc, canDropFolder, flattenGroups, folderKey, groupShutKey, joinPath, nameOf,
-  parentOf, scopeOf, type Group, type Row, type TreeNode
+  parentOf, recentDocs, scopeOf, splitPinned, starredDocs, type Group, type Row, type TreeNode
 } from '../lib/docTree'
 import ProjectChip from './ProjectChip'
 
@@ -68,6 +68,15 @@ export default function DocTree({ docs, activeId, query, onQuery }: Props): JSX.
   const openDoc = useStore((s) => s.openDoc)
   const deleteDoc = useStore((s) => s.deleteDoc)
   const setDocStar = useStore((s) => s.setDocStar)
+  const setDocPin = useStore((s) => s.setDocPin)
+  const [topShut, setTopShut] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('grain.docTopShut') || '[]') } catch { return [] }
+  })
+  const toggleTop = (k: string): void => {
+    const next = topShut.includes(k) ? topShut.filter((x) => x !== k) : [...topShut, k]
+    setTopShut(next)
+    try { localStorage.setItem('grain.docTopShut', JSON.stringify(next)) } catch { /* storage unavailable */ }
+  }
 
   const [over, setOver] = useState<string | null>(null)
   const [menu, setMenu] = useState<string | null>(null)
@@ -111,7 +120,10 @@ export default function DocTree({ docs, activeId, query, onQuery }: Props): JSX.
   }, [activeScope, activeFolder, expandTo])
 
   const expanded = useMemo(() => new Set(expandedList), [expandedList])
-  const groups = useMemo(() => buildGroups(folders, docs, projects), [folders, docs, projects])
+  const { pinned, rest } = useMemo(() => splitPinned(docs), [docs])
+  const starred = useMemo(() => starredDocs(rest), [rest])
+  const recent = useMemo(() => recentDocs(rest), [rest])
+  const groups = useMemo(() => buildGroups(folders, rest, projects), [folders, rest, projects])
   const rows = useMemo(
     () => flattenGroups(
       groups,
@@ -249,6 +261,10 @@ export default function DocTree({ docs, activeId, query, onQuery }: Props): JSX.
           {showScope && d.folder ? `${d.folder} · ` : ''}{d.words} words · {fmtWhen(d.updated_at)}
         </span>
       </span>
+      <button className={`icon-btn ghost xs ${d.pinned ? 'starred' : ''}`} title={d.pinned ? 'Unpin' : 'Pin'}
+        onClick={(e) => { e.stopPropagation(); void setDocPin(d.id, !d.pinned) }}>
+        <Pin size={12} fill={d.pinned ? 'currentColor' : 'none'} />
+      </button>
       <button className={`icon-btn ghost xs ${d.starred ? 'starred' : ''}`} title={d.starred ? 'Unstar' : 'Star'}
         onClick={(e) => { e.stopPropagation(); void setDocStar(d.id, !d.starred) }}>
         <Star size={12} fill={d.starred ? 'currentColor' : 'none'} />
@@ -360,6 +376,25 @@ export default function DocTree({ docs, activeId, query, onQuery }: Props): JSX.
     )
   }
 
+  /** A headed, collapsible shortcut list above the folder groups; rows are the same as the tree's. */
+  const topSection = (key: string, title: string, list: Doc[]): JSX.Element | null => {
+    if (!list.length) return null
+    const open = !topShut.includes(key)
+    return (
+      <div className="doc-top-section" key={`top:${key}`}>
+        <div className="doc-group-row">
+          <button className="doc-folder-toggle" onClick={() => toggleTop(key)} aria-expanded={open}
+            aria-label={`${open ? 'Collapse' : 'Expand'} ${title}`}>
+            <ChevronRight size={11} className={open ? 'rot90' : undefined} />
+          </button>
+          <button className="doc-group-name" onClick={() => toggleTop(key)}>{title}</button>
+          <span className="count">{list.length}</span>
+        </div>
+        {open && list.map((d) => docRow(d, 1, true))}
+      </div>
+    )
+  }
+
   const searching = query.trim().length > 0
 
   /** The draft row belongs directly under the row it was started from, at its children's indent. */
@@ -386,7 +421,12 @@ export default function DocTree({ docs, activeId, query, onQuery }: Props): JSX.
       {/* A search is a flat answer, not a shape: matches come back wherever they are filed. */}
       {searching
         ? (docs.length === 0 ? <p className="empty-hint">No matches.</p> : docs.map((d) => docRow(d, 0, true)))
-        : rows.flatMap(render)}
+        : <>
+          {topSection('pinned', 'Pinned', pinned)}
+          {topSection('starred', 'Starred', starred)}
+          {topSection('recent', 'Recent', recent)}
+          {rows.flatMap(render)}
+        </>}
 
       {!searching && <div className="doc-tree-tail" aria-hidden />}
     </div>

@@ -761,13 +761,14 @@ def list_tools() -> dict[str, Any]:
 class PageBridgeIn(BaseModel):
     url: str
     token: str
+    capabilities: list[str] | None = None  # ['page', 'browser']; omitted by an older main = the page loader only
 
 
 @app.post("/bridge/page")
 def register_page_bridge(body: PageBridgeIn) -> dict[str, Any]:
     """The Electron main process says where its offscreen page loader listens (open_page). Re-sent periodically."""
     try:
-        mac.page_bridge.register(body.url, body.token)
+        mac.page_bridge.register(body.url, body.token, body.capabilities)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     return {"ok": True}

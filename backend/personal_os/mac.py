@@ -423,6 +423,9 @@ async def run_shortcut(name: str, text_input: str | None = None, timeout: float 
 
 
 # ---- offscreen page loader (Electron main) ----
+REGISTRATION_TTL = 90.0  # seconds a registration stays good (main re-sends every 30)
+
+
 class PageBridge:
     """Where the Electron main process is listening. Main POSTs this on startup and every so often after."""
 
@@ -430,18 +433,48 @@ class PageBridge:
         self.url = ""
         self.token = ""
         self.seen = 0.0
+        self.capabilities: set[str] = {"page"}  # what main says it can do; an older main sends nothing and only has the loader
+        self.transport: httpx.AsyncBaseTransport | None = None  # tests inject a fake main here
 
-    def register(self, url: str, token: str) -> None:
+    def register(self, url: str, token: str, capabilities: list[str] | None = None) -> None:
         u = urllib.parse.urlsplit(url.strip())
         if u.scheme != "http" or u.hostname not in ("127.0.0.1", "localhost") or not u.port:
             raise ValueError("the page bridge must be http://127.0.0.1:<port>")
         if len(token.strip()) < 16:
             raise ValueError("the page bridge token is too short")
         self.url, self.token, self.seen = f"http://127.0.0.1:{u.port}", token.strip(), time.time()
+        self.capabilities = {str(c) for c in capabilities} if capabilities is not None else {"page"}
 
     @property
     def connected(self) -> bool:
-        return bool(self.url and self.token)
+        # Main re-registers every 30 s. A backend that outlives the desktop app would otherwise offer these tools forever.
+        return bool(self.url and self.token) and time.time() - self.seen <= REGISTRATION_TTL
+
+    def has(self, cap: str) -> bool:
+        return self.connected and cap in self.capabilities
+
+    async def browser(self, route: str, payload: dict[str, Any], timeout: float = 45.0) -> dict[str, Any]:
+        """POST one /browser/* call to main. Always returns the parsed body; a transport failure or a rejected
+        credential comes back as {ok: False, error, code} so callers have one shape to handle."""
+        if not self.connected:
+            return {"ok": False, "code": "bridge", "error": "the desktop app's browser is not connected"}
+        try:
+            async with httpx.AsyncClient(timeout=timeout, trust_env=False, transport=self.transport) as c:
+                r = await c.post(f"{self.url}/browser/{route.strip('/')}", json=payload,
+                                 headers={"Authorization": f"Bearer {self.token}"})
+        except httpx.TimeoutException:
+            return {"ok": False, "code": "timeout", "error": f"the desktop app's browser did not answer within {int(timeout)}s"}
+        except httpx.HTTPError as e:
+            return {"ok": False, "code": "bridge", "error": f"the desktop app's browser could not be reached ({type(e).__name__})"}
+        if r.status_code == 401:
+            return {"ok": False, "code": "bridge", "error": "the desktop app's browser rejected this backend's credentials"}
+        try:
+            body = r.json()
+        except ValueError:
+            body = None
+        if not isinstance(body, dict):
+            return {"ok": False, "code": "bridge", "error": f"the desktop app's browser answered HTTP {r.status_code} with no usable body"}
+        return body
 
     async def open_page(self, url: str, *, max_chars: int = 20000, timeout: float = 20.0) -> dict[str, Any]:
         if not self.connected:

@@ -228,6 +228,12 @@ def denied(name: str, reason: str) -> dict[str, Any]:
                       alternative=alt or "continue without it, or ask the user what they would like instead")
 
 
+# Reads that may be called again after a transient network failure (Toolbox._dispatch).
+RETRY_DANGER = ("safe", "network")
+NO_RETRY_GROUPS = ("browser", "shell", "sandbox")  # they hold session state
+TRANSIENT_ERRORS = (httpx.TransportError, asyncio.TimeoutError, ConnectionError)
+
+
 def call_key(name: str, args: dict[str, Any]) -> str:
     """Canonical signature of one call: key order and whitespace do not matter."""
     try:
@@ -726,6 +732,23 @@ class Toolbox:
             return "ask"
         return mode
 
+    async def _dispatch(self, spec: ToolSpec, ctx: dict[str, Any], args: dict[str, Any]) -> Any:
+        """spec.fn, retried on a transient network failure when the tool only reads. Nothing that writes, runs code
+        or holds session state is ever called twice: a retry there could repeat a side effect."""
+        from . import llm
+        v = self.settings().get("toolReadRetries", 2)
+        retries = max(0, min(int(v), 5)) if isinstance(v, (int, float)) and not isinstance(v, bool) else 2
+        if spec.danger not in RETRY_DANGER or spec.group in NO_RETRY_GROUPS or spec.name.startswith("agent_"):
+            retries = 0
+        for attempt in range(1, retries + 2):
+            try:
+                return await spec.fn(ctx, **args)
+            except TRANSIENT_ERRORS:
+                if attempt > retries:
+                    raise
+                log.info("tool %s failed transiently; retry %d/%d", spec.name, attempt, retries)
+                await asyncio.sleep(llm.retry_delay(attempt))
+
     async def call(self, name: str, args: dict[str, Any], ctx: dict[str, Any]) -> Any:
         spec = self.specs.get(name)
         if not spec:
@@ -738,7 +761,7 @@ class Toolbox:
                               "background run, so it is refused: code could send data out with nobody watching.",
                               alternative="run_python, which has no network")
         try:
-            out = await spec.fn(ctx, **args)
+            out = await self._dispatch(spec, ctx, args)
         except TypeError as e:  # backstop: signature mismatch, wrong types
             return tool_error(f"{name}: bad arguments — {_first_line(e)}",
                               expected="required: " + (", ".join(spec.parameters.get("required") or []) or "none"),

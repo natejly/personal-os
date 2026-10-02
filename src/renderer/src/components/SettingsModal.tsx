@@ -238,7 +238,7 @@ export default function SettingsModal(): JSX.Element {
                 <input list="model-options" value={draft.extractionModel} onChange={(e) => patch({ extractionModel: e.target.value })} placeholder="Same as the default model" spellCheck={false} />
               </label>
               <label><span>Embedding model <small className="muted">(shared with document search; changing it re-embeds both)</small></span>
-                <input list="model-options" value={draft.embeddingModel ?? ''} onChange={(e) => patch({ embeddingModel: e.target.value })} placeholder="qwen3-embedding-8b" spellCheck={false} />
+                <input value={draft.embeddingModel ?? ''} onChange={(e) => patch({ embeddingModel: e.target.value })} placeholder="qwen3-embedding-8b" spellCheck={false} />
               </label>
               <label className="toggle-row plain">
                 <span className="toggle-text"><b>Hybrid memory search</b><small>Combine keywords, embeddings, recency and graph links. Off means keywords only.</small></span>

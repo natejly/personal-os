@@ -1,4 +1,4 @@
-import { Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, CheckSquare, KanbanSquare, Mail, Laptop, FolderOpen, ListChecks, Layers, GraduationCap, PenLine } from 'lucide-react'
+import { Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, CheckSquare, KanbanSquare, Mail, Laptop, FolderOpen, ListChecks, Layers, GraduationCap, PenLine, HeartPulse } from 'lucide-react'
 import { useStore } from '../store'
 import type { ToolMode, ToolOverride } from '@shared/types'
 
@@ -7,7 +7,7 @@ const GROUP_ICON: Record<string, JSX.Element> = {
   utility: <Clock size={13} />, todos: <CheckSquare size={13} />, boards: <KanbanSquare size={13} />, google: <Mail size={13} />,
   mac: <Laptop size={13} />, files: <FolderOpen size={13} />,
   plan: <ListChecks size={13} />, context: <Layers size={13} />, skills: <GraduationCap size={13} />,
-  style: <PenLine size={13} />
+  style: <PenLine size={13} />, health: <HeartPulse size={13} />
 }
 export const DANGER_LABEL: Record<string, string> = { safe: 'read-only', writes: 'writes in-app data', network: 'reads the internet', executes: 'runs sandboxed code', external: 'acts outside the app', plan: 'always asks: the call is the approval card', schedules: 'books work for later' }
 const MODE_LABEL: Record<ToolMode, string> = { on: 'always on', ask: 'ask each time', off: 'off' }

@@ -162,6 +162,7 @@ function ConnectGoogle({ what, onConnect }: { what: string; onConnect: () => voi
 
 export default function HomeView(): JSX.Element {
   const TodosCard = moduleHome('todos')?.home?.Card
+  const HealthCard = moduleHome('health')?.home?.Card
   const d = useStore((s) => s.dashboard)
   const google = useStore((s) => s.google)
   const sidebarOpen = useStore((s) => s.sidebarOpen)
@@ -286,6 +287,8 @@ export default function HomeView(): JSX.Element {
           </section>}
 
           {on('todos') && TodosCard && <TodosCard data={d} />}
+
+          {on('health') && HealthCard && <HealthCard data={d} />}
 
           {on('inbox') && <section className="widget">
             <header><Mail size={14} /> Inbox {google?.connected && <span className="muted small">unread, 14 days</span>}<button className="link small" onClick={() => setView('mail')}>View all</button></header>

@@ -29,6 +29,7 @@ export const HOME_MODULES: HomeModule[] = [
   { key: 'recap', label: 'Daily recap' },
   { key: 'calendar', label: 'Calendar' },
   homeRow('todos'),
+  homeRow('health'),
   { key: 'inbox', label: 'Inbox' },
   { key: 'gtasks', label: 'Google Tasks' },
   { key: 'drive', label: 'Drive files' },
@@ -41,6 +42,7 @@ export const HOME_MODULES: HomeModule[] = [
 /** Views that may be removed from the sidebar. Home and chats are the shell itself and stay. */
 export const OPTIONAL_VIEWS: { view: View; label: string }[] = [
   viewRow('todos'),
+  viewRow('health'),
   { view: 'calendar', label: 'Calendar' },
   { view: 'mail', label: 'Mail' },
   { view: 'boards', label: 'Boards' },

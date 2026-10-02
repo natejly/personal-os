@@ -777,10 +777,54 @@ export interface GmailLabel {
   type: 'system' | 'user'
 }
 
+/** A tracked health metric (`/health/metrics`). `agg` turns one day's readings into the day's value. */
+export interface HealthMetric {
+  key: string
+  label: string
+  unit: string
+  /** 'scale' is 1-5; 'check' is yes (1) / no (0). */
+  kind: 'number' | 'scale' | 'check'
+  agg: 'sum' | 'last' | 'avg'
+  goal: number | null
+  goal_dir: 'at_least' | 'at_most' | null
+  decimals: number
+  builtin: boolean
+  hidden: boolean
+  position: number
+}
+
+/** One reading (`/health/entries`), filed under a local calendar day. */
+export interface HealthEntry {
+  id: string
+  metric: string
+  value: number
+  day: string
+  note: string
+  source: string
+  created_at: number
+}
+
+/** `/health/summary`: a metric with its daily series (oldest first, null where nothing was logged). */
+export interface HealthSummary extends HealthMetric {
+  today: number | null
+  series: { day: string; value: number | null }[]
+  avg: number | null
+  prev_avg: number | null
+  logged_days: number
+  met_days: number
+  streak: number
+  last: { value: number; day: string } | null
+}
+
+/** The Today card's slice of `/dashboard`. */
+export type HealthToday = Pick<HealthMetric, 'key' | 'label' | 'unit' | 'kind' | 'goal' | 'goal_dir' | 'decimals'> & { today: number | null }
+
 export interface TodayDashboard {
   google: GoogleStatus
   todos: Todo[]
   todo_stats: { open: number; overdue: number; today: number }
+  /** Visible health metrics with today's value; missing from a backend without the health module. */
+  health?: HealthToday[]
   projects: Project[]
   recent_memories: Memory[]
   recent_conversations: Conversation[]

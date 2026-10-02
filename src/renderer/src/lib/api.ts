@@ -8,6 +8,7 @@ import type {
   DeskStatus, FullDesk, PlanRecord, PromotionKind, PromotionResult,
   AgentInbox, AgentProposal, Job,
   Doc, DocFolder, FullDoc, DocRevision,
+  HealthEntry, HealthMetric, HealthSummary,
   McpEffective, McpReport, McpServer, McpServerDraft, McpTool, ToolMode,
   ActivityApplyResult, ActivityCapability, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityGrantResult,
   ActivityInsights, ActivityStatus, ActivitySuggestion, ActivitySummary, InsightStatus,
@@ -162,6 +163,22 @@ export const api = {
     update: (id: string, patch: { title?: string; notes?: string; due?: string | null; priority?: number; done?: boolean; project_id?: string | null; clear_due?: boolean; clear_project?: boolean; calendar_event_id?: string | null; calendar_link?: string | null; calendar_id?: string | null }) =>
       req<Todo>(`/todos/${id}`, { method: 'PUT', body: json(patch) }),
     delete: (id: string) => req(`/todos/${id}`, { method: 'DELETE' })
+  },
+  /** Health tracking (`/health/...`). Not `api.health`, which is the liveness probe on bare `/health`. */
+  healthLog: {
+    metrics: () => req<HealthMetric[]>('/health/metrics'),
+    createMetric: (m: { label: string; unit?: string; kind?: HealthMetric['kind']; agg?: HealthMetric['agg']; goal?: number | null; goal_dir?: HealthMetric['goal_dir']; decimals?: number }) =>
+      req<HealthMetric>('/health/metrics', { method: 'POST', body: json(m) }),
+    updateMetric: (key: string, patch: Partial<Pick<HealthMetric, 'label' | 'unit' | 'agg' | 'goal' | 'goal_dir' | 'decimals' | 'hidden' | 'position'>> & { clear_goal?: boolean }) =>
+      req<HealthMetric>(`/health/metrics/${encodeURIComponent(key)}`, { method: 'PUT', body: json(patch) }),
+    deleteMetric: (key: string) => req(`/health/metrics/${encodeURIComponent(key)}`, { method: 'DELETE' }),
+    /** `today` is the renderer's local day, so the backend never guesses the user's timezone. */
+    summary: (days: number, today: string, includeHidden = false) =>
+      req<HealthSummary[]>(`/health/summary?days=${days}&today=${today}&include_hidden=${includeHidden}`),
+    entries: (metric?: string, limit = 50) => req<HealthEntry[]>(`/health/entries?limit=${limit}${metric ? `&metric=${encodeURIComponent(metric)}` : ''}`),
+    log: (e: { metric: string; value: number; day?: string; note?: string }) => req<HealthEntry>('/health/entries', { method: 'POST', body: json(e) }),
+    updateEntry: (id: string, patch: { value?: number; day?: string; note?: string }) => req<HealthEntry>(`/health/entries/${id}`, { method: 'PUT', body: json(patch) }),
+    deleteEntry: (id: string) => req(`/health/entries/${id}`, { method: 'DELETE' })
   },
   mcp: {
     servers: () => req<McpServer[]>('/mcp/servers'),

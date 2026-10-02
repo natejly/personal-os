@@ -68,9 +68,10 @@ class Module:
 
 def build_modules(ctx: ModuleContext) -> list[Module]:
     """The built-in modules, in registration order."""
+    from .health import HealthModule
     from .todos import TodosModule
 
-    return [TodosModule(ctx)]
+    return [TodosModule(ctx), HealthModule(ctx)]
 
 
 M = TypeVar("M", bound=Module)

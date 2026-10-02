@@ -4832,7 +4832,7 @@ canvases = Canvases(db)
 app.include_router(artifact_router(artifacts, settings, on_delete=lambda aid: canvases.delete_windows_for("artifact", aid),
                                    sign=_artifact_render_path, verify=_artifact_render_ok))
 notes = Notes(db)
-presets = CanvasPresets(db, canvases)
+presets = CanvasPresets(db, canvases, notes, dashboards)
 # 'popped' rows are NOT reset here: import runs before the main process can restore them (it clears the ones it declines).
 
 
@@ -6192,6 +6192,22 @@ def create_canvas_preset(body: PresetIn) -> dict[str, Any]:
     if not p:
         raise HTTPException(404, "Unknown canvas")
     return p
+
+
+@app.get("/canvas-presets/{pid}/export")
+def export_canvas_preset(pid: str) -> dict[str, Any]:
+    p = presets.export(pid)
+    if not p:
+        raise HTTPException(404, "No such preset")
+    return p
+
+
+@app.post("/canvas-presets/import")
+def import_canvas_preset(body: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return presets.import_file(body.get("file") or {}, bool(body.get("instantiate", True)))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @app.put("/canvas-presets/{pid}")

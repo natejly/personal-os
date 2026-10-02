@@ -16,11 +16,12 @@ import hashlib
 import logging
 import re
 import threading
+from pathlib import Path
 from typing import Any
 
 from .chunker import chunk_blocks
 from .db import Database, new_id, now, row_to_dict
-from .extract_text import markdown_blocks
+from .extract_text import markdown_blocks, safe_upload_name
 from .repos import ALL, _scope_clause, fts_query
 
 SCHEMA = """
@@ -99,6 +100,44 @@ CREATE VIRTUAL TABLE IF NOT EXISTS doc_chunks_fts USING fts5(
   text, chunk_id UNINDEXED, doc_id UNINDEXED, tokenize='porter unicode61'
 );
 """
+
+DATA_URI = re.compile(r"\(data:[^)\s]*\)")
+ASSET_MIMES = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp"}
+ASSET_MAX_BYTES = 8 * 1024 * 1024
+
+
+class AssetError(ValueError):
+    def __init__(self, status: int, msg: str):
+        super().__init__(msg)
+        self.status = status
+
+
+def save_asset(root: Path, doc_id: str, filename: str, data: bytes, mime: str) -> str:
+    """Store a pasted image under <root>/<doc_id>/<sha8>-<name> and return its relative URL."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", doc_id or ""):
+        raise AssetError(400, "bad doc id")
+    ext = ASSET_MIMES.get((mime or "").split(";")[0].strip().lower())
+    if not ext:
+        raise AssetError(415, "only png, jpeg, gif and webp images can be added")
+    if len(data) > ASSET_MAX_BYTES:
+        raise AssetError(413, "images are limited to 8 MB")
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "-", Path(safe_upload_name(filename)).stem).strip("-.")[:60] or "image"
+    name = f"{hashlib.sha256(data).hexdigest()[:8]}-{stem}{ext}"
+    d = root / doc_id
+    d.mkdir(parents=True, exist_ok=True)
+    (d / name).write_bytes(data)
+    return f"/docs/assets/{doc_id}/{name}"
+
+
+def asset_path(root: Path, doc_id: str, name: str) -> Path:
+    """The stored file, or AssetError for a name that is not a plain segment (traversal) or does not exist."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", doc_id) or not re.fullmatch(r"[A-Za-z0-9._-]{1,200}", name) or ".." in name:
+        raise AssetError(400, "bad asset name")
+    p = root / doc_id / name
+    if not p.is_file() or p.is_symlink():
+        raise AssetError(404, "no such asset")
+    return p
+
 
 def doc_hit(r: Any) -> dict[str, Any]:
     """A doc chunk row as a retrieval hit. `document_id`/`name` mirror the file hits so ranking and the
@@ -250,7 +289,7 @@ class Docs:
         c.execute("DELETE FROM doc_chunks_fts WHERE doc_id=?", (doc_id,))
         c.execute("DELETE FROM doc_chunks WHERE doc_id=?", (doc_id,))  # cascades the vectors
         try:
-            chunks = chunk_blocks(markdown_blocks(content), title=title)
+            chunks = chunk_blocks(markdown_blocks(DATA_URI.sub("(image)", content)), title=title)  # base64 pastes stay out of the index
         except Exception:  # noqa: BLE001 - a chunker bug must not fail a save
             chunks = []
         for i, ch in enumerate(chunks):

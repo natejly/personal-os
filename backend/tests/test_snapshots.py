@@ -163,6 +163,20 @@ check(c.post("/runs/run-3/undo").json()["reverted"] == ["r.txt"] and (ROOT / "r.
 check(c.post("/runs/run-3/undo").status_code == 409, "second undo is a 409")
 check(c.post("/runs/run-3/redo").json()["reverted"] == ["r.txt"] and (ROOT / "r.txt").read_text() == "2", "POST redo")
 
+# after `done` the changes are readable at once, even while the run is still closing (auto-learn tail)
+(ROOT / "d.txt").write_text("1")
+store.create("run-4", None)
+store.update("run-4", message_id="msg-4")
+S.before("run-4", [ROOT])
+(ROOT / "d.txt").write_text("2")
+check(c.get("/messages/msg-4/changes").json()["count"] == 0, "before done the run is still open")
+store.append("run-4", 1, "done", {"id": "msg-4", "error": None, "segment": True})
+check(c.get("/messages/msg-4/changes").json()["count"] == 0, "a segment's done does not settle the run")
+store.append("run-4", 2, "done", {"id": "msg-4", "error": None, "segment": False, "context_used": {"x": "segment"}})
+mc = c.get("/messages/msg-4/changes").json()
+check(mc.get("run_id") == "run-4" and mc["count"] == 1, "after done the changes show without waiting for the run to close")
+check(c.post("/runs/run-4/undo").json()["reverted"] == ["d.txt"] and (ROOT / "d.txt").read_text() == "1", "undo right after done")
+
 # without git the feature reports itself unavailable
 real = sn.shutil.which
 sn.shutil.which = lambda _n: None  # type: ignore[assignment]

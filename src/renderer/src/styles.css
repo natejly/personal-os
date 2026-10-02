@@ -4,6 +4,17 @@
   --radius: 10px;
   --sidebar-w: 260px;
   --page-agent-w: 380px;
+  /* The reading column: messages, the composer and the plan panel all share it. */
+  --chat-col: 760px;
+  /* One status vocabulary for runs, desks, jobs and inbox rows. */
+  --st-working: var(--warn);
+  --st-needs-you: var(--accent);
+  --st-done: var(--ok);
+  --st-failed: var(--danger);
+  --st-idle: var(--text-faint);
+  /* A card that is waiting on the user: same edge and wash wherever it appears. */
+  --await-border: color-mix(in srgb, var(--accent) 45%, transparent);
+  --await-fill: color-mix(in srgb, var(--accent) 8%, transparent);
   /* Native form controls / dropdowns follow the app theme. */
   color-scheme: dark;
 
@@ -356,7 +367,8 @@ kbd {
   padding: 0 16px;
   border-bottom: 1px solid var(--border);
 }
-.sidebar-collapsed .chat-header { padding-left: 84px; }
+/* With the sidebar hidden the window's traffic lights sit over the left end of every title bar. */
+.sidebar-collapsed .chat-header, .sidebar-collapsed .page-header { padding-left: 84px; }
 .chat-title { flex: 1; min-width: 0; display: flex; }
 .title-btn {
   display: flex; align-items: center; gap: 6px;
@@ -374,6 +386,8 @@ kbd {
   border-radius: 6px; padding: 4px 8px; outline: 0; width: 320px;
 }
 .header-right { display: flex; align-items: center; gap: 8px; }
+/* Pushes whatever follows it to the far end of any flex row. */
+.spacer { flex: 1; }
 /* Todos / Calendar / Mail: the last thing in every title bar, set off from the view's own controls. */
 .app-switcher {
   display: flex; align-items: center; gap: 2px;
@@ -870,7 +884,9 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 /* --text-faint drops to 3.85:1 over the lighter .active row background. */
 .nav-item .count { margin-left: auto; font-size: 11px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .new-chat { margin-top: 4px; margin-bottom: 6px; color: var(--text); }
-.icon-btn.on { background: var(--active); color: var(--text); }
+/* One pressed look for every toggle button, whichever way the component marks it. */
+.icon-btn.on, .icon-btn.active, .icon-btn[aria-pressed='true'],
+.ghost-btn.on, .ghost-btn.active, .ghost-btn[aria-pressed='true'] { background: var(--active); color: var(--text); }
 .icon-btn.danger:hover { color: var(--danger); }
 .ghost-btn.danger { color: var(--danger); border-color: rgba(229,72,77,0.4); }
 .ghost-btn.full { width: 100%; justify-content: center; margin-top: 12px; }
@@ -1129,8 +1145,9 @@ textarea.instructions:focus { border-color: var(--accent); }
 .seg button + button { border-left: 1px solid var(--border-strong); }
 .seg button:last-child { border-right: 0; }
 .seg button:hover { color: var(--text); background: var(--hover); }
-.seg button.active { background: var(--bg-input); color: var(--text); }
-.seg button.on { background: var(--accent-solid); color: var(--on-accent); }
+/* One selected look, whichever class the component uses: a neutral raised cell. The accent fill is
+   kept for primary actions, so a view switch never competes with the button beside it. */
+.seg button.active, .seg button.on, .seg button[aria-pressed='true'] { background: var(--active); color: var(--text); font-weight: 500; }
 
 /* Floating graph controls, so the canvas keeps the full pane */
 .graph-tools { position: absolute; top: 10px; left: 10px; z-index: 2; display: flex; align-items: center; gap: 2px; padding: 4px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elev); box-shadow: 0 2px 8px rgba(0,0,0,0.18); }
@@ -1408,7 +1425,7 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 
 /* Read-back verdict on an external write (verify.py): proved, or conspicuously not. */
 .tag.verified { background: rgba(70,167,88,0.15); color: var(--ok); }
-.tag.unproven { background: rgba(229,72,77,0.15); color: var(--danger); }
+.tag.unproven, .tag.bad { background: rgba(229,72,77,0.15); color: var(--danger); }
 
 /* One card for a whole plan: the arguments are the card, so they are shown, not summarised. */
 .plan-head { display: flex; align-items: center; gap: 6px; font-size: 13px; margin-bottom: 4px; }
@@ -1499,7 +1516,9 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 /* A group reads as a header and its recent lines, the way Claude's own sidebar does: the folder
    carries the project colour, so no dot or count competes with the name, and the rows under it are
    indented to the header's text, not to its icon. */
-.icon-btn.xs { width: 16px; height: 16px; margin-left: -4px; }
+/* 16px to look at, 24px to hit: the box stays small enough for a tree row, the target does not. */
+.icon-btn.xs { position: relative; width: 16px; height: 16px; margin-left: -4px; }
+.icon-btn.xs::before { content: ''; position: absolute; inset: -4px; }
 .project-item { cursor: pointer; }
 .project-group + .project-group { margin-top: 10px; }
 .project-group .project-item { gap: 8px; font-weight: 500; }
@@ -1571,8 +1590,8 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 }
 .chip.warn { color: var(--warn); border-color: rgba(254, 188, 46, 0.4); }
 .chip.bad { color: var(--danger); border-color: rgba(229, 72, 77, 0.4); }
-.primary-btn.sm, .ghost-btn.sm { padding: 3px 9px; font-size: 12px; gap: 4px; }
-.primary-btn.sm { display: inline-flex; align-items: center; }
+/* The one small button size. `.small` is the older spelling of the same thing. */
+.primary-btn.sm, .ghost-btn.sm, .primary-btn.small, .ghost-btn.small { min-height: 24px; padding: 3px 9px; font-size: 12px; gap: 4px; }
 
 /* ---------- Kanban ---------- */
 /* Scroll stays inside the board area: the scrollbar sits above the window edge and
@@ -1945,7 +1964,6 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .act-state-pill.opt { color: var(--text-faint); }
 .act-cap-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
 .ghost-btn.xs, .link.xs { font-size: 11px; padding: 2px 7px; }
-.primary-btn.sm { font-size: 12px; padding: 4px 9px; }
 .act-grant-all { display: flex; flex-direction: column; gap: 5px; padding: 0 12px 10px; }
 
 /* Palantir mode: the one control that turns protections off, so it looks like it. */

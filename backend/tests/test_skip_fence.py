@@ -119,8 +119,20 @@ def test_bridge_fenced_call_not_approved() -> None:
 
 
 def test_job_run_clears_skip() -> None:
-    ev = run([[call(0, "t_write")], []], job=True, unattendedApprovals="deny")
-    check(not T.cards(ev) and not CALLS, "job run never inherits the flag (refused, not run)")
+    """A job's ctx carries no flag, so its bridge approver does not skip-approve a plain call either."""
+    cid = T.setup(None, skipPermissions=True)
+    appmod.convos.update(cid, {"settings": {"tools": {"t_probe": "on"}}})
+    CTX.clear()
+    T.drive(cid, [[call(0, "t_probe")], []], run=Run(cid, None, kind="job"))
+    check(CTX["skip_permissions"] is False, "job run ctx never carries the flag")
+    check(asyncio.run(CTX["bridge_approve"]("t_write", {"x": "a"}, False)) is False, "job bridge call not skip-approved")
+
+
+def test_plan_stays_ask_in_chat() -> None:
+    plan = {"title": "t", "steps": [{"tool": "t_write", "arguments": {"x": "a"}}]}
+    ev = run([[{"id": "p0", "name": "propose_plan", "arguments": json.dumps(plan)}], []])
+    c = T.cards(ev)
+    check(len(c) == 1 and c[0]["name"] == "propose_plan" and not CALLS, "propose_plan still raises a card under skip")
 
 
 def main() -> int:

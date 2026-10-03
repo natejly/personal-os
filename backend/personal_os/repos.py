@@ -364,6 +364,13 @@ class Memories:
             c.execute("DELETE FROM memories WHERE id=?", (id,))
             c.execute("DELETE FROM memories_fts WHERE memory_id=?", (id,))
 
+    def pinned(self, project_id: str | None) -> list[dict[str, Any]]:
+        """Every live pinned memory in scope: a pin is always in context, whatever the query."""
+        where, args = _scope_clause(project_id)
+        with self.db.tx() as c:
+            rows = c.execute(f"SELECT * FROM memories WHERE {where} AND pinned=1 AND invalid_at IS NULL AND deleted_at IS NULL ORDER BY updated_at DESC", args).fetchall()
+        return [d for d in (row_to_dict(r) for r in rows) if d]
+
     def for_context(self, project_id: str | None, query: str, limit: int = 40) -> list[dict[str, Any]]:
         """Pinned + recent memories, plus FTS hits for the query, deduped."""
         where, args = _scope_clause(project_id)

@@ -1095,6 +1095,16 @@ export interface Settings {
   /** How assistant edits to docs land. Missing means review: show the diff and wait. */
   docEditMode?: 'review' | 'apply'
   maxToolRounds: number
+  /** Connector tool count above which schemas are deferred behind tool search; 0 keeps every schema in the request. */
+  mcpDeferAbove?: number
+  /** Characters of skill bodies inlined into the prompt before falling back to a manifest. */
+  skillsInlineBudget?: number
+  /** Embedding model id used by memory and document retrieval. Changing it re-embeds both stores. */
+  embeddingModel?: string
+  /** Fuse keyword, embedding, recency and graph signals for memories; false = keyword only. */
+  hybridRetrieval?: boolean
+  /** Propose a memory tidy-up after this many new auto memories; 0 = manual only. */
+  consolidateEvery?: number
   /** Argument-pattern rules over the per-tool modes. Deny beats ask beats allow; forced approvals are never lifted. */
   permissionRules?: PermissionRules
   /** 'deny': a background run that would have to ask is refused instead of waiting for someone. */

@@ -8,7 +8,9 @@ from .style import context_block as style_block
 
 
 def estimate_tokens(text: str) -> int:
-    return max(1, len(text) // 4)
+    """ASCII at four characters a token; every other character counts as a whole token (CJK and emoji run near one)."""
+    non_ascii = len(text) - len(text.encode("ascii", "ignore"))
+    return max(1, (len(text) - non_ascii + 3) // 4 + non_ascii)
 
 
 # The page block is the one context source the user can see for themselves, so it is capped rather

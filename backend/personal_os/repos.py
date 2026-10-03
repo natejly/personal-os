@@ -327,15 +327,26 @@ class Conversations:
         return [{"role": r["role"], "content": r["content"]} for r in rows]
 
     def history_rows(self, conv_id: str) -> list[dict[str, Any]]:
-        """history() with the ids and timestamps compaction needs to say where a summary ends."""
+        """history() with the ids and timestamps compaction needs to say where a summary ends, and the tool events
+        of an assistant row (a reply that only ran tools has no prose but still happened)."""
         with self.db.tx() as c:
             rows = c.execute(
-                "SELECT id, role, content, created_at FROM messages WHERE conversation_id=? AND content != ''\n"
+                "SELECT id, role, content, created_at, tool_events FROM messages WHERE conversation_id=?\n"
+                "AND (content != '' OR (role = 'assistant' AND tool_events IS NOT NULL))\n"
                 "AND superseded_at IS NULL\n"
                 "ORDER BY created_at, rowid",
                 (conv_id,),
             ).fetchall()
-        return [dict(r) for r in rows]
+        out = []
+        for r in rows:
+            d = dict(r)
+            try:
+                ev = json.loads(d["tool_events"]) if d["tool_events"] else None
+            except ValueError:
+                ev = None
+            d["tool_events"] = ev if isinstance(ev, list) else None
+            out.append(d)
+        return out
 
 
 # ---------------- Memories ----------------

@@ -241,11 +241,56 @@ def test_chat_loop_hands_the_model_a_handle_not_a_truncation() -> None:
     tool_msgs = [m for m in SEEN[1] if m["role"] == "tool"]
     check(len(tool_msgs) == 1, "the tool answered into the context")
     src = (Path(__file__).resolve().parents[1] / "personal_os" / "app.py").read_text()
-    check("tool_results.for_model(conv_id, am[\"id\"], c[\"name\"], for_model, untrusted=brought_untrusted)" in src,
+    check("tool_results.render(conv_id, am[\"id\"], c[\"name\"], for_model, untrusted=brought_untrusted)" in src,
           "the tool-result append site goes through the handle store and marks untrusted blobs")
     check("brought_untrusted = bool(tool_ctx.get(\"tainted\"))" in src,
           "a blob saved during an already-tainted run is marked, not only the call that first tainted it")
     check("summarize_result(for_model, 24000)" not in src, "the 24k truncation of model-facing results is gone")
+
+
+def test_render_returns_the_handle_id_and_small_results_stay_inline() -> None:
+    cid = new_conv()
+    small, sid = appmod.tool_results.render(cid, "m1", "current_time", {"now": "noon"})
+    check(sid is None and json.loads(small) == {"now": "noon"}, "a small result is inline and has no handle")
+    big_result = {"text": "y" * (INLINE_CHARS + 500)}
+    content, rid = appmod.tool_results.render(cid, "m1", "fs_read", big_result)
+    check(rid and json.loads(content)["result_id"] == rid, "a big result is stored and its handle id comes back")
+    check(appmod.tool_results.for_model(cid, "m1", "fs_read", {"a": 1}) == _dumps({"a": 1}), "for_model is the first element of render")
+
+
+def test_the_handle_id_reaches_the_stored_event_and_the_next_turn() -> None:
+    cid = new_conv()
+    SEEN.clear()
+    big = {"text": "z" * (INLINE_CHARS + 500)}
+    real = appmod.toolbox.call
+
+    async def fake_call(name: str, args: dict[str, Any], ctx: dict[str, Any]) -> Any:
+        return big if name == "current_time" else await real(name, args, ctx)
+    appmod.toolbox.call = fake_call  # type: ignore[method-assign]
+    try:
+        ROUNDS[:] = [{"text": "checking", "calls": [call("c1", "current_time", {})]}, {"text": "done", "calls": []}]
+        run_chat(cid)
+    finally:
+        appmod.toolbox.call = real  # type: ignore[method-assign]
+    msg = [m for m in appmod.convos.get(cid)["messages"] if m["role"] == "assistant"][-1]
+    rid = (msg["tool_events"] or [{}])[0].get("result_id")
+    check(rid and rid.startswith("tr_"), "the persisted tool event carries the handle id")
+    SEEN.clear()
+    ROUNDS[:] = [{"text": "ok", "calls": []}]
+    run_chat(cid, "and now?")
+    replay = " ".join(m["content"] for m in SEEN[0] if m["role"] == "assistant" and isinstance(m.get("content"), str))
+    check(rid in replay and "current_time" in replay, "the next turn's history names the tool and its handle")
+    ctx: dict[str, Any] = {"project_id": None, "conversation_id": cid}
+    out = asyncio.run(appmod.toolbox.call("read_tool_result", {"result_id": rid, "offset": 0, "limit": 20}, ctx))
+    check("error" not in out and out["text"], "the handle still reads in a later run")
+
+
+def test_a_tainting_tool_handle_taints_even_without_the_untrusted_mark() -> None:
+    cid = new_conv()
+    handle = json.loads(appmod.tool_results.for_model(cid, "msg1", "gmail_read", {"body": "q" * (INLINE_CHARS + 100)}))
+    ctx: dict[str, Any] = {"project_id": None, "conversation_id": cid, "tainted": False}
+    asyncio.run(appmod.toolbox.call("read_tool_result", {"result_id": handle["result_id"], "limit": 20}, ctx))
+    check(ctx.get("tainted") is True, "paging a stored third-party result taints the run")
 
 
 # ---------------- skills: candidates are inert ----------------

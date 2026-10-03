@@ -84,12 +84,12 @@ class Usage:
 
     def record(self, *, model: str, kind: str, prompt_tokens: int, completion_tokens: int, duration_ms: int, cost: float | None,
                estimated: bool, conversation_id: str | None, project_id: str | None,
-               cached_tokens: int = 0, cache_write_tokens: int = 0, reasoning_tokens: int = 0) -> None:
+               cached_tokens: int = 0, cache_write_tokens: int = 0, reasoning_tokens: int = 0, round: int | None = None) -> None:
         with self.db.tx() as c:
             c.execute(
-                "INSERT INTO usage_log(id,created_at,model,kind,conversation_id,project_id,prompt_tokens,completion_tokens,duration_ms,cost,estimated,cached_tokens,cache_write_tokens,reasoning_tokens) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO usage_log(id,created_at,model,kind,conversation_id,project_id,prompt_tokens,completion_tokens,duration_ms,cost,estimated,cached_tokens,cache_write_tokens,reasoning_tokens,round) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (new_id(), now(), model, kind, conversation_id, project_id, int(prompt_tokens), int(completion_tokens), int(duration_ms), cost, 1 if estimated else 0,
-                 int(cached_tokens), int(cache_write_tokens), int(reasoning_tokens)),
+                 int(cached_tokens), int(cache_write_tokens), int(reasoning_tokens), round),
             )
 
     def reprice(self, pricing: Pricing, settings: dict[str, Any]) -> int:

@@ -366,7 +366,7 @@ def _record_usage(ev: dict[str, Any]) -> None:
         usage.record(model=ev.get("model", ""), kind=ev.get("kind", "chat"), prompt_tokens=pt, completion_tokens=ct,
                      duration_ms=int(ev.get("duration_ms") or 0), cost=pricing.cost(cfg, ev.get("model", ""), pt, ct, cached, cwrite),
                      estimated=bool(ev.get("estimated")), conversation_id=ev.get("conversation_id"), project_id=ev.get("project_id"),
-                     cached_tokens=cached, cache_write_tokens=cwrite, reasoning_tokens=reasoning)
+                     cached_tokens=cached, cache_write_tokens=cwrite, reasoning_tokens=reasoning, round=ev.get("round"))
     except Exception:  # noqa: BLE001 - accounting must never break a reply
         pass
 
@@ -1641,7 +1641,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             tools_hint = "\n".join(p for p in (tools_hint, mcp_search.catalog_hint(_counts.items())) if p)
         hints = (RENDER_HINT, tools_hint, JOB_HINT if proposal_only(run) else "",
                  DESK_HINT + _desk_manual_text() if desk else "", DESK_PLAN_HINT if planning and desk else "",
-                 CHAT_PLAN_HINT if chat_plan_mode in ("auto", "always") and tool_schemas else "", _today_hint())
+                 CHAT_PLAN_HINT if chat_plan_mode in ("auto", "always") and tool_schemas else "")
+        used["volatile_blocks"] = [*used["volatile_blocks"], _today_hint()]  # the date changes daily: keep it out of the cacheable prefix
         if cfg.get("cacheLayout", True):
             # Stable prefix first, per-turn retrieval just before the newest user message (see context.layout_messages).
             stable = "\n\n".join(p for p in (used["stable_system"], *hints) if p)
@@ -1650,7 +1651,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             used["stable_hash"] = hashlib.sha256(stable.encode()).hexdigest()[:12]
             cspan["meta"]["stable_hash"] = used["stable_hash"]
         else:
-            system = "\n\n".join(p for p in (system, *hints) if p)
+            system = "\n\n".join(p for p in (system, *hints, _today_hint()) if p)
             messages = [{"role": "system", "content": system}] + history
         used["system_prompt"] = system
         used["tokens_estimate"] = estimate_tokens(system)
@@ -1809,6 +1810,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             for _note in toolbox.shell.drain_notes(conv_id):  # a background shell job finished since the last round
                 messages.append({"role": "system", "content": _note})
             _reinject_plan()  # last message in the context, after the previous round's tool results
+            llm.usage_context.set({**llm.usage_context.get(), "round": _round})
             lspan = tracer.start("llm", model, {"round": _round, "messages": len(messages), "tools": len(tool_schemas)})
             round_span = lspan  # the tool calls below nest under it
             yield "span", {"message_id": am["id"], "span": lspan}
@@ -1842,7 +1844,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 partial = "time"
             u = end.get("usage") or end.get("usage_est") or {}
             pt, ct = int(u.get("prompt_tokens") or 0), int(u.get("completion_tokens") or 0)
-            budget.add(pt, ct, pricing.cost(cfg, model, pt, ct))
+            budget.add(pt, ct, pricing.cost(cfg, model, pt, ct, int(u.get("cached_tokens") or 0), int(u.get("cache_write_tokens") or 0)))
             if run is not None:
                 run.budget = budget.snapshot()
             tracer.end(lspan, {"finish_reason": end.get("finish_reason"), "usage": end.get("usage"),

@@ -550,7 +550,7 @@ class Database:
                           "edited_args": "TEXT", "edited_by": "TEXT"},
             "agent_runs": {"desk_id": "TEXT", "turn": "INTEGER NOT NULL DEFAULT 0", "resumed_from": "TEXT", "parent_run_id": "TEXT"},
             "usage_log": {"cached_tokens": "INTEGER NOT NULL DEFAULT 0", "cache_write_tokens": "INTEGER NOT NULL DEFAULT 0",
-                          "reasoning_tokens": "INTEGER NOT NULL DEFAULT 0"},
+                          "reasoning_tokens": "INTEGER NOT NULL DEFAULT 0", "round": "INTEGER"},
             "plan_steps": {"result_error": "TEXT", "title": "TEXT NOT NULL DEFAULT ''",
                            "danger": "TEXT NOT NULL DEFAULT 'safe'"},
         }

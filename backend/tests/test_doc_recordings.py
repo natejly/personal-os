@@ -659,6 +659,99 @@ def test_an_ordinary_revision_is_stale_after_an_append_is_accepted() -> None:
     assert full["status"] == "pending" and full["stale"] is True and full["stat_vs_current"] is not None
 
 
+def _kept_segment(w: World, mid: str, wav: Path, seq: int = 0) -> str:
+    wav.parent.mkdir(parents=True, exist_ok=True)
+    wav.write_bytes(b"RIFF....WAVE")
+    w.segment(mid, "kept words", seq=seq)
+    sid = w.repo.segment_id(mid, "mic", seq)
+    with w.db.tx() as c:
+        c.execute("UPDATE meeting_segments SET wav_path=? WHERE id=?", (str(wav), sid))
+    return sid
+
+
+def test_kept_segment_wav_guards() -> None:
+    w = World()
+    m = w.recording(w.docs.create("Plan", "# Plan"))
+    mid, audio = m["id"], w.tmp / "rec" / m["id"]
+    sid = _kept_segment(w, mid, audio / "a.wav")
+    assert w.repo.kept_segment_wav(mid, sid) is None                       # keep_audio is off
+    w.repo.patch(mid, {"keep_audio": True})
+    assert w.repo.kept_segment_wav(mid, sid) == (audio / "a.wav").resolve()
+    other = w.recording(w.docs.create("Other", "x"))
+    assert w.repo.kept_segment_wav(other["id"], sid) is None               # another meeting's segment
+    (audio / "a.wav").unlink()
+    assert w.repo.kept_segment_wav(mid, sid) is None                       # file gone
+    outside = w.tmp / "elsewhere.wav"
+    outside.write_bytes(b"x")
+    for bad in ("", str(outside), str(audio / ".." / ".." / "elsewhere.wav")):
+        with w.db.tx() as c:
+            c.execute("UPDATE meeting_segments SET wav_path=? WHERE id=?", (bad, sid))
+        assert w.repo.kept_segment_wav(mid, sid) is None, bad
+
+
+def test_routes_serve_kept_audio_and_store_the_per_recording_flag() -> None:
+    from fastapi.testclient import TestClient
+
+    from personal_os import app as app_mod
+    from personal_os.app import AUTH_TOKEN, app, docs, meeting_store
+
+    client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
+    d = docs.create("Audio plan", "# x")
+    m = meeting_store.create(title="t", doc_id=d["id"], status="scheduled")
+    mid = m["id"]
+    tmp = _tmp()
+    wav = tmp / "s.wav"
+    wav.write_bytes(b"RIFF....WAVE")
+    real_create, real_mac = meeting_store.create, app_mod.activity.IS_MAC
+    seen: list[Any] = []
+    try:
+        meeting_store.mark_started(mid, str(tmp), ["mic"], started_at=time.time())
+        with meeting_store.db.tx() as c:
+            c.execute("INSERT INTO meeting_segments (id, meeting_id, channel, seq, t_start, t_end, started_at, created_at, wav_path, state) "
+                      "VALUES ('seg-k', ?, 'mic', 0, 0, 6, 0, 0, ?, 'done')", (mid, str(wav)))
+        url = f"/meetings/{mid}/segments/seg-k/audio"
+        assert client.get(url).status_code == 404                           # keep_audio off
+        meeting_store.patch(mid, {"keep_audio": True})
+        r = client.get(url)
+        assert r.status_code == 200 and r.headers["content-type"] == "audio/wav" and r.content == wav.read_bytes()
+        assert client.get(f"/meetings/{mid}/segments/nope/audio").status_code == 404
+        assert client.get("/meetings/nope/segments/seg-k/audio").status_code == 404
+        wav.unlink()
+        assert client.get(url).status_code == 404                           # file missing
+
+        # the checkbox value reaches the row; the start itself is blocked, so only create is observed
+        app_mod.activity.IS_MAC = True
+        meeting_store.create = lambda **kw: (seen.append(kw), real_create(**kw))[1]   # type: ignore[assignment]
+        for sent, want in ((True, True), (None, False)):
+            body = {"mode": "record"} if sent is None else {"mode": "record", "keep_audio": sent}
+            client.post(f"/docs/{d['id']}/recordings", json=body)
+            assert seen[-1]["keep_audio"] is want
+    finally:
+        meeting_store.create, app_mod.activity.IS_MAC = real_create, real_mac     # type: ignore[assignment]
+        meeting_store.delete(mid)
+        docs.delete(d["id"])
+
+
+def test_start_keeps_audio_for_the_row_flag_and_patches_the_row_for_the_global_flag() -> None:
+    w = World()
+    w.svc.set_config({"enabled": True, "sources": ["mic"]})
+    w.svc.preflight = lambda force=False: {"ok": True, "blockers": []}      # type: ignore[assignment]
+    real = (meetings.native_audio.mic_available, audiocap.native_mic_input)
+    meetings.native_audio.mic_available = lambda: True                       # type: ignore[assignment]
+    audiocap.native_mic_input = lambda uid="": ["native", "mic", uid]        # type: ignore[assignment]
+    try:
+        doc = w.docs.create("Plan", "# Plan")
+        for glob, row, want_row in ((False, True, True), (True, False, True), (False, False, False)):
+            w.svc.set_config({"keepAudio": glob})
+            w.svc.pool = _Pool(w.tmp)                                        # type: ignore[assignment]
+            m = w.repo.create(title="t", doc_id=doc["id"], status="scheduled", keep_audio=row)
+            w.svc.start(m["id"])
+            assert w.svc.pool.kw["keep_audio"] is (glob or row)              # type: ignore[attr-defined]
+            assert w.repo.get(m["id"])["keep_audio"] is want_row
+    finally:
+        meetings.native_audio.mic_available, audiocap.native_mic_input = real  # type: ignore[assignment]
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in list(globals().items()):

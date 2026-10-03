@@ -103,7 +103,7 @@ export function recordAvailability(status: MeetingStatusInfo | null, docId: stri
   }
 }
 
-/** The first clip of a transcript line that still has kept audio, or null (audio not kept, or deleted). */
+/** The first clip of a transcript line that still has kept audio, or null (audio not kept, or deleted). Only that first clip plays for a merged line. */
 export function playableSegment(ids: string[], segments: MeetingSegment[], keepAudio: boolean): string | null {
   if (!keepAudio) return null
   return ids.find((id) => segments.some((s) => s.id === id && !!s.wav_path)) ?? null

@@ -1556,7 +1556,7 @@ class MeetingService:
             segment_seconds=seg_seconds,
             cut_on_silence=cut_on_silence,
             max_seconds=int(cfg["maxMeetingSeconds"]),
-            keep_audio=bool(cfg["keepAudio"] or m.get("keep_audio")),
+            keep_audio=bool(cfg["keepAudio"] or m.get("keep_audio")),   # per-recording can only turn keeping on; the global setting cannot be overridden off
             max_audio_bytes=int(cfg["maxAudioBytes"]),
             drain_seconds=float(cfg["drainSeconds"]),
             on_disk_check=lambda: self.meetings.audio_bytes(meeting_id),

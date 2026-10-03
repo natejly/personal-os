@@ -2667,3 +2667,17 @@ export interface Command {
   role: string | null
   text: string
 }
+
+/** A user-authored agent definition (inert until approved). Built-ins come back separately, without these fields. */
+export interface AgentDef {
+  id: string
+  name: string
+  description: string
+  model: string | null
+  steps: number | null
+  tools: string[]
+  hidden: boolean
+  approved: boolean
+  body: string
+}
+export interface BuiltinAgent { name: string; description: string; tools: string[] }

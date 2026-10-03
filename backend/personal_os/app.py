@@ -76,7 +76,7 @@ from .presets import CanvasPresets
 from . import resume
 from . import permrules
 from . import shell as shell_tool
-from .subagents import AgentDefs, Subagents
+from .subagents import ROUND_PARALLEL, WRITER_TOOLS, AgentDefs, Subagents
 from .commands import Commands
 from .workflows import ApprovalError as WorkflowApprovalError, Engine as WorkflowEngine, Workflows
 from .runs import ACTIVE, PROMOTE_STEP, STATUSES, Run, RunBus, RunStore, Topic
@@ -1687,6 +1687,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         stop_text: str | None = None
         blocked: set[str] = set()
         _round = 0
+        pre_tasks: dict[str, asyncio.Future] = {}  # call id -> a read-only call already running
         awaiting: dict[str, Any] | None = None  # the tool event of a call blocked on approval, for a cancelled run to keep
         # The call this reply let go of rather than keep waiting on. Set once, and the reply ends there.
         parked: str | None = None
@@ -1712,6 +1713,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             if block:
                 plan_msg = {"role": "system", "content": block}
                 messages.append(plan_msg)
+
+        async def _read_call(c: dict[str, Any], args: dict[str, Any], uid: str) -> Any:
+            if stop.is_set():  # tasks start in call order, so a stop set by an earlier call keeps this one from running
+                return None
+            return await _call_tool(run, _round, c["name"], args, tool_ctx, uid)
 
         async def _final_round() -> AsyncIterator[tuple[str, Any]]:
             """Closing answer after a budget or breaker stop: one tool-free call, itself exempt from the budget."""
@@ -1890,8 +1896,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             if buf and buf[-1] and not buf[-1].endswith("\n"):
                 buf.append("\n")
                 yield "delta", {"id": am["id"], "text": "\n"}
-            for c in calls:
+            pre_tasks.clear()
+            for ci, c in enumerate(calls):
                 if stop.is_set():
+                    for t in pre_tasks.values():
+                        t.cancel()
                     # Stop means the rest of this round's calls do not run either. The provider still needs a tool
                     # message per call, and nothing was journaled as started, so nothing replays.
                     messages.append({"role": "tool", "tool_call_id": c["id"], "content": json.dumps({"error": "Stopped by the user before this call ran; it was not executed."})})
@@ -1905,6 +1914,30 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 if partial == "loop":  # every pending call still needs a tool message, executed or not
                     messages.append({"role": "tool", "tool_call_id": c["id"], "content": stop_text or LOOP_STOP.format(name=c["name"], n=REPEAT_LIMIT)})
                     continue
+                if c["id"] not in pre_tasks and not planning and active_plan is None and not plan_seen:
+                    # Consecutive read-only calls start together (cap ROUND_PARALLEL); identical (tool, args) run once.
+                    # Anything that could ask, write, taint-then-gate or plan is a barrier and takes the path below.
+                    batch: dict[str, asyncio.Future] = {}
+                    for c2 in calls[ci:]:
+                        a2 = _call_args(c2)
+                        sig2 = tools.call_key(c2["name"], a2)
+                        sp2 = toolbox.specs.get(c2["name"])
+                        if not (sp2 and "_raw" not in a2 and sp2.danger in ("safe", "network") and modes.get(c2["name"]) == "on"
+                                and c2["name"] not in WRITER_TOOLS and c2["name"] not in (PLAN_TOOL, "todo_write")
+                                and not c2["name"].startswith("agent_") and c2["name"] not in blocked
+                                and not proposal_only(run) and _gate(c2["name"], "on", tool_ctx, a2) == "on"):
+                            break
+                        pr = permrules.resolve(c2["name"], a2, "on", False, rules=perm_rules, roots=_perm_roots(cfg, desk_id), conv=conv_id,
+                                               doom=detector is not None and detector.repeat_count(c2["name"], a2) >= permrules.DOOM_LIMIT - 1)
+                        if pr.mode != "on" or pr.refusal:
+                            break
+                        if sig2 not in batch:
+                            if len(batch) >= ROUND_PARALLEL:
+                                break
+                            batch[sig2] = asyncio.ensure_future(_read_call(c2, a2, f"{am['id']}:{c2['id']}"))
+                        pre_tasks[c2["id"]] = batch[sig2]
+                        if toolbox.taints(c2["name"]):
+                            break  # what it reads taints the run, so the calls after it gate differently
                 raw_mode = modes.get(c["name"], "off")
                 spec = toolbox.specs.get(c["name"])
                 # Connector tools are not in toolbox.specs but are external by construction; "safe" here would
@@ -2267,6 +2300,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         result = await _mcp_call(c["name"], args)
                         mcp_ran = True
                     ran = True
+                elif c["id"] in pre_tasks:
+                    result = await pre_tasks[c["id"]]
+                    if result is None:  # stop landed before this call started
+                        result = tools.denied(c["name"], "stopped by the user before this call ran")
+                    ran = True
                 else:
                     tool_ctx["fs_outside_ok"] = fs_ask  # the user approved this write (or granted the folder)
                     try:
@@ -2381,6 +2419,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             yield "span", {"message_id": am["id"], "span": s}
     finally:
         _active.pop(am["id"], None)
+        for t in pre_tasks.values():
+            t.cancel()
         if not desk_id:  # a chat's background shell jobs end with its run; a desk's outlive a turn (they wake it)
             await toolbox.shell.kill_conversation(conv_id)
 

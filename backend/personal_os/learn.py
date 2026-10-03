@@ -324,6 +324,17 @@ class Skills:
         self.db = db
         with db.tx() as c:
             c.executescript(SKILL_SCHEMA)
+            have = {r["name"] for r in c.execute("PRAGMA table_info(skills)")}
+            for col, ddl in (("use_count", "INTEGER NOT NULL DEFAULT 0"), ("last_used_at", "REAL")):
+                if col not in have:
+                    c.execute(f"ALTER TABLE skills ADD COLUMN {col} {ddl}")
+
+    def bump_use(self, ids: list[str]) -> None:
+        """Count a skill body reaching the model (skill_view, inline injection, $name)."""
+        if ids:
+            with self.db.tx() as c:
+                c.executemany("UPDATE skills SET use_count = use_count + 1, last_used_at = ? WHERE id = ?",
+                              [(now(), i) for i in ids])
 
     def list(self, status: str | None = None, project_id: str | None = "__all__") -> list[dict[str, Any]]:
         where, args = [], []

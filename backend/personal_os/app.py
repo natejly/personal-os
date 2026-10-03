@@ -2454,7 +2454,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     # A tainted reply has read someone else's page or transcript. Mining it into memory would
     # plant that text in later chats. The user can still save a memory by approving the tool.
     if (not error and text and not proposal_only(run) and not tool_ctx["tainted"]
-            and cfg.get("autoLearn", True) and conv["settings"].get("autoLearn", True)):
+            and cfg.get("autoLearn", True) and conv["settings"].get("autoLearn", True)
+            and conv["settings"].get("useMemory", True)):  # memory off: nothing written for other chats to read
         learner.submit(LearnJob(
             conversation_id=conv_id, message_id=am["id"], project_id=conv["project_id"],
             user_text=user_text, assistant_text=text, model=model, settings=cfg,
@@ -3707,7 +3708,9 @@ async def _memory_hits(project_id: str | None, query: str, cfg: dict[str, Any], 
         qvec = await memory_index.query_vec(cfg, query)
         if qvec is None:
             return None
-        return memory_index.search(project_id, query, qvec, limit=40, settings=cfg)
+        hits = memory_index.search(project_id, query, qvec, limit=40, settings=cfg)
+        have = {m["id"] for m in hits}
+        return [*(m for m in memories.pinned(project_id) if m["id"] not in have), *hits]  # pins ride on top of the 40
     except Exception:  # noqa: BLE001
         log.exception("memory retrieval failed; falling back to keyword search")
         return None

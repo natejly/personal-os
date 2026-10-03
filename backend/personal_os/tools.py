@@ -571,6 +571,7 @@ class Toolbox:
         self.memory_index: Any = None  # memory_index.MemoryIndex (hybrid memory search); set by app.py
         self.retriever: Any = None  # hybrid document search (retrieval.py); set by app.py
         self.plans: Any = None  # plans.Plans (approved plan records); desk_done's gate reads the unconsumed steps; set by app.py
+        self.canvases: Any = None  # canvas.Canvases; set by app.py (space_tools.py is not offered until then)
         self.artifacts = artifacts  # artifact_tools.py artifact_* tools are registered only when it is wired up
         self.fs_reads = fsx.ReadLedger()  # what each conversation has read of each file (fsx.py): the baseline for edits
         self.conversations = conversations  # past replies, so skill_from_run can read one run
@@ -593,6 +594,8 @@ class Toolbox:
             self._register_sandbox()
         if activity is not None:
             self._register_activity()
+        from . import space_tools
+        space_tools.register(self)
         self._register_mac()
         fsx.register(self)  # fs_glob / fs_grep / fs_edit / fs_copy / fs_mkdir
         self._register_reach()

@@ -4857,6 +4857,7 @@ async def recap(force: bool = False) -> dict[str, Any]:
 
 # ---------------- canvas mode: spaces, windows, notes ----------------
 canvases = Canvases(db)
+toolbox.canvases = canvases
 app.include_router(artifact_router(artifacts, settings, on_delete=lambda aid: canvases.delete_windows_for("artifact", aid),
                                    sign=_artifact_render_path, verify=_artifact_render_ok))
 notes = Notes(db)

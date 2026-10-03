@@ -260,6 +260,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "retrievalMinSimilarity": 0.25,
     # Memories: fuse BM25 + embeddings + recency + graph (memory_index.py). Needs embeddingModel; false = keyword-only.
     "hybridRetrieval": True,
+    # Embed meeting summaries/transcripts for by-meaning meeting search (meeting_index.py). Off: it sends meeting text to the embedding provider.
+    "meetingEmbeddings": False,
     "retrievalPerDocCap": 3,
     "retrievalCandidates": 20,
     # Also retrieve from the user's own Docs (not just uploaded files) when a chat has useDocuments on.

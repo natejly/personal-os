@@ -449,6 +449,7 @@ class Meetings:
         # Set by MeetingService: the routes call this repo directly, so the recorder pool has to
         # be reachable from here or a delete would pull the wav directory out from under a live capture.
         self.before_destroy: Callable[[str, bool], None] | None = None
+        self.on_final: Callable[[str], None] | None = None  # app.py: schedule semantic indexing of a finished meeting
         with db.tx() as c:
             c.executescript(SCHEMA)
             have = {r["name"] for r in c.execute("PRAGMA table_info(meetings)").fetchall()}
@@ -812,6 +813,9 @@ class Meetings:
                       " updated_at=? WHERE id=?",
                       (transcript, end, duration, status, str(error or "")[:1000], now(), id))
             self._reindex_row(c, id)
+        if self.on_final and status == "ready":
+            with contextlib.suppress(Exception):
+                self.on_final(id)
         return self.get(id)
 
     def delete(self, id: str) -> None:

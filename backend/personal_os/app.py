@@ -35,6 +35,7 @@ from .consolidate import Consolidator
 from .learn import MAX_INJECTED_SKILLS, LearnJob, LearnWorker, Skills, induce_skill, run_transcript, skill_block
 from .embed import Embedder
 from .memory_index import MemoryIndex
+from .meeting_index import MeetingIndex
 from .retrieval import Retriever
 from .repos import ALL, Conversations, Documents, Graph, Memories, Projects
 from .artifact_routes import is_render_path as _is_artifact_render, make_router as artifact_router
@@ -461,6 +462,8 @@ toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=
 embedder = Embedder()
 retriever = Retriever(db, documents, embedder, docs=docs)
 memory_index = MemoryIndex(db, memories, graph, embedder)
+meeting_index = MeetingIndex(db, meeting_store, embedder)
+meeting_store.on_final = lambda mid: meeting_index.schedule(settings(), [mid])
 learner.index = memory_index
 documents.on_chunks = lambda did, _rows: retriever.schedule(settings, did)
 docs.on_chunks = lambda _did: retriever.schedule_docs(settings)
@@ -473,6 +476,7 @@ async def _start_retrieval() -> None:
     retriever.schedule_docs(settings)
 toolbox.retriever = retriever
 toolbox.memory_index = memory_index
+toolbox.meeting_index = meeting_index
 toolbox.plans = plans  # desk_done's gate reads the approved plan's unconsumed steps
 toolbox.work_env = work_env  # python_install and run_python find the shared work venv here
 toolbox.web_cache = WebCache(db)  # fetch_url's response cache
@@ -5969,10 +5973,10 @@ async def meeting_suggest() -> list[dict[str, Any]]:
 
 
 @app.get("/meetings/search")
-def search_meetings(q: str, project_id: str | None = "all", limit: int = 10) -> list[dict[str, Any]]:
+async def search_meetings(q: str, project_id: str | None = "all", limit: int = 10) -> list[dict[str, Any]]:
     """FTS over titles, notes, enhanced notes and transcripts. Each hit's `field` says which one."""
     scope = "__all__" if project_id in (None, "all") else sid(project_id)
-    return meeting_store.search(q, scope, _clamp(limit))
+    return await meeting_index.search(settings(), q, scope, _clamp(limit))
 
 
 @app.get("/meetings/pending")

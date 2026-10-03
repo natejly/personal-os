@@ -569,6 +569,7 @@ class Toolbox:
         # ctx["desk_id"] inside each handler so desk A cannot address desk B's files.
         self.desks, self.workspace = desks, workspace
         self.memory_index: Any = None  # memory_index.MemoryIndex (hybrid memory search); set by app.py
+        self.meeting_index: Any = None  # meeting_index.MeetingIndex (by-meaning meeting search); set by app.py
         self.retriever: Any = None  # hybrid document search (retrieval.py); set by app.py
         self.plans: Any = None  # plans.Plans (approved plan records); desk_done's gate reads the unconsumed steps; set by app.py
         self.canvases: Any = None  # canvas.Canvases; set by app.py (space_tools.py is not offered until then)
@@ -2116,7 +2117,11 @@ def _register_meetings(self: Toolbox) -> None:
             return tool_error("meeting_search needs something to search for.", field="query",
                               expected="search terms or a short question",
                               example={"query": "pricing tiers"}, alternative=ALTERNATIVE["meeting_search"])
-        hits = _repo().search(q, "__all__" if project_id is None else project_id, limit=max(1, min(int(limit), 25)))
+        scope, want = "__all__" if project_id is None else project_id, max(1, min(int(limit), 25))
+        if self.meeting_index is not None:
+            hits = await self.meeting_index.search(self.settings(), q, scope, want)
+        else:
+            hits = _repo().search(q, scope, limit=want)
         # A search row carries started_at and nothing else datable, so a meeting that was never
         # recorded has no 'when' to report. Omit the key rather than show an empty string.
         return {"results": [{"meeting_id": h["meeting_id"], "title": h["title"] or "(untitled)",

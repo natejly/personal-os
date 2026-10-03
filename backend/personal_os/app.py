@@ -3961,6 +3961,40 @@ def index_status() -> dict[str, Any]:
     return retriever.status(settings())
 
 
+def _chunk_span(text: str, rows: list[Any], chunk_id: str) -> dict[str, Any]:
+    """Offsets of one chunk in its source text. Chunks overlap, so each search starts at the previous
+    chunk's start (not the document start) and a chunk whose text is not found verbatim gets -1."""
+    pos = 0
+    for r in rows:
+        i = text.find(r["text"], pos)
+        if r["id"] == chunk_id:
+            return {"text": r["text"], "heading": r["heading"] if "heading" in r.keys() else "", "page": r["page"] if "page" in r.keys() else None,
+                    "start": i, "end": i + len(r["text"]) if i >= 0 else -1}
+        if i >= 0:
+            pos = i + 1
+    raise HTTPException(404)
+
+
+@app.get("/documents/{id}/chunks/{chunk_id}")
+def document_chunk(id: str, chunk_id: str) -> dict[str, Any]:
+    d = documents.get(id)
+    if not d:
+        raise HTTPException(404)
+    with db.tx() as c:
+        rows = c.execute("SELECT * FROM chunks WHERE document_id=? ORDER BY idx", (id,)).fetchall()
+    return _chunk_span(d["text"] or "", rows, chunk_id)
+
+
+@app.get("/docs/{doc_id}/chunks/{chunk_id}")
+def doc_chunk(doc_id: str, chunk_id: str) -> dict[str, Any]:
+    d = docs.get(doc_id)
+    if not d:
+        raise HTTPException(404)
+    with db.tx() as c:
+        rows = c.execute("SELECT * FROM doc_chunks WHERE doc_id=? ORDER BY idx", (doc_id,)).fetchall()
+    return _chunk_span(d["content"] or "", rows, chunk_id)
+
+
 @app.get("/documents/{id}")
 def get_document(id: str) -> dict[str, Any]:
     d = documents.get(id)

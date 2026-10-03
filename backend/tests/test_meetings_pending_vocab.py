@@ -102,6 +102,17 @@ def test_vocab_has_terms_and_attendee_names() -> None:
     assert meetings.DEFAULT_CONFIG["terms"] == []
 
 
+def test_terms_persist_through_the_config_route_model() -> None:
+    from personal_os.app import MeetingConfigIn
+    repo, svc = _svc("")
+    patch = MeetingConfigIn(terms=["Kubernetes"]).model_dump(exclude_none=True)
+    assert patch == {"terms": ["Kubernetes"]}
+    svc.set_config(patch)
+    assert svc.config()["terms"] == ["Kubernetes"]
+    mid = repo.create(title="Sync")["id"]
+    assert "Kubernetes" in svc._vocab(mid, svc.config())
+
+
 def _tone(path: Path) -> None:
     with wave.open(str(path), "wb") as w:
         w.setnchannels(1)

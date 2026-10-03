@@ -5736,6 +5736,7 @@ class MeetingConfigIn(BaseModel):
     diarizeEmbeddingModel: str | None = None
     diarizeThreshold: float | None = None
     diarizeSpeakers: int | None = None
+    terms: list[str] | None = None
 
 
 class MeetingSpeakersIn(BaseModel):

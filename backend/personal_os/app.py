@@ -1810,6 +1810,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
 
         async def _final_round() -> AsyncIterator[tuple[str, Any]]:
             """Closing answer after a budget or breaker stop: one tool-free call, itself exempt from the budget."""
+            nonlocal notice
             _reinject_plan()
             # One newline, not a blank line: the transcript renders as markdown, where a blank line opens a
             # new paragraph and reads as an empty line dropped into the middle of the reply.

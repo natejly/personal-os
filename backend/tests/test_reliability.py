@@ -720,6 +720,59 @@ class StreamRetryTests(unittest.TestCase):
         self.assertFalse(llm._frame_error({"type": "invalid_request_error", "message": "m"})[1])
         self.assertTrue(llm._frame_error({})[0])
 
+    def test_a_frames_code_classifies_the_error(self) -> None:
+        """A gateway relays the upstream status as the frame's code; the error kind reads it like a real status."""
+        with Provider(lambda req: self.frame({"error": {"code": 429, "message": "slow"}})):
+            with self.assertRaises(llm.LLMError) as cm:
+                run(collect({**SETTINGS, "llmRetries": 0}))
+        self.assertEqual(cm.exception.kind, "rate_limit")
+        with Provider(lambda req: self.frame({"error": {"code": 502}})):
+            with self.assertRaises(llm.LLMError) as cm:
+                run(collect({**SETTINGS, "llmRetries": 0}))
+        self.assertEqual(cm.exception.kind, "server")
+        with Provider(lambda req: self.frame({"error": {"code": 401, "message": "bad key"}})):
+            with self.assertRaises(llm.LLMError) as cm:
+                run(collect())
+        self.assertEqual(cm.exception.kind, "auth")
+
+    def test_a_tool_call_fragment_counts_as_emitted(self) -> None:
+        class Drop(httpx.AsyncByteStream):
+            async def __aiter__(self) -> Any:
+                yield b'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"f","arguments":"{"}}]}}]}\n\n'
+                raise httpx.ReadError("reset")
+
+        with Provider(lambda req: httpx.Response(200, stream=Drop())) as p:
+            with self.assertRaises(llm.LLMError) as cm:
+                run(collect())
+        self.assertEqual(p.calls, 1)
+        self.assertIn("cut off", str(cm.exception))
+
+    def test_a_stop_before_the_error_frame_is_not_retried(self) -> None:
+        cancel = asyncio.Event()
+
+        def handler(req: httpx.Request) -> httpx.Response:
+            cancel.set()
+            return self.frame({"error": {"code": 502, "message": "upstream"}})
+
+        with Provider(handler) as p:
+            events = run(collect(cancel=cancel))
+        self.assertEqual((p.calls, events[-1]["finish_reason"], events[-1]["tool_calls"]), (1, "cancelled", []))
+
+    def test_an_unanswered_request_is_not_billed(self) -> None:
+        """Stop before any response: no usage row, and usage_est is zero so the run budget does not charge the prompt."""
+        heard: list[dict[str, Any]] = []
+        cancel = asyncio.Event()
+        cancel.set()
+        llm.on_usage(heard.append)
+        try:
+            with Provider(lambda req: httpx.Response(200, content=sse("ok"))) as p:
+                events = run(collect(cancel=cancel))
+        finally:
+            llm._usage_listeners.remove(heard.append)
+        self.assertEqual((p.calls, events[-1]["finish_reason"]), (0, "cancelled"))
+        self.assertEqual(events[-1]["usage_est"], {"prompt_tokens": 0, "completion_tokens": 0})
+        self.assertEqual(heard, [])
+
 
 if __name__ == "__main__":
     unittest.main()

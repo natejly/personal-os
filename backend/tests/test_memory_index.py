@@ -134,7 +134,7 @@ def test_learn_candidates_include_old_semantic_match(env, monkeypatch) -> None:
     asyncio.run(idx.index(CFG, limit=500))
     captured: list[Any] = []
 
-    async def fake_complete(settings: Any, model: str, messages: Any, kind: str = "learn") -> str:
+    async def fake_complete(settings: Any, model: str, messages: Any, kind: str = "learn", **kw: Any) -> str:
         captured.extend(messages)
         return json.dumps({})
 
@@ -155,7 +155,7 @@ def test_learn_candidates_include_old_semantic_match(env, monkeypatch) -> None:
 def test_learn_indexes_new_memories(env, monkeypatch) -> None:
     db, memories, graph, idx, fake = env
 
-    async def fake_complete(settings: Any, model: str, messages: Any, kind: str = "learn") -> str:
+    async def fake_complete(settings: Any, model: str, messages: Any, kind: str = "learn", **kw: Any) -> str:
         return json.dumps({"memories": [{"content": "User drinks oat milk lattes", "kind": "preference"}]})
 
     monkeypatch.setattr(learn.llm, "complete", fake_complete)

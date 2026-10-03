@@ -7,12 +7,21 @@ Runs under pytest, or directly: python backend/tests/test_reasoning_effort.py
 """
 from __future__ import annotations
 
+import asyncio
+import inspect
+import json
 import sys
 import tempfile
+import time
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import httpx  # noqa: E402
+import pytest  # noqa: E402
+
+from personal_os import llm  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.llm import effort_param  # noqa: E402
 from personal_os.repos import Conversations, DEFAULT_EFFORT  # noqa: E402
@@ -60,30 +69,8 @@ def test_caps_without_reasoning_leave_the_field_off() -> None:
     assert effort_param("kimi-k3", "medium", {"reasoning": False}) == "high"
 
 
-if __name__ == "__main__":
-    fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
-    failed = 0
-    for fn in fns:
-        try:
-            fn()
-            print(f"  ok  {fn.__name__}")
-        except Exception as e:  # noqa: BLE001
-            failed += 1
-            print(f"FAIL  {fn.__name__}: {type(e).__name__}: {e}")
-    print(f"\n{len(fns) - failed}/{len(fns)} passed")
-    sys.exit(1 if failed else 0)
-
 
 # --- a provider that rejects the field: step down, drop, remember -------------------------------------------------
-
-import asyncio  # noqa: E402
-import json  # noqa: E402
-import time  # noqa: E402
-from typing import Any  # noqa: E402
-
-import httpx  # noqa: E402
-
-from personal_os import llm  # noqa: E402
 
 _REAL_CLIENT = httpx.AsyncClient
 SETTINGS = {"baseUrl": "http://p.test/v1", "apiKey": "k", "llmRetries": 2}
@@ -116,13 +103,17 @@ def _stream(monkeypatch: Any, handler: Any, model: str = "m1", effort: str = "me
     return asyncio.run(go()), bodies
 
 
-def _fresh() -> None:
+@pytest.fixture(autouse=True)
+def _fresh_caps() -> Any:
+    """Each case learns from a clean slate, and a failing one leaves nothing behind for the next."""
+    llm._model_caps.clear()
+    llm._caps_listeners.clear()
+    yield
     llm._model_caps.clear()
     llm._caps_listeners.clear()
 
 
 def test_a_rejected_effort_is_dropped_remembered_and_not_resent(monkeypatch: Any) -> None:
-    _fresh()
     heard: list[dict[str, Any]] = []
     llm.on_caps(heard.append)
     evs, bodies = _stream(monkeypatch, lambda b: _reject("reasoning_effort") if "reasoning_effort" in b else _ok())
@@ -134,11 +125,9 @@ def test_a_rejected_effort_is_dropped_remembered_and_not_resent(monkeypatch: Any
     evs, bodies = _stream(monkeypatch, _ok)
     assert len(bodies) == 1 and "reasoning_effort" not in bodies[0]
     assert "effort_dropped" not in evs[-1]
-    _fresh()
 
 
 def test_xhigh_steps_to_high_once_without_using_an_attempt(monkeypatch: Any) -> None:
-    _fresh()
     calls: list[str] = []
 
     def handler(b: dict[str, Any]) -> httpx.Response:
@@ -151,18 +140,14 @@ def test_xhigh_steps_to_high_once_without_using_an_attempt(monkeypatch: Any) -> 
     assert llm.model_cap("http://p.test/v1", "m1")["effort"] == "high"
     assert llm.effort_param("m1", "max", base_url="http://p.test/v1") == "high"
     assert llm.effort_param("m1", "medium", base_url="http://p.test/v1") == "medium"
-    _fresh()
 
 
 def test_the_message_may_say_thinking(monkeypatch: Any) -> None:
-    _fresh()
     _, bodies = _stream(monkeypatch, lambda b: _reject("x", "This model does not support thinking.") if "reasoning_effort" in b else _ok())
     assert len(bodies) == 2
-    _fresh()
 
 
 def test_a_400_that_does_not_name_the_field_is_not_retried(monkeypatch: Any) -> None:
-    _fresh()
     bodies: list[Any] = []
 
     def handler(b: dict[str, Any]) -> httpx.Response:
@@ -175,29 +160,23 @@ def test_a_400_that_does_not_name_the_field_is_not_retried(monkeypatch: Any) -> 
     except llm.LLMError:
         pass
     assert len(bodies) == 1 and llm.model_cap("http://p.test/v1", "m1") is None
-    _fresh()
 
 
 def test_service_tier_is_dropped_for_the_request_only(monkeypatch: Any) -> None:
-    _fresh()
     evs, bodies = _stream(monkeypatch, lambda b: _reject("service_tier") if "service_tier" in b else _ok(), effort="default", fast=True)
     assert ["service_tier" in b for b in bodies] == [True, False]
     assert "effort_dropped" not in evs[-1] and not llm._model_caps
-    _fresh()
 
 
 def test_learned_caps_expire_and_reload() -> None:
-    _fresh()
     llm.load_caps({"http://p.test|m1": {"effort": "none", "at": time.time() - 31 * 86400}, "junk": 3})
     assert llm.model_cap("http://p.test", "m1") is None
     assert llm.effort_param("m1", "medium", base_url="http://p.test") == "medium"
     llm.load_caps({"http://p.test|m1": {"effort": "none", "at": time.time()}})
     assert llm.effort_param("m1", "medium", base_url="http://p.test/") is None
-    _fresh()
 
 
 def test_complete_sends_effort_only_when_asked(monkeypatch: Any) -> None:
-    _fresh()
     bodies: list[dict[str, Any]] = []
     real = _REAL_CLIENT
 
@@ -213,3 +192,18 @@ def test_complete_sends_effort_only_when_asked(monkeypatch: Any) -> None:
     asyncio.run(llm.complete(SETTINGS, "plain", msgs))
     assert bodies[0]["reasoning_effort"] == "low"
     assert "reasoning_effort" not in bodies[1] and "reasoning_effort" not in bodies[2]
+
+
+if __name__ == "__main__":
+    # The provider cases take pytest's monkeypatch and run only under pytest.
+    fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v) and not inspect.signature(v).parameters]
+    failed = 0
+    for fn in fns:
+        try:
+            fn()
+            print(f"  ok  {fn.__name__}")
+        except Exception as e:  # noqa: BLE001
+            failed += 1
+            print(f"FAIL  {fn.__name__}: {type(e).__name__}: {e}")
+    print(f"\n{len(fns) - failed}/{len(fns)} passed")
+    sys.exit(1 if failed else 0)

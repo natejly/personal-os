@@ -411,6 +411,21 @@ _PERMANENT_FRAME = frozenset({"invalid_request_error", "authentication_error", "
                               "model_not_found", "context_length_exceeded", "content_filter", "content_policy_violation", "insufficient_quota"})
 
 
+def _frame_status(err: Any) -> int | None:
+    """The HTTP status an error frame carries as its `code` (or `status`), when it is one; a gateway relays the
+    upstream status that way, so classify_error can read it like a real response."""
+    if not isinstance(err, dict):
+        return None
+    for key in ("code", "status"):
+        try:
+            n = int(err.get(key))
+        except (TypeError, ValueError):
+            continue
+        if 400 <= n < 600:
+            return n
+    return None
+
+
 def _frame_error(err: Any) -> tuple[str, bool]:
     """(text, retryable) for an error object that arrived inside a 200 stream. The text is never empty or 'None'."""
     if not isinstance(err, dict):
@@ -427,10 +442,7 @@ def _frame_error(err: Any) -> tuple[str, bool]:
         text = "Provider error " + " ".join(f"({x})" for x in (code, typ) if x)
     else:
         text = json.dumps(err)[:300]
-    try:
-        status = int(code)
-    except (TypeError, ValueError):
-        status = None
+    status = _frame_status(err)
     if status is not None and 400 <= status < 500 and status not in RETRYABLE_STATUS:
         return text, False
     if str(code or "").lower() in _PERMANENT_FRAME or str(typ or "").lower() in _PERMANENT_FRAME:
@@ -1073,7 +1085,8 @@ async def stream_chat(
                             err = obj["error"]
                             body_s = json.dumps({"error": err})
                             text, retryable = _frame_error(err)
-                            kind_e = classify_error(None, body_s)
+                            # The frame's own code stands in for the status, so a relayed 429 is `rate_limit`, not `bad_request`.
+                            kind_e = classify_error(_frame_status(err), body_s)
                             fail = (text, retryable and kind_e not in _PERMANENT_KINDS, kind_e, body_s)
                             break
                         if isinstance(obj.get("usage"), dict):
@@ -1148,8 +1161,9 @@ async def stream_chat(
     if incomplete:  # the connection died mid-reply: a half-received tool call must not run
         calls = {}
     tool_calls = _finish_calls(calls)
-    # Reasoning is billed as completion tokens, so it counts toward cost and the run budget.
-    p_chars, c_chars = len(json.dumps(messages)), out_chars + reason_chars + sum(len(c["arguments"]) for c in tool_calls)
+    # Reasoning is billed as completion tokens, so it counts toward cost and the run budget. A call Stop or the deadline
+    # ended before any response is not billed at all: the estimate would charge the budget for a prompt nobody answered.
+    p_chars, c_chars = (len(json.dumps(messages)) if sent else 0), out_chars + reason_chars + sum(len(c["arguments"]) for c in tool_calls)
     if sent:
         _emit_usage(model, kind, usage, int((time.time() - t0) * 1000), p_chars, c_chars)
     # usage_est is always present: this route often omits `usage` on streamed replies, and a budget cannot run on None.

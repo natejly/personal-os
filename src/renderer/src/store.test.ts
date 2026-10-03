@@ -125,7 +125,7 @@ const stubFetch = (t: { after: (fn: () => void) => void }, handler: (method: str
 
 const seed = (): void => {
   useStore.setState({
-    sessions: { c1: session({ streaming: null, conversation: { id: 'c1', title: 't', project_id: null, model: 'm1', settings: { effort: 'low' }, created_at: 0, updated_at: 0, messages: [] } } as Partial<ChatSession>) },
+    sessions: { c1: session({ streaming: null, conversation: { ...row(), messages: [] } } as unknown as Partial<ChatSession>) },
     conversations: [row() as never], toasts: [], focusedConversationId: null, dashboard: null
   })
 }

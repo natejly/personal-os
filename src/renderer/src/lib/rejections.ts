@@ -11,9 +11,23 @@ export function describeRejection(e: unknown): string | null {
   return text ? text.slice(0, 300) : null
 }
 
+const DEDUPE_MS = 10_000
+
+/**
+ * The toast text for a rejection, or null when it is not worth one or the same text was surfaced
+ * within the last few seconds. `seen` is the caller's text → time map; entries past the window are
+ * dropped on the way through so it cannot grow with every distinct message.
+ */
+export function rejectionToast(reason: unknown, now: number, seen: Map<string, number>): string | null {
+  for (const [text, at] of seen) if (now - at >= DEDUPE_MS) seen.delete(text)
+  const text = describeRejection(reason)
+  if (!text || seen.has(text)) return null
+  seen.set(text, now)
+  return text
+}
+
 let installed = false
 const recent = new Map<string, number>()
-const DEDUPE_MS = 10_000
 
 /**
  * One listener per window. The default console report is left alone (the main process copies it into
@@ -23,11 +37,7 @@ export function installRejectionToasts(toast: (text: string, kind: 'error') => v
   if (installed || typeof window === 'undefined' || typeof window.addEventListener !== 'function') return
   installed = true
   window.addEventListener('unhandledrejection', (ev: PromiseRejectionEvent) => {
-    const text = describeRejection(ev.reason)
-    if (!text) return
-    const now = Date.now()
-    if (now - (recent.get(text) ?? -Infinity) < DEDUPE_MS) return
-    recent.set(text, now)
-    toast(text, 'error')
+    const text = rejectionToast(ev.reason, Date.now(), recent)
+    if (text) toast(text, 'error')
   })
 }

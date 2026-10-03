@@ -580,8 +580,10 @@ def _headers(settings: dict[str, Any]) -> dict[str, str]:
     return h
 
 
-# Ids that name a non-chat model when the proxy reports no `mode` for them.
-_NON_CHAT_ID = re.compile(r"embed|rerank|whisper|tts|moderation", re.I)
+# Ids that name a non-chat model when the proxy reports no `mode` for them: a conservative
+# pattern, since the picker still shows whatever model the chat already uses.
+_NON_CHAT_ID = ((re.compile(r"embed|rerank", re.I), "embedding"), (re.compile(r"whisper|tts", re.I), "audio"),
+                (re.compile(r"moderation", re.I), "moderation"))
 
 
 async def list_models(settings: dict[str, Any]) -> list[dict[str, Any]]:
@@ -598,13 +600,12 @@ async def list_models(settings: dict[str, Any]) -> list[dict[str, Any]]:
             continue
         caps = caps_lookup(m["id"])
         row: dict[str, Any] = {"id": m["id"]}
-        mode = caps.get("mode")
-        if mode is None and _NON_CHAT_ID.search(m["id"]):
-            mode = "embedding" if re.search("embed|rerank", m["id"], re.I) else "audio" if re.search("whisper|tts", m["id"], re.I) else "moderation"
+        mode = caps.get("mode") or next((kind for pat, kind in _NON_CHAT_ID if pat.search(m["id"])), None)
         if mode is not None:
             row["mode"] = mode
-        if effort_supported(m["id"], caps) is not None:
-            row["reasoning"] = effort_supported(m["id"], caps)
+        reasoning = effort_supported(m["id"], caps)
+        if reasoning is not None:
+            row["reasoning"] = reasoning
         out.append(row)
     return sorted(out, key=lambda m: m["id"])
 

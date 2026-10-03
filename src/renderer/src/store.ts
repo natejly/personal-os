@@ -1334,7 +1334,8 @@ export const useStore = create<State>((set, get) => {
         inited = false
         return set({ ready: true, backendError: 'The backend is running, but your data could not be loaded: ' + (e as Error).message })
       }
-      installRejectionToasts((m, kind) => get().toast(m, kind))
+      // Quiet while the backend restarts: the banner already says so, and every refresher would fail at once.
+      installRejectionToasts((m, kind) => { if (get().backendState === 'ready') get().toast(m, kind) })
       // One-shot migration of the pre-spaces global mode: a user who left the app in canvas mode lands
       // in the canvas once, and the setting is reset so later launches open on Today. Only the main
       // window writes it back; a pop-out (`?surface=widget`) never renders App and must not touch settings.
@@ -1835,6 +1836,8 @@ export const useStore = create<State>((set, get) => {
         set({ pageAgentId: id })
         void get().refreshProjects()
       }
+      // The panel's model menu writes through the same queue as the chat page's: let a change land first.
+      await convWrites.get(id)?.catch(() => undefined)
       return runStream(id, { content: text, page_context: page })
     },
     regenerate: async (conversationId) => {

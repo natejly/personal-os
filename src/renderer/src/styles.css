@@ -1187,6 +1187,9 @@ textarea.instructions:focus { border-color: var(--accent); }
 .tool-icon { color: var(--accent); display: inline-flex; }
 .tool-name { font-weight: 600; text-transform: capitalize; white-space: nowrap; }
 .tool-summary { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); font-size: 11px; color: var(--text-faint); }
+.tool-group-rows { display: flex; flex-direction: column; gap: 4px; padding: 0 0 6px 14px; }
+.tool-group-rows > .tool-event { border: 0; background: transparent; }
+.tool-err { padding: 0 10px 6px 30px; font-size: 11px; color: var(--danger); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool-ms { font-size: 10px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
 .tool-event.pending .tool-name::after { content: ' running'; font-weight: 400; color: var(--text-faint); }
 .thinking.mini { padding: 0; }

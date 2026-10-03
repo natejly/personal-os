@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { adoptServerDoc, applyEvent, useStore, type ChatSession } from './store'
+import { adoptServerDoc, applyEvent, settleInterrupted, useStore, type ChatSession } from './store'
 import type { ChatEvent, Message } from '@shared/types'
 
 /**
@@ -103,4 +103,56 @@ test('accept/restore: typing during the request survives an append and yields to
   // the body was replaced outright: nothing to merge the typing into, the server wins
   const replaced = { id: 'd', content: 'a different body' } as never
   assert.deepEqual(adoptServerDoc('notes\nmore', replaced, 'notes\n', 'notes\n'), { activeDoc: replaced, docDraft: null })
+})
+
+const ev = (e: unknown): ChatEvent => e as ChatEvent
+
+test('a delta at or below the last applied seq is dropped, so a re-delivered event never appends twice', () => {
+  const delta = ev({ event: 'delta', data: { id: 'm1', text: '!' } })
+  const once = applyEvent(session({ streaming: { messageId: 'm1', runId: 'r1', abort: new AbortController(), answering: true, seq: 4, stopping: false } }), delta, true, 5)
+  assert.equal(once.conversation.messages?.[0].content, 'hi!')
+  assert.equal(once.streaming?.seq, 5)
+  const twice = applyEvent(once, delta, true, 5)
+  assert.equal(twice, once, 'the same seq again changes nothing')
+  assert.equal(applyEvent(once, delta, true, 3), once, 'and an older one neither')
+})
+
+test('assistant_message for a held id replaces the row wholesale', () => {
+  const held = session({ conversation: { id: 'c1', title: 't', project_id: null, model: null, settings: {}, created_at: 0, updated_at: 0, messages: [msg({ content: 'stale half', tool_events: [{ id: 't0' } as never] })] } as never })
+  const after = applyEvent(held, ev({ event: 'assistant_message', data: msg({ content: '' }) }), true)
+  assert.equal(after.conversation.messages?.length, 1)
+  assert.equal(after.conversation.messages?.[0].content, '')
+  assert.equal(after.conversation.messages?.[0].tool_events, null)
+})
+
+test('a replayed tool_call for a call the row already holds is not added twice', () => {
+  const call = ev({ event: 'tool_call', data: { message_id: 'm1', id: 't1', name: 'x', arguments: {} } })
+  const once = applyEvent(session(), call, true)
+  assert.equal(applyEvent(once, call, true).conversation.messages?.[0].tool_events?.length, 1)
+})
+
+test('error: an answering reply with a message is stamped and settled; pending calls become unknown but approvals are kept', () => {
+  const pending = { id: 't1', name: 'a', arguments: {}, result_preview: '', duration_ms: 0, error: null, pending: true }
+  const card = { ...pending, id: 't2', needs_approval: true }
+  const s = session({ conversation: { id: 'c1', title: 't', project_id: null, model: null, settings: {}, created_at: 0, updated_at: 0, messages: [msg({ tool_events: [pending, card] as never })] } as never })
+  const after = applyEvent(s, ev({ event: 'error', data: { message: 'Interrupted: restart', interrupted: true } }), true)
+  const m = after.conversation.messages?.[0]
+  assert.equal(m?.error, 'Interrupted: restart')
+  assert.equal(after.streaming?.answering, false)
+  assert.ok(after.finishedAt)
+  assert.equal(m?.tool_events?.[0].pending, false)
+  assert.match(m?.tool_events?.[0].error ?? '', /Outcome unknown/)
+  assert.equal(m?.tool_events?.[1].pending, true, 'a card still waiting is a decision, not an outcome')
+  assert.equal(settleInterrupted(s, 'x').conversation.messages?.[0].error, 'x')
+})
+
+test('error: once the reply is done nothing is touched; with no reply row it becomes a run error', () => {
+  const done = applyEvent(session(), DONE, true)
+  const err = ev({ event: 'error', data: { message: 'late', run_id: 'r1' } })
+  assert.equal(applyEvent(done, err, true), done)
+  const bare = session({ streaming: { messageId: null, runId: 'r1', abort: new AbortController(), answering: true, seq: 0, stopping: false } })
+  const after = applyEvent(bare, err, true)
+  assert.deepEqual(after.runError, { message: 'late', runId: 'r1', interrupted: false })
+  const next = applyEvent(after, ev({ event: 'user_message', data: msg({ id: 'u9', role: 'user' }) }), true)
+  assert.equal(next.runError, null, 'the next message clears it')
 })

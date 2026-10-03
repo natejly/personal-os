@@ -429,7 +429,7 @@ export const api = {
   chat: (convId: string, body: { content?: string; model?: string; page_context?: PageContext }) => req<ChatRunStarted>(`/conversations/${convId}/chat`, { method: 'POST', body: json(body) }),
   /** Injects a user message into a live run (steering). Throws a 409 when nothing is running. */
   steer: (convId: string, content: string) => req<{ ok: boolean; run_id: string; message: Message }>(`/conversations/${convId}/steer`, { method: 'POST', body: json({ content }) }),
-  runs: () => req<RunInfo[]>('/runs'),
+  runs: (conversationId?: string) => req<RunInfo[]>('/runs' + (conversationId ? `?conversation_id=${encodeURIComponent(conversationId)}` : '')),
   /** A subagent's run row (status while it works) and its recorded tape (calls, results). */
   agentRun: (id: string) => req<{ run_id: string; status: string; budget?: Record<string, number> | null }>(`/runs/${encodeURIComponent(id)}`),
   agentTape: (id: string) => req<RunTapeEvent[]>(`/runs/${encodeURIComponent(id)}/events`),
@@ -771,7 +771,7 @@ async function* sseStream(path: string, signal?: AbortSignal): AsyncGenerator<{ 
  * The stream is a tail on the run's stored tape, and every event carries its seq (`id:`), so with a `runId` a
  * dropped connection (a backend restart, the Mac waking up) reconnects from the last seq it saw instead of failing.
  */
-export async function* chatStream(convId: string, since = 0, signal?: AbortSignal, runId?: string, onGiveUp?: () => void): AsyncGenerator<ChatEvent> {
+export async function* chatStream(convId: string, since = 0, signal?: AbortSignal, runId?: string, onGiveUp?: () => void): AsyncGenerator<ChatEvent & { seq: number | null }> {
   let last = since
   let failures = 0
   // The events that end a turn. The server also closes a stream cleanly when this subscriber's queue
@@ -788,7 +788,7 @@ export async function* chatStream(convId: string, since = 0, signal?: AbortSigna
         if (seq !== null && Number.isFinite(seq)) last = seq
         if (event === 'malformed') continue
         if (event === 'done' || event === 'error' || event === 'parked') terminal = true
-        yield { event, data } as ChatEvent
+        yield { event, data, seq } as ChatEvent & { seq: number | null }
       }
       if (terminal || !runId || signal?.aborted) return
       // Bounded: a run that really ended without a terminal event would otherwise be re-asked forever.

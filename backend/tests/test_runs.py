@@ -521,13 +521,91 @@ def test_cancel_closes_the_provider_socket() -> None:
     asyncio.run(go())
 
 
+def test_run_info_carries_message_seq() -> None:
+    script(30, 0.05)
+    cid = new_conv()
+    started = j("POST", f"/conversations/{cid}/chat", {"content": "hi"})
+    wait_until(lambda: bool(run_info(cid).get("message_id")), "the assistant message to exist")
+    info = j("GET", f"/runs?conversation_id={cid}")[0]
+    ring = list(bus.get(cid)._ring)  # noqa: SLF001
+    seqs = [seq for seq, ev, _ in ring if ev == "assistant_message"]
+    check(info["message_seq"] == seqs[-1], f"message_seq is the latest assistant_message seq, got {info['message_seq']} vs {seqs}")
+    conflict = client.post(f"/conversations/{cid}/chat", json={"content": "again"}).json()["detail"]
+    check(conflict["message_id"] == info["message_id"] and conflict["message_seq"] == info["message_seq"],
+          "the 409 detail carries message_id and message_seq")
+    j("POST", f"/conversations/{cid}/stop")
+    drain(cid)
+    # A replay from message_seq - 1 holds the assistant_message and every delta of the in-flight message.
+    replay = events(read_streams([f"/conversations/{cid}/stream?since={info['message_seq'] - 1}&run_id={started['run_id']}"])[0])
+    check(replay[0][0] == "assistant_message", f"the replay opens with the message, got {replay[0][0]}")
+    check(text_of(replay) == message(cid)["content"], "the replayed deltas add up to the stored reply")
+
+
+def test_message_seq_advances_with_a_steer_segment() -> None:
+    run = Run("c-seq")
+    check(run.message_seq is None and run.info()["message_seq"] is None, "no assistant_message yet")
+    run.publish("assistant_message", {"id": "a"})
+    run.publish("delta", {"text": "x"})
+    first = run.message_seq
+    run.publish("assistant_message", {"id": "b"})
+    check(first == 1 and run.message_seq == 3 and run.info()["message_seq"] == 3, "message_seq follows the newest message")
+
+
+def test_run_state_is_published_on_the_app_topic() -> None:
+    seen: list[dict[str, Any]] = []
+    prev = bus.on_change
+
+    def spy(run: Run) -> None:
+        if run.conversation_id == cid:
+            seen.append(run.info())
+        if prev:
+            prev(run)
+
+    script(4, 0.02)
+    cid = new_conv()
+    before = app_mod.events.seq
+    bus.on_change = spy
+    try:
+        j("POST", f"/conversations/{cid}/chat", {"content": "hi"})
+        drain(cid)
+        wait_until(lambda: any(not i["live"] for i in seen), "the run-end frame")
+    finally:
+        bus.on_change = prev
+    check(seen[0]["answering"] is True, "a frame goes out when the run starts, answering")
+    check(any(i["live"] and not i["answering"] for i in seen), "answering turns false at the reply's done, while the run is still live")
+    check(not seen[-1]["live"] and seen[-1]["status"] == "done", "the last frame is the run's end")
+    check(app_mod.events.seq > before, "the frames reach the app topic")
+    # A status flip is a frame too, and so are a new segment and the final done.
+    flips: list[str] = []
+    r = Run("c-flip")
+    r.on_change = lambda run: flips.append(run.status)
+    r.set_status("awaiting_approval")
+    r.set_status("awaiting_approval")
+    r.set_status("running")
+    check(flips == ["awaiting_approval", "running"], f"only a real status change fires, got {flips}")
+    r.publish("assistant_message", {"id": "m"})
+    r.publish("done", {"segment": True})
+    check(len(flips) == 3 and not r.replied,"a segment done does not flip answering")
+    r.publish("done", {"id": "m"})
+    check(len(flips) == 4 and r.replied and not r.answering, f"assistant_message and a final done each fire, got {len(flips)}")
+
+
+def test_sse_survives_non_finite_numbers() -> None:
+    from personal_os.runs import sse
+    block = sse("tool_result", {"v": float("nan"), "xs": [float("inf"), 1.5]}, 3)
+    data = json.loads(block.split("data: ", 1)[1].strip())
+    check(data == {"v": "nan", "xs": ["inf", 1.5]}, f"non-finite floats become strings, got {data}")
+
+
 TESTS = [test_post_starts_a_background_run, test_second_post_conflicts, test_two_clients_see_the_same_events,
          test_late_client_replays_from_the_ring, test_event_names_are_the_chatevent_union, test_stop_ends_the_run,
          test_steer_folds_into_the_live_run, test_stop_and_steer_cut_a_blocked_provider_read,
          test_reasoning_stays_out_of_the_reply,
          test_cancel_closes_the_provider_socket, test_the_learn_tail_does_not_hold_the_conversation,
          test_run_survives_every_subscriber_leaving, test_an_overflowed_subscriber_reconnects_without_a_gap,
-         test_shutdown_cancels_a_live_run_and_keeps_its_text]
+         test_shutdown_cancels_a_live_run_and_keeps_its_text,
+         test_run_info_carries_message_seq, test_message_seq_advances_with_a_steer_segment,
+         test_run_state_is_published_on_the_app_topic, test_sse_survives_non_finite_numbers]
 
 if __name__ == "__main__":
     failures = 0

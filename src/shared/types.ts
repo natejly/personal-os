@@ -504,6 +504,9 @@ export interface ContextMeter {
   summary: { summary: string; summarized_messages: number; tokens_before: number; tokens_after: number; updated_at: number } | null
 }
 
+export type MessageOutcome = 'stopped' | 'rounds' | 'tokens' | 'time' | 'cost' | 'loop' | 'interrupted' | 'length' | 'incomplete'
+export type ErrorKind = 'rate_limit' | 'quota' | 'auth' | 'not_found' | 'overflow' | 'unsupported_param' | 'content_filter' | 'overloaded' | 'server' | 'bad_request' | 'transport' | 'cancelled' | 'timeout'
+
 export interface Message {
   id: string
   conversation_id: string
@@ -517,8 +520,14 @@ export interface Message {
   /** A reasoning model's chain-of-thought. Never sent back to the model as history. */
   reasoning?: string | null
   created_at: number
-  /** Set when the reply ran out of budget or hit a breaker; not persisted. */
-  partial?: PartialReason | null
+  /** How the reply ended when it did not end normally; null = complete, or failed with error. */
+  outcome?: MessageOutcome | null
+  error_kind?: ErrorKind | null
+  /** Regenerate group: id of the first answer; the active member carries the group's ids. */
+  variant_of?: string | null
+  variants?: string[] | null
+  /** Set on a user message that replaced an earlier one (edit-and-resend). */
+  edited_from?: string | null
 }
 
 export type Effort = 'default' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
@@ -1229,7 +1238,7 @@ export type ChatEvent =
   | { event: 'learned'; data: Learned }
   | { event: 'style_learned'; data: { project_id: string | null; profile: StyleProfile | null; sample_id: string } }
   | { event: 'learn_error'; data: { message: string } }
-  | { event: 'error'; data: { message: string } }
+  | { event: 'error'; data: { message: string; interrupted?: boolean; run_id?: string; pending_approvals?: string[] } }
 
 /** What one auto-learn pass (or the `remember` tool) put away. The ids are set only off `/events`. */
 export interface Learned {
@@ -1255,6 +1264,8 @@ export type BackgroundEvent =
   | { event: 'desk_status'; data: Desk }
   /** A doc recording's segment, status or summary moved. */
   | { event: 'recording'; data: RecordingEvent }
+  /** A run's answering / status state moved: lets every window know about a reply it did not start. */
+  | { event: 'run_state'; data: RunInfo }
 
 export interface BackupInfo {
   name: string; kind: 'daily' | 'manual' | 'premigrate' | 'prerestore'; created_at: number; size: number
@@ -1756,6 +1767,9 @@ export interface RunInfo {
   conversation_id: string
   message_id: string | null
   seq: number
+  /** Tape seq of the latest assistant_message; a window attaching mid-reply replays from just before it. */
+  message_seq?: number | null
+  kind?: string
   started_at: number
   live: boolean
   /** Still producing a reply. `live` outlasts it by the auto-learn tail that follows the last `done`. */
@@ -1926,7 +1940,7 @@ export interface PendingApproval {
 }
 
 /** 409 detail of POST /conversations/{id}/chat when that conversation already has a live run. */
-export interface RunConflict { message: string; run_id: string; seq: number }
+export interface RunConflict { message: string; run_id: string; seq: number; message_id?: string | null; message_seq?: number | null }
 
 /** One detached widget window as the main process sees it. */
 export interface PopoutInfo { windowId: string; bounds: PopoutBounds; pinned: boolean; opacity: number }

@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import type { ChatEvent, Conversation, Message, Span, ToolEvent } from '@shared/types'
-import { finishStatus, mergeConversation, pickEvictions, reduceStatus, settleApprovals } from './sessionStatus'
+import type { ChatEvent, Conversation, Message, RunInfo, Span, ToolEvent } from '@shared/types'
+import { finishStatus, foldRunState, mergeConversation, pickEvictions, pulseStatus, reduceStatus, replayCursor, settleApprovals } from './sessionStatus'
 
 const ev = (event: string, data: Record<string, unknown> = {}): ChatEvent => ({ event, data }) as unknown as ChatEvent
 const done = (error: string | null, stopped = false): ChatEvent => ev('done', { id: 'm1', error, context_used: null, tool_events: [], trace: [], stopped })
@@ -159,4 +159,46 @@ test('tool events and spans survive a refetch that has none of them yet', () => 
   const merged = mergeConversation(convo([msg('m1', 'x', { tool_events: events, trace })]), convo([msg('m1', 'x', { tool_events: [], trace: null })]), true)
   assert.deepEqual(merged.messages?.[0].tool_events, events)
   assert.deepEqual(merged.messages?.[0].trace, trace)
+})
+
+const runInfo = (over: Partial<RunInfo> = {}): RunInfo =>
+  ({ run_id: 'r1', conversation_id: 'c1', message_id: null, seq: 12, started_at: 0, live: true, answering: true, status: 'running', ...over })
+
+test('an attach replays from just before the in-flight message, or from the head of the tape when there is none', () => {
+  assert.equal(replayCursor(runInfo({ message_seq: 7 })), 6)
+  assert.equal(replayCursor(runInfo({ message_seq: null })), 12)
+  assert.equal(replayCursor(runInfo()), 12)
+})
+
+test('run_state frames add an answering run and drop it only when that same run ends', () => {
+  let map = foldRunState({}, runInfo())
+  assert.deepEqual(map, { c1: { run_id: 'r1', status: 'running' } })
+  map = foldRunState(map, runInfo({ status: 'awaiting_approval' }))
+  assert.equal(map.c1.status, 'awaiting_approval')
+  const stale = foldRunState(map, runInfo({ run_id: 'old', answering: false, live: false }))
+  assert.equal(stale, map, 'the end of an older run leaves the newer one alone')
+  assert.deepEqual(foldRunState(map, runInfo({ answering: false })), {})
+})
+
+test('the pulse prefers the session, then falls back to the live run', () => {
+  assert.equal(pulseStatus('done', { status: 'running' }), 'done')
+  assert.equal(pulseStatus('idle', { status: 'awaiting_approval' }), 'needs-approval')
+  assert.equal(pulseStatus('idle', { status: 'running' }), 'working')
+  assert.equal(pulseStatus('idle', undefined), 'idle')
+})
+
+test('a steer segment closing keeps the run working; the final done settles it', () => {
+  const seg = { event: 'done', data: { id: 'm1', error: null, context_used: null, tool_events: [], trace: [], stopped: false, segment: true } } as unknown as ChatEvent
+  assert.equal(reduceStatus('working', seg, 0), 'working')
+  const fin = { event: 'done', data: { id: 'm1', error: null, context_used: null, tool_events: [], trace: [], stopped: false } } as unknown as ChatEvent
+  assert.equal(reduceStatus('working', fin, 0), 'done')
+})
+
+test('a stale fetch keeps the local error and outcome the stream stamped', () => {
+  const local = msg('m1', 'text', { error: 'Interrupted: the backend shut down.', outcome: 'interrupted' } as Partial<Message>)
+  const merged = mergeConversation(convo([local]), convo([msg('m1', 'text')]), false)
+  assert.equal(merged.messages?.[0].error, 'Interrupted: the backend shut down.')
+  assert.equal(merged.messages?.[0].outcome, 'interrupted')
+  const fresh = mergeConversation(convo([local]), convo([msg('m1', 'text', { error: 'Server said' })]), false)
+  assert.equal(fresh.messages?.[0].error, 'Server said', 'the server row still wins when it has one')
 })

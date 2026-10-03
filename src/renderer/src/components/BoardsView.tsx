@@ -2,10 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Plus, Trash2, PanelLeftOpen, KanbanSquare, Calendar, X, ChevronDown } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
-import type { Board, BoardCard, BoardColumn } from '@shared/types'
+import type { Board, BoardCard, BoardColumn, CardEvent } from '@shared/types'
 import ProjectChip from './ProjectChip'
 import SendToSpace from './SendToSpace'
 import { clearHandoff, peekHandoff } from '../lib/handoff'
+import { oneLine } from '../lib/emailAsk'
 import { fenced, lines, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
 
@@ -16,6 +17,7 @@ function Card({ card, onOpen, onDragStart }: { card: BoardCard; onOpen: () => vo
   return (
     <div className={`kcard p${card.priority}`} draggable onDragStart={onDragStart} onClick={onOpen}>
       <div className="kcard-title">{card.title}</div>
+      {card.claimed_by && (card.lease_expires_at ?? 0) * 1000 > Date.now() && <div className="kcard-meta"><span className="tag" title={`Lease ends ${new Date((card.lease_expires_at ?? 0) * 1000).toLocaleTimeString()}`}>{card.claimed_by} · until {new Date((card.lease_expires_at ?? 0) * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span></div>}
       {(card.due || card.labels.length > 0) && (
         <div className="kcard-meta">
           {card.due && <span className={`tag ${overdue ? 'overdue' : ''}`}><Calendar size={10} />{new Date(card.due + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span>}
@@ -38,6 +40,8 @@ function CardModal({ card, board, onClose, onChange }: { card: BoardCard; board:
     onChange(); onClose()
   }
   const col = board.columns.find((c) => c.id === card.column_id)
+  const [events, setEvents] = useState<CardEvent[]>([])
+  useEffect(() => { void api.boards.cardEvents(board.id, card.id).then(setEvents).catch(() => setEvents([])) }, [board.id, card.id, card.column_id])
   return (
     <div className="modal-backdrop" onMouseDown={onClose}>
       <div className="modal" onMouseDown={(e) => e.stopPropagation()}>
@@ -51,6 +55,7 @@ function CardModal({ card, board, onClose, onChange }: { card: BoardCard; board:
             <label><span>Column</span><select value={card.column_id} onChange={(e) => void api.boards.moveCard(card.id, e.target.value).then(onChange)}>{board.columns.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label>
           </div>
           <label><span>Labels <small className="muted">(comma separated)</small></span><input value={labels} onChange={(e) => setLabels(e.target.value)} placeholder="design, blocked, v0.1" /></label>
+          {events.length > 0 && <ul className="muted small" aria-label="Card history">{events.slice(-8).map((e) => <li key={e.id}>{new Date(e.created_at * 1000).toLocaleString()} · {e.actor} · {e.kind}{typeof e.payload.reason === 'string' ? ` (${e.payload.reason})` : ''}{typeof e.payload.text === 'string' ? `: ${e.payload.text}` : ''}</li>)}</ul>}
           <p className="muted small">In {col?.name} · created {new Date(card.created_at * 1000).toLocaleDateString()}</p>
         </section>
         <footer>
@@ -155,14 +160,14 @@ export default function BoardsView(): JSX.Element {
   usePageContext(() => (board
     ? {
         view: 'boards',
-        label: `Board “${board.name}”`,
+        label: `Board “${oneLine(board.name, 80)}”`,
         detail: [
           `Board \`${board.id}\` is open.`,
           ...board.columns.map((col) => {
             const cards = byCol[col.id] ?? []
-            return `### ${col.name} (${cards.length})\n${cards.length ? lines(cards, (c) => `${c.title} (\`${c.id}\`)${c.due ? `, due ${c.due}` : ''}${c.labels.length ? `, labels: ${c.labels.join(', ')}` : ''}`, 20) : '- (empty)'}`
+            return `### ${oneLine(col.name, 80)} (${cards.length})\n${cards.length ? lines(cards, (c) => `${c.title} (\`${c.id}\`)${c.due ? `, due ${c.due}` : ''}${c.labels.length ? `, labels: ${c.labels.join(', ')}` : ''}`, 20) : '- (empty)'}`
           }),
-          open ? `The user has this card open: “${open.title}” (\`${open.id}\`)\n${fenced(open.description || '')}` : ''
+          open ? `The user has this card open: “${oneLine(open.title, 120)}” (\`${open.id}\`)\n${fenced(open.description || '')}` : ''
         ].filter(Boolean).join('\n\n'),
         refs: [{ kind: 'board', id: board.id, name: board.name }, ...(open ? [{ kind: 'card', id: open.id, name: open.title }] : [])],
         hints: ['What is stuck in this board?', 'Add cards for the next steps', 'Summarise progress for a standup']

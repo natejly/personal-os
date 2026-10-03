@@ -283,31 +283,74 @@ RECAP_SYSTEM = """You write the user's daily recap for the home screen of their 
 **Since yesterday** (what happened: chats, things learned, completed todos), **Today** (calendar, due todos, unread mail worth attention), **Suggested focus** (3 bullets max). Under 180 words. Skip empty sections. Never invent facts."""
 
 
-async def generate_widget_code(settings: dict[str, Any], model: str, prompt: str, sources: list[dict[str, Any]], base_url: str, width: int, height: int, samples: dict[str, Any]) -> str:
+def _line(text: Any, limit: int = 200) -> str:
+    return " ".join(str(text or "").replace("\r", " ").split())[:limit]
+
+
+def _fence(text: str) -> str:
+    return "```\n" + str(text or "").replace("```", "'''") + "\n```"
+
+
+class WidgetCodeRejected(ValueError):
+    """The generated HTML still breaks the rules after its one repair; it is stored as an error, never rendered."""
+
+
+_EXTERNAL = re.compile(r"""<script[^>]+\bsrc\s*=|<link[^>]+\bhref\s*=\s*["']?(?:https?:)?//|@import|url\(\s*["']?(?:https?:)?//|<iframe|<img[^>]+\bsrc\s*=\s*["']?(?:https?:)?//""", re.I)
+
+
+def html_problems(code: str, secrets: list[str]) -> list[str]:
+    out = []
+    if not code.strip():
+        out.append("the reply was empty")
+    if _EXTERNAL.search(code):
+        out.append("it loads an external script, stylesheet, image or frame; inline everything instead")
+    if any(sec and sec in code for sec in secrets):
+        out.append("it contains a source credential; credentials are injected server-side, never write them")
+    return out
+
+
+async def generate_widget_code(settings: dict[str, Any], model: str, prompt: str, sources: list[dict[str, Any]], base_url: str, width: int, height: int, samples: dict[str, Any],
+                               secrets: list[str] | None = None) -> str:
+    """Model call -> check -> at most ONE repair call (same shape as widget_spec.generate_spec). Raises WidgetCodeRejected."""
     src_lines = []
     for s in sources:
         sample = json.dumps(samples.get(s["id"]), ensure_ascii=False, default=str)
         if len(sample) > 1800:
             sample = sample[:1800] + "…"
-        src_lines.append(f"- {s['name']} ({s['kind']}): fetch(\"{base_url}/sources/{s['id']}/fetch\")\n  description: {s.get('description') or '-'}\n  sample response: {sample}")
-    user = f"Widget request: {prompt}\n\nSize: about {width * 340}px wide × {height}px tall.\n\nData sources:\n" + ("\n".join(src_lines) if src_lines else "(none: build a static or self-computed widget)")
-    code = _wrap(await llm.complete(settings, model, [{"role": "system", "content": WIDGET_SYSTEM}, {"role": "user", "content": user}]))
-    issues = lint_widget_html(code, base_url, bool(sources))
-    if issues:  # one repair round, never more; a failed or no-better repair keeps the original
+        desc = _line(s.get("description"), 300) or "-"
+        src_lines.append(f"- {_line(s.get('name'), 80)} ({_line(s.get('kind'), 40)}): fetch(\"{base_url}/sources/{s['id']}/fetch\")\n  description: {desc}\n  sample response: {sample}")
+    user = f"Widget request:\n{_fence(prompt)}\n\nSize: about {width * 340}px wide × {height}px tall.\n\nData sources:\n" + ("\n".join(src_lines) if src_lines else "(none: build a static or self-computed widget)")
+    msgs = [{"role": "system", "content": WIDGET_SYSTEM}, {"role": "user", "content": user}]
+    raw = await llm.complete(settings, model, msgs)
+    code = _wrap(raw)
+    # Hard problems (an empty reply, external loads, a leaked credential) must be gone after the one repair or the
+    # widget is rejected. Lint issues (no fetch(), a blank body) get the same repair but never block.
+    problems, issues = html_problems(_unfence(raw), secrets or []), lint_widget_html(code, base_url, bool(sources))
+    if problems or issues:  # one repair round, never more
+        echo = "" if any("credential" in p for p in problems) else raw  # a credential is never echoed back
         try:
-            fixed = _wrap(await llm.complete(settings, model, [
-                {"role": "system", "content": WIDGET_SYSTEM}, {"role": "user", "content": user},
-                {"role": "assistant", "content": code},
-                {"role": "user", "content": "That widget has problems:\n- " + "\n- ".join(issues) + "\nReturn the complete corrected HTML document only."}]))
-            if len(lint_widget_html(fixed, base_url, bool(sources))) < len(issues):
-                code = fixed
-        except Exception:  # noqa: BLE001
-            pass
+            raw2: str | None = await llm.complete(settings, model, msgs + [
+                {"role": "assistant", "content": echo},
+                {"role": "user", "content": "That widget has problems:\n- " + "\n- ".join(problems + issues)
+                 + "\nReturn the complete corrected HTML document only."}])
+        except Exception:  # noqa: BLE001 - a failed repair is judged as no repair
+            raw2 = None
+        if raw2 is not None and not html_problems(_unfence(raw2), secrets or []):
+            fixed = _wrap(raw2)
+            # Taken when it clears a hard problem or lints better; otherwise the original stands.
+            if problems or len(lint_widget_html(fixed, base_url, bool(sources))) < len(issues):
+                code, problems = fixed, []
+    if problems:
+        raise WidgetCodeRejected("; ".join(problems))
     return code
 
 
+def _unfence(raw: str) -> str:
+    return re.sub(r"^```(?:html)?\s*|\s*```$", "", raw.strip(), flags=re.I | re.M).strip()
+
+
 def _wrap(code: str) -> str:
-    code = re.sub(r"^```(?:html)?\s*|\s*```$", "", code.strip(), flags=re.I | re.M).strip()
+    code = _unfence(code)
     if "<html" not in code.lower():
         code = f"<!doctype html><html><body style='font-family:system-ui;color:#ecebe8;padding:12px'>{code}</body></html>"
     return code
@@ -333,7 +376,9 @@ async def generate_summary(settings: dict[str, Any], model: str, prompt: str, da
     blob = json.dumps(data, ensure_ascii=False, default=str)
     if len(blob) > 24000:
         blob = blob[:24000] + "…(truncated)"
-    return await llm.complete(settings, model, [{"role": "system", "content": SUMMARY_SYSTEM}, {"role": "user", "content": f"Focus: {prompt or 'what matters most'}\n\nData (JSON):\n{blob}"}])
+    focus = prompt.strip() if isinstance(prompt, str) and prompt.strip() else "what matters most"
+    return await llm.complete(settings, model, [{"role": "system", "content": SUMMARY_SYSTEM},
+                                                 {"role": "user", "content": f"Focus:\n{_fence(focus)}\n\nData (JSON):\n{blob}"}])
 
 
 async def generate_recap(settings: dict[str, Any], model: str, facts: dict[str, Any]) -> str:

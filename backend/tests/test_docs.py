@@ -193,7 +193,13 @@ check(j("GET", f"/docs/{made2['doc_id']}")["content"] == "beta\n", "a scheduled 
 sd = j("POST", "/docs", {"title": "Searchable", "content": "the quokkafrobnitz lives here"})
 hit = j("GET", "/docs/search?q=quokkafrobnitz")
 check([h["doc_id"] for h in hit] == [sd["id"]] and "quokkafrobnitz" in hit[0]["snippet"], "search route returns a snippet")
-check(j("GET", "/docs/search?q=quokkafrobnitz&project_id=nope") == [], "search route honours the scope")
+# A project sees its own docs with personal ones layered in, never another project's.
+pa, pb = j("POST", "/projects", {"name": "Search A"})["id"], j("POST", "/projects", {"name": "Search B"})["id"]
+pd = j("POST", "/docs", {"title": "Scoped", "content": "the zorbleplex lives here", "project_id": pa})
+check([h["doc_id"] for h in j("GET", f"/docs/search?q=zorbleplex&project_id={pa}")] == [pd["id"]], "search route: a project finds its own doc")
+check(j("GET", f"/docs/search?q=zorbleplex&project_id={pb}") == [], "search route: another project's doc stays out")
+check([h["doc_id"] for h in j("GET", f"/docs/search?q=quokkafrobnitz&project_id={pb}")] == [sd["id"]],
+      "search route: personal docs are layered into a project")
 j("GET", "/docs/search?q=%22%28%2A")
 j("DELETE", f"/docs/{sd['id']}")
 # ---- pinning: persists, survives a title edit, sorts first, keeps through trash ----

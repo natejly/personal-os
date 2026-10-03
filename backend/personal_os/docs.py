@@ -463,7 +463,7 @@ class Docs:
                 d = c.execute("SELECT id, title, project_id FROM docs WHERE id=? AND deleted_at IS NULL", (r["doc_id"],)).fetchone()
                 if not d:
                     continue
-                if project_id != "__all__" and d["project_id"] != project_id:
+                if project_id != "__all__" and d["project_id"] not in (None, project_id):  # a project sees its own plus personal
                     continue
                 out.append({"doc_id": d["id"], "title": d["title"], "snippet": (r["snippet"] or "").strip()})
                 if len(out) >= limit:

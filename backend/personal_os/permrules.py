@@ -17,6 +17,7 @@ import os
 import re
 import unicodedata
 from dataclasses import dataclass, field
+from email.utils import getaddresses
 from typing import Any, Iterable
 
 # Verdicts: 'deny' | 'ask' | 'allow' | None (no opinion: the tool's own mode stands).
@@ -25,11 +26,15 @@ MAX_SUGGESTIONS = 5
 DENIAL_LIMIT = 3
 # The call that would be this many identical ones in a row (counting those that ran) gets a card no rule lifts.
 DOOM_LIMIT = 3
+# Cards that are the user answering, not granting a tool. Skip-permissions does not settle these.
+STILL_ASK = frozenset({"propose_plan", "desk_ask"})
 HARD_STOP = ("Three calls in a row were refused. Stop attempting variations of them; tell the user what you were trying "
              "to do and ask how they would like to proceed.")
 
 READ_TOOLS = {"read_local_file", "fs_glob", "fs_grep"}
 EDIT_TOOLS = {"write_local_file", "fs_edit", "fs_copy", "fs_mkdir", "move_local_file", "trash_local_file"}
+MAIL_TOOLS = {"gmail_send", "gmail_draft", "gmail_reply", "gmail_forward"}
+CALENDAR_TOOLS = {"calendar_create", "calendar_update", "calendar_delete", "calendar_propose"}
 PATH_KEYS = ("path", "root", "directory", "dir", "file_path", "folder")
 SRC_KEYS = ("src", "source", "from")
 DEST_KEYS = ("dest", "dst", "destination", "to", "target")
@@ -661,6 +666,15 @@ def subject_for(tool: str, args: dict[str, Any]) -> list[Subject]:
         if dest:
             out.append(Subject("Edit", dest))
         return out or [Subject("Edit", None)]
+    if tool in MAIL_TOOLS:  # one subject per address, the same ones the read-back compares
+        raw = [x for k in ("to", "cc", "bcc") for x in ([a[k]] if isinstance(a.get(k), str) else a.get(k) or []) if isinstance(x, str)]
+        addrs = list(dict.fromkeys(ad.strip().lower() for _, ad in getaddresses(raw) if ad.strip()))
+        return [Subject(tool, ad) for ad in addrs] or [Subject(tool, None)]
+    if tool in CALENDAR_TOOLS:
+        ch = a.get("changes") if tool == "calendar_propose" else [a]
+        cals = list(dict.fromkeys((c.get("calendar_id") or "primary") if isinstance(c, dict) else "primary"
+                                  for c in ch)) if isinstance(ch, list) and ch else []
+        return [Subject(tool, str(c)) for c in cals] or [Subject(tool, None)]
     if tool == "agent_spawn":
         return [Subject("Agent", _first(a, ("agent", "type", "role", "agent_type")) or None)]
     return [Subject(tool, None)]
@@ -678,6 +692,8 @@ def _matches(rule: Rule, sub: Subject, tool: str, cwd: str | None) -> bool:
     if sub.kind == "external_directory":  # a folder: `dir/**` covers the folder itself too
         p = _real(sub.value, cwd)
         return _path_match(rule.pattern, p) or _path_match(rule.pattern, p.rstrip("/") + "/")
+    if tool in MAIL_TOOLS:  # addresses are case-insensitive
+        return _cmd_match(rule.pattern.lower(), sub.value)
     return _cmd_match(rule.pattern, sub.value)
 
 
@@ -905,7 +921,7 @@ def evaluate(tool: str, args: dict[str, Any], rules: RuleSet | dict[str, Any] | 
         v.kind = "rule"
         v.pending = list(v.subjects)
     elif verdict is None:
-        v.pending = [tool] if all(s.kind == tool for s in subs) else list(v.subjects)
+        v.pending = [tool] if all(s.kind == tool and s.value is None for s in subs) else list(v.subjects)
     # Rules written for the plain tool name apply to every kind of subject it has.
     if verdict is None and not rs.empty():
         plain, plain_rule = _decide(rs, [Subject(tool, None)], tool, cwd)
@@ -927,6 +943,8 @@ def _suggest_paths(subs: list[Subject]) -> list[str]:
             r = f"{s.kind}({os.path.dirname(p) or '/'}/**)"
             if r not in out:
                 out.append(r)
+        elif s.kind in MAIL_TOOLS | CALENDAR_TOOLS and s.value:
+            out.append(f"{s.kind}({s.value})")
         elif s.kind == "Agent" and s.value:
             out.append(f"Agent({s.value})")
     return out[:MAX_SUGGESTIONS]
@@ -1005,6 +1023,39 @@ def resolve(tool: str, args: dict[str, Any], mode: str, forced: bool, *, rules: 
     return res
 
 
+def mcp_denied(slug: str, rules: RuleSet | dict[str, Any] | None) -> str | None:
+    """Refusal text when a deny rule names this MCP slug (`mcp__srv__tool`) or its whole server (`mcp__srv`).
+    Only denies apply: a grant is the one thing that turns an MCP tool on, so allow/ask rules are ignored here."""
+    rs = rules if isinstance(rules, RuleSet) else load_rules(rules)
+    for r in rs.deny:
+        if r.pattern is None and (r.tool.lower() == slug.lower() or slug.lower().startswith(r.tool.lower() + "__")):
+            return f"blocked by your permission rule {r.text}"
+    return None
+
+
+def skip_permissions_on(conv_settings: dict[str, Any] | None, cfg: dict[str, Any] | None) -> bool:
+    """Whether this chat skips approval cards. A stored chat value wins; otherwise the global setting."""
+    conv = conv_settings or {}
+    if "skipPermissions" in conv:
+        return bool(conv["skipPermissions"])
+    return bool((cfg or {}).get("skipPermissions"))
+
+
+def lift_permission_ask(name: str, mode: str, *, skip: bool, forced: bool = False, danger: str = "",
+                        fenced: bool = False) -> str:
+    """Turn a plain ask into a run. A deny is not an ask (the caller keeps the refusal). Off stays off.
+
+    Stays a card: a plan or desk question (the user deciding, not granting a tool), a forced ask (taint,
+    doom loop, desk ask-as-you-go), an ask rule or an outside-folder write (`fenced`), an external or
+    schedules tool, and a shell command no read-only list or allow rule already cleared (a shell_run that
+    is still `ask` here was not cleared).
+    """
+    if (skip and mode == "ask" and name not in STILL_ASK and not forced and not fenced
+            and danger not in ("external", "schedules") and name != "shell_run"):
+        return "on"
+    return mode
+
+
 class DenialStreak:
     """Counts consecutive refused calls so the next result can tell the model to stop varying them."""
 
@@ -1028,6 +1079,8 @@ def validate_saved_rules(tool: str, args: dict[str, Any], texts: list[str]) -> l
             raise ValueError(f"{r.text} is not a rule for this call")
         if r.pattern is None or r.pattern.strip("* ") == "":
             raise ValueError(f"{r.text} would allow everything; narrow it")
+        if r.tool in MAIL_TOOLS | CALENDAR_TOOLS and not any(_matches(r, s, tool, None) for s in subject_for(tool, args)):
+            raise ValueError(f"{r.text} does not match this call's recipient or calendar")
         if r.text not in out:
             out.append(r.text)
     return out

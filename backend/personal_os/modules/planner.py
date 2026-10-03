@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING, Any, Callable
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from ..todos import UNTRUSTED_SOURCES
+
 from .. import planner as pl
 from ..google import GoogleNotConnected
 from ..todos import Todos
@@ -72,7 +74,9 @@ class PlannerModule(Module):
         scope = "__all__" if project_id in (None, "", "all") else self.ctx.sid(project_id)
         todos = self.todos.list(scope, include_done=False)
         result = pl.plan(todos, pl.busy_from_events(events, mirror), now, cfg, pl.locked_from_events(events, mirror))
-        return {**result, "generated_at": now.isoformat(timespec="minutes")}
+        # A meeting, an email follow-up, or a Google task title is other people's words. The proposal shows that title.
+        holds_untrusted = any(t.get("source") in UNTRUSTED_SOURCES for t in todos)
+        return {**result, "generated_at": now.isoformat(timespec="minutes"), "holds_untrusted": holds_untrusted}
 
     def apply_sync(self, blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
         g = self.ctx.google
@@ -137,6 +141,9 @@ class PlannerModule(Module):
     def register_tools(self, box: Toolbox) -> None:
         async def schedule_suggest(ctx: dict[str, Any], days: int = 5) -> Any:
             plan = await asyncio.to_thread(self.suggest_sync, days, None)
+            if plan.pop("holds_untrusted", False):
+                ctx["tainted"] = True
+                ctx.setdefault("taint_sources", []).append("schedule_suggest")
             titles = {b["todo_id"]: b["title"] for b in plan["blocks"]}
             blocks = [{"todo_id": b["todo_id"], "title": b["title"], "start": b["start"], "end": b["end"], "part": b["part"],
                        "why": "due {due}, priority {priority}, energy {energy}, time {time} (weighted)".format(**b["why"])} for b in plan["blocks"]]
@@ -149,4 +156,12 @@ class PlannerModule(Module):
             examples=[{}, {"days": 3}])
 
     def today(self) -> dict[str, Any]:
-        return {}
+        """Proposed blocks from open todos and the saved calendar snapshot. Never calls Google; nothing is written."""
+        cfg = self.config()
+        events = self.ctx.google.calendar_saved(cfg["lookaheadDays"] + 1)
+        if events is None:  # no snapshot: planning around unknown meetings would be a guess
+            return {"planner_blocks": []}
+        now = self.clock().replace(second=0, microsecond=0)
+        mirror = self._mirror_ids()
+        todos = self.todos.list("__all__", include_done=False)
+        return {"planner_blocks": pl.plan(todos, pl.busy_from_events(events, mirror), now, cfg, pl.locked_from_events(events, mirror))["blocks"]}

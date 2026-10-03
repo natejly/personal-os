@@ -34,6 +34,11 @@ BINDING_KEY = "googleTasksSyncBound"
 POKE_DEBOUNCE = 2.0
 
 
+def _line(text: str, limit: int = 2000) -> str:
+    """One line. A Google task title is text that may not have been typed in this app."""
+    return " ".join(str(text or "").replace("\r", " ").split())[:limit]
+
+
 def _remote_wins(rt: dict[str, Any], td: dict[str, Any]) -> bool:
     try:
         return _parse_iso(rt.get("updated") or "").timestamp() >= float(td["updated_at"])
@@ -231,9 +236,10 @@ class TasksSync:
         # Remote tasks nothing points at yet -> new local todos. Untitled ones are usually
         # rows someone is still typing into; skip them until they have a name.
         for eid, rt in remote.items():
-            if eid in linked or rt.get("deleted") or not (rt.get("title") or "").strip():
+            title = _line(rt.get("title") or "", 500)
+            if eid in linked or rt.get("deleted") or not title:
                 continue
-            td = self.todos.create(rt["title"], notes=rt.get("notes") or "", due=_date_only(rt.get("due")),
+            td = self.todos.create(title, notes=_line(rt.get("notes") or ""), due=_date_only(rt.get("due")),
                                    source="google", external_id=eid, notify=False)
             if rt.get("status") == "completed":
                 td = self.todos.update(td["id"], {"done": True}, notify=False) or td
@@ -289,11 +295,12 @@ class TasksSync:
 
     def _pull(self, td: dict[str, Any], rt: dict[str, Any]) -> int:
         patch: dict[str, Any] = {}
-        title = (rt.get("title") or "").strip()
+        title = _line(rt.get("title") or "", 500)
         if title and title != td["title"]:
             patch["title"] = title
-        if (rt.get("notes") or "") != td["notes"]:
-            patch["notes"] = rt.get("notes") or ""
+        notes = _line(rt.get("notes") or "")
+        if notes != (td.get("notes") or ""):
+            patch["notes"] = notes
         if _date_only(rt.get("due")) != td["due"]:
             patch["due"] = _date_only(rt.get("due"))
         done = 1 if rt.get("status") == "completed" else 0

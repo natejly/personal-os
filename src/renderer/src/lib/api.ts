@@ -1,5 +1,5 @@
 import type {
-  BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, DriveFile, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Artifact, ArtifactVersion, Recap, Conversation, ConversationSettings, ContextUsed, ContextMeter, Document, GraphData, GraphEdge, GraphNode, Message,
+  BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, DriveFile, Board, BoardCard, BoardColumn, CardEvent, DataSource, Dashboard, Widget, Artifact, ArtifactVersion, Recap, Conversation, ConversationSettings, ContextUsed, ContextMeter, Document, GraphData, GraphEdge, GraphNode, Message,
   ApprovalDecision, PermissionEvaluation, PlanEdit,
   Memory, MemoryProposal, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
   Command, AgentDef, BuiltinAgent, Workflow, WorkflowRun, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
@@ -167,6 +167,7 @@ export const api = {
     deleteColumn: (cid: string) => req(`/boards/columns/${cid}`, { method: 'DELETE' }),
     addCard: (id: string, c: { title: string; column_id?: string | null; description?: string; due?: string | null; priority?: number; labels?: string[] }) => req<BoardCard>(`/boards/${id}/cards`, { method: 'POST', body: json(c) }),
     updateCard: (cid: string, patch: { title?: string; description?: string; due?: string; priority?: number; labels?: string[]; clear_due?: boolean }) => req<BoardCard>(`/boards/cards/${cid}`, { method: 'PUT', body: json(patch) }),
+    cardEvents: (bid: string, cid: string) => req<CardEvent[]>(`/boards/${bid}/cards/${cid}/events`),
     moveCard: (cid: string, column_id: string, before_card_id: string | null = null) => req<BoardCard>(`/boards/cards/${cid}/move`, { method: 'POST', body: json({ column_id, before_card_id }) }),
     deleteCard: (cid: string) => req(`/boards/cards/${cid}`, { method: 'DELETE' })
   },
@@ -259,7 +260,10 @@ export const api = {
     list: (status?: 'to_reply' | 'awaiting_reply') => req<MailWatchList>(`/mail/watch${status ? `?status=${status}` : ''}`),
     refresh: () => req<{ refreshed: number }>('/mail/watch/refresh', { method: 'POST' }),
     dismiss: (id: string, dismissed = true) => req<MailWatchThread>(`/mail/watch/${encodeURIComponent(id)}`, { method: 'PUT', body: json({ dismissed }) }),
-    followup: (id: string) => req<Todo>(`/mail/watch/${encodeURIComponent(id)}/followup`, { method: 'POST' })
+    followup: (id: string) => req<Todo>(`/mail/watch/${encodeURIComponent(id)}/followup`, { method: 'POST' }),
+    /** Local only: hides the thread in the mail list until `until` (ISO). */
+    snooze: (id: string, until: string | null) => req<{ until: string | null }>(`/mail/threads/${encodeURIComponent(id)}/snooze`, { method: 'POST', body: json({ until }) }),
+    snoozed: () => req<{ thread_ids: string[] }>('/mail/snoozed')
   },
   /** Soft delete: every DELETE above lands here first; these restore it or erase it for good. */
   trash: {
@@ -332,6 +336,9 @@ export const api = {
     gmailLabels: () => req<GmailLabel[]>('/integrations/google/gmail/labels'),
     gmailModify: (id: string, patch: { mark_read?: boolean; archive?: boolean; star?: boolean }) =>
       proven(req<{ ok: boolean } & Verified>(`/integrations/google/gmail/${id}/modify`, { method: 'POST', body: json(patch) })),
+    /** Free slots as draft text; creates no draft or event. */
+    suggestTimes: (m: { window_start: string; window_end: string; duration_minutes?: number }) =>
+      req<{ body: string }>('/integrations/google/gmail/suggest-times', { method: 'POST', body: json(m) }),
     gmailDraft: (m: { to: string; subject: string; body: string; reply_to_message_id?: string | null }) =>
       proven(req<{ draft_id: string } & Verified>('/integrations/google/gmail/draft', { method: 'POST', body: json(m) })),
     /** Queues the send behind its undo hold; it has NOT gone out when this resolves. */
@@ -507,7 +514,7 @@ export const api = {
     deleteSample: (id: string) => req(`/style/samples/${id}`, { method: 'DELETE' })
   },
   graph: {
-    get: (s: Scope) => req<GraphData>(`/graph?${scope(s)}`),
+    get: (s: Scope, history = false) => req<GraphData>(`/graph?${scope(s)}${history ? '&include_invalid=true' : ''}`),
     createNode: (n: { project_id: string | null; label: string; type?: string; properties?: Record<string, unknown> }) =>
       req<GraphNode>('/graph/nodes', { method: 'POST', body: json(n) }),
     updateNode: (id: string, patch: Partial<Pick<GraphNode, 'label' | 'type' | 'properties'>>) => req<GraphNode>(`/graph/nodes/${id}`, { method: 'PUT', body: json(patch) }),

@@ -33,6 +33,11 @@ MAX_STEPS = 10
 MAX_TITLE = 120
 MAX_WHY = 200
 
+
+def _line(text: Any, limit: int) -> str:
+    """One line. A plan is re-sent as prompt text, so a newline in a label cannot open a new section."""
+    return " ".join(str(text or "").replace("\r", " ").split())[:limit]
+
 PLAN_TOOL = "propose_plan"
 # What may still run while a plan is being drafted: reading and thinking, never acting. 'plan' is
 # propose_plan's own tier, so the plan call itself is never blocked by the planning state it opens.
@@ -432,21 +437,25 @@ class Plans:
         if not plan or plan.get("status") != "approved":
             return ""
         marks = {"approved": "[ ]", "consumed": "[~]", "done": "[x]", "failed": "[!]", "dropped": "[-]", "rejected": "[-]"}
-        lines = [f"## Approved plan: {plan.get('title') or 'untitled'}"]
-        if plan.get("intent"):
-            lines.append(plan["intent"])
+        title = _line(plan.get("title"), MAX_TITLE) or "untitled"
+        lines = [f"## Approved plan: {title}"]
+        intent = _line(plan.get("intent"), MAX_TITLE)
+        if intent:
+            lines.append(intent)
         lines.append("Each open step [ ] is authorised once, with exactly these arguments; [x] is done, [!] failed, "
                      "[~] ran with an unknown outcome, [-] is not authorised.")
         for s in plan.get("steps") or []:
             args = json.dumps(s.get("arguments") or {}, ensure_ascii=False, default=str)
             if len(args) > 600:
                 args = args[:600] + "…"
-            line = f"{marks.get(s.get('status'), '[ ]')} {int(s['idx']) + 1}. {s.get('title') or s['tool']} - {s['tool']}({args})"
+            step_title = _line(s.get("title") or s["tool"], MAX_TITLE) or s["tool"]
+            line = f"{marks.get(s.get('status'), '[ ]')} {int(s['idx']) + 1}. {step_title} - {s['tool']}({args})"
             if s.get("status") == "failed" and s.get("result_error"):
-                line += f" -> failed: {str(s['result_error'])[:160]}"
+                line += f" -> failed: {_line(s['result_error'], 160)}"
             lines.append(line)
-        if plan.get("note"):
-            lines.append(f"The user's note on approval: {plan['note']}")
+        note = _line(plan.get("note"), MAX_WHY)
+        if note:
+            lines.append(f"The user's note on approval: {note}")
         return "\n".join(lines)
 
     @staticmethod

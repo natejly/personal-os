@@ -62,6 +62,7 @@ export default function MailView(): JSX.Element {
   const [q, setQ] = useState('')
   const [open, setOpen] = useState<GmailMessage | null>(null)
   const [full, setFull] = useState<GmailFullMessage | null>(null)
+  const [snoozed, setSnoozed] = useState<string[]>([])
   const [compose, setCompose] = useState<Compose | null>(null)
   const [review, setReview] = useState<Review | null>(null)
   const [busy, setBusy] = useState<'send' | 'draft' | 'review' | null>(null)
@@ -123,6 +124,23 @@ export default function MailView(): JSX.Element {
     if (!google?.connected) return
     api.google.gmailLabels().then(setLabels).catch(() => setLabels([]))
   }, [google?.connected])
+
+  useEffect(() => { api.mailWatch.snoozed().then((r) => setSnoozed(r.thread_ids)).catch(() => setSnoozed([])) }, [google?.connected])
+  const snooze = async (m: GmailMessage): Promise<void> => {
+    const t = new Date(); t.setDate(t.getDate() + 1); t.setHours(8, 0, 0, 0)
+    try {
+      await api.mailWatch.snooze(m.thread_id, t.toISOString())
+      setSnoozed((s) => [...s, m.thread_id])
+      if (open?.id === m.id) setOpen(null)
+    } catch (e) { toast((e as Error).message, 'error') }
+  }
+  const suggestTimes = async (): Promise<void> => {
+    const day = (n: number): string => { const d = new Date(); d.setDate(d.getDate() + n); return d.toLocaleDateString('en-CA') }
+    try {
+      const { body } = await api.google.suggestTimes({ window_start: day(1), window_end: day(7) })
+      setCompose((c) => c && { ...c, body: c.body ? `${c.body}\n\n${body}` : body })
+    } catch (e) { toast((e as Error).message, 'error') }
+  }
 
   const userLabels = labels.filter((l) => l.type === 'user')
   const patchLocal = (id: string, patch: Partial<GmailMessage>): void =>
@@ -285,7 +303,7 @@ export default function MailView(): JSX.Element {
           <div className="empty-hint big"><p>No mail matches these filters.</p></div>
         )}
         <div className="mail-list">
-          {messages.map((m) => (
+          {messages.filter((m) => !snoozed.includes(m.thread_id)).map((m) => (
             <div key={m.id} className={`mail-row ${m.unread ? 'unread' : ''}`} onClick={() => openMessage(m)} role="button" tabIndex={0}>
               <button className={`icon-btn ghost sm star ${isStarred(m) ? 'on' : ''}`} title={isStarred(m) ? 'Unstar' : 'Star'}
                 onClick={(e) => { e.stopPropagation(); void modify(m, { star: !isStarred(m) }) }}>
@@ -330,6 +348,7 @@ export default function MailView(): JSX.Element {
                 <Star size={14} fill={isStarred(open) ? 'currentColor' : 'none'} /> {isStarred(open) ? 'Unstar' : 'Star'}
               </button>
               <button className="ghost-btn" onClick={() => void modify(open, { archive: true })}><Archive size={14} /> Archive</button>
+              <button className="ghost-btn" onClick={() => void snooze(open)}>Snooze</button>
               <button className="ghost-btn" onClick={() => { void modify(open, { mark_read: false }); setOpen(null) }}><Mail size={14} /> Mark unread</button>
               <a className="ghost-btn" href={`https://mail.google.com/mail/u/0/#all/${open.thread_id}`} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Gmail</a>
               <button className="primary-btn" onClick={() => askAssistant(open)}><MessageSquare size={14} /> Ask assistant</button>
@@ -374,6 +393,7 @@ export default function MailView(): JSX.Element {
             </section>
             <footer>
               <button className="ghost-btn" onClick={() => { setCompose(null); setReview(null) }}>Discard</button>
+              <button className="ghost-btn" disabled={busy !== null} onClick={() => void suggestTimes()}>Suggest times</button>
               <button className="ghost-btn" disabled={busy !== null || !compose.body.trim()} onClick={() => void doReview()}>
                 <Sparkles size={14} /> {busy === 'review' ? 'Reviewing…' : 'AI review'}
               </button>

@@ -42,14 +42,14 @@ from .artifact_routes import is_render_path as _is_artifact_render, make_router 
 from .artifacts import Artifacts
 from .boards import Boards
 from .canvas import FALLBACK_NAME, SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
-from .dashboards import Dashboards, generate_recap, generate_summary, generate_widget_code, lint_widget_html
+from .dashboards import Dashboards, WidgetCodeRejected, generate_recap, generate_summary, generate_widget_code
 from .docs import ASSET_MIMES, asset_path, AssetError, Docs, save_asset, unified_diff
 from . import widget_spec
 from . import cache as google_cache
 from .google import Google, GoogleNotConnected, json_safe
 from . import job_history, job_tools
 from .jobs_policy import JobPolicy
-from .jobs import (KINDS, PROPOSAL_STATUSES, Jobs, Proposals, Scheduler, local_tz_name, spent, valid_cron,
+from .jobs import (KINDS, PowerWake, check_watch_dir, PROPOSAL_STATUSES, Jobs, Proposals, Scheduler, local_tz_name, spent, valid_cron,
                    valid_tz)
 from . import meeting_import, skillbuild, skillmd
 from . import mail_edits  # noqa: F401 - mail_edits registers the gmail validators
@@ -85,7 +85,7 @@ from .stuck import STUCK_NUDGE, STUCK_STOP, StuckDetector
 from .style import WritingStyle, learn_style_from_exchange, looks_like_prose
 from .modules import Module, ModuleContext, build_modules, get as module_get
 from .modules.todos import TodosModule
-from .tools import Toolbox, page_title, summarize_result
+from .tools import Toolbox, page_title, summarize_result, times_body
 from .webread import WebCache
 from .trash import Trash, router as trash_router
 from .trace import Tracer, now_ms
@@ -383,7 +383,7 @@ def _record_usage(ev: dict[str, Any]) -> None:
                      duration_ms=int(ev.get("duration_ms") or 0), cost=pricing.cost(cfg, ev.get("model", ""), pt, ct, cached, cwrite),
                      estimated=bool(ev.get("estimated")), conversation_id=ev.get("conversation_id"), project_id=ev.get("project_id"),
                      cached_tokens=cached, cache_write_tokens=cwrite, reasoning_tokens=reasoning,
-                     tag=str(ev.get("tag") or ""), round=int(ev.get("round") or 0))
+                     tag=str(ev.get("tag") or ""), round=ev.get("round"))
         _check_usage_alert(cfg)
     except Exception:  # noqa: BLE001 - accounting must never break a reply
         pass
@@ -1460,6 +1460,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         settings=cfg, conv_settings=conv["settings"], global_system_prompt=cfg["systemPrompt"],
         activity=monitor, skills=skills, style=style, meetings=meeting_svc,
         page=body.page_context.model_dump() if body.page_context else None,
+        draft=bool(conv["settings"].get("draftMode")),
     )
     skills.bump_use([x["id"] for x in used["skills"] if x.get("disclosure") != "manifest"])
     # Older messages are folded into a rolling summary when the replay outgrows the window (compaction.py).
@@ -1492,6 +1493,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         page = used.get("page") or {}
         if isinstance(page, dict) and (page.get("detail") or page.get("selection")):
             ctx_taints.append("page")
+        # A chat can skip approval cards (its own switch, else the global one). A job has nobody watching,
+        # so it keeps unattendedApprovals and never inherits this.
+        skip_permissions = permrules.skip_permissions_on(conv["settings"], cfg) and not (
+            run is not None and run.kind in UNATTENDED_KINDS)
         tool_ctx: dict[str, Any] = {
             "project_id": conv["project_id"], "conversation_id": conv_id,
             # Taint is sticky for the whole conversation: the injected instructions live on in the replayed history, so
@@ -1499,10 +1504,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             "tainted": bool(conv["settings"].get("tainted")) or bool(ctx_taints) or sandboxes.holds_import(conv_id),
             "taint_sources": list(conv["settings"].get("taint_sources") or []) + [f"context:{k}" for k in ctx_taints]
                 + (["sandbox_import"] if sandboxes.holds_import(conv_id) else []),
-            "allowed_urls": _urls(user_text), "settings": cfg,
+            "allowed_urls": _urls(user_text), "settings": cfg, "conv_settings": conv["settings"],
             # Set for a scheduled job: Toolbox.call refuses every outward-facing tool outright, and _call_tool has
             # already turned the call into a proposals row before it got that far.
             "proposal_only": proposal_only(run), "message_id": am["id"],
+            "skip_permissions": skip_permissions,
             # What desk_deliver/desk_done record an output or a note against, so Accept can name the run
             # that wrote a file instead of guessing with the latest one.
             # Where artifact_create files what it makes (artifacts.run_id), so it can be found again from the run.
@@ -1529,6 +1535,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             """A card for one call a run_python script made through the tool bridge. The script waits; the reply does not
             end. One-shot only: an 'always' answer is treated as 'allow' here, never as a standing grant."""
             nonlocal bridge_n
+            spec = toolbox.specs.get(name)
+            if skip_permissions and permrules.lift_permission_ask(
+                    name, "ask", skip=True, forced=forced, danger=spec.danger if spec else "external",
+                    fenced=toolbox.fs_needs_ask(name, args, tool_ctx)) == "on":
+                return True
             if run is None or run.store is None:
                 return False
             bridge_n += 1
@@ -1662,7 +1673,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             tools_hint = "\n".join(p for p in (tools_hint, mcp_search.catalog_hint(_counts.items())) if p)
         hints = (RENDER_HINT, tools_hint, JOB_HINT if proposal_only(run) else "",
                  DESK_HINT + _desk_manual_text() if desk else "", DESK_PLAN_HINT if planning and desk else "",
-                 CHAT_PLAN_HINT if chat_plan_mode in ("auto", "always") and tool_schemas else "", _today_hint())
+                 CHAT_PLAN_HINT if chat_plan_mode in ("auto", "always") and tool_schemas else "")
+        used["volatile_blocks"] = [*used["volatile_blocks"], _today_hint()]  # the date changes daily: keep it out of the cacheable prefix
         if cfg.get("cacheLayout", True):
             # Stable prefix first, per-turn retrieval just before the newest user message (see context.layout_messages).
             stable = "\n\n".join(p for p in (used["stable_system"], *hints) if p)
@@ -1671,7 +1683,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             used["stable_hash"] = hashlib.sha256(stable.encode()).hexdigest()[:12]
             cspan["meta"]["stable_hash"] = used["stable_hash"]
         else:
-            system = "\n\n".join(p for p in (system, *hints) if p)
+            system = "\n\n".join(p for p in (system, *hints, _today_hint()) if p)
             messages = [{"role": "system", "content": system}] + history
         used["system_prompt"] = system
         used["tokens_estimate"] = estimate_tokens(system)
@@ -1741,7 +1753,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             that does not qualify ends the run, so a write is a barrier and later reads wait for it. A reply that is
             tainted by an earlier call of the run is simulated, so a call that would then ask is not started."""
             width = max(1, int(cfg.get("parallelReads") or 1))
-            if width < 2 or planning or active_plan is not None or plan_seen:
+            if width < 2 or planning or active_plan is not None or plan_seen or proposal_only(run):
                 return 1
             sim = dict(tool_ctx)
             seg: list[tuple[dict[str, Any], dict[str, Any]]] = []
@@ -1763,18 +1775,18 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 return 1
             sem = asyncio.Semaphore(width)
 
-            async def run_one(name: str, args: dict[str, Any], ctx: dict[str, Any]) -> Any:
+            async def run_one(name: str, args: dict[str, Any], ctx: dict[str, Any], uid: str) -> Any:
                 async with sem:
                     # Stop skips reads still queued for a slot; reads already running side by side are not interrupted.
                     if stop.is_set():
                         return {"error": "Stopped by the user before this call ran; it was not executed."}
-                    return await toolbox.call(name, args, ctx)
+                    return await _call_tool(run, _round, name, args, ctx, uid)
 
             for c, args in seg:
                 key = tools.call_key(c["name"], args)
                 if key not in warm:  # an identical call in the round runs once and shares the result
                     warm_ctx[key] = dict(tool_ctx)  # taint set by a read must not reach calls gated before it
-                    warm[key] = asyncio.ensure_future(run_one(c["name"], args, warm_ctx[key]))
+                    warm[key] = asyncio.ensure_future(run_one(c["name"], args, warm_ctx[key], f"{am['id']}:{c['id']}"))
                     tasks.append(warm[key])
             return len(seg)
 
@@ -1916,7 +1928,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 partial = "time"
             u = end.get("usage") or end.get("usage_est") or {}
             pt, ct = int(u.get("prompt_tokens") or 0), int(u.get("completion_tokens") or 0)
-            budget.add(pt, ct, pricing.cost(cfg, model, pt, ct))
+            budget.add(pt, ct, pricing.cost(cfg, model, pt, ct, int(u.get("cached_tokens") or 0), int(u.get("cache_write_tokens") or 0)))
             if run is not None:
                 run.budget = budget.snapshot()
             tracer.end(lspan, {"finish_reason": end.get("finish_reason"), "usage": end.get("usage"),
@@ -2045,6 +2057,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     mode = perm.mode
                     if perm.kind == "doom_loop":
                         forced = True
+                elif mcp_is(c["name"]) and mode != "off":
+                    # A global deny rule can name an MCP slug or server; it refuses over any grant and the grant row is untouched.
+                    perm.refusal = permrules.mcp_denied(c["name"], perm_rules)
                 # A background run never waits on an approval: there is nobody at the keyboard, and the call is not
                 # going to happen either way. It becomes a proposal in _call_tool and the run carries on.
                 # MCP tools are external by construction but are not in Toolbox.specs, so proposes()
@@ -2118,6 +2133,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     # A background run has nobody to answer a card, and only external calls can become proposals.
                     # Opening one here would park the run forever (and every later fire behind it).
                     pre = tools.denied(c["name"], "not available in a background run: it needs an approval and nobody is watching")
+                # Dangerously skip permissions: an ask runs. A refusal already in `pre` stays a refusal.
+                # Forced, ask-rule, external, schedules and uncleared shell cards stay (lift_permission_ask). Jobs never set the flag.
+                if skip_permissions and pre is None and not perm.refusal:
+                    mode = permrules.lift_permission_ask(c["name"], mode, skip=True, forced=forced or perm.forced, danger=danger,
+                                                         fenced=fs_ask or perm.kind == "rule")
                 asks = mode == "ask" and claimed is None and pre is None
                 if asks and desk_id and c["name"] != PLAN_TOOL and run_store.claim_parked(desk_id, c["name"], args, uid):
                     # The user already said yes to exactly this call on a card an earlier turn let go
@@ -2125,7 +2145,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     asks = False
                 yield "tool_call", {"message_id": am["id"], "id": uid, "name": c["name"], "arguments": args,
                                     "needs_approval": asks, "forced": forced, "proposal": proposing or None,
-                                    "permission": perm.card() if asks else None,
+                                    "permission": ({**perm.card(), "danger": danger} if perm.card() else None) if asks else None,
                                     "plan": {"plan_id": claimed["plan_id"], "idx": claimed["idx"], "title": claimed["title"]} if claimed else None}
                 tspan = tracer.start("tool", c["name"], {"round": _round, "arguments": _short(args), "mode": mode, "forced": forced,
                                                          "plan_step": f"{claimed['plan_id']}#{claimed['idx']}" if claimed else None},
@@ -2257,7 +2277,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     granted = decision in ("always_chat", "always_global")
                     # A tainted reply cannot buy a standing grant, and neither can a plan card: 'always' on
                     # propose_plan would leave the plan with no approval at all.
-                    standing = granted and not forced and c["name"] != PLAN_TOOL
+                    # An external write is never granted whole-tool: only a patterned rule (always_rule) can stand.
+                    standing = granted and not forced and c["name"] != PLAN_TOOL and (danger != "external" or mcp_is(c["name"]))
                     if granted and not standing:
                         decision = "allow"  # one-shot
                     elif decision == "always_chat":
@@ -2426,6 +2447,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 if stuck and event["breaker"] == "stuck_nudge":
                     content = f"{content}\n\n[stuck_notice] {STUCK_NUDGE.format(detail=stuck.detail)}"
                 messages.append({"role": "tool", "tool_call_id": c["id"], "content": content})
+                # Persisted with the event (after the SSE copy went out) so the next turn replays exactly this text: no image bytes.
+                event["call_id"], event["for_model"] = c["id"], content
                 if c["name"] == "mcp_tool_search":
                     # A search loads schemas: bring their modes in (grants and ask are already resolved
                     # in mcp_modes) and offer them from the next round.
@@ -2499,7 +2522,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     # A tainted reply has read someone else's page or transcript. Mining it into memory would
     # plant that text in later chats. The user can still save a memory by approving the tool.
     if (not error and text and not proposal_only(run) and not tool_ctx["tainted"]
-            and cfg.get("autoLearn", True) and conv["settings"].get("autoLearn", True)):
+            and cfg.get("autoLearn", True) and conv["settings"].get("autoLearn", True)
+            and conv["settings"].get("useMemory", True)):  # memory off: nothing written for other chats to read
         learner.submit(LearnJob(
             conversation_id=conv_id, message_id=am["id"], project_id=conv["project_id"],
             user_text=user_text, assistant_text=text, model=model, settings=cfg,
@@ -3359,7 +3383,7 @@ async def _launch_job(job: dict[str, Any], fire: dict[str, Any]) -> str | None:
 
 
 job_policy = JobPolicy(jobs, run_store, _launch_job, settings=settings)
-scheduler = Scheduler(jobs, _launch_job, policy=job_policy)
+scheduler = Scheduler(jobs, _launch_job, policy=job_policy, wake=PowerWake())
 
 
 class JobIn(BaseModel):
@@ -3376,6 +3400,8 @@ class JobIn(BaseModel):
     max_retries: int = Field(default=1, ge=0, le=5)
     # None = every tool, as before. A list narrows the run to exactly those tools (job_tools).
     allowed_tools: list[str] | None = None
+    # kind='watch': a folder under the home folder; each pass that finds new or touched files in it fires one run.
+    watch_dir: str | None = Field(default=None, max_length=1000)
 
 
 class JobPatch(BaseModel):
@@ -3389,6 +3415,7 @@ class JobPatch(BaseModel):
     project_id: str | None = None
     max_retries: int | None = Field(default=None, ge=0, le=5)
     allowed_tools: list[str] | None = None  # an explicit null resets to "every tool"
+    watch_dir: str | None = Field(default=None, max_length=1000)
 
 
 # How far in the past a one-off may be set, on a write. The scheduler is happy to run a late task — that is the
@@ -3396,7 +3423,8 @@ class JobPatch(BaseModel):
 BACKDATE_GRACE_S = 120.0
 
 
-def _check_schedule(kind: str, expr: str | None, tz: str | None, run_at: float | None, *, fresh_time: bool) -> None:
+def _check_schedule(kind: str, expr: str | None, tz: str | None, run_at: float | None, *, fresh_time: bool,
+                    watch_dir: str | None = None) -> None:
     """Reject a schedule the scheduler could not read. Always checked against the schedule the row would *end up*
     with, so switching kind without supplying the other field is a 400 and not a crash in the arming code.
 
@@ -3407,6 +3435,14 @@ def _check_schedule(kind: str, expr: str | None, tz: str | None, run_at: float |
         raise HTTPException(400, f"'{kind}' is not a schedule kind ('cron' for a repeating job, 'once' for a one-off)")
     if tz and not valid_tz(tz):
         raise HTTPException(400, f"'{tz}' is not a timezone name (e.g. 'Europe/Berlin')")
+    if kind == "watch":
+        if expr and not valid_cron(expr):
+            raise HTTPException(400, f"'{expr}' is not a cron expression I can read (five fields, or leave it empty)")
+        try:
+            check_watch_dir(watch_dir)
+        except Exception as e:  # noqa: BLE001 - LocalPathError or a missing folder: say why
+            raise HTTPException(400, f"A directory job needs a folder under your home folder: {e}") from e
+        return
     if kind == "cron":
         if not valid_cron(expr or ""):
             raise HTTPException(400, f"'{expr}' is not a cron expression I can read (five fields, e.g. '30 7 * * *')"
@@ -3436,11 +3472,12 @@ def list_jobs() -> list[dict[str, Any]]:
 
 @app.post("/jobs")
 def create_job(body: JobIn) -> dict[str, Any]:
-    _check_schedule(body.kind, body.cron, body.timezone, body.run_at, fresh_time=True)
+    _check_schedule(body.kind, body.cron, body.timezone, body.run_at, fresh_time=True, watch_dir=body.watch_dir)
     _check_allowed_tools(body.allowed_tools)
     return jobs.create(body.name, body.cron, body.prompt, kind=body.kind, run_at=body.run_at,
                        timezone=body.timezone, enabled=body.enabled, project_id=wsid(body.project_id),
-                       max_retries=body.max_retries, allowed_tools=body.allowed_tools)
+                       max_retries=body.max_retries, allowed_tools=body.allowed_tools,
+                       watch_dir=body.watch_dir and check_watch_dir(body.watch_dir) if body.kind == "watch" else None)
 
 
 @app.patch("/jobs/{id}")
@@ -3454,7 +3491,7 @@ def update_job(id: str, body: JobPatch) -> dict[str, Any]:
     merged = {**cur, **patch}
     _check_allowed_tools(patch.get("allowed_tools"))
     _check_schedule(merged["kind"], merged["cron"], patch.get("timezone"), merged["run_at"],
-                    fresh_time="run_at" in patch)
+                    fresh_time="run_at" in patch, watch_dir=merged.get("watch_dir"))
     # Switching a spent one-off back on is the one re-arm that cannot work: it has no instant left to wait for,
     # so say that instead of leaving the toggle on with nothing scheduled behind it.
     if patch.get("enabled") and merged["kind"] == "once" and "run_at" not in patch and spent(cur):
@@ -3675,6 +3712,7 @@ async def _jobs_startup() -> None:
     try:
         jobs.seed()
         jobs.arm(time.time())
+        await job_policy.boot_retry()
     except Exception:  # noqa: BLE001 - a bad job row must not stop the backend from starting
         log.warning("could not prepare scheduled jobs", exc_info=True)
     app.state.jobs_task = asyncio.create_task(scheduler.loop(), name="job-scheduler")
@@ -3752,7 +3790,9 @@ async def _memory_hits(project_id: str | None, query: str, cfg: dict[str, Any], 
         qvec = await memory_index.query_vec(cfg, query)
         if qvec is None:
             return None
-        return memory_index.search(project_id, query, qvec, limit=40, settings=cfg)
+        hits = memory_index.search(project_id, query, qvec, limit=40, settings=cfg)
+        have = {m["id"] for m in hits}
+        return [*(m for m in memories.pinned(project_id) if m["id"] not in have), *hits]  # pins ride on top of the 40
     except Exception:  # noqa: BLE001
         log.exception("memory retrieval failed; falling back to keyword search")
         return None
@@ -3770,6 +3810,7 @@ async def context_preview(body: ContextPreviewIn) -> dict[str, Any]:
         memory_hits=await _memory_hits(sid(body.project_id), body.query, cfg, conv_settings),
         query=body.query, settings=cfg, conv_settings=conv_settings,
         global_system_prompt=cfg["systemPrompt"], activity=monitor, skills=skills, style=style, meetings=meeting_svc,
+        draft=bool(conv_settings.get("draftMode")),
     )
     return used
 
@@ -4432,6 +4473,22 @@ def google_gmail_draft(body: GmailComposeIn) -> Any:
     return _gcall(google.gmail_draft, body.to, body.subject, body.body, body.reply_to_message_id)
 
 
+class SuggestTimesIn(BaseModel):
+    duration_minutes: int = 30
+    window_start: str
+    window_end: str
+    working_hours: str | None = None
+
+
+@app.post("/integrations/google/gmail/suggest-times")
+async def google_gmail_suggest_times(body: SuggestTimesIn) -> Any:
+    """Compose box: free slots as draft text. Creates no draft, no event, sends nothing."""
+    found = await toolbox.specs["calendar_find_time"].fn({}, body.duration_minutes, body.window_start, body.window_end, None, body.working_hours)
+    if not isinstance(found, dict) or not found.get("slots"):
+        raise HTTPException(422, (found or {}).get("note") or (found or {}).get("error") or "No free slot found")
+    return {"body": times_body(found), "slots": found["slots"]}
+
+
 @app.post("/integrations/google/gmail/send")
 def google_gmail_send(body: GmailComposeIn) -> Any:
     # Queued, not sent: the hold is what makes Undo possible (see outbox.py). The response says so.
@@ -4544,6 +4601,10 @@ async def dashboard() -> dict[str, Any]:
         if _google_has(st, "drive.readonly"):
             fetches.append(fetch("drive", google.drive_files, "", 10))
         await asyncio.gather(*fetches)
+        # A synced task is already a native todo: show it once.
+        if out["tasks"] and tasks_sync.config()["enabled"]:
+            linked = {t["external_id"] for t in todos.list("__all__", True) if t.get("external_id")}
+            out["tasks"] = [t for t in out["tasks"] if t.get("id") not in linked]
     return out
 
 
@@ -4678,6 +4739,45 @@ def move_card(cid: str, body: MoveIn) -> dict[str, Any]:
     if not c:
         raise HTTPException(404)
     return c
+
+
+class ClaimIn(BaseModel):
+    holder: str
+    ttl_s: float = 600
+
+
+class ReleaseIn(BaseModel):
+    token: str
+    reason: str = "finished"
+
+
+@app.get("/boards/{id}/cards/{card}/events")
+def card_events(id: str, card: str) -> list[dict[str, Any]]:
+    return boards.events(card)
+
+
+@app.post("/boards/cards/{cid}/claim")
+def claim_card(cid: str, body: ClaimIn) -> dict[str, Any]:
+    token = boards.claim(cid, body.holder, body.ttl_s)
+    if token is None:
+        raise HTTPException(409, "That card is already claimed")
+    return {"token": token}
+
+
+@app.post("/boards/cards/{cid}/release")
+def release_card(cid: str, body: ReleaseIn) -> dict[str, bool]:
+    try:
+        return {"ok": boards.release(cid, body.token, body.reason)}
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.post("/boards/cards/{cid}/complete")
+def complete_card(cid: str) -> dict[str, bool]:
+    """The user accepting a card as done: the one check the HTTP surface may write."""
+    if not boards.complete(cid, "user_accepted", "user", by="user"):
+        raise HTTPException(404)
+    return {"ok": True}
 
 
 @app.delete("/boards/cards/{cid}")
@@ -4860,9 +4960,14 @@ async def _run_widget(w: dict[str, Any], request: Request, regenerate_code: bool
     if w["kind"] == "html":
         if regenerate_code or not w["code"]:
             samples = await _samples(w["source_ids"])
-            code = await generate_widget_code(cfg, cfg["defaultModel"], w["prompt"] or w["title"], srcs, str(request.base_url).rstrip("/"), w["width"], w["height"], samples)
-            left = lint_widget_html(code, str(request.base_url).rstrip("/"), bool(srcs))
-            w = dashboards.update_widget(w["id"], {"code": code, "refreshed_at": time.time(), "data_error": "; ".join(left)}) or w
+            base = str(request.base_url).rstrip("/")
+            secrets = [(dashboards.source(s_["id"], with_secret=True) or {}).get("secret", "") for s_ in srcs]
+            try:
+                code = await generate_widget_code(cfg, cfg["defaultModel"], w["prompt"] or w["title"], srcs, base, w["width"], w["height"], samples, secrets)
+            except WidgetCodeRejected as e:
+                msg = f"Generated HTML rejected: {e}"
+                return dashboards.update_widget(w["id"], {"code": "", "output": msg, "data_error": msg, "refreshed_at": time.time()}) or w
+            w = dashboards.update_widget(w["id"], {"code": code, "data_error": "", "refreshed_at": time.time()}) or w
     elif w["kind"] == "summary":
         data = await _samples(w["source_ids"])
         text = await generate_summary(cfg, model, w["prompt"], data)
@@ -4999,6 +5104,8 @@ async def recap(force: bool = False) -> dict[str, Any]:
 # ---------------- canvas mode: spaces, windows, notes ----------------
 canvases = Canvases(db)
 toolbox.canvases = canvases
+from . import widget_tools  # noqa: E402
+widget_tools.register(toolbox, dashboards, canvases, _widget_fetch)
 app.include_router(artifact_router(artifacts, settings, on_delete=lambda aid: canvases.delete_windows_for("artifact", aid),
                                    sign=_artifact_render_path, verify=_artifact_render_ok))
 notes = Notes(db)
@@ -6022,6 +6129,7 @@ class MeetingConfigIn(BaseModel):
     diarizeThreshold: float | None = None
     diarizeSpeakers: int | None = None
     dictationCleanup: bool | None = None
+    terms: list[str] | None = None
 
 
 class MeetingSpeakersIn(BaseModel):
@@ -6281,7 +6389,7 @@ async def diarize_meeting(id: str) -> dict[str, Any]:
 
 
 @app.put("/meetings/{id}/speakers")
-def rename_meeting_speakers(id: str, body: MeetingSpeakersIn) -> dict[str, Any]:
+async def rename_meeting_speakers(id: str, body: MeetingSpeakersIn) -> dict[str, Any]:
     try:
         m = meeting_svc.set_speakers(id, body.names)
     except ValueError as e:
@@ -6725,6 +6833,7 @@ def _lint_skill(name: str, description: str, procedure: str, skill_id: str | Non
 
 class SkillImportIn(BaseModel):
     text: str
+    references: dict[str, str] = {}
     project_id: str | None = None
 
 
@@ -6732,7 +6841,8 @@ class SkillImportIn(BaseModel):
 def import_skill_md(body: SkillImportIn) -> dict[str, Any]:
     """Paste a SKILL.md. It becomes a candidate, never an approved skill: approval stays the PATCH above."""
     try:
-        return skillmd.import_text(skills, _lint_skill, body.text, project_id=None if sid(body.project_id) == ALL else sid(body.project_id))
+        return skillmd.import_text(skills, _lint_skill, body.text, project_id=None if sid(body.project_id) == ALL else sid(body.project_id),
+                                references=body.references)
     except skillmd.ImportError_ as e:
         raise HTTPException(422, "; ".join(e.errors))
 

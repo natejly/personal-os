@@ -203,6 +203,18 @@ export default function MeetingsView(): JSX.Element {
     }
   }
 
+  const separateSpeakers = async (): Promise<void> => {
+    const cur = useStore.getState().activeMeeting
+    if (!cur) return
+    try {
+      const r = await api.meetings.diarize(cur.id)
+      toast(r.ok ? `Found ${r.speakers} speaker${r.speakers === 1 ? '' : 's'}.` : r.note, r.ok ? 'info' : 'error')
+      await openMeeting(cur.id)
+    } catch (e) {
+      toast((e as Error).message, 'error')
+    }
+  }
+
   const scope: Scope = libraryScope
   useEffect(() => { void refreshMeetings(query) }, [refreshMeetings, query, scope])
   // Anything still buffered belongs on disk before this view goes away -- and before the window does,
@@ -350,6 +362,9 @@ export default function MeetingsView(): JSX.Element {
                         ? 'Nothing transcribed yet. Clips close on a timer, so the first words take a moment.'
                         : m.sources.length === 0 ? 'No audio was captured for this meeting.' : 'No speech was transcribed.'}
                     </p>
+                  )}
+                  {speakerIds.length === 0 && m.status === 'ready' && m.keep_audio && lines.length > 0 && (
+                    <button type="button" className="ghost-btn small" onClick={() => void separateSpeakers()}>Separate speakers</button>
                   )}
                   {speakerIds.length > 0 && (
                     <div className="mtg-speakers">

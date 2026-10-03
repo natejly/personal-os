@@ -41,7 +41,7 @@ class ToolTests(unittest.TestCase):
         names = list(toolbox.specs)
         i = names.index("todo_list")
         self.assertEqual(names[i:i + 4], TODO_TOOLS)
-        self.assertEqual(names[i - 1], "read_tool_result")  # last of the working-memory block
+        self.assertEqual(names[i - 2:i], ["read_tool_result", "search_tool_results"])  # last of the working-memory block
         # Other modules (mailwatch, planner, health) register right after todos; the shell's own tools
         # resume with boards.
         rest = [n for n in names[i + 4:]

@@ -8,6 +8,7 @@ import { api, getBase } from '../lib/api'
 import { clearHandoff, peekHandoff } from '../lib/handoff'
 import SendToSpace from './SendToSpace'
 import type { Dashboard, DataSource, Widget } from '@shared/types'
+import { oneLine } from '../lib/emailAsk'
 import { lines, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
 import DeclarativeWidget from './DeclarativeWidget'
@@ -189,8 +190,8 @@ export default function DashboardsView(): JSX.Element {
   usePageContext(() => (dash
     ? {
         view: 'dashboards',
-        label: `Dashboard “${dash.name}”`,
-        detail: `Dashboard \`${dash.id}\`${dash.description ? ` — ${dash.description}` : ''}. Its widgets:\n${lines(dash.widgets, (w) => `${w.title} (\`${w.id}\`, ${w.kind})${w.prompt ? ` — asked for: ${w.prompt}` : ''}`)}`,
+        label: `Dashboard “${oneLine(dash.name, 80)}”`,
+        detail: `Dashboard \`${dash.id}\`${dash.description ? ` — ${oneLine(dash.description, 300)}` : ''}. Its widgets:\n${lines(dash.widgets, (w) => `${w.title} (\`${w.id}\`, ${w.kind})${w.prompt ? ` — asked for: ${w.prompt}` : ''}`)}`,
         refs: [{ kind: 'dashboard', id: dash.id, name: dash.name }, ...dash.widgets.slice(0, 20).map((w) => ({ kind: 'widget', id: w.id, name: w.title }))],
         hints: ['Add a widget for this week\u2019s numbers', 'What is this dashboard missing?']
       }

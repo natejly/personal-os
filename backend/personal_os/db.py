@@ -540,7 +540,7 @@ class Database:
             "jobs": {"kind": "TEXT NOT NULL DEFAULT 'cron'", "run_at": "REAL",
                      "max_retries": "INTEGER NOT NULL DEFAULT 1", "consecutive_failures": "INTEGER NOT NULL DEFAULT 0",
                      "paused_reason": "TEXT", "last_skip_at": "REAL", "last_skip_reason": "TEXT",
-                     "allowed_tools": "TEXT", "expires_at": "REAL"},
+                     "allowed_tools": "TEXT", "expires_at": "REAL", "watch_dir": "TEXT", "watch_seen": "TEXT"},
             "action_plans": {"desk_id": "TEXT", "intent": "TEXT NOT NULL DEFAULT ''",
                              "expected_taint": "TEXT NOT NULL DEFAULT '[]'"},
             "approvals": {"desk_id": "TEXT", "danger": "TEXT NOT NULL DEFAULT 'external'",
@@ -554,6 +554,8 @@ class Database:
                           "reasoning_tokens": "INTEGER NOT NULL DEFAULT 0",
                           # Who spent it: 'chat', 'job:<id>' or 'desk:<id>', and which tool round of the reply.
                           "tag": "TEXT NOT NULL DEFAULT ''", "round": "INTEGER NOT NULL DEFAULT 0"},
+            # idem_key: opt-in "same proposal twice is one proposal" (jobs.Proposals.create), unique when set.
+            "proposals": {"idem_key": "TEXT"},
             "plan_steps": {"result_error": "TEXT", "title": "TEXT NOT NULL DEFAULT ''",
                            "danger": "TEXT NOT NULL DEFAULT 'safe'"},
         }
@@ -568,6 +570,7 @@ class Database:
         c.execute("CREATE INDEX IF NOT EXISTS idx_runs_desk ON agent_runs(desk_id, started_at DESC)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_runs_parent ON agent_runs(parent_run_id)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_approvals_desk ON approvals(desk_id, status)")
+        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_proposals_idem ON proposals(idem_key)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_plans_desk ON action_plans(desk_id, created_at)")
         c.commit()
 

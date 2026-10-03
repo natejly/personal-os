@@ -13,7 +13,7 @@ from .. import todo_rules
 from ..google import GoogleNotConnected
 from ..gtasks import TasksSync
 from ..todocal import TodoCalendarMirror
-from ..todos import Todos
+from ..todos import UNTRUSTED_SOURCES, Todos
 from ..tools import ToolSpec, _obj, page, tool_error
 from . import Module, ModuleContext
 
@@ -221,9 +221,9 @@ class TodosModule(Module):
                      "urgency": todo_rules.urgency_of(t, today), "repeat": t.get("repeat"), "estimate_min": t.get("estimate_min"),
                      "tags": t.get("tags"), "parent_id": t.get("parent_id"), "blocked_by": t.get("depends_on")} for t in items]
             out = page(rows, offset=offset, limit=50, key="todos")
-            # A meeting action item is speech from the room, not a task the user typed.
+            # A meeting, an email follow-up, or a task synced from Google was not typed in this app.
             shown = {r["id"] for r in out["todos"]}
-            if any(t.get("source") == "meeting" and t["id"] in shown for t in items):
+            if any(t.get("source") in UNTRUSTED_SOURCES and t["id"] in shown for t in items):
                 ctx["tainted"] = True
                 ctx.setdefault("taint_sources", []).append("todo_list")
             return out
@@ -300,4 +300,6 @@ class TodosModule(Module):
                 await t
 
     def today(self) -> dict[str, Any]:
-        return {"todos": self.store.list("__all__", include_done=False)[:12], "todo_stats": self.store.stats()}
+        d = date.today()
+        rows = sorted(self.store.list("__all__", include_done=False), key=lambda t: -todo_rules.urgency(t, d))  # stable: ties keep the due order
+        return {"todos": rows[:12], "todo_stats": self.store.stats()}

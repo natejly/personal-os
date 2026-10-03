@@ -171,7 +171,8 @@ class Bridge:
         if raw == "off":
             return self._refuse(name, f"{name} is turned off for this chat.")
         # The same effective-mode rules the model's own calls get: taint upgrades on -> ask.
-        mode = self.tb.gate(name, raw, self.ctx)
+        # Args go too, so a cancel of a queued send is visible to the gate and a list is not.
+        mode = self.tb.gate(name, raw, self.ctx, args)
         if mode == "ask":
             if self.approve is None or self.ctx.get("proposal_only"):
                 return self._refuse(name, f"{name} needs the user's approval and there is nobody to ask in this run.")

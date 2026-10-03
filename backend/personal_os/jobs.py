@@ -26,9 +26,11 @@ it skipped, which is what the Agent Inbox shows as "ran late".
 from __future__ import annotations
 
 import asyncio
+import itertools
 import json
 import logging
 import os
+import subprocess
 import time
 from datetime import datetime, timezone as _utc
 from typing import Any, Awaitable, Callable, Iterable
@@ -53,7 +55,9 @@ LATE_GRACE_S = 90.0
 MAX_MISSED_COUNTED = 500
 
 PROPOSAL_STATUSES = ("pending", "accepted", "rejected")
-KINDS = ("cron", "once")
+KINDS = ("cron", "once", "watch")
+# A directory trigger lists one folder (not its subfolders) and remembers at most this many entries.
+WATCH_MAX_ENTRIES = 2000
 
 # What a job run is launched with. The three the user asked for; seeded disabled, because an unattended
 # run costs money and nobody opted in yet (the Agent Inbox offers the toggle).
@@ -202,7 +206,51 @@ def valid_schedule(kind: str, cron: str | None, run_at: float | None) -> bool:
     """Whether this pair of fields is a schedule the scheduler can actually read."""
     if kind == "once":
         return run_at is not None
+    if kind == "watch":
+        return not cron or valid_cron(cron)  # a directory job may have no clock at all
     return valid_cron(cron or "")
+
+
+def check_watch_dir(raw: str | None) -> str:
+    """The folder a directory job may watch: the local-file tools' guard (inside home, no dot-folders)."""
+    from . import mac
+    p = mac.allowed_path(raw or "")
+    if not p.is_dir():
+        raise mac.LocalPathError(f"{p} is not a folder")
+    return str(p)
+
+
+def scan_dir(path: str) -> dict[str, int]:
+    """name -> mtime_ns of what sits directly in `path`. One listing, no native watcher; {} if unreadable.
+    ponytail: top level only, capped; recurse or use fsevents if nested drops matter."""
+    try:
+        with os.scandir(path) as it:
+            return {e.name: e.stat().st_mtime_ns for e in itertools.islice(it, WATCH_MAX_ENTRIES)
+                    if not e.name.startswith(".")}
+    except OSError:
+        return {}
+
+
+class PowerWake:
+    """The real wake sink: asks the macOS power scheduler to wake the Mac at an instant. It needs privileges and
+    may not exist, so it fails quietly; the next wake then catches up late, which is how it worked before."""
+
+    @staticmethod
+    def _pmset(*args: str) -> None:
+        try:
+            subprocess.run(["pmset", "schedule", *args], capture_output=True, timeout=10, check=False)
+        except Exception:  # noqa: BLE001 - never a scheduler fault
+            log.debug("pmset schedule failed", exc_info=True)
+
+    @staticmethod
+    def _stamp(at: float) -> str:
+        return datetime.fromtimestamp(at).strftime("%m/%d/%y %H:%M:%S")
+
+    def schedule(self, at: float) -> None:
+        self._pmset("wake", self._stamp(at))
+
+    def cancel(self, at: float) -> None:
+        self._pmset("cancel", "wake", self._stamp(at))
 
 
 def spent(job: dict[str, Any]) -> bool:
@@ -221,6 +269,8 @@ def next_due_for(job: dict[str, Any], after: float) -> float | None:
     """
     if job.get("kind") == "once":
         return None if spent(job) or job.get("run_at") is None else float(job["run_at"])
+    if job.get("kind") == "watch" and not job.get("cron"):
+        return None  # a directory-only job has no clock slot; the folder is its trigger
     return next_fire(job["cron"], job["timezone"], after)
 
 
@@ -228,9 +278,11 @@ class Jobs:
     """CRUD over the `jobs` table. Every writer keeps `next_due_at` in step with the schedule and `enabled`."""
 
     FIELDS = ("name", "kind", "cron", "run_at", "timezone", "enabled", "prompt", "project_id", "max_retries",
-              "allowed_tools")
+              "allowed_tools", "watch_dir")
     # Changing any of these re-arms the job: a new schedule must not inherit the old one's pending slot.
     RE_ARM = frozenset({"kind", "cron", "run_at", "timezone", "enabled"})
+    # Taking a baseline listing when these change is what makes "idle until a file appears" true.
+    WATCH_FIELDS = frozenset({"watch_dir", "enabled", "kind"})
 
     def __init__(self, db: Database):
         self.db = db
@@ -239,6 +291,7 @@ class Jobs:
     def _row(r: Any) -> dict[str, Any] | None:
         d = row_to_dict(r)
         if d is not None:
+            d.pop("watch_seen", None)  # the folder listing is bookkeeping, not part of the job
             d["enabled"] = bool(d["enabled"])
             # NULL = inherit every tool (what every job did before this column); otherwise a JSON list of names.
             raw = d.get("allowed_tools")
@@ -259,7 +312,8 @@ class Jobs:
 
     def create(self, name: str, cron: str, prompt: str, *, kind: str = "cron", run_at: float | None = None,
                timezone: str | None = None, enabled: bool = False, project_id: str | None = None,
-               at: float | None = None, max_retries: int = 1, allowed_tools: list[str] | None = None) -> dict[str, Any]:
+               at: float | None = None, max_retries: int = 1, allowed_tools: list[str] | None = None,
+               watch_dir: str | None = None) -> dict[str, Any]:
         tz = timezone or local_tz_name()
         t = at if at is not None else now()
         jid = new_id()
@@ -269,9 +323,10 @@ class Jobs:
         nxt = next_due_for(fresh, t) if enabled else None
         with self.db.tx() as c:
             c.execute("INSERT INTO jobs(id, name, kind, cron, run_at, timezone, enabled, prompt, project_id, next_due_at, "
-                      "created_at, updated_at, max_retries, allowed_tools) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                      "created_at, updated_at, max_retries, allowed_tools, watch_dir, watch_seen) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                       (jid, name, kind, cron, run_at, tz, int(enabled), prompt, project_id, nxt, t, t, int(max_retries),
-                       None if allowed_tools is None else json.dumps(list(allowed_tools))))
+                       None if allowed_tools is None else json.dumps(list(allowed_tools)), watch_dir,
+                       json.dumps(scan_dir(watch_dir)) if watch_dir else None))
         return self.get(jid)  # type: ignore[return-value]
 
     def update(self, id: str, patch: dict[str, Any], at: float | None = None) -> dict[str, Any] | None:
@@ -301,6 +356,8 @@ class Jobs:
             cols["next_due_at"] = next_due_for(merged, t) if merged["enabled"] else None
         if not cols:
             return job
+        if self.WATCH_FIELDS & cols.keys() and merged.get("watch_dir"):
+            cols["watch_seen"] = json.dumps(scan_dir(merged["watch_dir"]))
         sets = ", ".join(f"{k}=?" for k in cols)
         with self.db.tx() as c:
             c.execute(f"UPDATE jobs SET {sets}, updated_at=? WHERE id=?", (*cols.values(), t, id))
@@ -321,6 +378,30 @@ class Jobs:
         with self.db.tx() as c:
             r = c.execute("SELECT MIN(next_due_at) AS t FROM jobs WHERE enabled=1 AND next_due_at IS NOT NULL").fetchone()
         return float(r["t"]) if r and r["t"] is not None else None
+
+    def watching(self) -> list[dict[str, Any]]:
+        """Enabled directory jobs."""
+        with self.db.tx() as c:
+            rows = c.execute("SELECT * FROM jobs WHERE enabled=1 AND kind='watch' AND watch_dir IS NOT NULL "
+                             "AND watch_dir<>''").fetchall()
+        return [d for d in (self._row(r) for r in rows) if d]
+
+    def poll_dir(self, job: dict[str, Any]) -> int:
+        """How many entries are new or touched in the job's folder since the last look, and remember this look.
+        The first look (no baseline yet) only records one."""
+        try:
+            check_watch_dir(job["watch_dir"])
+        except Exception:  # noqa: BLE001 - a folder that left the guard (moved, now hidden) just goes quiet
+            return 0
+        new = scan_dir(job["watch_dir"])
+        with self.db.tx() as c:
+            r = c.execute("SELECT watch_seen FROM jobs WHERE id=?", (job["id"],)).fetchone()
+        raw = r["watch_seen"] if r else None
+        old = json.loads(raw) if raw else None
+        if old is None or new != old:
+            with self.db.tx() as c:
+                c.execute("UPDATE jobs SET watch_seen=? WHERE id=?", (json.dumps(new), job["id"]))
+        return 0 if old is None else sum(1 for k, v in new.items() if old.get(k) != v)
 
     def arm(self, at: float) -> int:
         """Give every enabled job with no armed slot one, from now. A job armed this way has nothing to catch up.
@@ -403,14 +484,20 @@ class Proposals:
 
     def create(self, *, run_id: str | None, tool: str, args: dict[str, Any], job_id: str | None = None,
                conversation_id: str | None = None, message_id: str | None = None, call_id: str | None = None,
-               at: float | None = None) -> dict[str, Any]:
+               at: float | None = None, scope: str | None = None) -> dict[str, Any]:
+        """`scope` (a card or conversation id) makes the insert idempotent: the same scope + tool + args digest
+        returns the first row instead of adding a second. Without it every call is a new proposal."""
         pid = new_id()
         t = at if at is not None else now()
+        digest = args_digest(args)
+        key = f"{scope}:{tool}:{digest}" if scope else None
         with self.db.tx() as c:
-            c.execute("INSERT INTO proposals(id, run_id, job_id, conversation_id, message_id, call_id, tool, args, args_digest, "
-                      "status, created_at) VALUES(?,?,?,?,?,?,?,?,?,'pending',?)",
+            c.execute("INSERT OR IGNORE INTO proposals(id, run_id, job_id, conversation_id, message_id, call_id, tool, args, args_digest, "
+                      "status, created_at, idem_key) VALUES(?,?,?,?,?,?,?,?,?,'pending',?,?)",
                       (pid, run_id, job_id, conversation_id, message_id, call_id, tool,
-                       json.dumps(args, ensure_ascii=False, default=str), args_digest(args), t))
+                       json.dumps(args, ensure_ascii=False, default=str), digest, t, key))
+            if key:
+                pid = c.execute("SELECT id FROM proposals WHERE idem_key=?", (key,)).fetchone()["id"]
         return self.get(pid)  # type: ignore[return-value]
 
     def get(self, id: str) -> dict[str, Any] | None:
@@ -487,18 +574,38 @@ class Scheduler:
 
     def __init__(self, jobs: Jobs, launch: Callable[[dict[str, Any], dict[str, Any]], Awaitable[str | None]],
                  clock: Callable[[], float] = time.time,
-                 sleep: Callable[[float], Awaitable[None]] | None = None, policy: Any = None) -> None:
+                 sleep: Callable[[float], Awaitable[None]] | None = None, policy: Any = None, wake: Any = None) -> None:
         self.jobs = jobs
         self.launch = launch
         # Optional run policy (jobs_policy.JobPolicy): the overlap guard before a launch, the watcher after it.
         self.policy = policy
         self.clock = clock
         self._sleep = sleep
+        # Optional OS wake sink with schedule(at) / cancel(at): asks the machine to be awake for the next slot.
+        self.wake = wake
+        self._woken: float | None = None
         self.last_tick: float | None = None
         self.fires = 0
 
     async def _nap(self, seconds: float) -> None:
         await (self._sleep(seconds) if self._sleep is not None else asyncio.sleep(seconds))
+
+    def sync_wake(self) -> None:
+        """Keep one OS wake booked for the earliest due slot: none when nothing is due, and an unchanged instant
+        books nothing new. This only asks the machine to be awake; `tick` is still the one launcher."""
+        if self.wake is None:
+            return
+        want = self.jobs.earliest_due()
+        if want == self._woken:
+            return
+        try:
+            if self._woken is not None:
+                self.wake.cancel(self._woken)
+            if want is not None:
+                self.wake.schedule(want)
+        except Exception:  # noqa: BLE001 - a wake that cannot be booked must not stop the scheduler
+            log.debug("OS wake could not be updated", exc_info=True)
+        self._woken = want
 
     def plan(self, job: dict[str, Any], at: float) -> dict[str, Any]:
         """What this fire is for: the slot it belongs to, how late it is, how many slots it collapses.
@@ -530,8 +637,20 @@ class Scheduler:
             with self.jobs.db.tx() as c:
                 c.execute("UPDATE jobs SET expires_at=? WHERE enabled=1 AND kind!='once' AND expires_at IS NULL",
                           (at + days * 86400,))
-        for job in self.jobs.due(at):
+        due = self.jobs.due(at)
+        # Directory jobs: one listing each. A job that is also clock-due is still one launch this tick.
+        seen = {j["id"] for j in due}
+        hits = {j["id"]: n for j in self.jobs.watching() if (n := self.jobs.poll_dir(j))}
+        due += [j for j in self.jobs.watching() if j["id"] in hits and j["id"] not in seen]
+        for job in due:
             once = job["kind"] == "once"
+            if job["next_due_at"] is None:  # directory-only: fires on the folder, leaves any clock slot alone
+                fire = {"job_id": job["id"], "job": job["name"], "kind": job["kind"], "cron": job["cron"],
+                        "timezone": job["timezone"], "due_at": at, "fired_at": at, "late_seconds": 0.0,
+                        "missed_slots": 0, "late": False}
+                self.jobs.mark_fired(job["id"], fired_at=at, due_at=at, next_due_at=None)
+                await self._start(job, {**fire, "trigger": "dir", "collapsed": hits[job["id"]]}, fired)
+                continue
             if not valid_schedule(job["kind"], job["cron"], job["run_at"]):
                 bad = "has no time to run at" if once else f"'{job['cron']}' is not a cron expression this can read"
                 self.jobs.mark_fired(job["id"], fired_at=at, due_at=float(job["next_due_at"]), next_due_at=None,
@@ -543,34 +662,42 @@ class Scheduler:
             nxt = None if once else next_fire(job["cron"], job["timezone"], at)
             # Advance the clock bookkeeping before launching: a launch that throws must not re-fire next pass.
             self.jobs.mark_fired(job["id"], fired_at=at, due_at=fire["due_at"], next_due_at=nxt, disable=once)
+            if job["id"] in hits:
+                fire = {**fire, "trigger": "clock+dir", "collapsed": hits[job["id"]]}
             if days > 0 and job.get("expires_at") is not None and at >= float(job["expires_at"]):
                 # One last fire (this one), then the job stops until the user switches it back on.
                 self.jobs.pause(job["id"], "expired", at)
-            run_id: str | None = None
-            if self.policy is not None:
-                ok, why = await self.policy.admit(job, fire)
-                if not ok:
-                    # The slot is consumed (mark_fired ran): a long run must not buy a catch-up when it ends.
-                    self.fires += 1
-                    fired.append({**fire, "run_id": None, "skipped": why})
-                    continue
-            try:
-                run_id = await self.launch(job, fire)
-            except Exception as e:  # noqa: BLE001 - one bad job must not stop the others
-                log.exception("job %s could not be launched", job["name"])
-                self.jobs.mark_launched(job["id"], None, str(e))
-            else:
-                self.jobs.mark_launched(job["id"], run_id)
-                if self.policy is not None and run_id:
-                    self.policy.watch_soon(job, fire, run_id)
-            self.fires += 1
-            fired.append({**fire, "run_id": run_id})
+            await self._start(job, fire, fired)
+        self.sync_wake()
         return fired
+
+    async def _start(self, job: dict[str, Any], fire: dict[str, Any], fired: list[dict[str, Any]]) -> None:
+        """Admit and launch one fire, after its clock bookkeeping is already safe."""
+        run_id: str | None = None
+        if self.policy is not None:
+            ok, why = await self.policy.admit(job, fire)
+            if not ok:
+                # The slot is consumed (mark_fired ran): a long run must not buy a catch-up when it ends.
+                self.fires += 1
+                fired.append({**fire, "run_id": None, "skipped": why})
+                return
+        try:
+            run_id = await self.launch(job, fire)
+        except Exception as e:  # noqa: BLE001 - one bad job must not stop the others
+            log.exception("job %s could not be launched", job["name"])
+            self.jobs.mark_launched(job["id"], None, str(e))
+        else:
+            self.jobs.mark_launched(job["id"], run_id)
+            if self.policy is not None and run_id:
+                self.policy.watch_soon(job, fire, run_id)
+        self.fires += 1
+        fired.append({**fire, "run_id": run_id})
 
     async def loop(self) -> None:
         """Sleep to the next slot (capped), tick, repeat. An idle wake is one SELECT and no model call."""
         while True:
             try:
+                self.sync_wake()
                 nxt = self.jobs.earliest_due()
                 gap = MAX_SLEEP_S if nxt is None else max(0.5, min(MAX_SLEEP_S, nxt - self.clock()))
                 await self._nap(gap)

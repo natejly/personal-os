@@ -174,7 +174,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "micDeviceName": "",      # the name that index had when it was picked, so a reshuffle is refused
     "outputDevice": "",
     "outputDeviceName": "",
-    "sources": ["mic"],
+    "sources": ["mic", "output"],  # output (the far side) that cannot open is dropped and reported
     "segmentSeconds": 20,     # how far behind live the transcript runs
     # A recording made inside a doc ends each clip at a pause in speech, so these two are ceilings:
     # the longest a clip runs when nobody stops talking. Most clips close sooner.
@@ -191,6 +191,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "recipes": [],            # [{id, name, prompt}] saved focus lines for a summary
     "summaryLanguage": "auto",  # 'auto' = the transcript's majority language, else a language name
     "enhanceOnStop": True,
+    "terms": [],              # names/jargon prepended to the STT prompt, with the attendees
     "enhanceModel": "",
     "maxTranscriptChars": 48000,
     "minSummaryWords": 40,     # a doc recording shorter than this is not summarised
@@ -391,6 +392,11 @@ def _conference_link(event: dict[str, Any]) -> str:
     return ""
 
 
+def _scrub_text(text: str) -> str:
+    """Credential rules, then the email and phone rules (not the entropy threshold, already in the first set)."""
+    return redact.scrub(redact.scrub_secrets(text), ("email", "phone"), secret_assign=False)
+
+
 def _scrub_detail(detail: Any, depth: int = 0) -> Any:
     """Credential-scrub every string inside an STT detail payload.
 
@@ -402,7 +408,7 @@ def _scrub_detail(detail: Any, depth: int = 0) -> Any:
     timings where it left them.
     """
     if isinstance(detail, str):
-        return redact.scrub_secrets(detail)
+        return _scrub_text(detail)
     if depth > 8:  # a pathological payload must not recurse the request thread to death
         return detail
     if isinstance(detail, list):
@@ -865,11 +871,10 @@ class Meetings:
         body = str(text or "")
         payload = detail if detail is not None else {}
         if self.config().get("redactSecrets", True):
-            # Credential rules ONLY, never activity.Gate.scrub: its identity rules replace every
-            # address with [email] and every phone-shaped digit run with [phone]
-            # (redact.py), which would erase attendee identity from inside the conversation.
+            # Credential rules plus email and phone; activity.Gate.scrub's other extras
+            # (the secret-assign sweep) stay out.
             if body:
-                body = redact.scrub_secrets(body)
+                body = _scrub_text(body)
             # The same words arrive twice - once as `text`, once per utterance inside `detail` -
             # so both copies go through the redactor or neither is redacted.
             payload = _scrub_detail(payload)
@@ -993,7 +998,7 @@ class Meetings:
             text = (r["text"] or "").strip()
             if not text:
                 continue
-            utts = _speaker_utterances(r["detail"]) if r["channel"] != "mic" else []
+            utts = _speaker_utterances(r["detail"])  # mic gains ids only when it was diarized as the sole channel
             if utts:
                 for u in utts:
                     spk = str(u.get("speaker") or "")
@@ -1214,8 +1219,9 @@ class Meetings:
                 "SELECT id, text FROM meeting_action_items WHERE meeting_id=? ORDER BY created_at",
                 (meeting_id,)).fetchall()}
             for it in items or []:
-                # truncated FIRST, so the key matches the one the stored row will produce
-                text = str((it or {}).get("text") or "").strip()[:500]
+                # One line, then truncated, so a newline in someone else's words cannot open a
+                # section later, and the key matches the one the stored row will produce.
+                text = " ".join(str((it or {}).get("text") or "").replace("\r", " ").split())[:500]
                 if not text:
                     continue
                 key = self._item_key(text)
@@ -1224,11 +1230,12 @@ class Meetings:
                     c.execute("UPDATE meeting_action_items SET revision_id=? WHERE id=?",
                               (revision_id, existing))
                     continue
+                owner = " ".join(str(it.get("owner") or "").replace("\r", " ").split())[:200]
                 rid = new_id()
                 c.execute(
                     "INSERT INTO meeting_action_items(id,meeting_id,revision_id,text,owner,due,created_at)"
                     " VALUES(?,?,?,?,?,?,?)",
-                    (rid, meeting_id, revision_id, text, str(it.get("owner") or "")[:200],
+                    (rid, meeting_id, revision_id, text, owner,
                      str(it.get("due") or "")[:10], t))
                 seen[key] = rid
         return self.action_items(meeting_id)
@@ -1262,10 +1269,11 @@ class Meetings:
             m = c.execute("SELECT title, project_id FROM meetings WHERE id=?", (item["meeting_id"],)).fetchone()
         if item["todo_id"]:
             return item
-        title = (m["title"] if m else "") or "Untitled meeting"
+        meeting_title = " ".join(str((m["title"] if m else "") or "").replace("\r", " ").split())[:200] or "Untitled meeting"
+        title = " ".join(str(item.get("text") or "").replace("\r", " ").split())[:500] or "Untitled action"
         todo = todos.create(
-            title=item["text"], project_id=project_id if project_id is not None else (m["project_id"] if m else None),
-            notes=f"From meeting: {title}", due=_due_or_none(item["due"]), priority=2,
+            title=title, project_id=project_id if project_id is not None else (m["project_id"] if m else None),
+            notes=f"From meeting: {meeting_title}", due=_due_or_none(item["due"]), priority=2,
             source="meeting")
         with self.db.tx() as c:
             c.execute("UPDATE meeting_action_items SET status='added', todo_id=? WHERE id=?", (todo["id"], item_id))
@@ -1641,7 +1649,7 @@ class MeetingService:
             max_audio_bytes=int(cfg["maxAudioBytes"]),
             drain_seconds=float(cfg["drainSeconds"]),
             on_disk_check=lambda: self.meetings.audio_bytes(meeting_id),
-            vocab=meeting_notes.vocab_prompt(m) if cfg.get("vocabularyPrompt", True) else "",
+            vocab=self._vocab(meeting_id, cfg),
         )
         if cfg["keepAudio"] and not m.get("keep_audio"):
             self.meetings.patch(meeting_id, {"keep_audio": True})   # the wavs are kept, so the row says so (playback gates on it)
@@ -1652,6 +1660,15 @@ class MeetingService:
         log.info("meetings: recording %s (%s)", meeting_id, ", ".join(channels) or "no channels")
         self._emit("status", meeting_id, status="recording")
         return self.meetings.get(meeting_id)
+
+    def _vocab(self, meeting_id: str, cfg: dict[str, Any]) -> str:
+        """The user's terms, then the title and attendee names (unless vocabularyPrompt is off), as the head of the
+        STT prompt (the previous clip's tail follows)."""
+        m = self.meetings.get(meeting_id) or {}
+        words = [str(t).strip() for t in cfg.get("terms") or []]
+        if cfg.get("vocabularyPrompt", True):
+            words += [w.strip() for w in meeting_notes.vocab_prompt(m).split(",")]
+        return ", ".join(dict.fromkeys(w for w in words if w))[:300]  # ponytail: 300 chars keeps room for the tail
 
     def _release_recorder(self, meeting_id: str, deleting: bool) -> None:
         """Stop a live capture (no drain) before its meeting or its audio is removed.
@@ -1864,11 +1881,9 @@ class MeetingService:
                       template: str | None = None) -> dict[str, Any] | None:
         """Cache-or-generate, like /recap (app.py:1881-1907): an existing proposal is the answer.
 
-        AUTO-APPLY RULE: the revision is accepted for the user only when the pass SUCCEEDED and
-        `enhanced` is empty, or still byte-identical to the last applied revision's `after` - i.e.
-        they have not hand-edited it. That is what keeps Granola's "the notes just appear" feel
-        without ever overwriting a human edit; once they have touched it, the proposal waits for
-        accept or reject.
+        NEVER AUTO-APPLIED: a successful pass is a pending revision until `accept`, whether or not
+        `enhanced` is empty, the same as a doc recording's summary. The model's text is not the
+        user's own words and `enhanced` is read by `context_block`.
 
         A DEGRADED pass is never auto-applied. Its markdown is `meeting_notes._mechanical`'s
         fallback - the user's notes followed by the raw transcript - and `enhanced` is read by
@@ -1884,8 +1899,8 @@ class MeetingService:
         if not force:
             if m["pending"]:
                 return m["pending"]
-            # Auto-apply leaves nothing pending, so without this a second enhance of an unchanged
-            # meeting would pay for the same answer again. Same cache-or-generate as /recap.
+            # Once accepted, a second enhance of an unchanged meeting would pay for the same answer
+            # again. Same cache-or-generate as /recap.
             last = self.meetings.last_applied(meeting_id)
             if last is not None and m["enhanced"] and m["enhanced"] == last["after"]:
                 return last
@@ -1923,11 +1938,6 @@ class MeetingService:
         if res["headline"]:
             patch["summary"] = res["headline"]
         self.meetings.patch(meeting_id, patch)
-        last = self.meetings.last_applied(meeting_id)
-        untouched = not m["enhanced"].strip() or (last is not None and m["enhanced"] == last["after"])
-        if untouched and not res["degraded"]:
-            self.meetings.accept(rev["id"])
-            return self.meetings.revision(rev["id"])
         return rev
 
     # ---- the doc summary pass ----
@@ -2120,7 +2130,9 @@ class MeetingService:
                     "note": "no speaker-separation backend is installed; see the diarize row in Capabilities"}
         segs = [s for s in self.meetings.segments(meeting_id, limit=100000)
                 if s["state"] == "done" and s["wav_path"] and Path(s["wav_path"]).is_file()]
-        channel = "import" if any(s["channel"] == "import" for s in segs) else "output"
+        chans = {s["channel"] for s in segs}
+        # The mic is only diarized when it is the sole channel; with a far side its lines stay [you].
+        channel = "import" if "import" in chans else "output" if "output" in chans else "mic"
         segs = sorted((s for s in segs if s["channel"] == channel), key=lambda s: (s["t_start"], s["seq"]))
         if not segs:
             return {"ok": False, "backend": name, "speakers": 0, "note": "no retained audio to separate speakers in"}
@@ -2142,7 +2154,10 @@ class MeetingService:
             parts = [{"start": float(x.get("start") or 0.0), "end": float(x.get("end") or 0.0),
                       "text": str(x.get("text") or "").strip()}
                      for x in ((s.get("detail") or {}).get("segments") or []) if isinstance(x, dict)]
-            parts = [u for u in parts if u["text"]] or [{"start": 0.0, "end": length, "text": (s["text"] or "").strip()}]
+            parts = [u for u in parts if u["text"]]
+            if not parts:  # untimed text (Speech) has nothing to align to: no speaker ids
+                offset += length
+                continue
             shifted = [{**u, "start": u["start"] + offset, "end": u["end"] + offset} for u in parts]
             merged = diarize.merge_adjacent(diarize.assign_speakers(shifted, turns))
             utts = [{"start": round(u["start"] - offset + float(s["t_start"]), 3),
@@ -2171,7 +2186,20 @@ class MeetingService:
         if self.meetings.get(meeting_id, include_hidden=False) is None:
             return None
         self.meetings.set_speaker_names(meeting_id, names)
-        return self._settle_transcript(meeting_id) or self.meetings.get(meeting_id)
+        out = self._settle_transcript(meeting_id) or self.meetings.get(meeting_id)
+        m = out or {}
+        if (m.get("enhanced") or m.get("pending")) and not m.get("doc_id"):
+            # Notes written under the old names are stale: propose a fresh pass, never apply it.
+            with contextlib.suppress(RuntimeError):  # no running loop (sync caller): nothing to queue on
+                asyncio.ensure_future(self._reenhance_quietly(meeting_id))
+        return out
+
+    async def _reenhance_quietly(self, meeting_id: str) -> None:
+        try:
+            await self.enhance(meeting_id, force=True)
+        except Exception as e:  # noqa: BLE001 - a queued pass has nobody to raise to
+            self.last_error = f"{type(e).__name__}: {e}"
+            log.warning("meetings: re-enhance %s: %s", meeting_id, e)
 
     # ---- calendar ----
     async def suggest(self) -> list[dict[str, Any]]:
@@ -2271,7 +2299,7 @@ class MeetingService:
             if last is not None and last["degraded"] and body == (last["after"] or "").strip():
                 body = (full.get("notes") or "").strip()
             first = next((ln.strip() for ln in body.splitlines() if ln.strip() and not ln.startswith("#")), "")
-            head = m["summary"] or m["title"] or "(untitled)"
+            head = " ".join((m["summary"] or m["title"] or "(untitled)").replace("\r", " ").replace("\n", " ").split())[:200] or "(untitled)"
             parts.append(f"- {head}" + (f": {first[:200]}" if first else ""))
         return "\n".join(parts)[:max_chars]
 

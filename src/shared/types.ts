@@ -241,6 +241,8 @@ export interface PermissionCard {
   suggestions: string[]
   /** False for a forced card (taint, plan mode, doom loop): it can only be answered once. */
   session: boolean
+  /** The tool's danger tier; an 'external' write offers no whole-tool standing grant. */
+  danger?: string
 }
 
 /** Allow / ask / deny lists of `Tool(pattern)` rules (permrules.py). */
@@ -545,8 +547,12 @@ export interface ConversationSettings {
   useActivity: boolean
   /** Inject the writing-style profile, so drafts sound like the user. */
   useStyle: boolean
+  /** Explicit draft turn: the voice block is only injected while this is on (never on a tainted chat). Defaults off. */
+  draftMode?: boolean
   /** Per-chat plan mode. Absent reads as the global default; a desk writes it when it is created. */
   planMode?: 'off' | 'auto' | 'always'
+  /** Absent inherits Settings.skipPermissions. True runs tool calls that would have asked, in this chat. */
+  skipPermissions?: boolean
   /** Inject the recent-meetings block. Optional because stored conversations predate the key; a
    *  missing value reads as on, the way the backend's `.get(..., True)` does. */
   useMeetings?: boolean
@@ -663,6 +669,9 @@ export interface GraphEdge {
   relation: string
   properties: Record<string, unknown>
   created_at: number
+  fact?: string
+  valid_at?: number | null
+  invalid_at?: number | null
 }
 
 export interface GraphData {
@@ -1049,6 +1058,10 @@ export interface TodayDashboard {
   todo_stats: { open: number; overdue: number; today: number }
   /** Visible health metrics with today's value; missing from a backend without the health module. */
   health?: HealthToday[]
+  /** Mail-watch counts, from the table; absent without the module. */
+  mail_watch?: { to_reply: number; awaiting_reply_overdue: number }
+  /** The day plan the planner proposes from the saved calendar; nothing is written until confirmed. */
+  planner_blocks?: PlannerBlock[]
   projects: Project[]
   recent_memories: Memory[]
   recent_conversations: Conversation[]
@@ -1111,6 +1124,8 @@ export interface Settings {
   permissionRules?: PermissionRules
   /** 'deny': a background run that would have to ask is refused instead of waiting for someone. */
   unattendedApprovals?: 'ask' | 'deny'
+  /** Chats with no own value follow this. Off by default. Scheduled jobs ignore it. */
+  skipPermissions?: boolean
   /** Keep the system prompt stable and put per-turn retrieval beside the newest message (prompt caching). Default on. */
   cacheLayout?: boolean
   otelExport?: OtelExportConfig
@@ -1408,7 +1423,9 @@ export interface BoardCard {
   id: string; board_id: string; column_id: string; title: string; description: string; position: number
   due: string | null; priority: number; labels: string[]; created_at: number; updated_at: number
   over_limit?: boolean
+  claimed_by?: string | null; lease_expires_at?: number | null
 }
+export interface CardEvent { id: string; seq: number; card_id: string; actor: string; kind: string; payload: Record<string, unknown>; created_at: number }
 export interface Board { id: string; project_id: string | null; name: string; created_at: number; card_count?: number; columns: BoardColumn[]; cards: BoardCard[] }
 
 export interface DataSource {
@@ -2497,6 +2514,8 @@ export interface MeetingConfig {
   /** 'auto' follows the transcript's majority language, otherwise a language name. */
   summaryLanguage: string
   enhanceOnStop: boolean
+  /** Names and jargon given to the transcriber, along with the attendees. */
+  terms: string[]
   /** Blank falls back to the extraction model, then the default model. */
   enhanceModel: string
   /** Head-and-tail cap on the transcript sent to the model; decisions land at the end. */

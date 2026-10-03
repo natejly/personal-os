@@ -38,6 +38,15 @@ assert d.lint_widget_html("<html><body>  </body></html>") == ["the body is empty
 assert any("fetch" in i for i in d.lint_widget_html("<html><body>hi</body></html>", BASE, True))
 assert run(GOOD) == GOOD and len(CALLS) == 1
 assert run(BAD, GOOD) == GOOD and len(CALLS) == 2
-assert run(BAD, BAD) == BAD and len(CALLS) == 2
+# An external load the one repair could not remove is refused rather than saved: the sandbox would block it anyway.
+try:
+    run(BAD, BAD)
+    raise AssertionError("an unrepaired external load must be rejected")
+except d.WidgetCodeRejected:
+    pass
+assert len(CALLS) == 2
+# A lint-only problem (no fetch) that the repair does not improve keeps the original.
+NOFETCH = "<!doctype html><html><body>hi</body></html>"
+assert run(NOFETCH, NOFETCH) == NOFETCH and len(CALLS) == 2
 assert d.lint_widget_html(BAD, BASE, True)
 print("ok")

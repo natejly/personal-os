@@ -104,7 +104,7 @@ class Projects:
 # reasoning_effort, which on Kimi K3 means the model's own max. See llm.effort_param.
 DEFAULT_EFFORT = "low"
 DEFAULT_CONV_SETTINGS = {"effort": DEFAULT_EFFORT, "fast": False, "useMemory": True, "useGraph": True, "useDocuments": True, "useActivity": True,
-                         "useStyle": True, "useMeetings": True, "autoLearn": True, "useTools": True, "tools": {}}
+                         "useStyle": True, "draftMode": False, "useMeetings": True, "autoLearn": True, "useTools": True, "tools": {}}
 
 
 class Conversations:
@@ -211,10 +211,10 @@ class Conversations:
         """history() with the ids and timestamps compaction needs to say where a summary ends."""
         with self.db.tx() as c:
             rows = c.execute(
-                "SELECT id, role, content, created_at FROM messages WHERE conversation_id=? AND content != '' ORDER BY created_at, rowid",
+                "SELECT id, role, content, created_at, tool_events FROM messages WHERE conversation_id=? AND content != '' ORDER BY created_at, rowid",
                 (conv_id,),
             ).fetchall()
-        return [dict(r) for r in rows]
+        return [row_to_dict(r, ("tool_events",)) for r in rows]
 
 
 # ---------------- Memories ----------------
@@ -363,6 +363,13 @@ class Memories:
         with self.db.tx() as c:
             c.execute("DELETE FROM memories WHERE id=?", (id,))
             c.execute("DELETE FROM memories_fts WHERE memory_id=?", (id,))
+
+    def pinned(self, project_id: str | None) -> list[dict[str, Any]]:
+        """Every live pinned memory in scope: a pin is always in context, whatever the query."""
+        where, args = _scope_clause(project_id)
+        with self.db.tx() as c:
+            rows = c.execute(f"SELECT * FROM memories WHERE {where} AND pinned=1 AND invalid_at IS NULL AND deleted_at IS NULL ORDER BY updated_at DESC", args).fetchall()
+        return [d for d in (row_to_dict(r) for r in rows) if d]
 
     def for_context(self, project_id: str | None, query: str, limit: int = 40) -> list[dict[str, Any]]:
         """Pinned + recent memories, plus FTS hits for the query, deduped."""

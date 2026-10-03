@@ -1,6 +1,7 @@
 """Kanban boards: boards → columns → cards."""
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from .db import Database, new_id, now, row_to_dict
@@ -33,7 +34,23 @@ CREATE TABLE IF NOT EXISTS cards (
   updated_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_cards_col ON cards(column_id, position);
+-- Append-only: rows are only ever inserted, in the same transaction as the change they describe.
+CREATE TABLE IF NOT EXISTS card_events (
+  id TEXT PRIMARY KEY,
+  seq INTEGER NOT NULL UNIQUE,
+  card_id TEXT NOT NULL,
+  actor TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  payload TEXT NOT NULL DEFAULT '{}',
+  created_at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_card_events_card ON card_events(card_id, seq);
 """
+
+# What an agent holding a claim may log. `completed` is deliberately absent: only Boards.complete writes it.
+AGENT_EVENT_KINDS = {"comment", "artifact", "failed"}
+COMPLETE_CHECKS = {"user_accepted", "path_exists", "tests_passed"}
+RELEASE_REASONS = {"finished", "expired", "preempted", "cancelled"}
 
 DEFAULT_COLUMNS = ["Backlog", "To do", "In progress", "Done"]
 
@@ -43,6 +60,10 @@ class Boards:
         self.db = db
         with db.tx() as c:
             c.executescript(SCHEMA)
+            have = {r["name"] for r in c.execute("PRAGMA table_info(cards)")}
+            for col, ddl in (("claimed_by", "TEXT"), ("claim_token", "TEXT"), ("lease_expires_at", "REAL")):
+                if col not in have:
+                    c.execute(f"ALTER TABLE cards ADD COLUMN {col} {ddl}")
 
     def list(self) -> list[dict[str, Any]]:
         with self.db.tx() as c:
@@ -121,6 +142,105 @@ class Boards:
         card["over_limit"] = bool(lim) and n > lim
         return card
 
+    @staticmethod
+    def _log(c: Any, card_id: str, actor: str, kind: str, payload: dict[str, Any] | None = None, at: float | None = None) -> None:
+        # seq is computed inside the writing transaction; SQLite has one writer, and UNIQUE(seq) backs that up.
+        c.execute("INSERT INTO card_events(id,seq,card_id,actor,kind,payload,created_at) "
+                  "VALUES(?,(SELECT COALESCE(MAX(seq),0)+1 FROM card_events),?,?,?,?,?)",
+                  (new_id(), card_id, actor, kind, json.dumps(payload or {}, default=str), now() if at is None else at))
+
+    def events(self, card_id: str) -> list[dict[str, Any]]:
+        with self.db.tx() as c:
+            rows = c.execute("SELECT * FROM card_events WHERE card_id=? ORDER BY seq", (card_id,)).fetchall()
+        return [row_to_dict(r, ("payload",)) for r in rows]  # type: ignore[misc]
+
+    # claims: one conditional UPDATE decides who holds a card; the lease is cleared by moving the card
+    def claim(self, card_id: str, holder: str, ttl_s: float = 600, at: float | None = None) -> str | None:
+        t = now() if at is None else at
+        token = new_id()
+        with self.db.tx() as c:
+            prev = c.execute("SELECT claimed_by, claim_token FROM cards WHERE id=?", (card_id,)).fetchone()
+            n = c.execute("UPDATE cards SET claimed_by=?, claim_token=?, lease_expires_at=? WHERE id=? "
+                          "AND (claim_token IS NULL OR lease_expires_at<=?)", (holder, token, t + ttl_s, card_id, t)).rowcount
+            if not n:
+                return None
+            if prev and prev["claim_token"]:
+                self._log(c, card_id, "system", "released", {"reason": "expired", "holder": prev["claimed_by"]}, t)
+            self._log(c, card_id, holder, "claimed", {"ttl_s": ttl_s}, t)
+        return token
+
+    def renew(self, card_id: str, token: str, ttl_s: float = 600, at: float | None = None) -> bool:
+        t = now() if at is None else at
+        with self.db.tx() as c:
+            return bool(c.execute("UPDATE cards SET lease_expires_at=? WHERE id=? AND claim_token=? AND lease_expires_at>?",
+                                  (t + ttl_s, card_id, token, t)).rowcount)
+
+    def release(self, card_id: str, token: str, reason: str = "finished", at: float | None = None) -> bool:
+        if reason not in RELEASE_REASONS:
+            raise ValueError(f"reason must be one of {sorted(RELEASE_REASONS)}")
+        with self.db.tx() as c:
+            r = c.execute("SELECT claimed_by FROM cards WHERE id=? AND claim_token=?", (card_id, token)).fetchone()
+            if not r or not c.execute("UPDATE cards SET claim_token=NULL, claimed_by=NULL, lease_expires_at=NULL "
+                                      "WHERE id=? AND claim_token=?", (card_id, token)).rowcount:
+                return False
+            self._log(c, card_id, r["claimed_by"], "released", {"reason": reason}, at)
+        return True
+
+    def sweep(self, at: float | None = None) -> int:
+        """Expire stale leases. Logs released(expired); never completed."""
+        t = now() if at is None else at
+        with self.db.tx() as c:
+            rows = c.execute("SELECT id, claimed_by FROM cards WHERE claim_token IS NOT NULL AND lease_expires_at<=?", (t,)).fetchall()
+            for r in rows:
+                c.execute("UPDATE cards SET claim_token=NULL, claimed_by=NULL, lease_expires_at=NULL WHERE id=?", (r["id"],))
+                self._log(c, r["id"], "system", "released", {"reason": "expired", "holder": r["claimed_by"]}, t)
+        return len(rows)
+
+    def event(self, card_id: str, token: str, kind: str, payload: dict[str, Any] | None = None, at: float | None = None) -> bool:
+        """An agent's comment/artifact/failed note: written only while its lease is live. `completed` is refused."""
+        if kind not in AGENT_EVENT_KINDS:
+            raise ValueError(f"an agent may log only {sorted(AGENT_EVENT_KINDS)}; completion goes through Boards.complete")
+        t = now() if at is None else at
+        with self.db.tx() as c:
+            r = c.execute("SELECT claimed_by FROM cards WHERE id=? AND claim_token=? AND lease_expires_at>?", (card_id, token, t)).fetchone()
+            if not r:
+                return False
+            self._log(c, card_id, r["claimed_by"], kind, payload, t)
+        return True
+
+    def agent_move(self, card_id: str, token: str, column_id: str, at: float | None = None) -> bool:
+        """Move a card as its lease holder. Zero rows changed (False) when the token is wrong or the lease ran out."""
+        t = now() if at is None else at
+        with self.db.tx() as c:
+            card = c.execute("SELECT board_id, column_id, claimed_by FROM cards WHERE id=?", (card_id,)).fetchone()
+            if not card:
+                raise KeyError(f"Unknown card: {card_id}")
+            self._check_column(c, card["board_id"], column_id)
+            pos = c.execute("SELECT COALESCE(MAX(position),0)+1 FROM cards WHERE column_id=?", (column_id,)).fetchone()[0]
+            if not c.execute("UPDATE cards SET column_id=?, position=?, updated_at=? WHERE id=? AND claim_token=? AND lease_expires_at>?",
+                             (column_id, pos, t, card_id, token, t)).rowcount:
+                return False
+            self._log(c, card_id, card["claimed_by"], "moved", {"from": card["column_id"], "to": column_id}, t)
+        return True
+
+    def complete(self, card_id: str, check: str, pointer: str, by: str = "checker", at: float | None = None) -> bool:
+        """The only writer of `completed`: a check passed, and `pointer` says what was checked (a path, a test run, a user action)."""
+        if check not in COMPLETE_CHECKS:
+            raise ValueError(f"check must be one of {sorted(COMPLETE_CHECKS)}")
+        with self.db.tx() as c:
+            if not c.execute("SELECT 1 FROM cards WHERE id=?", (card_id,)).fetchone():
+                return False
+            self._log(c, card_id, by, "completed", {"check": check, "pointer": pointer}, at)
+        return True
+
+    def _user_moved(self, c: Any, card_id: str, old: str, new: str) -> None:
+        """A user's column change commits no matter who holds the card: it logs moved and, if a lease was live, preempts it."""
+        self._log(c, card_id, "user", "moved", {"from": old, "to": new})
+        r = c.execute("SELECT claimed_by, claim_token FROM cards WHERE id=?", (card_id,)).fetchone()
+        if r and r["claim_token"]:
+            c.execute("UPDATE cards SET claim_token=NULL, claimed_by=NULL, lease_expires_at=NULL WHERE id=?", (card_id,))
+            self._log(c, card_id, "user", "released", {"reason": "preempted", "holder": r["claimed_by"]})
+
     # cards
     def add_card(self, board_id: str, column_id: str | None, title: str, description: str = "", due: str | None = None, priority: int = 2, labels: list[str] | None = None) -> dict[str, Any]:
         import json
@@ -142,6 +262,7 @@ class Boards:
                 "INSERT INTO cards(id,board_id,column_id,title,description,position,due,priority,labels,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                 (cid, board_id, column_id, title.strip(), description, pos, due, int(priority), json.dumps(labels or []), t, t),
             )
+            self._log(c, cid, "user", "created", {"title": title.strip()}, t)
             return self._flag_limit(c, row_to_dict(c.execute("SELECT * FROM cards WHERE id=?", (cid,)).fetchone(), ("labels",)))
 
     def update_card(self, id: str, patch: dict[str, Any]) -> dict[str, Any] | None:
@@ -154,20 +275,23 @@ class Boards:
             return None
         fields["updated_at"] = now()
         with self.db.tx() as c:
-            card = c.execute("SELECT board_id FROM cards WHERE id=?", (id,)).fetchone()
+            card = c.execute("SELECT board_id, column_id FROM cards WHERE id=?", (id,)).fetchone()
             if not card:
                 raise KeyError(f"Unknown card: {id}")
             if fields.get("column_id"):
                 self._check_column(c, card["board_id"], fields["column_id"])
+                if fields["column_id"] != card["column_id"]:
+                    self._user_moved(c, id, card["column_id"], fields["column_id"])
             c.execute(f"UPDATE cards SET {', '.join(f'{k}=?' for k in fields)} WHERE id=?", (*fields.values(), id))
             return self._flag_limit(c, row_to_dict(c.execute("SELECT * FROM cards WHERE id=?", (id,)).fetchone(), ("labels",)))
 
     def move_card(self, id: str, column_id: str, before_card_id: str | None = None) -> dict[str, Any] | None:
         with self.db.tx() as c:
-            card = c.execute("SELECT board_id FROM cards WHERE id=?", (id,)).fetchone()
+            card = c.execute("SELECT board_id, column_id FROM cards WHERE id=?", (id,)).fetchone()
             if not card:
                 raise KeyError(f"Unknown card: {id}")
             self._check_column(c, card["board_id"], column_id)
+            self._user_moved(c, id, card["column_id"], column_id)
             if before_card_id:
                 b = c.execute("SELECT position FROM cards WHERE id=?", (before_card_id,)).fetchone()
                 prev = c.execute("SELECT MAX(position) FROM cards WHERE column_id=? AND position < ?", (column_id, b["position"])).fetchone()[0] if b else None

@@ -32,6 +32,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
 REQUEST_PHRASES = ("let me know", "can you", "could you", "please confirm", "when are you", "would you", "do you ", "are you able", "please send", "please let")
 AUTOMATED_LOCALPARTS = ("noreply", "no-reply", "donotreply", "do-not-reply", "notifications", "notification", "mailer-daemon", "postmaster")
 
+
+def _line(text: str, limit: int = 180) -> str:
+    """One line. A subject is someone else's text and becomes a todo title."""
+    return " ".join(str(text or "").replace("\r", " ").split())[:limit]
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS thread_status (
   thread_id TEXT PRIMARY KEY,
@@ -204,11 +209,20 @@ class MailWatch:
         with self.db.tx() as c:
             return c.execute("UPDATE thread_status SET dismissed=? WHERE thread_id=?", (int(dismissed), thread_id)).rowcount > 0
 
-    def snooze(self, thread_id: str, until: datetime | None) -> bool:
-        """Hide a thread from list() until `until` (None clears). Local only; Gmail is untouched."""
+    def snooze(self, thread_id: str, until: datetime | None, subject: str = "", create: bool = True) -> bool:
+        """Hide a thread from list() until `until` (None clears). Local only; Gmail is untouched. With `create`, a
+        thread not tracked yet gets a row, so any thread in the mail list can be snoozed."""
         with self.db.tx() as c:
+            if create:
+                c.execute("INSERT INTO thread_status(thread_id,subject,status,updated_at) VALUES(?,?,'fyi',?) "
+                          "ON CONFLICT(thread_id) DO NOTHING", (thread_id, subject, _now()))
             return c.execute("UPDATE thread_status SET snoozed_until=? WHERE thread_id=?",
                              (_aware(until).timestamp() if until else None, thread_id)).rowcount > 0
+
+    def snoozed_ids(self, at: datetime) -> list[str]:
+        with self.db.tx() as c:
+            return [r["thread_id"] for r in c.execute("SELECT thread_id FROM thread_status WHERE snoozed_until > ?",
+                                                      (_aware(at).timestamp(),))]
 
     def counts(self, cfg: dict[str, Any], at: datetime) -> dict[str, int]:
         to_reply = len(self.list("to_reply", at=at))
@@ -219,7 +233,7 @@ class MailWatch:
         """Todo suggestions for stale awaiting_reply threads with no follow-up yet. Creates nothing."""
         if not cfg.get("proposeFollowups"):
             return []
-        return [{"thread_id": r["thread_id"], "title": f"Follow up: {r['subject'] or '(no subject)'}",
+        return [{"thread_id": r["thread_id"], "title": f"Follow up: {_line(r['subject']) or '(no subject)'}",
                  "notes": f"Waiting on a reply since {str(r['last_date'] or '')[:10]}. Gmail thread {r['thread_id']}", "due": today.isoformat()}
                 for r in self.list("awaiting_reply", at=at)
                 if r["age_days"] >= cfg["awaitingAfterDays"] and not r["followup_todo_id"]]
@@ -231,9 +245,10 @@ class MailWatch:
             return None
         if row["followup_todo_id"] and todos.get(row["followup_todo_id"]):
             return todos.get(row["followup_todo_id"])
-        todo = todos.create(f"Follow up: {row['subject'] or '(no subject)'}",
+        subject = _line(row.get("subject") or "") or "(no subject)"
+        todo = todos.create(f"Follow up: {subject}",
                             notes=f"Waiting on a reply since {str(row['last_date'] or '')[:10]}. https://mail.google.com/mail/u/0/#all/{thread_id}",
-                            due=today.isoformat())
+                            due=today.isoformat(), source="email")
         with self.db.tx() as c:
             c.execute("UPDATE thread_status SET followup_todo_id=? WHERE thread_id=?", (todo["id"], thread_id))
         return todo

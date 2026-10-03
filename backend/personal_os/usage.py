@@ -84,7 +84,7 @@ class Usage:
 
     def record(self, *, model: str, kind: str, prompt_tokens: int, completion_tokens: int, duration_ms: int, cost: float | None,
                estimated: bool, conversation_id: str | None, project_id: str | None,
-               cached_tokens: int = 0, cache_write_tokens: int = 0, reasoning_tokens: int = 0, tag: str = "", round: int = 0) -> None:
+               cached_tokens: int = 0, cache_write_tokens: int = 0, reasoning_tokens: int = 0, tag: str = "", round: int | None = None) -> None:
         with self.db.tx() as c:
             c.execute(
                 "INSERT INTO usage_log(id,created_at,model,kind,conversation_id,project_id,prompt_tokens,completion_tokens,duration_ms,cost,estimated,cached_tokens,cache_write_tokens,reasoning_tokens,tag,round) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",

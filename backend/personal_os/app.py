@@ -1108,6 +1108,18 @@ def delete_message(id: str, mid: str) -> dict[str, bool]:
     return {"ok": True}
 
 
+@app.post("/conversations/{id}/messages/{mid}/activate")
+def activate_message(id: str, mid: str) -> dict[str, Any]:
+    """Switch the trailing answer to another regenerate variant. Flips flags only: no tool runs, no approval is touched."""
+    if not convos.get(id, with_messages=False):
+        raise HTTPException(404, "Conversation not found")
+    if bus.answering(id):
+        raise HTTPException(409, "A reply is in progress")
+    if not convos.activate_message(id, mid):
+        raise HTTPException(409, "That answer is not a variant of the latest reply")
+    return convos.get(id)  # type: ignore[return-value]
+
+
 class PageContextIn(BaseModel):
     """What the user had on screen when they asked, sent by the page agent (⌘I). See context.page_block."""
     view: str = ""
@@ -1389,6 +1401,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     model = body.model or conv["model"] or cfg["defaultModel"]
     if body.model and body.model != conv["model"]:
         convos.update(conv_id, {"model": body.model})
+    regen_am: dict[str, Any] | None = None  # set when a regenerate superseded the trailing answer
+    carried_root: str | None = None
 
     if body.content is not None:
         user_text = body.content.strip()
@@ -1409,15 +1423,22 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             return
         user_text = users[-1]["content"]
     else:
-        # regenerate: drop trailing assistant message
+        # regenerate: the trailing answer is superseded, not deleted, so it survives a failed or stopped replacement
         msgs = conv["messages"]
-        if msgs and msgs[-1]["role"] == "assistant":
-            convos.delete_message(msgs[-1]["id"])
-            yield "removed_message", {"id": msgs[-1]["id"]}
         users = [m for m in msgs if m["role"] == "user"]
         if not users:
             yield "error", {"message": "Nothing to regenerate"}
             return
+        if msgs and msgs[-1]["role"] == "assistant":
+            last = msgs[-1]
+            if last.get("content") or last.get("tool_events"):
+                regen_am = convos.begin_variant(last["id"], model)
+            else:
+                # An empty row is a failed earlier attempt: drop just that row and keep its group for the new one.
+                with db.tx() as c:
+                    c.execute("DELETE FROM messages WHERE id=?", (last["id"],))
+                carried_root = last.get("variant_of")
+            yield "removed_message", {"id": last["id"]}
         user_text = users[-1]["content"]
 
     tracer = Tracer()
@@ -1448,7 +1469,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     # budget). Without this the row stays blank with no error and its _active entry leaks.
     am: dict[str, Any] = {}
     try:
-        am = convos.add_message(conv_id, "assistant", "", model=model)
+        am = regen_am or convos.add_message(conv_id, "assistant", "", model=model, variant_of=carried_root)
 
         _bind_stop(am["id"], stop, run)
         buf: list[str] = []
@@ -2428,16 +2449,39 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
 
 
 async def _run_chat(run: Run, body: ChatIn) -> None:
-    async for event, data in _chat_stream(run.conversation_id, body, run.stop, run.steers, run=run):
-        if event == "assistant_message":
-            run.message_id = data.get("id")
-            # A steer opens a fresh segment, so the run is answering again.
-            run.replied = False
-        run.publish(event, data)
-        # Published after the event, so a client that sees `done` and immediately posts finds the run
-        # already closed to steers. The task runs on to auto-learn; it is no longer replying.
-        if event == "done":
-            run.replied = True
+    failure: str | None = None
+    try:
+        async for event, data in _chat_stream(run.conversation_id, body, run.stop, run.steers, run=run):
+            if event == "assistant_message":
+                run.message_id = data.get("id")
+                # A steer opens a fresh segment, so the run is answering again.
+                run.replied = False
+            run.publish(event, data)
+            # Published after the event, so a client that sees `done` and immediately posts finds the run
+            # already closed to steers. The task runs on to auto-learn; it is no longer replying.
+            if event == "done":
+                run.replied = True
+    except BaseException as e:  # noqa: BLE001 - noted for the settle hook below, then re-raised untouched
+        failure = None if isinstance(e, asyncio.CancelledError) else (str(e) or type(e).__name__)
+        raise
+    finally:
+        # A regenerate that ended with nothing (provider error, Stop before the first token, a setup crash, shutdown)
+        # puts the answer it superseded back. Synchronous, so it also runs while the task is being cancelled.
+        if body.content is None and not body.resume_of:
+            _settle_regenerate(run, failure)
+
+
+def _settle_regenerate(run: Run, failure: str | None) -> None:
+    try:
+        restored = convos.restore_if_empty(run.conversation_id)
+    except Exception:  # noqa: BLE001 - settling must never mask the run's own outcome
+        log.warning("could not restore the superseded answer of conversation %s", run.conversation_id, exc_info=True)
+        return
+    if not restored:
+        return
+    if run.message_id:
+        run.publish("removed_message", {"id": run.message_id})
+    run.publish("restored_message", {"message": restored, "reason": failure or run.error})
 
 
 async def _run_job(run: Run, body: ChatIn) -> None:
@@ -3164,7 +3208,8 @@ def evaluate_permission(body: PermissionEvalIn) -> dict[str, Any]:
 @app.on_event("startup")
 async def _recover_runs() -> None:
     """Runs left active by the last process died with it: mark them interrupted and salvage their reply from the tape."""
-    for r in run_store.recover(bus.live_ids()):
+    recovered = run_store.recover(bus.live_ids())
+    for r in recovered:
         mid = r.get("message_id")
         if not mid:
             continue
@@ -3182,6 +3227,12 @@ async def _recover_runs() -> None:
             convos.finish_message(mid, text, r["error"], json.loads(cur["context_used"]) if cur["context_used"] else None, tool_events)
         except Exception:  # noqa: BLE001 - recovery must never stop the backend from starting
             log.warning("could not salvage the reply of run %s", r["run_id"], exc_info=True)
+    # A regenerate that died before any text is replaced by the answer it superseded.
+    for cid in {r["conversation_id"] for r in recovered if r.get("kind", "chat") == "chat" and r.get("conversation_id")}:
+        try:
+            convos.restore_if_empty(cid)
+        except Exception:  # noqa: BLE001
+            log.warning("could not restore the superseded answer of conversation %s", cid, exc_info=True)
 
 
 # ---------------- scheduled jobs, proposals, agent inbox ----------------

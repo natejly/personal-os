@@ -137,9 +137,34 @@ class Conversations:
                 return None
             d = self._hydrate(r)
             if with_messages:
-                rows = c.execute("SELECT * FROM messages WHERE conversation_id=? ORDER BY created_at, rowid", (id,)).fetchall()
+                rows = c.execute(
+                    "SELECT * FROM messages WHERE conversation_id=?\n"
+                    "AND superseded_at IS NULL\n"
+                    "ORDER BY created_at, rowid", (id,)).fetchall()
                 d["messages"] = [row_to_dict(m, ("context_used", "tool_events", "trace")) for m in rows]
+                self._attach_variants(c, id, d["messages"])
         return d
+
+    @staticmethod
+    def _variant_groups(c: Any, conv_id: str) -> dict[str, list[str]]:
+        """Regenerate groups of a conversation: root id -> member ids in creation order (groups of one omitted)."""
+        rows = c.execute(
+            "SELECT id, variant_of FROM messages WHERE conversation_id=? AND (variant_of IS NOT NULL OR superseded_at IS NOT NULL "
+            "OR id IN (SELECT variant_of FROM messages WHERE conversation_id=? AND variant_of IS NOT NULL)) "
+            "ORDER BY created_at, rowid", (conv_id, conv_id)).fetchall()
+        groups: dict[str, list[str]] = {}
+        for r in rows:
+            groups.setdefault(r["variant_of"] or r["id"], []).append(r["id"])
+        return {k: v for k, v in groups.items() if len(v) > 1}
+
+    def _attach_variants(self, c: Any, conv_id: str, messages: list[dict[str, Any]]) -> None:
+        groups = self._variant_groups(c, conv_id)
+        if not groups:
+            return
+        for m in messages:
+            root = m.get("variant_of") or m["id"]
+            if root in groups and m["id"] in groups[root]:
+                m["variants"] = groups[root]
 
     def create(self, project_id: str | None, title: str, model: str) -> dict[str, Any]:
         cid = new_id()
@@ -171,38 +196,122 @@ class Conversations:
         with self.db.tx() as c:
             c.execute("DELETE FROM conversations WHERE id=?", (id,))
 
-    def add_message(self, conv_id: str, role: str, content: str, model: str | None = None) -> dict[str, Any]:
+    def add_message(self, conv_id: str, role: str, content: str, model: str | None = None, *, variant_of: str | None = None) -> dict[str, Any]:
         mid = new_id()
         t = now()
         with self.db.tx() as c:
             c.execute(
-                "INSERT INTO messages(id,conversation_id,role,content,model,created_at) VALUES(?,?,?,?,?,?)",
-                (mid, conv_id, role, content, model, t),
+                "INSERT INTO messages(id,conversation_id,role,content,model,created_at,variant_of) VALUES(?,?,?,?,?,?,?)",
+                (mid, conv_id, role, content, model, t, variant_of),
             )
             c.execute("UPDATE conversations SET updated_at=? WHERE id=?", (t, conv_id))
-        return {"id": mid, "conversation_id": conv_id, "role": role, "content": content, "model": model, "created_at": t, "error": None, "context_used": None, "tool_events": None, "trace": None, "reasoning": None}
+        return {"id": mid, "conversation_id": conv_id, "role": role, "content": content, "model": model, "created_at": t, "error": None, "context_used": None, "tool_events": None, "trace": None, "reasoning": None,
+                "outcome": None, "error_kind": None, "variant_of": variant_of}
+
+    MAX_VARIANTS = 5
+
+    def begin_variant(self, old_id: str, model: str | None = None) -> dict[str, Any]:
+        """Regenerate without losing the answer: hide `old_id` and open an empty sibling in one transaction, so a
+        group always has exactly one active row. Keeps the newest MAX_VARIANTS superseded rows."""
+        mid = new_id()
+        t = now()
+        with self.db.tx() as c:
+            old = c.execute("SELECT * FROM messages WHERE id=?", (old_id,)).fetchone()
+            if not old:
+                raise KeyError(old_id)
+            root = old["variant_of"] or old["id"]
+            c.execute("UPDATE messages SET superseded_at=? WHERE id=?", (t, old_id))
+            c.execute(
+                "INSERT INTO messages(id,conversation_id,role,content,model,created_at,variant_of) VALUES(?,?,?,?,?,?,?)",
+                (mid, old["conversation_id"], "assistant", "", model, t, root),
+            )
+            stale = c.execute(
+                "SELECT id FROM messages WHERE (id=? OR variant_of=?) AND superseded_at IS NOT NULL ORDER BY created_at DESC, rowid DESC",
+                (root, root)).fetchall()[self.MAX_VARIANTS:]
+            for r in stale:
+                c.execute("DELETE FROM messages WHERE id=?", (r["id"],))
+            if root in {r["id"] for r in stale}:
+                # The root row was pruned: re-key the survivors so `id = root OR variant_of = root` still holds.
+                keep = c.execute("SELECT id FROM messages WHERE variant_of=? ORDER BY created_at, rowid LIMIT 1", (root,)).fetchone()
+                c.execute("UPDATE messages SET variant_of=? WHERE variant_of=?", (keep["id"], root))
+                c.execute("UPDATE messages SET variant_of=NULL WHERE id=?", (keep["id"],))
+                root = keep["id"]
+            c.execute("UPDATE conversations SET updated_at=? WHERE id=?", (t, old["conversation_id"]))
+            variants = self._variant_groups(c, old["conversation_id"]).get(root)
+        return {"id": mid, "conversation_id": old["conversation_id"], "role": "assistant", "content": "", "model": model, "created_at": t, "error": None,
+                "context_used": None, "tool_events": None, "trace": None, "reasoning": None, "outcome": None, "error_kind": None, "variant_of": root,
+                "variants": variants}
+
+    def _hydrated_row(self, c: Any, conv_id: str, mid: str) -> dict[str, Any]:
+        row = row_to_dict(c.execute("SELECT * FROM messages WHERE id=?", (mid,)).fetchone(), ("context_used", "tool_events", "trace")) or {}
+        self._attach_variants(c, conv_id, [row])
+        return row
+
+    def restore_if_empty(self, conv_id: str) -> dict[str, Any] | None:
+        """A regenerate that produced nothing: drop the empty replacement and bring the newest superseded sibling back."""
+        with self.db.tx() as c:
+            last = c.execute(
+                "SELECT * FROM messages WHERE conversation_id=? AND superseded_at IS NULL ORDER BY created_at DESC, rowid DESC LIMIT 1", (conv_id,)).fetchone()
+            if not last or last["role"] != "assistant" or not last["variant_of"] or last["content"] or last["tool_events"]:
+                return None
+            root = last["variant_of"]
+            prev = c.execute(
+                "SELECT id FROM messages WHERE (id=? OR variant_of=?) AND superseded_at IS NOT NULL ORDER BY superseded_at DESC, created_at DESC, rowid DESC LIMIT 1",
+                (root, root)).fetchone()
+            if not prev:
+                return None
+            c.execute("DELETE FROM messages WHERE id=?", (last["id"],))
+            c.execute("UPDATE messages SET superseded_at=NULL WHERE id=?", (prev["id"],))
+            return self._hydrated_row(c, conv_id, prev["id"])
+
+    def activate_message(self, conv_id: str, mid: str) -> bool:
+        """Switch the trailing answer to another variant of its group. Only the last turn can switch: later turns
+        were built on the answer they follow."""
+        with self.db.tx() as c:
+            tgt = c.execute("SELECT * FROM messages WHERE id=? AND conversation_id=?", (mid, conv_id)).fetchone()
+            if not tgt or tgt["superseded_at"] is None:
+                return False
+            root = tgt["variant_of"] or tgt["id"]
+            last = c.execute(
+                "SELECT id FROM messages WHERE conversation_id=? AND superseded_at IS NULL ORDER BY created_at DESC, rowid DESC LIMIT 1", (conv_id,)).fetchone()
+            active = c.execute(
+                "SELECT id FROM messages WHERE (id=? OR variant_of=?) AND superseded_at IS NULL", (root, root)).fetchone()
+            if not last or not active or active["id"] != last["id"]:
+                return False
+            c.execute("UPDATE messages SET superseded_at=? WHERE id=?", (now(), active["id"]))
+            c.execute("UPDATE messages SET superseded_at=NULL WHERE id=?", (mid,))
+            return True
 
     def finish_message(self, mid: str, content: str, error: str | None, context_used: dict[str, Any] | None, tool_events: list[dict[str, Any]] | None = None,
-                       trace: list[dict[str, Any]] | None = None, reasoning: str | None = None) -> None:
+                       trace: list[dict[str, Any]] | None = None, reasoning: str | None = None, *,
+                       outcome: str | None = None, error_kind: str | None = None) -> None:
         with self.db.tx() as c:
             c.execute(
-                "UPDATE messages SET content=?, error=?, context_used=?, tool_events=?, trace=?, reasoning=? WHERE id=?",
+                "UPDATE messages SET content=?, error=?, context_used=?, tool_events=?, trace=?, reasoning=?, "
+                "outcome=COALESCE(?, outcome), error_kind=COALESCE(?, error_kind) WHERE id=?",
                 (content, error, json.dumps(context_used) if context_used else None, json.dumps(tool_events) if tool_events else None,
-                 json.dumps(trace) if trace else None, reasoning or None, mid),
+                 json.dumps(trace) if trace else None, reasoning or None, outcome, error_kind, mid),
             )
 
     def set_trace(self, mid: str, trace: list[dict[str, Any]]) -> None:
         with self.db.tx() as c:
             c.execute("UPDATE messages SET trace=? WHERE id=?", (json.dumps(trace), mid))
 
-    def delete_message(self, mid: str) -> None:
+    def delete_message(self, mid: str, conv_id: str | None = None) -> bool:
+        """Delete a message and, when it belongs to a regenerate group, every variant of it."""
         with self.db.tx() as c:
-            c.execute("DELETE FROM messages WHERE id=?", (mid,))
+            row = c.execute("SELECT id, variant_of, conversation_id FROM messages WHERE id=?", (mid,)).fetchone()
+            if not row or (conv_id is not None and row["conversation_id"] != conv_id):
+                return False
+            root = row["variant_of"] or row["id"]
+            return c.execute("DELETE FROM messages WHERE id=? OR variant_of=?", (root, root)).rowcount > 0
 
     def history(self, conv_id: str) -> list[dict[str, str]]:
         with self.db.tx() as c:
             rows = c.execute(
-                "SELECT role, content FROM messages WHERE conversation_id=? AND content != '' ORDER BY created_at, rowid",
+                "SELECT role, content FROM messages WHERE conversation_id=? AND content != ''\n"
+                "AND superseded_at IS NULL\n"
+                "ORDER BY created_at, rowid",
                 (conv_id,),
             ).fetchall()
         return [{"role": r["role"], "content": r["content"]} for r in rows]
@@ -211,7 +320,9 @@ class Conversations:
         """history() with the ids and timestamps compaction needs to say where a summary ends."""
         with self.db.tx() as c:
             rows = c.execute(
-                "SELECT id, role, content, created_at FROM messages WHERE conversation_id=? AND content != '' ORDER BY created_at, rowid",
+                "SELECT id, role, content, created_at FROM messages WHERE conversation_id=? AND content != ''\n"
+                "AND superseded_at IS NULL\n"
+                "ORDER BY created_at, rowid",
                 (conv_id,),
             ).fetchall()
         return [dict(r) for r in rows]

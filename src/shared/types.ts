@@ -504,6 +504,9 @@ export interface ContextMeter {
   summary: { summary: string; summarized_messages: number; tokens_before: number; tokens_after: number; updated_at: number } | null
 }
 
+export type MessageOutcome = 'stopped' | 'rounds' | 'tokens' | 'time' | 'cost' | 'loop' | 'interrupted' | 'length' | 'incomplete'
+export type ErrorKind = 'rate_limit' | 'quota' | 'auth' | 'not_found' | 'overflow' | 'unsupported_param' | 'content_filter' | 'overloaded' | 'server' | 'bad_request' | 'transport' | 'cancelled' | 'timeout'
+
 export interface Message {
   id: string
   conversation_id: string
@@ -517,8 +520,14 @@ export interface Message {
   /** A reasoning model's chain-of-thought. Never sent back to the model as history. */
   reasoning?: string | null
   created_at: number
-  /** Set when the reply ran out of budget or hit a breaker; not persisted. */
-  partial?: PartialReason | null
+  /** How the reply ended when it did not end normally; null = complete, or failed with error. */
+  outcome?: MessageOutcome | null
+  error_kind?: ErrorKind | null
+  /** Regenerate group: id of the first answer; the active member carries the group's ids. */
+  variant_of?: string | null
+  variants?: string[] | null
+  /** Set on a user message that replaced an earlier one (edit-and-resend). */
+  edited_from?: string | null
 }
 
 export type Effort = 'default' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
@@ -1202,6 +1211,7 @@ export type ChatEvent =
   | { event: 'user_message'; data: Message }
   | { event: 'assistant_message'; data: Message }
   | { event: 'removed_message'; data: { id: string } }
+  | { event: 'restored_message'; data: { message: Message; reason: string | null } }
   | { event: 'title'; data: { id: string; title: string } }
   | { event: 'delta'; data: { id: string; text: string } }
   | { event: 'reasoning'; data: { id: string; text: string } }

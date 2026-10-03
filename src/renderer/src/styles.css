@@ -541,7 +541,10 @@ kbd {
   color: var(--danger); font-size: 13px; margin-top: 8px;
   background: rgba(229, 72, 77, 0.1); padding: 8px 10px; border-radius: 8px;
 }
-.regen-row { display: flex; justify-content: flex-start; padding-left: 38px; margin-top: -10px; }
+.regen-row { display: flex; justify-content: flex-start; align-items: center; gap: 8px; padding-left: 38px; margin-top: -10px; }
+.variant-switcher { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.variant-switcher .icon-btn:disabled { opacity: 0.35; cursor: default; }
+.run-error-row { display: flex; align-items: center; gap: 10px; margin: 6px 0 0 38px; font-size: 13px; color: var(--text-muted); }
 
 .thinking { display: inline-flex; gap: 4px; padding: 6px 0; }
 .thinking span {

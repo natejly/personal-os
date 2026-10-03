@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { PanelLeftOpen, RefreshCw, Pencil, SlidersHorizontal } from 'lucide-react'
+import { PanelLeftOpen, Pencil, SlidersHorizontal } from 'lucide-react'
 import { useStore, useProject, useConversation, useIsStreaming, useStreamingMessageId } from '../store'
 import ProjectChip from './ProjectChip'
 import MessageView from './Message'
+import RegenRow from './RegenRow'
 import Composer from './Composer'
 import ChatControls from './ChatControls'
 import ContextDrawer from './ContextDrawer'
@@ -31,7 +32,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   const contextOpen = useStore((s) => s.contextOpen)
   const draftProjectId = useStore((s) => s.draftProjectId)
   const project = useProject(convo?.project_id ?? draftProjectId)
-  const { toggleSidebar, toggleContext, renameChat, regenerate, send } = useStore()
+  const { toggleSidebar, toggleContext, renameChat, send } = useStore()
   const firstPrompts = useOnboarding((s) => s.firstPrompts && !conversationId)
   const setFirstPrompts = useOnboarding((s) => s.setFirstPrompts)
   // The chips are for the first empty chat only; once any conversation is open they are spent.
@@ -104,12 +105,8 @@ export default function ChatView({ conversationId }: { conversationId?: string }
               </div>
             ) : (
               <div className="messages-inner">
-                {msgs.map((m) => <MessageView key={m.id} message={m} streaming={isStreamingHere && streamingMessageId === m.id} />)}
-                {!isStreamingHere && last?.role === 'assistant' && (
-                  <div className="regen-row">
-                    <button className="ghost-btn" onClick={() => void regenerate(conversationId)}><RefreshCw size={13} /> Regenerate</button>
-                  </div>
-                )}
+                {msgs.map((m) => <MessageView key={m.id} message={m} streaming={isStreamingHere && streamingMessageId === m.id} last={m.id === last?.id} />)}
+                <RegenRow conversationId={conversationId} last={last} streaming={isStreamingHere} />
               </div>
             )}
           </div>

@@ -530,6 +530,7 @@ export interface State {
 }
 
 let toastSeq = 0
+let flushChain: Promise<void> = Promise.resolve()
 /** Autosave debounce for the doc editor: long enough to be one history entry, short enough to trust. */
 const SAVE_DEBOUNCE_MS = 1200
 let saveTimer: ReturnType<typeof setTimeout> | null = null
@@ -1848,7 +1849,9 @@ export const useStore = create<State>((set, get) => {
       if (saveTimer) clearTimeout(saveTimer)
       saveTimer = setTimeout(() => { void get().flushDoc() }, SAVE_DEBOUNCE_MS)
     },
-    flushDoc: async () => {
+    // Flushes run one after another: an overlapping one would read the base the first is about to bump.
+    flushDoc: () => {
+      const run = async (): Promise<void> => {
       if (saveTimer) {
         clearTimeout(saveTimer)
         saveTimer = null
@@ -1862,7 +1865,7 @@ export const useStore = create<State>((set, get) => {
       if (content === undefined && title === undefined) return set({ docDraft: null, docTitleDraft: null })
       set({ docSaving: true })
       try {
-        const saved = await api.docs.save(doc.id, { content, title })
+        const saved = await api.docs.save(doc.id, { content, title, base_updated_at: doc.updated_at })
         // Keep whatever was typed while the request was in flight; adopt only the server's metadata.
         set((st) => {
           if (st.activeDoc?.id !== doc.id) return { docSaving: false }
@@ -1879,11 +1882,21 @@ export const useStore = create<State>((set, get) => {
         void get().refreshDocRevisions(doc.id)
       } catch (e) {
         set({ docSaving: false })
-        get().toast(`Could not save: ${(e as Error).message}`, 'error')
+        // Stale base: another window saved first. The draft stays on screen; reloading is the user's call.
+        if ((e as { status?: number }).status === 409) {
+          get().toast('This doc changed elsewhere. Your edits are kept here and not saved.', 'error',
+            { label: 'Reload', run: () => { set({ docDraft: null, docTitleDraft: null }); void get().openDoc(doc.id) } })
+        } else get().toast(`Could not save: ${(e as Error).message}`, 'error')
       }
+      }
+      const p = flushChain.then(run)
+      flushChain = p
+      return p
     },
     setDocStar: async (id, starred) => {
-      await api.docs.patch(id, { starred })
+      const d = await api.docs.patch(id, { starred })
+      // The PATCH bumped updated_at; keep the autosave base current or the next save 409s.
+      set((st) => ({ activeDoc: st.activeDoc?.id === id ? { ...st.activeDoc, starred: d.starred, updated_at: d.updated_at } : st.activeDoc }))
       await get().refreshDocs()
     },
     moveDoc: async (id, scope, folder) => {
@@ -1891,7 +1904,7 @@ export const useStore = create<State>((set, get) => {
         const d = await api.docs.move(id, scope, folder.trim())
         set((st) => ({
           activeDoc: st.activeDoc?.id === id
-            ? { ...st.activeDoc, folder: d.folder, project_id: d.project_id }
+            ? { ...st.activeDoc, folder: d.folder, project_id: d.project_id, updated_at: d.updated_at }
             : st.activeDoc
         }))
         await Promise.all([get().refreshDocs(), get().refreshDocFolders()])

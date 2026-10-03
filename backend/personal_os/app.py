@@ -5084,6 +5084,9 @@ class DocSave(BaseModel):
     content: str | None = None
     title: str | None = None
     summary: str = ""
+    # The updated_at the editor last loaded. When the stored doc is newer the save is refused (409)
+    # instead of overwriting another window's edit; omitted keeps the unconditional write.
+    base_updated_at: float | None = None
 
 
 class DocMetaPatch(BaseModel):
@@ -5297,6 +5300,10 @@ def get_doc(id: str) -> dict[str, Any]:
 
 @app.put("/docs/{id}")
 def save_doc(id: str, body: DocSave) -> dict[str, Any]:
+    if body.base_updated_at is not None:
+        cur = docs.get(id)
+        if cur and cur["updated_at"] > body.base_updated_at:
+            raise HTTPException(409, "This doc changed elsewhere since you opened it.")
     d = docs.save(id, body.content, body.title, body.summary)
     if not d:
         raise HTTPException(404)

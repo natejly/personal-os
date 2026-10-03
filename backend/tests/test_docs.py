@@ -182,4 +182,19 @@ for path in ("/health", "/notes", "/todos", "/boards"):
     j("GET", path)
 check(True, "the routes that were already there still work")
 
+# Autosave conflict: a stale base_updated_at is refused and leaves the body alone.
+_d = j("POST", "/docs", {"title": "Conflict", "content": "v1"})
+_a = j("PUT", f"/docs/{_d['id']}", {"content": "v2", "base_updated_at": _d["updated_at"]})
+_b = j("PUT", f"/docs/{_d['id']}", {"content": "v3", "base_updated_at": _a["updated_at"]})
+check(_b["content"] == "v3", "successive saves refresh the base and do not self-conflict")
+j("PUT", f"/docs/{_d['id']}", {"content": "stale", "base_updated_at": _d["updated_at"]}, expect=409)
+check(j("GET", f"/docs/{_d['id']}")["content"] == "v3", "409 leaves content unchanged")
+check(j("PUT", f"/docs/{_d['id']}", {"content": "v4"})["content"] == "v4", "no base keeps unconditional write")
+# A metadata PATCH bumps updated_at: the PATCH response is the base for the next save.
+_p = j("PATCH", f"/docs/{_d['id']}", {"starred": True})
+check(_p["updated_at"] > _d["updated_at"], "PATCH bumps updated_at")
+check(j("PUT", f"/docs/{_d['id']}", {"content": "v5", "base_updated_at": _p["updated_at"]})["content"] == "v5",
+      "a save based on the PATCH response is accepted")
+j("PUT", f"/docs/{_d['id']}", {"content": "x", "base_updated_at": _d["updated_at"]}, expect=409)
+
 print(f"test_docs: {passed} checks passed")

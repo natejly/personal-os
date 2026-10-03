@@ -4,7 +4,7 @@ import GrainLogo from '../GrainLogo'
 import { api } from '../../lib/api'
 import { useStore } from '../../store'
 import { useOnboarding } from './onboardingStore'
-import { STEPS, initialState, modelOptions, reduce, showsBaseUrl, stepBlocker, type ProviderInfo, type WizardAction, type WizardState } from './steps'
+import { ABOUT_EXAMPLES, STEPS, initialState, modelOptions, reduce, showsBaseUrl, stepBlocker, type ProviderInfo, type WizardAction, type WizardState } from './steps'
 import './onboarding.css'
 
 /** Opens in the real browser: the main process turns window.open into shell.openExternal. */
@@ -16,6 +16,7 @@ const TITLES: Record<WizardState['step'], string> = {
   key: 'Connect your account',
   test: 'Testing the connection',
   google: 'Connect Google',
+  about: 'Tell Grain about you',
   done: 'You are all set'
 }
 
@@ -80,12 +81,18 @@ export default function Onboarding(): JSX.Element {
       // The backend persisted through the normal settings path; pull it into the store rather than re-PUT it.
       useStore.setState({ settings: await api.settings.get() })
       void useStore.getState().loadModels()
+      // A pinned memory, so the assistant knows who it is talking to from the very first message.
+      // A failure here is not worth blocking setup on: the user can add it in Memory later.
+      const about = state.about.trim()
+      if (about) await api.memories.create({ project_id: null, content: about, kind: 'fact', pinned: true }).catch(() => undefined)
       setSaved({ state: 'ok' })
     } catch (e) {
       setSaved({ state: 'fail', error: (e as Error).message })
     }
-  }, [provider, state.baseUrl, state.apiKey, state.model])
-  useEffect(() => { if (state.step === 'done') void save() }, [state.step, save])
+  }, [provider, state.baseUrl, state.apiKey, state.model, state.about])
+  // Only arriving at `done` saves; `save` itself changes as the user types on the about step.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { if (state.step === 'done') void save() }, [state.step])
 
   const finish = (): void => {
     useStore.getState().newChat()
@@ -109,7 +116,7 @@ export default function Onboarding(): JSX.Element {
     } else if (e.key === 'Enter' && !e.shiftKey) {
       // A focused button handles its own Enter (it is its click); everything else means "continue".
       const t = e.target as HTMLElement
-      if (t.tagName === 'BUTTON' || t.tagName === 'A' || t.tagName === 'SUMMARY') return
+      if (t.tagName === 'BUTTON' || t.tagName === 'A' || t.tagName === 'SUMMARY' || t.tagName === 'TEXTAREA') return
       e.preventDefault()
       advance()
     }
@@ -215,6 +222,21 @@ export default function Onboarding(): JSX.Element {
           </>
         )}
 
+        {state.step === 'about' && (
+          <>
+            <p className="muted">Optional. Anything here is saved as a memory the assistant reads in every chat — your role, how you like replies, what it should never do without asking.</p>
+            <label><span>About you</span>
+              <textarea data-autofocus rows={4} value={state.about} onChange={(e) => dispatch({ type: 'about', about: e.target.value })} placeholder="I am a…" />
+            </label>
+            <div className="ob-examples">
+              {ABOUT_EXAMPLES.map((t) => (
+                <button key={t} type="button" className="ghost-btn" onClick={() => dispatch({ type: 'about', about: t })}>{t}</button>
+              ))}
+            </div>
+            <p className="muted small"><Lock size={11} /> Stored on this Mac. Edit or delete it any time in Memory.</p>
+          </>
+        )}
+
         {state.step === 'done' && (
           <div role="status" aria-live="polite">
             {saved.state === 'saving' && <p className="muted"><Loader2 size={13} className="spin" /> Saving…</p>}
@@ -237,6 +259,7 @@ export default function Onboarding(): JSX.Element {
           )}
           <span className="ob-spacer" />
           {state.step === 'google' && !google?.connected && <button type="button" className="ghost-btn" onClick={() => dispatch({ type: 'next' })}>Skip for now</button>}
+          {state.step === 'about' && !state.about.trim() && <button type="button" className="ghost-btn" onClick={() => dispatch({ type: 'next' })}>Skip for now</button>}
           {state.step === 'test' && state.test.state === 'fail' && <button type="button" className="primary-btn" data-autofocus onClick={() => void runTest()}><RefreshCw size={13} /> Try again</button>}
           {state.step === 'done' ? (
             <button type="button" className="primary-btn" data-autofocus disabled={saved.state !== 'ok'} onClick={finish}>Start chatting <ArrowRight size={13} /></button>

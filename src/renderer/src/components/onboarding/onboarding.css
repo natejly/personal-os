@@ -17,7 +17,10 @@
 .onboarding label { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; font-size: 13px; }
 .onboarding label > span { color: var(--text-muted); }
 .onboarding input { background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 9px 10px; outline: 0; width: 100%; }
-.onboarding input:focus { border-color: var(--accent); }
+.onboarding textarea { background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 8px; padding: 9px 10px; outline: 0; width: 100%; resize: vertical; font: inherit; color: inherit; }
+.onboarding input:focus, .onboarding textarea:focus { border-color: var(--accent); }
+.ob-examples { display: flex; flex-direction: column; gap: 6px; margin: -4px 0 12px; }
+.ob-examples .ghost-btn { text-align: left; font-size: 12px; color: var(--text-muted); }
 .onboarding .link { display: inline-flex; align-items: center; gap: 3px; }
 .ob-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; margin-top: 4px; }
 .ob-card-opt { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; text-align: left; padding: 10px 12px; border-radius: 10px; background: var(--bg-elev); border: 1px solid var(--border); }

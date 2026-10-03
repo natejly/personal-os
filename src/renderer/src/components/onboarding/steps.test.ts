@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { initialState, reduce, stepBlocker, showsBaseUrl, modelOptions, STEPS, type ProviderInfo, type WizardState } from './steps'
+import { initialState, reduce, stepBlocker, showsBaseUrl, modelOptions, firstPrompts, STEPS, type ProviderInfo, type WizardState } from './steps'
 
 const fw: ProviderInfo = { id: 'fireworks', name: 'Fireworks', baseUrl: 'https://api.fireworks.ai/inference/v1', needsKey: true, keyUrl: 'https://fireworks.ai/keys', defaultModel: 'm1', models: ['m1', 'm2'], note: null }
 const ol: ProviderInfo = { id: 'ollama', name: 'Ollama', baseUrl: 'http://localhost:11434/v1', needsKey: false, keyUrl: null, defaultModel: 'llama3', models: [], note: null }
@@ -19,6 +19,9 @@ test('walks the steps in order and stops at done', () => {
   assert.equal(reduce(s, { type: 'next' }, fw).step, 'test', 'an untested connection blocks')
   s = reduce(s, { type: 'test', test: { state: 'ok', latencyMs: 12 } })
   s = reduce(s, { type: 'next' }, fw)
+  assert.equal(s.step, 'google')
+  s = reduce(s, { type: 'next' }, fw)
+  assert.equal(s.step, 'about', 'google and about are both skippable, never blocking')
   s = reduce(s, { type: 'next' }, fw)
   assert.equal(s.step, STEPS[STEPS.length - 1])
   assert.equal(reduce(s, { type: 'next' }, fw).step, 'done')
@@ -68,4 +71,19 @@ test('base URL shows only for self-hosted providers', () => {
 test('model options merge without duplicates', () => {
   assert.deepEqual(modelOptions(fw, ['m2', 'm3']), ['m1', 'm2', 'm3'])
   assert.deepEqual(modelOptions(undefined, ['a']), ['a'])
+})
+
+test('about text survives, and never blocks', () => {
+  const s = reduce(at('about'), { type: 'about', about: ' I am an engineer ' })
+  assert.equal(s.about, ' I am an engineer ')
+  assert.equal(stepBlocker(s, fw), null)
+  // Unlike a field edit, typing about yourself does not invalidate a passing connection test.
+  const tested = reduce(at('about', { test: { state: 'ok' } }), { type: 'about', about: 'x' })
+  assert.equal(tested.test.state, 'ok')
+})
+
+test('first prompts only name Google surfaces once Google is connected', () => {
+  const off = firstPrompts(false).join(' ')
+  assert.ok(!/calendar|mail/i.test(off), off)
+  assert.match(firstPrompts(true).join(' '), /calendar/i)
 })

@@ -77,7 +77,7 @@ from .presets import CanvasPresets
 from . import resume
 from . import permrules
 from . import shell as shell_tool
-from .subagents import AgentDefs, Subagents
+from .subagents import AgentDefs, Subagents, parallel_safe
 from .commands import Commands
 from .workflows import ApprovalError as WorkflowApprovalError, Engine as WorkflowEngine, Workflows
 from .runs import ACTIVE, PROMOTE_STEP, STATUSES, Run, RunBus, RunStore, Topic
@@ -699,6 +699,8 @@ NUMERIC_SETTING_RANGES: dict[str, tuple[float, float]] = {
     "retainTraceDays": (1, 3_650),
     "retainToolResultDays": (1, 3_650),
     "retainApprovalDays": (1, 3_650),
+    "toolReadRetries": (0, 5),
+    "parallelReads": (1, 8),
     "browserMaxTabs": (1, 12),
     "browserIdleSeconds": (30, 86_400),
 }
@@ -1696,6 +1698,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         last_sig: str | None = None
         repeats = 0
         tool_errors: dict[str, int] = {}
+        warm_tasks: list[asyncio.Task] = []  # read-only calls started ahead of their turn in the round; cancelled at the end
         detector = StuckDetector() if cfg.get("stuckDetection", True) else None  # loop shapes REPEAT_LIMIT cannot see
         perm_rules = permrules.load_rules(cfg.get("permissionRules"))
         denials = permrules.DenialStreak()  # refused calls in a row; at three the next result says to stop varying them
@@ -1729,6 +1732,51 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             if block:
                 plan_msg = {"role": "system", "content": block}
                 messages.append(plan_msg)
+
+        def _warm_segment(calls: list[dict[str, Any]], start: int, warm: dict[str, asyncio.Task],
+                          warm_ctx: dict[str, dict[str, Any]], tasks: list[asyncio.Task]) -> int:
+            """Start the maximal run of read-only calls beginning at calls[start] together (at most parallelReads at a
+            time) and return its length. A call joins only when it would run without a card: on, not forced, no rule
+            asking or refusing it, not a writer, a spawn or session-holding tool, and no plan in play. The first call
+            that does not qualify ends the run, so a write is a barrier and later reads wait for it. A reply that is
+            tainted by an earlier call of the run is simulated, so a call that would then ask is not started."""
+            width = max(1, int(cfg.get("parallelReads") or 1))
+            if width < 2 or planning or active_plan is not None or plan_seen:
+                return 1
+            sim = dict(tool_ctx)
+            seg: list[tuple[dict[str, Any], dict[str, Any]]] = []
+            for c in calls[start:]:
+                name, args = c["name"], _call_args(c)
+                spec, raw = toolbox.specs.get(name), modes.get(name, "off")
+                if "_raw" in args or name in blocked or not parallel_safe(spec, name, raw):
+                    break
+                if _gate(name, raw, sim, args) != "on" or toolbox.fs_needs_ask(name, args, sim):
+                    break
+                perm = permrules.resolve(name, args, "on", False, rules=perm_rules, roots=_perm_roots(cfg, desk_id), conv=conv_id,
+                                         doom=detector is not None and detector.repeat_count(name, args) >= permrules.DOOM_LIMIT - 1)
+                if perm.mode != "on" or perm.refusal or perm.kind == "doom_loop":
+                    break
+                seg.append((c, args))
+                if spec.taints:
+                    sim["tainted"] = True
+            if len(seg) < 2:
+                return 1
+            sem = asyncio.Semaphore(width)
+
+            async def run_one(name: str, args: dict[str, Any], ctx: dict[str, Any]) -> Any:
+                async with sem:
+                    # Stop skips reads still queued for a slot; reads already running side by side are not interrupted.
+                    if stop.is_set():
+                        return {"error": "Stopped by the user before this call ran; it was not executed."}
+                    return await toolbox.call(name, args, ctx)
+
+            for c, args in seg:
+                key = tools.call_key(c["name"], args)
+                if key not in warm:  # an identical call in the round runs once and shares the result
+                    warm_ctx[key] = dict(tool_ctx)  # taint set by a read must not reach calls gated before it
+                    warm[key] = asyncio.ensure_future(run_one(c["name"], args, warm_ctx[key]))
+                    tasks.append(warm[key])
+            return len(seg)
 
         async def _final_round() -> AsyncIterator[tuple[str, Any]]:
             """Closing answer after a budget or breaker stop: one tool-free call, itself exempt from the budget."""
@@ -1913,7 +1961,16 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             if buf and buf[-1] and not buf[-1].endswith("\n"):
                 buf.append("\n")
                 yield "delta", {"id": am["id"], "text": "\n"}
-            for c in calls:
+            # Consecutive read-only calls start together (see _warm_segment); a write, an ask or any other call
+            # is a barrier. The loop below still gates, journals and reports every call in order and only
+            # collects the warmed result instead of calling the tool.
+            warm: dict[str, asyncio.Task] = {}
+            warm_ctx: dict[str, dict[str, Any]] = {}
+            warmed_upto = 0
+            for ci, c in enumerate(calls):
+                if ci >= warmed_upto and not stop.is_set():
+                    warm.clear()  # a result is only shared inside its own run of reads, never across a barrier
+                    warmed_upto = ci + max(1, _warm_segment(calls, ci, warm, warm_ctx, warm_tasks))
                 if stop.is_set():
                     # Stop means the rest of this round's calls do not run either. The provider still needs a tool
                     # message per call, and nothing was journaled as started, so nothing replays.
@@ -2281,6 +2338,14 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         result = await _mcp_call(c["name"], args)
                         mcp_ran = True
                     ran = True
+                elif not asks and (wkey := tools.call_key(c["name"], args)) in warm:
+                    # Started with its neighbours; an identical call in the round shares this one run.
+                    result = await warm[wkey]
+                    if isinstance(result, dict):
+                        result = dict(result)
+                    if warm_ctx[wkey].get("tainted"):
+                        tool_ctx["tainted"] = True
+                    ran = True
                 else:
                     tool_ctx["fs_outside_ok"] = fs_ask  # the user approved this write (or granted the folder)
                     try:
@@ -2370,6 +2435,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     tool_schemas = _schemas()
                 if tool_ctx.pop("plan_changed", None):
                     yield "plan", {"conversation_id": conv_id, "steps": (work_plans.get(conv_id) or {}).get("steps") or []}
+            # Warmed reads nobody consumed (Stop, a loop break) are cancelled and reaped now, not at run end.
+            pending = [t for t in warm_tasks if not t.done()]
+            for t in pending:
+                t.cancel()
+            await asyncio.gather(*warm_tasks, return_exceptions=True)
+            warm_tasks.clear()
             if partial == "loop":
                 async for chunk in _final_round():
                     yield chunk
@@ -2393,6 +2464,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             yield "span", {"message_id": am["id"], "span": s}
     finally:
         _active.pop(am["id"], None)
+        for t in warm_tasks:
+            t.cancel()
         if not desk_id:  # a chat's background shell jobs end with its run; a desk's outlive a turn (they wake it)
             await toolbox.shell.kill_conversation(conv_id)
 

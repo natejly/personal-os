@@ -96,6 +96,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "permissionRules": {"allow": [], "ask": [], "deny": []},
     # "deny": a job run that would have to ask is refused with a recorded reason instead of waiting for someone.
     "unattendedApprovals": "ask",
+    "toolReadRetries": 2,  # extra attempts for a read-only tool after a transient network error (0 = never retry)
+    "parallelReads": 4,  # read-only tool calls of one round that run together (1 = one at a time)
     "stuckDetection": True,  # nudge, then stop, on ping-pong / same-result / error-cycle loops (stuck.py)
     # Bank long messages the user writes as style samples and keep their voice profile current (style.py).
     # Independent of autoLearn: wanting the app to learn facts is not the same as wanting it to copy your voice.

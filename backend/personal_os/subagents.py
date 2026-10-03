@@ -56,6 +56,16 @@ CHILD_BLOCK = frozenset({
 CHILD_DANGER_BLOCK = ("plan", "schedules", "external")
 FILE_WRITERS = ("write_local_file", "move_local_file", "fs_edit", "fs_copy", "fs_mkdir")
 SHELL_TOOLS = ("shell_run", "shell_poll", "shell_kill")
+STATEFUL_GROUPS = ("browser", "shell", "sandbox")  # tools that hold session state never run side by side
+
+
+def parallel_safe(spec: Any, name: str, mode: str) -> bool:
+    """True when a call can run beside its neighbours: a plain read (safe/network tier) that is on, not a writer,
+    not a spawn, and not a tool that holds session state."""
+    return bool(spec and spec.danger in ("safe", "network") and mode == "on" and name not in WRITER_TOOLS
+                and not name.startswith("agent_") and spec.group not in STATEFUL_GROUPS)
+
+
 WRITER_TOOLS = frozenset({*FILE_WRITERS, *SHELL_TOOLS, "run_python", "desk_write_file", "desk_trash_file", "desk_import_sandbox"})
 PATH_ARGS = ("path", "dest", "destination", "src", "source", "cwd", "to")
 
@@ -694,9 +704,7 @@ class Subagents:
 
     # ---- one round of tool calls -------------------------------------------------------------------
     def _parallel_ok(self, ch: Child, name: str) -> bool:
-        spec = self.toolbox.specs.get(name)
-        return bool(spec and spec.danger in ("safe", "network") and ch.modes.get(name) == "on"
-                    and name not in WRITER_TOOLS and not name.startswith("agent_"))
+        return parallel_safe(self.toolbox.specs.get(name), name, ch.modes.get(name, "off"))
 
     async def _run_calls(self, ch: Child, calls: list[dict[str, Any]]) -> None:
         """Consecutive read-only calls run together (up to ROUND_PARALLEL); anything else is a barrier. Identical

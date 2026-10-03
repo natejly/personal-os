@@ -72,10 +72,13 @@ function Reasoning({ text, live }: { text: string; live: boolean }): JSX.Element
 /**
  * Continue / Resume under the newest reply when the backend says its run can be picked up. Bound to
  * its own message: a resumable run for some other message in the chat never shows here. The lookup
- * is repeated when the backend comes back, because it fails while the sidecar is down.
+ * is repeated when the backend comes back, because it fails while the sidecar is down, and again when
+ * the stream closes: at `done` the run row still reads `running` (its style-learning tail is on), and
+ * only the close that follows `Run.end` says how it ended.
  */
 function ContinueButton({ conversationId, messageId }: { conversationId: string; messageId: string }): JSX.Element | null {
   const backendState = useStore((s) => s.backendState)
+  const settled = useStore((s) => !s.sessions[conversationId]?.streaming)
   const [run, setRun] = useState<{ id: string; reason: string } | null>(null)
   const [busy, setBusy] = useState(false)
   useEffect(() => {
@@ -84,7 +87,7 @@ function ContinueButton({ conversationId, messageId }: { conversationId: string;
       if (live) setRun(r.resumable && r.run_id && r.message_id === messageId ? { id: r.run_id, reason: r.reason } : null)
     }).catch(() => undefined)
     return () => { live = false }
-  }, [conversationId, messageId, backendState])
+  }, [conversationId, messageId, backendState, settled])
   if (!run) return null
   return (
     <button className="ghost-btn" disabled={busy} onClick={() => {
@@ -111,8 +114,8 @@ function ErrorAction({ conversationId, kind }: { conversationId: string; kind: s
     } else {
       setBusy(true)
       api.compactConversation(conversationId)
-        .then(() => st().regenerate(conversationId))
-        .catch((e) => st().toast(`Could not compact: ${(e as Error).message}`, 'error'))
+        .then(() => st().regenerate(conversationId), (e) => st().toast(`Could not compact: ${(e as Error).message}`, 'error'))
+        .catch((e) => st().toast((e as Error).message, 'error'))
         .finally(() => setBusy(false))
     }
   }
@@ -166,7 +169,8 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
   const isUser = message.role === 'user'
   const ctx = message.context_used
   const ctxCount = ctx ? ctx.memories.length + ctx.nodes.length + ctx.chunks.length : 0
-  const note = !streaming && message.role === 'assistant' ? outcomeLabel(message.outcome) : null
+  // An interrupted row carries both an `Interrupted:` error and the outcome; the error line says it once.
+  const note = !streaming && message.role === 'assistant' && !message.error ? outcomeLabel(message.outcome) : null
   const bare = !streaming && message.role === 'assistant' && message.outcome === 'stopped' && !message.content && !message.tool_events?.length && !message.reasoning
   const trace = message.trace && message.trace.length > 0 ? traceSummary(message.trace) : null
   return (

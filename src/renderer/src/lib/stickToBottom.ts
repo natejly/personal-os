@@ -29,26 +29,35 @@ function innerScrollsUp(target: EventTarget | null, root: HTMLElement): boolean 
 /**
  * Follow-the-bottom for a transcript. Refs are the source of truth; state mirrors them only on a
  * flip, so a streamed token does not re-render the view. `resetKey` (the conversation id) re-sticks,
- * and so does a new trailing user message (the user's own send).
+ * and so does a new trailing user message (the user's own send). `unseen` is how many rows were
+ * appended since follow was released (`rows` is the transcript length): growth inside a row that is
+ * still streaming shows the pill but adds no count, or the number would climb once per frame.
  */
 export function useStickToBottom(
   scrollRef: RefObject<HTMLDivElement>,
-  opts: { resetKey: unknown; tailUserId: string | null }
+  opts: { resetKey: unknown; tailUserId: string | null; rows?: number }
 ): { stick: boolean; unseen: number; jump: () => void } {
   const stickRef = useRef(true)
   const prevTop = useRef(0)
-  const unseenRef = useRef(0)
+  const rows = opts.rows ?? 0
+  const rowsRef = useRef(rows)
+  const seenRows = useRef(rows)
   const [stick, setStick] = useState(true)
   const [unseen, setUnseen] = useState(0)
 
+  const setUnseenOnFlip = useCallback((n: number) => setUnseen((p) => (p === n ? p : n)), [])
+  // Re-attaching marks everything on screen as seen; releasing starts the count from here.
   const setStickBoth = useCallback((v: boolean) => {
     stickRef.current = v
+    if (v) { seenRows.current = rowsRef.current; setUnseenOnFlip(0) }
     setStick((p) => (p === v ? p : v))
-  }, [])
-  const setUnseenBoth = useCallback((n: number) => {
-    unseenRef.current = n
-    setUnseen((p) => (p === n ? p : n))
-  }, [])
+  }, [setUnseenOnFlip])
+
+  rowsRef.current = rows
+  useEffect(() => {
+    if (stickRef.current) seenRows.current = rows
+    else setUnseenOnFlip(Math.max(0, rows - seenRows.current))
+  }, [rows, setUnseenOnFlip])
 
   const toBottom = useCallback(() => {
     const el = scrollRef.current
@@ -59,9 +68,8 @@ export function useStickToBottom(
 
   const jump = useCallback(() => {
     setStickBoth(true)
-    setUnseenBoth(0)
     toBottom()
-  }, [setStickBoth, setUnseenBoth, toBottom])
+  }, [setStickBoth, toBottom])
 
   // A different chat starts at its last message with follow on, whatever the previous one was doing.
   useLayoutEffect(() => { jump() }, [opts.resetKey, jump])
@@ -71,14 +79,12 @@ export function useStickToBottom(
     const el = scrollRef.current
     if (!el) return
     const inner = el.querySelector('.messages-inner')
-    let innerH = inner ? inner.getBoundingClientRect().height : 0
     const release = (): void => setStickBoth(false)
     const onScroll = (): void => {
       const distance = el.scrollHeight - el.scrollTop - el.clientHeight
       const next = nextStick(stickRef.current, { top: el.scrollTop, prevTop: prevTop.current, distance })
       prevTop.current = el.scrollTop
       if (next !== stickRef.current) setStickBoth(next)
-      if (next && unseenRef.current) setUnseenBoth(0)
     }
     const onWheel = (e: WheelEvent): void => {
       if (e.deltaY < 0 && el.scrollTop > 0 && !innerScrollsUp(e.target, el)) release()
@@ -86,13 +92,9 @@ export function useStickToBottom(
     const onKey = (e: KeyboardEvent): void => {
       if (e.key === 'PageUp' || e.key === 'ArrowUp' || e.key === 'Home') release()
     }
-    // Runs once per frame before paint, so following needs no rAF of its own.
-    const ro = new ResizeObserver(() => {
-      const h = inner ? inner.getBoundingClientRect().height : 0
-      if (stickRef.current) toBottom()
-      else if (h > innerH) setUnseenBoth(unseenRef.current + 1)
-      innerH = h
-    })
+    // Runs once per frame before paint, so following needs no rAF of its own. The scroller itself is
+    // observed too: it shrinks when the composer grows or the plan panel appears.
+    const ro = new ResizeObserver(() => { if (stickRef.current) toBottom() })
     ro.observe(el)
     if (inner) ro.observe(inner)
     el.addEventListener('scroll', onScroll, { passive: true })
@@ -104,7 +106,7 @@ export function useStickToBottom(
       el.removeEventListener('wheel', onWheel)
       el.removeEventListener('keydown', onKey)
     }
-  }, [scrollRef, opts.resetKey, setStickBoth, setUnseenBoth, toBottom])
+  }, [scrollRef, opts.resetKey, setStickBoth, toBottom])
 
   return { stick, unseen, jump }
 }

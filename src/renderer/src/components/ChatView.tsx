@@ -48,7 +48,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   const lastLen = msgs[msgs.length - 1]?.content.length ?? 0
 
   const last = msgs[msgs.length - 1]
-  const { stick, unseen, jump } = useStickToBottom(scrollRef, { resetKey: convo?.id ?? conversationId ?? null, tailUserId: last?.role === 'user' ? last.id : null })
+  const { stick, unseen, jump } = useStickToBottom(scrollRef, { resetKey: convo?.id ?? conversationId ?? null, tailUserId: last?.role === 'user' ? last.id : null, rows: msgs.length })
 
   // Only the full-window chat is a "page"; a chat window on the canvas is one of many on screen.
   usePageContext(() => (conversationId ? undefined : {

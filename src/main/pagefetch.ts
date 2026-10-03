@@ -28,7 +28,9 @@ let active = 0
 let sessionReady = false
 let timer: NodeJS.Timeout | null = null
 
-type PageResult = { url: string; title: string; text: string; truncated: boolean; timedOut: boolean }
+type PageResult = { url: string; title: string; text: string; truncated: boolean; timedOut: boolean; links?: { text: string; href: string }[] }
+const MAX_LINKS = 40
+const MAX_SELECTOR = 200
 
 const isHttp = (u: URL): boolean => u.protocol === 'http:' || u.protocol === 'https:'
 
@@ -73,7 +75,7 @@ function agentSession(): Electron.Session {
 configureAgentBrowser({ session: agentSession })
 
 /** Picks the densest of <main>/<article>/[role=main] when it carries most of the text, else the whole body. */
-const EXTRACT = (max: number): string => `(() => {
+const EXTRACT = (max: number, withLinks: boolean): string => `(() => {
   const clean = (s) => (s || '').replace(/[ \\t\\u00a0]+/g, ' ').replace(/\\n\\s*\\n\\s*\\n+/g, '\\n\\n').trim();
   const body = document.body ? document.body.innerText : '';
   let best = '';
@@ -81,11 +83,26 @@ const EXTRACT = (max: number): string => `(() => {
     const t = el.innerText || '';
     if (t.length > best.length) best = t;
   }
-  const text = clean(best.length > 500 && best.length > body.length * 0.4 ? best : body);
-  return { title: document.title || '', url: location.href, text: text.slice(0, ${max + 1}) };
+  const useBest = best.length > 500 && best.length > body.length * 0.4;
+  const text = clean(useBest ? best : body);
+  const links = [];
+  if (${withLinks}) {
+    const roots = useBest ? document.querySelectorAll('main, article, [role="main"]') : [document.body];
+    const seen = new Set();
+    outer: for (const root of roots) for (const a of root ? root.querySelectorAll('a[href]') : []) {
+      let u; try { u = new URL(a.getAttribute('href'), location.href); } catch (e) { continue; }
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') continue;
+      u.hash = '';
+      if (seen.has(u.href)) continue;
+      seen.add(u.href);
+      links.push({ text: clean(a.innerText || a.getAttribute('aria-label') || '').slice(0, 120), href: u.href });
+      if (links.length >= ${MAX_LINKS}) break outer;
+    }
+  }
+  return { title: document.title || '', url: location.href, text: text.slice(0, ${max + 1}), links };
 })()`
 
-async function loadPage(url: string, maxChars: number, timeoutMs: number): Promise<PageResult> {
+async function loadPage(url: string, maxChars: number, timeoutMs: number, waitFor = '', withLinks = false): Promise<PageResult> {
   const win = new BrowserWindow({
     show: false,
     width: 1280,
@@ -127,14 +144,27 @@ async function loadPage(url: string, maxChars: number, timeoutMs: number): Promi
     const how = await Promise.race([loaded, timeout]).finally(() => clearTimeout(tid))
     if (how === 'timeout' && !domReady) throw new Error(`the page did not load within ${Math.round(timeoutMs / 1000)}s`)
     if (how === 'loaded') await new Promise((r) => setTimeout(r, SETTLE_MS))
-    const read = wc.executeJavaScript(EXTRACT(maxChars), true) as Promise<{ title: string; url: string; text: string }>
+    let timedOut = how === 'timeout'
+    if (waitFor) {
+      // Poll for the selector within the budget (read-only: no input is sent to the page).
+      const until = Date.now() + Math.min(timeoutMs, 15_000)
+      const probe = `!!document.querySelector(${JSON.stringify(waitFor)})`
+      let found = false
+      while (!found && Date.now() < until) {
+        found = (await wc.executeJavaScript(probe, true).catch(() => false)) === true
+        if (!found) await new Promise((r) => setTimeout(r, 250))
+      }
+      if (!found) timedOut = true
+    }
+    const read = wc.executeJavaScript(EXTRACT(maxChars, withLinks), true) as Promise<{ title: string; url: string; text: string; links?: { text: string; href: string }[] }>
     const out = await Promise.race([
       read,
       new Promise<never>((_r, reject) => setTimeout(() => reject(new Error('reading the page timed out')), 5_000))
     ])
     const text = String(out.text ?? '')
     return { url: String(out.url || url), title: String(out.title ?? ''), text: text.slice(0, maxChars),
-      truncated: text.length > maxChars, timedOut: how === 'timeout' }
+      truncated: text.length > maxChars, timedOut,
+      ...(withLinks ? { links: (out.links ?? []).slice(0, MAX_LINKS) } : {}) }
   } finally {
     if (!win.isDestroyed()) win.destroy()
   }
@@ -180,7 +210,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
     raw += chunk
     if (raw.length > MAX_BODY) return send(res, 413, { error: 'request too large' })
   }
-  let body: { url?: unknown; maxChars?: unknown; timeoutMs?: unknown }
+  let body: { url?: unknown; maxChars?: unknown; timeoutMs?: unknown; waitForSelector?: unknown; links?: unknown }
   try {
     body = JSON.parse(raw)
   } catch {
@@ -198,10 +228,11 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   if (active >= MAX_ACTIVE) return send(res, 429, { error: 'the page loader is busy; try again in a moment' })
   const maxChars = Math.max(1000, Math.min(Number(body.maxChars) || 20_000, MAX_CHARS))
   const timeoutMs = Math.max(3_000, Math.min(Number(body.timeoutMs) || 20_000, MAX_TIMEOUT_MS))
+  const waitFor = typeof body.waitForSelector === 'string' ? body.waitForSelector.slice(0, MAX_SELECTOR) : ''
   active++
   try {
     agentSession()
-    send(res, 200, await loadPage(target.toString(), maxChars, timeoutMs))
+    send(res, 200, await loadPage(target.toString(), maxChars, timeoutMs, waitFor, body.links === true))
   } catch (e) {
     send(res, 502, { error: (e as Error).message })
   } finally {

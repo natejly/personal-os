@@ -778,6 +778,58 @@ def test_meeting_read_of_a_live_meeting_returns_the_transcript_so_far() -> None:
     w.repo.finalize(m["id"], "", status="ready")
     out = asyncio.run(tb.call("meeting_read", {"meeting": m["id"], "part": "transcript"}, {"project_id": "p1"}))
     assert "we agreed on friday" in out["text"] and "in progress" not in out.get("note", "")
+# ---------------------------------------------------------------- silence notice and auto-pause
+
+
+def test_silent_for_and_the_silence_pause_use_the_clock_and_only_pause() -> None:
+    w = World()
+    doc = w.docs.create("Plan", "# Plan")
+    m = w.repo.create(title="t", doc_id=doc["id"], doc_mode="record", status="scheduled")
+    pool = _Pool(w.tmp)
+    w.svc.pool = pool                                                        # type: ignore[assignment]
+    t0 = time.time()
+    w.svc.set_config({"silencePauseMinutes": 2})
+    sess = pool.start(m["id"], {"mic": 1}, segment_seconds=6)
+    sess.started_at, sess.paused, sess.captures = t0, False, {"mic": 1}
+    sess.stats = lambda: {"elapsed_ms": 1, "segments_done": 0, "segments_pending": 0, "queued": 0,
+                          "paused": sess.paused, "channels": [{"channel": "mic", "alive": True, "error": ""}]}
+    sess.pause = lambda on: setattr(sess, "paused", on)
+    clock = [t0 + 30]
+    real = meetings.now
+    meetings.now = lambda: clock[0]                                          # type: ignore[assignment]
+    try:
+        act = w.svc.status()["active"]
+        assert act["channels"][0]["silent_for_s"] == 30 and not act["auto_paused"]
+        w.svc._check_silence(w.svc.config())
+        assert not sess.paused                                               # not before the minutes
+        w.svc._on_segment(m["id"], "mic", 0, Path("x.wav"), {"t_start": 0, "t_end": 6, "started_at": t0,
+                          "wav_path": "", "wav_bytes": 0, "duration_ms": 6000, "state": "recorded"})
+        w.svc._on_result(m["id"], "mic", 0, Path("x.wav"), {"text": "hello", "detail": {}, "backend": "p", "error": "",
+                         "state": "done", "wav_path": "", "wav_bytes": 0})
+        clock[0] = t0 + 30 + 100
+        assert w.svc.status()["active"]["channels"][0]["silent_for_s"] == 100
+        w.svc._check_silence(w.svc.config())
+        assert not sess.paused                                               # speech reset the clock
+        clock[0] = t0 + 30 + 121
+        w.svc._check_silence(w.svc.config())
+        assert sess.paused and w.svc.status()["active"]["auto_paused"]
+        assert "Paused after 2 minutes of silence" in w.repo.get(m["id"])["error"]
+        w.svc.resume(m["id"])
+        assert not sess.paused and not w.svc.status()["active"]["auto_paused"]
+        assert "Paused after" not in (w.repo.get(m["id"])["error"] or "")
+        assert "Paused after" not in (w.svc.status()["active"]["error"] or "")
+        assert w.svc.status()["active"]["channels"][0]["silent_for_s"] == 0
+        w.svc.set_config({"silencePauseMinutes": 0})
+        clock[0] += 99999
+        w.svc._check_silence(w.svc.config())
+        assert not sess.paused                                               # 0 disables
+    finally:
+        meetings.now = real                                                  # type: ignore[assignment]
+
+
+def test_the_config_route_model_keeps_silence_pause_minutes() -> None:
+    from personal_os.app import MeetingConfigIn
+    assert MeetingConfigIn(silencePauseMinutes=3).model_dump(exclude_none=True) == {"silencePauseMinutes": 3}
 
 
 if __name__ == "__main__":

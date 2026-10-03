@@ -5926,6 +5926,7 @@ class MeetingConfigIn(BaseModel):
     minSummaryWords: int | None = None
     vocabularyPrompt: bool | None = None
     keepAudio: bool | None = None
+    silencePauseMinutes: int | None = None
     maxAudioBytes: int | None = None
     redactSecrets: bool | None = None
     injectContext: bool | None = None

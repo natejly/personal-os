@@ -365,6 +365,9 @@ export default function MeetingSettings({ variant = 'page' }: { variant?: 'page'
         <input type="checkbox" checked={cfg.keepAudio} onChange={(e) => patch({ keepAudio: e.target.checked })} />
         <span className="switch" />
       </label>
+      <NumberField label="Pause a doc recording after silence" hint="Minutes with no speech before the recorder pauses itself and asks. 0 never pauses"
+        value={cfg.silencePauseMinutes} min={0} max={240} suffix="min"
+        onCommit={(v) => patch({ silencePauseMinutes: v })} />
       <NumberField label="Audio kept on disk at most" hint="Oldest failed clip is evicted first once this is reached"
         value={Math.round(cfg.maxAudioBytes / MIB)} min={64} max={65536} step={64} suffix="MiB"
         onCommit={(v) => patch({ maxAudioBytes: v * MIB })} />

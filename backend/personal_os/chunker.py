@@ -27,11 +27,13 @@ class Chunk:
         return " > ".join(self.heading)
 
 
-def contextualize(title: str, heading: str | Sequence[str], text: str) -> str:
-    """The string that is indexed and embedded for a chunk. `heading` is a path list or 'A > B'."""
+def contextualize(title: str, heading: str | Sequence[str], text: str, blurb: str = "") -> str:
+    """The string that is indexed and embedded for a chunk. `heading` is a path list or 'A > B'.
+    `blurb` is the optional model-written situating sentence (retrieval.contextualize_pending)."""
     path = heading if isinstance(heading, str) else " > ".join(heading)
     head = " > ".join(x for x in (title, path) if x)
-    return f"{head}\n{text}" if head else text
+    out = f"{head}\n{text}" if head else text
+    return f"{blurb}\n{out}" if blurb else out
 
 
 def _hard_cut(s: str, size: int) -> list[str]:

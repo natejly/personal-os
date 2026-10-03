@@ -1074,6 +1074,8 @@ export interface Settings {
   systemPrompt: string
   extractionModel: string
   autoLearn: boolean
+  /** Embed-backfill writes a model-made context blurb per chunk (one call each). */
+  contextualChunks?: boolean
   /** Bank long messages and saved docs as writing samples, and keep the voice profile current. */
   learnStyle: boolean
   theme: 'dark' | 'light' | 'system'

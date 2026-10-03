@@ -292,6 +292,9 @@ class Docs:
             for col, ddl in {"deleted_at": "REAL", "deleted_with": "TEXT", "pinned": "INTEGER NOT NULL DEFAULT 0"}.items():
                 if col not in have:
                     c.execute(f"ALTER TABLE docs ADD COLUMN {col} {ddl}")
+            # doc_chunks.blurb: optional model-written context line (retrieval.contextualize_pending).
+            if "blurb" not in {r["name"] for r in c.execute("PRAGMA table_info(doc_chunks)").fetchall()}:
+                c.execute("ALTER TABLE doc_chunks ADD COLUMN blurb TEXT NOT NULL DEFAULT ''")
             # doc_revisions.append arrived after the first release (recording summaries), so an existing DB needs it added.
             have_rev = {r["name"] for r in c.execute("PRAGMA table_info(doc_revisions)").fetchall()}
             if "append" not in have_rev:

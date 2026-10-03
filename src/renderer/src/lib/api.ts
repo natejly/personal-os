@@ -397,6 +397,8 @@ export const api = {
     create: (projectId: string | null, model?: string) => req<Conversation>('/conversations', { method: 'POST', body: json({ project_id: projectId, model }) }, CONTROL_TIMEOUT_MS),
     patch: (id: string, patch: { title?: string; model?: string; settings?: Partial<ConversationSettings> }) =>
       req<Conversation>(`/conversations/${id}`, { method: 'PATCH', body: json(patch) }, CONTROL_TIMEOUT_MS),
+    /** Ask for a fresh model-written title (replaces a typed one: it was asked for). */
+    retitle: (id: string) => req<Conversation>(`/conversations/${id}/title`, { method: 'POST' }),
     delete: (id: string) => req<{ ok: boolean; stopped?: boolean }>(`/conversations/${id}`, { method: 'DELETE' }),
     deleteMessage: (id: string, mid: string) => req(`/conversations/${id}/messages/${mid}`, { method: 'DELETE' })
   },

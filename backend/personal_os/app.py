@@ -27,7 +27,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import AfterValidator, BaseModel, Field
 
 from . import activity, approval_edits, assist, backups, llm, mac, mcp_drift, mcp_eval, mcp_search, tools
-from . import compaction, otel_export
+from . import compaction, otel_export, titles
 from .context import build_context, estimate_tokens, layout_messages
 from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
 from .extract_text import MAX_UPLOAD_BYTES, extract_structured, extract_text, for_index, has_readable_text, safe_upload_name
@@ -263,6 +263,7 @@ _approvals: dict[str, asyncio.Future] = {}
 # Background work that outlives the run that queued it, and the topic it reports on.
 events = Topic()
 consolidator = Consolidator(db, memories, graph)
+title_jobs = titles.TitleJobs(convos.get, convos.update, events.publish)
 learner = LearnWorker(memories=memories, graph=graph, set_trace=convos.set_trace, publish=events.publish, consolidator=consolidator,
                      alive=lambda cid: convos.get(cid, with_messages=False) is not None)
 
@@ -1114,10 +1115,39 @@ def patch_conversation(id: str, body: ConvPatch) -> dict[str, Any]:
     # command can print it back as if the chat were trusted again.
     if settings_patch.get("tainted") is False and sandboxes.holds_import(id):
         sandboxes.reset(id)
+    new_title = (patch.get("title") or "").strip()
+    if new_title:
+        cur = convos.get(id, with_messages=False)
+        # Only a changed title is the user's: the header input sends its value on every blur, edited or not.
+        if cur and new_title != cur["title"]:
+            patch["settings"] = {**settings_patch, "titleSource": "user"}
+            title_jobs.cancel(id)
     c = convos.update(id, patch)
     if not c:
         raise HTTPException(404)
     return c
+
+
+@app.post("/conversations/{id}/title")
+async def retitle_conversation(id: str) -> dict[str, Any]:
+    """Regenerate the title on request, from the user's messages only. Replaces a typed title too: it was asked for."""
+    c = convos.get(id)
+    if not c:
+        raise HTTPException(404)
+    texts = [m["content"] for m in c["messages"] if m["role"] == "user"]
+    cfg = settings()
+    try:
+        new = await titles.generate(cfg, c["model"] or cfg["defaultModel"], titles.pick_texts(texts))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"Could not generate a title: {e}") from None
+    if not new:
+        raise HTTPException(502, "The model returned no usable title.")
+    title_jobs.cancel(id)
+    out = convos.update(id, {"title": new, "settings": {"titleSource": "auto", "titleTurns": len(texts)}})
+    if not out:
+        raise HTTPException(404)
+    events.publish("conversation_changed", {"id": id, "title": new})
+    return out
 
 
 @app.delete("/conversations/{id}")
@@ -1476,8 +1506,7 @@ def _short(args: dict[str, Any], limit: int = 300) -> dict[str, Any]:
 
 
 def _title_from(text: str) -> str:
-    t = " ".join(text.split())
-    return (t[:48].rstrip() + "…") if len(t) > 48 else (t or "New chat")
+    return titles.placeholder(text)
 
 
 def _replay_args(raw: str | None) -> str:
@@ -1521,6 +1550,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     if body.model and body.model != conv["model"]:
         convos.update(conv_id, {"model": body.model})
     regen_am: dict[str, Any] | None = None  # set when a regenerate superseded the trailing answer
+    placeholder_title: str | None = None  # set when this turn wrote the instant title; the model title replaces it
     carried_root: str | None = None
 
     if body.content is not None:
@@ -1569,6 +1599,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         if conv["title"] == "New chat" and not [m for m in conv["messages"] if m["role"] == "user"]:
             title = _title_from(user_text)
             convos.update(conv_id, {"title": title})
+            placeholder_title = title
             yield "title", {"id": conv_id, "title": title}
     elif body.resume_of:
         # resume: the salvaged reply of the dead run stays visible as history; this reply continues after it
@@ -2860,6 +2891,20 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             user_text=user_text, assistant_text=text, model=model, settings=cfg,
             spans=list(tracer.spans),
         ))
+
+    # The model title: after the reply, off the run, from the user's typed text only. It replaces the placeholder this
+    # turn wrote, or (once, at RETITLE_AT user turns) an earlier auto title; a title the user typed is never touched.
+    # No taint or autoLearn gate: nothing but the user's own messages reaches the call.
+    if not error and not gone and not proposal_only(run) and cfg.get("autoTitle", True):
+        user_texts = [m["content"] for m in conv["messages"] if m["role"] == "user"] + [user_text]
+        fresh = convos.get(conv_id, with_messages=False)
+        fs = (fresh or {}).get("settings") or {}
+        if placeholder_title is not None:
+            if fs.get("titleSource") != "user" and fresh and fresh["title"] == placeholder_title:
+                title_jobs.spawn(conv_id, conv["project_id"], placeholder_title, user_texts, model, cfg, len(user_texts))
+        elif (fresh and fs.get("titleSource") == "auto" and len(user_texts) >= titles.RETITLE_AT
+              and int(fs.get("titleTurns") or 0) < titles.RETITLE_AT):
+            title_jobs.spawn(conv_id, conv["project_id"], fresh["title"], user_texts, model, cfg, len(user_texts))
 
     # Writing style, from the user's half of the exchange only (style.py). Banking a sample is free;
     # the LLM re-reads the samples only on the message that crosses the threshold, so most turns add
@@ -4605,6 +4650,7 @@ def search_documents(id: str, q: str) -> list[dict[str, Any]]:  # convenience fo
 @app.on_event("shutdown")
 async def _shutdown() -> None:
     await bus.shutdown()  # before the rmtree: a live run's sandboxed run_python writes in there
+    await title_jobs.stop()
     await learner.stop()  # after the runs, so nothing is still queueing work at it
     await meeting_bus.shutdown()
     shutil.rmtree(db.data_dir / "tmp", ignore_errors=True)

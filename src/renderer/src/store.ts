@@ -338,6 +338,8 @@ export interface State {
   clearSessionStatus: (conversationId: string) => void
   deleteChat: (id: string) => Promise<void>
   renameChat: (id: string, title: string) => Promise<void>
+  /** Regenerate a chat's title with the model; the sidebar and header follow via the same patch as a rename. */
+  retitleChat: (id: string) => Promise<void>
   setChatModel: (model: string, conversationId?: string) => Promise<void>
   /** Model, effort and fast in ONE request (the picker's Restore defaults); a draft parks them for `send`. Never rejects. */
   setChatConfig: (change: { model?: string; effort?: Effort; fast?: boolean }, conversationId?: string) => Promise<void>
@@ -1053,6 +1055,11 @@ export const useStore = create<State>((set, get) => {
     }
   }
 
+  // A title written off the run (or by another window) reaches the list and any open session without a refetch.
+  const applyTitle = (id: string, title: string): void => {
+    if (get().sessions[id]) patchConversation(id, (c) => (c.title === title ? c : { ...c, title }))
+    set((st) => ({ conversations: st.conversations.map((c) => (c.id === id && c.title !== title ? { ...c, title } : c)) }))
+  }
   const watchBackgroundEvents = async (): Promise<void> => {
     let backoff = 1000
     await seedLiveRuns()
@@ -1081,6 +1088,8 @@ export const useStore = create<State>((set, get) => {
               if (info.answering) void get().attachSession(info.conversation_id).catch(() => undefined)
               else if (!sess.streaming) void get().openSession(info.conversation_id).catch(() => undefined)
             }
+          } else if (ev.event === 'conversation_changed') {
+            applyTitle(ev.data.id, ev.data.title)
           } else if (ev.event === 'recording') {
             // Lazy: the docrec store imports this one, so a static import here would be a cycle.
             const data = ev.data
@@ -1478,7 +1487,7 @@ export const useStore = create<State>((set, get) => {
     ready: false,
     backendError: null,
     backendState: 'ready',
-    settings: { baseUrl: '', apiKey: '', apiKeySet: false, defaultModel: '', systemPrompt: '', extractionModel: '', autoLearn: true, learnStyle: true, theme: 'dark', accent: 'sage', gatherShortcut: '', tools: {}, maxToolRounds: 8, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {} },
+    settings: { baseUrl: '', apiKey: '', apiKeySet: false, defaultModel: '', systemPrompt: '', extractionModel: '', autoLearn: true, autoTitle: true, learnStyle: true, theme: 'dark', accent: 'sage', gatherShortcut: '', tools: {}, maxToolRounds: 8, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {} },
     models: [],
     modelsError: null,
     tools: [],
@@ -1907,6 +1916,12 @@ export const useStore = create<State>((set, get) => {
         await api.conversations.patch(id, { title: next })
         patchConversation(id, (c) => ({ ...c, title: next }))
         set((st) => ({ conversations: st.conversations.map((c) => (c.id === id ? { ...c, title: next } : c)) }))
+      })
+    },
+    retitleChat: async (id) => {
+      await guard('Could not suggest a title', async () => {
+        const c = await api.conversations.retitle(id)
+        applyTitle(id, c.title)
       })
     },
     setChatModel: async (model, conversationId) => {

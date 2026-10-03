@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { PanelLeftOpen, Pencil, SlidersHorizontal, ArrowDown } from 'lucide-react'
+import { PanelLeftOpen, Pencil, Sparkles, SlidersHorizontal, ArrowDown } from 'lucide-react'
 import { useStore, useProject, useConversation, useIsStreaming, useStreamingMessageId } from '../store'
 import ProjectChip from './ProjectChip'
 import MessageView from './Message'
@@ -36,6 +36,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   const toggleSidebar = useStore((s) => s.toggleSidebar)
   const toggleContext = useStore((s) => s.toggleContext)
   const renameChat = useStore((s) => s.renameChat)
+  const retitleChat = useStore((s) => s.retitleChat)
   const send = useStore((s) => s.send)
   const firstPrompts = useOnboarding((s) => s.firstPrompts && !conversationId)
   const setFirstPrompts = useOnboarding((s) => s.setFirstPrompts)
@@ -67,9 +68,14 @@ export default function ChatView({ conversationId }: { conversationId?: string }
         {!sidebarOpen && <button className="icon-btn no-drag" title="Show sidebar (⌘B)" aria-label="Show sidebar" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
         <div className="chat-title no-drag">
           {convo && editingTitle ? (
-            <input autoFocus aria-label="Chat title" defaultValue={convo.title}
-              onBlur={(e) => { void renameChat(convo.id, e.target.value); setEditingTitle(false) }}
-              onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); if (e.key === 'Escape') setEditingTitle(false) }} />
+            <>
+              <input autoFocus aria-label="Chat title" defaultValue={convo.title}
+                onBlur={(e) => { void renameChat(convo.id, e.target.value); setEditingTitle(false) }}
+                onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); if (e.key === 'Escape') setEditingTitle(false) }} />
+              {/* mousedown is stopped so the input does not blur (and rename) before the click lands */}
+              <button className="icon-btn" title="Suggest a title" aria-label="Suggest a title"
+                onMouseDown={(e) => e.preventDefault()} onClick={() => { setEditingTitle(false); void retitleChat(convo.id) }}><Sparkles size={14} /></button>
+            </>
           ) : (
             <button className="title-btn" onClick={() => convo && setEditingTitle(true)} disabled={!convo}>
               {convo?.title ?? 'New chat'}

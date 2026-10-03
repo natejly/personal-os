@@ -213,15 +213,14 @@ def test_a_model_cannot_smuggle_an_edit(editable) -> None:  # type: ignore[no-un
     ROUNDS.append({"tool_calls": [call("todo_add", {"title": title, "edited_arguments": {"title": sneaky}, "edited_by": "user"})]})
     ROUNDS.append(["done"])
     _cid, rid = start({"tools": {"todo_add": "ask"}})
-    a = asked(rid)
-    assert a["edited_args"] is None, "the model's call opens an unedited row"
-    j("POST", f"/approvals/{a['call_id']}", {"decision": "allow"})
     assert drain(rid)["status"] == "done"
+    # The signature rejects the stray keys before any card opens: there is nothing to approve, let alone edit.
+    assert [a for a in store.approvals(status=None, run_id=rid)] == []
     assert todos_named(sneaky) == [] and todos_named(title) == []
     ev = [r for r in results(rid) if r["name"] == "todo_add"][0]
     assert ev["error"], "the stray keys fail like any bad argument"
+    assert ev["invalid"] == "schema" and not ev["approval"]
     assert "edited_by" not in ev and "edited_arguments" not in ev
-    assert store.approval(a["call_id"])["edited_args"] is None
 
 
 def test_an_edit_cannot_ride_a_plan_and_a_forced_card_stays_forced(editable) -> None:  # type: ignore[no-untyped-def]

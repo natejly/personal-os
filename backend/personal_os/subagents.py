@@ -31,6 +31,7 @@ from typing import Any, Callable
 
 from . import compaction, llm, permrules
 from .db import new_id, now
+from .toolcalls import parse_arguments
 from .tools import ALTERNATIVE, ToolSpec, _obj, call_key, denied, summarize_result, tool_error
 
 log = logging.getLogger(__name__)
@@ -671,7 +672,8 @@ class Subagents:
                 return
             ch.messages.append({"role": "assistant", "content": text or None,
                                 "tool_calls": [{"id": c["id"], "type": "function",
-                                                "function": {"name": c["name"], "arguments": c["arguments"] or "{}"}} for c in calls]})
+                                                "function": {"name": c["name"] or "invalid_tool",
+                                                             "arguments": self._echo_args(c)}} for c in calls]})
             if rnd == ch.steps:
                 # Out of steps with calls still pending: answer each, then ask for one tool-free summary.
                 for c in calls:
@@ -737,11 +739,17 @@ class Subagents:
 
     @staticmethod
     def _args(c: dict[str, Any]) -> dict[str, Any]:
-        try:
-            a = json.loads(c["arguments"] or "{}")
-            return a if isinstance(a, dict) else {}
-        except ValueError:
-            return {"_raw": c["arguments"]}
+        args, _repaired, _problem = parse_arguments(c["arguments"])
+        return {"_raw": c["arguments"]} if args is None else args
+
+    @staticmethod
+    def _echo_args(c: dict[str, Any]) -> str:
+        """Arguments for the assistant turn sent back to the provider: '{}' for a call that failed to parse,
+        re-serialised JSON for a repaired one, the text as sent otherwise. Always a JSON object."""
+        args, repaired, _problem = parse_arguments(c["arguments"])
+        if args is None:
+            return "{}"
+        return json.dumps(args, ensure_ascii=False) if repaired else (c["arguments"] or "{}")
 
     async def _exec(self, ch: Child, c: dict[str, Any], args: dict[str, Any]) -> str:
         name = c["name"]

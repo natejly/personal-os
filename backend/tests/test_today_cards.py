@@ -82,13 +82,13 @@ class TodayCardTests(unittest.TestCase):
 
     def test_todos_come_back_in_urgency_order(self) -> None:
         today = date.today()
-        late = todos_mod.store.create("Overdue low", due=(today - timedelta(days=10)).isoformat(), priority=3)
-        soon = todos_mod.store.create("Later high", due=(today + timedelta(days=20)).isoformat(), priority=1)
-        rows = [r for r in todos_mod.today()["todos"] if r["id"] in (late["id"], soon["id"])]
-        want = sorted(rows, key=lambda r: -todo_rules.urgency(r, today))
-        self.assertEqual([r["id"] for r in rows], [r["id"] for r in want])
-        self.assertEqual(len(rows), 2)
-        for t in (late, soon):
+        # due order says near-low first; urgency says the high-priority one outranks it
+        near_low = todos_mod.store.create("Near low", due=(today + timedelta(days=1)).isoformat(), priority=3)
+        far_high = todos_mod.store.create("Far high", due=(today + timedelta(days=3)).isoformat(), priority=1)
+        self.assertGreater(todo_rules.urgency(far_high, today), todo_rules.urgency(near_low, today))
+        rows = [r["id"] for r in todos_mod.today()["todos"] if r["id"] in (near_low["id"], far_high["id"])]
+        self.assertEqual(rows, [far_high["id"], near_low["id"]])
+        for t in (near_low, far_high):
             todos_mod.store.trash(t["id"])
 
     def test_synced_task_shows_once(self) -> None:

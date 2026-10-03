@@ -144,3 +144,6 @@
 .dr-inflight { display: flex; align-items: center; gap: 8px; color: var(--text-faint); font-style: italic; }
 .dr-inflight .dr-dot { background: var(--danger); animation: pulse-dot 1.6s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) { .dr-inflight .dr-dot { animation: none; } }
+.dr-at-play { background: none; border: 0; padding: 0; cursor: pointer; display: inline-flex; align-items: center; gap: 3px; }
+.dr-at-play:hover { color: var(--text); }
+.dr-keep { display: flex; align-items: center; gap: 6px; padding: 6px 10px; font-size: 12px; color: var(--text-dim, var(--text-faint)); }

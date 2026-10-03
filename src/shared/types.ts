@@ -2420,6 +2420,8 @@ export interface MeetingSegment {
   /** 'proxy' | 'local', for the usage/debug line. */
   backend: string
   error: string
+  /** Where the kept wav sits; '' when the audio was not kept. */
+  wav_path?: string
   /** GET /meetings/{id}/segments?since= only: the rowid to poll from next. */
   cursor?: number
 }

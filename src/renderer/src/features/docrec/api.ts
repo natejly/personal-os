@@ -23,7 +23,7 @@ export interface SummarizeResult {
 export const docRecApi = {
   /** Creates a recording linked to the doc and starts it. 409 carries the blockers, and a refused
    *  start leaves no row behind. */
-  start: (docId: string, body: { mode?: DocRecordingMode; template?: string; title?: string } = {}) =>
+  start: (docId: string, body: { mode?: DocRecordingMode; template?: string; title?: string; keep_audio?: boolean } = {}) =>
     req<FullMeeting>(`/docs/${docId}/recordings`, { method: 'POST', body: json(body) }),
   /** Calendar "Take notes": one doc for the event, with the recording started on it. Repeating it for the
    *  same event returns the same doc (`existing`) without starting again. 409 leaves no doc behind. */

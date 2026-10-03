@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowDown, ChevronDown, ChevronUp, Copy, Download, RefreshCw, Search, X } from 'lucide-react'
+import { ArrowDown, Play, Pause, ChevronDown, ChevronUp, Copy, Download, RefreshCw, Search, X } from 'lucide-react'
 import type { FullMeeting, MeetingSegment } from '@shared/types'
 import { formatOffset, mergeSegments, speakerLabel } from '../../lib/transcript'
 import { exportFilename, formatTranscript, type ExportFormat } from './exportText'
+import { api } from '../../lib/api'
+import { playableSegment } from './segments'
 import { findMatches, splitRuns, stepMatch } from './search'
 
 /**
@@ -48,6 +50,37 @@ export default function TranscriptView({ title, segments, meeting, live, segment
   const [query, setQuery] = useState('')
   const [active, setActive] = useState(-1)
   const [copied, setCopied] = useState(false)
+  // One clip plays at a time; `playing` is the line id so its button can show Pause.
+  const player = useRef<{ el: HTMLAudioElement; url: string; seg: string } | null>(null)
+  const [playing, setPlaying] = useState<string | null>(null)
+  const [rate, setRate] = useState(1)
+  const stopPlayer = (): void => {
+    const p = player.current
+    if (p) { p.el.pause(); URL.revokeObjectURL(p.url) }
+    player.current = null
+    setPlaying(null)
+  }
+  useEffect(() => stopPlayer, []) // eslint-disable-line react-hooks/exhaustive-deps
+  const play = async (lineId: string, segId: string): Promise<void> => {
+    const was = playing
+    stopPlayer()
+    if (was === lineId) return
+    try {
+      const url = await api.meetings.segmentAudio(segments[0]?.meeting_id ?? meeting?.id ?? '', segId)
+      const el = new Audio(url)
+      el.playbackRate = rate
+      el.onended = stopPlayer
+      player.current = { el, url, seg: segId }
+      setPlaying(lineId)
+      await el.play()
+    } catch { stopPlayer() }
+  }
+  const cycleRate = (): void => {
+    const next = rate === 1 ? 1.5 : rate === 1.5 ? 2 : 1
+    setRate(next)
+    if (player.current) player.current.el.playbackRate = next
+  }
+  const keep = !!meeting?.keep_audio
 
   const lines = useMemo(() => mergeSegments(segments), [segments])
   const who = (l: (typeof lines)[number]): string =>
@@ -106,6 +139,9 @@ export default function TranscriptView({ title, segments, meeting, live, segment
           disabled={lines.length === 0} onClick={() => void copyAll()}><Copy size={14} /></button>
         <button className="ghost-btn dr-small" disabled={lines.length === 0} onClick={() => save('txt')}><Download size={12} /> .txt</button>
         <button className="ghost-btn dr-small" disabled={lines.length === 0} onClick={() => save('md')}><Download size={12} /> .md</button>
+        {keep && (
+          <button className="ghost-btn dr-small" onClick={cycleRate} title="Playback speed" aria-label="Playback speed">{rate}x</button>
+        )}
         {failed > 0 && onRetranscribe && (
           <button className="ghost-btn dr-small" disabled={busy} onClick={onRetranscribe}
             title="Transcribe the clips that failed again">
@@ -143,7 +179,15 @@ export default function TranscriptView({ title, segments, meeting, live, segment
             data-cited={l.ids.some((x) => marked.has(x)) ? '1' : undefined}>
             <div className="dr-line-head">
               <span className={`dr-who ${l.channel === 'mic' ? '' : 'them'}`}>{who(l)}</span>
-              <span className="dr-at">{formatOffset(l.t_start)}</span>
+              {(() => {
+                const seg = playableSegment(l.ids, segments, keep)
+                return seg
+                  ? <button className="dr-at dr-at-play" title="Play from here" aria-label={`Play from ${formatOffset(l.t_start)}`}
+                      onClick={() => void play(l.id, seg)}>
+                      {playing === l.id ? <Pause size={10} /> : <Play size={10} />} {formatOffset(l.t_start)}
+                    </button>
+                  : <span className="dr-at" title={keep ? 'This clip has no audio' : 'Audio was not kept'}>{formatOffset(l.t_start)}</span>
+              })()}
             </div>
             <p className="dr-line-text">
               {splitRuns(texts[i], matches, i, active).map((r, k) =>

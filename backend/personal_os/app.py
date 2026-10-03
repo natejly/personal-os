@@ -1760,11 +1760,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         log.exception("chat setup failed for %s", conv_id)
         if am:
             _active.pop(am["id"], None)
-            convos.finish_message(am["id"], "", str(e), used, [], tracer.spans, None)
+            convos.finish_message(am["id"], "", str(e), used, [], tracer.spans, None, error_kind=getattr(e, "kind", None))
             convos.touch(conv_id)
         yield "done", {"id": am.get("id"), "error": str(e), "context_used": used, "tool_events": [], "trace": tracer.spans,
                        "stopped": False, "partial": None, "segment": False, "tainted": False, "taint_sources": [],
-                       "reasoning": None}
+                       "reasoning": None, "outcome": None, "error_kind": getattr(e, "kind", None)}
         return
 
     try:
@@ -1876,6 +1876,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         messages.append({"role": "system", "content": TIME_STOP})
                         async for chunk in _final_round():
                             yield chunk
+                        if steers and not stop.is_set():
+                            continue
                     break  # partial is already "time"; text that was written stays as it is
                 if fr == "length" and not calls:
                     if "".join(buf).strip():
@@ -1896,7 +1898,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         quiet_retries = 1
                         messages.append({"role": "system", "content": EMPTY_NUDGE})
                         continue
-                    error = "The model returned an empty reply. Try again or pick another model."
+                    # Still silent. A reply that ran tools is its cards, and ends as one; one that did nothing is an error.
+                    if not tool_events:
+                        error = "The model returned an empty reply. Try again or pick another model."
                     break
             if not calls:
                 # A steer that arrived while this answer streamed: keep the model's own turn in its
@@ -1921,6 +1925,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                          "content": BUDGET_STOP.format(axis="the model's output limit")})
                     async for chunk in _final_round():
                         yield chunk
+                    if steers and not stop.is_set():
+                        continue
                     break
             over = budget.exceeded()
             if (over and run is not None and run.desk_id is None and (plan_seen or active_plan)
@@ -2209,7 +2215,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         yield "done", {"id": am["id"], "error": None, "context_used": used, "tool_events": tool_events,
                                        "trace": tracer.spans, "stopped": False, "partial": None, "segment": False,
                                        "tainted": tool_ctx["tainted"], "taint_sources": tool_ctx["taint_sources"],
-                                       "reasoning": reasoning, "parked": uid}
+                                       "reasoning": reasoning, "outcome": None, "error_kind": None, "parked": uid}
                         return
                     if run is not None:
                         run.set_status("running")

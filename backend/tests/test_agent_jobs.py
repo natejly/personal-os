@@ -465,6 +465,7 @@ def test_the_inbox_is_built_from_journal_rows() -> None:
     args = {"to": "mira@example.com", "subject": "Re: plan", "body": "Yes."}
     ROUNDS.append({"tool_calls": [call("gmail_send", args)]})
     ROUNDS.append([""])  # the run writes no prose at all: the entry must still be complete
+    ROUNDS.append([""])  # ...even after the one nudge an empty round gets; it did tool work, so this is not an error
     job = make_job("inbox", "0 * * * *", "scan and reply", at=T0)
     tick(T0 + 3 * HOUR + 300)  # late by 5 minutes, two slots skipped
     run = job_runs(job["id"])[0]

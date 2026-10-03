@@ -39,6 +39,32 @@ def test_timeout_with_nothing_still_raises() -> None:
     check(done["error"] and "time limit" in done["error"] and done["outcome"] is None, "nothing at all: today's error")
 
 
+def test_a_recorded_reason_survives_a_later_write_and_a_legacy_db_gains_the_columns() -> None:
+    import sqlite3
+    import tempfile
+    from pathlib import Path
+
+    from personal_os.db import Database
+    from personal_os.repos import Conversations
+
+    with tempfile.TemporaryDirectory() as d:
+        convos = Conversations(Database(d))
+        cid = convos.create(None, "t", "m")["id"]
+        am = convos.add_message(cid, "assistant", "", model="m")
+        check(am["outcome"] is None and am["error_kind"] is None, "a fresh row has no outcome and no error kind")
+        convos.finish_message(am["id"], "partway", None, None, outcome="rounds", error_kind=None)
+        convos.finish_message(am["id"], "partway", None, None)  # recovery or a later rewrite: no reason given
+        row = convos.get(cid)["messages"][-1]
+        check(row["outcome"] == "rounds", "a reason, once written, is not erased by a write that gives none")
+        # A database from before the columns existed: the additive migration adds them and old rows read back null.
+        p = Path(d) / "personal-os.db"
+        with sqlite3.connect(p) as c:
+            c.execute("ALTER TABLE messages DROP COLUMN outcome")
+            c.execute("ALTER TABLE messages DROP COLUMN error_kind")
+        old = Conversations(Database(d)).get(cid)["messages"][-1]
+        check(old["outcome"] is None and old["error_kind"] is None and old["content"] == "partway", "migrated: old rows read back with null reasons")
+
+
 if __name__ == "__main__":
     failed = 0
     prev = h.llm.stream_chat

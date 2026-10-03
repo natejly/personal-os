@@ -168,6 +168,21 @@ def test_empty_round_is_nudged_once() -> None:
     check(len(SEEN) == 2 and done["error"] and "empty reply" in done["error"], "a second empty round is an error")
 
 
+def test_silent_after_tool_work_is_not_an_error() -> None:
+    done, row, _ = reply([{"text": "", "calls": [call("c1")]}, {"text": ""}, {"text": ""}])
+    check(len(SEEN) == 3 and any(m.get("content") == EMPTY_NUDGE for m in SEEN[2]), "one nudge after the tool round")
+    check(done["error"] is None and done["outcome"] is None and row["error"] is None, "a reply that ran tools is its cards, not an error")
+    check(len(row["tool_events"]) == 1 and row["content"] == "", "the card is the reply")
+
+
+def test_cut_tool_calls_get_two_recoveries_then_a_closing_round() -> None:
+    cut = {"text": "", "finish": "length", "calls": [call("c1", args='{"q": "unfin')]}
+    done, row, _ = reply([dict(cut), dict(cut), dict(cut), {"text": "best I can do"}])
+    check(len(SEEN) == 4, f"three cut rounds then one closing round, got {len(SEEN)}")
+    check(any(m.get("role") == "tool" and "output limit" in m.get("content", "") for m in SEEN[3]), "the third cut call is answered with the stop text")
+    check(done["outcome"] == "length" and done["error"] is None and row["content"].endswith("best I can do"), "closing text, outcome length")
+
+
 def test_garbled_arguments_are_never_replayed() -> None:
     reply([{"text": "", "calls": [call("c1", args='{"q": "unfinished')]}, {"text": "ok"}])
     turn = next(m for m in SEEN[1] if m.get("role") == "assistant" and m.get("tool_calls"))

@@ -196,7 +196,7 @@ def plan(todos: list[dict[str, Any]], busy: list[Busy], now: datetime, cfg: dict
     planned_ids = {b.get("todo_id") for b in locked if b.get("todo_id")}
     today = now.date()
     order = sorted((t for t in todos if not t.get("done")),
-                   key=lambda t: (-todo_rules.urgency(t, today), t.get("due") or "9999-12-31", int(t.get("priority") or 2), str(t.get("id"))))
+                   key=lambda t: (-todo_rules.urgency_of(t, today), t.get("due") or "9999-12-31", int(t.get("priority") or 2), str(t.get("id"))))
     blocks: list[Block] = []
     unplaced: list[dict[str, Any]] = []
     already: list[str] = []

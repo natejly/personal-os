@@ -477,7 +477,8 @@ class Sandboxes:
         total = int(p.stdout.split()[0])
         if total > EXPORT_MAX_BYTES:
             raise SandboxError(f"{gp} is {total} bytes; the export limit is {EXPORT_MAX_BYTES}. Split or compress it first.")
-        raw = self._run([self._bin(), "exec", name, "cat", gp], timeout=120)
+        raw = self._run([self._bin(), "exec", name, "cat", gp], timeout=120,
+                      **({"hard_cap": EXPORT_MAX_BYTES + 1024, "keep": EXPORT_MAX_BYTES + 1024} if self._run is _run else {}))
         if raw.returncode != 0 or len(raw.stdout) != total:
             raise SandboxError(f"could not read {gp}: {_line(raw.stderr) or 'size changed while reading'}")
         return gp, raw.stdout

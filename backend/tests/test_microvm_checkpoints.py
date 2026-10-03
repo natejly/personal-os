@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import time
+import types
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -245,3 +246,20 @@ def test_export_file_binary_round_trip_and_limits(tmp_path: Any) -> None:
     assert r["saved"] == "outputs/a.bin" and ws.read_bytes("d1", "outputs/a.bin") == blob
     assert asyncio.run(tb.specs["sandbox_export_file"].fn(ctx, path="out/a.bin"))["saved"] != "outputs/a.bin"  # never overwrites
     assert "error" in asyncio.run(tb.specs["sandbox_export_file"].fn({"conversation_id": "c1"}, path="out/a.bin"))
+
+
+def test_export_file_read_passes_the_export_cap_to_the_real_runner(monkeypatch: Any) -> None:
+    """A 9 MB file must not hit the 8 MB default read cap of the real runner."""
+    size = 9_000_000
+    seen: list[int] = []
+
+    def fake_capped(argv: list[str], *, input: bytes | None = None, timeout: float = 60, hard_cap: int = 0, keep: Any = None) -> Any:
+        seen.append(hard_cap)
+        out = str(size).encode() if "wc -c" in " ".join(argv) else b"x" * size
+        return types.SimpleNamespace(returncode=0, stdout=out[:hard_cap], stderr=b"", timed_out=False, truncated=len(out) > hard_cap)
+    sb, d = make()
+    monkeypatch.setattr(microvm, "capped_run", fake_capped)
+    monkeypatch.setattr(sb, "_run", microvm._run)
+    monkeypatch.setattr(sb, "ensure", lambda cid: "c")
+    assert len(sb.export_file("c1", "big.bin")[1]) == size
+    assert seen[-1] > size

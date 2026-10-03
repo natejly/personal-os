@@ -149,8 +149,36 @@ async def searxng(cfg: dict[str, Any], q: str, n: int, tr: str) -> list[dict[str
         raise ProviderError("SearXNG did not return JSON") from None
 
 
-async def search(cfg: dict[str, Any], query: str, want: int, time_range: str = "", site: str = "") -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """(rows, meta). meta: engines_used, failed{provider: first error line}, time_range_ignored / time_range_note."""
+def _hosts(domains: Any) -> list[str]:
+    out = []
+    for d in domains or []:
+        h = re.sub(r"^https?://", "", str(d).strip().lower()).split("/")[0].removeprefix("www.")
+        if not _DOMAIN.match(h):
+            raise ValueError(f"domains must be bare domains like sqlite.org, got {d!r}")
+        out.append(h)
+    return out
+
+
+def filter_domains(rows: list[dict[str, Any]], allowed: list[str], blocked: list[str]) -> list[dict[str, Any]]:
+    """Keep rows whose own host is (a subdomain of) an allowed domain / is not a blocked one. A page's links never extend the list."""
+    def host(r: dict[str, Any]) -> str:
+        return (urllib.parse.urlsplit(str(r.get("url") or "")).hostname or "").removeprefix("www.")
+    def hit(h: str, ds: list[str]) -> bool:
+        return any(h == d or h.endswith("." + d) for d in ds)
+    return [r for r in rows if (not allowed or hit(host(r), allowed)) and not hit(host(r), blocked)]
+
+
+async def search(cfg: dict[str, Any], query: str, want: int, time_range: str = "", site: str = "",
+                 allowed_domains: list[str] | None = None, blocked_domains: list[str] | None = None) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """(rows, meta). meta: engines_used, failed{provider: first error line}, time_range_ignored / time_range_note.
+
+    allowed_domains / blocked_domains filter the merged rows; setting both is an error raised before any engine is called."""
+    if allowed_domains and blocked_domains:
+        raise ValueError("set allowed_domains or blocked_domains, not both")
+    allow, block = _hosts(allowed_domains), _hosts(blocked_domains)
+    if allow or block:
+        rows, meta = await search(cfg, query, want, time_range, site)
+        return filter_domains(rows, allow, block), meta
     tr = (time_range or "").strip().lower()
     if tr and tr not in TIME_RANGES:
         raise ValueError(f"time_range must be one of {', '.join(TIME_RANGES)}")

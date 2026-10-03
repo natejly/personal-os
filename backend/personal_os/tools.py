@@ -886,22 +886,24 @@ class Toolbox:
                       {"source": "Grain", "relation": "uses", "target": "SQLite", "source_type": "project", "target_type": "tool"},
                       {"source": "Acme", "relation": "acquired", "target": "Globex"}]))
 
-        async def web_search(ctx: dict[str, Any], query: str, max_results: int = 6, offset: int = 0, time_range: str = "", site: str = "") -> Any:
+        async def web_search(ctx: dict[str, Any], query: str, max_results: int = 6, offset: int = 0, time_range: str = "", site: str = "",
+                             allowed_domains: list[str] | None = None, blocked_domains: list[str] | None = None) -> Any:
             n = max(1, min(int(max_results), 10))
             off = max(0, int(offset))
             want = min(off + n, 25)
             try:
-                rows, meta = await websearch.search(self.settings(), query, want, time_range, site)
+                rows, meta = await websearch.search(self.settings(), query, want, time_range, site, allowed_domains, blocked_domains)
             except ValueError as e:
-                return tool_error(f"web_search: {e}", field="site" if "site" in str(e) else "time_range",
+                return tool_error(f"web_search: {e}", field="domains" if "domains" in str(e) else "site" if "site" in str(e) else "time_range",
                                   example={"query": query, "time_range": "week", "site": "sqlite.org"})
             for row in rows:
                 _allow_url(ctx, row.get("url"))
             return page(rows, offset=off, limit=n, key="results", **meta)
         R("web_search", ToolSpec("web_search", "Search the web for current information. Returns titles, URLs and snippets; call fetch_url to read a result in full. "
-                                 "time_range (day, week, month, year) limits to recent pages; site restricts to one domain.",
+                                 "time_range (day, week, month, year) limits to recent pages; site restricts to one domain; allowed_domains keeps only those domains, blocked_domains drops them (not both).",
             _obj({"query": {"type": "string"}, "max_results": {"type": "integer", "default": 6}, "offset": {"type": "integer", "default": 0},
-                  "time_range": {"type": "string", "enum": ["day", "week", "month", "year"]}, "site": {"type": "string"}}, ["query"]), web_search, "web", "network",
+                  "time_range": {"type": "string", "enum": ["day", "week", "month", "year"]}, "site": {"type": "string"},
+                  "allowed_domains": {"type": "array", "items": {"type": "string"}}, "blocked_domains": {"type": "array", "items": {"type": "string"}}}, ["query"]), web_search, "web", "network",
             examples=[{"query": "EU AI Act enforcement dates"}, {"query": "best espresso machine 2026", "max_results": 10},
                       {"query": "python 3.13 release notes", "max_results": 6, "offset": 6},
                       {"query": "wal checkpoint", "site": "sqlite.org"}, {"query": "OpenAI announcement", "time_range": "week"}], taints=True))
@@ -969,6 +971,7 @@ class Toolbox:
                         text, via = j["text"], "jina-reader"
                 except (reach.ReachError, httpx.HTTPError) as e:
                     log.info("jina reader fallback failed for %s: %s", final_url, _first_line(e))
+            full_text = text
             mc = max(1000, min(int(max_chars), 40000))
             focused = bool(focus and focus.strip())
             if focused:
@@ -977,7 +980,9 @@ class Toolbox:
                 text += "\n\n## References\n" + webread.references(rendered.links)
             window, total, nxt = webread.page_window(text, offset, mc)
             # Link URLs are page content, so they are deliberately not _allow_url'd: a tainted run cannot follow them.
-            out = {"url": final_url, "status": status, "content_type": ctype, "kind": kind, "text": window, "truncated": nxt is not None or body_truncated,
+            tm = re.search(r"<title[^>]*>(.*?)</title>", webread.decode(ctype, raw[:65536]), re.S | re.I) if kind == "html" else None
+            title = " ".join(html.unescape(tm.group(1)).split())[:200] if tm else ""
+            out = {"url": final_url, "title": title, "excerpt": " ".join(full_text.split())[:300], "status": status, "content_type": ctype, "kind": kind, "text": window, "truncated": nxt is not None or body_truncated,
                    "total_chars": total, "next_offset": nxt, "cached": bool(hit), "redirects": hops}
             if focused:
                 out["focused"] = True

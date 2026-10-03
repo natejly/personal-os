@@ -174,7 +174,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "micDeviceName": "",      # the name that index had when it was picked, so a reshuffle is refused
     "outputDevice": "",
     "outputDeviceName": "",
-    "sources": ["mic"],
+    "sources": ["mic", "output"],  # output (the far side) that cannot open is dropped and reported
     "segmentSeconds": 20,     # how far behind live the transcript runs
     # A recording made inside a doc ends each clip at a pause in speech, so these two are ceilings:
     # the longest a clip runs when nobody stops talking. Most clips close sooner.
@@ -935,7 +935,7 @@ class Meetings:
             text = (r["text"] or "").strip()
             if not text:
                 continue
-            utts = _speaker_utterances(r["detail"]) if r["channel"] != "mic" else []
+            utts = _speaker_utterances(r["detail"])  # mic gains ids only when it was diarized as the sole channel
             if utts:
                 for u in utts:
                     spk = str(u.get("speaker") or "")
@@ -1990,7 +1990,9 @@ class MeetingService:
                     "note": "no speaker-separation backend is installed; see the diarize row in Capabilities"}
         segs = [s for s in self.meetings.segments(meeting_id, limit=100000)
                 if s["state"] == "done" and s["wav_path"] and Path(s["wav_path"]).is_file()]
-        channel = "import" if any(s["channel"] == "import" for s in segs) else "output"
+        chans = {s["channel"] for s in segs}
+        # The mic is only diarized when it is the sole channel; with a far side its lines stay [you].
+        channel = "import" if "import" in chans else "output" if "output" in chans else "mic"
         segs = sorted((s for s in segs if s["channel"] == channel), key=lambda s: (s["t_start"], s["seq"]))
         if not segs:
             return {"ok": False, "backend": name, "speakers": 0, "note": "no retained audio to separate speakers in"}
@@ -2012,7 +2014,10 @@ class MeetingService:
             parts = [{"start": float(x.get("start") or 0.0), "end": float(x.get("end") or 0.0),
                       "text": str(x.get("text") or "").strip()}
                      for x in ((s.get("detail") or {}).get("segments") or []) if isinstance(x, dict)]
-            parts = [u for u in parts if u["text"]] or [{"start": 0.0, "end": length, "text": (s["text"] or "").strip()}]
+            parts = [u for u in parts if u["text"]]
+            if not parts:  # untimed text (Speech) has nothing to align to: no speaker ids
+                offset += length
+                continue
             shifted = [{**u, "start": u["start"] + offset, "end": u["end"] + offset} for u in parts]
             merged = diarize.merge_adjacent(diarize.assign_speakers(shifted, turns))
             utts = [{"start": round(u["start"] - offset + float(s["t_start"]), 3),

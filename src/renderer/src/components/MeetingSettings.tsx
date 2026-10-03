@@ -309,6 +309,15 @@ export default function MeetingSettings({ variant = 'page' }: { variant?: 'page'
         <input type="checkbox" checked={cfg.keepAudio} onChange={(e) => patch({ keepAudio: e.target.checked })} />
         <span className="switch" />
       </label>
+      <label className="toggle-row plain">
+        <span className="toggle-icon"><Mic size={15} /></span>
+        <span className="toggle-text">
+          <b>Separate speakers when a meeting ends</b>
+          <small>Labels who said what on the far side. Needs "Keep the audio after transcribing" on as well, because it works from the saved audio.</small>
+        </span>
+        <input type="checkbox" checked={cfg.diarize} onChange={(e) => patch({ diarize: e.target.checked })} />
+        <span className="switch" />
+      </label>
       <NumberField label="Audio kept on disk at most" hint="Oldest failed clip is evicted first once this is reached"
         value={Math.round(cfg.maxAudioBytes / MIB)} min={64} max={65536} step={64} suffix="MiB"
         onCommit={(v) => patch({ maxAudioBytes: v * MIB })} />

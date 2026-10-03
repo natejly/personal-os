@@ -2046,7 +2046,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     asks = False
                 yield "tool_call", {"message_id": am["id"], "id": uid, "name": c["name"], "arguments": args,
                                     "needs_approval": asks, "forced": forced, "proposal": proposing or None,
-                                    "permission": perm.card() if asks else None,
+                                    "permission": ({**perm.card(), "danger": danger} if perm.card() else None) if asks else None,
                                     "plan": {"plan_id": claimed["plan_id"], "idx": claimed["idx"], "title": claimed["title"]} if claimed else None}
                 tspan = tracer.start("tool", c["name"], {"round": _round, "arguments": _short(args), "mode": mode, "forced": forced,
                                                          "plan_step": f"{claimed['plan_id']}#{claimed['idx']}" if claimed else None},
@@ -2178,7 +2178,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     granted = decision in ("always_chat", "always_global")
                     # A tainted reply cannot buy a standing grant, and neither can a plan card: 'always' on
                     # propose_plan would leave the plan with no approval at all.
-                    standing = granted and not forced and c["name"] != PLAN_TOOL
+                    # An external write is never granted whole-tool: only a patterned rule (always_rule) can stand.
+                    standing = granted and not forced and c["name"] != PLAN_TOOL and (danger != "external" or mcp_is(c["name"]))
                     if granted and not standing:
                         decision = "allow"  # one-shot
                     elif decision == "always_chat":

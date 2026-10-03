@@ -357,9 +357,11 @@ def _parse_duration(value: str | None) -> float | None:
     return sum(float(n) * scale[u] for n, u in parts)
 
 
-def retry_after_from(headers: Any, now: float | None = None) -> float | None:
-    """Seconds to wait from a response's headers: `retry-after-ms`, else `retry-after`, else the smaller of the
-    `x-ratelimit-reset-requests` / `x-ratelimit-reset-tokens` durations. None when none is readable."""
+def retry_after_from(headers: Any, now: float | None = None, status: int | None = None) -> float | None:
+    """Seconds to wait from a response's headers: `retry-after-ms`, else `retry-after`, else (only for a 429, or when
+    `status` is not given) the smaller of the `x-ratelimit-reset-requests` / `x-ratelimit-reset-tokens` durations.
+    Those two describe a full bucket reset and ride on every response, so on a 5xx they say nothing about when to
+    retry and would only trip the too-long rule. None when none is readable."""
     get = headers.get
     ms = get("retry-after-ms")
     if ms:
@@ -370,6 +372,8 @@ def retry_after_from(headers: Any, now: float | None = None) -> float | None:
     secs = parse_retry_after(get("retry-after"), now)
     if secs is not None:
         return secs
+    if status is not None and status != 429:
+        return None
     resets = [d for d in (_parse_duration(get("x-ratelimit-reset-requests")), _parse_duration(get("x-ratelimit-reset-tokens"))) if d is not None]
     return min(resets) if resets else None
 
@@ -551,7 +555,7 @@ async def _send_with_retry(client: httpx.AsyncClient, settings: dict[str, Any], 
             continue
         if r.status_code < 400:
             return r, cm
-        retry_after = retry_after_from(r.headers)
+        retry_after = retry_after_from(r.headers, status=r.status_code)
         kind = classify_error(r.status_code, r.text)
         if cm is not None:
             with contextlib.suppress(Exception):
@@ -762,7 +766,10 @@ class ThinkSplitter:
             if self.lead:
                 buf = buf.lstrip()
                 self.lead = not buf
-            i = buf.lower().find(self.close)
+            # A regex search, not lower().find(): lower() can change a string's length (e.g. a dotted capital I), which
+            # would put the index off by a character or two in the original text.
+            m = re.search(re.escape(self.close), buf, re.IGNORECASE | re.ASCII)
+            i = m.start() if m else -1
             if i >= 0:
                 if buf[:i]:
                     out.append(("reasoning", buf[:i]))
@@ -837,6 +844,7 @@ async def stream_chat(
         body["tools"] = tools
         body["tool_choice"] = tool_choice
     calls: dict[int, dict[str, Any]] = {}
+    by_index: dict[int, int] = {}  # provider `index` -> slot, re-pointed when an index is reused for a new call
     last_idx = 0
     finish: str | None = None
     usage: dict[str, Any] | None = None
@@ -901,7 +909,7 @@ async def stream_chat(
                             out_chars += len(piece)
                         yield {"type": kind_p, "text": piece}
                     for tc in delta.get("tool_calls") or []:
-                        last_idx = _add_fragment(calls, tc, last_idx, known)
+                        last_idx = _add_fragment(calls, by_index, tc, last_idx, known)
                     if choice.get("finish_reason"):
                         finish = choice["finish_reason"]
             except asyncio.CancelledError:
@@ -952,13 +960,14 @@ def _is_other_call(cur: dict[str, Any], tc: dict[str, Any]) -> bool:
     return bool(cid and cur["name"] and cur["pid"] and cur["pid"] != cid and (tc.get("function") or {}).get("name"))
 
 
-def _slot(calls: dict[int, dict[str, Any]], tc: dict[str, Any], last: int) -> int:
+def _slot(calls: dict[int, dict[str, Any]], by_index: dict[int, int], tc: dict[str, Any], last: int) -> int:
     """Which call a streamed tool-call fragment belongs to.
 
     Providers usually send an int `index`, but some send null or omit it on parallel calls. Without one,
     a fragment carrying a new `id` opens a new call, as does a fresh name arriving after the latest call's
     arguments; anything else continues the latest. An indexed fragment whose id differs from a named call
-    already in that slot is also a new call.
+    already in that slot is also a new call: `by_index` is re-pointed at it, so the rest of its fragments
+    (which carry the same index and usually no id) follow it there.
     """
     try:
         idx = int(tc["index"]) if tc.get("index") is not None else None
@@ -973,15 +982,18 @@ def _slot(calls: dict[int, dict[str, Any]], tc: dict[str, Any], last: int) -> in
         if (cid and cur["name"] and cid != cur["id"] and cur["pid"]) or (not cid and fn.get("name") and cur["name"] and cur["arguments"]):
             return max(calls) + 1
         return last
-    cur = calls.get(idx)
-    if cur is not None and _is_other_call(cur, tc):
-        return max(calls) + 1
-    return idx
+    slot = by_index.get(idx)
+    if slot is None:
+        slot = idx if idx not in calls else max(calls) + 1
+    elif _is_other_call(calls[slot], tc):
+        slot = max(calls) + 1
+    by_index[idx] = slot
+    return slot
 
 
-def _add_fragment(calls: dict[int, dict[str, Any]], tc: dict[str, Any], last: int, known: set[Any]) -> int:
+def _add_fragment(calls: dict[int, dict[str, Any]], by_index: dict[int, int], tc: dict[str, Any], last: int, known: set[Any]) -> int:
     """Fold one streamed tool-call fragment into `calls`; returns the slot it landed in."""
-    idx = _slot(calls, tc, last)
+    idx = _slot(calls, by_index, tc, last)
     cur = calls.setdefault(idx, {"id": "call_" + uuid.uuid4().hex[:12], "pid": None, "name": "", "arguments": ""})
     if tc.get("id"):
         cur["id"] = cur["pid"] = tc["id"]

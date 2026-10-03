@@ -531,6 +531,16 @@ class ErrorKinds(unittest.TestCase):
         self.assertEqual(f({"x-ratelimit-reset-requests": "1m30s"}), 90.0)
         self.assertIsNone(f({}))
         self.assertIsNone(f({"retry-after": "soon"}))
+        # The bucket-reset headers only mean something on a 429; retry-after itself counts on any status.
+        self.assertEqual(f({"x-ratelimit-reset-tokens": "6m0s"}, status=429), 360.0)
+        self.assertIsNone(f({"x-ratelimit-reset-tokens": "6m0s"}, status=500))
+        self.assertEqual(f({"retry-after": "9", "x-ratelimit-reset-tokens": "6m0s"}, status=500), 9.0)
+
+    def test_server_error_with_a_long_bucket_reset_is_still_retried(self) -> None:
+        answers = [httpx.Response(500, headers={"x-ratelimit-reset-tokens": "6m0s"}, text="boom"), httpx.Response(200, content=sse("ok"))]
+        with Provider(lambda req: answers.pop(0)) as p:
+            self.assertEqual(text_of(run(collect())), "ok")
+        self.assertEqual(p.calls, 2)
 
     def test_llmerror_defaults(self) -> None:
         e = llm.LLMError("x")

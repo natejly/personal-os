@@ -95,6 +95,17 @@ class Assembly(unittest.TestCase):
         end = end_of(body([tc(0, "a", "one", "{}"), tc(0, "b", "two", "{}")]))
         self.assertEqual([(c["id"], c["name"]) for c in end["tool_calls"]], [("a", "one"), ("b", "two")])
 
+    def test_reused_index_keeps_routing_later_fragments_to_the_new_call(self) -> None:
+        # The second call's argument chunks carry the reused index and no id (or the same id, no name): they follow it.
+        for frags in ([tc(0, "a", "one", "{}"), tc(0, "b", "two", '{"x"'), tc(0, args=':1}')],
+                      [tc(0, "a", "one", "{}"), tc(0, "b", "two", '{"x"'), tc(0, "b", None, ':1}')]):
+            end = end_of(body(frags))
+            self.assertEqual(shape(end), [("one", "{}"), ("two", '{"x":1}')], frags)
+            self.assertEqual([c["id"] for c in end["tool_calls"]], ["a", "b"])
+        # A later index that collides with the slot opened for the reused one is still its own call.
+        end = end_of(body([tc(0, "a", "one", "{}"), tc(0, "b", "two", "{}"), tc(1, "c", "three", '{"y"'), tc(1, args=':2}')]))
+        self.assertEqual(shape(end), [("one", "{}"), ("two", "{}"), ("three", '{"y":2}')])
+
     def test_no_index_no_id_new_name_after_arguments(self) -> None:
         end = end_of(body([tc(name="one", args="{}"), tc(name="two", args="{}")]))
         self.assertEqual(shape(end), [("one", "{}"), ("two", "{}")])

@@ -67,6 +67,11 @@ class Splitter(unittest.TestCase):
             self.assertEqual(split(chunks), ("never ends", ""))
         self.assertEqual(split(["<think>half </thi"]), ("half </thi", ""))
 
+    def test_close_tag_after_text_whose_lower_case_is_longer(self) -> None:
+        # lower() turns a dotted capital I into two code points; the close tag must still be found where it really is.
+        for chunks in every_split("<think>İstanbul</think>Hello"):
+            self.assertEqual(split(chunks), ("İstanbul", "Hello"), chunks)
+
     def test_empty_stream(self) -> None:
         self.assertEqual(split([]), ("", ""))
         self.assertEqual(split(["", ""]), ("", ""))

@@ -99,11 +99,12 @@ def resolve_backend(cfg: dict[str, Any], data_dir: Path) -> str:
     want = str(cfg.get("sttBackend") or "auto").strip().lower()
     if want in ("speech", "proxy", "local", "off"):
         return want
-    if speech_ready():
+    local = bool(whisper_cli_path() and local_model_path(data_dir, cfg))
+    # Speech returns plain text with no timestamps; diarization needs timed segments, so prefer
+    # whisper.cpp when it is installed and speaker separation is on.
+    if speech_ready() and not (cfg.get("diarize") and local):
         return "speech"
-    if whisper_cli_path() and local_model_path(data_dir, cfg):
-        return "local"
-    return "proxy"
+    return "local" if local else "proxy"
 
 
 def transcribe(path: Path, *, settings: dict[str, Any], cfg: dict[str, Any], data_dir: Path,

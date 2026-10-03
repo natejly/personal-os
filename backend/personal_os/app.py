@@ -84,7 +84,7 @@ from .stuck import STUCK_NUDGE, STUCK_STOP, StuckDetector
 from .style import WritingStyle, learn_style_from_exchange, looks_like_prose
 from .modules import Module, ModuleContext, build_modules, get as module_get
 from .modules.todos import TodosModule
-from .tools import Toolbox, summarize_result
+from .tools import Toolbox, summarize_result, times_body
 from .webread import WebCache
 from .trash import Trash, router as trash_router
 from .trace import Tracer, now_ms
@@ -4344,6 +4344,22 @@ class GmailComposeIn(BaseModel):
 @app.post("/integrations/google/gmail/draft")
 def google_gmail_draft(body: GmailComposeIn) -> Any:
     return _gcall(google.gmail_draft, body.to, body.subject, body.body, body.reply_to_message_id)
+
+
+class SuggestTimesIn(BaseModel):
+    duration_minutes: int = 30
+    window_start: str
+    window_end: str
+    working_hours: str | None = None
+
+
+@app.post("/integrations/google/gmail/suggest-times")
+async def google_gmail_suggest_times(body: SuggestTimesIn) -> Any:
+    """Compose box: free slots as draft text. Creates no draft, no event, sends nothing."""
+    found = await toolbox.specs["calendar_find_time"].fn({}, body.duration_minutes, body.window_start, body.window_end, None, body.working_hours)
+    if not isinstance(found, dict) or not found.get("slots"):
+        raise HTTPException(422, (found or {}).get("note") or (found or {}).get("error") or "No free slot found")
+    return {"body": times_body(found), "slots": found["slots"]}
 
 
 @app.post("/integrations/google/gmail/send")

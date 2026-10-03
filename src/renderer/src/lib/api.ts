@@ -253,7 +253,10 @@ export const api = {
     list: (status?: 'to_reply' | 'awaiting_reply') => req<MailWatchList>(`/mail/watch${status ? `?status=${status}` : ''}`),
     refresh: () => req<{ refreshed: number }>('/mail/watch/refresh', { method: 'POST' }),
     dismiss: (id: string, dismissed = true) => req<MailWatchThread>(`/mail/watch/${encodeURIComponent(id)}`, { method: 'PUT', body: json({ dismissed }) }),
-    followup: (id: string) => req<Todo>(`/mail/watch/${encodeURIComponent(id)}/followup`, { method: 'POST' })
+    followup: (id: string) => req<Todo>(`/mail/watch/${encodeURIComponent(id)}/followup`, { method: 'POST' }),
+    /** Local only: hides the thread in the mail list until `until` (ISO). */
+    snooze: (id: string, until: string | null) => req<{ until: string | null }>(`/mail/threads/${encodeURIComponent(id)}/snooze`, { method: 'POST', body: json({ until }) }),
+    snoozed: () => req<{ thread_ids: string[] }>('/mail/snoozed')
   },
   /** Soft delete: every DELETE above lands here first; these restore it or erase it for good. */
   trash: {
@@ -326,6 +329,9 @@ export const api = {
     gmailLabels: () => req<GmailLabel[]>('/integrations/google/gmail/labels'),
     gmailModify: (id: string, patch: { mark_read?: boolean; archive?: boolean; star?: boolean }) =>
       proven(req<{ ok: boolean } & Verified>(`/integrations/google/gmail/${id}/modify`, { method: 'POST', body: json(patch) })),
+    /** Free slots as draft text; creates no draft or event. */
+    suggestTimes: (m: { window_start: string; window_end: string; duration_minutes?: number }) =>
+      req<{ body: string }>('/integrations/google/gmail/suggest-times', { method: 'POST', body: json(m) }),
     gmailDraft: (m: { to: string; subject: string; body: string; reply_to_message_id?: string | null }) =>
       proven(req<{ draft_id: string } & Verified>('/integrations/google/gmail/draft', { method: 'POST', body: json(m) })),
     /** Queues the send behind its undo hold; it has NOT gone out when this resolves. */

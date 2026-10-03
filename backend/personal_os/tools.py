@@ -79,6 +79,12 @@ PROPOSAL_ONLY_REFUSED_SCHEDULE = ("{name} books future unattended work, and this
                                   "move on.")
 
 
+def times_body(found: dict[str, Any]) -> str:
+    """The draft text for calendar_find_time's result: one line per slot."""
+    return "Would any of these times work?\n\n" + "\n".join(
+        f"- {s['start'].replace('T', ' ')} to {s['end'][11:]} ({found['timezone']})" for s in found["slots"])
+
+
 class ToolSpec:
     def __init__(self, name: str, description: str, parameters: dict[str, Any], fn: ToolFn, group: str, danger: str = "safe",
                  examples: list[dict[str, Any]] | None = None, taints: bool = False):
@@ -1540,6 +1546,29 @@ def _register_google(self: Toolbox) -> None:
         _obj({"to": {"type": "string"}, "subject": {"type": "string"}, "body": {"type": "string"}, "reply_to_message_id": {"type": "string"}}, ["to", "subject", "body"]), gmail_draft, "google", "external",
         examples=[{"to": "mira@example.com", "subject": "Invoice 42", "body": "Hi Mira,\n\nAttached is invoice 42.\n\nThanks"},
                   {"to": "team@example.com", "subject": "Re: sprint review", "body": "Works for me.", "reply_to_message_id": "18f2c1a9b7e4d0aa"}]))
+
+    async def propose_times_draft(ctx: dict[str, Any], to: str, subject: str, duration_minutes: int, window_start: str, window_end: str,
+                                  attendees: list[str] | None = None, working_hours: Any = None, timezone: str | None = None,
+                                  max_results: int = 3, confirm: bool = False, chosen_start: str | None = None) -> Any:
+        found = await calendar_find_time(ctx, duration_minutes, window_start, window_end, attendees, working_hours, 0, max_results, timezone)
+        if not isinstance(found, dict) or not found.get("slots"):
+            return found
+        slots = found["slots"]
+        body = times_body(found)
+        draft = await gmail_draft(ctx, to, subject, body)
+        out: dict[str, Any] = {"slots": slots, "draft": draft}
+        if confirm:  # only after the user picked a time; guests get an invite email only when they were named
+            pick = next((s for s in slots if s["start"] == chosen_start), None)
+            if not pick:
+                return tool_error("propose_times_draft: chosen_start must be the start of one of the offered slots.", field="chosen_start")
+            out["event"] = await calendar_create(ctx, subject, pick["start"], pick["end"], attendees=attendees, send_updates="all" if attendees else "none")
+        return out
+    R("propose_times_draft", ToolSpec("propose_times_draft", "Find free meeting slots (calendar_find_time rules: 9-18 local weekdays unless working_hours is given) and write them into a Gmail draft to `to`. Never sends and creates no event. After the user picks a slot, call again with confirm=true and chosen_start set to that slot's start to also create the event.",
+        _obj({"to": {"type": "string"}, "subject": {"type": "string"}, "duration_minutes": {"type": "integer"}, "window_start": {"type": "string"}, "window_end": {"type": "string"},
+              "attendees": {"type": "array", "items": {"type": "string"}}, "working_hours": {"type": "string"}, "timezone": {"type": "string"},
+              "max_results": {"type": "integer", "default": 3}, "confirm": {"type": "boolean", "default": False}, "chosen_start": {"type": "string"}},
+             ["to", "subject", "duration_minutes", "window_start", "window_end"]), propose_times_draft, "google", "external",
+        examples=[{"to": "mira@example.com", "subject": "Catch up", "duration_minutes": 30, "window_start": "2026-10-05", "window_end": "2026-10-09"}]))
 
     async def gmail_send(ctx: dict[str, Any], to: str, subject: str, body: str, reply_to_message_id: str | None = None,
                          as_draft: bool = False) -> Any:

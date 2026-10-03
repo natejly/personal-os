@@ -16,7 +16,7 @@ import { api } from '../lib/api'
 import { partitionChats } from '../lib/chatRows'
 import ChatRow from './ChatRow'
 import type { ChatSearchHit, Conversation, Doc, WidgetKind } from '@shared/types'
-import { snippetParts } from '../lib/chatSearch'
+import { mergeChatSearch, snippetParts } from '../lib/chatSearch'
 
 /** The first matching excerpt under a search result, with the matched words marked. */
 function Snippet({ hit }: { hit?: ChatSearchHit }): JSX.Element | null {
@@ -113,15 +113,20 @@ export default function Sidebar(): JSX.Element {
   const [hits, setHits] = useState<ChatSearchHit[]>([])
   const searchSeq = useRef(0)
   const composing = useRef(false)
+  // Nothing is sent while an IME composition is open; `composed` re-runs the effect once it ends.
+  const [composed, setComposed] = useState(0)
   useEffect(() => {
     const q = query.trim()
     const seq = ++searchSeq.current
     if (q.length < 3) { setHits([]); return }
     const t = setTimeout(() => {
-      api.conversations.search(q).then((r) => { if (seq === searchSeq.current) setHits(r) }).catch(() => undefined)
+      if (composing.current) return
+      api.conversations.search(q)
+        .then((r) => { if (seq === searchSeq.current) setHits(r) })
+        .catch(() => { if (seq === searchSeq.current) setHits([]) })
     }, 250)
     return () => clearTimeout(t)
-  }, [query])
+  }, [query, composed])
   const searchRef = useRef<HTMLInputElement>(null)
   const [projectsOpen, setProjectsOpen] = useState(true)
   const [recentsOpen, setRecentsOpen] = useState(true)
@@ -154,10 +159,10 @@ export default function Sidebar(): JSX.Element {
     c.project_id && projectById[c.project_id] ? <span className="project-dot sm" style={{ background: projectById[c.project_id].color }} title={projectById[c.project_id].name} /> : null
   const hitById = useMemo(() => new Map(hits.map((h) => [h.id, h])), [hits])
   // Body-only hits: a chat already listed by its title (pinned or grouped) shows its excerpt in place.
-  const inMessages = useMemo(() => {
-    const titled = new Set([...pinned, ...groups.flatMap((g) => g.items)].map((c) => c.id))
-    return query.trim().length >= 3 ? hits.filter((h) => !titled.has(h.id)) : []
-  }, [pinned, groups, hits, query])
+  const inMessages = useMemo(
+    () => (query.trim().length >= 3 ? mergeChatSearch([...pinned, ...groups.flatMap((g) => g.items)], hits).inMessages : []),
+    [pinned, groups, hits, query]
+  )
   // Archived chats are not in the store's list; loaded when the section opens and after each change.
   const [archivedOpen, setArchivedOpen] = useState(false)
   const [archived, setArchived] = useState<Conversation[]>([])
@@ -296,7 +301,7 @@ export default function Sidebar(): JSX.Element {
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onCompositionStart={() => { composing.current = true }}
-            onCompositionEnd={() => { composing.current = false }}
+            onCompositionEnd={() => { composing.current = false; setComposed((n) => n + 1) }}
             onKeyDown={(e) => {
               // Escape and Enter belong to the IME while a composition is open.
               if (composing.current) return

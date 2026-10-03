@@ -4,7 +4,7 @@ import { findMatches } from '../lib/findText'
 
 const SKIP = '.msg-actions, .avatar, .katex-mathml'
 
-/** Text nodes of every message under `root`, in document order, minus chrome and hidden copies. */
+/** Text nodes of every message under `root`, in document order, minus the action row, avatars and hidden copies. */
 function collect(root: Element): Text[] {
   const nodes: Text[] = []
   for (const msg of Array.from(root.querySelectorAll('.msg'))) {

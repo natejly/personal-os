@@ -159,20 +159,14 @@ class Conversations:
                     f"SELECT {cols}, m.content AS snip, 0 AS score "
                     + base.format(src="messages m", cond="m.content LIKE ? ESCAPE '\\'")
                     + " ORDER BY m.created_at DESC LIMIT 300", (f"%{esc}%",)).fetchall()
-        # Located by a case-insensitive regex, not by lowercasing: lower() can change a string's length
-        # (a dotted capital I becomes two characters) and shift every offset.
-        needle = re.compile(re.escape(q.strip()), re.IGNORECASE)
+        needle = q.strip().lower()
         out: dict[str, dict[str, Any]] = {}
         for r in rows:
             snip = r["snip"]
             if not fts_ok:
-                m = needle.search(snip)
-                if m is None:  # LIKE's own folding found it where Python's does not: head of the row, unmarked
-                    snip = snip[:120] + (" …" if len(snip) > 120 else "")
-                else:
-                    i, e = m.start(), m.end()
-                    a, b = max(0, i - 60), min(len(snip), e + 60)
-                    snip = ("… " if a else "") + snip[a:i] + "\x02" + snip[i:e] + "\x03" + snip[e:b] + (" …" if b < len(snip) else "")
+                i = snip.lower().find(needle)
+                a, b = max(0, i - 60), min(len(snip), i + len(needle) + 60)
+                snip = ("… " if a else "") + snip[a:i] + "\x02" + snip[i:i + len(needle)] + "\x03" + snip[i + len(needle):b] + (" …" if b < len(snip) else "")
             item = out.get(r["conversation_id"])
             if item is None:
                 if len(out) >= limit:

@@ -59,11 +59,12 @@ def test_widget_create_and_place_never_leak_the_secret(monkeypatch: pytest.Monke
     n = len(llm_calls)
     fresh = run(widget_spec.run_widget(store, store.widget(w["id"]), {}, "m", fetch))  # a plain refresh is a re-bind
     assert len(llm_calls) == n and fresh["data"]["rows"]
-    blob = json.dumps([out, store.widget(w["id"]), placed, win, f"/widgets/{w['id']}/render"], default=str)
+    blob = json.dumps([out, store.widget(w["id"]), placed, win, fresh, f"/widgets/{w['id']}/render"], default=str)
     assert SECRET not in blob
 
-    internal = run(box.specs["widget_create"].fn({}, kind="stat", source="todos", prompt="count"))
-    assert "widget_id" in internal or "error" in internal
+    internal = run(box.specs["widget_create"].fn({}, kind="chart", source="todos", prompt="count"))
+    iw = store.widget(internal["widget_id"])
+    assert (store.source(iw["source_ids"][0]) or {})["kind"] == "internal" and iw["spec"]["kind"] == "chart"
     bad = run(box.specs["widget_create"].fn({}, kind="chart", source="nope", prompt="x"))
     assert bad["field"] == "source"
 
@@ -143,3 +144,30 @@ def test_html_repair(monkeypatch: pytest.MonkeyPatch) -> None:
     assert isinstance(out, dash.WidgetCodeRejected) and len(calls) == 2
     out, calls = _html_run(monkeypatch, [f"<html>{SECRET}</html>", f"<html><i>{SECRET}</i></html>"], [SECRET])
     assert isinstance(out, dash.WidgetCodeRejected) and len(calls) == 2
+
+
+def test_html_widget_storage(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The repair is what gets saved; a rejected one is stored as an error with no code, so nothing renders."""
+    from personal_os import app as appmod
+    d = appmod.dashboards.create("repair-store")
+    src = appmod.dashboards.create_source("Secret API", "http", {"url": "https://api.example/x"}, secret=SECRET)
+    replies = ['<html><script src="https://cdn.example/x.js"></script></html>', "<html><body>repaired</body></html>"]
+
+    async def fake(*a: Any, **k: Any) -> str:
+        return replies.pop(0)
+
+    async def no_samples(ids: Any) -> dict[str, Any]:
+        return {}
+    monkeypatch.setattr(llm, "complete", fake)
+    monkeypatch.setattr(appmod, "_samples", no_samples)
+    req = SimpleNamespace(base_url="http://x/")
+    w = appmod.dashboards.create_widget(d["id"], "t", "html", "p", [src["id"]])
+    got = run(appmod._run_widget(w, req))
+    assert got["code"] == "<html><body>repaired</body></html>" and not got["data_error"]
+    assert appmod.dashboards.widget(w["id"])["code"] == got["code"]
+
+    replies[:] = [f"<html>{SECRET}</html>", '<html><link href="https://cdn.example/s.css"></html>']
+    got = run(appmod._run_widget(appmod.dashboards.widget(w["id"]), req, regenerate_code=True))
+    row = appmod.dashboards.widget(w["id"])
+    assert row["code"] == "" and row["data_error"] and row["output"] == row["data_error"] == got["data_error"]
+    assert "rejected" in row["data_error"] and SECRET not in json.dumps(row, default=str)

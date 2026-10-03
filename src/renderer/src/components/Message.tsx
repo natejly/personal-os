@@ -128,7 +128,7 @@ function FilesChanged({ messageId }: { messageId: string }): JSX.Element | null 
 
 // The store is read imperatively inside the handlers: any subscription here defeats the memo, and a
 // streamed token would re-render every message in every mounted transcript.
-const MessageView = memo(function MessageView({ message, streaming }: { message: Message; streaming: boolean }): JSX.Element {
+const MessageView = memo(function MessageView({ message, streaming, last = false }: { message: Message; streaming: boolean; last?: boolean }): JSX.Element {
   const isUser = message.role === 'user'
   const ctx = message.context_used
   const ctxCount = ctx ? ctx.memories.length + ctx.nodes.length + ctx.chunks.length : 0

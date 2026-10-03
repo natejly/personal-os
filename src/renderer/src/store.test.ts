@@ -236,3 +236,27 @@ test('deleting a chat whose reply was running says so in the Undo toast, and clo
     api.projects.globalStats = realStats
   }
 })
+
+test('removed_message then restored_message leaves the original answer in place', () => {
+  const old = msg({ id: 'old', created_at: 5, variants: ['old', 'new'] })
+  const user = msg({ id: 'u1', role: 'user', created_at: 1 })
+  let s = session({ conversation: { ...session().conversation, messages: [user, msg({ id: 'new', created_at: 9 })] } })
+  s = applyEvent(s, { event: 'removed_message', data: { id: 'new' } }, true)
+  s = applyEvent(s, { event: 'restored_message', data: { message: old, reason: 'boom' } }, true)
+  assert.deepEqual(s.conversation.messages!.map((m) => m.id), ['u1', 'old'])
+})
+
+test('restored_message for a present id is idempotent and keeps time order', () => {
+  const old = msg({ id: 'old', created_at: 5 })
+  const user = msg({ id: 'u1', role: 'user', created_at: 1 })
+  const s0 = session({ conversation: { ...session().conversation, messages: [user, old] } })
+  const once = applyEvent(s0, { event: 'restored_message', data: { message: old, reason: null } }, true)
+  const twice = applyEvent(once, { event: 'restored_message', data: { message: old, reason: null } }, true)
+  assert.deepEqual(twice.conversation.messages!.map((m) => m.id), ['u1', 'old'])
+})
+
+test('assistant_message keeps the variants it carries', () => {
+  const s0 = session({ conversation: { ...session().conversation, messages: [] } })
+  const s = applyEvent(s0, { event: 'assistant_message', data: msg({ id: 'new', variants: ['old', 'new'] }) }, true)
+  assert.deepEqual(s.conversation.messages![0].variants, ['old', 'new'])
+})

@@ -462,6 +462,8 @@ export const api = {
   contextMeter: (conversationId: string) => req<ContextMeter>(`/conversations/${conversationId}/context-meter`),
   compactConversation: (conversationId: string, focus?: string) =>
     req<{ compacted: boolean }>(`/conversations/${conversationId}/compact`, { method: 'POST', body: json({ focus: focus ?? null }) }),
+  activateMessage: (conversationId: string, messageId: string) =>
+    req<Conversation>(`/conversations/${conversationId}/messages/${messageId}/activate`, { method: 'POST' }),
   discardSummary: (conversationId: string) => req<{ removed: boolean }>(`/conversations/${conversationId}/summary`, { method: 'DELETE' }),
   contextPreview: (projectId: string | null, query: string, convSettings?: Partial<ConversationSettings>) =>
     req<ContextUsed>('/context/preview', { method: 'POST', body: json({ project_id: projectId, query, conv_settings: convSettings ?? {} }) }),

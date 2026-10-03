@@ -64,6 +64,8 @@ export interface ChatSession {
   unread: number
   /** epoch ms of the last focus or run; only used to pick eviction victims */
   touchedAt: number
+  /** The run died before it opened a reply (no message to stamp the error on): shown as a notice, cleared by the next message. */
+  runError: { message: string; runId: string | null; interrupted: boolean } | null
 }
 
 interface Toast { id: number; text: string; kind: 'info' | 'error' | 'learned'; action?: { label: string; run: () => void } }
@@ -100,7 +102,7 @@ const writeExpanded = (paths: string[]): string[] => {
 const styleScope = (s: Scope): string | null => (s === 'all' || s === 'personal' ? null : s)
 
 const newSession = (conversation: Conversation): ChatSession =>
-  ({ conversation, streaming: null, status: 'idle', finishedAt: null, pendingApprovals: 0, unread: 0, touchedAt: Date.now() })
+  ({ conversation, streaming: null, status: 'idle', finishedAt: null, pendingApprovals: 0, unread: 0, touchedAt: Date.now(), runError: null })
 
 const countApprovals = (c: Conversation): number =>
   (c.messages ?? []).reduce((n, m) => n + (m.tool_events ?? []).filter((t) => t.pending && t.needs_approval).length, 0)
@@ -334,6 +336,7 @@ export interface State {
   /** Send from the ⌘I panel: same contract as `send`, plus the page snapshot and its own thread. */
   sendToPageAgent: (text: string) => Promise<boolean>
   regenerate: (conversationId?: string) => Promise<void>
+  activateVariant: (conversationId: string, messageId: string) => Promise<void>
   /** Continue an interrupted reply in a new run (always the user's click). Rejects with the backend's reason when it cannot. */
   resumeRun: (conversationId: string, runId: string) => Promise<void>
   stop: (conversationId?: string) => Promise<void>
@@ -720,6 +723,13 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean): Cha
       return { ...s, conversation: { ...c, title: ev.data.title } }
     case 'removed_message':
       return withMsgs(msgs.filter((m) => m.id !== ev.data.id))
+    case 'restored_message': {
+      // The answer a failed regenerate had superseded. Replace by id (the tape can replay), else slot it in by time.
+      const back = ev.data.message
+      const rest = msgs.filter((m) => m.id !== back.id)
+      const at = rest.findIndex((m) => m.created_at > back.created_at)
+      return withMsgs(at < 0 ? [...rest, back] : [...rest.slice(0, at), back, ...rest.slice(at)])
+    }
     case 'delta':
       return mapMsg(ev.data.id, (m) => ({ ...m, content: m.content + ev.data.text }))
     case 'reasoning':
@@ -1855,6 +1865,16 @@ export const useStore = create<State>((set, get) => {
       }
       await convWrites.get(id)?.catch(() => undefined)
       await runStream(id, {})
+    },
+    activateVariant: async (conversationId, messageId) => {
+      if (get().sessions[conversationId]?.streaming?.answering) return
+      try {
+        const c = await api.activateMessage(conversationId, messageId)
+        // Replace the list wholesale: merging would keep the swapped-out row alive.
+        patchConversation(conversationId, (cur) => ({ ...cur, messages: c.messages }))
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
     },
     resumeRun: async (conversationId, runId) => {
       if (get().sessions[conversationId]?.streaming?.answering) return

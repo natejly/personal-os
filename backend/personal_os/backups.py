@@ -233,7 +233,10 @@ def human_export(db_path: Path) -> dict[str, tuple[str, Any]]:
     try:
         projects = {r["id"]: r["name"] for r in c.execute("SELECT id, name FROM projects")}
         convs = _rows(c, "SELECT id, project_id, title, model, created_at, updated_at FROM conversations ORDER BY created_at")
-        msgs = _rows(c, "SELECT conversation_id, role, content, model, created_at FROM messages ORDER BY created_at")
+        # Regenerated answers are kept as superseded rows; the export reads one answer per turn. A snapshot
+        # taken before the migration has no such column.
+        live = "WHERE superseded_at IS NULL " if any(r["name"] == "superseded_at" for r in c.execute("PRAGMA table_info(messages)")) else ""
+        msgs = _rows(c, f"SELECT conversation_id, role, content, model, created_at FROM messages {live}ORDER BY created_at")
         mems = _rows(c, "SELECT id, project_id, content, kind, source, pinned, created_at FROM memories ORDER BY created_at")
         docs = _rows(c, "SELECT id, project_id, name, mime, size, text, created_at FROM documents ORDER BY created_at")
     finally:

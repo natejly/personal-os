@@ -520,6 +520,46 @@ def test_child_calls_obey_permission_rules() -> None:
         check(out["state"] == "completed", f"{rules}: the child carried on")
 
 
+def test_child_skip_permissions_lifts_plain_ask_only() -> None:
+    """Under the parent's skip flag a child's plain ask runs with no card; an ask rule still raises one."""
+    for rules, mode, expect_ran in (({"allow": [], "ask": [], "deny": []}, "ask", True), ({"allow": [], "ask": ["fetch_url"], "deny": []}, "on", False)):
+        reset(permissionRules=rules)
+        spec = appmod.toolbox.specs["fetch_url"]
+        real, hits = spec.fn, []
+
+        async def fake(ctx: dict[str, Any], **kw: Any) -> Any:
+            hits.append(kw)
+            return {"url": kw.get("url"), "text": "page"}
+
+        spec.fn = fake
+        try:
+            SCRIPTS["browse"] = [{"text": "", "calls": [call("f1", "fetch_url", {"url": "https://example.com/a"})]}, {"text": "fetched"}]
+            fr = FakeRun()
+            modes = appmod.toolbox.effective({}, None, None)
+            modes["fetch_url"] = mode
+            ctx = mkctx(new_conv(), modes=modes, run=fr, message_id=None, skip_permissions=True)
+            ctx["allowed_urls"] = {"https://example.com/a"}
+
+            async def go() -> Any:
+                task = asyncio.create_task(appmod.toolbox.call("agent_spawn", {"task": "browse"}, ctx))
+                for _ in range(100):
+                    if task.done() or any(k.endswith(":f1") for k in appmod._approvals):
+                        break
+                    await asyncio.sleep(0.02)
+                for k in [k for k in appmod._approvals if k.endswith(":f1")]:
+                    appmod.run_store.decide(k, "deny")
+                    appmod._approvals[k].set_result("deny")
+                return await task
+
+            out = run(go())
+        finally:
+            spec.fn = real
+            appmod.db.set_settings({"permissionRules": {"allow": [], "ask": [], "deny": []}})
+        cards = [d for e, d in fr.events if e == "tool_call" and d.get("needs_approval")]
+        check(bool(hits) is expect_ran and bool(cards) is not expect_ran, f"{rules}: skip {'lifted the plain ask' if expect_ran else 'left the ask-rule card, declined'}")
+        check(out["state"] == "completed", f"{rules}: the child carried on")
+
+
 def test_tainted_parent_taints_child_externals() -> None:
     reset()
     ctx = mkctx(new_conv())

@@ -272,7 +272,7 @@ export default function SettingsModal(): JSX.Element {
             {tab === 'tools' && <section>
               <h3>Tools</h3>
               <label className="toggle-row plain">
-                <span className="toggle-text"><b>Dangerously skip permissions</b><small>In chats, tools run without an approval card, including mail, files, and the network. A deny rule still refuses. A plan and a desk question still wait. Scheduled jobs keep their own approval setting. A chat can turn this off for itself.</small></span>
+                <span className="toggle-text"><b>Dangerously skip permissions</b><small>In chats, ordinary tools run without an approval card. A deny rule still refuses, and these still ask: ask rules, mail and other external actions, shell commands, writes outside granted folders, calls made after untrusted content, repeated calls, a plan and a desk question. Scheduled jobs keep their own approval setting. A chat can turn this off for itself.</small></span>
                 <input type="checkbox" checked={!!draft.skipPermissions} onChange={(e) => patch({ skipPermissions: e.target.checked })} /><span className="switch" />
               </label>
               <p className="muted"><b>on</b> runs automatically, <b>ask</b> pauses the reply for your approval, <b>off</b> hides the tool. Anything that acts outside the app (email, calendar, Google Tasks) asks by default.</p>

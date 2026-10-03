@@ -199,14 +199,15 @@ def test_three_refusals_in_a_row_add_a_hard_stop_note() -> None:
 
 
 def test_skip_permissions_runs_an_ask_without_a_card() -> None:
-    check(permrules.lift_permission_ask("shell_run", "ask", skip=True) == "on", "an ask runs")
+    check(permrules.lift_permission_ask("memory_save", "ask", skip=True, danger="writes") == "on", "an ask runs")
+    check(permrules.lift_permission_ask("shell_run", "ask", skip=True) == "ask", "an uncleared shell command still asks")
     check(permrules.lift_permission_ask("propose_plan", "ask", skip=True) == "ask", "a plan still asks")
     check(permrules.lift_permission_ask("desk_ask", "ask", skip=True) == "ask", "a question still asks")
     check(permrules.lift_permission_ask("shell_run", "off", skip=True) == "off", "off stays off")
     check(permrules.skip_permissions_on({"skipPermissions": False}, {"skipPermissions": True}) is False, "the chat's off wins")
     cid = setup(skipPermissions=True)
     ev = drive(cid, [[sh(0, "make deploy")]])
-    check(not cards(ev) and RAN == ["make deploy"], "the global switch ran the ask with no card")
+    check(len(cards(ev)) == 1 and RAN == ["make deploy"], "the global switch does not lift a shell card")
     cid = setup(skipPermissions=True)
     appmod.convos.update(cid, {"settings": {"skipPermissions": False}})
     ev = drive(cid, [[sh(0, "make deploy")]], ["deny"])

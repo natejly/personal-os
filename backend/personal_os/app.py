@@ -1506,7 +1506,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             """A card for one call a run_python script made through the tool bridge. The script waits; the reply does not
             end. One-shot only: an 'always' answer is treated as 'allow' here, never as a standing grant."""
             nonlocal bridge_n
-            if skip_permissions:
+            spec = toolbox.specs.get(name)
+            if skip_permissions and permrules.lift_permission_ask(
+                    name, "ask", skip=True, forced=forced, danger=spec.danger if spec else "external",
+                    fenced=toolbox.fs_needs_ask(name, args, tool_ctx)) == "on":
                 return True
             if run is None or run.store is None:
                 return False
@@ -2036,9 +2039,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     # Opening one here would park the run forever (and every later fire behind it).
                     pre = tools.denied(c["name"], "not available in a background run: it needs an approval and nobody is watching")
                 # Dangerously skip permissions: an ask runs. A refusal already in `pre` stays a refusal.
-                # propose_plan and desk_ask stay cards (lift_permission_ask). Jobs never set the flag.
+                # Forced, ask-rule, external, schedules and uncleared shell cards stay (lift_permission_ask). Jobs never set the flag.
                 if skip_permissions and pre is None and not perm.refusal:
-                    mode = permrules.lift_permission_ask(c["name"], mode, skip=True)
+                    mode = permrules.lift_permission_ask(c["name"], mode, skip=True, forced=forced or perm.forced, danger=danger,
+                                                         fenced=fs_ask or perm.kind == "rule")
                 asks = mode == "ask" and claimed is None and pre is None
                 if asks and desk_id and c["name"] != PLAN_TOOL and run_store.claim_parked(desk_id, c["name"], args, uid):
                     # The user already said yes to exactly this call on a card an earlier turn let go

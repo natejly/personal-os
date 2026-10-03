@@ -779,7 +779,9 @@ class Subagents:
                                      roots=self._perm_roots(ch), conv=ch.conversation_id)
             mode, forced = perm.mode, perm.forced
             if not perm.refusal:
-                mode = permrules.lift_permission_ask(name, mode, skip=bool(ch.ctx.get("skip_permissions")))
+                mode = permrules.lift_permission_ask(
+                    name, mode, skip=bool(ch.ctx.get("skip_permissions")), forced=forced, danger=spec.danger,
+                    fenced=bool(fs_ask) or perm.kind == "rule")
             bad = perm.refusal or self._confine(ch, name, args)
             if bad:
                 result = denied(name, bad)

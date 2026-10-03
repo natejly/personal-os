@@ -24,3 +24,11 @@ export function behindLabel(segmentSeconds: number, queued: number, paused: bool
   if (b.seconds <= 0) return queued > 0 ? `${queued} clip${queued === 1 ? '' : 's'} waiting` : ''
   return `Transcript about ${b.atLeast ? 'at least ' : ''}${b.seconds}s behind${queued > 0 ? `, ${queued} queued` : ''}`
 }
+
+/** The mic notice, or '' while it is not silent long enough to mean anything. */
+export const SILENT_MIC_SECONDS = 10
+export function silentLabel(seconds: number | undefined): string {
+  if (seconds === undefined || !Number.isFinite(seconds) || seconds < SILENT_MIC_SECONDS) return ''
+  const s = Math.floor(seconds)
+  return `Mic heard nothing for ${s < 60 ? `${s}s` : `${Math.floor(s / 60)}m`}`
+}

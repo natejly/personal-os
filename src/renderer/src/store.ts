@@ -1,16 +1,24 @@
 import { create } from 'zustand'
+import { messageCharLimit, tooLongNotice } from './lib/messageLimit'
 import type { ApprovalDecision, BackendInfo, BackendState, PlanEdit, PlanDecision, PlanRecord,
   Desk, DeskEvent, DeskFile, FullDesk, PromotionResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, Document, Effort, TrashKind, FullDoc, GraphData, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodoCalendarStatus, TodayDashboard, Recap, Job, Meeting, MeetingCandidate, MeetingCapability, MeetingConfig, MeetingPreflight, MeetingSegment, MeetingStatus, MeetingStatusInfo, MeetingStreamEvent, FullMeeting } from '@shared/types'
 import { daily as dailyNote } from './features/notes/api'
+import { ApiError } from './lib/apiError'
+import { installRejectionToasts } from './lib/rejections'
 import { api, backgroundStream, chatStream, meetingStream, setBase, type Scope } from './lib/api'
 import { currentSelection } from './lib/pageContext'
 import { DEFAULT_EFFORT, NEEDS_YOU } from '../../shared/types'
-import { finishStatus, mergeConversation, pickEvictions, reduceStatus, settleApprovals } from './sessionStatus'
+import { chatNotice, finishStatus, foldRunState, mergeConversation, onScreen, pickEvictions, pulseStatus, reduceStatus, replayCursor, settleApprovals, type LiveRuns } from './sessionStatus'
+import { adjacentChatId } from './lib/chatRows'
+import { createDeltaBuffer } from './lib/deltaBuffer'
+import { CHAT_NOTICE_BODY, notify } from './lib/notify'
 import { applyCursor, fetchSegmentPages, needsSegmentReload } from './lib/transcript'
 import { viewHidden } from './moduleToggles'
 import { chainTo, folderKey, groupShutKey } from './lib/docTree'
 import { clearViews } from './lib/viewCache'
 import { emailAsk } from './lib/emailAsk'
+import type { UploadResult } from '@shared/types'
+import { uploadToast, type UploadOutcome } from './lib/uploadNote'
 
 /**
  * Settings as the renderer holds them: without the legacy `mode`, which only init() reads. Kept out
@@ -26,11 +34,18 @@ const withoutLegacyMode = (s: Settings): Settings => {
 /** `'canvas'` is the spaces desktop: one destination among the views, not a separate shell. */
 export type View = 'home' | 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'boards' | 'dashboards' | 'docs' | 'meetings' | 'activity' | 'library' | 'cowork' | 'project' | 'canvas'
 /** Which shelf of the Library is showing. Kept in the store so leaving and coming back lands you where you were. */
-export type LibraryTab = 'skills' | 'workflows' | 'connectors' | 'made' | 'artifacts'
+export type LibraryTab = 'skills' | 'workflows' | 'connectors' | 'made' | 'artifacts' | 'agents' | 'commands'
 /** Every view but the canvas: what ⌘⇧C and the sidebar's LayoutGrid button return to. */
 export type ClassicView = Exclude<View, 'canvas'>
 /** How the Docs editor splits its panes. */
 export type DocMode = 'edit' | 'split' | 'preview'
+const DOC_MODE_KEY = 'grain.docMode'
+export const readDocMode = (): DocMode => {
+  try {
+    const v = localStorage.getItem(DOC_MODE_KEY)
+    return v === 'edit' || v === 'split' || v === 'preview' ? v : 'split'
+  } catch { return 'split' }
+}
 /** How the Memory panel lays out its halves: the memory list, the knowledge graph, the voice profile. */
 export type MemoryMode = 'split' | 'list' | 'graph' | 'style'
 export type ContextTab = 'last' | 'preview' | 'trace'
@@ -47,7 +62,21 @@ export type { Scope, SessionStatus }
  * busy affordance — the caret, Stop, the hidden message actions, the chart placeholders — reads
  * `answering`, so a finished reply settles at `done` instead of at the end of the connection.
  */
-export interface Streaming { messageId: string | null; runId: string; abort: AbortController; answering: boolean }
+export interface Streaming {
+  messageId: string | null
+  runId: string
+  abort: AbortController
+  answering: boolean
+  /** Seq of the last event applied: a replayed or re-delivered event at or below it is dropped. */
+  seq: number
+  /** Stop was pressed and the run has not yet reported its end. */
+  stopping: boolean
+}
+
+/** A message sent but not yet confirmed by the run's `user_message` event; shown dimmed in the transcript. */
+export interface PendingSend { key: number; text: string; at: number }
+const EMPTY_PENDING: readonly PendingSend[] = Object.freeze([])
+let pendingKeySeq = 0
 
 /** One live conversation. Store-local: a running AbortController must never cross the IPC bus. */
 export interface ChatSession {
@@ -62,6 +91,10 @@ export interface ChatSession {
   unread: number
   /** epoch ms of the last focus or run; only used to pick eviction victims */
   touchedAt: number
+  /** The run died before it opened a reply (no message to stamp the error on): shown as a notice, cleared by the next message. */
+  runError: { message: string; runId: string | null; interrupted: boolean } | null
+  /** Sends the run has not echoed back yet (optimistic bubbles); undefined when none. */
+  pendingSends?: PendingSend[]
 }
 
 interface Toast { id: number; text: string; kind: 'info' | 'error' | 'learned'; action?: { label: string; run: () => void } }
@@ -98,7 +131,7 @@ const writeExpanded = (paths: string[]): string[] => {
 const styleScope = (s: Scope): string | null => (s === 'all' || s === 'personal' ? null : s)
 
 const newSession = (conversation: Conversation): ChatSession =>
-  ({ conversation, streaming: null, status: 'idle', finishedAt: null, pendingApprovals: 0, unread: 0, touchedAt: Date.now() })
+  ({ conversation, streaming: null, status: 'idle', finishedAt: null, pendingApprovals: 0, unread: 0, touchedAt: Date.now(), runError: null })
 
 const countApprovals = (c: Conversation): number =>
   (c.messages ?? []).reduce((n, m) => n + (m.tool_events ?? []).filter((t) => t.pending && t.needs_approval).length, 0)
@@ -142,6 +175,8 @@ export interface State {
   /** A model picked on a draft chat. Null follows `settings.defaultModel`; picking one must not rewrite that default. */
   draftModel: string | null
   draftFast: boolean
+  /** The first message of a chat that has no row yet, shown until the row exists. */
+  draftPendingSend: PendingSend | null
   /** A file was attached before this draft had a row. `send` marks the new chat untrusted. */
   uploadTaintTarget: 'draft' | 'page' | null
   /** Why that pending mark exists: `upload` for a file, `email` for a message someone else wrote. */
@@ -178,6 +213,8 @@ export interface State {
   conversations: Conversation[]
   /** Loaded conversations, keyed by id. Each one streams independently. */
   sessions: Record<string, ChatSession>
+  /** Conversations with a reply running right now, from `/runs` and the app topic's `run_state`: the sidebar pulse for a chat with no session. */
+  liveRuns: LiveRuns
   focusedConversationId: string | null
 
   memories: Memory[]
@@ -292,7 +329,7 @@ export interface State {
   setProjectModal: (m: State['projectModal']) => void
   toast: (text: string, kind?: Toast['kind'], action?: Toast['action']) => void
   /** After a soft delete: a toast with Undo (~8s) that restores it from the trash. */
-  offerUndo: (what: string, items: { type: TrashKind; id: string }[]) => void
+  offerUndo: (what: string, items: { type: TrashKind; id: string }[], note?: string) => void
   restoreTrashed: (items: { type: TrashKind; id: string }[]) => Promise<void>
 
   refreshProjects: () => Promise<void>
@@ -318,8 +355,20 @@ export interface State {
   /** Called on focus: clears unread and maps done/error back to idle, but never needs-approval. */
   clearSessionStatus: (conversationId: string) => void
   deleteChat: (id: string) => Promise<void>
+  pinChat: (id: string, on: boolean) => Promise<void>
+  archiveChat: (id: string, on: boolean) => Promise<void>
+  moveChat: (id: string, projectId: string | null) => Promise<void>
+  /** Chat above (-1) or below (1) the focused one in the list's own order; no-op in the canvas. */
+  stepChat: (dir: 1 | -1) => void
+  /** ⌘⇧F: opens the sidebar and bumps the tick the Sidebar watches to show and focus its search. */
+  searchChats: () => void
+  sidebarSearchTick: number
   renameChat: (id: string, title: string) => Promise<void>
+  /** Regenerate a chat's title with the model; the sidebar and header follow via the same patch as a rename. */
+  retitleChat: (id: string) => Promise<void>
   setChatModel: (model: string, conversationId?: string) => Promise<void>
+  /** Model, effort and fast in ONE request (the picker's Restore defaults); a draft parks them for `send`. Never rejects. */
+  setChatConfig: (change: { model?: string; effort?: Effort; fast?: boolean }, conversationId?: string) => Promise<void>
   setChatSettings: (patch: Partial<ConversationSettings>, conversationId?: string) => Promise<void>
   /** A library file was just attached to this chat, so the next reply treats its contents as untrusted. */
   noteUntrustedUpload: (conversationId?: string, pending?: 'draft' | 'page', source?: string) => Promise<void>
@@ -330,6 +379,9 @@ export interface State {
   /** Send from the ⌘I panel: same contract as `send`, plus the page snapshot and its own thread. */
   sendToPageAgent: (text: string) => Promise<boolean>
   regenerate: (conversationId?: string) => Promise<void>
+  /** Replace a sent user message: it and everything after it is hidden (not deleted) in the run that answers the new text. */
+  editAndResend: (messageId: string, text: string, conversationId?: string) => Promise<boolean>
+  activateVariant: (conversationId: string, messageId: string) => Promise<void>
   /** Continue an interrupted reply in a new run (always the user's click). Rejects with the backend's reason when it cannot. */
   resumeRun: (conversationId: string, runId: string) => Promise<void>
   stop: (conversationId?: string) => Promise<void>
@@ -453,8 +505,10 @@ export interface State {
   addTodo: (t: Parameters<typeof api.todos.create>[0]) => Promise<void>
   updateTodo: (id: string, patch: Parameters<typeof api.todos.update>[1]) => Promise<void>
   deleteTodo: (id: string) => Promise<void>
-  uploadDocuments: (files: FileList | File[], projectId: string | null) => Promise<string[]>
+  /** Stores each file and says which ones the assistant can read; the composer builds its note from that. */
+  uploadDocuments: (files: FileList | File[], projectId: string | null) => Promise<UploadOutcome[]>
   deleteDocument: (id: string) => Promise<void>
+  pinDocument: (id: string, pinned: boolean) => Promise<void>
 
   refreshDocs: (q?: string) => Promise<void>
   refreshDocsPending: () => Promise<void>
@@ -470,6 +524,7 @@ export interface State {
   /** Flush the buffer now (⌘S, switching docs, leaving the view). */
   flushDoc: () => Promise<void>
   setDocStar: (id: string, starred: boolean) => Promise<void>
+  setDocPin: (id: string, pinned: boolean) => Promise<void>
   /** File a doc: which project ('' is personal) and which folder in it, in one patch. */
   moveDoc: (id: string, scope: string, folder: string) => Promise<void>
   refreshDocFolders: () => Promise<void>
@@ -530,6 +585,7 @@ export interface State {
 }
 
 let toastSeq = 0
+let flushChain: Promise<void> = Promise.resolve()
 /** Autosave debounce for the doc editor: long enough to be one history entry, short enough to trust. */
 const SAVE_DEBOUNCE_MS = 1200
 let saveTimer: ReturnType<typeof setTimeout> | null = null
@@ -682,9 +738,61 @@ const share = (map: Map<string, Promise<void>>, key: string, fn: () => Promise<v
 let draftCreate: Promise<string | null> | null = null
 const loads = new Map<string, Promise<void>>()
 const attaches = new Map<string, Promise<void>>()
+/** The tail of each conversation's PATCH queue, so a send can wait for a model or effort change to land. */
+const convWrites = new Map<string, Promise<unknown>>()
+
+/** What editing `messageId` would hide: that row and every row after it, and whether any hidden reply ran tools. */
+export const editCut = (messages: Message[], messageId: string): { removed: number; ranTools: boolean } => {
+  const at = messages.findIndex((m) => m.id === messageId)
+  if (at < 0) return { removed: 0, ranTools: false }
+  const hidden = messages.slice(at)
+  return { removed: hidden.length, ranTools: hidden.some((m) => m.role === 'assistant' && !!m.tool_events?.some((t) => !t.pending)) }
+}
+
+export type StopOutcome = 'accepted' | 'gone' | 'failed'
+
+/**
+ * What a Stop request amounts to. `ok: false` and a 404 both mean there was no live run left to stop, which
+ * is the result the user wanted; only a request that never landed (a timeout, a refused connection, a 5xx) failed.
+ */
+export const stopOutcome = (call: { ok: boolean } | { error: unknown }): StopOutcome => {
+  if ('error' in call) return call.error instanceof ApiError && call.error.status === 404 ? 'gone' : 'failed'
+  return call.ok ? 'accepted' : 'gone'
+}
+
+/** One in-flight Stop per run: a second press (the button, then Escape) joins the first instead of sending another. */
+const stops = new Map<string, Promise<StopOutcome>>()
+
+/**
+ * A reply whose run died under it: the in-flight message carries the error, every tool call that never
+ * returned is marked unknown (an approval card still waiting is left, it is a decision and not an outcome),
+ * and the session stops answering. Pure, for the `error` event.
+ */
+export const settleInterrupted = (s: ChatSession, message: string): ChatSession => {
+  const mid = s.streaming?.messageId
+  const msgs = (s.conversation.messages ?? []).map((m) => m.id !== mid ? m : {
+    ...m,
+    error: m.error ?? message,
+    tool_events: m.tool_events?.map((t) => t.pending && !t.needs_approval
+      ? { ...t, pending: false, error: 'Outcome unknown: the reply ended before this call returned.' }
+      : t) ?? null
+  })
+  return {
+    ...s,
+    conversation: { ...s.conversation, messages: msgs },
+    streaming: s.streaming && { ...s.streaming, answering: false },
+    finishedAt: Date.now()
+  }
+}
 
 /** Every conversation mutation a stream event makes, as one new session. No side effects — exported for store.test.ts. */
-export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean): ChatSession => {
+export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean, seq?: number | null): ChatSession => {
+  // The tape is exactly-once on the wire, but an attach replay and a refetch can overlap: an event at or
+  // below what this session already applied is a no-op, so deltas never append twice.
+  if (seq != null && s.streaming) {
+    if (seq <= s.streaming.seq) return s
+    s = { ...s, streaming: { ...s.streaming, seq } }
+  }
   const c = s.conversation
   const msgs = c.messages ?? []
   const withMsgs = (messages: Message[]): ChatSession => ({ ...s, conversation: { ...c, messages } })
@@ -694,32 +802,49 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean): Cha
     case 'user_message':
       // Merge by id: a steer is persisted and published by its endpoint, so an attach replay plus the
       // live stream (or a refetch) can both carry it.
-      return msgs.some((m) => m.id === ev.data.id) ? s : withMsgs([...msgs, ev.data])
+      // The optimistic bubble this message confirms goes in the same returned session (the backend stores the stripped text).
+      {
+        const pend = s.pendingSends
+        const at = pend ? pend.findIndex((p) => p.text.trim() === ev.data.content) : -1
+        const rest = at >= 0 && pend ? pend.filter((_, i) => i !== at) : pend
+        const pendingSends = rest && rest.length ? rest : undefined
+        if (msgs.some((m) => m.id === ev.data.id)) return at >= 0 ? { ...s, runError: null, pendingSends } : { ...s, runError: null }
+        return { ...withMsgs([...msgs, ev.data]), runError: null, pendingSends }
+      }
     case 'assistant_message': {
       // Merge by id: attaching to a run replays this event into a conversation row that may already
-      // hold the message, and appending it twice is the duplicate the ring used to paint. An empty
-      // replayed body keeps whatever content we have, so a mid-reply attach loses nothing.
+      // hold the message, and appending it twice is the duplicate the ring used to paint. The replay
+      // then rebuilds the row from its deltas, so a held row is replaced wholesale, not merged.
       const held = msgs.some((m) => m.id === ev.data.id)
       return {
         ...(held
-          ? mapMsg(ev.data.id, (m) => ({ ...ev.data, content: ev.data.content || m.content }))
+          ? mapMsg(ev.data.id, () => ev.data)
           : withMsgs([...msgs, ev.data])),
+        runError: null,
         streaming: s.streaming && { ...s.streaming, messageId: ev.data.id, answering: true },
         // A steered run opens a new segment after a `done`; the green hold belongs to the real end.
-        finishedAt: null,
-        unread: focused || held ? s.unread : s.unread + 1
+        finishedAt: null
       }
     }
     case 'title':
       return { ...s, conversation: { ...c, title: ev.data.title } }
     case 'removed_message':
       return withMsgs(msgs.filter((m) => m.id !== ev.data.id))
+    case 'restored_message': {
+      // The answer a failed regenerate had superseded. Replace by id (the tape can replay), else slot it in by time.
+      const back = ev.data.message
+      const rest = msgs.filter((m) => m.id !== back.id)
+      const at = rest.findIndex((m) => m.created_at > back.created_at)
+      return withMsgs(at < 0 ? [...rest, back] : [...rest.slice(0, at), back, ...rest.slice(at)])
+    }
+    case 'status':
+      return mapMsg(ev.data.id, (m) => ({ ...m, status: ev.data.kind ? { kind: ev.data.kind, attempt: ev.data.attempt, max: ev.data.max, until: ev.data.until, reason: ev.data.reason } : null }))
     case 'delta':
-      return mapMsg(ev.data.id, (m) => ({ ...m, content: m.content + ev.data.text }))
+      return mapMsg(ev.data.id, (m) => ({ ...m, content: m.content + ev.data.text, status: null }))
     case 'reasoning':
-      return mapMsg(ev.data.id, (m) => ({ ...m, reasoning: (m.reasoning ?? '') + ev.data.text }))
+      return mapMsg(ev.data.id, (m) => ({ ...m, reasoning: (m.reasoning ?? '') + ev.data.text, status: null }))
     case 'tool_call':
-      return mapMsg(ev.data.message_id, (m) => ({ ...m, tool_events: [...(m.tool_events ?? []), { id: ev.data.id, name: ev.data.name, arguments: ev.data.arguments, result_preview: '', duration_ms: 0, error: null, pending: true, needs_approval: !!ev.data.needs_approval, forced: !!ev.data.forced, permission: ev.data.permission ?? null, plan: ev.data.plan ?? null, agent: ev.data.agent }] }))
+      return mapMsg(ev.data.message_id, (m) => (m.tool_events?.some((t) => t.id === ev.data.id) ? m : { ...m, status: null, tool_events: [...(m.tool_events ?? []), { id: ev.data.id, name: ev.data.name, arguments: ev.data.arguments, result_preview: '', duration_ms: 0, error: null, pending: true, needs_approval: !!ev.data.needs_approval, forced: !!ev.data.forced, permission: ev.data.permission ?? null, plan: ev.data.plan ?? null, agent: ev.data.agent }] }))
     case 'tool_result':
       return mapMsg(ev.data.message_id, (m) => ({ ...m, tool_events: (m.tool_events ?? []).map((t) => (t.id === ev.data.id ? { ...ev.data, pending: false } : t)) }))
     case 'span':
@@ -729,10 +854,26 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean): Cha
         return { ...m, trace: i >= 0 ? trace.map((sp, j) => (j === i ? ev.data.span : sp)) : [...trace, ev.data.span] }
       })
     case 'done': {
-      const done = mapMsg(ev.data.id, (m) => ({ ...m, error: ev.data.error, context_used: ev.data.context_used, tool_events: ev.data.tool_events?.length ? ev.data.tool_events : m.tool_events, trace: ev.data.trace?.length ? ev.data.trace : m.trace, reasoning: ev.data.reasoning ?? m.reasoning }))
+      const done = !ev.data.id ? s : mapMsg(ev.data.id, (m) => ({ ...m, status: null, error: ev.data.error, context_used: ev.data.context_used, tool_events: ev.data.tool_events?.length ? ev.data.tool_events : m.tool_events, trace: ev.data.trace?.length ? ev.data.trace : m.trace, reasoning: ev.data.reasoning ?? m.reasoning, outcome: ev.data.outcome ?? (ev.data.stopped ? 'stopped' : (ev.data.partial as Message['outcome']) ?? null), error_kind: ev.data.error_kind ?? null }))
       // The reply is whole and persisted here. The stream stays open for the auto-learn tail, so the
       // subscription is left alone and only `answering` drops.
-      return { ...done, streaming: done.streaming && { ...done.streaming, answering: false }, finishedAt: Date.now() }
+      // `unread` counts the final done, not the first token: a chat that is mid-reply off-screen has nothing to read yet.
+      // A steer segment's done is not the end, so it neither counts nor clears a Stop that is still pending.
+      const final = !ev.data.segment
+      return {
+        ...done,
+        streaming: done.streaming && { ...done.streaming, answering: false, stopping: final ? false : done.streaming.stopping },
+        finishedAt: Date.now(),
+        unread: final && !focused ? done.unread + 1 : done.unread
+      }
+    }
+    case 'error': {
+      // The run's terminal frame. Once `done` has gone out the reply is whole and there is nothing to settle;
+      // a death mid-reply stamps the message, and one before any reply exists has no message to carry it.
+      if (s.streaming && !s.streaming.answering) return s
+      const held = s.streaming?.messageId ? msgs.find((m) => m.id === s.streaming?.messageId) : undefined
+      if (s.streaming && held) return settleInterrupted(s, ev.data.message)
+      return { ...s, runError: { message: ev.data.message, runId: s.streaming?.runId ?? ev.data.run_id ?? null, interrupted: !!ev.data.interrupted } }
     }
     default:
       return s
@@ -775,6 +916,8 @@ const applyMeetingEvent = (s: MeetingWatch, ev: MeetingStreamEvent): MeetingWatc
   }
 }
 
+export { adjacentChatId }
+
 export const useStore = create<State>((set, get) => {
   /**
    * App's init effect runs twice under React.StrictMode, so both of these are latched. A second
@@ -806,7 +949,12 @@ export const useStore = create<State>((set, get) => {
         // ⌘N taken while reading a project chat silently filed the next unrelated thought under it.
         if (s.view !== 'canvas') s.newChat(null)
       } else if (action === 'settings') s.setSettingsOpen(true)
+      else if (action === 'new-note') void s.createDoc({})
+      else if (action === 'daily-note') { s.setView('docs'); void s.openDailyNote() }
       else if (action === 'toggle-sidebar') s.toggleSidebar()
+      else if (action === 'chat:next') s.stepChat(1)
+      else if (action === 'chat:prev') s.stepChat(-1)
+      else if (action === 'chat:search') s.searchChats()
       else if (action === 'toggle-context') s.toggleContext()
       else if (action === 'page-agent') s.togglePageAgent()
       else if (action === 'view:graph') s.openMemory('graph')
@@ -847,6 +995,18 @@ export const useStore = create<State>((set, get) => {
       const next = fn(cur)
       return next === cur ? {} : { sessions: { ...st.sessions, [convId]: next } }
     })
+  const addPending = (convId: string, p: PendingSend): void =>
+    patchSession(convId, (s) => ({ ...s, pendingSends: [...(s.pendingSends ?? []), p] }))
+  const dropPending = (convId: string, key: number): void =>
+    patchSession(convId, (s) => {
+      if (!s.pendingSends?.some((p) => p.key === key)) return s
+      const rest = s.pendingSends.filter((p) => p.key !== key)
+      return { ...s, pendingSends: rest.length ? rest : undefined }
+    })
+  /** A steer's response carries the stored message: applied as the event, it settles the bubble now (the stream copy is a no-op by id). */
+  const settleSteer = (convId: string, message: Message | undefined): void => {
+    if (message) patchSession(convId, (s) => applyEvent(s, { event: 'user_message', data: message } as ChatEvent, get().focusedConversationId === convId))
+  }
   const putSession = (conversation: Conversation): void =>
     set((st) => {
       const cur = st.sessions[conversation.id]
@@ -879,6 +1039,8 @@ export const useStore = create<State>((set, get) => {
   let backendSeen: BackendState = 'ready'
   let watching = false
   let stateWired = false
+  // `/events` resume cursor. The topic's seq restarts with the backend process, so a restart zeroes it.
+  let eventsSince = 0
 
   /**
    * The main process supervises the sidecar and announces each state. While it restarts the UI stays up
@@ -906,7 +1068,25 @@ export const useStore = create<State>((set, get) => {
       void get().refreshDocsPending()
       void get().refreshActivity()
       refreshAll()
+      // Runs did not survive the process: the conversation list, the live-run map and every session
+      // that was not streaming (its in-flight reply may have been closed out as interrupted) are stale.
+      void get().refreshConversations().catch(() => undefined)
+      eventsSince = 0
+      set({ liveRuns: {} })
+      void seedLiveRuns()
+      for (const id of Object.keys(get().sessions)) {
+        if (!get().sessions[id].streaming) void get().openSession(id).catch(() => undefined)
+      }
     }
+  }
+
+  const seedLiveRuns = async (): Promise<void> => {
+    const runs = await api.runs().catch(() => null)
+    if (!runs) return
+    const live: LiveRuns = {}
+    for (const r of runs) if (r.answering) live[r.conversation_id] = { run_id: r.run_id, status: r.status }
+    // Whatever a `run_state` frame already folded in is newer than this snapshot.
+    set((st) => ({ liveRuns: { ...live, ...st.liveRuns } }))
   }
 
   /**
@@ -933,13 +1113,18 @@ export const useStore = create<State>((set, get) => {
     }
   }
 
+  // A title written off the run (or by another window) reaches the list and any open session without a refetch.
+  const applyTitle = (id: string, title: string): void => {
+    if (get().sessions[id]) patchConversation(id, (c) => (c.title === title ? c : { ...c, title }))
+    set((st) => ({ conversations: st.conversations.map((c) => (c.id === id && c.title !== title ? { ...c, title } : c)) }))
+  }
   const watchBackgroundEvents = async (): Promise<void> => {
-    let since = 0
     let backoff = 1000
+    await seedLiveRuns()
     for (;;) {
       try {
-        for await (const ev of backgroundStream(since)) {
-          if (ev.seq !== null) since = ev.seq
+        for await (const ev of backgroundStream(eventsSince)) {
+          if (ev.seq !== null) eventsSince = ev.seq
           backoff = 1000
           if (ev.event === 'learned') {
             const { memories, nodes, edges } = ev.data
@@ -950,8 +1135,24 @@ export const useStore = create<State>((set, get) => {
           } else if (ev.event === 'job_finished') {
             void get().refreshAgentInbox()
             window.dispatchEvent(new Event('grain-job-finished'))
+          } else if (ev.event === 'usage_alert') {
+            get().toast(`Spend ${ev.data.period === 'daily' ? 'today' : 'this month'} is $${ev.data.spent.toFixed(2)}, over your $${ev.data.limit.toFixed(2)} alert`, 'error')
           } else if (ev.event === 'desk_status') {
             onDeskChanged(ev.data)
+          } else if (ev.event === 'preview') {
+            const data = ev.data
+            void import('./features/docrec/preview').then((m) => m.usePreview.getState().apply(data))
+          } else if (ev.event === 'run_state') {
+            const info = ev.data
+            set((st) => ({ liveRuns: foldRunState(st.liveRuns, info) }))
+            const sess = get().sessions[info.conversation_id]
+            // A reply this window did not start: follow it, or, once it ends, read what it persisted.
+            if (sess && sess.streaming?.runId !== info.run_id) {
+              if (info.answering) void get().attachSession(info.conversation_id).catch(() => undefined)
+              else if (!sess.streaming) void get().openSession(info.conversation_id).catch(() => undefined)
+            }
+          } else if (ev.event === 'conversation_changed') {
+            applyTitle(ev.data.id, ev.data.title)
           } else if (ev.event === 'recording') {
             // Lazy: the docrec store imports this one, so a static import here would be a cycle.
             const data = ev.data
@@ -1019,8 +1220,41 @@ export const useStore = create<State>((set, get) => {
     void get().refreshMeetingsPending()
   }
 
-  /** Consume one run's events into a session. `attached` means the run was started by someone else. */
-  const watchRun = async (convId: string, run: ChatRunStarted, from: { messageId: string | null; approvals: number; attached: boolean }): Promise<void> => {
+  /** One stream event folded into a session: the reducer plus the approval recount and the status verdict. */
+  const step = (s: ChatSession, ev: ChatEvent, visible: boolean, seq: number | null): ChatSession => {
+    const next = applyEvent(s, ev, visible, seq)
+    if (next === s) return s
+    // Only the events that open or settle a gate can move the count, and delta must stay free
+    // of any recount: it is the one event that arrives per token.
+    const gate = ev.event === 'tool_call' || ev.event === 'tool_result'
+      || ev.event === 'plan_card' || ev.event === 'plan_decision'
+    const pendingApprovals = gate ? countApprovals(next.conversation) : s.pendingApprovals
+    return { ...next, pendingApprovals, status: reduceStatus(s.status, ev, pendingApprovals) }
+  }
+
+  /**
+   * Tell the user a chat they are not looking at needs them, at most once per run and kind. Not for a desk's
+   * conversation (the desk notifier owns those), and not while the window is in front with the chat on screen.
+   */
+  const announce = (convId: string, runId: string, kind: 'reply' | 'approval' | 'failed', visible: boolean, seen: Set<string>): void => {
+    const key = `${runId}:${kind}`
+    if (seen.has(key)) return
+    seen.add(key)
+    if (get().settings.chatNotify === false) return
+    if (visible && typeof document !== 'undefined' && document.hasFocus()) return
+    if (get().desks.some((d) => d.conversation_id === convId)) return
+    const title = get().sessions[convId]?.conversation.title || get().conversations.find((c) => c.id === convId)?.title || 'Chat'
+    notify(title.length > 60 ? title.slice(0, 57) + '…' : title, CHAT_NOTICE_BODY[kind], { tag: key, onClick: () => void get().selectChat(convId) })
+  }
+
+  /**
+   * Consume one run's events into a session. `attached` means the run was started by someone else.
+   *
+   * `replay` is an attach that starts at the in-flight message: that message is blanked once, the tape up to
+   * `end` is buffered and folded in a single patch (so the window never paints a half-built reply), and the
+   * replayed events raise no toast, hold or refetch. A replayed `title` is dropped: the fetched row is newer.
+   */
+  const watchRun = async (convId: string, run: ChatRunStarted, from: { messageId: string | null; approvals: number; attached: boolean; pendingKey?: number; replay?: { messageId: string | null; end: number } }): Promise<void> => {
     // One subscription per conversation. A second subscription to the same run would apply every
     // delta twice, since `applyEvent` appends. A different run supersedes this one, so its viewer is
     // detached first: the old loop's `finally` is abort-identity guarded and will not undo us.
@@ -1029,31 +1263,98 @@ export const useStore = create<State>((set, get) => {
     prev?.abort.abort()
     const abort = new AbortController()
     const attached = from.attached
+    const replay = from.replay
     // Set by `desk_handoff`: this turn announced a successor before it ended, so the stream closing
     // is not the end of the desk's work and the pane re-attaches rather than going idle.
     let handoff: { desk_id: string; conversation_id: string; turn: number } | null = null
     clearHold(convId)
-    // Set when the stream kept closing without ever delivering an ending: what is stored is then the truth.
-    let gaveUp = false
-    patchSession(convId, (s) => ({ ...s, streaming: { messageId: from.messageId, runId: run.run_id, abort, answering: true }, status: settleApprovals('working', from.approvals), finishedAt: null, pendingApprovals: from.approvals, touchedAt: Date.now() }))
+    // Set by the reply's final `done`: what is stored is then what this window already has. A stream that
+    // kept closing without ever delivering one leaves it false, and what is stored is then the truth.
+    let settled = false
+    patchSession(convId, (s) => {
+      // Rebuilt from the tape, so what the fetch held of the in-flight message (possibly all of it, possibly a stale
+      // half) is cleared first. After the dedupe guard above: blanking a message a live watcher is filling would lose it.
+      const blank = replay?.messageId ?? null
+      const conversation = blank
+        ? { ...s.conversation, messages: (s.conversation.messages ?? []).map((m) => (m.id === blank ? { ...m, content: '', reasoning: null, tool_events: [] } : m)) }
+        : s.conversation
+      const approvals = blank ? countApprovals(conversation) : from.approvals
+      return {
+        ...s,
+        conversation,
+        streaming: { messageId: from.messageId, runId: run.run_id, abort, answering: true, seq: run.seq, stopping: false },
+        status: settleApprovals('working', approvals),
+        finishedAt: null,
+        pendingApprovals: approvals,
+        touchedAt: Date.now(),
+        runError: null
+      }
+    })
+    // Streamed text is applied at most once per interval. Events past the replay boundary only: the replay
+    // folds the tape in one patch already. Applied without a seq, which is safe because every other event
+    // flushes this first, so nothing with a seq can overtake a pending delta.
+    const buf = createDeltaBuffer((ev) => {
+      const visible = onScreen(convId, { view: get().view, focusedId: get().focusedConversationId, retained })
+      patchSession(convId, (s) => (s.streaming?.abort !== abort ? s : step(s, ev, visible, null)))
+    })
+    // Once per run and kind: a run that asks for approval twice rings once for it, and its ending rings once more.
+    const notified = new Set<string>()
+    let backlog: { ev: ChatEvent; seq: number | null }[] | null = replay ? [] : null
+    const flush = (): void => {
+      const events = backlog
+      backlog = null
+      if (!events?.length) return
+      // Abort-identity guarded like the `finally` below: a run that superseded this one mid-replay owns the session now.
+      patchSession(convId, (s) => (s.streaming?.abort !== abort ? s : events.reduce((acc, e) => (e.ev.event === 'title' ? acc : step(acc, e.ev, true, e.seq)), s)))
+    }
+    // The events that move something other than the transcript, so a replay still has to run them.
+    const track = (ev: ChatEvent): void => {
+      switch (ev.event) {
+        case 'plan':
+          set((st) => ({ plans: { ...st.plans, [convId]: ev.data.steps } }))
+          break
+        case 'desk_status':
+          putDesk(ev.data)
+          if (ev.data.status === 'review') void get().loadDeskFiles(ev.data.id)
+          if (NEEDS_YOU.includes(ev.data.status)) void get().refreshDeskInbox()
+          break
+        case 'desk_handoff':
+          handoff = ev.data
+          break
+      }
+    }
     try {
-      for await (const ev of chatStream(convId, run.seq, abort.signal, run.run_id, () => { gaveUp = true })) {
+      for await (const ev of chatStream(convId, run.seq, abort.signal, run.run_id)) {
         // A frame with no usable body has nothing to apply; ignoring it beats throwing inside the loop.
         if (!ev || !isRecord(ev.data)) continue
-        const focused = get().focusedConversationId === convId
-        patchSession(convId, (s) => {
-          const next = applyEvent(s, ev, focused)
-          // Only the events that open or settle a gate can move the count, and delta must stay free
-          // of any recount: it is the one event that arrives per token.
-          const gate = ev.event === 'tool_call' || ev.event === 'tool_result'
-            || ev.event === 'plan_card' || ev.event === 'plan_decision'
-          const pendingApprovals = gate ? countApprovals(next.conversation) : s.pendingApprovals
-          return { ...next, pendingApprovals, status: reduceStatus(s.status, ev, pendingApprovals) }
-        })
+        const seq = ev.seq
+        if (ev.event === 'done' && !ev.data.segment) settled = true
+        if (backlog && replay && seq !== null && seq > replay.end) flush()
+        if (backlog) {
+          backlog.push({ ev, seq })
+          track(ev)
+          if (seq === null || (replay && seq >= replay.end)) flush()
+          continue
+        }
+        if (ev.event === 'delta' || ev.event === 'reasoning') {
+          buf.push(ev)
+          continue
+        }
+        buf.flush()
+        const focused = onScreen(convId, { view: get().view, focusedId: get().focusedConversationId, retained })
+        const before = get().sessions[convId]?.status ?? 'idle'
+        patchSession(convId, (s) => step(s, ev, focused, seq))
+        const kind = chatNotice(before, get().sessions[convId]?.status ?? before, ev)
+        if (kind) announce(convId, run.run_id, kind, focused, notified)
         switch (ev.event) {
           case 'done':
             if (!ev.data.error) hold(convId)
+            // Retried silently on the way (a provider hiccup before the first token): worth saying once, after the fact.
+            if (ev.data.notice) get().toast(ev.data.notice, 'info')
             void get().refreshConversations()
+            break
+          case 'restored_message':
+            if (ev.data.reason) get().toast(`Regenerate failed: ${ev.data.reason}. The previous answer is back.`, 'error')
             break
           // Only the `remember` tool reaches here now; auto-learn reports on `/events` instead.
           case 'learned': {
@@ -1066,9 +1367,6 @@ export const useStore = create<State>((set, get) => {
             if (memories.length + updated.length + removed.length + nodes.length + edges.length) refreshAll()
             break
           }
-          case 'plan':
-            set((st) => ({ plans: { ...st.plans, [convId]: ev.data.steps } }))
-            break
           case 'style_learned':
             // A banked sample is quiet; a refreshed voice profile is worth saying once.
             if (ev.data.profile) get().toast('Updated how you write', 'learned')
@@ -1077,29 +1375,74 @@ export const useStore = create<State>((set, get) => {
           case 'learn_error':
             get().toast(`Auto-learn failed: ${ev.data.message}`, 'error')
             break
-          case 'desk_status':
-            putDesk(ev.data)
-            if (ev.data.status === 'review') void get().loadDeskFiles(ev.data.id)
-            if (NEEDS_YOU.includes(ev.data.status)) void get().refreshDeskInbox()
+          case 'error': {
+            // A reply row on screen carries the error itself; the toast is for a chat nobody is looking at.
+            // The reducer leaves `streaming` in place on an error, so the row it stamped is still findable here.
+            const s = get().sessions[convId]
+            const answeredHere = !!s?.streaming?.messageId && (s.conversation.messages ?? []).some((m) => m.id === s.streaming?.messageId)
+            if (!focused || !answeredHere) get().toast(ev.data.message, 'error')
             break
-          case 'desk_handoff':
-            handoff = ev.data
-            break
-          case 'error':
-            get().toast(ev.data.message, 'error')
-            break
+          }
+          default:
+            track(ev)
         }
       }
     } catch (e) {
       // An aborted signal is the user pressing Stop, not a failure.
       if (!abort.signal.aborted) {
-        get().toast((e as Error).message, 'error')
-        patchSession(convId, (s) => (s.streaming?.abort === abort ? { ...s, status: 'error', finishedAt: Date.now() } : s))
+        buf.flush()
+        const stalled = e instanceof ApiError && e.kind === 'stalled'
+        const s0 = get().sessions[convId]
+        const mine = s0?.streaming?.abort === abort
+        // After the reply's `done` only the auto-learn tail was lost, which leaves nothing to settle.
+        const live = mine && !!s0?.streaming?.answering
+        const bubble = live && !!s0?.streaming?.messageId && (s0.conversation.messages ?? []).some((m) => m.id === s0.streaming?.messageId)
+        const lost = 'Interrupted: lost the connection to the backend while this reply was streaming.'
+        if (live) {
+          patchSession(convId, (s) => {
+            if (s.streaming?.abort !== abort) return s
+            const settled = settleInterrupted(s, lost)
+            return { ...settled, status: 'error', runError: bubble ? s.runError : { message: lost, runId: run.run_id, interrupted: true } }
+          })
+        }
+        const visible = onScreen(convId, { view: get().view, focusedId: get().focusedConversationId, retained })
+        if (!live || !bubble || !visible) {
+          // After `done` the reply is whole, so there is nothing to continue: only the auto-learn tail was lost.
+          const text = !stalled ? (e as Error).message
+            : live ? 'The backend stopped responding. Restart it from Settings > Support, then continue the reply.'
+              : 'The backend stopped responding. Restart it from Settings > Support.'
+          get().toast(text, 'error')
+        }
+        if (live) announce(convId, run.run_id, 'failed', visible, notified)
       }
     } finally {
+      // Backstop: a stream that dies before `user_message` must not leave the dimmed bubble behind.
+      if (from.pendingKey !== undefined) dropPending(convId, from.pendingKey)
+      buf.flush()
+      flush()
+      // A stream that ended without its `done` is not a finished reply. When the run itself says it died, the
+      // transcript shows that here instead of waiting on the refetch below to find out.
+      if (!settled && !abort.signal.aborted && get().sessions[convId]?.streaming?.abort === abort && get().sessions[convId]?.streaming?.answering) {
+        const state = await api.runState(run.run_id).catch((err: unknown) => (err instanceof ApiError && err.status === 404 ? 'gone' as const : null))
+        const dead = state === 'gone' || (!!state && (state.status === 'interrupted' || state.status === 'error'))
+        if (dead) {
+          const msg = 'Interrupted: the reply ended before it finished.'
+          patchSession(convId, (s) => {
+            if (s.streaming?.abort !== abort) return s
+            const held = !!s.streaming.messageId && (s.conversation.messages ?? []).some((m) => m.id === s.streaming?.messageId)
+            const settledS = settleInterrupted(s, msg)
+            return { ...settledS, status: 'error', runError: held ? s.runError : { message: msg, runId: run.run_id, interrupted: true } }
+          })
+          // Settled here rather than by an `error` frame, so the one notice that frame would have raised is raised here.
+          if (get().sessions[convId]?.streaming?.abort === abort) {
+            announce(convId, run.run_id, 'failed', onScreen(convId, { view: get().view, focusedId: get().focusedConversationId, retained }), notified)
+          }
+        }
+      }
       patchSession(convId, (s) => (s.streaming?.abort === abort ? { ...s, streaming: null, status: finishStatus(s.status) } : s))
-      // An attached run wrote deltas this window never saw; the persisted message is the whole reply.
-      if (attached || gaveUp) void get().openSession(convId).catch(() => undefined)
+      // An attached run wrote deltas this window never saw, and a stream that ended without its `done` left
+      // the reply unfinished here: the persisted message is the whole reply.
+      if ((attached || !settled) && !abort.signal.aborted && get().sessions[convId]) void get().openSession(convId).catch(() => undefined)
       // A chained desk turn is a *new* run on this same conversation, and the stream for the old one
       // closes before the bus has registered it. Poll a few times rather than leave the pane dead.
       // `attachSession` is shared and this dedupes on run_id, so every extra attempt is a no-op.
@@ -1118,7 +1461,7 @@ export const useStore = create<State>((set, get) => {
    * `false` means the backend never accepted `body`, so the caller still owns the text it sent.
    * Resolves on that verdict, not at the end of the run: a composer is holding a draft on it.
    */
-  const runStream = async (convId: string, body: { content?: string; model?: string; page_context?: PageContext }): Promise<boolean> => {
+  const runStream = async (convId: string, body: { content?: string; model?: string; page_context?: PageContext; replace_from?: string }, pendingKey?: number): Promise<boolean> => {
     let run: ChatRunStarted
     try {
       run = await api.chat(convId, body)
@@ -1129,22 +1472,67 @@ export const useStore = create<State>((set, get) => {
         patchSession(convId, (s) => ({ ...s, status: 'error', finishedAt: Date.now() }))
         return false
       }
-      // Another window is already mid-reply. Adopt that run from its tail so the window paints, and
-      // steer the message into it instead of dropping it.
-      void watchRun(convId, { run_id: conflict.run_id, seq: conflict.seq }, { messageId: null, approvals: 0, attached: true })
+      // Another window is already mid-reply. Adopt that run, replaying its in-flight message so the window
+      // paints the whole reply, and steer the message into it instead of dropping it.
+      await get().attachSession(convId).catch(() => undefined)
+      if (body.replace_from) {
+        // An edit cannot be folded into a live reply: it replaces history, so it is refused whole.
+        get().toast('That chat is already replying — your edit was not sent.', 'error')
+        return false
+      }
       if (body.content) {
         try {
-          await api.steer(convId, body.content)
+          const r = await api.steer(convId, body.content)
+          settleSteer(convId, r.message)
           return true
-        } catch {
-          get().toast('That chat is already replying — your message was not sent.', 'error')
+        } catch (e) {
+          get().toast(e instanceof ApiError && e.kind === 'timeout' ? 'The backend did not answer, so your message was not sent.' : 'That chat is already replying — your message was not sent.', 'error')
         }
       }
       return false
     }
     // Synchronous up to its first await, so `streaming` is set before this returns.
-    void watchRun(convId, run, { messageId: null, approvals: 0, attached: false })
+    void watchRun(convId, run, { messageId: null, approvals: 0, attached: false, pendingKey })
     return true
+  }
+
+  /**
+   * One PATCH at a time per conversation, in call order, each applying the row the server answered
+   * with — so the store ends equal to the last write and two quick changes cannot overwrite each
+   * other. Rejects on failure: the taint mark in `noteUntrustedUpload` depends on that.
+   */
+  const writeConversation = (id: string, body: { model?: string; settings?: Partial<ConversationSettings> }): Promise<Conversation> => {
+    const prev = convWrites.get(id)
+    const run = async (): Promise<Conversation> => {
+      await prev?.catch(() => undefined)
+      const c = await api.conversations.patch(id, body)
+      patchConversation(id, (cur) => ({ ...cur, model: c.model, settings: c.settings }))
+      return c
+    }
+    const p = run()
+    convWrites.set(id, p)
+    void p.catch(() => undefined).then(() => { if (convWrites.get(id) === p) convWrites.delete(id) })
+    return p
+  }
+
+  /** Run an action whose failure should be told to the user and nothing more. */
+  const guard = async (label: string, fn: () => Promise<unknown>): Promise<boolean> => {
+    try {
+      await fn()
+      return true
+    } catch (e) {
+      get().toast(`${label}: ${(e as Error).message}`, 'error')
+      return false
+    }
+  }
+
+  /** A chat the backend no longer has: drop the session, the sidebar row and the Home row. No network call. */
+  const forgetChat = (id: string): void => {
+    get().closeSession(id)
+    set((st) => ({
+      conversations: st.conversations.filter((c) => c.id !== id),
+      dashboard: st.dashboard && { ...st.dashboard, recent_conversations: st.dashboard.recent_conversations.filter((c) => c.id !== id) }
+    }))
   }
 
   const patchChatSettings = async (patch: Partial<ConversationSettings>, conversationId?: string): Promise<void> => {
@@ -1158,15 +1546,14 @@ export const useStore = create<State>((set, get) => {
       }))
       return
     }
-    const c = await api.conversations.patch(id, { settings: patch })
-    patchConversation(id, (cur) => ({ ...cur, settings: c.settings }))
+    await writeConversation(id, { settings: patch })
   }
 
   return {
     ready: false,
     backendError: null,
     backendState: 'ready',
-    settings: { baseUrl: '', apiKey: '', apiKeySet: false, defaultModel: '', systemPrompt: '', extractionModel: '', autoLearn: true, learnStyle: true, theme: 'dark', accent: 'sage', gatherShortcut: '', tools: {}, maxToolRounds: 8, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {} },
+    settings: { baseUrl: '', apiKey: '', apiKeySet: false, defaultModel: '', systemPrompt: '', extractionModel: '', autoLearn: true, autoTitle: true, learnStyle: true, theme: 'dark', accent: 'sage', gatherShortcut: '', quickCaptureShortcut: '', dictationChord: '', tools: {}, maxToolRounds: 8, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {} },
     models: [],
     modelsError: null,
     tools: [],
@@ -1189,6 +1576,7 @@ export const useStore = create<State>((set, get) => {
     draftEffort: DEFAULT_EFFORT,
     draftModel: null,
     draftFast: false,
+    draftPendingSend: null,
     uploadTaintTarget: null,
     uploadTaintSource: 'upload',
     libraryScope: 'all',
@@ -1200,7 +1588,7 @@ export const useStore = create<State>((set, get) => {
     docFolders: [],
     expandedFolders: readExpanded(),
     docsPending: 0,
-    docMode: 'split',
+    docMode: readDocMode(),
     docDraft: null,
     docTitleDraft: null,
     docSaving: false,
@@ -1217,6 +1605,7 @@ export const useStore = create<State>((set, get) => {
     meetingBusy: false,
     meetingConsentOpen: false,
     sidebarOpen: true,
+    sidebarSearchTick: 0,
     contextOpen: false,
     contextTab: 'last',
     libraryTab: 'skills',
@@ -1242,6 +1631,7 @@ export const useStore = create<State>((set, get) => {
     toasts: [],
     conversations: [],
     sessions: {},
+    liveRuns: {},
     focusedConversationId: null,
     memories: [],
     graph: { nodes: [], edges: [] },
@@ -1283,13 +1673,15 @@ export const useStore = create<State>((set, get) => {
       let settings: Settings, projects: Project[], personalStats: Project['stats'], conversations: Conversation[]
       try {
         ;[settings, projects, personalStats, conversations] = await Promise.all([
-          api.settings.get(), api.projects.list(), api.projects.globalStats(), api.conversations.list('all')
+          api.settings.get(), api.projects.list(), api.projects.globalStats().catch(() => undefined), api.conversations.list('all')
         ])
       } catch (e) {
         // Release the guard so a retry can run, and surface the failure instead of an empty window.
         inited = false
-        return set({ ready: true, backendError: (e as Error).message })
+        return set({ ready: true, backendError: 'The backend is running, but your data could not be loaded: ' + (e as Error).message })
       }
+      // Quiet while the backend restarts: the banner already says so, and every refresher would fail at once.
+      installRejectionToasts((m, kind) => { if (get().backendState === 'ready') get().toast(m, kind) })
       // One-shot migration of the pre-spaces global mode: a user who left the app in canvas mode lands
       // in the canvas once, and the setting is reset so later launches open on Today. Only the main
       // window writes it back; a pop-out (`?surface=widget`) never renders App and must not touch settings.
@@ -1344,6 +1736,11 @@ export const useStore = create<State>((set, get) => {
       if (cur === 'meetings' && view !== 'meetings') void get().flushMeetingNotes()
       if (view === 'canvas' && cur !== 'canvas') set({ view, lastClassicView: cur })
       else set({ view })
+      // Coming back to the chat view shows the focused conversation, so what it finished while away is read.
+      if (view === 'chat') {
+        const fid = get().focusedConversationId
+        if (fid && (get().sessions[fid]?.unread ?? 0) > 0) get().clearSessionStatus(fid)
+      }
       if (view === 'docs') {
         void get().refreshDocs()
         void get().refreshDocsPending()
@@ -1392,8 +1789,7 @@ export const useStore = create<State>((set, get) => {
       const id = get().pageAgentId
       if (!id) return
       try {
-        await api.conversations.patch(id, { model })
-        patchConversation(id, (c) => ({ ...c, model }))
+        await writeConversation(id, { model })
       } catch (e) {
         get().toast((e as Error).message, 'error')
       }
@@ -1405,8 +1801,11 @@ export const useStore = create<State>((set, get) => {
       }))
       const id = get().pageAgentId
       if (!id) return
-      const c = await api.conversations.patch(id, { settings: patch })
-      patchConversation(id, (cur) => ({ ...cur, settings: c.settings }))
+      try {
+        await writeConversation(id, { settings: patch })
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
     },
     setPageContext: (pageContext) => set((s) => (s.pageContext === pageContext ? {} : { pageContext })),
     setContextTab: (contextTab) => set({ contextTab }),
@@ -1421,8 +1820,8 @@ export const useStore = create<State>((set, get) => {
       set((s) => ({ toasts: [...s.toasts, { id, text, kind, action }] }))
       setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), action ? UNDO_MS : kind === 'error' ? 6000 : 3500)
     },
-    offerUndo: (what, items) => {
-      get().toast(`Deleted ${what}`, 'info', { label: 'Undo', run: () => void get().restoreTrashed(items) })
+    offerUndo: (what, items, note) => {
+      get().toast(`Deleted ${what}${note ? `. ${note}` : ''}`, 'info', { label: 'Undo', run: () => void get().restoreTrashed(items) })
     },
     restoreTrashed: async (items) => {
       try {
@@ -1436,7 +1835,7 @@ export const useStore = create<State>((set, get) => {
     },
 
     refreshProjects: async () => {
-      const [projects, personalStats] = await Promise.all([api.projects.list(), api.projects.globalStats()])
+      const [projects, personalStats] = await Promise.all([api.projects.list(), api.projects.globalStats().catch(() => undefined)])
       set({ projects, personalStats })
     },
     // `draftProjectId` is deliberately not set here: opening a project is looking at it, not
@@ -1453,7 +1852,9 @@ export const useStore = create<State>((set, get) => {
     },
     deleteProject: async (id) => {
       const name = get().projects.find((p) => p.id === id)?.name
-      await api.projects.delete(id)
+      const res = await api.projects.delete(id)
+      // Each chat of the project loses its viewer too: the backend has stopped their replies.
+      for (const [cid, x] of Object.entries(get().sessions)) if (x.conversation.project_id === id) get().closeSession(cid)
       set((s) => {
         const sessions = Object.fromEntries(Object.entries(s.sessions).filter(([, x]) => x.conversation.project_id !== id))
         const fid = s.focusedConversationId
@@ -1468,7 +1869,7 @@ export const useStore = create<State>((set, get) => {
         }
       })
       await Promise.all([get().refreshProjects(), get().refreshConversations(), get().refreshDocs(), get().refreshTodos()])
-      get().offerUndo(name ? `project “${name}”` : 'project', [{ type: 'project', id }])
+      get().offerUndo(name ? `project “${name}”` : 'project', [{ type: 'project', id }], res?.stopped ? 'Reply stopped.' : undefined)
     },
 
     setLibraryScope: async (libraryScope) => {
@@ -1503,10 +1904,24 @@ export const useStore = create<State>((set, get) => {
       get().clearSessionStatus(id)
       // A session mid-run holds content the backend has not persisted yet, so never refetch over it.
       if (get().sessions[id]?.streaming) return
-      const c = await api.conversations.get(id)
-      if (get().focusedConversationId !== id) return
-      putSession(c)
-      set({ draftProjectId: c.project_id })
+      try {
+        await get().attachSession(id)
+      } catch (e) {
+        // Never reject: the caller is a click. A slow failure for a chat the user has left is theirs no longer.
+        if (get().focusedConversationId !== id) return
+        if (e instanceof ApiError && e.status === 404) {
+          forgetChat(id)
+          get().toast('That chat was deleted', 'error')
+        } else if (!get().sessions[id]) {
+          set({ focusedConversationId: null })
+          get().toast(`Could not open chat: ${(e as Error).message}`, 'error', { label: 'Retry', run: () => void get().selectChat(id) })
+        } else {
+          get().toast(`Could not refresh chat: ${(e as Error).message}`, 'error')
+        }
+        return
+      }
+      const opened = get().sessions[id]
+      if (get().focusedConversationId === id && opened) set({ draftProjectId: opened.conversation.project_id })
     },
     openSession: async (conversationId) =>
       share(loads, conversationId, async () => {
@@ -1515,17 +1930,25 @@ export const useStore = create<State>((set, get) => {
     attachSession: async (conversationId) =>
       share(attaches, conversationId, async () => {
         // A run started before this window existed: `GET /runs` is the only way it can know.
-        const runs = await api.runs().catch(() => null)
+        const runs = await api.runs(conversationId).catch(() => null)
         // `answering`, not `live`: a run in its auto-learn tail has nothing left to stream, and
         // attaching to one would paint a caret and a Stop button over a reply `openSession` just
         // fetched whole.
         const run = runs?.find((r) => r.conversation_id === conversationId && r.answering)
+        // Already watching this run: the `run_state` frame for a reply this window just started usually
+        // lands before its POST returns, so this is the common case and not worth a transcript fetch.
+        if (run && get().sessions[conversationId]?.streaming?.runId === run.run_id) return
         await get().openSession(conversationId)
         const s = get().sessions[conversationId]
         if (!run || !s) return
-        // From the run's own seq, so the tail streams live and no past delta is applied twice. Not
-        // awaited: `watchRun` only resolves when the run ends, and this promise gates the dedupe.
-        void watchRun(conversationId, { run_id: run.run_id, seq: run.seq }, { messageId: run.message_id, approvals: countApprovals(s.conversation), attached: true })
+        // Checked again after the fetch (a desk hand-off retry, a widget mount): attaching to a run already
+        // being watched would blank a live message.
+        if (s.streaming?.runId === run.run_id) return
+        // Replay from the in-flight message's own `assistant_message`, so the window shows the whole reply and any
+        // approval card published before it arrived. Not awaited: `watchRun` only resolves when the run ends, and
+        // this promise gates the dedupe.
+        const replay = run.message_seq != null ? { messageId: run.message_id, end: run.seq } : undefined
+        void watchRun(conversationId, { run_id: run.run_id, seq: replay ? replayCursor(run) : run.seq }, { messageId: run.message_id, approvals: countApprovals(s.conversation), attached: true, replay })
       }),
     closeSession: (conversationId) => {
       clearHold(conversationId)
@@ -1545,29 +1968,90 @@ export const useStore = create<State>((set, get) => {
     },
     deleteChat: async (id) => {
       const title = get().conversations.find((c) => c.id === id)?.title
-      await api.conversations.delete(id)
+      const res = await api.conversations.delete(id)
       get().closeSession(id)
       set((s) => ({ conversations: s.conversations.filter((c) => c.id !== id) }))
       void get().refreshProjects()
-      get().offerUndo(title ? `chat “${title}”` : 'chat', [{ type: 'conversation', id }])
+      get().offerUndo(title ? `chat “${title}”` : 'chat', [{ type: 'conversation', id }], res?.stopped ? 'Reply stopped.' : undefined)
     },
+    pinChat: async (id, on) => {
+      await guard(on ? 'Could not pin chat' : 'Could not unpin chat', async () => {
+        const row = await api.conversations.patch(id, { pinned: on })
+        set((st) => ({ conversations: st.conversations.map((c) => (c.id === id ? { ...c, pinned_at: row.pinned_at ?? null } : c)) }))
+      })
+    },
+    archiveChat: async (id, on) => {
+      const ok = await guard(on ? 'Could not archive chat' : 'Could not unarchive chat', () => api.conversations.patch(id, { archived: on }))
+      if (!ok) return
+      if (!on) return void get().refreshConversations().catch(() => undefined)
+      get().closeSession(id)
+      set((st) => ({ conversations: st.conversations.filter((c) => c.id !== id) }))
+      void get().refreshProjects()
+      get().toast('Archived chat', 'info', { label: 'Undo', run: () => void get().archiveChat(id, false) })
+    },
+    moveChat: async (id, projectId) => {
+      // A 409 (live run, desk or job transcript) arrives as the server's message in the guard's toast.
+      await guard('Could not move chat', async () => {
+        const row = await api.conversations.patch(id, { project_id: projectId })
+        const next = row.project_id ?? null
+        patchConversation(id, (c) => ({ ...c, project_id: next }))
+        set((st) => ({
+          conversations: st.conversations.map((c) => (c.id === id ? { ...c, project_id: next } : c)),
+          draftProjectId: st.focusedConversationId === id ? next : st.draftProjectId
+        }))
+        void get().refreshProjects()
+      })
+    },
+    stepChat: (dir) => {
+      const s = get()
+      if (s.view === 'canvas') return
+      const next = adjacentChatId(s.conversations, s.focusedConversationId, dir)
+      if (next) void s.selectChat(next)
+    },
+    searchChats: () => set((s) => ({ sidebarOpen: true, sidebarSearchTick: s.sidebarSearchTick + 1 })),
     renameChat: async (id, title) => {
-      if (!title.trim()) return
-      try {
-        await api.conversations.patch(id, { title: title.trim() })
-        patchConversation(id, (c) => ({ ...c, title: title.trim() }))
-        await get().refreshConversations()
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      }
+      const next = title.trim()
+      if (!next) return
+      const cur = get().sessions[id]?.conversation.title ?? get().conversations.find((c) => c.id === id)?.title
+      if (next === cur) return
+      // `update` does not touch updated_at, so the list order is unchanged and a local patch is the whole refresh.
+      await guard('Could not rename chat', async () => {
+        await api.conversations.patch(id, { title: next })
+        patchConversation(id, (c) => ({ ...c, title: next }))
+        set((st) => ({ conversations: st.conversations.map((c) => (c.id === id ? { ...c, title: next } : c)) }))
+      })
+    },
+    retitleChat: async (id) => {
+      await guard('Could not suggest a title', async () => {
+        const c = await api.conversations.retitle(id)
+        applyTitle(id, c.title)
+      })
     },
     setChatModel: async (model, conversationId) => {
       const id = conversationId ?? get().focusedConversationId
       // A draft has no row yet: park the choice for `send`, as effort does, instead of changing the default.
       if (!id) return void set({ draftModel: model })
       try {
-        await api.conversations.patch(id, { model })
-        patchConversation(id, (c) => ({ ...c, model }))
+        await writeConversation(id, { model })
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    setChatConfig: async (change, conversationId) => {
+      const id = conversationId ?? get().focusedConversationId
+      if (!id) {
+        set((st) => ({
+          draftModel: change.model ?? st.draftModel,
+          draftEffort: change.effort ?? st.draftEffort,
+          draftFast: change.fast ?? st.draftFast
+        }))
+        return
+      }
+      const settings: Partial<ConversationSettings> = {}
+      if (change.effort !== undefined) settings.effort = change.effort
+      if (change.fast !== undefined) settings.fast = change.fast
+      try {
+        await writeConversation(id, { ...(change.model ? { model: change.model } : {}), ...(Object.keys(settings).length ? { settings } : {}) })
       } catch (e) {
         get().toast((e as Error).message, 'error')
       }
@@ -1600,15 +2084,28 @@ export const useStore = create<State>((set, get) => {
 
     send: async (text, conversationId) => {
       if (!text.trim()) return false
+      // Checked first: an oversized send creates no chat and never reaches the steer-then-409 fallthrough.
+      const tooLong = tooLongNotice(text.length, messageCharLimit(get().settings.contextWindow))
+      if (tooLong) {
+        get().toast(tooLong, 'error')
+        return false
+      }
       const id = conversationId ?? get().focusedConversationId
+      // The bubble is on screen before the first await; every refusal below takes it back.
+      const pend: PendingSend = { key: ++pendingKeySeq, text, at: Date.now() }
       if (id) {
+        if (get().sessions[id]) addPending(id, pend)
+        const fail = (): false => {
+          dropPending(id, pend.key)
+          return false
+        }
         if (get().uploadTaintTarget === 'draft') {
           try {
             await get().noteUntrustedUpload(id)
             set({ uploadTaintTarget: null, uploadTaintSource: 'upload' })
           } catch (e) {
             get().toast((e as Error).message, 'error')
-            return false
+            return fail()
           }
         }
         // Mid-reply sends steer the run: the message lands in the conversation now and the model
@@ -1617,14 +2114,31 @@ export const useStore = create<State>((set, get) => {
         // there would be stored and never replied to — so that tail takes an ordinary send instead.
         if (get().sessions[id]?.streaming?.answering) {
           try {
-            await api.steer(id, text)
+            const r = await api.steer(id, text)
+            settleSteer(id, r.message)
+            dropPending(id, pend.key)
             return true
-          } catch {
+          } catch (e) {
+            // A steer that hung is not a run that ended: falling through would start a second request that hangs too.
+            if (e instanceof ApiError && e.kind === 'timeout') {
+              get().toast('The backend did not answer, so your message was not sent.', 'error')
+              return fail()
+            }
             // The run ended in the gap; fall through to a normal send.
           }
         }
-        if (!get().sessions[id]) await get().openSession(id)
-        return runStream(id, { content: text })
+        if (!get().sessions[id]) {
+          try {
+            await get().openSession(id)
+          } catch (e) {
+            get().toast((e as Error).message, 'error')
+            return false
+          }
+          addPending(id, pend)
+        }
+        // A model or effort change made an instant ago is still in flight: the run reads the row.
+        await convWrites.get(id)?.catch(() => undefined)
+        return (await runStream(id, { content: text }, pend.key)) || fail()
       }
       // A second send while the draft's row is still being created (a quick follow-up, Enter then a
       // click on Send) used to take this branch too and make a second chat with a second run. It
@@ -1633,6 +2147,7 @@ export const useStore = create<State>((set, get) => {
         const cid = await draftCreate
         return cid ? get().send(text, cid) : false
       }
+      set({ draftPendingSend: pend })
       let c: Conversation
       let created: (id: string | null) => void = () => undefined
       draftCreate = new Promise((r) => { created = r })
@@ -1641,6 +2156,7 @@ export const useStore = create<State>((set, get) => {
       } catch (e) {
         draftCreate = null
         created(null)
+        set({ draftPendingSend: null })
         // `send` never rejects: a caller holding the user's draft needs a verdict, not an exception.
         get().toast((e as Error).message, 'error')
         return false
@@ -1662,6 +2178,7 @@ export const useStore = create<State>((set, get) => {
         if (fromUpload && !patched?.settings?.tainted) {
           draftCreate = null
           created(null)
+          set({ draftPendingSend: null })
           get().toast('Could not mark this chat untrusted after the upload', 'error')
           return false
         }
@@ -1669,9 +2186,11 @@ export const useStore = create<State>((set, get) => {
       }
       c.messages = []
       putSession(c)
+      addPending(c.id, pend)
       // Listed now, not when the reply ends: the sidebar should show the chat you are in while it streams.
       const { messages: _m, ...row } = c
       set((s) => ({
+        draftPendingSend: null,
         focusedConversationId: c.id, view: 'chat', draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false,
         uploadTaintTarget: fromUpload ? null : uploadTaintTarget,
         uploadTaintSource: fromUpload ? 'upload' : uploadTaintSource,
@@ -1679,13 +2198,19 @@ export const useStore = create<State>((set, get) => {
       }))
       void get().refreshProjects()
       // Released once the run has started, so a waiting send sees it streaming and steers it.
-      const ok = await runStream(c.id, { content: text })
+      const ok = await runStream(c.id, { content: text }, pend.key)
+      if (!ok) dropPending(c.id, pend.key)
       draftCreate = null
       created(c.id)
       return ok
     },
     sendToPageAgent: async (text) => {
       if (!text.trim()) return false
+      const tooLong = tooLongNotice(text.length, messageCharLimit(get().settings.contextWindow))
+      if (tooLong) {
+        get().toast(tooLong, 'error')
+        return false
+      }
       const ctx = get().pageContext
       // The selection is read at send time, not when the view published itself: the user highlights
       // a paragraph and *then* reaches for ⌘I.
@@ -1745,13 +2270,45 @@ export const useStore = create<State>((set, get) => {
         set({ pageAgentId: id })
         void get().refreshProjects()
       }
+      // The panel's model menu writes through the same queue as the chat page's: let a change land first.
+      await convWrites.get(id)?.catch(() => undefined)
       return runStream(id, { content: text, page_context: page })
     },
     regenerate: async (conversationId) => {
       const id = conversationId ?? get().focusedConversationId
       if (!id || get().sessions[id]?.streaming?.answering) return
-      if (!get().sessions[id]) await get().openSession(id)
+      if (!get().sessions[id]) {
+        try {
+          await get().openSession(id)
+        } catch (e) {
+          get().toast((e as Error).message, 'error')
+          return
+        }
+      }
+      await convWrites.get(id)?.catch(() => undefined)
       await runStream(id, {})
+    },
+    editAndResend: async (messageId, text, conversationId) => {
+      const id = conversationId ?? get().focusedConversationId
+      const body = text.trim()
+      if (!id || !body) return false
+      if (get().sessions[id]?.streaming?.answering) {
+        // The pencil is hidden while answering, but a reply can start under an open editor (another window, a steer).
+        get().toast('That chat is already replying — your edit was not sent.', 'error')
+        return false
+      }
+      await convWrites.get(id)?.catch(() => undefined)
+      return runStream(id, { content: body, replace_from: messageId })
+    },
+    activateVariant: async (conversationId, messageId) => {
+      if (get().sessions[conversationId]?.streaming?.answering) return
+      try {
+        const c = await api.activateMessage(conversationId, messageId)
+        // Replace the list wholesale: merging would keep the swapped-out row alive.
+        patchConversation(conversationId, (cur) => ({ ...cur, messages: c.messages }))
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
     },
     resumeRun: async (conversationId, runId) => {
       if (get().sessions[conversationId]?.streaming?.answering) return
@@ -1763,13 +2320,31 @@ export const useStore = create<State>((set, get) => {
       const id = conversationId ?? get().focusedConversationId
       const st = id && get().sessions[id]?.streaming
       if (!id || !st) return
+      const runId = st.runId
+      // A press while one is in flight (the button, then Escape) joins it: one request, one verdict.
+      const pending = stops.get(runId)
+      if (pending) return void (await pending)
       // Aborting the fetch would only detach this window, so a stop is always a request to the run.
-      try {
-        if (st.messageId) await api.stop(st.messageId)
-        else await api.stopRun(id, st.runId)
-      } catch (e) {
-        // A 404 is a run that had already finished; anything else means Stop did not take.
-        if ((e as { status?: number }).status !== 404) get().toast(`Could not stop: ${(e as Error).message}`, 'error')
+      patchSession(id, (s) => (s.streaming?.runId === runId ? { ...s, streaming: { ...s.streaming, stopping: true } } : s))
+      let timedOut = false
+      let detail = ''
+      const call = (async (): Promise<StopOutcome> => {
+        try {
+          return stopOutcome(await api.stopRun(id, runId))
+        } catch (e) {
+          timedOut = e instanceof ApiError && e.kind === 'timeout'
+          detail = (e as Error).message
+          return stopOutcome({ error: e })
+        }
+      })()
+      stops.set(runId, call)
+      const outcome = await call
+      stops.delete(runId)
+      // Accepted keeps `stopping` up until the run's own `done` clears it. Anything else hands the button back.
+      if (outcome === 'accepted') return
+      patchSession(id, (s) => (s.streaming?.runId === runId ? { ...s, streaming: { ...s.streaming, stopping: false } } : s))
+      if (outcome === 'failed') {
+        get().toast(timedOut ? 'Stop did not reach the backend in time. The reply may still be running.' : `Could not stop: ${detail}`, 'error', { label: 'Retry', run: () => void get().stop(id) })
       }
     },
 
@@ -1843,7 +2418,9 @@ export const useStore = create<State>((set, get) => {
       if (saveTimer) clearTimeout(saveTimer)
       saveTimer = setTimeout(() => { void get().flushDoc() }, SAVE_DEBOUNCE_MS)
     },
-    flushDoc: async () => {
+    // Flushes run one after another: an overlapping one would read the base the first is about to bump.
+    flushDoc: () => {
+      const run = async (): Promise<void> => {
       if (saveTimer) {
         clearTimeout(saveTimer)
         saveTimer = null
@@ -1857,7 +2434,7 @@ export const useStore = create<State>((set, get) => {
       if (content === undefined && title === undefined) return set({ docDraft: null, docTitleDraft: null })
       set({ docSaving: true })
       try {
-        const saved = await api.docs.save(doc.id, { content, title })
+        const saved = await api.docs.save(doc.id, { content, title, base_updated_at: doc.updated_at })
         // Keep whatever was typed while the request was in flight; adopt only the server's metadata.
         set((st) => {
           if (st.activeDoc?.id !== doc.id) return { docSaving: false }
@@ -1874,11 +2451,25 @@ export const useStore = create<State>((set, get) => {
         void get().refreshDocRevisions(doc.id)
       } catch (e) {
         set({ docSaving: false })
-        get().toast(`Could not save: ${(e as Error).message}`, 'error')
+        // Stale base: another window saved first. The draft stays on screen; reloading is the user's call.
+        if ((e as { status?: number }).status === 409) {
+          get().toast('This doc changed elsewhere. Your edits are kept here and not saved.', 'error',
+            { label: 'Reload', run: () => { set({ docDraft: null, docTitleDraft: null }); void get().openDoc(doc.id) } })
+        } else get().toast(`Could not save: ${(e as Error).message}`, 'error')
       }
+      }
+      const p = flushChain.then(run)
+      flushChain = p
+      return p
     },
     setDocStar: async (id, starred) => {
-      await api.docs.patch(id, { starred })
+      const d = await api.docs.patch(id, { starred })
+      // The PATCH bumped updated_at; keep the autosave base current or the next save 409s.
+      set((st) => ({ activeDoc: st.activeDoc?.id === id ? { ...st.activeDoc, starred: d.starred, updated_at: d.updated_at } : st.activeDoc }))
+      await get().refreshDocs()
+    },
+    setDocPin: async (id, pinned) => {
+      await api.docs.patch(id, { pinned })
       await get().refreshDocs()
     },
     moveDoc: async (id, scope, folder) => {
@@ -1886,7 +2477,7 @@ export const useStore = create<State>((set, get) => {
         const d = await api.docs.move(id, scope, folder.trim())
         set((st) => ({
           activeDoc: st.activeDoc?.id === id
-            ? { ...st.activeDoc, folder: d.folder, project_id: d.project_id }
+            ? { ...st.activeDoc, folder: d.folder, project_id: d.project_id, updated_at: d.updated_at }
             : st.activeDoc
         }))
         await Promise.all([get().refreshDocs(), get().refreshDocFolders()])
@@ -1957,7 +2548,10 @@ export const useStore = create<State>((set, get) => {
       await Promise.all([get().refreshDocs(), get().refreshDocsPending()])
       get().offerUndo(title ? `“${title}”` : 'doc', [{ type: 'doc', id }])
     },
-    setDocMode: (docMode) => set({ docMode }),
+    setDocMode: (docMode) => {
+      try { localStorage.setItem(DOC_MODE_KEY, docMode) } catch { /* private window */ }
+      set({ docMode })
+    },
     refreshDocRevisions: async (id) => {
       const docId = id ?? get().activeDoc?.id
       if (!docId) return
@@ -2227,13 +2821,7 @@ export const useStore = create<State>((set, get) => {
         set({ deskBusy: false })
       }
     },
-    setPlanMode: async (convId, mode) => {
-      try {
-        await patchChatSettings({ planMode: mode }, convId)
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      }
-    },
+    setPlanMode: (convId, mode) => get().setChatSettings({ planMode: mode }, convId),
     markDeskEventSeen: async (eventId) => {
       // Optimistic: the badge is the whole point, so it must not wait on a round trip.
       set((st) => ({ deskInbox: st.deskInbox.filter((e) => e.id !== eventId) }))
@@ -2949,18 +3537,26 @@ export const useStore = create<State>((set, get) => {
       }
     },
     uploadDocuments: async (files, projectId) => {
-      const saved: string[] = []
+      const saved: UploadOutcome[] = []
       for (const f of Array.from(files)) {
         try {
-          const doc = await api.documents.upload(projectId, f)
-          saved.push(doc.name || f.name)
-          get().toast(`Uploaded ${doc.name || f.name}`)
+          const doc = (await api.documents.upload(projectId, f)) as UploadResult
+          // An older backend says nothing about readability; its files count as readable, as before.
+          const r: UploadOutcome = { name: doc.name || f.name, readable: doc.readable !== false, reason: doc.reason ?? null }
+          saved.push(r)
+          const t = uploadToast(r)
+          get().toast(t.text, t.kind)
         } catch (e) {
           get().toast(`${f.name}: ${(e as Error).message}`, 'error')
         }
       }
       await Promise.all([get().refreshDocuments(), get().refreshProjects()])
       return saved
+    },
+    pinDocument: async (id, pinned) => {
+      const flip = (v: boolean): void => set((s) => ({ documents: s.documents.map((d) => (d.id === id ? { ...d, pinned: v ? 1 : 0 } : d)) }))
+      flip(pinned)
+      try { await api.documents.pin(id, pinned) } catch (e) { flip(!pinned); get().toast((e as Error).message, 'error') }
     },
     deleteDocument: async (id) => {
       const name = get().documents.find((d) => d.id === id)?.name
@@ -3196,7 +3792,10 @@ export const useStore = create<State>((set, get) => {
  * does not focus conversations, and a widget's loader effect only re-runs when its `ref_id` changes.
  */
 export const retainSession = (conversationId: string): (() => void) => {
+  const first = !retained.has(conversationId)
   retained.set(conversationId, (retained.get(conversationId) ?? 0) + 1)
+  // A surface mounting this conversation is where the user reads it, so what finished while it was away is read.
+  if (first && (useStore.getState().sessions[conversationId]?.unread ?? 0) > 0) useStore.getState().clearSessionStatus(conversationId)
   return () => {
     const n = (retained.get(conversationId) ?? 0) - 1
     if (n > 0) return void retained.set(conversationId, n)
@@ -3217,10 +3816,17 @@ export const selectActive = (s: State): Conversation | null => pick(s)?.conversa
 export const useSession = (convId?: string): ChatSession | undefined => useStore((s) => pick(s, convId))
 export const useConversation = (convId?: string): Conversation | null => useStore((s) => pick(s, convId)?.conversation ?? null)
 export const useSessionStatus = (convId?: string): SessionStatus => useStore((s) => pick(s, convId)?.status ?? 'idle')
+/** `useSessionStatus`, falling back to the app topic's live run for a chat with no session in this window. */
+export const useChatPulse = (convId?: string): SessionStatus =>
+  useStore((s) => pulseStatus(pick(s, convId)?.status ?? 'idle', convId ? s.liveRuns[convId] : undefined))
+/** Sends the run has not confirmed yet, for the dimmed bubbles under the transcript. */
+export const usePendingSends = (convId?: string): readonly PendingSend[] => useStore((s) => pick(s, convId)?.pendingSends ?? EMPTY_PENDING)
+
 export const useIsStreaming = (convId?: string): boolean => useStore((s) => !!pick(s, convId)?.streaming?.answering)
 export const useStreamingMessageId = (convId?: string): string | null =>
   useStore((s) => {
     const st = pick(s, convId)?.streaming
     return st?.answering ? st.messageId : null
   })
+export const useIsStopping = (convId?: string): boolean => useStore((s) => !!pick(s, convId)?.streaming?.stopping)
 export const useUnread = (convId?: string): number => useStore((s) => pick(s, convId)?.unread ?? 0)

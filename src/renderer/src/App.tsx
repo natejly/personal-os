@@ -17,6 +17,7 @@ import PageAgentPanel from './components/PageAgentPanel'
 import LibraryView from './components/LibraryView'
 import CoworkView from './components/CoworkView'
 import { collectNotices } from './lib/deskNotify'
+import { notify } from './lib/notify'
 import SettingsModal from './components/SettingsModal'
 import ProjectModal from './components/ProjectModal'
 import { moduleForView } from './shell/registry'
@@ -65,10 +66,10 @@ function notifyDesk(n: { title: string; body: string; deskId: string }): void {
   if (bridge) return bridge(n)
   try {
     if (document.hasFocus()) return
-    if (typeof Notification === 'function' && Notification.permission !== 'denied') new Notification(n.title, { body: n.body })
   } catch {
-    // A notification is never worth a render crash.
+    return
   }
+  notify(n.title, n.body, { tag: `desk:${n.deskId}`, onClick: () => void useStore.getState().openDesk(n.deskId) })
 }
 
 const JOB_SEEN_KEY = 'grain.jobNotifySince'

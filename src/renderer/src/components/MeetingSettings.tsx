@@ -4,7 +4,7 @@ import {
 } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
-import type { MeetingCapability, MeetingConfig, MeetingTemplate } from '@shared/types'
+import type { MeetingCapability, MeetingConfig, MeetingTemplate, SavedPrompt } from '@shared/types'
 import { AudioDevicePicker } from './ActivityView'
 
 /**
@@ -24,6 +24,35 @@ const TEMPLATE_LABEL: Record<MeetingTemplate, string> = {
   user_interview: 'User interview',
   sales_call: 'Sales call',
   lecture: 'Lecture'
+}
+
+/** A list of named prose snippets with add and delete; the backend assigns ids and enforces `limit`. */
+function SavedList({ title, hint, field, limit, items, onChange }: {
+  title: string; hint: string; field: 'instructions' | 'prompt'; limit: number
+  items: SavedPrompt[]; onChange: (next: SavedPrompt[]) => void
+}): JSX.Element {
+  const [name, setName] = useState('')
+  const [body, setBody] = useState('')
+  const add = (): void => {
+    if (!name.trim() || !body.trim()) return
+    onChange([...items, { id: '', name: name.trim(), [field]: body.trim() }])
+    setName(''); setBody('')
+  }
+  return (
+    <div className="act-field">
+      <span><b>{title}</b><small>{hint}</small></span>
+      {items.map((it) => (
+        <div key={it.id}>
+          <b>{it.name}</b> <small>{(it[field] ?? '').slice(0, 80)}</small>{' '}
+          <button className="ghost-btn" onClick={() => onChange(items.filter((x) => x.id !== it.id))}>Delete</button>
+        </div>
+      ))}
+      <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" maxLength={60} />
+      <textarea value={body} onChange={(e) => setBody(e.target.value)} maxLength={limit} rows={3}
+        placeholder={`Up to ${limit} characters`} />
+      <button className="ghost-btn" disabled={!name.trim() || !body.trim()} onClick={add}>Add</button>
+    </div>
+  )
 }
 
 const MIB = 1024 * 1024
@@ -245,8 +274,17 @@ export default function MeetingSettings({ variant = 'page' }: { variant?: 'page'
         <span><b>Default template</b><small>shapes the notes skeleton and the enhance prompt</small></span>
         <select value={cfg.template} onChange={(e) => patch({ template: e.target.value as MeetingTemplate })}>
           {(Object.keys(TEMPLATE_LABEL) as MeetingTemplate[]).map((t) => <option key={t} value={t}>{TEMPLATE_LABEL[t]}</option>)}
+          {(cfg.customTemplates ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
       </label>
+      <label className="act-field">
+        <span><b>Summary language</b><small>“auto” writes in the transcript's majority language; or name one, such as French</small></span>
+        <input value={cfg.summaryLanguage ?? 'auto'} onChange={(e) => patch({ summaryLanguage: e.target.value })} maxLength={40} spellCheck={false} />
+      </label>
+      <SavedList title="Custom templates" hint="prose: purpose, length, style, sections" field="instructions" limit={1500}
+        items={cfg.customTemplates ?? []} onChange={(customTemplates) => patch({ customTemplates })} />
+      <SavedList title="Recipes" hint="saved focus lines you can pick when summarizing a recording" field="prompt" limit={300}
+        items={cfg.recipes ?? []} onChange={(recipes) => patch({ recipes })} />
       <label className="toggle-row plain">
         <span className="toggle-icon"><Sparkles size={15} /></span>
         <span className="toggle-text">
@@ -255,6 +293,20 @@ export default function MeetingSettings({ variant = 'page' }: { variant?: 'page'
         </span>
         <input type="checkbox" checked={cfg.enhanceOnStop} onChange={(e) => patch({ enhanceOnStop: e.target.checked })} />
         <span className="switch" />
+      </label>
+      <label className="toggle-row plain">
+        <span className="toggle-icon"><Sparkles size={15} /></span>
+        <span className="toggle-text">
+          <b>Tidy dictation with the model</b>
+          <small>Each dictated clip is sent to the extraction model to fix punctuation and fillers only. Off sends nothing.</small>
+        </span>
+        <input type="checkbox" checked={cfg.dictationCleanup} onChange={(e) => patch({ dictationCleanup: e.target.checked })} />
+        <span className="switch" />
+      </label>
+      <label className="act-field">
+        <span><b>Vocabulary</b><small>names and jargon the transcriber should spell right, comma separated; attendee names are added automatically</small></span>
+        <input defaultValue={(cfg.terms ?? []).join(', ')} spellCheck={false} placeholder="Grain, Kubernetes, Priya"
+          onBlur={(e) => patch({ terms: e.target.value.split(',').map((t) => t.trim()).filter(Boolean) })} />
       </label>
       <label className="act-field">
         <span><b>Enhance model</b><small>blank falls back to the extraction model, then the default chat model</small></span>
@@ -303,10 +355,31 @@ export default function MeetingSettings({ variant = 'page' }: { variant?: 'page'
       <label className="toggle-row plain">
         <span className="toggle-icon"><Mic size={15} /></span>
         <span className="toggle-text">
+          <b>Show dictation as you speak</b>
+          <small>Words appear in a small pill at the cursor while you talk, then the settled text is typed in. Uses on-device Speech Recognition and needs its permission.</small>
+        </span>
+        <input type="checkbox" checked={cfg.livePreview} onChange={(e) => patch({ livePreview: e.target.checked })} />
+        <span className="switch" />
+      </label>
+      <label className="toggle-row plain">
+        <span className="toggle-icon"><Mic size={15} /></span>
+        <span className="toggle-text">
           <b>Keep the audio after transcribing</b>
           <small>Off deletes each wav once its text has landed. On keeps them, so you can re-transcribe later with a better model.</small>
         </span>
         <input type="checkbox" checked={cfg.keepAudio} onChange={(e) => patch({ keepAudio: e.target.checked })} />
+        <span className="switch" />
+      </label>
+      <NumberField label="Pause a doc recording after silence" hint="Minutes with no speech before the recorder pauses itself and asks. 0 never pauses"
+        value={cfg.silencePauseMinutes} min={0} max={240} suffix="min"
+        onCommit={(v) => patch({ silencePauseMinutes: v })} />
+      <label className="toggle-row plain">
+        <span className="toggle-icon"><Mic size={15} /></span>
+        <span className="toggle-text">
+          <b>Separate speakers when a meeting ends</b>
+          <small>Labels who said what on the far side. Needs "Keep the audio after transcribing" on as well, because it works from the saved audio.</small>
+        </span>
+        <input type="checkbox" checked={cfg.diarize} onChange={(e) => patch({ diarize: e.target.checked })} />
         <span className="switch" />
       </label>
       <NumberField label="Audio kept on disk at most" hint="Oldest failed clip is evicted first once this is reached"

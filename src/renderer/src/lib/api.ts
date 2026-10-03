@@ -1,15 +1,15 @@
 import type {
-  BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, DriveFile, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Artifact, ArtifactVersion, Recap, Conversation, ConversationSettings, ContextUsed, ContextMeter, Document, GraphData, GraphEdge, GraphNode, Message,
+  BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, DriveFile, Board, BoardCard, BoardColumn, CardEvent, DataSource, Dashboard, Widget, Artifact, ArtifactVersion, Recap, Conversation, ConversationSettings, ContextUsed, ContextMeter, ConversationUsage, Document, GraphData, GraphEdge, GraphNode, Message,
   ApprovalDecision, PermissionEvaluation, PlanEdit,
   Memory, MemoryProposal, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
-  Command, Workflow, WorkflowRun, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
+  Command, AgentDef, BuiltinAgent, Workflow, WorkflowRun, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
   Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
   Desk, DeskAutonomy, DeskBudget, DeskDiff, DeskEvent, DeskFilePreview, DeskFileTree, DeskOutput, DeskRichPreview,
   DeskStatus, FullDesk, PlanRecord, PromotionKind, PromotionResult,
   AgentInbox, AgentProposal, Job, JobNotifyEvent, JobRunRecord, JobStats,
   Doc, DocFolder, FullDoc, DocRevision,
   HealthEntry, HealthMetric, HealthProvider, HealthSource, HealthSourcePlan, HealthSummary, HealthSyncResult, McpSignIn,
-  TrashKind, TrashListing,
+  TrashKind, TrashListing, ChatSearchHit,
   McpEffective, McpReport, McpServer, McpServerDraft, McpTool, ToolMode,
   ActivityApplyResult, ActivityCapability, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityGrantResult,
   ActivityCategoryReport, ActivityCategoryRule, ActivityInsights, ActivityRedactTest, ActivityStatus, ActivitySuggestion, ActivitySummary, InsightStatus,
@@ -18,6 +18,7 @@ import type {
   RunChanges, RunUndoResult,
   BackupInfo, DataOverview
 } from '@shared/types'
+import { ApiError } from './apiError'
 import type { ProviderInfo, SetupStatus, SetupTestResult } from '../components/onboarding/steps'
 
 export interface SetupBody { provider: string; baseUrl: string; apiKey: string | null; model: string }
@@ -38,6 +39,8 @@ export const setBase = (url: string): void => {
     })
 }
 export const getBase = (): string => base
+/** Route of one kept segment's audio. */
+export const audioPath = (meetingId: string, segId: string): string => `/meetings/${meetingId}/segments/${segId}/audio`
 /** The resolved token, for callers that cannot await (keepalive writes on unload). '' until setBase() resolves it. */
 export const getToken = (): string => token
 
@@ -47,15 +50,45 @@ const auth = async (): Promise<Record<string, string>> => {
   return token ? { 'X-Personal-OS-Token': token } : {}
 }
 
-export async function req<T>(path: string, init?: RequestInit): Promise<T> {
+/** How long a control request (send, steer, resume, a run or conversation read) may take before the client gives up on it. */
+export const CONTROL_TIMEOUT_MS = 20_000
+/** Stop is the one control the user is waiting on, so it gives up sooner and says so. */
+export const STOP_TIMEOUT_MS = 5_000
+
+/** A signal that fires when either input does; plain AbortSignal.any where the runtime has it. */
+const anySignal = (a: AbortSignal, b?: AbortSignal | null): AbortSignal => {
+  if (!b) return a
+  const any = (AbortSignal as unknown as { any?: (s: AbortSignal[]) => AbortSignal }).any
+  if (any) return any([a, b])
+  const c = new AbortController()
+  const fire = (): void => c.abort()
+  if (a.aborted || b.aborted) c.abort()
+  else { a.addEventListener('abort', fire, { once: true }); b.addEventListener('abort', fire, { once: true }) }
+  return c.signal
+}
+
+export async function req<T>(path: string, init?: RequestInit, timeoutMs?: number): Promise<T> {
   // The token wait only suspends while setBase() is still resolving it. Once it is (or when there is no
   // sidecar at all, as in tests), a req() runs synchronously up to its fetch — the canvas store's
   // flush-before-space-switch depends on that.
   if (!token && tokenP) await tokenP
-  const r = await fetch(`${base}${path}`, {
-    ...init,
-    headers: { ...(init?.body && !(init.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}), ...(init?.headers ?? {}), ...(token ? { 'X-Personal-OS-Token': token } : {}) }
-  })
+  // An ordinary timer rather than AbortSignal.timeout: it is cleared the moment the response arrives.
+  const deadline = timeoutMs ? new AbortController() : null
+  const timer = deadline ? setTimeout(() => deadline.abort(), timeoutMs) : null
+  let r: Response
+  try {
+    r = await fetch(`${base}${path}`, {
+      ...init,
+      ...(deadline ? { signal: anySignal(deadline.signal, init?.signal) } : {}),
+      headers: { ...(init?.body && !(init.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}), ...(init?.headers ?? {}), ...(token ? { 'X-Personal-OS-Token': token } : {}) }
+    })
+  } catch (e) {
+    // Only our own deadline becomes a timeout; a caller's abort and a refused connection pass through.
+    if (deadline?.signal.aborted && !init?.signal?.aborted) throw new ApiError(`The backend did not answer within ${Math.round((timeoutMs ?? 0) / 1000)} seconds.`, { kind: 'timeout' })
+    throw e
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
   if (!r.ok) {
     let msg = `${r.status} ${r.statusText}`
     try {
@@ -64,7 +97,7 @@ export async function req<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       /* ignore */
     }
-    throw Object.assign(new Error(msg), { status: r.status })
+    throw new ApiError(msg, { status: r.status, kind: 'http' })
   }
   return (await r.json()) as T
 }
@@ -93,6 +126,8 @@ const fresh = (refresh: boolean): string => (refresh ? '&refresh=true' : '')
 /** Scope filter: 'all' = everything, 'personal' = items in no project, or a project id (that project only). */
 export type Scope = 'all' | 'personal' | string
 const scope = (s: Scope): string => `project_id=${encodeURIComponent(s)}&include_global=false`
+
+export interface DocHit { doc_id: string; title: string; snippet: string; via?: 'recording' }
 
 export const api = {
   health: () => req<{ ok: boolean; data_dir: string }>('/health'),
@@ -163,6 +198,7 @@ export const api = {
     deleteColumn: (cid: string) => req(`/boards/columns/${cid}`, { method: 'DELETE' }),
     addCard: (id: string, c: { title: string; column_id?: string | null; description?: string; due?: string | null; priority?: number; labels?: string[] }) => req<BoardCard>(`/boards/${id}/cards`, { method: 'POST', body: json(c) }),
     updateCard: (cid: string, patch: { title?: string; description?: string; due?: string; priority?: number; labels?: string[]; clear_due?: boolean }) => req<BoardCard>(`/boards/cards/${cid}`, { method: 'PUT', body: json(patch) }),
+    cardEvents: (bid: string, cid: string) => req<CardEvent[]>(`/boards/${bid}/cards/${cid}/events`),
     moveCard: (cid: string, column_id: string, before_card_id: string | null = null) => req<BoardCard>(`/boards/cards/${cid}/move`, { method: 'POST', body: json({ column_id, before_card_id }) }),
     deleteCard: (cid: string) => req(`/boards/cards/${cid}`, { method: 'DELETE' })
   },
@@ -199,7 +235,7 @@ export const api = {
     get: (id: string) => req<Dashboard>(`/dashboards/${id}`),
     create: (d: { name: string; description?: string }) => req<Dashboard>('/dashboards', { method: 'POST', body: json(d) }),
     delete: (id: string) => req(`/dashboards/${id}`, { method: 'DELETE' }),
-    addWidget: (id: string, w: { kind: string; title?: string; prompt?: string; source_ids?: string[]; code?: string; output?: string; width?: number; height?: number }) => req<Widget>(`/dashboards/${id}/widgets`, { method: 'POST', body: json(w) })
+    addWidget: (id: string, w: { kind: string; title?: string; prompt?: string; source_ids?: string[]; code?: string; output?: string; width?: number; height?: number; spec?: Record<string, unknown> }) => req<Widget>(`/dashboards/${id}/widgets`, { method: 'POST', body: json(w) })
   },
   /** AI dashboard widgets (`/widgets/{id}`). Not `api.windows`, which is a canvas window. */
   widgets: {
@@ -212,9 +248,12 @@ export const api = {
     delete: (id: string) => req(`/widgets/${id}`, { method: 'DELETE' })
   },
   todos: {
-    list: (s: Scope = 'all', includeDone = false, q = '', sort: 'due' | 'urgency' = 'due') => req<Todo[]>(`/todos?project_id=${encodeURIComponent(s)}&include_done=${includeDone}&q=${encodeURIComponent(q)}&sort=${sort}`),
-    create: (t: { title: string; project_id?: string | null; notes?: string; due?: string | null; priority?: number; repeat?: TodoRepeat | null; estimate_min?: number | null }) => req<Todo>('/todos', { method: 'POST', body: json(t) }),
-    update: (id: string, patch: { title?: string; notes?: string; due?: string | null; priority?: number; done?: boolean; project_id?: string | null; clear_due?: boolean; clear_project?: boolean; repeat?: TodoRepeat; clear_repeat?: boolean; estimate_min?: number | null; clear_estimate?: boolean; calendar_event_id?: string | null; calendar_link?: string | null; calendar_id?: string | null }) =>
+    list: (s: Scope = 'all', includeDone = false, q = '', sort: 'due' | 'urgency' = 'due', tag = '') => req<Todo[]>(`/todos?project_id=${encodeURIComponent(s)}&include_done=${includeDone}&q=${encodeURIComponent(q)}&sort=${sort}&tag=${encodeURIComponent(tag)}`),
+    filters: () => req<TodoFilter[]>('/todo-filters'),
+    saveFilter: (f: { name: string; tag?: string; q?: string; project_id?: string | null }) => req<TodoFilter>('/todo-filters', { method: 'POST', body: json(f) }),
+    deleteFilter: (id: string) => req(`/todo-filters/${id}`, { method: 'DELETE' }),
+    create: (t: { title: string; project_id?: string | null; notes?: string; due?: string | null; priority?: number; repeat?: TodoRepeat | null; estimate_min?: number | null; tags?: string[]; parent_id?: string | null }) => req<Todo>('/todos', { method: 'POST', body: json(t) }),
+    update: (id: string, patch: { title?: string; notes?: string; due?: string | null; priority?: number; done?: boolean; project_id?: string | null; clear_due?: boolean; clear_project?: boolean; repeat?: TodoRepeat; clear_repeat?: boolean; estimate_min?: number | null; clear_estimate?: boolean; calendar_event_id?: string | null; calendar_link?: string | null; calendar_id?: string | null; tags?: string[]; parent_id?: string | null; clear_parent?: boolean; depends_on?: string[] }) =>
       req<Todo>(`/todos/${id}`, { method: 'PUT', body: json(patch) }),
     delete: (id: string) => req(`/todos/${id}`, { method: 'DELETE' })
   },
@@ -252,7 +291,10 @@ export const api = {
     list: (status?: 'to_reply' | 'awaiting_reply') => req<MailWatchList>(`/mail/watch${status ? `?status=${status}` : ''}`),
     refresh: () => req<{ refreshed: number }>('/mail/watch/refresh', { method: 'POST' }),
     dismiss: (id: string, dismissed = true) => req<MailWatchThread>(`/mail/watch/${encodeURIComponent(id)}`, { method: 'PUT', body: json({ dismissed }) }),
-    followup: (id: string) => req<Todo>(`/mail/watch/${encodeURIComponent(id)}/followup`, { method: 'POST' })
+    followup: (id: string) => req<Todo>(`/mail/watch/${encodeURIComponent(id)}/followup`, { method: 'POST' }),
+    /** Local only: hides the thread in the mail list until `until` (ISO). */
+    snooze: (id: string, until: string | null) => req<{ until: string | null }>(`/mail/threads/${encodeURIComponent(id)}/snooze`, { method: 'POST', body: json({ until }) }),
+    snoozed: () => req<{ thread_ids: string[] }>('/mail/snoozed')
   },
   /** Soft delete: every DELETE above lands here first; these restore it or erase it for good. */
   trash: {
@@ -325,6 +367,9 @@ export const api = {
     gmailLabels: () => req<GmailLabel[]>('/integrations/google/gmail/labels'),
     gmailModify: (id: string, patch: { mark_read?: boolean; archive?: boolean; star?: boolean }) =>
       proven(req<{ ok: boolean } & Verified>(`/integrations/google/gmail/${id}/modify`, { method: 'POST', body: json(patch) })),
+    /** Free slots as draft text; creates no draft or event. */
+    suggestTimes: (m: { window_start: string; window_end: string; duration_minutes?: number }) =>
+      req<{ body: string }>('/integrations/google/gmail/suggest-times', { method: 'POST', body: json(m) }),
     gmailDraft: (m: { to: string; subject: string; body: string; reply_to_message_id?: string | null }) =>
       proven(req<{ draft_id: string } & Verified>('/integrations/google/gmail/draft', { method: 'POST', body: json(m) })),
     /** Queues the send behind its undo hold; it has NOT gone out when this resolves. */
@@ -350,6 +395,8 @@ export const api = {
   assist: {
     complete: (p: { kind: string; before: string; after?: string; context?: string }) =>
       req<{ completion: string }>('/assist/complete', { method: 'POST', body: json(p) }),
+    cleanDictation: (text: string) =>
+      req<{ text: string }>('/docs/dictation/clean', { method: 'POST', body: json({ text }) }),
     mailReview: (p: { to?: string; subject?: string; body: string; reply_context?: string }) =>
       req<{ feedback: string[]; revised: string }>('/assist/mail-review', { method: 'POST', body: json(p) })
   },
@@ -357,17 +404,21 @@ export const api = {
     list: () => req<Project[]>('/projects'),
     create: (s: Pick<Project, 'name' | 'description' | 'system_prompt' | 'color'>) => req<Project>('/projects', { method: 'POST', body: json(s) }),
     update: (id: string, patch: Partial<Project>) => req<Project>(`/projects/${id}`, { method: 'PUT', body: json(patch) }),
-    delete: (id: string) => req(`/projects/${id}`, { method: 'DELETE' }),
+    delete: (id: string) => req<{ ok: boolean; stopped?: number }>(`/projects/${id}`, { method: 'DELETE' }),
     globalStats: () => req<NonNullable<Project['stats']>>('/projects/global/stats')
   },
   conversations: {
     list: (s: Scope = 'all') => req<Conversation[]>(`/conversations?${scope(s)}`),
-    get: (id: string) => req<Conversation>(`/conversations/${id}`),
-    create: (projectId: string | null, model?: string) => req<Conversation>('/conversations', { method: 'POST', body: json({ project_id: projectId, model }) }),
-    patch: (id: string, patch: { title?: string; model?: string; settings?: Partial<ConversationSettings> }) =>
-      req<Conversation>(`/conversations/${id}`, { method: 'PATCH', body: json(patch) }),
-    delete: (id: string) => req(`/conversations/${id}`, { method: 'DELETE' }),
-    deleteMessage: (id: string, mid: string) => req(`/conversations/${id}/messages/${mid}`, { method: 'DELETE' })
+    get: (id: string) => req<Conversation>(`/conversations/${id}`, undefined, CONTROL_TIMEOUT_MS),
+    create: (projectId: string | null, model?: string) => req<Conversation>('/conversations', { method: 'POST', body: json({ project_id: projectId, model }) }, CONTROL_TIMEOUT_MS),
+    patch: (id: string, patch: { title?: string; model?: string; settings?: Partial<ConversationSettings>; pinned?: boolean; archived?: boolean; project_id?: string | null }) =>
+      req<Conversation>(`/conversations/${id}`, { method: 'PATCH', body: json(patch) }, CONTROL_TIMEOUT_MS),
+    /** Ask for a fresh model-written title (replaces a typed one: it was asked for). */
+    retitle: (id: string) => req<Conversation>(`/conversations/${id}/title`, { method: 'POST' }),
+    listArchived: () => req<Conversation[]>('/conversations?project_id=all&archived=true'),
+    delete: (id: string) => req<{ ok: boolean; stopped?: boolean }>(`/conversations/${id}`, { method: 'DELETE' }),
+    deleteMessage: (id: string, mid: string) => req(`/conversations/${id}/messages/${mid}`, { method: 'DELETE' }),
+    search: (q: string, limit = 20) => req<ChatSearchHit[]>(`/conversations/search?q=${encodeURIComponent(q)}&limit=${limit}`)
   },
   /** The chat's plan artifact: the model writes it with `todo_write`, the user ticks steps off here. */
   plan: {
@@ -402,6 +453,14 @@ export const api = {
     update: (id: string, text: string) => req<Command>(`/commands/${id}`, { method: 'PUT', body: json({ text }) }),
     delete: (id: string) => req<{ ok: boolean }>(`/commands/${id}`, { method: 'DELETE' })
   },
+  /** Agent definitions: built-in roles plus the user's own, which cannot be spawned until approved. */
+  agentDefs: {
+    list: () => req<{ builtin: BuiltinAgent[]; custom: AgentDef[] }>('/agents/defs'),
+    create: (text: string) => req<AgentDef>('/agents/defs', { method: 'POST', body: json({ text }) }),
+    update: (id: string, text: string) => req<AgentDef>(`/agents/defs/${id}`, { method: 'PUT', body: json({ text }) }),
+    approve: (id: string, approved: boolean) => req<AgentDef>(`/agents/defs/${id}/approve?approved=${approved}`, { method: 'POST' }),
+    delete: (id: string) => req<{ ok: boolean }>(`/agents/defs/${id}`, { method: 'DELETE' })
+  },
   /** Procedural memory. Nothing here is injected until its status is 'approved'. */
   skills: {
     list: (status?: SkillStatus) => req<Skill[]>(`/skills${status ? `?status=${status}` : ''}`),
@@ -424,12 +483,11 @@ export const api = {
       req<{ skill: Skill; findings: SkillFinding[]; warnings: string[] }>('/skills/import', { method: 'POST', body: json({ text }) }),
     exportMd: (id: string) => req<{ filename: string; text: string }>(`/skills/${id}/export`)
   },
-  stop: (mid: string) => req(`/messages/${mid}/stop`, { method: 'POST' }),
   /** Starts the reply as a background task and returns at once; watch it with `chatStream(convId, seq)`. Throws a 409 carrying a `RunConflict` when that conversation already has a live run. */
-  chat: (convId: string, body: { content?: string; model?: string; page_context?: PageContext }) => req<ChatRunStarted>(`/conversations/${convId}/chat`, { method: 'POST', body: json(body) }),
+  chat: (convId: string, body: { content?: string; model?: string; page_context?: PageContext; replace_from?: string }) => req<ChatRunStarted>(`/conversations/${convId}/chat`, { method: 'POST', body: json(body) }, CONTROL_TIMEOUT_MS),
   /** Injects a user message into a live run (steering). Throws a 409 when nothing is running. */
-  steer: (convId: string, content: string) => req<{ ok: boolean; run_id: string; message: Message }>(`/conversations/${convId}/steer`, { method: 'POST', body: json({ content }) }),
-  runs: () => req<RunInfo[]>('/runs'),
+  steer: (convId: string, content: string) => req<{ ok: boolean; run_id: string; message: Message }>(`/conversations/${convId}/steer`, { method: 'POST', body: json({ content }) }, CONTROL_TIMEOUT_MS),
+  runs: (conversationId?: string) => req<RunInfo[]>('/runs' + (conversationId ? `?conversation_id=${encodeURIComponent(conversationId)}` : ''), undefined, CONTROL_TIMEOUT_MS),
   /** A subagent's run row (status while it works) and its recorded tape (calls, results). */
   agentRun: (id: string) => req<{ run_id: string; status: string; budget?: Record<string, number> | null }>(`/runs/${encodeURIComponent(id)}`),
   agentTape: (id: string) => req<RunTapeEvent[]>(`/runs/${encodeURIComponent(id)}/events`),
@@ -440,6 +498,8 @@ export const api = {
     const d = await req<{ run_id: string; resumable: boolean }>(`/runs/${rows[0].run_id}`)
     return { run_id: d.run_id, resumable: d.resumable }
   },
+  /** Whether the conversation's newest run can be resumed, and which message it would continue. */
+  resumableRun: (convId: string) => req<{ run_id: string | null; resumable: boolean; reason: string; message_id: string | null }>(`/conversations/${encodeURIComponent(convId)}/resumable`),
   /** The user's Undo for a local file write or move. A 409 message is JSON `{reason, conflict}`; `force` overrides a conflict. */
   restoreFileSnapshot: (id: string, force = false) => req<{ ok: boolean; path: string }>(`/file-snapshots/${id}/restore`, { method: 'POST', body: json({ force }) }),
   /** Folder changes a reply made (whole-folder snapshots), and the user's Undo / Redo of them. */
@@ -448,9 +508,11 @@ export const api = {
   undoRun: (runId: string) => req<RunUndoResult>(`/runs/${runId}/undo`, { method: 'POST' }),
   redoRun: (runId: string) => req<RunUndoResult>(`/runs/${runId}/redo`, { method: 'POST' }),
   /** Starts a new run that continues an interrupted one. 409 with a reason when it cannot. */
-  resumeRun: (runId: string) => req<ChatRunStarted>(`/runs/${runId}/resume`, { method: 'POST' }),
+  resumeRun: (runId: string) => req<ChatRunStarted>(`/runs/${runId}/resume`, { method: 'POST' }, CONTROL_TIMEOUT_MS),
+  /** Where a run stands right now: whether its task is alive and the last seq on its tape. 404 when the run is unknown. */
+  runState: (runId: string) => req<{ run_id: string; live: boolean; seq: number; status?: string }>(`/runs/${encodeURIComponent(runId)}`, undefined, CONTROL_TIMEOUT_MS),
   /** Stops a run before its assistant message exists. Detaching the stream would only drop a viewer. */
-  stopRun: (convId: string, runId?: string) => req<{ ok: boolean }>(`/conversations/${convId}/stop${runId ? `?run_id=${encodeURIComponent(runId)}` : ''}`, { method: 'POST' }),
+  stopRun: (convId: string, runId?: string) => req<{ ok: boolean }>(`/conversations/${convId}/stop${runId ? `?run_id=${encodeURIComponent(runId)}` : ''}`, { method: 'POST' }, STOP_TIMEOUT_MS),
   usage: {
     report: (days = 30) => req<UsageReport>(`/usage?days=${days}`),
     setPrices: (modelPrices: Record<string, { input: number; output: number }>) =>
@@ -458,9 +520,12 @@ export const api = {
   },
   messageOtlp: (messageId: string) => req<unknown>(`/messages/${messageId}/otlp`),
   testTraceExport: () => req<{ sent: boolean; reason?: string; status: number | null; error: string | null }>('/traces/export-test', { method: 'POST' }),
+  conversationUsage: (conversationId: string) => req<ConversationUsage>(`/conversations/${conversationId}/usage`),
   contextMeter: (conversationId: string) => req<ContextMeter>(`/conversations/${conversationId}/context-meter`),
   compactConversation: (conversationId: string, focus?: string) =>
     req<{ compacted: boolean }>(`/conversations/${conversationId}/compact`, { method: 'POST', body: json({ focus: focus ?? null }) }),
+  activateMessage: (conversationId: string, messageId: string) =>
+    req<Conversation>(`/conversations/${conversationId}/messages/${messageId}/activate`, { method: 'POST' }),
   discardSummary: (conversationId: string) => req<{ removed: boolean }>(`/conversations/${conversationId}/summary`, { method: 'DELETE' }),
   contextPreview: (projectId: string | null, query: string, convSettings?: Partial<ConversationSettings>) =>
     req<ContextUsed>('/context/preview', { method: 'POST', body: json({ project_id: projectId, query, conv_settings: convSettings ?? {} }) }),
@@ -490,7 +555,7 @@ export const api = {
     deleteSample: (id: string) => req(`/style/samples/${id}`, { method: 'DELETE' })
   },
   graph: {
-    get: (s: Scope) => req<GraphData>(`/graph?${scope(s)}`),
+    get: (s: Scope, history = false) => req<GraphData>(`/graph?${scope(s)}${history ? '&include_invalid=true' : ''}`),
     createNode: (n: { project_id: string | null; label: string; type?: string; properties?: Record<string, unknown> }) =>
       req<GraphNode>('/graph/nodes', { method: 'POST', body: json(n) }),
     updateNode: (id: string, patch: Partial<Pick<GraphNode, 'label' | 'type' | 'properties'>>) => req<GraphNode>(`/graph/nodes/${id}`, { method: 'PUT', body: json(patch) }),
@@ -502,14 +567,18 @@ export const api = {
   documents: {
     list: (s: Scope) => req<Document[]>(`/documents?${scope(s)}`),
     get: (id: string) => req<Document>(`/documents/${id}`),
+    pin: (id: string, pinned: boolean) => req<Document>(`/documents/${id}`, { method: 'PATCH', body: json({ pinned }) }),
     upload: (projectId: string | null, file: File) => {
       const fd = new FormData()
       fd.append('file', file)
       if (projectId) fd.append('project_id', projectId)
       return req<Document>('/documents', { method: 'POST', body: fd })
     },
-    delete: (id: string) => req(`/documents/${id}`, { method: 'DELETE' })
+    delete: (id: string) => req(`/documents/${id}`, { method: 'DELETE' }),
+    indexStatus: () => req<{ chunks: number; embedded: number; doc_chunks?: number; doc_embedded?: number; model: string | null; mode: string }>('/documents/index-status')
   },
+  /** Character span of a cited chunk in its source text (start -1 when not found verbatim). */
+  chunkSpan: (isDoc: boolean, id: string, chunkId: string) => req<{ text: string; start: number; end: number }>(`/${isDoc ? 'docs' : 'documents'}/${id}/chunks/${chunkId}`),
   activity: {
     status: () => req<ActivityStatus>('/activity/status'),
     config: (patch: Partial<ActivityConfig>) => req<ActivityStatus>('/activity/config', { method: 'PUT', body: json(patch) }),
@@ -621,12 +690,13 @@ export const api = {
   },
   docs: {
     list: (s: Scope = 'all', q = '') => req<Doc[]>(`/docs?project_id=${encodeURIComponent(s)}&q=${encodeURIComponent(q)}`),
+    search: (q: string, s: Scope = 'all') => req<DocHit[]>(`/docs/search?q=${encodeURIComponent(q)}&project_id=${encodeURIComponent(s)}`),
     get: (id: string) => req<FullDoc>(`/docs/${id}`),
     create: (d: { title?: string; content?: string; folder?: string; project_id?: string | null }) => req<FullDoc>('/docs', { method: 'POST', body: json(d) }),
     /** Autosave. Records a revision, folding a burst of keystrokes into one history entry. */
-    save: (id: string, patch: { content?: string; title?: string; summary?: string }) => req<FullDoc>(`/docs/${id}`, { method: 'PUT', body: json(patch) }),
+    save: (id: string, patch: { content?: string; title?: string; summary?: string; base_updated_at?: number }) => req<FullDoc>(`/docs/${id}`, { method: 'PUT', body: json(patch) }),
     /** Title, folder, star and project moves — metadata, so it stays out of the history. */
-    patch: (id: string, patch: { title?: string; folder?: string; starred?: boolean; project_id?: string | null; clear_project?: boolean; scope?: string }) =>
+    patch: (id: string, patch: { title?: string; folder?: string; starred?: boolean; pinned?: boolean; project_id?: string | null; clear_project?: boolean; scope?: string }) =>
       req<FullDoc>(`/docs/${id}`, { method: 'PATCH', body: json(patch) }),
     /** A whole drag in one patch: which tree ('' personal, else a project) and which folder in it. */
     move: (id: string, scope: string, folder: string) =>
@@ -692,7 +762,16 @@ export const api = {
       req<MeetingActionItem[]>(`/meetings/${id}/actions/add-todos`, { method: 'POST', body: json({ ids, project_id: projectId ?? null }) }),
     dismissAction: (id: string, actionId: string) => req<MeetingActionItem>(`/meetings/${id}/actions/${actionId}/dismiss`, { method: 'POST' }),
     retranscribe: (id: string, limit = 20) => req<{ settled: number; meeting: FullMeeting }>(`/meetings/${id}/retranscribe?limit=${limit}`, { method: 'POST' }),
+    /** A kept segment's wav as an object URL (the audio element cannot send the token header). */
+    segmentAudio: async (id: string, segId: string): Promise<string> => {
+      const r = await fetch(`${base}${audioPath(id, segId)}`, { headers: await auth() })
+      if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
+      return URL.createObjectURL(await r.blob())
+    },
     deleteAudio: (id: string) => req<FullMeeting>(`/meetings/${id}/audio`, { method: 'DELETE' }),
+    /** Typed-line marks for a doc recording: `line` is the line's first characters, `t` the recording offset in seconds. */
+    putNoteMarks: (id: string, marks: { line: string; t: number }[]) =>
+      req<{ marks: { line: string; t: number }[] }>(`/meetings/${id}/note-marks`, { method: 'PUT', body: json({ marks }) }),
     /** Rename diarized speakers ({ S1: 'Dana' }); the transcript is rebuilt server side. A blank name clears one. */
     setSpeakers: (id: string, names: Record<string, string>) =>
       req<FullMeeting>(`/meetings/${id}/speakers`, { method: 'PUT', body: json({ names }) }),
@@ -726,80 +805,156 @@ export const api = {
 }
 
 const STREAM_RETRIES = 8
+/** How long a stream may take to answer with its headers before the attempt is abandoned. */
+export const STREAM_CONNECT_MS = 10_000
+/**
+ * How long an open stream may stay silent. The backend sends a keepalive comment every runs.KEEPALIVE_S
+ * (15 s), so 45 s is three missed beats: a socket that has gone quiet without closing (a sleeping Mac, a
+ * wedged proxy) is detected here, since a clean close and a refused connection already surface by themselves.
+ */
+export const STREAM_IDLE_MS = 45_000
+
+const STALLED = 'The backend stopped responding.'
+
+/**
+ * One `reader.read()` that gives up after `ms` of silence. Any bytes, a keepalive comment included, count as
+ * life because each is a completed read. On a stall the reader is cancelled and an ApiError of kind 'stalled'
+ * is thrown; `ms <= 0` reads without a deadline.
+ */
+export async function readWithIdle<T>(reader: { read: () => Promise<ReadableStreamReadResult<T>>; cancel: (reason?: unknown) => Promise<void> }, ms: number): Promise<ReadableStreamReadResult<T>> {
+  if (!(ms > 0)) return reader.read()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const stall = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new ApiError(STALLED, { kind: 'stalled' })), ms)
+  })
+  try {
+    return await Promise.race([reader.read(), stall])
+  } catch (e) {
+    if (e instanceof ApiError && e.kind === 'stalled') void reader.cancel().catch(() => undefined)
+    throw e
+  } finally {
+    clearTimeout(timer)
+  }
+}
 
 /** One SSE connection, parsed. `seq` is the event's `id:` line, which only the app topic sends. */
-async function* sseStream(path: string, signal?: AbortSignal): AsyncGenerator<{ event: string; data: unknown; seq: number | null }> {
-  const r = await fetch(`${base}${path}`, { signal, headers: await auth() })
-  if (!r.ok || !r.body) throw new Error(`${r.status} ${r.statusText}`)
+async function* sseStream(path: string, signal?: AbortSignal, idleMs = 0, connectMs = STREAM_CONNECT_MS): AsyncGenerator<{ event: string; data: unknown; seq: number | null }> {
+  // Bounds the wait for the response headers only; once the body is flowing the idle watchdog takes over.
+  const connect = new AbortController()
+  let connectTimedOut = false
+  const timer = setTimeout(() => { connectTimedOut = true; connect.abort() }, connectMs)
+  const onAbort = (): void => connect.abort()
+  signal?.addEventListener('abort', onAbort, { once: true })
+  if (signal?.aborted) connect.abort()
+  let r: Response
+  try {
+    r = await fetch(`${base}${path}`, { signal: connect.signal, headers: await auth() })
+  } catch (e) {
+    if (connectTimedOut && !signal?.aborted) throw new ApiError('The backend did not answer in time.', { kind: 'timeout' })
+    throw e
+  } finally {
+    clearTimeout(timer)
+  }
+  if (!r.ok || !r.body) {
+    signal?.removeEventListener('abort', onAbort)
+    // The error body is not read, so the connection is released rather than left to the reconnect loop.
+    void r.body?.cancel().catch(() => undefined)
+    throw new ApiError(`${r.status} ${r.statusText}`, { status: r.status, kind: 'http' })
+  }
   const reader = r.body.getReader()
   const dec = new TextDecoder()
   let buf = ''
-  while (true) {
-    const { value, done } = await reader.read()
-    if (done) break
-    buf += dec.decode(value, { stream: true })
-    let idx: number
-    while ((idx = buf.indexOf('\n\n')) >= 0) {
-      const block = buf.slice(0, idx)
-      buf = buf.slice(idx + 2)
-      let event = 'message'
-      let data = ''
-      let id = ''
-      for (const line of block.split('\n')) {
-        if (line.startsWith('event:')) event = line.slice(6).trim()
-        else if (line.startsWith('data:')) data += line.slice(5).trim()
-        else if (line.startsWith('id:')) id = line.slice(3).trim()
+  try {
+    while (true) {
+      const { value, done } = await readWithIdle(reader, idleMs)
+      if (done) break
+      buf += dec.decode(value, { stream: true })
+      let idx: number
+      while ((idx = buf.indexOf('\n\n')) >= 0) {
+        const block = buf.slice(0, idx)
+        buf = buf.slice(idx + 2)
+        let event = 'message'
+        let data = ''
+        let id = ''
+        for (const line of block.split('\n')) {
+          if (line.startsWith('event:')) event = line.slice(6).trim()
+          else if (line.startsWith('data:')) data += line.slice(5).trim()
+          else if (line.startsWith('id:')) id = line.slice(3).trim()
+        }
+        if (!data) continue
+        const seq = id ? Number(id) : null
+        let parsed: unknown
+        try {
+          parsed = JSON.parse(data)
+        } catch {
+          // A frame that is not JSON would throw before the caller's cursor moves, so every retry would
+          // fetch the same frame again. Skip it, but still hand the seq over so the cursor passes it.
+          console.warn('Skipped a stream frame that is not JSON:', event)
+          yield { event: 'malformed', data: null, seq }
+          continue
+        }
+        yield { event, data: parsed, seq }
       }
-      if (!data) continue
-      const seq = id ? Number(id) : null
-      let parsed: unknown
-      try {
-        parsed = JSON.parse(data)
-      } catch {
-        // A frame that is not JSON would throw before the caller's cursor moves, so every retry would
-        // fetch the same frame again. Skip it, but still hand the seq over so the cursor passes it.
-        yield { event: 'malformed', data: null, seq }
-        continue
-      }
-      yield { event, data: parsed, seq }
     }
+  } finally {
+    signal?.removeEventListener('abort', onAbort)
   }
 }
+
+/** Timings a test can shrink; production passes none. */
+export interface StreamTiming { idleMs?: number; connectMs?: number }
 
 /**
  * Attach to a conversation's run and iterate its server-sent events from `since`. Any number of clients may.
  * The stream is a tail on the run's stored tape, and every event carries its seq (`id:`), so with a `runId` a
  * dropped connection (a backend restart, the Mac waking up) reconnects from the last seq it saw instead of failing.
+ *
+ * A connection that closes cleanly without the run's end (`error`, or a `done` that is not a steer segment) is
+ * not an ending: the run is asked what it is doing. A dead run (or one the backend no longer knows) ends the
+ * stream and the caller settles from the stored row; a live one is re-attached at once when the last
+ * connection moved the cursor, and backed off when it did not.
  */
-export async function* chatStream(convId: string, since = 0, signal?: AbortSignal, runId?: string, onGiveUp?: () => void): AsyncGenerator<ChatEvent> {
+export async function* chatStream(convId: string, since = 0, signal?: AbortSignal, runId?: string, onGiveUp?: () => void, timing: StreamTiming = {}): AsyncGenerator<ChatEvent & { seq: number | null }> {
   let last = since
   let failures = 0
-  // The events that end a turn. The server also closes a stream cleanly when this subscriber's queue
-  // overflowed, which is not an ending: without one of these, an EOF means "reconnect from `last`".
-  let terminal = false
+  let sawEnd = false
   let idle = 0
   while (true) {
-    let got = 0
+    const from = last
     try {
       const q = `since=${last}${runId ? `&run_id=${encodeURIComponent(runId)}` : ''}`
-      for await (const { event, data, seq } of sseStream(`/conversations/${convId}/stream?${q}`, signal)) {
+      for await (const { event, data, seq } of sseStream(`/conversations/${convId}/stream?${q}`, signal, timing.idleMs ?? STREAM_IDLE_MS, timing.connectMs)) {
         failures = 0
-        got++
         if (seq !== null && Number.isFinite(seq)) last = seq
         if (event === 'malformed') continue
-        if (event === 'done' || event === 'error' || event === 'parked') terminal = true
-        yield { event, data } as ChatEvent
+        if (event === 'error' || event === 'parked' || (event === 'done' && !(data as { segment?: boolean } | null)?.segment)) sawEnd = true
+        yield { event, data, seq } as ChatEvent & { seq: number | null }
       }
-      if (terminal || !runId || signal?.aborted) return
-      // Bounded: a run that really ended without a terminal event would otherwise be re-asked forever.
-      idle = got ? 0 : idle + 1
-      if (idle > 3) {
+      if (sawEnd || !runId || signal?.aborted) return
+      let live: boolean
+      try {
+        live = (await api.runState(runId)).live
+      } catch (e) {
+        // The run is unknown to the backend: there is nothing to reconnect to.
+        if (e instanceof ApiError && e.status === 404) return
+        live = true
+        failures++
+        if (failures > STREAM_RETRIES) throw e
+      }
+      if (!live) return
+      if (last > from) {
+        idle = 0
+        continue
+      }
+      // Bounded: a run that stays live but never advances would otherwise be re-asked forever.
+      if (++idle > 3) {
         onGiveUp?.()
         return
       }
       await new Promise((res) => setTimeout(res, Math.min(2000, 300 * 2 ** idle)))
       continue
     } catch (e) {
+      // A stalled or timed-out connection is reconnectable like a dropped one.
       if (signal?.aborted || !runId || ++failures > STREAM_RETRIES) throw e
       await new Promise((res) => setTimeout(res, Math.min(5000, 500 * 2 ** (failures - 1))))
     }
@@ -812,7 +967,7 @@ export async function* chatStream(convId: string, since = 0, signal?: AbortSigna
  * resume from, and the server's ring replays whatever happened while the socket was down.
  */
 export async function* backgroundStream(since = 0, signal?: AbortSignal): AsyncGenerator<BackgroundEvent & { seq: number | null }> {
-  for await (const { event, data, seq } of sseStream(`/events?since=${since}`, signal)) {
+  for await (const { event, data, seq } of sseStream(`/events?since=${since}`, signal, STREAM_IDLE_MS)) {
     yield { event, data, seq } as BackgroundEvent & { seq: number | null }
   }
 }

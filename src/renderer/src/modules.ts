@@ -32,6 +32,8 @@ export const HOME_MODULES: HomeModule[] = [
   homeRow('todos'),
   homeRow('health'),
   { key: 'inbox', label: 'Inbox' },
+  { key: 'mailwatch', label: 'Waiting mail' },
+  { key: 'plan', label: 'Day plan' },
   { key: 'gtasks', label: 'Google Tasks' },
   { key: 'drive', label: 'Drive files' },
   { key: 'meetings', label: 'Upcoming meetings' },

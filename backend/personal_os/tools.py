@@ -8,12 +8,14 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import inspect
 import datetime as dt
 import html
 import ipaddress
 import json
 import logging
 import os
+import posixpath
 import re
 import socket
 import time
@@ -24,8 +26,10 @@ from typing import Any, Awaitable, Callable
 import httpx
 
 from . import mac
+from .embed import rrf
 from . import fsx
 from . import skillbuild
+from .style import voice_wanted
 from .cowork import UNDECIDED_OUTPUTS
 from .workspace import MAX_FILE_CHARS, WorkspaceError
 from . import plans
@@ -40,7 +44,7 @@ from . import scheduling, verify
 from .jobs import local_tz_name, parse_when, valid_cron, valid_tz
 from . import audiocap, stt
 from .learn import SELF_LABELS, SKILL_STATUSES, induce_skill, run_transcript
-from .microvm import Sandboxes
+from .microvm import SandboxError, Sandboxes
 from .repos import Documents, Graph, Memories
 from .sandbox import WORKSPACE_REPORT_CAP, run_python
 
@@ -88,7 +92,7 @@ PROMPT_WRITES = frozenset({
     "save_memory", "graph_add", "save_writing_sample",
     "doc_create", "doc_edit",
     "todo_add", "todo_delete", "todo_update",
-    "board_add_card", "board_create", "board_move_card",
+    "board_add_card", "board_create", "board_move_card", "board_claim", "board_release", "board_comment",
     "skill_draft", "skill_revise", "skill_from_run",
     "health_log", "health_delete_entry",
     "artifact_create", "artifact_update", "artifact_edit",
@@ -101,6 +105,12 @@ PROPOSAL_ONLY_REFUSED_SCHEDULE = ("{name} books future unattended work, and this
                                   "run: a scheduled run that can schedule runs is a loop nobody asked for. It is "
                                   "recorded as a proposal the user accepts or rejects. Say what you proposed and "
                                   "move on.")
+
+
+def times_body(found: dict[str, Any]) -> str:
+    """The draft text for calendar_find_time's result: one line per slot."""
+    return "Would any of these times work?\n\n" + "\n".join(
+        f"- {s['start'].replace('T', ' ')} to {s['end'][11:]} ({found['timezone']})" for s in found["slots"])
 
 
 class ToolSpec:
@@ -168,6 +178,7 @@ ALTERNATIVE = {
     "sandbox_read_file": "ask the user to paste the file contents",
     "sandbox_list_files": "ask the user what the sandbox should contain",
     "sandbox_put_document": "read_document, then sandbox_write_file the excerpt you need",
+    "sandbox_export_file": "tell the user the path in the sandbox, or print a text file's contents in your reply",
     "sandbox_reset": "continue with the sandbox as it is",
     "sandbox_checkpoint": "continue without a checkpoint, or copy the files you care about out with sandbox_read_file",
     "sandbox_restore": "sandbox_reset to start fresh",
@@ -177,6 +188,7 @@ ALTERNATIVE = {
     "graph_add": "save_memory, or just state the relation in your reply",
     "todo_write": "keep the remaining steps in your reply, and name the one you are on",
     "read_tool_result": "work from the preview you already have, or call the original tool with a narrower query",
+    "search_tool_results": "page the handle you do have with read_tool_result, or call the original tool with a narrower query",
     "skill_list": "ask the user which of their procedures you mean",
     "skill_draft": "write the procedure out in your reply so the user can save it in Library → Skills",
     "skill_revise": "tell the user what you would change in that procedure",
@@ -251,6 +263,12 @@ def denied(name: str, reason: str) -> dict[str, Any]:
     alt = ALTERNATIVE.get(name)
     return tool_error(f"{name} is {reason}. Do not retry it.",
                       alternative=alt or "continue without it, or ask the user what they would like instead")
+
+
+# Reads that may be called again after a transient network failure (Toolbox._dispatch).
+RETRY_DANGER = ("safe", "network")
+NO_RETRY_GROUPS = ("browser", "shell", "sandbox")  # they hold session state
+TRANSIENT_ERRORS = (httpx.TransportError, asyncio.TimeoutError, ConnectionError)
 
 
 def call_key(name: str, args: dict[str, Any]) -> str:
@@ -461,6 +479,26 @@ def _pin(url: str, ip: str) -> tuple[str, str, str]:
     return pinned, (f"{host}:{port}" if port else host), host
 
 
+async def page_title(url: str, cfg: dict[str, Any]) -> str | None:
+    """<title> of a public page for a pasted link: SSRF-checked on every hop, 3 redirects, None on any failure."""
+    cur = url
+    try:
+        async with httpx.AsyncClient(timeout=10, follow_redirects=False, headers={"User-Agent": "Grain/0.1 (+desktop assistant)"}) as c:
+            for hop in range(4):
+                cur, host = _check_url(cur, {}, cfg, redirect=hop > 0)
+                r = await _open_pinned(c, "GET", cur, host)
+                if r.status_code in (301, 302, 303, 307, 308) and r.headers.get("location"):
+                    cur = urllib.parse.urljoin(cur, r.headers["location"])
+                    continue
+                if "html" not in r.headers.get("content-type", "html").lower():
+                    return None
+                m = re.search(r"<title[^>]*>(.*?)</title>", r.content[:200_000].decode("utf-8", "replace"), re.I | re.S)
+                return re.sub(r"\s+", " ", html.unescape(m.group(1))).strip()[:200] or None if m else None
+    except (UrlBlocked, httpx.HTTPError, asyncio.TimeoutError, OSError):
+        return None
+    return None
+
+
 async def _open_pinned(client: httpx.AsyncClient, method: str, url: str, host: str, *,
                        headers: dict[str, str] | None = None, params: dict[str, Any] | None = None,
                        content: Any = None) -> httpx.Response:
@@ -574,8 +612,10 @@ class Toolbox:
         # ctx["desk_id"] inside each handler so desk A cannot address desk B's files.
         self.desks, self.workspace = desks, workspace
         self.memory_index: Any = None  # memory_index.MemoryIndex (hybrid memory search); set by app.py
+        self.meeting_index: Any = None  # meeting_index.MeetingIndex (by-meaning meeting search); set by app.py
         self.retriever: Any = None  # hybrid document search (retrieval.py); set by app.py
         self.plans: Any = None  # plans.Plans (approved plan records); desk_done's gate reads the unconsumed steps; set by app.py
+        self.canvases: Any = None  # canvas.Canvases; set by app.py (space_tools.py is not offered until then)
         self.artifacts = artifacts  # artifact_tools.py artifact_* tools are registered only when it is wired up
         self.fs_reads = fsx.ReadLedger()  # what each conversation has read of each file (fsx.py): the baseline for edits
         self.conversations = conversations  # past replies, so skill_from_run can read one run
@@ -598,6 +638,8 @@ class Toolbox:
             self._register_sandbox()
         if activity is not None:
             self._register_activity()
+        from . import space_tools
+        space_tools.register(self)
         self._register_mac()
         fsx.register(self)  # fs_glob / fs_grep / fs_edit / fs_copy / fs_mkdir
         self._register_reach()
@@ -753,6 +795,43 @@ class Toolbox:
             return "ask"
         return mode
 
+    async def _dispatch(self, spec: ToolSpec, ctx: dict[str, Any], args: dict[str, Any]) -> Any:
+        """spec.fn, retried on a transient network failure when the tool only reads. Nothing that writes, runs code
+        or holds session state is ever called twice: a retry there could repeat a side effect."""
+        from . import llm
+        v = self.settings().get("toolReadRetries", 2)
+        retries = max(0, min(int(v), 5)) if isinstance(v, (int, float)) and not isinstance(v, bool) else 2
+        if spec.danger not in RETRY_DANGER or spec.group in NO_RETRY_GROUPS or spec.name.startswith("agent_"):
+            retries = 0
+        for attempt in range(1, retries + 2):
+            try:
+                return await spec.fn(ctx, **args)
+            except TRANSIENT_ERRORS:
+                if attempt > retries:
+                    raise
+                log.info("tool %s failed transiently; retry %d/%d", spec.name, attempt, retries)
+                await asyncio.sleep(llm.retry_delay(attempt))
+    @staticmethod
+    def _bad_arguments(name: str, spec: ToolSpec, e: Exception) -> dict[str, Any]:
+        return tool_error(f"{name}: bad arguments — {_first_line(e)}",
+                          expected="required: " + (", ".join(spec.parameters.get("required") or []) or "none"),
+                          example=(spec.examples or [None])[0], alternative=ALTERNATIVE.get(name))
+
+    def precheck(self, name: str, args: dict[str, Any]) -> dict[str, Any] | None:
+        """The error `call` would return for arguments the tool's signature cannot take, found before anything is
+        approved or run. Binds only (no type checks: tools coerce), so None means the call may go on. Not a spec
+        (a connector tool) is None as well."""
+        spec = self.specs.get(name)
+        if not spec:
+            return None
+        try:
+            inspect.signature(spec.fn).bind(None, **args)
+        except TypeError as e:
+            return self._bad_arguments(name, spec, e)
+        except ValueError:  # a callable with no introspectable signature
+            return None
+        return None
+
     async def call(self, name: str, args: dict[str, Any], ctx: dict[str, Any]) -> Any:
         spec = self.specs.get(name)
         if not spec:
@@ -765,11 +844,9 @@ class Toolbox:
                               "background run, so it is refused: code could send data out with nobody watching.",
                               alternative="run_python, which has no network")
         try:
-            out = await spec.fn(ctx, **args)
+            out = await self._dispatch(spec, ctx, args)
         except TypeError as e:  # backstop: signature mismatch, wrong types
-            return tool_error(f"{name}: bad arguments — {_first_line(e)}",
-                              expected="required: " + (", ".join(spec.parameters.get("required") or []) or "none"),
-                              example=(spec.examples or [None])[0], alternative=ALTERNATIVE.get(name))
+            return self._bad_arguments(name, spec, e)
         except Exception as e:  # noqa: BLE001
             log.warning("tool %s failed", name, exc_info=True)
             if type(e).__name__ == "GoogleNotConnected":
@@ -788,24 +865,37 @@ class Toolbox:
     def _register(self) -> None:
         R = self.specs.__setitem__
 
-        async def search_documents(ctx: dict[str, Any], query: str, limit: int = 8, offset: int = 0, scope: str = "all") -> Any:
+        async def search_documents(ctx: dict[str, Any], query: str = "", limit: int = 8, offset: int = 0, scope: str = "all",
+                                   queries: list[str] | None = None) -> Any:
+            subs = list(dict.fromkeys(q.strip() for q in (queries or []) if isinstance(q, str) and q.strip()))[:4]
+            if not subs and not query.strip():
+                return tool_error("Give a query, or queries for a compound question.", field="query", expected="a non-empty string",
+                                  example={"query": "notice period"})
             off, lim = max(0, int(offset)), max(1, min(int(limit), 20))
             if scope not in ("all", "files", "docs"):
                 return tool_error(f"Unknown scope '{scope}'.", field="scope", expected="'all', 'files' or 'docs'",
                                   example={"query": query, "scope": "docs"})
-            if self.retriever is not None:
-                srcs = ("files", "docs") if scope == "all" else (scope,)
-                hits = await self.retriever.search(ctx["project_id"], query, self.settings(), limit=off + lim, sources=srcs)
+            async def one(q: str) -> list[dict[str, Any]]:
+                if self.retriever is not None:
+                    srcs = ("files", "docs") if scope == "all" else (scope,)
+                    return await self.retriever.search(ctx["project_id"], q, self.settings(), limit=off + lim, sources=srcs)
+                return self.documents.search(ctx["project_id"], q, limit=off + lim)
+            if subs:  # compound question: one search per sub-query, ranked lists fused by rank
+                lists = await asyncio.gather(*(one(q) for q in subs))
+                byk = {f"{h.get('source', 'file')}:{h['chunk_id']}": h for hs in lists for h in reversed(hs)}  # first-ranked copy wins
+                order = rrf([[f"{h.get('source', 'file')}:{h['chunk_id']}" for h in hs] for hs in lists])
+                hits = [byk[k] for k, _ in order][:off + lim]
             else:
-                hits = self.documents.search(ctx["project_id"], query, limit=off + lim)
+                hits = await one(query)
             rows = [{"source": h.get("source", "file"), "document_id": None if h.get("source") == "doc" else h["document_id"],
                      "doc_id": h.get("doc_id"), "document": h["name"], "chunk": h["idx"], "section": h.get("heading") or None,
                      "page": h.get("page"), "text": h["text"]} for h in hits]
             return page(_scrub_public_text(rows), offset=off, limit=lim, key="results")
         R("search_documents", ToolSpec("search_documents", "Search (keywords and meaning) over the user's uploaded files AND their own Docs-editor notes (project + personal). Returns the best matching excerpts, each marked source 'file' (read it with read_document) or 'doc' (read it with doc_read, using doc_id). Use it when the user asks about something that may be in their files or notes; scope narrows it to 'files' or 'docs'.",
             _obj({"query": {"type": "string", "description": "Search terms or a short question"}, "limit": {"type": "integer", "default": 8}, "offset": {"type": "integer", "default": 0},
-                  "scope": {"type": "string", "enum": ["all", "files", "docs"], "default": "all"}}, ["query"]), search_documents, "knowledge",
-            examples=[{"query": "notice period"}, {"query": "Q3 revenue forecast", "limit": 5}, {"query": "onboarding checklist", "limit": 8, "offset": 8}], taints=True))
+                  "scope": {"type": "string", "enum": ["all", "files", "docs"], "default": "all"},
+                  "queries": {"type": "array", "items": {"type": "string"}, "maxItems": 4, "description": "For a compound question, up to 4 sub-queries (one per fact needed) instead of query; results are fused into one ranking"}}, []), search_documents, "knowledge",
+            examples=[{"query": "notice period"}, {"queries": ["notice period", "severance terms"]}, {"query": "Q3 revenue forecast", "limit": 5}, {"query": "onboarding checklist", "limit": 8, "offset": 8}], taints=True))
 
         async def read_document(ctx: dict[str, Any], document_id: str, offset: int = 0, length: int = 6000) -> Any:
             d = self.documents.get(document_id)
@@ -912,22 +1002,24 @@ class Toolbox:
                       {"source": "Grain", "relation": "uses", "target": "SQLite", "source_type": "project", "target_type": "tool"},
                       {"source": "Acme", "relation": "acquired", "target": "Globex"}]))
 
-        async def web_search(ctx: dict[str, Any], query: str, max_results: int = 6, offset: int = 0, time_range: str = "", site: str = "") -> Any:
+        async def web_search(ctx: dict[str, Any], query: str, max_results: int = 6, offset: int = 0, time_range: str = "", site: str = "",
+                             allowed_domains: list[str] | None = None, blocked_domains: list[str] | None = None) -> Any:
             n = max(1, min(int(max_results), 10))
             off = max(0, int(offset))
             want = min(off + n, 25)
             try:
-                rows, meta = await websearch.search(self.settings(), query, want, time_range, site)
+                rows, meta = await websearch.search(self.settings(), query, want, time_range, site, allowed_domains, blocked_domains)
             except ValueError as e:
-                return tool_error(f"web_search: {e}", field="site" if "site" in str(e) else "time_range",
+                return tool_error(f"web_search: {e}", field="domains" if "domains" in str(e) else "site" if "site" in str(e) else "time_range",
                                   example={"query": query, "time_range": "week", "site": "sqlite.org"})
             for row in rows:
                 _allow_url(ctx, row.get("url"))
             return page(_scrub_public_text(rows), offset=off, limit=n, key="results", **meta)
         R("web_search", ToolSpec("web_search", "Search the web for current information. Returns titles, URLs and snippets; call fetch_url to read a result in full. "
-                                 "time_range (day, week, month, year) limits to recent pages; site restricts to one domain.",
+                                 "time_range (day, week, month, year) limits to recent pages; site restricts to one domain; allowed_domains keeps only those domains, blocked_domains drops them (not both).",
             _obj({"query": {"type": "string"}, "max_results": {"type": "integer", "default": 6}, "offset": {"type": "integer", "default": 0},
-                  "time_range": {"type": "string", "enum": ["day", "week", "month", "year"]}, "site": {"type": "string"}}, ["query"]), web_search, "web", "network",
+                  "time_range": {"type": "string", "enum": ["day", "week", "month", "year"]}, "site": {"type": "string"},
+                  "allowed_domains": {"type": "array", "items": {"type": "string"}}, "blocked_domains": {"type": "array", "items": {"type": "string"}}}, ["query"]), web_search, "web", "network",
             examples=[{"query": "EU AI Act enforcement dates"}, {"query": "best espresso machine 2026", "max_results": 10},
                       {"query": "python 3.13 release notes", "max_results": 6, "offset": 6},
                       {"query": "wal checkpoint", "site": "sqlite.org"}, {"query": "OpenAI announcement", "time_range": "week"}], taints=True))
@@ -995,6 +1087,7 @@ class Toolbox:
                         text, via = j["text"], "jina-reader"
                 except (reach.ReachError, httpx.HTTPError) as e:
                     log.info("jina reader fallback failed for %s: %s", final_url, _first_line(e))
+            full_text = text
             mc = max(1000, min(int(max_chars), 40000))
             focused = bool(focus and focus.strip())
             if focused:
@@ -1004,7 +1097,9 @@ class Toolbox:
             window, total, nxt = webread.page_window(text, offset, mc)
             window = redact.scrub_command_output(window)
             # Link URLs are page content, so they are deliberately not _allow_url'd: a tainted run cannot follow them.
-            out = {"url": final_url, "status": status, "content_type": ctype, "kind": kind, "text": window, "truncated": nxt is not None or body_truncated,
+            tm = re.search(r"<title[^>]*>(.*?)</title>", webread.decode(ctype, raw[:65536]), re.S | re.I) if kind == "html" else None
+            title = " ".join(html.unescape(tm.group(1)).split())[:200] if tm else ""
+            out = {"url": final_url, "title": title, "excerpt": " ".join(full_text.split())[:300], "status": status, "content_type": ctype, "kind": kind, "text": window, "truncated": nxt is not None or body_truncated,
                    "total_chars": total, "next_offset": nxt, "cached": bool(hit), "redirects": hops}
             if focused:
                 out["focused"] = True
@@ -1264,7 +1359,8 @@ def _register_working(self: Toolbox) -> None:
                                   expected="the result_id from a tool result that came back as a handle",
                                   example={"result_id": recent[0] if recent else "tr_9f1c2a84", "offset": 0},
                                   alternative="call the tool again with a narrower query, or page the handle you do have: " + (", ".join(recent) or "none yet"))
-            if isinstance(out.get("shape"), dict) and out["shape"].get("untrusted"):
+            if (isinstance(out.get("shape"), dict) and out["shape"].get("untrusted")) or self.taints(str(out.get("tool") or "")):
+                # A handle outlives the banner: the user's Clear must not turn paging it into a way to launder its text.
                 ctx["tainted"] = True
                 ctx.setdefault("taint_sources", []).append("read_tool_result")
             return out
@@ -1276,6 +1372,20 @@ def _register_working(self: Toolbox) -> None:
                   "limit": {"type": "integer", "default": 4000, "description": "characters to return, max 20000"}}, ["result_id"]),
             read_tool_result, "context",
             examples=[{"result_id": "tr_9f1c2a84"}, {"result_id": "tr_9f1c2a84", "offset": 4000}, {"result_id": "tr_9f1c2a84", "offset": 0, "limit": 20000}]))
+
+        async def search_tool_results(ctx: dict[str, Any], query: str, limit: int = 3) -> Any:
+            out = self.results.search(ctx["conversation_id"], query, limit)
+            if out.pop("untrusted", False):
+                ctx["tainted"] = True
+                ctx.setdefault("taint_sources", []).append("read_tool_result")
+            return out
+        R("search_tool_results", ToolSpec("search_tool_results", (
+            "Keyword search over the large tool results already stored in this chat. Returns short windows with a result_id "
+            "and offset; pass them to read_tool_result to read around the hit."),
+            _obj({"query": {"type": "string", "description": "words to look for"},
+                  "limit": {"type": "integer", "default": 3, "description": "max results, up to 10"}}, ["query"]),
+            search_tool_results, "context",
+            examples=[{"query": "kiln ships Friday"}]))
 
 
 
@@ -1353,6 +1463,32 @@ def _register_google(self: Toolbox) -> None:
         return _scrub_public_text(await run(g.calendar_get, event_id, calendar_id))
     R("calendar_get", ToolSpec("calendar_get", "Full details of one event by id (from calendar_events): recurrence, reminders, guests and their RSVPs, color, visibility.",
         _obj({"event_id": {"type": "string"}, "calendar_id": {"type": "string", "default": "primary"}}, ["event_id"]), calendar_get, "google",
+        examples=[{"event_id": "7abc123def"}], taints=True))
+
+    async def meeting_brief(ctx: dict[str, Any], event_id: str, calendar_id: str = "primary") -> Any:
+        e = await run(g.calendar_get, event_id, calendar_id)
+        guests = [a for a in e.get("attendee_details") or [] if not a.get("self") and a.get("email")]
+        repo = getattr(self.meetings, "meetings", self.meetings)
+        people = []
+        for a in guests:
+            mail = a["email"]
+            name = a.get("name") or ""
+            terms = [mail] + ([name] if name else [])
+            seen: dict[str, str] = {}
+            for t in terms:
+                for m in self.memories.list(ctx["project_id"], t)[:5]:
+                    seen.setdefault(m["id"], m["content"])
+            past = []
+            if repo is not None:
+                with repo.db.tx() as c:
+                    rows = c.execute("SELECT id, title, COALESCE(started_at, scheduled_start, created_at) AS at FROM meetings "
+                                     "WHERE attendees LIKE ? AND COALESCE(calendar_event_id,'') != ? ORDER BY at DESC LIMIT 3",
+                                     (f"%{mail}%", event_id)).fetchall()
+                past = [{"meeting_id": r["id"], "title": r["title"], "at": r["at"]} for r in rows]
+            people.append({"email": mail, "name": name, "notes": list(seen.values())[:5], "past_meetings": past})
+        return {"event": {k: e.get(k) for k in ("summary", "start", "end", "location", "description")}, "people": people}
+    R("meeting_brief", ToolSpec("meeting_brief", "Pre-meeting brief for one calendar event: for each guest, what long-term memory holds about them and the last meetings you recorded with them. Read-only. Use before a meeting, or when asked who someone on the invite is.",
+        _obj({"event_id": {"type": "string"}, "calendar_id": {"type": "string", "default": "primary"}}, ["event_id"]), meeting_brief, "google",
         examples=[{"event_id": "7abc123def"}], taints=True))
 
     async def calendar_create(ctx: dict[str, Any], summary: str, start: str, end: str | None = None, description: str | None = None, location: str | None = None,
@@ -1552,6 +1688,29 @@ def _register_google(self: Toolbox) -> None:
         examples=[{"to": "mira@example.com", "subject": "Invoice 42", "body": "Hi Mira,\n\nAttached is invoice 42.\n\nThanks"},
                   {"to": "team@example.com", "subject": "Re: sprint review", "body": "Works for me.", "reply_to_message_id": "18f2c1a9b7e4d0aa"}]))
 
+    async def propose_times_draft(ctx: dict[str, Any], to: str, subject: str, duration_minutes: int, window_start: str, window_end: str,
+                                  attendees: list[str] | None = None, working_hours: Any = None, timezone: str | None = None,
+                                  max_results: int = 3, confirm: bool = False, chosen_start: str | None = None) -> Any:
+        found = await calendar_find_time(ctx, duration_minutes, window_start, window_end, attendees, working_hours, 0, max_results, timezone)
+        if not isinstance(found, dict) or not found.get("slots"):
+            return found
+        slots = found["slots"]
+        body = times_body(found)
+        draft = await gmail_draft(ctx, to, subject, body)
+        out: dict[str, Any] = {"slots": slots, "draft": draft}
+        if confirm:  # only after the user picked a time; guests get an invite email only when they were named
+            pick = next((s for s in slots if s["start"] == chosen_start), None)
+            if not pick:
+                return tool_error("propose_times_draft: chosen_start must be the start of one of the offered slots.", field="chosen_start")
+            out["event"] = await calendar_create(ctx, subject, pick["start"], pick["end"], attendees=attendees, send_updates="all" if attendees else "none")
+        return out
+    R("propose_times_draft", ToolSpec("propose_times_draft", "Find free meeting slots (calendar_find_time rules: 9-18 local weekdays unless working_hours is given) and write them into a Gmail draft to `to`. Never sends and creates no event. After the user picks a slot, call again with confirm=true and chosen_start set to that slot's start to also create the event.",
+        _obj({"to": {"type": "string"}, "subject": {"type": "string"}, "duration_minutes": {"type": "integer"}, "window_start": {"type": "string"}, "window_end": {"type": "string"},
+              "attendees": {"type": "array", "items": {"type": "string"}}, "working_hours": {"type": "string"}, "timezone": {"type": "string"},
+              "max_results": {"type": "integer", "default": 3}, "confirm": {"type": "boolean", "default": False}, "chosen_start": {"type": "string"}},
+             ["to", "subject", "duration_minutes", "window_start", "window_end"]), propose_times_draft, "google", "external",
+        examples=[{"to": "mira@example.com", "subject": "Catch up", "duration_minutes": 30, "window_start": "2026-10-05", "window_end": "2026-10-09"}]))
+
     async def gmail_send(ctx: dict[str, Any], to: str, subject: str, body: str, reply_to_message_id: str | None = None,
                          as_draft: bool = False) -> Any:
         if as_draft:
@@ -1715,7 +1874,7 @@ def _register_boards(self: Toolbox) -> None:
         examples=[{"board": "Work", "title": "Fix the login bug", "column": "To do", "priority": 1},
                   {"board": "Home", "title": "Book the plumber", "due": "2026-10-10"}]))
 
-    async def board_move_card(ctx: dict[str, Any], board: str, card: str, column: str) -> Any:
+    async def board_move_card(ctx: dict[str, Any], board: str, card: str, column: str, token: str | None = None) -> Any:
         b = self.boards.find_board(board)
         if not b:
             return tool_error(f"No board named '{board}'.", field="board", expected="a board name or id from board_list",
@@ -1727,11 +1886,47 @@ def _register_boards(self: Toolbox) -> None:
                               expected="a card title/id and a column name from board_list(board=...)",
                               example={"board": b["name"], "card": card, "column": b["columns"][0]["name"] if b["columns"] else "Done"},
                               alternative=f"board_list(board='{b['name']}') to see the exact titles and columns")
-        self.boards.move_card(c["id"], col["id"])
+        if token:
+            if not self.boards.agent_move(c["id"], token, col["id"]):
+                return tool_error("That claim token is wrong or its lease ran out; the card was not moved.", field="token",
+                                  expected="the token board_claim returned, still within its lease", alternative="board_claim again")
+        elif c.get("claim_token") and (c.get("lease_expires_at") or 0) > time.time():
+            return tool_error(f"'{c['title']}' is claimed by {c.get('claimed_by')}.", field="token",
+                              expected="the token board_claim returned", alternative="leave the card alone")
+        else:
+            self.boards.move_card(c["id"], col["id"])
         return {"moved": c["title"], "to": col["name"]}
-    R("board_move_card", ToolSpec("board_move_card", "Move a card (by title or id) to another column on a board.",
-        _obj({"board": {"type": "string"}, "card": {"type": "string"}, "column": {"type": "string"}}, ["board", "card", "column"]), board_move_card, "boards", "writes",
+    R("board_move_card", ToolSpec("board_move_card", "Move a card (by title or id) to another column on a board. Pass the claim token for a card you hold.",
+        _obj({"board": {"type": "string"}, "card": {"type": "string"}, "column": {"type": "string"}, "token": {"type": "string"}}, ["board", "card", "column"]), board_move_card, "boards", "writes",
         examples=[{"board": "Work", "card": "Fix the login bug", "column": "In progress"}, {"board": "Work", "card": "cd_7a1b90", "column": "Done"}]))
+
+    async def board_claim(ctx: dict[str, Any], card: str, ttl_s: float = 600) -> Any:
+        token = self.boards.claim(card, "agent", ttl_s)
+        if token is None:
+            return tool_error("That card is already claimed (or does not exist).", field="card", expected="a free card id",
+                              alternative="board_list to pick another card")
+        return {"claimed": card, "token": token, "ttl_s": ttl_s}
+    R("board_claim", ToolSpec("board_claim", "Claim a card for a lease (default 10 minutes). Returns a token that later board writes need. Moving the card by hand clears the claim.",
+        _obj({"card": {"type": "string"}, "ttl_s": {"type": "number", "default": 600}}, ["card"]), board_claim, "boards", "writes",
+        examples=[{"card": "cd_7a1b90"}]))
+
+    async def board_release(ctx: dict[str, Any], card: str, token: str, reason: str = "finished") -> Any:
+        try:
+            ok = self.boards.release(card, token, reason)
+        except ValueError as e:
+            return tool_error(str(e), field="reason", expected="finished | expired | preempted | cancelled", alternative="reason=finished")
+        return {"released": ok}
+    R("board_release", ToolSpec("board_release", "Release a card you claimed.",
+        _obj({"card": {"type": "string"}, "token": {"type": "string"}, "reason": {"type": "string", "default": "finished"}}, ["card", "token"]), board_release, "boards", "writes",
+        examples=[{"card": "cd_7a1b90", "token": "abc123"}]))
+
+    async def board_comment(ctx: dict[str, Any], card: str, token: str, text: str) -> Any:
+        ok = self.boards.event(card, token, "comment", {"text": text})
+        return {"commented": True} if ok else tool_error("That claim token is wrong or its lease ran out.", field="token",
+                                                         expected="the token board_claim returned", alternative="board_claim again")
+    R("board_comment", ToolSpec("board_comment", "Add a progress note to a card you hold. This cannot mark the card completed.",
+        _obj({"card": {"type": "string"}, "token": {"type": "string"}, "text": {"type": "string"}}, ["card", "token", "text"]), board_comment, "boards", "writes",
+        examples=[{"card": "cd_7a1b90", "token": "abc123", "text": "Drafted the outline"}]))
 
     async def board_create(ctx: dict[str, Any], name: str, columns: list[str] | None = None) -> Any:
         b = self.boards.create(name, ctx.get("project_id"), columns)
@@ -1803,6 +1998,31 @@ def _register_sandbox(self: Toolbox) -> None:
     R("sandbox_put_document", ToolSpec("sandbox_put_document", "Copy an uploaded document's extracted text into the sandbox as a file, so you can edit, transform or analyse it with sandbox_exec.",
         _obj({"document_id": {"type": "string"}, "path": {"type": "string", "description": "destination path; defaults to the document's name"}}, ["document_id"]), sandbox_put_document, "sandbox", "executes",
         examples=[{"document_id": "doc_3f2a91"}, {"document_id": "doc_3f2a91", "path": "input/report.txt"}]))
+
+    async def sandbox_export_file(ctx: dict[str, Any], path: str, dest: str | None = None) -> Any:
+        desk_id = str(ctx.get("desk_id") or "")
+        ws = self.workspace
+        if not desk_id or ws is None:
+            return tool_error("sandbox_export_file saves into a cowork desk's workspace, and this chat has no desk.",
+                              alternative=ALTERNATIVE["sandbox_export_file"])
+        try:
+            gp, data = await run(sb.export_file, ctx["conversation_id"], path)
+            rel = (dest or "").strip() or "outputs/" + posixpath.basename(gp)
+            target, room = ws.reserve_file(desk_id, rel)
+            if len(data) > room:
+                return tool_error("This workspace has no room for the file.", alternative=ALTERNATIVE["sandbox_export_file"])
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+        except (SandboxError, WorkspaceError) as e:
+            return tool_error(str(e), field="path", alternative=ALTERNATIVE["sandbox_export_file"])
+        out: dict[str, Any] = {"saved": ws._rel_of(desk_id, target), "bytes": len(data), "from_sandbox": gp}
+        if sb.networked(ctx["conversation_id"]):
+            out["network"] = True
+        return _mark(ctx, out, "sandbox_export_file")
+    R("sandbox_export_file", ToolSpec("sandbox_export_file", "Copy any file (binary included, up to 10 MB) from the sandbox's /workspace into this desk's workspace (default outputs/<name>) so the user can open it. Never overwrites an existing file.",
+        _obj({"path": {"type": "string", "description": "file under /workspace"}, "dest": {"type": "string", "description": "destination in the desk workspace; default outputs/<file name>"}}, ["path"]),
+        sandbox_export_file, "sandbox", "writes",
+        examples=[{"path": "report.pdf"}, {"path": "build/chart.xlsx", "dest": "outputs/chart.xlsx"}]))
 
     async def sandbox_reset(ctx: dict[str, Any]) -> Any:
         return await run(sb.reset, ctx["conversation_id"])
@@ -1882,6 +2102,10 @@ def _register_style(self: Toolbox) -> None:
     R = self.specs.__setitem__
 
     async def writing_style(ctx: dict[str, Any]) -> Any:
+        if not voice_wanted(ctx.get("conv_settings") or {}, draft=bool((ctx.get("conv_settings") or {}).get("draftMode")),
+                            tainted=bool(ctx.get("tainted"))):
+            return {"profile": None, "note": "The voice is off for this turn: it needs Draft mode on in the context drawer, "
+                                             "Writing style on, and a chat that has not read untrusted content."}
         p = self.style.for_context(ctx["project_id"])
         if not p or not (p["summary"] or p["guidelines"]):
             return {"profile": None,
@@ -1938,12 +2162,14 @@ def _register_docs(self: Toolbox) -> None:
         return [{"doc_id": d["id"], "title": d["title"], "words": d["words"],
                  "scope": "project" if d["project_id"] else "personal",
                  "pending_edits": d["pending"], "folder": d["folder"] or None}
-                for d in self.docs.list(q=query)]
+                for d in self.docs.list(q=query) if d["project_id"] in (None, ctx.get("project_id"))]  # the chat's project plus personal
     R("doc_list", ToolSpec("doc_list", "List the docs the user writes in the Docs editor — their markdown notes, drafts and documents. (Files they uploaded are a different thing: use search_documents for those.) Start here when they mention 'my notes', 'my essay' or 'the doc' and you need its id.",
         _obj({"query": {"type": "string", "description": "Optional filter on title or body"}}, []), doc_list, "docs"))
 
     async def doc_search(ctx: dict[str, Any], query: str, limit: int = 8) -> Any:
-        hits = self.docs.search(query, limit=max(1, min(int(limit), 20)))
+        hits = self.docs.search(query, ctx.get("project_id"), limit=max(1, min(int(limit), 20)))
+        if any(h.get("via") == "recording" for h in hits):
+            ctx["tainted"] = True  # spoken words are third-party content, same rule as meeting_search
         return {"results": hits, "count": len(hits)}
     R("doc_search", ToolSpec("doc_search", "Full-text search across the bodies of the user's docs, returning a snippet per hit. Use it to find where something is written before reading or revising it.",
         _obj({"query": {"type": "string"}, "limit": {"type": "integer", "default": 8}}, ["query"]), doc_search, "docs"))
@@ -1953,10 +2179,16 @@ def _register_docs(self: Toolbox) -> None:
         if not d:
             return _missing(doc)
         total = len(d["content"].splitlines())
-        return _scrub_public_text({"doc_id": d["id"], "title": d["title"], "total_lines": total, "words": d["words"],
-                                   "pending_edits": len(d["pending"]),
-                                   "text": _numbered(d["content"], from_line, total if to_line is None else int(to_line))})
-    R("doc_read", ToolSpec("doc_read", "Read a doc's markdown with line numbers (LaTeX written as $…$ or $$…$$ is part of the text). Read before editing: doc_edit matches on exact text, so you need the real wording. Page through a long doc with from_line/to_line.",
+        out = {"doc_id": d["id"], "title": d["title"], "total_lines": total, "words": d["words"],
+               "pending_edits": len(d["pending"]),
+               "text": _numbered(d["content"], from_line, total if to_line is None else int(to_line))}
+        # Titles only (no snippets), and only on the first page so paging costs no extra scan.
+        if int(from_line) <= 1:
+            links = [b["title"] for b in (self.docs.backlinks(d["id"]) or [])[:10]]
+            if links:
+                out["linked_from"] = links
+        return _scrub_public_text(out)
+    R("doc_read", ToolSpec("doc_read", "Read a doc's markdown with line numbers; the first page also carries linked_from, the titles of docs that link here (LaTeX written as $…$ or $$…$$ is part of the text). Read before editing: doc_edit matches on exact text, so you need the real wording. Page through a long doc with from_line/to_line.",
         _obj({"doc": {"type": "string", "description": "Doc id or title"}, "from_line": {"type": "integer", "default": 1}, "to_line": {"type": "integer"}}, ["doc"]), doc_read, "docs"))
 
     async def doc_create(ctx: dict[str, Any], title: str, content: str = "", folder: str = "") -> Any:
@@ -2135,7 +2367,11 @@ def _register_meetings(self: Toolbox) -> None:
             return tool_error("meeting_search needs something to search for.", field="query",
                               expected="search terms or a short question",
                               example={"query": "pricing tiers"}, alternative=ALTERNATIVE["meeting_search"])
-        hits = _repo().search(q, "__all__" if project_id is None else project_id, limit=max(1, min(int(limit), 25)))
+        scope, want = "__all__" if project_id is None else project_id, max(1, min(int(limit), 25))
+        if self.meeting_index is not None:
+            hits = await self.meeting_index.search(self.settings(), q, scope, want)
+        else:
+            hits = _repo().search(q, scope, limit=want)
         # A search row carries started_at and nothing else datable, so a meeting that was never
         # recorded has no 'when' to report. Omit the key rather than show an empty string.
         return {"results": [{"meeting_id": h["meeting_id"], "title": h["title"] or "(untitled)",
@@ -2173,6 +2409,11 @@ def _register_meetings(self: Toolbox) -> None:
                     "actions": [{"text": a["text"], "owner": a["owner"] or None, "due": a["due"] or None,
                                  "status": a["status"], "todo_id": a["todo_id"]} for a in m["actions"]]}
         body, note = m[want] or "", ""
+        if want == "transcript" and not body and hasattr(_repo(), "build_transcript"):
+            # The rolled-up transcript only lands at stop; mid-recording, read the settled segments so far.
+            body = _repo().build_transcript(m["id"])
+            if body and m["status"] == "recording":
+                note = "Recording in progress: this is the transcript so far."
         if want == "enhanced" and not body:
             # The enhance pass has not run (or its proposal is still pending), and an empty body
             # reads to the model as a meeting with nothing in it. The user's own notes are the real content.
@@ -2364,21 +2605,21 @@ def _register_mac(self: Toolbox) -> None:
         examples=[{"name": "Log Water"}, {"name": "Add to Reading List", "input": "https://example.com/article"}],
         taints=True))
 
-    async def open_page(ctx: dict[str, Any], url: str, max_chars: int = 20000) -> Any:
+    async def open_page(ctx: dict[str, Any], url: str, max_chars: int = 20000, wait_for: str = "", links: bool = False) -> Any:
         try:
             cur, host = _check_url(url, ctx, self.settings())
             await _resolve(host)
         except UrlBlocked as e:
             return tool_error(f"open_page refused {url}: {str(e).replace('fetch_url', 'open_page')}", field="url",
                               alternative=e.alternative or ALTERNATIVE["open_page"])
-        opened = await mac.page_bridge.open_page(cur, max_chars=max_chars)
+        opened = await mac.page_bridge.open_page(cur, max_chars=max_chars, wait_for=wait_for, links=links)
         if isinstance(opened, dict):
             for key in ("text", "title", "content"):
                 if isinstance(opened.get(key), str):
                     opened[key] = redact.scrub_command_output(opened[key])
         return opened
-    R("open_page", ToolSpec("open_page", "Load a web page in an offscreen browser (its own cookies, separate from the user's) and return its title and visible text. Use it when a page needs JavaScript and fetch_url came back empty. Read-only: it never clicks or fills in forms.",
-        _obj({"url": {"type": "string"}, "max_chars": {"type": "integer", "default": 20000}}, ["url"]), open_page, "web", "network",
+    R("open_page", ToolSpec("open_page", "Load a web page in an offscreen browser (its own cookies, separate from the user's) and return its title and visible text. Use it when a page needs JavaScript and fetch_url came back empty. Read-only: it never clicks or fills in forms. wait_for='css selector' waits for that element to appear (lazy pages); links=true also returns up to 40 page links.",
+        _obj({"url": {"type": "string"}, "max_chars": {"type": "integer", "default": 20000}, "wait_for": {"type": "string"}, "links": {"type": "boolean", "default": False}}, ["url"]), open_page, "web", "network",
         examples=[{"url": "https://example.com/app/pricing"}], taints=True))
 
 
@@ -2528,8 +2769,12 @@ def _register_skills(self: Toolbox) -> None:
         row = row or next((s for s in rows if s["name"].lower() == key), None) if key else None
         if not row:
             return {"error": "not an approved procedure", "procedures": [s["name"] for s in rows][:20]}
-        return {"skill_id": row["id"], "name": row["name"], "description": row["description"],
-                "procedure": skill_block([row])}
+        self.skills.bump_use([row["id"]])
+        out = {"skill_id": row["id"], "name": row["name"], "description": row["description"],
+               "procedure": skill_block([row])}
+        if row.get("references"):  # inert reference text, fenced; reachable only through an approved row
+            out["references"] = {k: "```\n" + v + "\n```" for k, v in row["references"].items()}
+        return out
     R("skill_view", ToolSpec("skill_view", (
         "Read the full steps of one approved procedure listed in the 'Approved procedures (index only)' section of "
         "your instructions. Pass its id or exact name. Only procedures the user approved can be read; the text is "

@@ -1,9 +1,12 @@
 import { useMemo, useState } from 'react'
 import {
   ResponsiveContainer, ComposedChart, BarChart, Bar, Line, Area, PieChart, Pie, Cell, ScatterChart, Scatter,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, Brush
 } from 'recharts'
-import { BarChart3, Table2, Code2, Copy, Check, AlertCircle } from 'lucide-react'
+import { parseJsonLoose } from '../lib/chartRepair'
+import { AlertCircle, BarChart3, Check, Code2, Copy, Pin, Table2 } from 'lucide-react'
+import { applyTransforms, isIsoDateColumn, fmtIsoDate, BRUSH_ABOVE, MAX_ROWS } from '../lib/chartTransforms'
+import { pinChart } from '../lib/pinChart'
 
 /**
  * Renders a ```chart fenced block: a compact JSON spec the model writes (see RENDER_HINT in the backend).
@@ -31,7 +34,6 @@ export interface Spec {
 }
 
 export const TYPES: ChartType[] = ['bar', 'line', 'area', 'pie', 'scatter']
-const MAX_ROWS = 500
 export const COLORS = 8 // --chart-1 … --chart-8 in styles.css
 
 export function num(v: unknown): number | null {
@@ -41,7 +43,7 @@ export function num(v: unknown): number | null {
 }
 
 export function parseSpec(source: string): Spec {
-  const raw = JSON.parse(source) as Record<string, unknown>
+  const raw = parseJsonLoose(source) as Record<string, unknown>
   if (!raw || typeof raw !== 'object') throw new Error('Chart spec must be a JSON object')
   let data: Row[] = []
   let x = typeof raw.x === 'string' ? raw.x : ''
@@ -70,6 +72,9 @@ export function parseSpec(source: string): Spec {
   }
   if (data.length === 0) throw new Error('Chart has no data rows')
   data = data.slice(0, MAX_ROWS)
+  // optional spec.transforms (sort | limit | filter | group), the same ops the dashboard widgets use
+  if (raw.transforms !== undefined) data = applyTransforms(data, raw.transforms)
+  if (data.length === 0) throw new Error('The transforms leave no rows')
 
   const keys = Array.from(new Set(data.flatMap((r) => Object.keys(r))))
   if (!x || !keys.includes(x)) x = keys.find((k) => data.some((r) => typeof r[k] === 'string' && num(r[k]) === null)) ?? keys[0]
@@ -121,11 +126,12 @@ export function Chart({ spec }: { spec: Spec }): JSX.Element {
   const legend = series.length > 1 ? <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} iconType="circle" iconSize={8} itemSorter={null} /> : null
   const tooltip = <Tooltip contentStyle={tooltipStyle} cursor={{ fill: 'var(--hover)', stroke: 'var(--chart-axis)' }} formatter={(v: unknown) => fmtNum(v, unit)} itemSorter={() => 0} />
   const numericX = spec.xType === 'number'
+  const dateX = !numericX && isIsoDateColumn(data, x)
   const xAxis = (
     <XAxis dataKey={x} tick={tick} axisLine={{ stroke: 'var(--chart-axis)' }} tickLine={false}
       type={numericX ? 'number' : 'category'}
       domain={numericX ? ['dataMin', 'dataMax'] : undefined}
-      tickFormatter={numericX ? (v: unknown) => fmtNum(v) : undefined}
+      tickFormatter={numericX ? (v: unknown) => fmtNum(v) : dateX ? fmtIsoDate : undefined}
       label={spec.xLabel ? { value: spec.xLabel, position: 'insideBottom', offset: -2, fill: 'var(--chart-ink)', fontSize: 11 } : undefined} />
   )
   // bars need a zero baseline; lines/areas read better zoomed to the data range
@@ -176,6 +182,7 @@ export function Chart({ spec }: { spec: Spec }): JSX.Element {
       {tooltip}
       {legend}
       {series.map(el)}
+      {data.length > BRUSH_ABOVE && <Brush dataKey={x} height={22} stroke="var(--chart-axis)" fill="var(--bg-elev)" tickFormatter={dateX ? fmtIsoDate : undefined} />}
     </Wrapper>
   )
 }
@@ -194,6 +201,8 @@ export function DataTable({ spec }: { spec: Spec }): JSX.Element {
 export default function ChartBlock({ source, streaming }: { source: string; streaming: boolean }): JSX.Element {
   const [view, setView] = useState<'chart' | 'table' | 'source'>('chart')
   const [copied, setCopied] = useState(false)
+  const [pinned, setPinned] = useState<'' | 'busy' | 'done' | 'err'>('')
+  const [pinErr, setPinErr] = useState('')
   const parsed = useMemo<{ spec: Spec } | { error: string }>(() => {
     try { return { spec: parseSpec(source) } } catch (e) { return { error: (e as Error).message } }
   }, [source])
@@ -217,6 +226,8 @@ export default function ChartBlock({ source, streaming }: { source: string; stre
           <button className={`icon-btn ghost ${view === 'chart' ? 'on' : ''}`} title="Chart" onClick={() => setView('chart')}><BarChart3 size={13} /></button>
           <button className={`icon-btn ghost ${view === 'table' ? 'on' : ''}`} title="Data table" onClick={() => setView('table')}><Table2 size={13} /></button>
           <button className={`icon-btn ghost ${view === 'source' ? 'on' : ''}`} title="Spec source" onClick={() => setView('source')}><Code2 size={13} /></button>
+          {!streaming && <button className="icon-btn ghost" title={pinned === 'done' ? 'Pinned (static data, does not refresh)' : pinned === 'err' ? pinErr || 'Pin failed' : 'Pin to the space as a widget (static data, does not refresh)'} disabled={pinned === 'busy'} onClick={() => { setPinned('busy'); pinChart(spec).then(() => setPinned('done'), (e) => { setPinErr((e as Error).message); setPinned('err') }) }}>{pinned === 'done' ? <Check size={13} /> : <Pin size={13} />}</button>}
+          {pinned === 'err' && <span role="alert" className="muted small">{pinErr || 'Pin failed'}</span>}
           <button className="icon-btn ghost" title="Copy spec" onClick={copy}>{copied ? <Check size={13} /> : <Copy size={13} />}</button>
         </div>
       </div>

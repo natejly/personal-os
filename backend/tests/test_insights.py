@@ -24,7 +24,7 @@ from personal_os.db import Database  # noqa: E402
 SETTINGS = {"baseUrl": "http://localhost:4000", "apiKey": "", "defaultModel": "test-model", "extractionModel": ""}
 
 
-def _monitor(reply: str = "") -> activity.Monitor:
+def _monitor(reply: str = "", autoMemory: bool = True) -> activity.Monitor:
     """A Monitor on a throwaway db with a stub LLM and no collectors running."""
     calls: list[dict] = []
 
@@ -36,6 +36,8 @@ def _monitor(reply: str = "") -> activity.Monitor:
 
     m = activity.Monitor(Database(Path(tempfile.mkdtemp())), lambda: dict(SETTINGS), fake_complete)
     m.llm_calls = calls  # type: ignore[attr-defined]
+    if autoMemory:
+        m.set_config({"insights": {"autoMemory": True}})
     return m
 
 
@@ -528,3 +530,12 @@ if __name__ == "__main__":
             traceback.print_exc()
     print(f"\n{len(fns) - failed}/{len(fns)} passed")
     sys.exit(1 if failed else 0)
+
+
+def test_autoMemory_defaults_off_so_a_confident_habit_writes_no_memory() -> None:
+    assert insights.DEFAULTS["autoMemory"] is False
+    m = _monitor(REPLY, autoMemory=False)
+    _seeded(m)
+    asyncio.run(m.insights.refresh(force=True))
+    assert m.insights.list_habits()
+    assert m.insights.memories.list(None) == []

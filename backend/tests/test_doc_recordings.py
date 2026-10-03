@@ -63,6 +63,7 @@ class World:
         self.svc = meetings.MeetingService(self.db, lambda: dict(SETTINGS), fake_complete, self.repo,
                                            docs=self.docs, publish=self.events.append)
         self.docs.on_delete = self.repo.purge_doc
+        self.svc.set_config({"minSummaryWords": 0})  # the fixtures' one-liners; the guard has its own tests
 
     def recording(self, doc: dict[str, Any], mode: str = "record", said: str = SAID,
                   status: str = "ready") -> dict[str, Any]:
@@ -173,7 +174,7 @@ def test_summarize_proposes_an_append_and_never_touches_the_doc() -> None:
     out = w.summarize(m["id"])
     rev = out["revision"]
     assert out["error"] is None and rev["status"] == "pending" and rev["tool"] == "recording_summary"
-    assert rev["after"].startswith("# Plan\n- item\n\n## Recording summary (")
+    assert rev["after"].startswith("# Plan\n- item\n\n:::ai\n\n## Recording summary (") and rev["after"].rstrip().endswith("\n\n:::")
     assert "Ship the tiers on the fourteenth" in rev["after"]
     got = w.docs.get(doc["id"])
     assert got["content"] == "# Plan\n- item"                      # not applied, whatever the edit mode
@@ -199,9 +200,9 @@ def test_text_typed_after_the_proposal_survives_accept() -> None:
     view = w.docs.get(doc["id"])["pending"][0]
     # the diff shows only the addition and is not stale
     assert view["before"] == "# Plan\nTyped while the summary was thinking."
-    assert view["after"].startswith(view["before"] + "\n\n## Recording summary") and view["stale"] is False
+    assert view["after"].startswith(view["before"] + "\n\n:::ai\n\n## Recording summary") and view["stale"] is False
     got = w.docs.accept(rev["id"])
-    assert got["content"].startswith("# Plan\nTyped while the summary was thinking.\n\n## Recording summary")
+    assert got["content"].startswith("# Plan\nTyped while the summary was thinking.\n\n:::ai\n\n## Recording summary")
     applied = w.docs.revision(rev["id"])
     assert applied["status"] == "applied" and applied["after"] == got["content"]
     assert applied["before"] == "# Plan\nTyped while the summary was thinking."
@@ -512,7 +513,7 @@ def test_routes_a_refused_start_leaves_no_row_and_the_doc_routes_work() -> None:
         real_complete = meeting_svc._complete
         meeting_svc._complete = fake
         try:
-            meeting_store.finalize(mid, "[you] we should ship on the fourteenth")
+            meeting_store.finalize(mid, "[you] we should ship on the fourteenth " + "word " * 40)
             r = client.post(f"/meetings/{mid}/summarize", json={})
             assert r.status_code == 200, r.text
             body = r.json()
@@ -578,6 +579,30 @@ def test_routes_404_for_a_trashed_docs_recording() -> None:
         for path in ("", "/segments", "/transcript", "/actions", "/revisions"):
             assert client.get(f"/meetings/{m['id']}{path}").status_code == 404, path
         assert client.post(f"/meetings/{m['id']}/summarize", json={}).status_code == 404
+    finally:
+        docs.delete(d["id"])
+
+
+def test_docs_search_finds_words_only_spoken_in_a_recording() -> None:
+    from fastapi.testclient import TestClient
+
+    from personal_os.app import AUTH_TOKEN, app, docs, meeting_store, toolbox
+
+    client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
+    d = docs.create("Offsite plan", "# Agenda")
+    m = meeting_store.create(title="Offsite plan", doc_id=d["id"], doc_mode="record", status="ready")
+    meeting_store.finalize(m["id"], "Dana: the zeppelinquartz budget is approved", status="ready")
+    try:
+        hits = client.get("/docs/search?q=zeppelinquartz").json()
+        assert [(h["doc_id"], h["via"]) for h in hits] == [(d["id"], "recording")] and "zeppelinquartz" in hits[0]["snippet"]
+        ctx: dict[str, Any] = {}
+        out = asyncio.get_event_loop().run_until_complete(toolbox.specs["doc_search"].fn(ctx, "zeppelinquartz"))
+        assert out["count"] == 1 and ctx.get("tainted") is True
+        clean: dict[str, Any] = {}
+        asyncio.get_event_loop().run_until_complete(toolbox.specs["doc_search"].fn(clean, "Agenda"))
+        assert not clean.get("tainted")
+        Trash(meeting_store.db, None, docs).trash("doc", d["id"])
+        assert client.get("/docs/search?q=zeppelinquartz").json() == []
     finally:
         docs.delete(d["id"])
 
@@ -657,6 +682,253 @@ def test_an_ordinary_revision_is_stale_after_an_append_is_accepted() -> None:
     cur = w.docs.get(doc["id"])["content"]
     full = w.docs._rev_view(w.docs.revision(old["id"]), cur)
     assert full["status"] == "pending" and full["stale"] is True and full["stat_vs_current"] is not None
+
+
+# ---------------------------------------------------------------- silence notice and auto-pause
+
+
+def test_summary_evidence_reaches_the_meeting_row_and_the_stored_text_is_tag_free() -> None:
+    w = World()
+    doc = w.docs.create("Plan", "# Plan")
+    m = w.recording(doc)
+    seg_id = w.repo.segments(m["id"], limit=10)[0]["id"]
+    w.reply = json.dumps({"summary_markdown": "- Ship the tiers {s1}\n- Dana owns the deck {s7}", "headline": "h"})
+    out = w.summarize(m["id"], force=True)
+    row = w.repo.get(m["id"])
+    assert row["summary_evidence"] == {"0": [seg_id]}
+    assert "{" not in row["enhanced"] and "{" not in out["revision"]["after"]
+
+
+def test_note_marks_reach_the_summary_payload_only_when_present() -> None:
+    w = World()
+    doc = w.docs.create("Plan", "# Plan\n- pricing tiers: ask about the fourteenth\n- gone line")
+    m = w.recording(doc)
+    w.summarize(m["id"])
+    assert "note_timeline" not in json.loads(w.llm[0]["messages"][1]["content"])
+    marks = w.repo.set_note_marks(m["id"], [{"line": "- pricing tiers: ask about the fourteenth", "t": 271},
+                                            {"line": "- gone line", "t": 300}, {"line": "- deleted", "t": 5}])
+    assert len(marks) == 3 and w.repo.get(m["id"])["note_marks"][0]["t"] == 271
+    w.docs.save(doc["id"], content="# Plan\n- pricing tiers: ask about the fourteenth")
+    w.summarize(m["id"], force=True)
+    user = json.loads(w.llm[-1]["messages"][1]["content"])
+    assert user["note_timeline"] == [{"at": "04:31", "line": "- pricing tiers: ask about the fourteenth"}]
+
+
+def test_note_marks_merge_cap_and_ignore_dictation() -> None:
+    w = World()
+    doc = w.docs.create("Plan", "x")
+    m = w.recording(doc)
+    w.repo.set_note_marks(m["id"], [{"line": "a", "t": 1}])
+    out = w.repo.set_note_marks(m["id"], [{"line": "a", "t": 9}, {"line": "bad", "t": "x"}])
+    assert out == [{"line": "a", "t": 9.0}]
+    out = w.repo.set_note_marks(m["id"], [{"line": f"l{i}", "t": i} for i in range(600)])
+    assert len(out) == meetings.MAX_NOTE_MARKS and out[-1]["line"] == "l599"
+    d = w.recording(doc, mode="dictate")
+    assert w.repo.set_note_marks(d["id"], [{"line": "a", "t": 1}]) == []
+    assert w.repo.set_note_marks("nope", []) is None
+# ---------------------------------------------------------------- calendar 'Take notes'
+def _event_world(start: Any) -> tuple[World, Any]:
+    from personal_os import app as appmod
+    w = World()
+    appmod.docs, appmod.meeting_store = w.docs, w.repo
+    appmod.activity.IS_MAC = True
+    appmod.meeting_svc = SimpleNamespace(start=start, capabilities=lambda: [])
+    w.docs.on_delete = w.repo.on_doc_deleted if hasattr(w.repo, "on_doc_deleted") else w.docs.on_delete
+    return w, appmod
+def test_from_event_creates_one_doc_with_attendees_and_is_idempotent() -> None:
+    w, appmod = _event_world(lambda mid: w.repo.get(mid))
+    body = appmod.DocFromEventIn(event_id="ev1", title="Pricing sync", start=1000.0,
+                                 attendees=[{"email": "a@x.io", "name": "Ann"}, "b@x.io"])
+    out = asyncio.run(appmod.doc_from_event(body))
+    assert out["existing"] is False and out["doc"]["title"] == "Pricing sync"
+    assert "Attendees: Ann, b@x.io" in out["doc"]["content"]
+    assert out["started"]["doc_id"] == out["doc"]["id"] and out["started"]["calendar_event_id"] == "ev1"
+    again = asyncio.run(appmod.doc_from_event(body))
+    assert again["existing"] is True and again["doc"]["id"] == out["doc"]["id"]
+    assert len(w.docs.list("__all__", "")) == 1
+def test_from_event_refused_start_leaves_no_doc() -> None:
+    from personal_os.meetings import MeetingBlocked
+
+    def refuse(mid: str) -> Any:
+        raise MeetingBlocked([{"id": "consent", "label": "Consent", "ok": False}])
+    w, appmod = _event_world(refuse)
+    try:
+        asyncio.run(appmod.doc_from_event(appmod.DocFromEventIn(event_id="ev2", title="T")))
+        raise AssertionError("expected 409")
+    except appmod.HTTPException as e:
+        assert e.status_code == 409
+    assert w.docs.list("__all__", "") == [] and w.repo.by_event("ev2") is None
+def test_a_recording_with_too_little_speech_is_refused_without_a_model_call() -> None:
+    w = World()
+    w.svc.set_config({"minSummaryWords": 40})
+    doc = w.docs.create("Plan", "# Plan\n")
+    res = w.summarize(w.recording(doc, said="uh okay then")["id"])
+    assert "Too little was said" in res["error"] and res["revision"] is None and w.llm == []
+def test_the_section_says_how_many_words_were_heard_and_which_model_and_template() -> None:
+    w = World()
+    doc = w.docs.create("Plan", "# Plan\n")
+    rev = w.summarize(w.recording(doc)["id"])["revision"]
+    assert "words heard)" in rev["after"]
+    assert "_Model test-model, template general_" in rev["after"]
+def test_meeting_read_of_a_live_meeting_returns_the_transcript_so_far() -> None:
+    from test_mcp_servers import full_toolbox
+    w = World()
+    doc = w.docs.create(title="Live")
+    m = w.repo.create(title="Live", doc_id=doc["id"], doc_mode="record", status="scheduled")
+    w.repo.mark_started(m["id"], str(w.tmp / "rec" / m["id"]), ["mic"], started_at=time.time() - 30)
+    w.segment(m["id"], "we agreed on friday")
+    tb = full_toolbox(w.repo)
+    ctx: dict[str, Any] = {"project_id": "p1"}
+    out = asyncio.run(tb.call("meeting_read", {"meeting": m["id"], "part": "transcript"}, ctx))
+    assert "we agreed on friday" in out["text"] and "transcript so far" in out["note"]
+    assert ctx.get("tainted") is True
+    # Stopped with an empty stored transcript: same fallback, no in-progress note.
+    w.repo.finalize(m["id"], "", status="ready")
+    out = asyncio.run(tb.call("meeting_read", {"meeting": m["id"], "part": "transcript"}, {"project_id": "p1"}))
+    assert "we agreed on friday" in out["text"] and "in progress" not in out.get("note", "")
+# ---------------------------------------------------------------- silence notice and auto-pause
+
+
+def test_silent_for_and_the_silence_pause_use_the_clock_and_only_pause() -> None:
+    w = World()
+    doc = w.docs.create("Plan", "# Plan")
+    m = w.repo.create(title="t", doc_id=doc["id"], doc_mode="record", status="scheduled")
+    pool = _Pool(w.tmp)
+    w.svc.pool = pool                                                        # type: ignore[assignment]
+    t0 = time.time()
+    w.svc.set_config({"silencePauseMinutes": 2})
+    sess = pool.start(m["id"], {"mic": 1}, segment_seconds=6)
+    sess.started_at, sess.paused, sess.captures = t0, False, {"mic": 1}
+    sess.stats = lambda: {"elapsed_ms": 1, "segments_done": 0, "segments_pending": 0, "queued": 0,
+                          "paused": sess.paused, "channels": [{"channel": "mic", "alive": True, "error": ""}]}
+    sess.pause = lambda on: setattr(sess, "paused", on)
+    clock = [t0 + 30]
+    real = meetings.now
+    meetings.now = lambda: clock[0]                                          # type: ignore[assignment]
+    try:
+        act = w.svc.status()["active"]
+        assert act["channels"][0]["silent_for_s"] == 30 and not act["auto_paused"]
+        w.svc._check_silence(w.svc.config())
+        assert not sess.paused                                               # not before the minutes
+        w.svc._on_segment(m["id"], "mic", 0, Path("x.wav"), {"t_start": 0, "t_end": 6, "started_at": t0,
+                          "wav_path": "", "wav_bytes": 0, "duration_ms": 6000, "state": "recorded"})
+        w.svc._on_result(m["id"], "mic", 0, Path("x.wav"), {"text": "hello", "detail": {}, "backend": "p", "error": "",
+                         "state": "done", "wav_path": "", "wav_bytes": 0})
+        clock[0] = t0 + 30 + 100
+        assert w.svc.status()["active"]["channels"][0]["silent_for_s"] == 100
+        w.svc._check_silence(w.svc.config())
+        assert not sess.paused                                               # speech reset the clock
+        clock[0] = t0 + 30 + 121
+        w.svc._check_silence(w.svc.config())
+        assert sess.paused and w.svc.status()["active"]["auto_paused"]
+        assert "Paused after 2 minutes of silence" in w.repo.get(m["id"])["error"]
+        w.svc.resume(m["id"])
+        assert not sess.paused and not w.svc.status()["active"]["auto_paused"]
+        assert "Paused after" not in (w.repo.get(m["id"])["error"] or "")
+        assert "Paused after" not in (w.svc.status()["active"]["error"] or "")
+        assert w.svc.status()["active"]["channels"][0]["silent_for_s"] == 0
+        w.svc.set_config({"silencePauseMinutes": 0})
+        clock[0] += 99999
+        w.svc._check_silence(w.svc.config())
+        assert not sess.paused                                               # 0 disables
+    finally:
+        meetings.now = real                                                  # type: ignore[assignment]
+
+
+def test_the_config_route_model_keeps_silence_pause_minutes() -> None:
+    from personal_os.app import MeetingConfigIn
+    assert MeetingConfigIn(silencePauseMinutes=3).model_dump(exclude_none=True) == {"silencePauseMinutes": 3}
+def _kept_segment(w: World, mid: str, wav: Path, seq: int = 0) -> str:
+    wav.parent.mkdir(parents=True, exist_ok=True)
+    wav.write_bytes(b"RIFF....WAVE")
+    w.segment(mid, "kept words", seq=seq)
+    sid = w.repo.segment_id(mid, "mic", seq)
+    with w.db.tx() as c:
+        c.execute("UPDATE meeting_segments SET wav_path=? WHERE id=?", (str(wav), sid))
+    return sid
+
+
+def test_kept_segment_wav_guards() -> None:
+    w = World()
+    m = w.recording(w.docs.create("Plan", "# Plan"))
+    mid, audio = m["id"], w.tmp / "rec" / m["id"]
+    sid = _kept_segment(w, mid, audio / "a.wav")
+    assert w.repo.kept_segment_wav(mid, sid) is None                       # keep_audio is off
+    w.repo.patch(mid, {"keep_audio": True})
+    assert w.repo.kept_segment_wav(mid, sid) == (audio / "a.wav").resolve()
+    other = w.recording(w.docs.create("Other", "x"))
+    assert w.repo.kept_segment_wav(other["id"], sid) is None               # another meeting's segment
+    (audio / "a.wav").unlink()
+    assert w.repo.kept_segment_wav(mid, sid) is None                       # file gone
+    outside = w.tmp / "elsewhere.wav"
+    outside.write_bytes(b"x")
+    for bad in ("", str(outside), str(audio / ".." / ".." / "elsewhere.wav")):
+        with w.db.tx() as c:
+            c.execute("UPDATE meeting_segments SET wav_path=? WHERE id=?", (bad, sid))
+        assert w.repo.kept_segment_wav(mid, sid) is None, bad
+
+
+def test_routes_serve_kept_audio_and_store_the_per_recording_flag() -> None:
+    from fastapi.testclient import TestClient
+
+    from personal_os import app as app_mod
+    from personal_os.app import AUTH_TOKEN, app, docs, meeting_store
+
+    client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
+    d = docs.create("Audio plan", "# x")
+    m = meeting_store.create(title="t", doc_id=d["id"], status="scheduled")
+    mid = m["id"]
+    tmp = _tmp()
+    wav = tmp / "s.wav"
+    wav.write_bytes(b"RIFF....WAVE")
+    real_create, real_mac = meeting_store.create, app_mod.activity.IS_MAC
+    seen: list[Any] = []
+    try:
+        meeting_store.mark_started(mid, str(tmp), ["mic"], started_at=time.time())
+        with meeting_store.db.tx() as c:
+            c.execute("INSERT INTO meeting_segments (id, meeting_id, channel, seq, t_start, t_end, started_at, created_at, wav_path, state) "
+                      "VALUES ('seg-k', ?, 'mic', 0, 0, 6, 0, 0, ?, 'done')", (mid, str(wav)))
+        url = f"/meetings/{mid}/segments/seg-k/audio"
+        assert client.get(url).status_code == 404                           # keep_audio off
+        meeting_store.patch(mid, {"keep_audio": True})
+        r = client.get(url)
+        assert r.status_code == 200 and r.headers["content-type"] == "audio/wav" and r.content == wav.read_bytes()
+        assert client.get(f"/meetings/{mid}/segments/nope/audio").status_code == 404
+        assert client.get("/meetings/nope/segments/seg-k/audio").status_code == 404
+        wav.unlink()
+        assert client.get(url).status_code == 404                           # file missing
+
+        # the checkbox value reaches the row; the start itself is blocked, so only create is observed
+        app_mod.activity.IS_MAC = True
+        meeting_store.create = lambda **kw: (seen.append(kw), real_create(**kw))[1]   # type: ignore[assignment]
+        for sent, want in ((True, True), (None, False)):
+            body = {"mode": "record"} if sent is None else {"mode": "record", "keep_audio": sent}
+            client.post(f"/docs/{d['id']}/recordings", json=body)
+            assert seen[-1]["keep_audio"] is want
+    finally:
+        meeting_store.create, app_mod.activity.IS_MAC = real_create, real_mac     # type: ignore[assignment]
+        meeting_store.delete(mid)
+        docs.delete(d["id"])
+
+
+def test_start_keeps_audio_for_the_row_flag_and_patches_the_row_for_the_global_flag() -> None:
+    w = World()
+    w.svc.set_config({"enabled": True, "sources": ["mic"]})
+    w.svc.preflight = lambda force=False: {"ok": True, "blockers": []}      # type: ignore[assignment]
+    real = (meetings.native_audio.mic_available, audiocap.native_mic_input)
+    meetings.native_audio.mic_available = lambda: True                       # type: ignore[assignment]
+    audiocap.native_mic_input = lambda uid="": ["native", "mic", uid]        # type: ignore[assignment]
+    try:
+        doc = w.docs.create("Plan", "# Plan")
+        for glob, row, want_row in ((False, True, True), (True, False, True), (False, False, False)):
+            w.svc.set_config({"keepAudio": glob})
+            w.svc.pool = _Pool(w.tmp)                                        # type: ignore[assignment]
+            m = w.repo.create(title="t", doc_id=doc["id"], status="scheduled", keep_audio=row)
+            w.svc.start(m["id"])
+            assert w.svc.pool.kw["keep_audio"] is (glob or row)              # type: ignore[attr-defined]
+            assert w.repo.get(m["id"])["keep_audio"] is want_row
+    finally:
+        meetings.native_audio.mic_available, audiocap.native_mic_input = real  # type: ignore[assignment]
 
 
 if __name__ == "__main__":

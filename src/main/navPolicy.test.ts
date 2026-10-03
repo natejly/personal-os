@@ -62,6 +62,9 @@ test('a subframe may load a widget or a source, and nothing else on the sidecar'
   assert.equal(frameNavigationAllowed(`${BACKEND}/integrations/google/callback?code=x&state=y`, BACKEND, RENDERER), false)
   assert.equal(frameNavigationAllowed(`${BACKEND}/widgets/abc/render/../../settings`, BACKEND, RENDERER), false)
   assert.equal(frameNavigationAllowed('https://evil.test/', BACKEND, RENDERER), false)
+  // A file dropped on a preview frame: the frame is sidecar or srcdoc content, never the disk.
+  assert.equal(frameNavigationAllowed('file:///tmp/x.pdf', BACKEND, RENDERER), false)
+  assert.equal(frameNavigationAllowed('file:///tmp/x.pdf', BACKEND, undefined), false)
 })
 
 test('the web widget cannot dial the sidecar or the page loader, in any loopback spelling', () => {

@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react'
-import { Check, MessageSquare, MessagesSquare, Pencil, RefreshCw } from 'lucide-react'
+import { Check, MessageSquare, MessagesSquare, Pencil } from 'lucide-react'
 import type { CanvasWindow, DragKind, DragPayload } from '@shared/types'
 import MessageView from '../../components/Message'
+import RegenRow from '../../components/RegenRow'
 import Composer from '../../components/Composer'
 import ChatControls from '../../components/ChatControls'
 import { api } from '../../lib/api'
-import { uploadContextNote } from '../../lib/uploadNote'
+import { uploadNote } from '../../lib/uploadNote'
 import { retainSession, useConversation, useIsStreaming, useStore, useStreamingMessageId } from '../../store'
 import { useDropTarget } from '../dnd'
 import type { WidgetDef, WidgetProps } from '../registry'
@@ -109,7 +110,6 @@ function ChatWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
   const streaming = useIsStreaming(convId)
   const streamingId = useStreamingMessageId(convId)
   const { status } = useRingStatus(convId)
-  const regenerate = useStore((s) => s.regenerate)
 
   // An on-screen window is not an LRU victim for as long as it is mounted.
   useEffect(() => (convId ? retainSession(convId) : undefined), [convId])
@@ -153,7 +153,8 @@ function ChatWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
       const saved = await app.uploadDocuments(files, convo?.project_id ?? null)
       if (!saved.length) return
       await app.noteUntrustedUpload(convId || undefined, 'draft')
-      draft(uploadContextNote(saved))
+      const { note } = uploadNote(saved)
+      if (note) draft(note)
       return
     }
     switch (p.kind) {
@@ -235,12 +236,8 @@ function ChatWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
       <ChatTitle convId={convId} title={convo?.title ?? ''} switcher={<ChatSwitcher win={win} convId={convId} />} />
       <div className="messages" ref={scroll} onScroll={onScroll}>
         <div className="messages-inner">
-          {msgs.map((m) => <MessageView key={m.id} message={m} streaming={streaming && streamingId === m.id} />)}
-          {!streaming && last?.role === 'assistant' && (
-            <div className="regen-row">
-              <button className="ghost-btn" onClick={() => void regenerate(convId)}><RefreshCw size={13} /> Regenerate</button>
-            </div>
-          )}
+          {msgs.map((m) => <MessageView key={m.id} message={m} streaming={streaming && streamingId === m.id} last={m.id === last?.id} />)}
+          <RegenRow conversationId={convId} last={last} streaming={streaming} />
           {!msgs.length && <p className="widget-sub">No messages yet.</p>}
         </div>
       </div>

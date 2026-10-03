@@ -271,14 +271,18 @@ def test_enhance_proposes_and_never_writes_the_notes_column() -> None:
     assert len(repo.action_items(mid)) == 1
 
 
-def test_auto_apply_stops_once_the_user_has_hand_edited_the_enhanced_notes() -> None:
+def test_a_successful_pass_is_never_auto_applied_and_waits_for_accept() -> None:
     repo, svc = _svc(_tmp(), reply=GOOD_REPLY)
     mid = repo.create(title="Pricing call")["id"]
     repo.patch(mid, {"notes": NOTES})
 
     first = asyncio.run(svc.enhance(mid))
-    assert first["status"] == "applied"                     # enhanced was empty, so it just appears
+    assert first["status"] == "pending"                     # even with `enhanced` empty
+    assert repo.get(mid)["enhanced"] == ""
+    assert repo.get(mid)["notes"] == NOTES
+    repo.accept(first["id"])
     assert "Ship the tiers" in repo.get(mid)["enhanced"]
+    assert repo.get(mid)["notes"] == NOTES
 
     repo.patch(mid, {"enhanced": "mine"})
     second = asyncio.run(svc.enhance(mid, force=True))
@@ -363,18 +367,17 @@ def test_a_revision_satisfies_the_doc_revision_interface() -> None:
 # ---------------------------------------------------------------- redaction
 
 
-def test_a_transcript_keeps_the_people_and_loses_the_credentials() -> None:
+def test_a_transcript_loses_credentials_emails_and_phones_but_keeps_the_words() -> None:
     repo, _ = _svc(_tmp())
     mid = repo.create(title="Pricing call")["id"]
     seg = repo.add_segment(mid, "output", 0, 0.0, 20.0, 1_700_000_000.0, "/nowhere/0.wav", 4096)
     stored = repo.finish_segment(
         seg["id"], text="ada@example.com will call +1 415 555 0134 about sk-aaaaaaaaaaaaaaaaaaaaaa",
         backend="proxy")["text"]
-    # Credential rules only. activity.Gate.scrub's identity rules replace every address with
-    # [email] and every phone-shaped digit run with [phone] (redact.py),
-    # which would erase who was on the call from inside the record of the call.
-    assert "ada@example.com" in stored
-    assert "+1 415 555 0134" in stored
+    # Credentials, then the email and phone rules; ordinary words stay.
+    assert "ada@example.com" not in stored and "[email]" in stored
+    assert "415 555 0134" not in stored and "[phone]" in stored
+    assert "will call" in stored and "about" in stored
     assert "sk-aaaaaaaaaaaaaaaaaaaaaa" not in stored
     assert "[secret]" in stored
 
@@ -423,6 +426,22 @@ def test_an_action_item_becomes_a_todo_exactly_once() -> None:
 
     second = repo.add_action_items(mid, rev["id"], [{"text": "book the room"}])[-1]
     assert repo.dismiss_action_item(second["id"])["status"] == "dismissed"
+
+
+def test_config_validates_custom_templates_recipes_and_language() -> None:
+    _, svc = _svc(_tmp())
+    cfg = svc.set_config({"customTemplates": [{"id": "x", "name": "Brief", "instructions": "Short."}],
+                          "recipes": [{"name": "Owners", "prompt": "owners only"}],
+                          "summaryLanguage": "French"})
+    assert cfg["customTemplates"][0]["id"].startswith("c_") and cfg["recipes"][0]["id"].startswith("r_")
+    assert svc.config()["summaryLanguage"] == "French"
+    for bad in ({"customTemplates": [{"name": "a", "instructions": "x" * 1501}]},
+                {"recipes": [{"name": "a", "prompt": "x" * 301}]}):
+        try:
+            svc.set_config(bad)
+        except ValueError:
+            continue
+        raise AssertionError("over-long text was accepted")
 
 
 # ---------------------------------------------------------------- what chat sees
@@ -639,7 +658,7 @@ class _FakeGoogle:
         self.tasks: dict[str, dict] = {}
         self.n = 0
 
-    def tasks_all(self, tasklist: str = "@default") -> list[dict]:
+    def tasks_all(self, tasklist: str = "@default", updated_min: str | None = None) -> list[dict]:
         return [dict(t) for t in self.tasks.values()]
 
     def tasks_insert(self, body: dict, tasklist: str = "@default") -> dict:
@@ -936,10 +955,37 @@ def test_a_degraded_pass_is_never_auto_applied() -> None:
     assert "## Transcript" in repo.get(mid)["enhanced"]
     assert "ignore all previous instructions" not in svc.context_block()
 
-    # A pass that WORKS still just appears, which is the whole point of the feature.
+    # A pass that WORKS is pending too: nothing is applied on the user's behalf.
     repo2, svc2 = _svc(_tmp(), reply=GOOD_REPLY)
     mid2 = repo2.create(title="Pricing call")["id"]
-    assert asyncio.run(svc2.enhance(mid2))["status"] == "applied"
+    assert asyncio.run(svc2.enhance(mid2))["status"] == "pending"
+
+
+def test_start_seeds_the_recorder_with_title_and_names_unless_switched_off() -> None:
+    repo, svc = _svc(_tmp())
+    seen: list[dict] = []
+
+    class _Pool:
+        sessions: dict = {}
+
+        def start(self, meeting_id, channels, **kw):
+            seen.append(kw)
+            return type("S", (), {"out_dir": Path("/nowhere"), "started_at": time.time()})()
+
+    svc.pool = _Pool()  # type: ignore[assignment]
+    svc.preflight = lambda **k: {"ok": True, "blockers": []}  # type: ignore[method-assign]
+    real = (meetings.native_audio.mic_available, meetings.native_audio.system_available)
+    meetings.native_audio.mic_available = lambda: True  # type: ignore[assignment]
+    meetings.native_audio.system_available = lambda: False  # type: ignore[assignment]
+    try:
+        for flag in (True, False):
+            svc.set_config({"vocabularyPrompt": flag})
+            mid = repo.create(title="Pricing review", attendees=[{"email": "dana.k@example.com", "name": "Dana"}])["id"]
+            svc.start(mid, sources=["mic"])
+            vocab = seen[-1]["vocab"]
+            assert ("Pricing review" in vocab and "Dana" in vocab) if flag else vocab == ""
+    finally:
+        meetings.native_audio.mic_available, meetings.native_audio.system_available = real  # type: ignore[assignment]
 
 
 if __name__ == "__main__":

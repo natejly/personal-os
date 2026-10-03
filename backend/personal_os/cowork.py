@@ -770,6 +770,7 @@ _VERBS = {
     "desk_trash_file": "trashing",
     "desk_deliver": "delivering",
     "desk_import_sandbox": "importing",
+    "sandbox_export_file": "exporting",
     "desk_ask": "asking you",
     "desk_done": "wrapping up",
     "propose_plan": "writing a plan",

@@ -31,6 +31,7 @@ from typing import Any, Callable
 
 from . import compaction, llm, permrules
 from .db import new_id, now
+from .toolcalls import parse_arguments
 from .tools import ALTERNATIVE, ToolSpec, _obj, call_key, denied, summarize_result, tool_error
 
 log = logging.getLogger(__name__)
@@ -56,12 +57,22 @@ CHILD_BLOCK = frozenset({
 CHILD_DANGER_BLOCK = ("plan", "schedules", "external")
 FILE_WRITERS = ("write_local_file", "move_local_file", "fs_edit", "fs_copy", "fs_mkdir")
 SHELL_TOOLS = ("shell_run", "shell_poll", "shell_kill")
+STATEFUL_GROUPS = ("browser", "shell", "sandbox")  # tools that hold session state never run side by side
+
+
+def parallel_safe(spec: Any, name: str, mode: str) -> bool:
+    """True when a call can run beside its neighbours: a plain read (safe/network tier) that is on, not a writer,
+    not a spawn, and not a tool that holds session state."""
+    return bool(spec and spec.danger in ("safe", "network") and mode == "on" and name not in WRITER_TOOLS
+                and not name.startswith("agent_") and spec.group not in STATEFUL_GROUPS)
+
+
 WRITER_TOOLS = frozenset({*FILE_WRITERS, *SHELL_TOOLS, "run_python", "desk_write_file", "desk_trash_file", "desk_import_sandbox"})
 PATH_ARGS = ("path", "dest", "destination", "src", "source", "cwd", "to")
 
 READ_TOOLS = (
     "search_documents", "read_document", "list_documents", "search_memory", "graph_search", "graph_traverse",
-    "web_search", "fetch_url", "read_local_file", "find_files", "fs_glob", "fs_grep", "read_tool_result", "current_time",
+    "web_search", "fetch_url", "read_local_file", "find_files", "fs_glob", "fs_grep", "read_tool_result", "search_tool_results", "current_time",
     "doc_list", "doc_search", "doc_read", "youtube_search", "youtube_video", "github_search", "github_read", "read_feed",
     "desk_list_files", "desk_read_file", "view_image", "doc_guide",
 )
@@ -662,10 +673,11 @@ class Subagents:
     async def _loop(self, ch: Child) -> None:
         cfg = ch.ctx.get("settings") or self.settings()
         schemas = self.toolbox.schemas(ch.modes)
-        window = int(cfg.get("contextWindow") or 128000)
         for rnd in range(1, ch.steps + 1):
             self._check(ch)
             ch.rounds = rnd
+            known = self.pricing.caps(ch.model).get("max_input_tokens") if self.pricing is not None else None
+            window = compaction.window_for(cfg, ch.model, known)
             # Once old tool output would free real room, it shrinks to a stub (the full text stays behind its handle).
             compaction.microcompact(ch.messages, int(cfg.get("microKeep") or 3), window, float(cfg.get("microAt") or 0.5))
             text, end = await self._model_round(ch, schemas)
@@ -680,7 +692,8 @@ class Subagents:
                 return
             ch.messages.append({"role": "assistant", "content": text or None,
                                 "tool_calls": [{"id": c["id"], "type": "function",
-                                                "function": {"name": c["name"], "arguments": c["arguments"] or "{}"}} for c in calls]})
+                                                "function": {"name": c["name"] or "invalid_tool",
+                                                             "arguments": self._echo_args(c)}} for c in calls]})
             if rnd == ch.steps:
                 # Out of steps with calls still pending: answer each, then ask for one tool-free summary.
                 for c in calls:
@@ -703,9 +716,7 @@ class Subagents:
 
     # ---- one round of tool calls -------------------------------------------------------------------
     def _parallel_ok(self, ch: Child, name: str) -> bool:
-        spec = self.toolbox.specs.get(name)
-        return bool(spec and spec.danger in ("safe", "network") and ch.modes.get(name) == "on"
-                    and name not in WRITER_TOOLS and not name.startswith("agent_"))
+        return parallel_safe(self.toolbox.specs.get(name), name, ch.modes.get(name, "off"))
 
     async def _run_calls(self, ch: Child, calls: list[dict[str, Any]]) -> None:
         """Consecutive read-only calls run together (up to ROUND_PARALLEL); anything else is a barrier. Identical
@@ -746,11 +757,17 @@ class Subagents:
 
     @staticmethod
     def _args(c: dict[str, Any]) -> dict[str, Any]:
-        try:
-            a = json.loads(c["arguments"] or "{}")
-            return a if isinstance(a, dict) else {}
-        except ValueError:
-            return {"_raw": c["arguments"]}
+        args, _repaired, _problem = parse_arguments(c["arguments"])
+        return {"_raw": c["arguments"]} if args is None else args
+
+    @staticmethod
+    def _echo_args(c: dict[str, Any]) -> str:
+        """Arguments for the assistant turn sent back to the provider: '{}' for a call that failed to parse,
+        re-serialised JSON for a repaired one, the text as sent otherwise. Always a JSON object."""
+        args, repaired, _problem = parse_arguments(c["arguments"])
+        if args is None:
+            return "{}"
+        return json.dumps(args, ensure_ascii=False) if repaired else (c["arguments"] or "{}")
 
     async def _exec(self, ch: Child, c: dict[str, Any], args: dict[str, Any]) -> str:
         name = c["name"]
@@ -779,7 +796,9 @@ class Subagents:
                                      roots=self._perm_roots(ch), conv=ch.conversation_id)
             mode, forced = perm.mode, perm.forced
             if not perm.refusal:
-                mode = permrules.lift_permission_ask(name, mode, skip=bool(ch.ctx.get("skip_permissions")))
+                mode = permrules.lift_permission_ask(
+                    name, mode, skip=bool(ch.ctx.get("skip_permissions")), forced=forced, danger=spec.danger,
+                    fenced=bool(fs_ask) or perm.kind == "rule")
             bad = perm.refusal or self._confine(ch, name, args)
             if bad:
                 result = denied(name, bad)

@@ -156,6 +156,42 @@ class StoreTests(unittest.TestCase):
         self.assertIn("mailWatch", llm.DEFAULT_SETTINGS)
         self.assertEqual(llm.DEFAULT_SETTINGS["mailWatch"]["awaitingAfterDays"], 3)
 
+    def test_snooze_hides_until_time_then_reappears(self) -> None:
+        self.put(thread("a", msg("1", "al@y.com", 1, "Can you help?")))
+        self.assertTrue(self.store.snooze("a", NOW + timedelta(hours=2)))
+        self.assertEqual(self.store.list("to_reply", at=NOW + timedelta(hours=1)), [])
+        self.assertEqual(self.store.list("to_reply", at=NOW + timedelta(hours=1), include_dismissed=True), [])
+        self.assertEqual([r["thread_id"] for r in self.store.list("to_reply", at=NOW + timedelta(hours=3))], ["a"])
+
+    def test_counts_follow_snooze(self) -> None:
+        self.put(thread("a", msg("1", "al@y.com", 1, "Can you help?")))
+        self.store.snooze("a", NOW + timedelta(hours=2))
+        self.assertEqual(self.store.counts(CFG, NOW)["to_reply"], 0)
+        self.assertEqual(self.store.counts(CFG, NOW + timedelta(hours=3))["to_reply"], 1)
+
+    def test_refresh_keeps_snooze_unless_new_message(self) -> None:
+        t1 = thread("a", msg("1", "al@y.com", 1, "Can you help?"))
+        self.put(t1)
+        self.store.snooze("a", NOW + timedelta(days=1))
+        self.put(t1)
+        self.assertIsNotNone(self.store.get("a")["snoozed_until"])
+        self.put(thread("a", msg("1", "al@y.com", 1, "Can you help?"), msg("2", "al@y.com", 0.5, "Ping?")))
+        self.assertIsNone(self.store.get("a")["snoozed_until"])
+        self.assertEqual(len(self.store.list("to_reply", at=NOW)), 1)
+
+    def test_snooze_column_migrates_old_table(self) -> None:
+        with tempfile.TemporaryDirectory() as d:
+            db = Database(d)
+            with db.tx() as c:
+                c.execute("CREATE TABLE thread_status (thread_id TEXT PRIMARY KEY, subject TEXT, status TEXT NOT NULL, reason TEXT, "
+                          "last_msg_id TEXT, last_from TEXT, last_date TEXT, age_days REAL, dismissed INTEGER NOT NULL DEFAULT 0, "
+                          "followup_todo_id TEXT, updated_at REAL)")
+                c.execute("INSERT INTO thread_status(thread_id,status,last_date) VALUES('a','to_reply',?)", (NOW.isoformat(),))
+            store = mw.MailWatch(db)
+            self.assertEqual(len(store.list("to_reply", at=NOW)), 1)
+            self.assertTrue(store.snooze("a", NOW + timedelta(hours=1)))
+            self.assertEqual(store.list("to_reply", at=NOW), [])
+
 
 class RefineTests(unittest.TestCase):
     pairs = [(thread("t", msg("1", "al@y.com", 1, "Attached the deck.", to="bo@y.com"), subject="Deck"), {"status": "fyi", "reason": "x", "age_days": 1, "last_from": "al@y.com"})]
@@ -281,6 +317,19 @@ class ModuleTests(unittest.TestCase):
         self.assertEqual([t["thread_id"] for t in out["threads"]], ["b"])
         self.assertEqual(out["threads"][0]["subject"], "Quote")
         self.assertIn("error", asyncio.run(spec.fn({}, kind="bogus")))
+
+    def test_snooze_route(self) -> None:
+        self.client.post("/mail/watch/refresh")
+        url = "/mail/watch/a/snooze"
+        self.assertEqual(self.client.put(url, json={"until": "2026-10-05T11:00:00+00:00"}).status_code, 422)
+        self.assertEqual(self.client.put(url, json={"until": "2026-10-05T11:00:00"}).status_code, 422)
+        self.assertEqual(self.client.put("/mail/watch/zzz/snooze", json={"until": "2026-10-06T11:00:00"}).status_code, 404)
+        self.assertEqual(self.client.put(url, json={"until": "2026-10-06T11:00:00"}).status_code, 200)
+        self.assertNotIn("a", [t["thread_id"] for t in self.client.get("/mail/watch").json()["threads"]])
+        r = self.client.put(url, json={"until": None})
+        self.assertEqual(r.status_code, 200)
+        self.assertIsNone(r.json()["snoozed_until"])
+        self.assertIn("a", [t["thread_id"] for t in self.client.get("/mail/watch").json()["threads"]])
 
     def test_not_connected_is_409(self) -> None:
         self.google._me = lambda: None  # type: ignore[method-assign]

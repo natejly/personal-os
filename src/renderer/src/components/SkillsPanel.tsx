@@ -53,6 +53,7 @@ function SkillRow({ skill }: { skill: Skill }): JSX.Element {
         <span className="skill-desc muted">{skill.description}</span>
         <ProjectChip projectId={skill.project_id} showPersonal />
         <small className="muted">{SOURCE_LABEL[skill.source]}</small>
+        {!!skill.use_count && <small className="muted" title="Times the assistant read this procedure">used {skill.use_count}×</small>}
         <div className="skill-actions no-drag" onClick={(e) => e.stopPropagation()}>
           {skill.status !== 'approved' && (
             <button className="primary-btn small" title="Let the assistant use this procedure"

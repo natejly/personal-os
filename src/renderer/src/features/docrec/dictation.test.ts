@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { MeetingSegment } from '@shared/types'
 import {
-  dictationDrained, dictationText, dictationsFor, forgetDictation, planDictation, readyForInsert, trackDictation
+  dictationCommand, dictationDrained, dictationText, dictationsFor, forgetDictation, planDictation, readyForInsert, trackDictation
 } from './dictation'
 
 test('spacing: a space after a word, none after whitespace or an opener, none before punctuation', () => {
@@ -32,6 +32,37 @@ test('commands: only a whole utterance is a command', () => {
   assert.equal(dictationText('New paragraph!', 'text\n'), '\n')
   assert.equal(dictationText('new paragraph', 'text\n\n'), '')
   assert.equal(dictationText('start a new line here', 'text'), ' start a new line here')
+})
+
+test('spoken punctuation attaches to the previous word', () => {
+  assert.equal(dictationText('period', 'hello'), '.')
+  assert.equal(dictationText('Comma.', 'hello'), ',')
+  assert.equal(dictationText('question mark', 'is it'), '?')
+  assert.equal(dictationText('the period of time', 'in'), ' the period of time')
+})
+
+test('bullets and headings start at a line start', () => {
+  assert.equal(dictationText('bullet', 'text'), '\n- ')
+  assert.equal(dictationText('next bullet', 'text\n'), '- ')
+  assert.equal(dictationText('bullet', '- '), '')
+  assert.equal(dictationText('heading two', 'text'), '\n## ')
+  assert.equal(dictationText('heading one', ''), '# ')
+  assert.equal(dictationText('first item', '- '), 'First item')
+})
+
+test('fillers are stripped as whole words only', () => {
+  assert.equal(dictationText('um we should, uh, go', 'x.'), ' We should, go')
+  assert.equal(dictationText('the umbrella', 'x.'), ' The umbrella')
+  assert.equal(dictationText('um, new line', 'text'), '\n')
+  assert.equal(dictationText('uh', 'x'), '')
+})
+
+test('editor commands type nothing and are recognised whole-utterance only', () => {
+  assert.equal(dictationText('scratch that', 'x'), '')
+  assert.equal(dictationText('Stop dictation.', 'x'), '')
+  assert.equal(dictationCommand('scratch that'), 'scratch')
+  assert.equal(dictationCommand('Stop dictation!'), 'stop')
+  assert.equal(dictationCommand('please stop dictation now'), null)
 })
 
 test('whitespace and empty input', () => {
@@ -103,4 +134,14 @@ test('readyForInsert is idempotent once its consumed ids are marked seen', () =>
   const second = readyForInsert(segs, new Set(first.consumed))
   assert.deepEqual(first.ready.map((s) => s.id), ['a', 'b'])
   assert.deepEqual(second.ready, [])
+})
+
+test('spoken punctuation: period, comma and question mark, mid-clip too', () => {
+  assert.equal(dictationText('thanks period', 'Hi '), 'thanks.')
+  assert.equal(dictationText('Thanks, period.', 'Hi '), 'Thanks.')
+  assert.equal(dictationText('hello comma there', 'Hi '), 'hello, there')
+  assert.equal(dictationText('are you coming question mark', 'Hi '), 'are you coming?')
+  assert.ok(!dictationText('no marks here', 'Hi ').includes('.'))
+  assert.equal(dictationText('new paragraph', 'Hi.'), '\n\n')
+  assert.equal(dictationText('it costs $5', 'Hi '), 'it costs \\$5')
 })

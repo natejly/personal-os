@@ -44,6 +44,16 @@ const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
 
 const SNAP_LABEL: Record<SnapMode, string> = { off: 'No snap', grid: 'Grid', guides: 'Guides', both: 'Grid + guides' }
 
+/** Read-only: how much of the library has vectors for the current embedding model. */
+function IndexStatusLine(): JSX.Element | null {
+  const [st, setSt] = useState<Awaited<ReturnType<typeof api.documents.indexStatus>> | null>(null)
+  useEffect(() => { api.documents.indexStatus().then(setSt).catch(() => undefined) }, [])
+  if (!st) return null
+  const total = st.chunks + (st.doc_chunks ?? 0)
+  const done = st.embedded + (st.doc_embedded ?? 0)
+  return <p className="muted small">Search index: {done} of {total} passages embedded ({st.mode}{st.model ? `, ${st.model}` : ', no embedding model'}).</p>
+}
+
 export default function SettingsModal(): JSX.Element {
   const settings = useStore((s) => s.settings)
   const models = useStore((s) => s.models)
@@ -119,11 +129,14 @@ export default function SettingsModal(): JSX.Element {
     const accel = draft.gatherShortcut.trim()
     const applied = accel === settings.gatherShortcut.trim() ? null : await window.os.shortcuts.setGather(accel)
     if (applied) setShortcut(applied)
+    const capAccel = (draft.quickCaptureShortcut ?? '').trim()
+    const capApplied = capAccel === (settings.quickCaptureShortcut ?? '').trim() ? null : await window.os.shortcuts.setCapture(capAccel)
+    if (capApplied && !capApplied.ok) return toast(capApplied.message ?? `${capApplied.accelerator} could not be registered.`, 'error')
     // A cleared or out-of-range rounds field is clamped here: 0 would mean unlimited to the backend.
     const rounds = Number.isFinite(draft.maxToolRounds) && draft.maxToolRounds >= 1
       ? Math.min(60, Math.round(draft.maxToolRounds)) : settings.maxToolRounds
     try {
-      await saveSettings({ ...draft, maxToolRounds: rounds, gatherShortcut: applied?.accelerator ?? draft.gatherShortcut })
+      await saveSettings({ ...draft, maxToolRounds: rounds, gatherShortcut: applied?.accelerator ?? draft.gatherShortcut, quickCaptureShortcut: capApplied?.accelerator ?? draft.quickCaptureShortcut })
     } catch (e) {
       // The dialog stays open with the draft intact, so nothing typed is lost.
       return toast((e as Error).message, 'error')
@@ -219,8 +232,12 @@ export default function SettingsModal(): JSX.Element {
                 </div>
               </div>
               <p className="muted small">What the assistant knows: memories and graph relations learned from chats, and documents whose best excerpts are pulled into replies. Changes here apply immediately.</p>
+              {knowledgeTab === 'documents' && <label className="toggle-row plain modal-free">
+                <span className="toggle-text"><b>Contextual chunks</b><small>When you run the embedding backfill, ask the model to write one sentence situating each chunk in its document, and index it with the chunk. Costs one model call per chunk. Off by default.</small></span>
+                <input type="checkbox" checked={draft.contextualChunks === true} onChange={(e) => patch({ contextualChunks: e.target.checked })} /><span className="switch" />
+              </label>}
               <div className="knowledge-body modal-free">
-                {knowledgeTab === 'memory' ? <MemoryPanel embedded /> : <DocumentsView embedded />}
+                {knowledgeTab === 'memory' ? <MemoryPanel embedded /> : <><IndexStatusLine /><DocumentsView embedded /></>}
               </div>
             </section>}
 
@@ -231,12 +248,24 @@ export default function SettingsModal(): JSX.Element {
                 <input type="checkbox" checked={draft.autoLearn} onChange={(e) => patch({ autoLearn: e.target.checked })} /><span className="switch" />
               </label>
               <label className="toggle-row plain">
+                <span className="toggle-text"><b>Auto-title chats</b><small>After the first reply, write a short title for the chat with the extraction model. A title you typed is never replaced.</small></span>
+                <input type="checkbox" checked={draft.autoTitle !== false} onChange={(e) => patch({ autoTitle: e.target.checked })} /><span className="switch" />
+              </label>
+              <label className="toggle-row plain">
                 <span className="toggle-text"><b>Learn how you write</b><small>Bank long messages you write and docs you save as writing samples, and keep your voice profile current, so drafts sound like you. Review it under Knowledge base → Memory → Voice.</small></span>
                 <input type="checkbox" checked={draft.learnStyle !== false} onChange={(e) => patch({ learnStyle: e.target.checked })} /><span className="switch" />
               </label>
               <label><span>Extraction model <small className="muted">(blank = same as chat model)</small></span>
                 <input list="model-options" value={draft.extractionModel} onChange={(e) => patch({ extractionModel: e.target.value })} placeholder="Same as the default model" spellCheck={false} />
               </label>
+              <label><span>Embedding model <small className="muted">(shared with document search; changing it re-embeds both)</small></span>
+                <input value={draft.embeddingModel ?? ''} onChange={(e) => patch({ embeddingModel: e.target.value })} placeholder="qwen3-embedding-8b" spellCheck={false} />
+              </label>
+              <label className="toggle-row plain">
+                <span className="toggle-text"><b>Hybrid memory search</b><small>Combine keywords, embeddings, recency and graph links. Off means keywords only.</small></span>
+                <input type="checkbox" checked={draft.hybridRetrieval !== false} onChange={(e) => patch({ hybridRetrieval: e.target.checked })} /><span className="switch" />
+              </label>
+              <label><span>Suggest a memory tidy-up every <small className="muted">(new auto memories; 0 = manual only)</small></span><input type="number" min={0} value={draft.consolidateEvery ?? 25} onChange={(e) => patch({ consolidateEvery: Math.max(0, Number(e.target.value) || 0) })} /></label>
             </section>}
 
             {tab === 'integrations' && <section>
@@ -272,7 +301,7 @@ export default function SettingsModal(): JSX.Element {
             {tab === 'tools' && <section>
               <h3>Tools</h3>
               <label className="toggle-row plain">
-                <span className="toggle-text"><b>Dangerously skip permissions</b><small>In chats, tools run without an approval card, including mail, files, and the network. A deny rule still refuses. A plan and a desk question still wait. Scheduled jobs keep their own approval setting. A chat can turn this off for itself.</small></span>
+                <span className="toggle-text"><b>Dangerously skip permissions</b><small>In chats, ordinary tools run without an approval card. A deny rule still refuses, and these still ask: ask rules, mail and other external actions, shell commands, writes outside granted folders, calls made after untrusted content, repeated calls, a plan and a desk question. Scheduled jobs and other unattended runs never skip: a call that would still ask is refused by default. A chat can turn this off for itself.</small></span>
                 <input type="checkbox" checked={!!draft.skipPermissions} onChange={(e) => patch({ skipPermissions: e.target.checked })} /><span className="switch" />
               </label>
               <p className="muted"><b>on</b> runs automatically, <b>ask</b> pauses the reply for your approval, <b>off</b> hides the tool. Anything that acts outside the app (email, calendar, Google Tasks) asks by default.</p>
@@ -295,6 +324,8 @@ export default function SettingsModal(): JSX.Element {
                 <span className="toggle-text"><b>Share the desk folder with its sandbox</b><small>A desk's Linux sandbox sees that desk's workspace at /workspace/desk. Nothing else of your Mac is shared.</small></span>
                 <input type="checkbox" checked={draft.sandboxMountDesk !== false} onChange={(e) => patch({ sandboxMountDesk: e.target.checked })} /><span className="switch" />
               </label>
+              <label><span>Defer connector tools above <small className="muted">(tool count; 0 = always send every schema)</small></span><input type="number" min={0} value={draft.mcpDeferAbove ?? 12} onChange={(e) => patch({ mcpDeferAbove: Math.max(0, Number(e.target.value) || 0) })} /></label>
+              <label><span>Skill text inlined per reply <small className="muted">(characters; beyond it skills show as a list)</small></span><input type="number" min={0} step={500} value={draft.skillsInlineBudget ?? 6000} onChange={(e) => patch({ skillsInlineBudget: Math.max(0, Number(e.target.value) || 0) })} /></label>
               <label><span>Max tool rounds per reply</span><input type="number" min={1} max={60} value={draft.maxToolRounds} onChange={(e) => patch({ maxToolRounds: Number(e.target.value) })} /></label>
               <label><span>Brave Search API key <small className="muted">(optional; without a key web search uses Exa, then DuckDuckGo)</small></span><input type="password" value={draft.braveApiKey} onChange={(e) => patch({ braveApiKey: e.target.value })} placeholder={settings.braveApiKeySet ? 'Saved. Type to replace' : 'BSA…'} spellCheck={false} /></label>
               <label><span>Tavily API key <small className="muted">(optional alternative)</small></span><input type="password" value={draft.tavilyApiKey} onChange={(e) => patch({ tavilyApiKey: e.target.value })} placeholder={settings.tavilyApiKeySet ? 'Saved. Type to replace' : 'tvly-…'} spellCheck={false} /></label>
@@ -365,6 +396,10 @@ export default function SettingsModal(): JSX.Element {
             {tab === 'behavior' && <section>
               <h3>Behavior</h3>
               <label><span>Global system prompt</span><textarea rows={4} value={draft.systemPrompt} onChange={(e) => patch({ systemPrompt: e.target.value })} /></label>
+              <label className="toggle-row plain">
+                <span className="toggle-text"><b>Notify me about chats</b><small>A system notification when a reply finishes, fails or needs your approval in a chat you are not looking at.</small></span>
+                <input type="checkbox" checked={draft.chatNotify !== false} onChange={(e) => patch({ chatNotify: e.target.checked })} /><span className="switch" />
+              </label>
               <label><span>Theme</span>
                 <select value={draft.theme} onChange={(e) => patch({ theme: e.target.value as Settings['theme'] })}>
                   <option value="dark">Dark</option><option value="light">Light</option><option value="system">System</option>
@@ -394,6 +429,14 @@ export default function SettingsModal(): JSX.Element {
               <label><span>Gather widgets shortcut <small className="muted">(global; brings every detached widget to the front and back again)</small></span>
                 <input value={draft.gatherShortcut} onChange={(e) => patch({ gatherShortcut: e.target.value })}
                   placeholder={shortcut?.accelerator || 'Control+Alt+Command+Space'} spellCheck={false} />
+              </label>
+              <label><span>Quick capture shortcut <small className="muted">(global; opens a small window that adds a line to today's note)</small></span>
+                <input value={draft.quickCaptureShortcut ?? ''} onChange={(e) => patch({ quickCaptureShortcut: e.target.value })}
+                  placeholder="CommandOrControl+Shift+Space" spellCheck={false} />
+              </label>
+              <label><span>Dictation chord <small className="muted">(in a doc: hold to dictate, tap to latch)</small></span>
+                <input value={draft.dictationChord ?? ''} onChange={(e) => patch({ dictationChord: e.target.value })}
+                  placeholder="Control+Alt+D" spellCheck={false} />
               </label>
               {shortcut && !shortcut.ok && (
                 <p className="test-msg fail">{shortcut.message ?? `${shortcut.accelerator} could not be registered.`} The menubar icon gathers them too.</p>

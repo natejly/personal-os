@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import datetime as dt
 import sys
+import time
 import tempfile
 import unittest
 from pathlib import Path
@@ -29,6 +30,8 @@ class _FakeGoogle:
     def __init__(self) -> None:
         self.tasks: dict[str, dict[str, Any]] = {}
         self.n = 0
+        self._seen: dict[str, dict[str, Any]] = {}
+        self.calls: list[str | None] = []
         self.clock = 1_000.0  # far in the past, so remote loses both-changed conflicts by default
 
     def _stamp(self) -> str:
@@ -43,8 +46,17 @@ class _FakeGoogle:
                            "deleted": False}
         return tid
 
-    def tasks_all(self, tasklist: str = "@default") -> list[dict[str, Any]]:
-        return [dict(t) for t in self.tasks.values()]
+    def tasks_all(self, tasklist: str = "@default", updated_min: str | None = None) -> list[dict[str, Any]]:
+        self.calls.append(updated_min)
+        rows = [dict(t) for t in self.tasks.values()]
+        # "Changed since" is modelled as: differs from what the previous call returned.
+        out = [r for r in rows if not updated_min or self._seen.get(r["id"]) != r]
+        self._seen = {r["id"]: r for r in rows}
+        return out
+
+    def remote_delete(self, tid: str) -> None:
+        """What the API shows after a delete: a tombstone, stamped now."""
+        self.tasks[tid].update(deleted=True, updated=_iso(time.time()))
 
     def tasks_insert(self, body: dict[str, Any], tasklist: str = "@default") -> dict[str, Any]:
         body = _task_body(body)  # the real client normalises due dates on the way in
@@ -165,10 +177,34 @@ class SyncTests(unittest.TestCase):
     def test_remote_delete_propagates(self) -> None:
         eid = self.g.seed("Ephemeral")
         self.sync.sync_once()
-        del self.g.tasks[eid]
+        self.g.remote_delete(eid)
         counts = self.sync.sync_once()
         self.assertEqual(counts["deleted_local"], 1)
         self.assertEqual(self.todos.list(include_done=True), [])
+        self.assertIsNotNone(self.g.calls[-1])  # found through the incremental pull
+
+    def test_second_pass_is_incremental_and_full_pass_recurs(self) -> None:
+        from personal_os import gtasks
+        self.g.seed("A")
+        self.sync.sync_once()
+        self.sync.sync_once()
+        self.assertEqual(self.g.calls[0], None)
+        self.assertIsNotNone(self.g.calls[1])
+        self.assertEqual(len(self.todos.list(include_done=True)), 1)  # unchanged tasks stay known
+        self.sync._full_at -= gtasks.FULL_EVERY + 1
+        self.sync.sync_once()
+        self.assertIsNone(self.g.calls[2])
+
+    def test_failure_forces_full_pass(self) -> None:
+        self.g.seed("A")
+        self.sync.sync_once()
+        real = self.g.tasks_all
+        self.g.tasks_all = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom"))
+        with self.assertRaises(RuntimeError):
+            self.sync.sync_once()
+        self.g.tasks_all = real
+        self.sync.sync_once()
+        self.assertIsNone(self.g.calls[-1])
 
     def test_reopening_pushes_needs_action(self) -> None:
         td = self.todos.create("Toggle me")

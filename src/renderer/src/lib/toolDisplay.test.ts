@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { argRows, cardStatus, changedKeys, describeCall, formatValue, fullTitle, humanizeName, labelFor, resultView, wasEdited } from './toolDisplay'
+import type { ToolEvent } from '@shared/types'
+import { appendPage, displayFullOutput, EMPTY_OUTPUT, errorLine, fmtMs, groupSummary, isFoldable, partitionEvents, argRows, cardStatus, changedKeys, describeCall, formatValue, fullTitle, humanizeName, labelFor, resultView, wasEdited } from './toolDisplay'
 
 test('titles are plain language, with the subject beside the verb', () => {
   assert.equal(fullTitle('google_tasks_add', { title: 'Buy milk' }), 'Add Google Task Buy milk')
@@ -80,6 +81,62 @@ test('desk tools read as verbs with the argument that matters', () => {
   assert.equal(fullTitle('view_image', { path: 'outputs/chart.png' }), 'Look at image outputs/chart.png')
   assert.equal(fullTitle('convert_document', { path: 'work/r.md', to: 'docx' }), 'Convert document work/r.md → docx')
   assert.equal(fullTitle('doc_guide', { format: 'xlsx' }), 'Read format guide xlsx')
+})
+
+const ev = (id: string, o: Record<string, unknown> = {}): ToolEvent =>
+  ({ id, name: 'web_search', arguments: { query: 'q' }, result_preview: '{}', duration_ms: 1000, error: null, ...o }) as ToolEvent
+const noCard = (): boolean => false
+
+test('durations read humanely', () => {
+  assert.equal(fmtMs(950), '950 ms')
+  assert.equal(fmtMs(48213), '48.2 s')
+  assert.equal(fmtMs(125000), '2m 05s')
+})
+
+test('errorLine is one short line', () => {
+  assert.equal(errorLine('\n  first line\nsecond'), 'first line')
+  assert.ok(errorLine('x'.repeat(300)).length <= 80)
+})
+
+test('only plain finished rows are foldable', () => {
+  assert.equal(isFoldable(ev('a'), noCard), true)
+  assert.equal(isFoldable(ev('a'), () => true), false)
+  const flips: Record<string, unknown>[] = [
+    { pending: true }, { error: 'x' }, { needs_approval: true }, { approval: 'allow' }, { plan: { plan_id: 'p', idx: 0, title: '' } },
+    { proposal: 'pr' }, { agent: 'x' }, { blocked: 'web_search' }, { breaker: 'loop' }, { images: [{ name: 'a', data: 'd' }] },
+    { undo: { snapshot_id: 's' } }, { result_preview: '{"verification":{"status":"verified"}}' },
+    { name: 'doc_edit' }, { name: 'agent_spawn' }, { name: 'propose_plan' }, { name: 'desk_ask' }
+  ]
+  for (const f of flips) assert.equal(isFoldable(ev('a', f), noCard), false, JSON.stringify(f))
+})
+
+test('partitionEvents groups runs of three or more and keeps order', () => {
+  assert.deepEqual(partitionEvents([ev('1'), ev('2')], noCard).map((i) => i.kind), ['single', 'single'])
+  const seven = [1, 2, 3, 4, 5, 6, 7].map((n) => ev(String(n), n === 4 ? { error: 'boom' } : {}))
+  const parts = partitionEvents(seven, noCard)
+  assert.deepEqual(parts.map((i) => i.kind), ['group', 'single', 'group'])
+  const g = parts[0]
+  assert.ok(g.kind === 'group' && g.key === '1' && g.events.length === 3)
+  const grow = partitionEvents([ev('1'), ev('2'), ev('3'), ev('4')], noCard)[0]
+  assert.ok(grow.kind === 'group' && grow.key === '1' && grow.events.length === 4)
+})
+
+test('groupSummary counts verbs, caps at three and totals the time', () => {
+  const evs = [...Array(8).keys()].map((n) => ev(`s${n}`)).concat([...Array(4).keys()].map((n) => ev(`r${n}`, { name: 'fetch_url', arguments: { url: 'https://a.test' } })))
+  assert.equal(groupSummary(evs), 'Ran 12 tools · Search the web ×8, Read web page ×4 · 12.0 s')
+  const many = [ev('1'), ev('2', { name: 'fetch_url' }), ev('3', { name: 'run_python' }), ev('4', { name: 'current_time' })]
+  assert.match(groupSummary(many), /\+1 more/)
+})
+
+test('full output pages append once and pretty-print only when complete', () => {
+  let o = appendPage(EMPTY_OUTPUT, { text: '{"a"', offset: 0, has_more: true, next_offset: 4 })
+  assert.deepEqual(appendPage(o, { text: 'zz', offset: 0, has_more: true, next_offset: 2 }), o)
+  o = appendPage(o, { text: ':1}', offset: 4, has_more: false })
+  assert.equal(o.text, '{"a":1}')
+  assert.equal(o.hasMore, false)
+  assert.equal(displayFullOutput(o.text, true), '{\n  "a": 1\n}')
+  assert.equal(displayFullOutput(o.text, false), o.text)
+  assert.equal(displayFullOutput('not json', true), 'not json')
 })
 
 test('browser calls name the page or the ref, and never echo typed text', () => {

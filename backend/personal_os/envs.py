@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 BASE_PACKAGES = ("pandas", "openpyxl", "xlsxwriter", "python-docx", "python-pptx", "pypdf", "pdfplumber", "reportlab",
-                 "matplotlib", "pillow")
+                 "matplotlib", "pillow", "numpy")
 INSTALL_TIMEOUT = 600
 MAX_PACKAGES_PER_CALL = 10
 MARKER = ".grain-env.json"  # written only after a full install, so a half-built venv never reads as ready

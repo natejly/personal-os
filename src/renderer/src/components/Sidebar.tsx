@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { MessageSquare, MessageSquarePlus, Search, Settings, Sparkles, Trash2, PanelLeftClose, Brain, FileText, Files, Plus, Folder, FolderKanban, ChevronRight, Home, KanbanSquare, LayoutDashboard, LayoutGrid, Library, Mic, Users, MonitorDot, BookOpen, Globe } from 'lucide-react'
+import { Pin, ArchiveRestore, MessageSquare, MessageSquarePlus, Search, Settings, Sparkles, PanelLeftClose, Brain, FileText, Files, Plus, Folder, FolderKanban, ChevronRight, Home, KanbanSquare, LayoutDashboard, LayoutGrid, Library, Mic, Users, MonitorDot, BookOpen, Globe } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import GrainLogo from './GrainLogo'
 import { useStore, type View } from '../store'
@@ -13,22 +13,24 @@ import { MODULES } from '../shell/registry'
 import { dragProps } from '../canvas/dnd'
 import { useCanvas } from '../canvas/store'
 import { api } from '../lib/api'
-import type { Conversation, Doc, WidgetKind } from '@shared/types'
+import { partitionChats } from '../lib/chatRows'
+import ChatRow from './ChatRow'
+import type { ChatSearchHit, Conversation, Doc, WidgetKind } from '@shared/types'
+import { mergeChatSearch, snippetParts } from '../lib/chatSearch'
 
-const DAY = 86_400_000
-/** Rows shown under a project group before the "View all" link takes over. */
-const PROJECT_ROWS = 4
-function groupLabel(ts: number): string {
-  const start = new Date()
-  start.setHours(0, 0, 0, 0)
-  const diff = start.getTime() - ts * 1000
-  if (diff < 0) return 'Today'
-  if (diff < DAY) return 'Yesterday'
-  if (diff < 7 * DAY) return 'Previous 7 days'
-  if (diff < 30 * DAY) return 'Previous 30 days'
-  return 'Older'
+/** The first matching excerpt under a search result, with the matched words marked. */
+function Snippet({ hit }: { hit?: ChatSearchHit }): JSX.Element | null {
+  const s = hit?.snippets[0]
+  if (!s) return null
+  return (
+    <span className="convo-snippet">
+      {snippetParts(s.text).map((p, i) => (p.hit ? <mark key={i}>{p.text}</mark> : <span key={i}>{p.text}</span>))}
+    </span>
+  )
 }
 
+/** Rows shown under a project group before the "View all" link takes over. */
+const PROJECT_ROWS = 4
 /**
  * `kind` makes the row a canvas drag source (contract §7, payload kind 'nav'). Boards and Dashboards
  * have none: their widgets need a `ref_id`, so a bare drag would open a window with nothing in it.
@@ -106,6 +108,25 @@ export default function Sidebar(): JSX.Element {
   const openConversation = (id: string): void => void selectChat(id)
   const [query, setQuery] = useState('')
   const [searching, setSearching] = useState(false)
+  // Full-text hits over message bodies, for queries of 3+ characters. Title matches stay instant; these
+  // arrive after a short debounce, and a stale reply is dropped by the sequence check.
+  const [hits, setHits] = useState<ChatSearchHit[]>([])
+  const searchSeq = useRef(0)
+  const composing = useRef(false)
+  // Nothing is sent while an IME composition is open; `composed` re-runs the effect once it ends.
+  const [composed, setComposed] = useState(0)
+  useEffect(() => {
+    const q = query.trim()
+    const seq = ++searchSeq.current
+    if (q.length < 3) { setHits([]); return }
+    const t = setTimeout(() => {
+      if (composing.current) return
+      api.conversations.search(q)
+        .then((r) => { if (seq === searchSeq.current) setHits(r) })
+        .catch(() => { if (seq === searchSeq.current) setHits([]) })
+    }, 250)
+    return () => clearTimeout(t)
+  }, [query, composed])
   const searchRef = useRef<HTMLInputElement>(null)
   const [projectsOpen, setProjectsOpen] = useState(true)
   const [recentsOpen, setRecentsOpen] = useState(true)
@@ -132,19 +153,37 @@ export default function Sidebar(): JSX.Element {
   }, [conversations, projectDocs])
   const projectById = useMemo(() => Object.fromEntries(projects.map((p) => [p.id, p])), [projects])
 
-  const groups = useMemo(() => {
-    const q = query.trim().toLowerCase()
-    const personal = conversations.filter((c) => !c.project_id)
-    const filtered = q ? conversations.filter((c) => c.title.toLowerCase().includes(q)) : personal
-    const out: { label: string; items: Conversation[] }[] = []
-    for (const c of filtered) {
-      const label = groupLabel(c.updated_at)
-      const g = out[out.length - 1]
-      if (g && g.label === label) g.items.push(c)
-      else out.push({ label, items: [c] })
-    }
-    return out
-  }, [conversations, query])
+  const convById = useMemo(() => Object.fromEntries(conversations.map((c) => [c.id, c])), [conversations])
+  const { pinned, groups } = useMemo(() => partitionChats(conversations, query), [conversations, query])
+  const projectDot = (c: Conversation): JSX.Element | null =>
+    c.project_id && projectById[c.project_id] ? <span className="project-dot sm" style={{ background: projectById[c.project_id].color }} title={projectById[c.project_id].name} /> : null
+  const hitById = useMemo(() => new Map(hits.map((h) => [h.id, h])), [hits])
+  // Body-only hits: a chat already listed by its title (pinned or grouped) shows its excerpt in place.
+  const inMessages = useMemo(
+    () => (query.trim().length >= 3 ? mergeChatSearch([...pinned, ...groups.flatMap((g) => g.items)], hits).inMessages : []),
+    [pinned, groups, hits, query]
+  )
+  // Archived chats are not in the store's list; loaded when the section opens and after each change.
+  const [archivedOpen, setArchivedOpen] = useState(false)
+  const [archived, setArchived] = useState<Conversation[]>([])
+  const archiveBump = conversations.length
+  useEffect(() => {
+    if (archivedOpen) void api.conversations.listArchived().then(setArchived).catch(() => undefined)
+  }, [archivedOpen, archiveBump])
+  const archiveChat = useStore((s) => s.archiveChat)
+  // ⌘⇧F: the store opens the sidebar; this brings the search field up. The tick seen at mount is
+  // skipped, or a remount would reopen the search for a press handled before it.
+  const searchTick = useStore((s) => s.sidebarSearchTick)
+  const seenTick = useRef(searchTick)
+  useEffect(() => {
+    if (searchTick === seenTick.current) return
+    seenTick.current = searchTick
+    setRecentsOpen(true)
+    setSearching(true)
+    // Already showing: the effect on `searching` will not fire, so focus and select here.
+    searchRef.current?.focus()
+    searchRef.current?.select()
+  }, [searchTick])
 
   // Module badges are pure functions of the store; useShallow compares the array element-wise, so a
   // fresh array with the same counts does not re-render.
@@ -219,11 +258,7 @@ export default function Sidebar(): JSX.Element {
                       <FileText size={12} className="row-kind" />
                     </div>
                   ) : (
-                    <div key={`c${r.id}`} className={`convo-item sub ${r.id === focusedId && view === 'chat' ? 'active' : ''}`} onClick={() => openConversation(r.id)} role="button" tabIndex={0}
-                      {...dragProps({ kind: 'conversation', id: r.id, label: r.title, projectId: p.id })}>
-                      <span className="convo-title"><ChatPulse conversationId={r.id} />{r.title}</span>
-                      <button className="icon-btn ghost" aria-label={`Delete chat: ${r.title}`} title="Delete" onClick={(e) => { e.stopPropagation(); void deleteChat(r.id) }}><Trash2 size={13} /></button>
-                    </div>
+                    <ChatRow key={`c${r.id}`} conv={convById[r.id]} sub active={r.id === focusedId && view === 'chat'} />
                   )))}
                   {rows.length > 0 && <button className="project-viewall" onClick={() => openProject(p.id)}>View all</button>}
                 </div>
@@ -265,28 +300,64 @@ export default function Sidebar(): JSX.Element {
             aria-label="Search recents"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Escape') { setQuery(''); setSearching(false) } }}
+            onCompositionStart={() => { composing.current = true }}
+            onCompositionEnd={() => { composing.current = false; setComposed((n) => n + 1) }}
+            onKeyDown={(e) => {
+              // Escape and Enter belong to the IME while a composition is open.
+              if (composing.current) return
+              if (e.key === 'Escape') { setQuery(''); setSearching(false) }
+              else if (e.key === 'Enter') {
+                const first = pinned[0] ?? groups[0]?.items[0] ?? inMessages[0]
+                if (first) { openConversation(first.id); setQuery(''); setSearching(false) }
+              } else if (e.key === 'ArrowDown') {
+                e.preventDefault()
+                document.querySelector<HTMLElement>('.convo-list .convo-item')?.focus()
+              }
+            }}
           />
         </label>
       )}
       <div className="convo-list">
-        {groups.length === 0 && <p className="empty-hint">{query ? 'No matches.' : 'No personal chats yet.'}</p>}
+        {pinned.length > 0 && (
+          <section>
+            <h4 className="pinned-head"><Pin size={11} /> Pinned</h4>
+            {pinned.map((c) => <ChatRow key={c.id} conv={c} active={c.id === focusedId && view === 'chat'} lead={projectDot(c)} trail={<Snippet hit={hitById.get(c.id)} />} />)}
+          </section>
+        )}
+        {groups.length === 0 && pinned.length === 0 && inMessages.length === 0 && <p className="empty-hint">{query ? 'No matches.' : 'No personal chats yet.'}</p>}
         {groups.map((g) => (
           <section key={g.label}>
             <h4>{g.label}</h4>
-            {g.items.map((c) => (
-              <div key={c.id} className={`convo-item ${c.id === focusedId && view === 'chat' ? 'active' : ''}`} onClick={() => openConversation(c.id)} role="button" tabIndex={0}
-                {...dragProps({ kind: 'conversation', id: c.id, label: c.title, projectId: c.project_id })}>
+            {g.items.map((c) => <ChatRow key={c.id} conv={c} active={c.id === focusedId && view === 'chat'} lead={projectDot(c)} trail={<Snippet hit={hitById.get(c.id)} />} />)}
+          </section>
+        ))}
+        {inMessages.length > 0 && (
+          <section>
+            <h4>In messages</h4>
+            {inMessages.map((h) => (
+              <div key={h.id} className={`convo-item ${h.id === focusedId && view === 'chat' ? 'active' : ''}`} onClick={() => openConversation(h.id)} role="button" tabIndex={0}
+                onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openConversation(h.id) } }}>
                 <span className="convo-title">
-                  <ChatPulse conversationId={c.id} />
-                  {c.project_id && projectById[c.project_id] && <span className="project-dot sm" style={{ background: projectById[c.project_id].color }} title={projectById[c.project_id].name} />}
-                  {c.title}
+                  {h.project_id && projectById[h.project_id] && <span className="project-dot sm" style={{ background: projectById[h.project_id].color }} title={projectById[h.project_id].name} />}
+                  {h.title}
+                  {h.hits > 1 && <span className="convo-hits">+{h.hits - 1}</span>}
+                  <Snippet hit={h} />
                 </span>
-                <button className="icon-btn ghost" aria-label={`Delete chat: ${c.title}`} title="Delete" onClick={(e) => { e.stopPropagation(); void deleteChat(c.id) }}><Trash2 size={14} /></button>
               </div>
             ))}
           </section>
-        ))}
+        )}
+        <section>
+          <h4 className="archived-head"><button className="section-toggle" onClick={() => setArchivedOpen((o) => !o)}><ChevronRight size={11} className={archivedOpen ? 'rot90' : ''} /> Archived</button></h4>
+          {archivedOpen && archived.length === 0 && <p className="empty-hint">Nothing archived.</p>}
+          {archivedOpen && archived.map((c) => (
+            <div key={c.id} className="convo-item archived" role="button" tabIndex={0} onClick={() => void selectChat(c.id)}
+              onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); void selectChat(c.id) } }}>
+              <span className="convo-title">{c.title}</span>
+              <button className="icon-btn ghost" aria-label={`Unarchive chat: ${c.title}`} title="Unarchive" onClick={(e) => { e.stopPropagation(); void archiveChat(c.id, false) }}><ArchiveRestore size={13} /></button>
+            </div>
+          ))}
+        </section>
       </div>
       </>)}
       </div>

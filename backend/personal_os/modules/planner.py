@@ -156,4 +156,12 @@ class PlannerModule(Module):
             examples=[{}, {"days": 3}])
 
     def today(self) -> dict[str, Any]:
-        return {}
+        """Proposed blocks from open todos and the saved calendar snapshot. Never calls Google; nothing is written."""
+        cfg = self.config()
+        events = self.ctx.google.calendar_saved(cfg["lookaheadDays"] + 1)
+        if events is None:  # no snapshot: planning around unknown meetings would be a guess
+            return {"planner_blocks": []}
+        now = self.clock().replace(second=0, microsecond=0)
+        mirror = self._mirror_ids()
+        todos = self.todos.list("__all__", include_done=False)
+        return {"planner_blocks": pl.plan(todos, pl.busy_from_events(events, mirror), now, cfg, pl.locked_from_events(events, mirror))["blocks"]}

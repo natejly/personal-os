@@ -253,6 +253,12 @@
 }
 .md-hints { margin-left: auto; opacity: 0.75; }
 
+/* focus mode: the gutter and status bar go, everything outside the current paragraph fades */
+.md-editor.focus .md-gutter, .md-editor.focus .md-status { display: none; }
+.md-editor.focus { grid-template-columns: minmax(0, 1fr); }
+.md-editor.focus .md-surface { grid-column: 1; }
+.md-mirror .dim { opacity: 0.3; }
+
 /* markdown tokens in the mirror */
 .tk-head { color: var(--accent); font-weight: 600; }
 .tk-bullet, .tk-punct { color: var(--accent); }
@@ -378,3 +384,8 @@
   .doc-panes.split { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
   .doc-panes.split .docs-render { border-left: 0; border-top: 1px solid var(--border); }
 }
+
+.doc-tag-chips { display: flex; flex-wrap: wrap; gap: 4px; padding: 0 8px 6px; }
+.doc-tag-chip { font-size: 11px; padding: 1px 7px; border-radius: 10px; border: 1px solid var(--border); background: none; color: var(--text-muted); cursor: pointer; }
+.doc-tag-chip:hover { color: var(--text); }
+.doc-tag-chip.on { color: var(--accent); border-color: var(--accent); }

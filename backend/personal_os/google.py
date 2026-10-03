@@ -380,6 +380,10 @@ class Google:
             })
         return sorted(out, key=lambda c: (not c["primary"], c["access_role"] not in ("owner", "writer"), c["summary"].lower()))
 
+    def enabled_calendar_ids(self) -> list[str]:
+        """Calendars checked on in Google: not hidden, and selected or primary."""
+        return [c["id"] for c in self.calendars() if c.get("id") and not c.get("hidden") and (c.get("selected") or c.get("primary"))]
+
     def calendar_ensure(self, summary: str) -> dict[str, Any]:
         """Find, or create, a secondary calendar of this name that we can write to.
 
@@ -519,6 +523,15 @@ class Google:
         if listed is not None and window_start == start and window_end == end:
             return listed
         return [ev for ev in stored.values() if _overlaps(ev, start, end)]
+
+    def calendar_saved(self, days: int) -> list[dict[str, Any]] | None:
+        """Events in the next `days` from the saved snapshots only; never calls Google. None when nothing was ever saved."""
+        snaps = [v for v in self._reads.values("calendar") if isinstance(v, dict) and isinstance(v.get("events"), dict)]
+        if not snaps:
+            return None
+        a = dt.datetime.now(dt.timezone.utc)
+        b = a + dt.timedelta(days=days)
+        return [ev for v in snaps for ev in v["events"].values() if _overlaps(ev, a, b)]
 
     def _drop_saved_event(self, calendar_id: str, event_id: str) -> None:
         """Take an event we are about to change out of the saved window.
@@ -996,8 +1009,11 @@ class Google:
         return verify.attach({"id": t["id"], "status": t.get("status")},
                              self._verify_task(tasklist, task_id, {"status": "completed"}, ("status",)))
 
-    def tasks_all(self, tasklist: str = "@default") -> list[dict[str, Any]]:
+    def tasks_all(self, tasklist: str = "@default", updated_min: str | None = None) -> list[dict[str, Any]]:
         """Every task in a list, completed and hidden included, with `updated` timestamps (for sync).
+
+        With `updated_min` (RFC 3339) only tasks changed since then come back, deleted ones
+        included as `deleted=True` tombstones.
 
         Deliberately uncached: this is the two-way sync's view of remote state, and it
         resolves conflicts by comparing `updated` timestamps. A stale read here could
@@ -1006,8 +1022,9 @@ class Google:
         svc = self._svc("tasks", "v1").tasks()
         out: list[dict[str, Any]] = []
         token = None
+        extra = {"updatedMin": updated_min, "showDeleted": True} if updated_min else {}
         while True:
-            res = svc.list(tasklist=tasklist, showCompleted=True, showHidden=True, maxResults=100, pageToken=token).execute()
+            res = svc.list(tasklist=tasklist, showCompleted=True, showHidden=True, maxResults=100, pageToken=token, **extra).execute()
             out += [_task_row(t) for t in res.get("items", [])]
             token = res.get("nextPageToken")
             if not token:
@@ -1470,7 +1487,7 @@ def _event_out(e: dict[str, Any], calendar_id: str | None = None, full: bool = F
             "reminders": e.get("reminders"),
             "organizer": (e.get("organizer") or {}).get("email"),
             "attendee_details": [
-                {"email": a.get("email"), "optional": bool(a.get("optional")), "response": a.get("responseStatus"),
+                {"email": a.get("email"), "name": a.get("displayName") or "", "optional": bool(a.get("optional")), "response": a.get("responseStatus"),
                  "organizer": bool(a.get("organizer")), "self": bool(a.get("self"))}
                 for a in e.get("attendees", [])
             ][:60],

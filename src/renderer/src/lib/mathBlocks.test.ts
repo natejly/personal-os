@@ -1,5 +1,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { unified } from 'unified'
+import remarkParse from 'remark-parse'
+import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
 import { normalizeMathBlocks } from './mathBlocks'
 
 test('text without display maths is returned untouched', () => {
@@ -77,4 +81,73 @@ test('empty delimiters are not mangled', () => {
 test('a real LaTeX environment with dollars inside survives a round trip', () => {
   const out = normalizeMathBlocks('$$q(x_t \\mid x_{t-1}) = \\mathcal{N}(x_t; \\sqrt{1-\\beta_t} x_{t-1}, \\beta_t I)$$')
   assert.equal(out, '$$\nq(x_t \\mid x_{t-1}) = \\mathcal{N}(x_t; \\sqrt{1-\\beta_t} x_{t-1}, \\beta_t I)\n$$')
+})
+
+// ---- prices, bracket delimiters, and the parser itself ----
+
+const n = normalizeMathBlocks
+
+test('prices in one sentence stay literal', () => {
+  assert.equal(n('It costs $5 and $10 per seat.'), 'It costs \\$5 and $10 per seat.')
+  assert.equal(n('Between $1,200 and $3,400 a month.'), 'Between \\$1,200 and $3,400 a month.')
+  assert.equal(n('Revenue rose from $5M to $10M.'), 'Revenue rose from \\$5M to $10M.')
+  assert.equal(n('($5, was $10)'), '(\\$5, was $10)')
+  assert.equal(n('$5-$10'), '\\$5-$10')
+  assert.equal(n('Costs $5\nand then $10 more'), 'Costs \\$5\nand then $10 more')
+})
+
+test('a price next to a formula keeps the formula', () => {
+  assert.equal(n('Paid $20; with $x^2$ maths.'), 'Paid \\$20; with $x^2$ maths.')
+  assert.equal(n('$x^2$ and $2x+1$'), '$x^2$ and $2x+1$')
+  assert.equal(n('$5$'), '$5$')
+})
+
+test('bracket delimiters become dollar maths', () => {
+  assert.equal(n('\\(a\\) and \\(5\\)'), '$a$ and $5$')
+  assert.equal(n('\\[\nx^2\n\\]'), '$$\nx^2\n$$')
+  assert.equal(n('\\[ x^2 \\]'), '$$\nx^2\n$$')
+  assert.equal(n('so \\[ x^2 \\] holds'), 'so $$x^2$$ holds')
+  assert.equal(n('\\[\nx^2\\]'), '$$\nx^2\n$$')
+  assert.equal(n('\\[\nx^2'), '$$\nx^2')
+})
+
+test('citations, links and escaped dollars are left alone', () => {
+  for (const s of ['\\[1\\] Smith et al.', '\\[not a link\\](http://x)', '\\$5 and \\$10']) assert.equal(n(s), s)
+})
+
+test('fences and inline code are untouched', () => {
+  for (const s of ['```\ncost $5 and $10 \\(x\\)\n```', 'run `echo $5 and $10` now', '~~~\n\\[\nx\n\\]\n~~~']) assert.equal(n(s), s)
+})
+
+test('normalising twice changes nothing', () => {
+  for (const s of ['It costs $5 and $10 per seat.', '\\(a\\) \\[ x^2 \\]', '\\[\nx^2\n\\]', 'Paid $20; with $x^2$ maths.', '$$a$$ and $5 or $6']) {
+    assert.equal(n(n(s)), n(s))
+  }
+})
+
+/** What the parser makes of the normalised source: the values of every inline and display formula. */
+const formulas = (src: string): string[] => {
+  const out: string[] = []
+  const walk = (node: { type: string; value?: string; children?: unknown[] }): void => {
+    if (node.type === 'inlineMath' || node.type === 'math') out.push(String(node.value))
+    for (const c of node.children ?? []) walk(c as never)
+  }
+  walk(unified().use(remarkParse).use(remarkGfm).use(remarkMath).parse(n(src)) as never)
+  return out
+}
+
+test('the parser sees no formula in a price pair, however it is split', () => {
+  assert.deepEqual(formulas('It costs $5 and $10 per seat.'), [])
+  assert.deepEqual(formulas('Revenue rose from $5M to $10M.'), [])
+  assert.deepEqual(formulas('Costs $5\nand then $10 more'), [])
+  assert.deepEqual(formulas('`$a` and `$b`'), [])
+})
+
+test('the parser sees exactly the intended formulas', () => {
+  assert.deepEqual(formulas('Paid $20; with $x^2$ maths.'), ['x^2'])
+  assert.deepEqual(formulas('\\$5 and $10 per seat, where $x$ is n'), ['x'])
+  assert.deepEqual(formulas('$x^2$ and $2x+1$'), ['x^2', '2x+1'])
+  assert.deepEqual(formulas('\\(x^2\\)'), ['x^2'])
+  assert.deepEqual(formulas('\\[\nx^2\n\\]'), ['x^2'])
+  assert.deepEqual(formulas('\\[ x^2 \\]'), ['x^2'])
 })

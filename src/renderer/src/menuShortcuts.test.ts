@@ -94,3 +94,42 @@ test('view:cowork routes with no view-specific wiring (⌘⇧K)', () => {
   fire('view:cowork')
   assert.equal(useStore.getState().view, 'cowork')
 })
+
+test('new-note creates a doc; daily-note switches to Files and opens today', () => {
+  const orig = useStore.getState()
+  const calls: string[] = []
+  useStore.setState({
+    createDoc: async () => { calls.push('create') },
+    openDailyNote: async () => { calls.push('daily') }
+  })
+  useStore.getState().setView('todos')
+  fire('new-note')
+  fire('daily-note')
+  assert.deepEqual(calls, ['create', 'daily'])
+  assert.equal(useStore.getState().view, 'docs')
+  useStore.setState({ createDoc: orig.createDoc, openDailyNote: orig.openDailyNote })
+})
+
+test('chat:search opens the sidebar and bumps the search tick once', () => {
+  useStore.setState({ sidebarOpen: false })
+  const before = useStore.getState().sidebarSearchTick
+  fire('chat:search')
+  assert.equal(useStore.getState().sidebarOpen, true)
+  assert.equal(useStore.getState().sidebarSearchTick, before + 1)
+})
+
+test('chat:next and chat:prev step through the list, clamp, and ignore the canvas', () => {
+  const row = (id: string) => ({ id, project_id: null, title: id, model: 'm', settings: {}, created_at: 0, updated_at: 0 })
+  useStore.setState({ conversations: [row('a'), row('b'), row('c')] as never, focusedConversationId: null, view: 'chat' })
+  fire('chat:next')
+  assert.equal(useStore.getState().focusedConversationId, 'a')
+  fire('chat:next')
+  assert.equal(useStore.getState().focusedConversationId, 'b')
+  fire('chat:prev')
+  assert.equal(useStore.getState().focusedConversationId, 'a')
+  fire('chat:prev')
+  assert.equal(useStore.getState().focusedConversationId, 'a')
+  useStore.setState({ view: 'canvas' })
+  fire('chat:next')
+  assert.equal(useStore.getState().focusedConversationId, 'a')
+})

@@ -15,7 +15,7 @@ export default function SkipPermissionsToggle({ conversationId }: { conversation
 
   const on = convSkip ?? globalOn
   const title = on
-    ? 'Dangerously skip permissions is on. Tools run without an approval card. Deny rules still refuse. Plans and questions still wait.'
+    ? 'Dangerously skip permissions is on. Ordinary tools run without an approval card. Deny rules, ask rules, mail and other external actions, shell commands, flagged content, repeated calls, plans and questions still ask.'
     : 'Permissions ask first. Turn this on to let tools run without an approval card in this chat.'
 
   return (

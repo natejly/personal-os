@@ -87,18 +87,18 @@ function showMain(): void {
   win.focus()
 }
 
-/** The stored accelerator, so a gather shortcut the user chose is still registered after a relaunch. */
-async function storedGather(): Promise<string | undefined> {
+/** The stored accelerators, so a gather or capture shortcut the user chose is still registered after a relaunch. */
+async function storedShortcuts(): Promise<{ gather?: string; capture?: string }> {
   const base = backendUrl()
-  if (!base) return undefined
+  if (!base) return {}
   try {
     const token = backendToken()
     const r = await fetch(`${base}/settings`, { headers: token ? { 'X-Personal-OS-Token': token } : {} })
-    if (!r.ok) return undefined
-    const s = (await r.json()) as { gatherShortcut?: string }
-    return s.gatherShortcut?.trim() || undefined
+    if (!r.ok) return {}
+    const s = (await r.json()) as { gatherShortcut?: string; quickCaptureShortcut?: string }
+    return { gather: s.gatherShortcut?.trim() || undefined, capture: s.quickCaptureShortcut?.trim() || undefined }
   } catch {
-    return undefined
+    return {}
   }
 }
 
@@ -157,6 +157,9 @@ function buildMenu(): void {
       label: 'File',
       submenu: [
         { label: 'New Chat', accelerator: 'CmdOrCtrl+N', click: () => sendMenu('new-chat') },
+        // Not an OS-global shortcut: nothing outside the app acts. Files gets a doc in the default place.
+        { label: 'New Note', accelerator: 'CmdOrCtrl+Shift+N', click: () => sendMenu('new-note') },
+        { label: "Today's Note", accelerator: 'CmdOrCtrl+Shift+D', click: () => sendMenu('daily-note') },
         { label: 'Upload Document…', accelerator: 'CmdOrCtrl+U', click: () => sendMenu('upload') },
         // ⌘W lives in the Window menu now: `role: 'close'` here could not be intercepted by the canvas.
         ...(isMac
@@ -168,7 +171,22 @@ function buildMenu(): void {
             ])
       ]
     },
-    { role: 'editMenu' },
+    {
+      // The stock edit roles, spelled out so Find can sit beside them. The label stays 'Edit' so macOS
+      // still appends its own dictation and emoji items.
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
+        { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'pasteAndMatchStyle' }, { role: 'delete' }, { role: 'selectAll' },
+        { type: 'separator' },
+        { label: 'Find…', accelerator: 'CmdOrCtrl+F', click: () => sendWindowMenu('chat:find') },
+        { label: 'Find Next', accelerator: 'CmdOrCtrl+G', click: () => sendWindowMenu('chat:find-next') },
+        { label: 'Find Previous', accelerator: 'Shift+CmdOrCtrl+G', click: () => sendWindowMenu('chat:find-prev') },
+        ...(isMac
+          ? [{ type: 'separator' }, { label: 'Speech', submenu: [{ role: 'startSpeaking' }, { role: 'stopSpeaking' }] }] as Electron.MenuItemConstructorOptions[]
+          : [])
+      ]
+    },
     {
       label: 'View',
       submenu: [
@@ -185,6 +203,11 @@ function buildMenu(): void {
         // ⌘0..⌘9 are all taken above and ⌘M is Minimize in the Window menu, so Meetings takes ⌘⇧M.
         { label: 'Meetings', accelerator: 'CmdOrCtrl+Shift+M', click: () => sendMenu('view:meetings') },
         { label: 'Cowork', accelerator: 'CmdOrCtrl+Shift+K', click: () => sendMenu('view:cowork') },
+        { type: 'separator' },
+        // ⌘⇧[ / ⌘⇧] step through chats (⌃⌘[ / ⌃⌘] are pop-out transparency and ⌥⌘arrows are spaces).
+        { label: 'Previous Chat', accelerator: 'CmdOrCtrl+Shift+[', click: () => sendMenu('chat:prev') },
+        { label: 'Next Chat', accelerator: 'CmdOrCtrl+Shift+]', click: () => sendMenu('chat:next') },
+        { label: 'Search Chats', accelerator: 'CmdOrCtrl+Shift+F', click: () => sendMenu('chat:search') },
         { type: 'separator' },
         { label: 'Toggle Spaces', accelerator: 'CmdOrCtrl+Shift+C', click: () => sendMenu('canvas:toggle') },
         { label: 'Toggle Sidebar', accelerator: 'CmdOrCtrl+B', click: () => sendMenu('toggle-sidebar') },
@@ -320,7 +343,8 @@ if (gotLock) app.whenReady().then(async () => {
   }
   await startPageBridge() // open_page's offscreen loader; registers itself with the backend
   // After the backend, so the stored accelerator wins over the default; still before any renderer exists.
-  registerShortcuts(() => win, await storedGather())
+  const stored = await storedShortcuts()
+  registerShortcuts(() => win, stored.gather, stored.capture)
   createWindow()
   void restorePopouts()
   startUpdater()

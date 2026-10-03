@@ -45,7 +45,7 @@ DEFAULTS: dict[str, Any] = {
     "lookbackDays": 21,     # how much day-stats history mining reads
     "minDays": 2,           # a pattern has to show up on at least this many days to count
     "maxSuggestions": 8,
-    "autoMemory": True,     # write high-confidence habits into the app's memory
+    "autoMemory": False,    # write high-confidence habits into the app's memory
     "memoryConfidence": 0.6,
 }
 

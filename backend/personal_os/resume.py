@@ -10,18 +10,51 @@ import json
 from typing import Any
 
 RESUME_NOTE = """## Resuming an interrupted reply
-The previous reply was cut off (the app stopped) before it finished. This is what it had already done.
+{reason}This is what it had already done.
 {body}
 Continue the task from here. Do not redo completed steps."""
 
+# Why the previous reply ended early, keyed by the tag resumable() returns.
+REASONS = {
+    "interrupted": "The previous reply was cut off (the app stopped) before it finished. ",
+    "error": "The previous reply failed with an error before it finished. ",
+    "stopped": "The previous reply was stopped by the user before it finished. ",
+    "rounds": "The previous reply ran out of tool rounds before it finished. ",
+    "tokens": "The previous reply ran out of its token budget before it finished. ",
+    "time": "The previous reply ran out of time before it finished. ",
+    "cost": "The previous reply ran out of its cost budget before it finished. ",
+    "length": "The previous reply was cut off at the model's output limit. ",
+    "incomplete": "The previous reply's stream ended before the model finished. ",
+}
+# Message outcomes that leave an unfinished reply worth continuing. "loop" is a stuck run: resuming repeats it.
+RESUMABLE_OUTCOMES = ("stopped", "rounds", "tokens", "time", "cost", "length", "incomplete")
+
+
+def reason_tag(run: dict[str, Any], message: dict[str, Any] | None = None) -> str | None:
+    """Why a run's reply is unfinished: 'interrupted', 'error', or the message outcome of a finished run; else None."""
+    status = run.get("status")
+    if status in ("interrupted", "error"):
+        return status
+    if status == "done" and (message or {}).get("outcome") in RESUMABLE_OUTCOMES:
+        return message["outcome"]
+    return None
+
 
 def resumable(run: dict[str, Any] | None, latest_for_conv: dict[str, Any] | None, answering: bool,
-              already_resumed: bool = False) -> tuple[bool, str]:
-    """(ok, reason). Only the newest run of a quiet conversation, once, and never a desk turn."""
+              already_resumed: bool = False, *, message: dict[str, Any] | None = None) -> tuple[bool, str]:
+    """(ok, reason). Only the newest run of a quiet conversation, once, and never a desk turn. A run that was
+    interrupted or errored qualifies; so does a finished one whose reply row says it stopped short (`message`).
+    On success the reason is the tag: 'interrupted', 'error', or the message's outcome."""
     if not run:
         return False, "no such run"
-    if run.get("status") != "interrupted":
-        return False, f"the run is {run.get('status')}, not interrupted"
+    status = run.get("status")
+    tag = reason_tag(run, message)
+    if tag is None:
+        if status == "done":
+            if (message or {}).get("outcome") == "loop":
+                return False, "the reply stopped because it was repeating itself; a resume would repeat it"
+            return False, "the reply finished normally"
+        return False, f"the run is {status}, not interrupted"
     if run.get("kind") != "chat":
         return False, "only chat runs can be resumed"
     if run.get("desk_id"):
@@ -32,7 +65,7 @@ def resumable(run: dict[str, Any] | None, latest_for_conv: dict[str, Any] | None
         return False, "a newer run exists in this conversation"
     if already_resumed:
         return False, "this run was already resumed"
-    return True, ""
+    return True, tag
 
 
 def taint_from_tape(events: list[tuple[int, str, Any]]) -> list[str]:
@@ -57,7 +90,8 @@ def _args(args: Any, n: int = 300) -> str:
 
 
 def build_resume_note(run: dict[str, Any], events: list[tuple[int, str, Any]], executed: list[dict[str, Any]],
-                      approvals: list[dict[str, Any]], max_text: int = 1500, max_preview: int = 300) -> str:
+                      approvals: list[dict[str, Any]], max_text: int = 1500, max_preview: int = 300,
+                      reason: str | None = None) -> str:
     mid = run.get("message_id")
     text = "".join((d.get("text") or "") for _, e, d in events
                    if e == "delta" and isinstance(d, dict) and d.get("id") == mid).strip()
@@ -82,4 +116,5 @@ def build_resume_note(run: dict[str, Any], events: list[tuple[int, str, Any]], e
                      + "\n".join(f"- {a.get('tool')} {_args(a.get('args'))}" for a in waiting))
     if not parts:
         parts.append("It had not done anything yet.")
-    return RESUME_NOTE.format(body="\n\n".join(parts))
+    tag = reason or reason_tag(run) or "interrupted"
+    return RESUME_NOTE.format(reason=REASONS.get(tag, REASONS["interrupted"]), body="\n\n".join(parts))

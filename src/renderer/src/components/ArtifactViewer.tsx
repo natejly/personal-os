@@ -1,19 +1,20 @@
 import { useCallback, useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { Code2, Download, History, RotateCcw, Trash2, X } from 'lucide-react'
+import { Code2, Download, History, Image, Maximize2, Minimize2, RotateCcw, Trash2, X } from 'lucide-react'
 import type { Artifact, ArtifactVersion } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore } from '../store'
 import { useModal } from '../lib/useModal'
 import ArtifactFrame from './ArtifactFrame'
+import { isSvgOnly } from '../artifacts/openExport'
 import { CopyButton } from './MarkdownPreview'
 import '../styles/artifacts.css'
 
-export function downloadHtml(name: string, code: string): void {
-  const url = URL.createObjectURL(new Blob([code], { type: 'text/html' }))
+export function downloadHtml(name: string, code: string, ext = 'html', type = 'text/html'): void {
+  const url = URL.createObjectURL(new Blob([code], { type }))
   const a = document.createElement('a')
   a.href = url
-  a.download = `${name.replace(/[^\w.-]+/g, '-').toLowerCase() || 'artifact'}.html`
+  a.download = `${name.replace(/[^\w.-]+/g, '-').toLowerCase() || 'artifact'}.${ext}`
   a.click()
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
@@ -38,6 +39,7 @@ export default function ArtifactViewer({ id, onClose, onDeleted, inline = false 
   const [showCode, setShowCode] = useState(false)
   const [reload, setReload] = useState(0)
   const [err, setErr] = useState('')
+  const [fs, setFs] = useState(false)
 
   const load = useCallback(async () => {
     try {
@@ -81,6 +83,15 @@ export default function ArtifactViewer({ id, onClose, onDeleted, inline = false 
     try { await api.artifacts.delete(id); onDeleted?.(); onClose?.() } catch (e) { toast((e as Error).message, 'error') }
   }
 
+  // Escape leaves fullscreen first; the dialog's own Escape (close) only sees it once we are back to normal.
+  useEffect(() => {
+    if (!fs) return
+    const k = (e: KeyboardEvent): void => { if (e.key === 'Escape') { e.stopPropagation(); setFs(false) } }
+    window.addEventListener('keydown', k, true)
+    return () => window.removeEventListener('keydown', k, true)
+  }, [fs])
+  const svg = isSvgOnly(code ?? art?.code ?? '') && (!shown || shown === latest || code !== null)
+
   const modal = useModal(() => onClose?.())
   const body = (
     <>
@@ -99,6 +110,8 @@ export default function ArtifactViewer({ id, onClose, onDeleted, inline = false 
           {shown && shown !== latest && <button className="ghost-btn" onClick={() => void restore()}><RotateCcw size={12} /> Restore</button>}
           <button className={`icon-btn ghost ${showCode ? 'on' : ''}`} aria-pressed={showCode} title="View source" aria-label="View source" onClick={() => setShowCode((v) => !v)}><Code2 size={14} /></button>
           <button className="icon-btn ghost" title="Download HTML" aria-label="Download HTML" onClick={() => void source().then((c) => downloadHtml(art?.title ?? 'artifact', c))}><Download size={14} /></button>
+          {svg && <button className="icon-btn ghost" title="Download SVG" aria-label="Download SVG" onClick={() => void source().then((c) => downloadHtml(art?.title ?? 'artifact', c, 'svg', 'image/svg+xml'))}><Image size={14} /></button>}
+          {!inline && <button className="icon-btn ghost" title={fs ? 'Exit full screen' : 'Full screen'} aria-label={fs ? 'Exit full screen' : 'Full screen'} aria-pressed={fs} onClick={() => setFs((v) => !v)}>{fs ? <Minimize2 size={14} /> : <Maximize2 size={14} />}</button>}
           <span title="Copy HTML"><CopyButton text={code ?? art?.code ?? ''} /></span>
           <button className="icon-btn ghost" title="Delete" aria-label="Delete artifact" onClick={() => void remove()}><Trash2 size={14} /></button>
           {!inline && <button className="icon-btn ghost" aria-label="Close" autoFocus onClick={onClose}><X size={15} /></button>}
@@ -117,7 +130,7 @@ export default function ArtifactViewer({ id, onClose, onDeleted, inline = false 
   if (inline) return <div className="art-view inline">{body}</div>
   return createPortal(
     <div className="modal-backdrop art-backdrop" {...modal.backdrop}>
-      <div className="art-view full" {...modal.modal}>{body}</div>
+      <div className={`art-view full ${fs ? 'fs' : ''}`} {...modal.modal}>{body}</div>
     </div>,
     document.body
   )

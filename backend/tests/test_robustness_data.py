@@ -102,7 +102,7 @@ def test_relearn_discards_when_hand_edited_during_call(monkeypatch: Any) -> None
         for i in range(4):
             st.add_sample(None, f"Sample number {i}. " + "I write short, plain sentences about my day and plans. " * 4, check=False)
 
-        async def fake(settings: Any, model: str, messages: Any, kind: str = "") -> str:
+        async def fake(settings: Any, model: str, messages: Any, kind: str = "", **kw: Any) -> str:
             st.save_profile(None, {"summary": "mine", "guidelines": ["g"], "edited": 1})
             return json.dumps({"summary": "model", "guidelines": ["x"]})
 
@@ -120,7 +120,7 @@ def test_samples_negative_limit_clamped() -> None:
 
 
 def _learn(memories: Memories, graph: Graph, reply: Any, monkeypatch: Any, before=None) -> dict[str, Any]:
-    async def fake(settings: Any, model: str, messages: Any, kind: str = "learn") -> str:
+    async def fake(settings: Any, model: str, messages: Any, kind: str = "learn", **kw: Any) -> str:
         if before:
             before()
         return json.dumps(reply)
@@ -178,3 +178,17 @@ def test_memory_update_refuses_blank() -> None:
         m = memories.create(None, "something real")
         with pytest.raises(ValueError):
             memories.update(m["id"], {"content": "   "})
+
+
+def test_board_wip_limit_warns_without_blocking() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        boards = Boards(Database(tmp))
+        b = boards.create("w")
+        todo, doing = b["columns"][1]["id"], b["columns"][2]["id"]
+        a = boards.add_card(b["id"], doing, "a")
+        assert a["over_limit"] is False  # no limit set
+        boards.update_column(doing, {"wip_limit": 1})
+        assert boards.add_card(b["id"], doing, "b")["over_limit"] is True
+        c = boards.add_card(b["id"], todo, "c")
+        assert c["over_limit"] is False
+        assert boards.move_card(c["id"], doing)["over_limit"] is True

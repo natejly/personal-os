@@ -34,6 +34,7 @@ LIMITS = (
     "The server's code is not read and its filesystem or network activity is not observed.",
     "A tool can behave differently from its description, including only on the call that matters.",
     "A tool that hangs, crashes or leaks data is only found by running it; the client bounds the damage with timeouts, it does not prevent it.",
+    "Toxic-flow detection guesses from tool names and descriptions which tools read private data and which send it out; it can miss a pair or flag harmless ones.",
     "Injection detection is pattern matching. Novel phrasing gets through, and unusual wording is flagged that is not an attack.",
 )
 
@@ -271,6 +272,31 @@ def check_shadowing(tool: dict[str, Any], other_tools: list[dict[str, Any]], whe
     return out
 
 
+_READ_VERBS = frozenset({"read", "get", "list", "fetch", "search", "query", "load", "open"})
+_PRIVATE_NOUNS = frozenset({"file", "files", "mail", "email", "emails", "message", "messages", "db", "database", "sql",
+                            "repo", "repository", "document", "documents", "note", "notes", "contact", "contacts",
+                            "calendar", "secret", "secrets", "drive", "inbox"})
+_OUTBOUND = frozenset({"send", "post", "upload", "publish", "email", "webhook", "http", "tweet", "notify", "forward"})
+
+
+def check_toxic_flow(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One warn when a single server offers both a private-data reader and an outbound writer.
+
+    Name/description heuristic only; it never changes a tool's danger tier or mode.
+    """
+    def toks(t: dict[str, Any], desc: bool) -> set[str]:
+        text = str(t.get("name") or "") + (" " + str(t.get("description") or "") if desc else "")
+        return set(re.split(r"[^a-z0-9]+", re.sub(r"([a-z])([A-Z])", r"\1 \2", text).lower()))
+    readers = [t for t in tools if toks(t, False) & _READ_VERBS and toks(t, True) & _PRIVATE_NOUNS]
+    writers = [t for t in tools if toks(t, False) & _OUTBOUND and not toks(t, False) & _READ_VERBS]
+    pair = next(((r, w) for r in readers for w in writers if r is not w), None)
+    if not pair:
+        return []
+    r, w = (str(x.get("name") or "") for x in pair)
+    return [_finding("toxic_flow", "warn", "server", f"{r} can read private data and {w} can send data out; "
+                     "together they could leak what the first reads")]
+
+
 def status_for(findings: Iterable[dict[str, Any]]) -> str:
     severities = {f.get("severity") for f in findings}
     if "fail" in severities:
@@ -295,7 +321,7 @@ def evaluate_tool(tool: dict[str, Any], slug: str = "") -> dict[str, Any]:
 def evaluate_tools(tools: list[dict[str, Any]], slugs: dict[str, str] | None = None) -> dict[str, Any]:
     """Static verdict on a server's whole advertised surface."""
     results = [evaluate_tool(t, (slugs or {}).get(str(t.get("name") or ""), "")) for t in tools]
-    findings = [f for r in results for f in r["findings"]]
+    findings = [f for r in results for f in r["findings"]] + check_toxic_flow(tools)
     status = status_for(findings)
     return {"status": status, "tools": results, "findings": findings, "limits": list(LIMITS),
             "summary": summarize(status, len(tools), findings), "model": EVAL_MODEL}

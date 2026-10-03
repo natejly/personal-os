@@ -13,7 +13,7 @@ from typing import Any
 
 from personal_os.context import build_context
 from personal_os.db import Database
-from personal_os.learn import MAX_SKILL_PROCEDURE, SKILLS_HEADER, Skills, run_transcript, skill_block
+from personal_os.learn import MAX_SKILL_PROCEDURE, SKILLS_HEADER, Skills, run_transcript, skill_block, skill_manifest
 from personal_os.repos import Documents, Graph, Memories, Projects
 
 
@@ -143,6 +143,17 @@ class SkillsTestCase(unittest.TestCase):
         missing, why = run_transcript(messages, "nope")
         self.assertIsNone(missing)
         self.assertEqual(why, "That reply is not in this chat.")
+
+    def test_a_token_in_a_procedure_is_stripped_for_the_model(self) -> None:
+        pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+        row = self.approved(procedure=f"1. Read the todos.\n2. The key is {pat}.")
+        block = skill_block([row])
+        self.assertNotIn(pat, block)
+        self.assertIn("[github-pat]", block)
+        self.assertIn(pat, self.skills.get(row["id"])["procedure"])
+        index = skill_manifest([{"id": row["id"], "name": "Weekly review", "description": f"key {pat}"}])
+        self.assertNotIn(pat, index)
+        self.assertIn("[github-pat]", index)
 
     def test_a_transcript_cannot_open_a_section(self) -> None:
         import asyncio

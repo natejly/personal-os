@@ -30,6 +30,10 @@ class DismissIn(BaseModel):
     dismissed: bool = True
 
 
+class SnoozeIn(BaseModel):
+    until: datetime | None = None  # None clears the snooze
+
+
 class MailWatchConfigIn(BaseModel):
     enabled: bool | None = None
     awaitingAfterDays: int | None = None
@@ -118,6 +122,25 @@ class MailWatchModule(Module):
             if not self.store.dismiss(thread_id, body.dismissed):
                 raise HTTPException(404)
             return self.store.get(thread_id)  # type: ignore[return-value]
+
+        @r.put("/mail/watch/{thread_id}/snooze")
+        def snooze(thread_id: str, body: SnoozeIn) -> dict[str, Any]:
+            until = mw._aware(body.until) if body.until else None  # a naive stamp is read as UTC
+            if until is not None and until <= self.clock():
+                raise HTTPException(422, "until must be in the future")
+            if not self.store.snooze(thread_id, until, create=False):
+                raise HTTPException(404)
+            return self.store.get(thread_id)  # type: ignore[return-value]
+
+        @r.post("/mail/threads/{thread_id}/snooze")
+        def snooze_thread(thread_id: str, body: SnoozeIn) -> dict[str, Any]:
+            """Local only: hides the thread in the mail list until `until` (null clears). No Gmail write."""
+            self.store.snooze(thread_id, body.until)
+            return {"thread_id": thread_id, "until": body.until}
+
+        @r.get("/mail/snoozed")
+        def snoozed() -> dict[str, Any]:
+            return {"thread_ids": self.store.snoozed_ids(self.clock())}
 
         @r.post("/mail/watch/{thread_id}/followup")
         def followup(thread_id: str) -> dict[str, Any]:

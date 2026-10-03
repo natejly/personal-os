@@ -516,7 +516,7 @@ def test_profile_allows_only_the_proxy_port_in_allowlist_mode() -> None:
 def test_allowlist_mode_env_and_only_the_proxy_is_reachable(box: Box) -> None:
     r = box.run("shell_run", command="env | grep -i proxy | sort; echo ALL=${ALL_PROXY-unset}")
     assert r["exit_code"] == 0
-    for k in ("HTTP_PROXY=http://grain:", "HTTPS_PROXY=http://grain:", "http_proxy=http://grain:", "https_proxy=http://grain:", "NO_PROXY="):
+    for k in ("HTTP_PROXY=http://", "HTTPS_PROXY=http://", "http_proxy=http://", "https_proxy=http://", "NO_PROXY="):
         assert k in r["output"], k
     assert "ALL=unset" in r["output"] and r["network"]["mode"] == "allowlist"
     # a host that is not allowed: the proxy answers 403 and records it; the reply is not tainted, the note tells the way forward

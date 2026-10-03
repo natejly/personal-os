@@ -42,6 +42,7 @@ def sweep(db: Database, cfg: dict[str, Any], now: float | None = None) -> dict[s
         # The message stays; only its span trace goes. NULL is what a message with no trace already has.
         "message_traces": ("UPDATE messages SET trace=NULL WHERE trace IS NOT NULL AND created_at < ?", (trace_cut,)),
         "tool_results": ("DELETE FROM tool_results WHERE created_at < ?", (result_cut,)),
+        "tool_results_fts": ("DELETE FROM tool_results_fts WHERE result_id NOT IN (SELECT id FROM tool_results)", ()),
         # A pending card waits forever on purpose (runs.py); only decided ones age out.
         "approvals": ("DELETE FROM approvals WHERE status != 'pending' AND COALESCE(decided_at, created_at) < ?", (approval_cut,)),
         # `started` means "outcome unknown" and must stay for the user to resolve, however old.

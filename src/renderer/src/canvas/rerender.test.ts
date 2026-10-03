@@ -11,6 +11,7 @@ import { createElement, type ReactNode } from 'react'
 import type { CanvasWindow } from '@shared/types'
 import { useStore, type ChatSession, type State } from '../store'
 import StatusRing from './StatusRing'
+import ToolEvents from '../components/ToolEvents'
 import { sameFrameProps } from './WindowFrame'
 
 type Sel = (s: State) => unknown
@@ -182,7 +183,7 @@ test('an App re-render that is not about the windows stops at the memo gate', ()
 const src = (p: string): string => readFileSync(`src/renderer/src/${p}`, 'utf8')
 
 test('nothing on the streamed-token path holds a selector-less useStore()', () => {
-  for (const f of ['App.tsx', 'components/Sidebar.tsx', 'components/Composer.tsx', 'components/Message.tsx']) {
+  for (const f of ['App.tsx', 'components/Sidebar.tsx', 'components/Composer.tsx', 'components/Message.tsx', 'components/ContextDrawer.tsx']) {
     const bare = src(f).split('\n').filter((l) => /\buseStore\(\)/.test(l) && !l.trimStart().startsWith('//'))
     assert.deepEqual(bare, [], `${f} subscribes to the whole store: ${bare.join(' | ')}`)
   }
@@ -192,4 +193,18 @@ test('MessageView carries no subscription at all, because its own memo cannot st
   const body = src('components/Message.tsx').slice(src('components/Message.tsx').indexOf('const MessageView = memo('))
   const hooks = body.split('\n').filter((l) => /\buseStore\(/.test(l) && !/useStore\.getState\(\)/.test(l))
   assert.deepEqual(hooks, [], `MessageView subscribes: ${hooks.join(' | ')}`)
+})
+
+test('a delta on one message re-renders no ToolEvents: rows keep identity and the list is memoised', () => {
+  const events = [{ id: 't1', name: 'web_search', arguments: {}, result_preview: '{}', duration_ms: 1, error: null }]
+  const other = { ...msg, id: 'm0', tool_events: events }
+  const streamed = { ...msg, tool_events: events }
+  useStore.setState({ sessions: { c1: { ...session, conversation: { ...session.conversation, messages: [other, streamed] } } } } as Partial<State>)
+  const before = useStore.getState().sessions['c1'].conversation.messages ?? []
+  token()
+  const after = useStore.getState().sessions['c1'].conversation.messages ?? []
+  assert.equal(after[0], before[0])
+  assert.equal(after[1].tool_events, before[1].tool_events)
+  // A memo wrapper skips a render whose props are shallow-equal, which is what the two checks above give it.
+  assert.equal((ToolEvents as unknown as { $$typeof: symbol }).$$typeof, Symbol.for('react.memo'))
 })

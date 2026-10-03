@@ -16,7 +16,7 @@ export interface ContextUsed {
   memories: { id: string; content: string; project_id: string | null }[]
   nodes: { id: string; label: string; type: string }[]
   edges: { id: string; relation: string; source_id: string; target_id: string }[]
-  chunks: { chunk_id: string; document_id: string; name: string; idx: number; text: string }[]
+  chunks: { chunk_id: string; document_id: string; name: string; idx: number; text: string; source?: string; doc_id?: string | null }[]
   /** The activity-monitor block, verbatim; null when the monitor is off or the chat opted out. */
   activity: string | null
   /** Approved skills injected as procedural memory. Absent on messages written before skills existed. */
@@ -27,6 +27,10 @@ export interface ContextUsed {
   style: { project_id: string | null; summary: string; guidelines: string[]; block: string } | null
   /** The recent-meetings block, verbatim; null when meetings are off or the chat opted out. */
   meetings: string | null
+  /** Pinned documents carried whole this turn. Absent on older messages. */
+  pinned?: { document_id: string; name: string }[]
+  /** Items dropped per section because it hit its token budget (contextBudget). */
+  trimmed?: Record<string, number>
   system_prompt: string
   tokens_estimate: number
 }
@@ -92,6 +96,8 @@ export interface Skill {
   created_at: number
   updated_at: number
   approved_at: number | null
+  use_count?: number
+  last_used_at?: number | null
 }
 
 /** A large tool result kept out of the model's context; `read_tool_result` pages it. */
@@ -235,6 +241,8 @@ export interface PermissionCard {
   suggestions: string[]
   /** False for a forced card (taint, plan mode, doom loop): it can only be answered once. */
   session: boolean
+  /** The tool's danger tier; an 'external' write offers no whole-tool standing grant. */
+  danger?: string
 }
 
 /** Allow / ask / deny lists of `Tool(pattern)` rules (permrules.py). */
@@ -408,6 +416,14 @@ export interface ToolEvent {
   proposal?: string | null
   /** Set when this call's arguments matched an approved plan step, so it ran without its own card. */
   plan?: PlanStepRef | null
+  /** Stopped mid-run or the app closed; the error text says which. */
+  interrupted?: boolean
+  /** Arguments were repaired before the call ran. */
+  repaired?: boolean
+  /** Refused before the gate: broken JSON, unknown name or signature mismatch. */
+  invalid?: 'arguments' | 'name' | 'schema'
+  /** Handle of the stored full result (read_tool_result). */
+  result_id?: string | null
   /** Set when a subagent made this call: its card rides the parent's stream, labelled with the child. */
   agent?: string
   /** write_local_file / move_local_file: the pre-image kept so the user can undo it (id is null when too large to keep). */
@@ -504,6 +520,18 @@ export interface ContextMeter {
   summary: { summary: string; summarized_messages: number; tokens_before: number; tokens_after: number; updated_at: number } | null
 }
 
+export type MessageOutcome = 'stopped' | 'rounds' | 'tokens' | 'time' | 'cost' | 'loop' | 'interrupted' | 'length' | 'incomplete'
+export type ErrorKind = 'rate_limit' | 'quota' | 'auth' | 'not_found' | 'overflow' | 'unsupported_param' | 'content_filter' | 'overloaded' | 'server' | 'bad_request' | 'transport' | 'cancelled' | 'timeout'
+
+/** A transient line under a streaming reply. `retry` counts down to `until` (epoch ms); `compacting` has no end time. */
+export interface MessageStatus {
+  kind: 'retry' | 'compacting'
+  attempt?: number
+  max?: number
+  until?: number
+  reason?: 'rate_limit' | 'provider_error' | 'connection'
+}
+
 export interface Message {
   id: string
   conversation_id: string
@@ -517,8 +545,16 @@ export interface Message {
   /** A reasoning model's chain-of-thought. Never sent back to the model as history. */
   reasoning?: string | null
   created_at: number
-  /** Set when the reply ran out of budget or hit a breaker; not persisted. */
-  partial?: PartialReason | null
+  /** Live only, never persisted: what a streaming reply is waiting on (a provider retry, a history summary). Set and cleared by `status` events. */
+  status?: MessageStatus | null
+  /** How the reply ended when it did not end normally; null = complete, or failed with error. */
+  outcome?: MessageOutcome | null
+  error_kind?: ErrorKind | null
+  /** Regenerate group: id of the first answer; the active member carries the group's ids. */
+  variant_of?: string | null
+  variants?: string[] | null
+  /** Set on a user message that replaced an earlier one (edit-and-resend). */
+  edited_from?: string | null
 }
 
 export type Effort = 'default' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
@@ -539,6 +575,8 @@ export interface ConversationSettings {
   useActivity: boolean
   /** Inject the writing-style profile, so drafts sound like the user. */
   useStyle: boolean
+  /** Explicit draft turn: the voice block is only injected while this is on (never on a tainted chat). Defaults off. */
+  draftMode?: boolean
   /** Per-chat plan mode. Absent reads as the global default; a desk writes it when it is created. */
   planMode?: 'off' | 'auto' | 'always'
   /** Absent inherits Settings.skipPermissions. True runs tool calls that would have asked, in this chat. */
@@ -547,6 +585,8 @@ export interface ConversationSettings {
    *  missing value reads as on, the way the backend's `.get(..., True)` does. */
   useMeetings?: boolean
   autoLearn: boolean
+  /** Who wrote the title: the user (never overwritten) or the model. Absent on chats that predate it. */
+  titleSource?: 'auto' | 'user'
   useTools: boolean
   /** Inject the skills the user approved. Defaults on; only approved ones are ever eligible. */
   useSkills?: boolean
@@ -559,6 +599,16 @@ export interface ConversationSettings {
   job_id?: string
 }
 
+/** One conversation matched by GET /conversations/search. Matched words in `text` sit between \x02 and \x03. */
+export interface ChatSearchHit {
+  id: string
+  title: string
+  project_id: string | null
+  updated_at: number
+  hits: number
+  snippets: { message_id: string; role: string; created_at: number; text: string }[]
+}
+
 export interface Conversation {
   id: string
   project_id: string | null
@@ -567,6 +617,10 @@ export interface Conversation {
   settings: ConversationSettings
   created_at: number
   updated_at: number
+  /** Set while the chat is pinned (epoch seconds); archiving clears it. */
+  pinned_at?: number | null
+  /** Set while the chat is archived: hidden from the list, still opens by id. */
+  archived_at?: number | null
   messages?: Message[]
 }
 
@@ -659,6 +713,9 @@ export interface GraphEdge {
   relation: string
   properties: Record<string, unknown>
   created_at: number
+  fact?: string
+  valid_at?: number | null
+  invalid_at?: number | null
 }
 
 export interface GraphData {
@@ -674,8 +731,20 @@ export interface Document {
   size: number
   chunk_count: number
   created_at: number
+  pinned?: number
   preview?: string
   text?: string
+}
+
+/** POST /documents: the stored row plus what the server could make of the file. */
+export interface UploadResult extends Document {
+  /** These exact bytes were already stored in this scope; the existing row came back. */
+  duplicate?: boolean
+  /** Some text came out of the file (false for a picture with no OCR text or a scan with no text layer). */
+  extracted?: boolean
+  /** False when a chat cannot read the file: it is stored, but the assistant cannot see what is in it. */
+  readable?: boolean
+  reason?: string | null
 }
 
 /** Recurring todo: completing it spawns the next instance (backend todo_rules.py). */
@@ -683,6 +752,14 @@ export interface TodoRepeat {
   every: number
   unit: 'day' | 'week' | 'month' | 'year'
   mode: 'from_due' | 'from_completion'
+}
+
+export interface TodoFilter {
+  id: string
+  name: string
+  tag?: string
+  q?: string
+  project_id?: string
 }
 
 export interface Todo {
@@ -706,6 +783,14 @@ export interface Todo {
   estimate_min?: number | null
   /** Weighted urgency score; only present on `?sort=urgency` lists. */
   urgency?: number
+  /** Lowercase labels; filter with `?tag=`. */
+  tags?: string[]
+  /** Set on a subtask; the list nests it under this todo. */
+  parent_id?: string | null
+  /** Ids of open todos this one waits on. */
+  depends_on?: string[]
+  blocked_count?: number
+  blocking_count?: number
   created_at: number
   updated_at: number
   completed_at: number | null
@@ -1028,6 +1113,10 @@ export interface TodayDashboard {
   todo_stats: { open: number; overdue: number; today: number }
   /** Visible health metrics with today's value; missing from a backend without the health module. */
   health?: HealthToday[]
+  /** Mail-watch counts, from the table; absent without the module. */
+  mail_watch?: { to_reply: number; awaiting_reply_overdue: number }
+  /** The day plan the planner proposes from the saved calendar; nothing is written until confirmed. */
+  planner_blocks?: PlannerBlock[]
   projects: Project[]
   recent_memories: Memory[]
   recent_conversations: Conversation[]
@@ -1053,6 +1142,10 @@ export interface Settings {
   systemPrompt: string
   extractionModel: string
   autoLearn: boolean
+  /** Embed-backfill writes a model-made context blurb per chunk (one call each). */
+  contextualChunks?: boolean
+  /** Write a short model title after the first reply (uses the extraction model). */
+  autoTitle: boolean
   /** Bank long messages and saved docs as writing samples, and keep the voice profile current. */
   learnStyle: boolean
   theme: 'dark' | 'light' | 'system'
@@ -1062,6 +1155,10 @@ export interface Settings {
   mode?: 'classic' | 'canvas'
   /** Electron accelerator for the global Gather/Scatter shortcut. */
   gatherShortcut: string
+  /** Electron accelerator for the global quick-capture window (appends to today's daily note). */
+  quickCaptureShortcut?: string
+  /** Hold-to-talk dictation chord in the Docs editor, e.g. 'Control+Alt+D'. */
+  dictationChord?: string
   /** Today-screen cards, keyed by module (see modules.ts); a missing key means shown. Cowork and meetings default off. */
   homeWidgets?: Record<string, boolean>
   /** Sidebar views the user removed. Missing means library, cowork and meetings are hidden. */
@@ -1070,6 +1167,16 @@ export interface Settings {
   /** How assistant edits to docs land. Missing means review: show the diff and wait. */
   docEditMode?: 'review' | 'apply'
   maxToolRounds: number
+  /** Connector tool count above which schemas are deferred behind tool search; 0 keeps every schema in the request. */
+  mcpDeferAbove?: number
+  /** Characters of skill bodies inlined into the prompt before falling back to a manifest. */
+  skillsInlineBudget?: number
+  /** Embedding model id used by memory and document retrieval. Changing it re-embeds both stores. */
+  embeddingModel?: string
+  /** Fuse keyword, embedding, recency and graph signals for memories; false = keyword only. */
+  hybridRetrieval?: boolean
+  /** Propose a memory tidy-up after this many new auto memories; 0 = manual only. */
+  consolidateEvery?: number
   /** Argument-pattern rules over the per-tool modes. Deny beats ask beats allow; forced approvals are never lifted. */
   permissionRules?: PermissionRules
   /** 'deny': a background run that would have to ask is refused instead of waiting for someone. */
@@ -1087,6 +1194,8 @@ export interface Settings {
   microKeep?: number
   microAt?: number
   /** Per-reply budgets; 0 means unlimited. */
+  /** Token budget per context section (0 = unlimited): memories, graph, chunks, activity, meetings, pinned. */
+  contextBudget?: Record<string, number>
   maxRunTokens?: number
   maxRunSeconds?: number
   maxRunCost?: number
@@ -1139,6 +1248,8 @@ export interface Settings {
   githubToken?: string
   /** Per-model cost overrides, $ per million tokens. Proxy prices are used for models not listed. */
   modelPrices: Record<string, ModelPrice>
+  /** Informational spend alerts in $ (0 = off); never stops a run. */
+  usageAlerts?: { dailyCost: number; monthlyCost: number }
   /** Cowork desk budgets. 0 on either axis means unlimited; a desk may tighten them, never loosen. */
   deskMaxTurns?: number
   deskMaxCost?: number
@@ -1147,6 +1258,8 @@ export interface Settings {
   parkAfterSeconds?: number
   /** A native notification when a desk stops and cannot go on without you. Missing reads as on. */
   deskNotify?: boolean
+  /** A system notification when a reply finishes, fails or needs approval in a chat that is not in front of you. */
+  chatNotify?: boolean
   /** A native notification when a scheduled job fails, is auto-paused or leaves proposals, while the window is hidden. Missing reads as on. */
   notifyJobs?: boolean
   /** Default plan mode for a new chat: off, auto (the first mutating call arms it), or always. */
@@ -1186,6 +1299,16 @@ export interface UsageBucket {
   reasoning_share?: number
 }
 
+/** What one chat has spent: the `usage_log` rows tagged with its id. `cost` leaves out `unpriced` calls. */
+export interface ConversationUsage {
+  totals: UsageBucket
+  by_kind: (UsageBucket & { kind: string })[]
+  /** First recorded call (epoch seconds); rows older than the retention window are gone. */
+  since: number | null
+  /** Calls whose token counts were estimated, not reported. */
+  estimated: number
+}
+
 export interface UsageReport {
   days: number
   totals: UsageBucket
@@ -1195,24 +1318,31 @@ export interface UsageReport {
   by_model: (UsageBucket & { model: string })[]
   by_kind: (UsageBucket & { kind: string })[]
   by_project: (UsageBucket & { project: string })[]
+  by_tag: (UsageBucket & { tag: string })[]
+  alerts?: { daily: { spent: number; limit: number; over: boolean }; monthly: { spent: number; limit: number; over: boolean }; over: boolean }
   prices: Record<string, ModelPrice>
 }
 
 export interface ModelInfo {
   id: string
+  mode?: string | null
+  reasoning?: boolean | null
 }
 
 export type ChatEvent =
   | { event: 'user_message'; data: Message }
   | { event: 'assistant_message'; data: Message }
   | { event: 'removed_message'; data: { id: string } }
+  | { event: 'restored_message'; data: { message: Message; reason: string | null } }
   | { event: 'title'; data: { id: string; title: string } }
   | { event: 'delta'; data: { id: string; text: string } }
   | { event: 'reasoning'; data: { id: string; text: string } }
   | { event: 'tool_call'; data: { message_id: string; id: string; name: string; arguments: Record<string, unknown>; needs_approval?: boolean; forced?: boolean; permission?: PermissionCard | null; plan?: PlanStepRef | null; agent?: string } }
   | { event: 'tool_result'; data: ToolEvent & { message_id: string } }
   | { event: 'span'; data: { message_id: string; span: Span } }
-  | { event: 'done'; data: { id: string; error: string | null; context_used: ContextUsed; tool_events: ToolEvent[]; trace: Span[]; stopped: boolean; partial?: PartialReason | null; segment?: boolean; tainted?: boolean; taint_sources?: string[]; reasoning?: string | null } }
+  /** Transient progress for a reply that has no tokens yet: a provider retry (`until` is epoch ms) or a history summary. `kind: null` clears it. */
+  | { event: 'status'; data: { id: string; kind: MessageStatus['kind'] | null; attempt?: number; max?: number; until?: number; reason?: MessageStatus['reason'] } }
+  | { event: 'done'; data: { id: string | null; error: string | null; context_used: ContextUsed | null; tool_events: ToolEvent[]; trace: Span[]; stopped: boolean; partial?: PartialReason | null; segment?: boolean; tainted?: boolean; taint_sources?: string[]; reasoning?: string | null; outcome?: MessageOutcome | null; error_kind?: ErrorKind | null; notice?: string | null } }
   | { event: 'taint'; data: { message_id: string; source: string } }
   | { event: 'subagent'; data: SubagentInfo & { message_id: string | null } }
   /** artifact_create / artifact_update landed. Also on the run tape, so a reload replays it. */
@@ -1228,12 +1358,14 @@ export type ChatEvent =
   | { event: 'desk_status'; data: Desk }
   /** A doc recording's segment, status or summary moved; see `RecordingEvent`. */
   | { event: 'recording'; data: RecordingEvent }
+  /** Live dictation words, volatile until a final or the settled segment replaces them. */
+  | { event: 'preview'; data: PreviewEvent }
   /** This turn is handing over to another one, announced before `done` so the UI can re-attach. */
   | { event: 'desk_handoff'; data: { desk_id: string; conversation_id: string; turn: number } }
   | { event: 'learned'; data: Learned }
   | { event: 'style_learned'; data: { project_id: string | null; profile: StyleProfile | null; sample_id: string } }
   | { event: 'learn_error'; data: { message: string } }
-  | { event: 'error'; data: { message: string } }
+  | { event: 'error'; data: { message: string; interrupted?: boolean; run_id?: string; pending_approvals?: string[] } }
 
 /** What one auto-learn pass (or the `remember` tool) put away. The ids are set only off `/events`. */
 export interface Learned {
@@ -1255,10 +1387,16 @@ export type BackgroundEvent =
   | { event: 'learned'; data: Learned }
   | { event: 'learn_error'; data: { conversation_id?: string; message_id?: string; message: string } }
   | { event: 'job_finished'; data: { run_id: string; job_id: string } }
+  | { event: 'usage_alert'; data: { period: 'daily' | 'monthly'; spent: number; limit: number } }
   /** Every desk write, for desks nobody is watching: the rail, the badge and the Today card stay live. */
   | { event: 'desk_status'; data: Desk }
   /** A doc recording's segment, status or summary moved. */
   | { event: 'recording'; data: RecordingEvent }
+  | { event: 'preview'; data: PreviewEvent }
+  /** A run's answering / status state moved: lets every window know about a reply it did not start. */
+  | { event: 'run_state'; data: RunInfo }
+  /** A conversation's title was rewritten off the run (model title or regenerate). */
+  | { event: 'conversation_changed'; data: { id: string; title: string } }
 
 export interface BackupInfo {
   name: string; kind: 'daily' | 'manual' | 'premigrate' | 'prerestore'; created_at: number; size: number
@@ -1316,6 +1454,8 @@ export interface GrainApi {
   shortcuts: {
     gather: () => Promise<ShortcutState>
     setGather: (accelerator: string) => Promise<ShortcutState>
+    capture: () => Promise<ShortcutState>
+    setCapture: (accelerator: string) => Promise<ShortcutState>
     onFailure: (cb: (s: ShortcutState) => void) => () => void
   }
   /** Data folder helpers for Settings → Data (native dialog, Finder, restart to apply a restore). */
@@ -1360,7 +1500,10 @@ export interface BoardColumn { id: string; board_id: string; name: string; posit
 export interface BoardCard {
   id: string; board_id: string; column_id: string; title: string; description: string; position: number
   due: string | null; priority: number; labels: string[]; created_at: number; updated_at: number
+  over_limit?: boolean
+  claimed_by?: string | null; lease_expires_at?: number | null
 }
+export interface CardEvent { id: string; seq: number; card_id: string; actor: string; kind: string; payload: Record<string, unknown>; created_at: number }
 export interface Board { id: string; project_id: string | null; name: string; created_at: number; card_count?: number; columns: BoardColumn[]; cards: BoardCard[] }
 
 export interface DataSource {
@@ -1624,9 +1767,13 @@ export interface Doc {
   title: string
   folder: string
   starred: number
+  /** Pinned docs sit in their own group above the folders; absent on older payloads. */
+  pinned?: number
   created_at: number
   updated_at: number
   words: number
+  /** Distinct lowercase #tags in the body (list rows only). */
+  tags?: string[]
   /** List rows carry a preview and a pending count; a fetched doc carries the body and the pending revisions. */
   preview?: string
   size?: number
@@ -1760,6 +1907,9 @@ export interface RunInfo {
   conversation_id: string
   message_id: string | null
   seq: number
+  /** Tape seq of the latest assistant_message; a window attaching mid-reply replays from just before it. */
+  message_seq?: number | null
+  kind?: string
   started_at: number
   live: boolean
   /** Still producing a reply. `live` outlasts it by the auto-learn tail that follows the last `done`. */
@@ -1930,7 +2080,7 @@ export interface PendingApproval {
 }
 
 /** 409 detail of POST /conversations/{id}/chat when that conversation already has a live run. */
-export interface RunConflict { message: string; run_id: string; seq: number }
+export interface RunConflict { message: string; run_id: string; seq: number; message_id?: string | null; message_seq?: number | null }
 
 /** One detached widget window as the main process sees it. */
 export interface PopoutInfo { windowId: string; bounds: PopoutBounds; pinned: boolean; opacity: number }
@@ -1990,6 +2140,8 @@ export interface ActivityConfig {
   excludeApps: string[]
   /** Window titles / URLs containing any of these are skipped. */
   excludeTitlePatterns: string[]
+  /** Drop a window only when every named field (substring or /regex/) matches. */
+  excludeRules: { app?: string; title?: string; url?: string }[]
   /** Strings or /regex/ that are never scrubbed. */
   redactAllow: string[]
   /** Strings or /regex/ that are always scrubbed. */
@@ -2247,6 +2399,14 @@ export type MeetingStatus =
 /** Shapes the enhance prompt and the notes skeleton; keys into meeting_notes.TEMPLATES. */
 export type MeetingTemplate = 'general' | 'standup' | 'one_on_one' | 'user_interview' | 'sales_call' | 'lecture'
 
+/** A named piece of user-written prose: a template's instructions or a recipe's prompt. */
+export interface SavedPrompt {
+  id: string
+  name: string
+  instructions?: string
+  prompt?: string
+}
+
 /** A list row: counts and a preview, never a body. */
 export interface Meeting {
   id: string
@@ -2294,6 +2454,15 @@ export interface RecordingEvent {
   error?: string | null
 }
 
+/** The app-wide `preview` event: in-flight dictation text. Never durable; the settled segment replaces it. */
+export interface PreviewEvent {
+  session: string
+  kind: 'volatile' | 'final'
+  text: string
+  t0: number
+  t1: number
+}
+
 /** A meeting with its bodies loaded — what GET /meetings/{id} returns. */
 export interface FullMeeting extends Omit<Meeting, 'notes_preview'> {
   /** What the user typed. No model ever writes this. */
@@ -2312,6 +2481,8 @@ export interface FullMeeting extends Omit<Meeting, 'notes_preview'> {
   keep_audio: boolean
   /** Display names for diarized speaker ids, e.g. { S1: 'Dana' }. */
   speaker_names: Record<string, string>
+  /** Summary line index (in `enhanced`) to the transcript segment ids it was written from. */
+  summary_evidence?: Record<string, string[]>
   /** Retained wav bytes, against the disk ceiling. */
   audio_bytes: number
   conversation_id: string | null
@@ -2351,6 +2522,8 @@ export interface MeetingSegment {
   /** 'proxy' | 'local', for the usage/debug line. */
   backend: string
   error: string
+  /** Where the kept wav sits; '' when the audio was not kept. */
+  wav_path?: string
   /** GET /meetings/{id}/segments?since= only: the rowid to poll from next. */
   cursor?: number
 }
@@ -2414,13 +2587,27 @@ export interface MeetingConfig {
   sttModel: string
   /** whisper.cpp ggml model file, for the local backend. */
   whisperModelPath: string
-  template: MeetingTemplate
+  template: MeetingTemplate | string
+  /** User-authored prose templates; ids start with c_. */
+  customTemplates: SavedPrompt[]
+  /** Saved focus lines for a summary; prompts are capped at 300 characters. */
+  recipes: SavedPrompt[]
+  /** 'auto' follows the transcript's majority language, otherwise a language name. */
+  summaryLanguage: string
   enhanceOnStop: boolean
+  /** Names and jargon given to the transcriber, along with the attendees. */
+  terms: string[]
   /** Blank falls back to the extraction model, then the default model. */
   enhanceModel: string
   /** Head-and-tail cap on the transcript sent to the model; decisions land at the end. */
   maxTranscriptChars: number
+  /** A recording with fewer spoken words than this is not summarised. */
+  minSummaryWords?: number
+  /** Seed the speech model with the meeting title and attendee names. */
+  vocabularyPrompt?: boolean
   keepAudio: boolean
+  /** Doc recordings pause after this many silent minutes; 0 never pauses. */
+  silencePauseMinutes: number
   /** Disk ceiling for retained wavs, oldest failed segment evicted first. */
   maxAudioBytes: number
   /** Scrub credential-shaped strings before anything is stored. Never activity's identity rules, which
@@ -2435,6 +2622,8 @@ export interface MeetingConfig {
   minAttendees: number
   /** Skip STT for segments with no speech, and drop known silence hallucinations. */
   vadGate: boolean
+  /** Dictation only: show in-flight words in a pill at the caret (on-device Speech; never typed in). */
+  livePreview: boolean
   vadMinSpeechRatio: number
   hallucinationFilter: boolean
   whisperVadModelPath: string
@@ -2447,6 +2636,8 @@ export interface MeetingConfig {
   diarizeEmbeddingModel: string
   diarizeThreshold: number
   diarizeSpeakers: number
+  /** Run each dictated clip through a model that only fixes punctuation, case and fillers. */
+  dictationCleanup: boolean
 }
 
 /** One row of the capability checklist: what this machine can do, and how to fix what it can't. */
@@ -2477,7 +2668,9 @@ export interface MeetingStatusInfo {
     /** Pause keeps capture running and throws the audio away, so `channels[].alive` stays true while
      *  paused. This flag is the only honest source of pausedness; never infer it from the channels. */
     paused: boolean
-    channels: { channel: string; alive: boolean; error: string }[]
+    channels: { channel: string; alive: boolean; error: string; silent_for_s?: number }[]
+    /** The recorder paused itself after a long silence; the bar asks "Still recording?". */
+    auto_paused?: boolean
     error: string
     /** Set when the live recording belongs to a doc; null for an ordinary meeting. */
     doc_id: string | null
@@ -2515,6 +2708,8 @@ export interface MeetingCandidate {
   conference_link: string
   /** Set once a meeting row exists for this event, so the nudge is not offered twice. */
   meeting_id: string | null
+  /** Invitees other than the user; local only, they become the doc header. */
+  attendees?: { email: string; name?: string }[]
 }
 
 /** One frame of the per-meeting SSE stream. */
@@ -2641,3 +2836,17 @@ export interface Command {
   role: string | null
   text: string
 }
+
+/** A user-authored agent definition (inert until approved). Built-ins come back separately, without these fields. */
+export interface AgentDef {
+  id: string
+  name: string
+  description: string
+  model: string | null
+  steps: number | null
+  tools: string[]
+  hidden: boolean
+  approved: boolean
+  body: string
+}
+export interface BuiltinAgent { name: string; description: string; tools: string[] }

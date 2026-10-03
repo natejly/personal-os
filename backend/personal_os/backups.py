@@ -215,6 +215,7 @@ _README = """Grain data export
 grain.db            A complete SQLite snapshot (open with any SQLite tool, or restore it in Grain).
                     It includes your settings, which can hold API keys: keep this file private.
 uploads/            Files you added to the knowledge base, as stored.
+doc_assets/         Images pasted into your documents, one folder per document.
 export/             The same content as plain text:
   conversations.md / conversations.json
   memories.md / memories.json
@@ -233,7 +234,10 @@ def human_export(db_path: Path) -> dict[str, tuple[str, Any]]:
     try:
         projects = {r["id"]: r["name"] for r in c.execute("SELECT id, name FROM projects")}
         convs = _rows(c, "SELECT id, project_id, title, model, created_at, updated_at FROM conversations ORDER BY created_at")
-        msgs = _rows(c, "SELECT conversation_id, role, content, model, created_at FROM messages ORDER BY created_at")
+        # Regenerated answers are kept as superseded rows; the export reads one answer per turn. A snapshot
+        # taken before the migration has no such column.
+        live = "WHERE superseded_at IS NULL " if any(r["name"] == "superseded_at" for r in c.execute("PRAGMA table_info(messages)")) else ""
+        msgs = _rows(c, f"SELECT conversation_id, role, content, model, created_at FROM messages {live}ORDER BY created_at")
         mems = _rows(c, "SELECT id, project_id, content, kind, source, pinned, created_at FROM memories ORDER BY created_at")
         docs = _rows(c, "SELECT id, project_id, name, mime, size, text, created_at FROM documents ORDER BY created_at")
     finally:
@@ -289,10 +293,11 @@ def _write_zip(part: Path, snap: Path, data_dir: Path) -> None:
         for base, (md, js) in human_export(snap).items():
             z.writestr(f"export/{base}.md", md)
             z.writestr(f"export/{base}.json", json.dumps(js, indent=2, ensure_ascii=False))
-        up = data_dir / "uploads"
-        for f in sorted(up.rglob("*")) if up.exists() else []:
-            if f.is_file() and not f.is_symlink():
-                z.write(f, f"uploads/{f.relative_to(up).as_posix()}")
+        for sub in ("uploads", "doc_assets"):
+            up = data_dir / sub
+            for f in sorted(up.rglob("*")) if up.exists() else []:
+                if f.is_file() and not f.is_symlink():
+                    z.write(f, f"{sub}/{f.relative_to(up).as_posix()}")
 
 
 # ---- scheduler + routes ----

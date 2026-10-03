@@ -2,10 +2,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { AudioLines, Mic, Pencil, Trash2, Volume2 } from 'lucide-react'
 import type { DocRecording } from '@shared/types'
 import { useStore } from '../../store'
+import { recorderState } from '../../lib/transcript'
 import { useDocRec } from './store'
 import { useDocRecSync } from './hooks'
 import { liveDoc } from './segments'
-import { EMPTY_COPY, fmtDuration, modeLabel, recordingWhen, statusLabel } from './format'
+import { EMPTY_COPY, fmtDuration, modeLabel, pendingLabel, recordingWhen, statusLabel } from './format'
 import TranscriptView from './TranscriptView'
 import SummaryView from './SummaryView'
 import '../../styles/docrec.css'
@@ -39,14 +40,16 @@ export default function RecordingsPanel({ docId }: { docId: string }): JSX.Eleme
   const settling = useDocRec((s) => s.settling)
   // The status, not `liveDoc(status)`: a selector that returns a fresh object each call never settles.
   const meetingStatus = useStore((s) => s.meetingStatus)
+  const docTitle = useStore((s) => (s.activeDoc?.id === docId ? s.docTitleDraft ?? s.activeDoc.title : undefined))
   const live = useMemo(() => liveDoc(meetingStatus), [meetingStatus])
   const [tab, setTab] = useState<Tab>('transcript')
+  const [cited, setCited] = useState<string[]>([])
   const [renaming, setRenaming] = useState(false)
 
   const row = rows.find((r) => r.id === selectedId) ?? null
   const isLive = !!row && live?.meetingId === row.id
   // A new selection should not inherit the previous one's half-typed title.
-  useEffect(() => { setRenaming(false) }, [selectedId])
+  useEffect(() => { setRenaming(false); setCited([]) }, [selectedId])
 
   if (rows.length === 0) {
     return (
@@ -130,11 +133,15 @@ export default function RecordingsPanel({ docId }: { docId: string }): JSX.Eleme
 
           {tab === 'transcript'
             ? <TranscriptView title={row.title} segments={segments ?? []} meeting={meeting} live={isLive}
-                segmentCount={row.segment_count} busy={busy}
+                segmentCount={row.segment_count} busy={busy} highlightIds={cited}
+                pending={isLive && meetingStatus?.active ? pendingLabel(recorderState(meetingStatus.active), meetingStatus.active.queued, meetingStatus.active.segments_pending) : ''}
                 onRetranscribe={() => void useDocRec.getState().retranscribe(row.id)} />
             : <SummaryView row={row} meeting={meeting} actions={actions} summarizing={summarizing} error={summaryError}
                 onSummarize={(o) => void useDocRec.getState().summarize(row.id, o)}
-                onAddTodos={(ids) => void useDocRec.getState().addTodos(row.id, ids)} />}
+                onAddTodos={(ids) => void useDocRec.getState().addTodos(row.id, ids)}
+                onSource={(ids) => { setCited(ids); setTab('transcript') }}
+                docTitle={docTitle}
+                onUseTitle={(t) => { useStore.getState().editDocTitle(t); void useStore.getState().flushDoc() }} />}
         </div>
       )}
     </div>

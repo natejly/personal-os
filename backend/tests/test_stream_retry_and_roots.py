@@ -60,6 +60,13 @@ def main() -> None:
     events, calls = run_stream([429, 503])
     text = "".join(e.get("text", "") for e in events if e.get("type") == "delta")
     assert calls == 3 and text == "hi", f"two refusals then a stream: retried and streamed once ({calls}, {events})"
+    rt = [e for e in events if e["type"] == "retry"]
+    assert [(e["attempt"], e["reason"]) for e in rt[:2]] == [(1, "rate_limit"), (2, "provider_error")] \
+        and rt[0]["max"] == llm.DEFAULT_SETTINGS["llmRetries"], rt
+    assert rt[2] == {"type": "retry", "attempt": 0}, "a clear follows the successful retry"
+    kinds = [e["type"] for e in events]
+    assert kinds.index("delta") > max(i for i, k in enumerate(kinds) if k == "retry"), "every retry event precedes the first token"
+    assert not [e for e in run_stream([])[0] if e["type"] == "retry"], "no retry events without a retry"
     events, calls = run_stream([429] * 10)
     retries = llm.DEFAULT_SETTINGS["llmRetries"]
     assert calls == retries + 1 and events[0]["type"] == "error" and "429" in events[0]["text"], \

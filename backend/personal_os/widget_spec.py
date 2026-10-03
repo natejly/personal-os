@@ -319,8 +319,11 @@ def compute_stat(spec: dict[str, Any], rows: list[Row]) -> dict[str, Any] | None
 async def bind(spec: dict[str, Any], fetch: FetchFn) -> dict[str, Any]:
     """Fetch the spec's source and shape it: {rows, stat, error}. Never raises; a failure is the `error` string."""
     try:
-        data = await fetch(str(spec.get("source_id") or ""))
-        rows = resolve_path(data, spec.get("path") or "$")
+        inline = spec.get("inline_rows")
+        if isinstance(inline, list):  # a pinned chat chart: stored rows, no source, no fetch
+            rows = [_row(r) for r in inline]
+        else:
+            rows = resolve_path(await fetch(str(spec.get("source_id") or "")), spec.get("path") or "$")
         rows = coerce_rows(rows, spec)
         rows = apply_transforms(rows, spec.get("transforms"))[:MAX_ROWS]
     except Exception as e:  # noqa: BLE001 - a dead source must show as an error on the widget, not a 500
@@ -478,6 +481,8 @@ async def run_widget(store: Any, w: dict[str, Any], settings: dict[str, Any], mo
                      regenerate: bool = False) -> dict[str, Any]:
     """Create/refresh a declarative widget. The model runs only to (re)generate the spec; a plain refresh is a re-bind."""
     sid = (w.get("source_ids") or [""])[0]
+    if isinstance((w.get("spec") or {}).get("inline_rows"), list):  # static rows: re-bind only, never the model
+        return await _bind_and_store(store, w, w["spec"], fetch)
     if not sid or not store.source(sid):
         return store.update_widget(w["id"], {"data_error": "This widget needs a data source.", "refreshed_at": _now()}) or w
     spec = w.get("spec") or {}

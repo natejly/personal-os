@@ -68,9 +68,13 @@ export function shouldAttachWidgetToken(args: {
   return true
 }
 
-/** Subframes may load the widget document and its data sources. The rest of the API stays in the app. */
+/**
+ * Subframes may load the widget document and its data sources. The rest of the API stays in the app,
+ * and so does the disk: every frame the renderer makes is a sidecar URL or srcdoc, so a file dropped
+ * on a preview frame has no business loading in it.
+ */
 export function frameNavigationAllowed(url: string, backendUrl: string, rendererUrl?: string): boolean {
-  if (url === 'about:blank' || url.startsWith('file://')) return true
+  if (url === 'about:blank') return true
   if (rendererUrl && (url === rendererUrl || url.startsWith(rendererUrl.endsWith('/') ? rendererUrl : `${rendererUrl}/`))) return true
   const backend = originOf(backendUrl)
   if (!backend) return false

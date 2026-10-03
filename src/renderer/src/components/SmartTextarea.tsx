@@ -30,13 +30,14 @@ interface Props {
   maxHeight?: number
   onBlur?: () => void
   onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void
+  onPaste?: (e: React.ClipboardEvent<HTMLTextAreaElement>) => void
 }
 
 const DEBOUNCE_MS = 600
 const MIN_CHARS = 15
 
 export default function SmartTextarea({
-  value, onChange, kind, context = '', variant = 'field', sharedStyle, placeholder, autoFocus, onBlur, onKeyDown,
+  value, onChange, kind, context = '', variant = 'field', sharedStyle, placeholder, autoFocus, onBlur, onKeyDown, onPaste,
   rows = 2, className = '', minChars = MIN_CHARS, autoGrow = false, maxHeight = 240
 }: Props): JSX.Element {
   const [ghost, setGhost] = useState('')
@@ -52,7 +53,7 @@ export default function SmartTextarea({
       const ta = taRef.current
       if (!ta || document.activeElement !== ta || ta.selectionStart !== value.length || ta.selectionEnd !== value.length) return
       api.assist
-        .complete({ kind, before: value, context })
+        .complete({ kind, before: value.slice(-4000), context })
         .then(({ completion }) => { if (seq.current === mine && completion) setGhost(completion) })
         .catch(() => undefined) // ghost text is a nicety; never surface its errors
     }, DEBOUNCE_MS)
@@ -105,6 +106,7 @@ export default function SmartTextarea({
         onScroll={syncScroll}
         onBlur={() => { setGhost(''); onBlur?.() }}
         onKeyDown={keyDown}
+        onPaste={onPaste}
       />
       {ghost && <span className="smart-ta-hint">tab</span>}
     </div>

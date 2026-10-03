@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { Check, Trash2, Calendar, CalendarPlus, ExternalLink, Repeat } from 'lucide-react'
+import { Check, Trash2, Calendar, CalendarPlus, ExternalLink, Repeat, ListPlus, Lock } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import type { Todo } from '@shared/types'
@@ -43,12 +43,14 @@ export async function scheduleTodo(todo: Todo, start?: string): Promise<Todo> {
   return { ...todo, due: when.length === 10 ? when : todo.due, ...link }
 }
 
-export default function TodoItem({ todo, showProject = true, compact = false }: { todo: Todo; showProject?: boolean; compact?: boolean }): JSX.Element {
+export default function TodoItem({ todo, showProject = true, compact = false, depth = 0, onTag }: { todo: Todo; showProject?: boolean; compact?: boolean; depth?: number; onTag?: (tag: string) => void }): JSX.Element {
   const updateTodo = useStore((s) => s.updateTodo)
   const deleteTodo = useStore((s) => s.deleteTodo)
   const toast = useStore((s) => s.toast)
   const google = useStore((s) => s.google)
+  const addTodo = useStore((s) => s.addTodo)
   const [editing, setEditing] = useState(false)
+  const [sub, setSub] = useState<string | null>(null)
   const [title, setTitle] = useState(todo.title)
   // The title as it was when editing began: a rename that lands meanwhile (sync, the agent) is not
   // something this edit changed, so it is neither overwritten nor reverted by a no-op commit.
@@ -58,6 +60,12 @@ export default function TodoItem({ todo, showProject = true, compact = false }: 
   const commit = (): void => {
     setEditing(false)
     if (title.trim() && title !== startTitle.current) void updateTodo(todo.id, { title: title.trim() })
+  }
+  const addSub = async (): Promise<void> => {
+    const t = (sub ?? '').trim()
+    setSub(null)
+    if (!t) return
+    try { await addTodo({ title: t, project_id: todo.project_id, parent_id: todo.id }) } catch (e) { toast((e as Error).message, 'error') }
   }
   const toCalendar = async (): Promise<void> => {
     try {
@@ -71,7 +79,7 @@ export default function TodoItem({ todo, showProject = true, compact = false }: 
   // attribute would eat the caret, so it comes off.
   const drag = dragProps({ kind: 'todo', id: todo.id, label: todo.title, projectId: todo.project_id })
   return (
-    <div className={`todo ${todo.done ? 'done' : ''} p${todo.priority} ${compact ? 'compact' : ''}`} {...(editing ? {} : drag)}>
+    <div className={`todo ${todo.done ? 'done' : ''} p${todo.priority} ${compact ? 'compact' : ''}`} style={depth ? { marginLeft: depth * 20 } : undefined} {...(editing ? {} : drag)}>
       <button className="todo-check" onClick={() => void updateTodo(todo.id, { done: !todo.done })} title={todo.done ? 'Reopen' : 'Complete'}>
         {todo.done ? <Check size={12} /> : null}
       </button>
@@ -82,9 +90,15 @@ export default function TodoItem({ todo, showProject = true, compact = false }: 
           <span className="todo-title" role="button" tabIndex={0} onClick={beginEdit} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); beginEdit() } }}>{todo.title}</span>
         )}
         {!compact && todo.notes && <span className="todo-notes">{todo.notes}</span>}
+        {sub !== null && (
+          <input autoFocus className="todo-subinput" placeholder="Subtask…" aria-label={`New subtask of ${todo.title}`} value={sub} onChange={(e) => setSub(e.target.value)}
+            onBlur={() => void addSub()} onKeyDown={(e) => { if (e.key === 'Enter') void addSub(); if (e.key === 'Escape') setSub(null) }} />
+        )}
       </div>
       <div className="todo-meta">
         {todo.urgency !== undefined && !todo.done && <span className="todo-urgency" title="Urgency score (due, priority, age)">{todo.urgency.toFixed(1)}</span>}
+        {!!todo.blocked_count && !todo.done && <span className="todo-blocked" title={`Waiting on ${todo.blocked_count} open todo${todo.blocked_count > 1 ? 's' : ''}`}><Lock size={11} /></span>}
+        {todo.tags?.map((t) => <button key={t} className="todo-tag" title={`Filter by #${t}`} onClick={() => onTag?.(t)}>#{t}</button>)}
         {todo.repeat && <span className="todo-repeat" title={`Repeats every ${todo.repeat.every > 1 ? todo.repeat.every + ' ' : ''}${todo.repeat.unit}${todo.repeat.every > 1 ? 's' : ''}${todo.repeat.mode === 'from_completion' ? ' after completion' : ''}`}><Repeat size={11} /></span>}
         {todo.external_id && <span className="g-logo g-logo-sm" title="Synced with Google Tasks">G</span>}
         {showProject && todo.project_id && <ProjectChip projectId={todo.project_id} />}
@@ -93,6 +107,12 @@ export default function TodoItem({ todo, showProject = true, compact = false }: 
           <span>{due.text || 'no date'}</span>
           <input type="date" aria-label={`Due date for ${todo.title}`} value={todo.due ?? ''} onChange={(e) => void updateTodo(todo.id, e.target.value ? { due: e.target.value } : { clear_due: true })} />
         </label>
+        {!compact && (
+          <input className="todo-tags" placeholder="tags" title="Tags, comma separated" aria-label={`Tags for ${todo.title}`}
+            defaultValue={(todo.tags ?? []).join(', ')} key={(todo.tags ?? []).join(',')}
+            onBlur={(e) => { const v = e.target.value.split(',').map((x) => x.trim().replace(/^#/, '').toLowerCase()).filter(Boolean); if (v.join(',') !== (todo.tags ?? []).join(',')) void updateTodo(todo.id, { tags: v }) }} />
+        )}
+        {!compact && !todo.done && <button className="icon-btn ghost" title="Add subtask" aria-label={`Add subtask to ${todo.title}`} onClick={() => setSub('')}><ListPlus size={13} /></button>}
         {!compact && !todo.done && (
           <input className="todo-est" type="number" min={0} max={960} step={5} placeholder="min" title="Estimate in minutes (used by Plan my day)" aria-label={`Estimate in minutes for ${todo.title}`}
             defaultValue={todo.estimate_min ?? ''} key={todo.estimate_min ?? 'none'}

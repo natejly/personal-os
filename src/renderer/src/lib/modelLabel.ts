@@ -31,3 +31,15 @@ export function modelChoices(ids: string[], query: string, selected: string): st
   }
   return [...byLabel.values()].sort((a, b) => modelLabel(a).localeCompare(modelLabel(b)) || a.localeCompare(b))
 }
+
+interface ModelCaps { id: string; mode?: string | null; reasoning?: boolean | null }
+
+/** Ids the picker may offer as chat models. A model whose kind is unknown stays: only an explicit non-chat mode drops it. */
+export function chatModelIds(models: ModelCaps[]): string[] {
+  return models.filter((m) => m.mode == null || m.mode === 'chat').map((m) => m.id)
+}
+
+/** The reasoning control shows unless the model is known to have no reasoning (an unknown model keeps it). */
+export function showsEffort(models: ModelCaps[], id: string): boolean {
+  return models.find((m) => m.id === id)?.reasoning !== false
+}

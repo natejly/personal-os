@@ -127,6 +127,7 @@ CREATE TABLE IF NOT EXISTS usage_log (
   estimated INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS usage_log_created ON usage_log(created_at);
+CREATE INDEX IF NOT EXISTS idx_usage_conv ON usage_log(conversation_id, created_at);
 CREATE TABLE IF NOT EXISTS chunks (
   id TEXT PRIMARY KEY,
   document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
@@ -528,18 +529,19 @@ class Database:
             # Soft delete (trash.py): deleted_at hides a row from every read; deleted_with names the project
             # whose deletion took it along, so restoring the project brings back exactly those rows.
             "projects": {"tools": "TEXT NOT NULL DEFAULT '{}'", "deleted_at": "REAL"},
-            "conversations": {"deleted_at": "REAL", "deleted_with": "TEXT"},
+            "conversations": {"deleted_at": "REAL", "deleted_with": "TEXT", "pinned_at": "REAL", "archived_at": "REAL"},
             "memories": {"deleted_at": "REAL", "deleted_with": "TEXT", "valid_from": "REAL", "invalid_at": "REAL", "superseded_by": "TEXT",
                          "source_conversation_id": "TEXT", "source_message_id": "TEXT"},
-            "documents": {"deleted_at": "REAL", "deleted_with": "TEXT", "content_hash": "TEXT NOT NULL DEFAULT ''"},
-            "chunks": {"heading": "TEXT NOT NULL DEFAULT ''", "page": "INTEGER"},
+            "documents": {"deleted_at": "REAL", "deleted_with": "TEXT", "content_hash": "TEXT NOT NULL DEFAULT ''",
+                          "pinned": "INTEGER NOT NULL DEFAULT 0"},
+            "chunks": {"heading": "TEXT NOT NULL DEFAULT ''", "page": "INTEGER", "blurb": "TEXT NOT NULL DEFAULT ''"},
             "kg_edges": {"valid_at": "REAL", "invalid_at": "REAL", "superseded_by": "TEXT",
                          "source_message_id": "TEXT", "fact": "TEXT NOT NULL DEFAULT ''"},
-            "messages": {"tool_events": "TEXT", "trace": "TEXT", "reasoning": "TEXT"},
+            "messages": {"tool_events": "TEXT", "trace": "TEXT", "reasoning": "TEXT", "outcome": "TEXT", "error_kind": "TEXT", "superseded_at": "REAL", "variant_of": "TEXT"},
             "jobs": {"kind": "TEXT NOT NULL DEFAULT 'cron'", "run_at": "REAL",
                      "max_retries": "INTEGER NOT NULL DEFAULT 1", "consecutive_failures": "INTEGER NOT NULL DEFAULT 0",
                      "paused_reason": "TEXT", "last_skip_at": "REAL", "last_skip_reason": "TEXT",
-                     "allowed_tools": "TEXT"},
+                     "allowed_tools": "TEXT", "expires_at": "REAL", "watch_dir": "TEXT", "watch_seen": "TEXT"},
             "action_plans": {"desk_id": "TEXT", "intent": "TEXT NOT NULL DEFAULT ''",
                              "expected_taint": "TEXT NOT NULL DEFAULT '[]'"},
             "approvals": {"desk_id": "TEXT", "danger": "TEXT NOT NULL DEFAULT 'external'",
@@ -550,7 +552,11 @@ class Database:
                           "edited_args": "TEXT", "edited_by": "TEXT"},
             "agent_runs": {"desk_id": "TEXT", "turn": "INTEGER NOT NULL DEFAULT 0", "resumed_from": "TEXT", "parent_run_id": "TEXT"},
             "usage_log": {"cached_tokens": "INTEGER NOT NULL DEFAULT 0", "cache_write_tokens": "INTEGER NOT NULL DEFAULT 0",
-                          "reasoning_tokens": "INTEGER NOT NULL DEFAULT 0"},
+                          "reasoning_tokens": "INTEGER NOT NULL DEFAULT 0",
+                          # Who spent it: 'chat', 'job:<id>' or 'desk:<id>', and which tool round of the reply.
+                          "tag": "TEXT NOT NULL DEFAULT ''", "round": "INTEGER NOT NULL DEFAULT 0"},
+            # idem_key: opt-in "same proposal twice is one proposal" (jobs.Proposals.create), unique when set.
+            "proposals": {"idem_key": "TEXT"},
             "plan_steps": {"result_error": "TEXT", "title": "TEXT NOT NULL DEFAULT ''",
                            "danger": "TEXT NOT NULL DEFAULT 'safe'"},
         }
@@ -565,6 +571,7 @@ class Database:
         c.execute("CREATE INDEX IF NOT EXISTS idx_runs_desk ON agent_runs(desk_id, started_at DESC)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_runs_parent ON agent_runs(parent_run_id)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_approvals_desk ON approvals(desk_id, status)")
+        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_proposals_idem ON proposals(idem_key)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_plans_desk ON action_plans(desk_id, created_at)")
         c.commit()
 

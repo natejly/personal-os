@@ -1,4 +1,4 @@
-import type { ChatEvent, Conversation, Message, SessionStatus } from '@shared/types'
+import type { ChatEvent, Conversation, Message, RunInfo, SessionStatus } from '@shared/types'
 
 /** The session logic of the canvas contract §8 — status machine, LRU and merge — pure so it can be tested without a store. */
 
@@ -12,6 +12,8 @@ export const settleApprovals = (prev: SessionStatus, pendingApprovals: number): 
 export const reduceStatus = (prev: SessionStatus, ev: ChatEvent, pendingApprovals: number): SessionStatus => {
   switch (ev.event) {
     case 'done':
+      // A steer segment closing is not the end of the run: the next segment is already coming.
+      if (ev.data.segment && !ev.data.error) return prev
       // `stopped` is not a failure: a partial answer still counts as done (contract §12.3).
       return ev.data.error ? 'error' : 'done'
     case 'error':
@@ -65,6 +67,10 @@ const longerText = (remote?: string | null, local?: string | null): string | nul
 
 const mergeMessage = (local: Message, remote: Message): Message => ({
   ...remote,
+  // An error stamped by the run's terminal event is not on the row a stale fetch returns.
+  error: remote.error ?? local.error,
+  outcome: remote.outcome ?? local.outcome ?? null,
+  error_kind: remote.error_kind ?? local.error_kind ?? null,
   content: remote.content.length >= local.content.length ? remote.content : local.content,
   tool_events: remote.tool_events?.length ? remote.tool_events : local.tool_events,
   trace: remote.trace?.length ? remote.trace : local.trace,
@@ -89,4 +95,48 @@ export const mergeConversation = (local: Conversation, remote: Conversation, kee
     return mergeMessage(l, r)
   })
   return { ...remote, messages: keepUnsent ? [...messages, ...unseen.values()] : messages }
+}
+
+/**
+ * Where an attach replays from. With an assistant message on the tape, the event just before it, so the
+ * whole in-flight message is rebuilt from its own deltas; before one exists, the tape is replayed as is.
+ */
+export const replayCursor = (run: Pick<RunInfo, 'seq' | 'message_seq'>): number =>
+  run.message_seq != null ? run.message_seq - 1 : run.seq
+
+/** Live runs by conversation, kept current from `run_state` frames. A stale end for another run leaves the entry alone. */
+export type LiveRuns = Record<string, { run_id: string; status?: string }>
+
+export const foldRunState = (map: LiveRuns, info: RunInfo): LiveRuns => {
+  if (info.answering) return { ...map, [info.conversation_id]: { run_id: info.run_id, status: info.status } }
+  if (map[info.conversation_id]?.run_id !== info.run_id) return map
+  const { [info.conversation_id]: _gone, ...rest } = map
+  return rest
+}
+
+/**
+ * Whether a conversation is in front of the user: the chat view showing it, or any surface that has it
+ * mounted (a canvas window or a pop-out holds a `retained` pin for as long as it does).
+ */
+export const onScreen = (convId: string, where: { view: string; focusedId: string | null; retained: { has: (id: string) => boolean } }): boolean =>
+  (where.view === 'chat' && where.focusedId === convId) || where.retained.has(convId)
+
+export type ChatNoticeKind = 'reply' | 'approval' | 'failed'
+
+/**
+ * What an event just did to a chat that is worth a system notification, from the status before and after it.
+ * One kind per transition, so a status that did not move rings never. A reply the user stopped is not news to them.
+ */
+export const chatNotice = (prev: SessionStatus, next: SessionStatus, ev: ChatEvent): ChatNoticeKind | null => {
+  if (next === 'needs-approval' && prev !== 'needs-approval') return 'approval'
+  if (next === 'error' && prev !== 'error') return 'failed'
+  if (next === 'done' && ev.event === 'done' && !ev.data.segment && !ev.data.stopped) return 'reply'
+  return null
+}
+
+/** The sidebar pulse: a session's own status wins, and a conversation with no session falls back to its live run. */
+export const pulseStatus = (sessionStatus: SessionStatus, liveRun?: { status?: string } | null): SessionStatus => {
+  if (sessionStatus !== 'idle') return sessionStatus
+  if (!liveRun) return 'idle'
+  return liveRun.status === 'awaiting_approval' ? 'needs-approval' : 'working'
 }

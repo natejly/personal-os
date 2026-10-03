@@ -3,7 +3,9 @@ import ReactDOM from 'react-dom/client'
 import App from './App'
 import PopoutSurface from './PopoutSurface'
 import { useCanvas } from './canvas/store'
+import QuickCapture from './features/notes/QuickCapture'
 import RootBoundary from './RootBoundary'
+import { installFileDropGuard } from './lib/fileDrop'
 import './styles.css'
 import 'highlight.js/styles/github-dark-dimmed.css'
 
@@ -17,7 +19,11 @@ const params = (): URLSearchParams => {
   return new URLSearchParams(q === -1 ? '' : window.location.href.slice(q + 1))
 }
 
+// Before anything mounts, in every window: a file dropped off-target must never load in place of the app.
+installFileDropGuard(window)
+
 const q = params()
+const capture = q.get('surface') === 'capture'
 const windowId = q.get('surface') === 'widget' ? q.get('window') : null
 
 /**
@@ -26,7 +32,7 @@ const windowId = q.get('surface') === 'widget' ? q.get('window') : null
  * owns both actions in either mode, including its own fall-through to closeSelf/minimizeSelf.
  * A pop-out answers for itself in `PopoutSurface`.
  */
-if (!windowId) {
+if (!windowId && !capture) {
   window.os.onMenu((action) => {
     if (useCanvas.getState().loaded) return
     if (action === 'close-window') window.os.closeSelf()
@@ -36,6 +42,6 @@ if (!windowId) {
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <RootBoundary>{windowId ? <PopoutSurface windowId={windowId} /> : <App />}</RootBoundary>
+    <RootBoundary>{capture ? <QuickCapture /> : windowId ? <PopoutSurface windowId={windowId} /> : <App />}</RootBoundary>
   </React.StrictMode>
 )

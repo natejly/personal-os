@@ -110,6 +110,7 @@ def guest_path(path: str | None) -> str:
     return posixpath.normpath(p)
 
 
+EXPORT_MAX_BYTES = 10_000_000  # one file handed out of the sandbox
 IDLE_STOP_S = 300       # a running container untouched this long is stopped (its files and installs survive)
 REAP_EVERY_S = 60
 
@@ -468,6 +469,24 @@ class Sandboxes:
         if self._net.get(name):
             out["network"] = True
         return out
+
+    def export_file(self, conversation_id: str, path: str) -> tuple[str, bytes]:
+        """The raw bytes of a file under /workspace, for handing to the user (capped at EXPORT_MAX_BYTES)."""
+        name = self.ensure(conversation_id)
+        gp = guest_path(path)
+        if gp == WORKSPACE or not gp.startswith(WORKSPACE + "/"):
+            raise SandboxError(f"{gp} is not a file under {WORKSPACE}; only files in /workspace can be exported")
+        p = self._run([self._bin(), "exec", name, "sh", "-c", 'test -f "$1" && wc -c < "$1"', "sh", gp], timeout=30)
+        if p.returncode != 0 or not p.stdout.split():
+            raise SandboxError(f"{gp} is not a regular file in the sandbox")
+        total = int(p.stdout.split()[0])
+        if total > EXPORT_MAX_BYTES:
+            raise SandboxError(f"{gp} is {total} bytes; the export limit is {EXPORT_MAX_BYTES}. Split or compress it first.")
+        raw = self._run([self._bin(), "exec", name, "cat", gp], timeout=120,
+                      **({"hard_cap": EXPORT_MAX_BYTES + 1024, "keep": EXPORT_MAX_BYTES + 1024} if self._run is _run else {}))
+        if raw.returncode != 0 or len(raw.stdout) != total:
+            raise SandboxError(f"could not read {gp}: {_line(raw.stderr) or 'size changed while reading'}")
+        return gp, raw.stdout
 
     def list_files(self, conversation_id: str, path: str | None = None) -> dict[str, Any]:
         name = self.ensure(conversation_id)

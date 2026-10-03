@@ -4,7 +4,9 @@ import { ToolOverrides } from './ToolPermissions'
 import TraceView from './TraceView'
 import { useStore, useProject, useConversation, useStreamingMessageId } from '../store'
 import { api } from '../lib/api'
-import { DEFAULT_EFFORT, type ContextMeter, type ContextUsed, type ConversationSettings } from '@shared/types'
+import ChunkViewer, { type ChunkRef } from './ChunkViewer'
+import { DEFAULT_EFFORT, type ContextMeter, type ContextUsed, type ConversationSettings, type ConversationUsage } from '@shared/types'
+import { fmtCost, usageLine } from '../lib/chatMeta'
 
 function Toggle({ label, hint, value, onChange, icon }: { label: string; hint: string; value: boolean; onChange: (v: boolean) => void; icon: JSX.Element }): JSX.Element {
   return (
@@ -18,13 +20,25 @@ function Toggle({ label, hint, value, onChange, icon }: { label: string; hint: s
 }
 
 /** Replayed history against the model window, with manual compaction and the summary it produced. */
-function ContextMeterView({ conversationId, refreshKey }: { conversationId: string; refreshKey: number }): JSX.Element | null {
+function ContextMeterView({ conversationId, refreshKey }: { conversationId: string; refreshKey: string }): JSX.Element | null {
   const [meter, setMeter] = useState<ContextMeter | null>(null)
+  const [spent, setSpent] = useState<ConversationUsage | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const load = (): void => { void api.contextMeter(conversationId).then(setMeter).catch(() => setMeter(null)) }
+  const load = (): void => {
+    void api.contextMeter(conversationId).then(setMeter).catch(() => setMeter(null))
+    // Its own catch: a failed usage read must leave the meter standing.
+    void api.conversationUsage(conversationId).then(setSpent).catch(() => setSpent(null))
+  }
   useEffect(load, [conversationId, refreshKey])
   if (!meter) return null
+  const spentLine = spent ? usageLine(spent) : null
+  const spentTitle = spent ? [
+    `${spent.totals.prompt_tokens.toLocaleString()} prompt (${(spent.totals.cached_tokens ?? 0).toLocaleString()} cached), ${spent.totals.completion_tokens.toLocaleString()} completion tokens over ${spent.totals.calls} calls`,
+    ...spent.by_kind.map((k) => `${k.kind}: ${k.calls} calls, ${k.calls > k.unpriced ? fmtCost(k.cost) : 'unpriced'}`),
+    spent.estimated ? `${spent.estimated} calls had estimated token counts` : '',
+    spent.since ? `Since ${new Date(spent.since * 1000).toLocaleString()} (older records may have been cleaned up)` : ''
+  ].filter(Boolean).join('\n') : undefined
   const frac = Math.min(1, meter.estimated_tokens / Math.max(1, meter.window))
   const act = async (fn: () => Promise<unknown>): Promise<void> => {
     setBusy(true)
@@ -41,6 +55,7 @@ function ContextMeterView({ conversationId, refreshKey }: { conversationId: stri
         <span>~{meter.estimated_tokens.toLocaleString()} of {meter.window.toLocaleString()} tokens</span>
         <button className="link" disabled={busy} onClick={() => void act(() => api.compactConversation(conversationId))}>{busy ? 'compacting…' : 'Compact now'}</button>
       </div>
+      {spentLine && <div className="ctx-usage" title={spentTitle}>{spentLine}</div>}
       {error && <p className="muted small">{error}</p>}
       {meter.summary && (
         <details className="ctx-summary">
@@ -54,14 +69,20 @@ function ContextMeterView({ conversationId, refreshKey }: { conversationId: stri
 }
 
 function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
-  const { setView, openMemory, openSettings, memories, setSettingsOpen } = useStore()
+  const setView = useStore((s) => s.setView)
+  const openMemory = useStore((s) => s.openMemory)
+  const openSettings = useStore((s) => s.openSettings)
+  const memories = useStore((s) => s.memories)
+  const setSettingsOpen = useStore((s) => s.setSettingsOpen)
   const [showPrompt, setShowPrompt] = useState(false)
+  const [viewing, setViewing] = useState<ChunkRef | null>(null)
   const has = ctx.memories.length + ctx.nodes.length + ctx.chunks.length + (ctx.skills?.length ?? 0) > 0
-    || Boolean(ctx.activity) || Boolean(ctx.page) || Boolean(ctx.style) || Boolean(ctx.meetings)
+    || Boolean(ctx.activity) || Boolean(ctx.page) || Boolean(ctx.style) || Boolean(ctx.meetings) || (ctx.pinned?.length ?? 0) > 0
   return (
     <div className="ctx-used">
       <div className="ctx-meta">
         ~{ctx.tokens_estimate} tokens of context
+        {ctx.trimmed && Object.keys(ctx.trimmed).length > 0 && <span className="muted"> · trimmed {Object.entries(ctx.trimmed).map(([k, n]) => `${k} ${n}`).join(', ')}</span>}
         <button className="link" onClick={() => setShowPrompt((v) => !v)}>{showPrompt ? 'hide' : 'view full system prompt'}</button>
       </div>
       {showPrompt && <pre className="ctx-prompt">{ctx.system_prompt}</pre>}
@@ -117,10 +138,17 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
           <ul>{ctx.skills?.map((s) => <li key={s.id}><b>{s.name}</b>{s.description ? ` — ${s.description}` : ''}</li>)}</ul>
         </section>
       )}
+      {(ctx.pinned?.length ?? 0) > 0 && (
+        <section>
+          <h5><FileText size={12} /> Pinned ({ctx.pinned!.length})</h5>
+          <ul>{ctx.pinned!.map((p) => <li key={p.document_id}><b>{p.name}</b></li>)}</ul>
+        </section>
+      )}
       {ctx.chunks.length > 0 && (
         <section>
           <h5><FileText size={12} /> Documents ({ctx.chunks.length} excerpt{ctx.chunks.length === 1 ? '' : 's'}) <button className="link" onClick={() => openSettings('knowledge', 'documents')}>manage</button></h5>
-          <ul>{ctx.chunks.map((c) => <li key={c.chunk_id}><b>{c.name}</b> · chunk {c.idx + 1}<div className="chunk-preview">{c.text}</div></li>)}</ul>
+          <ul>{ctx.chunks.map((c) => <li key={c.chunk_id}><button className="link" title="Open the passage in its source" onClick={() => setViewing(c)}><b>{c.name}</b> · chunk {c.idx + 1}</button><div className="chunk-preview">{c.text}</div></li>)}</ul>
+          {viewing && <ChunkViewer chunk={viewing} onClose={() => setViewing(null)} />}
         </section>
       )}
     </div>
@@ -133,7 +161,11 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
   const settings = useStore((s) => s.settings)
   const projectId = convo?.project_id ?? draftProjectId
   const project = useProject(projectId)
-  const { toggleContext, setChatSettings, openProject, induceSkill, setContextTab: setTab } = useStore()
+  const toggleContext = useStore((s) => s.toggleContext)
+  const setChatSettings = useStore((s) => s.setChatSettings)
+  const openProject = useStore((s) => s.openProject)
+  const induceSkill = useStore((s) => s.induceSkill)
+  const setTab = useStore((s) => s.setContextTab)
   const tab = useStore((s) => s.contextTab)
   const traceMessageId = useStore((s) => s.traceMessageId)
   const streamingMessageId = useStreamingMessageId(conversationId)
@@ -171,7 +203,7 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
       void api.contextPreview(projectId, query, cs).then(setPreview).catch(() => setPreview(null))
     }, 300)
     return () => clearTimeout(t)
-  }, [tab, query, projectId, cs.useMemory, cs.useGraph, cs.useDocuments, cs.useActivity, cs.useStyle, cs.useMeetings])
+  }, [tab, query, projectId, cs.useMemory, cs.useGraph, cs.useDocuments, cs.useActivity, cs.useStyle, cs.draftMode, cs.useMeetings])
 
   return (
     <aside className="context-drawer">
@@ -189,7 +221,7 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
         </div>
       </section>
 
-      {convo && <ContextMeterView conversationId={convo.id} refreshKey={convo.messages?.length ?? 0} />}
+      {convo && <ContextMeterView conversationId={convo.id} refreshKey={`${convo.messages?.length ?? 0}:${streamingMessageId ?? ''}`} />}
 
       <section className="ctx-section">
         <h4>{convo ? 'This chat uses' : 'New chats use'}</h4>
@@ -198,9 +230,10 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
         <Toggle icon={<FileText size={14} />} label="Documents" hint="Best matching excerpts (full-text search)" value={cs.useDocuments} onChange={(v) => void setChatSettings({ useDocuments: v }, conversationId)} />
         <Toggle icon={<MonitorDot size={14} />} label="Activity" hint={activityRunning ? 'What you have been doing on this computer' : 'Activity monitor is off'} value={cs.useActivity !== false} onChange={(v) => void setChatSettings({ useActivity: v }, conversationId)} />
         <Toggle icon={<PenLine size={14} />} label="Writing style" hint={hasStyle ? 'Drafts sound like you, not like the assistant' : 'No voice learned yet'} value={cs.useStyle !== false} onChange={(v) => void setChatSettings({ useStyle: v }, conversationId)} />
+        <Toggle icon={<PenLine size={14} />} label="Draft mode" hint="Use your voice for this chat's drafts. Off for ordinary replies; ignored once the chat has read untrusted content" value={cs.draftMode === true} onChange={(v) => void setChatSettings({ draftMode: v }, conversationId)} />
         <Toggle icon={<Mic size={14} />} label="Meetings" hint={meetingCount ? 'Your recent meeting notes and decisions' : 'No meetings recorded yet'} value={cs.useMeetings !== false} onChange={(v) => void setChatSettings({ useMeetings: v }, conversationId)} />
         <Toggle icon={<Wand2 size={14} />} label="Auto-learn" hint={settings.autoLearn ? 'Extract memories, graph & writing style after each reply' : 'Disabled globally in settings'} value={cs.autoLearn && settings.autoLearn} onChange={(v) => void setChatSettings({ autoLearn: v }, conversationId)} />
-        <Toggle icon={<Wrench size={14} />} label="Tools" hint={(cs.skipPermissions ?? settings.skipPermissions) ? 'Approval cards are off in this chat. Deny rules still refuse.' : 'Web, documents, memory, graph, todos, boards, Python… External actions ask first.'} value={cs.useTools} onChange={(v) => void setChatSettings({ useTools: v }, conversationId)} />
+        <Toggle icon={<Wrench size={14} />} label="Tools" hint={(cs.skipPermissions ?? settings.skipPermissions) ? 'Ordinary tools skip their card in this chat. External actions, shell, ask rules and flagged content still ask.' : 'Web, documents, memory, graph, todos, boards, Python… External actions ask first.'} value={cs.useTools} onChange={(v) => void setChatSettings({ useTools: v }, conversationId)} />
         <Toggle icon={<GraduationCap size={14} />} label="Skills" hint="Procedures you approved, injected as procedural memory. Candidates are never injected." value={cs.useSkills !== false} onChange={(v) => void setChatSettings({ useSkills: v }, conversationId)} />
         {convo && (
           <div className="ctx-tools">

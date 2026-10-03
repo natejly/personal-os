@@ -1,6 +1,6 @@
 import { Component, memo, useEffect, useRef, useState, type ReactNode } from 'react'
-import { AlertCircle, User, Sparkles, Brain, Share2, FileText, Activity, ChevronRight, Lightbulb, RotateCw, GraduationCap } from 'lucide-react'
-import type { Message, RunChanges } from '@shared/types'
+import { AlertCircle, User, Sparkles, Brain, Share2, FileText, Activity, ChevronRight, Lightbulb, RotateCw, GraduationCap, Pencil } from 'lucide-react'
+import type { Message, MessageStatus, RunChanges } from '@shared/types'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import ToolEvents from './ToolEvents'
@@ -8,6 +8,11 @@ import MarkdownPreview, { CopyButton } from './MarkdownPreview'
 export { SAFE_MD } from './MarkdownPreview'
 import { traceSummary, fmtMs } from './TraceView'
 import { modelLabel } from '../lib/modelLabel'
+import { outcomeLabel } from '../lib/outcomeLabel'
+import { errorAction } from '../lib/errorAction'
+import MessageEditor from './MessageEditor'
+import { statusText, statusTicks } from '../lib/runStatus'
+import { clockTime, fullTime } from '../lib/chatMeta'
 
 /**
  * One message's body, fenced: a render error in its markdown or tool cards (a null field, a bad
@@ -67,22 +72,57 @@ function Reasoning({ text, live }: { text: string; live: boolean }): JSX.Element
   )
 }
 
-/** Offered under a reply the backend lost mid-run, only while its newest run is still resumable. */
-function ResumeButton({ conversationId }: { conversationId: string }): JSX.Element | null {
-  const [run, setRun] = useState<string | null>(null)
+/**
+ * Continue / Resume under the newest reply when the backend says its run can be picked up. Bound to
+ * its own message: a resumable run for some other message in the chat never shows here. The lookup
+ * is repeated when the backend comes back, because it fails while the sidecar is down, and again when
+ * the stream closes: at `done` the run row still reads `running` (its style-learning tail is on), and
+ * only the close that follows `Run.end` says how it ended.
+ */
+function ContinueButton({ conversationId, messageId }: { conversationId: string; messageId: string }): JSX.Element | null {
+  const backendState = useStore((s) => s.backendState)
+  const settled = useStore((s) => !s.sessions[conversationId]?.streaming)
+  const [run, setRun] = useState<{ id: string; reason: string } | null>(null)
   const [busy, setBusy] = useState(false)
   useEffect(() => {
     let live = true
-    api.interruptedRun(conversationId).then((r) => { if (live && r?.resumable) setRun(r.run_id) }).catch(() => undefined)
+    api.resumableRun(conversationId).then((r) => {
+      if (live) setRun(r.resumable && r.run_id && r.message_id === messageId ? { id: r.run_id, reason: r.reason } : null)
+    }).catch(() => undefined)
     return () => { live = false }
-  }, [conversationId])
+  }, [conversationId, messageId, backendState, settled])
   if (!run) return null
   return (
     <button className="ghost-btn" disabled={busy} onClick={() => {
       setBusy(true)
-      useStore.getState().resumeRun(conversationId, run).then(() => setRun(null)).catch((e) => { setBusy(false); useStore.getState().toast((e as Error).message, 'error') })
-    }}><RotateCw size={13} /> Resume</button>
+      useStore.getState().resumeRun(conversationId, run.id).then(() => setRun(null)).catch((e) => { setBusy(false); useStore.getState().toast((e as Error).message, 'error') })
+    }}><RotateCw size={13} /> {run.reason === 'interrupted' ? 'Resume' : 'Continue'}</button>
   )
+}
+
+/** The single action an error class earns, under the newest reply. */
+function ErrorAction({ conversationId, kind }: { conversationId: string; kind: string }): JSX.Element | null {
+  const [busy, setBusy] = useState(false)
+  const act = errorAction(kind)
+  if (!act) return null
+  const st = (): ReturnType<typeof useStore.getState> => useStore.getState()
+  const go = (): void => {
+    if (act.action === 'retry') void st().regenerate(conversationId)
+    else if (act.action === 'settings') st().openSettings('provider')
+    else if (act.action === 'models') {
+      // The model menu lives under the composer; settings is the fallback when no menu is mounted.
+      const trigger = document.querySelector<HTMLButtonElement>('.model-menu-trigger')
+      if (trigger) trigger.click()
+      else st().openSettings('provider')
+    } else {
+      setBusy(true)
+      api.compactConversation(conversationId)
+        .then(() => st().regenerate(conversationId), (e) => st().toast(`Could not compact: ${(e as Error).message}`, 'error'))
+        .catch((e) => st().toast((e as Error).message, 'error'))
+        .finally(() => setBusy(false))
+    }
+  }
+  return <button className="ghost-btn" disabled={busy} onClick={go}>{busy ? 'Working…' : act.label}</button>
 }
 
 // Tools that can change a granted folder; a reply without one never asks the backend for a change list.
@@ -126,24 +166,45 @@ function FilesChanged({ messageId }: { messageId: string }): JSX.Element | null 
   )
 }
 
+/** What a silent stretch of a reply is waiting on. The 1s timer lives here, only while a countdown runs, so nothing above re-renders. */
+function StatusLine({ status }: { status: MessageStatus }): JSX.Element {
+  const [now, setNow] = useState(() => Date.now())
+  const ticking = statusTicks(status, now)
+  useEffect(() => {
+    if (!ticking) return
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [ticking])
+  return <div className="run-status" role="status">{statusText(status, now)}</div>
+}
+
 // The store is read imperatively inside the handlers: any subscription here defeats the memo, and a
 // streamed token would re-render every message in every mounted transcript.
-const MessageView = memo(function MessageView({ message, streaming }: { message: Message; streaming: boolean }): JSX.Element {
+const MessageView = memo(function MessageView({ message, streaming, last = false, editable = false }: { message: Message; streaming: boolean; last?: boolean; editable?: boolean }): JSX.Element {
+  const [editing, setEditing] = useState(false)
   const isUser = message.role === 'user'
   const ctx = message.context_used
   const ctxCount = ctx ? ctx.memories.length + ctx.nodes.length + ctx.chunks.length : 0
+  // An interrupted row carries both an `Interrupted:` error and the outcome; the error line says it once.
+  const note = !streaming && message.role === 'assistant' && !message.error ? outcomeLabel(message.outcome) : null
+  const bare = !streaming && message.role === 'assistant' && message.outcome === 'stopped' && !message.content && !message.tool_events?.length && !message.reasoning
   const trace = message.trace && message.trace.length > 0 ? traceSummary(message.trace) : null
+  const summarized = !isUser && message.trace?.some((sp) => sp.kind === 'compact' && sp.meta?.kind === 'history')
   return (
     <div className={`msg ${message.role}`}>
       <div className="avatar">{isUser ? <User size={14} /> : <Sparkles size={14} />}</div>
       <div className="bubble">
         {isUser ? (
-          <div className="user-bubble"><div className="user-text">{message.content}</div></div>
+          editing ? (
+            <MessageEditor message={message} onClose={() => setEditing(false)} />
+          ) : (
+            <div className="user-bubble"><div className="user-text">{message.content}</div></div>
+          )
         ) : (
           <div className="markdown">
             {message.reasoning && <Reasoning text={message.reasoning} live={streaming && !message.content} />}
             <BodyBoundary resetKey={message.id}>
-              {message.tool_events && message.tool_events.length > 0 && <ToolEvents events={message.tool_events} conversationId={message.conversation_id} />}
+              {message.tool_events && message.tool_events.length > 0 && <ToolEvents events={message.tool_events} conversationId={message.conversation_id} streaming={streaming} />}
               {message.content ? (
                 <MarkdownPreview source={message.content} streaming={streaming} />
               ) : streaming && !message.reasoning && !message.tool_events?.some((t) => t.pending) ? (
@@ -151,13 +212,22 @@ const MessageView = memo(function MessageView({ message, streaming }: { message:
               ) : null}
             </BodyBoundary>
             {streaming && message.content && <span className="cursor" />}
+            {streaming && message.status && <StatusLine status={message.status} />}
           </div>
         )}
         {message.error && <div className="msg-error"><AlertCircle size={14} /><span>{message.error}</span></div>}
-        {!streaming && message.role === 'assistant' && message.error?.startsWith('Interrupted:') && <ResumeButton conversationId={message.conversation_id} />}
+        {summarized && (
+          <button className="compact-note" title="Open the context panel, where the summary lives" onClick={() => { const s = useStore.getState(); if (!s.contextOpen) s.toggleContext() }}>
+            Earlier messages were summarized to fit the context window
+          </button>
+        )}
+        {bare ? <div className="msg-partial">Stopped before any output</div> : note && <div className="msg-partial">{note}</div>}
+        {last && !streaming && message.role === 'assistant' && message.error && message.error_kind && <div className="msg-error-actions"><ErrorAction conversationId={message.conversation_id} kind={message.error_kind} /></div>}
+        {last && !streaming && message.role === 'assistant' && <ContinueButton conversationId={message.conversation_id} messageId={message.id} />}
         {!streaming && message.role === 'assistant' && message.tool_events?.some((t) => FILE_CHANGING.test(t.name)) && <FilesChanged messageId={message.id} />}
-        {!streaming && (
+        {!streaming && !editing && (
           <div className="msg-actions">
+            {message.created_at > 0 && <time className="msg-time" dateTime={new Date(message.created_at * 1000).toISOString()} title={fullTime(message.created_at)}>{clockTime(message.created_at)}</time>}
             {message.model && (
               <span className="model-tag" title={message.model === modelLabel(message.model) ? undefined : message.model}>
                 {modelLabel(message.model)}
@@ -178,12 +248,27 @@ const MessageView = memo(function MessageView({ message, streaming }: { message:
                 <span><Activity size={11} />{trace.steps} step{trace.steps === 1 ? '' : 's'} · {fmtMs(trace.total_ms)}{trace.tokens ? ` · ${trace.tokens.toLocaleString()} tok` : ''}</span>
               </button>
             )}
-            <CopyButton text={message.content} />
+            {!bare && <CopyButton text={message.content} />}
+            {editable && isUser && (
+              <button type="button" className="ctx-chip" title="Edit and resend: this message and everything after it is hidden" aria-label="Edit message" onClick={() => setEditing(true)}>
+                <Pencil size={11} />
+              </button>
+            )}
           </div>
         )}
       </div>
     </div>
   )
 })
+
+/** A message sent and not yet confirmed by the run: the same bubble, dimmed, with no actions. */
+export function PendingUserMessage({ text }: { text: string }): JSX.Element {
+  return (
+    <div className="msg user pending" aria-busy="true">
+      <div className="avatar"><User size={14} /></div>
+      <div className="bubble"><div className="user-bubble"><div className="user-text">{text}</div></div></div>
+    </div>
+  )
+}
 
 export default MessageView

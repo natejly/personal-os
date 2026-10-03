@@ -27,28 +27,29 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from pydantic import AfterValidator, BaseModel, Field
 
 from . import activity, approval_edits, assist, backups, llm, mac, mcp_drift, mcp_eval, mcp_search, tools
-from . import compaction, otel_export
+from . import compaction, otel_export, titles
 from .context import build_context, estimate_tokens, layout_messages
 from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
-from .extract_text import MAX_UPLOAD_BYTES, extract_structured, extract_text, for_index, safe_upload_name
+from .extract_text import MAX_UPLOAD_BYTES, extract_structured, extract_text, for_index, has_readable_text, safe_upload_name
 from .consolidate import Consolidator
 from .learn import MAX_INJECTED_SKILLS, LearnJob, LearnWorker, Skills, induce_skill, run_transcript, skill_block
 from .embed import Embedder
 from .memory_index import MemoryIndex
+from .meeting_index import MeetingIndex
 from .retrieval import Retriever
 from .repos import ALL, Conversations, Documents, Graph, Memories, Projects
 from .artifact_routes import is_render_path as _is_artifact_render, make_router as artifact_router
 from .artifacts import Artifacts
 from .boards import Boards
 from .canvas import FALLBACK_NAME, SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
-from .dashboards import Dashboards, generate_recap, generate_summary, generate_widget_code
-from .docs import Docs, unified_diff
+from .dashboards import Dashboards, WidgetCodeRejected, generate_recap, generate_summary, generate_widget_code
+from .docs import ASSET_MIMES, asset_path, AssetError, Docs, save_asset, unified_diff
 from . import widget_spec
 from . import cache as google_cache
 from .google import Google, GoogleNotConnected, json_safe
 from . import job_history, job_tools
 from .jobs_policy import JobPolicy
-from .jobs import (KINDS, PROPOSAL_STATUSES, Jobs, Proposals, Scheduler, local_tz_name, spent, valid_cron,
+from .jobs import (KINDS, PowerWake, check_watch_dir, PROPOSAL_STATUSES, Jobs, Proposals, Scheduler, local_tz_name, spent, valid_cron,
                    valid_tz)
 from . import meeting_import, skillbuild, skillmd
 from . import mail_edits  # noqa: F401 - mail_edits registers the gmail validators
@@ -76,15 +77,16 @@ from .presets import CanvasPresets
 from . import resume
 from . import permrules
 from . import shell as shell_tool
-from .subagents import AgentDefs, Subagents
+from .subagents import AgentDefs, Subagents, parallel_safe
 from .commands import Commands
 from .workflows import ApprovalError as WorkflowApprovalError, Engine as WorkflowEngine, Workflows
-from .runs import ACTIVE, PROMOTE_STEP, STATUSES, Run, RunBus, RunStore, Topic
+from .runs import ACTIVE, PROMOTE_STEP, STATUSES, Run, RunBus, RunStore, Topic, args_digest
+from .toolcalls import ensure_unique_call_ids, parse_arguments, resolve_name
 from .stuck import STUCK_NUDGE, STUCK_STOP, StuckDetector
 from .style import WritingStyle, learn_style_from_exchange, looks_like_prose
 from .modules import Module, ModuleContext, build_modules, get as module_get
 from .modules.todos import TodosModule
-from .tools import Toolbox, summarize_result
+from .tools import Toolbox, page_title, summarize_result, times_body
 from .webread import WebCache
 from .trash import Trash, router as trash_router
 from .trace import Tracer, now_ms
@@ -246,6 +248,7 @@ app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_credenti
 # Each run is also a row (agent_runs) with its event tape (run_events); the bus is the hot path over it.
 run_store = RunStore(db)
 bus = RunBus(run_store)
+bus.on_change = lambda run: events.publish("run_state", run.info())  # `events` is bound below; read at call time
 # Plan-level approvals (propose_plan): one card authorises a set of calls, each bound to its argument digest.
 plans = Plans(db)
 # A second, independent bus, keyed by MEETING id. Nothing in RunBus is conversation-specific - _runs
@@ -261,7 +264,9 @@ _approvals: dict[str, asyncio.Future] = {}
 # Background work that outlives the run that queued it, and the topic it reports on.
 events = Topic()
 consolidator = Consolidator(db, memories, graph)
-learner = LearnWorker(memories=memories, graph=graph, set_trace=convos.set_trace, publish=events.publish, consolidator=consolidator)
+title_jobs = titles.TitleJobs(convos.get, convos.update, events.publish)
+learner = LearnWorker(memories=memories, graph=graph, set_trace=convos.set_trace, publish=events.publish, consolidator=consolidator,
+                     alive=lambda cid: convos.get(cid, with_messages=False) is not None)
 
 
 ENV_SEED = {
@@ -345,9 +350,11 @@ trash = Trash(db, todos, docs)
 app.include_router(trash_router(trash))
 usage = Usage(db)
 pricing = Pricing()
+llm.caps_lookup = pricing.caps
 app.include_router(otel_export.router(db, lambda: settings()))
 compactor = compaction.Compactor(db)
-app.include_router(compaction.router(compactor, convos, lambda: settings()))
+app.include_router(compaction.router(compactor, convos, lambda: settings(),
+                                     window_fn=lambda cfg, m: compaction.window_for(cfg, m, pricing.caps(m).get("max_input_tokens"))))
 
 
 def _int_setting(cfg: dict[str, Any], key: str, default: int) -> int:
@@ -355,6 +362,33 @@ def _int_setting(cfg: dict[str, Any], key: str, default: int) -> int:
         return int(cfg.get(key, default))
     except (TypeError, ValueError):
         return default
+
+
+_alerted: set[tuple[str, str]] = set()  # (period, day) already announced; one event each, never a timer
+
+
+def _check_usage_alert(cfg: dict[str, Any]) -> None:
+    """Evaluated only when a usage row is written. Rings the app topic once per period per day; blocks nothing."""
+    st = usage.alert_state(cfg)
+    if not st["over"]:
+        return
+    day = time.strftime("%Y-%m-%d")
+    for k in ("daily", "monthly"):
+        if st[k]["over"] and (k, day) not in _alerted:
+            _alerted.add((k, day))
+            events.publish("usage_alert", {"period": k, **st[k]})
+# One message may fill at most this share of the context window: past it the row would be replayed
+# on every later turn (the first user message always survives compaction) and the chat is unusable.
+MESSAGE_WINDOW_FRACTION = 0.5
+
+
+def _message_too_long(text: str, cfg: dict[str, Any]) -> str | None:
+    """A plain sentence when `text` is over the per-message bound, else None. Mirrors lib/messageLimit.ts."""
+    limit = int(_int_setting(cfg, "contextWindow", 128000) * 4 * MESSAGE_WINDOW_FRACTION)
+    if len(text) <= limit:
+        return None
+    return (f"That message is about {len(text):,} characters. One message can hold {limit:,} with the current "
+            "context window. Attach it as a file instead.")
 
 
 def _record_usage(ev: dict[str, Any]) -> None:
@@ -366,13 +400,29 @@ def _record_usage(ev: dict[str, Any]) -> None:
         usage.record(model=ev.get("model", ""), kind=ev.get("kind", "chat"), prompt_tokens=pt, completion_tokens=ct,
                      duration_ms=int(ev.get("duration_ms") or 0), cost=pricing.cost(cfg, ev.get("model", ""), pt, ct, cached, cwrite),
                      estimated=bool(ev.get("estimated")), conversation_id=ev.get("conversation_id"), project_id=ev.get("project_id"),
-                     cached_tokens=cached, cache_write_tokens=cwrite, reasoning_tokens=reasoning)
+                     cached_tokens=cached, cache_write_tokens=cwrite, reasoning_tokens=reasoning,
+                     tag=str(ev.get("tag") or ""), round=ev.get("round"))
+        _check_usage_alert(cfg)
     except Exception:  # noqa: BLE001 - accounting must never break a reply
         pass
 
 
 if not any(getattr(f, "__name__", "") == "_record_usage" for f in llm._usage_listeners):
     llm.on_usage(_record_usage)
+
+
+def _save_model_caps(caps: dict[str, Any]) -> None:
+    """llm.on_caps listener: keep what a provider rejected for a model across restarts."""
+    try:
+        db.set_settings({"modelCaps": caps})
+        events.publish("model_caps", {})
+    except Exception:  # noqa: BLE001 - a lost hint is relearned from the next rejection
+        pass
+
+
+llm.load_caps(db.get_settings().get("modelCaps") or {})
+if not any(getattr(f, "__name__", "") == "_save_model_caps" for f in llm._caps_listeners):
+    llm.on_caps(_save_model_caps)
 # A desk is one conversation plus one workspace plus one approved plan. The workspace is a plain
 # directory per desk under the data dir, containment-checked after symlink resolution; Desks is the
 # state machine and the timeline over it.
@@ -449,6 +499,7 @@ meeting_store = Meetings(db)
 meeting_svc = MeetingService(db, settings, llm.complete, meeting_store, google=google, todos=todos, docs=docs)
 # A doc that is purged (not trashed) takes its recordings with it: row, FTS entry and audio directory.
 docs.on_delete = meeting_store.purge_doc
+docs.recording_search = lambda q, n: [h for h in meeting_store.search(q, limit=n) if h["doc_id"]]
 # A doc that changes project takes its recordings along, or project-scoped meeting search shows them under the old one.
 docs.on_move = meeting_store.move_doc
 toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=google, boards=boards, sandboxes=sandboxes, docs=docs, activity=monitor,
@@ -460,6 +511,8 @@ toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=
 embedder = Embedder()
 retriever = Retriever(db, documents, embedder, docs=docs)
 memory_index = MemoryIndex(db, memories, graph, embedder)
+meeting_index = MeetingIndex(db, meeting_store, embedder)
+meeting_store.on_final = lambda mid: meeting_index.schedule(settings(), [mid])
 learner.index = memory_index
 documents.on_chunks = lambda did, _rows: retriever.schedule(settings, did)
 docs.on_chunks = lambda _did: retriever.schedule_docs(settings)
@@ -472,6 +525,7 @@ async def _start_retrieval() -> None:
     retriever.schedule_docs(settings)
 toolbox.retriever = retriever
 toolbox.memory_index = memory_index
+toolbox.meeting_index = meeting_index
 toolbox.plans = plans  # desk_done's gate reads the approved plan's unconsumed steps
 toolbox.work_env = work_env  # python_install and run_python find the shared work venv here
 toolbox.web_cache = WebCache(db)  # fetch_url's response cache
@@ -635,7 +689,7 @@ def health() -> dict[str, Any]:
 
 
 # Google OAuth material lives in settings but never leaves the backend.
-PRIVATE_SETTINGS = {"googleToken", "googleAuthPending"}
+PRIVATE_SETTINGS = {"googleToken", "googleAuthPending", "modelCaps"}
 # Readable through /settings, but only writable through its own route: a plain PUT would replace the
 # whole nested dict and silently drop the signal switches and exclusion lists.
 SETTINGS_READ_ONLY = {"activity", "googleTasksSync", "googleTodoCalendar", "meetings"}
@@ -674,9 +728,16 @@ NUMERIC_SETTING_RANGES: dict[str, tuple[float, float]] = {
     "llmRetries": (0, 10),
     "llmIdleSeconds": (10, 3_600),
     "retainUsageDays": (7, 3_650),
+    "contextWindow": (1000, 4_000_000),
+    "compactAt": (0.1, 0.95),
+    "microAt": (0.05, 0.95),
+    "compactKeepRecent": (2, 200),
+    "microKeep": (0, 50),
     "retainTraceDays": (1, 3_650),
     "retainToolResultDays": (1, 3_650),
     "retainApprovalDays": (1, 3_650),
+    "toolReadRetries": (0, 5),
+    "parallelReads": (1, 8),
     "browserMaxTabs": (1, 12),
     "browserIdleSeconds": (30, 86_400),
 }
@@ -745,9 +806,11 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.get("/models")
-async def models() -> list[dict[str, str]]:
+async def models() -> list[dict[str, Any]]:
     try:
-        return await llm.list_models(settings())
+        cfg = settings()
+        await pricing.refresh(cfg)
+        return await llm.list_models(cfg)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, str(e)) from e
 
@@ -1032,10 +1095,13 @@ def update_project(id: str, body: ProjectPatch) -> dict[str, Any]:
 
 
 @app.delete("/projects/{id}")
-def delete_project(id: str) -> dict[str, bool]:
+async def delete_project(id: str) -> dict[str, Any]:
+    # async so each run's stop Event is set on the loop that owns it. Stop is cooperative: the replies wind down and
+    # persist what they wrote, and the chats are still there to restore.
+    stopped = sum(1 for c in convos.list(id, include_jobs=True, include_desks=True) if bus.stop(c["id"]))
     trash.trash("project", id)  # its chats, memories and uploads go to the trash; docs and todos are demoted to personal
     canvases.delete_windows_for("project", id)  # ref_id has no foreign key: a deleted referent's windows are swept here
-    return {"ok": True}
+    return {"ok": True, "stopped": stopped}
 
 
 @app.get("/projects/global/stats")
@@ -1054,19 +1120,31 @@ class ConvPatch(BaseModel):
     title: str | None = None
     model: str | None = None
     settings: dict[str, Any] | None = None
+    pinned: bool | None = None
+    archived: bool | None = None
+    # null means Personal, so a move is detected by the key being present (model_fields_set).
+    project_id: str | None = None
 
 
 @app.get("/conversations")
 def list_conversations(project_id: str | None = None, include_jobs: bool = False,
-                       include_desks: bool = False) -> list[dict[str, Any]]:
+                       include_desks: bool = False, archived: bool = False) -> list[dict[str, Any]]:
     """A scheduled job's own transcripts are left out unless asked for: the Agent Inbox is their
     index, and Cowork is a desk's. Both stay reachable through their own flag."""
-    return convos.list(sid(project_id), include_jobs, include_desks)
+    return convos.list(sid(project_id), include_jobs, include_desks, archived)
 
 
 @app.post("/conversations")
 def create_conversation(body: ConvIn) -> dict[str, Any]:
     return convos.create(wsid(body.project_id), body.title, body.model or settings()["defaultModel"])
+
+
+@app.get("/conversations/search")
+def search_conversations(q: str = "", limit: int = 20) -> list[dict[str, Any]]:
+    """Full-text search over what was said. Declared before `/conversations/{id}` so "search" is not an id."""
+    if len(q.strip()) < 2:
+        return []
+    return convos.search(q, max(1, min(limit, 50)))
 
 
 @app.get("/conversations/{id}")
@@ -1080,32 +1158,92 @@ def get_conversation(id: str) -> dict[str, Any]:
 @app.patch("/conversations/{id}")
 def patch_conversation(id: str, body: ConvPatch) -> dict[str, Any]:
     patch = body.model_dump(exclude_none=True)
+    moving = "project_id" in body.model_fields_set
+    patch.pop("project_id", None)
+    if moving or body.archived:
+        row = convos.get(id, with_messages=False)
+        if not row:
+            raise HTTPException(404)
+        # live, not answering: the run reads the project for context and connector tooling, and its
+        # learn tail writes with it; a run parked on an approval must not be hidden either.
+        if bus.live(id):
+            raise HTTPException(409, "Stop the running reply first")
+        if moving:
+            if row["settings"].get("deskId") or row["settings"].get("job_id"):
+                raise HTTPException(409, "A desk or job transcript cannot be moved")
+            patch["project_id"] = wsid(body.project_id)
     settings_patch = patch.get("settings") if isinstance(patch.get("settings"), dict) else {}
     # Clearing the banner has to drop library text that was copied into the sandbox, or the next
     # command can print it back as if the chat were trusted again.
     if settings_patch.get("tainted") is False and sandboxes.holds_import(id):
         sandboxes.reset(id)
+    new_title = (patch.get("title") or "").strip()
+    if new_title:
+        cur = convos.get(id, with_messages=False)
+        # Only a changed title is the user's: the header input sends its value on every blur, edited or not.
+        if cur and new_title != cur["title"]:
+            patch["settings"] = {**settings_patch, "titleSource": "user"}
+            title_jobs.cancel(id)
     c = convos.update(id, patch)
     if not c:
         raise HTTPException(404)
     return c
 
 
+@app.post("/conversations/{id}/title")
+async def retitle_conversation(id: str) -> dict[str, Any]:
+    """Regenerate the title on request, from the user's messages only. Replaces a typed title too: it was asked for."""
+    c = convos.get(id)
+    if not c:
+        raise HTTPException(404)
+    texts = [m["content"] for m in c["messages"] if m["role"] == "user"]
+    cfg = settings()
+    try:
+        new = await titles.generate(cfg, c["model"] or cfg["defaultModel"], titles.pick_texts(texts))
+    except Exception as e:  # noqa: BLE001
+        raise HTTPException(502, f"Could not generate a title: {e}") from None
+    if not new:
+        raise HTTPException(502, "The model returned no usable title.")
+    title_jobs.cancel(id)
+    out = convos.update(id, {"title": new, "settings": {"titleSource": "auto", "titleTurns": len(texts)}})
+    if not out:
+        raise HTTPException(404)
+    events.publish("conversation_changed", {"id": id, "title": new})
+    return out
+
+
 @app.delete("/conversations/{id}")
-def delete_conversation(id: str) -> dict[str, bool]:
+async def delete_conversation(id: str) -> dict[str, Any]:
+    # Stop the live reply first (async, so its Event is set on the owning loop): a trashed chat must not keep calling
+    # tools, waiting on a card or feeding auto-learn. Idempotent: an already-trashed or idle chat answers ok.
+    stopped = bus.stop(id)
     trash.trash("conversation", id)
     canvases.delete_windows_for("chat", id)
-    return {"ok": True}
+    return {"ok": True, "stopped": stopped}
 
 
 @app.delete("/conversations/{id}/messages/{mid}")
-def delete_message(id: str, mid: str) -> dict[str, bool]:
+async def delete_message(id: str, mid: str) -> dict[str, bool]:
+    if not convos.get(id, with_messages=False):
+        raise HTTPException(404, "No such conversation")
+    if (run := bus.answering(id)) is not None:
+        raise HTTPException(409, {"message": "That conversation has a running reply", "run_id": run.run_id, "seq": run.seq})
     # The path's conversation must own the message: this used to delete it from whichever conversation held it.
-    conv = convos.get(id)
-    if not conv or not any(m["id"] == mid for m in conv["messages"]):
+    if not convos.delete_message(mid, id):
         raise HTTPException(404, "No such message in this conversation")
-    convos.delete_message(mid)
     return {"ok": True}
+
+
+@app.post("/conversations/{id}/messages/{mid}/activate")
+def activate_message(id: str, mid: str) -> dict[str, Any]:
+    """Switch the trailing answer to another regenerate variant. Flips flags only: no tool runs, no approval is touched."""
+    if not convos.get(id, with_messages=False):
+        raise HTTPException(404, "Conversation not found")
+    if bus.answering(id):
+        raise HTTPException(409, "A reply is in progress")
+    if not convos.activate_message(id, mid):
+        raise HTTPException(409, "That answer is not a variant of the latest reply")
+    return convos.get(id)  # type: ignore[return-value]
 
 
 class PageContextIn(BaseModel):
@@ -1123,11 +1261,12 @@ class ChatIn(BaseModel):
     model: str | None = None
     page_context: PageContextIn | None = None
     resume_of: str | None = None  # run_id of an interrupted run this reply continues (POST /runs/{id}/resume)
+    replace_from: str | None = None  # id of an earlier user message this one replaces: it and everything after it are hidden
 
 
 RENDER_HINT = """## Rendering
 Besides normal markdown, the UI renders three fenced code blocks inline:
-- ```chart — a small JSON spec for a data chart: {"type": "bar" | "line" | "area" | "pie" | "scatter", "title": "...", "x": "<key used for the x axis / category>", "series": ["<numeric key>", ...], "data": [{"<x key>": ..., "<numeric key>": ..., ...}, ...], "stacked": false, "xLabel": "...", "yLabel": "...", "unit": ""}. `data` is an array of objects (one per x value); keep it under 200 rows. Use a chart whenever numbers would be clearer that way (comparisons, trends, breakdowns).
+- ```chart — a small JSON spec for a data chart: {"type": "bar" | "line" | "area" | "pie" | "scatter", "title": "...", "x": "<key used for the x axis / category>", "series": ["<numeric key>", ...], "data": [{"<x key>": ..., "<numeric key>": ..., ...}, ...], "stacked": false, "xLabel": "...", "yLabel": "...", "unit": "", "transforms": [{"op": "sort", "by": "<key>", "dir": "desc"}, {"op": "limit", "n": 10}]}. `data` is an array of objects (one per x value); keep it under 200 rows. `transforms` is optional (ops: sort, limit, filter {field, cmp, value}, group {by, agg: {<key>: "sum|mean|count|min|max"}}) for trimming or aggregating raw rows; ISO dates (2026-03-01) as x values get a date axis. Use a chart whenever numbers would be clearer that way (comparisons, trends, breakdowns).
 - ```interactive — a chart the user steers with sliders and other controls; it recomputes instantly as they drag, with no new request to you: {"title": "Compound growth", "type": "line", "controls": [{"id": "rate", "label": "Annual return", "type": "slider", "min": 0, "max": 15, "step": 0.25, "value": 7, "unit": "%"}, {"id": "start", "label": "Starting amount", "type": "number", "value": 5000, "unit": "$"}], "x": {"id": "year", "label": "Year", "from": 0, "to": 30, "steps": 120}, "series": [{"key": "balance", "label": "Balance", "expr": "start * pow(1 + rate/100, year)"}], "readouts": [{"label": "Final balance", "expr": "balance_last", "unit": "$"}], "unit": "$", "yLabel": "Balance"}
   - `controls` (max 12): `type` is slider (the default), number, select (needs "options": [...]), or toggle. Every `id` must be a plain name, because the formulas reference it by that name.
   - `x` is either a swept range — `from`/`to`/`steps` (max 400), each a number or a formula over the controls — or `{"id": "...", "values": [...]}` for fixed categories. To drive real rows instead, pass `"data": [{...}, ...]` and set `"x"` to the column name; formulas then also see that row's columns.
@@ -1138,6 +1277,7 @@ Besides normal markdown, the UI renders three fenced code blocks inline:
 - ```mermaid — diagrams (flowchart, sequenceDiagram, gantt, mindmap, timeline, ...).
 - ```html — a self-contained HTML document or fragment (inline CSS/JS, no network, no external files). It is shown as a sandboxed live preview with a Code/Preview toggle and a "Save as artifact" button. Use it for a mock-up, a small interactive demo or a formatted layout. ```svg renders as an image.
 For anything larger or that the user will keep and revise (a calculator, a dashboard-like page, a game, a formatted report), call artifact_create with the full HTML instead; change it with artifact_edit (exact search/replace pairs) for small fixes, or artifact_update (full new HTML) when most of it changes; the chat shows it as a live card and keeps every version. Both run in a sandbox with no network, no external scripts/fonts/images (use data: URIs or inline SVG), no localStorage and no form submits.
+Maths renders when written inline as `$...$` and as a display block with `$$` on its own lines; do not use `\\(` `\\)` or `\\[` `\\]`.
 Only chart real values you have or computed; never invent data for decoration. Text before and after a block is shown as usual."""
 
 TOOLS_HINT = "You have tools. Use them when they would make the answer more accurate or current; otherwise answer directly. After using tools, write the final answer for the user."
@@ -1167,10 +1307,16 @@ def _today_hint() -> str:
 
 BUDGET_STOP = ("Out of budget ({axis}): this tool call was not executed and no further tool calls will run. "
                "Write the best final answer you can from what you already have, and say in one line what is still missing.")
+TIME_STOP = ("Out of budget (time): no further tool calls will run. "
+             "Write the best final answer you can from what you already have, and say in one line what is still missing.")
+EMPTY_NUDGE = ("Your last turn ended without any text and without a tool call. Answer the user now in plain text, "
+               "or say in one line what you did and what is still missing.")
 SOFT_NUDGE = ("Budget check: about {pct}% of this reply's budget is used. "
               "Make at most one or two more tool calls, then write the final answer.")
 LOOP_STOP = ("{name} has been called with identical arguments {n} times in a row, so this reply is stopping tool use. "
              "Answer with what you already have, and say in one line what you could not finish.")
+CUT_CALL = ("the arguments were cut off at the model's output limit and the call was not run; "
+            "send a smaller call or split the content")
 REPEAT_LIMIT = 5
 TOOL_ERROR_LIMIT = 3
 
@@ -1180,6 +1326,7 @@ PROPOSAL_ONLY_KINDS = ("job",)
 # Caps for an unattended run, applied on top of the user's settings and only downward (see _caps). Tighter than
 # interactive on purpose: nobody is watching, and a longer leash makes the answer worse, not better.
 # A model call that is still open after this long while writing the closing answer is abandoned.
+EFFORT_DROPPED_NOTICE = "This model does not accept a reasoning effort; it was sent without one."
 FINAL_ROUND_SECONDS = 90.0
 # Hard ceiling on an unattended run end to end (model, tools, everything), a backstop for a hang the budget cannot see.
 JOB_HARD_SECONDS = 1800.0
@@ -1287,13 +1434,48 @@ class Budget:
                 "seconds": round(self.elapsed(), 3), "paused_seconds": round(self.paused, 3)}
 
 
-def _call_args(c: dict[str, Any]) -> dict[str, Any]:
-    """A streamed tool call's arguments as a dict: non-object JSON is {}, unparseable text rides along as _raw."""
-    try:
-        args = json.loads(c["arguments"] or "{}")
-    except ValueError:
-        return {"_raw": c["arguments"]}
-    return args if isinstance(args, dict) else {}
+def _invalid_call_error(c: dict[str, Any], spec: Any) -> dict[str, Any]:
+    """The tool result for a call `_normalise_call` refused: the parse error, a sample of what was sent and the
+    signature to follow, or the unknown-name text with the nearest tools. Capped, it rides in the transcript."""
+    problem = str(c["_problem"])[:500]
+    if c["_invalid"] == "name":
+        return tools.tool_error(problem, alternative="call one of the tools listed in this request, by its exact name")
+    asked = c["_asked"] or c["name"]
+    if problem == CUT_CALL:
+        return tools.tool_error(f"{asked}: {CUT_CALL}"[:500], alternative=tools.ALTERNATIVE.get(asked))
+    err = tools.tool_error(f"{asked}: the arguments were not valid JSON ({problem})"[:500],
+                           expected=("required: " + (", ".join(spec.parameters.get("required") or []) or "none")) if spec else None,
+                           example=(spec.examples or [None])[0] if spec else None,
+                           alternative=tools.ALTERNATIVE.get(asked))
+    err["sent"] = str(c.get("_raw") or "")[:200]
+    return err
+
+
+def _normalise_call(c: dict[str, Any], known: set[str], advertised: list[str], cut: bool) -> None:
+    """Settle one streamed call in place, once, before anything reads it. `name` becomes the resolved tool (or
+    'invalid_tool', the original in `_asked`); `_args` is the parsed object ({} for a failed call); `_repaired` and
+    `_problem` say what happened, and `_invalid` is 'name' or 'arguments' when the call may not run. `arguments` is
+    rewritten only for a repaired call (its JSON) or a failed one ('{}'), so a valid call replays byte for byte."""
+    raw = c.get("arguments") or ""
+    c["_raw"] = raw
+    args, repaired, problem = parse_arguments(raw)
+    name, renamed, name_problem = resolve_name(str(c.get("name") or ""), known, advertised)
+    c["_asked"] = c.get("name") or ""
+    c["_repaired"] = repaired or renamed
+    c["_problem"] = None
+    c["_invalid"] = None
+    if name_problem:
+        c["name"], c["_problem"], c["_invalid"] = "invalid_tool", name_problem, "name"
+    else:
+        c["name"] = name
+        if args is None:
+            c["_problem"], c["_invalid"] = (CUT_CALL if cut else problem), "arguments"
+    if c["_invalid"]:
+        c["_args"], c["arguments"], c["_repaired"] = {}, "{}", False
+    else:
+        c["_args"] = args or {}
+        if repaired:
+            c["arguments"] = json.dumps(c["_args"], ensure_ascii=False)
 
 
 # Tools whose call changes something outside the reply: each runs at most once per (run, round, tool, args).
@@ -1334,6 +1516,47 @@ async def _call_tool(run: Run | None, step: int, name: str, args: dict[str, Any]
     return result
 
 
+# How long a write that Stop caught mid-call is given to report its real outcome before it is cancelled.
+STOP_GRACE_SECONDS = 3.0
+
+
+async def _await_tool(coro: Any, stop: asyncio.Event, *, grace: float) -> tuple[Any, bool]:
+    """Await a tool call, but let Stop cut it short. Returns (result, interrupted).
+
+    Stop gives the call `grace` seconds to finish on its own (a write milliseconds from done then reports what
+    happened), then cancels it and waits at most 2 s for its cleanup (a foreground shell kills its process group on
+    cancel). A thread-backed body cannot be killed: its await is abandoned and it runs out its own limit in the
+    background. If the run itself is cancelled (shutdown) the call is cancelled and awaited the same way before the
+    cancel propagates, so cleanup handlers still run. The call's exception, if any, is always retrieved."""
+    if stop.is_set():
+        coro.close()  # Stop already landed (during the approval wait, or while the card event went out): never start it
+        return None, True
+    task = asyncio.ensure_future(coro)
+    waiter = asyncio.ensure_future(stop.wait())
+    try:
+        await asyncio.wait({task, waiter}, return_when=asyncio.FIRST_COMPLETED)
+        if not task.done():  # Stop fired first
+            if grace > 0:
+                await asyncio.wait({task}, timeout=grace)
+            if not task.done():
+                task.cancel()
+                await asyncio.wait({task}, timeout=2)
+                if not task.done():  # abandoned (thread-backed): whatever it ends with later is still retrieved
+                    task.add_done_callback(lambda t: t.cancelled() or t.exception())
+                return None, True
+        return task.result(), False
+    except asyncio.CancelledError:
+        task.cancel()
+        await asyncio.wait({task}, timeout=2)
+        if not task.done():
+            task.add_done_callback(lambda t: t.cancelled() or t.exception())
+        raise
+    finally:
+        waiter.cancel()
+        if task.done() and not task.cancelled():
+            task.exception()  # retrieved, so an abandoned failure is not logged as never awaited
+
+
 def _urls(text: str) -> set[str]:
     """URLs the user typed this turn: still fetchable, whole, once the reply has read untrusted content."""
     return {u for u in (m.rstrip(".,;:!?") for m in re.findall(r"https?://[^\s<>\"')]+", text or "")) if u}
@@ -1345,8 +1568,7 @@ def _short(args: dict[str, Any], limit: int = 300) -> dict[str, Any]:
 
 
 def _title_from(text: str) -> str:
-    t = " ".join(text.split())
-    return (t[:48].rstrip() + "…") if len(t) > 48 else (t or "New chat")
+    return titles.placeholder(text)
 
 
 def _replay_args(raw: str | None) -> str:
@@ -1357,6 +1579,14 @@ def _replay_args(raw: str | None) -> str:
     except ValueError:
         return "{}"
     return raw or "{}" if isinstance(args, dict) else "{}"
+
+
+def _retry_status(message_id: str, ev: dict[str, Any]) -> dict[str, Any]:
+    """The `status` payload for a stream_chat `retry` event; attempt 0 is the clear."""
+    if not ev.get("attempt"):
+        return {"id": message_id, "kind": None}
+    return {"id": message_id, "kind": "retry", "attempt": ev["attempt"], "max": ev.get("max"),
+            "until": now_ms() + int(float(ev.get("delay_s") or 0) * 1000), "reason": ev.get("reason")}
 
 
 def _bind_stop(message_id: str, stop: asyncio.Event, run: Run | None) -> None:
@@ -1389,17 +1619,57 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     model = body.model or conv["model"] or cfg["defaultModel"]
     if body.model and body.model != conv["model"]:
         convos.update(conv_id, {"model": body.model})
+    regen_am: dict[str, Any] | None = None  # set when a regenerate superseded the trailing answer
+    placeholder_title: str | None = None  # set when this turn wrote the instant title; the model title replaces it
+    carried_root: str | None = None
 
     if body.content is not None:
         user_text = body.content.strip()
         if not user_text:
             yield "error", {"message": "Empty message"}
             return
+        edited_from: str | None = None
+        had_writes = False
+        if body.replace_from:
+            # Edit and resend: the cut happens here, inside the run, so a refused request (409) can never leave
+            # a half-applied cut. Rows are hidden, not deleted; state derived from them is invalidated with them.
+            cut = convos.supersede_from(conv_id, body.replace_from)
+            if not cut:
+                yield "error", {"message": "That message can no longer be edited"}
+                return
+            edited_from = body.replace_from
+            hidden = {r["id"] for r in cut}
+            for r in cut:
+                yield "removed_message", {"id": r["id"]}
+            cut_at = cut[0]["created_at"]
+            summary = compactor.get(conv_id)
+            if summary and (summary["upto_message_id"] in hidden or summary["upto_created"] >= cut_at):
+                compactor.clear(conv_id)
+            wp = work_plans.get(conv_id)
+            if wp and wp["updated_at"] >= cut_at:
+                work_plans.clear(conv_id)
+                yield "plan", {"conversation_id": conv_id, "steps": []}
+            for a in run_store.approvals("pending", limit=500):
+                if a["message_id"] in hidden:
+                    if a["tool"] == PLAN_TOOL:
+                        plans.decide(a["call_id"], "deny", by="stop", note="The message this plan was proposed for was edited.")
+                    run_store.decide(a["call_id"], "deny", by="superseded", note="The message this call belonged to was edited.")
+            # Connector tools are not in toolbox.specs but are external by construction (as the tool loop treats them).
+            ran = [str(te.get("name") or "") for r in cut for te in r["tool_events"] if not te.get("pending")]
+            had_writes = any((toolbox.specs[n].danger if n in toolbox.specs else (MCP_DANGER if mcp_is(n) else "safe")) in MUTATING
+                             for n in ran)
+            first_user = next((m for m in conv["messages"] if m["role"] == "user"), None)
+            conv = {**conv, "messages": [m for m in conv["messages"] if m["id"] not in hidden]}
+            # Cutting the first message re-titles the chat below, unless the user renamed it (an auto title is derived).
+            if first_user and first_user["id"] in hidden and conv["title"] == _title_from(first_user["content"]):
+                convos.update(conv_id, {"title": "New chat"})
+                conv = {**conv, "title": "New chat"}
         um = convos.add_message(conv_id, "user", user_text)
-        yield "user_message", um
+        yield "user_message", {**um, **({"edited_from": edited_from, "had_writes": had_writes} if edited_from else {})}
         if conv["title"] == "New chat" and not [m for m in conv["messages"] if m["role"] == "user"]:
             title = _title_from(user_text)
             convos.update(conv_id, {"title": title})
+            placeholder_title = title
             yield "title", {"id": conv_id, "title": title}
     elif body.resume_of:
         # resume: the salvaged reply of the dead run stays visible as history; this reply continues after it
@@ -1409,19 +1679,29 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             return
         user_text = users[-1]["content"]
     else:
-        # regenerate: drop trailing assistant message
+        # regenerate: the trailing answer is superseded, not deleted, so it survives a failed or stopped replacement
         msgs = conv["messages"]
-        if msgs and msgs[-1]["role"] == "assistant":
-            convos.delete_message(msgs[-1]["id"])
-            yield "removed_message", {"id": msgs[-1]["id"]}
         users = [m for m in msgs if m["role"] == "user"]
         if not users:
             yield "error", {"message": "Nothing to regenerate"}
             return
+        if msgs and msgs[-1]["role"] == "assistant":
+            last = msgs[-1]
+            if last.get("content") or last.get("tool_events"):
+                regen_am = convos.begin_variant(last["id"], model)
+            else:
+                # An empty row is a failed earlier attempt: drop just that row and keep its group for the new one.
+                with db.tx() as c:
+                    c.execute("DELETE FROM messages WHERE id=?", (last["id"],))
+                carried_root = last.get("variant_of")
+            yield "removed_message", {"id": last["id"]}
         user_text = users[-1]["content"]
 
     tracer = Tracer()
-    llm.usage_context.set({"conversation_id": conv_id, "project_id": conv["project_id"]})
+    _desk = (run.desk_id if run else None) or conv["settings"].get("deskId")
+    _job = conv["settings"].get("job_id")
+    _ucx = {"conversation_id": conv_id, "project_id": conv["project_id"], "tag": f"desk:{_desk}" if _desk else f"job:{_job}" if _job else "chat"}
+    llm.usage_context.set(_ucx)
     await pricing.refresh(cfg)
     project = projects.get(conv["project_id"]) if conv["project_id"] else None
     cspan = tracer.start("context", "Assemble context", {"model": model})
@@ -1433,10 +1713,45 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         settings=cfg, conv_settings=conv["settings"], global_system_prompt=cfg["systemPrompt"],
         activity=monitor, skills=skills, style=style, meetings=meeting_svc,
         page=body.page_context.model_dump() if body.page_context else None,
+        draft=bool(conv["settings"].get("draftMode")),
     )
+    skills.bump_use([x["id"] for x in used["skills"] if x.get("disclosure") != "manifest"])
     # Older messages are folded into a rolling summary when the replay outgrows the window (compaction.py).
-    history, cinfo = await compaction.prepare_history(compactor, convos, cfg, str(cfg.get("extractionModel") or model), conv_id,
-                                                      used["tokens_estimate"])
+    # The window is this model's: the global setting, what the proxy reports, and what an overflow taught us.
+    win = compaction.window_for(cfg, model, pricing.caps(model).get("max_input_tokens"))
+    # The summarizer call can take a while. When it is about to run, the reply row is opened first so the transcript
+    # can say what is happening (a `status` event); a turn that does not compact is unchanged.
+    pre_am: dict[str, Any] | None = None
+    if compaction.needs_compaction(compactor, convos, cfg, conv_id, used["tokens_estimate"], window=win):
+        pre_am = regen_am or convos.add_message(conv_id, "assistant", "", model=model, variant_of=carried_root)
+        _bind_stop(pre_am["id"], stop, run)
+        yield "assistant_message", {**pre_am, "context_used": used}
+        yield "status", {"id": pre_am["id"], "kind": "compacting"}
+    try:
+        history, cinfo = await compaction.prepare_history(compactor, convos, cfg, str(cfg.get("extractionModel") or model), conv_id,
+                                                          used["tokens_estimate"], window=win, cancel=stop)
+    except asyncio.CancelledError:
+        if pre_am:
+            _active.pop(pre_am["id"], None)
+            convos.finish_message(pre_am["id"], "", "Cancelled", used, [], tracer.spans, None)
+            convos.touch(conv_id)
+        raise
+    except llm.LLMError:
+        if not stop.is_set():
+            if pre_am:
+                _active.pop(pre_am["id"], None)
+            raise
+        # Stopped while the history was being summarized: a reply row exists only if the status line opened one.
+        if pre_am:
+            _active.pop(pre_am["id"], None)
+            convos.finish_message(pre_am["id"], "", None, used, [], tracer.spans, None, outcome="stopped")
+            convos.touch(conv_id)
+        yield "done", {"id": pre_am["id"] if pre_am else None, "error": None, "context_used": None, "tool_events": [], "trace": tracer.spans, "stopped": True,
+                       "partial": None, "segment": False, "tainted": bool(conv["settings"].get("tainted")), "taint_sources": [],
+                       "reasoning": None, "outcome": "stopped", "error_kind": None}
+        return
+    if pre_am:
+        yield "status", {"id": pre_am["id"], "kind": None}
     tracer.end(cspan, {"memories": len(used["memories"]), "entities": len(used["nodes"]), "excerpts": len(used["chunks"]),
                        "history_messages": len(history)})
     compact_span: dict[str, Any] | None = None
@@ -1448,7 +1763,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     # budget). Without this the row stays blank with no error and its _active entry leaks.
     am: dict[str, Any] = {}
     try:
-        am = convos.add_message(conv_id, "assistant", "", model=model)
+        am = pre_am or regen_am or convos.add_message(conv_id, "assistant", "", model=model, variant_of=carried_root)
 
         _bind_stop(am["id"], stop, run)
         buf: list[str] = []
@@ -1475,7 +1790,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             "tainted": bool(conv["settings"].get("tainted")) or bool(ctx_taints) or sandboxes.holds_import(conv_id),
             "taint_sources": list(conv["settings"].get("taint_sources") or []) + [f"context:{k}" for k in ctx_taints]
                 + (["sandbox_import"] if sandboxes.holds_import(conv_id) else []),
-            "allowed_urls": _urls(user_text), "settings": cfg,
+            "allowed_urls": _urls(user_text), "settings": cfg, "conv_settings": conv["settings"],
             # Set for a scheduled job: Toolbox.call refuses every outward-facing tool outright, and _call_tool has
             # already turned the call into a proposals row before it got that far.
             "proposal_only": proposal_only(run), "message_id": am["id"],
@@ -1506,7 +1821,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             """A card for one call a run_python script made through the tool bridge. The script waits; the reply does not
             end. One-shot only: an 'always' answer is treated as 'allow' here, never as a standing grant."""
             nonlocal bridge_n
-            if skip_permissions:
+            spec = toolbox.specs.get(name)
+            if skip_permissions and permrules.lift_permission_ask(
+                    name, "ask", skip=True, forced=forced, danger=spec.danger if spec else "external",
+                    fenced=toolbox.fs_needs_ask(name, args, tool_ctx)) == "on":
                 return True
             if run is None or run.store is None:
                 return False
@@ -1641,31 +1959,41 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             tools_hint = "\n".join(p for p in (tools_hint, mcp_search.catalog_hint(_counts.items())) if p)
         hints = (RENDER_HINT, tools_hint, JOB_HINT if proposal_only(run) else "",
                  DESK_HINT + _desk_manual_text() if desk else "", DESK_PLAN_HINT if planning and desk else "",
-                 CHAT_PLAN_HINT if chat_plan_mode in ("auto", "always") and tool_schemas else "", _today_hint())
+                 CHAT_PLAN_HINT if chat_plan_mode in ("auto", "always") and tool_schemas else "")
+        used["volatile_blocks"] = [*used["volatile_blocks"], _today_hint()]  # the date changes daily: keep it out of the cacheable prefix
         if cfg.get("cacheLayout", True):
             # Stable prefix first, per-turn retrieval just before the newest user message (see context.layout_messages).
             stable = "\n\n".join(p for p in (used["stable_system"], *hints) if p)
-            messages = layout_messages(stable, used["volatile_blocks"], history)
             system = "\n\n".join(p for p in (stable, *used["volatile_blocks"]) if p)
             used["stable_hash"] = hashlib.sha256(stable.encode()).hexdigest()[:12]
             cspan["meta"]["stable_hash"] = used["stable_hash"]
         else:
-            system = "\n\n".join(p for p in (system, *hints) if p)
-            messages = [{"role": "system", "content": system}] + history
+            stable = None
+            system = "\n\n".join(p for p in (system, *hints, _today_hint()) if p)
         used["system_prompt"] = system
         used["tokens_estimate"] = estimate_tokens(system)
+        run_notes: list[dict[str, Any]] = []  # system notes that follow the history, whichever history it is
         if parked_note:
-            messages.append({"role": "system", "content": parked_note})
+            run_notes.append({"role": "system", "content": parked_note})
         if body.resume_of:
             old = run_store.get(body.resume_of) or {}
             old_events = run_store.events(body.resume_of)
-            messages.append({"role": "system", "content": resume.build_resume_note(
-                old, old_events, run_store.executed(body.resume_of), run_store.approvals(None, run_id=body.resume_of))})
+            run_notes.append({"role": "system", "content": resume.build_resume_note(
+                old, old_events, run_store.executed(body.resume_of), run_store.approvals(None, run_id=body.resume_of),
+                reason=resume.reason_tag(old, _run_message(old)))})
             # Taint is only ever added to: a resume cannot launder what the dead run read.
             for src in resume.taint_from_tape(old_events):
                 tool_ctx["tainted"] = True
                 if src not in tool_ctx["taint_sources"]:
                     tool_ctx["taint_sources"].append(src)
+
+        def _assemble(hist: list[dict[str, str]]) -> list[dict[str, Any]]:
+            """Everything before this run's own messages: the layout around `hist`, then the parked / resume notes."""
+            head = layout_messages(stable, used["volatile_blocks"], hist) if stable is not None \
+                else [{"role": "system", "content": system}] + hist
+            return head + [dict(n) for n in run_notes]
+        messages = _assemble(history)
+        base_len = len(messages)  # what follows is this run's own steers, tool turns and notes
         yield "assistant_message", {**am, "context_used": used}
         yield "span", {"message_id": am["id"], "span": cspan}
         if compact_span:
@@ -1677,6 +2005,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         last_sig: str | None = None
         repeats = 0
         tool_errors: dict[str, int] = {}
+        warm_tasks: list[asyncio.Task] = []  # read-only calls started ahead of their turn in the round; cancelled at the end
         detector = StuckDetector() if cfg.get("stuckDetection", True) else None  # loop shapes REPEAT_LIMIT cannot see
         perm_rules = permrules.load_rules(cfg.get("permissionRules"))
         denials = permrules.DenialStreak()  # refused calls in a row; at three the next result says to stop varying them
@@ -1684,6 +2013,13 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         stop_text: str | None = None
         blocked: set[str] = set()
         _round = 0
+        seen_call_ids: set[str] = set()  # a provider restarts its call numbering every round; ids stay unique per reply
+        quiet_retries = 0  # silent retries of an incomplete or empty round: at most one per reply
+        cut_recoveries = 0  # rounds whose tool calls were cut off at the output limit
+        seen_ids = set(cinfo.get("row_ids") or [])  # rows the context was built from; a steer in it is not sent twice
+        inflight: dict[str, Any] | None = None  # the call whose tool is executing, for a cancelled run to record
+        error_kind: str | None = None
+        notice: str | None = None  # one line for the user on the final done, e.g. the model took no reasoning effort
         awaiting: dict[str, Any] | None = None  # the tool event of a call blocked on approval, for a cancelled run to keep
         # The call this reply let go of rather than keep waiting on. Set once, and the reply ends there.
         parked: str | None = None
@@ -1694,6 +2030,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         # call rather than remembered: after a round of long tool results the task itself is the first
         # thing to fall out of attention. One slot, moved, never accumulated.
         plan_msg: dict[str, Any] | None = None
+        nudged = False
 
         def _reinject_plan() -> None:
             nonlocal plan_msg
@@ -1710,14 +2047,130 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 plan_msg = {"role": "system", "content": block}
                 messages.append(plan_msg)
 
+        def _warm_segment(calls: list[dict[str, Any]], start: int, warm: dict[str, asyncio.Task],
+                          warm_ctx: dict[str, dict[str, Any]], tasks: list[asyncio.Task]) -> int:
+            """Start the maximal run of read-only calls beginning at calls[start] together (at most parallelReads at a
+            time) and return its length. A call joins only when it would run without a card: on, not forced, no rule
+            asking or refusing it, not a writer, a spawn or session-holding tool, and no plan in play. The first call
+            that does not qualify ends the run, so a write is a barrier and later reads wait for it. A reply that is
+            tainted by an earlier call of the run is simulated, so a call that would then ask is not started."""
+            width = max(1, int(cfg.get("parallelReads") or 1))
+            if width < 2 or planning or active_plan is not None or plan_seen or proposal_only(run):
+                return 1
+            sim = dict(tool_ctx)
+            seg: list[tuple[dict[str, Any], dict[str, Any]]] = []
+            for c in calls[start:]:
+                name, args = c["name"], c["_args"] or {}
+                spec, raw = toolbox.specs.get(name), modes.get(name, "off")
+                if c["_invalid"] or name in blocked or not parallel_safe(spec, name, raw):
+                    break
+                if _gate(name, raw, sim, args) != "on" or toolbox.fs_needs_ask(name, args, sim):
+                    break
+                perm = permrules.resolve(name, args, "on", False, rules=perm_rules, roots=_perm_roots(cfg, desk_id), conv=conv_id,
+                                         doom=detector is not None and detector.repeat_count(name, args) >= permrules.DOOM_LIMIT - 1)
+                if perm.mode != "on" or perm.refusal or perm.kind == "doom_loop":
+                    break
+                seg.append((c, args))
+                if spec.taints:
+                    sim["tainted"] = True
+            if len(seg) < 2:
+                return 1
+            sem = asyncio.Semaphore(width)
+
+            async def run_one(name: str, args: dict[str, Any], ctx: dict[str, Any], uid: str) -> Any:
+                async with sem:
+                    # Stop skips reads still queued for a slot; reads already running side by side are not interrupted.
+                    if stop.is_set():
+                        return {"error": "Stopped by the user before this call ran; it was not executed."}
+                    return await _call_tool(run, _round, name, args, ctx, uid)
+
+            for c, args in seg:
+                key = tools.call_key(c["name"], args)
+                if key not in warm:  # an identical call in the round runs once and shares the result
+                    warm_ctx[key] = dict(tool_ctx)  # taint set by a read must not reach calls gated before it
+                    warm[key] = asyncio.ensure_future(run_one(c["name"], args, warm_ctx[key], f"{am['id']}:{c['id']}"))
+                    tasks.append(warm[key])
+            return len(seg)
+        overflow_retried = False
+        run_started = am["created_at"]
+
+        async def _recover_overflow(e: llm.ContextOverflowError) -> dict[str, Any] | None:
+            """The provider said this request does not fit. Learn the model's limit, stub old tool output, fold the
+            history from before this run into the summary, and rebuild the head of `messages` in place. None when
+            neither step freed anything."""
+            nonlocal win, base_len
+            before = compaction.estimate_messages(messages)
+            compaction.note_overflow(model, e.limit, before)
+            win = compaction.window_for(cfg, model, pricing.caps(model).get("max_input_tokens"))
+            cleared, saved = compaction.microcompact(messages, 1, win, 0.0)
+            summarized = 0
+            rows = [r for r in convos.history_rows(conv_id) if r["created_at"] < run_started]
+            untrusted = bool(tool_ctx.get("tainted"))
+            try:
+                res = await compactor.compact({**cfg, "compactKeepRecent": min(_int_setting(cfg, "compactKeepRecent", 8), 2)},
+                                              str(cfg.get("extractionModel") or model), conv_id, rows, include_untrusted=untrusted,
+                                              complete=compaction.bind_supported(llm.complete, cancel=stop))
+            except Exception:  # noqa: BLE001 - a summarizer failure leaves the stubs as the only relief
+                log.warning("overflow compaction failed for %s", conv_id, exc_info=True)
+                res = None
+            if res:
+                head = _assemble(compactor.build_history(rows, compactor.get(conv_id), untrusted))
+                messages[:] = head + messages[base_len:]
+                base_len = len(head)
+                summarized = res["summarized"]
+                saved += max(0, res["tokens_before"] - res["tokens_after"])
+            if not cleared and not res:
+                return None
+            span = tracer.start("compact", "Compact after overflow", {"kind": "overflow"}, parent=cspan)
+            tracer.end(span, {"cleared": cleared, "summarized": summarized, "tokens_saved": saved})
+            return {"span": span}
+
+        async def _stream_round() -> AsyncIterator[dict[str, Any]]:
+            """The round's model stream. A provider overflow before anything streamed is recovered once per reply:
+            the stream is re-issued over the compacted context and a synthetic `overflow_recovered` event says so.
+            Anything else (a second overflow, one after text arrived) propagates to the reply's error handling."""
+            nonlocal overflow_retried
+            while True:
+                streamed = False
+                stream = llm.stream_chat(cfg, model, messages, tool_schemas or None,
+                                         effort=str(conv["settings"].get("effort") or "default"),
+                                         fast=bool(conv["settings"].get("fast")),
+                                         cancel=_stream_cancel(stop, steers, run))
+                try:
+                    async for ev in stream:
+                        streamed = streamed or ev["type"] in ("reasoning", "delta")
+                        yield ev
+                    return
+                except llm.ContextOverflowError as e:
+                    if streamed or overflow_retried or stop.is_set():
+                        raise
+                    overflow_retried = True
+                    recovered = await _recover_overflow(e)
+                    if stop.is_set():
+                        return  # Stop arrived while the summarizer ran: the round ends with nothing, as stopped
+                    if recovered is None:
+                        raise
+                finally:
+                    await stream.aclose()
+                yield {"type": "overflow_recovered", **recovered}
+
+        async def _end_jobs() -> None:
+            """A chat's background shell jobs end with its reply; a desk's outlive a turn (they wake it). Called at
+            the very end of the reply, after its `done`, and on cancellation: no await sits between the last
+            steer check and `done`, so a steer is either folded in or already answered with a 409."""
+            if not desk_id:
+                await toolbox.shell.kill_conversation(conv_id)
+
         async def _final_round() -> AsyncIterator[tuple[str, Any]]:
             """Closing answer after a budget or breaker stop: one tool-free call, itself exempt from the budget."""
+            nonlocal notice
             _reinject_plan()
             # One newline, not a blank line: the transcript renders as markdown, where a blank line opens a
             # new paragraph and reads as an empty line dropped into the middle of the reply.
             if buf and buf[-1] and not buf[-1].endswith("\n"):
                 buf.append("\n")
                 yield "delta", {"id": am["id"], "text": "\n"}
+            llm.usage_context.set({**_ucx, "round": _round})
             span = tracer.start("llm", model, {"round": _round, "final": True, "messages": len(messages), "tools": len(tool_schemas)})
             yield "span", {"message_id": am["id"], "span": span}
             start, fin = len(buf), {}
@@ -1736,8 +2189,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 elif ev["type"] == "delta":
                     buf.append(ev["text"])
                     yield "delta", {"id": am["id"], "text": ev["text"]}
+                elif ev["type"] == "retry":
+                    yield "status", _retry_status(am["id"], ev)
                 else:
                     fin = ev
+                    if ev.get("effort_dropped"):
+                        notice = EFFORT_DROPPED_NOTICE
                 if steers:
                     break
             tracer.end(span, {"finish_reason": fin.get("finish_reason"), "usage": fin.get("usage"),
@@ -1754,11 +2211,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         log.exception("chat setup failed for %s", conv_id)
         if am:
             _active.pop(am["id"], None)
-            convos.finish_message(am["id"], "", str(e), used, [], tracer.spans, None)
+            convos.finish_message(am["id"], "", str(e), used, [], tracer.spans, None, error_kind=getattr(e, "kind", None))
             convos.touch(conv_id)
         yield "done", {"id": am.get("id"), "error": str(e), "context_used": used, "tool_events": [], "trace": tracer.spans,
                        "stopped": False, "partial": None, "segment": False, "tainted": False, "taint_sources": [],
-                       "reasoning": None}
+                       "reasoning": None, "outcome": None, "error_kind": getattr(e, "kind", None)}
         return
 
     try:
@@ -1774,7 +2231,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 # A segment that already streamed or ran tools closes cleanly; an untouched one is reused.
                 if buf or tool_events or rbuf:
                     reasoning = "".join(rbuf).strip() or None
-                    convos.finish_message(am["id"], "".join(buf).strip(), None, used, tool_events, tracer.spans, reasoning)
+                    convos.finish_message(am["id"], "".join(buf).strip(), None, used, tool_events, tracer.spans, reasoning,
+                                          outcome=partial)
                     _active.pop(am["id"], None)
                     # A steer closes the current segment and the reply carries on in a fresh assistant
                     # message, so this `done` ends a segment, not the run. Anything supervising the run
@@ -1782,7 +2240,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     yield "done", {"id": am["id"], "error": None, "context_used": used, "tool_events": tool_events,
                                    "trace": tracer.spans, "stopped": False, "partial": partial, "segment": True,
                                    "tainted": tool_ctx["tainted"], "taint_sources": tool_ctx["taint_sources"],
-                                   "reasoning": reasoning}
+                                   "reasoning": reasoning, "outcome": partial}
                     am = convos.add_message(conv_id, "assistant", "", model=model)
                     _bind_stop(am["id"], stop, run)
                     tool_ctx["message_id"] = am["id"]
@@ -1791,36 +2249,71 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     tool_events = []
                     tracer = Tracer()
                     yield "assistant_message", {**am, "context_used": used}
+                elif any(um["created_at"] >= am["created_at"] for um in steered):
+                    # Nothing was written, and the steer landed after this row: swap it for a fresh one so the
+                    # transcript reads user message, then answer. No segment closed, so no `done` and the
+                    # tracer keeps its spans (the context span belongs to the reply, not to the row).
+                    _active.pop(am["id"], None)
+                    # Just this row: on a regenerate it is the open sibling of a group, and delete_message would take
+                    # the whole group (the answer being replaced) with it. The fresh row keeps the row's place in it.
+                    with db.tx() as c:
+                        c.execute("DELETE FROM messages WHERE id=?", (am["id"],))
+                    yield "removed_message", {"id": am["id"]}
+                    am = convos.add_message(conv_id, "assistant", "", model=model, variant_of=am.get("variant_of"))
+                    _bind_stop(am["id"], stop, run)
+                    tool_ctx["message_id"] = am["id"]
+                    yield "assistant_message", {**am, "context_used": used, "trace": tracer.spans}
                 for um in steered:
-                    messages.append({"role": "user", "content": um["content"]})
+                    if um["id"] not in seen_ids:  # a steer that landed during context assembly is already in the history
+                        messages.append({"role": "user", "content": um["content"]})
                     user_text = um["content"]
                     tool_ctx["allowed_urls"] |= _urls(um["content"])
+                # The new message gets a clean slate: breakers that tripped on the work before it must not cut
+                # the work it asks for. Budget and round count are the run's and stay.
+                if partial == "loop":
+                    partial = None
+                repeats, last_sig, stuck_hits, stop_text = 0, None, 0, None
+                blocked.clear()
+                tool_errors.clear()
+                if detector is not None:
+                    detector.obs.clear()
+
             _round += 1
             budget.rounds = _round - 1  # rounds already completed: the Nth round's tool calls must still be allowed to run
             round_start = len(buf)
             end: dict[str, Any] = {}
             # Old tool results shrink to stubs once the run has filled half the window; read_tool_result still serves them.
-            n_cleared, n_saved = compaction.microcompact(messages, _int_setting(cfg, "microKeep", 3), _int_setting(cfg, "contextWindow", 128000),
+            n_cleared, n_saved = compaction.microcompact(messages, _int_setting(cfg, "microKeep", 3), win,
                                                          float(cfg.get("microAt", 0.5)))
             if n_cleared:
                 mspan = tracer.start("compact", "Clear old tool results", {"kind": "micro"}, parent=cspan)
                 tracer.end(mspan, {"cleared": n_cleared, "tokens_saved": n_saved})
                 yield "span", {"message_id": am["id"], "span": mspan}
+                nudge = compaction.memory_nudge(n_cleared, nudged, tool_schemas)
+                if nudge:
+                    nudged = True  # once per run, ahead of the re-injected plan, so the prefix stays stable after this round
+                    messages.append({"role": "system", "content": nudge})
             for _note in toolbox.shell.drain_notes(conv_id):  # a background shell job finished since the last round
                 messages.append({"role": "system", "content": _note})
             _reinject_plan()  # last message in the context, after the previous round's tool results
+            llm.usage_context.set({**_ucx, "round": _round})
             lspan = tracer.start("llm", model, {"round": _round, "messages": len(messages), "tools": len(tool_schemas)})
             round_span = lspan  # the tool calls below nest under it
             yield "span", {"message_id": am["id"], "span": lspan}
             first_token: int | None = None
             budget.arm_deadline()
-            async for ev in llm.stream_chat(cfg, model, messages, tool_schemas or None,
-                                            effort=str(conv["settings"].get("effort") or "default"),
-                                            fast=bool(conv["settings"].get("fast")),
-                                            cancel=_stream_cancel(stop, steers, run)):
+            async for ev in _stream_round():
                 if stop.is_set():
                     break
-                if ev["type"] == "reasoning":
+                if ev["type"] == "overflow_recovered":
+                    # The request did not fit; the context was compacted and the same round is being re-issued.
+                    tracer.end(lspan, {"finish_reason": "overflow"}, error="Context overflow; compacted and retrying")
+                    yield "span", {"message_id": am["id"], "span": lspan}
+                    yield "span", {"message_id": am["id"], "span": ev["span"]}
+                    lspan = tracer.start("llm", model, {"round": _round, "messages": len(messages), "tools": len(tool_schemas)})
+                    round_span = lspan
+                    yield "span", {"message_id": am["id"], "span": lspan}
+                elif ev["type"] == "reasoning":
                     if first_token is None:
                         first_token = now_ms()
                     rbuf.append(ev["text"])
@@ -1830,19 +2323,25 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         first_token = now_ms()
                     buf.append(ev["text"])
                     yield "delta", {"id": am["id"], "text": ev["text"]}
+                elif ev["type"] == "retry":
+                    yield "status", _retry_status(am["id"], ev)
                 else:
                     end = ev
+                    if ev.get("effort_dropped"):
+                        notice = EFFORT_DROPPED_NOTICE
                 if steers:
                     break
             calls = [] if end.get("finish_reason") == "cancelled" else (end.get("tool_calls") or [])
+            ensure_unique_call_ids(calls, seen_call_ids)
             if end.get("finish_reason") == "timeout":
                 # The provider outran maxRunSeconds mid-stream. Keep what arrived and mark the reply partial.
-                if not "".join(buf).strip():
+                # A reply that already ran tools has something to close out with (see below), so it does not raise.
+                if not "".join(buf).strip() and not any(m.get("role") == "tool" for m in messages):
                     raise llm.LLMError(f"This reply hit its {int(budget.max_seconds)}s time limit before the model produced anything. Try again, or raise maxRunSeconds in Settings.")
                 partial = "time"
             u = end.get("usage") or end.get("usage_est") or {}
             pt, ct = int(u.get("prompt_tokens") or 0), int(u.get("completion_tokens") or 0)
-            budget.add(pt, ct, pricing.cost(cfg, model, pt, ct))
+            budget.add(pt, ct, pricing.cost(cfg, model, pt, ct, int(u.get("cached_tokens") or 0), int(u.get("cache_write_tokens") or 0)))
             if run is not None:
                 run.budget = budget.snapshot()
             tracer.end(lspan, {"finish_reason": end.get("finish_reason"), "usage": end.get("usage"),
@@ -1852,19 +2351,80 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             yield "span", {"message_id": am["id"], "span": lspan}
             if stop.is_set():
                 break
+            fr, inc = end.get("finish_reason"), bool(end.get("incomplete"))
+            round_text = "".join(buf[round_start:]).strip()
+            # How this round ended, when it did not end well. A steer overrides all of it: the new message is the
+            # next thing to answer, and the segment closes as it always did.
+            if not steers:
+                if fr == "content_filter":
+                    calls = []
+                    error, error_kind = "The provider filtered this reply. Try rephrasing.", "content_filter"
+                    break
+                if fr == "timeout":
+                    calls = []
+                    if not round_text and any(m.get("role") == "tool" for m in messages):
+                        messages.append({"role": "system", "content": TIME_STOP})
+                        async for chunk in _final_round():
+                            yield chunk
+                        if steers and not stop.is_set():
+                            continue
+                    break  # partial is already "time"; text that was written stays as it is
+                if fr == "length" and not calls:
+                    if "".join(buf).strip():
+                        partial = "length"
+                    else:
+                        error = ("The model reached its output limit before writing an answer. "
+                                 "Try a lower effort or a shorter request.")
+                    break
+                if inc:
+                    calls = []
+                    if not round_text and quiet_retries == 0 and not budget.exceeded():
+                        quiet_retries = 1  # a counted round: the usage above was already charged
+                        continue
+                    partial = "incomplete"
+                    break
+                if not calls and not desk_id and not "".join(buf).strip():
+                    if quiet_retries == 0 and not budget.exceeded():
+                        quiet_retries = 1
+                        messages.append({"role": "system", "content": EMPTY_NUDGE})
+                        continue
+                    # Still silent. A reply that ran tools is its cards, and ends as one; one that did nothing is an error.
+                    if not tool_events:
+                        error = "The model returned an empty reply. Try again or pick another model."
+                    break
             if not calls:
                 # A steer that arrived while this answer streamed: keep the model's own turn in its
                 # context, then loop back so the top of the loop closes this segment and a new one
                 # replies to it.
                 if steers:
-                    messages.append({"role": "assistant", "content": "".join(buf[round_start:]).strip() or ""})
+                    if round_text:
+                        messages.append({"role": "assistant", "content": round_text})
                     continue
                 break
+            known_names = set(toolbox.specs) | set(modes) | set(mcp_modes)
+            advertised = [s["function"]["name"] for s in tool_schemas]
+            for i, c in enumerate(calls):
+                _normalise_call(c, known_names, advertised, fr == "length" and i == len(calls) - 1)
             turn = {"role": "assistant", "content": "".join(buf[round_start:]).strip() or None,
                     "tool_calls": [{"id": c["id"], "type": "function", "function": {"name": c["name"], "arguments": _replay_args(c["arguments"])}} for c in calls]}
+            if fr == "length" and not steers:
+                # The output limit cut this round's tool calls short. They are never replayed as written (see
+                # _replay_args), so the model can try again smaller; twice in one reply is a loop of its own.
+                cut_recoveries += 1
+                if cut_recoveries > 2:
+                    partial = "length"
+                    messages.append(turn)
+                    for c in calls:
+                        messages.append({"role": "tool", "tool_call_id": c["id"],
+                                         "content": BUDGET_STOP.format(axis="the model's output limit")})
+                    async for chunk in _final_round():
+                        yield chunk
+                    if steers and not stop.is_set():
+                        continue
+                    break
             over = budget.exceeded()
             if (over and run is not None and run.desk_id is None and (plan_seen or active_plan)
-                    and plans.covers(run.run_id, [(c["name"], _call_args(c)) for c in calls], desk_id=run.desk_id)):
+                    and plans.covers(run.run_id, [(c["name"], c["_args"]) for c in calls], desk_id=run.desk_id)):
                 # Every call here is a step the user approved. The budget that ran out was spent drafting that
                 # plan, so refusing now would turn the approval into a dead end. The next round is still checked.
                 # Never a desk: a desk carries its remaining steps into a chained turn instead (_should_chain).
@@ -1887,13 +2447,22 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             if buf and buf[-1] and not buf[-1].endswith("\n"):
                 buf.append("\n")
                 yield "delta", {"id": am["id"], "text": "\n"}
-            for c in calls:
+            # Consecutive read-only calls start together (see _warm_segment); a write, an ask or any other call
+            # is a barrier. The loop below still gates, journals and reports every call in order and only
+            # collects the warmed result instead of calling the tool.
+            warm: dict[str, asyncio.Task] = {}
+            warm_ctx: dict[str, dict[str, Any]] = {}
+            warmed_upto = 0
+            for ci, c in enumerate(calls):
+                if ci >= warmed_upto and not stop.is_set():
+                    warm.clear()  # a result is only shared inside its own run of reads, never across a barrier
+                    warmed_upto = ci + max(1, _warm_segment(calls, ci, warm, warm_ctx, warm_tasks))
                 if stop.is_set():
                     # Stop means the rest of this round's calls do not run either. The provider still needs a tool
                     # message per call, and nothing was journaled as started, so nothing replays.
                     messages.append({"role": "tool", "tool_call_id": c["id"], "content": json.dumps({"error": "Stopped by the user before this call ran; it was not executed."})})
                     continue
-                args = _call_args(c)
+                args = c["_args"] or {}
                 sig = tools.call_key(c["name"], args)
                 repeats = repeats + 1 if sig == last_sig else 1
                 last_sig = sig
@@ -1901,6 +2470,36 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     partial = "loop"
                 if partial == "loop":  # every pending call still needs a tool message, executed or not
                     messages.append({"role": "tool", "tool_call_id": c["id"], "content": stop_text or LOOP_STOP.format(name=c["name"], n=REPEAT_LIMIT)})
+                    continue
+                # A call that cannot run as sent (broken JSON, an unknown name, a cut-off call) is answered here with
+                # what was wrong. It never reaches the gate, a rule, a plan claim, an approval card or the tool:
+                # nothing the user could approve would ever work. Arguments the signature cannot take are refused
+                # below instead, once the gate has spoken: a plan-mode or turned-off refusal comes first, as it did.
+                invalid = c["_invalid"]
+                if c["_problem"]:
+                    bad = _invalid_call_error(c, toolbox.specs.get(c["name"]))
+                    shown = (c["_asked"] or c["name"])[:80] if invalid == "name" else c["name"]
+                    uid = f"{am['id']}:{c['id']}"
+                    if c["name"] in blocked:
+                        bad = tools.denied(c["name"], f"failing {TOOL_ERROR_LIMIT} times in a row and disabled for the rest of this reply")
+                    yield "tool_call", {"message_id": am["id"], "id": uid, "name": shown, "arguments": {},
+                                        "needs_approval": False, "forced": False, "proposal": None, "permission": None, "plan": None}
+                    tspan = tracer.start("tool", shown, {"round": _round, "arguments": {}, "invalid": invalid}, parent=round_span)
+                    yield "span", {"message_id": am["id"], "span": tspan}
+                    preview, err = summarize_result(bad), bad.get("error")
+                    tool_errors[c["name"]] = tool_errors.get(c["name"], 0) + 1
+                    if tool_errors[c["name"]] >= TOOL_ERROR_LIMIT:
+                        blocked.add(c["name"])
+                    tracer.end(tspan, {"result_chars": len(preview), "invalid": invalid}, error=err)
+                    event = {"id": uid, "name": shown, "arguments": {}, "result_preview": preview, "duration_ms": 0,
+                             "error": err, "images": None, "undo": None, "approval": None, "plan": None, "forced": False,
+                             "tainted": False, "blocked": None, "breaker": partial, "proposal": None, "artifact": None,
+                             "invalid": invalid}
+                    tool_events.append(event)
+                    yield "tool_result", {"message_id": am["id"], **event}
+                    yield "span", {"message_id": am["id"], "span": tspan}
+                    messages.append({"role": "tool", "tool_call_id": c["id"],
+                                     "content": tool_results.for_model(conv_id, am["id"], c["name"], bad, untrusted=False)})
                     continue
                 raw_mode = modes.get(c["name"], "off")
                 spec = toolbox.specs.get(c["name"])
@@ -1962,6 +2561,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     mode = perm.mode
                     if perm.kind == "doom_loop":
                         forced = True
+                elif mcp_is(c["name"]) and mode != "off":
+                    # A global deny rule can name an MCP slug or server; it refuses over any grant and the grant row is untouched.
+                    perm.refusal = permrules.mcp_denied(c["name"], perm_rules)
                 # A background run never waits on an approval: there is nobody at the keyboard, and the call is not
                 # going to happen either way. It becomes a proposal in _call_tool and the run carries on.
                 # MCP tools are external by construction but are not in Toolbox.specs, so proposes()
@@ -1977,6 +2579,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 plan: dict[str, Any] | None = None     # this call's own proposed plan, when it is propose_plan
                 claimed: dict[str, Any] | None = None  # the approved plan step this call consumed instead of asking
                 pre: Any = None                        # a result settled before the gate: nothing to approve
+                if c["name"] != PLAN_TOOL and mode != "off" and (bad := toolbox.precheck(c["name"], args)) is not None:
+                    # Arguments the tool's signature cannot take: nothing the user could approve would ever run, so
+                    # no card opens and no plan step is spent on it. Not the plan tool: its placeholder function is
+                    # narrower than its schema, and normalize_plan below is its check.
+                    pre, invalid = bad, "schema"
                 if c["name"] == PLAN_TOOL and mode != "off":
                     # A plan is nothing but its card, so it asks whatever the mode says, and no standing grant
                     # below can turn that off. It is not a taint upgrade either, so it is not `forced`.
@@ -1999,7 +2606,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         # Its own event, because the card needs the whole plan with its steps and
                         # their digests; the tool_call event carries only the raw arguments.
                         yield "plan_card", {"message_id": am["id"], "call_id": uid, "plan": plan}
-                elif (plan_seen or active_plan) and c["name"] != PLAN_TOOL:
+                elif (plan_seen or active_plan) and c["name"] != PLAN_TOOL and pre is None:
                     # Digest binding: an approved step whose arguments hash to the same thing stands in for the
                     # modal, exactly once. A forced approval never consults a plan -- untrusted content in this
                     # reply must always reach the user -- and a claim only matches inside its own run.
@@ -2036,9 +2643,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     # Opening one here would park the run forever (and every later fire behind it).
                     pre = tools.denied(c["name"], "not available in a background run: it needs an approval and nobody is watching")
                 # Dangerously skip permissions: an ask runs. A refusal already in `pre` stays a refusal.
-                # propose_plan and desk_ask stay cards (lift_permission_ask). Jobs never set the flag.
+                # Forced, ask-rule, external, schedules and uncleared shell cards stay (lift_permission_ask). Jobs never set the flag.
                 if skip_permissions and pre is None and not perm.refusal:
-                    mode = permrules.lift_permission_ask(c["name"], mode, skip=True)
+                    mode = permrules.lift_permission_ask(c["name"], mode, skip=True, forced=forced or perm.forced, danger=danger,
+                                                         fenced=fs_ask or perm.kind == "rule")
                 asks = mode == "ask" and claimed is None and pre is None
                 if asks and desk_id and c["name"] != PLAN_TOOL and run_store.claim_parked(desk_id, c["name"], args, uid):
                     # The user already said yes to exactly this call on a card an earlier turn let go
@@ -2046,16 +2654,19 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     asks = False
                 yield "tool_call", {"message_id": am["id"], "id": uid, "name": c["name"], "arguments": args,
                                     "needs_approval": asks, "forced": forced, "proposal": proposing or None,
-                                    "permission": perm.card() if asks else None,
+                                    "permission": ({**perm.card(), "danger": danger} if perm.card() else None) if asks else None,
                                     "plan": {"plan_id": claimed["plan_id"], "idx": claimed["idx"], "title": claimed["title"]} if claimed else None}
                 tspan = tracer.start("tool", c["name"], {"round": _round, "arguments": _short(args), "mode": mode, "forced": forced,
-                                                         "plan_step": f"{claimed['plan_id']}#{claimed['idx']}" if claimed else None},
+                                                         "plan_step": f"{claimed['plan_id']}#{claimed['idx']}" if claimed else None,
+                                                         **({"repaired": True} if c["_repaired"] else {}),
+                                                         **({"invalid": invalid} if invalid else {})},
                                  parent=round_span)
                 yield "span", {"message_id": am["id"], "span": tspan}
                 t0 = time.time()
                 decision = "allow"
                 deny_note: str | None = None
                 edit_info: dict[str, Any] = {}
+                interrupted = False  # Stop cut this call short (see _await_tool)
                 if asks:
                     # Pause the reply until the user approves or denies this call (POST /approvals/{call_id}).
                     # The approval is a row, and it waits as long as it takes: there is no auto-deny.
@@ -2063,9 +2674,14 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     fut: asyncio.Future = asyncio.get_event_loop().create_future()
                     _approvals[uid] = fut
                     store = run.store if run is not None else None
+                    mine = False  # whether the row on file is the one this wait opened (a reused id returns the old row)
                     if store is not None:
-                        store.open_approval(uid, run.run_id, c["name"], args, conversation_id=conv_id, message_id=am["id"],
-                                           forced=forced, desk_id=run.desk_id, danger=danger)
+                        opened = store.open_approval(uid, run.run_id, c["name"], args, conversation_id=conv_id, message_id=am["id"],
+                                                     forced=forced, desk_id=run.desk_id, danger=danger)
+                        mine = bool(opened and opened.get("status") == "pending" and opened.get("run_id") == run.run_id
+                                    and opened.get("tool") == c["name"] and opened.get("args_digest") == args_digest(args))
+                        if not mine:
+                            log.warning("approval %s was already on file for another call; only a live answer will count", uid)
                         run.budget = budget.snapshot()
                         run.set_status("awaiting_approval")
                     awaiting = {"id": uid, "name": c["name"], "arguments": args, "result_preview": "", "duration_ms": 0,
@@ -2093,6 +2709,19 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                 if plan is not None:  # a stop means "stop", not "never": this no does not block later
                                     plans.decide(uid, "deny", by="stop", note="You stopped the reply before answering this plan.")
                                 break
+                            if steers and not desk_id:
+                                # The user wrote instead of answering the card: that is a no, with their words as the
+                                # reason. `by="steer"` keeps a plan re-proposable (only a user's own no blocks it), and
+                                # the loop top folds the message in once this call has its result.
+                                note = str(steers[-1]["content"]).strip()[:500]
+                                fut.set_result("deny")
+                                _approval_notes[uid] = note
+                                if store is not None:
+                                    store.decide(uid, "deny", by="steer", note=note)
+                                if plan is not None:
+                                    plans.decide(uid, "deny", by="steer", note=note)
+                                break
+
                             # Park, never auto-deny, and never in front of somebody who is looking at
                             # the card: with a viewer attached the run waits as long as it takes.
                             if (park_after > 0 and waited >= park_after and store is not None
@@ -2106,14 +2735,14 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                             except asyncio.TimeoutError:
                                 waited += 2
                                 row = store.approval(uid) if store is not None else None
-                                if row and row["status"] != "pending" and not fut.done():  # decided on the row alone
+                                if mine and row and row["status"] != "pending" and not fut.done():  # decided on the row alone
                                     fut.set_result(row["decision"])
                         decision = fut.result() if fut.done() else "deny"
                     finally:
                         _approvals.pop(uid, None)
                     deny_note = _approval_notes.pop(uid, None)
                     pending_card, awaiting = awaiting, None
-                    if decision != "deny" and store is not None and (arow := store.approval(uid)) and arow.get("edited_args"):
+                    if decision != "deny" and mine and store is not None and (arow := store.approval(uid)) and arow.get("edited_args"):
                         # The user rewrote this call on its card. approval_edits validated it in the route and the row's
                         # digest was re-bound to it; from here on the edited arguments are THE call: they run, are
                         # journaled, verified and queued (outbox) in place of the model's. Never read from the model's call.
@@ -2153,7 +2782,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         yield "done", {"id": am["id"], "error": None, "context_used": used, "tool_events": tool_events,
                                        "trace": tracer.spans, "stopped": False, "partial": None, "segment": False,
                                        "tainted": tool_ctx["tainted"], "taint_sources": tool_ctx["taint_sources"],
-                                       "reasoning": reasoning, "parked": uid}
+                                       "reasoning": reasoning, "outcome": None, "error_kind": None, "parked": uid}
                         return
                     if run is not None:
                         run.set_status("running")
@@ -2178,7 +2807,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     granted = decision in ("always_chat", "always_global")
                     # A tainted reply cannot buy a standing grant, and neither can a plan card: 'always' on
                     # propose_plan would leave the plan with no approval at all.
-                    standing = granted and not forced and c["name"] != PLAN_TOOL
+                    # An external write is never granted whole-tool: only a patterned rule (always_rule) can stand.
+                    standing = granted and not forced and c["name"] != PLAN_TOOL and (danger != "external" or mcp_is(c["name"]))
                     if granted and not standing:
                         decision = "allow"  # one-shot
                     elif decision == "always_chat":
@@ -2256,16 +2886,33 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     if proposal_only(run) and run is not None:
                         result = _propose(run, c["name"], args, uid, tool_ctx)
                     else:
-                        result = await _mcp_call(c["name"], args)
-                        mcp_ran = True
+                        inflight = {"id": uid, "name": c["name"], "arguments": args}
+                        result, interrupted = await _await_tool(_mcp_call(c["name"], args), stop,
+                                                                grace=STOP_GRACE_SECONDS if danger in IDEMPOTENT_DANGER else 0.0)
+                        mcp_ran = not interrupted
+                    ran = not interrupted
+                elif not asks and (wkey := tools.call_key(c["name"], args)) in warm:
+                    # Started with its neighbours; an identical call in the round shares this one run.
+                    result = await warm[wkey]
+                    if isinstance(result, dict):
+                        result = dict(result)
+                    if warm_ctx[wkey].get("tainted"):
+                        tool_ctx["tainted"] = True
                     ran = True
                 else:
                     tool_ctx["fs_outside_ok"] = fs_ask  # the user approved this write (or granted the folder)
+                    inflight = {"id": uid, "name": c["name"], "arguments": args}
                     try:
-                        result = await _call_tool(run, _round, c["name"], args, tool_ctx, uid)
+                        result, interrupted = await _await_tool(
+                            _call_tool(run, _round, c["name"], args, tool_ctx, uid), stop,
+                            grace=STOP_GRACE_SECONDS if danger in IDEMPOTENT_DANGER else 0.0)
                     finally:
                         tool_ctx["fs_outside_ok"] = False
-                    ran = True
+                    ran = not interrupted
+                if interrupted:
+                    # The journal row stays `started`, so a later identical call reports unknown_outcome rather than repeating it.
+                    result = tools.tool_error("Stopped by the user before it finished; whether it took effect is unknown."
+                                              if danger in IDEMPOTENT_DANGER else "Stopped by the user.")
                 hint = denials.note()
                 if hint and isinstance(result, dict):
                     result["permission_note"] = hint
@@ -2296,9 +2943,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 event = {"id": uid, "name": c["name"], "arguments": args, "result_preview": preview, "duration_ms": ms,
                          "error": err, "images": images or None, **edit_info,
                          "undo": result.get("undo") if isinstance(result, dict) and isinstance(result.get("undo"), dict) else None,
-                         "approval": (("plan" if claimed else decision) if mode == "ask" else None),
+                         "approval": (("plan" if claimed else decision) if mode == "ask" and not invalid else None),
                          "plan": {"plan_id": claimed["plan_id"], "idx": claimed["idx"], "title": claimed["title"]} if claimed else None,
                          "forced": forced, "tainted": tainted, "blocked": c["name"] if was_blocked else None, "breaker": partial,
+                         **({"interrupted": True, "pending": False} if interrupted else {}),
+                         **({"repaired": True} if c["_repaired"] else {}),
+                         **({"invalid": invalid} if invalid else {}),
                          "blocked_by": "plan_mode" if blocked_reason == PLAN_BLOCKED else None,
                          "proposal": (result.get("proposal_id") if proposing and isinstance(result, dict) else None),
                          # Persisted with the tool event, so the card finds its artifact again after a reload.
@@ -2321,6 +2971,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     # actually worked, so the plan can be read after the fact.
                     plans.finish(uid, not err, err)
                 tool_events.append(event)
+                inflight = None
                 yield "tool_result", {"message_id": am["id"], **event}
                 if made and not err:
                     yield "artifact", {"message_id": am["id"], "call_id": uid, "conversation_id": conv_id, **made}
@@ -2335,10 +2986,14 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 # Anything saved while this run is tainted can carry that text, including a script
                 # that prints it. Paging the handle later has to taint again, even after the banner is cleared.
                 brought_untrusted = bool(tool_ctx.get("tainted"))
-                content = tool_results.for_model(conv_id, am["id"], c["name"], for_model, untrusted=brought_untrusted)
+                content, rid = tool_results.render(conv_id, am["id"], c["name"], for_model, untrusted=brought_untrusted)
+                if rid:
+                    event["result_id"] = rid  # persisted with the tool event, so later turns can name the handle
                 if stuck and event["breaker"] == "stuck_nudge":
                     content = f"{content}\n\n[stuck_notice] {STUCK_NUDGE.format(detail=stuck.detail)}"
                 messages.append({"role": "tool", "tool_call_id": c["id"], "content": content})
+                # Persisted with the event (after the SSE copy went out) so the next turn replays exactly this text: no image bytes.
+                event["call_id"], event["for_model"] = c["id"], content
                 if c["name"] == "mcp_tool_search":
                     # A search loads schemas: bring their modes in (grants and ask are already resolved
                     # in mcp_modes) and offer them from the next round.
@@ -2348,6 +3003,14 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     tool_schemas = _schemas()
                 if tool_ctx.pop("plan_changed", None):
                     yield "plan", {"conversation_id": conv_id, "steps": (work_plans.get(conv_id) or {}).get("steps") or []}
+            # Warmed reads nobody consumed (Stop, a loop break) are cancelled and reaped now, not at run end.
+            pending = [t for t in warm_tasks if not t.done()]
+            for t in pending:
+                t.cancel()
+            await asyncio.gather(*warm_tasks, return_exceptions=True)
+            warm_tasks.clear()
+            if stop.is_set():  # no final round for a Stop: the existing stop path persists the reply
+                break
             if partial == "loop":
                 async for chunk in _final_round():
                     yield chunk
@@ -2362,21 +3025,36 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         text = "".join(buf).strip()
         # A call still waiting on approval keeps its card: the approval row stays pending and can still be answered.
         kept = tool_events + ([awaiting] if awaiting else [])
-        convos.finish_message(am["id"], text, None if text else "Cancelled", used, kept, tracer.spans, "".join(rbuf).strip() or None)
+        if inflight:
+            # The call was executing when the task was cut: whether it took effect is unknown, and its journal row
+            # stays `started`, so a resume does not repeat it either.
+            kept = kept + [{**inflight, "result_preview": "", "duration_ms": 0, "pending": False, "interrupted": True,
+                            "error": "The app closed while this was running; it may or may not have completed."}]
+        gone = None
+        if run is not None and run.kind == "chat" and not desk_id:
+            gone = "Interrupted: the backend shut down while this reply was running."
+        convos.finish_message(am["id"], text, gone or (None if text else "Cancelled"), used, kept, tracer.spans,
+                              "".join(rbuf).strip() or None, outcome="interrupted")
         convos.touch(conv_id)
+        await _end_jobs()
         raise
     except Exception as e:  # noqa: BLE001
         error = str(e)
+        error_kind = getattr(e, "kind", None)
         for s in tracer.fail_open(error):
             yield "span", {"message_id": am["id"], "span": s}
     finally:
         _active.pop(am["id"], None)
-        if not desk_id:  # a chat's background shell jobs end with its run; a desk's outlive a turn (they wake it)
-            await toolbox.shell.kill_conversation(conv_id)
+        for t in warm_tasks:
+            t.cancel()
 
     text = "".join(buf).strip()
+    if not text and not error and not stop.is_set() and not tool_events and not desk_id:
+        error = "The model returned an empty reply. Try again."
     reasoning = "".join(rbuf).strip() or None
-    convos.finish_message(am["id"], text, error, used, tool_events, tracer.spans, reasoning)
+    outcome = None if error else ("stopped" if stop.is_set() else partial)
+    convos.finish_message(am["id"], text, error, used, tool_events, tracer.spans, reasoning,
+                          outcome=outcome, error_kind=error_kind)
     convos.touch(conv_id)
     otel_export.export_in_background(cfg, conv_id, am["id"], model, project["name"] if project else None, tracer.spans, used, text)
     if tool_ctx["tainted"]:
@@ -2392,7 +3070,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     yield "done", {"id": am["id"], "error": error, "context_used": used, "tool_events": tool_events,
                    "trace": tracer.spans, "stopped": stop.is_set(), "partial": partial, "segment": False,
                    "tainted": tool_ctx["tainted"], "taint_sources": tool_ctx["taint_sources"],
-                   "reasoning": reasoning}
+                   "reasoning": reasoning, "outcome": outcome, "error_kind": error_kind, "notice": notice}
+    await _end_jobs()  # after the done: _run_chat has marked the run replied, so a steer already gets its 409
     if tool_ctx.get("learned"):
         yield "learned", tool_ctx["learned"]
 
@@ -2403,13 +3082,30 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     # asked for, on text the user has not read yet. What it found belongs in its report and the inbox.
     # A tainted reply has read someone else's page or transcript. Mining it into memory would
     # plant that text in later chats. The user can still save a memory by approving the tool.
-    if (not error and text and not proposal_only(run) and not tool_ctx["tainted"]
-            and cfg.get("autoLearn", True) and conv["settings"].get("autoLearn", True)):
+    # A chat deleted mid-reply is not mined: the exchange is the user's to discard (Undo restores it unlearned).
+    gone = convos.get(conv_id, with_messages=False) is None
+    if (not error and text and not gone and not proposal_only(run) and not tool_ctx["tainted"]
+            and cfg.get("autoLearn", True) and conv["settings"].get("autoLearn", True)
+            and conv["settings"].get("useMemory", True)):  # memory off: nothing written for other chats to read
         learner.submit(LearnJob(
             conversation_id=conv_id, message_id=am["id"], project_id=conv["project_id"],
             user_text=user_text, assistant_text=text, model=model, settings=cfg,
             spans=list(tracer.spans),
         ))
+
+    # The model title: after the reply, off the run, from the user's typed text only. It replaces the placeholder this
+    # turn wrote, or (once, at RETITLE_AT user turns) an earlier auto title; a title the user typed is never touched.
+    # No taint or autoLearn gate: nothing but the user's own messages reaches the call.
+    if not error and not gone and not proposal_only(run) and cfg.get("autoTitle", True):
+        user_texts = [m["content"] for m in conv["messages"] if m["role"] == "user"] + [user_text]
+        fresh = convos.get(conv_id, with_messages=False)
+        fs = (fresh or {}).get("settings") or {}
+        if placeholder_title is not None:
+            if fs.get("titleSource") != "user" and fresh and fresh["title"] == placeholder_title:
+                title_jobs.spawn(conv_id, conv["project_id"], placeholder_title, user_texts, model, cfg, len(user_texts))
+        elif (fresh and fs.get("titleSource") == "auto" and len(user_texts) >= titles.RETITLE_AT
+              and int(fs.get("titleTurns") or 0) < titles.RETITLE_AT):
+            title_jobs.spawn(conv_id, conv["project_id"], fresh["title"], user_texts, model, cfg, len(user_texts))
 
     # Writing style, from the user's half of the exchange only (style.py). Banking a sample is free;
     # the LLM re-reads the samples only on the message that crosses the threshold, so most turns add
@@ -2418,7 +3114,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     # that did nothing — and never leaves a span open for the UI to show as still running.
     # Same bound as auto-learn: a message in a chat that has read someone else's page is not a
     # sample of how the user writes. The voice profile is injected into later chats.
-    if (not error and not tool_ctx["tainted"] and cfg.get("learnStyle", True)
+    if (not error and not gone and not tool_ctx["tainted"] and cfg.get("learnStyle", True)
             and conv["settings"].get("autoLearn", True) and looks_like_prose(user_text)):
         sspan = tracer.start("style", "Learn writing style")
         yield "span", {"message_id": am["id"], "span": sspan}
@@ -2439,16 +3135,39 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
 
 
 async def _run_chat(run: Run, body: ChatIn) -> None:
-    async for event, data in _chat_stream(run.conversation_id, body, run.stop, run.steers, run=run):
-        if event == "assistant_message":
-            run.message_id = data.get("id")
-            # A steer opens a fresh segment, so the run is answering again.
-            run.replied = False
-        run.publish(event, data)
-        # Published after the event, so a client that sees `done` and immediately posts finds the run
-        # already closed to steers. The task runs on to auto-learn; it is no longer replying.
-        if event == "done":
-            run.replied = True
+    failure: str | None = None
+    try:
+        async for event, data in _chat_stream(run.conversation_id, body, run.stop, run.steers, run=run):
+            if event == "assistant_message":
+                run.message_id = data.get("id")
+                # A steer opens a fresh segment, so the run is answering again.
+                run.replied = False
+            run.publish(event, data)
+            # Published after the event, so a client that sees `done` and immediately posts finds the run
+            # already closed to steers. The task runs on to auto-learn; it is no longer replying.
+            if event == "done":
+                run.replied = True
+    except BaseException as e:  # noqa: BLE001 - noted for the settle hook below, then re-raised untouched
+        failure = None if isinstance(e, asyncio.CancelledError) else (str(e) or type(e).__name__)
+        raise
+    finally:
+        # A regenerate that ended with nothing (provider error, Stop before the first token, a setup crash, shutdown)
+        # puts the answer it superseded back. Synchronous, so it also runs while the task is being cancelled.
+        if body.content is None and not body.resume_of:
+            _settle_regenerate(run, failure)
+
+
+def _settle_regenerate(run: Run, failure: str | None) -> None:
+    try:
+        restored = convos.restore_if_empty(run.conversation_id)
+    except Exception:  # noqa: BLE001 - settling must never mask the run's own outcome
+        log.warning("could not restore the superseded answer of conversation %s", run.conversation_id, exc_info=True)
+        return
+    if not restored:
+        return
+    if run.message_id:
+        run.publish("removed_message", {"id": run.message_id})
+    run.publish("restored_message", {"message": restored, "reason": failure or run.error})
 
 
 async def _run_job(run: Run, body: ChatIn) -> None:
@@ -2676,14 +3395,31 @@ toolbox.shell.on_note = _shell_wake
 @app.post("/conversations/{id}/chat")
 async def chat(id: str, body: ChatIn) -> dict[str, Any]:
     """Start the reply as a background task. Watch it on GET /conversations/{id}/stream?since=seq."""
-    if not convos.get(id):
+    row = convos.get(id, with_messages=False)
+    if not row:
         raise HTTPException(404, "Conversation not found")
+    # Before anything is persisted or a run exists; a string detail, so the client toasts it as is.
+    if body.content is not None and (too_long := _message_too_long(body.content, settings())):
+        raise HTTPException(413, too_long)
+    # A chat with a live run is never hidden: writing in an archived one brings it back.
+    if row.get("archived_at"):
+        convos.update(id, {"archived": False})
     # `answering`, not `live`: a run still auto-learning has finished its reply, and a new message
     # deserves a run of its own rather than a 409 the caller can only turn into a dropped steer.
     running = bus.answering(id)
     if running:
         raise HTTPException(409, {"message": "That conversation already has a running reply",
-                                 "run_id": running.run_id, "seq": running.seq})
+                                 "run_id": running.run_id, "seq": running.seq,
+                                 "message_id": running.message_id, "message_seq": running.message_seq})
+    if body.replace_from:
+        conv = convos.get(id)
+        if not (body.content or "").strip():
+            raise HTTPException(400, "Empty message")
+        if conv["settings"].get("deskId") or conv["settings"].get("job_id"):
+            raise HTTPException(400, "A desk or job transcript cannot be edited")
+        target = next((m for m in conv["messages"] if m["id"] == body.replace_from), None)
+        if not target or target["role"] != "user":
+            raise HTTPException(404, "No such message to edit")
     run = bus.start(id, lambda r: _run_chat(r, body), input=body.model_dump())
     return {"run_id": run.run_id, "seq": run.seq}
 
@@ -2698,13 +3434,17 @@ async def steer_run(id: str, body: SteerIn) -> dict[str, Any]:
 
     The message is persisted and published here, so a window sees it immediately. Nothing can slip
     in after the round loop ends: `run.replied` is set in the same synchronous step that publishes
-    `done`, with no await between, so a handler that observes `answering` still has a round coming.
+    `done`, with no await between, so a handler that observes `answering` still has a round coming. The
+    generator holds the other end of that: after its last steer check it awaits nothing before `done`
+    (shell teardown runs after it), so a steer is either folded in or gets this 409 and becomes a new run.
     """
     if not convos.get(id):
         raise HTTPException(404, "Conversation not found")
     text = (body.content or "").strip()
     if not text:
         raise HTTPException(400, "Empty message")
+    if too_long := _message_too_long(text, settings()):
+        raise HTTPException(413, too_long)
     # Only a run that is still answering can fold the message into a round; past its `done` the loop
     # is over, so accepting one here would store a message nothing ever replies to.
     run = bus.answering(id)
@@ -2978,14 +3718,37 @@ async def get_run(run_id: str) -> dict[str, Any]:
     mem = bus.get(row["conversation_id"]) if row["conversation_id"] else None
     over = mem.info() if mem is not None and mem.run_id == run_id else {"seq": row["last_seq"], "live": False}
     return {**row, **over, "approvals": run_store.approvals(None, run_id=run_id), "executed_calls": run_store.executed(run_id),
-            "plans": plans.for_run(run_id), "resumable": _resumable(row)[0]}
+            "plans": plans.for_run(run_id), "resumable": (res := _resumable(row))[0], "resume_reason": res[1]}
 
 
 def _resumable(row: dict[str, Any]) -> tuple[bool, str]:
     cid = row.get("conversation_id")
     if not cid:
         return False, "no conversation"
-    return resume.resumable(row, run_store.latest(cid), bool(bus.answering(cid)), bool(run_store.resumed_by(row["run_id"])))
+    return resume.resumable(row, run_store.latest(cid), bool(bus.answering(cid)), bool(run_store.resumed_by(row["run_id"])),
+                            message=_run_message(row))
+
+
+def _run_message(row: dict[str, Any]) -> dict[str, Any] | None:
+    """The reply row a run wrote, for its outcome."""
+    mid = row.get("message_id")
+    if not mid:
+        return None
+    with db.tx() as c:
+        r = c.execute("SELECT outcome, error FROM messages WHERE id=?", (mid,)).fetchone()
+    return dict(r) if r else None
+
+
+@app.get("/conversations/{id}/resumable")
+async def conversation_resumable(id: str) -> dict[str, Any]:
+    """Whether the conversation's latest reply stopped short and can be continued, in one query for the UI."""
+    if not convos.get(id, with_messages=False):
+        raise HTTPException(404, "No such conversation")
+    row = run_store.latest(id)
+    if not row:
+        return {"run_id": None, "resumable": False, "reason": "no run", "message_id": None}
+    ok, reason = _resumable(row)
+    return {"run_id": row["run_id"], "resumable": ok, "reason": reason, "message_id": row.get("message_id")}
 
 
 @app.post("/runs/{run_id}/resume")
@@ -3038,6 +3801,11 @@ def _patch_tool_event(message_id: str | None, call_id: str, patch: dict[str, Any
             c.execute("UPDATE messages SET tool_events=? WHERE id=?", (json.dumps(evs), message_id))
 
 
+def _untrashed(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Pending cards of a trashed chat are hidden, not decided: Undo brings the chat and its cards back."""
+    return [a for a in rows if not a.get("conversation_id") or convos.get(a["conversation_id"], with_messages=False)]
+
+
 @app.get("/approvals")
 async def list_approvals(status: str | None = "pending", run_id: str | None = None, limit: int = 100,
                          desk_id: str | None = None) -> list[dict[str, Any]]:
@@ -3046,6 +3814,8 @@ async def list_approvals(status: str | None = "pending", run_id: str | None = No
     if status not in (None, "", "all", "pending", "approved", "denied"):
         raise HTTPException(400, "status must be pending, approved, denied or all")
     rows = run_store.approvals(None if status in (None, "", "all") else status, run_id, _clamp(limit), desk_id)
+    if status == "pending":
+        rows = _untrashed(rows)
     # A plan card is read back through its plan, not through the approval row: action_plans stays the
     # one place a plan lives, and the row carries only the id that gets you there.
     return [{**a, "live": a["call_id"] in _approvals,
@@ -3175,7 +3945,8 @@ def evaluate_permission(body: PermissionEvalIn) -> dict[str, Any]:
 @app.on_event("startup")
 async def _recover_runs() -> None:
     """Runs left active by the last process died with it: mark them interrupted and salvage their reply from the tape."""
-    for r in run_store.recover(bus.live_ids()):
+    recovered = run_store.recover(bus.live_ids())
+    for r in recovered:
         mid = r.get("message_id")
         if not mid:
             continue
@@ -3184,15 +3955,31 @@ async def _recover_runs() -> None:
                 cur = c.execute("SELECT content, tool_events, context_used FROM messages WHERE id=?", (mid,)).fetchone()
             if cur is None or cur["content"] or cur["tool_events"]:
                 continue  # already finished (the cancel path persisted it): the message is the better record
-            text, tool_events = run_store.transcript(r["run_id"], mid)
+            text, tape = run_store.transcript(r["run_id"], mid)
+            # Finished calls carry a duration; a bare tool_call with no result was running when the app died, so it
+            # may or may not have completed. A call waiting on a card is one of the pending approvals, not that.
+            tool_events = [e for e in tape if "duration_ms" in e]
             done = {e.get("id") for e in tool_events}
+            asked = {a["call_id"] for a in r["pending_approvals"] if a["message_id"] == mid}
+            for e in tape:
+                if "duration_ms" not in e and e.get("id") not in asked:
+                    tool_events.append({"id": e.get("id"), "name": e.get("name"), "arguments": e.get("arguments") or {},
+                                        "result_preview": "", "duration_ms": 0, "pending": False, "interrupted": True,
+                                        "error": "The app closed while this was running; it may or may not have completed."})
             for a in r["pending_approvals"]:
                 if a["message_id"] == mid and a["call_id"] not in done:
                     tool_events.append({"id": a["call_id"], "name": a["tool"], "arguments": a["args"], "result_preview": "",
                                         "duration_ms": 0, "error": None, "pending": True, "needs_approval": True, "forced": a["forced"]})
-            convos.finish_message(mid, text, r["error"], json.loads(cur["context_used"]) if cur["context_used"] else None, tool_events)
+            convos.finish_message(mid, text, r["error"], json.loads(cur["context_used"]) if cur["context_used"] else None, tool_events,
+                                  outcome="interrupted")
         except Exception:  # noqa: BLE001 - recovery must never stop the backend from starting
             log.warning("could not salvage the reply of run %s", r["run_id"], exc_info=True)
+    # A regenerate that died before any text is replaced by the answer it superseded.
+    for cid in {r["conversation_id"] for r in recovered if r.get("kind", "chat") == "chat" and r.get("conversation_id")}:
+        try:
+            convos.restore_if_empty(cid)
+        except Exception:  # noqa: BLE001
+            log.warning("could not restore the superseded answer of conversation %s", cid, exc_info=True)
 
 
 # ---------------- scheduled jobs, proposals, agent inbox ----------------
@@ -3264,7 +4051,7 @@ async def _launch_job(job: dict[str, Any], fire: dict[str, Any]) -> str | None:
 
 
 job_policy = JobPolicy(jobs, run_store, _launch_job, settings=settings)
-scheduler = Scheduler(jobs, _launch_job, policy=job_policy)
+scheduler = Scheduler(jobs, _launch_job, policy=job_policy, wake=PowerWake())
 
 
 class JobIn(BaseModel):
@@ -3281,6 +4068,8 @@ class JobIn(BaseModel):
     max_retries: int = Field(default=1, ge=0, le=5)
     # None = every tool, as before. A list narrows the run to exactly those tools (job_tools).
     allowed_tools: list[str] | None = None
+    # kind='watch': a folder under the home folder; each pass that finds new or touched files in it fires one run.
+    watch_dir: str | None = Field(default=None, max_length=1000)
 
 
 class JobPatch(BaseModel):
@@ -3294,6 +4083,7 @@ class JobPatch(BaseModel):
     project_id: str | None = None
     max_retries: int | None = Field(default=None, ge=0, le=5)
     allowed_tools: list[str] | None = None  # an explicit null resets to "every tool"
+    watch_dir: str | None = Field(default=None, max_length=1000)
 
 
 # How far in the past a one-off may be set, on a write. The scheduler is happy to run a late task — that is the
@@ -3301,7 +4091,8 @@ class JobPatch(BaseModel):
 BACKDATE_GRACE_S = 120.0
 
 
-def _check_schedule(kind: str, expr: str | None, tz: str | None, run_at: float | None, *, fresh_time: bool) -> None:
+def _check_schedule(kind: str, expr: str | None, tz: str | None, run_at: float | None, *, fresh_time: bool,
+                    watch_dir: str | None = None) -> None:
     """Reject a schedule the scheduler could not read. Always checked against the schedule the row would *end up*
     with, so switching kind without supplying the other field is a 400 and not a crash in the arming code.
 
@@ -3312,6 +4103,14 @@ def _check_schedule(kind: str, expr: str | None, tz: str | None, run_at: float |
         raise HTTPException(400, f"'{kind}' is not a schedule kind ('cron' for a repeating job, 'once' for a one-off)")
     if tz and not valid_tz(tz):
         raise HTTPException(400, f"'{tz}' is not a timezone name (e.g. 'Europe/Berlin')")
+    if kind == "watch":
+        if expr and not valid_cron(expr):
+            raise HTTPException(400, f"'{expr}' is not a cron expression I can read (five fields, or leave it empty)")
+        try:
+            check_watch_dir(watch_dir)
+        except Exception as e:  # noqa: BLE001 - LocalPathError or a missing folder: say why
+            raise HTTPException(400, f"A directory job needs a folder under your home folder: {e}") from e
+        return
     if kind == "cron":
         if not valid_cron(expr or ""):
             raise HTTPException(400, f"'{expr}' is not a cron expression I can read (five fields, e.g. '30 7 * * *')"
@@ -3341,11 +4140,12 @@ def list_jobs() -> list[dict[str, Any]]:
 
 @app.post("/jobs")
 def create_job(body: JobIn) -> dict[str, Any]:
-    _check_schedule(body.kind, body.cron, body.timezone, body.run_at, fresh_time=True)
+    _check_schedule(body.kind, body.cron, body.timezone, body.run_at, fresh_time=True, watch_dir=body.watch_dir)
     _check_allowed_tools(body.allowed_tools)
     return jobs.create(body.name, body.cron, body.prompt, kind=body.kind, run_at=body.run_at,
                        timezone=body.timezone, enabled=body.enabled, project_id=wsid(body.project_id),
-                       max_retries=body.max_retries, allowed_tools=body.allowed_tools)
+                       max_retries=body.max_retries, allowed_tools=body.allowed_tools,
+                       watch_dir=body.watch_dir and check_watch_dir(body.watch_dir) if body.kind == "watch" else None)
 
 
 @app.patch("/jobs/{id}")
@@ -3359,7 +4159,7 @@ def update_job(id: str, body: JobPatch) -> dict[str, Any]:
     merged = {**cur, **patch}
     _check_allowed_tools(patch.get("allowed_tools"))
     _check_schedule(merged["kind"], merged["cron"], patch.get("timezone"), merged["run_at"],
-                    fresh_time="run_at" in patch)
+                    fresh_time="run_at" in patch, watch_dir=merged.get("watch_dir"))
     # Switching a spent one-off back on is the one re-arm that cannot work: it has no instant left to wait for,
     # so say that instead of leaving the toggle on with nothing scheduled behind it.
     if patch.get("enabled") and merged["kind"] == "once" and "run_at" not in patch and spent(cur):
@@ -3521,7 +4321,7 @@ def agent_inbox(hours: float = 72.0, limit: int = 20, include_dry: int = 0) -> d
     """
     cutoff = time.time() - max(0.0, float(hours)) * 3600
     pending_approvals = []
-    for a in run_store.approvals("pending", limit=100):
+    for a in _untrashed(run_store.approvals("pending", limit=100)):
         row = run_store.get(a["run_id"]) if a["run_id"] else None
         pending_approvals.append({**a, "live": a["call_id"] in _approvals, "run_kind": (row or {}).get("kind"),
                                   "job": ((row or {}).get("input") or {}).get("job")})
@@ -3580,6 +4380,7 @@ async def _jobs_startup() -> None:
     try:
         jobs.seed()
         jobs.arm(time.time())
+        await job_policy.boot_retry()
     except Exception:  # noqa: BLE001 - a bad job row must not stop the backend from starting
         log.warning("could not prepare scheduled jobs", exc_info=True)
     app.state.jobs_task = asyncio.create_task(scheduler.loop(), name="job-scheduler")
@@ -3600,7 +4401,14 @@ async def _jobs_shutdown() -> None:
 async def usage_report(days: int = 30) -> dict[str, Any]:
     cfg = settings()
     await pricing.refresh(cfg)
-    return {**usage.report(days), "prices": pricing.table(cfg)}
+    return {**usage.report(days), "alerts": usage.alert_state(cfg), "prices": pricing.table(cfg)}
+
+
+@app.get("/conversations/{id}/usage")
+async def conversation_usage(id: str) -> dict[str, Any]:
+    if not convos.get(id, with_messages=False):
+        raise HTTPException(404, "Conversation not found")
+    return usage.conversation(id)
 
 
 class PricesIn(BaseModel):
@@ -3657,7 +4465,9 @@ async def _memory_hits(project_id: str | None, query: str, cfg: dict[str, Any], 
         qvec = await memory_index.query_vec(cfg, query)
         if qvec is None:
             return None
-        return memory_index.search(project_id, query, qvec, limit=40, settings=cfg)
+        hits = memory_index.search(project_id, query, qvec, limit=40, settings=cfg)
+        have = {m["id"] for m in hits}
+        return [*(m for m in memories.pinned(project_id) if m["id"] not in have), *hits]  # pins ride on top of the 40
     except Exception:  # noqa: BLE001
         log.exception("memory retrieval failed; falling back to keyword search")
         return None
@@ -3675,6 +4485,7 @@ async def context_preview(body: ContextPreviewIn) -> dict[str, Any]:
         memory_hits=await _memory_hits(sid(body.project_id), body.query, cfg, conv_settings),
         query=body.query, settings=cfg, conv_settings=conv_settings,
         global_system_prompt=cfg["systemPrompt"], activity=monitor, skills=skills, style=style, meetings=meeting_svc,
+        draft=bool(conv_settings.get("draftMode")),
     )
     return used
 
@@ -3961,9 +4772,56 @@ def index_status() -> dict[str, Any]:
     return retriever.status(settings())
 
 
+def _chunk_span(text: str, rows: list[Any], chunk_id: str) -> dict[str, Any]:
+    """Offsets of one chunk in its source text. Chunks overlap, so each search starts at the previous
+    chunk's start (not the document start) and a chunk whose text is not found verbatim gets -1."""
+    pos = 0
+    for r in rows:
+        i = text.find(r["text"], pos)
+        if r["id"] == chunk_id:
+            return {"text": r["text"], "heading": r["heading"] if "heading" in r.keys() else "", "page": r["page"] if "page" in r.keys() else None,
+                    "start": i, "end": i + len(r["text"]) if i >= 0 else -1}
+        if i >= 0:
+            pos = i + 1
+    raise HTTPException(404)
+
+
+@app.get("/documents/{id}/chunks/{chunk_id}")
+def document_chunk(id: str, chunk_id: str) -> dict[str, Any]:
+    d = documents.get(id)
+    if not d:
+        raise HTTPException(404)
+    with db.tx() as c:
+        rows = c.execute("SELECT * FROM chunks WHERE document_id=? ORDER BY idx", (id,)).fetchall()
+    return _chunk_span(d["text"] or "", rows, chunk_id)
+
+
+@app.get("/docs/{doc_id}/chunks/{chunk_id}")
+def doc_chunk(doc_id: str, chunk_id: str) -> dict[str, Any]:
+    d = docs.get(doc_id)
+    if not d:
+        raise HTTPException(404)
+    with db.tx() as c:
+        rows = c.execute("SELECT * FROM doc_chunks WHERE doc_id=? ORDER BY idx", (doc_id,)).fetchall()
+    return _chunk_span(d["content"] or "", rows, chunk_id)
+
+
 @app.get("/documents/{id}")
 def get_document(id: str) -> dict[str, Any]:
     d = documents.get(id)
+    if not d:
+        raise HTTPException(404)
+    return d
+
+
+class DocumentPatch(BaseModel):
+    pinned: bool
+
+
+@app.patch("/documents/{id}")
+def patch_document(id: str, body: DocumentPatch) -> dict[str, Any]:
+    """Pin a document so every chat in its scope carries it, whatever retrieval finds."""
+    d = documents.set_pinned(id, body.pinned)
     if not d:
         raise HTTPException(404)
     return d
@@ -3999,7 +4857,7 @@ def _store_upload(project_id: str | None, name: str, mime: str, data: bytes) -> 
     digest = hashlib.sha256(data).hexdigest()
     dup = documents.find_by_hash(pid, digest)
     if dup:
-        return {**dup, "duplicate": True}
+        return {**dup, "duplicate": True, "extracted": has_readable_text(dup.get("text") or "")}
     text = for_index(extract_text(safe, data, mime))
     try:
         blocks = extract_structured(safe, data, mime)
@@ -4008,21 +4866,30 @@ def _store_upload(project_id: str | None, name: str, mime: str, data: bytes) -> 
     dest = db.data_dir / "uploads" / f"{new_id()}-{safe}"
     dest.write_bytes(data)
     try:
-        return documents.create(pid, safe, mime, len(data), str(dest), text, blocks=blocks, content_hash=digest)
+        row = documents.create(pid, safe, mime, len(data), str(dest), text, blocks=blocks, content_hash=digest)
     except BaseException:
         dest.unlink(missing_ok=True)
         raise
+    return {**row, "extracted": has_readable_text(text)}
+
+
+UNREADABLE_UPLOAD = ("No readable text came out of this file. It is stored and can be referred to by name, "
+                     "but the assistant cannot see what is in it.")
 
 
 @app.post("/documents")
 async def upload_document(file: UploadFile = File(...), project_id: str | None = Form(None)) -> dict[str, Any]:
     data = await _read_upload(file)
     try:
-        return await asyncio.to_thread(_store_upload, project_id, file.filename or "untitled", file.content_type or "", data)
+        row = await asyncio.to_thread(_store_upload, project_id, file.filename or "untitled", file.content_type or "", data)
     except HTTPException:
         raise
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, str(e)) from e
+    # Stored either way; the client must not call a file the model cannot read an upload that worked.
+    if row.get("extracted"):
+        return {**row, "readable": True}
+    return {**row, "readable": False, "reason": UNREADABLE_UPLOAD}
 
 
 class ReindexIn(BaseModel):
@@ -4044,6 +4911,7 @@ async def embed_backfill() -> dict[str, Any]:
     current model. Idempotent."""
     docs.backfill_chunks()
     embedder.reset()  # the user asked for it now, so a back-off from an earlier failure does not apply
+    await retriever.contextualize_pending(settings())  # no-op unless contextualChunks; never raises
     return await retriever.embed_pending(settings())
 
 
@@ -4064,6 +4932,7 @@ def search_documents(id: str, q: str) -> list[dict[str, Any]]:  # convenience fo
 @app.on_event("shutdown")
 async def _shutdown() -> None:
     await bus.shutdown()  # before the rmtree: a live run's sandboxed run_python writes in there
+    await title_jobs.stop()
     await learner.stop()  # after the runs, so nothing is still queueing work at it
     await meeting_bus.shutdown()
     shutil.rmtree(db.data_dir / "tmp", ignore_errors=True)
@@ -4289,6 +5158,22 @@ def google_gmail_draft(body: GmailComposeIn) -> Any:
     return _gcall(google.gmail_draft, body.to, body.subject, body.body, body.reply_to_message_id)
 
 
+class SuggestTimesIn(BaseModel):
+    duration_minutes: int = 30
+    window_start: str
+    window_end: str
+    working_hours: str | None = None
+
+
+@app.post("/integrations/google/gmail/suggest-times")
+async def google_gmail_suggest_times(body: SuggestTimesIn) -> Any:
+    """Compose box: free slots as draft text. Creates no draft, no event, sends nothing."""
+    found = await toolbox.specs["calendar_find_time"].fn({}, body.duration_minutes, body.window_start, body.window_end, None, body.working_hours)
+    if not isinstance(found, dict) or not found.get("slots"):
+        raise HTTPException(422, (found or {}).get("note") or (found or {}).get("error") or "No free slot found")
+    return {"body": times_body(found), "slots": found["slots"]}
+
+
 @app.post("/integrations/google/gmail/send")
 def google_gmail_send(body: GmailComposeIn) -> Any:
     # Queued, not sent: the hold is what makes Undo possible (see outbox.py). The response says so.
@@ -4326,6 +5211,19 @@ async def assist_mail_review(body: MailReviewIn) -> dict[str, Any]:
         raise HTTPException(502, f"Review failed: {e}") from e
 
 
+class DictationCleanIn(BaseModel):
+    text: str
+
+
+@app.post("/docs/dictation/clean")
+async def docs_dictation_clean(body: DictationCleanIn) -> dict[str, str]:
+    """Optional model pass over one committed dictation clip. Off by default: no model call is made
+    unless meetings.dictationCleanup is on. Always returns text, the input itself when anything fails."""
+    if not meeting_svc.config().get("dictationCleanup"):
+        return {"text": body.text}
+    return {"text": await assist.clean_dictation(settings(), body.text)}
+
+
 @app.get("/integrations/google/tasks")
 def google_tasks(show_completed: bool = False, refresh: bool = False) -> Any:
     return _gcall(google.tasks_list, "@default", show_completed, refresh=refresh)
@@ -4358,6 +5256,12 @@ def _google_has(status: dict[str, Any], scope_tail: str) -> bool:
     return any(s.endswith(scope_tail) for s in status.get("scopes") or [])
 
 
+def _home_calendar() -> list[dict[str, Any]]:
+    """Today's calendar card: the next 48 hours on every calendar checked on in Google."""
+    ids = google.enabled_calendar_ids()
+    return google.calendar_events(2, calendar_ids=ids or None)
+
+
 # ---------------- dashboard ----------------
 @app.get("/dashboard")
 async def dashboard() -> dict[str, Any]:
@@ -4379,7 +5283,7 @@ async def dashboard() -> dict[str, Any]:
 
         # Not `jobs`: that name is the scheduled-job repo at module scope.
         fetches = [
-            fetch("calendar", google.calendar_events, 2),
+            fetch("calendar", _home_calendar),
             fetch("gmail", google.gmail_search, "is:unread in:inbox newer_than:14d", 10),
             fetch("tasks", google.tasks_list, "@default", False),
         ]
@@ -4388,6 +5292,10 @@ async def dashboard() -> dict[str, Any]:
         if _google_has(st, "drive.readonly"):
             fetches.append(fetch("drive", google.drive_files, "", 10))
         await asyncio.gather(*fetches)
+        # A synced task is already a native todo: show it once.
+        if out["tasks"] and tasks_sync.config()["enabled"]:
+            linked = {t["external_id"] for t in todos.list("__all__", True) if t.get("external_id")}
+            out["tasks"] = [t for t in out["tasks"] if t.get("id") not in linked]
     return out
 
 
@@ -4524,6 +5432,45 @@ def move_card(cid: str, body: MoveIn) -> dict[str, Any]:
     return c
 
 
+class ClaimIn(BaseModel):
+    holder: str
+    ttl_s: float = 600
+
+
+class ReleaseIn(BaseModel):
+    token: str
+    reason: str = "finished"
+
+
+@app.get("/boards/{id}/cards/{card}/events")
+def card_events(id: str, card: str) -> list[dict[str, Any]]:
+    return boards.events(card)
+
+
+@app.post("/boards/cards/{cid}/claim")
+def claim_card(cid: str, body: ClaimIn) -> dict[str, Any]:
+    token = boards.claim(cid, body.holder, body.ttl_s)
+    if token is None:
+        raise HTTPException(409, "That card is already claimed")
+    return {"token": token}
+
+
+@app.post("/boards/cards/{cid}/release")
+def release_card(cid: str, body: ReleaseIn) -> dict[str, bool]:
+    try:
+        return {"ok": boards.release(cid, body.token, body.reason)}
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.post("/boards/cards/{cid}/complete")
+def complete_card(cid: str) -> dict[str, bool]:
+    """The user accepting a card as done: the one check the HTTP surface may write."""
+    if not boards.complete(cid, "user_accepted", "user", by="user"):
+        raise HTTPException(404)
+    return {"ok": True}
+
+
 @app.delete("/boards/cards/{cid}")
 def delete_card(cid: str) -> dict[str, bool]:
     boards.delete_card(cid)
@@ -4563,6 +5510,7 @@ class WidgetIn(BaseModel):
     width: int = 1
     height: int = 280
     refresh_minutes: int = 60
+    spec: dict[str, Any] = {}    # chart/stat/table: a ready spec (e.g. inline_rows from a pinned chat chart) skips generation
 
 
 class WidgetPatch(BaseModel):
@@ -4703,8 +5651,14 @@ async def _run_widget(w: dict[str, Any], request: Request, regenerate_code: bool
     if w["kind"] == "html":
         if regenerate_code or not w["code"]:
             samples = await _samples(w["source_ids"])
-            code = await generate_widget_code(cfg, cfg["defaultModel"], w["prompt"] or w["title"], srcs, str(request.base_url).rstrip("/"), w["width"], w["height"], samples)
-            w = dashboards.update_widget(w["id"], {"code": code, "refreshed_at": time.time()}) or w
+            base = str(request.base_url).rstrip("/")
+            secrets = [(dashboards.source(s_["id"], with_secret=True) or {}).get("secret", "") for s_ in srcs]
+            try:
+                code = await generate_widget_code(cfg, cfg["defaultModel"], w["prompt"] or w["title"], srcs, base, w["width"], w["height"], samples, secrets)
+            except WidgetCodeRejected as e:
+                msg = f"Generated HTML rejected: {e}"
+                return dashboards.update_widget(w["id"], {"code": "", "output": msg, "data_error": msg, "refreshed_at": time.time()}) or w
+            w = dashboards.update_widget(w["id"], {"code": code, "data_error": "", "refreshed_at": time.time()}) or w
     elif w["kind"] == "summary":
         data = await _samples(w["source_ids"])
         text = await generate_summary(cfg, model, w["prompt"], data)
@@ -4724,7 +5678,7 @@ async def create_widget(id: str, body: WidgetIn, request: Request) -> dict[str, 
     if not dashboards.get(id):
         raise HTTPException(404)
     title = body.title.strip() or (body.prompt.strip()[:40] or "Widget")
-    w = dashboards.create_widget(id, title, body.kind, body.prompt, body.source_ids, body.code, body.output, body.width, body.height, body.refresh_minutes)
+    w = dashboards.create_widget(id, title, body.kind, body.prompt, body.source_ids, body.code, body.output, body.width, body.height, body.refresh_minutes, body.spec)
     if body.kind in ("html", "summary") + widget_spec.KINDS:
         try:
             w = await _run_widget(w, request, regenerate_code=(body.kind == "html" and not body.code))
@@ -4840,10 +5794,13 @@ async def recap(force: bool = False) -> dict[str, Any]:
 
 # ---------------- canvas mode: spaces, windows, notes ----------------
 canvases = Canvases(db)
+toolbox.canvases = canvases
+from . import widget_tools  # noqa: E402
+widget_tools.register(toolbox, dashboards, canvases, _widget_fetch)
 app.include_router(artifact_router(artifacts, settings, on_delete=lambda aid: canvases.delete_windows_for("artifact", aid),
                                    sign=_artifact_render_path, verify=_artifact_render_ok))
 notes = Notes(db)
-presets = CanvasPresets(db, canvases)
+presets = CanvasPresets(db, canvases, notes, dashboards)
 # 'popped' rows are NOT reset here: import runs before the main process can restore them (it clears the ones it declines).
 
 
@@ -5095,12 +6052,16 @@ class DocSave(BaseModel):
     content: str | None = None
     title: str | None = None
     summary: str = ""
+    # The updated_at the editor last loaded. When the stored doc is newer the save is refused (409)
+    # instead of overwriting another window's edit; omitted keeps the unconditional write.
+    base_updated_at: float | None = None
 
 
 class DocMetaPatch(BaseModel):
     title: str | None = None
     folder: str | None = None
     starred: bool | None = None
+    pinned: bool | None = None
     project_id: str | None = None
     clear_project: bool = False
     # Where in the Files tree this doc now lives: '' is the personal tree, otherwise a project id.
@@ -5113,6 +6074,12 @@ class DocMetaPatch(BaseModel):
 def list_docs(project_id: str | None = "all", q: str = "") -> list[dict[str, Any]]:
     scope = "__all__" if project_id in (None, "all") else sid(project_id)
     return docs.list(scope, q)
+
+
+@app.get("/docs/search")
+def search_docs(q: str = "", project_id: str | None = "all", limit: int = 20) -> list[dict[str, Any]]:
+    scope = "__all__" if project_id in (None, "all") else sid(project_id)
+    return docs.search(q, scope, max(1, min(limit, 50)))
 
 
 @app.get("/docs/pending")
@@ -5184,27 +6151,39 @@ def open_daily_doc(body: DailyIn) -> dict[str, Any]:
     return {"doc": doc, "created": created}
 
 
+class DailyAppendIn(BaseModel):
+    text: str
+    date: str | None = None
+
+
+@app.post("/docs/daily/append")
+def append_daily_doc(body: DailyAppendIn) -> dict[str, Any]:
+    try:
+        return {"doc": docs.append_daily(body.text, body.date)}
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
 class DocRecordingIn(BaseModel):
     mode: str = "record"       # 'record' captures the room and proposes a summary; 'dictate' types what you say
     template: str = "general"
     title: str | None = None
+    keep_audio: bool | None = None   # keep this recording's audio for playback; None follows the global setting
 
 
-@app.post("/docs/{doc_id}/recordings")
-async def start_doc_recording(doc_id: str, body: DocRecordingIn) -> dict[str, Any]:
-    """Create a recording linked to this doc and start it, through the same consent + preflight gate
-    as any meeting. If the start is refused the row made for it is deleted, so nothing is left behind."""
-    d = docs.get(doc_id)
-    if not d:
-        raise HTTPException(404)
-    if body.mode not in ("record", "dictate"):
+async def _start_doc_recording(d: dict[str, Any], mode: str, template: str, title: str | None = None,
+                               meeting_id: str | None = None, **meeting_kw: Any) -> dict[str, Any]:
+    """Create (or adopt `meeting_id`) a recording linked to doc `d` and start it, through the same
+    consent + preflight gate as any meeting. A refused start deletes the row made for it; raises
+    HTTPException, and the caller decides what else to clean up."""
+    if mode not in ("record", "dictate"):
         raise HTTPException(400, "mode must be 'record' or 'dictate'")
     if not activity.IS_MAC:
         row = next((r for r in meeting_svc.capabilities() if r["id"] == "platform"), {})
         raise HTTPException(400, row.get("fix") or "Recording is macOS-only.")
     m = meeting_store.create(
-        title=(body.title or "").strip() or d["title"], project_id=d["project_id"], template=body.template,
-        status="scheduled", doc_id=doc_id, doc_mode=body.mode)
+        title=(title or "").strip() or d["title"], project_id=d["project_id"], template=template,
+        status="scheduled", doc_id=d["id"], doc_mode=mode, **meeting_kw)
     try:
         started = await asyncio.to_thread(meeting_svc.start, m["id"])
     except BaseException as e:
@@ -5222,6 +6201,56 @@ async def start_doc_recording(doc_id: str, body: DocRecordingIn) -> dict[str, An
     return started
 
 
+@app.post("/docs/{doc_id}/recordings")
+async def start_doc_recording(doc_id: str, body: DocRecordingIn) -> dict[str, Any]:
+    d = docs.get(doc_id)
+    if not d:
+        raise HTTPException(404)
+    return await _start_doc_recording(d, body.mode, body.template, body.title, keep_audio=bool(body.keep_audio))
+
+
+class DocFromEventIn(BaseModel):
+    event_id: str
+    title: str = ""
+    start: float | None = None
+    attendees: list[Any] = []
+    project_id: str | None = None
+    mode: str = "record"
+    template: str = "general"
+
+
+# Declared above /docs/{id}, like /docs/daily.
+@app.post("/docs/from-event")
+async def doc_from_event(body: DocFromEventIn) -> dict[str, Any]:
+    """Calendar 'Take notes': one doc titled from the event, with the attendees listed, and a recording
+    linked to it. Repeating the call for the same event hands back the same doc. If the start is refused
+    (consent, preflight, busy) the doc is deleted too, so a blocked click leaves nothing behind."""
+    eid = body.event_id.strip()
+    if not eid:
+        raise HTTPException(400, "event_id is required")
+    prior = meeting_store.by_event(eid)
+    if prior and prior.get("doc_id") and (d := docs.get(prior["doc_id"])):
+        return {"doc": d, "started": prior, "existing": True}
+    people = [p for p in (_attendee_label(a) for a in body.attendees) if p]
+    title = body.title.strip() or "Meeting notes"
+    head = f"# {title}\n\n" + (f"Attendees: {', '.join(people)}\n\n" if people else "")
+    d = docs.create(title, head, wsid(body.project_id))
+    try:
+        started = await _start_doc_recording(
+            d, body.mode, body.template, title, calendar_event_id=None if prior else eid, attendees=body.attendees,
+            scheduled_start=body.start)
+    except BaseException:
+        docs.delete(d["id"])
+        raise
+    return {"doc": docs.get(d["id"]), "started": started, "existing": False}
+
+
+def _attendee_label(a: Any) -> str:
+    if isinstance(a, dict):
+        return str(a.get("name") or a.get("displayName") or a.get("email") or "").strip()
+    return str(a or "").strip()
+
+
 @app.get("/docs/{doc_id}/recordings")
 def doc_recordings(doc_id: str) -> list[dict[str, Any]]:
     if not docs.get(doc_id):
@@ -5237,6 +6266,39 @@ def doc_backlinks(doc_id: str) -> list[dict[str, Any]]:
     return out
 
 
+class LinkTitleIn(BaseModel):
+    url: str
+
+
+@app.post("/docs/link-title")
+async def doc_link_title(body: LinkTitleIn) -> dict[str, Any]:
+    """The page title behind a pasted URL, through the same address guard as fetch_url. {title: null} when unreadable."""
+    return {"title": await page_title(body.url, settings())}
+
+
+# Both declared above /docs/{id} so "assets" is not read as a doc id.
+@app.get("/docs/assets/{doc_id}/{name}")
+def get_doc_asset(doc_id: str, name: str) -> FileResponse:
+    try:
+        p = asset_path(db.data_dir / "doc_assets", doc_id, name)
+    except AssetError as e:
+        raise HTTPException(e.status, str(e)) from e
+    ext = p.suffix.lower()
+    mime = next((m for m, x in ASSET_MIMES.items() if x == ext), "application/octet-stream")
+    return FileResponse(p, media_type=mime, headers={"X-Content-Type-Options": "nosniff"})
+
+
+@app.post("/docs/{id}/assets")
+async def upload_doc_asset(id: str, file: UploadFile = File(...)) -> dict[str, Any]:
+    if not docs.get(id):
+        raise HTTPException(404)
+    data = await file.read(8 * 1024 * 1024 + 1)  # one byte past the cap is enough to refuse it
+    try:
+        return {"url": save_asset(db.data_dir / "doc_assets", id, file.filename or "image", data, file.content_type or "")}
+    except AssetError as e:
+        raise HTTPException(e.status, str(e)) from e
+
+
 @app.get("/docs/{id}")
 def get_doc(id: str) -> dict[str, Any]:
     d = docs.get(id)
@@ -5247,6 +6309,10 @@ def get_doc(id: str) -> dict[str, Any]:
 
 @app.put("/docs/{id}")
 def save_doc(id: str, body: DocSave) -> dict[str, Any]:
+    if body.base_updated_at is not None:
+        cur = docs.get(id)
+        if cur and cur["updated_at"] > body.base_updated_at:
+            raise HTTPException(409, "This doc changed elsewhere since you opened it.")
     d = docs.save(id, body.content, body.title, body.summary)
     if not d:
         raise HTTPException(404)
@@ -5340,6 +6406,7 @@ class ActivityConfigIn(BaseModel):
     redact: bool | None = None
     excludeApps: list[str] | None = None
     excludeTitlePatterns: list[str] | None = None
+    excludeRules: list[dict[str, str]] | None = None
     redactAllow: list[str] | None = None
     redactDeny: list[str] | None = None
     redactThreshold: float | None = None
@@ -5645,6 +6712,15 @@ def _recording_changed(event: dict[str, Any]) -> None:
 meeting_svc.publish = _recording_changed
 
 
+def _preview_changed(event: dict[str, Any]) -> None:
+    """Volatile/final dictation text, from the audio thread: same hand-off to the loop as above."""
+    if _loop is not None and not _loop.is_closed():
+        _loop.call_soon_threadsafe(events.publish, "preview", event)
+
+
+meeting_svc.preview_publish = _preview_changed
+
+
 class MeetingIn(BaseModel):
     """A new meeting. `status` is `scheduled` rather than the repo's `notes_only` default because
     this row was made in order to be recorded; the one the 45s tick adopts says so for itself."""
@@ -5715,10 +6791,16 @@ class MeetingConfigIn(BaseModel):
     sttModel: str | None = None
     whisperModelPath: str | None = None
     template: str | None = None
+    customTemplates: list[dict[str, Any]] | None = None
+    recipes: list[dict[str, Any]] | None = None
+    summaryLanguage: str | None = None
     enhanceOnStop: bool | None = None
     enhanceModel: str | None = None
     maxTranscriptChars: int | None = None
+    minSummaryWords: int | None = None
+    vocabularyPrompt: bool | None = None
     keepAudio: bool | None = None
+    silencePauseMinutes: int | None = None
     maxAudioBytes: int | None = None
     redactSecrets: bool | None = None
     injectContext: bool | None = None
@@ -5726,6 +6808,7 @@ class MeetingConfigIn(BaseModel):
     calendarIds: list[str] | None = None
     minAttendees: int | None = None
     vadGate: bool | None = None
+    livePreview: bool | None = None
     vadMinSpeechRatio: float | None = None
     hallucinationFilter: bool | None = None
     whisperVadModelPath: str | None = None
@@ -5736,6 +6819,8 @@ class MeetingConfigIn(BaseModel):
     diarizeEmbeddingModel: str | None = None
     diarizeThreshold: float | None = None
     diarizeSpeakers: int | None = None
+    dictationCleanup: bool | None = None
+    terms: list[str] | None = None
 
 
 class MeetingSpeakersIn(BaseModel):
@@ -5774,7 +6859,10 @@ async def meeting_preflight(force: bool = False) -> dict[str, Any]:
 def meeting_config(body: MeetingConfigIn) -> dict[str, Any]:
     """Deep-merged, and it never touches a live recording: picking a different microphone halfway
     through a call applies to the next segment instead of tearing the capture down."""
-    meeting_svc.set_config(body.model_dump(exclude_none=True))
+    try:
+        meeting_svc.set_config(body.model_dump(exclude_none=True))
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
     return meeting_svc.status()
 
 
@@ -5817,10 +6905,10 @@ async def meeting_suggest() -> list[dict[str, Any]]:
 
 
 @app.get("/meetings/search")
-def search_meetings(q: str, project_id: str | None = "all", limit: int = 10) -> list[dict[str, Any]]:
+async def search_meetings(q: str, project_id: str | None = "all", limit: int = 10) -> list[dict[str, Any]]:
     """FTS over titles, notes, enhanced notes and transcripts. Each hit's `field` says which one."""
     scope = "__all__" if project_id in (None, "all") else sid(project_id)
-    return meeting_store.search(q, scope, _clamp(limit))
+    return await meeting_index.search(settings(), q, scope, _clamp(limit))
 
 
 @app.get("/meetings/pending")
@@ -5992,7 +7080,7 @@ async def diarize_meeting(id: str) -> dict[str, Any]:
 
 
 @app.put("/meetings/{id}/speakers")
-def rename_meeting_speakers(id: str, body: MeetingSpeakersIn) -> dict[str, Any]:
+async def rename_meeting_speakers(id: str, body: MeetingSpeakersIn) -> dict[str, Any]:
     try:
         m = meeting_svc.set_speakers(id, body.names)
     except ValueError as e:
@@ -6000,6 +7088,20 @@ def rename_meeting_speakers(id: str, body: MeetingSpeakersIn) -> dict[str, Any]:
     if not m:
         raise HTTPException(404)
     return m
+
+
+class NoteMarksIn(BaseModel):
+    """Lines typed during a recording: [{line, t}] with t the recording offset in seconds."""
+
+    marks: list[dict[str, Any]] = Field(default_factory=list)
+
+
+@app.put("/meetings/{id}/note-marks")
+def put_note_marks(id: str, body: NoteMarksIn) -> dict[str, Any]:
+    out = meeting_svc.meetings.set_note_marks(id, body.marks[-500:])
+    if out is None:
+        raise HTTPException(404)
+    return {"marks": out}
 
 
 @app.post("/meetings/{id}/pause")
@@ -6139,6 +7241,17 @@ async def retranscribe_meeting(id: str, limit: int = 20) -> dict[str, Any]:
     return {"settled": settled, "meeting": meeting_store.get(id, include_hidden=False)}
 
 
+@app.get("/meetings/{id}/segments/{seg_id}/audio")
+def meeting_segment_audio(id: str, seg_id: str) -> FileResponse:
+    """One kept segment's wav, for click-to-play. 404 unless the recording keeps audio and the file is inside its audio dir."""
+    if meeting_store.is_hidden(id):
+        raise HTTPException(404)
+    p = meeting_store.kept_segment_wav(id, seg_id)
+    if not p:
+        raise HTTPException(404, "Audio was not kept")
+    return FileResponse(p, media_type="audio/wav")
+
+
 @app.delete("/meetings/{id}/audio")
 def delete_meeting_audio(id: str) -> dict[str, Any]:
     """The wavs go; the segment rows stay, so the UI can still say why retranscribe is over."""
@@ -6203,6 +7316,22 @@ def create_canvas_preset(body: PresetIn) -> dict[str, Any]:
     if not p:
         raise HTTPException(404, "Unknown canvas")
     return p
+
+
+@app.get("/canvas-presets/{pid}/export")
+def export_canvas_preset(pid: str) -> dict[str, Any]:
+    p = presets.export(pid)
+    if not p:
+        raise HTTPException(404, "No such preset")
+    return p
+
+
+@app.post("/canvas-presets/import")
+def import_canvas_preset(body: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return presets.import_file(body.get("file") or {}, bool(body.get("instantiate", True)))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @app.put("/canvas-presets/{pid}")
@@ -6395,6 +7524,7 @@ def _lint_skill(name: str, description: str, procedure: str, skill_id: str | Non
 
 class SkillImportIn(BaseModel):
     text: str
+    references: dict[str, str] = {}
     project_id: str | None = None
 
 
@@ -6402,7 +7532,8 @@ class SkillImportIn(BaseModel):
 def import_skill_md(body: SkillImportIn) -> dict[str, Any]:
     """Paste a SKILL.md. It becomes a candidate, never an approved skill: approval stays the PATCH above."""
     try:
-        return skillmd.import_text(skills, _lint_skill, body.text, project_id=None if sid(body.project_id) == ALL else sid(body.project_id))
+        return skillmd.import_text(skills, _lint_skill, body.text, project_id=None if sid(body.project_id) == ALL else sid(body.project_id),
+                                references=body.references)
     except skillmd.ImportError_ as e:
         raise HTTPException(422, "; ".join(e.errors))
 

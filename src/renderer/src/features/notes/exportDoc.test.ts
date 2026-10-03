@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { exportFilename } from './exportDoc'
-import { linkFromPaste } from './smartPaste'
+import { linkFromPaste, pickImage, withTitle } from './smartPaste'
 import { readingTime, wordCount } from './stats'
 
 test('filenames drop separators and reserved characters', () => {
@@ -23,7 +23,7 @@ test('a url pasted over a selection becomes a link', () => {
 })
 
 test('smart paste leaves everything else alone', () => {
-  assert.equal(linkFromPaste('', 'https://example.com'), null)
+  assert.equal(linkFromPaste('', 'not a url'), null)
   assert.equal(linkFromPaste('two\nlines', 'https://example.com'), null)
   assert.equal(linkFromPaste('word', 'not a url'), null)
   assert.equal(linkFromPaste('word', 'https://a.com and more'), null)
@@ -39,4 +39,20 @@ test('word count and reading time', () => {
   assert.equal(readingTime(0), '')
   assert.equal(readingTime(40), '< 1 min read')
   assert.equal(readingTime(460), '2 min read')
+})
+
+test('a bare url becomes a link labelled by itself, and the title replaces the label only while it is untouched', () => {
+  assert.equal(linkFromPaste('', 'https://x.test'), '[https://x.test](https://x.test)')
+  const text = 'a [https://x.test](https://x.test) b'
+  assert.deepEqual(withTitle(text, 2, 'https://x.test', 'Hello\n[World]'), { start: 3, end: 17, text: 'Hello  World' })
+  assert.equal(withTitle('a [edited](https://x.test) b', 2, 'https://x.test', 'T'), null)
+  assert.equal(withTitle(text, 2, 'https://x.test', '  '), null)
+})
+
+test('image paste allows four types under 8 MB and says why otherwise', () => {
+  assert.equal(pickImage([{ type: 'text/plain', size: 1 }]), null)
+  assert.deepEqual(pickImage([{ type: 'text/plain', size: 1 }, { type: 'image/png', size: 10 }]), { ok: true, index: 1 })
+  assert.equal(pickImage([{ type: 'image/svg+xml', size: 10 }])?.ok, false)
+  assert.equal(pickImage([{ type: 'image/webp', size: 8 * 1024 * 1024 + 1 }])?.ok, false)
+  assert.equal(pickImage([{ type: 'image/gif', size: 8 * 1024 * 1024 }])?.ok, true)
 })

@@ -1,4 +1,5 @@
 import { session, shell } from 'electron'
+import { mainFrameNavigationAllowed } from './appUrl'
 import { backendToken, backendUrl } from './backend'
 import { frameNavigationAllowed, shouldAttachWidgetToken, webviewNavigationBlocked, webviewRequestBlocked } from './navPolicy'
 import { pageBridgeUrl } from './pagefetch'
@@ -56,17 +57,12 @@ export function guardWebWidgetSession(): void {
  * or paints no background leaves the transparent vibrancy window looking like an empty grey rectangle.
  * It would also hand the preload (window.os.backendToken()) to a page the model supplied.
  * Top-level navigation is not covered by CSP, so it is blocked here and handed to the system browser.
+ * Only the renderer's own URL passes (appUrl.ts): a file dropped beside the composer used to count
+ * as "local" and replace the app with the file. openExternal ignores it, so such a drop does nothing.
  */
 export function guardNavigation(contents: Electron.WebContents): void {
-  const local = (url: string): boolean => {
-    if (url === 'about:blank' || url.startsWith('file://')) return true
-    const dev = process.env.ELECTRON_RENDERER_URL
-    if (!dev) return false
-    if (url === dev) return true
-    return url.startsWith(dev.endsWith('/') ? dev : `${dev}/`)
-  }
   contents.on('will-navigate', (e, url) => {
-    if (local(url)) return
+    if (mainFrameNavigationAllowed(url)) return
     e.preventDefault()
     openExternal(url)
   })

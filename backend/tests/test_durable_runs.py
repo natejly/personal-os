@@ -287,6 +287,14 @@ def test_a_duplicate_write_in_one_round_runs_once_end_to_end() -> None:
     assert len(journal) == 1 and journal[0]["tool"] == "todo_add" and journal[0]["status"] == "done" and journal[0]["step"] == 1
 
 
+def test_chat_notify_is_a_known_setting_that_round_trips() -> None:
+    assert llm.DEFAULT_SETTINGS["chatNotify"] is True
+    assert j("GET", "/settings")["chatNotify"] is True
+    assert j("PUT", "/settings", {"chatNotify": False})["chatNotify"] is False
+    assert j("GET", "/settings")["chatNotify"] is False
+    assert j("PUT", "/settings", {"chatNotify": True})["chatNotify"] is True
+
+
 def test_read_only_tools_skip_the_journal() -> None:
     ROUNDS.append({"tool_calls": [call("current_time", {})]})
     _cid, rid = start({"tools": {"current_time": "on"}})

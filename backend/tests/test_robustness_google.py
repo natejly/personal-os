@@ -6,6 +6,7 @@ from __future__ import annotations
 import base64
 import datetime as dt
 import sys
+import time
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -41,14 +42,15 @@ class _Tasks:
         self.n = 0
         self.refuse_title: str | None = None
 
-    def tasks_all(self, tasklist: str = "@default") -> list[dict[str, Any]]:
-        return [dict(t) for t in self.lists.setdefault(tasklist, {}).values()]
+    def tasks_all(self, tasklist: str = "@default", updated_min: str | None = None) -> list[dict[str, Any]]:
+        rows = self.lists.setdefault(tasklist, {}).values()
+        return [dict(t) for t in rows if not updated_min or t["updated"] >= updated_min]
 
     def tasks_insert(self, body: dict[str, Any], tasklist: str = "@default") -> dict[str, Any]:
         if body.get("title") == self.refuse_title:
             raise RuntimeError("400 Bad Request")
         self.n += 1
-        row = {"id": f"t{self.n}", "updated": f"2026-10-02T00:00:{self.n:02d}Z", **body}
+        row = {"id": f"t{self.n}", "updated": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), **body}
         self.lists.setdefault(tasklist, {})[row["id"]] = row
         return dict(row)
 
@@ -110,12 +112,13 @@ def test_switching_account_does_not_delete_local_todos() -> None:
     sync = TasksSync(todos, g, settings.get, settings.set)  # type: ignore[arg-type]
     todos.create("Keep me")
     sync.sync_once()
+    sync.sync_once()  # second pass is incremental: the old account's id map is now cached
 
     g.lists.clear()  # another account: none of the old task ids exist there
     settings.data["googleToken"] = {"email": "other@example.com"}
     counts = sync.sync_once()
 
-    assert counts["deleted_local"] == 0
+    assert counts["deleted_local"] == 0 and counts["created_local"] == 0
     assert [t["title"] for t in todos.list()] == ["Keep me"]
 
 

@@ -825,6 +825,18 @@ def test_stop_says_so_when_the_worker_does_not_finish_in_time() -> None:
     assert not session.worker.is_alive()
 
 
+def test_vocab_prefixes_every_prompt() -> None:
+    out = _tmp()
+    with transcribes_as({"text": "hello"}, {"text": "and then"}) as stub, _Worker(out, vocab="Pricing review, Dana") as w:
+        w.feed(0, _wav(out / "mic-00000.wav"))
+        w.wait(1)
+        w.feed(1, _wav(out / "mic-00001.wav"))
+        w.wait(2)
+    assert stub.calls[0]["prompt"] == "Pricing review, Dana"
+    assert stub.calls[1]["prompt"] == "Pricing review, Dana hello"
+    assert len(stub.calls[1]["prompt"]) <= meeting_recorder.stt.MAX_PROMPT_CHARS
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

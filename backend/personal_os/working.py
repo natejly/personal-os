@@ -19,9 +19,11 @@ a tainted tool fetched can only be re-read inside the reply chain that was alrea
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from .db import Database, new_id, now, row_to_dict
+from .repos import fts_query
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS chat_plans (
@@ -42,6 +44,10 @@ CREATE TABLE IF NOT EXISTS tool_results (
   created_at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_tool_results_conv ON tool_results(conversation_id, created_at DESC);
+-- Not covered by ON DELETE CASCADE: retention.sweep removes orphans, ToolResults.search joins back to tool_results.
+CREATE VIRTUAL TABLE IF NOT EXISTS tool_results_fts USING fts5(
+  content, result_id UNINDEXED, conversation_id UNINDEXED, tokenize='porter unicode61'
+);
 """
 
 STATUSES = ("pending", "in_progress", "done")
@@ -123,6 +129,9 @@ class Plans:
         self.db = db
         with db.tx() as c:
             c.executescript(SCHEMA)
+            # Blobs stored before the index existed.
+            c.execute("INSERT INTO tool_results_fts(content, result_id, conversation_id) SELECT content, id, conversation_id "
+                      "FROM tool_results WHERE id NOT IN (SELECT result_id FROM tool_results_fts)")
 
     def get(self, conversation_id: str) -> dict[str, Any] | None:
         with self.db.tx() as c:
@@ -160,6 +169,8 @@ INLINE_CHARS = 4000
 PREVIEW_CHARS = 2000
 MAX_STORED_CHARS = 2_000_000
 READ_CHARS = 4000
+SEARCH_WINDOW = 600   # chars per search hit
+SEARCH_TOTAL = 3800   # serialized size of all hits, under INLINE_CHARS
 MAX_READ_CHARS = 20000
 
 HANDLE_NOTE = ("Large result: it is stored outside this conversation's context, not truncated. `preview` is its head. "
@@ -210,15 +221,17 @@ class ToolResults:
                 "INSERT INTO tool_results(id, conversation_id, message_id, tool, content, total_chars, shape, created_at) VALUES(?,?,?,?,?,?,?,?)",
                 (rid, conversation_id, message_id, tool, content[:MAX_STORED_CHARS], total, json.dumps(shape), now()),
             )
+            c.execute("INSERT INTO tool_results_fts(content, result_id, conversation_id) VALUES(?,?,?)",
+                      (content[:MAX_STORED_CHARS], rid, conversation_id))
         return {"id": rid, "total_chars": total}
 
-    def for_model(self, conversation_id: str, message_id: str | None, tool: str, result: Any, untrusted: bool = False) -> str:
-        """The tool message's content: the result itself when small, a handle when not."""
+    def render(self, conversation_id: str, message_id: str | None, tool: str, result: Any, untrusted: bool = False) -> tuple[str, str | None]:
+        """The tool message's content: the result itself when small, a handle when not. Also the handle's id, if any."""
         from .tools import summarize_result  # local: tools.py imports nothing from here
 
         blob = _dumps(result)
         if len(blob) <= INLINE_CHARS:
-            return blob
+            return blob, None
         shape = shape_of(result)
         if untrusted:
             # Reading this blob later has to taint again. Clearing the chat banner does not delete it.
@@ -227,7 +240,10 @@ class ToolResults:
         return _dumps({
             "result_id": row["id"], "tool": tool, "total_chars": row["total_chars"], "shape": shape,
             "preview": summarize_result(result, PREVIEW_CHARS), "note": HANDLE_NOTE,
-        })
+        }), row["id"]
+
+    def for_model(self, conversation_id: str, message_id: str | None, tool: str, result: Any, untrusted: bool = False) -> str:
+        return self.render(conversation_id, message_id, tool, result, untrusted)[0]
 
     def get(self, result_id: str, conversation_id: str | None = None) -> dict[str, Any] | None:
         sql = "SELECT * FROM tool_results WHERE id=?"
@@ -254,6 +270,34 @@ class ToolResults:
         elif not window:
             out["note"] = f"Offset {off} is past the end of this result ({len(text)} characters). Nothing left to read."
         return out
+
+    def search(self, conversation_id: str, query: str, limit: int = 3) -> dict[str, Any]:
+        """Keyword windows over this chat's stored blobs. Each hit carries the offset to hand read_tool_result.
+        ponytail: window found by literal term match, so a stemmed-only match (run/running) falls back to offset 0."""
+        q = fts_query(query)
+        if not q:
+            return {"matches": [], "note": "Query had no searchable words (3+ letters)."}
+        limit = max(1, min(int(limit), 10))
+        with self.db.tx() as c:
+            rows = c.execute(
+                "SELECT t.id, t.tool, t.total_chars, t.shape, t.content FROM tool_results_fts f JOIN tool_results t ON t.id=f.result_id "
+                "WHERE tool_results_fts MATCH ? AND f.conversation_id=? AND t.conversation_id=? ORDER BY rank LIMIT ?",
+                (q, conversation_id, conversation_id, limit)).fetchall()
+        pat = re.compile("|".join(re.escape(t) for t in re.findall(r'"([^"]+)"', q)), re.I)
+        per = min(SEARCH_WINDOW, SEARCH_TOTAL // limit)
+        while True:
+            matches, untrusted = [], False
+            for r in rows:
+                m = pat.search(r["content"])
+                off = max(0, (m.start() if m else 0) - per // 4)
+                shape = json.loads(r["shape"] or "{}")
+                untrusted = untrusted or bool(shape.get("untrusted"))
+                matches.append({"result_id": r["id"], "tool": r["tool"], "total_chars": r["total_chars"], "offset": off,
+                                "text": r["content"][off: off + per]})
+            out = {"matches": matches, "untrusted": untrusted}
+            if len(_dumps(out)) <= SEARCH_TOTAL or per <= 40:  # JSON escaping can double quoted text
+                return out
+            per //= 2
 
     def list(self, conversation_id: str, limit: int = 20) -> list[dict[str, Any]]:
         with self.db.tx() as c:

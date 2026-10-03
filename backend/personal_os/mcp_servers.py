@@ -43,6 +43,7 @@ SLUG_ATTEMPTS = 4
 # module stays free of the tool implementations' dependencies; test_mcp_servers keeps it honest.
 RESERVED_TOOL_NAMES = frozenset({
     "search_documents", "read_document", "list_documents",
+    "space_list", "space_add_widget", "space_arrange",
     "search_memory", "save_memory",
     "graph_search", "graph_traverse", "graph_add",
     "web_search", "fetch_url",

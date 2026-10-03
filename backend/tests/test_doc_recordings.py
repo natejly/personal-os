@@ -684,6 +684,9 @@ def test_an_ordinary_revision_is_stale_after_an_append_is_accepted() -> None:
     assert full["status"] == "pending" and full["stale"] is True and full["stat_vs_current"] is not None
 
 
+# ---------------------------------------------------------------- silence notice and auto-pause
+
+
 def test_summary_evidence_reaches_the_meeting_row_and_the_stored_text_is_tag_free() -> None:
     w = World()
     doc = w.docs.create("Plan", "# Plan")
@@ -726,6 +729,7 @@ def test_note_marks_merge_cap_and_ignore_dictation() -> None:
 # ---------------------------------------------------------------- calendar 'Take notes'
 def _event_world(start: Any) -> tuple[World, Any]:
     from personal_os import app as appmod
+    w = World()
     appmod.docs, appmod.meeting_store = w.docs, w.repo
     appmod.activity.IS_MAC = True
     appmod.meeting_svc = SimpleNamespace(start=start, capabilities=lambda: [])
@@ -744,6 +748,7 @@ def test_from_event_creates_one_doc_with_attendees_and_is_idempotent() -> None:
     assert len(w.docs.list("__all__", "")) == 1
 def test_from_event_refused_start_leaves_no_doc() -> None:
     from personal_os.meetings import MeetingBlocked
+
     def refuse(mid: str) -> Any:
         raise MeetingBlocked([{"id": "consent", "label": "Consent", "ok": False}])
     w, appmod = _event_world(refuse)
@@ -754,17 +759,20 @@ def test_from_event_refused_start_leaves_no_doc() -> None:
         assert e.status_code == 409
     assert w.docs.list("__all__", "") == [] and w.repo.by_event("ev2") is None
 def test_a_recording_with_too_little_speech_is_refused_without_a_model_call() -> None:
+    w = World()
     w.svc.set_config({"minSummaryWords": 40})
     doc = w.docs.create("Plan", "# Plan\n")
     res = w.summarize(w.recording(doc, said="uh okay then")["id"])
     assert "Too little was said" in res["error"] and res["revision"] is None and w.llm == []
 def test_the_section_says_how_many_words_were_heard_and_which_model_and_template() -> None:
+    w = World()
     doc = w.docs.create("Plan", "# Plan\n")
     rev = w.summarize(w.recording(doc)["id"])["revision"]
     assert "words heard)" in rev["after"]
     assert "_Model test-model, template general_" in rev["after"]
 def test_meeting_read_of_a_live_meeting_returns_the_transcript_so_far() -> None:
     from test_mcp_servers import full_toolbox
+    w = World()
     doc = w.docs.create(title="Live")
     m = w.repo.create(title="Live", doc_id=doc["id"], doc_mode="record", status="scheduled")
     w.repo.mark_started(m["id"], str(w.tmp / "rec" / m["id"]), ["mic"], started_at=time.time() - 30)

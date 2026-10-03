@@ -256,16 +256,19 @@ def test_chunks_cover_every_line_and_overlap() -> None:
     assert chunks[1].splitlines()[0] in chunks[0], "each chunk repeats the end of the one before"
 def test_long_transcript_is_mapped_per_chunk_then_reduced_once() -> None:
     calls: list[str] = []
+
     async def stub(settings, model, messages, kind="x"):
         calls.append(messages[0]["content"][:20])
         return json.dumps({"summary_markdown": "merged" if "merge" in messages[0]["content"] else "part",
                            "headline": "h", "action_items": []})
+
     text = "".join(f"[you] line {i:03d}\n" for i in range(200))
     res = asyncio.run(meeting_notes.summarize_recording(
         complete_fn=stub, settings=SETTINGS, model="m", meeting=MEETING, doc_title="t", doc_content="",
         transcript=text, max_transcript_chars=2000))
     n = len(meeting_notes.chunk_transcript(text, 1000))
     assert res["markdown"] == "merged" and len(calls) == n + 1 and n > 1
+
     calls.clear()
     asyncio.run(meeting_notes.summarize_recording(
         complete_fn=stub, settings=SETTINGS, model="m", meeting=MEETING, doc_title="t", doc_content="",
@@ -274,18 +277,23 @@ def test_long_transcript_is_mapped_per_chunk_then_reduced_once() -> None:
 def test_a_failed_chunk_or_reduce_leaves_no_partial_summary() -> None:
     text = "".join(f"[you] line {i:03d}\n" for i in range(200))
     good = json.dumps({"summary_markdown": "part", "headline": "h", "action_items": []})
+
     def run(stub):
         return asyncio.run(meeting_notes.summarize_recording(
             complete_fn=stub, settings=SETTINGS, model="m", meeting=MEETING, doc_title="t", doc_content="",
             transcript=text, max_transcript_chars=2000))
+
     n = {"i": 0}
+
     async def chunk_raises(settings, model, messages, kind="x"):
         n["i"] += 1
         if n["i"] == 2:
             raise RuntimeError("proxy down")
         return good
+
     async def reduce_is_junk(settings, model, messages, kind="x"):
         return "not json" if "merge" in messages[0]["content"] else good
+
     for stub in (chunk_raises, reduce_is_junk):
         res = run(stub)
         assert res["error"] and res["markdown"] == ""

@@ -34,6 +34,9 @@ class _Repo:
     def search(self, *_a: Any, **_k: Any) -> list[Any]:
         return []
 
+    def pinned(self, *_a: Any, **_k: Any) -> list[Any]:
+        return []
+
 
 db = Database(Path(tempfile.mkdtemp(prefix="skillusage-db-")))
 skills = Skills(db)

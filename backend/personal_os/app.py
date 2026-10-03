@@ -5451,6 +5451,7 @@ class ActivityConfigIn(BaseModel):
     redact: bool | None = None
     excludeApps: list[str] | None = None
     excludeTitlePatterns: list[str] | None = None
+    excludeRules: list[dict[str, str]] | None = None
     redactAllow: list[str] | None = None
     redactDeny: list[str] | None = None
     redactThreshold: float | None = None

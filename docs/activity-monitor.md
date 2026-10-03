@@ -49,7 +49,10 @@ transcribes it, and unlinks the wav.
   storing anything about the window. Password managers ship in the default list.
 - **Excluded titles and URLs** — case-insensitive substring match. Defaults cover
   sign-in pages, 2FA, banking, private browsing, and anything mentioning keys or
-  seed phrases.
+  seed phrases. Either list also accepts `/regex/` entries.
+- **Conditional rules** (`excludeRules`) — `{app, title, url}`, each field a substring or
+  `/regex/`; a window is dropped only when every field the rule names matches, e.g.
+  Safari only when the title matches `/bank|login/`. A rule with a bad regex never matches.
 - **Secure input** — macOS sets a system-wide flag whenever a password field is
   focused. Keystroke capture stops entirely while it is set, and the count of
   skipped keys is reported rather than hidden.

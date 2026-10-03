@@ -1995,6 +1995,8 @@ export interface ActivityConfig {
   excludeApps: string[]
   /** Window titles / URLs containing any of these are skipped. */
   excludeTitlePatterns: string[]
+  /** Drop a window only when every named field (substring or /regex/) matches. */
+  excludeRules: { app?: string; title?: string; url?: string }[]
   /** Strings or /regex/ that are never scrubbed. */
   redactAllow: string[]
   /** Strings or /regex/ that are always scrubbed. */

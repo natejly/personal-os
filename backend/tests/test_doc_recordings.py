@@ -671,6 +671,35 @@ def test_summary_evidence_reaches_the_meeting_row_and_the_stored_text_is_tag_fre
     assert "{" not in row["enhanced"] and "{" not in out["revision"]["after"]
 
 
+def test_note_marks_reach_the_summary_payload_only_when_present() -> None:
+    w = World()
+    doc = w.docs.create("Plan", "# Plan\n- pricing tiers: ask about the fourteenth\n- gone line")
+    m = w.recording(doc)
+    w.summarize(m["id"])
+    assert "note_timeline" not in json.loads(w.llm[0]["messages"][1]["content"])
+    marks = w.repo.set_note_marks(m["id"], [{"line": "- pricing tiers: ask about the fourteenth", "t": 271},
+                                            {"line": "- gone line", "t": 300}, {"line": "- deleted", "t": 5}])
+    assert len(marks) == 3 and w.repo.get(m["id"])["note_marks"][0]["t"] == 271
+    w.docs.save(doc["id"], content="# Plan\n- pricing tiers: ask about the fourteenth")
+    w.summarize(m["id"], force=True)
+    user = json.loads(w.llm[-1]["messages"][1]["content"])
+    assert user["note_timeline"] == [{"at": "04:31", "line": "- pricing tiers: ask about the fourteenth"}]
+
+
+def test_note_marks_merge_cap_and_ignore_dictation() -> None:
+    w = World()
+    doc = w.docs.create("Plan", "x")
+    m = w.recording(doc)
+    w.repo.set_note_marks(m["id"], [{"line": "a", "t": 1}])
+    out = w.repo.set_note_marks(m["id"], [{"line": "a", "t": 9}, {"line": "bad", "t": "x"}])
+    assert out == [{"line": "a", "t": 9.0}]
+    out = w.repo.set_note_marks(m["id"], [{"line": f"l{i}", "t": i} for i in range(600)])
+    assert len(out) == meetings.MAX_NOTE_MARKS and out[-1]["line"] == "l599"
+    d = w.recording(doc, mode="dictate")
+    assert w.repo.set_note_marks(d["id"], [{"line": "a", "t": 1}]) == []
+    assert w.repo.set_note_marks("nope", []) is None
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in list(globals().items()):

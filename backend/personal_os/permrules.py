@@ -1015,13 +1015,17 @@ def skip_permissions_on(conv_settings: dict[str, Any] | None, cfg: dict[str, Any
     return bool((cfg or {}).get("skipPermissions"))
 
 
-def lift_permission_ask(name: str, mode: str, *, skip: bool) -> str:
-    """Turn an ask into a run. A deny is not an ask (the caller keeps the refusal). Off stays off.
+def lift_permission_ask(name: str, mode: str, *, skip: bool, forced: bool = False, danger: str = "",
+                        fenced: bool = False) -> str:
+    """Turn a plain ask into a run. A deny is not an ask (the caller keeps the refusal). Off stays off.
 
-    A plan card and a desk question stay: those are the user deciding, not granting a tool. The hardline
-    list is a refusal, so it is untouched here. A doom-loop card is an ask, and this mode does lift it.
+    Stays a card: a plan or desk question (the user deciding, not granting a tool), a forced ask (taint,
+    doom loop, desk ask-as-you-go), an ask rule or an outside-folder write (`fenced`), an external or
+    schedules tool, and a shell command no read-only list or allow rule already cleared (a shell_run that
+    is still `ask` here was not cleared).
     """
-    if skip and mode == "ask" and name not in STILL_ASK:
+    if (skip and mode == "ask" and name not in STILL_ASK and not forced and not fenced
+            and danger not in ("external", "schedules") and name != "shell_run"):
         return "on"
     return mode
 

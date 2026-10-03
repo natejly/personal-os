@@ -1,7 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { adoptServerDoc, applyEvent, settleInterrupted, useStore, type ChatSession } from './store'
+import { adoptServerDoc, applyEvent, editCut, settleInterrupted, useStore, type ChatSession } from './store'
 import { api } from './lib/api'
+import { mergeConversation } from './sessionStatus'
 import type { ChatEvent, Message } from '@shared/types'
 
 /**
@@ -326,4 +327,39 @@ test('error: once the reply is done nothing is touched; with no reply row it bec
   assert.deepEqual(after.runError, { message: 'late', runId: 'r1', interrupted: false })
   const next = applyEvent(after, ev({ event: 'user_message', data: msg({ id: 'u9', role: 'user' }) }), true)
   assert.equal(next.runError, null, 'the next message clears it')
+})
+
+test('editCut counts the rows from the message onward and notices tool runs', () => {
+  const t = { id: 't1', name: 'a', arguments: {}, result_preview: '', duration_ms: 0, error: null, pending: false }
+  const rows = [msg({ id: 'u1', role: 'user' }), msg({ id: 'a1', role: 'assistant', tool_events: [t] as never }), msg({ id: 'u2', role: 'user' }), msg({ id: 'a2', role: 'assistant' })]
+  assert.deepEqual(editCut(rows, 'u1'), { removed: 4, ranTools: true })
+  assert.deepEqual(editCut(rows, 'u2'), { removed: 2, ranTools: false })
+  assert.deepEqual(editCut(rows, 'nope'), { removed: 0, ranTools: false })
+})
+
+test('editAndResend refuses while the chat is answering and for empty text', async () => {
+  const calls: unknown[] = []
+  const real = api.chat
+  api.chat = (async (...a: unknown[]) => { calls.push(a); throw new Error('unexpected') }) as never
+  try {
+    useStore.setState({ sessions: { c9: session({ streaming: { messageId: null, runId: 'r', abort: new AbortController(), answering: true, seq: 0, stopping: false } }) } as never })
+    assert.equal(await useStore.getState().editAndResend('u1', 'hi', 'c9'), false)
+    assert.equal(await useStore.getState().editAndResend('u1', '   ', 'c9'), false)
+    assert.equal(calls.length, 0)
+  } finally {
+    api.chat = real
+  }
+})
+
+test('an edit cut folded through applyEvent leaves no hidden row, even when a streaming refetch keeps unsent rows', () => {
+  const rows = [msg({ id: 'u1', role: 'user' }), msg({ id: 'a1' }), msg({ id: 'u2', role: 'user' }), msg({ id: 'a2' })]
+  let s = session({ conversation: { ...session().conversation, messages: rows } })
+  for (const id of ['u2', 'a2']) s = applyEvent(s, ev({ event: 'removed_message', data: { id } }), true)
+  s = applyEvent(s, ev({ event: 'user_message', data: msg({ id: 'u3', role: 'user', edited_from: 'u2' }) }), true)
+  s = applyEvent(s, ev({ event: 'assistant_message', data: msg({ id: 'a3', content: '' }) }), true)
+  assert.deepEqual(s.conversation.messages?.map((m) => m.id), ['u1', 'a1', 'u3', 'a3'])
+  // The server's copy mid-stream: the hidden rows are gone, the reply row is not stored yet.
+  const remote = { ...s.conversation, messages: [rows[0], rows[1], msg({ id: 'u3', role: 'user' })] }
+  const merged = mergeConversation(s.conversation, remote, true)
+  assert.deepEqual(merged.messages?.map((m) => m.id), ['u1', 'a1', 'u3', 'a3'], 'keepUnsent keeps the live reply, not the cut')
 })

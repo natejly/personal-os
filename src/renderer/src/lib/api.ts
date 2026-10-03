@@ -427,7 +427,7 @@ export const api = {
   },
   stop: (mid: string) => req(`/messages/${mid}/stop`, { method: 'POST' }),
   /** Starts the reply as a background task and returns at once; watch it with `chatStream(convId, seq)`. Throws a 409 carrying a `RunConflict` when that conversation already has a live run. */
-  chat: (convId: string, body: { content?: string; model?: string; page_context?: PageContext }) => req<ChatRunStarted>(`/conversations/${convId}/chat`, { method: 'POST', body: json(body) }),
+  chat: (convId: string, body: { content?: string; model?: string; page_context?: PageContext; replace_from?: string }) => req<ChatRunStarted>(`/conversations/${convId}/chat`, { method: 'POST', body: json(body) }),
   /** Injects a user message into a live run (steering). Throws a 409 when nothing is running. */
   steer: (convId: string, content: string) => req<{ ok: boolean; run_id: string; message: Message }>(`/conversations/${convId}/steer`, { method: 'POST', body: json({ content }) }),
   runs: (conversationId?: string) => req<RunInfo[]>('/runs' + (conversationId ? `?conversation_id=${encodeURIComponent(conversationId)}` : '')),

@@ -5,7 +5,7 @@ import MessageView from '../../components/Message'
 import Composer from '../../components/Composer'
 import ChatControls from '../../components/ChatControls'
 import { api } from '../../lib/api'
-import { uploadContextNote } from '../../lib/uploadNote'
+import { uploadNote } from '../../lib/uploadNote'
 import { retainSession, useConversation, useIsStreaming, useStore, useStreamingMessageId } from '../../store'
 import { useDropTarget } from '../dnd'
 import type { WidgetDef, WidgetProps } from '../registry'
@@ -153,7 +153,8 @@ function ChatWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
       const saved = await app.uploadDocuments(files, convo?.project_id ?? null)
       if (!saved.length) return
       await app.noteUntrustedUpload(convId || undefined, 'draft')
-      draft(uploadContextNote(saved))
+      const { note } = uploadNote(saved)
+      if (note) draft(note)
       return
     }
     switch (p.kind) {

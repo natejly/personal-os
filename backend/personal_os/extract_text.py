@@ -168,6 +168,22 @@ def extract_structured(name: str, data: bytes, mime: str = "") -> list[Block]:
     return markdown_blocks(extract_text(name, data, mime))
 
 
+# What is stored for a file nothing could be read out of; _image_text has its own longer wording.
+NO_TEXT_NOTE = "[File {name} ({kind}, {size} bytes). No text could be extracted. The file is stored and can be referred to by name.]"
+# Either wording, and nothing else: a document that merely quotes the sentence is real text.
+_NO_TEXT_RE = re.compile(
+    r"\[File .+? \(.*?, \d+ bytes\)\. No text could be extracted[.;].*?The file is stored and can be referred to by name\.\]",
+    re.DOTALL,
+)
+
+
+def has_readable_text(text: str) -> bool:
+    """False when nothing came out of a file: an empty extraction (a scan with no text layer and no
+    OCR) or one that is only the no-text marker. The row is still stored; the upload route reports it."""
+    t = (text or "").strip()
+    return bool(t) and _NO_TEXT_RE.fullmatch(t) is None
+
+
 def extract_text(name: str, data: bytes, mime: str = "") -> str:
     ext = Path(name).suffix.lower()
     mime = (mime or "").split(";")[0].strip().lower()
@@ -186,7 +202,7 @@ def extract_text(name: str, data: bytes, mime: str = "") -> str:
     if _looks_textual(data, mime, ext):
         return data.decode("utf-8", errors="replace")
     kind = mime or ext or "binary"
-    return f"[File {name} ({kind}, {len(data)} bytes). No text could be extracted. The file is stored and can be referred to by name.]"
+    return NO_TEXT_NOTE.format(name=name, kind=kind, size=len(data))
 
 
 def _parsed(ext: str, mime: str, data: bytes) -> str | None:

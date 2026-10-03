@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import { ArrowUp, Square, Paperclip } from 'lucide-react'
 import PlanModeToggle from './PlanModeToggle'
-import { uploadContextNote } from '../lib/uploadNote'
+import { uploadNote } from '../lib/uploadNote'
 import { useStore, useIsStreaming } from '../store'
 import SmartTextarea from './SmartTextarea'
 import { useOnboarding } from './onboarding/onboardingStore'
-import { COMPOSER_INSERT_EVENT, appendDraft, type ComposerInsertDetail } from '../lib/composerInsert'
+import { COMPOSER_INSERT_EVENT } from '../lib/composerInsert'
+import { appendToDraft, clearRedirect, composerKey, dropDraft, getDraft, moveDraft, restoreDraft, useDraft } from '../lib/drafts'
 
 interface ComposerProps {
   conversationId?: string
@@ -16,14 +17,20 @@ interface ComposerProps {
   /** Overrides the store's `send`, for a composer that is not a plain chat — the ⌘I page agent. */
   onSend?: (text: string) => Promise<boolean>
   placeholder?: string
+  /** Where the unsent text lives (lib/drafts.ts); derived from the conversation when not given. */
+  draftKey?: string
 }
 
-export default function Composer({ conversationId, footer, compact = false, onSend, placeholder }: ComposerProps): JSX.Element {
-  const [text, setText] = useState('')
+export default function Composer({ conversationId, footer, compact = false, onSend, placeholder, draftKey }: ComposerProps): JSX.Element {
   const box = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const streaming = useIsStreaming(conversationId)
   const activeId = useStore((s) => conversationId ?? s.focusedConversationId)
+  const draftProjectId = useStore((s) => s.draftProjectId)
+  // The draft is read by key, so switching chats or views shows each one's own text and a refused
+  // send can be handed back to the chat it came from, not whichever is showing by then.
+  const key = draftKey ?? composerKey({ conversationId, page: !!onSend, focusedId: activeId, draftProjectId })
+  const [text, setText] = useDraft(key)
   const uploadTarget = useStore((s) => s.sessions[conversationId ?? s.focusedConversationId ?? '']?.conversation.project_id ?? s.draftProjectId)
   const hasKey = useStore((s) => !!s.settings.apiKeySet || /^https?:\/\/(localhost|127\.0\.0\.1)[:/]/.test(s.settings.baseUrl ?? ''))
   // A local endpoint (Ollama, a local proxy) needs no key, so it is not "unfinished".
@@ -36,43 +43,67 @@ export default function Composer({ conversationId, footer, compact = false, onSe
 
   useEffect(() => { box.current?.querySelector('textarea')?.focus() }, [activeId])
 
-  // A tool card's slot chip asks for text in the composer of the conversation being looked at.
+  // A tool card's slot chip put its text in the drafts store already; the composer of the
+  // conversation being looked at only takes focus so the next keystroke lands after it.
   useEffect(() => {
-    const onInsert = (e: Event): void => {
+    if (onSend) return
+    const onInsert = (): void => {
       if ((conversationId ?? activeId) !== useStore.getState().focusedConversationId) return
-      const t = (e as CustomEvent<ComposerInsertDetail>).detail?.text
-      if (!t) return
-      setText((cur) => appendDraft(cur, t))
       box.current?.querySelector('textarea')?.focus()
     }
     window.addEventListener(COMPOSER_INSERT_EVENT, onInsert)
     return () => window.removeEventListener(COMPOSER_INSERT_EVENT, onInsert)
-  }, [activeId, conversationId])
+  }, [activeId, conversationId, onSend])
+
+  /** The key as it stands now: a send from the not-yet-created chat ends with the created one focused. */
+  const keyNow = (): string => {
+    const s = useStore.getState()
+    return draftKey ?? composerKey({ conversationId, page: !!onSend, focusedId: s.focusedConversationId, draftProjectId: s.draftProjectId })
+  }
 
   /**
-   * The draft is cleared optimistically and handed back if `send` refuses it. Typed text is never
-   * dropped: a draft written since goes after the returned one. Mid-reply, `send` steers the live
-   * run instead of refusing, so the composer stays open while the assistant works.
+   * The upload note goes to the draft this composer showed when the files were picked, which may no
+   * longer be the one on screen by the time the upload ends. A file with no readable text gets no
+   * note (uploadNote.ts). A draft with no row yet remembers the upload, so the send still creates
+   * the chat marked untrusted, even after a relaunch.
    */
   const attach = async (files: FileList | File[]): Promise<void> => {
     const list = Array.from(files)
     if (!list.length) return
+    const k0 = key
     const saved = await uploadDocuments(list, uploadTarget)
     if (!saved.length) return
     const real = conversationId && conversationId !== '\u0000page-agent' ? conversationId : undefined
     await noteUntrustedUpload(real, onSend ? 'page' : 'draft').catch((e: unknown) => {
       useStore.getState().toast((e as Error).message, 'error')
     })
-    const note = uploadContextNote(saved)
-    setText((cur) => (cur.trim() ? `${cur}\n\n${note}` : note))
+    const { note } = uploadNote(saved)
+    if (note) appendToDraft(k0, note, { paragraph: true, taint: real ? undefined : 'upload' })
   }
 
+  /**
+   * The draft is cleared optimistically and handed back if `send` refuses it. Typed text is never
+   * dropped: a draft written since goes after the returned one, under the key the composer resolves
+   * at that moment (a chat created by this send included). Mid-reply, `send` steers the live run
+   * instead of refusing, so the composer stays open while the assistant works.
+   */
   const submit = async (): Promise<void> => {
     if (!text.trim()) return
+    const k0 = key
     const t = text
-    setText('')
+    const entry = getDraft(k0)
+    // The untrusted mark an upload left on a row-less draft is consumed by the next send; after a
+    // relaunch only the draft remembers it, so it is re-armed here before the send reads it.
+    if (entry?.taint && useStore.getState().uploadTaintTarget === null) {
+      useStore.setState({ uploadTaintTarget: onSend ? 'page' : 'draft', uploadTaintSource: entry.taint })
+    }
+    clearRedirect(k0)
+    dropDraft(k0)
     const ok = await (onSend ? onSend(t) : send(t, conversationId)).catch(() => false)
-    if (!ok) setText((cur) => (cur.trim() ? `${t}\n\n${cur}` : t))
+    const k1 = keyNow()
+    // The new chat has its row now: anything typed while it was being made follows it.
+    if (k0.startsWith('new:') && k1.startsWith('c:')) moveDraft(k0, k1)
+    if (!ok) restoreDraft(k1, t)
   }
 
   return (

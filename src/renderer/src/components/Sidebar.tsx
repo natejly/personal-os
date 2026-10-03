@@ -134,12 +134,16 @@ export default function Sidebar(): JSX.Element {
     if (archivedOpen) void api.conversations.listArchived().then(setArchived).catch(() => undefined)
   }, [archivedOpen, archiveBump])
   const archiveChat = useStore((s) => s.archiveChat)
-  // ⌘⇧F: the store opens the sidebar; this brings the search field up. Tick 0 is the initial mount.
+  // ⌘⇧F: the store opens the sidebar; this brings the search field up. The tick seen at mount is
+  // skipped, or a remount would reopen the search for a press handled before it.
   const searchTick = useStore((s) => s.sidebarSearchTick)
+  const seenTick = useRef(searchTick)
   useEffect(() => {
-    if (searchTick === 0) return
+    if (searchTick === seenTick.current) return
+    seenTick.current = searchTick
     setRecentsOpen(true)
     setSearching(true)
+    // Already showing: the effect on `searching` will not fire, so focus and select here.
     searchRef.current?.focus()
     searchRef.current?.select()
   }, [searchTick])
@@ -290,7 +294,8 @@ export default function Sidebar(): JSX.Element {
           <h4 className="archived-head"><button className="section-toggle" onClick={() => setArchivedOpen((o) => !o)}><ChevronRight size={11} className={archivedOpen ? 'rot90' : ''} /> Archived</button></h4>
           {archivedOpen && archived.length === 0 && <p className="empty-hint">Nothing archived.</p>}
           {archivedOpen && archived.map((c) => (
-            <div key={c.id} className="convo-item archived" role="button" tabIndex={0} onClick={() => void selectChat(c.id)}>
+            <div key={c.id} className="convo-item archived" role="button" tabIndex={0} onClick={() => void selectChat(c.id)}
+              onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); void selectChat(c.id) } }}>
               <span className="convo-title">{c.title}</span>
               <button className="icon-btn ghost" aria-label={`Unarchive chat: ${c.title}`} title="Unarchive" onClick={(e) => { e.stopPropagation(); void archiveChat(c.id, false) }}><ArchiveRestore size={13} /></button>
             </div>

@@ -21,10 +21,11 @@ export default function ChatRow({ conv, active, sub = false, lead }: { conv: Con
   const projects = useStore((s) => s.projects)
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null)
   const [renaming, setRenaming] = useState(false)
-  const cancelled = useRef(false)
+  /** Enter commits and the unmount's blur commits again: the first one settles, Escape settles it empty. */
+  const settled = useRef(false)
 
   const entries = (): MenuEntry[] => [
-    { label: 'Rename', run: () => { cancelled.current = false; setRenaming(true) } },
+    { label: 'Rename', run: () => { settled.current = false; setRenaming(true) } },
     { label: conv.pinned_at ? 'Unpin' : 'Pin', run: () => void pinChat(conv.id, !conv.pinned_at) },
     {
       kind: 'submenu',
@@ -39,10 +40,11 @@ export default function ChatRow({ conv, active, sub = false, lead }: { conv: Con
     { label: 'Delete', danger: true, run: () => void deleteChat(conv.id) }
   ]
 
-  const commit = (value: string): void => {
+  const commit = (value: string | null): void => {
+    if (settled.current) return
+    settled.current = true
     setRenaming(false)
-    if (cancelled.current) return
-    void renameChat(conv.id, value)
+    if (value !== null) void renameChat(conv.id, value)
   }
 
   return (
@@ -55,6 +57,8 @@ export default function ChatRow({ conv, active, sub = false, lead }: { conv: Con
         onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); void selectChat(conv.id) } }}
         onContextMenu={(e) => { e.preventDefault(); setMenuAt({ x: e.clientX, y: e.clientY }) }}
         {...dragProps({ kind: 'conversation', id: conv.id, label: conv.title, projectId: conv.project_id })}
+        // A text field inside a draggable element cannot select by mouse: the drag wins.
+        draggable={!renaming}
       >
         <span className="convo-title">
           <ChatPulse conversationId={conv.id} />
@@ -65,18 +69,19 @@ export default function ChatRow({ conv, active, sub = false, lead }: { conv: Con
               autoFocus
               defaultValue={conv.title}
               aria-label="Chat title"
+              onFocus={(e) => e.currentTarget.select()}
               onClick={(e) => e.stopPropagation()}
               onMouseDown={(e) => e.stopPropagation()}
               onKeyDown={(e) => {
                 e.stopPropagation()
                 if (e.key === 'Enter') commit(e.currentTarget.value)
-                else if (e.key === 'Escape') { cancelled.current = true; setRenaming(false) }
+                else if (e.key === 'Escape') commit(null)
               }}
               onBlur={(e) => commit(e.currentTarget.value)}
             />
           ) : conv.title}
         </span>
-        <button className="icon-btn ghost" aria-label={`Chat options: ${conv.title}`} title="More"
+        <button className="icon-btn ghost" aria-label={`Chat options: ${conv.title}`} title="More" aria-haspopup="menu" aria-expanded={!!menuAt}
           onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); setMenuAt({ x: r.left, y: r.bottom }) }}><MoreHorizontal size={14} /></button>
         <button className="icon-btn ghost" aria-label={`Delete chat: ${conv.title}`} title="Delete" onClick={(e) => { e.stopPropagation(); void deleteChat(conv.id) }}><Trash2 size={13} /></button>
       </div>

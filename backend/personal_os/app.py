@@ -80,6 +80,7 @@ from .subagents import AgentDefs, Subagents
 from .commands import Commands
 from .workflows import ApprovalError as WorkflowApprovalError, Engine as WorkflowEngine, Workflows
 from .runs import ACTIVE, PROMOTE_STEP, STATUSES, Run, RunBus, RunStore, Topic
+from .toolcalls import ensure_unique_call_ids
 from .stuck import STUCK_NUDGE, STUCK_STOP, StuckDetector
 from .style import WritingStyle, learn_style_from_exchange, looks_like_prose
 from .modules import Module, ModuleContext, build_modules, get as module_get
@@ -1167,6 +1168,10 @@ def _today_hint() -> str:
 
 BUDGET_STOP = ("Out of budget ({axis}): this tool call was not executed and no further tool calls will run. "
                "Write the best final answer you can from what you already have, and say in one line what is still missing.")
+TIME_STOP = ("Out of budget (time): no further tool calls will run. "
+             "Write the best final answer you can from what you already have, and say in one line what is still missing.")
+EMPTY_NUDGE = ("Your last turn ended without any text and without a tool call. Answer the user now in plain text, "
+               "or say in one line what you did and what is still missing.")
 SOFT_NUDGE = ("Budget check: about {pct}% of this reply's budget is used. "
               "Make at most one or two more tool calls, then write the final answer.")
 LOOP_STOP = ("{name} has been called with identical arguments {n} times in a row, so this reply is stopping tool use. "
@@ -1653,7 +1658,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             old = run_store.get(body.resume_of) or {}
             old_events = run_store.events(body.resume_of)
             messages.append({"role": "system", "content": resume.build_resume_note(
-                old, old_events, run_store.executed(body.resume_of), run_store.approvals(None, run_id=body.resume_of))})
+                old, old_events, run_store.executed(body.resume_of), run_store.approvals(None, run_id=body.resume_of),
+                reason=resume.reason_tag(old, _run_message(old)))})
             # Taint is only ever added to: a resume cannot launder what the dead run read.
             for src in resume.taint_from_tape(old_events):
                 tool_ctx["tainted"] = True
@@ -1677,6 +1683,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         stop_text: str | None = None
         blocked: set[str] = set()
         _round = 0
+        seen_call_ids: set[str] = set()  # a provider restarts its call numbering every round; ids stay unique per reply
+        quiet_retries = 0  # silent retries of an incomplete or empty round: at most one per reply
+        cut_recoveries = 0  # rounds whose tool calls were cut off at the output limit
+        error_kind: str | None = None
         awaiting: dict[str, Any] | None = None  # the tool event of a call blocked on approval, for a cancelled run to keep
         # The call this reply let go of rather than keep waiting on. Set once, and the reply ends there.
         parked: str | None = None
@@ -1767,7 +1777,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 # A segment that already streamed or ran tools closes cleanly; an untouched one is reused.
                 if buf or tool_events or rbuf:
                     reasoning = "".join(rbuf).strip() or None
-                    convos.finish_message(am["id"], "".join(buf).strip(), None, used, tool_events, tracer.spans, reasoning)
+                    convos.finish_message(am["id"], "".join(buf).strip(), None, used, tool_events, tracer.spans, reasoning,
+                                          outcome=partial)
                     _active.pop(am["id"], None)
                     # A steer closes the current segment and the reply carries on in a fresh assistant
                     # message, so this `done` ends a segment, not the run. Anything supervising the run
@@ -1775,7 +1786,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     yield "done", {"id": am["id"], "error": None, "context_used": used, "tool_events": tool_events,
                                    "trace": tracer.spans, "stopped": False, "partial": partial, "segment": True,
                                    "tainted": tool_ctx["tainted"], "taint_sources": tool_ctx["taint_sources"],
-                                   "reasoning": reasoning}
+                                   "reasoning": reasoning, "outcome": partial}
                     am = convos.add_message(conv_id, "assistant", "", model=model)
                     _bind_stop(am["id"], stop, run)
                     tool_ctx["message_id"] = am["id"]
@@ -1828,9 +1839,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 if steers:
                     break
             calls = [] if end.get("finish_reason") == "cancelled" else (end.get("tool_calls") or [])
+            ensure_unique_call_ids(calls, seen_call_ids)
             if end.get("finish_reason") == "timeout":
                 # The provider outran maxRunSeconds mid-stream. Keep what arrived and mark the reply partial.
-                if not "".join(buf).strip():
+                # A reply that already ran tools has something to close out with (see below), so it does not raise.
+                if not "".join(buf).strip() and not any(m.get("role") == "tool" for m in messages):
                     raise llm.LLMError(f"This reply hit its {int(budget.max_seconds)}s time limit before the model produced anything. Try again, or raise maxRunSeconds in Settings.")
                 partial = "time"
             u = end.get("usage") or end.get("usage_est") or {}
@@ -1845,16 +1858,67 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             yield "span", {"message_id": am["id"], "span": lspan}
             if stop.is_set():
                 break
+            fr, inc = end.get("finish_reason"), bool(end.get("incomplete"))
+            round_text = "".join(buf[round_start:]).strip()
+            # How this round ended, when it did not end well. A steer overrides all of it: the new message is the
+            # next thing to answer, and the segment closes as it always did.
+            if not steers:
+                if fr == "content_filter":
+                    calls = []
+                    error, error_kind = "The provider filtered this reply. Try rephrasing.", "content_filter"
+                    break
+                if fr == "timeout":
+                    calls = []
+                    if not round_text and any(m.get("role") == "tool" for m in messages):
+                        messages.append({"role": "system", "content": TIME_STOP})
+                        async for chunk in _final_round():
+                            yield chunk
+                    break  # partial is already "time"; text that was written stays as it is
+                if fr == "length" and not calls:
+                    if "".join(buf).strip():
+                        partial = "length"
+                    else:
+                        error = ("The model reached its output limit before writing an answer. "
+                                 "Try a lower effort or a shorter request.")
+                    break
+                if inc:
+                    calls = []
+                    if not round_text and quiet_retries == 0 and not budget.exceeded():
+                        quiet_retries = 1  # a counted round: the usage above was already charged
+                        continue
+                    partial = "incomplete"
+                    break
+                if not calls and not desk_id and not "".join(buf).strip():
+                    if quiet_retries == 0 and not budget.exceeded():
+                        quiet_retries = 1
+                        messages.append({"role": "system", "content": EMPTY_NUDGE})
+                        continue
+                    error = "The model returned an empty reply. Try again or pick another model."
+                    break
             if not calls:
                 # A steer that arrived while this answer streamed: keep the model's own turn in its
                 # context, then loop back so the top of the loop closes this segment and a new one
                 # replies to it.
                 if steers:
-                    messages.append({"role": "assistant", "content": "".join(buf[round_start:]).strip() or ""})
+                    if round_text:
+                        messages.append({"role": "assistant", "content": round_text})
                     continue
                 break
             turn = {"role": "assistant", "content": "".join(buf[round_start:]).strip() or None,
                     "tool_calls": [{"id": c["id"], "type": "function", "function": {"name": c["name"], "arguments": _replay_args(c["arguments"])}} for c in calls]}
+            if fr == "length" and not steers:
+                # The output limit cut this round's tool calls short. They are never replayed as written (see
+                # _replay_args), so the model can try again smaller; twice in one reply is a loop of its own.
+                cut_recoveries += 1
+                if cut_recoveries > 2:
+                    partial = "length"
+                    messages.append(turn)
+                    for c in calls:
+                        messages.append({"role": "tool", "tool_call_id": c["id"],
+                                         "content": BUDGET_STOP.format(axis="the model's output limit")})
+                    async for chunk in _final_round():
+                        yield chunk
+                    break
             over = budget.exceeded()
             if (over and run is not None and run.desk_id is None and (plan_seen or active_plan)
                     and plans.covers(run.run_id, [(c["name"], _call_args(c)) for c in calls], desk_id=run.desk_id)):
@@ -2351,11 +2415,16 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         text = "".join(buf).strip()
         # A call still waiting on approval keeps its card: the approval row stays pending and can still be answered.
         kept = tool_events + ([awaiting] if awaiting else [])
-        convos.finish_message(am["id"], text, None if text else "Cancelled", used, kept, tracer.spans, "".join(rbuf).strip() or None)
+        gone = None
+        if run is not None and run.kind == "chat" and not desk_id:
+            gone = "Interrupted: the backend shut down while this reply was running."
+        convos.finish_message(am["id"], text, gone or (None if text else "Cancelled"), used, kept, tracer.spans,
+                              "".join(rbuf).strip() or None, outcome="interrupted")
         convos.touch(conv_id)
         raise
     except Exception as e:  # noqa: BLE001
         error = str(e)
+        error_kind = getattr(e, "kind", None)
         for s in tracer.fail_open(error):
             yield "span", {"message_id": am["id"], "span": s}
     finally:
@@ -2364,8 +2433,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             await toolbox.shell.kill_conversation(conv_id)
 
     text = "".join(buf).strip()
+    if not text and not error and not stop.is_set() and not tool_events and not desk_id:
+        error = "The model returned an empty reply. Try again."
     reasoning = "".join(rbuf).strip() or None
-    convos.finish_message(am["id"], text, error, used, tool_events, tracer.spans, reasoning)
+    outcome = None if error else ("stopped" if stop.is_set() else partial)
+    convos.finish_message(am["id"], text, error, used, tool_events, tracer.spans, reasoning,
+                          outcome=outcome, error_kind=error_kind)
     convos.touch(conv_id)
     otel_export.export_in_background(cfg, conv_id, am["id"], model, project["name"] if project else None, tracer.spans, used, text)
     if tool_ctx["tainted"]:
@@ -2381,7 +2454,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     yield "done", {"id": am["id"], "error": error, "context_used": used, "tool_events": tool_events,
                    "trace": tracer.spans, "stopped": stop.is_set(), "partial": partial, "segment": False,
                    "tainted": tool_ctx["tainted"], "taint_sources": tool_ctx["taint_sources"],
-                   "reasoning": reasoning}
+                   "reasoning": reasoning, "outcome": outcome, "error_kind": error_kind}
     if tool_ctx.get("learned"):
         yield "learned", tool_ctx["learned"]
 
@@ -2967,14 +3040,37 @@ async def get_run(run_id: str) -> dict[str, Any]:
     mem = bus.get(row["conversation_id"]) if row["conversation_id"] else None
     over = mem.info() if mem is not None and mem.run_id == run_id else {"seq": row["last_seq"], "live": False}
     return {**row, **over, "approvals": run_store.approvals(None, run_id=run_id), "executed_calls": run_store.executed(run_id),
-            "plans": plans.for_run(run_id), "resumable": _resumable(row)[0]}
+            "plans": plans.for_run(run_id), "resumable": (res := _resumable(row))[0], "resume_reason": res[1]}
 
 
 def _resumable(row: dict[str, Any]) -> tuple[bool, str]:
     cid = row.get("conversation_id")
     if not cid:
         return False, "no conversation"
-    return resume.resumable(row, run_store.latest(cid), bool(bus.answering(cid)), bool(run_store.resumed_by(row["run_id"])))
+    return resume.resumable(row, run_store.latest(cid), bool(bus.answering(cid)), bool(run_store.resumed_by(row["run_id"])),
+                            message=_run_message(row))
+
+
+def _run_message(row: dict[str, Any]) -> dict[str, Any] | None:
+    """The reply row a run wrote, for its outcome."""
+    mid = row.get("message_id")
+    if not mid:
+        return None
+    with db.tx() as c:
+        r = c.execute("SELECT outcome, error FROM messages WHERE id=?", (mid,)).fetchone()
+    return dict(r) if r else None
+
+
+@app.get("/conversations/{id}/resumable")
+async def conversation_resumable(id: str) -> dict[str, Any]:
+    """Whether the conversation's latest reply stopped short and can be continued, in one query for the UI."""
+    if not convos.get(id, with_messages=False):
+        raise HTTPException(404, "No such conversation")
+    row = run_store.latest(id)
+    if not row:
+        return {"run_id": None, "resumable": False, "reason": "no run", "message_id": None}
+    ok, reason = _resumable(row)
+    return {"run_id": row["run_id"], "resumable": ok, "reason": reason, "message_id": row.get("message_id")}
 
 
 @app.post("/runs/{run_id}/resume")
@@ -3173,13 +3269,23 @@ async def _recover_runs() -> None:
                 cur = c.execute("SELECT content, tool_events, context_used FROM messages WHERE id=?", (mid,)).fetchone()
             if cur is None or cur["content"] or cur["tool_events"]:
                 continue  # already finished (the cancel path persisted it): the message is the better record
-            text, tool_events = run_store.transcript(r["run_id"], mid)
+            text, tape = run_store.transcript(r["run_id"], mid)
+            # Finished calls carry a duration; a bare tool_call with no result was running when the app died, so it
+            # may or may not have completed. A call waiting on a card is one of the pending approvals, not that.
+            tool_events = [e for e in tape if "duration_ms" in e]
             done = {e.get("id") for e in tool_events}
+            asked = {a["call_id"] for a in r["pending_approvals"] if a["message_id"] == mid}
+            for e in tape:
+                if "duration_ms" not in e and e.get("id") not in asked:
+                    tool_events.append({"id": e.get("id"), "name": e.get("name"), "arguments": e.get("arguments") or {},
+                                        "result_preview": "", "duration_ms": 0, "pending": False, "interrupted": True,
+                                        "error": "The app closed while this was running; it may or may not have completed."})
             for a in r["pending_approvals"]:
                 if a["message_id"] == mid and a["call_id"] not in done:
                     tool_events.append({"id": a["call_id"], "name": a["tool"], "arguments": a["args"], "result_preview": "",
                                         "duration_ms": 0, "error": None, "pending": True, "needs_approval": True, "forced": a["forced"]})
-            convos.finish_message(mid, text, r["error"], json.loads(cur["context_used"]) if cur["context_used"] else None, tool_events)
+            convos.finish_message(mid, text, r["error"], json.loads(cur["context_used"]) if cur["context_used"] else None, tool_events,
+                                  outcome="interrupted")
         except Exception:  # noqa: BLE001 - recovery must never stop the backend from starting
             log.warning("could not salvage the reply of run %s", r["run_id"], exc_info=True)
 

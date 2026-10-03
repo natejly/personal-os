@@ -374,17 +374,23 @@ class RunStore:
 
     # ---- recovery ----
     def transcript(self, run_id: str, message_id: str) -> tuple[str, list[dict[str, Any]]]:
-        """The reply text and finished tool events of one assistant message, rebuilt from the tape."""
+        """The reply text and tool events of one assistant message, rebuilt from the tape. Finished calls come first;
+        a call that was announced but never produced a result follows, as its raw tool_call event (needs_approval
+        says whether it was a card waiting on the user)."""
         text: list[str] = []
         tool_events: list[dict[str, Any]] = []
+        opened: dict[str, dict[str, Any]] = {}
         for _, event, data in self.events(run_id):
             if not isinstance(data, dict):
                 continue
             if event == "delta" and data.get("id") == message_id:
                 text.append(data.get("text") or "")
+            elif event == "tool_call" and data.get("message_id") == message_id:
+                opened[str(data.get("id"))] = {k: v for k, v in data.items() if k != "message_id"}
             elif event == "tool_result" and data.get("message_id") == message_id:
                 tool_events.append({k: v for k, v in data.items() if k != "message_id"})
-        return "".join(text).strip(), tool_events
+                opened.pop(str(data.get("id")), None)
+        return "".join(text).strip(), tool_events + list(opened.values())
 
     def recover(self, live: Iterable[str] = ()) -> list[dict[str, Any]]:
         """At startup: every run still marked active, but not running in this process, died with the last one.

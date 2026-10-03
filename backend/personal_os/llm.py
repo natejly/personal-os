@@ -7,7 +7,9 @@ import email.utils
 import json
 import logging
 import random
+import re
 import time
+import uuid
 from contextvars import ContextVar
 from typing import Any, AsyncIterator, Callable
 
@@ -272,7 +274,21 @@ STREAM_IDLE_S = 300.0
 
 
 class LLMError(Exception):
-    pass
+    """A provider or transport failure with a readable message. `kind` is the machine-readable class (see
+    classify_error; also transport, cancelled, timeout) and `status` the HTTP status, when there was one."""
+
+    def __init__(self, message: str = "", kind: str | None = None, status: int | None = None):
+        super().__init__(message)
+        self.kind = kind
+        self.status = status
+
+
+class ContextOverflowError(LLMError):
+    """The conversation does not fit the model. `limit` is the window the provider named, when it did."""
+
+    def __init__(self, message: str = "", kind: str | None = "overflow", status: int | None = None, limit: int | None = None):
+        super().__init__(message, kind, status)
+        self.limit = limit
 
 
 NOT_CONFIGURED = "No AI provider is set up yet. Open Settings and choose one."
@@ -295,6 +311,9 @@ def supports_service_tier(settings: dict[str, Any]) -> bool:
 # jitter, but ONLY while nothing has been streamed to the caller: after the first token a retry would repeat
 # or contradict text the user already read, so a mid-reply failure is reported instead.
 RETRYABLE_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504, 529})
+# What is worth retrying is decided by the classified kind, not the status alone: a 429 that says the account is
+# out of quota is `quota`, and waiting does not fix it.
+RETRYABLE_KINDS = frozenset({"rate_limit", "overloaded", "server", "transport"})
 RETRY_BASE_S = 1.0
 RETRY_CAP_S = 30.0
 # A Retry-After longer than this is not worth holding a reply open for; say so instead.
@@ -317,6 +336,42 @@ def parse_retry_after(value: str | None, now: float | None = None) -> float | No
     except (TypeError, ValueError):
         return None
     return max(0.0, when - (time.time() if now is None else now))
+
+
+_DURATION = re.compile(r"(\d+(?:\.\d+)?)(ms|h|m|s)")
+
+
+def _parse_duration(value: str | None) -> float | None:
+    """A rate-limit reset such as `250ms`, `1s`, `6m0s` or a bare number of seconds, as seconds."""
+    if not value:
+        return None
+    value = value.strip().lower()
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        pass
+    parts = _DURATION.findall(value)
+    if not parts or "".join(n + u for n, u in parts) != value:
+        return None
+    scale = {"ms": 0.001, "s": 1.0, "m": 60.0, "h": 3600.0}
+    return sum(float(n) * scale[u] for n, u in parts)
+
+
+def retry_after_from(headers: Any, now: float | None = None) -> float | None:
+    """Seconds to wait from a response's headers: `retry-after-ms`, else `retry-after`, else the smaller of the
+    `x-ratelimit-reset-requests` / `x-ratelimit-reset-tokens` durations. None when none is readable."""
+    get = headers.get
+    ms = get("retry-after-ms")
+    if ms:
+        try:
+            return max(0.0, float(ms.strip()) / 1000.0)
+        except ValueError:
+            pass
+    secs = parse_retry_after(get("retry-after"), now)
+    if secs is not None:
+        return secs
+    resets = [d for d in (_parse_duration(get("x-ratelimit-reset-requests")), _parse_duration(get("x-ratelimit-reset-tokens"))) if d is not None]
+    return min(resets) if resets else None
 
 
 def retry_delay(attempt: int, retry_after: float | None = None, rand: Callable[[], float] = random.random) -> float:
@@ -347,13 +402,88 @@ def _provider_message(body: str) -> str:
     return " ".join(body.split())[:300]
 
 
-def describe_http_error(status: int, reason: str, body: str, retried: int = 0, retry_after: float | None = None) -> str:
+def _error_fields(body: str) -> tuple[str, str, str]:
+    """(code, type, message) of a provider error body, lower-cased; tolerates non-JSON and a string `error`."""
+    try:
+        err = json.loads(body)
+        err = err.get("error", err) if isinstance(err, dict) else err
+    except (ValueError, AttributeError, TypeError):
+        return "", "", str(body or "").lower()
+    if isinstance(err, dict):
+        return str(err.get("code") or "").lower(), str(err.get("type") or "").lower(), str(err.get("message") or "").lower()
+    return "", "", str(err or "").lower()
+
+
+_FILTER_MSG = re.compile(r"content policy|safety system|content management|content[_ ]filter")
+_OVERFLOW_MSG = re.compile(r"context (length|window)|maximum context|prompt is too long|too many tokens|reduce the length|n_ctx")
+_QUOTA_MSG = re.compile(r"exceeded your current quota|insufficient (quota|credits?|balance)|credit balance|billing|payment required")
+_PARAM_MSG = re.compile(r"unsupported (parameter|value)|unknown parameter|unrecognized request argument|does not support")
+_OVERLOAD_MSG = re.compile(r"overloaded|at capacity")
+
+
+def classify_error(status: int | None, body: str) -> str:
+    """The machine-readable class of a provider failure; first matching rule wins. `status` is None for an
+    error frame inside a stream."""
+    code, typ, msg = _error_fields(body)
+    if code in ("content_filter", "content_policy_violation") or typ in ("content_filter", "content_policy_violation") or _FILTER_MSG.search(msg):
+        return "content_filter"
+    if status == 413 or code == "context_length_exceeded" or _OVERFLOW_MSG.search(msg):
+        return "overflow"
+    if status == 402 or code == "insufficient_quota" or typ == "insufficient_quota" or code.startswith("billing") or typ.startswith("billing") or _QUOTA_MSG.search(msg):
+        return "quota"
+    if status in (401, 403):
+        return "auth"
+    if status == 404:
+        return "not_found"
+    if (status in (400, 422) and code in ("unsupported_parameter", "unsupported_value", "unknown_parameter")) or (status in (400, 422, None) and _PARAM_MSG.search(msg)):
+        return "unsupported_param"
+    if status == 429:
+        return "rate_limit"
+    if status == 529 or (status in (500, 503) and _OVERLOAD_MSG.search(msg)):
+        return "overloaded"
+    if status is not None and (status in (408, 425) or status >= 500):
+        return "server"
+    return "bad_request"
+
+
+def parse_context_limit(body: str) -> int | None:
+    """The context window a provider's overflow message names, when it names one (1,000 to 4,000,000 tokens)."""
+    text = _provider_message(body) if body else ""
+    for pat in (r"maximum context length is (\d[\d,_]*)", r"(\d[\d,_]*) tokens? *> *(\d[\d,_]*) maximum",
+                r"context window of (\d[\d,_]*)", r"n_ctx[=: ]+(\d[\d,_]*)"):
+        m = re.search(pat, text, re.IGNORECASE)
+        if m:
+            n = int(re.sub(r"[,_]", "", m.group(m.lastindex)))
+            if 1_000 <= n <= 4_000_000:
+                return n
+    return None
+
+
+def _provider_error(message: str, kind: str | None, status: int | None, body: str) -> LLMError:
+    """LLMError for a classified failure; an overflow carries the parsed window."""
+    if kind == "overflow":
+        return ContextOverflowError(message, kind, status, parse_context_limit(body))
+    return LLMError(message, kind, status)
+
+
+def describe_http_error(status: int, reason: str, body: str, retried: int = 0, retry_after: float | None = None, kind: str | None = None) -> str:
     """A sentence a person can act on, for a failed provider response."""
     tail = f" Retried {retried} time{'s' if retried != 1 else ''}." if retried else ""
     detail = _provider_message(body)
+    if kind == "quota":
+        return f"The provider says you are out of quota or credit ({status}). Check billing with the provider, or pick another model. {detail}".strip()
+    if kind == "overflow":
+        return f"This conversation is too long for the model ({status}). Compact it or start a new chat. {detail}".strip()
+    if kind == "unsupported_param":
+        return f"The model rejected a request option ({status}). Set effort to Default, turn off Fast, or pick another model. {detail}".strip()
+    if kind == "content_filter":
+        return f"The provider's content filter blocked the request ({status}). Rephrase it or pick another model. {detail}".strip()
+    if kind == "overloaded":
+        return f"The provider is overloaded ({status}).{tail} Try again shortly or pick another model. {detail}".strip()
     if status == 429:
         wait = f" The provider asked to wait {int(retry_after)}s." if retry_after else ""
-        return f"The provider is rate-limiting you (429).{tail}{wait} Wait a moment and try again, or pick another model."
+        more = f" {detail}" if detail and kind == "rate_limit" else ""
+        return f"The provider is rate-limiting you (429).{tail}{wait} Wait a moment and try again, or pick another model.{more}"
     if status in (401, 403):
         return f"The provider rejected your API key or access ({status}). Check the API key in Settings. {detail}".strip()
     if status == 404:
@@ -412,7 +542,7 @@ async def _send_with_retry(client: httpx.AsyncClient, settings: dict[str, Any], 
             if cancel is not None and cancel.is_set():
                 raise LLMError("Stopped.") from e
             if attempt >= retries:
-                raise LLMError(describe_transport_error(e, attempt)) from e
+                raise LLMError(describe_transport_error(e, attempt), kind="transport") from e
             attempt += 1
             delay = retry_delay(attempt)
             log.warning("provider connection failed (%s); retry %d/%d in %.1fs", type(e).__name__, attempt, retries, delay)
@@ -421,19 +551,20 @@ async def _send_with_retry(client: httpx.AsyncClient, settings: dict[str, Any], 
             continue
         if r.status_code < 400:
             return r, cm
-        retry_after = parse_retry_after(r.headers.get("retry-after"))
+        retry_after = retry_after_from(r.headers)
+        kind = classify_error(r.status_code, r.text)
         if cm is not None:
             with contextlib.suppress(Exception):
                 await cm.__aexit__(None, None, None)
         too_long = retry_after is not None and retry_after > RETRY_AFTER_MAX_S
-        if r.status_code in RETRYABLE_STATUS and attempt < retries and not too_long:
+        if kind in RETRYABLE_KINDS and attempt < retries and not too_long:
             attempt += 1
             delay = retry_delay(attempt, retry_after)
             log.warning("provider answered %d; retry %d/%d in %.1fs", r.status_code, attempt, retries, delay)
             if not await _backoff(delay, cancel):
                 raise LLMError("Stopped while waiting to retry the provider.")
             continue
-        raise LLMError(describe_http_error(r.status_code, r.reason_phrase, r.text, attempt, retry_after))
+        raise _provider_error(describe_http_error(r.status_code, r.reason_phrase, r.text, attempt, retry_after, kind), kind, r.status_code, r.text)
 
 
 
@@ -552,6 +683,90 @@ def _reason_text(delta: dict[str, Any]) -> str:
     return ""
 
 
+def _content_text(obj: dict[str, Any]) -> str:
+    """The answer text of a delta or message: a str as is, a list of str / {text} parts joined, anything else ''."""
+    raw = obj.get("content")
+    if isinstance(raw, str):
+        return raw
+    if isinstance(raw, list):
+        return "".join(i if isinstance(i, str) else i["text"] if isinstance(i, dict) and isinstance(i.get("text"), str) else "" for i in raw)
+    return ""
+
+
+_THINK_OPEN = {"<think>": "</think>", "<thinking>": "</thinking>"}
+_THINK_BLOCK = re.compile(r"\s*<(think(?:ing)?)>(.*?)</\1>\s*", re.IGNORECASE | re.DOTALL)
+
+
+class ThinkSplitter:
+    """Routes a model's inline `<think>...</think>` block to reasoning and the rest to the answer.
+
+    One instance per stream. Only a block that opens the reply (after whitespace) counts, so a literal tag later in an
+    answer is left alone. feed() and flush() return [("reasoning" | "delta", piece)]; text that might be part of a tag
+    split across chunks is held back until the next chunk decides it.
+    """
+
+    def __init__(self) -> None:
+        self.state = "probe"
+        self.held = ""
+        self.close = ""
+        self.lead = False  # drop leading whitespace (after the open tag) or newlines (after the close tag)
+
+    def feed(self, text: str) -> list[tuple[str, str]]:
+        out: list[tuple[str, str]] = []
+        if self.state == "probe":
+            self.held += text
+            s = self.held.lstrip().lower()
+            tag = next((t for t in _THINK_OPEN if s.startswith(t)), None)
+            if tag:
+                rest = self.held.lstrip()[len(tag):]
+                self.state, self.close, self.held, self.lead = "think", _THINK_OPEN[tag], "", True
+                text = rest
+            elif not s or any(t.startswith(s) for t in _THINK_OPEN):
+                return out
+            else:
+                self.state, held, self.held = "pass", self.held, ""
+                return [("delta", held)]
+        if self.state == "think":
+            buf = self.held + text
+            if self.lead:
+                buf = buf.lstrip()
+                self.lead = not buf
+            i = buf.lower().find(self.close)
+            if i >= 0:
+                if buf[:i]:
+                    out.append(("reasoning", buf[:i]))
+                self.state, self.held, self.lead = "pass", "", True
+                text = buf[i + len(self.close):]
+            else:
+                keep = next((k for k in range(min(len(self.close) - 1, len(buf)), 0, -1) if self.close.startswith(buf[-k:].lower())), 0)
+                self.held = buf[len(buf) - keep:]
+                if buf[:len(buf) - keep]:
+                    out.append(("reasoning", buf[:len(buf) - keep]))
+                return out
+        if self.state == "pass":
+            if self.lead:
+                text = text.lstrip("\r\n")
+                self.lead = not text
+            if text:
+                out.append(("delta", text))
+        return out
+
+    def flush(self) -> list[tuple[str, str]]:
+        held, self.held = self.held, ""
+        if not held:
+            return []
+        return [("reasoning" if self.state == "think" else "delta", held)]
+
+
+def strip_think(text: str) -> str:
+    """`text` without a leading think block; '' when the block never closes."""
+    m = _THINK_BLOCK.match(text)
+    if m:
+        return text[m.end():]
+    s = text.lstrip().lower()
+    return "" if any(s.startswith(t) for t in _THINK_OPEN) else text
+
+
 async def _close_when(cancel: asyncio.Event, response: httpx.Response) -> None:
     """Drop the provider socket when stop or steer fires, so the read is not stuck until the next token."""
     await cancel.wait()
@@ -567,7 +782,10 @@ async def stream_chat(
     Yields {"type": "delta", "text": str} for content, {"type": "reasoning", "text": str} for a
     reasoning model's chain-of-thought, and finally
     {"type": "end", "finish_reason": str|None, "tool_calls": [{"id","name","arguments"}], "usage": {...}|None,
-     "usage_est": {"prompt_tokens": int, "completion_tokens": int}}.
+     "usage_est": {"prompt_tokens": int, "completion_tokens": int}, "incomplete": bool}.
+
+    `delta.text` is always a str and never contains a leading think block (that goes out as reasoning). `incomplete` is
+    True when the stream ended with neither a finish_reason nor [DONE] (a dropped connection); its tool calls are cleared.
 
     `cancel`, once set, closes the HTTP stream immediately. The final event then has finish_reason
     "cancelled" and no tool calls, including any arguments that had only partly arrived.
@@ -594,7 +812,9 @@ async def stream_chat(
     t0 = time.time()
     out_chars = 0
     reason_chars = 0
-    cancelled = timed_out = False
+    cancelled = timed_out = saw_done = False
+    splitter = ThinkSplitter()
+    known = {t.get("function", {}).get("name") for t in tools or []}
     idle = _idle_s(settings)
     deadline_at = stream_deadline.get()
     # read= bounds the wait for response headers (and backs up a chunk); the per-chunk idle limit is enforced below.
@@ -615,7 +835,7 @@ async def stream_chat(
                         if deadline_at is not None and time.monotonic() >= deadline_at:
                             timed_out = True
                             break
-                        raise LLMError(f"The provider stopped responding: no data for {int(idle)}s mid-reply. Try again.") from None
+                        raise LLMError(f"The provider stopped responding: no data for {int(idle)}s mid-reply. Try again.", kind="timeout") from None
                     if cancel is not None and cancel.is_set():
                         cancelled = True
                         break
@@ -624,6 +844,7 @@ async def stream_chat(
                         continue
                     data = line[5:].strip()
                     if data == "[DONE]":
+                        saw_done = True
                         break
                     try:
                         obj = json.loads(data)
@@ -631,7 +852,9 @@ async def stream_chat(
                         continue
                     if obj.get("error"):
                         err = obj["error"]
-                        raise LLMError(err.get("message") if isinstance(err, dict) else str(err))
+                        body_s = json.dumps({"error": err})
+                        kind_e = classify_error(None, body_s)
+                        raise _provider_error(_provider_message(body_s), kind_e, None, body_s)
                     if isinstance(obj.get("usage"), dict):
                         usage = parse_usage(obj["usage"])
                     choice = (obj.get("choices") or [{}])[0]
@@ -640,20 +863,14 @@ async def stream_chat(
                     if reason:
                         reason_chars += len(reason)
                         yield {"type": "reasoning", "text": reason}
-                    if delta.get("content"):
-                        out_chars += len(delta["content"])
-                        yield {"type": "delta", "text": delta["content"]}
+                    for kind_p, piece in splitter.feed(_content_text(delta)):
+                        if kind_p == "reasoning":
+                            reason_chars += len(piece)
+                        else:
+                            out_chars += len(piece)
+                        yield {"type": kind_p, "text": piece}
                     for tc in delta.get("tool_calls") or []:
-                        idx = _slot(calls, tc, last_idx)
-                        last_idx = idx
-                        cur = calls.setdefault(idx, {"id": tc.get("id") or f"call_{idx}", "name": "", "arguments": ""})
-                        if tc.get("id"):
-                            cur["id"] = tc["id"]
-                        fn = tc.get("function") or {}
-                        if fn.get("name"):
-                            cur["name"] += fn["name"]
-                        if fn.get("arguments"):
-                            cur["arguments"] += fn["arguments"]
+                        last_idx = _add_fragment(calls, tc, last_idx, known)
                     if choice.get("finish_reason"):
                         finish = choice["finish_reason"]
             except asyncio.CancelledError:
@@ -661,7 +878,7 @@ async def stream_chat(
             except Exception as e:
                 if cancel is None or not cancel.is_set():
                     if isinstance(e, httpx.HTTPError):  # after the first byte: reported, never retried
-                        raise LLMError(describe_transport_error(e) + " The reply was cut off.") from e
+                        raise LLMError(describe_transport_error(e) + " The reply was cut off.", kind="transport") from e
                     raise
                 cancelled = True
             finally:
@@ -672,6 +889,13 @@ async def stream_chat(
         finally:
             with contextlib.suppress(Exception):
                 await cm.__aexit__(None, None, None)
+    for kind_p, piece in splitter.flush():  # a tag-like tail held back at the end of the stream
+        if kind_p == "reasoning":
+            reason_chars += len(piece)
+        else:
+            out_chars += len(piece)
+        yield {"type": kind_p, "text": piece}
+    incomplete = finish is None and not saw_done and not cancelled and not timed_out and not (cancel is not None and cancel.is_set())
     if cancelled or (cancel is not None and cancel.is_set()):
         # A half-parsed tool call must not run. The caller keeps whatever text already streamed.
         calls = {}
@@ -679,39 +903,86 @@ async def stream_chat(
     elif timed_out:
         calls = {}
         finish = "timeout"
+    if incomplete:  # the connection died mid-reply: a half-received tool call must not run
+        calls = {}
+    tool_calls = _finish_calls(calls)
     # Reasoning is billed as completion tokens, so it counts toward cost and the run budget.
-    p_chars, c_chars = len(json.dumps(messages)), out_chars + reason_chars + sum(len(c["arguments"]) for c in calls.values())
+    p_chars, c_chars = len(json.dumps(messages)), out_chars + reason_chars + sum(len(c["arguments"]) for c in tool_calls)
     _emit_usage(model, kind, usage, int((time.time() - t0) * 1000), p_chars, c_chars)
     # usage_est is always present: this route often omits `usage` on streamed replies, and a budget cannot run on None.
-    yield {"type": "end", "finish_reason": finish, "tool_calls": [calls[i] for i in sorted(calls)], "usage": usage,
-           "usage_est": {"prompt_tokens": p_chars // 4, "completion_tokens": c_chars // 4}}
+    yield {"type": "end", "finish_reason": finish, "tool_calls": tool_calls, "usage": usage,
+           "usage_est": {"prompt_tokens": p_chars // 4, "completion_tokens": c_chars // 4}, "incomplete": incomplete}
 
 
-def _is_other_call(cur: dict[str, Any], key: int, cid: Any) -> bool:
-    # An id we invented ourselves (`call_<n>`) was never the provider's, so a real one arriving later is not a new call.
-    return bool(cid and cur["name"] and cur["id"] != cid and cur["id"] != f"call_{key}")
+def _is_other_call(cur: dict[str, Any], tc: dict[str, Any]) -> bool:
+    """A fragment with a new provider id and a function name is a new call, not more of `cur`. An id we invented
+    ourselves (`pid` unset) was never the provider's, so a real one arriving later is not a new call."""
+    cid = tc.get("id")
+    return bool(cid and cur["name"] and cur["pid"] and cur["pid"] != cid and (tc.get("function") or {}).get("name"))
 
 
 def _slot(calls: dict[int, dict[str, Any]], tc: dict[str, Any], last: int) -> int:
     """Which call a streamed tool-call fragment belongs to.
 
     Providers usually send an int `index`, but some send null or omit it on parallel calls. Without one,
-    a fragment carrying a new `id` opens a new call and anything else continues the latest. An indexed
-    fragment whose id differs from a named call already in that slot is also a new call.
+    a fragment carrying a new `id` opens a new call, as does a fresh name arriving after the latest call's
+    arguments; anything else continues the latest. An indexed fragment whose id differs from a named call
+    already in that slot is also a new call.
     """
     try:
         idx = int(tc["index"]) if tc.get("index") is not None else None
     except (TypeError, ValueError):
         idx = None
     cid = tc.get("id")
+    fn = tc.get("function") or {}
     if idx is None:
-        if calls and _is_other_call(calls[last], last, cid):
+        if not calls:
+            return 0
+        cur = calls[last]
+        if (cid and cur["name"] and cid != cur["id"] and cur["pid"]) or (not cid and fn.get("name") and cur["name"] and cur["arguments"]):
             return max(calls) + 1
-        return last if calls else 0
+        return last
     cur = calls.get(idx)
-    if cur is not None and _is_other_call(cur, idx, cid):
+    if cur is not None and _is_other_call(cur, tc):
         return max(calls) + 1
     return idx
+
+
+def _add_fragment(calls: dict[int, dict[str, Any]], tc: dict[str, Any], last: int, known: set[Any]) -> int:
+    """Fold one streamed tool-call fragment into `calls`; returns the slot it landed in."""
+    idx = _slot(calls, tc, last)
+    cur = calls.setdefault(idx, {"id": "call_" + uuid.uuid4().hex[:12], "pid": None, "name": "", "arguments": ""})
+    if tc.get("id"):
+        cur["id"] = cur["pid"] = tc["id"]
+    fn = tc.get("function") or {}
+    frag = fn.get("name")
+    if frag and isinstance(frag, str):
+        name = cur["name"]
+        # Some providers resend the whole name on every chunk; a real split name still joins.
+        resent = frag == name or (name in known and not any(k and k.startswith(name + frag) for k in known))
+        if not resent:
+            cur["name"] = name + frag
+    if fn.get("arguments"):
+        cur["arguments"] += fn["arguments"]
+    return idx
+
+
+def _finish_calls(calls: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
+    """Calls in creation order with the public shape; nameless ones (they cannot run) are dropped and repeated
+    provider ids made unique, since approvals and plan steps are keyed on the id."""
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for i in sorted(calls):
+        c = calls[i]
+        if not c["name"]:
+            continue
+        cid, n = c["id"], 1
+        while cid in seen:
+            n += 1
+            cid = f"{c['id']}_{n}"
+        seen.add(cid)
+        out.append({"id": cid, "name": c["name"], "arguments": c["arguments"]})
+    return out
 
 
 async def complete(settings: dict[str, Any], model: str, messages: list[dict[str, Any]], kind: str = "learn") -> str:
@@ -720,7 +991,7 @@ async def complete(settings: dict[str, Any], model: str, messages: list[dict[str
     async with httpx.AsyncClient(timeout=httpx.Timeout(120, connect=CONNECT_TIMEOUT_S)) as client:
         r, _ = await _send_with_retry(client, settings, {"model": model, "messages": messages, "stream": False}, stream=False)
     data = r.json()
-    text = data["choices"][0]["message"]["content"] or ""
+    text = strip_think(_content_text(data["choices"][0]["message"]))
     _emit_usage(model, kind, parse_usage(data["usage"]) if isinstance(data.get("usage"), dict) else None, int((time.time() - t0) * 1000), _prompt_chars(messages), len(text))
     return text
 

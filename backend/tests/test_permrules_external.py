@@ -44,8 +44,7 @@ def test_deny_beats_allow_on_and_skip():
     assert res(mail("ok@x.com, bad@x.com"), **d).refusal
     assert res(mail("bad@x.com"), mode="on", **d).refusal
     assert not res(mail("ok@x.com"), mode="on", **d).refusal
-    # skip-permissions runs after this refusal and never reads it (app.py: `not perm.refusal`)
-    assert res(mail("bad@x.com"), **d).refusal
+    # the skip-permissions lift is exercised in test_permrules_external_loop.py
 
 
 def test_calendar_subject():

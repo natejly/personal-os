@@ -80,7 +80,7 @@ from .subagents import AgentDefs, Subagents
 from .commands import Commands
 from .workflows import ApprovalError as WorkflowApprovalError, Engine as WorkflowEngine, Workflows
 from .runs import ACTIVE, PROMOTE_STEP, STATUSES, Run, RunBus, RunStore, Topic, args_digest
-from .toolcalls import ensure_unique_call_ids
+from .toolcalls import ensure_unique_call_ids, parse_arguments, resolve_name
 from .stuck import STUCK_NUDGE, STUCK_STOP, StuckDetector
 from .style import WritingStyle, learn_style_from_exchange, looks_like_prose
 from .modules import Module, ModuleContext, build_modules, get as module_get
@@ -1225,6 +1225,8 @@ SOFT_NUDGE = ("Budget check: about {pct}% of this reply's budget is used. "
               "Make at most one or two more tool calls, then write the final answer.")
 LOOP_STOP = ("{name} has been called with identical arguments {n} times in a row, so this reply is stopping tool use. "
              "Answer with what you already have, and say in one line what you could not finish.")
+CUT_CALL = ("the arguments were cut off at the model's output limit and the call was not run; "
+            "send a smaller call or split the content")
 REPEAT_LIMIT = 5
 TOOL_ERROR_LIMIT = 3
 
@@ -1342,13 +1344,48 @@ class Budget:
                 "seconds": round(self.elapsed(), 3), "paused_seconds": round(self.paused, 3)}
 
 
-def _call_args(c: dict[str, Any]) -> dict[str, Any]:
-    """A streamed tool call's arguments as a dict: non-object JSON is {}, unparseable text rides along as _raw."""
-    try:
-        args = json.loads(c["arguments"] or "{}")
-    except ValueError:
-        return {"_raw": c["arguments"]}
-    return args if isinstance(args, dict) else {}
+def _invalid_call_error(c: dict[str, Any], spec: Any) -> dict[str, Any]:
+    """The tool result for a call `_normalise_call` refused: the parse error, a sample of what was sent and the
+    signature to follow, or the unknown-name text with the nearest tools. Capped, it rides in the transcript."""
+    problem = str(c["_problem"])[:500]
+    if c["_invalid"] == "name":
+        return tools.tool_error(problem, alternative="call one of the tools listed in this request, by its exact name")
+    asked = c["_asked"] or c["name"]
+    if problem == CUT_CALL:
+        return tools.tool_error(f"{asked}: {CUT_CALL}"[:500], alternative=tools.ALTERNATIVE.get(asked))
+    err = tools.tool_error(f"{asked}: the arguments were not valid JSON ({problem})"[:500],
+                           expected=("required: " + (", ".join(spec.parameters.get("required") or []) or "none")) if spec else None,
+                           example=(spec.examples or [None])[0] if spec else None,
+                           alternative=tools.ALTERNATIVE.get(asked))
+    err["sent"] = str(c.get("_raw") or "")[:200]
+    return err
+
+
+def _normalise_call(c: dict[str, Any], known: set[str], advertised: list[str], cut: bool) -> None:
+    """Settle one streamed call in place, once, before anything reads it. `name` becomes the resolved tool (or
+    'invalid_tool', the original in `_asked`); `_args` is the parsed object ({} for a failed call); `_repaired` and
+    `_problem` say what happened, and `_invalid` is 'name' or 'arguments' when the call may not run. `arguments` is
+    rewritten only for a repaired call (its JSON) or a failed one ('{}'), so a valid call replays byte for byte."""
+    raw = c.get("arguments") or ""
+    c["_raw"] = raw
+    args, repaired, problem = parse_arguments(raw)
+    name, renamed, name_problem = resolve_name(str(c.get("name") or ""), known, advertised)
+    c["_asked"] = c.get("name") or ""
+    c["_repaired"] = repaired or renamed
+    c["_problem"] = None
+    c["_invalid"] = None
+    if name_problem:
+        c["name"], c["_problem"], c["_invalid"] = "invalid_tool", name_problem, "name"
+    else:
+        c["name"] = name
+        if args is None:
+            c["_problem"], c["_invalid"] = (CUT_CALL if cut else problem), "arguments"
+    if c["_invalid"]:
+        c["_args"], c["arguments"], c["_repaired"] = {}, "{}", False
+    else:
+        c["_args"] = args or {}
+        if repaired:
+            c["arguments"] = json.dumps(c["_args"], ensure_ascii=False)
 
 
 # Tools whose call changes something outside the reply: each runs at most once per (run, round, tool, args).
@@ -1805,6 +1842,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         seen_call_ids: set[str] = set()  # a provider restarts its call numbering every round; ids stay unique per reply
         quiet_retries = 0  # silent retries of an incomplete or empty round: at most one per reply
         cut_recoveries = 0  # rounds whose tool calls were cut off at the output limit
+        seen_ids = set(cinfo.get("row_ids") or [])  # rows the context was built from; a steer in it is not sent twice
+        inflight: dict[str, Any] | None = None  # the call whose tool is executing, for a cancelled run to record
         error_kind: str | None = None
         notice: str | None = None  # one line for the user on the final done, e.g. the model took no reasoning effort
         awaiting: dict[str, Any] | None = None  # the tool event of a call blocked on approval, for a cancelled run to keep
@@ -1896,6 +1935,13 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     await stream.aclose()
                 yield {"type": "overflow_recovered", **recovered}
 
+        async def _end_jobs() -> None:
+            """A chat's background shell jobs end with its reply; a desk's outlive a turn (they wake it). Called at
+            the very end of the reply, after its `done`, and on cancellation: no await sits between the last
+            steer check and `done`, so a steer is either folded in or already answered with a 409."""
+            if not desk_id:
+                await toolbox.shell.kill_conversation(conv_id)
+
         async def _final_round() -> AsyncIterator[tuple[str, Any]]:
             """Closing answer after a budget or breaker stop: one tool-free call, itself exempt from the budget."""
             nonlocal notice
@@ -1981,10 +2027,35 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     tool_events = []
                     tracer = Tracer()
                     yield "assistant_message", {**am, "context_used": used}
+                elif any(um["created_at"] >= am["created_at"] for um in steered):
+                    # Nothing was written, and the steer landed after this row: swap it for a fresh one so the
+                    # transcript reads user message, then answer. No segment closed, so no `done` and the
+                    # tracer keeps its spans (the context span belongs to the reply, not to the row).
+                    _active.pop(am["id"], None)
+                    # Just this row: on a regenerate it is the open sibling of a group, and delete_message would take
+                    # the whole group (the answer being replaced) with it. The fresh row keeps the row's place in it.
+                    with db.tx() as c:
+                        c.execute("DELETE FROM messages WHERE id=?", (am["id"],))
+                    yield "removed_message", {"id": am["id"]}
+                    am = convos.add_message(conv_id, "assistant", "", model=model, variant_of=am.get("variant_of"))
+                    _bind_stop(am["id"], stop, run)
+                    tool_ctx["message_id"] = am["id"]
+                    yield "assistant_message", {**am, "context_used": used, "trace": tracer.spans}
                 for um in steered:
-                    messages.append({"role": "user", "content": um["content"]})
+                    if um["id"] not in seen_ids:  # a steer that landed during context assembly is already in the history
+                        messages.append({"role": "user", "content": um["content"]})
                     user_text = um["content"]
                     tool_ctx["allowed_urls"] |= _urls(um["content"])
+                # The new message gets a clean slate: breakers that tripped on the work before it must not cut
+                # the work it asks for. Budget and round count are the run's and stay.
+                if partial == "loop":
+                    partial = None
+                repeats, last_sig, stuck_hits, stop_text = 0, None, 0, None
+                blocked.clear()
+                tool_errors.clear()
+                if detector is not None:
+                    detector.obs.clear()
+
             _round += 1
             budget.rounds = _round - 1  # rounds already completed: the Nth round's tool calls must still be allowed to run
             round_start = len(buf)
@@ -2101,6 +2172,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         messages.append({"role": "assistant", "content": round_text})
                     continue
                 break
+            known_names = set(toolbox.specs) | set(modes) | set(mcp_modes)
+            advertised = [s["function"]["name"] for s in tool_schemas]
+            for i, c in enumerate(calls):
+                _normalise_call(c, known_names, advertised, fr == "length" and i == len(calls) - 1)
             turn = {"role": "assistant", "content": "".join(buf[round_start:]).strip() or None,
                     "tool_calls": [{"id": c["id"], "type": "function", "function": {"name": c["name"], "arguments": _replay_args(c["arguments"])}} for c in calls]}
             if fr == "length" and not steers:
@@ -2120,7 +2195,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     break
             over = budget.exceeded()
             if (over and run is not None and run.desk_id is None and (plan_seen or active_plan)
-                    and plans.covers(run.run_id, [(c["name"], _call_args(c)) for c in calls], desk_id=run.desk_id)):
+                    and plans.covers(run.run_id, [(c["name"], c["_args"]) for c in calls], desk_id=run.desk_id)):
                 # Every call here is a step the user approved. The budget that ran out was spent drafting that
                 # plan, so refusing now would turn the approval into a dead end. The next round is still checked.
                 # Never a desk: a desk carries its remaining steps into a chained turn instead (_should_chain).
@@ -2149,7 +2224,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     # message per call, and nothing was journaled as started, so nothing replays.
                     messages.append({"role": "tool", "tool_call_id": c["id"], "content": json.dumps({"error": "Stopped by the user before this call ran; it was not executed."})})
                     continue
-                args = _call_args(c)
+                args = c["_args"] or {}
                 sig = tools.call_key(c["name"], args)
                 repeats = repeats + 1 if sig == last_sig else 1
                 last_sig = sig
@@ -2157,6 +2232,36 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     partial = "loop"
                 if partial == "loop":  # every pending call still needs a tool message, executed or not
                     messages.append({"role": "tool", "tool_call_id": c["id"], "content": stop_text or LOOP_STOP.format(name=c["name"], n=REPEAT_LIMIT)})
+                    continue
+                # A call that cannot run as sent (broken JSON, an unknown name, a cut-off call) is answered here with
+                # what was wrong. It never reaches the gate, a rule, a plan claim, an approval card or the tool:
+                # nothing the user could approve would ever work. Arguments the signature cannot take are refused
+                # below instead, once the gate has spoken: a plan-mode or turned-off refusal comes first, as it did.
+                invalid = c["_invalid"]
+                if c["_problem"]:
+                    bad = _invalid_call_error(c, toolbox.specs.get(c["name"]))
+                    shown = (c["_asked"] or c["name"])[:80] if invalid == "name" else c["name"]
+                    uid = f"{am['id']}:{c['id']}"
+                    if c["name"] in blocked:
+                        bad = tools.denied(c["name"], f"failing {TOOL_ERROR_LIMIT} times in a row and disabled for the rest of this reply")
+                    yield "tool_call", {"message_id": am["id"], "id": uid, "name": shown, "arguments": {},
+                                        "needs_approval": False, "forced": False, "proposal": None, "permission": None, "plan": None}
+                    tspan = tracer.start("tool", shown, {"round": _round, "arguments": {}, "invalid": invalid}, parent=round_span)
+                    yield "span", {"message_id": am["id"], "span": tspan}
+                    preview, err = summarize_result(bad), bad.get("error")
+                    tool_errors[c["name"]] = tool_errors.get(c["name"], 0) + 1
+                    if tool_errors[c["name"]] >= TOOL_ERROR_LIMIT:
+                        blocked.add(c["name"])
+                    tracer.end(tspan, {"result_chars": len(preview), "invalid": invalid}, error=err)
+                    event = {"id": uid, "name": shown, "arguments": {}, "result_preview": preview, "duration_ms": 0,
+                             "error": err, "images": None, "undo": None, "approval": None, "plan": None, "forced": False,
+                             "tainted": False, "blocked": None, "breaker": partial, "proposal": None, "artifact": None,
+                             "invalid": invalid}
+                    tool_events.append(event)
+                    yield "tool_result", {"message_id": am["id"], **event}
+                    yield "span", {"message_id": am["id"], "span": tspan}
+                    messages.append({"role": "tool", "tool_call_id": c["id"],
+                                     "content": tool_results.for_model(conv_id, am["id"], c["name"], bad, untrusted=False)})
                     continue
                 raw_mode = modes.get(c["name"], "off")
                 spec = toolbox.specs.get(c["name"])
@@ -2233,6 +2338,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 plan: dict[str, Any] | None = None     # this call's own proposed plan, when it is propose_plan
                 claimed: dict[str, Any] | None = None  # the approved plan step this call consumed instead of asking
                 pre: Any = None                        # a result settled before the gate: nothing to approve
+                if c["name"] != PLAN_TOOL and mode != "off" and (bad := toolbox.precheck(c["name"], args)) is not None:
+                    # Arguments the tool's signature cannot take: nothing the user could approve would ever run, so
+                    # no card opens and no plan step is spent on it. Not the plan tool: its placeholder function is
+                    # narrower than its schema, and normalize_plan below is its check.
+                    pre, invalid = bad, "schema"
                 if c["name"] == PLAN_TOOL and mode != "off":
                     # A plan is nothing but its card, so it asks whatever the mode says, and no standing grant
                     # below can turn that off. It is not a taint upgrade either, so it is not `forced`.
@@ -2255,7 +2365,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         # Its own event, because the card needs the whole plan with its steps and
                         # their digests; the tool_call event carries only the raw arguments.
                         yield "plan_card", {"message_id": am["id"], "call_id": uid, "plan": plan}
-                elif (plan_seen or active_plan) and c["name"] != PLAN_TOOL:
+                elif (plan_seen or active_plan) and c["name"] != PLAN_TOOL and pre is None:
                     # Digest binding: an approved step whose arguments hash to the same thing stands in for the
                     # modal, exactly once. A forced approval never consults a plan -- untrusted content in this
                     # reply must always reach the user -- and a claim only matches inside its own run.
@@ -2301,7 +2411,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                     "permission": perm.card() if asks else None,
                                     "plan": {"plan_id": claimed["plan_id"], "idx": claimed["idx"], "title": claimed["title"]} if claimed else None}
                 tspan = tracer.start("tool", c["name"], {"round": _round, "arguments": _short(args), "mode": mode, "forced": forced,
-                                                         "plan_step": f"{claimed['plan_id']}#{claimed['idx']}" if claimed else None},
+                                                         "plan_step": f"{claimed['plan_id']}#{claimed['idx']}" if claimed else None,
+                                                         **({"repaired": True} if c["_repaired"] else {}),
+                                                         **({"invalid": invalid} if invalid else {})},
                                  parent=round_span)
                 yield "span", {"message_id": am["id"], "span": tspan}
                 t0 = time.time()
@@ -2351,6 +2463,19 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                 if plan is not None:  # a stop means "stop", not "never": this no does not block later
                                     plans.decide(uid, "deny", by="stop", note="You stopped the reply before answering this plan.")
                                 break
+                            if steers and not desk_id:
+                                # The user wrote instead of answering the card: that is a no, with their words as the
+                                # reason. `by="steer"` keeps a plan re-proposable (only a user's own no blocks it), and
+                                # the loop top folds the message in once this call has its result.
+                                note = str(steers[-1]["content"]).strip()[:500]
+                                fut.set_result("deny")
+                                _approval_notes[uid] = note
+                                if store is not None:
+                                    store.decide(uid, "deny", by="steer", note=note)
+                                if plan is not None:
+                                    plans.decide(uid, "deny", by="steer", note=note)
+                                break
+
                             # Park, never auto-deny, and never in front of somebody who is looking at
                             # the card: with a viewer attached the run waits as long as it takes.
                             if (park_after > 0 and waited >= park_after and store is not None
@@ -2514,12 +2639,14 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     if proposal_only(run) and run is not None:
                         result = _propose(run, c["name"], args, uid, tool_ctx)
                     else:
+                        inflight = {"id": uid, "name": c["name"], "arguments": args}
                         result, interrupted = await _await_tool(_mcp_call(c["name"], args), stop,
                                                                 grace=STOP_GRACE_SECONDS if danger in IDEMPOTENT_DANGER else 0.0)
                         mcp_ran = not interrupted
                     ran = not interrupted
                 else:
                     tool_ctx["fs_outside_ok"] = fs_ask  # the user approved this write (or granted the folder)
+                    inflight = {"id": uid, "name": c["name"], "arguments": args}
                     try:
                         result, interrupted = await _await_tool(
                             _call_tool(run, _round, c["name"], args, tool_ctx, uid), stop,
@@ -2561,10 +2688,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 event = {"id": uid, "name": c["name"], "arguments": args, "result_preview": preview, "duration_ms": ms,
                          "error": err, "images": images or None, **edit_info,
                          "undo": result.get("undo") if isinstance(result, dict) and isinstance(result.get("undo"), dict) else None,
-                         "approval": (("plan" if claimed else decision) if mode == "ask" else None),
+                         "approval": (("plan" if claimed else decision) if mode == "ask" and not invalid else None),
                          "plan": {"plan_id": claimed["plan_id"], "idx": claimed["idx"], "title": claimed["title"]} if claimed else None,
                          "forced": forced, "tainted": tainted, "blocked": c["name"] if was_blocked else None, "breaker": partial,
                          **({"interrupted": True, "pending": False} if interrupted else {}),
+                         **({"repaired": True} if c["_repaired"] else {}),
+                         **({"invalid": invalid} if invalid else {}),
                          "blocked_by": "plan_mode" if blocked_reason == PLAN_BLOCKED else None,
                          "proposal": (result.get("proposal_id") if proposing and isinstance(result, dict) else None),
                          # Persisted with the tool event, so the card finds its artifact again after a reload.
@@ -2587,6 +2716,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     # actually worked, so the plan can be read after the fact.
                     plans.finish(uid, not err, err)
                 tool_events.append(event)
+                inflight = None
                 yield "tool_result", {"message_id": am["id"], **event}
                 if made and not err:
                     yield "artifact", {"message_id": am["id"], "call_id": uid, "conversation_id": conv_id, **made}
@@ -2632,12 +2762,18 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         text = "".join(buf).strip()
         # A call still waiting on approval keeps its card: the approval row stays pending and can still be answered.
         kept = tool_events + ([awaiting] if awaiting else [])
+        if inflight:
+            # The call was executing when the task was cut: whether it took effect is unknown, and its journal row
+            # stays `started`, so a resume does not repeat it either.
+            kept = kept + [{**inflight, "result_preview": "", "duration_ms": 0, "pending": False, "interrupted": True,
+                            "error": "The app closed while this was running; it may or may not have completed."}]
         gone = None
         if run is not None and run.kind == "chat" and not desk_id:
             gone = "Interrupted: the backend shut down while this reply was running."
         convos.finish_message(am["id"], text, gone or (None if text else "Cancelled"), used, kept, tracer.spans,
                               "".join(rbuf).strip() or None, outcome="interrupted")
         convos.touch(conv_id)
+        await _end_jobs()
         raise
     except Exception as e:  # noqa: BLE001
         error = str(e)
@@ -2646,8 +2782,6 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             yield "span", {"message_id": am["id"], "span": s}
     finally:
         _active.pop(am["id"], None)
-        if not desk_id:  # a chat's background shell jobs end with its run; a desk's outlive a turn (they wake it)
-            await toolbox.shell.kill_conversation(conv_id)
 
     text = "".join(buf).strip()
     if not text and not error and not stop.is_set() and not tool_events and not desk_id:
@@ -2672,6 +2806,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                    "trace": tracer.spans, "stopped": stop.is_set(), "partial": partial, "segment": False,
                    "tainted": tool_ctx["tainted"], "taint_sources": tool_ctx["taint_sources"],
                    "reasoning": reasoning, "outcome": outcome, "error_kind": error_kind, "notice": notice}
+    await _end_jobs()  # after the done: _run_chat has marked the run replied, so a steer already gets its 409
     if tool_ctx.get("learned"):
         yield "learned", tool_ctx["learned"]
 
@@ -3003,7 +3138,9 @@ async def steer_run(id: str, body: SteerIn) -> dict[str, Any]:
 
     The message is persisted and published here, so a window sees it immediately. Nothing can slip
     in after the round loop ends: `run.replied` is set in the same synchronous step that publishes
-    `done`, with no await between, so a handler that observes `answering` still has a round coming.
+    `done`, with no await between, so a handler that observes `answering` still has a round coming. The
+    generator holds the other end of that: after its last steer check it awaits nothing before `done`
+    (shell teardown runs after it), so a steer is either folded in or gets this 409 and becomes a new run.
     """
     if not convos.get(id):
         raise HTTPException(404, "Conversation not found")

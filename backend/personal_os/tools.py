@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import inspect
 import datetime as dt
 import html
 import ipaddress
@@ -726,6 +727,27 @@ class Toolbox:
             return "ask"
         return mode
 
+    @staticmethod
+    def _bad_arguments(name: str, spec: ToolSpec, e: Exception) -> dict[str, Any]:
+        return tool_error(f"{name}: bad arguments — {_first_line(e)}",
+                          expected="required: " + (", ".join(spec.parameters.get("required") or []) or "none"),
+                          example=(spec.examples or [None])[0], alternative=ALTERNATIVE.get(name))
+
+    def precheck(self, name: str, args: dict[str, Any]) -> dict[str, Any] | None:
+        """The error `call` would return for arguments the tool's signature cannot take, found before anything is
+        approved or run. Binds only (no type checks: tools coerce), so None means the call may go on. Not a spec
+        (a connector tool) is None as well."""
+        spec = self.specs.get(name)
+        if not spec:
+            return None
+        try:
+            inspect.signature(spec.fn).bind(None, **args)
+        except TypeError as e:
+            return self._bad_arguments(name, spec, e)
+        except ValueError:  # a callable with no introspectable signature
+            return None
+        return None
+
     async def call(self, name: str, args: dict[str, Any], ctx: dict[str, Any]) -> Any:
         spec = self.specs.get(name)
         if not spec:
@@ -740,9 +762,7 @@ class Toolbox:
         try:
             out = await spec.fn(ctx, **args)
         except TypeError as e:  # backstop: signature mismatch, wrong types
-            return tool_error(f"{name}: bad arguments — {_first_line(e)}",
-                              expected="required: " + (", ".join(spec.parameters.get("required") or []) or "none"),
-                              example=(spec.examples or [None])[0], alternative=ALTERNATIVE.get(name))
+            return self._bad_arguments(name, spec, e)
         except Exception as e:  # noqa: BLE001
             log.warning("tool %s failed", name, exc_info=True)
             if type(e).__name__ == "GoogleNotConnected":

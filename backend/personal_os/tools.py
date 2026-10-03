@@ -14,6 +14,7 @@ import ipaddress
 import json
 import logging
 import os
+import posixpath
 import re
 import socket
 import time
@@ -40,7 +41,7 @@ from . import scheduling, verify
 from .jobs import local_tz_name, parse_when, valid_cron, valid_tz
 from . import audiocap, stt
 from .learn import SELF_LABELS, SKILL_STATUSES, induce_skill, run_transcript
-from .microvm import Sandboxes
+from .microvm import SandboxError, Sandboxes
 from .repos import Documents, Graph, Memories
 from .sandbox import run_python
 
@@ -144,6 +145,7 @@ ALTERNATIVE = {
     "sandbox_read_file": "ask the user to paste the file contents",
     "sandbox_list_files": "ask the user what the sandbox should contain",
     "sandbox_put_document": "read_document, then sandbox_write_file the excerpt you need",
+    "sandbox_export_file": "tell the user the path in the sandbox, or print a text file's contents in your reply",
     "sandbox_reset": "continue with the sandbox as it is",
     "sandbox_checkpoint": "continue without a checkpoint, or copy the files you care about out with sandbox_read_file",
     "sandbox_restore": "sandbox_reset to start fresh",
@@ -1846,6 +1848,31 @@ def _register_sandbox(self: Toolbox) -> None:
     R("sandbox_put_document", ToolSpec("sandbox_put_document", "Copy an uploaded document's extracted text into the sandbox as a file, so you can edit, transform or analyse it with sandbox_exec.",
         _obj({"document_id": {"type": "string"}, "path": {"type": "string", "description": "destination path; defaults to the document's name"}}, ["document_id"]), sandbox_put_document, "sandbox", "executes",
         examples=[{"document_id": "doc_3f2a91"}, {"document_id": "doc_3f2a91", "path": "input/report.txt"}]))
+
+    async def sandbox_export_file(ctx: dict[str, Any], path: str, dest: str | None = None) -> Any:
+        desk_id = str(ctx.get("desk_id") or "")
+        ws = self.workspace
+        if not desk_id or ws is None:
+            return tool_error("sandbox_export_file saves into a cowork desk's workspace, and this chat has no desk.",
+                              alternative=ALTERNATIVE["sandbox_export_file"])
+        try:
+            gp, data = await run(sb.export_file, ctx["conversation_id"], path)
+            rel = (dest or "").strip() or "outputs/" + posixpath.basename(gp)
+            target, room = ws.reserve_file(desk_id, rel)
+            if len(data) > room:
+                return tool_error("This workspace has no room for the file.", alternative=ALTERNATIVE["sandbox_export_file"])
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+        except (SandboxError, WorkspaceError) as e:
+            return tool_error(str(e), field="path", alternative=ALTERNATIVE["sandbox_export_file"])
+        out: dict[str, Any] = {"saved": ws._rel_of(desk_id, target), "bytes": len(data), "from_sandbox": gp}
+        if sb.networked(ctx["conversation_id"]):
+            out["network"] = True
+        return _mark(ctx, out, "sandbox_export_file")
+    R("sandbox_export_file", ToolSpec("sandbox_export_file", "Copy any file (binary included, up to 10 MB) from the sandbox's /workspace into this desk's workspace (default outputs/<name>) so the user can open it. Never overwrites an existing file.",
+        _obj({"path": {"type": "string", "description": "file under /workspace"}, "dest": {"type": "string", "description": "destination in the desk workspace; default outputs/<file name>"}}, ["path"]),
+        sandbox_export_file, "sandbox", "writes",
+        examples=[{"path": "report.pdf"}, {"path": "build/chart.xlsx", "dest": "outputs/chart.xlsx"}]))
 
     async def sandbox_reset(ctx: dict[str, Any]) -> Any:
         return await run(sb.reset, ctx["conversation_id"])

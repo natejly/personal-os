@@ -6,7 +6,9 @@ import sqlite3
 from typing import Any
 
 from .canvas import _INSERT_WINDOW, _RENAMED_DEFAULTS, FALLBACK_NAME, WIDGET_KINDS, Canvases, clamp_opacity
+from .dashboards import Dashboards
 from .db import Database, new_id, now, row_to_dict
+from .notes import Notes
 
 # Owned here, like canvas.py's tables: CREATE TABLE IF NOT EXISTS in the constructor covers existing databases.
 SCHEMA = """
@@ -55,9 +57,11 @@ def _exists(c: sqlite3.Connection, table: str, rid: str | None) -> bool:
 
 
 class CanvasPresets:
-    def __init__(self, db: Database, canvases: Canvases):
+    def __init__(self, db: Database, canvases: Canvases, notes: Notes | None = None, dashboards: Dashboards | None = None):
         self.db = db
         self.canvases = canvases
+        self.notes = notes
+        self.dashboards = dashboards
         with db.tx() as c:
             c.executescript(SCHEMA)
             for old, new in _RENAMED_DEFAULTS:
@@ -101,6 +105,65 @@ class CanvasPresets:
     def delete(self, id: str) -> None:
         with self.db.tx() as c:
             c.execute("DELETE FROM canvas_presets WHERE id=?", (id,))
+
+    # ---------- portable files ----------
+    # Notes and dashboard widgets travel with their content; every other referent stays a ref (a chat
+    # must never leave the machine, and boards/projects/artifacts have no body that fits a window).
+    def export(self, id: str) -> dict[str, Any] | None:
+        p = self.get(id)
+        if not p or not self.notes or not self.dashboards:
+            return None
+        embedded: dict[str, Any] = {}
+        windows = []
+        for w in p["windows"] or []:
+            ref, kind = w.get("ref_id"), w.get("kind")
+            if kind == "note" and ref:
+                n = self.notes.get(ref)
+                if not n:
+                    continue
+                embedded[ref] = {"kind": "note", "body": n["body"], "color": n["color"]}
+            elif kind == "dashboard-widget" and ref:
+                d = self.dashboards.widget(ref)
+                if not d:
+                    continue
+                embedded[ref] = {"kind": "dashboard-widget", **{k: d[k] for k in ("title", "prompt", "code", "output", "width", "height", "refresh_minutes", "spec")}, "widget_kind": d["kind"]}
+            windows.append({**w, "project_id": None})
+        return {"grain_preset": 1, "name": p["name"], **{k: p[k] for k in ("snap_mode", "grid_size", "zoom", "pan_x", "pan_y", "wallpaper")},
+                "windows": windows, "embedded": embedded}
+
+    def import_file(self, data: dict[str, Any], instantiate: bool = True) -> dict[str, Any]:
+        """Recreate each embedded referent under a new id, store the preset against the new ids, optionally make its canvas.
+        Raises ValueError on a file that is not a preset export."""
+        if data.get("grain_preset") != 1 or not isinstance(data.get("windows"), list) or not self.notes or not self.dashboards:
+            raise ValueError("Not a preset file")
+        emb = data.get("embedded") or {}
+        remap: dict[str, str] = {}
+        dash_id = ""
+        for old, e in emb.items():
+            if e.get("kind") == "note":
+                remap[old] = self.notes.create(str(e.get("body", "")), str(e.get("color") or "yellow"))["id"]
+            elif e.get("kind") == "dashboard-widget":
+                dash_id = dash_id or self.dashboards.create(f"{data.get('name') or 'Imported'} widgets")["id"]
+                # Data sources are machine-local, so an imported widget starts with none.
+                remap[old] = self.dashboards.create_widget(
+                    dash_id, str(e.get("title", "")), str(e.get("widget_kind", "")), str(e.get("prompt", "")), None, str(e.get("code", "")),
+                    str(e.get("output", "")), int(e.get("width", 1)), int(e.get("height", 280)), int(e.get("refresh_minutes", 60)), e.get("spec") or {})["id"]
+        windows = []
+        for w in data["windows"]:
+            if not isinstance(w, dict) or not all(isinstance(w.get(k), (int, float)) for k in ("x", "y", "w", "h")):
+                continue
+            windows.append({**w, "ref_id": remap.get(w.get("ref_id"), w.get("ref_id")), "project_id": None})
+        pid = new_id()
+        t = now()
+        with self.db.tx() as c:
+            c.execute(
+                "INSERT INTO canvas_presets(id,name,project_id,snap_mode,grid_size,zoom,pan_x,pan_y,wallpaper,windows,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                (pid, str(data.get("name") or "").strip() or FALLBACK_NAME, None, data.get("snap_mode") or "both", int(data.get("grid_size") or 16),
+                 float(data.get("zoom") or 1.0), float(data.get("pan_x") or 0), float(data.get("pan_y") or 0), str(data.get("wallpaper") or ""), json.dumps(windows), t, t))
+        out = {"preset": self.get(pid)}
+        if instantiate:
+            out["canvas"] = self.instantiate(pid)
+        return out
 
     def instantiate(self, id: str, name: str | None = None) -> dict[str, Any] | None:
         """None means no such preset. Windows whose referent is gone (or whose kind is unknown) are skipped and counted.

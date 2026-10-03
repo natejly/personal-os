@@ -221,6 +221,38 @@ def test_maximized_then_hidden() -> None:
     j("DELETE", f"/canvas-presets/{p['id']}")
 
 
+def test_export_import_round_trip() -> None:
+    import json
+
+    from personal_os.app import db
+
+    cid = j("POST", "/canvases", {"name": "Portable"})["id"]
+    note = j("POST", "/notes", {"body": "carry me", "color": "blue"})
+    dash = j("POST", "/dashboards", {"name": "D"})
+    wid = j("POST", f"/dashboards/{dash['id']}/widgets", {"title": "W", "kind": "html", "prompt": "p", "code": "<b>x</b>"})["id"]
+    j("POST", f"/canvases/{cid}/windows", {"kind": "note", "ref_id": note["id"]})
+    j("POST", f"/canvases/{cid}/windows", {"kind": "dashboard-widget", "ref_id": wid})
+    j("POST", f"/canvases/{cid}/windows", {"kind": "todos"})
+    p = j("POST", "/canvas-presets", {"canvas_id": cid})
+    exp = j("GET", f"/canvas-presets/{p['id']}/export")
+    check(exp["embedded"][note["id"]]["body"] == "carry me", "export embeds the note body")
+    check(exp["embedded"][wid]["code"] == "<b>x</b>", "export embeds the widget spec")
+    # Drop the referents, then import: they must be recreated, not skipped.
+    j("DELETE", f"/notes/{note['id']}")
+    j("DELETE", f"/dashboards/{dash['id']}")
+    got = j("POST", "/canvas-presets/import", {"file": json.loads(json.dumps(exp))})
+    made = got["canvas"]
+    check(made["skipped"] == 0, "nothing skipped: referents were recreated")
+    check([w["kind"] for w in made["windows"]] == ["note", "dashboard-widget", "todos"], "same kinds and count")
+    nid = made["windows"][0]["ref_id"]
+    check(nid != note["id"] and j("GET", f"/notes/{nid}")["body"] == "carry me", "note recreated under a new id")
+    with db.tx() as c:
+        check(c.execute("SELECT code FROM widgets WHERE id=?", (made["windows"][1]["ref_id"],)).fetchone()[0] == "<b>x</b>", "widget recreated")
+    check(j("GET", f"/canvas-presets/{got['preset']['id']}")["name"] == p["name"], "preset stored")
+    j("POST", "/canvas-presets/import", {"file": {"windows": []}}, expect=400)
+    j("GET", "/canvas-presets/nope/export", expect=404)
+
+
 def test_delete() -> None:
     j("DELETE", f"/canvases/{fx['cid']}")
     check(len(j("GET", f"/canvas-presets/{fx['pid']}")["windows"]) == 3, "deleting the source canvas keeps the preset")
@@ -232,7 +264,7 @@ def test_delete() -> None:
 
 TESTS = [test_create_from_canvas, test_blank_name_and_unknown_canvas, test_list_and_get, test_rename, test_instantiate,
          test_dangling_ref, test_needs_ref_with_null_ref, test_unknown_kind_in_stored_json, test_project_binding,
-         test_empty_canvas, test_maximized_then_hidden, test_delete]
+         test_empty_canvas, test_maximized_then_hidden, test_export_import_round_trip, test_delete]
 
 if __name__ == "__main__":
     failures = 0

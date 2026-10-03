@@ -73,3 +73,19 @@ export const isUntitled = (title: string | null | undefined): boolean => {
 
 /** The headline as a doc title: one line, at most 80 characters. */
 export const headlineTitle = (headline: string): string => headline.replace(/\s+/g, ' ').trim().slice(0, 80).trim()
+
+/** The built-in templates, then the user's own, as one picker list. */
+export const BUILTIN_TEMPLATES: { id: string; label: string }[] = [
+  { id: 'general', label: 'General' },
+  { id: 'standup', label: 'Standup' },
+  { id: 'one_on_one', label: 'One on one' },
+  { id: 'user_interview', label: 'User interview' },
+  { id: 'sales_call', label: 'Sales call' },
+  { id: 'lecture', label: 'Lecture' }
+]
+export const mergeTemplates = (custom: { id: string; name: string }[] = []): { id: string; label: string }[] =>
+  [...BUILTIN_TEMPLATES, ...custom.map((c) => ({ id: c.id, label: c.name }))]
+
+/** The focus line a recipe fills in, or the current one when the id is unknown (a deleted recipe). */
+export const applyRecipe = (recipes: { id: string; prompt?: string }[], id: string, current = ''): string =>
+  recipes.find((r) => r.id === id)?.prompt ?? current

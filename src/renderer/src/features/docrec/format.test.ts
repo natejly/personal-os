@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { fmtDuration, headlineTitle, isUntitled, modeLabel, pendingLabel, recordingWhen, summaryCopy } from './format'
+import { applyRecipe, fmtDuration, headlineTitle, isUntitled, mergeTemplates, modeLabel, pendingLabel, recordingWhen, summaryCopy } from './format'
 
 test('fmtDuration steps from seconds to minutes to hours', () => {
   assert.equal(fmtDuration(42000), '42s')
@@ -59,4 +59,12 @@ test('isUntitled is true only for blank or placeholder titles', () => {
 test('headlineTitle clips to 80 characters on one line', () => {
   assert.equal(headlineTitle('a\n b'), 'a b')
   assert.equal(headlineTitle('x'.repeat(200)).length, 80)
+test('mergeTemplates lists the built-ins then the custom ones', () => {
+  const t = mergeTemplates([{ id: 'c_brief', name: 'Brief' }])
+  assert.equal(t[0].id, 'general')
+  assert.deepEqual(t[t.length - 1], { id: 'c_brief', label: 'Brief' })
+test('applyRecipe fills the focus line and leaves it alone for an unknown id', () => {
+  const recipes = [{ id: 'r_owners', prompt: 'owners only' }]
+  assert.equal(applyRecipe(recipes, 'r_owners'), 'owners only')
+  assert.equal(applyRecipe(recipes, 'r_gone', 'keep me'), 'keep me')
 })

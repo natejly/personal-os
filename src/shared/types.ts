@@ -2261,6 +2261,14 @@ export type MeetingStatus =
 /** Shapes the enhance prompt and the notes skeleton; keys into meeting_notes.TEMPLATES. */
 export type MeetingTemplate = 'general' | 'standup' | 'one_on_one' | 'user_interview' | 'sales_call' | 'lecture'
 
+/** A named piece of user-written prose: a template's instructions or a recipe's prompt. */
+export interface SavedPrompt {
+  id: string
+  name: string
+  instructions?: string
+  prompt?: string
+}
+
 /** A list row: counts and a preview, never a body. */
 export interface Meeting {
   id: string
@@ -2439,7 +2447,13 @@ export interface MeetingConfig {
   sttModel: string
   /** whisper.cpp ggml model file, for the local backend. */
   whisperModelPath: string
-  template: MeetingTemplate
+  template: MeetingTemplate | string
+  /** User-authored prose templates; ids start with c_. */
+  customTemplates: SavedPrompt[]
+  /** Saved focus lines for a summary; prompts are capped at 300 characters. */
+  recipes: SavedPrompt[]
+  /** 'auto' follows the transcript's majority language, otherwise a language name. */
+  summaryLanguage: string
   enhanceOnStop: boolean
   /** Blank falls back to the extraction model, then the default model. */
   enhanceModel: string

@@ -1,19 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ListPlus, Quote, Sparkles } from 'lucide-react'
 import type { DocRecording, FullMeeting, MeetingActionItem } from '@shared/types'
 import MarkdownPreview from '../../components/MarkdownPreview'
+import { api } from '../../lib/api'
 import { evidenceChunks } from './evidence'
-import { headlineTitle, isUntitled, SUMMARY_TRUST, summaryCopy } from './format'
-
-/** Mirrors the backend's templates (`meeting_notes.TEMPLATES`); the first is the default. */
-const TEMPLATES: { id: string; label: string }[] = [
-  { id: 'general', label: 'General' },
-  { id: 'standup', label: 'Standup' },
-  { id: 'one_on_one', label: 'One on one' },
-  { id: 'user_interview', label: 'User interview' },
-  { id: 'sales_call', label: 'Sales call' },
-  { id: 'lecture', label: 'Lecture' }
-]
+import { applyRecipe, headlineTitle, isUntitled, mergeTemplates, SUMMARY_TRUST, summaryCopy } from './format'
 
 export interface SummaryViewProps {
   row: DocRecording
@@ -34,6 +25,12 @@ export interface SummaryViewProps {
 export default function SummaryView({ row, meeting, actions, summarizing, error, onSummarize, onAddTodos, onSource, docTitle, onUseTitle }: SummaryViewProps): JSX.Element {
   const [template, setTemplate] = useState<string>(meeting?.template ?? row.template ?? 'general')
   const [focus, setFocus] = useState('')
+  const [custom, setCustom] = useState<{ id: string; name: string }[]>([])
+  const [recipes, setRecipes] = useState<{ id: string; name: string; prompt?: string }[]>([])
+  useEffect(() => {
+    api.meetings.config().then((c) => { setCustom(c.customTemplates ?? []); setRecipes(c.recipes ?? []) }).catch(() => {})
+  }, [])
+  const TEMPLATES = mergeTemplates(custom)
   const summary = meeting?.enhanced ?? ''
   const copy = summaryCopy(row.summary_state, row.doc_mode, row.status, error, summary.trim() !== '')
   const dictation = row.doc_mode === 'dictate'
@@ -74,9 +71,18 @@ export default function SummaryView({ row, meeting, actions, summarizing, error,
               </select>
             </label>
           </div>
+          {recipes.length > 0 && (
+            <label className="dr-field">
+              <span>Recipe</span>
+              <select value="" disabled={summarizing} onChange={(e) => setFocus(applyRecipe(recipes, e.target.value, focus))}>
+                <option value="">Choose a saved focus…</option>
+                {recipes.map((r) => <option key={r.id} value={r.id}>{r.name}</option>)}
+              </select>
+            </label>
+          )}
           <label className="dr-field">
             <span>Focus (optional)</span>
-            <input value={focus} maxLength={200} placeholder="For example: decisions and owners only"
+            <input value={focus} maxLength={300} placeholder="For example: decisions and owners only"
               onChange={(e) => setFocus(e.target.value)} disabled={summarizing} />
           </label>
           <button className="ghost-btn" disabled={!canRun}

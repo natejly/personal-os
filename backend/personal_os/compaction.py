@@ -292,7 +292,11 @@ def router(compactor: Compactor, convos: Any, settings_fn: Callable[[], dict[str
         cfg = settings_fn()
         s = compactor.get(conv_id)
         hist = compactor.build_history(convos.history_rows(conv_id), s)
+        with compactor.db.tx() as c:  # spend covers every call, including the rows the summary folded away
+            spend = c.execute("SELECT COALESCE(SUM(cost),0) AS cost, COALESCE(SUM(prompt_tokens+completion_tokens),0) AS tokens"
+                              " FROM usage_log WHERE conversation_id=?", (conv_id,)).fetchone()
         return {"window": _int(cfg, "contextWindow", 128000), "estimated_tokens": estimate_messages(hist),
-                "compact_at": _float(cfg, "compactAt", 0.7), "summary": s}
+                "compact_at": _float(cfg, "compactAt", 0.7), "summary": s,
+                "spend": {"cost": spend["cost"], "tokens": spend["tokens"]}}
 
     return r

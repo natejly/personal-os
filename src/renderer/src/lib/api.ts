@@ -94,6 +94,8 @@ const fresh = (refresh: boolean): string => (refresh ? '&refresh=true' : '')
 export type Scope = 'all' | 'personal' | string
 const scope = (s: Scope): string => `project_id=${encodeURIComponent(s)}&include_global=false`
 
+export interface DocHit { doc_id: string; title: string; snippet: string; via?: 'recording' }
+
 export const api = {
   health: () => req<{ ok: boolean; data_dir: string }>('/health'),
   diagnostics: () => req<Record<string, unknown>>('/diagnostics'),
@@ -631,6 +633,7 @@ export const api = {
   },
   docs: {
     list: (s: Scope = 'all', q = '') => req<Doc[]>(`/docs?project_id=${encodeURIComponent(s)}&q=${encodeURIComponent(q)}`),
+    search: (q: string, s: Scope = 'all') => req<DocHit[]>(`/docs/search?q=${encodeURIComponent(q)}&project_id=${encodeURIComponent(s)}`),
     get: (id: string) => req<FullDoc>(`/docs/${id}`),
     create: (d: { title?: string; content?: string; folder?: string; project_id?: string | null }) => req<FullDoc>('/docs', { method: 'POST', body: json(d) }),
     /** Autosave. Records a revision, folding a burst of keystrokes into one history entry. */

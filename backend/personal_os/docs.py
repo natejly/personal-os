@@ -239,6 +239,8 @@ class Docs:
         self.on_delete: Any = None
         # Called with (doc id, new project id or None) after a doc changed project (app.py keeps its recordings in step).
         self.on_move: Any = None
+        # (query, limit) -> recording hits [{doc_id, snippet}]; wired by app.py so spoken words are searchable.
+        self.recording_search: Any = None
         # Serialises `daily`, so a double click cannot find nothing twice and create two notes.
         self._daily_lock = threading.Lock()
         with db.tx() as c:
@@ -406,6 +408,17 @@ class Docs:
                 out.append({"doc_id": d["id"], "title": d["title"], "snippet": (r["snippet"] or "").strip()})
                 if len(out) >= limit:
                     break
+            seen = {o["doc_id"] for o in out}
+            for h in (self.recording_search(q, max(1, limit) * 3) if self.recording_search else []):
+                if len(out) >= limit:
+                    break
+                if h["doc_id"] in seen:
+                    continue
+                d = c.execute("SELECT id, title, project_id FROM docs WHERE id=? AND deleted_at IS NULL", (h["doc_id"],)).fetchone()
+                if not d or (project_id != "__all__" and d["project_id"] != project_id):
+                    continue
+                seen.add(d["id"])
+                out.append({"doc_id": d["id"], "title": d["title"], "snippet": h["snippet"], "via": "recording"})
         return out
 
     # ---- writes ----

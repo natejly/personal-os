@@ -173,6 +173,13 @@ export default function DocsView(): JSX.Element {
       if (!h) return ''
       const { start } = h.getSelection()
       return h.getText().slice(Math.max(0, start - 80), start)
+    },
+    // "scratch that": range-checked, so text typed since the clip is never eaten.
+    (text) => {
+      const h = editor.current
+      if (!h || !text) return
+      const { start } = h.getSelection()
+      if (h.getText().slice(0, start).endsWith(text)) h.replaceRange(start - text.length, start, '')
     }
   )
 

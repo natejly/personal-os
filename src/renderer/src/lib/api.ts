@@ -350,6 +350,8 @@ export const api = {
   assist: {
     complete: (p: { kind: string; before: string; after?: string; context?: string }) =>
       req<{ completion: string }>('/assist/complete', { method: 'POST', body: json(p) }),
+    cleanDictation: (text: string) =>
+      req<{ text: string }>('/docs/dictation/clean', { method: 'POST', body: json({ text }) }),
     mailReview: (p: { to?: string; subject?: string; body: string; reply_context?: string }) =>
       req<{ feedback: string[]; revised: string }>('/assist/mail-review', { method: 'POST', body: json(p) })
   },

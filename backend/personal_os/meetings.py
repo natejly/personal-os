@@ -210,6 +210,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "diarizeEmbeddingModel": "",
     "diarizeThreshold": 0.5,
     "diarizeSpeakers": 0,       # 0 = decide from the audio
+    "dictationCleanup": False,  # model pass over each dictated clip (assist.clean_dictation)
 }
 
 # `patch` is the user's door into a meeting. Everything the recorder owns - started_at,

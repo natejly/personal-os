@@ -1589,6 +1589,7 @@ class MeetingService:
             return None
         session.pause(False)
         self._auto_paused.discard(meeting_id)
+        self._note(meeting_id, clear=("Paused after",))
         # The silence clock restarts: time spent paused is not time the mic was quiet.
         self._heard[meeting_id] = {c: now() for c in getattr(session, "captures", {})}
         return self.status()

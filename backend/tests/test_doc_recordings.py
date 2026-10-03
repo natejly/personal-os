@@ -697,6 +697,8 @@ def test_silent_for_and_the_silence_pause_use_the_clock_and_only_pause() -> None
         assert "Paused after 2 minutes of silence" in w.repo.get(m["id"])["error"]
         w.svc.resume(m["id"])
         assert not sess.paused and not w.svc.status()["active"]["auto_paused"]
+        assert "Paused after" not in (w.repo.get(m["id"])["error"] or "")
+        assert "Paused after" not in (w.svc.status()["active"]["error"] or "")
         assert w.svc.status()["active"]["channels"][0]["silent_for_s"] == 0
         w.svc.set_config({"silencePauseMinutes": 0})
         clock[0] += 99999

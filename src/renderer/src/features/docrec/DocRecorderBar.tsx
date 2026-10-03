@@ -50,9 +50,9 @@ export default function DocRecorderBar({ docId }: { docId: string }): JSX.Elemen
       <span className="dr-bar-mode">{state === 'paused' ? 'Paused' : state === 'stalled' ? 'Capture stopped' : dictating ? 'Dictating' : modeLabel(active.doc_mode)}</span>
       <span className="dr-clock">{formatOffset(elapsed)}</span>
       {lag && <span className="dr-lag">{lag}</span>}
-      {silent && !warning && <span className="dr-warn" title={silent}><AlertTriangle size={12} /> {silent}</span>}
+      {silent && <span className="dr-warn" title={silent}><AlertTriangle size={12} /> {silent}</span>}
       {active.auto_paused && state === 'paused' && <span className="dr-warn">Still recording?</span>}
-      {warning && <span className="dr-warn" title={warning}><AlertTriangle size={12} /> {warning}</span>}
+      {warning && !(active.auto_paused && warning.startsWith('Paused after')) && <span className="dr-warn" title={warning}><AlertTriangle size={12} /> {warning}</span>}
       <span className="dr-bar-actions">
         {state === 'recording' && (
           <button className="ghost-btn dr-small" disabled={busy} onClick={() => void useDocRec.getState().pause()}><Pause size={12} /> Pause</button>

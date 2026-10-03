@@ -61,7 +61,7 @@ PATH_ARGS = ("path", "dest", "destination", "src", "source", "cwd", "to")
 
 READ_TOOLS = (
     "search_documents", "read_document", "list_documents", "search_memory", "graph_search", "graph_traverse",
-    "web_search", "fetch_url", "read_local_file", "find_files", "fs_glob", "fs_grep", "read_tool_result", "current_time",
+    "web_search", "fetch_url", "read_local_file", "find_files", "fs_glob", "fs_grep", "read_tool_result", "search_tool_results", "current_time",
     "doc_list", "doc_search", "doc_read", "youtube_search", "youtube_video", "github_search", "github_read", "read_feed",
     "desk_list_files", "desk_read_file", "view_image", "doc_guide",
 )

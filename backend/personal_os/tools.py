@@ -152,6 +152,7 @@ ALTERNATIVE = {
     "graph_add": "save_memory, or just state the relation in your reply",
     "todo_write": "keep the remaining steps in your reply, and name the one you are on",
     "read_tool_result": "work from the preview you already have, or call the original tool with a narrower query",
+    "search_tool_results": "page the handle you do have with read_tool_result, or call the original tool with a narrower query",
     "skill_list": "ask the user which of their procedures you mean",
     "skill_draft": "write the procedure out in your reply so the user can save it in Library → Skills",
     "skill_revise": "tell the user what you would change in that procedure",
@@ -1249,6 +1250,20 @@ def _register_working(self: Toolbox) -> None:
                   "limit": {"type": "integer", "default": 4000, "description": "characters to return, max 20000"}}, ["result_id"]),
             read_tool_result, "context",
             examples=[{"result_id": "tr_9f1c2a84"}, {"result_id": "tr_9f1c2a84", "offset": 4000}, {"result_id": "tr_9f1c2a84", "offset": 0, "limit": 20000}]))
+
+        async def search_tool_results(ctx: dict[str, Any], query: str, limit: int = 3) -> Any:
+            out = self.results.search(ctx["conversation_id"], query, limit)
+            if out.pop("untrusted", False):
+                ctx["tainted"] = True
+                ctx.setdefault("taint_sources", []).append("read_tool_result")
+            return out
+        R("search_tool_results", ToolSpec("search_tool_results", (
+            "Keyword search over the large tool results already stored in this chat. Returns short windows with a result_id "
+            "and offset; pass them to read_tool_result to read around the hit."),
+            _obj({"query": {"type": "string", "description": "words to look for"},
+                  "limit": {"type": "integer", "default": 3, "description": "max results, up to 10"}}, ["query"]),
+            search_tool_results, "context",
+            examples=[{"query": "kiln ships Friday"}]))
 
 
 

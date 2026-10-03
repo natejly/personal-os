@@ -3,7 +3,7 @@ import { ListPlus, Quote, Sparkles } from 'lucide-react'
 import type { DocRecording, FullMeeting, MeetingActionItem } from '@shared/types'
 import MarkdownPreview from '../../components/MarkdownPreview'
 import { evidenceChunks } from './evidence'
-import { SUMMARY_TRUST, summaryCopy } from './format'
+import { headlineTitle, isUntitled, SUMMARY_TRUST, summaryCopy } from './format'
 
 /** Mirrors the backend's templates (`meeting_notes.TEMPLATES`); the first is the default. */
 const TEMPLATES: { id: string; label: string }[] = [
@@ -25,9 +25,13 @@ export interface SummaryViewProps {
   onAddTodos: (ids?: string[]) => void
   /** Open the Transcript tab on these segments. */
   onSource?: (ids: string[]) => void
+
+  /** The doc's current title; undefined when unknown (no button is offered). */
+  docTitle?: string
+  onUseTitle?: (title: string) => void
 }
 
-export default function SummaryView({ row, meeting, actions, summarizing, error, onSummarize, onAddTodos, onSource }: SummaryViewProps): JSX.Element {
+export default function SummaryView({ row, meeting, actions, summarizing, error, onSummarize, onAddTodos, onSource, docTitle, onUseTitle }: SummaryViewProps): JSX.Element {
   const [template, setTemplate] = useState<string>(meeting?.template ?? row.template ?? 'general')
   const [focus, setFocus] = useState('')
   const summary = meeting?.enhanced ?? ''
@@ -40,7 +44,14 @@ export default function SummaryView({ row, meeting, actions, summarizing, error,
     <div className="dr-summary">
       <p className={`dr-state ${copy.tone}`}>{copy.text}</p>
 
-      {meeting?.summary && !dictation && <p className="dr-headline">{meeting.summary}</p>}
+      {meeting?.summary && !dictation && (
+        <div>
+          <p className="dr-headline">{meeting.summary}</p>
+          {onUseTitle && docTitle !== undefined && isUntitled(docTitle) && headlineTitle(meeting.summary) !== '' && (
+            <button className="ghost-btn dr-small" onClick={() => onUseTitle(headlineTitle(meeting.summary))}>Use as doc title</button>
+          )}
+        </div>
+      )}
       {summary.trim() !== '' && !dictation && <div className="dr-summary-body">
         {evidenceChunks(summary, meeting?.summary_evidence).map((c, i) => (
           <div key={i} className={c.ids.length ? 'dr-cited' : undefined}>

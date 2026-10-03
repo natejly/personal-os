@@ -64,3 +64,12 @@ export const EMPTY_COPY =
 /** The trust line under a summary. */
 export const SUMMARY_TRUST =
   'A summary is a proposal. It goes into the note only when you accept it, and what you typed is never changed.'
+
+/** A doc nobody has titled yet: blank, or the placeholder a new doc starts with. */
+export const isUntitled = (title: string | null | undefined): boolean => {
+  const t = (title ?? '').trim().toLowerCase()
+  return t === '' || t === 'untitled'
+}
+
+/** The headline as a doc title: one line, at most 80 characters. */
+export const headlineTitle = (headline: string): string => headline.replace(/\s+/g, ' ').trim().slice(0, 80).trim()

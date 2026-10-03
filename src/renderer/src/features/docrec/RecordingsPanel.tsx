@@ -40,6 +40,7 @@ export default function RecordingsPanel({ docId }: { docId: string }): JSX.Eleme
   const settling = useDocRec((s) => s.settling)
   // The status, not `liveDoc(status)`: a selector that returns a fresh object each call never settles.
   const meetingStatus = useStore((s) => s.meetingStatus)
+  const docTitle = useStore((s) => (s.activeDoc?.id === docId ? s.docTitleDraft ?? s.activeDoc.title : undefined))
   const live = useMemo(() => liveDoc(meetingStatus), [meetingStatus])
   const [tab, setTab] = useState<Tab>('transcript')
   const [cited, setCited] = useState<string[]>([])
@@ -138,7 +139,9 @@ export default function RecordingsPanel({ docId }: { docId: string }): JSX.Eleme
             : <SummaryView row={row} meeting={meeting} actions={actions} summarizing={summarizing} error={summaryError}
                 onSummarize={(o) => void useDocRec.getState().summarize(row.id, o)}
                 onAddTodos={(ids) => void useDocRec.getState().addTodos(row.id, ids)}
-                onSource={(ids) => { setCited(ids); setTab('transcript') }} />}
+                onSource={(ids) => { setCited(ids); setTab('transcript') }}
+                docTitle={docTitle}
+                onUseTitle={(t) => { useStore.getState().editDocTitle(t); void useStore.getState().flushDoc() }} />}
         </div>
       )}
     </div>

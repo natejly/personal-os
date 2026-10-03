@@ -814,6 +814,8 @@ async function* sseStream(path: string, signal?: AbortSignal, idleMs = 0, connec
   }
   if (!r.ok || !r.body) {
     signal?.removeEventListener('abort', onAbort)
+    // The error body is not read, so the connection is released rather than left to the reconnect loop.
+    void r.body?.cancel().catch(() => undefined)
     throw new ApiError(`${r.status} ${r.statusText}`, { status: r.status, kind: 'http' })
   }
   const reader = r.body.getReader()

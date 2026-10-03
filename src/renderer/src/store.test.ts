@@ -469,10 +469,17 @@ const reset = (): void => {
   useStore.setState({ view: 'home', focusedConversationId: null, toasts: [] } as never)
 }
 
-test('a stream that closes without its done, from a run that died, settles the open reply as interrupted', async () => {
+test('a stream that closes without its done, from a run that died, settles the open reply as interrupted and notifies once', async () => {
+  const made: Array<{ body?: string; tag?: string }> = []
+  const g = globalThis as unknown as { Notification?: unknown; document?: unknown }
+  const realN = g.Notification
+  const realD = g.document
+  g.Notification = class { static permission = 'granted'; onclick: (() => void) | null = null; constructor(_title: string, o: { body?: string; tag?: string }) { made.push(o) } }
+  g.document = { hasFocus: () => false }
   const tape = [block(1, 'assistant_message', msg({ id: 'a1', content: '' })), block(2, 'delta', { id: 'a1', text: 'Half' }), block(3, 'tool_call', { message_id: 'a1', id: 't1', name: 'web_search', arguments: {} })].join('')
   const fake = backend({ live: false, status: 'interrupted', seq: 3 }, tape)
   try {
+    useStore.setState({ settings: { ...useStore.getState().settings, chatNotify: true }, desks: [] } as never)
     await useStore.getState().attachSession('c1')
     await tick(50)
     fake.close()
@@ -483,9 +490,12 @@ test('a stream that closes without its done, from a run that died, settles the o
     assert.equal(a1?.tool_events?.[0].pending, false, 'the open tool row is closed')
     assert.equal(s.streaming, null)
     assert.equal(s.status, 'error')
+    assert.deepEqual(made, [{ body: 'Reply failed', tag: 'r1:failed' }], 'the death settled here is announced here, once')
   } finally {
     reset()
     fake.restore()
+    g.Notification = realN
+    g.document = realD
   }
 })
 

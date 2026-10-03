@@ -1225,7 +1225,7 @@ export const useStore = create<State>((set, get) => {
       const visible = onScreen(convId, { view: get().view, focusedId: get().focusedConversationId, retained })
       patchSession(convId, (s) => (s.streaming?.abort !== abort ? s : step(s, ev, visible, null)))
     })
-    // Once per run and kind: an approval asked twice in a run is two kinds of news, a reply ending is one.
+    // Once per run and kind: a run that asks for approval twice rings once for it, and its ending rings once more.
     const notified = new Set<string>()
     let backlog: { ev: ChatEvent; seq: number | null }[] | null = replay ? [] : null
     const flush = (): void => {
@@ -1335,7 +1335,10 @@ export const useStore = create<State>((set, get) => {
         }
         const visible = onScreen(convId, { view: get().view, focusedId: get().focusedConversationId, retained })
         if (!live || !bubble || !visible) {
-          const text = stalled ? 'The backend stopped responding. Restart it from Settings > Support, then continue the reply.' : (e as Error).message
+          // After `done` the reply is whole, so there is nothing to continue: only the auto-learn tail was lost.
+          const text = !stalled ? (e as Error).message
+            : live ? 'The backend stopped responding. Restart it from Settings > Support, then continue the reply.'
+              : 'The backend stopped responding. Restart it from Settings > Support.'
           get().toast(text, 'error')
         }
         if (live) announce(convId, run.run_id, 'failed', visible, notified)
@@ -1356,6 +1359,10 @@ export const useStore = create<State>((set, get) => {
             const settledS = settleInterrupted(s, msg)
             return { ...settledS, status: 'error', runError: held ? s.runError : { message: msg, runId: run.run_id, interrupted: true } }
           })
+          // Settled here rather than by an `error` frame, so the one notice that frame would have raised is raised here.
+          if (get().sessions[convId]?.streaming?.abort === abort) {
+            announce(convId, run.run_id, 'failed', onScreen(convId, { view: get().view, focusedId: get().focusedConversationId, retained }), notified)
+          }
         }
       }
       patchSession(convId, (s) => (s.streaming?.abort === abort ? { ...s, streaming: null, status: finishStatus(s.status) } : s))

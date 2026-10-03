@@ -5,6 +5,7 @@ import type { MarkdownEditorHandle } from '../features/notes/handle'
 import { linkFromPaste, pickImage, withTitle } from '../features/notes/smartPaste'
 import { linkTitle, uploadDocAsset } from '../features/notes/api'
 import { builtinCommands, detectSlash, filterCommands, type SlashCommand } from '../features/notes/slash'
+import { wrapToggle } from '../features/notes/format'
 import { readingTime, wordCount } from '../features/notes/stats'
 import { diffRange, insertWithoutFocus, replaceInTextarea } from '../features/notes/textEdit'
 import { detectWikiTrigger, filterTargets, wikiText } from '../features/notes/wikilinks'
@@ -131,19 +132,9 @@ function span(text: string, wiki = false): string {
   return out + esc(text.slice(last))
 }
 
-/** Wrap or unwrap the selection with a markdown delimiter, keeping the selection on the text. */
 function wrapSelection(el: HTMLTextAreaElement, left: string, right = left): { value: string; start: number; end: number } {
-  const { value, selectionStart: s, selectionEnd: e } = el
-  const sel = value.slice(s, e)
-  const already = value.slice(s - left.length, s) === left && value.slice(e, e + right.length) === right
-  if (already) {
-    return { value: value.slice(0, s - left.length) + sel + value.slice(e + right.length), start: s - left.length, end: e - left.length }
-  }
-  if (sel.startsWith(left) && sel.endsWith(right) && sel.length >= left.length + right.length) {
-    const inner = sel.slice(left.length, sel.length - right.length)
-    return { value: value.slice(0, s) + inner + value.slice(e), start: s, end: s + inner.length }
-  }
-  return { value: value.slice(0, s) + left + sel + right + value.slice(e), start: s + left.length, end: e + left.length }
+  const { text, start, end } = wrapToggle(el.value, el.selectionStart, el.selectionEnd, left, right)
+  return { value: text, start, end }
 }
 
 const LIST_ITEM = /^(\s*)([-*+]|(\d+)[.)])(\s+)(\[[ xX]\]\s+)?(.*)$/
@@ -317,10 +308,10 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
       trackCaret()
       return true
     },
-    replaceRange: (start, end, text) => {
+    replaceRange: (start, end, text, selStart, selEnd) => {
       const el = ta.current
       if (!el || el.readOnly) return
-      replaceInTextarea(el, start, end, text)
+      replaceInTextarea(el, start, end, text, selStart, selEnd)
       trackCaret()
     },
     getSelection: () => {

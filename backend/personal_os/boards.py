@@ -113,6 +113,14 @@ class Boards:
         if col["board_id"] != board_id:
             raise ValueError("Column belongs to a different board")
 
+    @staticmethod
+    def _flag_limit(c: Any, card: dict[str, Any]) -> dict[str, Any]:
+        """Soft WIP check: never blocks (agents move cards too), only tells the caller the column is over its limit."""
+        lim = c.execute("SELECT wip_limit FROM board_columns WHERE id=?", (card["column_id"],)).fetchone()["wip_limit"]
+        n = c.execute("SELECT COUNT(*) FROM cards WHERE column_id=?", (card["column_id"],)).fetchone()[0]
+        card["over_limit"] = bool(lim) and n > lim
+        return card
+
     # cards
     def add_card(self, board_id: str, column_id: str | None, title: str, description: str = "", due: str | None = None, priority: int = 2, labels: list[str] | None = None) -> dict[str, Any]:
         import json
@@ -134,7 +142,7 @@ class Boards:
                 "INSERT INTO cards(id,board_id,column_id,title,description,position,due,priority,labels,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
                 (cid, board_id, column_id, title.strip(), description, pos, due, int(priority), json.dumps(labels or []), t, t),
             )
-            return row_to_dict(c.execute("SELECT * FROM cards WHERE id=?", (cid,)).fetchone(), ("labels",))  # type: ignore[return-value]
+            return self._flag_limit(c, row_to_dict(c.execute("SELECT * FROM cards WHERE id=?", (cid,)).fetchone(), ("labels",)))
 
     def update_card(self, id: str, patch: dict[str, Any]) -> dict[str, Any] | None:
         import json
@@ -152,7 +160,7 @@ class Boards:
             if fields.get("column_id"):
                 self._check_column(c, card["board_id"], fields["column_id"])
             c.execute(f"UPDATE cards SET {', '.join(f'{k}=?' for k in fields)} WHERE id=?", (*fields.values(), id))
-            return row_to_dict(c.execute("SELECT * FROM cards WHERE id=?", (id,)).fetchone(), ("labels",))
+            return self._flag_limit(c, row_to_dict(c.execute("SELECT * FROM cards WHERE id=?", (id,)).fetchone(), ("labels",)))
 
     def move_card(self, id: str, column_id: str, before_card_id: str | None = None) -> dict[str, Any] | None:
         with self.db.tx() as c:
@@ -167,7 +175,7 @@ class Boards:
             else:
                 pos = c.execute("SELECT COALESCE(MAX(position),0)+1 FROM cards WHERE column_id=?", (column_id,)).fetchone()[0]
             c.execute("UPDATE cards SET column_id=?, position=?, updated_at=? WHERE id=?", (column_id, pos, now(), id))
-            return row_to_dict(c.execute("SELECT * FROM cards WHERE id=?", (id,)).fetchone(), ("labels",))
+            return self._flag_limit(c, row_to_dict(c.execute("SELECT * FROM cards WHERE id=?", (id,)).fetchone(), ("labels",)))
 
     def delete_card(self, id: str) -> None:
         with self.db.tx() as c:

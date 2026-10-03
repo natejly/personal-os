@@ -2329,3 +2329,4 @@ select:focus-visible {
 .todo-blocked { display: inline-flex; color: var(--text-dim); }
 .todo-subinput { margin-top: 4px; font-size: 12px; }
 .todo-filters { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; }
+.kcol .count.over-limit { color: var(--danger, #d33); font-weight: 600; }

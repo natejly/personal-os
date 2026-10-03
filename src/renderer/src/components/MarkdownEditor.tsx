@@ -2,7 +2,8 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffec
 import CaretMenu from '../features/notes/CaretMenu'
 import { measureCaret, type CaretRect } from '../features/notes/caretPosition'
 import type { MarkdownEditorHandle } from '../features/notes/handle'
-import { linkFromPaste } from '../features/notes/smartPaste'
+import { linkFromPaste, pickImage, withTitle } from '../features/notes/smartPaste'
+import { linkTitle, uploadDocAsset } from '../features/notes/api'
 import { builtinCommands, detectSlash, filterCommands, type SlashCommand } from '../features/notes/slash'
 import { readingTime, wordCount } from '../features/notes/stats'
 import { diffRange, insertWithoutFocus, replaceInTextarea } from '../features/notes/textEdit'
@@ -35,6 +36,8 @@ export interface EditorHandleProps {
   linkTargets?: { id: string; title: string }[]
   /** Opt in: pasting a URL over selected text makes `[selection](url)`. */
   smartPaste?: boolean
+  /** With smartPaste: pasting or dropping an image stores it under this doc and inserts `![](url)`. */
+  imageDocId?: string
   /** Called with the caret's 1-based line whenever it changes (drives the outline). */
   onCaretLine?: (line: number) => void
   /** Opt in: reading time and the size of the selection in the status bar. */
@@ -168,7 +171,7 @@ function shiftLines(value: string, s: number, e: number, out: boolean): { value:
 
 const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(function MarkdownEditor({
   value, onChange, onSave, placeholder, readOnly = false, wrap = true, onScrollFraction,
-  slash = false, extraCommands, linkTargets, smartPaste = false, onCaretLine, richStatus = false, previewText = ''
+  slash = false, extraCommands, linkTargets, smartPaste = false, imageDocId, onCaretLine, richStatus = false, previewText = ''
 }, ref): JSX.Element {
   const ta = useRef<HTMLTextAreaElement>(null)
   const mirror = useRef<HTMLPreElement>(null)
@@ -348,14 +351,54 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
   }), [trackCaret])
   useImperativeHandle(ref, () => handle, [handle])
 
+  const [notice, setNotice] = useState('')
+  useEffect(() => { if (notice) { const t = setTimeout(() => setNotice(''), 4000); return () => clearTimeout(t) } }, [notice])
+
+  /** Upload the first image in `files` and put `![](url)` at the caret. False when there was no image to take. */
+  const takeImage = (files: FileList | null): boolean => {
+    const pick = pickImage(files)
+    const el = ta.current
+    if (!pick || !el || !imageDocId) return false
+    if (!pick.ok) { setNotice(pick.reason); return true }
+    setNotice('Adding image...')
+    uploadDocAsset(imageDocId, files![pick.index]).then(({ url }) => {
+      const e = ta.current
+      if (!e) return
+      replaceInTextarea(e, e.selectionStart, e.selectionEnd, `![](${url})`)
+      trackCaret()
+      setNotice('')
+    }).catch((err) => setNotice(`Could not add the image: ${err instanceof Error ? err.message : err}`))
+    return true
+  }
+
   const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>): void => {
     if (!smartPaste || readOnly) return
+    if (takeImage(e.clipboardData.files)) { e.preventDefault(); return }
     const el = e.currentTarget
-    const link = linkFromPaste(el.value.slice(el.selectionStart, el.selectionEnd), e.clipboardData.getData('text/plain'))
+    const sel = el.value.slice(el.selectionStart, el.selectionEnd)
+    const url = e.clipboardData.getData('text/plain').trim()
+    const link = linkFromPaste(sel, url)
     if (!link) return
     e.preventDefault()
-    replaceInTextarea(el, el.selectionStart, el.selectionEnd, link)
+    const at = el.selectionStart
+    replaceInTextarea(el, at, el.selectionEnd, link)
     trackCaret()
+    // Bare URL: the link is already in the text; the title arrives later and never blocks the paste.
+    if (!sel.trim()) {
+      linkTitle(url).then(({ title }) => {
+        const cur = ta.current
+        const swap = cur && title ? withTitle(cur.value, at, url, title) : null
+        if (cur && swap) {
+          const caret = cur.selectionStart
+          replaceInTextarea(cur, swap.start, swap.end, swap.text, caret >= swap.end ? caret + swap.text.length - (swap.end - swap.start) : caret)
+        }
+      }).catch(() => undefined)
+    }
+  }
+
+  const onDrop = (e: React.DragEvent<HTMLTextAreaElement>): void => {
+    if (!smartPaste || readOnly || !e.dataTransfer.files.length) return
+    if (takeImage(e.dataTransfer.files)) e.preventDefault()
   }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -460,6 +503,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
           onClick={trackCaret}
           onSelect={trackCaret}
           onPaste={onPaste}
+          onDrop={onDrop}
           onBlur={() => setDismissed(menuKey)}
           onScroll={() => { syncScroll(); if (menuOpen) placeMenu() }}
         />
@@ -486,6 +530,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
             {wordCount(value.slice(sel.start, sel.end))} words, {sel.end - sel.start} chars selected
           </span>
         )}
+        {notice && <span className="md-sel">{notice}</span>}
         <span className="md-hints">⌘B bold · ⇧⌘I italic · ⌘K link · ⇧⌘M maths · ⇧⌘E code · Tab indent</span>
       </div>
     </div>

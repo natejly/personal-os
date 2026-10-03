@@ -1,4 +1,5 @@
-import { createContext, memo, useCallback, useContext, useMemo, useRef, useState } from 'react'
+import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { fetchBlobUrl } from '../features/notes/api'
 import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
@@ -51,8 +52,21 @@ function ExternalLink({ href, children, ...rest }: React.AnchorHTMLAttributes<HT
   )
 }
 
+/** A doc's own pasted image: the asset route wants the app token, which an <img> cannot send, so it is fetched into a blob. */
+function DocAsset({ src, alt }: { src: string; alt: string }): JSX.Element {
+  const [url, setUrl] = useState('')
+  useEffect(() => {
+    let dead = false
+    let made = ''
+    fetchBlobUrl(src).then((u) => { made = u; if (dead) URL.revokeObjectURL(u); else setUrl(u) }).catch(() => undefined)
+    return () => { dead = true; if (made) URL.revokeObjectURL(made) }
+  }, [src])
+  return url ? <img src={url} alt={alt} /> : <span className="muted">{alt || 'image'}</span>
+}
+
 function SafeImage({ src, alt }: React.ImgHTMLAttributes<HTMLImageElement>): JSX.Element {
   const s = typeof src === 'string' ? src : ''
+  if (/^\/docs\/assets\/[\w-]+\/[\w.-]+$/.test(s) && !s.includes('..')) return <DocAsset src={s} alt={alt ?? ''} />
   if (s.startsWith('data:image/')) return <img src={s} alt={alt ?? ''} />
   return <ExternalLink href={s}>{alt || s || 'image'}</ExternalLink>
 }

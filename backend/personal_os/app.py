@@ -42,7 +42,7 @@ from .artifacts import Artifacts
 from .boards import Boards
 from .canvas import FALLBACK_NAME, SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
 from .dashboards import Dashboards, generate_recap, generate_summary, generate_widget_code
-from .docs import Docs, unified_diff
+from .docs import ASSET_MIMES, AssetError, Docs, asset_path, save_asset, unified_diff
 from . import widget_spec
 from . import cache as google_cache
 from .google import Google, GoogleNotConnected, json_safe
@@ -84,7 +84,7 @@ from .stuck import STUCK_NUDGE, STUCK_STOP, StuckDetector
 from .style import WritingStyle, learn_style_from_exchange, looks_like_prose
 from .modules import Module, ModuleContext, build_modules, get as module_get
 from .modules.todos import TodosModule
-from .tools import Toolbox, summarize_result
+from .tools import Toolbox, page_title, summarize_result
 from .webread import WebCache
 from .trash import Trash, router as trash_router
 from .trace import Tracer, now_ms
@@ -5288,6 +5288,39 @@ def doc_backlinks(doc_id: str) -> list[dict[str, Any]]:
     if out is None:
         raise HTTPException(404)
     return out
+
+
+class LinkTitleIn(BaseModel):
+    url: str
+
+
+@app.post("/docs/link-title")
+async def doc_link_title(body: LinkTitleIn) -> dict[str, Any]:
+    """The page title behind a pasted URL, through the same address guard as fetch_url. {title: null} when unreadable."""
+    return {"title": await page_title(body.url, settings())}
+
+
+# Both declared above /docs/{id} so "assets" is not read as a doc id.
+@app.get("/docs/assets/{doc_id}/{name}")
+def get_doc_asset(doc_id: str, name: str) -> FileResponse:
+    try:
+        p = asset_path(db.data_dir / "doc_assets", doc_id, name)
+    except AssetError as e:
+        raise HTTPException(e.status, str(e)) from e
+    ext = p.suffix.lower()
+    mime = next((m for m, x in ASSET_MIMES.items() if x == ext), "application/octet-stream")
+    return FileResponse(p, media_type=mime, headers={"X-Content-Type-Options": "nosniff"})
+
+
+@app.post("/docs/{id}/assets")
+async def upload_doc_asset(id: str, file: UploadFile = File(...)) -> dict[str, Any]:
+    if not docs.get(id):
+        raise HTTPException(404)
+    data = await file.read(8 * 1024 * 1024 + 1)  # one byte past the cap is enough to refuse it
+    try:
+        return {"url": save_asset(db.data_dir / "doc_assets", id, file.filename or "image", data, file.content_type or "")}
+    except AssetError as e:
+        raise HTTPException(e.status, str(e)) from e
 
 
 @app.get("/docs/{id}")

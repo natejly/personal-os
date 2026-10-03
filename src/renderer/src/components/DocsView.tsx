@@ -399,6 +399,7 @@ export default function DocsView(): JSX.Element {
                   extraCommands={extraCommands}
                   linkTargets={linkTargets}
                   smartPaste
+                  imageDocId={activeDoc?.id}
                   richStatus
                   previewText={previewText}
                   onCaretLine={setCaretLine}

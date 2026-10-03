@@ -436,6 +436,26 @@ def _pin(url: str, ip: str) -> tuple[str, str, str]:
     return pinned, (f"{host}:{port}" if port else host), host
 
 
+async def page_title(url: str, cfg: dict[str, Any]) -> str | None:
+    """<title> of a public page for a pasted link: SSRF-checked on every hop, 3 redirects, None on any failure."""
+    cur = url
+    try:
+        async with httpx.AsyncClient(timeout=10, follow_redirects=False, headers={"User-Agent": "Grain/0.1 (+desktop assistant)"}) as c:
+            for hop in range(4):
+                cur, host = _check_url(cur, {}, cfg, redirect=hop > 0)
+                r = await _open_pinned(c, "GET", cur, host)
+                if r.status_code in (301, 302, 303, 307, 308) and r.headers.get("location"):
+                    cur = urllib.parse.urljoin(cur, r.headers["location"])
+                    continue
+                if "html" not in r.headers.get("content-type", "html").lower():
+                    return None
+                m = re.search(r"<title[^>]*>(.*?)</title>", r.content[:200_000].decode("utf-8", "replace"), re.I | re.S)
+                return re.sub(r"\s+", " ", html.unescape(m.group(1))).strip()[:200] or None if m else None
+    except (UrlBlocked, httpx.HTTPError, asyncio.TimeoutError, OSError):
+        return None
+    return None
+
+
 async def _open_pinned(client: httpx.AsyncClient, method: str, url: str, host: str, *,
                        headers: dict[str, str] | None = None, params: dict[str, Any] | None = None,
                        content: Any = None) -> httpx.Response:

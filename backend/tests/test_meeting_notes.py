@@ -306,6 +306,7 @@ def test_language_is_in_the_payload_and_the_prompt_rule() -> None:
 def test_summarize_recording_takes_custom_and_language() -> None:
     fn, calls = _stub(json.dumps({"summary_markdown": "ok"}))
     custom = [{"id": "c_x", "name": "X", "instructions": "Be terse."}]
+    asyncio.run(meeting_notes.summarize_recording(
         complete_fn=fn, settings=dict(SETTINGS), model="m", meeting=MEETING, doc_title="t", doc_content="",
         transcript="hi", template="c_x", custom=custom, language="German", focus="owners"))
     assert "Be terse." in calls[0]["messages"][0]["content"]

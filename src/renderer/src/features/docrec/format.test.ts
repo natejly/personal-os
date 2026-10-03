@@ -59,14 +59,20 @@ test('isUntitled is true only for blank or placeholder titles', () => {
 test('headlineTitle clips to 80 characters on one line', () => {
   assert.equal(headlineTitle('a\n b'), 'a b')
   assert.equal(headlineTitle('x'.repeat(200)).length, 80)
+})
+
 test('mergeTemplates lists the built-ins then the custom ones', () => {
   const t = mergeTemplates([{ id: 'c_brief', name: 'Brief' }])
   assert.equal(t[0].id, 'general')
   assert.deepEqual(t[t.length - 1], { id: 'c_brief', label: 'Brief' })
+})
+
 test('applyRecipe fills the focus line and leaves it alone for an unknown id', () => {
   const recipes = [{ id: 'r_owners', prompt: 'owners only' }]
   assert.equal(applyRecipe(recipes, 'r_owners'), 'owners only')
   assert.equal(applyRecipe(recipes, 'r_gone', 'keep me'), 'keep me')
+})
+
 test('the heads-up message is a plain sentence', () => {
   assert.match(HEADS_UP_MESSAGE, /tell me if you'd rather I didn't\.$/)
 })

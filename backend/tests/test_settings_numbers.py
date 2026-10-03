@@ -44,6 +44,19 @@ class PutSettingsTests(unittest.TestCase):
         self.assertEqual(client.get("/settings").json()["maxRunCost"], llm.DEFAULT_SETTINGS["maxRunCost"])
 
 
+class ContextSettingsTests(unittest.TestCase):
+    def tearDown(self) -> None:
+        client.put("/settings", json={k: llm.DEFAULT_SETTINGS[k] for k in ("contextWindow", "compactAt", "microAt", "compactKeepRecent", "microKeep")})
+
+    def test_context_settings_are_clamped_to_their_ranges(self) -> None:
+        for key, bad in (("contextWindow", 10), ("contextWindow", 5_000_000), ("compactAt", 0), ("compactAt", 1.5),
+                         ("microAt", 0.01), ("compactKeepRecent", 1), ("microKeep", -1), ("compactKeepRecent", "x")):
+            self.assertEqual(client.put("/settings", json={key: bad}).status_code, 422, (key, bad))
+        r = client.put("/settings", json={"contextWindow": 32000, "compactAt": 0.6, "microKeep": 0})
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["contextWindow"], 32000)
+
+
 class BudgetTests(unittest.TestCase):
     def test_junk_stored_before_validation_falls_back_to_defaults(self) -> None:
         b = Budget({"maxToolRounds": "abc", "maxRunTokens": None, "maxRunSeconds": -5, "maxRunCost": "nan"})

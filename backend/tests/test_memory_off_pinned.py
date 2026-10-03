@@ -81,7 +81,7 @@ def test_pinned_row_survives_the_hybrid_cut(monkeypatch) -> None:
     text, _ = build_context(**kw, memory_hits=None)
     assert "Zebra crossing allergy" in text
 
-    async def fake_complete(settings, model, messages, kind="learn"):
+    async def fake_complete(settings, model, messages, kind="learn", **kw):
         return json.dumps({"updates": [{"id": "M1", "content": "changed"}]})
     monkeypatch.setattr(learn.llm, "complete", fake_complete)
     asyncio.run(learn.learn_from_exchange(settings=cfg, memories=mem, graph=appmod.graph, project_id=None,

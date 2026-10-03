@@ -40,8 +40,8 @@ a, b = conv(), conv()
 filler = "lorem ipsum dolor sit amet " * 200
 text = filler + "the kiln ships Friday morning " + filler[:4000]
 check(len(text) > 9000, "fixture is big")
-rid = TR.store(a, None, "web_search", text, {})["id"]
-other = TR.store(b, None, "web_search", "kiln ships Friday elsewhere", {})["id"]
+rid = TR.store(a, None, "run_python", text, {})["id"]
+other = TR.store(b, None, "run_python", "kiln ships Friday elsewhere", {})["id"]
 
 # one window with the phrase; its offset reads back the phrase
 ctx_a = {"project_id": None, "conversation_id": a}
@@ -68,7 +68,7 @@ check(ctx_a.get("tainted") is not True, "trusted hit does not taint")
 # many matches stay inline-sized
 d = conv()
 for _ in range(10):
-    TR.store(d, None, "web_search", '{"a": "quote kiln", ' * 400, {})
+    TR.store(d, None, "run_python", '{"a": "quote kiln", ' * 400, {})
 big = call("search_tool_results", {"query": "kiln", "limit": 10}, {"project_id": None, "conversation_id": d})
 check(len(_dumps(big)) <= INLINE_CHARS, f"serialized {len(_dumps(big))} <= {INLINE_CHARS}")
 check(len(TR.search(d, "kiln")["matches"]) == 3, "default limit 3")

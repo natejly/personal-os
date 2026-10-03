@@ -5,6 +5,7 @@ import PopoutSurface from './PopoutSurface'
 import { useCanvas } from './canvas/store'
 import QuickCapture from './features/notes/QuickCapture'
 import RootBoundary from './RootBoundary'
+import { installFileDropGuard } from './lib/fileDrop'
 import './styles.css'
 import 'highlight.js/styles/github-dark-dimmed.css'
 
@@ -17,6 +18,9 @@ const params = (): URLSearchParams => {
   const q = window.location.href.indexOf('?')
   return new URLSearchParams(q === -1 ? '' : window.location.href.slice(q + 1))
 }
+
+// Before anything mounts, in every window: a file dropped off-target must never load in place of the app.
+installFileDropGuard(window)
 
 const q = params()
 const capture = q.get('surface') === 'capture'

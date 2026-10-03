@@ -173,4 +173,48 @@ check(compaction.memory_nudge(0, False, _sm) is None, "no nudge when nothing was
 check(compaction.memory_nudge(2, True, _sm) is None, "no second nudge in a run")
 check(compaction.memory_nudge(2, False, [{"function": {"name": "web_search"}}]) is None, "no nudge without save_memory")
 check(compaction.memory_nudge(2, False, _sm) == compaction.MEMORY_NUDGE, "nudge when clearing and save_memory offered")
+# (e) a per-model window, a Stop, and the estimate for non-ASCII text
+from personal_os.context import estimate_tokens  # noqa: E402
+
+mid = make_conv(14, 1000)
+tight_calls = len(calls)
+h, info = run(compaction.prepare_history(compactor, convos, {**CFG, "contextWindow": 1_000_000}, "m", mid, 10, complete=stub, window=4000))
+check(info["compacted"] and len(calls) == tight_calls + 1, "a smaller per-model window compacts what the global one would not")
+check(len(info["row_ids"]) == 14, "row_ids names the stored rows on the compacted path")
+
+seen_kw: list[dict[str, Any]] = []
+
+
+async def kw_stub(cfg: Any, model: str, messages: Any, kind: str = "learn", *, cancel: Any = None, deadline: Any = None) -> str:
+    seen_kw.append({"cancel": cancel, "deadline": deadline})
+    return "SUMMARY-KW"
+
+
+ev = asyncio.Event()
+run(compaction.prepare_history(compactor, convos, CFG, "m", make_conv(40), 100, complete=kw_stub, cancel=ev, deadline=12.5))
+check(seen_kw and seen_kw[0]["cancel"] is ev and seen_kw[0]["deadline"] == 12.5, "cancel and deadline reach a completer that takes them")
+
+
+async def cancelled(cfg: Any, model: str, messages: Any, kind: str = "learn") -> str:
+    raise llm.LLMError("cancelled", "cancelled")
+
+
+ev2 = asyncio.Event()
+ev2.set()
+try:
+    run(compaction.prepare_history(compactor, convos, CFG, "m", make_conv(40), 100, complete=cancelled, cancel=ev2))
+    check(False, "a cancelled summarizer re-raises")
+except llm.LLMError:
+    check(True, "a cancelled summarizer re-raises so the reply can end as stopped")
+h, info = run(compaction.prepare_history(compactor, convos, CFG, "m", make_conv(40), 100, complete=cancelled))
+check(not info["compacted"] and info["row_ids"], "without a Stop a summarizer failure still sends the full history")
+
+# (f) the announcement predicate agrees with the branch prepare_history takes
+check(compaction.needs_compaction(compactor, convos, CFG, make_conv(40), 100) is True, "a long chat needs compaction")
+check(compaction.needs_compaction(compactor, convos, CFG, make_conv(2), 100) is False, "a short chat does not")
+check(compaction.needs_compaction(compactor, convos, {**CFG, "autoCompact": False}, make_conv(40), 100) is False, "auto-compact off never announces")
+check(compaction.needs_compaction(compactor, object(), CFG, "x", 100) is False, "a failing repo is False, not an error")
+
+check(estimate_tokens("a" * 40) == 10 and estimate_tokens("你" * 40) == 40 and estimate_tokens("") == 1, "non-ASCII counts a token a character")
+
 print(f"test_compaction: {passed} checks passed")

@@ -32,7 +32,7 @@ def _fts_ids(db: Database) -> set[str]:
 
 
 def _learn(memories: Memories, graph: Graph, reply: dict[str, Any], monkeypatch: Any, captured: list | None = None, **kw: Any) -> dict[str, Any]:
-    async def fake_complete(settings: Any, model: str, messages: Any, kind: str = "learn") -> str:
+    async def fake_complete(settings: Any, model: str, messages: Any, kind: str = "learn", **kw: Any) -> str:
         if captured is not None:
             captured.extend(messages)
         return json.dumps(reply)

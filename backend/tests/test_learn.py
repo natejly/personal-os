@@ -16,7 +16,7 @@ from personal_os.repos import Graph, Memories  # noqa: E402
 
 
 def _run(memories: Memories, graph: Graph, reply: dict[str, Any], monkeypatch: Any) -> dict[str, Any]:
-    async def fake_complete(settings: Any, model: str, messages: Any, kind: str = "learn") -> str:
+    async def fake_complete(settings: Any, model: str, messages: Any, kind: str = "learn", **kw: Any) -> str:
         return json.dumps(reply)
 
     monkeypatch.setattr(learn.llm, "complete", fake_complete)
@@ -29,7 +29,7 @@ def _run(memories: Memories, graph: Graph, reply: dict[str, Any], monkeypatch: A
 def test_a_memory_cannot_forge_the_exchange(monkeypatch: Any) -> None:
     seen: list[Any] = []
 
-    async def fake_complete(settings: Any, model: str, messages: Any, kind: str = "learn") -> str:
+    async def fake_complete(settings: Any, model: str, messages: Any, kind: str = "learn", **kw: Any) -> str:
         seen.append(messages)
         return "{}"
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import inspect
 import datetime as dt
 import html
 import ipaddress
@@ -785,6 +786,26 @@ class Toolbox:
                     raise
                 log.info("tool %s failed transiently; retry %d/%d", spec.name, attempt, retries)
                 await asyncio.sleep(llm.retry_delay(attempt))
+    @staticmethod
+    def _bad_arguments(name: str, spec: ToolSpec, e: Exception) -> dict[str, Any]:
+        return tool_error(f"{name}: bad arguments — {_first_line(e)}",
+                          expected="required: " + (", ".join(spec.parameters.get("required") or []) or "none"),
+                          example=(spec.examples or [None])[0], alternative=ALTERNATIVE.get(name))
+
+    def precheck(self, name: str, args: dict[str, Any]) -> dict[str, Any] | None:
+        """The error `call` would return for arguments the tool's signature cannot take, found before anything is
+        approved or run. Binds only (no type checks: tools coerce), so None means the call may go on. Not a spec
+        (a connector tool) is None as well."""
+        spec = self.specs.get(name)
+        if not spec:
+            return None
+        try:
+            inspect.signature(spec.fn).bind(None, **args)
+        except TypeError as e:
+            return self._bad_arguments(name, spec, e)
+        except ValueError:  # a callable with no introspectable signature
+            return None
+        return None
 
     async def call(self, name: str, args: dict[str, Any], ctx: dict[str, Any]) -> Any:
         spec = self.specs.get(name)
@@ -800,9 +821,7 @@ class Toolbox:
         try:
             out = await self._dispatch(spec, ctx, args)
         except TypeError as e:  # backstop: signature mismatch, wrong types
-            return tool_error(f"{name}: bad arguments — {_first_line(e)}",
-                              expected="required: " + (", ".join(spec.parameters.get("required") or []) or "none"),
-                              example=(spec.examples or [None])[0], alternative=ALTERNATIVE.get(name))
+            return self._bad_arguments(name, spec, e)
         except Exception as e:  # noqa: BLE001
             log.warning("tool %s failed", name, exc_info=True)
             if type(e).__name__ == "GoogleNotConnected":
@@ -1313,7 +1332,8 @@ def _register_working(self: Toolbox) -> None:
                                   expected="the result_id from a tool result that came back as a handle",
                                   example={"result_id": recent[0] if recent else "tr_9f1c2a84", "offset": 0},
                                   alternative="call the tool again with a narrower query, or page the handle you do have: " + (", ".join(recent) or "none yet"))
-            if isinstance(out.get("shape"), dict) and out["shape"].get("untrusted"):
+            if (isinstance(out.get("shape"), dict) and out["shape"].get("untrusted")) or self.taints(str(out.get("tool") or "")):
+                # A handle outlives the banner: the user's Clear must not turn paging it into a way to launder its text.
                 ctx["tainted"] = True
                 ctx.setdefault("taint_sources", []).append("read_tool_result")
             return out

@@ -34,7 +34,7 @@ export default function PlanModeToggle({ conversationId }: { conversationId?: st
   cycle.current = () => {
     const next = NEXT[mode]
     if (convId) void setPlanMode(convId, next)
-    else void saveSettings({ planMode: next })
+    else saveSettings({ planMode: next }).catch((e) => useStore.getState().toast((e as Error).message, 'error'))
   }
 
   // Only the composer the user is actually looking at owns the shortcut: several chat widgets can be

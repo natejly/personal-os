@@ -16,3 +16,17 @@ export function isAppUrl(
     return false
   }
 }
+
+/**
+ * What the app window (or a pop-out) may navigate to at the top level: about:blank, or the app's
+ * own renderer. Query and hash are ignored, so a pop-out's `?surface=widget&window=…` and the
+ * error boundary's reload pass; every other file:// URL, such as a dropped PDF, does not.
+ */
+export function mainFrameNavigationAllowed(
+  url: string,
+  devUrl: string | undefined = process.env.ELECTRON_RENDERER_URL,
+  indexPath: string = join(__dirname, '../renderer/index.html')
+): boolean {
+  if (url === 'about:blank') return true
+  return isAppUrl(url, devUrl, indexPath)
+}

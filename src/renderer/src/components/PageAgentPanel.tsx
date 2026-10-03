@@ -81,6 +81,7 @@ export default function PageAgentPanel(): JSX.Element {
 
       <Composer
         conversationId={threadId ?? NO_THREAD}
+        draftKey="page"
         compact
         onSend={sendToPageAgent}
         placeholder={ctx ? `Ask about ${ctx.label}…` : 'Ask…'}
@@ -90,9 +91,10 @@ export default function PageAgentPanel(): JSX.Element {
             effort={convo?.settings?.effort ?? pageAgentEffort}
             fast={convo?.settings?.fast ?? pageAgentFast}
             placement="up"
-            onModel={(m) => void setPageAgentModel(m)}
-            onEffort={(e) => void setPageAgentParams({ effort: e })}
-            onFast={(f) => void setPageAgentParams({ fast: f })}
+            onChange={(c) => {
+              if (c.model) void setPageAgentModel(c.model)
+              if (c.effort !== undefined || c.fast !== undefined) void setPageAgentParams({ effort: c.effort, fast: c.fast })
+            }}
           />
         }
       />

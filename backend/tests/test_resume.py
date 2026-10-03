@@ -213,7 +213,97 @@ def test_note_unit() -> None:
     check("(error)" in a and "gmail_send" in a, "errors and started calls listed")
     check(resume_mod.taint_from_tape([(1, "taint", {"source": "fetch_url"}), (2, "delta", {})]) == ["fetch_url"], "taint sources read from the tape")
     ok, why = resume_mod.resumable({"status": "interrupted", "kind": "chat", "desk_id": None, "run_id": "r"}, {"run_id": "r"}, False)
-    check(ok and not why, "resumable happy path")
+    check(ok and why == "interrupted", "resumable happy path returns the tag")
+
+
+def test_resumable_by_outcome() -> None:
+    run = {"status": "done", "kind": "chat", "desk_id": None, "run_id": "r"}
+    latest = {"run_id": "r"}
+    for outcome in ("stopped", "rounds", "tokens", "time", "cost", "length", "incomplete"):
+        ok, why = resume_mod.resumable(run, latest, False, message={"outcome": outcome})
+        check(ok and why == outcome, f"done + {outcome} is resumable, reason is the tag")
+    check(not resume_mod.resumable(run, latest, False, message={"outcome": None})[0], "a clean done is refused")
+    check(not resume_mod.resumable(run, latest, False, message={"outcome": "loop"})[0], "a loop is refused")
+    check(not resume_mod.resumable(run, latest, False)[0], "no message row, no resume of a done run")
+    for status in ("interrupted", "error"):
+        ok, why = resume_mod.resumable({**run, "status": status}, latest, False)
+        check(ok and why == status, f"{status} is resumable with its own tag")
+    check(not resume_mod.resumable({**run, "desk_id": "d"}, latest, False, message={"outcome": "stopped"})[0], "desk still refused")
+    check(not resume_mod.resumable({**run, "kind": "job"}, latest, False, message={"outcome": "stopped"})[0], "non-chat still refused")
+    note = resume_mod.build_resume_note(run, [], [], [], reason="stopped")
+    check("stopped by the user" in note, "the note opens with why the reply stopped")
+
+
+def test_resumable_route() -> None:
+    check(client.get("/conversations/nope/resumable").status_code == 404, "unknown conversation -> 404")
+    cid = appmod.convos.create(None, "t", "m")["id"]
+    empty = client.get(f"/conversations/{cid}/resumable").json()
+    check(empty == {"run_id": None, "resumable": False, "reason": "no run", "message_id": None}, f"no run yet, got {empty}")
+    cid, rid = dead_run()
+    got = client.get(f"/conversations/{cid}/resumable").json()
+    check(set(got) == {"run_id", "resumable", "reason", "message_id"}, "shape")
+    check(got["run_id"] == rid and got["resumable"] is True and got["reason"] == "interrupted" and got["message_id"], "interrupted run is resumable")
+    check(client.get(f"/runs/{rid}").json()["resume_reason"] == "interrupted", "GET /runs/{id} carries resume_reason")
+    cid, rid = dead_run(status="done")
+    with appmod.db.tx() as c:
+        c.execute("UPDATE messages SET outcome='stopped', error=NULL WHERE id=?", (store.get(rid)["message_id"],))
+    got = client.get(f"/conversations/{cid}/resumable").json()
+    check(got["resumable"] is True and got["reason"] == "stopped", "a stopped reply is resumable once the run is done")
+    ROUNDS[:] = [{"text": "continuing", "calls": []}]
+    SEEN.clear()
+    check(resume_it(rid).status_code == 200, "and it resumes")
+    wait(cid)
+    note = [m["content"] for m in SEEN[0] if m["role"] == "system" and "Resuming" in (m.get("content") or "")][0]
+    check("stopped by the user" in note, "the model is told it was a user Stop")
+
+
+def test_shutdown_and_salvage_persist_interrupted() -> None:
+    """A cancelled chat run keeps its text and says why; a run that died without cleanup is salvaged from the tape."""
+    cid = appmod.convos.create(None, "t", "m")["id"]
+    appmod.convos.add_message(cid, "user", "go")
+    am = appmod.convos.add_message(cid, "assistant", "", model="m")
+    rid = "salv" + str(time.time_ns())
+    store.create(rid, cid, "chat", {})
+    store.update(rid, message_id=am["id"])
+    for i, (ev, data) in enumerate([("delta", {"id": am["id"], "text": "Looking"}),
+                                    ("tool_call", {"message_id": am["id"], "id": "k1", "name": "list_documents", "arguments": {}, "needs_approval": False}),
+                                    ("tool_call", {"message_id": am["id"], "id": "k2", "name": "gmail_draft", "arguments": {"to": "x"}, "needs_approval": True})], 1):
+        store.append(rid, i, ev, data)
+    store.open_approval("k2", rid, "gmail_draft", {"to": "x"}, conversation_id=cid, message_id=am["id"])
+    asyncio.run(appmod._recover_runs())  # noqa: SLF001
+    row = appmod.convos.get(cid)["messages"][-1]
+    check(row["outcome"] == "interrupted", "the salvaged reply is marked interrupted")
+    by = {e["id"]: e for e in row["tool_events"]}
+    check(by["k1"]["interrupted"] is True and by["k1"]["pending"] is False and "may or may not" in by["k1"]["error"], "the open call is an interrupted event")
+    check(by["k2"].get("pending") is True and not by["k2"].get("interrupted"), "a call waiting on a card stays a pending approval card")
+
+    # The cancel path: a live run cancelled by shutdown persists the text, the reason and the outcome.
+    prev = llm.stream_chat
+
+    async def slow(*a: Any, **k: Any) -> Any:
+        for i in range(200):
+            await asyncio.sleep(0.02)
+            yield {"type": "delta", "text": f"w{i} "}
+        yield {"type": "end", "finish_reason": "stop", "tool_calls": [], "usage": None}
+
+    llm.stream_chat = slow
+
+    async def go() -> dict[str, Any]:
+        import httpx
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=appmod.app), base_url="http://test",
+                                     headers={"X-Personal-OS-Token": appmod.AUTH_TOKEN}) as ac:
+            c2 = (await ac.post("/conversations", json={})).json()["id"]
+            await ac.post(f"/conversations/{c2}/chat", json={"content": "hi"})
+            while appmod.bus.get(c2) is None or appmod.bus.get(c2).seq < 6:
+                await asyncio.sleep(0.01)
+            await appmod.bus.shutdown()
+            return (await ac.get(f"/conversations/{c2}")).json()["messages"][-1]
+    try:
+        last = asyncio.run(go())
+    finally:
+        llm.stream_chat = prev
+    check(last["outcome"] == "interrupted" and last["content"], "a shutdown keeps the text and marks the reply interrupted")
+    check(last["error"] and last["error"].startswith("Interrupted:"), f"and says why, got {last['error']!r}")
 
 
 def test_prior_call_unit() -> None:

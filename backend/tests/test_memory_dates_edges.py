@@ -22,7 +22,7 @@ TS = datetime(2026, 10, 2, 9, 0).timestamp()  # a Friday
 def _learn(reply: dict[str, Any], monkeypatch: Any, tmp: str) -> tuple[Database, dict[str, Any]]:
     seen: list[Any] = []
 
-    async def fake(settings: Any, model: str, messages: Any, kind: str = "learn") -> str:
+    async def fake(settings: Any, model: str, messages: Any, kind: str = "learn", **kw: Any) -> str:
         seen.extend(messages)
         return json.dumps(reply)
 

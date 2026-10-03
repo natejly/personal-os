@@ -171,7 +171,22 @@ function buildMenu(): void {
             ])
       ]
     },
-    { role: 'editMenu' },
+    {
+      // The stock edit roles, spelled out so Find can sit beside them. The label stays 'Edit' so macOS
+      // still appends its own dictation and emoji items.
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
+        { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'pasteAndMatchStyle' }, { role: 'delete' }, { role: 'selectAll' },
+        { type: 'separator' },
+        { label: 'Find…', accelerator: 'CmdOrCtrl+F', click: () => sendWindowMenu('chat:find') },
+        { label: 'Find Next', accelerator: 'CmdOrCtrl+G', click: () => sendWindowMenu('chat:find-next') },
+        { label: 'Find Previous', accelerator: 'Shift+CmdOrCtrl+G', click: () => sendWindowMenu('chat:find-prev') },
+        ...(isMac
+          ? [{ type: 'separator' }, { label: 'Speech', submenu: [{ role: 'startSpeaking' }, { role: 'stopSpeaking' }] }] as Electron.MenuItemConstructorOptions[]
+          : [])
+      ]
+    },
     {
       label: 'View',
       submenu: [
@@ -188,6 +203,11 @@ function buildMenu(): void {
         // ⌘0..⌘9 are all taken above and ⌘M is Minimize in the Window menu, so Meetings takes ⌘⇧M.
         { label: 'Meetings', accelerator: 'CmdOrCtrl+Shift+M', click: () => sendMenu('view:meetings') },
         { label: 'Cowork', accelerator: 'CmdOrCtrl+Shift+K', click: () => sendMenu('view:cowork') },
+        { type: 'separator' },
+        // ⌘⇧[ / ⌘⇧] step through chats (⌃⌘[ / ⌃⌘] are pop-out transparency and ⌥⌘arrows are spaces).
+        { label: 'Previous Chat', accelerator: 'CmdOrCtrl+Shift+[', click: () => sendMenu('chat:prev') },
+        { label: 'Next Chat', accelerator: 'CmdOrCtrl+Shift+]', click: () => sendMenu('chat:next') },
+        { label: 'Search Chats', accelerator: 'CmdOrCtrl+Shift+F', click: () => sendMenu('chat:search') },
         { type: 'separator' },
         { label: 'Toggle Spaces', accelerator: 'CmdOrCtrl+Shift+C', click: () => sendMenu('canvas:toggle') },
         { label: 'Toggle Sidebar', accelerator: 'CmdOrCtrl+B', click: () => sendMenu('toggle-sidebar') },

@@ -102,7 +102,7 @@ def test_relearn_discards_when_hand_edited_during_call(monkeypatch: Any) -> None
         for i in range(4):
             st.add_sample(None, f"Sample number {i}. " + "I write short, plain sentences about my day and plans. " * 4, check=False)
 
-        async def fake(settings: Any, model: str, messages: Any, kind: str = "") -> str:
+        async def fake(settings: Any, model: str, messages: Any, kind: str = "", **kw: Any) -> str:
             st.save_profile(None, {"summary": "mine", "guidelines": ["g"], "edited": 1})
             return json.dumps({"summary": "model", "guidelines": ["x"]})
 
@@ -120,7 +120,7 @@ def test_samples_negative_limit_clamped() -> None:
 
 
 def _learn(memories: Memories, graph: Graph, reply: Any, monkeypatch: Any, before=None) -> dict[str, Any]:
-    async def fake(settings: Any, model: str, messages: Any, kind: str = "learn") -> str:
+    async def fake(settings: Any, model: str, messages: Any, kind: str = "learn", **kw: Any) -> str:
         if before:
             before()
         return json.dumps(reply)

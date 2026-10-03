@@ -248,3 +248,78 @@ export function changedKeys(original: Record<string, unknown> | null | undefined
   const keys = new Set([...Object.keys(original ?? {}), ...Object.keys(edited ?? {})])
   return [...keys].filter((k) => JSON.stringify((original ?? {})[k] ?? null) !== JSON.stringify((edited ?? {})[k] ?? null))
 }
+
+/** A duration for a row: ms under a second, seconds under a minute, then m:ss. */
+export function fmtMs(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)} ms`
+  if (ms < 60000) return `${(ms / 1000).toFixed(ms < 10000 ? 2 : 1)} s`
+  const total = Math.round(ms / 1000)
+  return `${Math.floor(total / 60)}m ${String(total % 60).padStart(2, '0')}s`
+}
+
+/** The first non-empty line of an error, short enough to sit under a collapsed row. */
+export function errorLine(error: string): string {
+  const first = (error.split('\n').map((l) => l.trim()).find(Boolean)) ?? ''
+  return clip(first, 80)
+}
+
+const OWN_BODY = new Set(['propose_plan', 'desk_ask', 'doc_edit'])
+
+/**
+ * Only a finished, plain row may fold into a group: no approval state, plan tag, verdict, undo, image or
+ * inline body. An allow-list on purpose, so anything that needs the user's eye stays visible.
+ */
+export function isFoldable(t: ToolEvent, hasCard: (name: string) => boolean): boolean {
+  return !hasCard(t.name) && !t.pending && !t.error && !t.needs_approval && !t.approval && !t.plan && !t.proposal
+    && !t.agent && !t.blocked && !t.breaker && !(t.images?.length) && !t.undo?.snapshot_id
+    && readVerdict(t.result_preview) === null && !OWN_BODY.has(t.name) && !t.name.startsWith('agent_')
+}
+
+export type ToolItem = { kind: 'single'; event: ToolEvent } | { kind: 'group'; key: string; events: ToolEvent[] }
+
+/** Maximal runs of at least `min` foldable events become one group keyed by the first id; order is kept. */
+export function partitionEvents(events: ToolEvent[], hasCard: (name: string) => boolean, min = 3): ToolItem[] {
+  const out: ToolItem[] = []
+  let run: ToolEvent[] = []
+  const flush = (): void => {
+    if (run.length >= min) out.push({ kind: 'group', key: run[0].id, events: run })
+    else for (const event of run) out.push({ kind: 'single', event })
+    run = []
+  }
+  for (const t of events) {
+    if (isFoldable(t, hasCard)) run.push(t)
+    else { flush(); out.push({ kind: 'single', event: t }) }
+  }
+  flush()
+  return out
+}
+
+/** `Ran 12 tools · Search the web ×8, Read web page ×4 · 41.0 s`, with no model call. */
+export function groupSummary(events: ToolEvent[]): string {
+  const counts = new Map<string, number>()
+  for (const t of events) {
+    const v = describeCall(t.name, t.arguments).verb
+    counts.set(v, (counts.get(v) ?? 0) + 1)
+  }
+  const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1])
+  const shown = ranked.slice(0, 3).map(([v, n]) => `${v} ×${n}`)
+  if (ranked.length > 3) shown.push(`+${ranked.length - 3} more`)
+  const total = events.reduce((a, t) => a + (t.duration_ms || 0), 0)
+  return `Ran ${events.length} tools · ${shown.join(', ')} · ${fmtMs(total)}`
+}
+
+/** Paged viewer state for a stored tool result. */
+export interface FullOutput { text: string; nextOffset: number; hasMore: boolean }
+export const EMPTY_OUTPUT: FullOutput = { text: '', nextOffset: 0, hasMore: true }
+
+/** Appends one page. A page whose offset is not where the text ends is ignored, so a double click cannot duplicate text. */
+export function appendPage(prev: FullOutput, page: { text: string; offset: number; has_more: boolean; next_offset?: number }): FullOutput {
+  if (page.offset !== prev.nextOffset) return prev
+  return { text: prev.text + page.text, nextOffset: page.next_offset ?? page.offset + page.text.length, hasMore: page.has_more }
+}
+
+/** Pretty-prints only a complete, valid JSON blob; a partial or non-JSON one is shown as stored. */
+export function displayFullOutput(text: string, complete: boolean): string {
+  if (!complete) return text
+  try { return JSON.stringify(JSON.parse(text), null, 2) } catch { return text }
+}

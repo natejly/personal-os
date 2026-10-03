@@ -425,5 +425,354 @@ class BudgetDeadline(unittest.TestCase):
         self.assertTrue(10 < (app_llm.stream_deadline.get() or 0) - time.monotonic() <= 20)
 
 
+def err_body(message: str, code: str | None = None, typ: str | None = None) -> str:
+    return json.dumps({"error": {"message": message, "code": code, "type": typ}})
+
+
+class ErrorKinds(unittest.TestCase):
+    def test_classify_table(self) -> None:
+        table = [
+            (400, err_body("blocked by content policy"), "content_filter"),
+            (400, err_body("x", "content_policy_violation"), "content_filter"),
+            (400, err_body("This model's maximum context length is 128000 tokens"), "overflow"),
+            (413, "too big", "overflow"),
+            (400, err_body("x", "context_length_exceeded"), "overflow"),
+            (429, err_body("You exceeded your current quota"), "quota"),
+            (402, "pay", "quota"),
+            (429, err_body("x", "insufficient_quota"), "quota"),
+            (401, "no", "auth"),
+            (403, "no", "auth"),
+            (404, "no", "not_found"),
+            (400, err_body("Unsupported parameter: reasoning_effort"), "unsupported_param"),
+            (422, err_body("x", "unknown_parameter"), "unsupported_param"),
+            (429, err_body("quota"), "rate_limit"),  # the bare word alone is a plain rate limit
+            (429, "slow down", "rate_limit"),
+            (529, "busy", "overloaded"),
+            (503, err_body("The model is overloaded"), "overloaded"),
+            (503, "down", "server"),
+            (500, "boom", "server"),
+            (408, "slow", "server"),
+            (400, "plain", "bad_request"),
+            (None, '{"error": "broke"}', "bad_request"),
+            (None, err_body("context window of 8192 tokens exceeded"), "overflow"),
+        ]
+        for status, body, want in table:
+            self.assertEqual(llm.classify_error(status, body), want, (status, body))
+
+    def test_quota_429_is_not_retried(self) -> None:
+        with Provider(lambda req: httpx.Response(429, text=err_body("You exceeded your current quota"))) as p:
+            with self.assertRaises(llm.LLMError) as cm:
+                run(collect())
+        self.assertEqual(p.calls, 1)
+        self.assertEqual((cm.exception.kind, cm.exception.status), ("quota", 429))
+        self.assertNotIn("Wait a moment", str(cm.exception))
+
+    def test_plain_429_retries_honouring_retry_after_ms(self) -> None:
+        answers = [httpx.Response(429, headers={"retry-after-ms": "2500"}, text="slow"), httpx.Response(200, content=sse("ok"))]
+        with Provider(lambda req: answers.pop(0)) as p:
+            events = run(collect())
+        self.assertEqual(text_of(events), "ok")
+        self.assertGreaterEqual(p.sleeps[0], 2.5)
+
+    def test_overloaded_is_retried(self) -> None:
+        answers = [httpx.Response(529, text="busy"), httpx.Response(200, content=sse("ok"))]
+        with Provider(lambda req: answers.pop(0)) as p:
+            self.assertEqual(text_of(run(collect())), "ok")
+        self.assertEqual(p.calls, 2)
+
+    def test_terminal_statuses_are_not_retried(self) -> None:
+        for status, kind in ((401, "auth"), (404, "not_found"), (400, "bad_request")):
+            with Provider(lambda req, s=status: httpx.Response(s, text="no")) as p:
+                with self.assertRaises(llm.LLMError) as cm:
+                    run(collect())
+            self.assertEqual((p.calls, cm.exception.kind), (1, kind))
+
+    def test_overflow_carries_the_parsed_limit(self) -> None:
+        body = err_body("This model's maximum context length is 128000 tokens. However, you requested 140000 tokens.")
+        with Provider(lambda req: httpx.Response(400, text=body)):
+            with self.assertRaises(llm.ContextOverflowError) as cm:
+                run(collect())
+        self.assertEqual((cm.exception.kind, cm.exception.limit, cm.exception.status), ("overflow", 128000, 400))
+
+    def test_parse_context_limit(self) -> None:
+        for msg, want in (("maximum context length is 32,768 tokens", 32768), ("150000 tokens > 131072 maximum", 131072),
+                          ("context window of 200000 tokens", 200000), ("n_ctx=8192", 8192), ("maximum context length is 12", None),
+                          ("nothing here", None)):
+            self.assertEqual(llm.parse_context_limit(err_body(msg)), want, msg)
+
+    def test_in_stream_error_frame_is_classified(self) -> None:
+        def frame(msg: str) -> bytes:
+            return f"data: {json.dumps({'error': {'message': msg}})}\n\n".encode()
+
+        with Provider(lambda req: httpx.Response(200, content=frame("Your credit balance is too low"))):
+            with self.assertRaises(llm.LLMError) as cm:
+                run(collect())
+        self.assertEqual(cm.exception.kind, "quota")
+        self.assertIn("credit balance", str(cm.exception))
+        with Provider(lambda req: httpx.Response(200, content=frame("maximum context length is 8192 tokens"))):
+            with self.assertRaises(llm.ContextOverflowError) as cm:
+                run(collect())
+        self.assertEqual(cm.exception.limit, 8192)
+
+    def test_transport_failure_kind(self) -> None:
+        def boom(req: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("down")
+
+        with Provider(boom):
+            with self.assertRaises(llm.LLMError) as cm:
+                run(collect({**SETTINGS, "llmRetries": 0}))
+        self.assertEqual(cm.exception.kind, "transport")
+
+    def test_retry_after_from_precedence(self) -> None:
+        f = llm.retry_after_from
+        self.assertEqual(f({"retry-after-ms": "1500", "retry-after": "9"}), 1.5)
+        self.assertEqual(f({"retry-after": "9", "x-ratelimit-reset-requests": "1s"}), 9.0)
+        self.assertEqual(f({"x-ratelimit-reset-requests": "6m0s", "x-ratelimit-reset-tokens": "250ms"}), 0.25)
+        self.assertEqual(f({"x-ratelimit-reset-requests": "1m30s"}), 90.0)
+        self.assertIsNone(f({}))
+        self.assertIsNone(f({"retry-after": "soon"}))
+        # The bucket-reset headers only mean something on a 429; retry-after itself counts on any status.
+        self.assertEqual(f({"x-ratelimit-reset-tokens": "6m0s"}, status=429), 360.0)
+        self.assertIsNone(f({"x-ratelimit-reset-tokens": "6m0s"}, status=500))
+        self.assertEqual(f({"retry-after": "9", "x-ratelimit-reset-tokens": "6m0s"}, status=500), 9.0)
+
+    def test_server_error_with_a_long_bucket_reset_is_still_retried(self) -> None:
+        answers = [httpx.Response(500, headers={"x-ratelimit-reset-tokens": "6m0s"}, text="boom"), httpx.Response(200, content=sse("ok"))]
+        with Provider(lambda req: answers.pop(0)) as p:
+            self.assertEqual(text_of(run(collect())), "ok")
+        self.assertEqual(p.calls, 2)
+
+    def test_llmerror_defaults(self) -> None:
+        e = llm.LLMError("x")
+        self.assertEqual((str(e), e.kind, e.status), ("x", None, None))
+
+
+class StreamRetryTests(unittest.TestCase):
+    """A failure before the first token is retried under the one llmRetries cap; Stop and the deadline cut the header wait."""
+
+    @staticmethod
+    def frame(body: dict[str, Any]) -> httpx.Response:
+        return httpx.Response(200, content=f"data: {json.dumps(body)}\n\n".encode())
+
+    def test_error_frame_before_any_token_is_retried(self) -> None:
+        answers = [self.frame({"error": {"code": 429, "message": "slow"}}), httpx.Response(200, content=sse("ok"))]
+        with Provider(lambda req: answers.pop(0)) as p:
+            events = run(collect())
+        self.assertEqual(text_of(events), "ok")
+        self.assertEqual((p.calls, len(p.sleeps)), (2, 1))
+
+    def test_a_frame_without_a_message_never_reads_none(self) -> None:
+        with Provider(lambda req: self.frame({"error": {"code": 502}})) as p:
+            with self.assertRaises(llm.LLMError) as cm:
+                run(collect())
+        self.assertEqual(p.calls, 4)
+        msg = str(cm.exception)
+        self.assertNotIn("None", msg)
+        self.assertIn("502", msg)
+        self.assertIn("Retried 3 times", msg)
+
+    def test_a_frame_after_a_token_is_not_retried(self) -> None:
+        body = b'data: {"choices":[{"delta":{"content":"par"}}]}\n\ndata: {"error":{"code":502,"message":"upstream"}}\n\n'
+        got: list[dict[str, Any]] = []
+
+        async def go() -> None:
+            async for ev in llm.stream_chat(SETTINGS, "m", [{"role": "user", "content": "hi"}]):
+                got.append(ev)
+
+        with Provider(lambda req: httpx.Response(200, content=body)) as p:
+            with self.assertRaises(llm.LLMError) as cm:
+                run(go())
+        self.assertEqual(p.calls, 1)
+        self.assertEqual(text_of(got), "par")
+        self.assertTrue(str(cm.exception).endswith("The reply was cut off."))
+
+    def test_permanent_frames_fail_at_once(self) -> None:
+        for err in ({"code": 401, "message": "bad key"}, {"type": "context_length_exceeded", "message": "too long"}):
+            with Provider(lambda req, e=err: self.frame({"error": e})) as p:
+                with self.assertRaises(llm.LLMError):
+                    run(collect())
+            self.assertEqual(p.calls, 1, err)
+
+    def test_empty_stream_is_retried(self) -> None:
+        with Provider(lambda req: httpx.Response(200, content=b"")) as p:
+            with self.assertRaises(llm.LLMError) as cm:
+                run(collect())
+        self.assertEqual(p.calls, 4)
+        self.assertIn("empty reply", str(cm.exception))
+
+    def test_a_drop_before_content_is_retried(self) -> None:
+        class Drop(httpx.AsyncByteStream):
+            async def __aiter__(self) -> Any:
+                raise httpx.ReadError("reset")
+                yield b""
+
+        answers: list[Any] = [Drop(), Drop(), None]
+
+        def handler(req: httpx.Request) -> httpx.Response:
+            st = answers.pop(0)
+            return httpx.Response(200, content=sse("ok")) if st is None else httpx.Response(200, stream=st)
+
+        with Provider(handler) as p:
+            self.assertEqual(text_of(run(collect())), "ok")
+        self.assertEqual(p.calls, 3)
+
+    def test_header_and_stream_retries_share_one_cap(self) -> None:
+        class Drop(httpx.AsyncByteStream):
+            async def __aiter__(self) -> Any:
+                raise httpx.ReadError("reset")
+                yield b""
+
+        def handler(n: dict[str, int]) -> Callable[[httpx.Request], httpx.Response]:
+            def h(req: httpx.Request) -> httpx.Response:
+                n["i"] += 1
+                return httpx.Response(429, text="slow") if n["i"] <= 2 else httpx.Response(200, stream=Drop())
+            return h
+
+        with Provider(handler({"i": 0})) as p:
+            with self.assertRaises(llm.LLMError):
+                run(collect())
+        self.assertEqual(p.calls, 4)
+        with Provider(handler({"i": 0})) as p:
+            with self.assertRaises(llm.LLMError):
+                run(collect({**SETTINGS, "llmRetries": 0}))
+        self.assertEqual(p.calls, 1)
+
+    def test_stop_during_the_header_wait_ends_as_cancelled(self) -> None:
+        async def silent(req: httpx.Request) -> httpx.Response:
+            await asyncio.sleep(30)
+            return httpx.Response(200)
+
+        async def go() -> tuple[list[dict[str, Any]], float]:
+            cancel = asyncio.Event()
+            asyncio.get_running_loop().call_later(0.05, cancel.set)
+            t0 = time.monotonic()
+            evs = [ev async for ev in llm.stream_chat({**SETTINGS, "llmIdleSeconds": 30}, "m", [{"role": "user", "content": "x"}], cancel=cancel)]
+            return evs, time.monotonic() - t0
+
+        with Provider(silent):  # type: ignore[arg-type]
+            events, took = run(go())
+        self.assertEqual(events[-1]["finish_reason"], "cancelled")
+        self.assertEqual(events[-1]["tool_calls"], [])
+        self.assertLess(took, 0.5)
+
+    def test_deadline_ends_a_header_wait_as_a_timeout(self) -> None:
+        async def silent(req: httpx.Request) -> httpx.Response:
+            await asyncio.sleep(30)
+            return httpx.Response(200)
+
+        async def go() -> list[dict[str, Any]]:
+            llm.stream_deadline.set(time.monotonic() + 0.1)
+            return await collect()
+
+        with Provider(silent):  # type: ignore[arg-type]
+            events = run(go())
+        self.assertEqual(events[-1]["finish_reason"], "timeout")
+
+    def test_a_backoff_that_would_cross_the_deadline_raises_the_providers_error(self) -> None:
+        async def go() -> None:
+            llm.stream_deadline.set(time.monotonic() + 0.05)
+            await collect()
+
+        with Provider(lambda req: self.frame({"error": {"code": 502, "message": "upstream"}})) as p:
+            with self.assertRaises(llm.LLMError) as cm:
+                run(go())
+        self.assertEqual((p.calls, p.sleeps), (1, []))
+        self.assertIn("upstream", str(cm.exception))
+
+        async def go429() -> None:
+            llm.stream_deadline.set(time.monotonic() + 0.05)
+            await collect()
+
+        with Provider(lambda req: httpx.Response(429, text="slow")) as p:
+            with self.assertRaises(llm.LLMError) as cm:
+                run(go429())
+        self.assertEqual((p.calls, p.sleeps), (1, []))
+        self.assertIn("rate-limiting", str(cm.exception))
+
+    def test_complete_stops_and_ignores_a_stale_deadline(self) -> None:
+        async def silent(req: httpx.Request) -> httpx.Response:
+            await asyncio.sleep(30)
+            return httpx.Response(200)
+
+        async def stop() -> None:
+            ev = asyncio.Event()
+            asyncio.get_running_loop().call_later(0.05, ev.set)
+            await llm.complete(SETTINGS, "m", [{"role": "user", "content": "x"}], cancel=ev)
+
+        with Provider(silent):  # type: ignore[arg-type]
+            with self.assertRaises(llm.LLMError) as cm:
+                run(stop())
+        self.assertEqual(cm.exception.kind, "cancelled")
+
+        async def stale() -> str:
+            llm.stream_deadline.set(time.monotonic() - 100)
+            return await llm.complete(SETTINGS, "m", [{"role": "user", "content": "x"}])
+
+        with Provider(lambda req: httpx.Response(200, json={"choices": [{"message": {"content": "fine"}}]})):
+            self.assertEqual(run(stale()), "fine")
+
+    def test_frame_error_shapes(self) -> None:
+        self.assertEqual(llm._frame_error({"message": "boom"}), ("boom", True))
+        self.assertEqual(llm._frame_error({"metadata": {"raw": "upstream died"}}), ("upstream died", True))
+        self.assertEqual(llm._frame_error("plain"), ("plain", True))
+        self.assertEqual(llm._frame_error({"code": 401}), ("Provider error (401)", False))
+        self.assertEqual(llm._frame_error({"code": 429, "message": "m"}), ("m", True))
+        self.assertFalse(llm._frame_error({"type": "invalid_request_error", "message": "m"})[1])
+        self.assertTrue(llm._frame_error({})[0])
+
+    def test_a_frames_code_classifies_the_error(self) -> None:
+        """A gateway relays the upstream status as the frame's code; the error kind reads it like a real status."""
+        with Provider(lambda req: self.frame({"error": {"code": 429, "message": "slow"}})):
+            with self.assertRaises(llm.LLMError) as cm:
+                run(collect({**SETTINGS, "llmRetries": 0}))
+        self.assertEqual(cm.exception.kind, "rate_limit")
+        with Provider(lambda req: self.frame({"error": {"code": 502}})):
+            with self.assertRaises(llm.LLMError) as cm:
+                run(collect({**SETTINGS, "llmRetries": 0}))
+        self.assertEqual(cm.exception.kind, "server")
+        with Provider(lambda req: self.frame({"error": {"code": 401, "message": "bad key"}})):
+            with self.assertRaises(llm.LLMError) as cm:
+                run(collect())
+        self.assertEqual(cm.exception.kind, "auth")
+
+    def test_a_tool_call_fragment_counts_as_emitted(self) -> None:
+        class Drop(httpx.AsyncByteStream):
+            async def __aiter__(self) -> Any:
+                yield b'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"f","arguments":"{"}}]}}]}\n\n'
+                raise httpx.ReadError("reset")
+
+        with Provider(lambda req: httpx.Response(200, stream=Drop())) as p:
+            with self.assertRaises(llm.LLMError) as cm:
+                run(collect())
+        self.assertEqual(p.calls, 1)
+        self.assertIn("cut off", str(cm.exception))
+
+    def test_a_stop_before_the_error_frame_is_not_retried(self) -> None:
+        cancel = asyncio.Event()
+
+        def handler(req: httpx.Request) -> httpx.Response:
+            cancel.set()
+            return self.frame({"error": {"code": 502, "message": "upstream"}})
+
+        with Provider(handler) as p:
+            events = run(collect(cancel=cancel))
+        self.assertEqual((p.calls, events[-1]["finish_reason"], events[-1]["tool_calls"]), (1, "cancelled", []))
+
+    def test_an_unanswered_request_is_not_billed(self) -> None:
+        """Stop before any response: no usage row, and usage_est is zero so the run budget does not charge the prompt."""
+        heard: list[dict[str, Any]] = []
+        cancel = asyncio.Event()
+        cancel.set()
+        llm.on_usage(heard.append)
+        try:
+            with Provider(lambda req: httpx.Response(200, content=sse("ok"))) as p:
+                events = run(collect(cancel=cancel))
+        finally:
+            llm._usage_listeners.remove(heard.append)
+        self.assertEqual((p.calls, events[-1]["finish_reason"]), (0, "cancelled"))
+        self.assertEqual(events[-1]["usage_est"], {"prompt_tokens": 0, "completion_tokens": 0})
+        self.assertEqual(heard, [])
+
+
 if __name__ == "__main__":
     unittest.main()

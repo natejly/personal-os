@@ -56,7 +56,7 @@ class MigrationTests(unittest.TestCase):
         _old_db(self.d)
         self.assertEqual(_version(self.d), 0)
         db = Database(self.d)
-        self.assertEqual(_version(self.d), 1)
+        self.assertEqual(_version(self.d), migrations.latest())
         with db.tx() as c:
             self.assertEqual(c.execute("SELECT content FROM messages").fetchone()[0], "hi there")
             self.assertEqual(c.execute("SELECT content FROM memories").fetchone()[0], "likes tea")
@@ -76,7 +76,8 @@ class MigrationTests(unittest.TestCase):
             seen.append(len(backups.list_backups(self.d)))
             c.execute("ALTER TABLE memories ADD COLUMN flavor TEXT")
 
-        migrations.MIGRATIONS.append((2, "flavor", step2))
+        nxt = migrations.latest() + 1
+        migrations.MIGRATIONS.append((nxt, "flavor", step2))
         try:
             Database(self.d)
         finally:
@@ -85,8 +86,8 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(len(bs), before + 1)
         self.assertEqual(seen, [before + 1])
         self.assertEqual(bs[0]["kind"], "premigrate")
-        self.assertEqual(bs[0]["schema_version"], 1)
-        self.assertEqual(_version(self.d), 2)
+        self.assertEqual(bs[0]["schema_version"], nxt - 1)
+        self.assertEqual(_version(self.d), nxt)
 
     def test_failed_step_rolls_back_and_keeps_version(self) -> None:
         _old_db(self.d)
@@ -96,13 +97,14 @@ class MigrationTests(unittest.TestCase):
             c.execute("ALTER TABLE memories ADD COLUMN half TEXT")
             raise RuntimeError("nope")
 
-        migrations.MIGRATIONS.append((2, "boom", boom))
+        was = migrations.latest()
+        migrations.MIGRATIONS.append((was + 1, "boom", boom))
         try:
             with self.assertRaises(RuntimeError):
                 Database(self.d)
         finally:
             migrations.MIGRATIONS.pop()
-        self.assertEqual(_version(self.d), 1)
+        self.assertEqual(_version(self.d), was)
         c = sqlite3.connect(self.d / "personal-os.db")
         self.assertNotIn("half", [r[1] for r in c.execute("PRAGMA table_info(memories)")])
         c.close()

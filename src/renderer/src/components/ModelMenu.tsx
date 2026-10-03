@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEve
 import { createPortal } from 'react-dom'
 import { Check, ChevronDown, RotateCcw } from 'lucide-react'
 import { DEFAULT_EFFORT, type Effort } from '@shared/types'
-import { modelChoices, modelLabel } from '../lib/modelLabel'
+import { chatModelIds, modelChoices, modelLabel, showsEffort } from '../lib/modelLabel'
 import { useStore } from '../store'
 
 const EFFORTS: { id: Effort; label: string }[] = [
@@ -23,9 +23,8 @@ interface ModelMenuProps {
   model: string
   effort: Effort
   fast: boolean
-  onModel: (model: string) => void
-  onEffort: (effort: Effort) => void
-  onFast: (fast: boolean) => void
+  /** One change, one request: Restore defaults sends effort and fast together. */
+  onChange: (change: { model?: string; effort?: Effort; fast?: boolean }) => void
   /** Composer footers open upward; a header control opens downward. */
   placement?: 'up' | 'down'
 }
@@ -34,9 +33,11 @@ interface ModelMenuProps {
  * Model, reasoning level, and fast mode. The model list shows the model name, not the
  * provider path. Reasoning is the dropdown beside the model. Edit still holds effort and Fast.
  */
-export default function ModelMenu({ model, effort, fast, onModel, onEffort, onFast, placement = 'up' }: ModelMenuProps): JSX.Element {
+export default function ModelMenu({ model, effort, fast, onChange, placement = 'up' }: ModelMenuProps): JSX.Element {
   const models = useStore((s) => s.models)
   const modelsError = useStore((s) => s.modelsError)
+  const loadModels = useStore((s) => s.loadModels)
+  const [retrying, setRetrying] = useState(false)
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [hi, setHi] = useState(0)
@@ -48,18 +49,23 @@ export default function ModelMenu({ model, effort, fast, onModel, onEffort, onFa
   const searchRef = useRef<HTMLInputElement>(null)
 
   const options = useMemo(() => {
-    const ids = models.map((m) => m.id)
+    // Embedding and similar models are not chat choices; the current model stays visible whatever its kind.
+    const ids = chatModelIds(models)
     if (model && !ids.includes(model)) ids.unshift(model)
     return modelChoices(ids, query, model).map((id) => ({ id, label: modelLabel(id) }))
   }, [models, model, query])
 
   const suffix = variantSuffix(fast)
-  const dirty = effort !== DEFAULT_EFFORT || fast
+  const effortShown = showsEffort(models, model)
+  const editingEffortShown = editing ? showsEffort(models, editing) : true
+  // A hidden control cannot be the reason for "Restore defaults".
+  const dirty = (editingEffortShown && effort !== DEFAULT_EFFORT) || fast
 
   useEffect(() => {
     if (!open) return
     setQuery('')
     setEditing(null)
+    if (modelsError || models.length === 0) void loadModels()
     const t = window.setTimeout(() => searchRef.current?.focus(), 0)
     return () => window.clearTimeout(t)
   }, [open])
@@ -133,13 +139,17 @@ export default function ModelMenu({ model, effort, fast, onModel, onEffort, onFa
   }, [open, editing, query, placement, options.length])
 
   const pick = (id: string): void => {
-    onModel(id)
+    onChange({ model: id })
     setOpen(false)
   }
 
-  const applyTo = (id: string, fn: () => void): void => {
-    if (id !== model) onModel(id)
-    fn()
+  const applyTo = (id: string, change: { effort?: Effort; fast?: boolean }): void => {
+    onChange({ ...(id !== model ? { model: id } : {}), ...change })
+  }
+
+  const retry = (): void => {
+    setRetrying(true)
+    void loadModels().finally(() => setRetrying(false))
   }
 
   const onSearchKey = (e: ReactKeyboardEvent): void => {
@@ -171,18 +181,18 @@ export default function ModelMenu({ model, effort, fast, onModel, onEffort, onFa
         {suffix && <span className="model-menu-suffix">{suffix}</span>}
         <ChevronDown size={12} className="model-menu-chevron" />
       </button>
-      <label className="model-menu-effort">
+      {effortShown && <label className="model-menu-effort">
         <span>Reasoning</span>
         <select
           className="chat-control"
           aria-label="Reasoning level"
           title="Reasoning level"
           value={effort}
-          onChange={(e) => onEffort(e.target.value as Effort)}
+          onChange={(e) => onChange({ effort: e.target.value as Effort })}
         >
           {EFFORTS.map((e) => <option key={e.id} value={e.id}>{e.label}</option>)}
         </select>
-      </label>
+      </label>}
       {open && createPortal(
         <>
           <div
@@ -201,7 +211,12 @@ export default function ModelMenu({ model, effort, fast, onModel, onEffort, onFa
               onChange={(e) => { setQuery(e.target.value); setHi(0) }}
               onKeyDown={onSearchKey}
             />
-            {modelsError && <p className="model-menu-error">{modelsError}</p>}
+            {modelsError && (
+              <p className="model-menu-error">
+                {modelsError}{' '}
+                <button type="button" className="model-menu-retry" disabled={retrying} onClick={retry}>Retry</button>
+              </p>
+            )}
             <div className="model-menu-list" role="listbox" aria-label="Models">
               {options.length === 0 && <p className="model-menu-empty">No models match.</p>}
               {options.map((m, i) => {
@@ -243,15 +258,15 @@ export default function ModelMenu({ model, effort, fast, onModel, onEffort, onFa
               style={{ top: box?.subTop ?? -9999, left: box?.subLeft ?? 0, visibility: box ? 'visible' : 'hidden' }}
             >
               <div className="model-menu-param-title">{modelLabel(editing)}</div>
-              <div className="model-menu-section">Reasoning</div>
-              {EFFORTS.map((e) => (
+              {editingEffortShown && <div className="model-menu-section">Reasoning</div>}
+              {editingEffortShown && EFFORTS.map((e) => (
                 <button
                   key={e.id}
                   type="button"
                   role="menuitemradio"
                   aria-checked={effort === e.id}
                   className="model-menu-choice"
-                  onClick={() => applyTo(editing, () => onEffort(e.id))}
+                  onClick={() => applyTo(editing, { effort: e.id })}
                 >
                   <span>{e.label}</span>
                   {effort === e.id && <Check size={14} />}
@@ -264,7 +279,7 @@ export default function ModelMenu({ model, effort, fast, onModel, onEffort, onFa
                 aria-checked={fast}
                 className="model-menu-switch"
                 title="Faster responses. Sends priority processing when the provider supports it."
-                onClick={() => applyTo(editing, () => onFast(!fast))}
+                onClick={() => applyTo(editing, { fast: !fast })}
               >
                 <span>Fast</span>
                 <span className={`model-menu-track${fast ? ' on' : ''}`} aria-hidden><span /></span>
@@ -273,7 +288,7 @@ export default function ModelMenu({ model, effort, fast, onModel, onEffort, onFa
                 <button
                   type="button"
                   className="model-menu-reset"
-                  onClick={() => applyTo(editing, () => { onEffort(DEFAULT_EFFORT); onFast(false) })}
+                  onClick={() => applyTo(editing, { ...(editingEffortShown ? { effort: DEFAULT_EFFORT } : {}), fast: false })}
                 >
                   <RotateCcw size={13} /> Restore defaults
                 </button>

@@ -248,6 +248,10 @@ export default function SettingsModal(): JSX.Element {
                 <input type="checkbox" checked={draft.autoLearn} onChange={(e) => patch({ autoLearn: e.target.checked })} /><span className="switch" />
               </label>
               <label className="toggle-row plain">
+                <span className="toggle-text"><b>Auto-title chats</b><small>After the first reply, write a short title for the chat with the extraction model. A title you typed is never replaced.</small></span>
+                <input type="checkbox" checked={draft.autoTitle !== false} onChange={(e) => patch({ autoTitle: e.target.checked })} /><span className="switch" />
+              </label>
+              <label className="toggle-row plain">
                 <span className="toggle-text"><b>Learn how you write</b><small>Bank long messages you write and docs you save as writing samples, and keep your voice profile current, so drafts sound like you. Review it under Knowledge base → Memory → Voice.</small></span>
                 <input type="checkbox" checked={draft.learnStyle !== false} onChange={(e) => patch({ learnStyle: e.target.checked })} /><span className="switch" />
               </label>
@@ -392,6 +396,10 @@ export default function SettingsModal(): JSX.Element {
             {tab === 'behavior' && <section>
               <h3>Behavior</h3>
               <label><span>Global system prompt</span><textarea rows={4} value={draft.systemPrompt} onChange={(e) => patch({ systemPrompt: e.target.value })} /></label>
+              <label className="toggle-row plain">
+                <span className="toggle-text"><b>Notify me about chats</b><small>A system notification when a reply finishes, fails or needs your approval in a chat you are not looking at.</small></span>
+                <input type="checkbox" checked={draft.chatNotify !== false} onChange={(e) => patch({ chatNotify: e.target.checked })} /><span className="switch" />
+              </label>
               <label><span>Theme</span>
                 <select value={draft.theme} onChange={(e) => patch({ theme: e.target.value as Settings['theme'] })}>
                   <option value="dark">Dark</option><option value="light">Light</option><option value="system">System</option>

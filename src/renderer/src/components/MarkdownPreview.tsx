@@ -1,12 +1,16 @@
 import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { fetchBlobUrl } from '../features/notes/api'
 import ReactMarkdown, { defaultUrlTransform, type Components } from 'react-markdown'
+import type { PluggableList } from 'unified'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import rehypeKatex from 'rehype-katex'
 import rehypeHighlight from 'rehype-highlight'
 import { Copy, Check } from 'lucide-react'
 import { normalizeMathBlocks } from '../lib/mathBlocks'
+import { repairStreamingMarkdown } from '../lib/streamRepair'
+import { splitMarkdown } from '../lib/splitMarkdown'
+import RenderBoundary from './RenderBoundary'
 import ChartBlock from './ChartBlock'
 import InteractiveBlock from './InteractiveBlock'
 import MermaidBlock from './MermaidBlock'
@@ -27,8 +31,11 @@ import 'katex/dist/katex.min.css'
  * the same wherever it appears.
  *
  * Maths is written `$x^2$` inline and `$$…$$` as a block, on one line or several — `normalizeMathBlocks`
- * reshapes the one-line form into what remark-math needs. remark-math wants no space just inside the
- * delimiters, which is what keeps a price like "$5 and $10" from being read as a formula.
+ * reshapes the one-line form into what remark-math needs, accepts `\(…\)` / `\[…\]`, and escapes a price
+ * like "$5 and $10" (the parser itself would pair those two dollar signs into a formula).
+ *
+ * The source is cut into top-level blocks (splitMarkdown) and each is rendered by a memoised child, so a
+ * streaming reply re-parses only its last block and finished code / chart / diagram blocks are untouched.
  */
 
 function CopyButton({ text }: { text: string }): JSX.Element {
@@ -83,17 +90,29 @@ function textOf(n: React.ReactNode): string {
   return textOf((n as React.ReactElement<{ children?: React.ReactNode }>).props?.children)
 }
 
-function Pre({ streaming, ...props }: React.HTMLAttributes<HTMLPreElement> & { streaming?: boolean }): JSX.Element {
+/** Whether the block being rendered is still receiving text. It travels by context so the `pre` component
+ *  type stays one module-level function; a per-render closure would remount every fenced block per token. */
+const StreamingCtx = createContext(false)
+
+const ChartBlockM = memo(ChartBlock)
+const InteractiveBlockM = memo(InteractiveBlock)
+const MermaidBlockM = memo(MermaidBlock)
+const HtmlBlockM = memo(HtmlBlock)
+const SvgBlockM = memo(SvgBlock)
+
+function Pre({ node, ...props }: React.HTMLAttributes<HTMLPreElement> & { node?: unknown }): JSX.Element {
+  void node // react-markdown's AST node must not reach the DOM
+  const streaming = useContext(StreamingCtx)
   const child = props.children as React.ReactElement<{ className?: string; children?: string }> | undefined
   const lang = child?.props?.className?.replace('hljs language-', '').replace('language-', '') ?? ''
   const code = textOf(child?.props?.children)
   // Blocks the model can use to render rich content instead of code (see RENDER_HINT in the backend).
-  if (lang === 'chart') return <ChartBlock source={code} streaming={!!streaming} />
-  if (lang === 'interactive') return <InteractiveBlock source={code} streaming={!!streaming} />
-  if (lang === 'mermaid') return <MermaidBlock source={code} streaming={!!streaming} />
+  if (lang === 'chart') return <ChartBlockM source={code} streaming={!!streaming} />
+  if (lang === 'interactive') return <InteractiveBlockM source={code} streaming={!!streaming} />
+  if (lang === 'mermaid') return <MermaidBlockM source={code} streaming={!!streaming} />
   // Model HTML/SVG never runs in the app's origin: both render in a sandboxed srcdoc iframe (HtmlBlock).
-  if (fenceKind(lang) === 'html') return <HtmlBlock source={code} streaming={!!streaming} />
-  if (fenceKind(lang) === 'svg') return <SvgBlock source={code} streaming={!!streaming} />
+  if (fenceKind(lang) === 'html') return <HtmlBlockM source={code} streaming={!!streaming} />
+  if (fenceKind(lang) === 'svg') return <SvgBlockM source={code} streaming={!!streaming} />
   return (
     <div className="code-block">
       <div className="code-head"><span>{lang || 'text'}</span><CopyButton text={code} /></div>
@@ -101,6 +120,15 @@ function Pre({ streaming, ...props }: React.HTMLAttributes<HTMLPreElement> & { s
     </div>
   )
 }
+
+/** A table scrolls sideways inside its own wrapper instead of widening the message column. */
+function Table({ node, ...props }: React.TableHTMLAttributes<HTMLTableElement> & { node?: unknown }): JSX.Element {
+  void node
+  return <div className="md-table-scroll"><table {...props} /></div>
+}
+
+/** The one component map every plain render shares; its identity never changes. */
+export const MD_COMPONENTS: Components = { ...SAFE_MD, pre: Pre as Components['pre'], table: Table as Components['table'] }
 
 const REMARK = [remarkGfm, remarkMath, remarkAi]
 // `strict: false` keeps an unknown macro as red source text instead of throwing the whole render away,
@@ -140,9 +168,27 @@ export interface MarkdownPreviewProps {
   onRecording?: (id: string) => void
 }
 
-const MarkdownPreview = memo(function MarkdownPreview({ source, streaming = false, onWikilink, knownTitles, onToggleTask, onRecording }: MarkdownPreviewProps): JSX.Element {
+/** One top-level block of the source. Memoised on its text, so finished blocks cost nothing per token. */
+const MdBlock = memo(function MdBlock({ source, streaming, remark, components, urlTransform }: {
+  source: string
+  streaming: boolean
+  remark: PluggableList
+  components: Components
+  urlTransform?: (url: string) => string
+}): JSX.Element {
+  return (
+    <StreamingCtx.Provider value={streaming}>
+      <ReactMarkdown remarkPlugins={remark} rehypePlugins={REHYPE} components={components} urlTransform={urlTransform}>
+        {source}
+      </ReactMarkdown>
+    </StreamingCtx.Provider>
+  )
+})
+
+const MarkdownInner = memo(function MarkdownInner({ source, streaming = false, onWikilink, knownTitles, onToggleTask, onRecording }: MarkdownPreviewProps): JSX.Element {
   // `$$x$$` written on one line is display maths to everyone except remark-math; see mathBlocks.ts.
-  const md = useMemo(() => normalizeMathBlocks(source), [source])
+  // A streaming message first has its half-written tail closed (streamRepair.ts); a finished one is parsed as stored.
+  const md = useMemo(() => normalizeMathBlocks(streaming ? repairStreamingMarkdown(source) : source), [source, streaming])
   // Callers pass fresh lambdas every render; reading them through refs keeps `components` (and so every
   // chart and frame under it) from remounting each time.
   const wikiRef = useRef(onWikilink)
@@ -157,10 +203,13 @@ const MarkdownPreview = memo(function MarkdownPreview({ source, streaming = fals
   const known = useMemo(() => (knownTitles ? new Set([...knownTitles].map(titleKey)) : null), [knownTitles])
   const lineMap = useMemo(() => (tasks ? taskLineMap(source, md) : null), [tasks, source, md])
   const toggle = useCallback((line: number) => taskRef.current?.(line), [])
+  // Task toggles address a line of the whole source, so a document with live checkboxes stays one block.
+  const blocks = useMemo(() => (tasks ? [md] : splitMarkdown(md)), [tasks, md])
 
   const remark = useMemo(() => (wiki ? [...REMARK, remarkWikilinks] : REMARK), [wiki])
   const components = useMemo((): Components => {
-    const c: Components = { ...SAFE_MD, pre: (p) => <Pre {...p} streaming={streaming} /> }
+    if (!wiki && !tasks && !rec) return MD_COMPONENTS
+    const c: Components = { ...MD_COMPONENTS }
     if (wiki || rec) {
       c.a = (p) => {
         const recId = rec ? recordingIdFromHref(p.href) : null
@@ -185,14 +234,25 @@ const MarkdownPreview = memo(function MarkdownPreview({ source, streaming = fals
       }
     }
     return c
-  }, [streaming, wiki, rec, tasks, known, lineMap])
+  }, [wiki, rec, tasks, known, lineMap])
 
   const body = (
-    <ReactMarkdown remarkPlugins={remark} rehypePlugins={REHYPE} components={components} urlTransform={rec ? recUrl : undefined}>
-      {md}
-    </ReactMarkdown>
+    <>
+      {blocks.map((b, i) => (
+        <MdBlock key={i} source={b} streaming={streaming && i === blocks.length - 1} remark={remark} components={components}
+          urlTransform={rec ? recUrl : undefined} />
+      ))}
+    </>
   )
   return tasks ? <TaskToggle.Provider value={toggle}>{body}</TaskToggle.Provider> : body
+})
+
+const MarkdownPreview = memo(function MarkdownPreview(props: MarkdownPreviewProps): JSX.Element {
+  return (
+    <RenderBoundary label="markdown" resetKey={props.source} fallback={() => <pre className="render-fallback">{props.source}</pre>}>
+      <MarkdownInner {...props} />
+    </RenderBoundary>
+  )
 })
 
 export default MarkdownPreview

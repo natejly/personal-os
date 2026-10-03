@@ -41,7 +41,7 @@ from .artifact_routes import is_render_path as _is_artifact_render, make_router 
 from .artifacts import Artifacts
 from .boards import Boards
 from .canvas import FALLBACK_NAME, SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
-from .dashboards import Dashboards, generate_recap, generate_summary, generate_widget_code
+from .dashboards import Dashboards, WidgetCodeRejected, generate_recap, generate_summary, generate_widget_code
 from .docs import Docs, unified_diff
 from . import widget_spec
 from . import cache as google_cache
@@ -4833,8 +4833,13 @@ async def _run_widget(w: dict[str, Any], request: Request, regenerate_code: bool
     if w["kind"] == "html":
         if regenerate_code or not w["code"]:
             samples = await _samples(w["source_ids"])
-            code = await generate_widget_code(cfg, cfg["defaultModel"], w["prompt"] or w["title"], srcs, str(request.base_url).rstrip("/"), w["width"], w["height"], samples)
-            w = dashboards.update_widget(w["id"], {"code": code, "refreshed_at": time.time()}) or w
+            secrets = [(dashboards.source(s_["id"], with_secret=True) or {}).get("secret", "") for s_ in srcs]
+            try:
+                code = await generate_widget_code(cfg, cfg["defaultModel"], w["prompt"] or w["title"], srcs, str(request.base_url).rstrip("/"), w["width"], w["height"], samples, secrets)
+            except WidgetCodeRejected as e:
+                msg = f"Generated HTML rejected: {e}"
+                return dashboards.update_widget(w["id"], {"code": "", "output": msg, "data_error": msg, "refreshed_at": time.time()}) or w
+            w = dashboards.update_widget(w["id"], {"code": code, "data_error": "", "refreshed_at": time.time()}) or w
     elif w["kind"] == "summary":
         data = await _samples(w["source_ids"])
         text = await generate_summary(cfg, model, w["prompt"], data)
@@ -4970,6 +4975,8 @@ async def recap(force: bool = False) -> dict[str, Any]:
 
 # ---------------- canvas mode: spaces, windows, notes ----------------
 canvases = Canvases(db)
+from . import widget_tools  # noqa: E402
+widget_tools.register(toolbox, dashboards, canvases, _widget_fetch)
 app.include_router(artifact_router(artifacts, settings, on_delete=lambda aid: canvases.delete_windows_for("artifact", aid),
                                    sign=_artifact_render_path, verify=_artifact_render_ok))
 notes = Notes(db)

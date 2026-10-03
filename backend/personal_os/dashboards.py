@@ -291,7 +291,27 @@ def _fence(text: str) -> str:
     return "```\n" + str(text or "").replace("```", "'''") + "\n```"
 
 
-async def generate_widget_code(settings: dict[str, Any], model: str, prompt: str, sources: list[dict[str, Any]], base_url: str, width: int, height: int, samples: dict[str, Any]) -> str:
+class WidgetCodeRejected(ValueError):
+    """The generated HTML still breaks the rules after its one repair; it is stored as an error, never rendered."""
+
+
+_EXTERNAL = re.compile(r"""<script[^>]+\bsrc\s*=|<link[^>]+\bhref\s*=\s*["']?(?:https?:)?//|@import|url\(\s*["']?(?:https?:)?//|<iframe|<img[^>]+\bsrc\s*=\s*["']?(?:https?:)?//""", re.I)
+
+
+def html_problems(code: str, secrets: list[str]) -> list[str]:
+    out = []
+    if not code.strip():
+        out.append("the reply was empty")
+    if _EXTERNAL.search(code):
+        out.append("it loads an external script, stylesheet, image or frame; inline everything instead")
+    if any(sec and sec in code for sec in secrets):
+        out.append("it contains a source credential; credentials are injected server-side, never write them")
+    return out
+
+
+async def generate_widget_code(settings: dict[str, Any], model: str, prompt: str, sources: list[dict[str, Any]], base_url: str, width: int, height: int, samples: dict[str, Any],
+                               secrets: list[str] | None = None) -> str:
+    """Model call -> check -> at most ONE repair call (same shape as widget_spec.generate_spec). Raises WidgetCodeRejected."""
     src_lines = []
     for s in sources:
         sample = json.dumps(samples.get(s["id"]), ensure_ascii=False, default=str)
@@ -300,8 +320,19 @@ async def generate_widget_code(settings: dict[str, Any], model: str, prompt: str
         desc = _line(s.get("description"), 300) or "-"
         src_lines.append(f"- {_line(s.get('name'), 80)} ({_line(s.get('kind'), 40)}): fetch(\"{base_url}/sources/{s['id']}/fetch\")\n  description: {desc}\n  sample response: {sample}")
     user = f"Widget request:\n{_fence(prompt)}\n\nSize: about {width * 340}px wide × {height}px tall.\n\nData sources:\n" + ("\n".join(src_lines) if src_lines else "(none: build a static or self-computed widget)")
-    code = await llm.complete(settings, model, [{"role": "system", "content": WIDGET_SYSTEM}, {"role": "user", "content": user}])
-    code = re.sub(r"^```(?:html)?\s*|\s*```$", "", code.strip(), flags=re.I | re.M).strip()
+    msgs = [{"role": "system", "content": WIDGET_SYSTEM}, {"role": "user", "content": user}]
+    for attempt in range(2):
+        raw = await llm.complete(settings, model, msgs)
+        code = re.sub(r"^```(?:html)?\s*|\s*```$", "", raw.strip(), flags=re.I | re.M).strip()
+        problems = html_problems(code, secrets or [])
+        if not problems:
+            break
+        if attempt == 0:  # the broken reply is not echoed back verbatim when it holds a credential
+            echo = "" if any("credential" in p for p in problems) else raw
+            msgs = msgs + [{"role": "assistant", "content": echo},
+                           {"role": "user", "content": "That widget has problems:\n- " + "\n- ".join(problems) + "\nReturn the corrected HTML only."}]
+    else:
+        raise WidgetCodeRejected("; ".join(problems))
     if "<html" not in code.lower():
         code = f"<!doctype html><html><body style='font-family:system-ui;color:#ecebe8;padding:12px'>{code}</body></html>"
     return code

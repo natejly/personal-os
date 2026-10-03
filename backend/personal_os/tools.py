@@ -1911,12 +1911,12 @@ def _register_docs(self: Toolbox) -> None:
         return [{"doc_id": d["id"], "title": d["title"], "words": d["words"],
                  "scope": "project" if d["project_id"] else "personal",
                  "pending_edits": d["pending"], "folder": d["folder"] or None}
-                for d in self.docs.list(q=query)]
+                for d in self.docs.list(q=query) if d["project_id"] in (None, ctx.get("project_id"))]  # the chat's project plus personal
     R("doc_list", ToolSpec("doc_list", "List the docs the user writes in the Docs editor — their markdown notes, drafts and documents. (Files they uploaded are a different thing: use search_documents for those.) Start here when they mention 'my notes', 'my essay' or 'the doc' and you need its id.",
         _obj({"query": {"type": "string", "description": "Optional filter on title or body"}}, []), doc_list, "docs"))
 
     async def doc_search(ctx: dict[str, Any], query: str, limit: int = 8) -> Any:
-        hits = self.docs.search(query, limit=max(1, min(int(limit), 20)))
+        hits = self.docs.search(query, ctx.get("project_id"), limit=max(1, min(int(limit), 20)))
         return {"results": hits, "count": len(hits)}
     R("doc_search", ToolSpec("doc_search", "Full-text search across the bodies of the user's docs, returning a snippet per hit. Use it to find where something is written before reading or revising it.",
         _obj({"query": {"type": "string"}, "limit": {"type": "integer", "default": 8}}, ["query"]), doc_search, "docs"))

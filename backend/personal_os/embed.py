@@ -67,7 +67,7 @@ async def embed_texts(settings: dict[str, Any], texts: list[str], model: str | N
         async with httpx.AsyncClient(timeout=TIMEOUT) as client:
             for i in range(0, len(texts), BATCH):
                 batch = texts[i:i + BATCH]
-                r = await client.post(f"{llm._base(settings)}/v1/embeddings", headers=llm._headers(settings),
+                r = await client.post(llm._url(settings, "/embeddings"), headers=llm._headers(settings),
                                       json={"model": name, "input": batch})
                 if r.status_code >= 400:
                     raise EmbedError(f"{r.status_code}: {r.text[:200]}")

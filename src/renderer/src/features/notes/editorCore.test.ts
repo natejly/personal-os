@@ -67,4 +67,12 @@ test('#tag tint is docs-only, skips code and headings, and keeps one output line
   assert.equal(on.split('tk-tag').length - 1, 1)
   assert.ok(on.includes('<span class="tk-tag">#todo/now</span>'))
   assert.equal(on.split('\n').length, src.split('\n').length)
+test('focus mode dims only lines outside the caret paragraph and keeps the line count', () => {
+  const src = 'a\nb\n\n```\nc\n\nd\n```\ne'
+  for (const active of [1, 3, 5, 9]) {
+    assert.equal(highlight(src, false, active).split('\n').length, src.split('\n').length)
+  }
+  const lines = highlight('one\ntwo\n\nthree', false, 4).split('\n')
+  assert.deepEqual(lines.map((l) => l.startsWith('<span class="dim">')), [true, true, true, false])
+  assert.ok(!highlight('x', false).includes('dim'))
 })

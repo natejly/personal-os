@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   FileText, Files, PanelLeftOpen, PanelRight, X, Columns2, Eye, Pencil,
-  Sparkles, Save, Link2, Link2Off, ChevronDown, Folder, FolderKanban, FolderTree
+  Sparkles, Save, Link2, Link2Off, ChevronDown, Folder, FolderKanban, FolderTree, Focus, AlignVerticalSpaceAround
 } from 'lucide-react'
 import { useStore } from '../store'
 import { api, type DocHit } from '../lib/api'
@@ -37,6 +37,10 @@ const PANEL_LABEL: Record<PanelTab, string> = { outline: 'Outline', recordings: 
 const TREE_KEY = 'grain.docs.treeOpen'
 const treeWasOpen = (): boolean => {
   try { return localStorage.getItem(TREE_KEY) !== '0' } catch { return true }
+}
+
+const flagOn = (key: string): boolean => {
+  try { return localStorage.getItem(key) === '1' } catch { return false }
 }
 
 export default function DocsView(): JSX.Element {
@@ -76,6 +80,12 @@ export default function DocsView(): JSX.Element {
   const setTreeOpen = (open: boolean): void => {
     setTreeOpenState(open)
     try { localStorage.setItem(TREE_KEY, open ? '1' : '0') } catch { /* private window */ }
+  }
+  const [writeFlags, setWriteFlags] = useState({ focus: flagOn('grain.docs.focus'), typewriter: flagOn('grain.docs.typewriter') })
+  const toggleFlag = (k: 'focus' | 'typewriter'): void => {
+    const next = !writeFlags[k]
+    setWriteFlags({ ...writeFlags, [k]: next })
+    try { localStorage.setItem(`grain.docs.${k}`, next ? '1' : '0') } catch { /* private window */ }
   }
   const [linked, setLinked] = useState(true)
   const [editFrac, setEditFrac] = useState<number | null>(null)
@@ -382,6 +392,12 @@ export default function DocsView(): JSX.Element {
                 <button className={docMode === 'split' ? 'on' : ''} title="Editor and preview" onClick={() => setDocMode('split')}><Columns2 size={13} /></button>
                 <button className={docMode === 'preview' ? 'on' : ''} title="Preview only" onClick={() => setDocMode('preview')}><Eye size={13} /></button>
               </div>
+              {docMode !== 'preview' && (
+                <>
+                  <button className={`icon-btn ghost ${writeFlags.focus ? 'on' : ''}`} title="Focus mode: dim all but the current paragraph" aria-pressed={writeFlags.focus} onClick={() => toggleFlag('focus')}><Focus size={14} /></button>
+                  <button className={`icon-btn ghost ${writeFlags.typewriter ? 'on' : ''}`} title="Typewriter scrolling: keep the caret line mid-height" aria-pressed={writeFlags.typewriter} onClick={() => toggleFlag('typewriter')}><AlignVerticalSpaceAround size={14} /></button>
+                </>
+              )}
               {docMode === 'split' && (
                 <button className="icon-btn ghost" title={linked ? 'Unlink scrolling' : 'Link scrolling'} onClick={() => setLinked((l) => !l)}>
                   {linked ? <Link2 size={14} /> : <Link2Off size={14} />}
@@ -435,6 +451,8 @@ export default function DocsView(): JSX.Element {
                   richStatus
                   previewText={previewText}
                   onCaretLine={setCaretLine}
+                  focusMode={writeFlags.focus}
+                  typewriter={writeFlags.typewriter}
                 />
               )}
               {docMode !== 'edit' && (

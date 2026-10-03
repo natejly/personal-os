@@ -3959,6 +3959,19 @@ def get_document(id: str) -> dict[str, Any]:
     return d
 
 
+class DocumentPatch(BaseModel):
+    pinned: bool
+
+
+@app.patch("/documents/{id}")
+def patch_document(id: str, body: DocumentPatch) -> dict[str, Any]:
+    """Pin a document so every chat in its scope carries it, whatever retrieval finds."""
+    d = documents.set_pinned(id, body.pinned)
+    if not d:
+        raise HTTPException(404)
+    return d
+
+
 def _too_big(n: int) -> str | None:
     if n > MAX_UPLOAD_BYTES:
         return f"Files must be {MAX_UPLOAD_BYTES // (1024 * 1024)} MB or smaller"

@@ -27,6 +27,10 @@ export interface ContextUsed {
   style: { project_id: string | null; summary: string; guidelines: string[]; block: string } | null
   /** The recent-meetings block, verbatim; null when meetings are off or the chat opted out. */
   meetings: string | null
+  /** Pinned documents carried whole this turn. Absent on older messages. */
+  pinned?: { document_id: string; name: string }[]
+  /** Items dropped per section because it hit its token budget (contextBudget). */
+  trimmed?: Record<string, number>
   system_prompt: string
   tokens_estimate: number
 }
@@ -672,6 +676,7 @@ export interface Document {
   size: number
   chunk_count: number
   created_at: number
+  pinned?: number
   preview?: string
   text?: string
 }
@@ -1087,6 +1092,8 @@ export interface Settings {
   microKeep?: number
   microAt?: number
   /** Per-reply budgets; 0 means unlimited. */
+  /** Token budget per context section (0 = unlimited): memories, graph, chunks, activity, meetings, pinned. */
+  contextBudget?: Record<string, number>
   maxRunTokens?: number
   maxRunSeconds?: number
   maxRunCost?: number

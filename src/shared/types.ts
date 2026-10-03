@@ -562,6 +562,8 @@ export interface ConversationSettings {
    *  missing value reads as on, the way the backend's `.get(..., True)` does. */
   useMeetings?: boolean
   autoLearn: boolean
+  /** Who wrote the title: the user (never overwritten) or the model. Absent on chats that predate it. */
+  titleSource?: 'auto' | 'user'
   useTools: boolean
   /** Inject the skills the user approved. Defaults on; only approved ones are ever eligible. */
   useSkills?: boolean
@@ -1079,6 +1081,8 @@ export interface Settings {
   systemPrompt: string
   extractionModel: string
   autoLearn: boolean
+  /** Write a short model title after the first reply (uses the extraction model). */
+  autoTitle: boolean
   /** Bank long messages and saved docs as writing samples, and keep the voice profile current. */
   learnStyle: boolean
   theme: 'dark' | 'light' | 'system'
@@ -1290,6 +1294,8 @@ export type BackgroundEvent =
   | { event: 'recording'; data: RecordingEvent }
   /** A run's answering / status state moved: lets every window know about a reply it did not start. */
   | { event: 'run_state'; data: RunInfo }
+  /** A conversation's title was rewritten off the run (model title or regenerate). */
+  | { event: 'conversation_changed'; data: { id: string; title: string } }
 
 export interface BackupInfo {
   name: string; kind: 'daily' | 'manual' | 'premigrate' | 'prerestore'; created_at: number; size: number

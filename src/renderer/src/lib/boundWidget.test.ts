@@ -42,3 +42,12 @@ test('stat and delta formatting', () => {
   assert.equal(fmtDelta(0), '0')
   assert.equal(fmtDelta(null), '')
 })
+
+test('a chat chart converts to an inline-rows widget spec that renders back to the same chart', async () => {
+  const { chartToWidgetSpec } = await import('./boundWidget')
+  const spec = chartToWidgetSpec({ type: 'line', title: 'T', x: 'n', series: [{ key: 'v' }], data: [{ n: 'a', v: 1 }], stacked: false, unit: '$' })
+  assert.equal(spec.kind, 'chart')
+  assert.deepEqual(spec.inline_rows, [{ n: 'a', v: 1 }])
+  const src = boundChartSource(w({ spec, data: { rows: spec.inline_rows as never, stat: null } }))
+  assert.equal(JSON.parse(src as string).type, 'line')
+})

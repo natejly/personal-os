@@ -57,6 +57,7 @@ export default function DeclarativeWidget({ widget, height = 260 }: { widget: Wi
     <>
       {err}
       {parsed.spec.title && <div className="stat-label" style={{ padding: '4px 12px 0' }}>{parsed.spec.title}</div>}
+      {Array.isArray(widget.spec?.inline_rows) && <div className="muted small" style={{ padding: '0 12px' }}>Static data, does not refresh</div>}
       <div className="chart-canvas" style={{ height }}>
         <ResponsiveContainer width="100%" height="100%"><Chart spec={parsed.spec} /></ResponsiveContainer>
       </div>

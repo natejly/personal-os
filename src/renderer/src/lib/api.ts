@@ -201,7 +201,7 @@ export const api = {
     get: (id: string) => req<Dashboard>(`/dashboards/${id}`),
     create: (d: { name: string; description?: string }) => req<Dashboard>('/dashboards', { method: 'POST', body: json(d) }),
     delete: (id: string) => req(`/dashboards/${id}`, { method: 'DELETE' }),
-    addWidget: (id: string, w: { kind: string; title?: string; prompt?: string; source_ids?: string[]; code?: string; output?: string; width?: number; height?: number }) => req<Widget>(`/dashboards/${id}/widgets`, { method: 'POST', body: json(w) })
+    addWidget: (id: string, w: { kind: string; title?: string; prompt?: string; source_ids?: string[]; code?: string; output?: string; width?: number; height?: number; spec?: Record<string, unknown> }) => req<Widget>(`/dashboards/${id}/widgets`, { method: 'POST', body: json(w) })
   },
   /** AI dashboard widgets (`/widgets/{id}`). Not `api.windows`, which is a canvas window. */
   widgets: {

@@ -7,7 +7,7 @@ import { installRejectionToasts } from './lib/rejections'
 import { api, backgroundStream, chatStream, meetingStream, setBase, type Scope } from './lib/api'
 import { currentSelection } from './lib/pageContext'
 import { DEFAULT_EFFORT, NEEDS_YOU } from '../../shared/types'
-import { finishStatus, mergeConversation, pickEvictions, reduceStatus, settleApprovals } from './sessionStatus'
+import { finishStatus, foldRunState, mergeConversation, pickEvictions, pulseStatus, reduceStatus, replayCursor, settleApprovals, type LiveRuns } from './sessionStatus'
 import { applyCursor, fetchSegmentPages, needsSegmentReload } from './lib/transcript'
 import { viewHidden } from './moduleToggles'
 import { chainTo, folderKey, groupShutKey } from './lib/docTree'
@@ -49,7 +49,16 @@ export type { Scope, SessionStatus }
  * busy affordance — the caret, Stop, the hidden message actions, the chart placeholders — reads
  * `answering`, so a finished reply settles at `done` instead of at the end of the connection.
  */
-export interface Streaming { messageId: string | null; runId: string; abort: AbortController; answering: boolean }
+export interface Streaming {
+  messageId: string | null
+  runId: string
+  abort: AbortController
+  answering: boolean
+  /** Seq of the last event applied: a replayed or re-delivered event at or below it is dropped. */
+  seq: number
+  /** Stop was pressed and the run has not yet reported its end. */
+  stopping: boolean
+}
 
 /** One live conversation. Store-local: a running AbortController must never cross the IPC bus. */
 export interface ChatSession {
@@ -182,6 +191,8 @@ export interface State {
   conversations: Conversation[]
   /** Loaded conversations, keyed by id. Each one streams independently. */
   sessions: Record<string, ChatSession>
+  /** Conversations with a reply running right now, from `/runs` and the app topic's `run_state`: the sidebar pulse for a chat with no session. */
+  liveRuns: LiveRuns
   focusedConversationId: string | null
 
   memories: Memory[]
@@ -692,8 +703,36 @@ const attaches = new Map<string, Promise<void>>()
 /** The tail of each conversation's PATCH queue, so a send can wait for a model or effort change to land. */
 const convWrites = new Map<string, Promise<unknown>>()
 
+/**
+ * A reply whose run died under it: the in-flight message carries the error, every tool call that never
+ * returned is marked unknown (an approval card still waiting is left, it is a decision and not an outcome),
+ * and the session stops answering. Pure, for the `error` event.
+ */
+export const settleInterrupted = (s: ChatSession, message: string): ChatSession => {
+  const mid = s.streaming?.messageId
+  const msgs = (s.conversation.messages ?? []).map((m) => m.id !== mid ? m : {
+    ...m,
+    error: m.error ?? message,
+    tool_events: m.tool_events?.map((t) => t.pending && !t.needs_approval
+      ? { ...t, pending: false, error: 'Outcome unknown: the reply ended before this call returned.' }
+      : t) ?? null
+  })
+  return {
+    ...s,
+    conversation: { ...s.conversation, messages: msgs },
+    streaming: s.streaming && { ...s.streaming, answering: false },
+    finishedAt: Date.now()
+  }
+}
+
 /** Every conversation mutation a stream event makes, as one new session. No side effects — exported for store.test.ts. */
-export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean): ChatSession => {
+export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean, seq?: number | null): ChatSession => {
+  // The tape is exactly-once on the wire, but an attach replay and a refetch can overlap: an event at or
+  // below what this session already applied is a no-op, so deltas never append twice.
+  if (seq != null && s.streaming) {
+    if (seq <= s.streaming.seq) return s
+    s = { ...s, streaming: { ...s.streaming, seq } }
+  }
   const c = s.conversation
   const msgs = c.messages ?? []
   const withMsgs = (messages: Message[]): ChatSession => ({ ...s, conversation: { ...c, messages } })
@@ -703,16 +742,17 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean): Cha
     case 'user_message':
       // Merge by id: a steer is persisted and published by its endpoint, so an attach replay plus the
       // live stream (or a refetch) can both carry it.
-      return msgs.some((m) => m.id === ev.data.id) ? s : withMsgs([...msgs, ev.data])
+      return msgs.some((m) => m.id === ev.data.id) ? { ...s, runError: null } : { ...withMsgs([...msgs, ev.data]), runError: null }
     case 'assistant_message': {
       // Merge by id: attaching to a run replays this event into a conversation row that may already
-      // hold the message, and appending it twice is the duplicate the ring used to paint. An empty
-      // replayed body keeps whatever content we have, so a mid-reply attach loses nothing.
+      // hold the message, and appending it twice is the duplicate the ring used to paint. The replay
+      // then rebuilds the row from its deltas, so a held row is replaced wholesale, not merged.
       const held = msgs.some((m) => m.id === ev.data.id)
       return {
         ...(held
-          ? mapMsg(ev.data.id, (m) => ({ ...ev.data, content: ev.data.content || m.content }))
+          ? mapMsg(ev.data.id, () => ev.data)
           : withMsgs([...msgs, ev.data])),
+        runError: null,
         streaming: s.streaming && { ...s.streaming, messageId: ev.data.id, answering: true },
         // A steered run opens a new segment after a `done`; the green hold belongs to the real end.
         finishedAt: null,
@@ -735,7 +775,7 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean): Cha
     case 'reasoning':
       return mapMsg(ev.data.id, (m) => ({ ...m, reasoning: (m.reasoning ?? '') + ev.data.text }))
     case 'tool_call':
-      return mapMsg(ev.data.message_id, (m) => ({ ...m, tool_events: [...(m.tool_events ?? []), { id: ev.data.id, name: ev.data.name, arguments: ev.data.arguments, result_preview: '', duration_ms: 0, error: null, pending: true, needs_approval: !!ev.data.needs_approval, forced: !!ev.data.forced, permission: ev.data.permission ?? null, plan: ev.data.plan ?? null, agent: ev.data.agent }] }))
+      return mapMsg(ev.data.message_id, (m) => (m.tool_events?.some((t) => t.id === ev.data.id) ? m : { ...m, tool_events: [...(m.tool_events ?? []), { id: ev.data.id, name: ev.data.name, arguments: ev.data.arguments, result_preview: '', duration_ms: 0, error: null, pending: true, needs_approval: !!ev.data.needs_approval, forced: !!ev.data.forced, permission: ev.data.permission ?? null, plan: ev.data.plan ?? null, agent: ev.data.agent }] }))
     case 'tool_result':
       return mapMsg(ev.data.message_id, (m) => ({ ...m, tool_events: (m.tool_events ?? []).map((t) => (t.id === ev.data.id ? { ...ev.data, pending: false } : t)) }))
     case 'span':
@@ -749,6 +789,14 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean): Cha
       // The reply is whole and persisted here. The stream stays open for the auto-learn tail, so the
       // subscription is left alone and only `answering` drops.
       return { ...done, streaming: done.streaming && { ...done.streaming, answering: false }, finishedAt: Date.now() }
+    }
+    case 'error': {
+      // The run's terminal frame. Once `done` has gone out the reply is whole and there is nothing to settle;
+      // a death mid-reply stamps the message, and one before any reply exists has no message to carry it.
+      if (s.streaming && !s.streaming.answering) return s
+      const held = s.streaming?.messageId ? msgs.find((m) => m.id === s.streaming?.messageId) : undefined
+      if (s.streaming && held) return settleInterrupted(s, ev.data.message)
+      return { ...s, runError: { message: ev.data.message, runId: s.streaming?.runId ?? ev.data.run_id ?? null, interrupted: !!ev.data.interrupted } }
     }
     default:
       return s
@@ -895,6 +943,8 @@ export const useStore = create<State>((set, get) => {
   let backendSeen: BackendState = 'ready'
   let watching = false
   let stateWired = false
+  // `/events` resume cursor. The topic's seq restarts with the backend process, so a restart zeroes it.
+  let eventsSince = 0
 
   /**
    * The main process supervises the sidecar and announces each state. While it restarts the UI stays up
@@ -922,7 +972,25 @@ export const useStore = create<State>((set, get) => {
       void get().refreshDocsPending()
       void get().refreshActivity()
       refreshAll()
+      // Runs did not survive the process: the conversation list, the live-run map and every session
+      // that was not streaming (its in-flight reply may have been closed out as interrupted) are stale.
+      void get().refreshConversations().catch(() => undefined)
+      eventsSince = 0
+      set({ liveRuns: {} })
+      void seedLiveRuns()
+      for (const id of Object.keys(get().sessions)) {
+        if (!get().sessions[id].streaming) void get().openSession(id).catch(() => undefined)
+      }
     }
+  }
+
+  const seedLiveRuns = async (): Promise<void> => {
+    const runs = await api.runs().catch(() => null)
+    if (!runs) return
+    const live: LiveRuns = {}
+    for (const r of runs) if (r.answering) live[r.conversation_id] = { run_id: r.run_id, status: r.status }
+    // Whatever a `run_state` frame already folded in is newer than this snapshot.
+    set((st) => ({ liveRuns: { ...live, ...st.liveRuns } }))
   }
 
   /**
@@ -950,12 +1018,12 @@ export const useStore = create<State>((set, get) => {
   }
 
   const watchBackgroundEvents = async (): Promise<void> => {
-    let since = 0
     let backoff = 1000
+    await seedLiveRuns()
     for (;;) {
       try {
-        for await (const ev of backgroundStream(since)) {
-          if (ev.seq !== null) since = ev.seq
+        for await (const ev of backgroundStream(eventsSince)) {
+          if (ev.seq !== null) eventsSince = ev.seq
           backoff = 1000
           if (ev.event === 'learned') {
             const { memories, nodes, edges } = ev.data
@@ -968,6 +1036,15 @@ export const useStore = create<State>((set, get) => {
             window.dispatchEvent(new Event('grain-job-finished'))
           } else if (ev.event === 'desk_status') {
             onDeskChanged(ev.data)
+          } else if (ev.event === 'run_state') {
+            const info = ev.data
+            set((st) => ({ liveRuns: foldRunState(st.liveRuns, info) }))
+            const sess = get().sessions[info.conversation_id]
+            // A reply this window did not start: follow it, or, once it ends, read what it persisted.
+            if (sess && sess.streaming?.runId !== info.run_id) {
+              if (info.answering) void get().attachSession(info.conversation_id).catch(() => undefined)
+              else if (!sess.streaming) void get().openSession(info.conversation_id).catch(() => undefined)
+            }
           } else if (ev.event === 'recording') {
             // Lazy: the docrec store imports this one, so a static import here would be a cycle.
             const data = ev.data
@@ -1035,8 +1112,26 @@ export const useStore = create<State>((set, get) => {
     void get().refreshMeetingsPending()
   }
 
-  /** Consume one run's events into a session. `attached` means the run was started by someone else. */
-  const watchRun = async (convId: string, run: ChatRunStarted, from: { messageId: string | null; approvals: number; attached: boolean }): Promise<void> => {
+  /** One stream event folded into a session: the reducer plus the approval recount and the status verdict. */
+  const step = (s: ChatSession, ev: ChatEvent, visible: boolean, seq: number | null): ChatSession => {
+    const next = applyEvent(s, ev, visible, seq)
+    if (next === s) return s
+    // Only the events that open or settle a gate can move the count, and delta must stay free
+    // of any recount: it is the one event that arrives per token.
+    const gate = ev.event === 'tool_call' || ev.event === 'tool_result'
+      || ev.event === 'plan_card' || ev.event === 'plan_decision'
+    const pendingApprovals = gate ? countApprovals(next.conversation) : s.pendingApprovals
+    return { ...next, pendingApprovals, status: reduceStatus(s.status, ev, pendingApprovals) }
+  }
+
+  /**
+   * Consume one run's events into a session. `attached` means the run was started by someone else.
+   *
+   * `replay` is an attach that starts at the in-flight message: that message is blanked once, the tape up to
+   * `end` is buffered and folded in a single patch (so the window never paints a half-built reply), and the
+   * replayed events raise no toast, hold or refetch. A replayed `title` is dropped: the fetched row is newer.
+   */
+  const watchRun = async (convId: string, run: ChatRunStarted, from: { messageId: string | null; approvals: number; attached: boolean; replay?: { messageId: string | null; end: number } }): Promise<void> => {
     // One subscription per conversation. A second subscription to the same run would apply every
     // delta twice, since `applyEvent` appends. A different run supersedes this one, so its viewer is
     // detached first: the old loop's `finally` is abort-identity guarded and will not undo us.
@@ -1045,27 +1140,72 @@ export const useStore = create<State>((set, get) => {
     prev?.abort.abort()
     const abort = new AbortController()
     const attached = from.attached
+    const replay = from.replay
     // Set by `desk_handoff`: this turn announced a successor before it ended, so the stream closing
     // is not the end of the desk's work and the pane re-attaches rather than going idle.
     let handoff: { desk_id: string; conversation_id: string; turn: number } | null = null
     clearHold(convId)
-    // Set when the stream kept closing without ever delivering an ending: what is stored is then the truth.
-    let gaveUp = false
-    patchSession(convId, (s) => ({ ...s, streaming: { messageId: from.messageId, runId: run.run_id, abort, answering: true }, status: settleApprovals('working', from.approvals), finishedAt: null, pendingApprovals: from.approvals, touchedAt: Date.now() }))
+    // Set by the reply's final `done`: what is stored is then what this window already has. A stream that
+    // kept closing without ever delivering one leaves it false, and what is stored is then the truth.
+    let settled = false
+    patchSession(convId, (s) => {
+      // Rebuilt from the tape, so what the fetch held of the in-flight message (possibly all of it, possibly a stale
+      // half) is cleared first. After the dedupe guard above: blanking a message a live watcher is filling would lose it.
+      const blank = replay?.messageId ?? null
+      const conversation = blank
+        ? { ...s.conversation, messages: (s.conversation.messages ?? []).map((m) => (m.id === blank ? { ...m, content: '', reasoning: null, tool_events: [] } : m)) }
+        : s.conversation
+      const approvals = blank ? countApprovals(conversation) : from.approvals
+      return {
+        ...s,
+        conversation,
+        streaming: { messageId: from.messageId, runId: run.run_id, abort, answering: true, seq: run.seq, stopping: false },
+        status: settleApprovals('working', approvals),
+        finishedAt: null,
+        pendingApprovals: approvals,
+        touchedAt: Date.now(),
+        runError: null
+      }
+    })
+    let backlog: { ev: ChatEvent; seq: number | null }[] | null = replay ? [] : null
+    const flush = (): void => {
+      const events = backlog
+      backlog = null
+      if (!events?.length) return
+      // Abort-identity guarded like the `finally` below: a run that superseded this one mid-replay owns the session now.
+      patchSession(convId, (s) => (s.streaming?.abort !== abort ? s : events.reduce((acc, e) => (e.ev.event === 'title' ? acc : step(acc, e.ev, true, e.seq)), s)))
+    }
+    // The events that move something other than the transcript, so a replay still has to run them.
+    const track = (ev: ChatEvent): void => {
+      switch (ev.event) {
+        case 'plan':
+          set((st) => ({ plans: { ...st.plans, [convId]: ev.data.steps } }))
+          break
+        case 'desk_status':
+          putDesk(ev.data)
+          if (ev.data.status === 'review') void get().loadDeskFiles(ev.data.id)
+          if (NEEDS_YOU.includes(ev.data.status)) void get().refreshDeskInbox()
+          break
+        case 'desk_handoff':
+          handoff = ev.data
+          break
+      }
+    }
     try {
-      for await (const ev of chatStream(convId, run.seq, abort.signal, run.run_id, () => { gaveUp = true })) {
+      for await (const ev of chatStream(convId, run.seq, abort.signal, run.run_id)) {
         // A frame with no usable body has nothing to apply; ignoring it beats throwing inside the loop.
         if (!ev || !isRecord(ev.data)) continue
+        const seq = ev.seq
+        if (ev.event === 'done' && !ev.data.segment) settled = true
+        if (backlog && replay && seq !== null && seq > replay.end) flush()
+        if (backlog) {
+          backlog.push({ ev, seq })
+          track(ev)
+          if (seq === null || (replay && seq >= replay.end)) flush()
+          continue
+        }
         const focused = get().focusedConversationId === convId
-        patchSession(convId, (s) => {
-          const next = applyEvent(s, ev, focused)
-          // Only the events that open or settle a gate can move the count, and delta must stay free
-          // of any recount: it is the one event that arrives per token.
-          const gate = ev.event === 'tool_call' || ev.event === 'tool_result'
-            || ev.event === 'plan_card' || ev.event === 'plan_decision'
-          const pendingApprovals = gate ? countApprovals(next.conversation) : s.pendingApprovals
-          return { ...next, pendingApprovals, status: reduceStatus(s.status, ev, pendingApprovals) }
-        })
+        patchSession(convId, (s) => step(s, ev, focused, seq))
         switch (ev.event) {
           case 'done':
             if (!ev.data.error) hold(convId)
@@ -1082,9 +1222,6 @@ export const useStore = create<State>((set, get) => {
             if (memories.length + updated.length + removed.length + nodes.length + edges.length) refreshAll()
             break
           }
-          case 'plan':
-            set((st) => ({ plans: { ...st.plans, [convId]: ev.data.steps } }))
-            break
           case 'style_learned':
             // A banked sample is quiet; a refreshed voice profile is worth saying once.
             if (ev.data.profile) get().toast('Updated how you write', 'learned')
@@ -1093,17 +1230,16 @@ export const useStore = create<State>((set, get) => {
           case 'learn_error':
             get().toast(`Auto-learn failed: ${ev.data.message}`, 'error')
             break
-          case 'desk_status':
-            putDesk(ev.data)
-            if (ev.data.status === 'review') void get().loadDeskFiles(ev.data.id)
-            if (NEEDS_YOU.includes(ev.data.status)) void get().refreshDeskInbox()
+          case 'error': {
+            // A reply row on screen carries the error itself; the toast is for a chat nobody is looking at.
+            // The reducer leaves `streaming` in place on an error, so the row it stamped is still findable here.
+            const s = get().sessions[convId]
+            const answeredHere = !!s?.streaming?.messageId && (s.conversation.messages ?? []).some((m) => m.id === s.streaming?.messageId)
+            if (!focused || !answeredHere) get().toast(ev.data.message, 'error')
             break
-          case 'desk_handoff':
-            handoff = ev.data
-            break
-          case 'error':
-            get().toast(ev.data.message, 'error')
-            break
+          }
+          default:
+            track(ev)
         }
       }
     } catch (e) {
@@ -1113,9 +1249,11 @@ export const useStore = create<State>((set, get) => {
         patchSession(convId, (s) => (s.streaming?.abort === abort ? { ...s, status: 'error', finishedAt: Date.now() } : s))
       }
     } finally {
+      flush()
       patchSession(convId, (s) => (s.streaming?.abort === abort ? { ...s, streaming: null, status: finishStatus(s.status) } : s))
-      // An attached run wrote deltas this window never saw; the persisted message is the whole reply.
-      if (attached || gaveUp) void get().openSession(convId).catch(() => undefined)
+      // An attached run wrote deltas this window never saw, and a stream that ended without its `done` left
+      // the reply unfinished here: the persisted message is the whole reply.
+      if ((attached || !settled) && !abort.signal.aborted && get().sessions[convId]) void get().openSession(convId).catch(() => undefined)
       // A chained desk turn is a *new* run on this same conversation, and the stream for the old one
       // closes before the bus has registered it. Poll a few times rather than leave the pane dead.
       // `attachSession` is shared and this dedupes on run_id, so every extra attempt is a no-op.
@@ -1145,9 +1283,9 @@ export const useStore = create<State>((set, get) => {
         patchSession(convId, (s) => ({ ...s, status: 'error', finishedAt: Date.now() }))
         return false
       }
-      // Another window is already mid-reply. Adopt that run from its tail so the window paints, and
-      // steer the message into it instead of dropping it.
-      void watchRun(convId, { run_id: conflict.run_id, seq: conflict.seq }, { messageId: null, approvals: 0, attached: true })
+      // Another window is already mid-reply. Adopt that run, replaying its in-flight message so the window
+      // paints the whole reply, and steer the message into it instead of dropping it.
+      await get().attachSession(convId).catch(() => undefined)
       if (body.content) {
         try {
           await api.steer(convId, body.content)
@@ -1296,6 +1434,7 @@ export const useStore = create<State>((set, get) => {
     toasts: [],
     conversations: [],
     sessions: {},
+    liveRuns: {},
     focusedConversationId: null,
     memories: [],
     graph: { nodes: [], edges: [] },
@@ -1589,17 +1728,25 @@ export const useStore = create<State>((set, get) => {
     attachSession: async (conversationId) =>
       share(attaches, conversationId, async () => {
         // A run started before this window existed: `GET /runs` is the only way it can know.
-        const runs = await api.runs().catch(() => null)
+        const runs = await api.runs(conversationId).catch(() => null)
         // `answering`, not `live`: a run in its auto-learn tail has nothing left to stream, and
         // attaching to one would paint a caret and a Stop button over a reply `openSession` just
         // fetched whole.
         const run = runs?.find((r) => r.conversation_id === conversationId && r.answering)
+        // Already watching this run: the `run_state` frame for a reply this window just started usually
+        // lands before its POST returns, so this is the common case and not worth a transcript fetch.
+        if (run && get().sessions[conversationId]?.streaming?.runId === run.run_id) return
         await get().openSession(conversationId)
         const s = get().sessions[conversationId]
         if (!run || !s) return
-        // From the run's own seq, so the tail streams live and no past delta is applied twice. Not
-        // awaited: `watchRun` only resolves when the run ends, and this promise gates the dedupe.
-        void watchRun(conversationId, { run_id: run.run_id, seq: run.seq }, { messageId: run.message_id, approvals: countApprovals(s.conversation), attached: true })
+        // Checked again after the fetch (a desk hand-off retry, a widget mount): attaching to a run already
+        // being watched would blank a live message.
+        if (s.streaming?.runId === run.run_id) return
+        // Replay from the in-flight message's own `assistant_message`, so the window shows the whole reply and any
+        // approval card published before it arrived. Not awaited: `watchRun` only resolves when the run ends, and
+        // this promise gates the dedupe.
+        const replay = run.message_seq != null ? { messageId: run.message_id, end: run.seq } : undefined
+        void watchRun(conversationId, { run_id: run.run_id, seq: replay ? replayCursor(run) : run.seq }, { messageId: run.message_id, approvals: countApprovals(s.conversation), attached: true, replay })
       }),
     closeSession: (conversationId) => {
       clearHold(conversationId)
@@ -3334,6 +3481,9 @@ export const selectActive = (s: State): Conversation | null => pick(s)?.conversa
 export const useSession = (convId?: string): ChatSession | undefined => useStore((s) => pick(s, convId))
 export const useConversation = (convId?: string): Conversation | null => useStore((s) => pick(s, convId)?.conversation ?? null)
 export const useSessionStatus = (convId?: string): SessionStatus => useStore((s) => pick(s, convId)?.status ?? 'idle')
+/** `useSessionStatus`, falling back to the app topic's live run for a chat with no session in this window. */
+export const useChatPulse = (convId?: string): SessionStatus =>
+  useStore((s) => pulseStatus(pick(s, convId)?.status ?? 'idle', convId ? s.liveRuns[convId] : undefined))
 export const useIsStreaming = (convId?: string): boolean => useStore((s) => !!pick(s, convId)?.streaming?.answering)
 export const useStreamingMessageId = (convId?: string): string | null =>
   useStore((s) => {

@@ -247,6 +247,7 @@ app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_credenti
 # Each run is also a row (agent_runs) with its event tape (run_events); the bus is the hot path over it.
 run_store = RunStore(db)
 bus = RunBus(run_store)
+bus.on_change = lambda run: events.publish("run_state", run.info())  # `events` is bound below; read at call time
 # Plan-level approvals (propose_plan): one card authorises a set of calls, each bound to its argument digest.
 plans = Plans(db)
 # A second, independent bus, keyed by MEETING id. Nothing in RunBus is conversation-specific - _runs
@@ -2869,7 +2870,8 @@ async def chat(id: str, body: ChatIn) -> dict[str, Any]:
     running = bus.answering(id)
     if running:
         raise HTTPException(409, {"message": "That conversation already has a running reply",
-                                 "run_id": running.run_id, "seq": running.seq})
+                                 "run_id": running.run_id, "seq": running.seq,
+                                 "message_id": running.message_id, "message_seq": running.message_seq})
     run = bus.start(id, lambda r: _run_chat(r, body), input=body.model_dump())
     return {"run_id": run.run_id, "seq": run.seq}
 

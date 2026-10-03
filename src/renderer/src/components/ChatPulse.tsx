@@ -1,4 +1,4 @@
-import { useSessionStatus } from '../store'
+import { useChatPulse } from '../store'
 import type { SessionStatus } from '@shared/types'
 
 const TITLE: Record<Exclude<SessionStatus, 'idle'>, string> = {
@@ -13,7 +13,7 @@ const TITLE: Record<Exclude<SessionStatus, 'idle'>, string> = {
  * to its own status string instead of the whole list re-rendering on every streamed token.
  */
 export default function ChatPulse({ conversationId }: { conversationId: string }): JSX.Element | null {
-  const status = useSessionStatus(conversationId)
+  const status = useChatPulse(conversationId)
   if (status === 'idle') return null
   return <span className={`pulse ${status}`} title={TITLE[status]} />
 }

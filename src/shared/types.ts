@@ -1249,7 +1249,7 @@ export type ChatEvent =
   | { event: 'learned'; data: Learned }
   | { event: 'style_learned'; data: { project_id: string | null; profile: StyleProfile | null; sample_id: string } }
   | { event: 'learn_error'; data: { message: string } }
-  | { event: 'error'; data: { message: string } }
+  | { event: 'error'; data: { message: string; interrupted?: boolean; run_id?: string; pending_approvals?: string[] } }
 
 /** What one auto-learn pass (or the `remember` tool) put away. The ids are set only off `/events`. */
 export interface Learned {
@@ -1275,6 +1275,8 @@ export type BackgroundEvent =
   | { event: 'desk_status'; data: Desk }
   /** A doc recording's segment, status or summary moved. */
   | { event: 'recording'; data: RecordingEvent }
+  /** A run's answering / status state moved: lets every window know about a reply it did not start. */
+  | { event: 'run_state'; data: RunInfo }
 
 export interface BackupInfo {
   name: string; kind: 'daily' | 'manual' | 'premigrate' | 'prerestore'; created_at: number; size: number
@@ -1776,6 +1778,9 @@ export interface RunInfo {
   conversation_id: string
   message_id: string | null
   seq: number
+  /** Tape seq of the latest assistant_message; a window attaching mid-reply replays from just before it. */
+  message_seq?: number | null
+  kind?: string
   started_at: number
   live: boolean
   /** Still producing a reply. `live` outlasts it by the auto-learn tail that follows the last `done`. */
@@ -1946,7 +1951,7 @@ export interface PendingApproval {
 }
 
 /** 409 detail of POST /conversations/{id}/chat when that conversation already has a live run. */
-export interface RunConflict { message: string; run_id: string; seq: number }
+export interface RunConflict { message: string; run_id: string; seq: number; message_id?: string | null; message_seq?: number | null }
 
 /** One detached widget window as the main process sees it. */
 export interface PopoutInfo { windowId: string; bounds: PopoutBounds; pinned: boolean; opacity: number }

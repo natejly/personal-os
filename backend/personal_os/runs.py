@@ -14,6 +14,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import math
 import sqlite3
 import threading
 import time
@@ -48,7 +49,22 @@ RunEvent = tuple[int, str, Any]
 def sse(event: str, data: Any, seq: int | None = None) -> str:
     """One SSE block. `id:` carries the seq, so a client knows what to pass as ?since= when it reconnects."""
     head = f"id: {seq}\n" if seq is not None else ""
-    return f"{head}event: {event}\ndata: {json.dumps(data)}\n\n"
+    try:
+        body = json.dumps(data, allow_nan=False)
+    except ValueError:  # NaN / Infinity are not JSON: a browser's JSON.parse would throw and the stream would stall
+        body = json.dumps(_finite(data), allow_nan=False)
+    return f"{head}event: {event}\ndata: {body}\n\n"
+
+
+def _finite(v: Any) -> Any:
+    """A copy of `v` with every non-finite float turned into its string form."""
+    if isinstance(v, float):
+        return v if math.isfinite(v) else str(v)
+    if isinstance(v, dict):
+        return {k: _finite(x) for k, x in v.items()}
+    if isinstance(v, (list, tuple)):
+        return [_finite(x) for x in v]
+    return v
 
 
 def _dumps(v: Any) -> str:
@@ -452,6 +468,11 @@ class Run:
         # What launched the run, as stored in agent_runs.input. A job fire record for kind='job'.
         self.input: dict[str, Any] = dict(input or {})
         self.message_id: str | None = None
+        # Tape seq of the latest assistant_message: where a window that attaches mid-reply replays from,
+        # so it sees the whole in-flight message and not only what streams after it arrives.
+        self.message_seq: int | None = None
+        # Set by RunBus.start: told when the run's answering / status state changes.
+        self.on_change: Callable[[Run], None] | None = None
         self.started_at = time.time()
         self.ended_at: float | None = None
         # Set when the reply's `done` goes out. The task lives on past that — auto-learn is the last
@@ -507,9 +528,9 @@ class Run:
 
     def info(self) -> dict[str, Any]:
         return {"run_id": self.run_id, "conversation_id": self.conversation_id, "message_id": self.message_id,
-                "seq": self.seq, "started_at": self.started_at, "live": self.live, "answering": self.answering,
-                "status": self.status, "kind": self.kind, "desk_id": self.desk_id, "turn": self.turn,
-                "ended_at": self.ended_at, "error": self.error}
+                "seq": self.seq, "message_seq": self.message_seq, "started_at": self.started_at, "live": self.live,
+                "answering": self.answering, "status": self.status, "kind": self.kind, "desk_id": self.desk_id,
+                "turn": self.turn, "ended_at": self.ended_at, "error": self.error}
 
     def set_status(self, status: str) -> None:
         if status == self.status:
@@ -517,9 +538,19 @@ class Run:
         self.status = status
         if self.store is not None:
             self.store.update(self.run_id, status=status, budget=self.budget, last_seq=self.seq)
+        self._changed()
+
+    def _changed(self) -> None:
+        if self.on_change is not None:
+            try:
+                self.on_change(self)
+            except Exception:  # noqa: BLE001 - a listener must never break the run
+                log.debug("run change listener failed for %s", self.run_id, exc_info=True)
 
     def publish(self, event: str, data: Any) -> None:
         self.seq += 1
+        if event == "assistant_message":
+            self.message_seq = self.seq
         item = (self.seq, event, data)
         if self.store is not None:  # write-through: the table is the source of truth, the ring a cache
             self.store.append(self.run_id, self.seq, event, data)
@@ -537,6 +568,13 @@ class Run:
                 sub.q.put_nowait(item)
             except asyncio.QueueFull:
                 sub.overflow = True
+        # The two points where `answering` flips: a new segment opens, or the reply's final done goes out.
+        # _run_chat sets `replied` just after publishing, so a listener would still see the old value.
+        if event == "assistant_message":
+            self._changed()
+        elif event == "done" and not (isinstance(data, dict) and data.get("segment")):
+            self.replied = True
+            self._changed()
 
     def end(self, status: str | None = None) -> None:
         self.ended_at = time.time()
@@ -664,6 +702,15 @@ class RunBus:
         self._retired: set[Run] = set()
         # Awaited when a run's runner finishes, before the run is closed (the after-snapshot of a reply).
         self.after_hooks: list[Callable[[Run], Awaitable[None]]] = []
+        # Told whenever a run's answering / status state changes (the app topic's `run_state`).
+        self.on_change: Callable[[Run], None] | None = None
+
+    def changed(self, run: Run) -> None:
+        if self.on_change is not None:
+            try:
+                self.on_change(run)
+            except Exception:  # noqa: BLE001 - a listener must never break the run
+                log.debug("run change listener failed for %s", run.run_id, exc_info=True)
 
     def get(self, conversation_id: str) -> Run | None:
         return self._runs.get(conversation_id)
@@ -706,7 +753,9 @@ class RunBus:
             self._retired.add(displaced)
         run = Run(conversation_id, self.store, kind=kind, input=input, desk_id=desk_id, turn=turn)
         self._runs[conversation_id] = run
+        run.on_change = self.changed
         run.task = asyncio.create_task(self._drive(run, runner), name=f"run:{run.run_id}")
+        self.changed(run)
         return run
 
     def stop(self, conversation_id: str, run_id: str | None = None) -> bool:
@@ -754,6 +803,7 @@ class RunBus:
                     log.debug("after hook failed for run %s", run.run_id, exc_info=True)
             run.end(status)
             self._retired.discard(run)
+            self.changed(run)
 
     def _prune(self) -> None:
         cutoff = time.time() - RETAIN_S

@@ -35,14 +35,15 @@ from .consolidate import Consolidator
 from .learn import MAX_INJECTED_SKILLS, LearnJob, LearnWorker, Skills, induce_skill, run_transcript, skill_block
 from .embed import Embedder
 from .memory_index import MemoryIndex
+from .meeting_index import MeetingIndex
 from .retrieval import Retriever
 from .repos import ALL, Conversations, Documents, Graph, Memories, Projects
 from .artifact_routes import is_render_path as _is_artifact_render, make_router as artifact_router
 from .artifacts import Artifacts
 from .boards import Boards
 from .canvas import FALLBACK_NAME, SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
-from .dashboards import Dashboards, generate_recap, generate_summary, generate_widget_code
-from .docs import Docs, unified_diff
+from .dashboards import Dashboards, generate_recap, generate_summary, generate_widget_code, lint_widget_html
+from .docs import ASSET_MIMES, asset_path, AssetError, Docs, save_asset, unified_diff
 from . import widget_spec
 from . import cache as google_cache
 from .google import Google, GoogleNotConnected, json_safe
@@ -76,7 +77,7 @@ from .presets import CanvasPresets
 from . import resume
 from . import permrules
 from . import shell as shell_tool
-from .subagents import AgentDefs, Subagents
+from .subagents import AgentDefs, Subagents, parallel_safe
 from .commands import Commands
 from .workflows import ApprovalError as WorkflowApprovalError, Engine as WorkflowEngine, Workflows
 from .runs import ACTIVE, PROMOTE_STEP, STATUSES, Run, RunBus, RunStore, Topic
@@ -84,7 +85,7 @@ from .stuck import STUCK_NUDGE, STUCK_STOP, StuckDetector
 from .style import WritingStyle, learn_style_from_exchange, looks_like_prose
 from .modules import Module, ModuleContext, build_modules, get as module_get
 from .modules.todos import TodosModule
-from .tools import Toolbox, summarize_result
+from .tools import Toolbox, page_title, summarize_result
 from .webread import WebCache
 from .trash import Trash, router as trash_router
 from .trace import Tracer, now_ms
@@ -357,6 +358,21 @@ def _int_setting(cfg: dict[str, Any], key: str, default: int) -> int:
         return default
 
 
+_alerted: set[tuple[str, str]] = set()  # (period, day) already announced; one event each, never a timer
+
+
+def _check_usage_alert(cfg: dict[str, Any]) -> None:
+    """Evaluated only when a usage row is written. Rings the app topic once per period per day; blocks nothing."""
+    st = usage.alert_state(cfg)
+    if not st["over"]:
+        return
+    day = time.strftime("%Y-%m-%d")
+    for k in ("daily", "monthly"):
+        if st[k]["over"] and (k, day) not in _alerted:
+            _alerted.add((k, day))
+            events.publish("usage_alert", {"period": k, **st[k]})
+
+
 def _record_usage(ev: dict[str, Any]) -> None:
     """llm.on_usage listener: persist one row per model call with a best-effort cost."""
     try:
@@ -366,7 +382,9 @@ def _record_usage(ev: dict[str, Any]) -> None:
         usage.record(model=ev.get("model", ""), kind=ev.get("kind", "chat"), prompt_tokens=pt, completion_tokens=ct,
                      duration_ms=int(ev.get("duration_ms") or 0), cost=pricing.cost(cfg, ev.get("model", ""), pt, ct, cached, cwrite),
                      estimated=bool(ev.get("estimated")), conversation_id=ev.get("conversation_id"), project_id=ev.get("project_id"),
-                     cached_tokens=cached, cache_write_tokens=cwrite, reasoning_tokens=reasoning)
+                     cached_tokens=cached, cache_write_tokens=cwrite, reasoning_tokens=reasoning,
+                     tag=str(ev.get("tag") or ""), round=int(ev.get("round") or 0))
+        _check_usage_alert(cfg)
     except Exception:  # noqa: BLE001 - accounting must never break a reply
         pass
 
@@ -449,6 +467,7 @@ meeting_store = Meetings(db)
 meeting_svc = MeetingService(db, settings, llm.complete, meeting_store, google=google, todos=todos, docs=docs)
 # A doc that is purged (not trashed) takes its recordings with it: row, FTS entry and audio directory.
 docs.on_delete = meeting_store.purge_doc
+docs.recording_search = lambda q, n: [h for h in meeting_store.search(q, limit=n) if h["doc_id"]]
 # A doc that changes project takes its recordings along, or project-scoped meeting search shows them under the old one.
 docs.on_move = meeting_store.move_doc
 toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=google, boards=boards, sandboxes=sandboxes, docs=docs, activity=monitor,
@@ -460,6 +479,8 @@ toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=
 embedder = Embedder()
 retriever = Retriever(db, documents, embedder, docs=docs)
 memory_index = MemoryIndex(db, memories, graph, embedder)
+meeting_index = MeetingIndex(db, meeting_store, embedder)
+meeting_store.on_final = lambda mid: meeting_index.schedule(settings(), [mid])
 learner.index = memory_index
 documents.on_chunks = lambda did, _rows: retriever.schedule(settings, did)
 docs.on_chunks = lambda _did: retriever.schedule_docs(settings)
@@ -472,6 +493,7 @@ async def _start_retrieval() -> None:
     retriever.schedule_docs(settings)
 toolbox.retriever = retriever
 toolbox.memory_index = memory_index
+toolbox.meeting_index = meeting_index
 toolbox.plans = plans  # desk_done's gate reads the approved plan's unconsumed steps
 toolbox.work_env = work_env  # python_install and run_python find the shared work venv here
 toolbox.web_cache = WebCache(db)  # fetch_url's response cache
@@ -677,6 +699,8 @@ NUMERIC_SETTING_RANGES: dict[str, tuple[float, float]] = {
     "retainTraceDays": (1, 3_650),
     "retainToolResultDays": (1, 3_650),
     "retainApprovalDays": (1, 3_650),
+    "toolReadRetries": (0, 5),
+    "parallelReads": (1, 8),
     "browserMaxTabs": (1, 12),
     "browserIdleSeconds": (30, 86_400),
 }
@@ -1127,7 +1151,7 @@ class ChatIn(BaseModel):
 
 RENDER_HINT = """## Rendering
 Besides normal markdown, the UI renders three fenced code blocks inline:
-- ```chart — a small JSON spec for a data chart: {"type": "bar" | "line" | "area" | "pie" | "scatter", "title": "...", "x": "<key used for the x axis / category>", "series": ["<numeric key>", ...], "data": [{"<x key>": ..., "<numeric key>": ..., ...}, ...], "stacked": false, "xLabel": "...", "yLabel": "...", "unit": ""}. `data` is an array of objects (one per x value); keep it under 200 rows. Use a chart whenever numbers would be clearer that way (comparisons, trends, breakdowns).
+- ```chart — a small JSON spec for a data chart: {"type": "bar" | "line" | "area" | "pie" | "scatter", "title": "...", "x": "<key used for the x axis / category>", "series": ["<numeric key>", ...], "data": [{"<x key>": ..., "<numeric key>": ..., ...}, ...], "stacked": false, "xLabel": "...", "yLabel": "...", "unit": "", "transforms": [{"op": "sort", "by": "<key>", "dir": "desc"}, {"op": "limit", "n": 10}]}. `data` is an array of objects (one per x value); keep it under 200 rows. `transforms` is optional (ops: sort, limit, filter {field, cmp, value}, group {by, agg: {<key>: "sum|mean|count|min|max"}}) for trimming or aggregating raw rows; ISO dates (2026-03-01) as x values get a date axis. Use a chart whenever numbers would be clearer that way (comparisons, trends, breakdowns).
 - ```interactive — a chart the user steers with sliders and other controls; it recomputes instantly as they drag, with no new request to you: {"title": "Compound growth", "type": "line", "controls": [{"id": "rate", "label": "Annual return", "type": "slider", "min": 0, "max": 15, "step": 0.25, "value": 7, "unit": "%"}, {"id": "start", "label": "Starting amount", "type": "number", "value": 5000, "unit": "$"}], "x": {"id": "year", "label": "Year", "from": 0, "to": 30, "steps": 120}, "series": [{"key": "balance", "label": "Balance", "expr": "start * pow(1 + rate/100, year)"}], "readouts": [{"label": "Final balance", "expr": "balance_last", "unit": "$"}], "unit": "$", "yLabel": "Balance"}
   - `controls` (max 12): `type` is slider (the default), number, select (needs "options": [...]), or toggle. Every `id` must be a plain name, because the formulas reference it by that name.
   - `x` is either a swept range — `from`/`to`/`steps` (max 400), each a number or a formula over the controls — or `{"id": "...", "values": [...]}` for fixed categories. To drive real rows instead, pass `"data": [{...}, ...]` and set `"x"` to the column name; formulas then also see that row's columns.
@@ -1421,7 +1445,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         user_text = users[-1]["content"]
 
     tracer = Tracer()
-    llm.usage_context.set({"conversation_id": conv_id, "project_id": conv["project_id"]})
+    _desk = (run.desk_id if run else None) or conv["settings"].get("deskId")
+    _job = conv["settings"].get("job_id")
+    _ucx = {"conversation_id": conv_id, "project_id": conv["project_id"], "tag": f"desk:{_desk}" if _desk else f"job:{_job}" if _job else "chat"}
+    llm.usage_context.set(_ucx)
     await pricing.refresh(cfg)
     project = projects.get(conv["project_id"]) if conv["project_id"] else None
     cspan = tracer.start("context", "Assemble context", {"model": model})
@@ -1434,6 +1461,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         activity=monitor, skills=skills, style=style, meetings=meeting_svc,
         page=body.page_context.model_dump() if body.page_context else None,
     )
+    skills.bump_use([x["id"] for x in used["skills"] if x.get("disclosure") != "manifest"])
     # Older messages are folded into a rolling summary when the replay outgrows the window (compaction.py).
     history, cinfo = await compaction.prepare_history(compactor, convos, cfg, str(cfg.get("extractionModel") or model), conv_id,
                                                       used["tokens_estimate"])
@@ -1670,6 +1698,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         last_sig: str | None = None
         repeats = 0
         tool_errors: dict[str, int] = {}
+        warm_tasks: list[asyncio.Task] = []  # read-only calls started ahead of their turn in the round; cancelled at the end
         detector = StuckDetector() if cfg.get("stuckDetection", True) else None  # loop shapes REPEAT_LIMIT cannot see
         perm_rules = permrules.load_rules(cfg.get("permissionRules"))
         denials = permrules.DenialStreak()  # refused calls in a row; at three the next result says to stop varying them
@@ -1687,6 +1716,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         # call rather than remembered: after a round of long tool results the task itself is the first
         # thing to fall out of attention. One slot, moved, never accumulated.
         plan_msg: dict[str, Any] | None = None
+        nudged = False
 
         def _reinject_plan() -> None:
             nonlocal plan_msg
@@ -1703,6 +1733,51 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 plan_msg = {"role": "system", "content": block}
                 messages.append(plan_msg)
 
+        def _warm_segment(calls: list[dict[str, Any]], start: int, warm: dict[str, asyncio.Task],
+                          warm_ctx: dict[str, dict[str, Any]], tasks: list[asyncio.Task]) -> int:
+            """Start the maximal run of read-only calls beginning at calls[start] together (at most parallelReads at a
+            time) and return its length. A call joins only when it would run without a card: on, not forced, no rule
+            asking or refusing it, not a writer, a spawn or session-holding tool, and no plan in play. The first call
+            that does not qualify ends the run, so a write is a barrier and later reads wait for it. A reply that is
+            tainted by an earlier call of the run is simulated, so a call that would then ask is not started."""
+            width = max(1, int(cfg.get("parallelReads") or 1))
+            if width < 2 or planning or active_plan is not None or plan_seen:
+                return 1
+            sim = dict(tool_ctx)
+            seg: list[tuple[dict[str, Any], dict[str, Any]]] = []
+            for c in calls[start:]:
+                name, args = c["name"], _call_args(c)
+                spec, raw = toolbox.specs.get(name), modes.get(name, "off")
+                if "_raw" in args or name in blocked or not parallel_safe(spec, name, raw):
+                    break
+                if _gate(name, raw, sim, args) != "on" or toolbox.fs_needs_ask(name, args, sim):
+                    break
+                perm = permrules.resolve(name, args, "on", False, rules=perm_rules, roots=_perm_roots(cfg, desk_id), conv=conv_id,
+                                         doom=detector is not None and detector.repeat_count(name, args) >= permrules.DOOM_LIMIT - 1)
+                if perm.mode != "on" or perm.refusal or perm.kind == "doom_loop":
+                    break
+                seg.append((c, args))
+                if spec.taints:
+                    sim["tainted"] = True
+            if len(seg) < 2:
+                return 1
+            sem = asyncio.Semaphore(width)
+
+            async def run_one(name: str, args: dict[str, Any], ctx: dict[str, Any]) -> Any:
+                async with sem:
+                    # Stop skips reads still queued for a slot; reads already running side by side are not interrupted.
+                    if stop.is_set():
+                        return {"error": "Stopped by the user before this call ran; it was not executed."}
+                    return await toolbox.call(name, args, ctx)
+
+            for c, args in seg:
+                key = tools.call_key(c["name"], args)
+                if key not in warm:  # an identical call in the round runs once and shares the result
+                    warm_ctx[key] = dict(tool_ctx)  # taint set by a read must not reach calls gated before it
+                    warm[key] = asyncio.ensure_future(run_one(c["name"], args, warm_ctx[key]))
+                    tasks.append(warm[key])
+            return len(seg)
+
         async def _final_round() -> AsyncIterator[tuple[str, Any]]:
             """Closing answer after a budget or breaker stop: one tool-free call, itself exempt from the budget."""
             _reinject_plan()
@@ -1711,6 +1786,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             if buf and buf[-1] and not buf[-1].endswith("\n"):
                 buf.append("\n")
                 yield "delta", {"id": am["id"], "text": "\n"}
+            llm.usage_context.set({**_ucx, "round": _round})
             span = tracer.start("llm", model, {"round": _round, "final": True, "messages": len(messages), "tools": len(tool_schemas)})
             yield "span", {"message_id": am["id"], "span": span}
             start, fin = len(buf), {}
@@ -1799,9 +1875,14 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 mspan = tracer.start("compact", "Clear old tool results", {"kind": "micro"}, parent=cspan)
                 tracer.end(mspan, {"cleared": n_cleared, "tokens_saved": n_saved})
                 yield "span", {"message_id": am["id"], "span": mspan}
+                nudge = compaction.memory_nudge(n_cleared, nudged, tool_schemas)
+                if nudge:
+                    nudged = True  # once per run, ahead of the re-injected plan, so the prefix stays stable after this round
+                    messages.append({"role": "system", "content": nudge})
             for _note in toolbox.shell.drain_notes(conv_id):  # a background shell job finished since the last round
                 messages.append({"role": "system", "content": _note})
             _reinject_plan()  # last message in the context, after the previous round's tool results
+            llm.usage_context.set({**_ucx, "round": _round})
             lspan = tracer.start("llm", model, {"round": _round, "messages": len(messages), "tools": len(tool_schemas)})
             round_span = lspan  # the tool calls below nest under it
             yield "span", {"message_id": am["id"], "span": lspan}
@@ -1880,7 +1961,16 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             if buf and buf[-1] and not buf[-1].endswith("\n"):
                 buf.append("\n")
                 yield "delta", {"id": am["id"], "text": "\n"}
-            for c in calls:
+            # Consecutive read-only calls start together (see _warm_segment); a write, an ask or any other call
+            # is a barrier. The loop below still gates, journals and reports every call in order and only
+            # collects the warmed result instead of calling the tool.
+            warm: dict[str, asyncio.Task] = {}
+            warm_ctx: dict[str, dict[str, Any]] = {}
+            warmed_upto = 0
+            for ci, c in enumerate(calls):
+                if ci >= warmed_upto and not stop.is_set():
+                    warm.clear()  # a result is only shared inside its own run of reads, never across a barrier
+                    warmed_upto = ci + max(1, _warm_segment(calls, ci, warm, warm_ctx, warm_tasks))
                 if stop.is_set():
                     # Stop means the rest of this round's calls do not run either. The provider still needs a tool
                     # message per call, and nothing was journaled as started, so nothing replays.
@@ -2248,6 +2338,14 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         result = await _mcp_call(c["name"], args)
                         mcp_ran = True
                     ran = True
+                elif not asks and (wkey := tools.call_key(c["name"], args)) in warm:
+                    # Started with its neighbours; an identical call in the round shares this one run.
+                    result = await warm[wkey]
+                    if isinstance(result, dict):
+                        result = dict(result)
+                    if warm_ctx[wkey].get("tainted"):
+                        tool_ctx["tainted"] = True
+                    ran = True
                 else:
                     tool_ctx["fs_outside_ok"] = fs_ask  # the user approved this write (or granted the folder)
                     try:
@@ -2337,6 +2435,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     tool_schemas = _schemas()
                 if tool_ctx.pop("plan_changed", None):
                     yield "plan", {"conversation_id": conv_id, "steps": (work_plans.get(conv_id) or {}).get("steps") or []}
+            # Warmed reads nobody consumed (Stop, a loop break) are cancelled and reaped now, not at run end.
+            pending = [t for t in warm_tasks if not t.done()]
+            for t in pending:
+                t.cancel()
+            await asyncio.gather(*warm_tasks, return_exceptions=True)
+            warm_tasks.clear()
             if partial == "loop":
                 async for chunk in _final_round():
                     yield chunk
@@ -2360,6 +2464,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             yield "span", {"message_id": am["id"], "span": s}
     finally:
         _active.pop(am["id"], None)
+        for t in warm_tasks:
+            t.cancel()
         if not desk_id:  # a chat's background shell jobs end with its run; a desk's outlive a turn (they wake it)
             await toolbox.shell.kill_conversation(conv_id)
 
@@ -3589,7 +3695,7 @@ async def _jobs_shutdown() -> None:
 async def usage_report(days: int = 30) -> dict[str, Any]:
     cfg = settings()
     await pricing.refresh(cfg)
-    return {**usage.report(days), "prices": pricing.table(cfg)}
+    return {**usage.report(days), "alerts": usage.alert_state(cfg), "prices": pricing.table(cfg)}
 
 
 class PricesIn(BaseModel):
@@ -3950,9 +4056,56 @@ def index_status() -> dict[str, Any]:
     return retriever.status(settings())
 
 
+def _chunk_span(text: str, rows: list[Any], chunk_id: str) -> dict[str, Any]:
+    """Offsets of one chunk in its source text. Chunks overlap, so each search starts at the previous
+    chunk's start (not the document start) and a chunk whose text is not found verbatim gets -1."""
+    pos = 0
+    for r in rows:
+        i = text.find(r["text"], pos)
+        if r["id"] == chunk_id:
+            return {"text": r["text"], "heading": r["heading"] if "heading" in r.keys() else "", "page": r["page"] if "page" in r.keys() else None,
+                    "start": i, "end": i + len(r["text"]) if i >= 0 else -1}
+        if i >= 0:
+            pos = i + 1
+    raise HTTPException(404)
+
+
+@app.get("/documents/{id}/chunks/{chunk_id}")
+def document_chunk(id: str, chunk_id: str) -> dict[str, Any]:
+    d = documents.get(id)
+    if not d:
+        raise HTTPException(404)
+    with db.tx() as c:
+        rows = c.execute("SELECT * FROM chunks WHERE document_id=? ORDER BY idx", (id,)).fetchall()
+    return _chunk_span(d["text"] or "", rows, chunk_id)
+
+
+@app.get("/docs/{doc_id}/chunks/{chunk_id}")
+def doc_chunk(doc_id: str, chunk_id: str) -> dict[str, Any]:
+    d = docs.get(doc_id)
+    if not d:
+        raise HTTPException(404)
+    with db.tx() as c:
+        rows = c.execute("SELECT * FROM doc_chunks WHERE doc_id=? ORDER BY idx", (doc_id,)).fetchall()
+    return _chunk_span(d["content"] or "", rows, chunk_id)
+
+
 @app.get("/documents/{id}")
 def get_document(id: str) -> dict[str, Any]:
     d = documents.get(id)
+    if not d:
+        raise HTTPException(404)
+    return d
+
+
+class DocumentPatch(BaseModel):
+    pinned: bool
+
+
+@app.patch("/documents/{id}")
+def patch_document(id: str, body: DocumentPatch) -> dict[str, Any]:
+    """Pin a document so every chat in its scope carries it, whatever retrieval finds."""
+    d = documents.set_pinned(id, body.pinned)
     if not d:
         raise HTTPException(404)
     return d
@@ -4033,6 +4186,7 @@ async def embed_backfill() -> dict[str, Any]:
     current model. Idempotent."""
     docs.backfill_chunks()
     embedder.reset()  # the user asked for it now, so a back-off from an earlier failure does not apply
+    await retriever.contextualize_pending(settings())  # no-op unless contextualChunks; never raises
     return await retriever.embed_pending(settings())
 
 
@@ -4315,6 +4469,19 @@ async def assist_mail_review(body: MailReviewIn) -> dict[str, Any]:
         raise HTTPException(502, f"Review failed: {e}") from e
 
 
+class DictationCleanIn(BaseModel):
+    text: str
+
+
+@app.post("/docs/dictation/clean")
+async def docs_dictation_clean(body: DictationCleanIn) -> dict[str, str]:
+    """Optional model pass over one committed dictation clip. Off by default: no model call is made
+    unless meetings.dictationCleanup is on. Always returns text, the input itself when anything fails."""
+    if not meeting_svc.config().get("dictationCleanup"):
+        return {"text": body.text}
+    return {"text": await assist.clean_dictation(settings(), body.text)}
+
+
 @app.get("/integrations/google/tasks")
 def google_tasks(show_completed: bool = False, refresh: bool = False) -> Any:
     return _gcall(google.tasks_list, "@default", show_completed, refresh=refresh)
@@ -4552,6 +4719,7 @@ class WidgetIn(BaseModel):
     width: int = 1
     height: int = 280
     refresh_minutes: int = 60
+    spec: dict[str, Any] = {}    # chart/stat/table: a ready spec (e.g. inline_rows from a pinned chat chart) skips generation
 
 
 class WidgetPatch(BaseModel):
@@ -4693,7 +4861,8 @@ async def _run_widget(w: dict[str, Any], request: Request, regenerate_code: bool
         if regenerate_code or not w["code"]:
             samples = await _samples(w["source_ids"])
             code = await generate_widget_code(cfg, cfg["defaultModel"], w["prompt"] or w["title"], srcs, str(request.base_url).rstrip("/"), w["width"], w["height"], samples)
-            w = dashboards.update_widget(w["id"], {"code": code, "refreshed_at": time.time()}) or w
+            left = lint_widget_html(code, str(request.base_url).rstrip("/"), bool(srcs))
+            w = dashboards.update_widget(w["id"], {"code": code, "refreshed_at": time.time(), "data_error": "; ".join(left)}) or w
     elif w["kind"] == "summary":
         data = await _samples(w["source_ids"])
         text = await generate_summary(cfg, model, w["prompt"], data)
@@ -4713,7 +4882,7 @@ async def create_widget(id: str, body: WidgetIn, request: Request) -> dict[str, 
     if not dashboards.get(id):
         raise HTTPException(404)
     title = body.title.strip() or (body.prompt.strip()[:40] or "Widget")
-    w = dashboards.create_widget(id, title, body.kind, body.prompt, body.source_ids, body.code, body.output, body.width, body.height, body.refresh_minutes)
+    w = dashboards.create_widget(id, title, body.kind, body.prompt, body.source_ids, body.code, body.output, body.width, body.height, body.refresh_minutes, body.spec)
     if body.kind in ("html", "summary") + widget_spec.KINDS:
         try:
             w = await _run_widget(w, request, regenerate_code=(body.kind == "html" and not body.code))
@@ -4829,10 +4998,11 @@ async def recap(force: bool = False) -> dict[str, Any]:
 
 # ---------------- canvas mode: spaces, windows, notes ----------------
 canvases = Canvases(db)
+toolbox.canvases = canvases
 app.include_router(artifact_router(artifacts, settings, on_delete=lambda aid: canvases.delete_windows_for("artifact", aid),
                                    sign=_artifact_render_path, verify=_artifact_render_ok))
 notes = Notes(db)
-presets = CanvasPresets(db, canvases)
+presets = CanvasPresets(db, canvases, notes, dashboards)
 # 'popped' rows are NOT reset here: import runs before the main process can restore them (it clears the ones it declines).
 
 
@@ -5084,12 +5254,16 @@ class DocSave(BaseModel):
     content: str | None = None
     title: str | None = None
     summary: str = ""
+    # The updated_at the editor last loaded. When the stored doc is newer the save is refused (409)
+    # instead of overwriting another window's edit; omitted keeps the unconditional write.
+    base_updated_at: float | None = None
 
 
 class DocMetaPatch(BaseModel):
     title: str | None = None
     folder: str | None = None
     starred: bool | None = None
+    pinned: bool | None = None
     project_id: str | None = None
     clear_project: bool = False
     # Where in the Files tree this doc now lives: '' is the personal tree, otherwise a project id.
@@ -5102,6 +5276,12 @@ class DocMetaPatch(BaseModel):
 def list_docs(project_id: str | None = "all", q: str = "") -> list[dict[str, Any]]:
     scope = "__all__" if project_id in (None, "all") else sid(project_id)
     return docs.list(scope, q)
+
+
+@app.get("/docs/search")
+def search_docs(q: str = "", project_id: str | None = "all", limit: int = 20) -> list[dict[str, Any]]:
+    scope = "__all__" if project_id in (None, "all") else sid(project_id)
+    return docs.search(q, scope, max(1, min(limit, 50)))
 
 
 @app.get("/docs/pending")
@@ -5173,27 +5353,39 @@ def open_daily_doc(body: DailyIn) -> dict[str, Any]:
     return {"doc": doc, "created": created}
 
 
+class DailyAppendIn(BaseModel):
+    text: str
+    date: str | None = None
+
+
+@app.post("/docs/daily/append")
+def append_daily_doc(body: DailyAppendIn) -> dict[str, Any]:
+    try:
+        return {"doc": docs.append_daily(body.text, body.date)}
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
 class DocRecordingIn(BaseModel):
     mode: str = "record"       # 'record' captures the room and proposes a summary; 'dictate' types what you say
     template: str = "general"
     title: str | None = None
+    keep_audio: bool | None = None   # keep this recording's audio for playback; None follows the global setting
 
 
-@app.post("/docs/{doc_id}/recordings")
-async def start_doc_recording(doc_id: str, body: DocRecordingIn) -> dict[str, Any]:
-    """Create a recording linked to this doc and start it, through the same consent + preflight gate
-    as any meeting. If the start is refused the row made for it is deleted, so nothing is left behind."""
-    d = docs.get(doc_id)
-    if not d:
-        raise HTTPException(404)
-    if body.mode not in ("record", "dictate"):
+async def _start_doc_recording(d: dict[str, Any], mode: str, template: str, title: str | None = None,
+                               meeting_id: str | None = None, **meeting_kw: Any) -> dict[str, Any]:
+    """Create (or adopt `meeting_id`) a recording linked to doc `d` and start it, through the same
+    consent + preflight gate as any meeting. A refused start deletes the row made for it; raises
+    HTTPException, and the caller decides what else to clean up."""
+    if mode not in ("record", "dictate"):
         raise HTTPException(400, "mode must be 'record' or 'dictate'")
     if not activity.IS_MAC:
         row = next((r for r in meeting_svc.capabilities() if r["id"] == "platform"), {})
         raise HTTPException(400, row.get("fix") or "Recording is macOS-only.")
     m = meeting_store.create(
-        title=(body.title or "").strip() or d["title"], project_id=d["project_id"], template=body.template,
-        status="scheduled", doc_id=doc_id, doc_mode=body.mode)
+        title=(title or "").strip() or d["title"], project_id=d["project_id"], template=template,
+        status="scheduled", doc_id=d["id"], doc_mode=mode, **meeting_kw)
     try:
         started = await asyncio.to_thread(meeting_svc.start, m["id"])
     except BaseException as e:
@@ -5211,6 +5403,56 @@ async def start_doc_recording(doc_id: str, body: DocRecordingIn) -> dict[str, An
     return started
 
 
+@app.post("/docs/{doc_id}/recordings")
+async def start_doc_recording(doc_id: str, body: DocRecordingIn) -> dict[str, Any]:
+    d = docs.get(doc_id)
+    if not d:
+        raise HTTPException(404)
+    return await _start_doc_recording(d, body.mode, body.template, body.title, keep_audio=bool(body.keep_audio))
+
+
+class DocFromEventIn(BaseModel):
+    event_id: str
+    title: str = ""
+    start: float | None = None
+    attendees: list[Any] = []
+    project_id: str | None = None
+    mode: str = "record"
+    template: str = "general"
+
+
+# Declared above /docs/{id}, like /docs/daily.
+@app.post("/docs/from-event")
+async def doc_from_event(body: DocFromEventIn) -> dict[str, Any]:
+    """Calendar 'Take notes': one doc titled from the event, with the attendees listed, and a recording
+    linked to it. Repeating the call for the same event hands back the same doc. If the start is refused
+    (consent, preflight, busy) the doc is deleted too, so a blocked click leaves nothing behind."""
+    eid = body.event_id.strip()
+    if not eid:
+        raise HTTPException(400, "event_id is required")
+    prior = meeting_store.by_event(eid)
+    if prior and prior.get("doc_id") and (d := docs.get(prior["doc_id"])):
+        return {"doc": d, "started": prior, "existing": True}
+    people = [p for p in (_attendee_label(a) for a in body.attendees) if p]
+    title = body.title.strip() or "Meeting notes"
+    head = f"# {title}\n\n" + (f"Attendees: {', '.join(people)}\n\n" if people else "")
+    d = docs.create(title, head, wsid(body.project_id))
+    try:
+        started = await _start_doc_recording(
+            d, body.mode, body.template, title, calendar_event_id=None if prior else eid, attendees=body.attendees,
+            scheduled_start=body.start)
+    except BaseException:
+        docs.delete(d["id"])
+        raise
+    return {"doc": docs.get(d["id"]), "started": started, "existing": False}
+
+
+def _attendee_label(a: Any) -> str:
+    if isinstance(a, dict):
+        return str(a.get("name") or a.get("displayName") or a.get("email") or "").strip()
+    return str(a or "").strip()
+
+
 @app.get("/docs/{doc_id}/recordings")
 def doc_recordings(doc_id: str) -> list[dict[str, Any]]:
     if not docs.get(doc_id):
@@ -5226,6 +5468,39 @@ def doc_backlinks(doc_id: str) -> list[dict[str, Any]]:
     return out
 
 
+class LinkTitleIn(BaseModel):
+    url: str
+
+
+@app.post("/docs/link-title")
+async def doc_link_title(body: LinkTitleIn) -> dict[str, Any]:
+    """The page title behind a pasted URL, through the same address guard as fetch_url. {title: null} when unreadable."""
+    return {"title": await page_title(body.url, settings())}
+
+
+# Both declared above /docs/{id} so "assets" is not read as a doc id.
+@app.get("/docs/assets/{doc_id}/{name}")
+def get_doc_asset(doc_id: str, name: str) -> FileResponse:
+    try:
+        p = asset_path(db.data_dir / "doc_assets", doc_id, name)
+    except AssetError as e:
+        raise HTTPException(e.status, str(e)) from e
+    ext = p.suffix.lower()
+    mime = next((m for m, x in ASSET_MIMES.items() if x == ext), "application/octet-stream")
+    return FileResponse(p, media_type=mime, headers={"X-Content-Type-Options": "nosniff"})
+
+
+@app.post("/docs/{id}/assets")
+async def upload_doc_asset(id: str, file: UploadFile = File(...)) -> dict[str, Any]:
+    if not docs.get(id):
+        raise HTTPException(404)
+    data = await file.read(8 * 1024 * 1024 + 1)  # one byte past the cap is enough to refuse it
+    try:
+        return {"url": save_asset(db.data_dir / "doc_assets", id, file.filename or "image", data, file.content_type or "")}
+    except AssetError as e:
+        raise HTTPException(e.status, str(e)) from e
+
+
 @app.get("/docs/{id}")
 def get_doc(id: str) -> dict[str, Any]:
     d = docs.get(id)
@@ -5236,6 +5511,10 @@ def get_doc(id: str) -> dict[str, Any]:
 
 @app.put("/docs/{id}")
 def save_doc(id: str, body: DocSave) -> dict[str, Any]:
+    if body.base_updated_at is not None:
+        cur = docs.get(id)
+        if cur and cur["updated_at"] > body.base_updated_at:
+            raise HTTPException(409, "This doc changed elsewhere since you opened it.")
     d = docs.save(id, body.content, body.title, body.summary)
     if not d:
         raise HTTPException(404)
@@ -5329,6 +5608,7 @@ class ActivityConfigIn(BaseModel):
     redact: bool | None = None
     excludeApps: list[str] | None = None
     excludeTitlePatterns: list[str] | None = None
+    excludeRules: list[dict[str, str]] | None = None
     redactAllow: list[str] | None = None
     redactDeny: list[str] | None = None
     redactThreshold: float | None = None
@@ -5634,6 +5914,15 @@ def _recording_changed(event: dict[str, Any]) -> None:
 meeting_svc.publish = _recording_changed
 
 
+def _preview_changed(event: dict[str, Any]) -> None:
+    """Volatile/final dictation text, from the audio thread: same hand-off to the loop as above."""
+    if _loop is not None and not _loop.is_closed():
+        _loop.call_soon_threadsafe(events.publish, "preview", event)
+
+
+meeting_svc.preview_publish = _preview_changed
+
+
 class MeetingIn(BaseModel):
     """A new meeting. `status` is `scheduled` rather than the repo's `notes_only` default because
     this row was made in order to be recorded; the one the 45s tick adopts says so for itself."""
@@ -5704,10 +5993,16 @@ class MeetingConfigIn(BaseModel):
     sttModel: str | None = None
     whisperModelPath: str | None = None
     template: str | None = None
+    customTemplates: list[dict[str, Any]] | None = None
+    recipes: list[dict[str, Any]] | None = None
+    summaryLanguage: str | None = None
     enhanceOnStop: bool | None = None
     enhanceModel: str | None = None
     maxTranscriptChars: int | None = None
+    minSummaryWords: int | None = None
+    vocabularyPrompt: bool | None = None
     keepAudio: bool | None = None
+    silencePauseMinutes: int | None = None
     maxAudioBytes: int | None = None
     redactSecrets: bool | None = None
     injectContext: bool | None = None
@@ -5715,6 +6010,7 @@ class MeetingConfigIn(BaseModel):
     calendarIds: list[str] | None = None
     minAttendees: int | None = None
     vadGate: bool | None = None
+    livePreview: bool | None = None
     vadMinSpeechRatio: float | None = None
     hallucinationFilter: bool | None = None
     whisperVadModelPath: str | None = None
@@ -5725,6 +6021,7 @@ class MeetingConfigIn(BaseModel):
     diarizeEmbeddingModel: str | None = None
     diarizeThreshold: float | None = None
     diarizeSpeakers: int | None = None
+    dictationCleanup: bool | None = None
 
 
 class MeetingSpeakersIn(BaseModel):
@@ -5763,7 +6060,10 @@ async def meeting_preflight(force: bool = False) -> dict[str, Any]:
 def meeting_config(body: MeetingConfigIn) -> dict[str, Any]:
     """Deep-merged, and it never touches a live recording: picking a different microphone halfway
     through a call applies to the next segment instead of tearing the capture down."""
-    meeting_svc.set_config(body.model_dump(exclude_none=True))
+    try:
+        meeting_svc.set_config(body.model_dump(exclude_none=True))
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
     return meeting_svc.status()
 
 
@@ -5806,10 +6106,10 @@ async def meeting_suggest() -> list[dict[str, Any]]:
 
 
 @app.get("/meetings/search")
-def search_meetings(q: str, project_id: str | None = "all", limit: int = 10) -> list[dict[str, Any]]:
+async def search_meetings(q: str, project_id: str | None = "all", limit: int = 10) -> list[dict[str, Any]]:
     """FTS over titles, notes, enhanced notes and transcripts. Each hit's `field` says which one."""
     scope = "__all__" if project_id in (None, "all") else sid(project_id)
-    return meeting_store.search(q, scope, _clamp(limit))
+    return await meeting_index.search(settings(), q, scope, _clamp(limit))
 
 
 @app.get("/meetings/pending")
@@ -5991,6 +6291,20 @@ def rename_meeting_speakers(id: str, body: MeetingSpeakersIn) -> dict[str, Any]:
     return m
 
 
+class NoteMarksIn(BaseModel):
+    """Lines typed during a recording: [{line, t}] with t the recording offset in seconds."""
+
+    marks: list[dict[str, Any]] = Field(default_factory=list)
+
+
+@app.put("/meetings/{id}/note-marks")
+def put_note_marks(id: str, body: NoteMarksIn) -> dict[str, Any]:
+    out = meeting_svc.meetings.set_note_marks(id, body.marks[-500:])
+    if out is None:
+        raise HTTPException(404)
+    return {"marks": out}
+
+
 @app.post("/meetings/{id}/pause")
 def pause_meeting(id: str) -> dict[str, Any]:
     """ffmpeg keeps running so segment numbering stays monotonic; the worker discards the audio.
@@ -6128,6 +6442,17 @@ async def retranscribe_meeting(id: str, limit: int = 20) -> dict[str, Any]:
     return {"settled": settled, "meeting": meeting_store.get(id, include_hidden=False)}
 
 
+@app.get("/meetings/{id}/segments/{seg_id}/audio")
+def meeting_segment_audio(id: str, seg_id: str) -> FileResponse:
+    """One kept segment's wav, for click-to-play. 404 unless the recording keeps audio and the file is inside its audio dir."""
+    if meeting_store.is_hidden(id):
+        raise HTTPException(404)
+    p = meeting_store.kept_segment_wav(id, seg_id)
+    if not p:
+        raise HTTPException(404, "Audio was not kept")
+    return FileResponse(p, media_type="audio/wav")
+
+
 @app.delete("/meetings/{id}/audio")
 def delete_meeting_audio(id: str) -> dict[str, Any]:
     """The wavs go; the segment rows stay, so the UI can still say why retranscribe is over."""
@@ -6192,6 +6517,22 @@ def create_canvas_preset(body: PresetIn) -> dict[str, Any]:
     if not p:
         raise HTTPException(404, "Unknown canvas")
     return p
+
+
+@app.get("/canvas-presets/{pid}/export")
+def export_canvas_preset(pid: str) -> dict[str, Any]:
+    p = presets.export(pid)
+    if not p:
+        raise HTTPException(404, "No such preset")
+    return p
+
+
+@app.post("/canvas-presets/import")
+def import_canvas_preset(body: dict[str, Any]) -> dict[str, Any]:
+    try:
+        return presets.import_file(body.get("file") or {}, bool(body.get("instantiate", True)))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @app.put("/canvas-presets/{pid}")

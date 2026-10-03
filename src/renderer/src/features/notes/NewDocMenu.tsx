@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { CalendarDays, ChevronDown, Plus } from 'lucide-react'
-import { TEMPLATES } from './templates'
+import { TEMPLATES, expandTemplate, userTemplates } from './templates'
+import { api } from '../../lib/api'
+import { useStore } from '../../store'
 import '../../styles/notes.css'
 
 /** A split "New" button: the main half makes a blank doc, the chevron opens templates and today's daily note. */
@@ -9,6 +11,7 @@ export default function NewDocMenu({ onCreate, onDaily }: {
   onDaily: () => void
 }): JSX.Element {
   const [open, setOpen] = useState(false)
+  const mine = userTemplates(useStore((s) => s.docs))
   const root = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -28,6 +31,15 @@ export default function NewDocMenu({ onCreate, onDaily }: {
     onCreate({ title: t.title(now), content: t.body(now) })
   }
 
+  const makeFrom = async (id: string): Promise<void> => {
+    setOpen(false)
+    try {
+      const doc = await api.docs.get(id)
+      const title = doc.title || 'Untitled'
+      onCreate({ title, content: expandTemplate(doc.content ?? '', { now: new Date(), title }).text })
+    } catch { /* the doc vanished; nothing to create */ }
+  }
+
   return (
     <div className="newdoc" ref={root}>
       <button className="newdoc-main ghost-btn" title="New doc" onClick={() => make('blank')}><Plus size={13} /> New</button>
@@ -43,6 +55,9 @@ export default function NewDocMenu({ onCreate, onDaily }: {
           <div className="notes-menu-label">From template</div>
           {TEMPLATES.filter((t) => t.id !== 'blank').map((t) => (
             <button key={t.id} role="menuitem" className="notes-menu-row" onClick={() => make(t.id)}>{t.name}</button>
+          ))}
+          {mine.map((t) => (
+            <button key={t.id} role="menuitem" className="notes-menu-row" onClick={() => void makeFrom(t.id)}>{t.title || 'Untitled'}</button>
           ))}
         </div>
       )}

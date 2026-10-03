@@ -1,10 +1,12 @@
 import { create } from 'zustand'
-import type { DocRecording, DocRecordingMode, FullMeeting, MeetingActionItem, MeetingSegment, RecordingEvent } from '@shared/types'
+import type { MeetingCandidate, DocRecording, DocRecordingMode, FullMeeting, MeetingActionItem, MeetingSegment, RecordingEvent } from '@shared/types'
 import { consentResume, useStore } from '../../store'
 import { fetchSegmentPages } from '../../lib/transcript'
 import { docRecApi, type SummarizeBody } from './api'
 import { forgetDictation } from './dictation'
+import { usePreview } from './preview'
 import { startRefusal, type BlockerAction } from './blockers'
+import { blockInsertText, recordingBlockLabel, recordingBlockLine } from './recordingBlock'
 import { foldSegments, isSettled, liveDoc, needsFullReload, settleDone } from './segments'
 
 /**
@@ -57,7 +59,9 @@ interface DocRecState {
 
   load: (docId: string) => Promise<void>
   select: (docId: string, meetingId: string | null) => Promise<void>
-  start: (docId: string, mode: DocRecordingMode, opts?: { template?: string; title?: string }) => Promise<void>
+  start: (docId: string, mode: DocRecordingMode, opts?: { template?: string; title?: string; keep_audio?: boolean }) => Promise<void>
+  /** Calendar 'Take notes': creates the event's doc (once) and records into it. */
+  startFromEvent: (c: MeetingCandidate) => Promise<void>
   stop: () => Promise<void>
   pause: () => Promise<void>
   resume: () => Promise<void>
@@ -83,6 +87,11 @@ const cursors = new Map<string, number>()
 /** Recordings a `summary` event has been seen for. The event can land before Stop's response does,
  *  i.e. before `beginSettling`, so it is remembered here rather than only on `settling`. */
 const summaryEvents = new Set<string>()
+
+/** The open editor's way to take a line at its caret (DocsView registers it); null when none is mounted. */
+type BlockSink = (docId: string, make: (before: string, after: string) => string) => void
+let blockSink: BlockSink | null = null
+export const setRecordingBlockSink = (s: BlockSink | null): void => { blockSink = s }
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
@@ -274,11 +283,17 @@ export const useDocRec = create<DocRecState>((set, get) => {
 
     start: async (docId, mode, opts) => {
       if (get().busy) return
+      const open = useStore.getState().activeDoc
+      if (mode === 'dictate' && open?.id === docId && (open.pending?.length ?? 0) > 0) {
+        const text = 'Review the assistant edit first: dictation would type under a pending change.'
+        set({ notice: { text, action: 'none' } })
+        return toast(text, 'error')
+      }
       set({ busy: true, notice: null })
       try {
         // The draft goes first so what was typed before Record is on the server, not in a buffer.
         await useStore.getState().flushDoc()
-        const m = await docRecApi.start(docId, { mode, template: opts?.template, title: opts?.title })
+        const m = await docRecApi.start(docId, { mode, template: opts?.template, title: opts?.title, keep_audio: opts?.keep_audio })
         cursors.delete(m.id)
         set((st) => ({
           segments: { ...st.segments, [m.id]: [] },
@@ -286,6 +301,11 @@ export const useDocRec = create<DocRecState>((set, get) => {
           selectedId: { ...st.selectedId, [docId]: m.id }
         }))
         currentDoc = docId
+        // The anchor for this recording's transcript and summary; dictation types text instead.
+        if (mode === 'record') {
+          const line = recordingBlockLine(m.id, recordingBlockLabel(m))
+          blockSink?.(docId, (before, after) => blockInsertText(line, before, after))
+        }
         await Promise.all([useStore.getState().refreshMeetingStatus(), refreshList(docId)])
         get().kick()
       } catch (e) {
@@ -293,6 +313,37 @@ export const useDocRec = create<DocRecState>((set, get) => {
         if (refusal.action === 'consent') {
           // Park the start, and let the existing consent modal resume it as a doc recording.
           consentResume.run = () => void get().start(docId, mode, opts)
+          useStore.getState().setMeetingConsentOpen(true)
+        } else {
+          set({ notice: { text: refusal.text, action: refusal.action } })
+          toast(refusal.text, 'error')
+        }
+      } finally {
+        set({ busy: false })
+      }
+    },
+
+    startFromEvent: async (c) => {
+      if (get().busy) return
+      set({ busy: true, notice: null })
+      try {
+        const start = Date.parse(c.start)
+        const r = await docRecApi.fromEvent({
+          event_id: c.event_id, title: c.title, start: Number.isNaN(start) ? null : start / 1000, attendees: c.attendees ?? [] })
+        cursors.delete(r.started.id)
+        set((st) => ({
+          segments: { ...st.segments, [r.started.id]: [] },
+          meetings: { ...st.meetings, [r.started.id]: r.started },
+          selectedId: { ...st.selectedId, [r.doc.id]: r.started.id }
+        }))
+        currentDoc = r.doc.id
+        await useStore.getState().openDoc(r.doc.id)
+        await Promise.all([useStore.getState().refreshMeetingStatus(), refreshList(r.doc.id)])
+        get().kick()
+      } catch (e) {
+        const refusal = startRefusal(message(e))
+        if (refusal.action === 'consent') {
+          consentResume.run = () => void get().startFromEvent(c)
           useStore.getState().setMeetingConsentOpen(true)
         } else {
           set({ notice: { text: refusal.text, action: refusal.action } })
@@ -443,6 +494,7 @@ export const useDocRec = create<DocRecState>((set, get) => {
       const docId = ev.doc_id
       if (ev.kind === 'segment' && ev.segment) {
         const seg = ev.segment
+        usePreview.getState().settle(ev.meeting_id, seg.t_end)
         set((st) => ({ segments: { ...st.segments, [ev.meeting_id]: foldSegments(st.segments[ev.meeting_id] ?? [], [seg]) } }))
         return
       }

@@ -259,8 +259,45 @@ def test_routes() -> None:
     check(dash["widgets"][0]["spec"]["kind"] == "chart", "dashboard listing carries the parsed spec")
 
 
+def test_inline_rows() -> None:
+    fetches: list[str] = []
+
+    async def fetch(sid: str) -> Any:
+        fetches.append(sid)
+        raise AssertionError("inline rows must not fetch")
+
+    spec = {"kind": "chart", "inline_rows": [{"n": "a", "v": "$3"}, {"n": "b", "v": 1}, {"n": "c", "v": 2}],
+            "select": {"x": "n", "y": ["v"]}, "transforms": [{"op": "sort", "by": "v", "dir": "desc"}, {"op": "limit", "n": 2}],
+            "chart": {"type": "bar"}}
+    out = run(ws.bind(spec, fetch))
+    check(out["error"] == "" and [r["n"] for r in out["rows"]] == ["a", "c"] and out["rows"][0]["v"] == 3, "inline: coerced and transformed")
+    check(not fetches, "inline: zero fetch calls")
+
+    store = Dashboards(Database(tempfile.mkdtemp(prefix="widgetspec-inline-")))
+    d = store.create("D")
+    w = store.create_widget(d["id"], "Pinned", "chart", spec=spec)
+
+    async def no_model(*a: Any, **k: Any) -> Any:
+        raise AssertionError("inline widget must not call the model")
+    real = ws.generate_spec
+    ws.generate_spec = no_model  # type: ignore[assignment]
+    try:
+        w2 = run(ws.run_widget(store, w, {}, "m", fetch, regenerate=True))
+    finally:
+        ws.generate_spec = real  # type: ignore[assignment]
+    check(w2["data"]["rows"][0]["n"] == "a" and not w2["data_error"] and not fetches, "run_widget re-binds inline spec, no model, no source")
+
+    from fastapi.testclient import TestClient
+
+    from personal_os.app import AUTH_TOKEN, app
+    c = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
+    dd = c.post("/dashboards", json={"name": "Pins"}).json()
+    r = c.post(f"/dashboards/{dd['id']}/widgets", json={"kind": "chart", "title": "P", "spec": spec})
+    check(r.status_code == 200 and r.json()["spec"]["inline_rows"][0]["n"] == "a" and r.json()["data"]["rows"], "POST persists the inline spec and binds it")
+
+
 TESTS = [test_resolve_path, test_transforms, test_validate_and_autofix, test_stat, test_generate_spec, test_bind_ttl_and_lifecycle, test_schema_migration,
-         test_routes]
+         test_routes, test_inline_rows]
 
 if __name__ == "__main__":
     failures = 0

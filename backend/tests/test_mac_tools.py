@@ -435,6 +435,23 @@ def test_bridge_posts_and_caps(monkeypatch: pytest.MonkeyPatch) -> None:
     assert seen["body"]["maxChars"] == 1000 and len(out["text"]) == 1000 and out["truncated"] and out["title"] == "Ex"
 
 
+def test_bridge_links_and_wait_for(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[dict[str, Any]] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(json.loads(req.content))
+        return httpx.Response(200, json={"url": "https://e.com/", "title": "", "text": "t",
+                                         "links": [{"text": "a", "href": f"https://e.com/{i}"} for i in range(60)]})
+    real = httpx.AsyncClient
+    monkeypatch.setattr(mac.httpx, "AsyncClient", lambda **kw: real(transport=httpx.MockTransport(handler)))
+    b = mac.PageBridge()
+    b.register("http://127.0.0.1:9000", "s" * 32)
+    out = asyncio.run(b.open_page("https://e.com", wait_for=" #app ", links=True))
+    assert seen[0]["waitForSelector"] == "#app" and seen[0]["links"] is True and len(out["links"]) == 40
+    out = asyncio.run(b.open_page("https://e.com"))
+    assert "links" not in out and "waitForSelector" not in seen[1] and "links" not in seen[1]
+
+
 # ---- Toolbox wiring ----
 def make_toolbox() -> Toolbox:
     return Toolbox(None, None, None, lambda: {})  # type: ignore[arg-type]

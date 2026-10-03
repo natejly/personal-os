@@ -94,3 +94,18 @@ test('view:cowork routes with no view-specific wiring (⌘⇧K)', () => {
   fire('view:cowork')
   assert.equal(useStore.getState().view, 'cowork')
 })
+
+test('new-note creates a doc; daily-note switches to Files and opens today', () => {
+  const orig = useStore.getState()
+  const calls: string[] = []
+  useStore.setState({
+    createDoc: async () => { calls.push('create') },
+    openDailyNote: async () => { calls.push('daily') }
+  })
+  useStore.getState().setView('todos')
+  fire('new-note')
+  fire('daily-note')
+  assert.deepEqual(calls, ['create', 'daily'])
+  assert.equal(useStore.getState().view, 'docs')
+  useStore.setState({ createDoc: orig.createDoc, openDailyNote: orig.openDailyNote })
+})

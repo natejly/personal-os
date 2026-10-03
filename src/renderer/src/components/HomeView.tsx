@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Home, Calendar, Mail, Brain, FolderKanban, Sparkles, RefreshCw, PanelLeftOpen, ExternalLink, Plus, MessageSquare, Mic, SlidersHorizontal, X, ListChecks, HardDrive } from 'lucide-react'
 import { useStore } from '../store'
+import { useDocRec } from '../features/docrec/store'
 import { api } from '../lib/api'
 import { formatOffset, offerableCandidates } from '../lib/transcript'
 import { HOME_MODULES, homeModuleOn } from '../modules'
@@ -53,6 +54,8 @@ function MeetingsCard(): JSX.Element {
   const startRecording = useStore((s) => s.startRecording)
   const recordCandidate = useStore((s) => s.recordCandidate)
   const setView = useStore((s) => s.setView)
+  const startFromEvent = useDocRec((s) => s.startFromEvent)
+  const docBusy = useDocRec((s) => s.busy)
   const [candidates, setCandidates] = useState<MeetingCandidate[]>([])
 
   useEffect(() => {
@@ -111,6 +114,11 @@ function MeetingsCard(): JSX.Element {
                 title={recorderOff ? OFF_TITLE : undefined}
                 onClick={() => { setView('meetings'); void recordCandidate(c) }}>
                 take notes
+              </button>
+              <button className="link small" disabled={docBusy || meetingBusy || active !== null || recorderOff}
+                title={recorderOff ? OFF_TITLE : 'Create a doc for this event and record into it'}
+                onClick={() => { setView('meetings'); void startFromEvent(c) }}>
+                in a doc
               </button>
             </li>
           ))}

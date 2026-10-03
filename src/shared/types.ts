@@ -16,7 +16,7 @@ export interface ContextUsed {
   memories: { id: string; content: string; project_id: string | null }[]
   nodes: { id: string; label: string; type: string }[]
   edges: { id: string; relation: string; source_id: string; target_id: string }[]
-  chunks: { chunk_id: string; document_id: string; name: string; idx: number; text: string }[]
+  chunks: { chunk_id: string; document_id: string; name: string; idx: number; text: string; source?: string; doc_id?: string | null }[]
   /** The activity-monitor block, verbatim; null when the monitor is off or the chat opted out. */
   activity: string | null
   /** Approved skills injected as procedural memory. Absent on messages written before skills existed. */
@@ -27,6 +27,10 @@ export interface ContextUsed {
   style: { project_id: string | null; summary: string; guidelines: string[]; block: string } | null
   /** The recent-meetings block, verbatim; null when meetings are off or the chat opted out. */
   meetings: string | null
+  /** Pinned documents carried whole this turn. Absent on older messages. */
+  pinned?: { document_id: string; name: string }[]
+  /** Items dropped per section because it hit its token budget (contextBudget). */
+  trimmed?: Record<string, number>
   system_prompt: string
   tokens_estimate: number
 }
@@ -92,6 +96,8 @@ export interface Skill {
   created_at: number
   updated_at: number
   approved_at: number | null
+  use_count?: number
+  last_used_at?: number | null
 }
 
 /** A large tool result kept out of the model's context; `read_tool_result` pages it. */
@@ -672,6 +678,7 @@ export interface Document {
   size: number
   chunk_count: number
   created_at: number
+  pinned?: number
   preview?: string
   text?: string
 }
@@ -681,6 +688,14 @@ export interface TodoRepeat {
   every: number
   unit: 'day' | 'week' | 'month' | 'year'
   mode: 'from_due' | 'from_completion'
+}
+
+export interface TodoFilter {
+  id: string
+  name: string
+  tag?: string
+  q?: string
+  project_id?: string
 }
 
 export interface Todo {
@@ -704,6 +719,14 @@ export interface Todo {
   estimate_min?: number | null
   /** Weighted urgency score; only present on `?sort=urgency` lists. */
   urgency?: number
+  /** Lowercase labels; filter with `?tag=`. */
+  tags?: string[]
+  /** Set on a subtask; the list nests it under this todo. */
+  parent_id?: string | null
+  /** Ids of open todos this one waits on. */
+  depends_on?: string[]
+  blocked_count?: number
+  blocking_count?: number
   created_at: number
   updated_at: number
   completed_at: number | null
@@ -1051,6 +1074,8 @@ export interface Settings {
   systemPrompt: string
   extractionModel: string
   autoLearn: boolean
+  /** Embed-backfill writes a model-made context blurb per chunk (one call each). */
+  contextualChunks?: boolean
   /** Bank long messages and saved docs as writing samples, and keep the voice profile current. */
   learnStyle: boolean
   theme: 'dark' | 'light' | 'system'
@@ -1060,6 +1085,10 @@ export interface Settings {
   mode?: 'classic' | 'canvas'
   /** Electron accelerator for the global Gather/Scatter shortcut. */
   gatherShortcut: string
+  /** Electron accelerator for the global quick-capture window (appends to today's daily note). */
+  quickCaptureShortcut?: string
+  /** Hold-to-talk dictation chord in the Docs editor, e.g. 'Control+Alt+D'. */
+  dictationChord?: string
   /** Today-screen cards, keyed by module (see modules.ts); a missing key means shown. Cowork and meetings default off. */
   homeWidgets?: Record<string, boolean>
   /** Sidebar views the user removed. Missing means library, cowork and meetings are hidden. */
@@ -1068,6 +1097,16 @@ export interface Settings {
   /** How assistant edits to docs land. Missing means review: show the diff and wait. */
   docEditMode?: 'review' | 'apply'
   maxToolRounds: number
+  /** Connector tool count above which schemas are deferred behind tool search; 0 keeps every schema in the request. */
+  mcpDeferAbove?: number
+  /** Characters of skill bodies inlined into the prompt before falling back to a manifest. */
+  skillsInlineBudget?: number
+  /** Embedding model id used by memory and document retrieval. Changing it re-embeds both stores. */
+  embeddingModel?: string
+  /** Fuse keyword, embedding, recency and graph signals for memories; false = keyword only. */
+  hybridRetrieval?: boolean
+  /** Propose a memory tidy-up after this many new auto memories; 0 = manual only. */
+  consolidateEvery?: number
   /** Argument-pattern rules over the per-tool modes. Deny beats ask beats allow; forced approvals are never lifted. */
   permissionRules?: PermissionRules
   /** 'deny': a background run that would have to ask is refused instead of waiting for someone. */
@@ -1083,6 +1122,8 @@ export interface Settings {
   microKeep?: number
   microAt?: number
   /** Per-reply budgets; 0 means unlimited. */
+  /** Token budget per context section (0 = unlimited): memories, graph, chunks, activity, meetings, pinned. */
+  contextBudget?: Record<string, number>
   maxRunTokens?: number
   maxRunSeconds?: number
   maxRunCost?: number
@@ -1135,6 +1176,8 @@ export interface Settings {
   githubToken?: string
   /** Per-model cost overrides, $ per million tokens. Proxy prices are used for models not listed. */
   modelPrices: Record<string, ModelPrice>
+  /** Informational spend alerts in $ (0 = off); never stops a run. */
+  usageAlerts?: { dailyCost: number; monthlyCost: number }
   /** Cowork desk budgets. 0 on either axis means unlimited; a desk may tighten them, never loosen. */
   deskMaxTurns?: number
   deskMaxCost?: number
@@ -1191,6 +1234,8 @@ export interface UsageReport {
   by_model: (UsageBucket & { model: string })[]
   by_kind: (UsageBucket & { kind: string })[]
   by_project: (UsageBucket & { project: string })[]
+  by_tag: (UsageBucket & { tag: string })[]
+  alerts?: { daily: { spent: number; limit: number; over: boolean }; monthly: { spent: number; limit: number; over: boolean }; over: boolean }
   prices: Record<string, ModelPrice>
 }
 
@@ -1224,6 +1269,8 @@ export type ChatEvent =
   | { event: 'desk_status'; data: Desk }
   /** A doc recording's segment, status or summary moved; see `RecordingEvent`. */
   | { event: 'recording'; data: RecordingEvent }
+  /** Live dictation words, volatile until a final or the settled segment replaces them. */
+  | { event: 'preview'; data: PreviewEvent }
   /** This turn is handing over to another one, announced before `done` so the UI can re-attach. */
   | { event: 'desk_handoff'; data: { desk_id: string; conversation_id: string; turn: number } }
   | { event: 'learned'; data: Learned }
@@ -1251,10 +1298,12 @@ export type BackgroundEvent =
   | { event: 'learned'; data: Learned }
   | { event: 'learn_error'; data: { conversation_id?: string; message_id?: string; message: string } }
   | { event: 'job_finished'; data: { run_id: string; job_id: string } }
+  | { event: 'usage_alert'; data: { period: 'daily' | 'monthly'; spent: number; limit: number } }
   /** Every desk write, for desks nobody is watching: the rail, the badge and the Today card stay live. */
   | { event: 'desk_status'; data: Desk }
   /** A doc recording's segment, status or summary moved. */
   | { event: 'recording'; data: RecordingEvent }
+  | { event: 'preview'; data: PreviewEvent }
 
 export interface BackupInfo {
   name: string; kind: 'daily' | 'manual' | 'premigrate' | 'prerestore'; created_at: number; size: number
@@ -1312,6 +1361,8 @@ export interface GrainApi {
   shortcuts: {
     gather: () => Promise<ShortcutState>
     setGather: (accelerator: string) => Promise<ShortcutState>
+    capture: () => Promise<ShortcutState>
+    setCapture: (accelerator: string) => Promise<ShortcutState>
     onFailure: (cb: (s: ShortcutState) => void) => () => void
   }
   /** Data folder helpers for Settings → Data (native dialog, Finder, restart to apply a restore). */
@@ -1356,6 +1407,7 @@ export interface BoardColumn { id: string; board_id: string; name: string; posit
 export interface BoardCard {
   id: string; board_id: string; column_id: string; title: string; description: string; position: number
   due: string | null; priority: number; labels: string[]; created_at: number; updated_at: number
+  over_limit?: boolean
 }
 export interface Board { id: string; project_id: string | null; name: string; created_at: number; card_count?: number; columns: BoardColumn[]; cards: BoardCard[] }
 
@@ -1620,9 +1672,13 @@ export interface Doc {
   title: string
   folder: string
   starred: number
+  /** Pinned docs sit in their own group above the folders; absent on older payloads. */
+  pinned?: number
   created_at: number
   updated_at: number
   words: number
+  /** Distinct lowercase #tags in the body (list rows only). */
+  tags?: string[]
   /** List rows carry a preview and a pending count; a fetched doc carries the body and the pending revisions. */
   preview?: string
   size?: number
@@ -1986,6 +2042,8 @@ export interface ActivityConfig {
   excludeApps: string[]
   /** Window titles / URLs containing any of these are skipped. */
   excludeTitlePatterns: string[]
+  /** Drop a window only when every named field (substring or /regex/) matches. */
+  excludeRules: { app?: string; title?: string; url?: string }[]
   /** Strings or /regex/ that are never scrubbed. */
   redactAllow: string[]
   /** Strings or /regex/ that are always scrubbed. */
@@ -2243,6 +2301,14 @@ export type MeetingStatus =
 /** Shapes the enhance prompt and the notes skeleton; keys into meeting_notes.TEMPLATES. */
 export type MeetingTemplate = 'general' | 'standup' | 'one_on_one' | 'user_interview' | 'sales_call' | 'lecture'
 
+/** A named piece of user-written prose: a template's instructions or a recipe's prompt. */
+export interface SavedPrompt {
+  id: string
+  name: string
+  instructions?: string
+  prompt?: string
+}
+
 /** A list row: counts and a preview, never a body. */
 export interface Meeting {
   id: string
@@ -2290,6 +2356,15 @@ export interface RecordingEvent {
   error?: string | null
 }
 
+/** The app-wide `preview` event: in-flight dictation text. Never durable; the settled segment replaces it. */
+export interface PreviewEvent {
+  session: string
+  kind: 'volatile' | 'final'
+  text: string
+  t0: number
+  t1: number
+}
+
 /** A meeting with its bodies loaded — what GET /meetings/{id} returns. */
 export interface FullMeeting extends Omit<Meeting, 'notes_preview'> {
   /** What the user typed. No model ever writes this. */
@@ -2308,6 +2383,8 @@ export interface FullMeeting extends Omit<Meeting, 'notes_preview'> {
   keep_audio: boolean
   /** Display names for diarized speaker ids, e.g. { S1: 'Dana' }. */
   speaker_names: Record<string, string>
+  /** Summary line index (in `enhanced`) to the transcript segment ids it was written from. */
+  summary_evidence?: Record<string, string[]>
   /** Retained wav bytes, against the disk ceiling. */
   audio_bytes: number
   conversation_id: string | null
@@ -2347,6 +2424,8 @@ export interface MeetingSegment {
   /** 'proxy' | 'local', for the usage/debug line. */
   backend: string
   error: string
+  /** Where the kept wav sits; '' when the audio was not kept. */
+  wav_path?: string
   /** GET /meetings/{id}/segments?since= only: the rowid to poll from next. */
   cursor?: number
 }
@@ -2410,13 +2489,25 @@ export interface MeetingConfig {
   sttModel: string
   /** whisper.cpp ggml model file, for the local backend. */
   whisperModelPath: string
-  template: MeetingTemplate
+  template: MeetingTemplate | string
+  /** User-authored prose templates; ids start with c_. */
+  customTemplates: SavedPrompt[]
+  /** Saved focus lines for a summary; prompts are capped at 300 characters. */
+  recipes: SavedPrompt[]
+  /** 'auto' follows the transcript's majority language, otherwise a language name. */
+  summaryLanguage: string
   enhanceOnStop: boolean
   /** Blank falls back to the extraction model, then the default model. */
   enhanceModel: string
   /** Head-and-tail cap on the transcript sent to the model; decisions land at the end. */
   maxTranscriptChars: number
+  /** A recording with fewer spoken words than this is not summarised. */
+  minSummaryWords?: number
+  /** Seed the speech model with the meeting title and attendee names. */
+  vocabularyPrompt?: boolean
   keepAudio: boolean
+  /** Doc recordings pause after this many silent minutes; 0 never pauses. */
+  silencePauseMinutes: number
   /** Disk ceiling for retained wavs, oldest failed segment evicted first. */
   maxAudioBytes: number
   /** Scrub credential-shaped strings before anything is stored. Never activity's identity rules, which
@@ -2431,6 +2522,8 @@ export interface MeetingConfig {
   minAttendees: number
   /** Skip STT for segments with no speech, and drop known silence hallucinations. */
   vadGate: boolean
+  /** Dictation only: show in-flight words in a pill at the caret (on-device Speech; never typed in). */
+  livePreview: boolean
   vadMinSpeechRatio: number
   hallucinationFilter: boolean
   whisperVadModelPath: string
@@ -2443,6 +2536,8 @@ export interface MeetingConfig {
   diarizeEmbeddingModel: string
   diarizeThreshold: number
   diarizeSpeakers: number
+  /** Run each dictated clip through a model that only fixes punctuation, case and fillers. */
+  dictationCleanup: boolean
 }
 
 /** One row of the capability checklist: what this machine can do, and how to fix what it can't. */
@@ -2473,7 +2568,9 @@ export interface MeetingStatusInfo {
     /** Pause keeps capture running and throws the audio away, so `channels[].alive` stays true while
      *  paused. This flag is the only honest source of pausedness; never infer it from the channels. */
     paused: boolean
-    channels: { channel: string; alive: boolean; error: string }[]
+    channels: { channel: string; alive: boolean; error: string; silent_for_s?: number }[]
+    /** The recorder paused itself after a long silence; the bar asks "Still recording?". */
+    auto_paused?: boolean
     error: string
     /** Set when the live recording belongs to a doc; null for an ordinary meeting. */
     doc_id: string | null
@@ -2511,6 +2608,8 @@ export interface MeetingCandidate {
   conference_link: string
   /** Set once a meeting row exists for this event, so the nudge is not offered twice. */
   meeting_id: string | null
+  /** Invitees other than the user; local only, they become the doc header. */
+  attendees?: { email: string; name?: string }[]
 }
 
 /** One frame of the per-meeting SSE stream. */
@@ -2637,3 +2736,17 @@ export interface Command {
   role: string | null
   text: string
 }
+
+/** A user-authored agent definition (inert until approved). Built-ins come back separately, without these fields. */
+export interface AgentDef {
+  id: string
+  name: string
+  description: string
+  model: string | null
+  steps: number | null
+  tools: string[]
+  hidden: boolean
+  approved: boolean
+  body: string
+}
+export interface BuiltinAgent { name: string; description: string; tools: string[] }

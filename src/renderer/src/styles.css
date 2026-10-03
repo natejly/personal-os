@@ -569,6 +569,7 @@ kbd {
   margin: 0 0 12px; padding: 4px 14px;
   border-left: 3px solid var(--border-strong); color: var(--text-muted);
 }
+.markdown .ai-run { margin: 0 0 12px; padding: 2px 0 2px 14px; border-left: 3px solid var(--accent); color: var(--text-muted); }
 .markdown code {
   font-family: var(--mono); font-size: 12.5px;
   background: var(--hover); padding: 2px 5px; border-radius: 4px;
@@ -2319,3 +2320,13 @@ select:focus-visible {
 .data-row .toggle-text small { font-size: 12px; line-height: 1.45; color: var(--muted, inherit); }
 .data-row .ghost-btn { flex: none; white-space: nowrap; }
 .data-list { list-style: none; margin: 6px 0 0; padding: 0; max-height: 240px; overflow-y: auto; }
+
+/* todo structure: tags, blocked marker, subtask input, saved filters */
+.todo-tag { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--text-dim); cursor: pointer; }
+.todo-tag.on { background: var(--accent-soft, var(--border)); color: var(--text); }
+.todo-tag button { all: unset; cursor: pointer; display: inline-flex; }
+.todo-tags { width: 84px; font-size: 11px; }
+.todo-blocked { display: inline-flex; color: var(--text-dim); }
+.todo-subinput { margin-top: 4px; font-size: 12px; }
+.todo-filters { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0; }
+.kcol .count.over-limit { color: var(--danger, #d33); font-weight: 600; }

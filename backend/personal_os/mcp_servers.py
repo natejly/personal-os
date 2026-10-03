@@ -43,6 +43,7 @@ SLUG_ATTEMPTS = 4
 # module stays free of the tool implementations' dependencies; test_mcp_servers keeps it honest.
 RESERVED_TOOL_NAMES = frozenset({
     "search_documents", "read_document", "list_documents",
+    "space_list", "space_add_widget", "space_arrange",
     "search_memory", "save_memory",
     "graph_search", "graph_traverse", "graph_add",
     "web_search", "fetch_url",
@@ -56,7 +57,7 @@ RESERVED_TOOL_NAMES = frozenset({
     "todo_list", "todo_add", "todo_update", "todo_delete",
     "health_summary", "health_log", "health_delete_entry",
     "mail_followups", "schedule_suggest",
-    "calendar_events", "calendar_create", "calendar_get", "calendar_update", "calendar_delete", "calendar_respond",
+    "calendar_events", "calendar_create", "calendar_get", "meeting_brief", "calendar_update", "calendar_delete", "calendar_respond",
     "calendar_free_busy", "calendar_find_time", "calendar_propose",
     "gmail_search", "gmail_read", "gmail_draft", "gmail_send", "gmail_modify", "gmail_outbox",
     "google_tasks_list", "google_tasks_add", "google_tasks_complete",
@@ -65,7 +66,7 @@ RESERVED_TOOL_NAMES = frozenset({
     "google_sheets_read", "google_sheets_write", "google_sheets_create",
     "board_list", "board_add_card", "board_move_card", "board_create",
     "sandbox_exec", "sandbox_write_file", "sandbox_read_file", "sandbox_list_files",
-    "sandbox_put_document", "sandbox_reset", "sandbox_checkpoint", "sandbox_restore",
+    "sandbox_put_document", "sandbox_export_file", "sandbox_reset", "sandbox_checkpoint", "sandbox_restore",
     "doc_list", "doc_search", "doc_read", "doc_create", "doc_edit",
     "activity_recent", "activity_pause", "activity_access", "activity_insights", "activity_report",
     "find_files", "read_local_file", "write_local_file", "move_local_file", "trash_local_file",

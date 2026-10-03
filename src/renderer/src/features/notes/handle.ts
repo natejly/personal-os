@@ -13,7 +13,8 @@ export interface MarkdownEditorHandle {
    * while the editor is not focused.
    */
   insertQuietly: (text: string) => boolean
-  replaceRange: (start: number, end: number, text: string) => void
+  /** Optional selStart/selEnd leave the selection there instead of after the text. */
+  replaceRange: (start: number, end: number, text: string, selStart?: number, selEnd?: number) => void
   getSelection: () => { start: number; end: number; text: string }
   /** The textarea's current text, which is ahead of the `value` prop for a moment after a keystroke. */
   getText: () => string

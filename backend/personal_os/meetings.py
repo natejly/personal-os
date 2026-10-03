@@ -32,7 +32,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from . import audiocap, diarize, meeting_notes, meeting_recorder, native_audio, redact, stt
+from . import audiocap, diarize, meeting_notes, meeting_recorder, native_audio, redact, stt, stt_stream
 from .db import Database, new_id, now, row_to_dict
 from .docs import diff_stat, word_count
 from .repos import fts_query
@@ -179,6 +179,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # A recording made inside a doc ends each clip at a pause in speech, so these two are ceilings:
     # the longest a clip runs when nobody stops talking. Most clips close sooner.
     "docSegmentSeconds": 10,
+    "livePreview": False,     # dictation only: show in-flight words at the caret (on-device Speech; never typed in)
     "dictationSegmentSeconds": 8,  # dictation, where the words are waiting to be typed
     "maxMeetingSeconds": 14400,
     "drainSeconds": 90,
@@ -186,10 +187,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "sttModel": "whisper-1",
     "whisperModelPath": "",
     "template": "general",
+    "customTemplates": [],    # [{id: 'c_<slug>', name, instructions}] prose templates
+    "recipes": [],            # [{id, name, prompt}] saved focus lines for a summary
+    "summaryLanguage": "auto",  # 'auto' = the transcript's majority language, else a language name
     "enhanceOnStop": True,
     "enhanceModel": "",
     "maxTranscriptChars": 48000,
+    "minSummaryWords": 40,     # a doc recording shorter than this is not summarised
+    "vocabularyPrompt": True,  # seed whisper with the meeting title and attendee names
     "keepAudio": False,
+    "silencePauseMinutes": 10,   # doc recordings pause after this long with no speech; 0 never pauses
     "maxAudioBytes": 2147483648,
     "redactSecrets": True,
     "injectContext": True,
@@ -207,20 +214,21 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "diarizeEmbeddingModel": "",
     "diarizeThreshold": 0.5,
     "diarizeSpeakers": 0,       # 0 = decide from the audio
+    "dictationCleanup": False,  # model pass over each dictated clip (assist.clean_dictation)
 }
 
 # `patch` is the user's door into a meeting. Everything the recorder owns - started_at,
 # audio_dir, sources, transcript, duration_ms - is deliberately absent: those go through
 # mark_started/finalize so a stray PATCH cannot claim a meeting recorded something it didn't.
 PATCH_FIELDS = {"title", "notes", "enhanced", "summary", "template", "project_id",
-                "keep_audio", "status", "error", "conversation_id"}
+                "keep_audio", "status", "error", "conversation_id", "summary_evidence"}
 
 # Only these three columns are in meetings_fts alongside the transcript, so a patch that changes
 # none of them skips the reindex: FTS5 has no UPDATE, so a reindex is a DELETE plus an INSERT of
 # the whole row, and the error banner is patched once per failed segment.
 INDEXED_FIELDS = {"title", "notes", "enhanced"}
 
-JSON_FIELDS = ("attendees", "sources", "decisions", "topics", "detail", "speaker_names")
+JSON_FIELDS = ("attendees", "sources", "decisions", "topics", "detail", "speaker_names", "summary_evidence", "note_marks")
 
 # Columns added to `meetings` after the first release, as {name: ddl}. Empty today and applied in
 # __init__ anyway: CREATE TABLE IF NOT EXISTS will not add a column, and db.py's _migrate runs
@@ -229,7 +237,14 @@ JSON_FIELDS = ("attendees", "sources", "decisions", "topics", "detail", "speaker
 # doc_id/doc_mode link a recording to a doc (plain TEXT, the cascade is code: see Docs.on_delete);
 # summary_revision_id is the doc_revisions row of the latest proposed summary.
 ADDED_COLUMNS: dict[str, str] = {"speaker_names": "TEXT NOT NULL DEFAULT '{}'",
-                                 "doc_id": "TEXT", "doc_mode": "TEXT", "summary_revision_id": "TEXT"}
+                                 "doc_id": "TEXT", "doc_mode": "TEXT", "summary_revision_id": "TEXT",
+                                 # {line index in `enhanced`: [segment ids]}: where each summary line came from
+                                 "summary_evidence": "TEXT NOT NULL DEFAULT '{}'",
+                                 # [{line, t}]: the first NOTE_MARK_CHARS of a line typed during a recording and
+                                 # the recording offset in seconds. Kept out of the doc body on purpose.
+                                 "note_marks": "TEXT NOT NULL DEFAULT '[]'"}
+MAX_NOTE_MARKS = 500
+NOTE_MARK_CHARS = 40
 
 DOC_MODES = ("record", "dictate")
 
@@ -278,6 +293,30 @@ def _deep_merge(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
     out = dict(base)
     for k, v in patch.items():
         out[k] = _deep_merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else v
+    return out
+
+
+TEMPLATE_MAX = 1500   # chars of user-authored template prose that reach the system prompt
+RECIPE_MAX = 300      # the focus line is capped at 300 in meeting_notes.summarize_recording
+
+
+def _clean_items(raw: Any, prefix: str, body_key: str, limit: int) -> list[dict[str, str]]:
+    """Validate a saved list of {id, name, <body_key>}; an over-long body is refused, not trimmed."""
+    out: list[dict[str, str]] = []
+    for it in raw if isinstance(raw, list) else []:
+        if not isinstance(it, dict):
+            continue
+        name, body = str(it.get("name") or "").strip()[:60], str(it.get(body_key) or "").strip()
+        if not name or not body:
+            continue
+        if len(body) > limit:
+            raise ValueError(f"'{name}' is over {limit} characters")
+        iid = str(it.get("id") or "")
+        if not iid.startswith(prefix) or len(iid) > 40:
+            iid = prefix + (re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_") or "x")[:30]
+        while any(o["id"] == iid for o in out):
+            iid = iid[:36] + "_" + new_id()[:3]
+        out.append({"id": iid, "name": name, body_key: body})
     return out
 
 
@@ -411,6 +450,7 @@ class Meetings:
         # Set by MeetingService: the routes call this repo directly, so the recorder pool has to
         # be reachable from here or a delete would pull the wav directory out from under a live capture.
         self.before_destroy: Callable[[str, bool], None] | None = None
+        self.on_final: Callable[[str], None] | None = None  # app.py: schedule semantic indexing of a finished meeting
         with db.tx() as c:
             c.executescript(SCHEMA)
             have = {r["name"] for r in c.execute("PRAGMA table_info(meetings)").fetchall()}
@@ -653,22 +693,23 @@ class Meetings:
                calendar_link: str = "", conference_link: str = "", attendees: Any = None,
                scheduled_start: float | None = None, scheduled_end: float | None = None,
                status: str = "notes_only", doc_id: str | None = None,
-               doc_mode: str | None = None) -> dict[str, Any]:
+               doc_mode: str | None = None, keep_audio: bool = False) -> dict[str, Any]:
         mid = new_id()
         t = now()
         people = _attendee_rows(attendees)
-        tpl = template if template in meeting_notes.TEMPLATES else "general"
+        tpl = template if template in meeting_notes.TEMPLATES or str(template).startswith("c_") else "general"
         try:
             with self.db.tx() as c:
                 c.execute(
                     "INSERT INTO meetings(id,project_id,title,status,template,scheduled_start,scheduled_end,"
                     " calendar_event_id,calendar_id,calendar_link,conference_link,attendees,created_at,updated_at,"
-                    " doc_id,doc_mode)"
-                    " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    " doc_id,doc_mode,keep_audio)"
+                    " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (mid, project_id, (title or "").strip()[:200], status, tpl, scheduled_start, scheduled_end,
                      calendar_event_id or None, calendar_id, calendar_link, conference_link,
                      json.dumps(people), t, t, doc_id or None,
-                     (doc_mode if doc_mode in DOC_MODES else "record") if doc_id else None))
+                     (doc_mode if doc_mode in DOC_MODES else "record") if doc_id else None,
+                     int(bool(keep_audio))))
                 self._reindex(c, mid, title, "", "", "")
         except sqlite3.IntegrityError:
             # The partial unique index on calendar_event_id is the point: the 45s nudge tries to
@@ -686,12 +727,15 @@ class Meetings:
             return self.get(id)
         if "title" in fields:
             fields["title"] = str(fields["title"] or "").strip()[:200]
-        if "template" in fields and fields["template"] not in meeting_notes.TEMPLATES:
+        if "template" in fields and fields["template"] not in meeting_notes.TEMPLATES \
+                and not str(fields["template"]).startswith("c_"):
             fields["template"] = "general"
         if "keep_audio" in fields:
             fields["keep_audio"] = int(bool(fields["keep_audio"]))
         if "error" in fields:
             fields["error"] = str(fields["error"] or "")[:1000]
+        if "summary_evidence" in fields:
+            fields["summary_evidence"] = json.dumps(fields["summary_evidence"] or {})
         fields["updated_at"] = now()
         sets = ", ".join(f"{k}=?" for k in fields)
         with self.db.tx() as c:
@@ -771,6 +815,9 @@ class Meetings:
                       " updated_at=? WHERE id=?",
                       (transcript, end, duration, status, str(error or "")[:1000], now(), id))
             self._reindex_row(c, id)
+        if self.on_final and status == "ready":
+            with contextlib.suppress(Exception):
+                self.on_final(id)
         return self.get(id)
 
     def delete(self, id: str) -> None:
@@ -840,6 +887,17 @@ class Meetings:
             return row_to_dict(c.execute(
                 "SELECT * FROM meeting_segments WHERE meeting_id=? AND channel=? AND seq=?",
                 (meeting_id, channel, int(seq))).fetchone(), JSON_FIELDS)
+
+    def kept_segment_wav(self, meeting_id: str, seg_id: str) -> Path | None:
+        """The segment's wav, only when this recording keeps audio and the file sits inside its audio dir."""
+        with self.db.tx() as c:
+            r = c.execute("SELECT s.wav_path, m.audio_dir, m.keep_audio FROM meeting_segments s "
+                          "JOIN meetings m ON m.id = s.meeting_id WHERE s.id=? AND s.meeting_id=?",
+                          (seg_id, meeting_id)).fetchone()
+        if not r or not r["keep_audio"] or not r["wav_path"] or not r["audio_dir"]:
+            return None
+        p = Path(r["wav_path"]).resolve()
+        return p if p.is_file() and p.is_relative_to(Path(r["audio_dir"]).resolve()) else None
 
     def segment_id(self, meeting_id: str, channel: str, seq: int) -> str:
         """The row id for a (channel, seq), since the recorder's callbacks only know those two."""
@@ -1004,6 +1062,29 @@ class Meetings:
                       (json.dumps(out), now(), meeting_id))
         return out
 
+    def set_note_marks(self, meeting_id: str, marks: list[dict[str, Any]]) -> list[dict[str, Any]] | None:
+        """Merge typed-line marks into a doc recording: a repeated line keeps its latest offset, the
+        newest MAX_NOTE_MARKS survive. None if the meeting is missing, [] stored for non-record rows."""
+        cur = self.get(meeting_id)
+        if cur is None:
+            return None
+        if cur.get("doc_mode") != "record":
+            return []
+        by_line = {m["line"]: m for m in (cur.get("note_marks") or []) if isinstance(m, dict) and m.get("line")}
+        for m in marks or []:
+            line = str(m.get("line") or "").strip()[:NOTE_MARK_CHARS]
+            try:
+                t = max(0.0, float(m.get("t")))
+            except (TypeError, ValueError):
+                continue
+            if line:
+                by_line.pop(line, None)
+                by_line[line] = {"line": line, "t": round(t, 1)}
+        out = list(by_line.values())[-MAX_NOTE_MARKS:]
+        with self.db.tx() as c:
+            c.execute("UPDATE meetings SET note_marks=? WHERE id=?", (json.dumps(out), meeting_id))
+        return out
+
     def _rev_view(self, r: dict[str, Any], current: str | None = None) -> dict[str, Any]:
         """A revision in DocRevision's field shape, so <DiffView> renders it with no adapter.
 
@@ -1090,7 +1171,7 @@ class Meetings:
                       (m["enhanced"], t, rev_id))
             c.execute("UPDATE meeting_revisions SET status='superseded', resolved_at=? "
                       "WHERE meeting_id=? AND status='pending' AND id<>?", (t, r["meeting_id"], rev_id))
-            c.execute("UPDATE meetings SET enhanced=?, updated_at=? WHERE id=?", (r["after"], t, r["meeting_id"]))
+            c.execute("UPDATE meetings SET enhanced=?, summary_evidence='{}', updated_at=? WHERE id=?", (r["after"], t, r["meeting_id"]))
             self._reindex_row(c, r["meeting_id"])
             meeting_id = r["meeting_id"]
         return self.get(meeting_id)
@@ -1256,6 +1337,10 @@ class MeetingService:
         self.docs = docs
         # Called with a `recording` event dict from any thread; app.py hands it to the event loop.
         self.publish = publish
+        # Called with a `preview` event dict from any thread; app.py hands it to the event loop.
+        self.preview_publish: Callable[[dict[str, Any]], None] | None = None
+        self._heard: dict[str, dict[str, float]] = {}   # meeting -> channel -> wall time of last speech
+        self._auto_paused: set[str] = set()
         self.pool = meeting_recorder.RecorderPool(db.data_dir, settings_fn, self.config)
         self.last_error = ""
         self._preflight: tuple[float, dict[str, Any]] | None = None
@@ -1287,7 +1372,11 @@ class MeetingService:
         """
         cfg = _deep_merge(self.config(), patch or {})
         cfg["sources"] = [s for s in (cfg.get("sources") or []) if s in SOURCES] or ["mic"]
-        if cfg.get("template") not in meeting_notes.TEMPLATES:
+        cfg["customTemplates"] = _clean_items(cfg.get("customTemplates"), "c_", "instructions", TEMPLATE_MAX)
+        cfg["recipes"] = _clean_items(cfg.get("recipes"), "r_", "prompt", RECIPE_MAX)
+        cfg["summaryLanguage"] = str(cfg.get("summaryLanguage") or "auto").strip()[:40] or "auto"
+        if cfg.get("template") not in meeting_notes.TEMPLATES and \
+                cfg.get("template") not in {c["id"] for c in cfg["customTemplates"]}:
             cfg["template"] = "general"
         if str(cfg.get("sttBackend") or "") not in stt.BACKENDS:
             cfg["sttBackend"] = "auto"
@@ -1386,6 +1475,7 @@ class MeetingService:
             m = self.meetings.get(session.meeting_id) or {}
             s = session.stats()
             errors = session.errors()
+            quiet = {c["channel"]: self._silent_for(session, c["channel"]) for c in s["channels"]}
             active = {
                 "meeting_id": session.meeting_id,
                 "status": m.get("status") or "recording",
@@ -1395,7 +1485,8 @@ class MeetingService:
                 "segments_pending": s["segments_pending"],
                 "queued": s["queued"],
                 "paused": s["paused"],
-                "channels": s["channels"],
+                "channels": [{**c, "silent_for_s": quiet[c["channel"]]} for c in s["channels"]],
+                "auto_paused": session.meeting_id in self._auto_paused,
                 "doc_id": m.get("doc_id"),
                 "doc_mode": m.get("doc_mode"),
                 "segment_seconds": int(getattr(session, "segment_seconds", 0) or cfg["segmentSeconds"]),
@@ -1537,18 +1628,23 @@ class MeetingService:
                 "fix": "Pick an audio input in Meetings settings.",
             }])
 
+        preview = (stt_stream.make_engine(meeting_id, cfg, self.preview_publish)
+                   if m.get("doc_mode") == "dictate" and "mic" in channels else None)
         session = self.pool.start(
-            meeting_id, channels,
+            meeting_id, channels, preview=preview,
             on_segment=lambda ch, seq, path, info: self._on_segment(meeting_id, ch, seq, path, info),
             on_result=lambda ch, seq, path, res: self._on_result(meeting_id, ch, seq, path, res),
             segment_seconds=seg_seconds,
             cut_on_silence=cut_on_silence,
             max_seconds=int(cfg["maxMeetingSeconds"]),
-            keep_audio=bool(cfg["keepAudio"]),
+            keep_audio=bool(cfg["keepAudio"] or m.get("keep_audio")),   # per-recording can only turn keeping on; the global setting cannot be overridden off
             max_audio_bytes=int(cfg["maxAudioBytes"]),
             drain_seconds=float(cfg["drainSeconds"]),
             on_disk_check=lambda: self.meetings.audio_bytes(meeting_id),
+            vocab=meeting_notes.vocab_prompt(m) if cfg.get("vocabularyPrompt", True) else "",
         )
+        if cfg["keepAudio"] and not m.get("keep_audio"):
+            self.meetings.patch(meeting_id, {"keep_audio": True})   # the wavs are kept, so the row says so (playback gates on it)
         self.meetings.mark_started(meeting_id, str(session.out_dir), list(channels), session.started_at)
         # A missing loopback device is a degradation the user has to be able to see, not an error.
         self.meetings.patch(meeting_id, {"error": "; ".join(
@@ -1583,7 +1679,35 @@ class MeetingService:
         if session is None:
             return None
         session.pause(False)
+        self._auto_paused.discard(meeting_id)
+        self._note(meeting_id, clear=("Paused after",))
+        # The silence clock restarts: time spent paused is not time the mic was quiet.
+        self._heard[meeting_id] = {c: now() for c in getattr(session, "captures", {})}
         return self.status()
+
+    def _silent_for(self, session: Any, channel: str) -> int:
+        """Seconds since this channel last produced speech (a segment with text), or since start/resume.
+
+        ponytail: segment-granular, not a live level, so it lags by up to one clip; a real meter
+        needs a capture-side tap.
+        """
+        since = self._heard.get(session.meeting_id, {}).get(channel) or session.started_at
+        return max(0, int(now() - since))
+
+    def _check_silence(self, cfg: dict[str, Any]) -> None:
+        """Pause (never stop) a doc recording whose every channel has been quiet for the configured minutes."""
+        minutes = float(cfg.get("silencePauseMinutes") or 0)
+        session = self.pool.live()
+        if minutes <= 0 or session is None or session.paused:
+            return
+        m = self.meetings.get(session.meeting_id) or {}
+        chans = list(getattr(session, "captures", {}))
+        if not m.get("doc_id") or not chans:
+            return
+        if all(self._silent_for(session, c) >= minutes * 60 for c in chans):
+            self.pause(session.meeting_id)
+            self._auto_paused.add(session.meeting_id)
+            self._note(session.meeting_id, f"Paused after {minutes:g} minutes of silence")
 
     async def stop(self, meeting_id: str) -> dict[str, Any] | None:
         """Captures down, queue drained, transcript rolled up - then enhance is QUEUED, not awaited.
@@ -1614,6 +1738,8 @@ class MeetingService:
         drained, pending = True, 0
         if self.pool.get(meeting_id) is not None:
             self.meetings.patch(meeting_id, {"status": "transcribing"})
+            self._heard.pop(meeting_id, None)
+            self._auto_paused.discard(meeting_id)
             res = await asyncio.to_thread(self.pool.stop, meeting_id) or {}
             # Absent keys mean a pool that predates the contract; the old behaviour was to assume
             # the drain finished, so that is what a missing `drained` still means.
@@ -1768,8 +1894,6 @@ class MeetingService:
             return m["pending"] or self.meetings.last_applied(meeting_id)
         cfg = self.config()
         tpl = template or m["template"] or cfg["template"]
-        if tpl not in meeting_notes.TEMPLATES:
-            tpl = "general"
         settings = self.settings()
         model = meeting_notes.pick_model(cfg, settings)
         self._enhancing.add(meeting_id)
@@ -1779,6 +1903,7 @@ class MeetingService:
             res = await meeting_notes.enhance(
                 complete_fn=self._complete, settings=settings, model=model, meeting=m,
                 notes=m["notes"], transcript=m["transcript"], template=tpl,
+                custom=cfg["customTemplates"], language=cfg["summaryLanguage"],
                 max_transcript_chars=int(cfg["maxTranscriptChars"]))
         finally:
             self._enhancing.discard(meeting_id)
@@ -1856,19 +1981,26 @@ class MeetingService:
             out["error"] = "A summary is already being written for this recording."
             return out
         cfg = self.config()
+        words = len(m["transcript"].split())
+        if words < int(cfg.get("minSummaryWords", 40)):
+            out["error"] = f"Too little was said to summarise ({words} words)."
+            self._note(meeting_id, "Nothing was said", clear=("Nothing was said", "Summary failed"))
+            self._emit("summary", meeting_id, revision_id=None, error=out["error"])
+            out["meeting"] = self.meetings.get(meeting_id)
+            return out
         tpl = template or m["template"] or cfg["template"]
-        if tpl not in meeting_notes.TEMPLATES:
-            tpl = "general"
         settings = self.settings()
         model = meeting_notes.pick_model(cfg, settings)
         self._summarizing.add(meeting_id)
         prior_status = m["status"]
         try:
             self.meetings.patch(meeting_id, {"status": "enhancing"})
+            numbered, sources = meeting_notes.numbered_transcript(self.meetings.segments(meeting_id, limit=100000))
             res = await meeting_notes.summarize_recording(
                 complete_fn=self._complete, settings=settings, model=model, meeting=m,
-                doc_title=doc["title"], doc_content=doc["content"], transcript=m["transcript"],
-                template=tpl, focus=focus, max_transcript_chars=int(cfg["maxTranscriptChars"]))
+                doc_title=doc["title"], doc_content=doc["content"], transcript=numbered or m["transcript"],
+                sources=sources, template=tpl, focus=focus, custom=cfg["customTemplates"],
+                language=cfg["summaryLanguage"], max_transcript_chars=int(cfg["maxTranscriptChars"]))
         finally:
             self._summarizing.discard(meeting_id)
             self.meetings.patch(meeting_id, {"status": "ready" if prior_status == "enhancing" else prior_status})
@@ -1888,7 +2020,8 @@ class MeetingService:
             items = [{**it, "text": redact.scrub_secrets(it["text"])} for it in items]
         # Stored escaped too, so the Summary tab and the doc render the same thing.
         body = meeting_notes.escape_currency(body)
-        section = f"{meeting_notes.section_heading(m)}\n\n{body.strip()}"
+        section = meeting_notes.wrap_ai(f"{meeting_notes.section_heading(m, words)}\n\n{body.strip()}"
+                                        f"\n\n_Model {res['model']}, template {tpl}_")
         # The doc may have been trashed while the model was thinking; propose_append says so with None.
         rev = self.docs.propose_append(doc_id, section, summary="Recording summary", tool="recording_summary")
         if rev is None:
@@ -1903,7 +2036,7 @@ class MeetingService:
         self.meetings.set_summary_revision(meeting_id, rev["id"])
         if items:
             self.meetings.add_action_items(meeting_id, None, items)
-        patch: dict[str, Any] = {"enhanced": body}
+        patch: dict[str, Any] = {"enhanced": body, "summary_evidence": res["evidence"]}
         if headline:
             patch["summary"] = headline
         self.meetings.patch(meeting_id, patch)
@@ -2085,6 +2218,8 @@ class MeetingService:
                 "title": str(e.get("summary") or "(no title)"), "start": str(e.get("start") or ""),
                 "end": str(e.get("end") or ""), "attendee_count": count, "has_external": has_external,
                 "conference_link": _conference_link(e), "meeting_id": existing["id"] if existing else None,
+                "attendees": [{"email": a.get("email") or "", "name": a.get("name") or a.get("displayName") or ""}
+                              for a in details if not a.get("self")] or [{"email": x} for x in emails],
             })
         self._suggest = (now(), out)
         return out
@@ -2190,9 +2325,8 @@ class MeetingService:
     async def loop(self) -> None:
         """One tick every 45 seconds. No LLM in here: a nudge must not cost a model call.
 
-        Auto-stop is purely TIME-based. Nothing in this design measures amplitude - there is no
-        voice-activity detection anywhere in the codebase - so a "stopped after 90s of silence"
-        rule would be a lie about what is being observed.
+        Auto-stop is purely TIME-based. The silence pause only reads which finished clips had
+        speech in them, and it pauses, never stops.
         """
         while True:
             try:
@@ -2202,6 +2336,7 @@ class MeetingService:
                     continue
                 await self._nudge(cfg)
                 await self._auto_stop(cfg)
+                self._check_silence(cfg)
                 await asyncio.to_thread(self.retranscribe, "", RETRANSCRIBE_PER_TICK)
                 await asyncio.to_thread(self._sweep_audio, cfg)
             except asyncio.CancelledError:
@@ -2299,6 +2434,9 @@ class MeetingService:
                 self._emit("status", meeting_id, status="error", error=str(res["error"])[:300])
             # The row finish_segment RETURNS, never `res["text"]`: the stored row is the one that
             # went through the credential scrubber.
+            # A failed clip is not silence: the user may be talking while transcription lags.
+            if (res["state"] == "done" and (res["text"] or "").strip()) or (res["error"] and not res.get("evicted")):
+                self._heard.setdefault(meeting_id, {})[channel] = now()
             if row is not None and row.get("state") in ("done", "empty", "failed"):
                 self._emit("segment", meeting_id, segment=row)
         except Exception as e:  # noqa: BLE001

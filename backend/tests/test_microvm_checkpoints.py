@@ -5,6 +5,7 @@ import os
 import subprocess
 import sys
 import time
+import types
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -213,3 +214,52 @@ def test_tools_registered_and_wired() -> None:
     assert r["checkpoint"] == "clean"
     assert asyncio.run(tb.specs["sandbox_restore"].fn(ctx, label="clean")) == {"restored": "clean"}
     assert llm.DEFAULT_SETTINGS["sandboxKeepDays"] == 14
+
+
+def test_export_file_binary_round_trip_and_limits(tmp_path: Any) -> None:
+    import asyncio
+
+    from personal_os.workspace import Workspace
+    blob = bytes(range(256)) * 3
+    files = {"/workspace/out/a.bin": blob, "/workspace/big.bin": b"x" * (microvm.EXPORT_MAX_BYTES + 1)}
+    sb, d = make()
+    base = d.__call__
+
+    def runner(argv: list[str], *, input: bytes | None = None, timeout: float = 60) -> "subprocess.CompletedProcess[bytes]":
+        if argv[1] == "exec" and argv[-1].startswith("/workspace"):
+            data = files.get(argv[-1])
+            if data is None:
+                return cp(1, "", "no such file")
+            if argv[-2] == "cat":
+                return subprocess.CompletedProcess([], 0, data, b"")
+            return cp(0, str(len(data)))
+        return base(argv, input=input, timeout=timeout)
+    sb._run = runner  # type: ignore[assignment]
+    assert sb.export_file("c1", "out/a.bin") == ("/workspace/out/a.bin", blob)
+    for bad in ("/etc/passwd", "../etc/passwd", "/workspace", "big.bin", "missing.bin"):
+        with pytest.raises(SandboxError):
+            sb.export_file("c1", bad)
+    ws = Workspace(tmp_path)
+    tb = Toolbox(None, None, None, lambda: {}, sandboxes=sb, workspace=ws)  # type: ignore[arg-type]
+    ctx: dict[str, Any] = {"conversation_id": "c1", "desk_id": "d1"}
+    r = asyncio.run(tb.specs["sandbox_export_file"].fn(ctx, path="out/a.bin"))
+    assert r["saved"] == "outputs/a.bin" and ws.read_bytes("d1", "outputs/a.bin") == blob
+    assert asyncio.run(tb.specs["sandbox_export_file"].fn(ctx, path="out/a.bin"))["saved"] != "outputs/a.bin"  # never overwrites
+    assert "error" in asyncio.run(tb.specs["sandbox_export_file"].fn({"conversation_id": "c1"}, path="out/a.bin"))
+
+
+def test_export_file_read_passes_the_export_cap_to_the_real_runner(monkeypatch: Any) -> None:
+    """A 9 MB file must not hit the 8 MB default read cap of the real runner."""
+    size = 9_000_000
+    seen: list[int] = []
+
+    def fake_capped(argv: list[str], *, input: bytes | None = None, timeout: float = 60, hard_cap: int = 0, keep: Any = None) -> Any:
+        seen.append(hard_cap)
+        out = str(size).encode() if "wc -c" in " ".join(argv) else b"x" * size
+        return types.SimpleNamespace(returncode=0, stdout=out[:hard_cap], stderr=b"", timed_out=False, truncated=len(out) > hard_cap)
+    sb, d = make()
+    monkeypatch.setattr(microvm, "capped_run", fake_capped)
+    monkeypatch.setattr(sb, "_run", microvm._run)
+    monkeypatch.setattr(sb, "ensure", lambda cid: "c")
+    assert len(sb.export_file("c1", "big.bin")[1]) == size
+    assert seen[-1] > size

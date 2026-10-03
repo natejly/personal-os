@@ -19,7 +19,19 @@ function startsSentence(before: string): boolean {
   if (before.trim() === '') return true
   // A line start counts, including a markdown list or heading marker that is already typed.
   if (/\n\s*$/.test(before)) return true
+  // A list or heading marker typed by a command ("- ", "## ") leaves the caret at a line start.
+  if (/(^|\n)[ \t]*(?:[-*]|#{1,6}) $/.test(before)) return true
   return /[.!?]["”’)\]]*\s*$/.test(before)
+}
+
+const FILLER = /(?:^|\s)(?:um+|uh+|uhm|erm|hmm+)\b[,.]?(?=\s|$)/gi
+const PUNCT: Record<string, string> = { period: '.', 'full stop': '.', comma: ',', 'question mark': '?', 'exclamation mark': '!', 'exclamation point': '!', colon: ':', semicolon: ';' }
+const HEADINGS: Record<string, string> = { 'heading one': '# ', 'heading two': '## ', 'heading three': '### ' }
+
+/** Whole-utterance commands that act on the editor rather than type text. */
+export function dictationCommand(raw: string): 'scratch' | 'stop' | null {
+  const cmd = commandKey(raw.replace(FILLER, ' '))
+  return cmd === 'scratch that' ? 'scratch' : cmd === 'stop dictation' ? 'stop' : null
 }
 
 /**
@@ -35,9 +47,15 @@ function startsSentence(before: string): boolean {
  * `before` is the text before the caret (a tail of a few dozen characters is enough).
  */
 export function dictationText(raw: string, before: string): string {
-  const text = raw.trim().replace(/\s+/g, ' ')
+  // Fillers go first, so "um, new line" is still the command. Only whole words: "umbrella" stays.
+  const text = raw.replace(FILLER, ' ').trim().replace(/\s+/g, ' ')
   if (!text) return ''
   const cmd = commandKey(text)
+  if (cmd === 'scratch that' || cmd === 'stop dictation') return ''
+  if (PUNCT[cmd]) return PUNCT[cmd]
+  const atLineStart = /(^|\n)[ \t]*$/.test(before)
+  if (cmd === 'bullet' || cmd === 'next bullet') return /(^|\n)[ \t]*- $/.test(before) ? '' : atLineStart ? '- ' : '\n- '
+  if (HEADINGS[cmd]) return atLineStart ? HEADINGS[cmd] : `\n${HEADINGS[cmd]}`
   if (cmd === 'new line' || cmd === 'newline') return '\n'
   if (cmd === 'new paragraph') {
     if (/\n\n\s*$/.test(before)) return ''
@@ -103,12 +121,12 @@ export function dictationDrained(segments: MeetingSegment[], typed: ReadonlySet<
  * typed into the doc it was dictated into, and `typed` survives switching docs, leaving the Docs
  * view and a preview-only stretch with no editor, so the clips said meanwhile are typed on return.
  */
-export interface DictationSession { docId: string; typed: Set<string>; endedAt: number }
+export interface DictationSession { docId: string; typed: Set<string>; endedAt: number; /** The text the last clip typed, for "scratch that". */ last: string }
 const sessions = new Map<string, DictationSession>()
 
 export function trackDictation(meetingId: string, docId: string): DictationSession {
   let s = sessions.get(meetingId)
-  if (!s) { s = { docId, typed: new Set(), endedAt: 0 }; sessions.set(meetingId, s) }
+  if (!s) { s = { docId, typed: new Set(), endedAt: 0, last: '' }; sessions.set(meetingId, s) }
   return s
 }
 export const forgetDictation = (meetingId: string): void => { sessions.delete(meetingId) }

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   FileText, Files, PanelLeftOpen, PanelRight, X, Columns2, Eye, Pencil,
-  Sparkles, Save, Link2, Link2Off, ChevronDown, Folder, FolderKanban, FolderTree
+  Sparkles, Save, Link2, Link2Off, ChevronDown, Folder, FolderKanban, FolderTree, Focus, AlignVerticalSpaceAround
 } from 'lucide-react'
 import { useStore } from '../store'
-import { api } from '../lib/api'
+import { api, type DocHit } from '../lib/api'
 import type { Doc } from '@shared/types'
 import MarkdownEditor from './MarkdownEditor'
 import MarkdownPreview from './MarkdownPreview'
@@ -14,10 +14,13 @@ import { scopeOf } from '../lib/docTree'
 import ResizeHandle from './ResizeHandle'
 import { clip, lines, usePageContext } from '../lib/pageContext'
 import { PANEL_TABS, parsePanelState, resolveWikiDoc, type PanelState, type PanelTab } from '../lib/docPanel'
-import { DocRecordButton, DocRecorderBar, RecordingsPanel, liveDoc, useDictation, useDocRec } from '../features/docrec'
+import { DocRecordButton, DocRecorderBar, liveDoc, RecordingsPanel, setRecordingBlockSink, useDictation, useDocRec, useNoteMarks, usePreview } from '../features/docrec'
+import { useDictationChord } from '../features/docrec/useChord'
 import Backlinks from '../features/notes/Backlinks'
 import DocOutline from '../features/notes/DocOutline'
+import FormatBar from '../features/notes/FormatBar'
 import ExportMenu from '../features/notes/ExportMenu'
+import { expandTemplate, userTemplates } from '../features/notes/templates'
 import NewDocMenu from '../features/notes/NewDocMenu'
 import type { MarkdownEditorHandle } from '../features/notes/handle'
 import type { SlashCommand } from '../features/notes/slash'
@@ -34,6 +37,10 @@ const PANEL_LABEL: Record<PanelTab, string> = { outline: 'Outline', recordings: 
 const TREE_KEY = 'grain.docs.treeOpen'
 const treeWasOpen = (): boolean => {
   try { return localStorage.getItem(TREE_KEY) !== '0' } catch { return true }
+}
+
+const flagOn = (key: string): boolean => {
+  try { return localStorage.getItem(key) === '1' } catch { return false }
 }
 
 export default function DocsView(): JSX.Element {
@@ -74,6 +81,12 @@ export default function DocsView(): JSX.Element {
     setTreeOpenState(open)
     try { localStorage.setItem(TREE_KEY, open ? '1' : '0') } catch { /* private window */ }
   }
+  const [writeFlags, setWriteFlags] = useState({ focus: flagOn('grain.docs.focus'), typewriter: flagOn('grain.docs.typewriter') })
+  const toggleFlag = (k: 'focus' | 'typewriter'): void => {
+    const next = !writeFlags[k]
+    setWriteFlags({ ...writeFlags, [k]: next })
+    try { localStorage.setItem(`grain.docs.${k}`, next ? '1' : '0') } catch { /* private window */ }
+  }
   const [linked, setLinked] = useState(true)
   const [editFrac, setEditFrac] = useState<number | null>(null)
   // Non-null while "New folder…" is being typed in the toolbar. An Electron renderer has no
@@ -82,6 +95,16 @@ export default function DocsView(): JSX.Element {
   const previewRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => { void refreshDocs(query) }, [refreshDocs, query])
+  // Ranked hits with a snippet for the tree's search; null until the (debounced) answer arrives.
+  const [hits, setHits] = useState<DocHit[] | null>(null)
+  useEffect(() => {
+    setHits(null)
+    const q = query.trim()
+    if (!q) return
+    let stale = false
+    const t = setTimeout(() => { api.docs.search(q).then((h) => { if (!stale) setHits(h) }).catch(() => { /* keep the plain list */ }) }, 200)
+    return () => { stale = true; clearTimeout(t) }
+  }, [query])
   // Anything still buffered belongs on disk before this view goes away — and before the window does.
   useEffect(() => {
     const flush = (): void => { void flushDoc() }
@@ -96,6 +119,7 @@ export default function DocsView(): JSX.Element {
 
   // The editor shows the buffer while typing and the saved body otherwise.
   const body = docDraft ?? activeDoc?.content ?? ''
+  useNoteMarks(activeDoc?.id ?? '', body)
   const title = docTitleDraft ?? activeDoc?.title ?? ''
   const pending = activeDoc?.pending ?? []
   const applied = useMemo(() => docRevisions.filter((r) => r.status !== 'pending'), [docRevisions])
@@ -129,18 +153,41 @@ export default function DocsView(): JSX.Element {
 
   const docId = activeDoc?.id ?? ''
   const liveHere = live && live.docId === docId ? live : null
-  const recordingCount = useDocRec((s) => s.recordings[docId]?.length ?? 0)
+  const recs = useDocRec((s) => s.recordings[docId])
+  const recordingCount = recs?.length ?? 0
+  // Ids the agent can hand to meeting_read, which also answers mid-recording from the transcript so far.
+  const recList = (recs ?? []).slice(0, 5).map((r) => `\`${r.id}\` ${r.title || 'Untitled'} (${r.status}, summary ${r.summary_state})`).join('; ')
 
   // ---- editor wiring ----
   // Slash-menu entries that need the recorder; the editor's own commands are built in. Memoised
   // because the editor re-derives its command list from this array's identity.
+  const userTpls = useMemo(() => userTemplates(docs), [docs])
   const extraCommands = useMemo((): SlashCommand[] => (docId
-    ? [
+    ? ([
         { id: 'record', label: 'Record and summarize', hint: 'mic', keywords: ['record', 'transcribe', 'meeting', 'summary'], run: () => void useDocRec.getState().start(docId, 'record') },
         { id: 'dictate', label: 'Dictate into note', hint: 'mic', keywords: ['dictate', 'speak', 'voice', 'talk'], run: () => void useDocRec.getState().start(docId, 'dictate') },
         { id: 'daily', label: 'Daily note', hint: 'today', keywords: ['today', 'journal', 'daily'], run: () => void openDailyNote() }
-      ]
-    : []), [docId, openDailyNote])
+      ] as SlashCommand[])
+    : [] as SlashCommand[]).concat(userTpls.map((t): SlashCommand => ({
+      id: `tpl-${t.id}`, label: `Template: ${t.title || 'Untitled'}`, hint: 'template', keywords: ['template', t.title],
+      run: (h) => {
+        void api.docs.get(t.id).then((full) => {
+          const x = expandTemplate(full.content ?? '', { now: new Date(), title: activeDoc?.title })
+          h.insertAtCaret(x.text, x.caret)
+        }).catch(() => {})
+      }
+    }))), [docId, openDailyNote, userTpls, activeDoc?.title])
+  // Starting a recording writes its block at the caret, through the editor's own undo-safe insert.
+  useEffect(() => {
+    setRecordingBlockSink((id, make) => {
+      const h = editor.current
+      if (id !== docId || !h) return
+      const t = h.getText()
+      const { start, end } = h.getSelection()
+      h.insertQuietly(make(t.slice(0, start), t.slice(end)))
+    })
+    return () => setRecordingBlockSink(null)
+  }, [docId])
   // A link can point at any other titled doc. The list may be narrowed by the tree's search box; that
   // only shortens the picker.
   const linkTargets = useMemo(
@@ -160,11 +207,21 @@ export default function DocsView(): JSX.Element {
       if (!h) return ''
       const { start } = h.getSelection()
       return h.getText().slice(Math.max(0, start - 80), start)
+    },
+    // "scratch that": range-checked, so text typed since the clip is never eaten.
+    (text) => {
+      const h = editor.current
+      if (!h || !text) return
+      const { start } = h.getSelection()
+      if (h.getText().slice(0, start).endsWith(text)) h.replaceRange(start - text.length, start, '')
     }
   )
 
   // Dictation types into the editor, so a preview-only view has nowhere to put the words.
   const dictatingHere = liveHere?.mode === 'dictate'
+  const previewText = usePreview((s) => (dictatingHere && liveHere ? s.byId[liveHere.meetingId]?.text ?? '' : ''))
+  // Hold-to-talk. Not while an assistant revision waits for review: the words would land under a diff.
+  useDictationChord(docId, pending.length === 0, dictatingHere)
   useEffect(() => { if (dictatingHere && docMode === 'preview') setDocMode('split') }, [dictatingHere, docMode, setDocMode])
 
   // A recording that starts on THIS doc opens the Recordings tab, so the live transcript is in view.
@@ -209,7 +266,7 @@ export default function DocsView(): JSX.Element {
     ? {
         view: 'docs',
         label: `Doc “${activeDoc.title || 'Untitled'}”`,
-        detail: `Open${dirty ? ', unsaved edits' : ''}. ${projectName ? `Project “${projectName}”` : 'Personal'}${activeDoc.folder ? ` / ${activeDoc.folder}` : ''}. Id \`${activeDoc.id}\`. ${liveHere ? `Being ${liveHere.mode === 'dictate' ? 'dictated into' : 'recorded'} now (recording \`${liveHere.meetingId}\`). ` : ''}${recordingCount ? `${recordingCount} recording${recordingCount === 1 ? '' : 's'} linked to this doc. ` : ''}Revise with doc_edit. The user reviews the diff unless document edits are set to accept all.\n\n\`\`\`markdown\n${clip(body)}\n\`\`\``,
+        detail: `Open${dirty ? ', unsaved edits' : ''}. ${projectName ? `Project “${projectName}”` : 'Personal'}${activeDoc.folder ? ` / ${activeDoc.folder}` : ''}. Id \`${activeDoc.id}\`. ${liveHere ? `Being ${liveHere.mode === 'dictate' ? 'dictated into' : 'recorded'} now (recording \`${liveHere.meetingId}\`). ` : ''}${recordingCount ? `${recordingCount} recording${recordingCount === 1 ? '' : 's'} linked to this doc${recList ? `: ${recList}` : ''}. ` : ''}Revise with doc_edit. The user reviews the diff unless document edits are set to accept all.\n\n\`\`\`markdown\n${clip(body)}\n\`\`\``,
         refs: [{ kind: 'doc', id: activeDoc.id, name: activeDoc.title }],
         hints: ['Summarise this doc', 'Tighten the writing', 'Pull out the action items as todos']
       }
@@ -219,7 +276,7 @@ export default function DocsView(): JSX.Element {
         detail: `No doc is open. Files are grouped by project — Personal plus one folder per project. The list shows:\n${lines(docs, (d) => `“${d.title || 'Untitled'}” (\`${d.id}\`)${d.project_id ? ` in project ${d.project_id}` : ' in Personal'}${d.folder ? `/${d.folder}` : ''}`)}`,
         refs: docs.slice(0, 40).map((d) => ({ kind: 'doc', id: d.id, name: d.title })),
         hints: ['What have I been writing about?', 'Start a doc for this week’s plan']
-      }), [activeDoc?.id, activeDoc?.title, activeDoc?.folder, projectName, body, dirty, docs, liveHere?.meetingId, liveHere?.mode, recordingCount])
+      }), [activeDoc?.id, activeDoc?.title, activeDoc?.folder, projectName, body, dirty, docs, liveHere?.meetingId, liveHere?.mode, recordingCount, recList])
 
   return (
     <main className="page docs-page">
@@ -241,7 +298,7 @@ export default function DocsView(): JSX.Element {
         {treeOpen && (
           <>
             <aside className="docs-side">
-              <DocTree docs={docs} activeId={activeDoc?.id ?? null} query={query} onQuery={setQuery} />
+              <DocTree hits={hits} docs={docs} activeId={activeDoc?.id ?? null} query={query} onQuery={setQuery} />
             </aside>
             <ResizeHandle id="docs-tree-w" defaultSize={240} min={170} max={480} grows="right" onCollapse={() => setTreeOpen(false)} label="File tree width" className="docs-tree-edge" />
           </>
@@ -335,6 +392,12 @@ export default function DocsView(): JSX.Element {
                 <button className={docMode === 'split' ? 'on' : ''} title="Editor and preview" onClick={() => setDocMode('split')}><Columns2 size={13} /></button>
                 <button className={docMode === 'preview' ? 'on' : ''} title="Preview only" onClick={() => setDocMode('preview')}><Eye size={13} /></button>
               </div>
+              {docMode !== 'preview' && (
+                <>
+                  <button className={`icon-btn ghost ${writeFlags.focus ? 'on' : ''}`} title="Focus mode: dim all but the current paragraph" aria-pressed={writeFlags.focus} onClick={() => toggleFlag('focus')}><Focus size={14} /></button>
+                  <button className={`icon-btn ghost ${writeFlags.typewriter ? 'on' : ''}`} title="Typewriter scrolling: keep the caret line mid-height" aria-pressed={writeFlags.typewriter} onClick={() => toggleFlag('typewriter')}><AlignVerticalSpaceAround size={14} /></button>
+                </>
+              )}
               {docMode === 'split' && (
                 <button className="icon-btn ghost" title={linked ? 'Unlink scrolling' : 'Link scrolling'} onClick={() => setLinked((l) => !l)}>
                   {linked ? <Link2 size={14} /> : <Link2Off size={14} />}
@@ -367,6 +430,7 @@ export default function DocsView(): JSX.Element {
               </div>
             )}
 
+            {docMode !== 'preview' && <FormatBar editor={editor} />}
             <div className={`doc-panes ${docMode}`}>
               {docMode === 'split' && (
                 <ResizeHandle id="doc-split" unit="%" defaultSize={50} min={20} max={80} grows="right" label="Editor and preview split" className="doc-split-edge" />
@@ -383,8 +447,12 @@ export default function DocsView(): JSX.Element {
                   extraCommands={extraCommands}
                   linkTargets={linkTargets}
                   smartPaste
+                  imageDocId={activeDoc?.id}
                   richStatus
+                  previewText={previewText}
                   onCaretLine={setCaretLine}
+                  focusMode={writeFlags.focus}
+                  typewriter={writeFlags.typewriter}
                 />
               )}
               {docMode !== 'edit' && (
@@ -395,6 +463,7 @@ export default function DocsView(): JSX.Element {
                         source={body}
                         knownTitles={knownTitles}
                         onWikilink={(t) => void openWikilink(t)}
+                        onRecording={(id) => { setPanel({ open: true, tab: 'recordings' }); void useDocRec.getState().select(docId, id) }}
                         onToggleTask={(line) => {
                           const next = toggleTaskAt(body, line)
                           if (next !== null) editDoc(next)

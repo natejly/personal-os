@@ -44,6 +44,18 @@ CREATE TABLE IF NOT EXISTS todos (
 );
 CREATE INDEX IF NOT EXISTS idx_todos_open ON todos(done, due);
 
+CREATE TABLE IF NOT EXISTS todo_deps (
+  todo_id TEXT NOT NULL,      -- this todo waits on ...
+  blocks_id TEXT NOT NULL,    -- ... this one (the blocker)
+  PRIMARY KEY (todo_id, blocks_id)
+);
+
+CREATE TABLE IF NOT EXISTS todo_filters (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  query TEXT NOT NULL         -- JSON: {tag, q, project_id}
+);
+
 CREATE TABLE IF NOT EXISTS todo_tombstones (
   external_id TEXT PRIMARY KEY,
   deleted_at REAL NOT NULL
@@ -85,7 +97,8 @@ class Todos:
             for col, ddl in {"calendar_event_id": "TEXT", "calendar_link": "TEXT", "synced_at": "REAL",
                              "remote_updated": "TEXT", "calendar_id": "TEXT", "calendar_sig": "TEXT",
                              "repeat": "TEXT", "estimate_min": "INTEGER",
-                             "deleted_at": "REAL", "deleted_with": "TEXT"}.items():  # the last two: trash.py
+                             "deleted_at": "REAL", "deleted_with": "TEXT",  # the last two: trash.py
+                             "parent_id": "TEXT", "tags": "TEXT"}.items():  # local-only: Tasks sync never reads these
                 if col not in have:
                     c.execute(f"ALTER TABLE todos ADD COLUMN {col} {ddl}")
 
@@ -97,7 +110,110 @@ class Todos:
                 row["repeat"] = json.loads(row["repeat"])
             except ValueError:
                 row["repeat"] = None
+        if row:
+            try:
+                row["tags"] = json.loads(row["tags"]) if row.get("tags") else []
+            except ValueError:
+                row["tags"] = []
         return row
+
+    @staticmethod
+    def clean_tags(raw: Any) -> list[str]:
+        """Tags as a de-duplicated list of lowercase words; accepts a list or a comma separated string."""
+        items = raw.split(",") if isinstance(raw, str) else (raw or [])
+        out: list[str] = []
+        for t in items:
+            t = str(t).strip().lstrip("#").lower()[:40]
+            if t and t not in out:
+                out.append(t)
+        return out
+
+    def _attach(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Add `depends_on` (open blockers), `blocked_count` and `blocking_count` to rows."""
+        with self.db.tx() as c:
+            pairs = c.execute("SELECT d.todo_id, d.blocks_id FROM todo_deps d JOIN todos b ON b.id=d.blocks_id"
+                              " JOIN todos a ON a.id=d.todo_id WHERE b.done=0 AND b.deleted_at IS NULL AND a.deleted_at IS NULL").fetchall()
+        waits: dict[str, list[str]] = {}
+        blocking: dict[str, int] = {}
+        for a, b in pairs:
+            waits.setdefault(a, []).append(b)
+            blocking[b] = blocking.get(b, 0) + 1
+        for r in rows:
+            r["depends_on"] = waits.get(r["id"], [])
+            r["blocked_count"] = len(r["depends_on"])
+            r["blocking_count"] = blocking.get(r["id"], 0)
+        return rows
+
+    def set_deps(self, id: str, blockers: list[str]) -> None:
+        """Replace what `id` waits on. Raises ValueError for an unknown todo, itself, or a cycle."""
+        blockers = list(dict.fromkeys(blockers))
+        with self.db.tx() as c:
+            for b in blockers:
+                if b == id:
+                    raise ValueError("a todo cannot depend on itself")
+                if not c.execute("SELECT 1 FROM todos WHERE id=? AND deleted_at IS NULL", (b,)).fetchone():
+                    raise ValueError(f"no todo with id {b!r} to depend on")
+            # A cycle exists when a blocker already (transitively) waits on `id`.
+            edges: dict[str, list[str]] = {}
+            for a, b in c.execute("SELECT todo_id, blocks_id FROM todo_deps WHERE todo_id != ?", (id,)).fetchall():
+                edges.setdefault(a, []).append(b)
+            seen: set[str] = set()
+            stack = list(blockers)
+            while stack:
+                n = stack.pop()
+                if n == id:
+                    raise ValueError("that dependency would make a cycle")
+                if n not in seen:
+                    seen.add(n)
+                    stack += edges.get(n, [])
+            c.execute("DELETE FROM todo_deps WHERE todo_id=?", (id,))
+            c.executemany("INSERT INTO todo_deps(todo_id, blocks_id) VALUES(?,?)", [(id, b) for b in blockers])
+
+    def _check_parent(self, id: str, parent_id: str | None) -> None:
+        seen: set[str] = set()
+        while parent_id:
+            if parent_id == id or parent_id in seen:
+                raise ValueError("a todo cannot be its own ancestor")
+            seen.add(parent_id)
+            p = self.get(parent_id)
+            if not p:
+                raise ValueError(f"no todo with id {parent_id!r} to nest under")
+            parent_id = p.get("parent_id")
+
+    @staticmethod
+    def nest(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Reorder so each todo's subtasks follow it. Rows whose parent is not in the list stay top-level."""
+        ids = {r["id"] for r in rows}
+        kids: dict[str, list[dict[str, Any]]] = {}
+        for r in rows:
+            if r.get("parent_id") in ids:
+                kids.setdefault(r["parent_id"], []).append(r)
+        out: list[dict[str, Any]] = []
+
+        def walk(r: dict[str, Any]) -> None:
+            out.append(r)
+            for k in kids.get(r["id"], []):
+                walk(k)
+        for r in rows:
+            if r.get("parent_id") not in ids:
+                walk(r)
+        return out
+
+    # ---- saved filters ----
+    def filters(self) -> list[dict[str, Any]]:
+        with self.db.tx() as c:
+            return [{"id": r["id"], "name": r["name"], **json.loads(r["query"])} for r in c.execute("SELECT * FROM todo_filters ORDER BY name").fetchall()]
+
+    def save_filter(self, name: str, query: dict[str, Any]) -> dict[str, Any]:
+        fid = new_id()
+        q = {k: query[k] for k in ("tag", "q", "project_id") if query.get(k)}
+        with self.db.tx() as c:
+            c.execute("INSERT INTO todo_filters(id,name,query) VALUES(?,?,?)", (fid, name.strip(), json.dumps(q)))
+        return {"id": fid, "name": name.strip(), **q}
+
+    def delete_filter(self, id: str) -> None:
+        with self.db.tx() as c:
+            c.execute("DELETE FROM todo_filters WHERE id=?", (id,))
 
     def _changed(self) -> None:
         if self.on_change:
@@ -106,7 +222,7 @@ class Todos:
             except Exception:  # noqa: BLE001 - a sync hiccup must never break a todo write
                 pass
 
-    def list(self, project_id: str | None = "__all__", include_done: bool = False, q: str = "") -> list[dict[str, Any]]:
+    def list(self, project_id: str | None = "__all__", include_done: bool = False, q: str = "", tag: str = "") -> list[dict[str, Any]]:
         where, args = ["deleted_at IS NULL"], []
         if project_id != "__all__":
             if project_id is None:
@@ -121,21 +237,28 @@ class Todos:
             args += [f"%{q}%", f"%{q}%"]
         sql = "SELECT * FROM todos" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY done, CASE WHEN due IS NULL THEN 1 ELSE 0 END, due, priority, created_at DESC"
         with self.db.tx() as c:
-            return [self._out(row_to_dict(r)) for r in c.execute(sql, args).fetchall()]  # type: ignore[misc]
+            rows = [self._out(row_to_dict(r)) for r in c.execute(sql, args).fetchall()]  # type: ignore[misc]
+        if tag.strip():
+            want = self.clean_tags(tag)
+            rows = [r for r in rows if all(w in r["tags"] for w in want)]  # type: ignore[index]
+        return self._attach(rows)  # type: ignore[arg-type]
 
     def get(self, id: str) -> dict[str, Any] | None:
         with self.db.tx() as c:
-            return self._out(row_to_dict(c.execute("SELECT * FROM todos WHERE id=? AND deleted_at IS NULL", (id,)).fetchone()))
+            row = self._out(row_to_dict(c.execute("SELECT * FROM todos WHERE id=? AND deleted_at IS NULL", (id,)).fetchone()))
+        return self._attach([row])[0] if row else None
 
-    def create(self, title: str, project_id: str | None = None, notes: str = "", due: str | None = None, priority: int = 2, source: str = "local", external_id: str | None = None, notify: bool = True, repeat: dict[str, Any] | None = None, estimate_min: int | None = None) -> dict[str, Any]:
+    def create(self, title: str, project_id: str | None = None, notes: str = "", due: str | None = None, priority: int = 2, source: str = "local", external_id: str | None = None, notify: bool = True, repeat: dict[str, Any] | None = None, estimate_min: int | None = None, tags: Any = None, parent_id: str | None = None) -> dict[str, Any]:
         rep = todo_rules.parse_repeat(repeat)
         tid = new_id()
         t = now()
         due = clean_due(due)
+        self._check_parent(tid, parent_id)
         with self.db.tx() as c:
             c.execute(
-                "INSERT INTO todos(id,project_id,title,notes,due,priority,done,source,external_id,created_at,updated_at,repeat,estimate_min) VALUES(?,?,?,?,?,?,0,?,?,?,?,?,?)",
-                (tid, project_id, title.strip(), notes, due or None, int(priority), source, external_id, t, t, json.dumps(rep) if rep else None, int(estimate_min) if estimate_min else None),
+                "INSERT INTO todos(id,project_id,title,notes,due,priority,done,source,external_id,created_at,updated_at,repeat,estimate_min,tags,parent_id) VALUES(?,?,?,?,?,?,0,?,?,?,?,?,?,?,?)",
+                (tid, project_id, title.strip(), notes, due or None, int(priority), source, external_id, t, t, json.dumps(rep) if rep else None, int(estimate_min) if estimate_min else None,
+                 json.dumps(self.clean_tags(tags)), parent_id or None),
             )
         if notify:
             self._changed()
@@ -145,9 +268,17 @@ class Todos:
         """Apply a patch. Completing an open repeating todo spawns its next instance (_spawn_next); Tasks-sync
         completions come through here too, so they recur as well. The completed row has its repeat cleared,
         so reopening and completing it again never spawns a second copy."""
-        fields = {k: v for k, v in patch.items() if k in {"title", "notes", "due", "priority", "done", "project_id", "calendar_event_id", "calendar_link", "calendar_id", "repeat", "estimate_min"}}
-        if not fields:
+        fields = {k: v for k, v in patch.items() if k in {"title", "notes", "due", "priority", "done", "project_id", "calendar_event_id", "calendar_link", "calendar_id", "repeat", "estimate_min", "tags", "parent_id"}}
+        deps = patch.get("depends_on")
+        if not fields and deps is None:
             return self.get(id)
+        if "tags" in fields:
+            fields["tags"] = json.dumps(self.clean_tags(fields["tags"]))
+        if "parent_id" in fields:
+            fields["parent_id"] = fields["parent_id"] or None
+            self._check_parent(id, fields["parent_id"])
+        if deps is not None:
+            self.set_deps(id, list(deps))
         if "due" in fields:
             fields["due"] = clean_due(fields["due"])
         if "repeat" in fields:
@@ -178,7 +309,8 @@ class Todos:
         due = date.fromisoformat(row["due"][:10]) if row.get("due") else None
         nxt = todo_rules.next_due(due, row["repeat"], completed_on)
         return self.create(row["title"], row.get("project_id"), row.get("notes") or "", nxt.isoformat(), row["priority"],
-                           source="local", notify=False, repeat=row["repeat"], estimate_min=row.get("estimate_min"))
+                           source="local", notify=False, repeat=row["repeat"], estimate_min=row.get("estimate_min"),
+                           tags=row.get("tags"), parent_id=row.get("parent_id"))
 
     @staticmethod
     def _tombstone(c: Any, t: dict[str, Any]) -> None:
@@ -196,6 +328,7 @@ class Todos:
             if tombstone and t and not t.get("deleted_at"):
                 self._tombstone(c, t)
             c.execute("DELETE FROM todos WHERE id=?", (id,))
+            c.execute("DELETE FROM todo_deps WHERE todo_id=? OR blocks_id=?", (id, id))
         if notify:
             self._changed()
 

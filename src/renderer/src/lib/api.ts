@@ -1,8 +1,8 @@
 import type {
-  BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, DriveFile, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Artifact, ArtifactVersion, Recap, Conversation, ConversationSettings, ContextUsed, ContextMeter, Document, GraphData, GraphEdge, GraphNode, Message,
+  BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, DriveFile, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Artifact, ArtifactVersion, Recap, Conversation, ConversationSettings, ContextUsed, ContextMeter, Document, GraphData, GraphEdge, GraphNode, Message,
   ApprovalDecision, PermissionEvaluation, PlanEdit,
   Memory, MemoryProposal, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
-  Command, Workflow, WorkflowRun, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
+  Command, AgentDef, BuiltinAgent, Workflow, WorkflowRun, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
   Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
   Desk, DeskAutonomy, DeskBudget, DeskDiff, DeskEvent, DeskFilePreview, DeskFileTree, DeskOutput, DeskRichPreview,
   DeskStatus, FullDesk, PlanRecord, PromotionKind, PromotionResult,
@@ -38,6 +38,8 @@ export const setBase = (url: string): void => {
     })
 }
 export const getBase = (): string => base
+/** Route of one kept segment's audio. */
+export const audioPath = (meetingId: string, segId: string): string => `/meetings/${meetingId}/segments/${segId}/audio`
 /** The resolved token, for callers that cannot await (keepalive writes on unload). '' until setBase() resolves it. */
 export const getToken = (): string => token
 
@@ -93,6 +95,8 @@ const fresh = (refresh: boolean): string => (refresh ? '&refresh=true' : '')
 /** Scope filter: 'all' = everything, 'personal' = items in no project, or a project id (that project only). */
 export type Scope = 'all' | 'personal' | string
 const scope = (s: Scope): string => `project_id=${encodeURIComponent(s)}&include_global=false`
+
+export interface DocHit { doc_id: string; title: string; snippet: string; via?: 'recording' }
 
 export const api = {
   health: () => req<{ ok: boolean; data_dir: string }>('/health'),
@@ -199,7 +203,7 @@ export const api = {
     get: (id: string) => req<Dashboard>(`/dashboards/${id}`),
     create: (d: { name: string; description?: string }) => req<Dashboard>('/dashboards', { method: 'POST', body: json(d) }),
     delete: (id: string) => req(`/dashboards/${id}`, { method: 'DELETE' }),
-    addWidget: (id: string, w: { kind: string; title?: string; prompt?: string; source_ids?: string[]; code?: string; output?: string; width?: number; height?: number }) => req<Widget>(`/dashboards/${id}/widgets`, { method: 'POST', body: json(w) })
+    addWidget: (id: string, w: { kind: string; title?: string; prompt?: string; source_ids?: string[]; code?: string; output?: string; width?: number; height?: number; spec?: Record<string, unknown> }) => req<Widget>(`/dashboards/${id}/widgets`, { method: 'POST', body: json(w) })
   },
   /** AI dashboard widgets (`/widgets/{id}`). Not `api.windows`, which is a canvas window. */
   widgets: {
@@ -212,9 +216,12 @@ export const api = {
     delete: (id: string) => req(`/widgets/${id}`, { method: 'DELETE' })
   },
   todos: {
-    list: (s: Scope = 'all', includeDone = false, q = '', sort: 'due' | 'urgency' = 'due') => req<Todo[]>(`/todos?project_id=${encodeURIComponent(s)}&include_done=${includeDone}&q=${encodeURIComponent(q)}&sort=${sort}`),
-    create: (t: { title: string; project_id?: string | null; notes?: string; due?: string | null; priority?: number; repeat?: TodoRepeat | null; estimate_min?: number | null }) => req<Todo>('/todos', { method: 'POST', body: json(t) }),
-    update: (id: string, patch: { title?: string; notes?: string; due?: string | null; priority?: number; done?: boolean; project_id?: string | null; clear_due?: boolean; clear_project?: boolean; repeat?: TodoRepeat; clear_repeat?: boolean; estimate_min?: number | null; clear_estimate?: boolean; calendar_event_id?: string | null; calendar_link?: string | null; calendar_id?: string | null }) =>
+    list: (s: Scope = 'all', includeDone = false, q = '', sort: 'due' | 'urgency' = 'due', tag = '') => req<Todo[]>(`/todos?project_id=${encodeURIComponent(s)}&include_done=${includeDone}&q=${encodeURIComponent(q)}&sort=${sort}&tag=${encodeURIComponent(tag)}`),
+    filters: () => req<TodoFilter[]>('/todo-filters'),
+    saveFilter: (f: { name: string; tag?: string; q?: string; project_id?: string | null }) => req<TodoFilter>('/todo-filters', { method: 'POST', body: json(f) }),
+    deleteFilter: (id: string) => req(`/todo-filters/${id}`, { method: 'DELETE' }),
+    create: (t: { title: string; project_id?: string | null; notes?: string; due?: string | null; priority?: number; repeat?: TodoRepeat | null; estimate_min?: number | null; tags?: string[]; parent_id?: string | null }) => req<Todo>('/todos', { method: 'POST', body: json(t) }),
+    update: (id: string, patch: { title?: string; notes?: string; due?: string | null; priority?: number; done?: boolean; project_id?: string | null; clear_due?: boolean; clear_project?: boolean; repeat?: TodoRepeat; clear_repeat?: boolean; estimate_min?: number | null; clear_estimate?: boolean; calendar_event_id?: string | null; calendar_link?: string | null; calendar_id?: string | null; tags?: string[]; parent_id?: string | null; clear_parent?: boolean; depends_on?: string[] }) =>
       req<Todo>(`/todos/${id}`, { method: 'PUT', body: json(patch) }),
     delete: (id: string) => req(`/todos/${id}`, { method: 'DELETE' })
   },
@@ -350,6 +357,8 @@ export const api = {
   assist: {
     complete: (p: { kind: string; before: string; after?: string; context?: string }) =>
       req<{ completion: string }>('/assist/complete', { method: 'POST', body: json(p) }),
+    cleanDictation: (text: string) =>
+      req<{ text: string }>('/docs/dictation/clean', { method: 'POST', body: json({ text }) }),
     mailReview: (p: { to?: string; subject?: string; body: string; reply_context?: string }) =>
       req<{ feedback: string[]; revised: string }>('/assist/mail-review', { method: 'POST', body: json(p) })
   },
@@ -401,6 +410,14 @@ export const api = {
     create: (text: string) => req<Command>('/commands', { method: 'POST', body: json({ text }) }),
     update: (id: string, text: string) => req<Command>(`/commands/${id}`, { method: 'PUT', body: json({ text }) }),
     delete: (id: string) => req<{ ok: boolean }>(`/commands/${id}`, { method: 'DELETE' })
+  },
+  /** Agent definitions: built-in roles plus the user's own, which cannot be spawned until approved. */
+  agentDefs: {
+    list: () => req<{ builtin: BuiltinAgent[]; custom: AgentDef[] }>('/agents/defs'),
+    create: (text: string) => req<AgentDef>('/agents/defs', { method: 'POST', body: json({ text }) }),
+    update: (id: string, text: string) => req<AgentDef>(`/agents/defs/${id}`, { method: 'PUT', body: json({ text }) }),
+    approve: (id: string, approved: boolean) => req<AgentDef>(`/agents/defs/${id}/approve?approved=${approved}`, { method: 'POST' }),
+    delete: (id: string) => req<{ ok: boolean }>(`/agents/defs/${id}`, { method: 'DELETE' })
   },
   /** Procedural memory. Nothing here is injected until its status is 'approved'. */
   skills: {
@@ -502,14 +519,18 @@ export const api = {
   documents: {
     list: (s: Scope) => req<Document[]>(`/documents?${scope(s)}`),
     get: (id: string) => req<Document>(`/documents/${id}`),
+    pin: (id: string, pinned: boolean) => req<Document>(`/documents/${id}`, { method: 'PATCH', body: json({ pinned }) }),
     upload: (projectId: string | null, file: File) => {
       const fd = new FormData()
       fd.append('file', file)
       if (projectId) fd.append('project_id', projectId)
       return req<Document>('/documents', { method: 'POST', body: fd })
     },
-    delete: (id: string) => req(`/documents/${id}`, { method: 'DELETE' })
+    delete: (id: string) => req(`/documents/${id}`, { method: 'DELETE' }),
+    indexStatus: () => req<{ chunks: number; embedded: number; doc_chunks?: number; doc_embedded?: number; model: string | null; mode: string }>('/documents/index-status')
   },
+  /** Character span of a cited chunk in its source text (start -1 when not found verbatim). */
+  chunkSpan: (isDoc: boolean, id: string, chunkId: string) => req<{ text: string; start: number; end: number }>(`/${isDoc ? 'docs' : 'documents'}/${id}/chunks/${chunkId}`),
   activity: {
     status: () => req<ActivityStatus>('/activity/status'),
     config: (patch: Partial<ActivityConfig>) => req<ActivityStatus>('/activity/config', { method: 'PUT', body: json(patch) }),
@@ -621,12 +642,13 @@ export const api = {
   },
   docs: {
     list: (s: Scope = 'all', q = '') => req<Doc[]>(`/docs?project_id=${encodeURIComponent(s)}&q=${encodeURIComponent(q)}`),
+    search: (q: string, s: Scope = 'all') => req<DocHit[]>(`/docs/search?q=${encodeURIComponent(q)}&project_id=${encodeURIComponent(s)}`),
     get: (id: string) => req<FullDoc>(`/docs/${id}`),
     create: (d: { title?: string; content?: string; folder?: string; project_id?: string | null }) => req<FullDoc>('/docs', { method: 'POST', body: json(d) }),
     /** Autosave. Records a revision, folding a burst of keystrokes into one history entry. */
-    save: (id: string, patch: { content?: string; title?: string; summary?: string }) => req<FullDoc>(`/docs/${id}`, { method: 'PUT', body: json(patch) }),
+    save: (id: string, patch: { content?: string; title?: string; summary?: string; base_updated_at?: number }) => req<FullDoc>(`/docs/${id}`, { method: 'PUT', body: json(patch) }),
     /** Title, folder, star and project moves — metadata, so it stays out of the history. */
-    patch: (id: string, patch: { title?: string; folder?: string; starred?: boolean; project_id?: string | null; clear_project?: boolean; scope?: string }) =>
+    patch: (id: string, patch: { title?: string; folder?: string; starred?: boolean; pinned?: boolean; project_id?: string | null; clear_project?: boolean; scope?: string }) =>
       req<FullDoc>(`/docs/${id}`, { method: 'PATCH', body: json(patch) }),
     /** A whole drag in one patch: which tree ('' personal, else a project) and which folder in it. */
     move: (id: string, scope: string, folder: string) =>
@@ -692,7 +714,16 @@ export const api = {
       req<MeetingActionItem[]>(`/meetings/${id}/actions/add-todos`, { method: 'POST', body: json({ ids, project_id: projectId ?? null }) }),
     dismissAction: (id: string, actionId: string) => req<MeetingActionItem>(`/meetings/${id}/actions/${actionId}/dismiss`, { method: 'POST' }),
     retranscribe: (id: string, limit = 20) => req<{ settled: number; meeting: FullMeeting }>(`/meetings/${id}/retranscribe?limit=${limit}`, { method: 'POST' }),
+    /** A kept segment's wav as an object URL (the audio element cannot send the token header). */
+    segmentAudio: async (id: string, segId: string): Promise<string> => {
+      const r = await fetch(`${base}${audioPath(id, segId)}`, { headers: await auth() })
+      if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
+      return URL.createObjectURL(await r.blob())
+    },
     deleteAudio: (id: string) => req<FullMeeting>(`/meetings/${id}/audio`, { method: 'DELETE' }),
+    /** Typed-line marks for a doc recording: `line` is the line's first characters, `t` the recording offset in seconds. */
+    putNoteMarks: (id: string, marks: { line: string; t: number }[]) =>
+      req<{ marks: { line: string; t: number }[] }>(`/meetings/${id}/note-marks`, { method: 'PUT', body: json({ marks }) }),
     /** Rename diarized speakers ({ S1: 'Dana' }); the transcript is rebuilt server side. A blank name clears one. */
     setSpeakers: (id: string, names: Record<string, string>) =>
       req<FullMeeting>(`/meetings/${id}/speakers`, { method: 'PUT', body: json({ names }) }),

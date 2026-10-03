@@ -21,6 +21,15 @@ export const statusLabel = (s: MeetingStatus): string => STATUS[s] ?? s
 export const modeLabel = (mode: 'record' | 'dictate' | null, finished = false): string =>
   mode === 'dictate' ? (finished ? 'Dictated' : 'Dictation') : (finished ? 'Recorded' : 'Recording')
 
+/**
+ * The trailing placeholder in a live transcript: what is happening to the audio right now. Empty
+ * when nothing is being heard (not recording, or paused), so no row is drawn.
+ */
+export function pendingLabel(state: 'recording' | 'paused' | 'stalled' | 'idle', queued: number, segmentsPending: number): string {
+  if (state !== 'recording') return ''
+  return queued > 0 || segmentsPending > 0 ? 'Transcribing' : 'Listening'
+}
+
 export interface SummaryCopy {
   /** One short state line. */
   text: string
@@ -55,3 +64,30 @@ export const EMPTY_COPY =
 /** The trust line under a summary. */
 export const SUMMARY_TRUST =
   'A summary is a proposal. It goes into the note only when you accept it, and what you typed is never changed.'
+
+/** A doc nobody has titled yet: blank, or the placeholder a new doc starts with. */
+export const isUntitled = (title: string | null | undefined): boolean => {
+  const t = (title ?? '').trim().toLowerCase()
+  return t === '' || t === 'untitled'
+}
+
+/** The headline as a doc title: one line, at most 80 characters. */
+export const headlineTitle = (headline: string): string => headline.replace(/\s+/g, ' ').trim().slice(0, 80).trim()
+
+/** The built-in templates, then the user's own, as one picker list. */
+export const BUILTIN_TEMPLATES: { id: string; label: string }[] = [
+  { id: 'general', label: 'General' },
+  { id: 'standup', label: 'Standup' },
+  { id: 'one_on_one', label: 'One on one' },
+  { id: 'user_interview', label: 'User interview' },
+  { id: 'sales_call', label: 'Sales call' },
+  { id: 'lecture', label: 'Lecture' }
+]
+export const mergeTemplates = (custom: { id: string; name: string }[] = []): { id: string; label: string }[] =>
+  [...BUILTIN_TEMPLATES, ...custom.map((c) => ({ id: c.id, label: c.name }))]
+
+/** The focus line a recipe fills in, or the current one when the id is unknown (a deleted recipe). */
+export const applyRecipe = (recipes: { id: string; prompt?: string }[], id: string, current = ''): string =>
+  recipes.find((r) => r.id === id)?.prompt ?? current
+/** The sentence copied for pasting into a call's chat, so the others hear about the recording from the person. */
+export const HEADS_UP_MESSAGE = "I'm taking notes with a local recorder; tell me if you'd rather I didn't."

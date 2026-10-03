@@ -13,6 +13,11 @@ export function exportFilename(title: string, ext = 'md'): string {
   return `${base || 'Untitled'}.${ext}`
 }
 
+/** Drop the `:::ai` / `:::` authorship fence lines (and the blank line after each) for formats that cannot show them. */
+export function stripAiFences(md: string): string {
+  return md.replace(/^[ \t]*:::(?:ai)?[ \t]*\n(?:[ \t]*\n)?/gm, '')
+}
+
 export function downloadMarkdown(title: string, content: string): void {
   const url = URL.createObjectURL(new Blob([content], { type: 'text/markdown;charset=utf-8' }))
   const a = document.createElement('a')

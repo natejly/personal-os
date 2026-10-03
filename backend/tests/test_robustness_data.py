@@ -178,3 +178,17 @@ def test_memory_update_refuses_blank() -> None:
         m = memories.create(None, "something real")
         with pytest.raises(ValueError):
             memories.update(m["id"], {"content": "   "})
+
+
+def test_board_wip_limit_warns_without_blocking() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        boards = Boards(Database(tmp))
+        b = boards.create("w")
+        todo, doing = b["columns"][1]["id"], b["columns"][2]["id"]
+        a = boards.add_card(b["id"], doing, "a")
+        assert a["over_limit"] is False  # no limit set
+        boards.update_column(doing, {"wip_limit": 1})
+        assert boards.add_card(b["id"], doing, "b")["over_limit"] is True
+        c = boards.add_card(b["id"], todo, "c")
+        assert c["over_limit"] is False
+        assert boards.move_card(c["id"], doing)["over_limit"] is True

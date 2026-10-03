@@ -38,6 +38,8 @@ const api: GrainApi = {
   shortcuts: {
     gather: () => ipcRenderer.invoke('shortcuts:gather'),
     setGather: (accelerator: string) => ipcRenderer.invoke('shortcuts:set-gather', accelerator),
+    capture: () => ipcRenderer.invoke('shortcuts:capture'),
+    setCapture: (accelerator: string) => ipcRenderer.invoke('shortcuts:set-capture', accelerator),
     onFailure: (cb) => listen<ShortcutState>('shortcuts:failed', cb)
   },
   data: {

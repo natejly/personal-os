@@ -996,8 +996,11 @@ class Google:
         return verify.attach({"id": t["id"], "status": t.get("status")},
                              self._verify_task(tasklist, task_id, {"status": "completed"}, ("status",)))
 
-    def tasks_all(self, tasklist: str = "@default") -> list[dict[str, Any]]:
+    def tasks_all(self, tasklist: str = "@default", updated_min: str | None = None) -> list[dict[str, Any]]:
         """Every task in a list, completed and hidden included, with `updated` timestamps (for sync).
+
+        With `updated_min` (RFC 3339) only tasks changed since then come back, deleted ones
+        included as `deleted=True` tombstones.
 
         Deliberately uncached: this is the two-way sync's view of remote state, and it
         resolves conflicts by comparing `updated` timestamps. A stale read here could
@@ -1006,8 +1009,9 @@ class Google:
         svc = self._svc("tasks", "v1").tasks()
         out: list[dict[str, Any]] = []
         token = None
+        extra = {"updatedMin": updated_min, "showDeleted": True} if updated_min else {}
         while True:
-            res = svc.list(tasklist=tasklist, showCompleted=True, showHidden=True, maxResults=100, pageToken=token).execute()
+            res = svc.list(tasklist=tasklist, showCompleted=True, showHidden=True, maxResults=100, pageToken=token, **extra).execute()
             out += [_task_row(t) for t in res.get("items", [])]
             token = res.get("nextPageToken")
             if not token:
@@ -1470,7 +1474,7 @@ def _event_out(e: dict[str, Any], calendar_id: str | None = None, full: bool = F
             "reminders": e.get("reminders"),
             "organizer": (e.get("organizer") or {}).get("email"),
             "attendee_details": [
-                {"email": a.get("email"), "optional": bool(a.get("optional")), "response": a.get("responseStatus"),
+                {"email": a.get("email"), "name": a.get("displayName") or "", "optional": bool(a.get("optional")), "response": a.get("responseStatus"),
                  "organizer": bool(a.get("organizer")), "self": bool(a.get("self"))}
                 for a in e.get("attendees", [])
             ][:60],

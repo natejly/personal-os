@@ -1,4 +1,5 @@
-import { isoDate, longDate } from './dates'
+import type { Doc } from '@shared/types'
+import { clock, isoDate, longDate } from './dates'
 
 /** Starting points for a new doc. Plain markdown, so a template is never more than text to edit. */
 export interface NoteTemplate {
@@ -24,3 +25,27 @@ export const TEMPLATES: NoteTemplate[] = [
     `# Lecture\n\n**Date:** ${longDate(d)}\n**Topic:**\n\n## Key ideas\n\n- \n\n## Details\n\n## Questions\n\n- \n\n## Summary\n\n`),
   make('todo', 'To-do list', () => 'To-do', () => `# To-do\n\n- [ ] \n- [ ] \n- [ ] \n`)
 ]
+
+/** Personal docs filed in a folder named Templates are user templates. Plain folder, no flag. */
+export const TEMPLATES_FOLDER = 'Templates'
+export const userTemplates = (docs: Doc[]): Doc[] =>
+  docs.filter((d) => !d.project_id && d.folder === TEMPLATES_FOLDER)
+
+/**
+ * Fill {{date}} {{time}} {{title}} in a template body. {{cursor}} is cut out and returned as a caret
+ * offset into the result; unknown {{x}} stay as written.
+ */
+export function expandTemplate(body: string, ctx: { now: Date; title?: string }): { text: string; caret?: number } {
+  const vars: Record<string, string> = { date: isoDate(ctx.now), time: clock(ctx.now), title: ctx.title ?? '' }
+  let caret: number | undefined
+  let text = ''
+  let last = 0
+  for (const m of body.matchAll(/\{\{(\w+)\}\}/g)) {
+    text += body.slice(last, m.index)
+    last = m.index! + m[0].length
+    if (m[1] === 'cursor') { if (caret === undefined) caret = text.length }
+    else text += vars[m[1]] ?? m[0]
+  }
+  text += body.slice(last)
+  return caret === undefined ? { text } : { text, caret }
+}

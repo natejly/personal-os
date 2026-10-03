@@ -2,10 +2,13 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffec
 import CaretMenu from '../features/notes/CaretMenu'
 import { measureCaret, type CaretRect } from '../features/notes/caretPosition'
 import type { MarkdownEditorHandle } from '../features/notes/handle'
-import { linkFromPaste } from '../features/notes/smartPaste'
+import { linkFromPaste, pickImage, withTitle } from '../features/notes/smartPaste'
+import { linkTitle, uploadDocAsset } from '../features/notes/api'
 import { builtinCommands, detectSlash, filterCommands, type SlashCommand } from '../features/notes/slash'
+import { wrapToggle } from '../features/notes/format'
 import { readingTime, wordCount } from '../features/notes/stats'
 import { diffRange, insertWithoutFocus, replaceInTextarea } from '../features/notes/textEdit'
+import { TAG_BODY } from '../features/notes/tags'
 import { detectWikiTrigger, filterTargets, wikiText } from '../features/notes/wikilinks'
 import '../styles/notes.css'
 
@@ -35,10 +38,18 @@ export interface EditorHandleProps {
   linkTargets?: { id: string; title: string }[]
   /** Opt in: pasting a URL over selected text makes `[selection](url)`. */
   smartPaste?: boolean
+  /** With smartPaste: pasting or dropping an image stores it under this doc and inserts `![](url)`. */
+  imageDocId?: string
   /** Called with the caret's 1-based line whenever it changes (drives the outline). */
   onCaretLine?: (line: number) => void
   /** Opt in: reading time and the size of the selection in the status bar. */
   richStatus?: boolean
+  /** In-flight dictation words, drawn in a pill at the caret. Display only: never part of `value`. */
+  previewText?: string
+  /** Keep the caret line at ~45% of the editor height as you type. */
+  typewriter?: boolean
+  /** Dim everything outside the current paragraph; hides the gutter and status bar. */
+  focusMode?: boolean
 }
 
 export type { MarkdownEditorHandle }
@@ -50,7 +61,24 @@ const esc = (s: string): string => s.replace(/&/g, '&amp;').replace(/</g, '&lt;'
  * keeps it honest against the textarea: every input line produces exactly one output line, so the two
  * layers can never drift. Fenced code and maths blocks are tracked as state across lines.
  */
-export function highlight(src: string, wikilinks = false): string {
+export function highlight(src: string, wikilinks = false, activeLine?: number): string {
+  const out = highlightLines(src, wikilinks)
+  if (activeLine === undefined) return out.join('\n')
+  const [a, b] = paragraphRange(src.split('\n'), activeLine - 1)
+  return out.map((h, i) => (i < a || i > b ? `<span class="dim">${h}</span>` : h)).join('\n')
+}
+
+/** Inclusive 0-based line span of the blank-line-delimited paragraph holding line `i`. */
+export function paragraphRange(lines: string[], i: number): [number, number] {
+  if (!(lines[i] ?? '').trim()) return [i, i]
+  let a = i
+  let b = i
+  while (a > 0 && lines[a - 1].trim()) a--
+  while (b < lines.length - 1 && lines[b + 1].trim()) b++
+  return [a, b]
+}
+
+function highlightLines(src: string, wikilinks: boolean): string[] {
   const out: string[] = []
   let fence: string | null = null
   let mathBlock = false
@@ -79,13 +107,13 @@ export function highlight(src: string, wikilinks = false): string {
     }
     out.push(inline(line, wikilinks))
   }
-  return out.join('\n')
+  return out
 }
 
 function inline(line: string, wiki: boolean): string {
   // Block-level prefixes first — they colour the whole line.
   const heading = /^(\s{0,3}#{1,6}\s)(.*)$/.exec(line)
-  if (heading) return `<span class="tk-head">${esc(heading[1])}${span(heading[2], wiki)}</span>`
+  if (heading) return `<span class="tk-head">${esc(heading[1])}${span(heading[2], wiki, false)}</span>`
   const quote = /^(\s*>+\s?)(.*)$/.exec(line)
   if (quote) return `<span class="tk-punct">${esc(quote[1])}</span><span class="tk-quote">${span(quote[2], wiki)}</span>`
   const rule = /^\s*([-*_])(\s*\1){2,}\s*$/.test(line)
@@ -98,47 +126,38 @@ function inline(line: string, wiki: boolean): string {
 }
 
 /** Inline spans: maths, code, links, emphasis. One pass, longest-delimiter-first. */
-function span(text: string, wiki = false): string {
+function span(text: string, wiki = false, tags = wiki): string {
   const pattern = new RegExp(
     [
-      '(\\$\\$[^$]+\\$\\$)', // block maths on one line
-      '(\\$(?:\\\\.|[^$\\\\\\n])+\\$)', // inline maths
-      '(`[^`\\n]+`)', // code
+      '(?<m1>\\$\\$[^$]+\\$\\$)', // block maths on one line
+      '(?<m2>\\$(?:\\\\.|[^$\\\\\\n])+\\$)', // inline maths
+      '(?<code>`[^`\\n]+`)', // code
       // Only when the host opted in, and before the plain link so `[[a]](b)` is not misread.
-      ...(wiki ? ['(\\[\\[[^\\[\\]\\n|]+(?:\\|[^\\[\\]\\n]+)?\\]\\])'] : []), // wikilink
-      '(!?\\[[^\\]\\n]*\\]\\([^)\\n]*\\))', // link / image
-      '(\\*\\*[^*\\n]+\\*\\*|__[^_\\n]+__)', // strong
-      '(\\*[^*\\n]+\\*|_[^_\\n]+_)', // emphasis
-      '(~~[^~\\n]+~~)' // strike
+      ...(wiki ? ['(?<wiki>\\[\\[[^\\[\\]\\n|]+(?:\\|[^\\[\\]\\n]+)?\\]\\])'] : []), // wikilink
+      '(?<link>!?\\[[^\\]\\n]*\\]\\([^)\\n]*\\))', // link / image
+      '(?<strong>\\*\\*[^*\\n]+\\*\\*|__[^_\\n]+__)', // strong
+      '(?<em>\\*[^*\\n]+\\*|_[^_\\n]+_)', // emphasis
+      '(?<strike>~~[^~\\n]+~~)', // strike
+      ...(tags ? [`(?<tag>(?<=^|\\s)#${TAG_BODY})`] : []) // #tag (docs only)
     ].join('|'),
-    'g'
+    'gu'
   )
   let out = ''
   let last = 0
   for (let m = pattern.exec(text); m; m = pattern.exec(text)) {
     out += esc(text.slice(last, m.index))
-    // With the wikilink group present every later group shifts up by one.
-    const g = wiki ? m.slice(1) : [m[1], m[2], m[3], undefined, ...m.slice(4)]
-    const cls = g[0] || g[1] ? 'tk-math' : g[2] ? 'tk-code' : g[3] ? 'tk-wikilink' : g[4] ? 'tk-link' : g[5] ? 'tk-strong' : g[6] ? 'tk-em' : 'tk-strike'
+    // Named groups, so adding one never shifts the others.
+    const g = m.groups ?? {}
+    const cls = g.m1 || g.m2 ? 'tk-math' : g.code ? 'tk-code' : g.wiki ? 'tk-wikilink' : g.link ? 'tk-link' : g.strong ? 'tk-strong' : g.em ? 'tk-em' : g.tag ? 'tk-tag' : 'tk-strike'
     out += `<span class="${cls}">${esc(m[0])}</span>`
     last = m.index + m[0].length
   }
   return out + esc(text.slice(last))
 }
 
-/** Wrap or unwrap the selection with a markdown delimiter, keeping the selection on the text. */
 function wrapSelection(el: HTMLTextAreaElement, left: string, right = left): { value: string; start: number; end: number } {
-  const { value, selectionStart: s, selectionEnd: e } = el
-  const sel = value.slice(s, e)
-  const already = value.slice(s - left.length, s) === left && value.slice(e, e + right.length) === right
-  if (already) {
-    return { value: value.slice(0, s - left.length) + sel + value.slice(e + right.length), start: s - left.length, end: e - left.length }
-  }
-  if (sel.startsWith(left) && sel.endsWith(right) && sel.length >= left.length + right.length) {
-    const inner = sel.slice(left.length, sel.length - right.length)
-    return { value: value.slice(0, s) + inner + value.slice(e), start: s, end: s + inner.length }
-  }
-  return { value: value.slice(0, s) + left + sel + right + value.slice(e), start: s + left.length, end: e + left.length }
+  const { text, start, end } = wrapToggle(el.value, el.selectionStart, el.selectionEnd, left, right)
+  return { value: text, start, end }
 }
 
 const LIST_ITEM = /^(\s*)([-*+]|(\d+)[.)])(\s+)(\[[ xX]\]\s+)?(.*)$/
@@ -166,7 +185,7 @@ function shiftLines(value: string, s: number, e: number, out: boolean): { value:
 
 const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(function MarkdownEditor({
   value, onChange, onSave, placeholder, readOnly = false, wrap = true, onScrollFraction,
-  slash = false, extraCommands, linkTargets, smartPaste = false, onCaretLine, richStatus = false
+  slash = false, extraCommands, linkTargets, smartPaste = false, imageDocId, onCaretLine, richStatus = false, previewText = '', typewriter = false, focusMode = false
 }, ref): JSX.Element {
   const ta = useRef<HTMLTextAreaElement>(null)
   const mirror = useRef<HTMLPreElement>(null)
@@ -176,7 +195,13 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
   const [sel, setSel] = useState({ start: 0, end: 0 })
   const lineCount = useMemo(() => value.split('\n').length, [value])
   const wikiOn = !!linkTargets
-  const html = useMemo(() => highlight(value, wikiOn) + '\n', [value, wikiOn])
+  // Keyed on the paragraph span, not the caret line, so moving within a paragraph does not re-highlight.
+  const para = useMemo(() => (focusMode ? paragraphRange(value.split('\n'), caret.line - 1).join(':') : ''), [focusMode, value, caret.line])
+  const html = useMemo(() => {
+    if (!focusMode) return highlight(value, wikiOn) + '\n'
+    return highlight(value, wikiOn, Number(para.split(':')[0]) + 1) + '\n'
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value, wikiOn, focusMode, para])
 
   const syncScroll = useCallback((): void => {
     const el = ta.current
@@ -194,6 +219,8 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
 
   useLayoutEffect(syncScroll, [value, syncScroll])
 
+  // A mouse click moves the caret where the reader pointed; typewriter scrolling waits for typing or keys.
+  const clicked = useRef(false)
   const trackCaret = useCallback((): void => {
     const el = ta.current
     if (!el) return
@@ -204,6 +231,17 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
     const end = el.selectionEnd
     setSel((s) => (s.start === start && s.end === end ? s : { start, end }))
   }, [])
+
+  // After the mirror repaints: put the caret line at ~45% of the height. The mirror follows via syncScroll.
+  useLayoutEffect(() => {
+    const el = ta.current
+    if (!typewriter || !el || !mirror.current || document.activeElement !== el || clicked.current) return
+    const r = measureCaret(mirror.current, el.selectionStart)
+    if (!r) return
+    const top = r.top - mirror.current.getBoundingClientRect().top + el.scrollTop
+    el.scrollTop = Math.max(0, top - el.clientHeight * 0.45)
+    syncScroll()
+  }, [typewriter, value, caret.line, caret.col, syncScroll])
 
   const lastLine = useRef(0)
   useEffect(() => {
@@ -267,6 +305,14 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
   // After the mirror has repainted this value, so the marker position is for the text the user sees.
   useLayoutEffect(placeMenu, [placeMenu, value, wrap])
 
+  // The in-flight dictation pill: hangs below the caret, drawn here and never written into `value`.
+  const [pill, setPill] = useState<{ top: number; left: number } | null>(null)
+  useLayoutEffect(() => {
+    const sr = surface.current?.getBoundingClientRect()
+    const r = previewText && mirror.current && sr ? measureCaret(mirror.current, sel.end) : null
+    setPill(r && sr ? { top: r.top - sr.top + r.height + 4, left: Math.max(0, Math.min(r.left - sr.left, sr.width - 120)) } : null)
+  }, [previewText, sel.end, value, wrap])
+
   const pick = (i: number): void => {
     const el = ta.current
     if (!el || !trigger) return
@@ -304,10 +350,10 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
       trackCaret()
       return true
     },
-    replaceRange: (start, end, text) => {
+    replaceRange: (start, end, text, selStart, selEnd) => {
       const el = ta.current
       if (!el || el.readOnly) return
-      replaceInTextarea(el, start, end, text)
+      replaceInTextarea(el, start, end, text, selStart, selEnd)
       trackCaret()
     },
     getSelection: () => {
@@ -338,14 +384,54 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
   }), [trackCaret])
   useImperativeHandle(ref, () => handle, [handle])
 
+  const [notice, setNotice] = useState('')
+  useEffect(() => { if (notice) { const t = setTimeout(() => setNotice(''), 4000); return () => clearTimeout(t) } }, [notice])
+
+  /** Upload the first image in `files` and put `![](url)` at the caret. False when there was no image to take. */
+  const takeImage = (files: FileList | null): boolean => {
+    const pick = pickImage(files)
+    const el = ta.current
+    if (!pick || !el || !imageDocId) return false
+    if (!pick.ok) { setNotice(pick.reason); return true }
+    setNotice('Adding image...')
+    uploadDocAsset(imageDocId, files![pick.index]).then(({ url }) => {
+      const e = ta.current
+      if (!e) return
+      replaceInTextarea(e, e.selectionStart, e.selectionEnd, `![](${url})`)
+      trackCaret()
+      setNotice('')
+    }).catch((err) => setNotice(`Could not add the image: ${err instanceof Error ? err.message : err}`))
+    return true
+  }
+
   const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>): void => {
     if (!smartPaste || readOnly) return
+    if (takeImage(e.clipboardData.files)) { e.preventDefault(); return }
     const el = e.currentTarget
-    const link = linkFromPaste(el.value.slice(el.selectionStart, el.selectionEnd), e.clipboardData.getData('text/plain'))
+    const sel = el.value.slice(el.selectionStart, el.selectionEnd)
+    const url = e.clipboardData.getData('text/plain').trim()
+    const link = linkFromPaste(sel, url)
     if (!link) return
     e.preventDefault()
-    replaceInTextarea(el, el.selectionStart, el.selectionEnd, link)
+    const at = el.selectionStart
+    replaceInTextarea(el, at, el.selectionEnd, link)
     trackCaret()
+    // Bare URL: the link is already in the text; the title arrives later and never blocks the paste.
+    if (!sel.trim()) {
+      linkTitle(url).then(({ title }) => {
+        const cur = ta.current
+        const swap = cur && title ? withTitle(cur.value, at, url, title) : null
+        if (cur && swap) {
+          const caret = cur.selectionStart
+          replaceInTextarea(cur, swap.start, swap.end, swap.text, caret >= swap.end ? caret + swap.text.length - (swap.end - swap.start) : caret)
+        }
+      }).catch(() => undefined)
+    }
+  }
+
+  const onDrop = (e: React.DragEvent<HTMLTextAreaElement>): void => {
+    if (!smartPaste || readOnly || !e.dataTransfer.files.length) return
+    if (takeImage(e.dataTransfer.files)) e.preventDefault()
   }
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
@@ -428,7 +514,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
   }
 
   return (
-    <div className={`md-editor ${wrap ? '' : 'nowrap'}`}>
+    <div className={`md-editor ${wrap ? '' : 'nowrap'} ${focusMode ? 'focus' : ''}`}>
       <div className="md-gutter" ref={gutter} aria-hidden>
         {Array.from({ length: lineCount }, (_, i) => (
           <div key={i} className={i + 1 === caret.line ? 'cur' : undefined}>{i + 1}</div>
@@ -444,15 +530,18 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
           readOnly={readOnly}
           spellCheck
           wrap={wrap ? 'soft' : 'off'}
-          onChange={(e) => { onChange(e.target.value); trackCaret() }}
-          onKeyDown={onKeyDown}
+          onChange={(e) => { clicked.current = false; onChange(e.target.value); trackCaret() }}
+          onMouseDown={() => { clicked.current = true }}
+          onKeyDown={(e) => { clicked.current = false; onKeyDown(e) }}
           onKeyUp={trackCaret}
           onClick={trackCaret}
           onSelect={trackCaret}
           onPaste={onPaste}
+          onDrop={onDrop}
           onBlur={() => setDismissed(menuKey)}
           onScroll={() => { syncScroll(); if (menuOpen) placeMenu() }}
         />
+        {pill && <div className="caret-pill" role="status" aria-live="off" style={pill}>{previewText}</div>}
         {menuOpen && anchor && trigger && (
           <CaretMenu
             items={menuItems}
@@ -475,6 +564,7 @@ const MarkdownEditor = forwardRef<MarkdownEditorHandle, EditorHandleProps>(funct
             {wordCount(value.slice(sel.start, sel.end))} words, {sel.end - sel.start} chars selected
           </span>
         )}
+        {notice && <span className="md-sel">{notice}</span>}
         <span className="md-hints">⌘B bold · ⇧⌘I italic · ⌘K link · ⇧⌘M maths · ⇧⌘E code · Tab indent</span>
       </div>
     </div>

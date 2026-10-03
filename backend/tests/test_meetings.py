@@ -410,6 +410,22 @@ def test_an_action_item_becomes_a_todo_exactly_once() -> None:
     assert repo.dismiss_action_item(second["id"])["status"] == "dismissed"
 
 
+def test_config_validates_custom_templates_recipes_and_language() -> None:
+    _, svc = _svc(_tmp())
+    cfg = svc.set_config({"customTemplates": [{"id": "x", "name": "Brief", "instructions": "Short."}],
+                          "recipes": [{"name": "Owners", "prompt": "owners only"}],
+                          "summaryLanguage": "French"})
+    assert cfg["customTemplates"][0]["id"].startswith("c_") and cfg["recipes"][0]["id"].startswith("r_")
+    assert svc.config()["summaryLanguage"] == "French"
+    for bad in ({"customTemplates": [{"name": "a", "instructions": "x" * 1501}]},
+                {"recipes": [{"name": "a", "prompt": "x" * 301}]}):
+        try:
+            svc.set_config(bad)
+        except ValueError:
+            continue
+        raise AssertionError("over-long text was accepted")
+
+
 # ---------------------------------------------------------------- what chat sees
 
 
@@ -613,7 +629,7 @@ class _FakeGoogle:
         self.tasks: dict[str, dict] = {}
         self.n = 0
 
-    def tasks_all(self, tasklist: str = "@default") -> list[dict]:
+    def tasks_all(self, tasklist: str = "@default", updated_min: str | None = None) -> list[dict]:
         return [dict(t) for t in self.tasks.values()]
 
     def tasks_insert(self, body: dict, tasklist: str = "@default") -> dict:
@@ -914,6 +930,33 @@ def test_a_degraded_pass_is_never_auto_applied() -> None:
     repo2, svc2 = _svc(_tmp(), reply=GOOD_REPLY)
     mid2 = repo2.create(title="Pricing call")["id"]
     assert asyncio.run(svc2.enhance(mid2))["status"] == "applied"
+
+
+def test_start_seeds_the_recorder_with_title_and_names_unless_switched_off() -> None:
+    repo, svc = _svc(_tmp())
+    seen: list[dict] = []
+
+    class _Pool:
+        sessions: dict = {}
+
+        def start(self, meeting_id, channels, **kw):
+            seen.append(kw)
+            return type("S", (), {"out_dir": Path("/nowhere"), "started_at": time.time()})()
+
+    svc.pool = _Pool()  # type: ignore[assignment]
+    svc.preflight = lambda **k: {"ok": True, "blockers": []}  # type: ignore[method-assign]
+    real = (meetings.native_audio.mic_available, meetings.native_audio.system_available)
+    meetings.native_audio.mic_available = lambda: True  # type: ignore[assignment]
+    meetings.native_audio.system_available = lambda: False  # type: ignore[assignment]
+    try:
+        for flag in (True, False):
+            svc.set_config({"vocabularyPrompt": flag})
+            mid = repo.create(title="Pricing review", attendees=[{"email": "dana.k@example.com", "name": "Dana"}])["id"]
+            svc.start(mid, sources=["mic"])
+            vocab = seen[-1]["vocab"]
+            assert ("Pricing review" in vocab and "Dana" in vocab) if flag else vocab == ""
+    finally:
+        meetings.native_audio.mic_available, meetings.native_audio.system_available = real  # type: ignore[assignment]
 
 
 if __name__ == "__main__":

@@ -158,7 +158,29 @@ def _when(meeting: dict[str, Any]) -> str:
     return datetime.fromtimestamp(float(ts)).strftime("%A %Y-%m-%d %H:%M")
 
 
+def resolve_template(template: str, custom: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """A built-in template, a user-authored one (prose instructions, no fixed sections), or general.
+
+    A custom id that was deleted since a recording was made lands on general rather than failing.
+    """
+    if template in TEMPLATES:
+        return TEMPLATES[template]
+    for c in custom or []:
+        if c.get("id") == template:
+            return {"label": c.get("name") or "Custom", "sections": [], "hint": c.get("instructions") or ""}
+    return TEMPLATES["general"]
+
+
+def _language_rule(language: str) -> str:
+    lang = (language or "").strip()
+    if not lang or lang.lower() == "auto":
+        return "\nWrite in the transcript's majority language.\n"
+    return f"\nWrite in {lang[:40]}, whatever language the transcript is in.\n"
+
+
 def _template_block(tpl: dict[str, Any]) -> str:
+    if not tpl.get("sections"):
+        return f"\nMeeting kind: {tpl.get('label') or 'Meeting'}\n{tpl.get('hint') or ''}\n"
     sections = "\n".join(f"- {s}" for s in (tpl.get("sections") or []))
     return (f"\nMeeting kind: {tpl.get('label') or 'Meeting'}\n{tpl.get('hint') or ''}\n\n"
             f"Sections to reach for, in this order, but only where the user's notes or the transcript\n"
@@ -179,6 +201,48 @@ def cap_transcript(text: str, limit: int) -> str:
     head = int(limit * 0.4)
     tail = limit - head
     return f"{text[:head]}\n\n[... {len(text) - head - tail} characters omitted ...]\n\n{text[len(text) - tail:]}"
+
+
+def numbered_transcript(segments: list[dict[str, Any]]) -> tuple[str, dict[str, str]]:
+    """`[s3 04:31 you] text` per spoken segment, plus {"s3": real segment id}.
+
+    The short tags are what the model cites; they are mapped back to real ids so a made-up one is
+    detectable. Channel-level speakers only, as everywhere else.
+    """
+    lines: list[str] = []
+    ids: dict[str, str] = {}
+    for sg in segments:
+        text = (sg.get("text") or "").strip()
+        if sg.get("state") != "done" or not text:
+            continue
+        tag = f"s{len(ids) + 1}"
+        ids[tag] = sg["id"]
+        t = int(sg.get("t_start") or 0)
+        who = "you" if sg.get("channel") == "mic" else "them"
+        lines.append(f"[{tag} {t // 60:02d}:{t % 60:02d} {who}] {text}")
+    return "\n".join(lines), ids
+
+
+_EVIDENCE_TAG = re.compile(r"[ \t]*\{\s*(s\d+(?:\s*,\s*s\d+)*)\s*\}[ \t]*$")
+
+
+def split_evidence(markdown: str, sources: dict[str, str]) -> tuple[str, dict[str, list[str]]]:
+    """Strip trailing `{s3,s7}` tags off each line; return (clean body, {line index: real segment ids}).
+
+    Tags naming a segment that does not exist are dropped, and a line left with none gets no entry.
+    The body is tag-free whether or not any tag was valid.
+    """
+    out: list[str] = []
+    evidence: dict[str, list[str]] = {}
+    for i, line in enumerate(markdown.split("\n")):
+        m = _EVIDENCE_TAG.search(line)
+        if m:
+            line = line[:m.start()]
+            real = [sources[t] for t in dict.fromkeys(x.strip() for x in m.group(1).split(",")) if t in sources]
+            if real:
+                evidence[str(i)] = real
+        out.append(line)
+    return "\n".join(out), evidence
 
 
 def pick_model(cfg: dict[str, Any], settings: dict[str, Any]) -> str:
@@ -206,10 +270,12 @@ async def enhance(
     notes: str,
     transcript: str,
     template: str = "general",
+    custom: list[dict[str, Any]] | None = None,
+    language: str = "auto",
     max_transcript_chars: int = 48000,
 ) -> dict[str, Any]:
     """One LLM call per meeting. Never raises: a failure comes back as degraded markdown."""
-    tpl = TEMPLATES.get(template) or TEMPLATES["general"]
+    tpl = resolve_template(template, custom)
     body = cap_transcript(transcript or "", max_transcript_chars)
     notes = notes or ""
     out: dict[str, Any] = {"markdown": "", "decisions": [], "action_items": [], "topics": [],
@@ -222,6 +288,7 @@ async def enhance(
         "attendees": _attendees(meeting),
         "notes": notes,
         "transcript": body,
+        "language": language or "auto",
     }
     if names:
         payload["speakers"] = names
@@ -229,7 +296,7 @@ async def enhance(
     try:
         raw = await complete_fn(
             settings, model,
-            [{"role": "system", "content": _system_prompt(names) + _template_block(tpl)},
+            [{"role": "system", "content": _system_prompt(names) + _template_block(tpl) + _language_rule(language)},
              {"role": "user", "content": user}],
             kind="meeting",
         )
@@ -298,6 +365,9 @@ Rules:
 - Speaker attribution is channel-level only: `[you]` is the user and `[them]` is everyone else who
   was heard. Never attribute a quote to a named person, however obvious the voice seems.
 - Write markdown, no preamble and no closing commentary.
+- Each transcript line starts with a tag like `[s12 04:31 you]`. End every bullet or paragraph line
+  of the summary with the tags of the lines that support it, as `{s12,s14}`. Cite only tags that
+  appear in the transcript; leave a line untagged when nothing supports it.
 """
 
 
@@ -309,13 +379,38 @@ def _doc_prompt(names: dict[str, str]) -> str:
     return DOC_SUMMARY_PROMPT[:start] + ATTRIBUTION_RULE + DOC_SUMMARY_PROMPT[end:]
 
 
-def section_heading(meeting: dict[str, Any]) -> str:
-    """`## Recording summary (2026-10-02 14:30, 12 min)`: when it was made and how long it ran."""
+VOCAB_CHARS = 150  # short on purpose: a long list invites whisper to say the names on silence
+
+
+def vocab_prompt(meeting: dict[str, Any]) -> str:
+    """Title and attendee names as a comma list, to seed the speech model's spelling of them."""
+    parts: list[str] = [str(meeting.get("title") or "").strip()]
+    for a in _parse_list(meeting.get("attendees")):
+        if isinstance(a, dict):
+            name = str(a.get("name") or "").strip() or str(a.get("email") or "").split("@")[0]
+        else:
+            name = str(a).split("@")[0].strip()
+        parts.append(name)
+    out = ""
+    for p in dict.fromkeys(x for x in parts if x):  # de-duplicated, order kept
+        if len(out) + len(p) + 2 > VOCAB_CHARS:
+            break
+        out += (", " if out else "") + p
+    return out
+
+
+def section_heading(meeting: dict[str, Any], words: int = 0) -> str:
+    """`## Recording summary (2026-10-02 14:30, 12 min, 840 words heard)`: when, how long, how much."""
     ts = meeting.get("started_at") or meeting.get("created_at")
     when = datetime.fromtimestamp(float(ts)).strftime("%Y-%m-%d %H:%M") if ts else ""
     minutes = max(1, round(float(meeting.get("duration_ms") or 0) / 60000.0))
-    inside = ", ".join(p for p in (when, f"{minutes} min") if p)
+    inside = ", ".join(p for p in (when, f"{minutes} min", f"{words} words heard" if words else "") if p)
     return f"## Recording summary ({inside})"
+
+
+def wrap_ai(section: str) -> str:
+    """Fence an inserted section so the preview can mark it as model-written; plain text elsewhere, advisory."""
+    return f":::ai\n\n{section}\n\n:::"
 
 
 _CURRENCY = re.compile(r"(?<!\\)\$(?=\d)")
@@ -351,6 +446,59 @@ def escape_currency(markdown: str) -> str:
     return "\n".join(out)
 
 
+def _note_timeline(marks: Any, doc_content: str) -> list[dict[str, str]]:
+    """When each still-present typed line was written, as [{at:'04:31', line}], oldest first."""
+    if not isinstance(marks, list):
+        return []
+    lines = [ln.strip() for ln in (doc_content or "").splitlines()]
+    out = []
+    for m in sorted((m for m in marks if isinstance(m, dict)), key=lambda m: float(m.get("t") or 0)):
+        snip = str(m.get("line") or "")
+        full = next((ln for ln in lines if snip and ln.startswith(snip)), None)
+        if full is None:
+            continue
+        secs = int(float(m.get("t") or 0))
+        out.append({"at": f"{secs // 60:02d}:{secs % 60:02d}", "line": full[:200]})
+    return out
+
+
+REDUCE_PROMPT = """You merge partial summaries of consecutive parts of ONE recording into a single section.
+
+Each part was summarised on its own, so they overlap and may repeat each other. Merge them in order,
+drop repeats, and where a later part changes or reverses an earlier statement keep the later one.
+Add nothing that is not in the parts: no new decision, name, number, date or commitment.
+Use `###` subheadings if the section needs structure, never `#` or `##`.
+
+Return ONLY a JSON object:
+{"summary_markdown": "the merged body as markdown", "headline": "under 60 chars",
+ "action_items": [{"text": "", "owner": "", "due": "YYYY-MM-DD or empty"}]}
+"""
+
+
+def chunk_transcript(text: str, size: int, overlap: float = 0.15) -> list[str]:
+    """Split on line boundaries into chunks of about `size` chars, each repeating the last ~15% of the one before."""
+    lines = (text or "").splitlines(keepends=True)
+    chunks: list[str] = []
+    cur: list[str] = []
+    n = 0
+    for ln in lines:
+        if cur and n + len(ln) > size:
+            chunks.append("".join(cur))
+            keep: list[str] = []
+            k = 0
+            for prev in reversed(cur):
+                if k + len(prev) > size * overlap:
+                    break
+                keep.insert(0, prev)
+                k += len(prev)
+            cur, n = keep, k
+        cur.append(ln)
+        n += len(ln)
+    if cur:
+        chunks.append("".join(cur))
+    return chunks
+
+
 async def summarize_recording(
     *,
     complete_fn: Callable[..., Any],
@@ -362,7 +510,10 @@ async def summarize_recording(
     transcript: str,
     template: str = "general",
     focus: str = "",
+    custom: list[dict[str, Any]] | None = None,
+    language: str = "auto",
     max_transcript_chars: int = 48000,
+    sources: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """One LLM call per summary. Never raises: a failure comes back with `error` set and NO markdown.
 
@@ -370,7 +521,12 @@ async def summarize_recording(
     notes, which is acceptable when the result is a reviewable meeting revision and wrong for a
     doc: a doc is not tainted, so verbatim third-party speech must not be put into it by a failure.
     """
-    tpl = TEMPLATES.get(template) or TEMPLATES["general"]
+    if max_transcript_chars > 0 and len(transcript or "") > max_transcript_chars:
+        return await _summarize_long(
+            complete_fn=complete_fn, settings=settings, model=model, meeting=meeting,
+            doc_title=doc_title, doc_content=doc_content, transcript=transcript, template=template,
+            focus=focus, custom=custom, language=language, max_transcript_chars=max_transcript_chars)
+    tpl = resolve_template(template, custom)
     names = _speaker_names(meeting)
     payload: dict[str, Any] = {
         "note_title": str(doc_title or ""),
@@ -380,15 +536,20 @@ async def summarize_recording(
         "duration": _fmt_duration(meeting.get("duration_ms")),
         "transcript": cap_transcript(transcript or "", max_transcript_chars),
     }
+    payload["language"] = language or "auto"
     if focus.strip():
         payload["focus"] = focus.strip()[:300]
     if names:
         payload["speakers"] = names
-    out: dict[str, Any] = {"markdown": "", "headline": "", "action_items": [], "error": "", "model": model}
+    timeline = _note_timeline(meeting.get("note_marks"), doc_content)
+    if timeline:
+        payload["note_timeline"] = timeline
+    out: dict[str, Any] = {"markdown": "", "headline": "", "action_items": [], "error": "", "model": model,
+                           "evidence": {}}
     try:
         raw = await complete_fn(
             settings, model,
-            [{"role": "system", "content": _doc_prompt(names) + _template_block(tpl)},
+            [{"role": "system", "content": _doc_prompt(names) + _template_block(tpl) + _language_rule(language)},
              {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
             kind="doc_recording",
         )
@@ -396,9 +557,48 @@ async def summarize_recording(
         markdown = str(data.get("summary_markdown") or "").strip()
         if not markdown:
             raise ValueError("no summary_markdown in the reply")
-        out["markdown"] = markdown
+        # Tags are always stripped; they only become evidence when the caller sent numbered lines.
+        out["markdown"], out["evidence"] = split_evidence(markdown, sources or {})
         out["headline"] = str(data.get("headline") or "").strip()[:120]
         out["action_items"] = _action_items(data.get("action_items"))
     except Exception as e:  # noqa: BLE001 - a dead model must not paste anything into the doc
         out["error"] = f"{type(e).__name__}: {e}"
+    return out
+
+
+async def _summarize_long(*, complete_fn, settings, model, meeting, doc_title, doc_content,
+                          transcript, template, focus, max_transcript_chars,
+                          custom=None, language="auto") -> dict[str, Any]:
+    """Map-reduce for a transcript past the cap: each overlapping chunk is summarised, then merged once.
+
+    Nothing is dropped from the middle, unlike `cap_transcript`. A failed chunk fails the whole
+    summary: a merge over a missing part would read as complete.
+    """
+    import asyncio
+    chunks = chunk_transcript(transcript, max(1000, max_transcript_chars // 2))
+    parts = await asyncio.gather(*(summarize_recording(
+        complete_fn=complete_fn, settings=settings, model=model, meeting=meeting, doc_title=doc_title,
+        doc_content=doc_content, transcript=c, template=template, focus=focus,
+        custom=custom, language=language, max_transcript_chars=0) for c in chunks))
+    out: dict[str, Any] = {"markdown": "", "headline": "", "action_items": [], "error": "", "model": model}
+    bad = next((p for p in parts if p["error"] or not p["markdown"]), None)
+    if bad is not None:
+        out["error"] = bad["error"] or "a part of the recording came back empty"
+        return out
+    payload = {"parts": [{"summary_markdown": p["markdown"], "headline": p["headline"],
+                          "action_items": p["action_items"]} for p in parts]}
+    try:
+        raw = await complete_fn(
+            settings, model,
+            [{"role": "system", "content": REDUCE_PROMPT},
+             {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
+            kind="doc_recording")
+        data = _parse_json(raw)
+        out["markdown"] = str(data.get("summary_markdown") or "").strip()
+        if not out["markdown"]:
+            raise ValueError("no summary_markdown in the reply")
+        out["headline"] = str(data.get("headline") or "").strip()[:120]
+        out["action_items"] = _action_items(data.get("action_items"))
+    except Exception as e:  # noqa: BLE001 - same rule as the single call: nothing partial reaches the doc
+        out["markdown"], out["error"] = "", f"{type(e).__name__}: {e}"
     return out

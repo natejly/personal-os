@@ -96,6 +96,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "permissionRules": {"allow": [], "ask": [], "deny": []},
     # "deny": a job run that would have to ask is refused with a recorded reason instead of waiting for someone.
     "unattendedApprovals": "ask",
+    "toolReadRetries": 2,  # extra attempts for a read-only tool after a transient network error (0 = never retry)
+    "parallelReads": 4,  # read-only tool calls of one round that run together (1 = one at a time)
     "stuckDetection": True,  # nudge, then stop, on ping-pong / same-result / error-cycle loops (stuck.py)
     # Bank long messages the user writes as style samples and keep their voice profile current (style.py).
     # Independent of autoLearn: wanting the app to learn facts is not the same as wanting it to copy your voice.
@@ -104,6 +106,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "accent": "sage",
     "mode": "classic",
     "gatherShortcut": "Control+Alt+Command+Space",
+    # Global quick capture: a small window that appends a timestamped bullet to today's daily note.
+    "quickCaptureShortcut": "CommandOrControl+Shift+Space",
+    # Hold this in the Docs editor to dictate while held; a quick tap latches it on.
+    "dictationChord": "Control+Alt+D",
     # Shell modularity: Today-screen cards ({key: bool}, missing = shown) and sidebar views the user removed.
     # Library / Cowork / Meetings / Activity ship off; Settings → Modules turns them back on.
     "homeWidgets": {"cowork": False, "meetings": False},
@@ -133,6 +139,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "mcpDeferAbove": 12,
     # Approved skills are inlined in the system prompt up to this many characters; past it, an index + skill_view.
     "skillsInlineBudget": 6000,
+    # Per-section token budgets for the retrieval blocks of a turn (0 = unlimited). Past a budget the
+    # lowest-ranked trailing items are dropped and the block says how many. `pinned` covers pinned documents.
+    "contextBudget": {"memories": 1500, "graph": 800, "chunks": 2000, "activity": 800, "meetings": 800, "pinned": 3000},
     # Per-reply budgets; 0 = unlimited. A run that hits one still writes a final answer, marked partial.
     "maxRunTokens": 200_000,
     "maxRunSeconds": 300,
@@ -143,6 +152,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "llmIdleSeconds": 300,  # a reasoning model can think a long while before its first token
     # Retention (retention.py): days of history kept in tables that only ever grow. User content is never pruned.
     "retainUsageDays": 365,
+    # Informational spend alerts across runs, $ per day / calendar month; 0 = off. Never stops a run.
+    "usageAlerts": {"dailyCost": 0, "monthlyCost": 0},
     "retainTraceDays": 60,
     "retainToolResultDays": 30,
     "retainApprovalDays": 90,
@@ -173,6 +184,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # 30 min) and how many consecutive failed fires switch a job off.
     "jobRetryBackoffS": 120,
     "jobFailureStreakLimit": 3,
+    "jobExpireDays": 0,  # recurring jobs pause (reason "expired") after one last fire this many days after arming; 0 = never
     # OS notification when an unattended job fails, is paused, or leaves proposals (only while the app is hidden).
     "notifyJobs": True,
     # A system notification when a desk needs you or finishes, while the window is not focused.
@@ -253,8 +265,16 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "retrievalMinSimilarity": 0.25,
     # Memories: fuse BM25 + embeddings + recency + graph (memory_index.py). Needs embeddingModel; false = keyword-only.
     "hybridRetrieval": True,
+    # Embed meeting summaries/transcripts for by-meaning meeting search (meeting_index.py). Off: it sends meeting text to the embedding provider.
+    "meetingEmbeddings": False,
     "retrievalPerDocCap": 3,
     "retrievalCandidates": 20,
+    # Off by default, one model call per chunk: embed-backfill writes a short blurb situating each chunk in
+    # its document, which is then indexed and embedded with the chunk. Rerank: reorder the fused candidates
+    # with a rerank model (/v1/rerank, else one completion) before trimming; blank model = off.
+    "contextualChunks": False,
+    "retrievalRerank": False,
+    "retrievalRerankModel": "",
     # Also retrieve from the user's own Docs (not just uploaded files) when a chat has useDocuments on.
     "useDocsInContext": True,
     # Reply tracker (mailwatch.py); MailWatchModule.config() merges stored values over these defaults.

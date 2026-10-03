@@ -365,6 +365,30 @@ def test_probes_never_raise_and_never_shell_out_to_a_device() -> None:
         assert len(stt.capabilities(cfg, data_dir)) == 3
 
 
+def test_local_passes_the_prompt_flag_only_when_given() -> None:
+    import subprocess
+    data_dir = Path(tempfile.mkdtemp())
+    model = data_dir / "m.bin"
+    model.write_bytes(b"x")
+    argvs: list[list[str]] = []
+
+    def fake_run(argv, **kw):
+        argvs.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout="hi", stderr="")
+
+    real = subprocess.run
+    subprocess.run = fake_run  # type: ignore[assignment]
+    try:
+        with whisper_is("/bin/whisper-cli"):
+            cfg = {"sttBackend": "local", "whisperModelPath": str(model)}
+            stt.transcribe(_wav(), settings=SETTINGS, cfg=cfg, data_dir=data_dir, prompt="Pricing review, Dana")
+            stt.transcribe(_wav(), settings=SETTINGS, cfg=cfg, data_dir=data_dir)
+    finally:
+        subprocess.run = real  # type: ignore[assignment]
+    assert argvs[0][argvs[0].index("--prompt") + 1] == "Pricing review, Dana"
+    assert "--prompt" not in argvs[1]
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

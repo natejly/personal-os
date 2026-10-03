@@ -123,7 +123,7 @@ def transcribe(path: Path, *, settings: dict[str, Any], cfg: dict[str, Any], dat
         elif backend == "proxy":
             text, detail, error = _proxy(path, settings, str(cfg.get("sttModel") or "whisper-1"), prompt)
         elif backend == "local":
-            text, detail, error = _local(path, data_dir, cfg)
+            text, detail, error = _local(path, data_dir, cfg, prompt)
         else:
             error = f"transcription is off. {OFF_FIX}"
     except Exception as e:  # noqa: BLE001 - this runs on a worker thread; a failure is data
@@ -353,7 +353,7 @@ def _proxy(path: Path, settings: dict[str, Any], model: str,
     return str(payload.get("text") or ""), {"segments": payload.get("segments") or []}, ""
 
 
-def _local(path: Path, data_dir: Path, cfg: dict[str, Any]) -> tuple[str, dict[str, Any], str]:
+def _local(path: Path, data_dir: Path, cfg: dict[str, Any], prompt: str = "") -> tuple[str, dict[str, Any], str]:
     """whisper.cpp on this machine. -oj writes <wav>.json (segment offsets), -otxt the fallback text."""
     cli = whisper_cli_path()
     if not cli:
@@ -364,6 +364,8 @@ def _local(path: Path, data_dir: Path, cfg: dict[str, Any]) -> tuple[str, dict[s
     txt = path.with_suffix(path.suffix + ".txt")
     js = path.with_suffix(path.suffix + ".json")
     argv = [cli, "-m", model, "-f", str(path), "-of", str(path), "-oj", "-otxt", "-nt", "-l", "auto"]
+    if prompt:
+        argv += ["--prompt", prompt[-MAX_PROMPT_CHARS:]]
     vad = vad_model_path(data_dir, cfg)
     if vad:
         argv += ["--vad", "-vm", vad]

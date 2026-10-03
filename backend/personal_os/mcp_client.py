@@ -273,6 +273,7 @@ class _Supervisor:
         self._ready = asyncio.Event()
         self._stop = asyncio.Event()
         self._check_now = anyio.Event()
+        self._relist = anyio.Event()
         self._err: _Stderr | None = None
         self._task: asyncio.Task[None] | None = None
 
@@ -342,10 +343,11 @@ class _Supervisor:
     async def _cycle(self) -> None:
         err = self._err = _Stderr(self.stderr)
         self._check_now = anyio.Event()
+        self._relist = anyio.Event()
         try:
             async with _open(self.config, err, self.oauth) as (read, write):
                 async with ClientSession(read, write, read_timeout_seconds=self.call_timeout,
-                                         client_info=CLIENT_INFO) as session:
+                                         client_info=CLIENT_INFO, message_handler=self._on_message) as session:
                     with anyio.fail_after(self.connect_timeout):
                         init = await session.initialize()
                         listing = await session.list_tools()
@@ -357,11 +359,29 @@ class _Supervisor:
                     self._ready.set()
                     async with anyio.create_task_group() as tg:
                         tg.start_soon(self._heartbeat, session, err)
+                        tg.start_soon(self._relister, session)
                         await self._serve(session, tg)
                         tg.cancel_scope.cancel()
         finally:
             self._err = None
             err.close()
+
+    async def _on_message(self, message: Any) -> None:
+        # Only flag it: re-listing here would block the session's receive loop.
+        if getattr(message, "method", "") == "notifications/tools/list_changed":
+            self._relist.set()
+
+    async def _relister(self, session: ClientSession) -> None:
+        """Re-sync tools after a list_changed notice, so drift review sees mid-session edits."""
+        while True:
+            await self._relist.wait()
+            self._relist = anyio.Event()
+            try:
+                with anyio.fail_after(self.call_timeout):
+                    listing = await session.list_tools()
+                self._register(listing.tools)
+            except Exception:  # noqa: BLE001 - a failed refresh keeps the old tools; the next notice retries
+                log.warning("MCP tool re-list failed for %s", self.config.name, exc_info=True)
 
     async def _serve(self, session: ClientSession, tg: TaskGroup) -> None:
         while not self._stop.is_set():

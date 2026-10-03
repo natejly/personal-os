@@ -487,13 +487,19 @@ class PageBridge:
             return {"ok": False, "code": "bridge", "error": f"the desktop app's browser answered HTTP {r.status_code} with no usable body"}
         return body
 
-    async def open_page(self, url: str, *, max_chars: int = 20000, timeout: float = 20.0) -> dict[str, Any]:
+    async def open_page(self, url: str, *, max_chars: int = 20000, timeout: float = 20.0,
+                        wait_for: str = "", links: bool = False) -> dict[str, Any]:
         if not self.connected:
             raise RuntimeError("the desktop app's page loader is not connected")
         n = max(1000, min(int(max_chars), PAGE_MAX_CHARS))
         t = max(3.0, min(float(timeout), 45.0))
         async with httpx.AsyncClient(timeout=t + 10, trust_env=False) as c:
-            r = await c.post(f"{self.url}/page", json={"url": url, "maxChars": n, "timeoutMs": int(t * 1000)},
+            payload: dict[str, Any] = {"url": url, "maxChars": n, "timeoutMs": int(t * 1000)}
+            if wait_for.strip():
+                payload["waitForSelector"] = wait_for.strip()[:200]
+            if links:
+                payload["links"] = True
+            r = await c.post(f"{self.url}/page", json=payload,
                              headers={"Authorization": f"Bearer {self.token}"})
         if r.status_code == 401:
             raise RuntimeError("the page loader rejected this backend's credentials")
@@ -501,8 +507,12 @@ class PageBridge:
         if r.status_code != 200 or body.get("error"):
             raise RuntimeError(str(body.get("error") or f"HTTP {r.status_code}")[:300])
         text = str(body.get("text") or "")
-        return {"url": body.get("url") or url, "title": body.get("title") or "", "text": text[:n],
-                "truncated": bool(body.get("truncated")) or len(text) > n, "timed_out": bool(body.get("timedOut"))}
+        out: dict[str, Any] = {"url": body.get("url") or url, "title": body.get("title") or "", "text": text[:n],
+                               "truncated": bool(body.get("truncated")) or len(text) > n, "timed_out": bool(body.get("timedOut"))}
+        if links:  # page content, not allow-listed: a tainted run cannot follow these
+            out["links"] = [{"text": str(l.get("text") or "")[:120], "href": str(l["href"])} for l in (body.get("links") or [])
+                            if isinstance(l, dict) and l.get("href")][:40]
+        return out
 
 
 page_bridge = PageBridge()

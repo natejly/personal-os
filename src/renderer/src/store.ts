@@ -26,11 +26,18 @@ const withoutLegacyMode = (s: Settings): Settings => {
 /** `'canvas'` is the spaces desktop: one destination among the views, not a separate shell. */
 export type View = 'home' | 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'boards' | 'dashboards' | 'docs' | 'meetings' | 'activity' | 'library' | 'cowork' | 'project' | 'canvas'
 /** Which shelf of the Library is showing. Kept in the store so leaving and coming back lands you where you were. */
-export type LibraryTab = 'skills' | 'workflows' | 'connectors' | 'made' | 'artifacts'
+export type LibraryTab = 'skills' | 'workflows' | 'connectors' | 'made' | 'artifacts' | 'agents' | 'commands'
 /** Every view but the canvas: what ⌘⇧C and the sidebar's LayoutGrid button return to. */
 export type ClassicView = Exclude<View, 'canvas'>
 /** How the Docs editor splits its panes. */
 export type DocMode = 'edit' | 'split' | 'preview'
+const DOC_MODE_KEY = 'grain.docMode'
+export const readDocMode = (): DocMode => {
+  try {
+    const v = localStorage.getItem(DOC_MODE_KEY)
+    return v === 'edit' || v === 'split' || v === 'preview' ? v : 'split'
+  } catch { return 'split' }
+}
 /** How the Memory panel lays out its halves: the memory list, the knowledge graph, the voice profile. */
 export type MemoryMode = 'split' | 'list' | 'graph' | 'style'
 export type ContextTab = 'last' | 'preview' | 'trace'
@@ -455,6 +462,7 @@ export interface State {
   deleteTodo: (id: string) => Promise<void>
   uploadDocuments: (files: FileList | File[], projectId: string | null) => Promise<string[]>
   deleteDocument: (id: string) => Promise<void>
+  pinDocument: (id: string, pinned: boolean) => Promise<void>
 
   refreshDocs: (q?: string) => Promise<void>
   refreshDocsPending: () => Promise<void>
@@ -470,6 +478,7 @@ export interface State {
   /** Flush the buffer now (⌘S, switching docs, leaving the view). */
   flushDoc: () => Promise<void>
   setDocStar: (id: string, starred: boolean) => Promise<void>
+  setDocPin: (id: string, pinned: boolean) => Promise<void>
   /** File a doc: which project ('' is personal) and which folder in it, in one patch. */
   moveDoc: (id: string, scope: string, folder: string) => Promise<void>
   refreshDocFolders: () => Promise<void>
@@ -530,6 +539,7 @@ export interface State {
 }
 
 let toastSeq = 0
+let flushChain: Promise<void> = Promise.resolve()
 /** Autosave debounce for the doc editor: long enough to be one history entry, short enough to trust. */
 const SAVE_DEBOUNCE_MS = 1200
 let saveTimer: ReturnType<typeof setTimeout> | null = null
@@ -806,6 +816,8 @@ export const useStore = create<State>((set, get) => {
         // ⌘N taken while reading a project chat silently filed the next unrelated thought under it.
         if (s.view !== 'canvas') s.newChat(null)
       } else if (action === 'settings') s.setSettingsOpen(true)
+      else if (action === 'new-note') void s.createDoc({})
+      else if (action === 'daily-note') { s.setView('docs'); void s.openDailyNote() }
       else if (action === 'toggle-sidebar') s.toggleSidebar()
       else if (action === 'toggle-context') s.toggleContext()
       else if (action === 'page-agent') s.togglePageAgent()
@@ -950,8 +962,13 @@ export const useStore = create<State>((set, get) => {
           } else if (ev.event === 'job_finished') {
             void get().refreshAgentInbox()
             window.dispatchEvent(new Event('grain-job-finished'))
+          } else if (ev.event === 'usage_alert') {
+            get().toast(`Spend ${ev.data.period === 'daily' ? 'today' : 'this month'} is $${ev.data.spent.toFixed(2)}, over your $${ev.data.limit.toFixed(2)} alert`, 'error')
           } else if (ev.event === 'desk_status') {
             onDeskChanged(ev.data)
+          } else if (ev.event === 'preview') {
+            const data = ev.data
+            void import('./features/docrec/preview').then((m) => m.usePreview.getState().apply(data))
           } else if (ev.event === 'recording') {
             // Lazy: the docrec store imports this one, so a static import here would be a cycle.
             const data = ev.data
@@ -1166,7 +1183,7 @@ export const useStore = create<State>((set, get) => {
     ready: false,
     backendError: null,
     backendState: 'ready',
-    settings: { baseUrl: '', apiKey: '', apiKeySet: false, defaultModel: '', systemPrompt: '', extractionModel: '', autoLearn: true, learnStyle: true, theme: 'dark', accent: 'sage', gatherShortcut: '', tools: {}, maxToolRounds: 8, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {} },
+    settings: { baseUrl: '', apiKey: '', apiKeySet: false, defaultModel: '', systemPrompt: '', extractionModel: '', autoLearn: true, learnStyle: true, theme: 'dark', accent: 'sage', gatherShortcut: '', quickCaptureShortcut: '', dictationChord: '', tools: {}, maxToolRounds: 8, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {} },
     models: [],
     modelsError: null,
     tools: [],
@@ -1200,7 +1217,7 @@ export const useStore = create<State>((set, get) => {
     docFolders: [],
     expandedFolders: readExpanded(),
     docsPending: 0,
-    docMode: 'split',
+    docMode: readDocMode(),
     docDraft: null,
     docTitleDraft: null,
     docSaving: false,
@@ -1843,7 +1860,9 @@ export const useStore = create<State>((set, get) => {
       if (saveTimer) clearTimeout(saveTimer)
       saveTimer = setTimeout(() => { void get().flushDoc() }, SAVE_DEBOUNCE_MS)
     },
-    flushDoc: async () => {
+    // Flushes run one after another: an overlapping one would read the base the first is about to bump.
+    flushDoc: () => {
+      const run = async (): Promise<void> => {
       if (saveTimer) {
         clearTimeout(saveTimer)
         saveTimer = null
@@ -1857,7 +1876,7 @@ export const useStore = create<State>((set, get) => {
       if (content === undefined && title === undefined) return set({ docDraft: null, docTitleDraft: null })
       set({ docSaving: true })
       try {
-        const saved = await api.docs.save(doc.id, { content, title })
+        const saved = await api.docs.save(doc.id, { content, title, base_updated_at: doc.updated_at })
         // Keep whatever was typed while the request was in flight; adopt only the server's metadata.
         set((st) => {
           if (st.activeDoc?.id !== doc.id) return { docSaving: false }
@@ -1874,11 +1893,25 @@ export const useStore = create<State>((set, get) => {
         void get().refreshDocRevisions(doc.id)
       } catch (e) {
         set({ docSaving: false })
-        get().toast(`Could not save: ${(e as Error).message}`, 'error')
+        // Stale base: another window saved first. The draft stays on screen; reloading is the user's call.
+        if ((e as { status?: number }).status === 409) {
+          get().toast('This doc changed elsewhere. Your edits are kept here and not saved.', 'error',
+            { label: 'Reload', run: () => { set({ docDraft: null, docTitleDraft: null }); void get().openDoc(doc.id) } })
+        } else get().toast(`Could not save: ${(e as Error).message}`, 'error')
       }
+      }
+      const p = flushChain.then(run)
+      flushChain = p
+      return p
     },
     setDocStar: async (id, starred) => {
-      await api.docs.patch(id, { starred })
+      const d = await api.docs.patch(id, { starred })
+      // The PATCH bumped updated_at; keep the autosave base current or the next save 409s.
+      set((st) => ({ activeDoc: st.activeDoc?.id === id ? { ...st.activeDoc, starred: d.starred, updated_at: d.updated_at } : st.activeDoc }))
+      await get().refreshDocs()
+    },
+    setDocPin: async (id, pinned) => {
+      await api.docs.patch(id, { pinned })
       await get().refreshDocs()
     },
     moveDoc: async (id, scope, folder) => {
@@ -1886,7 +1919,7 @@ export const useStore = create<State>((set, get) => {
         const d = await api.docs.move(id, scope, folder.trim())
         set((st) => ({
           activeDoc: st.activeDoc?.id === id
-            ? { ...st.activeDoc, folder: d.folder, project_id: d.project_id }
+            ? { ...st.activeDoc, folder: d.folder, project_id: d.project_id, updated_at: d.updated_at }
             : st.activeDoc
         }))
         await Promise.all([get().refreshDocs(), get().refreshDocFolders()])
@@ -1957,7 +1990,10 @@ export const useStore = create<State>((set, get) => {
       await Promise.all([get().refreshDocs(), get().refreshDocsPending()])
       get().offerUndo(title ? `“${title}”` : 'doc', [{ type: 'doc', id }])
     },
-    setDocMode: (docMode) => set({ docMode }),
+    setDocMode: (docMode) => {
+      try { localStorage.setItem(DOC_MODE_KEY, docMode) } catch { /* private window */ }
+      set({ docMode })
+    },
     refreshDocRevisions: async (id) => {
       const docId = id ?? get().activeDoc?.id
       if (!docId) return
@@ -2961,6 +2997,11 @@ export const useStore = create<State>((set, get) => {
       }
       await Promise.all([get().refreshDocuments(), get().refreshProjects()])
       return saved
+    },
+    pinDocument: async (id, pinned) => {
+      const flip = (v: boolean): void => set((s) => ({ documents: s.documents.map((d) => (d.id === id ? { ...d, pinned: v ? 1 : 0 } : d)) }))
+      flip(pinned)
+      try { await api.documents.pin(id, pinned) } catch (e) { flip(!pinned); get().toast((e as Error).message, 'error') }
     },
     deleteDocument: async (id) => {
       const name = get().documents.find((d) => d.id === id)?.name

@@ -16,11 +16,12 @@ import hashlib
 import logging
 import re
 import threading
+from pathlib import Path
 from typing import Any
 
 from .chunker import chunk_blocks
 from .db import Database, new_id, now, row_to_dict
-from .extract_text import markdown_blocks
+from .extract_text import markdown_blocks, safe_upload_name
 from .repos import ALL, _scope_clause, fts_query
 
 SCHEMA = """
@@ -68,6 +69,14 @@ CREATE TABLE IF NOT EXISTS doc_folders (
   PRIMARY KEY (scope, path)
 );
 
+-- `#tag` tokens in a doc's body, rebuilt on every reindex (create, save, accept, restore, move).
+CREATE TABLE IF NOT EXISTS doc_tags (
+  doc_id TEXT NOT NULL REFERENCES docs(id) ON DELETE CASCADE,
+  tag TEXT NOT NULL,
+  PRIMARY KEY (doc_id, tag)
+);
+CREATE INDEX IF NOT EXISTS idx_doc_tags_tag ON doc_tags(tag);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS docs_fts USING fts5(
   title, content, doc_id UNINDEXED, tokenize='porter unicode61'
 );
@@ -99,6 +108,44 @@ CREATE VIRTUAL TABLE IF NOT EXISTS doc_chunks_fts USING fts5(
   text, chunk_id UNINDEXED, doc_id UNINDEXED, tokenize='porter unicode61'
 );
 """
+
+DATA_URI = re.compile(r"\(data:[^)\s]*\)")
+ASSET_MIMES = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif", "image/webp": ".webp"}
+ASSET_MAX_BYTES = 8 * 1024 * 1024
+
+
+class AssetError(ValueError):
+    def __init__(self, status: int, msg: str):
+        super().__init__(msg)
+        self.status = status
+
+
+def save_asset(root: Path, doc_id: str, filename: str, data: bytes, mime: str) -> str:
+    """Store a pasted image under <root>/<doc_id>/<sha8>-<name> and return its relative URL."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", doc_id or ""):
+        raise AssetError(400, "bad doc id")
+    ext = ASSET_MIMES.get((mime or "").split(";")[0].strip().lower())
+    if not ext:
+        raise AssetError(415, "only png, jpeg, gif and webp images can be added")
+    if len(data) > ASSET_MAX_BYTES:
+        raise AssetError(413, "images are limited to 8 MB")
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "-", Path(safe_upload_name(filename)).stem).strip("-.")[:60] or "image"
+    name = f"{hashlib.sha256(data).hexdigest()[:8]}-{stem}{ext}"
+    d = root / doc_id
+    d.mkdir(parents=True, exist_ok=True)
+    (d / name).write_bytes(data)
+    return f"/docs/assets/{doc_id}/{name}"
+
+
+def asset_path(root: Path, doc_id: str, name: str) -> Path:
+    """The stored file, or AssetError for a name that is not a plain segment (traversal) or does not exist."""
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", doc_id) or not re.fullmatch(r"[A-Za-z0-9._-]{1,200}", name) or ".." in name:
+        raise AssetError(400, "bad asset name")
+    p = root / doc_id / name
+    if not p.is_file() or p.is_symlink():
+        raise AssetError(404, "no such asset")
+    return p
+
 
 def doc_hit(r: Any) -> dict[str, Any]:
     """A doc chunk row as a retrieval hit. `document_id`/`name` mirror the file hits so ranking and the
@@ -143,6 +190,39 @@ def _link_line(content: str, want: str) -> str | None:
 # column rather than a foreign key, so a doc is never orphaned by a folder row going missing.
 MAX_FOLDER_DEPTH = 8
 MAX_SEGMENT = 60
+
+
+_TAG_RE = re.compile(r"(?:^|\s)#([^\W\d_][\w/-]*)")
+
+
+def extract_tags(src: str) -> list[str]:
+    """Distinct lowercase `#tag`s, first-seen order. Mirrors features/notes/tags.ts: fences, `$$`
+    blocks, headings and inline code are skipped."""
+    seen: dict[str, None] = {}
+    fence: str | None = None
+    math = False
+    for line in (src or "").split("\n"):
+        if fence is not None:
+            if line.lstrip().startswith(fence):
+                fence = None
+            continue
+        m = re.match(r"\s*(```+|~~~+)", line)
+        if m:
+            fence = m.group(1)[:3]
+            continue
+        if math:
+            math = "$$" not in line
+            continue
+        if re.fullmatch(r"\s*\$\$\s*", line):
+            math = True
+            continue
+        if re.match(r"\s{0,3}#{1,6}(\s|$)", line):
+            continue
+        for t in _TAG_RE.findall(re.sub(r"`[^`\n]*`", " ", line)):
+            t = t.rstrip("-/").lower()
+            if t:
+                seen[t] = None
+    return list(seen)
 
 
 def folder_path(raw: str | None) -> str:
@@ -200,6 +280,8 @@ class Docs:
         self.on_delete: Any = None
         # Called with (doc id, new project id or None) after a doc changed project (app.py keeps its recordings in step).
         self.on_move: Any = None
+        # (query, limit) -> recording hits [{doc_id, snippet}]; wired by app.py so spoken words are searchable.
+        self.recording_search: Any = None
         # Serialises `daily`, so a double click cannot find nothing twice and create two notes.
         self._daily_lock = threading.Lock()
         with db.tx() as c:
@@ -207,14 +289,24 @@ class Docs:
             self._migrate_folder_scope(c)
             # Soft delete (trash.py). docs is created here, not in db.py, so its columns are added here too.
             have = {r["name"] for r in c.execute("PRAGMA table_info(docs)").fetchall()}
-            for col, ddl in {"deleted_at": "REAL", "deleted_with": "TEXT"}.items():
+            for col, ddl in {"deleted_at": "REAL", "deleted_with": "TEXT", "pinned": "INTEGER NOT NULL DEFAULT 0"}.items():
                 if col not in have:
                     c.execute(f"ALTER TABLE docs ADD COLUMN {col} {ddl}")
+            # doc_chunks.blurb: optional model-written context line (retrieval.contextualize_pending).
+            if "blurb" not in {r["name"] for r in c.execute("PRAGMA table_info(doc_chunks)").fetchall()}:
+                c.execute("ALTER TABLE doc_chunks ADD COLUMN blurb TEXT NOT NULL DEFAULT ''")
             # doc_revisions.append arrived after the first release (recording summaries), so an existing DB needs it added.
             have_rev = {r["name"] for r in c.execute("PRAGMA table_info(doc_revisions)").fetchall()}
             if "append" not in have_rev:
                 c.execute("ALTER TABLE doc_revisions ADD COLUMN append TEXT")
         self.backfill_chunks()
+        self._backfill_tags()
+
+    def _backfill_tags(self) -> None:
+        """Tag docs that predate doc_tags. Cheap: only docs with no tag row are scanned."""
+        with self.db.tx() as c:
+            for r in c.execute("SELECT id, content FROM docs WHERE id NOT IN (SELECT doc_id FROM doc_tags)").fetchall():
+                c.executemany("INSERT INTO doc_tags(doc_id, tag) VALUES(?,?)", [(r["id"], t) for t in extract_tags(r["content"])])
 
     @staticmethod
     def _migrate_folder_scope(c: Any) -> None:
@@ -238,6 +330,8 @@ class Docs:
     def _reindex(self, c: Any, doc_id: str, title: str, content: str) -> None:
         c.execute("DELETE FROM docs_fts WHERE doc_id=?", (doc_id,))
         c.execute("INSERT INTO docs_fts(title, content, doc_id) VALUES(?,?,?)", (title, content, doc_id))
+        c.execute("DELETE FROM doc_tags WHERE doc_id=?", (doc_id,))
+        c.executemany("INSERT INTO doc_tags(doc_id, tag) VALUES(?,?)", [(doc_id, t) for t in extract_tags(content)])
         self._index_chunks(c, doc_id, title, content)
 
     def _index_chunks(self, c: Any, doc_id: str, title: str, content: str) -> bool:
@@ -250,7 +344,7 @@ class Docs:
         c.execute("DELETE FROM doc_chunks_fts WHERE doc_id=?", (doc_id,))
         c.execute("DELETE FROM doc_chunks WHERE doc_id=?", (doc_id,))  # cascades the vectors
         try:
-            chunks = chunk_blocks(markdown_blocks(content), title=title)
+            chunks = chunk_blocks(markdown_blocks(DATA_URI.sub("(image)", content)), title=title)  # base64 pastes stay out of the index
         except Exception:  # noqa: BLE001 - a chunker bug must not fail a save
             chunks = []
         for i, ch in enumerate(chunks):
@@ -298,21 +392,28 @@ class Docs:
             else:
                 where.append("d.project_id = ?")
                 args.append(project_id)
-        if q.strip():
+        tag = extract_tags(f" {q.strip()}")[:1] if q.strip().startswith("#") else []
+        if tag:  # `#tag` searches by tag; a nested `#a/b` also matches under `#a`
+            where.append("EXISTS (SELECT 1 FROM doc_tags t WHERE t.doc_id=d.id AND (t.tag=? OR t.tag LIKE ? ESCAPE '\\'))")
+            args += [tag[0], tag[0].replace("_", "\\_").replace("%", "\\%") + "/%"]
+        elif q.strip():
             where.append("(d.title LIKE ? OR d.content LIKE ?)")
             args += [f"%{q}%", f"%{q}%"]
         sql = (
-            "SELECT d.id, d.project_id, d.title, d.folder, d.starred, d.created_at, d.updated_at, d.content, "
+            "SELECT d.id, d.project_id, d.title, d.folder, d.starred, d.pinned, d.created_at, d.updated_at, d.content, "
             "  length(d.content) AS size, "
+            "  (SELECT group_concat(tag, char(10)) FROM doc_tags t WHERE t.doc_id=d.id) AS tag_list, "
             "  (SELECT COUNT(*) FROM doc_revisions r WHERE r.doc_id=d.id AND r.status='pending') AS pending "
             "FROM docs d" + (" WHERE " + " AND ".join(where) if where else "") +
-            " ORDER BY d.starred DESC, d.updated_at DESC"
+            " ORDER BY d.pinned DESC, d.starred DESC, d.updated_at DESC"
         )
         with self.db.tx() as c:
             rows = c.execute(sql, args).fetchall()
         out = []
         for r in rows:
             d = dict(r)
+            tl = d.pop("tag_list")
+            d["tags"] = sorted(tl.split("\n")) if tl else []
             body = d.pop("content") or ""  # the list shows a preview; bodies stay out of the payload
             out.append({**d, "preview": body[:240], "words": word_count(body)})
         return out
@@ -367,6 +468,17 @@ class Docs:
                 out.append({"doc_id": d["id"], "title": d["title"], "snippet": (r["snippet"] or "").strip()})
                 if len(out) >= limit:
                     break
+            seen = {o["doc_id"] for o in out}
+            for h in (self.recording_search(q, max(1, limit) * 3) if self.recording_search else []):
+                if len(out) >= limit:
+                    break
+                if h["doc_id"] in seen:
+                    continue
+                d = c.execute("SELECT id, title, project_id FROM docs WHERE id=? AND deleted_at IS NULL", (h["doc_id"],)).fetchone()
+                if not d or (project_id != "__all__" and d["project_id"] != project_id):
+                    continue
+                seen.add(d["id"])
+                out.append({"doc_id": d["id"], "title": d["title"], "snippet": h["snippet"], "via": "recording"})
         return out
 
     # ---- writes ----
@@ -416,13 +528,14 @@ class Docs:
 
     def update_meta(self, id: str, patch: dict[str, Any]) -> dict[str, Any] | None:
         """Title/folder/star/project moves that are not content edits, so they skip the history."""
-        fields = {k: v for k, v in patch.items() if k in {"title", "folder", "starred", "project_id"}}
+        fields = {k: v for k, v in patch.items() if k in {"title", "folder", "starred", "pinned", "project_id"}}
         if not fields:
             return self.get(id)
         if "title" in fields:
             fields["title"] = (str(fields["title"]).strip()[:200]) or "Untitled"
-        if "starred" in fields:
-            fields["starred"] = 1 if fields["starred"] else 0
+        for flag in ("starred", "pinned"):
+            if flag in fields:
+                fields[flag] = 1 if fields[flag] else 0
         if "folder" in fields:
             fields["folder"] = folder_path(fields["folder"])
         fields["updated_at"] = now()
@@ -526,6 +639,22 @@ class Docs:
             self.create_folder(DAILY_FOLDER, "")
             body = f"# {day.strftime('%A, %B')} {day.day}, {day.year}\n\n"
             return self.create(title, body, None, DAILY_FOLDER), True
+
+    def append_daily(self, text: str, date_str: str | None = None, at: datetime.datetime | None = None) -> dict[str, Any]:
+        """Append "- HH:MM text" to a day's note as a user revision, creating the note if needed.
+
+        Held under `_daily_lock` for the whole read-modify-write so two quick captures both land, in order."""
+        text = " ".join(text.split())
+        if not text:
+            raise ValueError("Nothing to capture")
+        doc, _ = self.daily(date_str)
+        stamp = (at or datetime.datetime.now()).strftime("%H:%M")
+        with self._daily_lock:
+            cur = self.get(doc["id"]) or doc
+            body = cur["content"]
+            if body and not body.endswith("\n"):
+                body += "\n"
+            return self.save(doc["id"], body + f"- {stamp} {text}\n", summary="Quick capture", coalesce=False) or cur
 
     def backlinks(self, id: str) -> list[dict[str, Any]] | None:
         """Live docs that link to this one with `[[Title]]` or `[[Title|alias]]`, newest first.

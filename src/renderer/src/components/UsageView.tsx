@@ -166,6 +166,18 @@ export default function UsageView(): JSX.Element {
             <ChartBlock source={charts.weekday} streaming={false} />
             {report.by_project.length > 1 && <ChartBlock source={charts.byProject} streaming={false} />}
           </div>
+          {report.by_tag?.length > 0 && (
+            <>
+              <h4 className="usage-sub">By source</h4>
+              <table className="usage-table">
+                <tbody>
+                  {report.by_tag.slice(0, 12).map((t) => (
+                    <tr key={t.tag}><td>{t.tag}</td><td>{t.calls} calls</td><td>{t.tokens.toLocaleString()} tokens</td><td>${t.cost.toFixed(4)}</td></tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )}
         </>
       )}
 

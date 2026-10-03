@@ -136,6 +136,23 @@ check(toolbox.specs["doc_read"].danger == "safe", "doc_read is read-only")
 read = call("doc_read", {"doc": "Paper"})
 check("   1| " in read["text"], "doc_read numbers the lines")
 
+# backlinks surface as titles on the first page only, and only when something links in
+check("linked_from" not in read, "no linked_from when nothing links in")
+src = call("doc_create", {"title": "Linker", "content": "See [[Paper]]\nline2\n"})
+read = call("doc_read", {"doc": "Paper"})
+check(read.get("linked_from") == ["Linker"], f"doc_read lists the linking title: {read.get('linked_from')}")
+_orig_bl = docs.backlinks
+_bl_calls = []
+docs.backlinks = lambda *a, **k: (_bl_calls.append(a), _orig_bl(*a, **k))[1]
+try:
+    later = call("doc_read", {"doc": "Paper", "from_line": 2})
+    check("text" in later and "linked_from" not in later and not _bl_calls, f"no backlinks scan past the first page: {_bl_calls}")
+    call("doc_read", {"doc": "Paper"})
+    check(len(_bl_calls) == 1, "first page does scan backlinks (stub counts)")
+finally:
+    docs.backlinks = _orig_bl
+j("DELETE", f"/docs/{src['doc_id']}")
+
 made = call("doc_create", {"title": "Derivation", "content": "$$\\int_0^1 x^2\\,dx = \\tfrac13$$\n"})
 check(made["doc_id"] and made["created"] == "Derivation", "doc_create makes a doc")
 
@@ -172,6 +189,28 @@ job = call("doc_edit", {"doc": made2["doc_id"], "edits": [{"find": "beta", "repl
 check(job["status"] == "pending_review", "a scheduled run does not accept-all")
 check(j("GET", f"/docs/{made2['doc_id']}")["content"] == "beta\n", "a scheduled run leaves the body alone")
 
+# ---- GET /docs/search: snippets, scope, odd characters ----
+sd = j("POST", "/docs", {"title": "Searchable", "content": "the quokkafrobnitz lives here"})
+hit = j("GET", "/docs/search?q=quokkafrobnitz")
+check([h["doc_id"] for h in hit] == [sd["id"]] and "quokkafrobnitz" in hit[0]["snippet"], "search route returns a snippet")
+check(j("GET", "/docs/search?q=quokkafrobnitz&project_id=nope") == [], "search route honours the scope")
+j("GET", "/docs/search?q=%22%28%2A")
+j("DELETE", f"/docs/{sd['id']}")
+# ---- pinning: persists, survives a title edit, sorts first, keeps through trash ----
+pa = j("POST", "/docs", {"title": "Pin A"})["id"]
+pb = j("POST", "/docs", {"title": "Pin B"})["id"]
+j("PATCH", f"/docs/{pa}", {"pinned": True})
+check(next(r for r in j("GET", "/docs") if r["id"] == pa)["pinned"] == 1, "pinned shows in the list")
+j("PATCH", f"/docs/{pa}", {"title": "Pin A2"})
+check(j("GET", "/docs")[0]["id"] == pa and j("GET", "/docs")[0]["pinned"] == 1, "a title edit keeps the pin, and pinned sorts first")
+j("PATCH", f"/docs/{pa}", {"pinned": False})
+check(next(r for r in j("GET", "/docs") if r["id"] == pa)["pinned"] == 0, "unpin clears it")
+j("PATCH", f"/docs/{pb}", {"pinned": True})
+j("DELETE", f"/docs/{pb}")
+check(all(r["id"] != pb for r in j("GET", "/docs")), "a deleted pinned doc is not listed")
+j("POST", f"/trash/doc/{pb}/restore")
+check(next(r for r in j("GET", "/docs") if r["id"] == pb)["pinned"] == 1, "restoring a trashed doc keeps its pin")
+
 # ---- deletion takes the history with it ----
 j("DELETE", f"/docs/{did}")
 j("GET", f"/docs/{did}", expect=404)
@@ -181,5 +220,20 @@ check(True, "a deleted doc is gone")
 for path in ("/health", "/notes", "/todos", "/boards"):
     j("GET", path)
 check(True, "the routes that were already there still work")
+
+# Autosave conflict: a stale base_updated_at is refused and leaves the body alone.
+_d = j("POST", "/docs", {"title": "Conflict", "content": "v1"})
+_a = j("PUT", f"/docs/{_d['id']}", {"content": "v2", "base_updated_at": _d["updated_at"]})
+_b = j("PUT", f"/docs/{_d['id']}", {"content": "v3", "base_updated_at": _a["updated_at"]})
+check(_b["content"] == "v3", "successive saves refresh the base and do not self-conflict")
+j("PUT", f"/docs/{_d['id']}", {"content": "stale", "base_updated_at": _d["updated_at"]}, expect=409)
+check(j("GET", f"/docs/{_d['id']}")["content"] == "v3", "409 leaves content unchanged")
+check(j("PUT", f"/docs/{_d['id']}", {"content": "v4"})["content"] == "v4", "no base keeps unconditional write")
+# A metadata PATCH bumps updated_at: the PATCH response is the base for the next save.
+_p = j("PATCH", f"/docs/{_d['id']}", {"starred": True})
+check(_p["updated_at"] > _d["updated_at"], "PATCH bumps updated_at")
+check(j("PUT", f"/docs/{_d['id']}", {"content": "v5", "base_updated_at": _p["updated_at"]})["content"] == "v5",
+      "a save based on the PATCH response is accepted")
+j("PUT", f"/docs/{_d['id']}", {"content": "x", "base_updated_at": _d["updated_at"]}, expect=409)
 
 print(f"test_docs: {passed} checks passed")

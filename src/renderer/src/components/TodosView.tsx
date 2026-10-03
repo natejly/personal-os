@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { Plus, CheckSquare, PanelLeftOpen, RefreshCw } from 'lucide-react'
-import type { TodoRepeat } from '@shared/types'
+import { Plus, CheckSquare, PanelLeftOpen, RefreshCw, Bookmark, X } from 'lucide-react'
+import type { TodoFilter, TodoRepeat } from '@shared/types'
+import { api } from '../lib/api'
 import { useStore, type Scope } from '../store'
 import TodoItem from './TodoItem'
 import ScopeSelect from './ScopeSelect'
@@ -23,6 +24,15 @@ export default function TodosView(): JSX.Element {
   const [priority, setPriority] = useState(2)
   const [repeat, setRepeat] = useState<'' | TodoRepeat['unit']>('')
   const [sort, setSort] = useState<'due' | 'urgency'>('due')
+  const [tag, setTag] = useState('')
+  const [saved, setSaved] = useState<TodoFilter[]>([])
+  useEffect(() => { void api.todos.filters().then(setSaved).catch(() => undefined) }, [])
+  const saveFilter = async (): Promise<void> => {
+    const name = tag.trim()
+    if (!name) return
+    try { const f = await api.todos.saveFilter({ name: `#${name}`, tag: name }); setSaved((s) => [...s, f]) } catch (e) { toast((e as Error).message, 'error') }
+  }
+  const dropFilter = async (id: string): Promise<void> => { await api.todos.deleteFilter(id).catch(() => undefined); setSaved((s) => s.filter((f) => f.id !== id)) }
 
   useEffect(() => { void refreshTodos(scope, showDone, sort) }, [scope, showDone, sort, refreshTodos])
   useEffect(() => { void refreshTasksSync() }, [refreshTasksSync])
@@ -42,13 +52,14 @@ export default function TodosView(): JSX.Element {
     await refreshTodos(scope, showDone, sort)
   }
 
-  const open = todos.filter((t) => !t.done)
+  const shown = tag ? todos.filter((t) => t.tags?.includes(tag)) : todos
+  const open = shown.filter((t) => !t.done)
   const todayKey = localDay()
   const overdue = open.filter((t) => t.due && new Date(t.due + 'T00:00:00') < new Date(new Date().toDateString()))
   const today = open.filter((t) => t.due === todayKey)
   const upcoming = open.filter((t) => t.due && !overdue.includes(t) && !today.includes(t))
   const someday = open.filter((t) => !t.due)
-  const done = todos.filter((t) => t.done)
+  const done = shown.filter((t) => t.done)
 
   const fmt = (t: typeof todos[number]): string =>
     `${t.title} (\`${t.id}\`${t.due ? `, due ${t.due}` : ''}${t.priority !== 2 ? `, priority ${t.priority}` : ''})`
@@ -66,13 +77,23 @@ export default function TodosView(): JSX.Element {
     hints: ['What should I do first?', 'Reschedule the overdue ones to tomorrow', 'Break the biggest one into steps']
   }), [todos, todayKey])
 
+  // A subtask indents under its parent when the parent is in the same section.
+  const depthOf = (t: typeof todos[number], items: typeof todos): number => {
+    let d = 0, cur = t
+    while (cur.parent_id && d < 5) {
+      const p = items.find((x) => x.id === cur.parent_id)
+      if (!p) break
+      d++; cur = p
+    }
+    return d
+  }
   // A plain function, not a component: a component declared here would be a new type every render and
   // remount every TodoItem, losing an open title edit or date picker whenever the list refreshes.
   const section = (label: string, items: typeof todos): JSX.Element | null =>
     items.length ? (
       <section className="todo-section">
         <h4 className="section-h">{label} <span>{items.length}</span></h4>
-        {items.map((t) => <TodoItem key={t.id} todo={t} />)}
+        {items.map((t) => <TodoItem key={t.id} todo={t} depth={depthOf(t, items)} onTag={setTag} />)}
       </section>
     ) : null
 
@@ -113,6 +134,20 @@ export default function TodosView(): JSX.Element {
           <select aria-label="Repeat" value={repeat} onChange={(e) => setRepeat(e.target.value as '' | TodoRepeat['unit'])}><option value="">No repeat</option><option value="day">Daily</option><option value="week">Weekly</option><option value="month">Monthly</option><option value="year">Yearly</option></select>
           <button className="primary-btn" onClick={() => void add()} disabled={!title.trim()}><Plus size={14} /> Add</button>
         </div>
+        {(tag || saved.length > 0) && (
+          <div className="todo-filters">
+            {saved.map((f) => (
+              <span key={f.id} className={`todo-tag ${tag === f.tag ? 'on' : ''}`}>
+                <button onClick={() => setTag(tag === f.tag ? '' : f.tag ?? '')}>{f.name}</button>
+                <button aria-label={`Remove filter ${f.name}`} onClick={() => void dropFilter(f.id)}><X size={10} /></button>
+              </span>
+            ))}
+            {tag && <>
+              <span className="todo-tag on">#{tag} <button aria-label="Clear tag filter" onClick={() => setTag('')}><X size={10} /></button></span>
+              {!saved.some((f) => f.tag === tag) && <button className="icon-btn ghost" title="Save this filter" aria-label="Save this filter" onClick={() => void saveFilter()}><Bookmark size={13} /></button>}
+            </>}
+          </div>
+        )}
         {todos.length === 0 && <p className="empty-hint big">No todos yet.</p>}
         {sort === 'urgency' ? section('By urgency', open) : <>
           {section('Overdue', overdue)}

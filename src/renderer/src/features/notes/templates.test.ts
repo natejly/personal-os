@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { TEMPLATES } from './templates'
+import type { Doc } from '@shared/types'
+import { TEMPLATES, expandTemplate, userTemplates } from './templates'
 import { clock, isoDate, longDate } from './dates'
 
 // Local-time constructor on purpose: the date a person sees must not move with the timezone.
@@ -32,4 +33,14 @@ test('dated templates carry the date and blank is empty', () => {
   assert.ok(byId.daily.body(d).startsWith('# Friday, October 2, 2026'))
   assert.ok(byId.meeting.title(d).includes('2026-10-02'))
   assert.ok(byId.todo.body(d).includes('- [ ]'))
+})
+
+test('expandTemplate fills variables, cuts the cursor, keeps unknown ones', () => {
+  assert.deepEqual(expandTemplate('{{date}} a{{cursor}}', { now: d }), { text: '2026-10-02 a', caret: 12 })
+  assert.deepEqual(expandTemplate('# {{title}} {{time}} {{x}}', { now: d, title: 'T' }), { text: '# T 09:07 {{x}}' })
+})
+
+test('userTemplates takes only personal docs in the Templates folder', () => {
+  const mk = (id: string, folder: string, project_id: string | null = null) => ({ id, folder, project_id }) as Doc
+  assert.deepEqual(userTemplates([mk('a', 'Templates'), mk('b', 'Work'), mk('c', 'Templates', 'p')]).map((x) => x.id), ['a'])
 })

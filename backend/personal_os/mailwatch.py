@@ -49,7 +49,8 @@ CREATE TABLE IF NOT EXISTS thread_status (
   age_days REAL,
   dismissed INTEGER NOT NULL DEFAULT 0,
   followup_todo_id TEXT,
-  updated_at REAL
+  updated_at REAL,
+  snooze_until TEXT
 );
 """
 
@@ -162,6 +163,8 @@ class MailWatch:
         self.db = db
         with db.tx() as c:
             c.executescript(SCHEMA)
+            if "snooze_until" not in {r["name"] for r in c.execute("PRAGMA table_info(thread_status)")}:
+                c.execute("ALTER TABLE thread_status ADD COLUMN snooze_until TEXT")
 
     def refresh(self, rows: list[tuple[dict[str, Any], dict[str, Any]]]) -> int:
         """Upsert (thread, classification) pairs. A changed last message un-dismisses the thread."""
@@ -186,6 +189,9 @@ class MailWatch:
         args: list[Any] = [] if status is None else [status]
         if not include_dismissed:
             where.append("dismissed = 0")
+        if at is not None:  # snoozed threads come back when their time passes; ISO UTC strings sort as time
+            where.append("(snooze_until IS NULL OR snooze_until <= ?)")
+            args.append(_aware(at).astimezone(timezone.utc).isoformat())
         with self.db.tx() as c:
             rows = [dict(r) for r in c.execute(f"SELECT * FROM thread_status WHERE {' AND '.join(where)} ORDER BY last_date DESC", args).fetchall()]
         if at is not None:  # age is relative to the last message, so recompute it at read time
@@ -201,6 +207,17 @@ class MailWatch:
     def dismiss(self, thread_id: str, dismissed: bool) -> bool:
         with self.db.tx() as c:
             return c.execute("UPDATE thread_status SET dismissed=? WHERE thread_id=?", (int(dismissed), thread_id)).rowcount > 0
+
+    def snooze(self, thread_id: str, until: datetime | None, subject: str = "") -> None:
+        """Hide a thread until `until` (None clears it). Local only: nothing is written to Gmail."""
+        v = _aware(until).astimezone(timezone.utc).isoformat() if until else None
+        with self.db.tx() as c:
+            c.execute("INSERT INTO thread_status(thread_id,subject,status,updated_at) VALUES(?,?,'fyi',?) ON CONFLICT(thread_id) DO NOTHING", (thread_id, subject, _now()))
+            c.execute("UPDATE thread_status SET snooze_until=? WHERE thread_id=?", (v, thread_id))
+
+    def snoozed_ids(self, at: datetime) -> list[str]:
+        with self.db.tx() as c:
+            return [r["thread_id"] for r in c.execute("SELECT thread_id FROM thread_status WHERE snooze_until > ?", (_aware(at).astimezone(timezone.utc).isoformat(),))]
 
     def counts(self, cfg: dict[str, Any], at: datetime) -> dict[str, int]:
         to_reply = len(self.list("to_reply", at=at))

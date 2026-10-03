@@ -527,6 +527,22 @@ class Docs:
             body = f"# {day.strftime('%A, %B')} {day.day}, {day.year}\n\n"
             return self.create(title, body, None, DAILY_FOLDER), True
 
+    def append_daily(self, text: str, date_str: str | None = None, at: datetime.datetime | None = None) -> dict[str, Any]:
+        """Append "- HH:MM text" to a day's note as a user revision, creating the note if needed.
+
+        Held under `_daily_lock` for the whole read-modify-write so two quick captures both land, in order."""
+        text = " ".join(text.split())
+        if not text:
+            raise ValueError("Nothing to capture")
+        doc, _ = self.daily(date_str)
+        stamp = (at or datetime.datetime.now()).strftime("%H:%M")
+        with self._daily_lock:
+            cur = self.get(doc["id"]) or doc
+            body = cur["content"]
+            if body and not body.endswith("\n"):
+                body += "\n"
+            return self.save(doc["id"], body + f"- {stamp} {text}\n", summary="Quick capture", coalesce=False) or cur
+
     def backlinks(self, id: str) -> list[dict[str, Any]] | None:
         """Live docs that link to this one with `[[Title]]` or `[[Title|alias]]`, newest first.
 

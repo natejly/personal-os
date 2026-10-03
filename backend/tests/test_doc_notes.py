@@ -82,6 +82,19 @@ j("GET", "/docs/nope/backlinks", expect=404)
 j("DELETE", f"/docs/{tid}")
 j("GET", f"/docs/{tid}/backlinks", expect=404)
 
+# ---- quick capture append ----
+r1 = j("POST", "/docs/daily/append", {"text": "first  thought", "date": "2031-05-06"})
+r2 = j("POST", "/docs/daily/append", {"text": "second", "date": "2031-05-06"})
+body = r2["doc"]["content"]
+lines = [x for x in body.splitlines() if x.startswith("- ")]
+check(len(lines) == 2 and lines[0].endswith(" first thought") and lines[1].endswith(" second"), "two appends land in order")
+check(body.startswith("# "), "append created the daily note with its heading")
+revs = [x for x in docs.revisions(r1["doc"]["id"]) if x["summary"] == "Quick capture"]
+check(len(revs) == 2, "each capture is its own revision")
+j("POST", "/docs/daily/append", {"text": "   "}, expect=400)
+j("POST", "/docs/daily/append", {"text": "x", "date": "nope"}, expect=400)
+docs.delete(r1["doc"]["id"])
+
 # ---- auth behaves like sibling routes ----
 bare = TestClient(app)
 want = bare.get("/docs/pending").status_code

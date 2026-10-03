@@ -15,6 +15,7 @@ import ResizeHandle from './ResizeHandle'
 import { clip, lines, usePageContext } from '../lib/pageContext'
 import { PANEL_TABS, parsePanelState, resolveWikiDoc, type PanelState, type PanelTab } from '../lib/docPanel'
 import { DocRecordButton, DocRecorderBar, liveDoc, RecordingsPanel, setRecordingBlockSink, useDictation, useDocRec, useNoteMarks, usePreview } from '../features/docrec'
+import { useDictationChord } from '../features/docrec/useChord'
 import Backlinks from '../features/notes/Backlinks'
 import DocOutline from '../features/notes/DocOutline'
 import ExportMenu from '../features/notes/ExportMenu'
@@ -178,6 +179,8 @@ export default function DocsView(): JSX.Element {
   // Dictation types into the editor, so a preview-only view has nowhere to put the words.
   const dictatingHere = liveHere?.mode === 'dictate'
   const previewText = usePreview((s) => (dictatingHere && liveHere ? s.byId[liveHere.meetingId]?.text ?? '' : ''))
+  // Hold-to-talk. Not while an assistant revision waits for review: the words would land under a diff.
+  useDictationChord(docId, pending.length === 0, dictatingHere)
   useEffect(() => { if (dictatingHere && docMode === 'preview') setDocMode('split') }, [dictatingHere, docMode, setDocMode])
 
   // A recording that starts on THIS doc opens the Recordings tab, so the live transcript is in view.

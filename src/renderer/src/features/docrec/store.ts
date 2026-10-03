@@ -283,6 +283,12 @@ export const useDocRec = create<DocRecState>((set, get) => {
 
     start: async (docId, mode, opts) => {
       if (get().busy) return
+      const open = useStore.getState().activeDoc
+      if (mode === 'dictate' && open?.id === docId && (open.pending?.length ?? 0) > 0) {
+        const text = 'Review the assistant edit first: dictation would type under a pending change.'
+        set({ notice: { text, action: 'none' } })
+        return toast(text, 'error')
+      }
       set({ busy: true, notice: null })
       try {
         // The draft goes first so what was typed before Record is on the server, not in a buffer.

@@ -806,6 +806,8 @@ export const useStore = create<State>((set, get) => {
         // ⌘N taken while reading a project chat silently filed the next unrelated thought under it.
         if (s.view !== 'canvas') s.newChat(null)
       } else if (action === 'settings') s.setSettingsOpen(true)
+      else if (action === 'new-note') void s.createDoc({})
+      else if (action === 'daily-note') { s.setView('docs'); void s.openDailyNote() }
       else if (action === 'toggle-sidebar') s.toggleSidebar()
       else if (action === 'toggle-context') s.toggleContext()
       else if (action === 'page-agent') s.togglePageAgent()
@@ -1169,7 +1171,7 @@ export const useStore = create<State>((set, get) => {
     ready: false,
     backendError: null,
     backendState: 'ready',
-    settings: { baseUrl: '', apiKey: '', apiKeySet: false, defaultModel: '', systemPrompt: '', extractionModel: '', autoLearn: true, learnStyle: true, theme: 'dark', accent: 'sage', gatherShortcut: '', tools: {}, maxToolRounds: 8, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {} },
+    settings: { baseUrl: '', apiKey: '', apiKeySet: false, defaultModel: '', systemPrompt: '', extractionModel: '', autoLearn: true, learnStyle: true, theme: 'dark', accent: 'sage', gatherShortcut: '', quickCaptureShortcut: '', dictationChord: '', tools: {}, maxToolRounds: 8, braveApiKey: '', tavilyApiKey: '', googleClientId: '', googleClientSecret: '', modelPrices: {} },
     models: [],
     modelsError: null,
     tools: [],

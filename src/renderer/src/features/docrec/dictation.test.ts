@@ -104,3 +104,13 @@ test('readyForInsert is idempotent once its consumed ids are marked seen', () =>
   assert.deepEqual(first.ready.map((s) => s.id), ['a', 'b'])
   assert.deepEqual(second.ready, [])
 })
+
+test('spoken punctuation: period, comma and question mark, mid-clip too', () => {
+  assert.equal(dictationText('thanks period', 'Hi '), 'thanks.')
+  assert.equal(dictationText('Thanks, period.', 'Hi '), 'Thanks.')
+  assert.equal(dictationText('hello comma there', 'Hi '), 'hello, there')
+  assert.equal(dictationText('are you coming question mark', 'Hi '), 'are you coming?')
+  assert.ok(!dictationText('no marks here', 'Hi ').includes('.'))
+  assert.equal(dictationText('new paragraph', 'Hi.'), '\n\n')
+  assert.equal(dictationText('it costs $5', 'Hi '), 'it costs \\$5')
+})

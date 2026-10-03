@@ -5852,6 +5852,7 @@ class MeetingConfigIn(BaseModel):
     diarizeEmbeddingModel: str | None = None
     diarizeThreshold: float | None = None
     diarizeSpeakers: int | None = None
+    terms: list[str] | None = None
 
 
 class MeetingSpeakersIn(BaseModel):
@@ -6108,7 +6109,7 @@ async def diarize_meeting(id: str) -> dict[str, Any]:
 
 
 @app.put("/meetings/{id}/speakers")
-def rename_meeting_speakers(id: str, body: MeetingSpeakersIn) -> dict[str, Any]:
+async def rename_meeting_speakers(id: str, body: MeetingSpeakersIn) -> dict[str, Any]:
     try:
         m = meeting_svc.set_speakers(id, body.names)
     except ValueError as e:

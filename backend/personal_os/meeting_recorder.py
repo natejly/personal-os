@@ -445,8 +445,10 @@ class TranscribeWorker(_RecorderThread):
                  keep_audio: bool = False,
                  max_attempts: int = MAX_ATTEMPTS,
                  max_audio_bytes: int = DEFAULT_MAX_AUDIO_BYTES,
-                 on_disk_check: Callable[[], int] | None = None):
+                 on_disk_check: Callable[[], int] | None = None,
+                 vocab: str = ""):
         super().__init__(f"transcribe-{meeting_id}", halt)
+        self.vocab = vocab
         self.meeting_id = meeting_id
         self.q = q
         self.out_dir = out_dir
@@ -542,7 +544,8 @@ class TranscribeWorker(_RecorderThread):
         while True:
             attempts += 1
             res = stt.transcribe(path, settings=self.settings_fn(), cfg=self.config_fn(),
-                                 data_dir=self.data_dir, prompt=self._tail.get(channel, ""))
+                                 data_dir=self.data_dir,
+                                 prompt=(self.vocab + " " + self._tail.get(channel, "")).strip())
             if not res.get("error") or attempts >= self.max_attempts or self.halt.is_set():
                 break
             self.sleep(RETRY_BACKOFF[min(attempts - 1, len(RETRY_BACKOFF) - 1)])
@@ -640,7 +643,8 @@ class RecordingSession:
                  max_audio_bytes: int = DEFAULT_MAX_AUDIO_BYTES,
                  drain_seconds: float = DEFAULT_DRAIN_SECONDS,
                  on_disk_check: Callable[[], int] | None = None,
-                 cut_on_silence: bool = False, min_segment_seconds: float = 2.0):
+                 cut_on_silence: bool = False, min_segment_seconds: float = 2.0,
+                 vocab: str = ""):
         if not channels:
             raise ValueError("a recording needs at least one channel")
         self.meeting_id = meeting_id
@@ -670,7 +674,7 @@ class RecordingSession:
             meeting_id, self.q, self.stop_event, out_dir=out_dir, settings_fn=settings_fn,
             config_fn=config_fn, data_dir=data_dir, on_result=self._result,
             keep_audio=keep_audio, max_attempts=max_attempts,
-            max_audio_bytes=max_audio_bytes, on_disk_check=on_disk_check)
+            max_audio_bytes=max_audio_bytes, on_disk_check=on_disk_check, vocab=vocab)
         self._on_result = on_result
 
     # ------------------------------------------------------------ lifecycle
@@ -842,7 +846,8 @@ class RecorderPool:
               drain_seconds: float = DEFAULT_DRAIN_SECONDS,
               on_disk_check: Callable[[], int] | None = None,
               cut_on_silence: bool = False,
-              min_segment_seconds: float = 2.0) -> RecordingSession:
+              min_segment_seconds: float = 2.0,
+              vocab: str = "") -> RecordingSession:
         with self._lock:
             live = self._live()
             if live is not None:
@@ -860,7 +865,7 @@ class RecorderPool:
                 max_seconds=max_seconds, keep_audio=keep_audio, max_attempts=max_attempts,
                 max_audio_bytes=max_audio_bytes, drain_seconds=drain_seconds,
                 on_disk_check=on_disk_check, cut_on_silence=cut_on_silence,
-                min_segment_seconds=min_segment_seconds)
+                min_segment_seconds=min_segment_seconds, vocab=vocab)
             self.sessions[meeting_id] = session
             # start() under the SAME lock as the busy check. It only spawns threads - ffmpeg is
             # launched inside the capture thread - so the lock is held for microseconds, and

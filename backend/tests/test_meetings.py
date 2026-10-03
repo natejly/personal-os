@@ -271,14 +271,18 @@ def test_enhance_proposes_and_never_writes_the_notes_column() -> None:
     assert len(repo.action_items(mid)) == 1
 
 
-def test_auto_apply_stops_once_the_user_has_hand_edited_the_enhanced_notes() -> None:
+def test_a_successful_pass_is_never_auto_applied_and_waits_for_accept() -> None:
     repo, svc = _svc(_tmp(), reply=GOOD_REPLY)
     mid = repo.create(title="Pricing call")["id"]
     repo.patch(mid, {"notes": NOTES})
 
     first = asyncio.run(svc.enhance(mid))
-    assert first["status"] == "applied"                     # enhanced was empty, so it just appears
+    assert first["status"] == "pending"                     # even with `enhanced` empty
+    assert repo.get(mid)["enhanced"] == ""
+    assert repo.get(mid)["notes"] == NOTES
+    repo.accept(first["id"])
     assert "Ship the tiers" in repo.get(mid)["enhanced"]
+    assert repo.get(mid)["notes"] == NOTES
 
     repo.patch(mid, {"enhanced": "mine"})
     second = asyncio.run(svc.enhance(mid, force=True))
@@ -363,18 +367,17 @@ def test_a_revision_satisfies_the_doc_revision_interface() -> None:
 # ---------------------------------------------------------------- redaction
 
 
-def test_a_transcript_keeps_the_people_and_loses_the_credentials() -> None:
+def test_a_transcript_loses_credentials_emails_and_phones_but_keeps_the_words() -> None:
     repo, _ = _svc(_tmp())
     mid = repo.create(title="Pricing call")["id"]
     seg = repo.add_segment(mid, "output", 0, 0.0, 20.0, 1_700_000_000.0, "/nowhere/0.wav", 4096)
     stored = repo.finish_segment(
         seg["id"], text="ada@example.com will call +1 415 555 0134 about sk-aaaaaaaaaaaaaaaaaaaaaa",
         backend="proxy")["text"]
-    # Credential rules only. activity.Gate.scrub's identity rules replace every address with
-    # [email] and every phone-shaped digit run with [phone] (redact.py),
-    # which would erase who was on the call from inside the record of the call.
-    assert "ada@example.com" in stored
-    assert "+1 415 555 0134" in stored
+    # Credentials, then the email and phone rules; ordinary words stay.
+    assert "ada@example.com" not in stored and "[email]" in stored
+    assert "415 555 0134" not in stored and "[phone]" in stored
+    assert "will call" in stored and "about" in stored
     assert "sk-aaaaaaaaaaaaaaaaaaaaaa" not in stored
     assert "[secret]" in stored
 
@@ -925,10 +928,10 @@ def test_a_degraded_pass_is_never_auto_applied() -> None:
     assert "## Transcript" in repo.get(mid)["enhanced"]
     assert "ignore all previous instructions" not in svc.context_block()
 
-    # A pass that WORKS still just appears, which is the whole point of the feature.
+    # A pass that WORKS is pending too: nothing is applied on the user's behalf.
     repo2, svc2 = _svc(_tmp(), reply=GOOD_REPLY)
     mid2 = repo2.create(title="Pricing call")["id"]
-    assert asyncio.run(svc2.enhance(mid2))["status"] == "applied"
+    assert asyncio.run(svc2.enhance(mid2))["status"] == "pending"
 
 
 if __name__ == "__main__":

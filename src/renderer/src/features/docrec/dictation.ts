@@ -14,6 +14,10 @@ const OPENERS = /[\s(\[{“‘]$/
 /** Punctuation that attaches to the word before it. */
 const CLOSERS = /^[.,;:!?)\]}%”’]/
 
+const SPOKEN_MARKS: Record<string, string> = { period: '.', comma: ',', 'question mark': '?' }
+// The recogniser may already have punctuated around the word ("Thanks, period."), so absorb it.
+const SPOKEN_MARK = /\s*,?\s*\b(period|comma|question mark)\b[.,!?]?/gi
+
 /** Whether the next letter starts a sentence, judged from the text before the caret. */
 function startsSentence(before: string): boolean {
   if (before.trim() === '') return true
@@ -27,6 +31,7 @@ function startsSentence(before: string): boolean {
  *
  * - A clip that is, on its own, "new line" or "new paragraph" becomes that break. Only a whole
  *   utterance is a command: the same words inside a sentence are words the user said.
+ * - Spoken "period", "comma" and "question mark" become the mark, wherever they fall in the clip.
  * - Otherwise one space joins it to what precedes, unless the caret already follows whitespace or
  *   an opening bracket, or the clip begins with punctuation that belongs to the previous word.
  * - The first letter is capitalised when the caret starts a sentence. A clip that continues one is
@@ -45,7 +50,8 @@ export function dictationText(raw: string, before: string): string {
   }
   // A spoken price arrives as `$12`, and two of them in one paragraph are the shape the preview
   // reads as inline maths. Speech never dictates a formula, so every amount is escaped.
-  let out = text.replace(/(?<!\\)\$(?=\d)/g, '\\$')
+  let out = text.replace(SPOKEN_MARK, (_, w: string) => SPOKEN_MARKS[w.toLowerCase()]).trim()
+  out = out.replace(/(?<!\\)\$(?=\d)/g, '\\$')
   if (startsSentence(before)) out = out.charAt(0).toUpperCase() + out.slice(1)
   // A straight quote is ambiguous: it opens a quotation when it follows a space, a bracket or the
   // start, and closes one when it follows a word or punctuation (`point?"`).

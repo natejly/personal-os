@@ -187,6 +187,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "whisperModelPath": "",
     "template": "general",
     "enhanceOnStop": True,
+    "terms": [],              # names/jargon prepended to the STT prompt, with the attendees
     "enhanceModel": "",
     "maxTranscriptChars": 48000,
     "keepAudio": False,
@@ -352,6 +353,11 @@ def _conference_link(event: dict[str, Any]) -> str:
     return ""
 
 
+def _scrub_text(text: str) -> str:
+    """Credential rules, then the email and phone rules (not the entropy threshold, already in the first set)."""
+    return redact.scrub(redact.scrub_secrets(text), ("email", "phone"), secret_assign=False)
+
+
 def _scrub_detail(detail: Any, depth: int = 0) -> Any:
     """Credential-scrub every string inside an STT detail payload.
 
@@ -363,7 +369,7 @@ def _scrub_detail(detail: Any, depth: int = 0) -> Any:
     timings where it left them.
     """
     if isinstance(detail, str):
-        return redact.scrub_secrets(detail)
+        return _scrub_text(detail)
     if depth > 8:  # a pathological payload must not recurse the request thread to death
         return detail
     if isinstance(detail, list):
@@ -818,11 +824,10 @@ class Meetings:
         body = str(text or "")
         payload = detail if detail is not None else {}
         if self.config().get("redactSecrets", True):
-            # Credential rules ONLY, never activity.Gate.scrub: its identity rules replace every
-            # address with [email] and every phone-shaped digit run with [phone]
-            # (redact.py), which would erase attendee identity from inside the conversation.
+            # Credential rules plus email and phone; activity.Gate.scrub's other extras
+            # (the secret-assign sweep) stay out.
             if body:
-                body = redact.scrub_secrets(body)
+                body = _scrub_text(body)
             # The same words arrive twice - once as `text`, once per utterance inside `detail` -
             # so both copies go through the redactor or neither is redacted.
             payload = _scrub_detail(payload)
@@ -1551,6 +1556,7 @@ class MeetingService:
             max_audio_bytes=int(cfg["maxAudioBytes"]),
             drain_seconds=float(cfg["drainSeconds"]),
             on_disk_check=lambda: self.meetings.audio_bytes(meeting_id),
+            vocab=self._vocab(meeting_id, cfg),
         )
         self.meetings.mark_started(meeting_id, str(session.out_dir), list(channels), session.started_at)
         # A missing loopback device is a degradation the user has to be able to see, not an error.
@@ -1559,6 +1565,13 @@ class MeetingService:
         log.info("meetings: recording %s (%s)", meeting_id, ", ".join(channels) or "no channels")
         self._emit("status", meeting_id, status="recording")
         return self.meetings.get(meeting_id)
+
+    def _vocab(self, meeting_id: str, cfg: dict[str, Any]) -> str:
+        """Terms plus attendee names, as the head of the STT prompt (the previous clip's tail follows)."""
+        m = self.meetings.get(meeting_id) or {}
+        words = [str(t).strip() for t in cfg.get("terms") or []]
+        words += [a["name"].strip() for a in m.get("attendees") or [] if a.get("name")]
+        return ", ".join(dict.fromkeys(w for w in words if w))[:300]  # ponytail: 300 chars keeps room for the tail
 
     def _release_recorder(self, meeting_id: str, deleting: bool) -> None:
         """Stop a live capture (no drain) before its meeting or its audio is removed.
@@ -1741,11 +1754,9 @@ class MeetingService:
                       template: str | None = None) -> dict[str, Any] | None:
         """Cache-or-generate, like /recap (app.py:1881-1907): an existing proposal is the answer.
 
-        AUTO-APPLY RULE: the revision is accepted for the user only when the pass SUCCEEDED and
-        `enhanced` is empty, or still byte-identical to the last applied revision's `after` - i.e.
-        they have not hand-edited it. That is what keeps Granola's "the notes just appear" feel
-        without ever overwriting a human edit; once they have touched it, the proposal waits for
-        accept or reject.
+        NEVER AUTO-APPLIED: a successful pass is a pending revision until `accept`, whether or not
+        `enhanced` is empty, the same as a doc recording's summary. The model's text is not the
+        user's own words and `enhanced` is read by `context_block`.
 
         A DEGRADED pass is never auto-applied. Its markdown is `meeting_notes._mechanical`'s
         fallback - the user's notes followed by the raw transcript - and `enhanced` is read by
@@ -1761,8 +1772,8 @@ class MeetingService:
         if not force:
             if m["pending"]:
                 return m["pending"]
-            # Auto-apply leaves nothing pending, so without this a second enhance of an unchanged
-            # meeting would pay for the same answer again. Same cache-or-generate as /recap.
+            # Once accepted, a second enhance of an unchanged meeting would pay for the same answer
+            # again. Same cache-or-generate as /recap.
             last = self.meetings.last_applied(meeting_id)
             if last is not None and m["enhanced"] and m["enhanced"] == last["after"]:
                 return last
@@ -1801,11 +1812,6 @@ class MeetingService:
         if res["headline"]:
             patch["summary"] = res["headline"]
         self.meetings.patch(meeting_id, patch)
-        last = self.meetings.last_applied(meeting_id)
-        untouched = not m["enhanced"].strip() or (last is not None and m["enhanced"] == last["after"])
-        if untouched and not res["degraded"]:
-            self.meetings.accept(rev["id"])
-            return self.meetings.revision(rev["id"])
         return rev
 
     # ---- the doc summary pass ----
@@ -2046,7 +2052,20 @@ class MeetingService:
         if self.meetings.get(meeting_id, include_hidden=False) is None:
             return None
         self.meetings.set_speaker_names(meeting_id, names)
-        return self._settle_transcript(meeting_id) or self.meetings.get(meeting_id)
+        out = self._settle_transcript(meeting_id) or self.meetings.get(meeting_id)
+        m = out or {}
+        if (m.get("enhanced") or m.get("pending")) and not m.get("doc_id"):
+            # Notes written under the old names are stale: propose a fresh pass, never apply it.
+            with contextlib.suppress(RuntimeError):  # no running loop (sync caller): nothing to queue on
+                asyncio.ensure_future(self._reenhance_quietly(meeting_id))
+        return out
+
+    async def _reenhance_quietly(self, meeting_id: str) -> None:
+        try:
+            await self.enhance(meeting_id, force=True)
+        except Exception as e:  # noqa: BLE001 - a queued pass has nobody to raise to
+            self.last_error = f"{type(e).__name__}: {e}"
+            log.warning("meetings: re-enhance %s: %s", meeting_id, e)
 
     # ---- calendar ----
     async def suggest(self) -> list[dict[str, Any]]:

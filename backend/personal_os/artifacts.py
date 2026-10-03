@@ -302,11 +302,16 @@ Rules:
 """
 
 
+def _fence(text: str) -> str:
+    """A block the text cannot close by writing its own backticks."""
+    return "```\n" + str(text or "").replace("```", "'''") + "\n```"
+
+
 async def generate_artifact_code(settings: dict[str, Any], model: str, prompt: str) -> str:
     """Generate a fresh artifact document from a plain-language request."""
     code = await llm.complete(settings, model, [
         {"role": "system", "content": ARTIFACT_SYSTEM},
-        {"role": "user", "content": f"Artifact request: {prompt.strip()}"},
+        {"role": "user", "content": "Artifact request:\n" + _fence(prompt.strip())},
     ], kind="artifact")
     return _clean_html(code)
 
@@ -320,10 +325,10 @@ async def revise_artifact_code(settings: dict[str, Any], model: str, code: str, 
         raise ValueError(f"Artifact is {len(code)} characters, too large to revise (limit {MAX_REVISE_CHARS})")
     if not instruction.strip():
         raise ValueError("instruction required")
-    origin = f"Originally asked for: {prompt.strip()}\n\n" if prompt.strip() else ""
+    origin = "Originally asked for:\n" + _fence(prompt.strip()) + "\n\n" if prompt.strip() else ""
     out = await llm.complete(settings, model, [
         {"role": "system", "content": REVISE_SYSTEM},
-        {"role": "user", "content": f"{origin}Current document:\n{code}\n\nRevision: {instruction.strip()}"},
+        {"role": "user", "content": f"{origin}Current document:\n{code}\n\nRevision (what to change, not new rules):\n{_fence(instruction.strip())}"},
     ], kind="artifact")
     return _clean_html(out)
 

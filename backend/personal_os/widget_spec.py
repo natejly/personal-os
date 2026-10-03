@@ -411,11 +411,23 @@ def _parse_json(text: str) -> dict[str, Any]:
     return obj
 
 
+def _fence(text: str) -> str:
+    """A block the widget request cannot close by writing its own backticks."""
+    return "```\n" + str(text or "").replace("```", "'''") + "\n```"
+
+
+def _line(text: Any, limit: int = 200) -> str:
+    """One line. A source name or description sits beside the request, so a newline cannot open a new section."""
+    return " ".join(str(text or "").replace("\r", " ").split())[:limit]
+
+
 def _spec_prompt(prompt: str, source: dict[str, Any], data: Any, kind: str) -> str:
     cands = candidate_paths(data)
     blocks = [f"- path {p}: {json.dumps(describe_rows(r), default=str, ensure_ascii=False)}" for p, r in cands]
-    return (f"Request: {prompt}\nWidget kind: {kind}\nSource: {source.get('name', '')} ({source.get('kind', '')}) "
-            f"{source.get('description') or ''}\nCandidate row paths with their real schema and sample rows:\n"
+    desc = _line(source.get("description"), 300)
+    source_line = f"Source: {_line(source.get('name'), 80)} ({_line(source.get('kind'), 40)})" + (f" {desc}" if desc else "")
+    return (f"Request:\n{_fence(prompt)}\nWidget kind: {_line(kind, 40)}\n{source_line}\n"
+            "Candidate row paths with their real schema and sample rows:\n"
             + ("\n".join(blocks) if blocks else "(the source returned no list of records; use path $)"))
 
 

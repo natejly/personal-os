@@ -1133,8 +1133,9 @@ class Meetings:
                 "SELECT id, text FROM meeting_action_items WHERE meeting_id=? ORDER BY created_at",
                 (meeting_id,)).fetchall()}
             for it in items or []:
-                # truncated FIRST, so the key matches the one the stored row will produce
-                text = str((it or {}).get("text") or "").strip()[:500]
+                # One line, then truncated, so a newline in someone else's words cannot open a
+                # section later, and the key matches the one the stored row will produce.
+                text = " ".join(str((it or {}).get("text") or "").replace("\r", " ").split())[:500]
                 if not text:
                     continue
                 key = self._item_key(text)
@@ -1143,11 +1144,12 @@ class Meetings:
                     c.execute("UPDATE meeting_action_items SET revision_id=? WHERE id=?",
                               (revision_id, existing))
                     continue
+                owner = " ".join(str(it.get("owner") or "").replace("\r", " ").split())[:200]
                 rid = new_id()
                 c.execute(
                     "INSERT INTO meeting_action_items(id,meeting_id,revision_id,text,owner,due,created_at)"
                     " VALUES(?,?,?,?,?,?,?)",
-                    (rid, meeting_id, revision_id, text, str(it.get("owner") or "")[:200],
+                    (rid, meeting_id, revision_id, text, owner,
                      str(it.get("due") or "")[:10], t))
                 seen[key] = rid
         return self.action_items(meeting_id)
@@ -1181,10 +1183,11 @@ class Meetings:
             m = c.execute("SELECT title, project_id FROM meetings WHERE id=?", (item["meeting_id"],)).fetchone()
         if item["todo_id"]:
             return item
-        title = (m["title"] if m else "") or "Untitled meeting"
+        meeting_title = " ".join(str((m["title"] if m else "") or "").replace("\r", " ").split())[:200] or "Untitled meeting"
+        title = " ".join(str(item.get("text") or "").replace("\r", " ").split())[:500] or "Untitled action"
         todo = todos.create(
-            title=item["text"], project_id=project_id if project_id is not None else (m["project_id"] if m else None),
-            notes=f"From meeting: {title}", due=_due_or_none(item["due"]), priority=2,
+            title=title, project_id=project_id if project_id is not None else (m["project_id"] if m else None),
+            notes=f"From meeting: {meeting_title}", due=_due_or_none(item["due"]), priority=2,
             source="meeting")
         with self.db.tx() as c:
             c.execute("UPDATE meeting_action_items SET status='added', todo_id=? WHERE id=?", (todo["id"], item_id))
@@ -2136,7 +2139,7 @@ class MeetingService:
             if last is not None and last["degraded"] and body == (last["after"] or "").strip():
                 body = (full.get("notes") or "").strip()
             first = next((ln.strip() for ln in body.splitlines() if ln.strip() and not ln.startswith("#")), "")
-            head = m["summary"] or m["title"] or "(untitled)"
+            head = " ".join((m["summary"] or m["title"] or "(untitled)").replace("\r", " ").replace("\n", " ").split())[:200] or "(untitled)"
             parts.append(f"- {head}" + (f": {first[:200]}" if first else ""))
         return "\n".join(parts)[:max_chars]
 

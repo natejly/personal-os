@@ -12,7 +12,7 @@ import ProjectChip from './ProjectChip'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { SAFE_MD } from './Message'
-import { lines, usePageContext } from '../lib/pageContext'
+import { fenced, lines, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
 
 function greeting(): string {
@@ -207,7 +207,7 @@ export default function HomeView(): JSX.Element {
       todayEvents.length ? `Today\u2019s calendar:\n${lines(todayEvents, (e) => `${e.start} — ${e.summary} (\`${e.id}\`)`)}` : 'Nothing on the calendar today.',
       laterEvents.length ? `Coming up:\n${lines(laterEvents, (e) => `${e.start} — ${e.summary}`, 10)}` : '',
       d?.todos?.length ? `Open todos:\n${lines(d.todos, (t) => `${t.title} (\`${t.id}\`${t.due ? `, due ${t.due}` : ''})`)}` : 'No open todos.',
-      recap?.content ? `Yesterday\u2019s recap:\n${recap.content.slice(0, 1500)}` : ''
+      recap?.content ? `Yesterday\u2019s recap:\n${fenced(recap.content, 1500)}` : ''
     ].filter(Boolean).join('\n\n'),
     refs: (d?.todos ?? []).slice(0, 20).map((t) => ({ kind: 'todo', id: t.id, name: t.title })),
     hints: ['What should I focus on today?', 'Block time for my todos', 'Anything I am forgetting?']

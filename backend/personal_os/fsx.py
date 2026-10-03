@@ -74,6 +74,28 @@ class Grants:
         return self.desk or (self.roots[0] if self.roots else None)
 
 
+def carry_desk_copies(box: Any, ctx: dict[str, Any], g: Grants, paths: list[Path]) -> None:
+    """A download copied or edited into another workspace path stays a download."""
+    did = str(ctx.get("desk_id") or "")
+    ws = getattr(box, "workspace", None)
+    if not did or ws is None or g.desk is None:
+        return
+    rels: list[str] = []
+    for raw in paths:
+        try:
+            p = raw.resolve()
+        except OSError:
+            continue
+        if not p.is_file() or not g.in_desk(p) or p == g.desk:
+            continue
+        rels.append(p.relative_to(g.desk).as_posix())
+    if rels:
+        try:
+            ws.carry_fetch_copies(did, rels)
+        except Exception:  # noqa: BLE001 - recording a copy must not fail the write that already landed
+            return
+
+
 def grants_for(box: Any, ctx: dict[str, Any]) -> Grants:
     roots: list[Path] = []
     raw = box.settings().get("workspaceRoots") or []
@@ -890,6 +912,7 @@ def register(box: Any) -> None:
         if err:
             out["syntax_error"] = err
             out["note"] = "the file was written, but it does not parse; fix it with another fs_edit"
+        carry_desk_copies(box, ctx, g, [p])
         return out
     R("fs_edit", ToolSpec("fs_edit", "Change a file by replacing exact text: old must match once (or pass replace_all). If the exact text is not found it also tries matching ignoring each line's indentation, then matching by a block's first and last line. Returns a unified diff and which matcher applied. Read the part you are changing first. Python, JSON, TOML and YAML files are syntax-checked afterwards. Outside the desk workspace and the user's workspace folders it asks first.",
         _obj({"path": {"type": "string"}, "old": {"type": "string", "description": "Text to replace, copied exactly"},
@@ -950,6 +973,10 @@ def register(box: Any) -> None:
         if snap and snap.get("snapshot_id"):
             await asyncio.to_thread(box.filesnap.finalize, snap["snapshot_id"], str(d))
             out["undo"] = {"snapshot_id": snap["snapshot_id"]}
+        copied = [d]
+        if d.is_dir():
+            copied = [Path(dirpath) / name for dirpath, _dirs, names in os.walk(d) for name in names]
+        carry_desk_copies(box, ctx, g, copied)
         return out
     R("fs_copy", ToolSpec("fs_copy", "Copy a file or folder to a new path. Never overwrites: the destination must not exist (a destination folder that exists receives the copy under the same name). Secret files are not copied. Writing outside the desk workspace and the user's workspace folders asks first.",
         _obj({"src": {"type": "string"}, "dst": {"type": "string"}}, ["src", "dst"]), fs_copy, "files", "writes",

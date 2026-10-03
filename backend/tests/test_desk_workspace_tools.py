@@ -32,14 +32,14 @@ DESK = "desk1"
 
 
 class Box:
-    def __init__(self, tmp: Path, **ws_kw: Any) -> None:
+    def __init__(self, tmp: Path, sandboxes: Any = None, **ws_kw: Any) -> None:
         self.settings: dict[str, Any] = {"workspaceRoots": []}
         self.db = Database(tmp / "data")
         with self.db.tx() as c:
             c.execute("INSERT INTO conversations(id, title, model, created_at, updated_at) VALUES(?,?,?,?,?)", ("c1", "t", "m", 0.0, 0.0))
         self.ws = Workspace(Path(os.environ["PERSONAL_OS_DATA_DIR"]) / f"ws-{tmp.name}", **ws_kw)
         self.tb = Toolbox(None, None, None, lambda: self.settings, results=ToolResults(self.db), workspace=self.ws,
-                          desks=Desks(self.db, self.ws))  # type: ignore[arg-type]
+                          sandboxes=sandboxes, desks=Desks(self.db, self.ws))  # type: ignore[arg-type]
         self.ctx: dict[str, Any] = {"conversation_id": "c1", "desk_id": DESK, "message_id": None, "settings": self.settings,
                                     "tainted": False, "taint_sources": []}
         self.root = self.ws.ensure(DESK)
@@ -202,6 +202,153 @@ def fake_open(responses: dict[str, httpx.Response], seen: list[str] | None = Non
     return opener
 
 
+def test_reading_a_download_taints_again_after_the_chat_is_cleared(box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
+    url = "https://example.com/note.txt"
+    monkeypatch.setattr(tools_mod, "_open_pinned_stream", fake_open({
+        url: httpx.Response(200, content=b"hello from the web\n", headers={"content-type": "text/plain"}),
+    }))
+    saved = box.run("desk_fetch_file", url=url)
+    assert saved["path"].endswith("note.txt")
+    assert box.ws.was_fetched(DESK, saved["path"])
+    box.ctx["tainted"] = False
+    box.ctx["taint_sources"] = []
+    got = box.run("desk_read_file", path=saved["path"])
+    assert "hello from the web" in got["text"]
+    assert box.ctx["tainted"] is True and "desk_read_file" in box.ctx["taint_sources"]
+    box.ctx["tainted"] = False
+    box.ctx["taint_sources"] = []
+    box.run("desk_write_file", path="work/own.md", content="mine\n")
+    own = box.run("desk_read_file", path="work/own.md")
+    assert own["text"].startswith("mine") and box.ctx["tainted"] is False
+    assert box.ws.was_fetched(DESK, "work/own.md") is False
+
+
+def test_copying_a_download_to_a_new_path_stays_untrusted(box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
+    url = "https://example.com/note.txt"
+    body = b"hello from the web\n"
+    monkeypatch.setattr(tools_mod, "_open_pinned_stream", fake_open({
+        url: httpx.Response(200, content=body, headers={"content-type": "text/plain"}),
+    }))
+    saved = box.run("desk_fetch_file", url=url)
+    box.ctx["tainted"] = False
+    box.ctx["taint_sources"] = []
+    copied = box.run("desk_write_file", path="work/copy.md", content=body.decode())
+    assert box.ws.was_fetched(DESK, copied["path"])
+    got = box.run("desk_read_file", path=copied["path"])
+    assert "hello from the web" in got["text"]
+    assert box.ctx["tainted"] is True and "desk_read_file" in box.ctx["taint_sources"]
+
+
+def test_writing_extracted_download_text_stays_untrusted(box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
+    from personal_os import extract_text as xt
+
+    url = "https://example.com/q.pdf"
+    monkeypatch.setattr(tools_mod, "_open_pinned_stream", fake_open({
+        url: httpx.Response(200, content=b"%PDF-1.4 not a real document", headers={"content-type": "application/pdf"}),
+    }))
+    saved = box.run("desk_fetch_file", url=url)
+    assert saved["path"].endswith(".pdf")
+    monkeypatch.setattr(xt, "extract_text", lambda name, data: "quoted page\n")
+    box.ctx["tainted"] = False
+    box.ctx["taint_sources"] = []
+    copied = box.run("desk_write_file", path="work/notes.md", content="quoted page\n")
+    assert box.ws.was_fetched(DESK, copied["path"])
+    got = box.run("desk_read_file", path=copied["path"])
+    assert got["text"].startswith("quoted page") and box.ctx["tainted"] is True
+
+
+def test_fs_copy_of_a_download_stays_untrusted(box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
+    url = "https://example.com/note.txt"
+    body = b"hello from the web\n"
+    monkeypatch.setattr(tools_mod, "_open_pinned_stream", fake_open({
+        url: httpx.Response(200, content=body, headers={"content-type": "text/plain"}),
+    }))
+    saved = box.run("desk_fetch_file", url=url)
+    copied = box.run("fs_copy", src=saved["path"], dst="work/via-fs.txt")
+    assert copied["path"].endswith("via-fs.txt")
+    assert box.ws.was_fetched(DESK, "work/via-fs.txt")
+    box.ctx["tainted"] = False
+    box.ctx["taint_sources"] = []
+    got = box.run("desk_read_file", path="work/via-fs.txt")
+    assert "hello from the web" in got["text"] and box.ctx["tainted"] is True
+    own = box.run("desk_write_file", path="work/own.md", content="mine\n")
+    again = box.run("fs_copy", src=own["path"], dst="work/own-copy.md")
+    assert again["path"].endswith("own-copy.md")
+    assert box.ws.was_fetched(DESK, "work/own-copy.md") is False
+
+
+def test_a_script_copy_of_a_download_stays_untrusted(box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
+    url = "https://example.com/note.txt"
+    body = b"hello from the web\n"
+    monkeypatch.setattr(tools_mod, "_open_pinned_stream", fake_open({
+        url: httpx.Response(200, content=body, headers={"content-type": "text/plain"}),
+    }))
+    saved = box.run("desk_fetch_file", url=url)
+    script = f"import shutil\nshutil.copy({saved['path']!r}, 'work/via-script.txt')\n"
+    ran = box.run("run_python", code=script)
+    assert ran.get("exit_code") == 0, ran
+    assert box.ws.was_fetched(DESK, "work/via-script.txt")
+    box.ctx["tainted"] = False
+    box.ctx["taint_sources"] = []
+    got = box.run("desk_read_file", path="work/via-script.txt")
+    assert "hello from the web" in got["text"] and box.ctx["tainted"] is True
+
+
+def test_a_shell_copy_of_a_download_stays_untrusted(box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
+    url = "https://example.com/note.txt"
+    body = b"hello from the web\n"
+    monkeypatch.setattr(tools_mod, "_open_pinned_stream", fake_open({
+        url: httpx.Response(200, content=body, headers={"content-type": "text/plain"}),
+    }))
+    saved = box.run("desk_fetch_file", url=url)
+    ran = box.run("shell_run", command=f"cp {saved['path']} work/via-shell.txt", cwd=str(box.root))
+    assert ran.get("exit_code") == 0, ran
+    assert box.ws.was_fetched(DESK, "work/via-shell.txt")
+    box.ctx["tainted"] = False
+    box.ctx["taint_sources"] = []
+    got = box.run("desk_read_file", path="work/via-shell.txt")
+    assert "hello from the web" in got["text"] and box.ctx["tainted"] is True
+    secret = Path(os.environ["PERSONAL_OS_DATA_DIR"]) / "personal-os.db"
+    secret.write_bytes(b"not-for-the-shell")
+    denied = box.run("shell_run", command=f"cat {secret}", cwd=str(box.root))
+    assert denied.get("exit_code") != 0
+    assert "not-for-the-shell" not in (denied.get("output") or "")
+
+
+def test_renaming_a_download_keeps_it_untrusted(box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
+    url = "https://example.com/note.txt"
+    body = b"hello from the web\n"
+    monkeypatch.setattr(tools_mod, "_open_pinned_stream", fake_open({
+        url: httpx.Response(200, content=body, headers={"content-type": "text/plain"}),
+    }))
+    saved = box.run("desk_fetch_file", url=url)
+    ran = box.run("shell_run", command=f"mv {saved['path']} work/renamed.txt", cwd=str(box.root))
+    assert ran.get("exit_code") == 0, ran
+    assert not (box.root / saved["path"]).exists()
+    assert box.ws.was_fetched(DESK, "work/renamed.txt")
+    box.ctx["tainted"] = False
+    box.ctx["taint_sources"] = []
+    got = box.run("desk_read_file", path="work/renamed.txt")
+    assert "hello from the web" in got["text"] and box.ctx["tainted"] is True
+
+
+def test_a_script_rename_of_a_download_stays_untrusted(box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
+    url = "https://example.com/note.txt"
+    body = b"hello from the web\n"
+    monkeypatch.setattr(tools_mod, "_open_pinned_stream", fake_open({
+        url: httpx.Response(200, content=body, headers={"content-type": "text/plain"}),
+    }))
+    saved = box.run("desk_fetch_file", url=url)
+    script = f"import os\nos.rename({saved['path']!r}, 'work/renamed-py.txt')\n"
+    ran = box.run("run_python", code=script)
+    assert ran.get("exit_code") == 0, ran
+    assert box.ws.was_fetched(DESK, "work/renamed-py.txt")
+    box.ctx["tainted"] = False
+    box.ctx["taint_sources"] = []
+    got = box.run("desk_read_file", path="work/renamed-py.txt")
+    assert "hello from the web" in got["text"] and box.ctx["tainted"] is True
+
+
 def test_fetch_saves_with_hash_and_safe_name(box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
     body = b"%PDF-1.4 hello"
     url = "https://example.com/files/Q3%20report.pdf"
@@ -273,6 +420,36 @@ def test_fetch_obeys_the_tainted_run_rule(box: Box, monkeypatch: pytest.MonkeyPa
     monkeypatch.setattr(tools_mod, "_open_pinned_stream", fake_open({"https://example.com/x.pdf": httpx.Response(200, content=b"%PDF")}))
     assert box.run("desk_fetch_file", url="https://example.com/x.pdf")["path"].endswith("x.pdf")
     assert box.ctx["tainted"] is True  # the download is third-party content
+
+
+def test_a_networked_sandbox_import_stays_untrusted_after_clear(tmp_path: Path) -> None:
+    class Sb:
+        def __init__(self, net: bool) -> None:
+            self.net = net
+
+        def read_file(self, cid: str, path: str, off: int, length: int) -> dict[str, str]:
+            return {"text": "from the net\n", "path": path}
+
+        def networked(self, cid: str) -> bool:
+            return self.net
+
+        def holds_import(self, cid: str) -> bool:
+            return False
+
+    dirty = Box(tmp_path / "dirty", sandboxes=Sb(True))
+    out = dirty.run("desk_import_sandbox", sandbox_path="out.md", path="work/out.md")
+    assert out["path"] == "work/out.md" and dirty.ws.was_fetched(DESK, "work/out.md")
+    dirty.ctx["tainted"] = False
+    dirty.ctx["taint_sources"] = []
+    got = dirty.run("desk_read_file", path="work/out.md")
+    assert "from the net" in got["text"] and dirty.ctx["tainted"] is True
+
+    clean = Box(tmp_path / "clean", sandboxes=Sb(False))
+    clean.run("desk_import_sandbox", sandbox_path="out.md", path="work/out.md")
+    assert clean.ws.was_fetched(DESK, "work/out.md") is False
+    clean.ctx["tainted"] = False
+    clean.run("desk_read_file", path="work/out.md")
+    assert clean.ctx["tainted"] is False
 
 
 def test_import_sandbox_description_is_truthful(box: Box) -> None:

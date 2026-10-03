@@ -25,6 +25,8 @@ MAX_SUGGESTIONS = 5
 DENIAL_LIMIT = 3
 # The call that would be this many identical ones in a row (counting those that ran) gets a card no rule lifts.
 DOOM_LIMIT = 3
+# Cards that are the user answering, not granting a tool. Skip-permissions does not settle these.
+STILL_ASK = frozenset({"propose_plan", "desk_ask"})
 HARD_STOP = ("Three calls in a row were refused. Stop attempting variations of them; tell the user what you were trying "
              "to do and ask how they would like to proceed.")
 
@@ -1003,6 +1005,25 @@ def resolve(tool: str, args: dict[str, Any], mode: str, forced: bool, *, rules: 
     elif mode == "ask" and not forced and covered:
         res.mode = "on"
     return res
+
+
+def skip_permissions_on(conv_settings: dict[str, Any] | None, cfg: dict[str, Any] | None) -> bool:
+    """Whether this chat skips approval cards. A stored chat value wins; otherwise the global setting."""
+    conv = conv_settings or {}
+    if "skipPermissions" in conv:
+        return bool(conv["skipPermissions"])
+    return bool((cfg or {}).get("skipPermissions"))
+
+
+def lift_permission_ask(name: str, mode: str, *, skip: bool) -> str:
+    """Turn an ask into a run. A deny is not an ask (the caller keeps the refusal). Off stays off.
+
+    A plan card and a desk question stay: those are the user deciding, not granting a tool. The hardline
+    list is a refusal, so it is untouched here. A doom-loop card is an ask, and this mode does lift it.
+    """
+    if skip and mode == "ask" and name not in STILL_ASK:
+        return "on"
+    return mode
 
 
 class DenialStreak:

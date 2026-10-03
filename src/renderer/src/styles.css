@@ -628,6 +628,7 @@ kbd {
 }
 .chat-control:hover { color: var(--text); background: var(--hover); border-color: var(--border); }
 .composer-wrap:not(.compact) .composer-footer { padding: 6px 8px 0; }
+.skip-perms.on { color: var(--danger); }
 .composer-wrap:not(.compact) .chat-control { font-size: 12px; height: 24px; }
 /* Size each select to its value, so the chevron sits by the text instead of at the end of a fixed box. */
 .chat-control { field-sizing: content; }

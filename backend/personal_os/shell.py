@@ -568,6 +568,25 @@ def register(tb: Any) -> None:
                 return None
         return None
 
+    def _note_shell_copies(ctx: dict[str, Any], since_ns: int) -> None:
+        """A download copied by a shell command stays a download, same as a script or fs_copy."""
+        did = str(ctx.get("desk_id") or "")
+        ws = getattr(tb, "workspace", None)
+        if not did or ws is None or since_ns <= 0:
+            return
+        try:
+            if not ws.fetched_paths(did):
+                return
+            dr = desk_root(ctx)
+            if dr is None:
+                return
+            from .sandbox import WORKSPACE_REPORT_CAP, _workspace_changes
+            rels = _workspace_changes(str(dr), since_ns)
+            # A rename keeps the file's mtime, so `rels` can be empty while the download's old path is gone.
+            ws.carry_fetch_copies(did, None if len(rels) >= WORKSPACE_REPORT_CAP else rels)
+        except Exception:  # noqa: BLE001 - recording a copy must not fail the command that already ran
+            return
+
     def hint(ctx: dict[str, Any]) -> str:
         # Only point at a researcher when this caller may spawn one (a child at the depth cap may not).
         modes = ctx.get("modes")
@@ -645,11 +664,13 @@ def register(tb: Any) -> None:
         if network or unsandboxed:
             # Whatever a networked or unconfined command prints may be third-party text.
             taint(ctx, "shell_run:unsandboxed" if unsandboxed else "shell_run:network")
+        since_ns = time.time_ns()
         try:
             job = await jobs.start(argv, command=command, cwd=str(where), env=env, tmp=tmp,
                                    conversation_id=ctx.get("conversation_id"), run_id=ctx.get("run_id"),
                                    background=bool(background), notify=bool(notify_on_complete), timeout=timeout,
                                    max_background=int(s.get("shellMaxBackground") or 4), on_timeout=on_timeout, egress_token=token)
+            job.since_ns = since_ns
         except ShellError as e:
             jobs.egress.revoke(token)
             shutil.rmtree(tmp, ignore_errors=True)
@@ -692,6 +713,7 @@ def register(tb: Any) -> None:
                                            "shell_poll(job_id) reads new output, shell_kill(job_id) stops it"
                                            + ("; you are told when it finishes." if job.notify else ".")}
             net_report(res)
+            _note_shell_copies(ctx, since_ns)
             return res
         if not unsandboxed and job.exit_code in (65, 71) and text.lstrip().startswith("sandbox-exec:"):
             jobs.sandbox_failed = True
@@ -719,6 +741,7 @@ def register(tb: Any) -> None:
                 row = tb.results.store(ctx["conversation_id"], ctx.get("message_id"), "shell_run", text,
                                        {"type": "string", "chars": len(text)})
                 out["result_id"] = row["id"]
+        _note_shell_copies(ctx, since_ns)
         return out
     spec = ToolSpec("shell_run", "Run a shell command (zsh) on this Mac inside the working folder. It is sandboxed by the OS: the "
                     "disk is readable except secrets, files can be written only inside the working folder, and the network is "
@@ -756,6 +779,7 @@ def register(tb: Any) -> None:
                 taint(ctx, "shell_run:network")
             if seen["blocked"]:
                 out["note"] = (str(out.get("note", "")) + " " + net_blocked_note(seen["blocked"])).strip()
+        _note_shell_copies(ctx, int(getattr(job, "since_ns", 0) or 0))
         return out
     R("shell_poll", ToolSpec("shell_poll", "Read the new output of a background shell job and whether it is still running "
                              "(status running | exited | timed_out | killed | orphaned, and the exit code once it ends). "
@@ -768,6 +792,7 @@ def register(tb: Any) -> None:
         if not job:
             return tool_error(f"No shell job '{job_id}' in this conversation.", field="job_id")
         status = await jobs.kill(job)
+        _note_shell_copies(ctx, int(getattr(job, "since_ns", 0) or 0))
         return {"job_id": job.id, "status": status, "exit_code": job.exit_code}
     R("shell_kill", ToolSpec("shell_kill", "Stop a background shell job: SIGTERM to its whole process group, SIGKILL if it "
                              "has not exited after 3 seconds.", _obj({"job_id": {"type": "string"}}, ["job_id"]),

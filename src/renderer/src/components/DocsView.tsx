@@ -12,7 +12,8 @@ import DiffView from './DiffView'
 import DocTree from './DocTree'
 import { scopeOf } from '../lib/docTree'
 import ResizeHandle from './ResizeHandle'
-import { clip, lines, usePageContext } from '../lib/pageContext'
+import { oneLine } from '../lib/emailAsk'
+import { fenced, lines, usePageContext } from '../lib/pageContext'
 import { PANEL_TABS, parsePanelState, resolveWikiDoc, type PanelState, type PanelTab } from '../lib/docPanel'
 import { DocRecordButton, DocRecorderBar, RecordingsPanel, liveDoc, useDictation, useDocRec } from '../features/docrec'
 import Backlinks from '../features/notes/Backlinks'
@@ -208,8 +209,8 @@ export default function DocsView(): JSX.Element {
   usePageContext(() => (activeDoc
     ? {
         view: 'docs',
-        label: `Doc “${activeDoc.title || 'Untitled'}”`,
-        detail: `Open${dirty ? ', unsaved edits' : ''}. ${projectName ? `Project “${projectName}”` : 'Personal'}${activeDoc.folder ? ` / ${activeDoc.folder}` : ''}. Id \`${activeDoc.id}\`. ${liveHere ? `Being ${liveHere.mode === 'dictate' ? 'dictated into' : 'recorded'} now (recording \`${liveHere.meetingId}\`). ` : ''}${recordingCount ? `${recordingCount} recording${recordingCount === 1 ? '' : 's'} linked to this doc. ` : ''}Revise with doc_edit. The user reviews the diff unless document edits are set to accept all.\n\n\`\`\`markdown\n${clip(body)}\n\`\`\``,
+        label: `Doc “${oneLine(activeDoc.title || 'Untitled', 80)}”`,
+        detail: `Open${dirty ? ', unsaved edits' : ''}. ${projectName ? `Project “${oneLine(projectName, 80)}”` : 'Personal'}${activeDoc.folder ? ` / ${oneLine(activeDoc.folder, 80)}` : ''}. Id \`${oneLine(activeDoc.id, 80)}\`. ${liveHere ? `Being ${liveHere.mode === 'dictate' ? 'dictated into' : 'recorded'} now (recording \`${oneLine(liveHere.meetingId, 80)}\`). ` : ''}${recordingCount ? `${recordingCount} recording${recordingCount === 1 ? '' : 's'} linked to this doc. ` : ''}Revise with doc_edit. The user reviews the diff unless document edits are set to accept all.\n\n${fenced(body)}`,
         refs: [{ kind: 'doc', id: activeDoc.id, name: activeDoc.title }],
         hints: ['Summarise this doc', 'Tighten the writing', 'Pull out the action items as todos']
       }

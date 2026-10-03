@@ -105,6 +105,14 @@ def shell_profile(writable: list[str], network: bool = False, proxy_port: int | 
         wb = None
     if wb:
         late = f"(allow file-read* (subpath {_q(os.path.realpath(os.path.dirname(wb)))}))\n"
+    # A desk workspace lives inside the app data dir, which the deny above covers. Re-allow only those
+    # writable folders, then repeat the secret-name denies so a database or .env still loses.
+    data_real = os.path.realpath(data)
+    inside = list(dict.fromkeys(rp for p in writable if (rp := os.path.realpath(p)).startswith(data_real + os.sep)))
+    if inside:
+        w_in = " ".join(f"(subpath {_q(p)})" for p in inside)
+        late += f"(allow file-read* file-write* {w_in})\n"
+        late += '(deny file-read* (regex #"/\\.env($|\\.)") (regex #"/\\.auth_token$") (regex #"/personal-os\\.db"))\n'
     return f"""(version 1)
 (deny default)
 {net}

@@ -283,14 +283,23 @@ RECAP_SYSTEM = """You write the user's daily recap for the home screen of their 
 **Since yesterday** (what happened: chats, things learned, completed todos), **Today** (calendar, due todos, unread mail worth attention), **Suggested focus** (3 bullets max). Under 180 words. Skip empty sections. Never invent facts."""
 
 
+def _line(text: Any, limit: int = 200) -> str:
+    return " ".join(str(text or "").replace("\r", " ").split())[:limit]
+
+
+def _fence(text: str) -> str:
+    return "```\n" + str(text or "").replace("```", "'''") + "\n```"
+
+
 async def generate_widget_code(settings: dict[str, Any], model: str, prompt: str, sources: list[dict[str, Any]], base_url: str, width: int, height: int, samples: dict[str, Any]) -> str:
     src_lines = []
     for s in sources:
         sample = json.dumps(samples.get(s["id"]), ensure_ascii=False, default=str)
         if len(sample) > 1800:
             sample = sample[:1800] + "…"
-        src_lines.append(f"- {s['name']} ({s['kind']}): fetch(\"{base_url}/sources/{s['id']}/fetch\")\n  description: {s.get('description') or '-'}\n  sample response: {sample}")
-    user = f"Widget request: {prompt}\n\nSize: about {width * 340}px wide × {height}px tall.\n\nData sources:\n" + ("\n".join(src_lines) if src_lines else "(none: build a static or self-computed widget)")
+        desc = _line(s.get("description"), 300) or "-"
+        src_lines.append(f"- {_line(s.get('name'), 80)} ({_line(s.get('kind'), 40)}): fetch(\"{base_url}/sources/{s['id']}/fetch\")\n  description: {desc}\n  sample response: {sample}")
+    user = f"Widget request:\n{_fence(prompt)}\n\nSize: about {width * 340}px wide × {height}px tall.\n\nData sources:\n" + ("\n".join(src_lines) if src_lines else "(none: build a static or self-computed widget)")
     code = await llm.complete(settings, model, [{"role": "system", "content": WIDGET_SYSTEM}, {"role": "user", "content": user}])
     code = re.sub(r"^```(?:html)?\s*|\s*```$", "", code.strip(), flags=re.I | re.M).strip()
     if "<html" not in code.lower():
@@ -302,7 +311,9 @@ async def generate_summary(settings: dict[str, Any], model: str, prompt: str, da
     blob = json.dumps(data, ensure_ascii=False, default=str)
     if len(blob) > 24000:
         blob = blob[:24000] + "…(truncated)"
-    return await llm.complete(settings, model, [{"role": "system", "content": SUMMARY_SYSTEM}, {"role": "user", "content": f"Focus: {prompt or 'what matters most'}\n\nData (JSON):\n{blob}"}])
+    focus = prompt.strip() if isinstance(prompt, str) and prompt.strip() else "what matters most"
+    return await llm.complete(settings, model, [{"role": "system", "content": SUMMARY_SYSTEM},
+                                                 {"role": "user", "content": f"Focus:\n{_fence(focus)}\n\nData (JSON):\n{blob}"}])
 
 
 async def generate_recap(settings: dict[str, Any], model: str, facts: dict[str, Any]) -> str:

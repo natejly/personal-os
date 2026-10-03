@@ -47,6 +47,8 @@ RESERVED_DIRS = (BASELINE_DIR, TRASH_DIR)
 DESK_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 SNIFF_BYTES = 8192
 WRITE_MODES = ("create", "overwrite", "append")
+# Formats whose extracted text, written out under a new name, is still the download.
+_EXTRACT_SUFFIXES = frozenset({".pdf", ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt", ".odt", ".rtf"})
 
 
 class WorkspaceError(Exception):
@@ -154,6 +156,126 @@ class Workspace:
 
     def _rel_of(self, desk_id: str, path: Path) -> str:
         return path.relative_to(self.desk_root(desk_id).resolve()).as_posix()
+
+    def _fetch_ledger(self, desk_id: str) -> Path:
+        """Outside the workspace, so a desk cannot delete the record of a file it downloaded."""
+        name = self.desk_root(desk_id).name
+        return self.root.parent / "cowork-fetched" / name
+
+    def _fetch_rows(self, desk_id: str) -> list[tuple[str, str]]:
+        """Ledger lines are `path` or `path\\tsha256`. A hash lets a rename be recognized after the old path is gone."""
+        path = self._fetch_ledger(desk_id)
+        if not path.is_file():
+            return []
+        rows: list[tuple[str, str]] = []
+        for ln in path.read_text().splitlines():
+            ln = ln.strip()
+            if not ln:
+                continue
+            rel, _, digest = ln.partition("\t")
+            rows.append((rel.strip(), digest.strip()))
+        return rows
+
+    def note_fetch(self, desk_id: str, rel: str) -> None:
+        rel = self._rel_of(desk_id, self.resolve_in(desk_id, rel))
+        digest = ""
+        try:
+            src = self.resolve_in(desk_id, rel)
+            if src.is_file():
+                data = src.read_bytes()
+                if data:
+                    digest = hashlib.sha256(data).hexdigest()
+        except OSError:
+            digest = ""
+        path = self._fetch_ledger(desk_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        rows = [(r, d) for r, d in self._fetch_rows(desk_id) if r != rel]
+        rows.append((rel, digest))
+        path.write_text("".join(f"{r}\t{d}\n" if d else f"{r}\n" for r, d in sorted(rows)))
+
+    def was_fetched(self, desk_id: str, rel: str) -> bool:
+        try:
+            rel = self._rel_of(desk_id, self.resolve_in(desk_id, rel))
+        except WorkspaceError:
+            return False
+        return any(r == rel for r, _ in self._fetch_rows(desk_id))
+
+    def fetched_paths(self, desk_id: str) -> list[str]:
+        """Relative paths this desk downloaded or copied out of a networked sandbox."""
+        return [r for r, _ in self._fetch_rows(desk_id)]
+
+    def carry_fetch_copies(self, desk_id: str, rels: list[str] | None = None) -> list[str]:
+        """Mark workspace paths that now hold a download's bytes, or the text extracted from one.
+
+        `desk_write_file` is not the only way a file appears: a script, a copy, an edit, or a rename
+        can put the same bytes under a new name. `rels` is those paths; None walks the workspace.
+        A missing ledger path widens the walk, because a rename keeps the file's timestamp."""
+        noted: list[str] = []
+        rows = self._fetch_rows(desk_id)
+        if not rows:
+            return noted
+        digests = {d for _, d in rows if d}
+        missing = False
+        blobs: list[tuple[str, bytes]] = []
+        for src_rel, _digest in rows:
+            try:
+                src = self.resolve_in(desk_id, src_rel)
+            except WorkspaceError:
+                missing = True
+                continue
+            if not src.is_file():
+                missing = True
+                continue
+            try:
+                blobs.append((src_rel, src.read_bytes()))
+            except OSError:
+                missing = True
+                continue
+        if missing:
+            rels = None
+        if not blobs and not digests:
+            return noted
+        if rels is None:
+            rels = [e["path"] for e in self.tree(desk_id) if not e.get("is_dir")]
+        extract = None
+        for rel in rels:
+            try:
+                if self.was_fetched(desk_id, rel):
+                    continue
+                dest = self.resolve_in(desk_id, rel)
+            except WorkspaceError:
+                continue
+            if not dest.is_file():
+                continue
+            try:
+                data = dest.read_bytes()
+            except OSError:
+                continue
+            if not data:
+                continue
+            if hashlib.sha256(data).hexdigest() in digests:
+                self.note_fetch(desk_id, rel)
+                noted.append(rel)
+                continue
+            if any(raw == data and src_rel != rel for src_rel, raw in blobs):
+                self.note_fetch(desk_id, rel)
+                noted.append(rel)
+                continue
+            for src_rel, raw in blobs:
+                if src_rel == rel or PurePosixPath(src_rel).suffix.lower() not in _EXTRACT_SUFFIXES:
+                    continue
+                if extract is None:
+                    from . import extract_text as xt
+                    extract = xt.extract_text
+                try:
+                    shown = extract(PurePosixPath(src_rel).name, raw)
+                except Exception:  # noqa: BLE001 - a reader failure must not fail the write
+                    continue
+                if shown and shown.encode("utf-8") == data:
+                    self.note_fetch(desk_id, rel)
+                    noted.append(rel)
+                    break
+        return noted
 
     def _baseline_of(self, desk_id: str, rel: str) -> Path:
         root = self.desk_root(desk_id).resolve()

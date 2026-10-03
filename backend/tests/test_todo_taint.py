@@ -42,6 +42,13 @@ def test_a_meeting_todo_taints_and_a_local_one_does_not() -> None:
     assert "todo_list" in ctx2.get("taint_sources", [])
     assert box.gate("todo_delete", "on", ctx2) == "ask"
 
+    for source in ("email", "google"):
+        store = Todos(Database(tempfile.mkdtemp()))
+        store.create("Reply about the invoice", source=source)
+        ctx3: dict = {"project_id": None}
+        asyncio.run(_box(store).call("todo_list", {}, ctx3))
+        assert ctx3.get("tainted") is True, source
+
 
 if __name__ == "__main__":
     test_a_meeting_todo_taints_and_a_local_one_does_not()

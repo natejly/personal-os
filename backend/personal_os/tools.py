@@ -41,7 +41,7 @@ from . import audiocap, stt
 from .learn import SELF_LABELS, SKILL_STATUSES, induce_skill, run_transcript
 from .microvm import Sandboxes
 from .repos import Documents, Graph, Memories
-from .sandbox import run_python
+from .sandbox import WORKSPACE_REPORT_CAP, run_python
 
 ToolFn = Callable[..., Awaitable[Any]]
 log = logging.getLogger(__name__)
@@ -715,12 +715,14 @@ class Toolbox:
         """Effective mode for one call. Untrusted content forces external tools, and anything that writes lasting text, to ask.
 
         A tainted run also asks before a web fetch or search (the address or query can carry what was
-        just read), before booking unattended work, and before running code in a networked sandbox.
+        just read), before booking unattended work, before running code in a networked sandbox, and
+        before cancelling a queued email. Listing that hold does not ask.
         """
         spec = self.specs.get(name)
+        cancel_send = name == "gmail_outbox" and isinstance(args, dict) and args.get("action") == "cancel"
         if spec and mode == "on" and ctx.get("tainted") and (
                 spec.danger in ("external", "network", "schedules") or name in PROMPT_WRITES
-                or self._networked_sandbox_call(spec, ctx)):
+                or self._networked_sandbox_call(spec, ctx) or cancel_send):
             return "ask"
         if mode == "on" and args is not None and self.forces_ask(name, args):
             return "ask"
@@ -1006,11 +1008,26 @@ class Toolbox:
             env = getattr(self, "work_env", None)
             py = env.python_path() if env is not None else None
             secs = max(1, min(int(timeout), 120))
+            async def _carry(result: Any) -> None:
+                if not wroot or not isinstance(result, dict):
+                    return
+                changed = result.get("workspace_files") or []
+                if not isinstance(changed, list):
+                    return
+                rels = None if len(changed) >= WORKSPACE_REPORT_CAP else [str(r) for r in changed]
+                try:
+                    await asyncio.to_thread(self.workspace.carry_fetch_copies, desk_id, rels)
+                except (WorkspaceError, OSError):
+                    pass
+
             if tools:  # programmatic tool calling: the script drives app tools over a socket (toolbridge.py)
                 from . import toolbridge
                 runner = (lambda c, t, _py, bridge: run_python(c, t, py, bridge, workspace=wroot)) if (wroot or py) else run_python
-                return await toolbridge.run(self, ctx, code, timeout, list(tools), runner)
+                bridged = await toolbridge.run(self, ctx, code, timeout, list(tools), runner)
+                await _carry(bridged)
+                return bridged
             out = await asyncio.to_thread(run_python, code, secs, py, None, wroot)
+            await _carry(out)
             if wroot:
                 use = self.workspace.usage(desk_id)
                 if use["files"] > self.workspace.max_files or use["bytes"] > self.workspace.max_total_bytes:
@@ -1791,7 +1808,7 @@ def _register_activity(self: Toolbox) -> None:
                          "headline": s["headline"], "summary": s["body"], "apps": s["apps"]} for s in summaries],
         }
     R("activity_recent", ToolSpec("activity_recent", "What the user has actually been doing on their computer recently, from the local activity monitor: a live line about the current window, the durable profile of how they work, and the summarized periods. Empty when the monitor is off. Use it when the user asks what they were doing, where their time went, or to ground advice in their real workflow.",
-        _obj({"hours": {"type": "number", "default": 8}}, []), activity_recent, "activity"))
+        _obj({"hours": {"type": "number", "default": 8}}, []), activity_recent, "activity", taints=True))
 
     async def activity_access(ctx: dict[str, Any]) -> Any:
         """Read-only: which macOS permissions the monitor has, so the assistant can answer "why is
@@ -1816,13 +1833,13 @@ def _register_activity(self: Toolbox) -> None:
         cannot accept one on the user's behalf: applying is a button in the Activity panel."""
         return self.activity.insights.brief(limit=int(limit))
     R("activity_insights", ToolSpec("activity_insights", "The habits the activity monitor has noticed about how this person works, the patterns behind them, and the automation suggestions it has on offer but the user has not accepted yet. Use it when the user asks how they could save time, what you have noticed about their workflow, or what to automate - and when you are about to suggest a workflow change, so you can ground it in their real patterns instead of guessing. Read-only: never treat a suggestion as approved.",
-        _obj({"limit": {"type": "integer", "default": 5}}, []), activity_insights, "activity"))
+        _obj({"limit": {"type": "integer", "default": 5}}, []), activity_insights, "activity", taints=True))
 
     async def activity_report(ctx: dict[str, Any], days: int = 7) -> Any:
         from . import activity_categories as cats
         return cats.report_for(self.activity, max(1, min(90, int(days))))
     R("activity_report", ToolSpec("activity_report", "Where the user's focused computer time went by category (Work/Coding, Comms, Social/Media...) over the last few days, with a productivity score from -2 to 2 and the apps that are still uncategorized. Computed locally from the activity monitor; read-only. Use it for 'how was my week' or 'how much time did I spend on X'.",
-        _obj({"days": {"type": "integer", "default": 7}}, []), activity_report, "activity"))
+        _obj({"days": {"type": "integer", "default": 7}}, []), activity_report, "activity", taints=True))
 
     async def activity_pause(ctx: dict[str, Any], minutes: float = 30.0) -> Any:
         return {"paused_until": self.activity.pause(minutes)["pause_until"]}
@@ -2589,6 +2606,19 @@ def _register_cowork(self: Toolbox) -> None:
         except (WorkspaceError, OSError, KeyError):
             pass
 
+    def _taint_if_fetched(ctx: dict[str, Any], workspace: Any, desk_id: str, path: str) -> None:
+        """A file this desk downloaded is still third-party text after the chat is cleared."""
+        try:
+            fetched = workspace.was_fetched(desk_id, path)
+        except Exception:  # noqa: BLE001 - a missing ledger means the file was not downloaded
+            return
+        if not fetched:
+            return
+        ctx["tainted"] = True
+        sources = ctx.setdefault("taint_sources", [])
+        if "desk_read_file" not in sources:
+            sources.append("desk_read_file")
+
     async def desk_read_file(ctx: dict[str, Any], path: str, offset: int = 0, length: int = 6000) -> Any:
         desk_id = _id(ctx, "desk_read_file")
         if not isinstance(desk_id, str):
@@ -2604,6 +2634,7 @@ def _register_cowork(self: Toolbox) -> None:
             except WorkspaceError as e:
                 return _fail("desk_read_file", e)
             _note_read(ctx, desk_id, path, out)
+            _taint_if_fetched(ctx, ws, desk_id, path)
             return out
         # Not plain text: PDF, office files, pictures, anything with NULs. extract_text returns a marker when it
         # cannot read a format, which is passed on rather than hidden.
@@ -2619,6 +2650,7 @@ def _register_cowork(self: Toolbox) -> None:
             out["next_offset"] = end
         if kind == "image":
             out["note"] = "This is a picture: use view_image to look at it. The text above is only what could be read off it."
+        _taint_if_fetched(ctx, ws, desk_id, path)
         return out
     # Deliberately not taints=True: the workspace holds what this agent itself wrote, and marking it
     # untrusted would force every later external step of its own approved plan back to a card.
@@ -2636,6 +2668,10 @@ def _register_cowork(self: Toolbox) -> None:
             res = ws.write(desk_id, path, content, mode)
         except WorkspaceError as e:
             return _fail("desk_write_file", e)
+        try:
+            ws.carry_fetch_copies(desk_id, [str(res.get("path") or path)])
+        except (WorkspaceError, OSError):
+            pass
         # The agent knows this file now: it just wrote it, so fs_edit needs no separate read first.
         try:
             p = ws.resolve_in(desk_id, res["path"])
@@ -2800,15 +2836,23 @@ def _register_cowork(self: Toolbox) -> None:
                               field="sandbox_path", expected="a text file in the sandbox",
                               alternative=ALTERNATIVE["desk_import_sandbox"])
         # Conditional taint, the _mark() pattern from _register_sandbox: a networked sandbox may have
-        # fetched these bytes from the internet, so the import carries their taint. ToolSpec.taints is
-        # static and the same call is clean when the sandbox has no network, so it is set by hand.
-        if sb.networked(ctx["conversation_id"]):
+        # fetched these bytes from the internet, and an imported library file is third-party text too.
+        # ToolSpec.taints is static and the same call is clean otherwise, so it is set by hand.
+        # The written path is recorded outside the workspace, so a later desk_read_file taints again
+        # after the chat is cleared.
+        cid = ctx.get("conversation_id") or ""
+        untrusted = bool(cid) and (sb.networked(cid) or sb.holds_import(cid))
+        if untrusted:
             ctx["tainted"] = True
-            ctx.setdefault("taint_sources", []).append("desk_import_sandbox")
+            sources = ctx.setdefault("taint_sources", [])
+            if "desk_import_sandbox" not in sources:
+                sources.append("desk_import_sandbox")
         try:
             res = ws.write(desk_id, path, text, "overwrite")
         except WorkspaceError as e:
             return _fail("desk_import_sandbox", e)
+        if untrusted:
+            ws.note_fetch(desk_id, str(res.get("path") or path))
         res["from_sandbox"] = out.get("path", sandbox_path)
         if out.get("truncated"):  # say so rather than hand over a prefix as if it were the file
             res["truncated"] = True
@@ -2898,6 +2942,7 @@ def _register_cowork(self: Toolbox) -> None:
                 with contextlib.suppress(OSError):
                     tmp.unlink()
         saved = ws._rel_of(desk_id, dest)
+        ws.note_fetch(desk_id, saved)
         suffix = PurePosixPath(saved).suffix.lower()
         hint = ("view_image looks at a picture" if suffix in PICTURE_EXT or ctype.startswith("image/")
                 else "desk_read_file reads it (PDFs and office files come back as extracted text)")

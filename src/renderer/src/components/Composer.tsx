@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { ArrowUp, Square, Paperclip } from 'lucide-react'
 import PlanModeToggle from './PlanModeToggle'
+import SkipPermissionsToggle from './SkipPermissionsToggle'
 import { uploadContextNote } from '../lib/uploadNote'
 import { useStore, useIsStreaming } from '../store'
 import SmartTextarea from './SmartTextarea'
@@ -113,6 +114,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
           only for the focused conversation, so several mounted chat widgets do not all cycle at once. */}
       <div className="composer-footer">
         <PlanModeToggle conversationId={conversationId} />
+        <SkipPermissionsToggle conversationId={conversationId} />
         {footer}
       </div>
     </div>

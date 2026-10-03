@@ -1464,6 +1464,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         page = used.get("page") or {}
         if isinstance(page, dict) and (page.get("detail") or page.get("selection")):
             ctx_taints.append("page")
+        # A chat can skip approval cards (its own switch, else the global one). A job has nobody watching,
+        # so it keeps unattendedApprovals and never inherits this.
+        skip_permissions = permrules.skip_permissions_on(conv["settings"], cfg) and not (
+            run is not None and run.kind in UNATTENDED_KINDS)
         tool_ctx: dict[str, Any] = {
             "project_id": conv["project_id"], "conversation_id": conv_id,
             # Taint is sticky for the whole conversation: the injected instructions live on in the replayed history, so
@@ -1475,6 +1479,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             # Set for a scheduled job: Toolbox.call refuses every outward-facing tool outright, and _call_tool has
             # already turned the call into a proposals row before it got that far.
             "proposal_only": proposal_only(run), "message_id": am["id"],
+            "skip_permissions": skip_permissions,
             # What desk_deliver/desk_done record an output or a note against, so Accept can name the run
             # that wrote a file instead of guessing with the latest one.
             # Where artifact_create files what it makes (artifacts.run_id), so it can be found again from the run.
@@ -1501,6 +1506,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             """A card for one call a run_python script made through the tool bridge. The script waits; the reply does not
             end. One-shot only: an 'always' answer is treated as 'allow' here, never as a standing grant."""
             nonlocal bridge_n
+            if skip_permissions:
+                return True
             if run is None or run.store is None:
                 return False
             bridge_n += 1
@@ -2028,6 +2035,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     # A background run has nobody to answer a card, and only external calls can become proposals.
                     # Opening one here would park the run forever (and every later fire behind it).
                     pre = tools.denied(c["name"], "not available in a background run: it needs an approval and nobody is watching")
+                # Dangerously skip permissions: an ask runs. A refusal already in `pre` stays a refusal.
+                # propose_plan and desk_ask stay cards (lift_permission_ask). Jobs never set the flag.
+                if skip_permissions and pre is None and not perm.refusal:
+                    mode = permrules.lift_permission_ask(c["name"], mode, skip=True)
                 asks = mode == "ask" and claimed is None and pre is None
                 if asks and desk_id and c["name"] != PLAN_TOOL and run_store.claim_parked(desk_id, c["name"], args, uid):
                     # The user already said yes to exactly this call on a card an earlier turn let go

@@ -6,7 +6,8 @@ import ChatPulse from './ChatPulse'
 import MemoryPanel from './MemoryPanel'
 import DocumentsView from './DocumentsView'
 import SendToSpace from './SendToSpace'
-import { lines, usePageContext } from '../lib/pageContext'
+import { oneLine } from '../lib/emailAsk'
+import { fenced, lines, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
 
 type Tab = 'chats' | 'instructions' | 'knowledge' | 'memory'
@@ -26,10 +27,10 @@ export default function ProjectView(): JSX.Element {
   usePageContext(() => (project
     ? {
         view: 'project',
-        label: `Project “${project.name}”`,
+        label: `Project “${oneLine(project.name, 80)}”`,
         detail: [
-          `Project \`${project.id}\`${project.description ? ` — ${project.description}` : ''}.`,
-          project.system_prompt ? `Its instructions:\n${project.system_prompt.slice(0, 2000)}` : '',
+          `Project \`${project.id}\`${project.description ? ` — ${oneLine(project.description, 300)}` : ''}.`,
+          project.system_prompt ? `Its instructions:\n${fenced(project.system_prompt, 2000)}` : '',
           `Chats in it:\n${lines(conversations.filter((c) => c.project_id === project.id), (c) => `${c.title} (\`${c.id}\`)`, 20)}`
         ].filter(Boolean).join('\n\n'),
         refs: [{ kind: 'project', id: project.id, name: project.name }],

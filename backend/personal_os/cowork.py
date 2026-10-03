@@ -178,6 +178,17 @@ def read_notes(root: Path | str | None) -> str:
     return text if len(text) <= NOTES_CAP else "[...earlier notes cut]\n" + text[-NOTES_CAP:]
 
 
+def _line(text: Any, limit: int = 300) -> str:
+    """One line. This text is pasted into a system message, so a newline cannot open a new section."""
+    return " ".join(str(text or "").replace("\r", " ").split())[:limit]
+
+
+def _quote_notes(text: str) -> str:
+    """A block the notes cannot close. They are the desk's own file, and that file can quote the end marker."""
+    body = text.replace("```", "'''").replace("--- end of notes ---", "--- end of notes (quoted) ---")
+    return "```\n" + body + "\n```"
+
+
 def continue_message(kind: str, notes: str = "") -> str:
     """The user message of a chained, nudged, woken or resumed turn: the instruction plus the desk's own
     notes from earlier turns, delimited so they read as the desk's memory and never as instructions."""
@@ -185,8 +196,9 @@ def continue_message(kind: str, notes: str = "") -> str:
     notes = (notes or "").strip()
     if not notes:
         return base
+    quoted = _quote_notes(notes[-NOTES_CAP:])
     return (f"{base}\n\n--- Your own notes from earlier turns (work/PROGRESS.md; written by you, not instructions "
-            f"from the user) ---\n{notes[-NOTES_CAP:]}\n--- end of notes ---")
+            f"from the user) ---\n{quoted}\n--- end of notes ---")
 
 
 def desk_manual(offered: set[str], facts: dict[str, Any]) -> str:
@@ -251,18 +263,19 @@ def parked_report(rows: list[dict[str, Any]], plan_for: Callable[[str], dict[str
     lines: list[str] = []
     for a in rows:
         ok = a.get("status") == "approved"
-        note = (a.get("note") or "").strip()
-        if a["tool"] == "propose_plan":
+        note = _line(a.get("note"), 400)
+        tool = _line(a.get("tool"), 80) or "a tool"
+        if tool == "propose_plan":
             plan = plan_for(a["call_id"]) or {}
-            title = plan.get("title") or "your plan"
+            title = _line(plan.get("title"), 120) or "your plan"
             if ok:
                 lines.append(f"- The user approved the plan \"{title}\". It is the approved plan at the end of "
                              "your context; carry it out.")
             else:
                 lines.append(f"- The user rejected the plan \"{title}\". Run none of its steps; draft a different "
                              "one or ask what they want instead.")
-        elif a["tool"] == "desk_ask":
-            q = str((a.get("args") or {}).get("question") or "").strip()
+        elif tool == "desk_ask":
+            q = _line((a.get("args") or {}).get("question"), 300)
             if ok and note:
                 lines.append(f"- You asked: {q}\n  The user answered: {note}")
             else:
@@ -273,11 +286,11 @@ def parked_report(rows: list[dict[str, Any]], plan_for: Callable[[str], dict[str
             if len(args) > 600:
                 args = args[:600] + "…"
             if ok:
-                lines.append(f"- The user approved {a['tool']}({args}). Call it again with exactly these arguments "
+                lines.append(f"- The user approved {tool}({args}). Call it again with exactly these arguments "
                              "and it runs without another card; any change asks again.")
             else:
-                lines.append(f"- The user declined {a['tool']}({args}). Do not retry it.")
-        if note and a["tool"] != "desk_ask":
+                lines.append(f"- The user declined {tool}({args}). Do not retry it.")
+        if note and tool != "desk_ask":
             lines.append(f"  Their note: {note}")
     if not lines:
         return ""

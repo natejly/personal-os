@@ -640,6 +640,15 @@ def mine(*, events: list[dict[str, Any]], days: list[dict[str, Any]],
     }
 
 
+def _line(text: Any, limit: int = 200) -> str:
+    """One line. A title or a profile sits in the insight prompt, so a newline cannot open a new section."""
+    return " ".join(str(text or "").replace("\r", " ").split())[:limit]
+
+
+def _fence(text: str) -> str:
+    return "```\n" + str(text or "").replace("```", "'''") + "\n```"
+
+
 def digest(pat: dict[str, Any]) -> str:
     """The mined patterns as the compact text the model is asked to reason over."""
     w = pat.get("window") or {}
@@ -652,14 +661,14 @@ def digest(pat: dict[str, Any]) -> str:
         "Patterns (id | confidence | what):",
     ]
     for p in pat.get("patterns") or []:
-        lines.append(f"- {p['id']} | {p['confidence']:.2f} | {p['title']} - {p['detail']}")
-    apps = ", ".join(f"{a['app']} {_mins(a['seconds'])}" for a in (pat.get("apps") or [])[:8])
+        lines.append(f"- {p['id']} | {p['confidence']:.2f} | {_line(p.get('title'), 160)} - {_line(p.get('detail'), 300)}")
+    apps = ", ".join(f"{_line(a['app'], 80)} {_mins(a['seconds'])}" for a in (pat.get("apps") or [])[:8])
     if apps:
         lines += ["", f"Time by app: {apps}"]
-    cats = ", ".join(f"{c['path']} {_mins(c['seconds'])}" for c in (pat.get("categories") or []) if "/" not in c["path"])
+    cats = ", ".join(f"{_line(c['path'], 80)} {_mins(c['seconds'])}" for c in (pat.get("categories") or []) if "/" not in str(c.get("path") or ""))
     if cats:
         lines.append(f"Time by category: {cats}")
-    hosts = ", ".join(f"{h['host']} x{h['visits']}" for h in (pat.get("hosts") or [])[:8])
+    hosts = ", ".join(f"{_line(h['host'], 80)} x{h['visits']}" for h in (pat.get("hosts") or [])[:8])
     if hosts:
         lines.append(f"Sites (host only): {hosts}")
     return "\n".join(lines)
@@ -744,7 +753,7 @@ def fallback(pat: dict[str, Any], taken: set[str]) -> dict[str, Any]:
     for p in pat.get("patterns") or []:
         k, ev = p["kind"], p["evidence"]
         if k == "thrash" and len(ev.get("apps") or []) == 2:
-            a, b = ev["apps"]
+            a, b = _line(ev["apps"][0], 80), _line(ev["apps"][1], 80)
             out.append({
                 "key": _slug(f"batch-{a}-{b}", "sug-"), "kind": "automation",
                 "title": f"Batch the {b} trips instead of {ev['round_trips']} round trips",
@@ -761,7 +770,7 @@ def fallback(pat: dict[str, Any], taken: set[str]) -> dict[str, Any]:
                                      f"day instead of every few minutes."},
             })
         elif k == "site_habit":
-            host = ev.get("host", "")
+            host = _line(ev.get("host", ""), 80)
             out.append({
                 "key": _slug(f"digest-{host}", "sug-"), "kind": "automation",
                 "title": f"Turn the {host} habit into one digest",
@@ -794,17 +803,19 @@ def fallback(pat: dict[str, Any], taken: set[str]) -> dict[str, Any]:
                                         f"{(b1 + 1) % 24:02d}:00; schedule demanding work there and meetings elsewhere.",
                            "confidence": p["confidence"], "evidence": [p["id"]], "supersedes": ""})
         elif k == "category_share":
-            habits.append({"key": _slug(f"habit-category-{ev.get('category', '')}"), "kind": "fact",
+            category = _line(ev.get("category", ""), 80)
+            habits.append({"key": _slug(f"habit-category-{category}"), "kind": "fact",
                            "statement": f"About {int((ev.get('share') or 0) * 100)}% of the user's focused screen "
-                                        f"time goes to {ev.get('category')}.",
+                                        f"time goes to {category}.",
                            "confidence": p["confidence"], "evidence": [p["id"]], "supersedes": ""})
         elif k == "distraction_drift":
             band = ev.get("band")
             when = f"{band[0]:02d}:00-{(band[1] + 1) % 24:02d}:00" if band else "the evening"
+            cats = ", ".join(line for c in (ev.get("categories") or []) if (line := _line(c, 40)))
             out.append({
                 "key": "sug-guard-drift", "kind": "hygiene",
                 "title": f"Guard {when} against drifting",
-                "detail": f"Over a third of focus time slides to {', '.join(ev.get('categories') or [])} around "
+                "detail": f"Over a third of focus time slides to {cats} around "
                           f"then. Decide the plan for that window ahead of time - a calendar block, or a todo "
                           f"picked in advance - so the default is not the feed.",
                 "why": f"{ev.get('days')} days where the low-value categories passed 30% of focus time.",
@@ -815,7 +826,7 @@ def fallback(pat: dict[str, Any], taken: set[str]) -> dict[str, Any]:
                                      f"start with at that time and put a calendar block on it."},
             })
         elif k == "topic":
-            topic = ev.get("topic", "")
+            topic = _line(ev.get("topic", ""), 80)
             out.append({
                 "key": _slug(f"project-{topic}", "sug-"), "kind": "automation",
                 "title": f"Give \"{topic}\" a project",
@@ -870,13 +881,14 @@ def fallback(pat: dict[str, Any], taken: set[str]) -> dict[str, Any]:
             })
         elif k == "app_routine" and ev.get("band"):
             b0, b1 = ev["band"]
-            habits.append({"key": _slug(f"habit-{ev.get('app', '')}-window"), "kind": "fact",
-                           "statement": f"User spends most of their {ev.get('app')} time between {b0:02d}:00 and "
+            app = _line(ev.get("app", ""), 80)
+            habits.append({"key": _slug(f"habit-{app}-window"), "kind": "fact",
+                           "statement": f"User spends most of their {app} time between {b0:02d}:00 and "
                                         f"{(b1 + 1) % 24:02d}:00.",
                            "confidence": p["confidence"], "evidence": [p["id"]], "supersedes": ""})
         elif k == "input_load":
             habits.append({"key": "habit-primary-tool", "kind": "fact",
-                           "statement": f"User does most of their writing in {ev.get('app')}.",
+                           "statement": f"User does most of their writing in {_line(ev.get('app', ''), 80)}.",
                            "confidence": p["confidence"], "evidence": [p["id"]], "supersedes": ""})
     return {"habits": [h for h in habits if h["key"] not in taken][:8],
             "suggestions": [s for s in out if s["key"] not in taken]}
@@ -1009,10 +1021,12 @@ class Insights:
                 tools = ", ".join(sorted(self.tools_fn()))[:1200]
             except Exception:  # noqa: BLE001
                 tools = ""
-        already = [f"- {r['key']} ({r['status']}): {r['title']}" for r in self.list_suggestions(include_all=True)]
+        already = [f"- {_line(r['key'], 60)} ({_line(r['status'], 20)}): {_line(r['title'], 120)}"
+                   for r in self.list_suggestions(include_all=True)]
         parts = [
             "## Mined patterns", digest(pat),
-            "", "## How they work (profile built from the same data)", prof or "(none yet)",
+            "", "## How they work (profile built from the same data)",
+            _fence(prof) if prof.strip() else "(none yet)",
             "", "## What this app can do", SURFACE,
         ]
         if tools:
@@ -1129,7 +1143,7 @@ class Insights:
         existing = {r["key"]: r for r in self.list_suggestions(include_all=True)}
         seen: set[str] = set()
         for raw in _items(items, max(1, cap)):
-            title = str(raw.get("title") or "").strip()[:120]
+            title = _line(raw.get("title"), 120)
             if not title:
                 continue
             key = _slug(str(raw.get("key") or title), "sug-" if not str(raw.get("key") or "").startswith("sug") else "")
@@ -1143,9 +1157,15 @@ class Insights:
             if atype not in ("prompt", "todo", "memory", "setting", "none"):
                 atype = "none"
             action = {**(action or {}), "type": atype}
+            if atype == "prompt":
+                action["prompt"] = _line(action.get("prompt"), 1000)
+            elif atype == "todo":
+                action["title"] = _line(action.get("title") or title, 200)
+            elif atype == "memory":
+                action["content"] = _line(action.get("content"), 1000)
             fields = (
-                kind, title, str(raw.get("detail") or "")[:1200], str(raw.get("why") or "")[:600],
-                str(raw.get("impact") or "")[:200],
+                kind, title, _line(raw.get("detail"), 1200), _line(raw.get("why"), 600),
+                _line(raw.get("impact"), 200),
                 (str(raw.get("effort") or "low") if str(raw.get("effort") or "low") in ("low", "medium", "high") else "low"),
                 json.dumps(action), json.dumps([str(x) for x in (raw.get("evidence") if isinstance(raw.get("evidence"), list) else [])][:8]),
                 _model_conf(raw.get("confidence")),
@@ -1206,18 +1226,18 @@ class Insights:
         result: dict[str, Any] = {"type": atype}
         if atype == "todo":
             todo = self.todos.create(
-                title=str(action.get("title") or s["title"])[:200],
-                notes=f"{s['detail']}\n\nWhy: {s['why']}".strip(), priority=2, source="activity-insight",
+                title=_line(action.get("title") or s["title"], 200),
+                notes=_line(f"{s['detail']} Why: {s['why']}", 1500), priority=2, source="activity-insight",
             )
             result["todo"] = todo
             self.set_status(sid, "done", f"todo created: {todo['id']}")
         elif atype == "memory":
-            content = str(action.get("content") or s["detail"])[:1000]
+            content = _line(action.get("content") or s["detail"], 1000)
             mem = self.memories.create(None, content, kind="preference", source=MEMORY_SOURCE)
             result["memory"] = mem
             self.set_status(sid, "done", f"memory created: {mem['id']}")
         elif atype == "prompt":
-            result["prompt"] = str(action.get("prompt") or f"{s['title']}. {s['detail']}")
+            result["prompt"] = _line(action.get("prompt") or f"{s['title']}. {s['detail']}", 1500)
             self.set_status(sid, "accepted", "sent to chat")
         else:
             result["how"] = str(action.get("how") or s["detail"])

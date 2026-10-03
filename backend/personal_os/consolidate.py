@@ -23,6 +23,11 @@ from .repos import ALL, Graph, Memories
 
 log = logging.getLogger("personal_os")
 
+
+def _line(text: Any, limit: int = 2000) -> str:
+    """One line. A memory or a label sits in the proposal prompt, so a newline cannot open a new group."""
+    return " ".join(str(text or "").replace("\r", " ").split())[:limit]
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS memory_proposals (
   id TEXT PRIMARY KEY,
@@ -217,10 +222,10 @@ class Consolidator:
                     alias[tag] = it
                     group_of[tag] = gi
                     if cand["type"] == "entity":
-                        lines.append(f"  [{tag}] {it['label']} ({it['type']}, {it['degree']} relations)")
+                        lines.append(f"  [{tag}] {_line(it.get('label'), 200)} ({_line(it.get('type'), 40)}, {it['degree']} relations)")
                     else:
                         saved = time.strftime("%Y-%m-%d", time.localtime(it["created_at"]))
-                        lines.append(f"  [{tag}] saved={saved}: {it['content']}")
+                        lines.append(f"  [{tag}] saved={saved}: {_line(it.get('content'))}")
             extraction_model = settings.get("extractionModel") or model
             try:
                 raw = await llm.complete(settings, extraction_model, [{"role": "system", "content": PROMPT},

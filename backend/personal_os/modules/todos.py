@@ -13,7 +13,7 @@ from .. import todo_rules
 from ..google import GoogleNotConnected
 from ..gtasks import TasksSync
 from ..todocal import TodoCalendarMirror
-from ..todos import Todos
+from ..todos import UNTRUSTED_SOURCES, Todos
 from ..tools import ToolSpec, _obj, page, tool_error
 from . import Module, ModuleContext
 
@@ -189,9 +189,9 @@ class TodosModule(Module):
             rows = [{"id": t["id"], "title": t["title"], "due": t["due"], "priority": t["priority"], "done": bool(t["done"]), "notes": t["notes"][:200],
                      "urgency": todo_rules.urgency(t, today), "repeat": t.get("repeat"), "estimate_min": t.get("estimate_min")} for t in items]
             out = page(rows, offset=offset, limit=50, key="todos")
-            # A meeting action item is speech from the room, not a task the user typed.
+            # A meeting, an email follow-up, or a task synced from Google was not typed in this app.
             shown = {r["id"] for r in out["todos"]}
-            if any(t.get("source") == "meeting" and t["id"] in shown for t in items):
+            if any(t.get("source") in UNTRUSTED_SOURCES and t["id"] in shown for t in items):
                 ctx["tainted"] = True
                 ctx.setdefault("taint_sources", []).append("todo_list")
             return out

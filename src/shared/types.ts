@@ -541,6 +541,8 @@ export interface ConversationSettings {
   useStyle: boolean
   /** Per-chat plan mode. Absent reads as the global default; a desk writes it when it is created. */
   planMode?: 'off' | 'auto' | 'always'
+  /** Absent inherits Settings.skipPermissions. True runs tool calls that would have asked, in this chat. */
+  skipPermissions?: boolean
   /** Inject the recent-meetings block. Optional because stored conversations predate the key; a
    *  missing value reads as on, the way the backend's `.get(..., True)` does. */
   useMeetings?: boolean
@@ -1072,6 +1074,8 @@ export interface Settings {
   permissionRules?: PermissionRules
   /** 'deny': a background run that would have to ask is refused instead of waiting for someone. */
   unattendedApprovals?: 'ask' | 'deny'
+  /** Chats with no own value follow this. Off by default. Scheduled jobs ignore it. */
+  skipPermissions?: boolean
   /** Keep the system prompt stable and put per-turn retrieval beside the newest message (prompt caching). Default on. */
   cacheLayout?: boolean
   otelExport?: OtelExportConfig

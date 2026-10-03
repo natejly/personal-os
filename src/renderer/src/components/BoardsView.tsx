@@ -6,6 +6,7 @@ import type { Board, BoardCard, BoardColumn } from '@shared/types'
 import ProjectChip from './ProjectChip'
 import SendToSpace from './SendToSpace'
 import { clearHandoff, peekHandoff } from '../lib/handoff'
+import { oneLine } from '../lib/emailAsk'
 import { fenced, lines, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
 
@@ -155,14 +156,14 @@ export default function BoardsView(): JSX.Element {
   usePageContext(() => (board
     ? {
         view: 'boards',
-        label: `Board “${board.name}”`,
+        label: `Board “${oneLine(board.name, 80)}”`,
         detail: [
           `Board \`${board.id}\` is open.`,
           ...board.columns.map((col) => {
             const cards = byCol[col.id] ?? []
-            return `### ${col.name} (${cards.length})\n${cards.length ? lines(cards, (c) => `${c.title} (\`${c.id}\`)${c.due ? `, due ${c.due}` : ''}${c.labels.length ? `, labels: ${c.labels.join(', ')}` : ''}`, 20) : '- (empty)'}`
+            return `### ${oneLine(col.name, 80)} (${cards.length})\n${cards.length ? lines(cards, (c) => `${c.title} (\`${c.id}\`)${c.due ? `, due ${c.due}` : ''}${c.labels.length ? `, labels: ${c.labels.join(', ')}` : ''}`, 20) : '- (empty)'}`
           }),
-          open ? `The user has this card open: “${open.title}” (\`${open.id}\`)\n${fenced(open.description || '')}` : ''
+          open ? `The user has this card open: “${oneLine(open.title, 120)}” (\`${open.id}\`)\n${fenced(open.description || '')}` : ''
         ].filter(Boolean).join('\n\n'),
         refs: [{ kind: 'board', id: board.id, name: board.name }, ...(open ? [{ kind: 'card', id: open.id, name: open.title }] : [])],
         hints: ['What is stuck in this board?', 'Add cards for the next steps', 'Summarise progress for a standup']

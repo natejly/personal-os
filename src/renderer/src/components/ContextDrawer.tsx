@@ -200,7 +200,7 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
         <Toggle icon={<PenLine size={14} />} label="Writing style" hint={hasStyle ? 'Drafts sound like you, not like the assistant' : 'No voice learned yet'} value={cs.useStyle !== false} onChange={(v) => void setChatSettings({ useStyle: v }, conversationId)} />
         <Toggle icon={<Mic size={14} />} label="Meetings" hint={meetingCount ? 'Your recent meeting notes and decisions' : 'No meetings recorded yet'} value={cs.useMeetings !== false} onChange={(v) => void setChatSettings({ useMeetings: v }, conversationId)} />
         <Toggle icon={<Wand2 size={14} />} label="Auto-learn" hint={settings.autoLearn ? 'Extract memories, graph & writing style after each reply' : 'Disabled globally in settings'} value={cs.autoLearn && settings.autoLearn} onChange={(v) => void setChatSettings({ autoLearn: v }, conversationId)} />
-        <Toggle icon={<Wrench size={14} />} label="Tools" hint="Web, documents, memory, graph, todos, boards, Python… External actions ask first." value={cs.useTools} onChange={(v) => void setChatSettings({ useTools: v }, conversationId)} />
+        <Toggle icon={<Wrench size={14} />} label="Tools" hint={(cs.skipPermissions ?? settings.skipPermissions) ? 'Approval cards are off in this chat. Deny rules still refuse.' : 'Web, documents, memory, graph, todos, boards, Python… External actions ask first.'} value={cs.useTools} onChange={(v) => void setChatSettings({ useTools: v }, conversationId)} />
         <Toggle icon={<GraduationCap size={14} />} label="Skills" hint="Procedures you approved, injected as procedural memory. Candidates are never injected." value={cs.useSkills !== false} onChange={(v) => void setChatSettings({ useSkills: v }, conversationId)} />
         {convo && (
           <div className="ctx-tools">
@@ -218,7 +218,7 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
           <div className="muted small" style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '8px 0 4px 24px' }}>
             <ShieldAlert size={14} style={{ flexShrink: 0, marginTop: 2 }} />
             <span>
-              This chat has read untrusted content{cs.taint_sources?.length ? ` (${cs.taint_sources.join(', ')})` : ''}. Mail, web fetches, and saving memories ask first. Auto-learn and the writing voice stay off until you clear this. Clear also stops activity, meeting notes, and document excerpts in this chat until you turn them back on. If a library file was copied into the sandbox, clear resets that sandbox too.
+              This chat has read untrusted content{cs.taint_sources?.length ? ` (${cs.taint_sources.join(', ')})` : ''}. Mail, web fetches, saving memories, and cancelling a queued send ask first. Auto-learn and the writing voice stay off until you clear this. Clear also stops activity, meeting notes, and document excerpts in this chat until you turn them back on. If a library file was copied into the sandbox, clear resets that sandbox too.
               <button className="link small" onClick={() => void setChatSettings({ tainted: false, taint_sources: [], useActivity: false, useMeetings: false, useDocuments: false })}>clear</button>
             </span>
           </div>

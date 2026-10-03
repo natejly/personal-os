@@ -26,6 +26,7 @@ import httpx
 from . import mac
 from . import fsx
 from . import skillbuild
+from .style import voice_wanted
 from .cowork import UNDECIDED_OUTPUTS
 from .workspace import MAX_FILE_CHARS, WorkspaceError
 from . import plans
@@ -1855,6 +1856,10 @@ def _register_style(self: Toolbox) -> None:
     R = self.specs.__setitem__
 
     async def writing_style(ctx: dict[str, Any]) -> Any:
+        if not voice_wanted(ctx.get("conv_settings") or {}, draft=bool((ctx.get("conv_settings") or {}).get("draftMode")),
+                            tainted=bool(ctx.get("tainted"))):
+            return {"profile": None, "note": "The voice is off for this turn: it needs Draft mode on in the context drawer, "
+                                             "Writing style on, and a chat that has not read untrusted content."}
         p = self.style.for_context(ctx["project_id"])
         if not p or not (p["summary"] or p["guidelines"]):
             return {"profile": None,

@@ -150,6 +150,11 @@ STYLE_FOOTER = (
 )
 
 
+def voice_wanted(conv_settings: dict[str, Any], *, draft: bool, tainted: bool) -> bool:
+    """The voice is for drafting only: toggle on, an explicit draft turn, and a chat that has read nothing untrusted."""
+    return bool(draft) and not tainted and bool(conv_settings.get("useStyle", True))
+
+
 def _parse_json(text: str) -> dict[str, Any]:
     m = re.search(r"\{.*\}", (text or "").strip(), re.S)
     if not m:

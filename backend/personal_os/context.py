@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Any
 
 from .repos import Documents, Graph, Memories
-from .style import context_block as style_block
+from .style import context_block as style_block, voice_wanted
 
 
 def estimate_tokens(text: str) -> int:
@@ -113,6 +113,7 @@ def build_context(
     meetings: Any = None,
     doc_hits: list[dict[str, Any]] | None = None,
     memory_hits: list[dict[str, Any]] | None = None,
+    draft: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     """Returns (system_prompt, context_used)."""
     # Two lists so a caller can keep the stable prefix byte-identical turn to turn (prompt caching):
@@ -190,11 +191,12 @@ def build_context(
 
     # The user's own voice, for drafting on their behalf (see style.py). One profile per chat — the
     # project's when it has one — and the block itself tells the model not to *reply* in that voice.
-    if style is not None and conv_settings.get("useStyle", True):
+    # Draft turns only, never on a tainted chat, and volatile so the stable prefix stays byte-identical.
+    if style is not None and voice_wanted(conv_settings, draft=draft, tainted=bool(conv_settings.get("tainted"))):
         profile = style.for_context(project_id)
         block = style_block(profile)
         if block:
-            parts.append(block)
+            volatile.append(block)
             used["style"] = {"project_id": profile["project_id"], "summary": profile["summary"],
                              "guidelines": profile["guidelines"], "block": block}
 

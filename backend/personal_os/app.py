@@ -1433,6 +1433,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         settings=cfg, conv_settings=conv["settings"], global_system_prompt=cfg["systemPrompt"],
         activity=monitor, skills=skills, style=style, meetings=meeting_svc,
         page=body.page_context.model_dump() if body.page_context else None,
+        draft=bool(conv["settings"].get("draftMode")),
     )
     # Older messages are folded into a rolling summary when the replay outgrows the window (compaction.py).
     history, cinfo = await compaction.prepare_history(compactor, convos, cfg, str(cfg.get("extractionModel") or model), conv_id,
@@ -1475,7 +1476,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             "tainted": bool(conv["settings"].get("tainted")) or bool(ctx_taints) or sandboxes.holds_import(conv_id),
             "taint_sources": list(conv["settings"].get("taint_sources") or []) + [f"context:{k}" for k in ctx_taints]
                 + (["sandbox_import"] if sandboxes.holds_import(conv_id) else []),
-            "allowed_urls": _urls(user_text), "settings": cfg,
+            "allowed_urls": _urls(user_text), "settings": cfg, "conv_settings": conv["settings"],
             # Set for a scheduled job: Toolbox.call refuses every outward-facing tool outright, and _call_tool has
             # already turned the call into a proposals row before it got that far.
             "proposal_only": proposal_only(run), "message_id": am["id"],
@@ -3675,6 +3676,7 @@ async def context_preview(body: ContextPreviewIn) -> dict[str, Any]:
         memory_hits=await _memory_hits(sid(body.project_id), body.query, cfg, conv_settings),
         query=body.query, settings=cfg, conv_settings=conv_settings,
         global_system_prompt=cfg["systemPrompt"], activity=monitor, skills=skills, style=style, meetings=meeting_svc,
+        draft=bool(conv_settings.get("draftMode")),
     )
     return used
 

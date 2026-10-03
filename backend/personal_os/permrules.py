@@ -1007,6 +1007,16 @@ def resolve(tool: str, args: dict[str, Any], mode: str, forced: bool, *, rules: 
     return res
 
 
+def mcp_denied(slug: str, rules: RuleSet | dict[str, Any] | None) -> str | None:
+    """Refusal text when a deny rule names this MCP slug (`mcp__srv__tool`) or its whole server (`mcp__srv`).
+    Only denies apply: a grant is the one thing that turns an MCP tool on, so allow/ask rules are ignored here."""
+    rs = rules if isinstance(rules, RuleSet) else load_rules(rules)
+    for r in rs.deny:
+        if r.pattern is None and (r.tool.lower() == slug.lower() or slug.lower().startswith(r.tool.lower() + "__")):
+            return f"blocked by your permission rule {r.text}"
+    return None
+
+
 def skip_permissions_on(conv_settings: dict[str, Any] | None, cfg: dict[str, Any] | None) -> bool:
     """Whether this chat skips approval cards. A stored chat value wins; otherwise the global setting."""
     conv = conv_settings or {}

@@ -1962,6 +1962,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     mode = perm.mode
                     if perm.kind == "doom_loop":
                         forced = True
+                elif mcp_is(c["name"]) and mode != "off":
+                    # A global deny rule can name an MCP slug or server; it refuses over any grant and the grant row is untouched.
+                    perm.refusal = permrules.mcp_denied(c["name"], perm_rules)
                 # A background run never waits on an approval: there is nobody at the keyboard, and the call is not
                 # going to happen either way. It becomes a proposal in _call_tool and the run carries on.
                 # MCP tools are external by construction but are not in Toolbox.specs, so proposes()

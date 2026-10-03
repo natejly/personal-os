@@ -1117,11 +1117,8 @@ async def delete_message(id: str, mid: str) -> dict[str, bool]:
     if (run := bus.answering(id)) is not None:
         raise HTTPException(409, {"message": "That conversation has a running reply", "run_id": run.run_id, "seq": run.seq})
     # The path's conversation must own the message: this used to delete it from whichever conversation held it.
-    with db.tx() as c:
-        owned = c.execute("SELECT 1 FROM messages WHERE id=? AND conversation_id=?", (mid, id)).fetchone()
-    if not owned:
+    if not convos.delete_message(mid, id):
         raise HTTPException(404, "No such message in this conversation")
-    convos.delete_message(mid)
     return {"ok": True}
 
 
@@ -1152,6 +1149,7 @@ class ChatIn(BaseModel):
     model: str | None = None
     page_context: PageContextIn | None = None
     resume_of: str | None = None  # run_id of an interrupted run this reply continues (POST /runs/{id}/resume)
+    replace_from: str | None = None  # id of an earlier user message this one replaces: it and everything after it are hidden
 
 
 RENDER_HINT = """## Rendering
@@ -1472,8 +1470,38 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         if not user_text:
             yield "error", {"message": "Empty message"}
             return
+        edited_from: str | None = None
+        if body.replace_from:
+            # Edit and resend: the cut happens here, inside the run, so a refused request (409) can never leave
+            # a half-applied cut. Rows are hidden, not deleted; state derived from them is invalidated with them.
+            cut = convos.supersede_from(conv_id, body.replace_from)
+            if not cut:
+                yield "error", {"message": "That message can no longer be edited"}
+                return
+            edited_from = body.replace_from
+            hidden = {r["id"] for r in cut}
+            for r in cut:
+                yield "removed_message", {"id": r["id"]}
+            cut_at = cut[0]["created_at"]
+            summary = compactor.get(conv_id)
+            if summary and (summary["upto_message_id"] in hidden or summary["upto_created"] >= cut_at):
+                compactor.clear(conv_id)
+            wp = work_plans.get(conv_id)
+            if wp and wp["updated_at"] >= cut_at:
+                work_plans.clear(conv_id)
+                yield "plan", {"conversation_id": conv_id, "steps": []}
+            for a in run_store.approvals("pending", limit=500):
+                if a["message_id"] in hidden:
+                    if a["tool"] == PLAN_TOOL:
+                        plans.decide(a["call_id"], "deny", by="stop", note="The message this plan was proposed for was edited.")
+                    run_store.decide(a["call_id"], "deny", by="superseded", note="The message this call belonged to was edited.")
+            had_writes = any((sp := toolbox.specs.get(te.get("name"))) is not None and sp.danger in MUTATING
+                             for r in cut for te in r["tool_events"] if not te.get("pending"))
+            if cut[0]["id"] == next((m["id"] for m in conv["messages"] if m["role"] == "user"), None) and conv["title"] != "New chat":
+                convos.update(conv_id, {"title": "New chat"})
+                conv = {**conv, "title": "New chat", "messages": []}
         um = convos.add_message(conv_id, "user", user_text)
-        yield "user_message", um
+        yield "user_message", {**um, **({"edited_from": edited_from, "had_writes": had_writes} if edited_from else {})}
         if conv["title"] == "New chat" and not [m for m in conv["messages"] if m["role"] == "user"]:
             title = _title_from(user_text)
             convos.update(conv_id, {"title": title})
@@ -2873,6 +2901,15 @@ async def chat(id: str, body: ChatIn) -> dict[str, Any]:
         raise HTTPException(409, {"message": "That conversation already has a running reply",
                                  "run_id": running.run_id, "seq": running.seq,
                                  "message_id": running.message_id, "message_seq": running.message_seq})
+    if body.replace_from:
+        conv = convos.get(id)
+        if not (body.content or "").strip():
+            raise HTTPException(400, "Empty message")
+        if conv["settings"].get("deskId") or conv["settings"].get("job_id"):
+            raise HTTPException(400, "A desk or job transcript cannot be edited")
+        target = next((m for m in conv["messages"] if m["id"] == body.replace_from), None)
+        if not target or target["role"] != "user":
+            raise HTTPException(404, "No such message to edit")
     run = bus.start(id, lambda r: _run_chat(r, body), input=body.model_dump())
     return {"run_id": run.run_id, "seq": run.seq}
 

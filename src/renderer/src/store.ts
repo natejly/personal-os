@@ -349,6 +349,8 @@ export interface State {
   /** Send from the ⌘I panel: same contract as `send`, plus the page snapshot and its own thread. */
   sendToPageAgent: (text: string) => Promise<boolean>
   regenerate: (conversationId?: string) => Promise<void>
+  /** Replace a sent user message: it and everything after it is hidden (not deleted) in the run that answers the new text. */
+  editAndResend: (messageId: string, text: string, conversationId?: string) => Promise<boolean>
   activateVariant: (conversationId: string, messageId: string) => Promise<void>
   /** Continue an interrupted reply in a new run (always the user's click). Rejects with the backend's reason when it cannot. */
   resumeRun: (conversationId: string, runId: string) => Promise<void>
@@ -711,6 +713,14 @@ const convWrites = new Map<string, Promise<unknown>>()
  * returned is marked unknown (an approval card still waiting is left, it is a decision and not an outcome),
  * and the session stops answering. Pure, for the `error` event.
  */
+/** What editing `messageId` would hide: that row and every row after it, and whether any hidden reply ran tools. */
+export const editCut = (messages: Message[], messageId: string): { removed: number; ranTools: boolean } => {
+  const at = messages.findIndex((m) => m.id === messageId)
+  if (at < 0) return { removed: 0, ranTools: false }
+  const hidden = messages.slice(at)
+  return { removed: hidden.length, ranTools: hidden.some((m) => m.role === 'assistant' && !!m.tool_events?.some((t) => !t.pending)) }
+}
+
 export const settleInterrupted = (s: ChatSession, message: string): ChatSession => {
   const mid = s.streaming?.messageId
   const msgs = (s.conversation.messages ?? []).map((m) => m.id !== mid ? m : {
@@ -1275,7 +1285,7 @@ export const useStore = create<State>((set, get) => {
    * `false` means the backend never accepted `body`, so the caller still owns the text it sent.
    * Resolves on that verdict, not at the end of the run: a composer is holding a draft on it.
    */
-  const runStream = async (convId: string, body: { content?: string; model?: string; page_context?: PageContext }): Promise<boolean> => {
+  const runStream = async (convId: string, body: { content?: string; model?: string; page_context?: PageContext; replace_from?: string }): Promise<boolean> => {
     let run: ChatRunStarted
     try {
       run = await api.chat(convId, body)
@@ -1289,6 +1299,11 @@ export const useStore = create<State>((set, get) => {
       // Another window is already mid-reply. Adopt that run, replaying its in-flight message so the window
       // paints the whole reply, and steer the message into it instead of dropping it.
       await get().attachSession(convId).catch(() => undefined)
+      if (body.replace_from) {
+        // An edit cannot be folded into a live reply: it replaces history, so it is refused whole.
+        get().toast('That chat is already replying — your edit was not sent.', 'error')
+        return false
+      }
       if (body.content) {
         try {
           await api.steer(convId, body.content)
@@ -2015,6 +2030,13 @@ export const useStore = create<State>((set, get) => {
       }
       await convWrites.get(id)?.catch(() => undefined)
       await runStream(id, {})
+    },
+    editAndResend: async (messageId, text, conversationId) => {
+      const id = conversationId ?? get().focusedConversationId
+      const body = text.trim()
+      if (!id || !body || get().sessions[id]?.streaming?.answering) return false
+      await convWrites.get(id)?.catch(() => undefined)
+      return runStream(id, { content: body, replace_from: messageId })
     },
     activateVariant: async (conversationId, messageId) => {
       if (get().sessions[conversationId]?.streaming?.answering) return

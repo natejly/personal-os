@@ -1,5 +1,5 @@
 import { Component, memo, useEffect, useRef, useState, type ReactNode } from 'react'
-import { AlertCircle, User, Sparkles, Brain, Share2, FileText, Activity, ChevronRight, Lightbulb, RotateCw, GraduationCap } from 'lucide-react'
+import { AlertCircle, User, Sparkles, Brain, Share2, FileText, Activity, ChevronRight, Lightbulb, RotateCw, GraduationCap, Pencil } from 'lucide-react'
 import type { Message, RunChanges } from '@shared/types'
 import { useStore } from '../store'
 import { api } from '../lib/api'
@@ -10,6 +10,7 @@ import { traceSummary, fmtMs } from './TraceView'
 import { modelLabel } from '../lib/modelLabel'
 import { outcomeLabel } from '../lib/outcomeLabel'
 import { errorAction } from '../lib/errorAction'
+import MessageEditor from './MessageEditor'
 
 /**
  * One message's body, fenced: a render error in its markdown or tool cards (a null field, a bad
@@ -165,7 +166,8 @@ function FilesChanged({ messageId }: { messageId: string }): JSX.Element | null 
 
 // The store is read imperatively inside the handlers: any subscription here defeats the memo, and a
 // streamed token would re-render every message in every mounted transcript.
-const MessageView = memo(function MessageView({ message, streaming, last = false }: { message: Message; streaming: boolean; last?: boolean }): JSX.Element {
+const MessageView = memo(function MessageView({ message, streaming, last = false, editable = false }: { message: Message; streaming: boolean; last?: boolean; editable?: boolean }): JSX.Element {
+  const [editing, setEditing] = useState(false)
   const isUser = message.role === 'user'
   const ctx = message.context_used
   const ctxCount = ctx ? ctx.memories.length + ctx.nodes.length + ctx.chunks.length : 0
@@ -178,7 +180,11 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
       <div className="avatar">{isUser ? <User size={14} /> : <Sparkles size={14} />}</div>
       <div className="bubble">
         {isUser ? (
-          <div className="user-bubble"><div className="user-text">{message.content}</div></div>
+          editing ? (
+            <MessageEditor message={message} onClose={() => setEditing(false)} />
+          ) : (
+            <div className="user-bubble"><div className="user-text">{message.content}</div></div>
+          )
         ) : (
           <div className="markdown">
             {message.reasoning && <Reasoning text={message.reasoning} live={streaming && !message.content} />}
@@ -198,7 +204,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
         {last && !streaming && message.role === 'assistant' && message.error && message.error_kind && <div className="msg-error-actions"><ErrorAction conversationId={message.conversation_id} kind={message.error_kind} /></div>}
         {last && !streaming && message.role === 'assistant' && <ContinueButton conversationId={message.conversation_id} messageId={message.id} />}
         {!streaming && message.role === 'assistant' && message.tool_events?.some((t) => FILE_CHANGING.test(t.name)) && <FilesChanged messageId={message.id} />}
-        {!streaming && (
+        {!streaming && !editing && (
           <div className="msg-actions">
             {message.model && (
               <span className="model-tag" title={message.model === modelLabel(message.model) ? undefined : message.model}>
@@ -221,6 +227,11 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
               </button>
             )}
             {!bare && <CopyButton text={message.content} />}
+            {editable && isUser && (
+              <button type="button" className="ctx-chip" title="Edit and resend: this message and everything after it is hidden" aria-label="Edit message" onClick={() => setEditing(true)}>
+                <Pencil size={11} />
+              </button>
+            )}
           </div>
         )}
       </div>

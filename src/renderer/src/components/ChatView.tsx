@@ -100,7 +100,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
               </div>
             ) : (
               <div className="messages-inner">
-                {msgs.map((m) => <MessageView key={m.id} message={m} streaming={isStreamingHere && streamingMessageId === m.id} last={m.id === last?.id} />)}
+                {msgs.map((m) => <MessageView key={m.id} message={m} streaming={isStreamingHere && streamingMessageId === m.id} last={m.id === last?.id} editable={!isStreamingHere} />)}
                 <RegenRow conversationId={conversationId} last={last} streaming={isStreamingHere} />
               </div>
             )}

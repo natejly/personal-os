@@ -316,6 +316,23 @@ class Conversations:
             root = row["variant_of"] or row["id"]
             return c.execute("DELETE FROM messages WHERE id=? OR variant_of=?", (root, root)).rowcount > 0
 
+    def supersede_from(self, conv_id: str, mid: str) -> list[dict[str, Any]]:
+        """Hide `mid` (a live user row) and every live row after it, with one stamp, in one transaction.
+
+        Nothing is deleted: the rows stay on disk, out of every transcript reader. Returns the hidden rows as
+        {id, created_at, role, tool_events} in transcript order; [] when `mid` is not a live user row here."""
+        with self.db.tx() as c:
+            rows = c.execute("SELECT * FROM messages WHERE conversation_id=? AND superseded_at IS NULL ORDER BY created_at, rowid",
+                             (conv_id,)).fetchall()
+            ids = [r["id"] for r in rows]
+            if mid not in ids or rows[ids.index(mid)]["role"] != "user":
+                return []
+            cut = rows[ids.index(mid):]
+            t = now()
+            c.execute(f"UPDATE messages SET superseded_at=? WHERE id IN ({','.join('?' * len(cut))})", (t, *[r["id"] for r in cut]))
+            hidden = [row_to_dict(r, ("tool_events",)) or {} for r in cut]
+        return [{"id": r["id"], "created_at": r["created_at"], "role": r["role"], "tool_events": r.get("tool_events") or []} for r in hidden]
+
     def history(self, conv_id: str) -> list[dict[str, str]]:
         with self.db.tx() as c:
             rows = c.execute(

@@ -2347,6 +2347,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 if stuck and event["breaker"] == "stuck_nudge":
                     content = f"{content}\n\n[stuck_notice] {STUCK_NUDGE.format(detail=stuck.detail)}"
                 messages.append({"role": "tool", "tool_call_id": c["id"], "content": content})
+                # Persisted with the event (after the SSE copy went out) so the next turn replays exactly this text: no image bytes.
+                event["call_id"], event["for_model"] = c["id"], content
                 if c["name"] == "mcp_tool_search":
                     # A search loads schemas: bring their modes in (grants and ask are already resolved
                     # in mcp_modes) and offer them from the next round.

@@ -190,6 +190,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "enhanceOnStop": True,
     "enhanceModel": "",
     "maxTranscriptChars": 48000,
+    "minSummaryWords": 40,     # a doc recording shorter than this is not summarised
+    "vocabularyPrompt": True,  # seed whisper with the meeting title and attendee names
     "keepAudio": False,
     "maxAudioBytes": 2147483648,
     "redactSecrets": True,
@@ -1585,6 +1587,7 @@ class MeetingService:
             max_audio_bytes=int(cfg["maxAudioBytes"]),
             drain_seconds=float(cfg["drainSeconds"]),
             on_disk_check=lambda: self.meetings.audio_bytes(meeting_id),
+            vocab=meeting_notes.vocab_prompt(m) if cfg.get("vocabularyPrompt", True) else "",
         )
         self.meetings.mark_started(meeting_id, str(session.out_dir), list(channels), session.started_at)
         # A missing loopback device is a degradation the user has to be able to see, not an error.
@@ -1893,6 +1896,13 @@ class MeetingService:
             out["error"] = "A summary is already being written for this recording."
             return out
         cfg = self.config()
+        words = len(m["transcript"].split())
+        if words < int(cfg.get("minSummaryWords", 40)):
+            out["error"] = f"Too little was said to summarise ({words} words)."
+            self._note(meeting_id, "Nothing was said", clear=("Nothing was said", "Summary failed"))
+            self._emit("summary", meeting_id, revision_id=None, error=out["error"])
+            out["meeting"] = self.meetings.get(meeting_id)
+            return out
         tpl = template or m["template"] or cfg["template"]
         if tpl not in meeting_notes.TEMPLATES:
             tpl = "general"
@@ -1927,7 +1937,8 @@ class MeetingService:
             items = [{**it, "text": redact.scrub_secrets(it["text"])} for it in items]
         # Stored escaped too, so the Summary tab and the doc render the same thing.
         body = meeting_notes.escape_currency(body)
-        section = meeting_notes.wrap_ai(f"{meeting_notes.section_heading(m)}\n\n{body.strip()}")
+        section = meeting_notes.wrap_ai(f"{meeting_notes.section_heading(m, words)}\n\n{body.strip()}"
+                                        f"\n\n_Model {res['model']}, template {tpl}_")
         # The doc may have been trashed while the model was thinking; propose_append says so with None.
         rev = self.docs.propose_append(doc_id, section, summary="Recording summary", tool="recording_summary")
         if rev is None:

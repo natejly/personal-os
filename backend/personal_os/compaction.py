@@ -182,9 +182,11 @@ _learned: dict[str, int] = {}
 
 
 def note_overflow(model: str, limit: int | None, estimate_at_failure: int | None) -> None:
+    """Lower-only: a later overflow with a looser estimate must not widen what an earlier one taught."""
     vals = [v for v in (limit, estimate_at_failure) if v and v > 0]
     if model and vals:
-        _learned[model] = max(4096, min(vals))
+        new = max(4096, min(vals))
+        _learned[model] = min(new, _learned.get(model, new))
 
 
 def window_for(cfg: dict[str, Any], model: str, known: int | None = None) -> int:
@@ -238,12 +240,14 @@ class Compactor:
 
     def build_history(self, rows: list[dict[str, Any]], summary: dict[str, Any] | None,
                       include_untrusted: bool = False) -> list[dict[str, str]]:
+        # Index-aligned with `rows` until the end: an assistant row whose only events never ran (a parked card)
+        # renders empty and is dropped last, so the model never sees a blank turn.
         plain = [{"role": r["role"], "content": _row_content(r, include_untrusted)} for r in rows]
         if not summary:
-            return plain
+            return [m for m in plain if m["content"]]
         start = self._tail_start(rows, summary)
         head = plain[:1] if rows and rows[0]["role"] == "user" and start > 0 else []
-        return head + [{"role": "user", "content": SUMMARY_PREFIX + summary["summary"]}] + plain[start:]
+        return [m for m in head + [{"role": "user", "content": SUMMARY_PREFIX + summary["summary"]}] + plain[start:] if m["content"]]
 
     async def compact(self, cfg: dict[str, Any], model: str, conv_id: str, history_rows: list[dict[str, Any]],
                       focus: str | None = None, complete: Complete | None = None, include_untrusted: bool = False) -> dict[str, Any] | None:

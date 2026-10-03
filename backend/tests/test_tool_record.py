@@ -78,6 +78,19 @@ def test_history_rows_and_build_history() -> None:
     assert compactor.build_history(convos.history_rows(cid), None)[1] == h1[1], "an earlier row renders the same after a later turn"
 
 
+def test_a_row_whose_only_card_never_ran_is_not_a_blank_turn() -> None:
+    parked = [{"id": "p1", "name": "gmail_send", "arguments": {"id": "d_1"}, "result_preview": "", "duration_ms": 0,
+               "error": None, "pending": True, "needs_approval": True, "forced": False, "parked": True}]
+    cid = conv_with(parked, "")
+    rows = convos.history_rows(cid)
+    assert [r["role"] for r in rows] == ["user", "assistant"], "the row is read (row_ids must name it)"
+    assert [m["role"] for m in compactor.build_history(rows, None)] == ["user"], "but it renders as nothing, so it is left out"
+    convos.add_message(cid, "user", "well?")
+    rows = convos.history_rows(cid)
+    summary = {"summary": "S", "upto_message_id": rows[0]["id"], "upto_created": rows[0]["created_at"]}
+    assert all(m["content"] for m in compactor.build_history(rows, summary)), "the same after a summary"
+
+
 def test_superseded_rows_stay_excluded() -> None:
     cid = conv_with(EVENTS, "")
     row = [r for r in convos.history_rows(cid) if r["role"] == "assistant"][0]

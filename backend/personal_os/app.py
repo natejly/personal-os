@@ -1872,18 +1872,13 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         raise
                     overflow_retried = True
                     recovered = await _recover_overflow(e)
+                    if stop.is_set():
+                        return  # Stop arrived while the summarizer ran: the round ends with nothing, as stopped
                     if recovered is None:
                         raise
                 finally:
                     await stream.aclose()
                 yield {"type": "overflow_recovered", **recovered}
-
-        async def _end_jobs() -> None:
-            """A chat's background shell jobs end with its reply; a desk's outlive a turn (they wake it). Called at
-            the very end of the reply, after its `done`, and on cancellation: no await sits between the last
-            steer check and `done`, so a steer is either folded in or already answered with a 409."""
-            if not desk_id:
-                await toolbox.shell.kill_conversation(conv_id)
 
         async def _final_round() -> AsyncIterator[tuple[str, Any]]:
             """Closing answer after a budget or breaker stop: one tool-free call, itself exempt from the budget."""

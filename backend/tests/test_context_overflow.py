@@ -23,7 +23,7 @@ appmod.db.set_settings({"autoLearn": False, "baseUrl": ""})
 convos = appmod.convos
 
 SEEN: list[list[dict[str, Any]]] = []
-SCRIPT: list[str] = []  # per request: 'overflow', 'late-overflow' (after a token) or 'ok'
+SCRIPT: list[str] = []  # per request: 'overflow', 'late-overflow' (after a token), 'tool' (one tool call) or 'ok'
 
 
 async def _stream(settings: dict[str, Any], model: str, messages: list[dict[str, Any]], tools: Any = None, kind: str = "chat",
@@ -32,6 +32,10 @@ async def _stream(settings: dict[str, Any], model: str, messages: list[dict[str,
     step = SCRIPT.pop(0) if SCRIPT else "ok"
     if step == "overflow":
         raise llm.ContextOverflowError("The conversation does not fit the model.", limit=8000)
+    if step == "tool":
+        yield {"type": "end", "finish_reason": "tool_calls", "usage": None,
+               "tool_calls": [{"id": f"call_{len(SEEN)}", "name": "current_time", "arguments": "{}"}]}
+        return
     yield {"type": "delta", "text": "partial "}
     if step == "late-overflow":
         raise llm.ContextOverflowError("The conversation does not fit the model.", limit=8000)
@@ -100,6 +104,42 @@ def test_an_overflow_after_a_token_is_not_recovered() -> None:
     assert len(SEEN) == 1 and d["error_kind"] == "overflow"
 
 
+def test_an_overflow_after_tool_rounds_keeps_the_runs_own_turns_paired() -> None:
+    cid = seed()
+    SCRIPT[:] = ["tool", "tool", "overflow", "ok"]
+    d = done_of(drive(cid))
+    assert d["error"] is None and len(SEEN) == 4
+    retry = SEEN[3]
+    assert any(m["content"].startswith(compaction.SUMMARY_PREFIX) for m in retry if isinstance(m.get("content"), str))
+    calls = [c["id"] for m in retry if m.get("role") == "assistant" for c in (m.get("tool_calls") or [])]
+    answered = [m["tool_call_id"] for m in retry if m.get("role") == "tool"]
+    assert len(calls) == 2 and calls == answered, "the rebuilt head left this run's tool turns intact and in order"
+    tail = [m for m in SEEN[2] if m.get("role") in ("tool",) or m.get("tool_calls")]
+    assert [m for m in retry if m.get("role") in ("tool",) or m.get("tool_calls")] == tail, "the tail is carried over verbatim"
+
+
+def test_a_stop_during_the_overflow_summarizer_ends_as_stopped() -> None:
+    cid = seed()
+    SCRIPT[:] = ["overflow", "ok"]
+    stop = asyncio.Event()
+
+    async def blocked(cfg: Any, model: str, messages: Any, kind: str = "learn", *, cancel: Any = None) -> str:
+        stop.set()
+        raise llm.LLMError("cancelled", "cancelled")
+
+    async def go() -> list[tuple[str, Any]]:
+        return [ev async for ev in appmod._chat_stream(cid, appmod.ChatIn(content="next"), stop)]
+    prev_s, prev_c = llm.stream_chat, llm.complete
+    llm.stream_chat, llm.complete = _stream, blocked  # type: ignore[assignment]
+    SEEN.clear()
+    try:
+        d = done_of(asyncio.run(go()))
+    finally:
+        llm.stream_chat, llm.complete = prev_s, prev_c
+    assert d["stopped"] is True and d["outcome"] == "stopped" and d["error"] is None
+    assert len(SEEN) == 1, "the round was not re-issued after the Stop"
+
+
 def test_window_never_exceeds_the_setting_and_shrinks_on_overflow() -> None:
     cfg = {"contextWindow": 100000}
     assert compaction.window_for(cfg, "m1", None) == 100000
@@ -107,6 +147,10 @@ def test_window_never_exceeds_the_setting_and_shrinks_on_overflow() -> None:
     assert compaction.window_for(cfg, "m1", 32000) == 32000
     compaction.note_overflow("m1", 16000, 40000)
     assert compaction.window_for(cfg, "m1", 32000) == 16000
+    compaction.note_overflow("m1", None, 30000)
+    assert compaction.window_for(cfg, "m1", 32000) == 16000, "a later, looser overflow never widens the learned limit"
+    compaction.note_overflow("m1", 12000, 30000)
+    assert compaction.window_for(cfg, "m1", 32000) == 12000, "a tighter one still narrows it"
     assert compaction.window_for(cfg, "m2", None) == 100000, "learned per model"
     compaction.note_overflow("m3", None, 100)
     assert compaction.window_for(cfg, "m3", None) == 4096, "a floor"

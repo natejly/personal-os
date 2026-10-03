@@ -234,7 +234,7 @@ def test_event_names_are_the_chatevent_union() -> None:
     check(by["assistant_message"]["id"] and "context_used" in by["assistant_message"], "assistant_message shape")
     check(set(by["delta"]) == {"id", "text"}, f"delta shape is {{id, text}}, got {set(by['delta'])}")
     check(set(by["done"]) == {"id", "error", "context_used", "tool_events", "trace", "stopped",
-                              "partial", "segment", "tainted", "taint_sources", "reasoning", "outcome", "error_kind"}, f"done shape, got {set(by['done'])}")
+                              "partial", "segment", "tainted", "taint_sources", "reasoning", "outcome", "error_kind", "notice"}, f"done shape, got {set(by['done'])}")
     check(by["done"]["segment"] is False, "the last done ends the run; a steered segment's says True")
     check(by["done"]["stopped"] is False, "an uninterrupted run reports stopped false")
     check(set(by["span"]) == {"message_id", "span"}, "span shape")
@@ -471,6 +471,28 @@ def test_reasoning_stays_out_of_the_reply() -> None:
         llm.stream_chat = prev
 
 
+def test_a_dropped_effort_is_noticed_once_on_the_final_done() -> None:
+    """The provider took no reasoning effort: the done says so in one line; a reply that kept it says nothing."""
+    prev = llm.stream_chat
+
+    async def _dropped(settings: dict[str, Any], model: str, messages: list[dict[str, Any]],
+                       tools: list[dict[str, Any]] | None = None, kind: str = "chat",
+                       effort: str = "default", tool_choice: str = "auto", fast: bool = False,
+                       cancel: asyncio.Event | None = None) -> Any:
+        yield {"type": "delta", "text": "ok"}
+        yield {"type": "end", "finish_reason": "stop", "tool_calls": [], "usage": None, "effort_dropped": "medium"}
+
+    llm.stream_chat = _dropped
+    try:
+        cid = new_conv()
+        j("POST", f"/conversations/{cid}/chat", {"content": "hi"})
+        drain(cid)
+        done = next(d for e, d in events(read_streams([f"/conversations/{cid}/stream?since=0"])[0]) if e == "done")
+        check(done["notice"] == "This model does not accept a reasoning effort; it was sent without one.", f"notice, got {done.get('notice')!r}")
+    finally:
+        llm.stream_chat = prev
+
+
 def test_cancel_closes_the_provider_socket() -> None:
     """stream_chat itself drops the connection; the read must not sit until the server sends more."""
     async def go() -> None:
@@ -601,7 +623,7 @@ def test_sse_survives_non_finite_numbers() -> None:
 TESTS = [test_post_starts_a_background_run, test_second_post_conflicts, test_two_clients_see_the_same_events,
          test_late_client_replays_from_the_ring, test_event_names_are_the_chatevent_union, test_stop_ends_the_run,
          test_steer_folds_into_the_live_run, test_stop_and_steer_cut_a_blocked_provider_read,
-         test_reasoning_stays_out_of_the_reply,
+         test_reasoning_stays_out_of_the_reply, test_a_dropped_effort_is_noticed_once_on_the_final_done,
          test_cancel_closes_the_provider_socket, test_the_learn_tail_does_not_hold_the_conversation,
          test_run_survives_every_subscriber_leaving, test_an_overflowed_subscriber_reconnects_without_a_gap,
          test_shutdown_cancels_a_live_run_and_keeps_its_text,

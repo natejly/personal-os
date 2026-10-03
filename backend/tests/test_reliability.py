@@ -547,5 +547,179 @@ class ErrorKinds(unittest.TestCase):
         self.assertEqual((str(e), e.kind, e.status), ("x", None, None))
 
 
+class StreamRetryTests(unittest.TestCase):
+    """A failure before the first token is retried under the one llmRetries cap; Stop and the deadline cut the header wait."""
+
+    @staticmethod
+    def frame(body: dict[str, Any]) -> httpx.Response:
+        return httpx.Response(200, content=f"data: {json.dumps(body)}\n\n".encode())
+
+    def test_error_frame_before_any_token_is_retried(self) -> None:
+        answers = [self.frame({"error": {"code": 429, "message": "slow"}}), httpx.Response(200, content=sse("ok"))]
+        with Provider(lambda req: answers.pop(0)) as p:
+            events = run(collect())
+        self.assertEqual(text_of(events), "ok")
+        self.assertEqual((p.calls, len(p.sleeps)), (2, 1))
+
+    def test_a_frame_without_a_message_never_reads_none(self) -> None:
+        with Provider(lambda req: self.frame({"error": {"code": 502}})) as p:
+            with self.assertRaises(llm.LLMError) as cm:
+                run(collect())
+        self.assertEqual(p.calls, 4)
+        msg = str(cm.exception)
+        self.assertNotIn("None", msg)
+        self.assertIn("502", msg)
+        self.assertIn("Retried 3 times", msg)
+
+    def test_a_frame_after_a_token_is_not_retried(self) -> None:
+        body = b'data: {"choices":[{"delta":{"content":"par"}}]}\n\ndata: {"error":{"code":502,"message":"upstream"}}\n\n'
+        got: list[dict[str, Any]] = []
+
+        async def go() -> None:
+            async for ev in llm.stream_chat(SETTINGS, "m", [{"role": "user", "content": "hi"}]):
+                got.append(ev)
+
+        with Provider(lambda req: httpx.Response(200, content=body)) as p:
+            with self.assertRaises(llm.LLMError) as cm:
+                run(go())
+        self.assertEqual(p.calls, 1)
+        self.assertEqual(text_of(got), "par")
+        self.assertTrue(str(cm.exception).endswith("The reply was cut off."))
+
+    def test_permanent_frames_fail_at_once(self) -> None:
+        for err in ({"code": 401, "message": "bad key"}, {"type": "context_length_exceeded", "message": "too long"}):
+            with Provider(lambda req, e=err: self.frame({"error": e})) as p:
+                with self.assertRaises(llm.LLMError):
+                    run(collect())
+            self.assertEqual(p.calls, 1, err)
+
+    def test_empty_stream_is_retried(self) -> None:
+        with Provider(lambda req: httpx.Response(200, content=b"")) as p:
+            with self.assertRaises(llm.LLMError) as cm:
+                run(collect())
+        self.assertEqual(p.calls, 4)
+        self.assertIn("empty reply", str(cm.exception))
+
+    def test_a_drop_before_content_is_retried(self) -> None:
+        class Drop(httpx.AsyncByteStream):
+            async def __aiter__(self) -> Any:
+                raise httpx.ReadError("reset")
+                yield b""
+
+        answers: list[Any] = [Drop(), Drop(), None]
+
+        def handler(req: httpx.Request) -> httpx.Response:
+            st = answers.pop(0)
+            return httpx.Response(200, content=sse("ok")) if st is None else httpx.Response(200, stream=st)
+
+        with Provider(handler) as p:
+            self.assertEqual(text_of(run(collect())), "ok")
+        self.assertEqual(p.calls, 3)
+
+    def test_header_and_stream_retries_share_one_cap(self) -> None:
+        class Drop(httpx.AsyncByteStream):
+            async def __aiter__(self) -> Any:
+                raise httpx.ReadError("reset")
+                yield b""
+
+        def handler(n: dict[str, int]) -> Callable[[httpx.Request], httpx.Response]:
+            def h(req: httpx.Request) -> httpx.Response:
+                n["i"] += 1
+                return httpx.Response(429, text="slow") if n["i"] <= 2 else httpx.Response(200, stream=Drop())
+            return h
+
+        with Provider(handler({"i": 0})) as p:
+            with self.assertRaises(llm.LLMError):
+                run(collect())
+        self.assertEqual(p.calls, 4)
+        with Provider(handler({"i": 0})) as p:
+            with self.assertRaises(llm.LLMError):
+                run(collect({**SETTINGS, "llmRetries": 0}))
+        self.assertEqual(p.calls, 1)
+
+    def test_stop_during_the_header_wait_ends_as_cancelled(self) -> None:
+        async def silent(req: httpx.Request) -> httpx.Response:
+            await asyncio.sleep(30)
+            return httpx.Response(200)
+
+        async def go() -> tuple[list[dict[str, Any]], float]:
+            cancel = asyncio.Event()
+            asyncio.get_running_loop().call_later(0.05, cancel.set)
+            t0 = time.monotonic()
+            evs = [ev async for ev in llm.stream_chat({**SETTINGS, "llmIdleSeconds": 30}, "m", [{"role": "user", "content": "x"}], cancel=cancel)]
+            return evs, time.monotonic() - t0
+
+        with Provider(silent):  # type: ignore[arg-type]
+            events, took = run(go())
+        self.assertEqual(events[-1]["finish_reason"], "cancelled")
+        self.assertEqual(events[-1]["tool_calls"], [])
+        self.assertLess(took, 0.5)
+
+    def test_deadline_ends_a_header_wait_as_a_timeout(self) -> None:
+        async def silent(req: httpx.Request) -> httpx.Response:
+            await asyncio.sleep(30)
+            return httpx.Response(200)
+
+        async def go() -> list[dict[str, Any]]:
+            llm.stream_deadline.set(time.monotonic() + 0.1)
+            return await collect()
+
+        with Provider(silent):  # type: ignore[arg-type]
+            events = run(go())
+        self.assertEqual(events[-1]["finish_reason"], "timeout")
+
+    def test_a_backoff_that_would_cross_the_deadline_raises_the_providers_error(self) -> None:
+        async def go() -> None:
+            llm.stream_deadline.set(time.monotonic() + 0.05)
+            await collect()
+
+        with Provider(lambda req: self.frame({"error": {"code": 502, "message": "upstream"}})) as p:
+            with self.assertRaises(llm.LLMError) as cm:
+                run(go())
+        self.assertEqual((p.calls, p.sleeps), (1, []))
+        self.assertIn("upstream", str(cm.exception))
+
+        async def go429() -> None:
+            llm.stream_deadline.set(time.monotonic() + 0.05)
+            await collect()
+
+        with Provider(lambda req: httpx.Response(429, text="slow")) as p:
+            with self.assertRaises(llm.LLMError) as cm:
+                run(go429())
+        self.assertEqual((p.calls, p.sleeps), (1, []))
+        self.assertIn("rate-limiting", str(cm.exception))
+
+    def test_complete_stops_and_ignores_a_stale_deadline(self) -> None:
+        async def silent(req: httpx.Request) -> httpx.Response:
+            await asyncio.sleep(30)
+            return httpx.Response(200)
+
+        async def stop() -> None:
+            ev = asyncio.Event()
+            asyncio.get_running_loop().call_later(0.05, ev.set)
+            await llm.complete(SETTINGS, "m", [{"role": "user", "content": "x"}], cancel=ev)
+
+        with Provider(silent):  # type: ignore[arg-type]
+            with self.assertRaises(llm.LLMError) as cm:
+                run(stop())
+        self.assertEqual(cm.exception.kind, "cancelled")
+
+        async def stale() -> str:
+            llm.stream_deadline.set(time.monotonic() - 100)
+            return await llm.complete(SETTINGS, "m", [{"role": "user", "content": "x"}])
+
+        with Provider(lambda req: httpx.Response(200, json={"choices": [{"message": {"content": "fine"}}]})):
+            self.assertEqual(run(stale()), "fine")
+
+    def test_frame_error_shapes(self) -> None:
+        self.assertEqual(llm._frame_error({"message": "boom"}), ("boom", True))
+        self.assertEqual(llm._frame_error({"metadata": {"raw": "upstream died"}}), ("upstream died", True))
+        self.assertEqual(llm._frame_error("plain"), ("plain", True))
+        self.assertEqual(llm._frame_error({"code": 401}), ("Provider error (401)", False))
+        self.assertEqual(llm._frame_error({"code": 429, "message": "m"}), ("m", True))
+        self.assertFalse(llm._frame_error({"type": "invalid_request_error", "message": "m"})[1])
+        self.assertTrue(llm._frame_error({})[0])
+
+
 if __name__ == "__main__":
     unittest.main()

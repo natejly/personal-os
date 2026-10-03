@@ -101,7 +101,7 @@ async def learn_from_exchange(
             "content": f"Existing memories:\n{existing_list}\n\n---\nUser said:\n{user_text[:4000]}\n\nAssistant replied:\n{assistant_text[:3000]}",
         },
     ]
-    raw = await llm.complete(settings, extraction_model, messages)
+    raw = await llm.complete(settings, extraction_model, messages, effort="low")
     data = _parse_json(raw)
 
     def _list(v: Any) -> list[Any]:
@@ -481,7 +481,7 @@ async def induce_skill(
         {"role": "system", "content": INDUCE_PROMPT},
         {"role": "user", "content": f"Conversation:\n{transcript[:12000]}"},
     ]
-    data = _parse_json(await llm.complete(settings, extraction_model, messages))
+    data = _parse_json(await llm.complete(settings, extraction_model, messages, effort="low"))
     if not data or data.get("skip"):
         return None
     name, procedure = str(data.get("name") or "").strip(), str(data.get("procedure") or "").strip()

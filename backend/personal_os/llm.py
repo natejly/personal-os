@@ -314,6 +314,7 @@ RETRYABLE_STATUS = frozenset({408, 425, 429, 500, 502, 503, 504, 529})
 # What is worth retrying is decided by the classified kind, not the status alone: a 429 that says the account is
 # out of quota is `quota`, and waiting does not fix it.
 RETRYABLE_KINDS = frozenset({"rate_limit", "overloaded", "server", "transport"})
+_PERMANENT_KINDS = frozenset({"overflow", "quota", "auth", "not_found", "content_filter", "unsupported_param"})
 RETRY_BASE_S = 1.0
 RETRY_CAP_S = 30.0
 # A Retry-After longer than this is not worth holding a reply open for; say so instead.
@@ -404,6 +405,37 @@ def _provider_message(body: str) -> str:
     except (ValueError, AttributeError):
         pass
     return " ".join(body.split())[:300]
+
+
+_PERMANENT_FRAME = frozenset({"invalid_request_error", "authentication_error", "invalid_api_key", "permission_error", "not_found_error",
+                              "model_not_found", "context_length_exceeded", "content_filter", "content_policy_violation", "insufficient_quota"})
+
+
+def _frame_error(err: Any) -> tuple[str, bool]:
+    """(text, retryable) for an error object that arrived inside a 200 stream. The text is never empty or 'None'."""
+    if not isinstance(err, dict):
+        return (str(err)[:300] or "Provider error"), True
+    code, typ = err.get("code"), err.get("type")
+    meta = err.get("metadata")
+    raw = meta.get("raw") if isinstance(meta, dict) else None
+    msg = err.get("message")
+    if isinstance(msg, str) and msg.strip():
+        text = msg.strip()[:300]
+    elif isinstance(raw, str) and raw.strip():
+        text = raw.strip()[:300]
+    elif code or typ:
+        text = "Provider error " + " ".join(f"({x})" for x in (code, typ) if x)
+    else:
+        text = json.dumps(err)[:300]
+    try:
+        status = int(code)
+    except (TypeError, ValueError):
+        status = None
+    if status is not None and 400 <= status < 500 and status not in RETRYABLE_STATUS:
+        return text, False
+    if str(code or "").lower() in _PERMANENT_FRAME or str(typ or "").lower() in _PERMANENT_FRAME:
+        return text, False
+    return text, True
 
 
 def _error_fields(body: str) -> tuple[str, str, str]:
@@ -520,57 +552,176 @@ async def _backoff(delay: float, cancel: asyncio.Event | None = None) -> bool:
     return False
 
 
-async def _send_with_retry(client: httpx.AsyncClient, settings: dict[str, Any], body: dict[str, Any], *, stream: bool,
-                           cancel: asyncio.Event | None = None) -> tuple[httpx.Response, Any]:
-    """POST the completion request, retrying 429/5xx/connection failures. Returns (response, stream context or None).
+class _Aborted(Exception):
+    """The caller's Stop (`reason` 'cancelled') or the run's deadline ('timeout') ended a provider call. Private and
+    not an LLMError, so it cannot be stored on a message as an error by accident."""
 
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
+async def _race(aw: Any, cancel: asyncio.Event | None, deadline_at: float | None) -> Any:
+    """Await `aw`, but give up the moment `cancel` is set or `deadline_at` (a time.monotonic() value) passes."""
+    task = asyncio.ensure_future(aw)
+    waiter = asyncio.ensure_future(cancel.wait()) if cancel is not None else None
+    left = None if deadline_at is None else max(deadline_at - time.monotonic(), 0.0)
+    try:
+        await asyncio.wait({task, *([waiter] if waiter is not None else [])}, timeout=left, return_when=asyncio.FIRST_COMPLETED)
+        if task.done():
+            return task.result()
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await task
+        raise _Aborted("cancelled" if cancel is not None and cancel.is_set() else "timeout")
+    except asyncio.CancelledError:
+        task.cancel()
+        raise
+    finally:
+        if waiter is not None:
+            waiter.cancel()
+
+
+# What this provider told us a model cannot take, keyed 'base|model': {effort: 'none' | 'high', at: epoch}. Learned from
+# a rejected reasoning_effort, persisted by the app (private setting `modelCaps`), and forgotten after 30 days so a
+# wrong or outdated entry heals.
+CAPS_TTL_S = 30 * 86400.0
+_model_caps: dict[str, dict[str, Any]] = {}
+_caps_listeners: list[Callable[[dict[str, dict[str, Any]]], None]] = []
+
+
+def _caps_key(base_url: str | None, model: str) -> str:
+    return f"{str(base_url or '').strip().rstrip('/')}|{model}"
+
+
+def load_caps(saved: Any) -> None:
+    _model_caps.clear()
+    for k, v in (saved.items() if isinstance(saved, dict) else []):
+        if isinstance(v, dict) and v.get("effort") in ("none", "high") and isinstance(v.get("at"), (int, float)):
+            _model_caps[str(k)] = {"effort": v["effort"], "at": float(v["at"])}
+
+
+def model_cap(base_url: str | None, model: str) -> dict[str, Any] | None:
+    e = _model_caps.get(_caps_key(base_url, model))
+    return e if e and time.time() - float(e.get("at") or 0) < CAPS_TTL_S else None
+
+
+def on_caps(fn: Callable[[dict[str, dict[str, Any]]], None]) -> None:
+    _caps_listeners.append(fn)
+
+
+def _learn_cap(settings: dict[str, Any], model: str, effort: str) -> None:
+    prev = model_cap(settings.get("baseUrl"), model)
+    if prev and prev["effort"] == effort:
+        return
+    _model_caps[_caps_key(settings.get("baseUrl"), model)] = {"effort": effort, "at": time.time()}
+    for fn in list(_caps_listeners):
+        try:
+            fn({k: dict(v) for k, v in _model_caps.items()})
+        except Exception:  # noqa: BLE001 - persisting a hint must never fail a reply
+            log.exception("model caps listener failed")
+
+
+_EFFORT_MSG = ("reasoning_effort", "reasoning effort", "does not support thinking", "does not support reasoning")
+
+
+def _rejected_optional(status: int, text: str, body: dict[str, Any]) -> str | None:
+    """Which optional request field a 400/422 names as the problem ('reasoning_effort' or 'service_tier'), if it is
+    in `body`. A rejection that does not name the field is not ours to retry."""
+    if status not in (400, 422):
+        return None
+    _, _, msg = _error_fields(text)
+    param = ""
+    try:
+        err = json.loads(text).get("error")
+        param = str(err.get("param") or "").lower() if isinstance(err, dict) else ""
+    except (ValueError, AttributeError, TypeError):
+        pass
+    if "reasoning_effort" in body and (param == "reasoning_effort" or any(m in msg for m in _EFFORT_MSG)):
+        return "reasoning_effort"
+    if "service_tier" in body and (param == "service_tier" or "service_tier" in msg or "service tier" in msg):
+        return "service_tier"
+    return None
+
+
+async def _close_cm(cm: Any) -> None:
+    if cm is not None:
+        with contextlib.suppress(Exception):
+            await cm.__aexit__(None, None, None)
+
+
+async def _send_with_retry(client: httpx.AsyncClient, settings: dict[str, Any], body: dict[str, Any], *, stream: bool,
+                           cancel: asyncio.Event | None = None, deadline_at: float | None = None,
+                           attempt: int = 0) -> tuple[httpx.Response, Any, int]:
+    """POST the completion request, retrying 429/5xx/connection failures. Returns (response, stream context or None,
+    retries used).
+
+    `attempt` is the retries already spent, so header-level and stream-level retries share the one `llmRetries` cap.
     A streamed response comes back open: the caller closes it through the context. A non-2xx answer that survives
-    the retries (or is not retryable) raises LLMError with a readable message.
+    the retries (or is not retryable) raises LLMError with a readable message. Stop or the deadline raise _Aborted,
+    during the header wait as well as between attempts; a backoff that would cross the deadline is not slept, the
+    provider's own error is raised instead. A 400/422 that names `reasoning_effort` or `service_tier` is resent with
+    the field stepped down or dropped, without using an attempt; the body is edited in place, so the caller can see
+    what was dropped.
     """
     retries = _retries(settings)
-    attempt = 0
     url = _url(settings, "/chat/completions", body.get("model"))
+    stepped = dropped = False
+    sent_effort = body.get("reasoning_effort")
     while True:
+        if cancel is not None and cancel.is_set():
+            raise _Aborted("cancelled")
         cm = client.stream("POST", url, headers=_headers(settings), json=body) if stream else None
         try:
             if cm is not None:
-                r = await cm.__aenter__()
+                r = await _race(cm.__aenter__(), cancel, deadline_at)
                 if r.status_code >= 400:
-                    await r.aread()
+                    await _race(r.aread(), cancel, deadline_at)
             else:
-                r = await client.post(url, headers=_headers(settings), json=body)
+                r = await _race(client.post(url, headers=_headers(settings), json=body), cancel, deadline_at)
+        except _Aborted:
+            await _close_cm(cm)
+            raise
         except (httpx.TransportError, httpx.ProtocolError) as e:
-            if cm is not None:
-                with contextlib.suppress(Exception):
-                    await cm.__aexit__(None, None, None)
+            await _close_cm(cm)
             if cancel is not None and cancel.is_set():
-                raise LLMError("Stopped.") from e
-            if attempt >= retries:
+                raise _Aborted("cancelled") from e
+            delay = retry_delay(attempt + 1)
+            if attempt >= retries or (deadline_at is not None and time.monotonic() + delay >= deadline_at):
                 raise LLMError(describe_transport_error(e, attempt), kind="transport") from e
             attempt += 1
-            delay = retry_delay(attempt)
             log.warning("provider connection failed (%s); retry %d/%d in %.1fs", type(e).__name__, attempt, retries, delay)
             if not await _backoff(delay, cancel):
-                raise LLMError("Stopped while waiting to retry the provider.") from e
+                raise _Aborted("cancelled") from e
             continue
         if r.status_code < 400:
-            return r, cm
+            if sent_effort and (stepped or dropped):
+                _learn_cap(settings, str(body.get("model") or ""), "none" if dropped else "high")
+            return r, cm, attempt
         retry_after = retry_after_from(r.headers, status=r.status_code)
         kind = classify_error(r.status_code, r.text)
-        if cm is not None:
-            with contextlib.suppress(Exception):
-                await cm.__aexit__(None, None, None)
+        await _close_cm(cm)
+        field = _rejected_optional(r.status_code, r.text, body)
+        if field == "reasoning_effort" and body[field] in ("xhigh", "max") and not stepped:
+            stepped = True
+            body[field] = "high"
+            log.warning("provider rejected reasoning_effort %s; resending with high", sent_effort)
+            continue
+        if field:
+            dropped = dropped or field == "reasoning_effort"
+            body.pop(field, None)
+            log.warning("provider rejected %s; resending without it", field)
+            continue
         too_long = retry_after is not None and retry_after > RETRY_AFTER_MAX_S
         if kind in RETRYABLE_KINDS and attempt < retries and not too_long:
-            attempt += 1
-            delay = retry_delay(attempt, retry_after)
-            log.warning("provider answered %d; retry %d/%d in %.1fs", r.status_code, attempt, retries, delay)
-            if not await _backoff(delay, cancel):
-                raise LLMError("Stopped while waiting to retry the provider.")
-            continue
+            delay = retry_delay(attempt + 1, retry_after)
+            if deadline_at is None or time.monotonic() + delay < deadline_at:
+                attempt += 1
+                log.warning("provider answered %d; retry %d/%d in %.1fs", r.status_code, attempt, retries, delay)
+                if not await _backoff(delay, cancel):
+                    raise _Aborted("cancelled")
+                continue
         raise _provider_error(describe_http_error(r.status_code, r.reason_phrase, r.text, attempt, retry_after, kind), kind, r.status_code, r.text)
-
-
 
 
 def _headers(settings: dict[str, Any]) -> dict[str, str]:
@@ -676,7 +827,7 @@ def effort_supported(model: str, caps: dict[str, Any] | None) -> bool | None:
     return (caps or {}).get("reasoning")
 
 
-def effort_param(model: str, effort: str, caps: dict[str, Any] | None = None) -> str | None:
+def effort_param(model: str, effort: str, caps: dict[str, Any] | None = None, base_url: str | None = None) -> str | None:
     """The `reasoning_effort` to send, or None to leave the field off.
 
     `'default'` always omits the field. That is a deliberate choice, not the starting level:
@@ -692,6 +843,12 @@ def effort_param(model: str, effort: str, caps: dict[str, Any] | None = None) ->
         return _KIMI_K3_EFFORT.get(effort, "high")
     if (caps or {}).get("reasoning") is False:
         return None
+    # What this provider already rejected for this model (see _send_with_retry), so a tool loop does not pay a failed request per round.
+    learned = model_cap(base_url, model) if base_url else None
+    if learned and learned["effort"] == "none":
+        return None
+    if learned and effort in ("xhigh", "max"):
+        return "high"
     return effort
 
 
@@ -827,16 +984,19 @@ async def stream_chat(
     True when the stream ended with neither a finish_reason nor [DONE] (a dropped connection); its tool calls are cleared.
 
     `cancel`, once set, closes the HTTP stream immediately. The final event then has finish_reason
-    "cancelled" and no tool calls, including any arguments that had only partly arrived.
+    "cancelled" and no tool calls, including any arguments that had only partly arrived. Stop also interrupts the wait for
+    response headers and a retry backoff (the end event then carries no usage), and the same goes for the deadline.
 
     The `stream_deadline` context var (a time.monotonic() value) bounds the whole stream: when it passes, the stream ends the same
     way with finish_reason "timeout". A stream that goes `llmIdleSeconds` without a byte raises LLMError.
-    Connect failures, 429 and 5xx are retried (with backoff) until the first byte; never after.
+    Connect failures, 429 and 5xx, an error frame inside a 200, a drop and an empty stream are retried (with backoff,
+    under the one `llmRetries` cap) until the first content, reasoning or tool-call fragment; never after. `end` carries
+    `effort_dropped` (the value) when the provider rejected reasoning_effort and the request went without it.
     """
     body: dict[str, Any] = {"model": model, "messages": messages, "stream": True, "stream_options": {"include_usage": True}}
     # Only sent when the model accepts it. A missing field is not neutral: Kimi K3 reads it as max,
     # and a model that does not support the field rejects the whole request.
-    wired = effort_param(model, effort, caps=caps_lookup(model))
+    wired = effort_param(model, effort, caps=caps_lookup(model), base_url=settings.get("baseUrl"))
     if wired:
         body["reasoning_effort"] = wired
     if fast and supports_service_tier(settings):
@@ -857,78 +1017,120 @@ async def stream_chat(
     known = {t.get("function", {}).get("name") for t in tools or []}
     idle = _idle_s(settings)
     deadline_at = stream_deadline.get()
+    retries = _retries(settings)
+    attempt = 0  # retries spent, header-level and stream-level together
+    sent = True  # False when Stop or the deadline ended the call before any response arrived
+    dropped = ""
     # read= bounds the wait for response headers (and backs up a chunk); the per-chunk idle limit is enforced below.
     async with httpx.AsyncClient(timeout=httpx.Timeout(CONNECT_TIMEOUT_S, read=idle + 5, write=30, pool=CONNECT_TIMEOUT_S)) as client:
-        r, cm = await _send_with_retry(client, settings, body, stream=True, cancel=cancel)
-        try:
-            # Closes the socket from a second task so a read blocked on the next token returns at once.
-            abort = asyncio.create_task(_close_when(cancel, r)) if cancel is not None else None
+        while True:
+            # Per-attempt state: a re-issued request must not inherit anything from the one it replaces.
+            calls, by_index, last_idx = {}, {}, 0
+            finish, usage = None, None
+            out_chars = reason_chars = 0
+            saw_done = False
+            splitter = ThinkSplitter()
+            emitted = False  # the first content, reasoning or tool-call fragment ends the right to retry
+            fail: tuple[str, bool, str | None, str] | None = None  # (message, retryable, kind, body)
             try:
-                lines = r.aiter_lines().__aiter__()
-                while True:
-                    left = idle if deadline_at is None else min(idle, deadline_at - time.monotonic())
-                    try:
-                        line = await asyncio.wait_for(lines.__anext__(), max(left, 0.01))
-                    except StopAsyncIteration:
-                        break
-                    except asyncio.TimeoutError:
-                        if deadline_at is not None and time.monotonic() >= deadline_at:
-                            timed_out = True
+                r, cm, attempt = await _send_with_retry(client, settings, body, stream=True, cancel=cancel, deadline_at=deadline_at, attempt=attempt)
+            except _Aborted as a:
+                cancelled, timed_out, sent = a.reason == "cancelled", a.reason != "cancelled", False
+                break
+            if wired and "reasoning_effort" not in body:
+                dropped = wired
+            try:
+                # Closes the socket from a second task so a read blocked on the next token returns at once.
+                abort = asyncio.create_task(_close_when(cancel, r)) if cancel is not None else None
+                try:
+                    lines = r.aiter_lines().__aiter__()
+                    while True:
+                        left = idle if deadline_at is None else min(idle, deadline_at - time.monotonic())
+                        try:
+                            line = await asyncio.wait_for(lines.__anext__(), max(left, 0.01))
+                        except StopAsyncIteration:
                             break
-                        raise LLMError(f"The provider stopped responding: no data for {int(idle)}s mid-reply. Try again.", kind="timeout") from None
-                    if cancel is not None and cancel.is_set():
-                        cancelled = True
-                        break
-                    line = line.strip()
-                    if not line.startswith("data:"):
-                        continue
-                    data = line[5:].strip()
-                    if data == "[DONE]":
-                        saw_done = True
-                        break
-                    try:
-                        obj = json.loads(data)
-                    except ValueError:
-                        continue
-                    if obj.get("error"):
-                        err = obj["error"]
-                        body_s = json.dumps({"error": err})
-                        kind_e = classify_error(None, body_s)
-                        raise _provider_error(_provider_message(body_s), kind_e, None, body_s)
-                    if isinstance(obj.get("usage"), dict):
-                        usage = parse_usage(obj["usage"])
-                    choice = (obj.get("choices") or [{}])[0]
-                    delta = choice.get("delta") or {}
-                    reason = _reason_text(delta)
-                    if reason:
-                        reason_chars += len(reason)
-                        yield {"type": "reasoning", "text": reason}
-                    for kind_p, piece in splitter.feed(_content_text(delta)):
-                        if kind_p == "reasoning":
-                            reason_chars += len(piece)
-                        else:
-                            out_chars += len(piece)
-                        yield {"type": kind_p, "text": piece}
-                    for tc in delta.get("tool_calls") or []:
-                        last_idx = _add_fragment(calls, by_index, tc, last_idx, known)
-                    if choice.get("finish_reason"):
-                        finish = choice["finish_reason"]
-            except asyncio.CancelledError:
-                raise
-            except Exception as e:
-                if cancel is None or not cancel.is_set():
-                    if isinstance(e, httpx.HTTPError):  # after the first byte: reported, never retried
-                        raise LLMError(describe_transport_error(e) + " The reply was cut off.", kind="transport") from e
+                        except asyncio.TimeoutError:
+                            if deadline_at is not None and time.monotonic() >= deadline_at:
+                                timed_out = True
+                                break
+                            raise LLMError(f"The provider stopped responding: no data for {int(idle)}s mid-reply. Try again.", kind="timeout") from None
+                        if cancel is not None and cancel.is_set():
+                            cancelled = True
+                            break
+                        line = line.strip()
+                        if not line.startswith("data:"):
+                            continue
+                        data = line[5:].strip()
+                        if data == "[DONE]":
+                            saw_done = True
+                            break
+                        try:
+                            obj = json.loads(data)
+                        except ValueError:
+                            continue
+                        if obj.get("error"):
+                            err = obj["error"]
+                            body_s = json.dumps({"error": err})
+                            text, retryable = _frame_error(err)
+                            kind_e = classify_error(None, body_s)
+                            fail = (text, retryable and kind_e not in _PERMANENT_KINDS, kind_e, body_s)
+                            break
+                        if isinstance(obj.get("usage"), dict):
+                            usage = parse_usage(obj["usage"])
+                        choice = (obj.get("choices") or [{}])[0]
+                        delta = choice.get("delta") or {}
+                        reason = _reason_text(delta)
+                        if reason:
+                            emitted = True
+                            reason_chars += len(reason)
+                            yield {"type": "reasoning", "text": reason}
+                        for kind_p, piece in splitter.feed(_content_text(delta)):
+                            emitted = emitted or bool(piece)
+                            if kind_p == "reasoning":
+                                reason_chars += len(piece)
+                            else:
+                                out_chars += len(piece)
+                            yield {"type": kind_p, "text": piece}
+                        for tc in delta.get("tool_calls") or []:
+                            emitted = True
+                            last_idx = _add_fragment(calls, by_index, tc, last_idx, known)
+                        if choice.get("finish_reason"):
+                            finish = choice["finish_reason"]
+                except asyncio.CancelledError:
                     raise
-                cancelled = True
+                except Exception as e:
+                    if cancel is None or not cancel.is_set():
+                        if not isinstance(e, httpx.HTTPError):
+                            raise
+                        fail = (describe_transport_error(e), True, "transport", "")
+                    else:
+                        cancelled = True
+                finally:
+                    if abort is not None:
+                        abort.cancel()
+                        with contextlib.suppress(asyncio.CancelledError, Exception):
+                            await abort
             finally:
-                if abort is not None:
-                    abort.cancel()
-                    with contextlib.suppress(asyncio.CancelledError, Exception):
-                        await abort
-        finally:
-            with contextlib.suppress(Exception):
-                await cm.__aexit__(None, None, None)
+                await _close_cm(cm)
+            if cancel is not None and cancel.is_set():
+                cancelled, fail = True, None
+            if fail is None and not (cancelled or timed_out) and not emitted and finish is None and usage is None:
+                fail = ("The provider returned an empty reply. Try again, or pick another model.", True, "server", "")
+            if fail is None or cancelled or timed_out:
+                break
+            message, retryable, kind_f, body_f = fail
+            delay = retry_delay(attempt + 1)
+            if not emitted and retryable and attempt < retries and (deadline_at is None or time.monotonic() + delay < deadline_at):
+                attempt += 1
+                log.warning("provider failed before the first token (%s); retry %d/%d in %.1fs", message, attempt, retries, delay)
+                if not await _backoff(delay, cancel):
+                    cancelled = True
+                    break
+                continue
+            # Nothing is re-issued once a token reached the caller: the reply stays what it was and says it was cut off.
+            message += (f" Retried {attempt} time{'s' if attempt != 1 else ''}." if attempt else "") + (" The reply was cut off." if emitted else "")
+            raise _provider_error(message, kind_f, None, body_f)
     for kind_p, piece in splitter.flush():  # a tag-like tail held back at the end of the stream
         if kind_p == "reasoning":
             reason_chars += len(piece)
@@ -948,10 +1150,14 @@ async def stream_chat(
     tool_calls = _finish_calls(calls)
     # Reasoning is billed as completion tokens, so it counts toward cost and the run budget.
     p_chars, c_chars = len(json.dumps(messages)), out_chars + reason_chars + sum(len(c["arguments"]) for c in tool_calls)
-    _emit_usage(model, kind, usage, int((time.time() - t0) * 1000), p_chars, c_chars)
+    if sent:
+        _emit_usage(model, kind, usage, int((time.time() - t0) * 1000), p_chars, c_chars)
     # usage_est is always present: this route often omits `usage` on streamed replies, and a budget cannot run on None.
-    yield {"type": "end", "finish_reason": finish, "tool_calls": tool_calls, "usage": usage,
-           "usage_est": {"prompt_tokens": p_chars // 4, "completion_tokens": c_chars // 4}, "incomplete": incomplete}
+    end: dict[str, Any] = {"type": "end", "finish_reason": finish, "tool_calls": tool_calls, "usage": usage,
+                           "usage_est": {"prompt_tokens": p_chars // 4, "completion_tokens": c_chars // 4}, "incomplete": incomplete}
+    if dropped:
+        end["effort_dropped"] = dropped
+    yield end
 
 
 def _is_other_call(cur: dict[str, Any], tc: dict[str, Any]) -> bool:
@@ -1029,11 +1235,25 @@ def _finish_calls(calls: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
-async def complete(settings: dict[str, Any], model: str, messages: list[dict[str, Any]], kind: str = "learn") -> str:
-    """Non-streaming completion (used for extraction, and for vision: `content` may be a list of text/image_url parts)."""
+async def complete(settings: dict[str, Any], model: str, messages: list[dict[str, Any]], kind: str = "learn", *,
+                   effort: str = "default", cancel: asyncio.Event | None = None, deadline: float | None = None) -> str:
+    """Non-streaming completion (used for extraction, and for vision: `content` may be a list of text/image_url parts).
+
+    `cancel` (Stop) and `deadline` (a time.monotonic() value) end the call early as an LLMError of kind 'cancelled' /
+    'timeout'; neither is read from a context var, so a call made after a run's deadline has passed is unaffected.
+    """
     t0 = time.time()
+    body: dict[str, Any] = {"model": model, "messages": messages, "stream": False}
+    wired = effort_param(model, effort, caps=caps_lookup(model), base_url=settings.get("baseUrl"))
+    if wired:
+        body["reasoning_effort"] = wired
     async with httpx.AsyncClient(timeout=httpx.Timeout(120, connect=CONNECT_TIMEOUT_S)) as client:
-        r, _ = await _send_with_retry(client, settings, {"model": model, "messages": messages, "stream": False}, stream=False)
+        try:
+            r, _, _ = await _send_with_retry(client, settings, body, stream=False, cancel=cancel, deadline_at=deadline)
+        except _Aborted as a:
+            if a.reason == "cancelled":
+                raise LLMError("Stopped.", kind="cancelled") from None
+            raise LLMError("The model provider took too long.", kind="timeout") from None
     data = r.json()
     text = strip_think(_content_text(data["choices"][0]["message"]))
     _emit_usage(model, kind, parse_usage(data["usage"]) if isinstance(data.get("usage"), dict) else None, int((time.time() - t0) * 1000), _prompt_chars(messages), len(text))

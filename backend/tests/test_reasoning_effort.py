@@ -72,3 +72,144 @@ if __name__ == "__main__":
             print(f"FAIL  {fn.__name__}: {type(e).__name__}: {e}")
     print(f"\n{len(fns) - failed}/{len(fns)} passed")
     sys.exit(1 if failed else 0)
+
+
+# --- a provider that rejects the field: step down, drop, remember -------------------------------------------------
+
+import asyncio  # noqa: E402
+import json  # noqa: E402
+import time  # noqa: E402
+from typing import Any  # noqa: E402
+
+import httpx  # noqa: E402
+
+from personal_os import llm  # noqa: E402
+
+_REAL_CLIENT = httpx.AsyncClient
+SETTINGS = {"baseUrl": "http://p.test/v1", "apiKey": "k", "llmRetries": 2}
+SSE = b'data: {"choices":[{"delta":{"content":"hi"}}]}\n\ndata: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'
+
+
+def _reject(field: str, message: str | None = None) -> httpx.Response:
+    return httpx.Response(400, json={"error": {"message": message or f"Unsupported parameter: '{field}'", "param": field}})
+
+
+def _ok(_b: dict[str, Any] | None = None) -> httpx.Response:
+    return httpx.Response(200, content=SSE)
+
+
+def _stream(monkeypatch: Any, handler: Any, model: str = "m1", effort: str = "medium", fast: bool = False) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    bodies: list[dict[str, Any]] = []
+    real = _REAL_CLIENT
+
+    def h(req: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(req.content))
+        return handler(bodies[-1])
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **k: real(*a, **{**k, "transport": httpx.MockTransport(h)}))
+    monkeypatch.setattr(llm, "caps_lookup", lambda _m: {})
+    monkeypatch.setattr(llm, "supports_service_tier", lambda _s: True)
+
+    async def go() -> list[dict[str, Any]]:
+        return [ev async for ev in llm.stream_chat(SETTINGS, model, [{"role": "user", "content": "x"}], effort=effort, fast=fast)]
+
+    return asyncio.run(go()), bodies
+
+
+def _fresh() -> None:
+    llm._model_caps.clear()
+    llm._caps_listeners.clear()
+
+
+def test_a_rejected_effort_is_dropped_remembered_and_not_resent(monkeypatch: Any) -> None:
+    _fresh()
+    heard: list[dict[str, Any]] = []
+    llm.on_caps(heard.append)
+    evs, bodies = _stream(monkeypatch, lambda b: _reject("reasoning_effort") if "reasoning_effort" in b else _ok())
+    assert [("reasoning_effort" in b) for b in bodies] == [True, False]
+    assert any(e.get("text") == "hi" for e in evs)
+    assert evs[-1]["effort_dropped"] == "medium"
+    assert llm.model_cap("http://p.test/v1/", "m1")["effort"] == "none"
+    assert len(heard) == 1
+    evs, bodies = _stream(monkeypatch, _ok)
+    assert len(bodies) == 1 and "reasoning_effort" not in bodies[0]
+    assert "effort_dropped" not in evs[-1]
+    _fresh()
+
+
+def test_xhigh_steps_to_high_once_without_using_an_attempt(monkeypatch: Any) -> None:
+    _fresh()
+    calls: list[str] = []
+
+    def handler(b: dict[str, Any]) -> httpx.Response:
+        calls.append(b.get("reasoning_effort", ""))
+        return _reject("reasoning_effort", "reasoning_effort must be one of low, medium, high") if b.get("reasoning_effort") in ("max", "xhigh") else _ok()
+
+    evs, _ = _stream(monkeypatch, handler, effort="max")
+    assert calls == ["max", "high"]
+    assert "effort_dropped" not in evs[-1]
+    assert llm.model_cap("http://p.test/v1", "m1")["effort"] == "high"
+    assert llm.effort_param("m1", "max", base_url="http://p.test/v1") == "high"
+    assert llm.effort_param("m1", "medium", base_url="http://p.test/v1") == "medium"
+    _fresh()
+
+
+def test_the_message_may_say_thinking(monkeypatch: Any) -> None:
+    _fresh()
+    _, bodies = _stream(monkeypatch, lambda b: _reject("x", "This model does not support thinking.") if "reasoning_effort" in b else _ok())
+    assert len(bodies) == 2
+    _fresh()
+
+
+def test_a_400_that_does_not_name_the_field_is_not_retried(monkeypatch: Any) -> None:
+    _fresh()
+    bodies: list[Any] = []
+
+    def handler(b: dict[str, Any]) -> httpx.Response:
+        bodies.append(b)
+        return httpx.Response(400, json={"error": {"message": "bad messages"}})
+
+    try:
+        _stream(monkeypatch, handler)
+        raise AssertionError("expected an LLMError")
+    except llm.LLMError:
+        pass
+    assert len(bodies) == 1 and llm.model_cap("http://p.test/v1", "m1") is None
+    _fresh()
+
+
+def test_service_tier_is_dropped_for_the_request_only(monkeypatch: Any) -> None:
+    _fresh()
+    evs, bodies = _stream(monkeypatch, lambda b: _reject("service_tier") if "service_tier" in b else _ok(), effort="default", fast=True)
+    assert ["service_tier" in b for b in bodies] == [True, False]
+    assert "effort_dropped" not in evs[-1] and not llm._model_caps
+    _fresh()
+
+
+def test_learned_caps_expire_and_reload() -> None:
+    _fresh()
+    llm.load_caps({"http://p.test|m1": {"effort": "none", "at": time.time() - 31 * 86400}, "junk": 3})
+    assert llm.model_cap("http://p.test", "m1") is None
+    assert llm.effort_param("m1", "medium", base_url="http://p.test") == "medium"
+    llm.load_caps({"http://p.test|m1": {"effort": "none", "at": time.time()}})
+    assert llm.effort_param("m1", "medium", base_url="http://p.test/") is None
+    _fresh()
+
+
+def test_complete_sends_effort_only_when_asked(monkeypatch: Any) -> None:
+    _fresh()
+    bodies: list[dict[str, Any]] = []
+    real = _REAL_CLIENT
+
+    def h(req: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(req.content))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **k: real(*a, **{**k, "transport": httpx.MockTransport(h)}))
+    monkeypatch.setattr(llm, "caps_lookup", lambda _m: {})
+    msgs = [{"role": "user", "content": "x"}]
+    asyncio.run(llm.complete(SETTINGS, "kimi-k3", msgs, effort="low"))
+    asyncio.run(llm.complete(SETTINGS, "kimi-k2.7-code", msgs, effort="low"))
+    asyncio.run(llm.complete(SETTINGS, "plain", msgs))
+    assert bodies[0]["reasoning_effort"] == "low"
+    assert "reasoning_effort" not in bodies[1] and "reasoning_effort" not in bodies[2]

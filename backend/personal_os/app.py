@@ -377,6 +377,20 @@ def _record_usage(ev: dict[str, Any]) -> None:
 
 if not any(getattr(f, "__name__", "") == "_record_usage" for f in llm._usage_listeners):
     llm.on_usage(_record_usage)
+
+
+def _save_model_caps(caps: dict[str, Any]) -> None:
+    """llm.on_caps listener: keep what a provider rejected for a model across restarts."""
+    try:
+        db.set_settings({"modelCaps": caps})
+        events.publish("model_caps", {})
+    except Exception:  # noqa: BLE001 - a lost hint is relearned from the next rejection
+        pass
+
+
+llm.load_caps(db.get_settings().get("modelCaps") or {})
+if not any(getattr(f, "__name__", "") == "_save_model_caps" for f in llm._caps_listeners):
+    llm.on_caps(_save_model_caps)
 # A desk is one conversation plus one workspace plus one approved plan. The workspace is a plain
 # directory per desk under the data dir, containment-checked after symlink resolution; Desks is the
 # state machine and the timeline over it.
@@ -639,7 +653,7 @@ def health() -> dict[str, Any]:
 
 
 # Google OAuth material lives in settings but never leaves the backend.
-PRIVATE_SETTINGS = {"googleToken", "googleAuthPending"}
+PRIVATE_SETTINGS = {"googleToken", "googleAuthPending", "modelCaps"}
 # Readable through /settings, but only writable through its own route: a plain PUT would replace the
 # whole nested dict and silently drop the signal switches and exclusion lists.
 SETTINGS_READ_ONLY = {"activity", "googleTasksSync", "googleTodoCalendar", "meetings"}
@@ -1214,6 +1228,7 @@ PROPOSAL_ONLY_KINDS = ("job",)
 # Caps for an unattended run, applied on top of the user's settings and only downward (see _caps). Tighter than
 # interactive on purpose: nobody is watching, and a longer leash makes the answer worse, not better.
 # A model call that is still open after this long while writing the closing answer is abandoned.
+EFFORT_DROPPED_NOTICE = "This model does not accept a reasoning effort; it was sent without one."
 FINAL_ROUND_SECONDS = 90.0
 # Hard ceiling on an unattended run end to end (model, tools, everything), a backstop for a hang the budget cannot see.
 JOB_HARD_SECONDS = 1800.0
@@ -1766,6 +1781,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         quiet_retries = 0  # silent retries of an incomplete or empty round: at most one per reply
         cut_recoveries = 0  # rounds whose tool calls were cut off at the output limit
         error_kind: str | None = None
+        notice: str | None = None  # one line for the user on the final done, e.g. the model took no reasoning effort
         awaiting: dict[str, Any] | None = None  # the tool event of a call blocked on approval, for a cancelled run to keep
         # The call this reply let go of rather than keep waiting on. Set once, and the reply ends there.
         parked: str | None = None
@@ -1820,6 +1836,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     yield "delta", {"id": am["id"], "text": ev["text"]}
                 else:
                     fin = ev
+                    if ev.get("effort_dropped"):
+                        notice = EFFORT_DROPPED_NOTICE
                 if steers:
                     break
             tracer.end(span, {"finish_reason": fin.get("finish_reason"), "usage": fin.get("usage"),
@@ -1915,6 +1933,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     yield "delta", {"id": am["id"], "text": ev["text"]}
                 else:
                     end = ev
+                    if ev.get("effort_dropped"):
+                        notice = EFFORT_DROPPED_NOTICE
                 if steers:
                     break
             calls = [] if end.get("finish_reason") == "cancelled" else (end.get("tool_calls") or [])
@@ -2555,7 +2575,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     yield "done", {"id": am["id"], "error": error, "context_used": used, "tool_events": tool_events,
                    "trace": tracer.spans, "stopped": stop.is_set(), "partial": partial, "segment": False,
                    "tainted": tool_ctx["tainted"], "taint_sources": tool_ctx["taint_sources"],
-                   "reasoning": reasoning, "outcome": outcome, "error_kind": error_kind}
+                   "reasoning": reasoning, "outcome": outcome, "error_kind": error_kind, "notice": notice}
     if tool_ctx.get("learned"):
         yield "learned", tool_ctx["learned"]
 

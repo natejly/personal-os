@@ -104,7 +104,7 @@ class Projects:
 # reasoning_effort, which on Kimi K3 means the model's own max. See llm.effort_param.
 DEFAULT_EFFORT = "low"
 DEFAULT_CONV_SETTINGS = {"effort": DEFAULT_EFFORT, "fast": False, "useMemory": True, "useGraph": True, "useDocuments": True, "useActivity": True,
-                         "useStyle": True, "useMeetings": True, "autoLearn": True, "useTools": True, "tools": {}}
+                         "useStyle": True, "draftMode": False, "useMeetings": True, "autoLearn": True, "useTools": True, "tools": {}}
 
 
 class Conversations:

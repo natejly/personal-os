@@ -171,7 +171,7 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
       void api.contextPreview(projectId, query, cs).then(setPreview).catch(() => setPreview(null))
     }, 300)
     return () => clearTimeout(t)
-  }, [tab, query, projectId, cs.useMemory, cs.useGraph, cs.useDocuments, cs.useActivity, cs.useStyle, cs.useMeetings])
+  }, [tab, query, projectId, cs.useMemory, cs.useGraph, cs.useDocuments, cs.useActivity, cs.useStyle, cs.draftMode, cs.useMeetings])
 
   return (
     <aside className="context-drawer">
@@ -198,6 +198,7 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
         <Toggle icon={<FileText size={14} />} label="Documents" hint="Best matching excerpts (full-text search)" value={cs.useDocuments} onChange={(v) => void setChatSettings({ useDocuments: v }, conversationId)} />
         <Toggle icon={<MonitorDot size={14} />} label="Activity" hint={activityRunning ? 'What you have been doing on this computer' : 'Activity monitor is off'} value={cs.useActivity !== false} onChange={(v) => void setChatSettings({ useActivity: v }, conversationId)} />
         <Toggle icon={<PenLine size={14} />} label="Writing style" hint={hasStyle ? 'Drafts sound like you, not like the assistant' : 'No voice learned yet'} value={cs.useStyle !== false} onChange={(v) => void setChatSettings({ useStyle: v }, conversationId)} />
+        <Toggle icon={<PenLine size={14} />} label="Draft mode" hint="Use your voice for this chat's drafts. Off for ordinary replies; ignored once the chat has read untrusted content" value={cs.draftMode === true} onChange={(v) => void setChatSettings({ draftMode: v }, conversationId)} />
         <Toggle icon={<Mic size={14} />} label="Meetings" hint={meetingCount ? 'Your recent meeting notes and decisions' : 'No meetings recorded yet'} value={cs.useMeetings !== false} onChange={(v) => void setChatSettings({ useMeetings: v }, conversationId)} />
         <Toggle icon={<Wand2 size={14} />} label="Auto-learn" hint={settings.autoLearn ? 'Extract memories, graph & writing style after each reply' : 'Disabled globally in settings'} value={cs.autoLearn && settings.autoLearn} onChange={(v) => void setChatSettings({ autoLearn: v }, conversationId)} />
         <Toggle icon={<Wrench size={14} />} label="Tools" hint={(cs.skipPermissions ?? settings.skipPermissions) ? 'Ordinary tools skip their card in this chat. External actions, shell, ask rules and flagged content still ask.' : 'Web, documents, memory, graph, todos, boards, Python… External actions ask first.'} value={cs.useTools} onChange={(v) => void setChatSettings({ useTools: v }, conversationId)} />

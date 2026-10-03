@@ -541,6 +541,8 @@ export interface ConversationSettings {
   useActivity: boolean
   /** Inject the writing-style profile, so drafts sound like the user. */
   useStyle: boolean
+  /** Explicit draft turn: the voice block is only injected while this is on (never on a tainted chat). Defaults off. */
+  draftMode?: boolean
   /** Per-chat plan mode. Absent reads as the global default; a desk writes it when it is created. */
   planMode?: 'off' | 'auto' | 'always'
   /** Absent inherits Settings.skipPermissions. True runs tool calls that would have asked, in this chat. */

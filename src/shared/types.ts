@@ -2416,6 +2416,8 @@ export interface MeetingConfig {
   whisperModelPath: string
   template: MeetingTemplate
   enhanceOnStop: boolean
+  /** Names and jargon given to the transcriber, along with the attendees. */
+  terms: string[]
   /** Blank falls back to the extraction model, then the default model. */
   enhanceModel: string
   /** Head-and-tail cap on the transcript sent to the model; decisions land at the end. */

@@ -257,6 +257,11 @@ export default function MeetingSettings({ variant = 'page' }: { variant?: 'page'
         <span className="switch" />
       </label>
       <label className="act-field">
+        <span><b>Vocabulary</b><small>names and jargon the transcriber should spell right, comma separated; attendee names are added automatically</small></span>
+        <input defaultValue={(cfg.terms ?? []).join(', ')} spellCheck={false} placeholder="Grain, Kubernetes, Priya"
+          onBlur={(e) => patch({ terms: e.target.value.split(',').map((t) => t.trim()).filter(Boolean) })} />
+      </label>
+      <label className="act-field">
         <span><b>Enhance model</b><small>blank falls back to the extraction model, then the default chat model</small></span>
         <input value={cfg.enhanceModel} onChange={(e) => patch({ enhanceModel: e.target.value })} spellCheck={false} placeholder="(default)" />
       </label>

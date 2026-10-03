@@ -122,7 +122,9 @@ def test_deny_survives_skip_permissions() -> None:
     check(not RAN and not cards(ev) and results(ev)[0]["error"], "a denied recipient is refused with skip-permissions on")
     cid = setup({"deny": ["gmail_send(bad@x.com)"]}, mode="ask", skipPermissions=True)
     ev = drive(cid, [[sh(0, "ok@x.com")], []])
-    check(RAN == ["ok@x.com"] and not cards(ev), "another recipient still runs under skip-permissions")
+    # An external tool is one of the asks skip-permissions leaves alone: the other recipient still gets a card
+    # (the harness answers it "allow"), and only then runs.
+    check(RAN == ["ok@x.com"] and len(cards(ev)) == 1, "another recipient still asks under skip-permissions, then runs once allowed")
 
 
 def test_external_card_has_danger_and_no_whole_tool_grant() -> None:

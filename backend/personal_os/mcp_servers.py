@@ -64,6 +64,7 @@ RESERVED_TOOL_NAMES = frozenset({
     "google_docs_search", "google_docs_read", "google_docs_create", "google_docs_append",
     "google_sheets_read", "google_sheets_write", "google_sheets_create",
     "board_list", "board_add_card", "board_move_card", "board_create",
+    "board_claim", "board_comment", "board_release", "propose_times_draft",
     "sandbox_exec", "sandbox_write_file", "sandbox_read_file", "sandbox_list_files",
     "sandbox_put_document", "sandbox_reset", "sandbox_checkpoint", "sandbox_restore",
     "doc_list", "doc_search", "doc_read", "doc_create", "doc_edit",

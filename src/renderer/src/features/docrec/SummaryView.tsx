@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { ListPlus, Sparkles } from 'lucide-react'
+import { ListPlus, Quote, Sparkles } from 'lucide-react'
 import type { DocRecording, FullMeeting, MeetingActionItem } from '@shared/types'
 import MarkdownPreview from '../../components/MarkdownPreview'
+import { evidenceChunks } from './evidence'
 import { SUMMARY_TRUST, summaryCopy } from './format'
 
 /** Mirrors the backend's templates (`meeting_notes.TEMPLATES`); the first is the default. */
@@ -22,9 +23,11 @@ export interface SummaryViewProps {
   error: string | null
   onSummarize: (opts: { template: string; focus: string; force: boolean }) => void
   onAddTodos: (ids?: string[]) => void
+  /** Open the Transcript tab on these segments. */
+  onSource?: (ids: string[]) => void
 }
 
-export default function SummaryView({ row, meeting, actions, summarizing, error, onSummarize, onAddTodos }: SummaryViewProps): JSX.Element {
+export default function SummaryView({ row, meeting, actions, summarizing, error, onSummarize, onAddTodos, onSource }: SummaryViewProps): JSX.Element {
   const [template, setTemplate] = useState<string>(meeting?.template ?? row.template ?? 'general')
   const [focus, setFocus] = useState('')
   const summary = meeting?.enhanced ?? ''
@@ -38,7 +41,17 @@ export default function SummaryView({ row, meeting, actions, summarizing, error,
       <p className={`dr-state ${copy.tone}`}>{copy.text}</p>
 
       {meeting?.summary && !dictation && <p className="dr-headline">{meeting.summary}</p>}
-      {summary.trim() !== '' && !dictation && <div className="dr-summary-body"><MarkdownPreview source={summary} /></div>}
+      {summary.trim() !== '' && !dictation && <div className="dr-summary-body">
+        {evidenceChunks(summary, meeting?.summary_evidence).map((c, i) => (
+          <div key={i} className={c.ids.length ? 'dr-cited' : undefined}>
+            <MarkdownPreview source={c.text} />
+            {c.ids.length > 0 && onSource && (
+              <button className="icon-btn ghost dr-source" title="Show where this was said" aria-label="Show source in transcript"
+                onClick={() => onSource(c.ids)}><Quote size={11} /></button>
+            )}
+          </div>
+        ))}
+      </div>}
 
       {!dictation && (
         <div className="dr-regen">

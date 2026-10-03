@@ -210,6 +210,38 @@ def test_escape_currency_keeps_prices_out_of_inline_maths() -> None:
     assert esc("```\nprice=$9\n```\nowed $9") == "```\nprice=$9\n```\nowed \\$9"
 
 
+# ---------------------------------------------------------------- evidence tags
+
+
+def _summ(reply: str, **kw) -> dict:
+    fn, _ = _stub(reply)
+    return asyncio.run(meeting_notes.summarize_recording(
+        complete_fn=fn, settings=dict(SETTINGS), model="m", meeting=MEETING, doc_title="Plan",
+        doc_content="", transcript="x", **kw))
+
+
+def test_numbered_transcript_skips_unspoken_segments_and_maps_tags_to_real_ids() -> None:
+    text, ids = meeting_notes.numbered_transcript([
+        {"id": "a", "state": "done", "text": "hello", "t_start": 5, "channel": "mic"},
+        {"id": "b", "state": "failed", "text": "lost", "t_start": 9},
+        {"id": "c", "state": "done", "text": "  ", "t_start": 10},
+        {"id": "d", "state": "done", "text": "reply", "t_start": 65, "channel": "system"},
+    ])
+    assert ids == {"s1": "a", "s2": "d"}
+    assert text == "[s1 00:05 you] hello\n[s2 01:05 them] reply"
+
+
+def test_evidence_tags_become_real_segment_ids_and_leave_a_clean_body() -> None:
+    reply = json.dumps({"summary_markdown": "- first point {s1,s2}\n- invented {s9}\n- plain", "headline": "h"})
+    res = _summ(reply, sources={"s1": "seg-a", "s2": "seg-b"})
+    assert "{" not in res["markdown"] and res["error"] == ""
+    assert res["evidence"] == {"0": ["seg-a", "seg-b"]}      # the bogus s9 line has no entry
+
+
+def test_an_untagged_reply_gives_a_summary_with_empty_evidence() -> None:
+    res = _summ(json.dumps({"summary_markdown": "- a\n- b"}), sources={"s1": "seg-a"})
+    assert res["markdown"] == "- a\n- b" and res["evidence"] == {}
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

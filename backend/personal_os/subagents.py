@@ -653,10 +653,11 @@ class Subagents:
     async def _loop(self, ch: Child) -> None:
         cfg = ch.ctx.get("settings") or self.settings()
         schemas = self.toolbox.schemas(ch.modes)
-        window = int(cfg.get("contextWindow") or 128000)
         for rnd in range(1, ch.steps + 1):
             self._check(ch)
             ch.rounds = rnd
+            known = self.pricing.caps(ch.model).get("max_input_tokens") if self.pricing is not None else None
+            window = compaction.window_for(cfg, ch.model, known)
             # Once old tool output would free real room, it shrinks to a stub (the full text stays behind its handle).
             compaction.microcompact(ch.messages, int(cfg.get("microKeep") or 3), window, float(cfg.get("microAt") or 0.5))
             text, end = await self._model_round(ch, schemas)

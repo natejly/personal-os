@@ -1220,7 +1220,8 @@ def _register_working(self: Toolbox) -> None:
                                   expected="the result_id from a tool result that came back as a handle",
                                   example={"result_id": recent[0] if recent else "tr_9f1c2a84", "offset": 0},
                                   alternative="call the tool again with a narrower query, or page the handle you do have: " + (", ".join(recent) or "none yet"))
-            if isinstance(out.get("shape"), dict) and out["shape"].get("untrusted"):
+            if (isinstance(out.get("shape"), dict) and out["shape"].get("untrusted")) or self.taints(str(out.get("tool") or "")):
+                # A handle outlives the banner: the user's Clear must not turn paging it into a way to launder its text.
                 ctx["tainted"] = True
                 ctx.setdefault("taint_sources", []).append("read_tool_result")
             return out

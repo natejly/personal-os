@@ -351,7 +351,8 @@ pricing = Pricing()
 llm.caps_lookup = pricing.caps
 app.include_router(otel_export.router(db, lambda: settings()))
 compactor = compaction.Compactor(db)
-app.include_router(compaction.router(compactor, convos, lambda: settings()))
+app.include_router(compaction.router(compactor, convos, lambda: settings(),
+                                     window_fn=lambda cfg, m: compaction.window_for(cfg, m, pricing.caps(m).get("max_input_tokens"))))
 
 
 def _int_setting(cfg: dict[str, Any], key: str, default: int) -> int:
@@ -692,6 +693,11 @@ NUMERIC_SETTING_RANGES: dict[str, tuple[float, float]] = {
     "llmRetries": (0, 10),
     "llmIdleSeconds": (10, 3_600),
     "retainUsageDays": (7, 3_650),
+    "contextWindow": (1000, 4_000_000),
+    "compactAt": (0.1, 0.95),
+    "microAt": (0.05, 0.95),
+    "compactKeepRecent": (2, 200),
+    "microKeep": (0, 50),
     "retainTraceDays": (1, 3_650),
     "retainToolResultDays": (1, 3_650),
     "retainApprovalDays": (1, 3_650),
@@ -1534,8 +1540,19 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         page=body.page_context.model_dump() if body.page_context else None,
     )
     # Older messages are folded into a rolling summary when the replay outgrows the window (compaction.py).
-    history, cinfo = await compaction.prepare_history(compactor, convos, cfg, str(cfg.get("extractionModel") or model), conv_id,
-                                                      used["tokens_estimate"])
+    # The window is this model's: the global setting, what the proxy reports, and what an overflow taught us.
+    win = compaction.window_for(cfg, model, pricing.caps(model).get("max_input_tokens"))
+    try:
+        history, cinfo = await compaction.prepare_history(compactor, convos, cfg, str(cfg.get("extractionModel") or model), conv_id,
+                                                          used["tokens_estimate"], window=win, cancel=stop)
+    except llm.LLMError:
+        if not stop.is_set():
+            raise
+        # Stopped while the history was being summarized: no reply row exists yet, so there is nothing to persist.
+        yield "done", {"id": None, "error": None, "context_used": None, "tool_events": [], "trace": tracer.spans, "stopped": True,
+                       "partial": None, "segment": False, "tainted": bool(conv["settings"].get("tainted")), "taint_sources": [],
+                       "reasoning": None, "outcome": "stopped", "error_kind": None}
+        return
     tracer.end(cspan, {"memories": len(used["memories"]), "entities": len(used["nodes"]), "excerpts": len(used["chunks"]),
                        "history_messages": len(history)})
     compact_span: dict[str, Any] | None = None
@@ -1737,21 +1754,21 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         if cfg.get("cacheLayout", True):
             # Stable prefix first, per-turn retrieval just before the newest user message (see context.layout_messages).
             stable = "\n\n".join(p for p in (used["stable_system"], *hints) if p)
-            messages = layout_messages(stable, used["volatile_blocks"], history)
             system = "\n\n".join(p for p in (stable, *used["volatile_blocks"]) if p)
             used["stable_hash"] = hashlib.sha256(stable.encode()).hexdigest()[:12]
             cspan["meta"]["stable_hash"] = used["stable_hash"]
         else:
+            stable = None
             system = "\n\n".join(p for p in (system, *hints) if p)
-            messages = [{"role": "system", "content": system}] + history
         used["system_prompt"] = system
         used["tokens_estimate"] = estimate_tokens(system)
+        run_notes: list[dict[str, Any]] = []  # system notes that follow the history, whichever history it is
         if parked_note:
-            messages.append({"role": "system", "content": parked_note})
+            run_notes.append({"role": "system", "content": parked_note})
         if body.resume_of:
             old = run_store.get(body.resume_of) or {}
             old_events = run_store.events(body.resume_of)
-            messages.append({"role": "system", "content": resume.build_resume_note(
+            run_notes.append({"role": "system", "content": resume.build_resume_note(
                 old, old_events, run_store.executed(body.resume_of), run_store.approvals(None, run_id=body.resume_of),
                 reason=resume.reason_tag(old, _run_message(old)))})
             # Taint is only ever added to: a resume cannot launder what the dead run read.
@@ -1759,6 +1776,14 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 tool_ctx["tainted"] = True
                 if src not in tool_ctx["taint_sources"]:
                     tool_ctx["taint_sources"].append(src)
+
+        def _assemble(hist: list[dict[str, str]]) -> list[dict[str, Any]]:
+            """Everything before this run's own messages: the layout around `hist`, then the parked / resume notes."""
+            head = layout_messages(stable, used["volatile_blocks"], hist) if stable is not None \
+                else [{"role": "system", "content": system}] + hist
+            return head + [dict(n) for n in run_notes]
+        messages = _assemble(history)
+        base_len = len(messages)  # what follows is this run's own steers, tool turns and notes
         yield "assistant_message", {**am, "context_used": used}
         yield "span", {"message_id": am["id"], "span": cspan}
         if compact_span:
@@ -1807,6 +1832,69 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             if block:
                 plan_msg = {"role": "system", "content": block}
                 messages.append(plan_msg)
+
+        overflow_retried = False
+        run_started = am["created_at"]
+
+        async def _recover_overflow(e: llm.ContextOverflowError) -> dict[str, Any] | None:
+            """The provider said this request does not fit. Learn the model's limit, stub old tool output, fold the
+            history from before this run into the summary, and rebuild the head of `messages` in place. None when
+            neither step freed anything."""
+            nonlocal win, base_len
+            before = compaction.estimate_messages(messages)
+            compaction.note_overflow(model, e.limit, before)
+            win = compaction.window_for(cfg, model, pricing.caps(model).get("max_input_tokens"))
+            cleared, saved = compaction.microcompact(messages, 1, win, 0.0)
+            summarized = 0
+            rows = [r for r in convos.history_rows(conv_id) if r["created_at"] < run_started]
+            untrusted = bool(tool_ctx.get("tainted"))
+            try:
+                res = await compactor.compact({**cfg, "compactKeepRecent": min(_int_setting(cfg, "compactKeepRecent", 8), 2)},
+                                              str(cfg.get("extractionModel") or model), conv_id, rows, include_untrusted=untrusted,
+                                              complete=compaction.bind_supported(llm.complete, cancel=stop))
+            except Exception:  # noqa: BLE001 - a summarizer failure leaves the stubs as the only relief
+                log.warning("overflow compaction failed for %s", conv_id, exc_info=True)
+                res = None
+            if res:
+                head = _assemble(compactor.build_history(rows, compactor.get(conv_id), untrusted))
+                messages[:] = head + messages[base_len:]
+                base_len = len(head)
+                summarized = res["summarized"]
+                saved += max(0, res["tokens_before"] - res["tokens_after"])
+            if not cleared and not res:
+                return None
+            span = tracer.start("compact", "Compact after overflow", {"kind": "overflow"}, parent=cspan)
+            tracer.end(span, {"cleared": cleared, "summarized": summarized, "tokens_saved": saved})
+            return {"span": span}
+
+        async def _stream_round() -> AsyncIterator[dict[str, Any]]:
+            """The round's model stream. A provider overflow before anything streamed is recovered once per reply:
+            the stream is re-issued over the compacted context and a synthetic `overflow_recovered` event says so.
+            Anything else (a second overflow, one after text arrived) propagates to the reply's error handling."""
+            nonlocal overflow_retried
+            while True:
+                streamed = False
+                stream = llm.stream_chat(cfg, model, messages, tool_schemas or None,
+                                         effort=str(conv["settings"].get("effort") or "default"),
+                                         fast=bool(conv["settings"].get("fast")),
+                                         cancel=_stream_cancel(stop, steers, run))
+                try:
+                    async for ev in stream:
+                        streamed = streamed or ev["type"] in ("reasoning", "delta")
+                        yield ev
+                    return
+                except llm.ContextOverflowError as e:
+                    if streamed or overflow_retried or stop.is_set():
+                        raise
+                    overflow_retried = True
+                    recovered = await _recover_overflow(e)
+                    if stop.is_set():
+                        return  # Stop arrived while the summarizer ran: the round ends with nothing, as stopped
+                    if recovered is None:
+                        raise
+                finally:
+                    await stream.aclose()
+                yield {"type": "overflow_recovered", **recovered}
 
         async def _final_round() -> AsyncIterator[tuple[str, Any]]:
             """Closing answer after a budget or breaker stop: one tool-free call, itself exempt from the budget."""
@@ -1902,7 +1990,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             round_start = len(buf)
             end: dict[str, Any] = {}
             # Old tool results shrink to stubs once the run has filled half the window; read_tool_result still serves them.
-            n_cleared, n_saved = compaction.microcompact(messages, _int_setting(cfg, "microKeep", 3), _int_setting(cfg, "contextWindow", 128000),
+            n_cleared, n_saved = compaction.microcompact(messages, _int_setting(cfg, "microKeep", 3), win,
                                                          float(cfg.get("microAt", 0.5)))
             if n_cleared:
                 mspan = tracer.start("compact", "Clear old tool results", {"kind": "micro"}, parent=cspan)
@@ -1916,13 +2004,18 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             yield "span", {"message_id": am["id"], "span": lspan}
             first_token: int | None = None
             budget.arm_deadline()
-            async for ev in llm.stream_chat(cfg, model, messages, tool_schemas or None,
-                                            effort=str(conv["settings"].get("effort") or "default"),
-                                            fast=bool(conv["settings"].get("fast")),
-                                            cancel=_stream_cancel(stop, steers, run)):
+            async for ev in _stream_round():
                 if stop.is_set():
                     break
-                if ev["type"] == "reasoning":
+                if ev["type"] == "overflow_recovered":
+                    # The request did not fit; the context was compacted and the same round is being re-issued.
+                    tracer.end(lspan, {"finish_reason": "overflow"}, error="Context overflow; compacted and retrying")
+                    yield "span", {"message_id": am["id"], "span": lspan}
+                    yield "span", {"message_id": am["id"], "span": ev["span"]}
+                    lspan = tracer.start("llm", model, {"round": _round, "messages": len(messages), "tools": len(tool_schemas)})
+                    round_span = lspan
+                    yield "span", {"message_id": am["id"], "span": lspan}
+                elif ev["type"] == "reasoning":
                     if first_token is None:
                         first_token = now_ms()
                     rbuf.append(ev["text"])
@@ -2508,7 +2601,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 # Anything saved while this run is tainted can carry that text, including a script
                 # that prints it. Paging the handle later has to taint again, even after the banner is cleared.
                 brought_untrusted = bool(tool_ctx.get("tainted"))
-                content = tool_results.for_model(conv_id, am["id"], c["name"], for_model, untrusted=brought_untrusted)
+                content, rid = tool_results.render(conv_id, am["id"], c["name"], for_model, untrusted=brought_untrusted)
+                if rid:
+                    event["result_id"] = rid  # persisted with the tool event, so later turns can name the handle
                 if stuck and event["breaker"] == "stuck_nudge":
                     content = f"{content}\n\n[stuck_notice] {STUCK_NUDGE.format(detail=stuck.detail)}"
                 messages.append({"role": "tool", "tool_call_id": c["id"], "content": content})

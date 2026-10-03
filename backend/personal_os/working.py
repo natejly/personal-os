@@ -212,13 +212,13 @@ class ToolResults:
             )
         return {"id": rid, "total_chars": total}
 
-    def for_model(self, conversation_id: str, message_id: str | None, tool: str, result: Any, untrusted: bool = False) -> str:
-        """The tool message's content: the result itself when small, a handle when not."""
+    def render(self, conversation_id: str, message_id: str | None, tool: str, result: Any, untrusted: bool = False) -> tuple[str, str | None]:
+        """The tool message's content: the result itself when small, a handle when not. Also the handle's id, if any."""
         from .tools import summarize_result  # local: tools.py imports nothing from here
 
         blob = _dumps(result)
         if len(blob) <= INLINE_CHARS:
-            return blob
+            return blob, None
         shape = shape_of(result)
         if untrusted:
             # Reading this blob later has to taint again. Clearing the chat banner does not delete it.
@@ -227,7 +227,10 @@ class ToolResults:
         return _dumps({
             "result_id": row["id"], "tool": tool, "total_chars": row["total_chars"], "shape": shape,
             "preview": summarize_result(result, PREVIEW_CHARS), "note": HANDLE_NOTE,
-        })
+        }), row["id"]
+
+    def for_model(self, conversation_id: str, message_id: str | None, tool: str, result: Any, untrusted: bool = False) -> str:
+        return self.render(conversation_id, message_id, tool, result, untrusted)[0]
 
     def get(self, result_id: str, conversation_id: str | None = None) -> dict[str, Any] | None:
         sql = "SELECT * FROM tool_results WHERE id=?"

@@ -6,7 +6,8 @@ import { modelLabel } from '../lib/modelLabel'
 
 /** Waterfall view of one assistant reply's execution trace. */
 
-export const fmtMs = (ms: number): string => (ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(ms < 10000 ? 2 : 1)} s`)
+import { fmtMs } from '../lib/toolDisplay'
+export { fmtMs }
 
 export function traceSummary(spans: Span[]): { steps: number; total_ms: number; tokens: number; llm: number; tools: number; errors: number } {
   const now = Date.now()

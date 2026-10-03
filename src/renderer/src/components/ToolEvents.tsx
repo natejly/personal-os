@@ -9,7 +9,7 @@ import DiffView from './DiffView'
 import PlanApproval from './PlanApproval'
 import RenderBoundary from './RenderBoundary'
 import ApprovalRules from './ApprovalRules'
-import { describeCall } from '../lib/toolDisplay'
+import { describeCall, errorLine, fmtMs, groupSummary, partitionEvents } from '../lib/toolDisplay'
 import { GenericApproval, GenericBody } from './toolcards/GenericCard'
 // Importing the index registers every dedicated card (TaskCard, FileCard, and whatever other workstreams add).
 import { TOOL_CARDS } from './toolcards'
@@ -180,7 +180,7 @@ function AgentRunCard({ id }: { id: string }): JSX.Element {
   }, [open, id, status])
   return (
     <div className="tool-doc-diff agent-run">
-      <button className="tool-head" onClick={() => setOpen((o) => !o)}>
+      <button className="tool-head" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
         <ChevronRight size={12} className={open ? 'rot90' : ''} />
         <Bot size={13} />
         <span className="tool-name">subagent {id.slice(-4)}</span>
@@ -315,8 +315,11 @@ function Row({ render }: { render: () => JSX.Element }): JSX.Element {
   return render()
 }
 
-function ToolEvents({ events, conversationId }: { events: ToolEvent[]; conversationId: string }): JSX.Element {
+const hasCard = (t: ToolEvent): boolean => t.name !== 'propose_plan' && !(t.name === 'desk_ask' && !!t.pending && !!t.needs_approval) && !!TOOL_CARDS[t.name]
+
+function ToolEvents({ events, conversationId, streaming = false }: { events: ToolEvent[]; conversationId: string; streaming?: boolean }): JSX.Element {
   const [open, setOpen] = useState<Record<string, boolean>>({})
+  const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>({})
   const approveTool = useStore((s) => s.approveTool)
   const decideFor = (t: ToolEvent) => async (approve: boolean, edited?: Record<string, unknown>): Promise<void> =>
     approveTool(t.id, approve ? 'allow' : 'deny', conversationId, edited ? { arguments: edited } : undefined)
@@ -326,7 +329,7 @@ function ToolEvents({ events, conversationId }: { events: ToolEvent[]; conversat
     const d = describeCall(t.name, t.arguments)
     return (
       <div className={`tool-event ${t.pending ? 'pending' : ''} ${t.error ? 'error' : ''}`}>
-        <button className="tool-head" onClick={() => setOpen((o) => ({ ...o, [t.id]: !o[t.id] }))}>
+        <button className="tool-head" aria-expanded={!!open[t.id]} onClick={() => setOpen((o) => ({ ...o, [t.id]: !o[t.id] }))}>
           <ChevronRight size={12} className={open[t.id] ? 'rot90' : ''} />
           <span className="tool-icon">{ICONS[t.name] ?? <Wrench size={13} />}</span>
           <span className="tool-name human">{d.verb}</span>
@@ -336,8 +339,9 @@ function ToolEvents({ events, conversationId }: { events: ToolEvent[]; conversat
           {t.plan ? (
             <span className="tag plan" title={`Approved in the plan "${t.plan.title || 'untitled'}" (step ${t.plan.idx + 1})`}>in plan</span>
           ) : t.approval && t.approval !== 'allow' && <span className="tag">{t.approval === 'deny' ? 'denied' : 'approved'}</span>}
-          {t.pending ? (t.needs_approval ? <span className="tag ask">needs approval</span> : <span className="thinking mini"><span /><span /><span /></span>) : t.error ? <AlertCircle size={12} /> : <span className="tool-ms">{t.duration_ms} ms</span>}
+          {t.pending ? (t.needs_approval ? <span className="tag ask">needs approval</span> : <span className="thinking mini"><span /><span /><span /></span>) : t.error ? <AlertCircle size={12} /> : <span className="tool-ms">{fmtMs(t.duration_ms)}</span>}
         </button>
+        {t.error && !open[t.id] && <div className="tool-err">{errorLine(t.error)}</div>}
         {t.images && t.images.length > 0 && (
           <div className="tool-images">
             {t.images.map((im) => (
@@ -369,23 +373,41 @@ function ToolEvents({ events, conversationId }: { events: ToolEvent[]; conversat
     )
   }
 
+  function renderEvent(t: ToolEvent): JSX.Element {
+    // A dedicated card owns the whole call, pending and finished. It renders from the event alone, so a
+    // reload (events replayed from the persisted run) shows the same card. propose_plan / desk_ask stay special.
+    // A pending desk_ask keeps the answer box below; once it is answered (or running) its card shows the question and choices.
+    const Card = hasCard(t) ? TOOL_CARDS[t.name] : undefined
+    return (
+      <RenderBoundary key={t.id} label={`tool ${t.name}`} resetKey={t} fallback={() => <ToolFallback event={t} conversationId={conversationId} />}>
+        {Card ? (
+          <>
+            <Card event={t} pending={!!t.pending && !!t.needs_approval} decide={decideFor(t)} />
+            {!t.pending && !t.error && t.undo?.snapshot_id && <UndoButton snapshotId={t.undo.snapshot_id} />}
+            {t.pending && t.needs_approval && <ApprovalRules event={t} conversationId={conversationId} />}
+          </>
+        ) : <Row render={() => genericRow(t)} />}
+      </RenderBoundary>
+    )
+  }
+
+  // Foldable rows are finished and plain (see isFoldable), so a group never hides anything that needs the user.
+  const items = partitionEvents(events, (n) => hasCard({ name: n } as ToolEvent))
   return (
     <div className="tool-events">
-      {events.map((t) => {
-        // A dedicated card owns the whole call, pending and finished. It renders from the event alone, so a
-        // reload (events replayed from the persisted run) shows the same card. propose_plan / desk_ask stay special.
-        // A pending desk_ask keeps the answer box below; once it is answered (or running) its card shows the question and choices.
-        const Card = t.name !== 'propose_plan' && !(t.name === 'desk_ask' && t.pending && t.needs_approval) ? TOOL_CARDS[t.name] : undefined
+      {items.map((it) => {
+        if (it.kind === 'single') return renderEvent(it.event)
+        // Open while the reply streams, folded once it is done or loaded from history; a manual toggle wins.
+        const isOpen = groupOpen[it.key] ?? !!streaming
         return (
-          <RenderBoundary key={t.id} label={`tool ${t.name}`} resetKey={t} fallback={() => <ToolFallback event={t} conversationId={conversationId} />}>
-            {Card ? (
-              <>
-                <Card event={t} pending={!!t.pending && !!t.needs_approval} decide={decideFor(t)} />
-                {!t.pending && !t.error && t.undo?.snapshot_id && <UndoButton snapshotId={t.undo.snapshot_id} />}
-                {t.pending && t.needs_approval && <ApprovalRules event={t} conversationId={conversationId} />}
-              </>
-            ) : <Row render={() => genericRow(t)} />}
-          </RenderBoundary>
+          <div key={`g-${it.key}`} className="tool-event tool-group">
+            <button className="tool-head" aria-expanded={isOpen} onClick={() => setGroupOpen((g) => ({ ...g, [it.key]: !isOpen }))}>
+              <ChevronRight size={12} className={isOpen ? 'rot90' : ''} />
+              <span className="tool-icon"><ListChecks size={13} /></span>
+              <span className="tool-summary">{groupSummary(it.events)}</span>
+            </button>
+            {isOpen && <div className="tool-group-rows">{it.events.map(renderEvent)}</div>}
+          </div>
         )
       })}
     </div>

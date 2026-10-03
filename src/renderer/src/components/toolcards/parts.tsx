@@ -1,7 +1,9 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { AlertCircle, CheckCircle2, CircleDashed, Loader2, ShieldAlert, ShieldCheck, XCircle } from 'lucide-react'
 import type { ToolEvent } from '@shared/types'
-import { argRows, cardStatus, preview, resultView, type ArgRow, type CardStatus } from '../../lib/toolDisplay'
+import { api } from '../../lib/api'
+import { appendPage, argRows, cardStatus, displayFullOutput, EMPTY_OUTPUT, preview, resultView, type ArgRow, type CardStatus, type FullOutput } from '../../lib/toolDisplay'
 import './toolcards.css'
 
 /** Text that collapses past a few lines, so an email body or file does not take over the chat. */
@@ -67,9 +69,59 @@ function pretty(v: unknown): string {
   return JSON.stringify(v, null, 2)
 }
 
+/**
+ * The complete stored output of a call, in a modal. Plain text only: it is third-party content and never goes
+ * through markdown or HTML. Pages load 20k characters at a time from the stored row.
+ */
+function FullOutputModal({ event, onClose }: { event: ToolEvent; onClose: () => void }): JSX.Element {
+  const [out, setOut] = useState<FullOutput>(EMPTY_OUTPUT)
+  const [total, setTotal] = useState<number | null>(null)
+  const [state, setState] = useState<'loading' | 'ready' | 'gone'>('loading')
+  const [copied, setCopied] = useState(false)
+  const load = async (from: number): Promise<void> => {
+    setState('loading')
+    try {
+      const page = await api.toolResults.read(event.result_id as string, from, 20000)
+      setOut((o) => appendPage(o, page))
+      setTotal(page.total_chars)
+      setState('ready')
+    } catch { setState('gone') }
+  }
+  useEffect(() => { void load(0) }, [])
+  useEffect(() => {
+    const k = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', k)
+    return () => window.removeEventListener('keydown', k)
+  }, [onClose])
+  const copy = async (): Promise<void> => {
+    try { await navigator.clipboard.writeText(out.text); setCopied(true); setTimeout(() => setCopied(false), 1500) } catch { /* clipboard blocked */ }
+  }
+  const complete = !out.hasMore && state === 'ready'
+  return createPortal(
+    <div className="tc-full-back" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
+      <div className="tc-full" role="dialog" aria-modal="true" aria-label="Full tool output">
+        <header>
+          <b className="grow">Full output · {event.name}</b>
+          <button type="button" className="ghost-btn" onClick={() => void copy()} disabled={!out.text}>{copied ? 'Copied' : complete ? 'Copy' : 'Copy loaded'}</button>
+          <button type="button" className="ghost-btn" onClick={onClose}>Close</button>
+        </header>
+        {state === 'gone' && !out.text ? <pre>Full output no longer stored.</pre> : <pre>{displayFullOutput(out.text, complete) || (state === 'loading' ? 'Loading…' : '(empty)')}</pre>}
+        <footer>
+          <span>{out.text.length.toLocaleString()}{total !== null ? ` of ${total.toLocaleString()}` : ''} characters</span>
+          {state === 'gone' && out.text && <span>Full output no longer stored.</span>}
+          {state === 'ready' && out.hasMore && <button type="button" className="ghost-btn" onClick={() => void load(out.nextOffset)}>Load more</button>}
+          {state === 'ready' && !out.hasMore && total !== null && out.text.length < total && <span>Stored output ends here.</span>}
+        </footer>
+      </div>
+    </div>,
+    document.body
+  )
+}
+
 /** The raw call, behind a disclosure. The only place JSON is shown. */
 export function RawDetails({ event }: { event: ToolEvent }): JSX.Element {
   const edited = event.edited_by === 'user'
+  const [viewing, setViewing] = useState(false)
   return (
     <details className="tc-details">
       <summary>Details</summary>
@@ -78,6 +130,10 @@ export function RawDetails({ event }: { event: ToolEvent }): JSX.Element {
         <pre>{pretty(event.arguments)}</pre>
         {edited && event.original_arguments && (<><h6>Arguments the assistant proposed</h6><pre>{pretty(event.original_arguments)}</pre></>)}
         {!event.pending && (<><h6>{event.error ? 'Error' : 'Result'}</h6><pre>{pretty(event.error ?? event.result_preview) || '(empty)'}</pre></>)}
+        {!event.pending && event.result_id && (
+          <button type="button" className="ghost-btn tc-fullbtn" onClick={() => setViewing(true)}>Show full output</button>
+        )}
+        {viewing && <FullOutputModal event={event} onClose={() => setViewing(false)} />}
       </div>
     </details>
   )

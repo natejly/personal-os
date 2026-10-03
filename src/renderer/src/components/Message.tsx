@@ -189,7 +189,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
           <div className="markdown">
             {message.reasoning && <Reasoning text={message.reasoning} live={streaming && !message.content} />}
             <BodyBoundary resetKey={message.id}>
-              {message.tool_events && message.tool_events.length > 0 && <ToolEvents events={message.tool_events} conversationId={message.conversation_id} />}
+              {message.tool_events && message.tool_events.length > 0 && <ToolEvents events={message.tool_events} conversationId={message.conversation_id} streaming={streaming} />}
               {message.content ? (
                 <MarkdownPreview source={message.content} streaming={streaming} />
               ) : streaming && !message.reasoning && !message.tool_events?.some((t) => t.pending) ? (

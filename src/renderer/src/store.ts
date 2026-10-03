@@ -478,6 +478,7 @@ export interface State {
   /** Flush the buffer now (⌘S, switching docs, leaving the view). */
   flushDoc: () => Promise<void>
   setDocStar: (id: string, starred: boolean) => Promise<void>
+  setDocPin: (id: string, pinned: boolean) => Promise<void>
   /** File a doc: which project ('' is personal) and which folder in it, in one patch. */
   moveDoc: (id: string, scope: string, folder: string) => Promise<void>
   refreshDocFolders: () => Promise<void>
@@ -1907,6 +1908,10 @@ export const useStore = create<State>((set, get) => {
       const d = await api.docs.patch(id, { starred })
       // The PATCH bumped updated_at; keep the autosave base current or the next save 409s.
       set((st) => ({ activeDoc: st.activeDoc?.id === id ? { ...st.activeDoc, starred: d.starred, updated_at: d.updated_at } : st.activeDoc }))
+      await get().refreshDocs()
+    },
+    setDocPin: async (id, pinned) => {
+      await api.docs.patch(id, { pinned })
       await get().refreshDocs()
     },
     moveDoc: async (id, scope, folder) => {

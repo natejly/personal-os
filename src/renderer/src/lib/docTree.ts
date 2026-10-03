@@ -215,3 +215,15 @@ export function flattenGroups(
   }
   return rows
 }
+
+/** Pinned docs get their own group above the folders, so they leave the tree rather than appear twice. */
+export const splitPinned = (docs: Doc[]): { pinned: Doc[]; rest: Doc[] } => ({
+  pinned: docs.filter((d) => d.pinned),
+  rest: docs.filter((d) => !d.pinned)
+})
+
+export const starredDocs = (docs: Doc[]): Doc[] => docs.filter((d) => d.starred)
+
+/** The n most recently edited docs, newest first. */
+export const recentDocs = (docs: Doc[], n = 5): Doc[] =>
+  [...docs].sort((a, b) => b.updated_at - a.updated_at).slice(0, n)

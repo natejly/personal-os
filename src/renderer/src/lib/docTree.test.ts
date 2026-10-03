@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import type { Doc, DocFolder } from '@shared/types'
 import {
   buildGroups, canDropDoc, canDropFolder, chainTo, flattenGroups, folderKey, groupShutKey, isInside,
-  joinPath, nameOf, parentOf, scopeOf, type Group
+  joinPath, nameOf, parentOf, recentDocs, scopeOf, splitPinned, starredDocs, type Group
 } from './docTree'
 
 const folder = (path: string, scope = ''): DocFolder => ({
@@ -175,4 +175,25 @@ test('a group is open until it is shut, which is the opposite of a folder', () =
     'nothing remembered means every group open and every folder shut')
   assert.deepEqual(sketch(groups, ['']), ['Personal', 'Alpha', 'Work'],
     'shutting Personal hides its whole tree, and the project groups stay')
+})
+
+test('splitPinned takes pinned docs out of the rest so none is listed twice', () => {
+  const a = { ...doc('a', 'F'), pinned: 1 }
+  const b = doc('b', 'F')
+  const { pinned, rest } = splitPinned([a, b])
+  assert.deepEqual(pinned.map((d) => d.title), ['a'])
+  const g = buildGroups([], rest, [])
+  assert.equal(g[0].deep, 1)
+})
+
+test('recentDocs is newest first, limited, and empty-safe', () => {
+  const ds = [1, 2, 3, 4, 5, 6, 7].map((t) => ({ ...doc(`t${t}`), updated_at: t }))
+  assert.deepEqual(recentDocs(ds).map((d) => d.title), ['t7', 't6', 't5', 't4', 't3'])
+  assert.deepEqual(recentDocs([]), [])
+  assert.equal(recentDocs(ds, 2).length, 2)
+})
+
+test('starredDocs keeps only starred docs in order', () => {
+  const ds = [{ ...doc('a'), starred: 1 }, doc('b'), { ...doc('c'), starred: 1 }]
+  assert.deepEqual(starredDocs(ds).map((d) => d.title), ['a', 'c'])
 })

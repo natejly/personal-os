@@ -179,6 +179,20 @@ check([h["doc_id"] for h in hit] == [sd["id"]] and "quokkafrobnitz" in hit[0]["s
 check(j("GET", "/docs/search?q=quokkafrobnitz&project_id=nope") == [], "search route honours the scope")
 j("GET", "/docs/search?q=%22%28%2A")
 j("DELETE", f"/docs/{sd['id']}")
+# ---- pinning: persists, survives a title edit, sorts first, keeps through trash ----
+pa = j("POST", "/docs", {"title": "Pin A"})["id"]
+pb = j("POST", "/docs", {"title": "Pin B"})["id"]
+j("PATCH", f"/docs/{pa}", {"pinned": True})
+check(next(r for r in j("GET", "/docs") if r["id"] == pa)["pinned"] == 1, "pinned shows in the list")
+j("PATCH", f"/docs/{pa}", {"title": "Pin A2"})
+check(j("GET", "/docs")[0]["id"] == pa and j("GET", "/docs")[0]["pinned"] == 1, "a title edit keeps the pin, and pinned sorts first")
+j("PATCH", f"/docs/{pa}", {"pinned": False})
+check(next(r for r in j("GET", "/docs") if r["id"] == pa)["pinned"] == 0, "unpin clears it")
+j("PATCH", f"/docs/{pb}", {"pinned": True})
+j("DELETE", f"/docs/{pb}")
+check(all(r["id"] != pb for r in j("GET", "/docs")), "a deleted pinned doc is not listed")
+j("POST", f"/trash/doc/{pb}/restore")
+check(next(r for r in j("GET", "/docs") if r["id"] == pb)["pinned"] == 1, "restoring a trashed doc keeps its pin")
 
 # ---- deletion takes the history with it ----
 j("DELETE", f"/docs/{did}")

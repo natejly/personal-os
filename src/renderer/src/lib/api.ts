@@ -490,7 +490,7 @@ export const api = {
     deleteSample: (id: string) => req(`/style/samples/${id}`, { method: 'DELETE' })
   },
   graph: {
-    get: (s: Scope) => req<GraphData>(`/graph?${scope(s)}`),
+    get: (s: Scope, history = false) => req<GraphData>(`/graph?${scope(s)}${history ? '&include_invalid=true' : ''}`),
     createNode: (n: { project_id: string | null; label: string; type?: string; properties?: Record<string, unknown> }) =>
       req<GraphNode>('/graph/nodes', { method: 'POST', body: json(n) }),
     updateNode: (id: string, patch: Partial<Pick<GraphNode, 'label' | 'type' | 'properties'>>) => req<GraphNode>(`/graph/nodes/${id}`, { method: 'PUT', body: json(patch) }),

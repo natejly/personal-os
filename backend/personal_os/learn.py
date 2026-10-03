@@ -16,6 +16,7 @@ import logging
 import re
 import time
 import unicodedata
+from datetime import date, datetime, timedelta
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -35,7 +36,7 @@ Return ONLY a JSON object with this shape:
   "updates": [{"id": "M3", "content": "...", "kind": "fact|preference|goal|note"}],
   "forget": ["M5"],
   "entities": [{"label": "...", "type": "person|project|organization|tool|place|concept|other"}],
-  "relations": [{"source": "<entity label>", "target": "<entity label>", "relation": "short verb phrase", "replaces": "<optional: an existing relation this one supersedes, as 'Source|relation|Target'>"}],
+  "relations": [{"source": "<entity label>", "target": "<entity label>", "relation": "short verb phrase", "fact": "<optional: one sentence stating the relation>", "replaces": "<optional: an existing relation this one supersedes, as 'Source|relation|Target'>"}],
   "ended": [{"source": "<entity label>", "target": "<entity label>", "relation": "relation that no longer holds"}]
 }
 
@@ -54,6 +55,31 @@ Rules:
 """
 
 KINDS = {"fact", "preference", "goal", "note"}
+
+_DAYS = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+REL_DATE_RE = re.compile(r"\b(tomorrow|tonight|yesterday|(?:next|this) (?:week|month|year|weekend|" + "|".join(_DAYS) + r"))\b", re.I)
+
+
+def absolutize(text: str, today: date) -> str | None:
+    """Replace relative day phrases with dates computed from `today`; None when one cannot be resolved (week, month...)."""
+    ok = True
+
+    def sub(m: re.Match[str]) -> str:
+        nonlocal ok
+        w = m.group(1).lower()
+        if w in ("tomorrow", "yesterday", "tonight"):
+            return (today + timedelta(days={"tomorrow": 1, "yesterday": -1, "tonight": 0}[w])).isoformat()
+        kind, day = w.split()
+        if day not in _DAYS:
+            ok = False
+            return w
+        ahead = (_DAYS.index(day) - today.weekday()) % 7
+        if kind == "next" and ahead == 0:
+            ahead = 7
+        return (today + timedelta(days=ahead)).isoformat()
+
+    out = REL_DATE_RE.sub(sub, text)
+    return out if ok else None
 
 
 SELF_LABELS = {"user", "the user", "me", "myself", "i"}
@@ -82,7 +108,10 @@ async def learn_from_exchange(
     conversation_id: str | None = None,
     message_id: str | None = None,
     index: Any = None,
+    message_ts: float | None = None,
 ) -> dict[str, Any]:
+    ts = message_ts or time.time()
+    today = datetime.fromtimestamp(ts).date()
     prov = {"conversation_id": conversation_id, "message_id": message_id}
     qvec = await index.query_vec(settings, user_text) if index is not None else None
     if qvec is not None:
@@ -103,7 +132,7 @@ async def learn_from_exchange(
     existing_list = "\n".join(lines) or "(none)"
     extraction_model = settings.get("extractionModel") or model
     messages = [
-        {"role": "system", "content": EXTRACT_PROMPT + f"\nToday is {time.strftime('%A, %Y-%m-%d')}."},
+        {"role": "system", "content": EXTRACT_PROMPT + f"\nToday is {today:%A, %Y-%m-%d}."},
         {
             "role": "user",
             "content": (
@@ -165,6 +194,7 @@ async def learn_from_exchange(
     added_memories = []
     for m in _list(data.get("memories")):
         content = _s(m.get("content")) if isinstance(m, dict) else _s(m)
+        content = absolutize(content, today) or ""  # a relative date the store cannot resolve is dropped, not kept to rot
         if len(content) < 6:
             continue
         kind = m.get("kind", "fact") if isinstance(m, dict) else "fact"
@@ -205,7 +235,8 @@ async def learn_from_exchange(
             tid = label_to_id.get(t.lower()) or graph.upsert_node(project_id, t)["id"]
             if sid == tid:
                 continue
-            edge = graph.upsert_edge(project_id, sid, tid, rel, source_message_id=message_id)
+            edge = graph.upsert_edge(project_id, sid, tid, rel, source_message_id=message_id,
+                                     valid_at=ts, fact=_s(r.get("fact"))[:500])
         except Exception:  # noqa: BLE001 - one bad relation must not lose the rest
             continue
         added_edges.append(edge)

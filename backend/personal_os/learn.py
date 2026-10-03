@@ -524,7 +524,9 @@ class LearnWorker:
         publish: Callable[[str, Any], None],
         depth: int = 32,
         consolidator: Any = None,
+        alive: Callable[[str], bool] | None = None,
     ) -> None:
+        self._alive = alive  # False for a conversation that has since been trashed: its queued job is dropped
         self._consolidator = consolidator  # consolidate.Consolidator: only ever asked to *propose*
         self._since_tidy = 0
         self.index: Any = None  # memory_index.MemoryIndex; set by app.py
@@ -587,6 +589,8 @@ class LearnWorker:
             self._publish("proposals", {"count": len(made)})
 
     async def _run(self, job: LearnJob) -> None:
+        if self._alive is not None and not self._alive(job.conversation_id):
+            return
         tracer = Tracer(job.spans)
         span = tracer.start("learn", job.settings.get("extractionModel") or job.model)
         try:

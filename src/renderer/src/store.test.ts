@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { adoptServerDoc, applyEvent, useStore, type ChatSession } from './store'
+import { api } from './lib/api'
 import type { ChatEvent, Message } from '@shared/types'
 
 /**
@@ -208,4 +209,30 @@ test('send on a chat whose session cannot load resolves false with a toast', asy
   stubFetch(t, () => json({ detail: 'gone' }, 404))
   assert.equal(await useStore.getState().send('hi', 'ghost'), false)
   assert.equal(useStore.getState().toasts.length, 1)
+})
+
+test('deleting a chat whose reply was running says so in the Undo toast, and closes its session', async () => {
+  const realDelete = api.conversations.delete
+  const realList = api.projects.list
+  const realStats = api.projects.globalStats
+  api.projects.list = (async () => []) as never // the delete refreshes the sidebar in the background
+  api.projects.globalStats = (async () => ({})) as never
+  const abort = new AbortController()
+  useStore.setState({ toasts: [], sessions: { c9: session({ conversation: { ...session().conversation, id: 'c9' }, streaming: { messageId: 'm1', runId: 'r', abort, answering: true } as never }) } })
+  try {
+    api.conversations.delete = (async () => ({ ok: true, stopped: true })) as never
+    await useStore.getState().deleteChat('c9')
+    assert.equal(abort.signal.aborted, true)
+    assert.equal(useStore.getState().sessions.c9, undefined)
+    assert.match(useStore.getState().toasts.at(-1)!.text, /Reply stopped\./)
+
+    useStore.setState({ toasts: [] })
+    api.conversations.delete = (async () => ({ ok: true, stopped: false })) as never
+    await useStore.getState().deleteChat('c9')
+    assert.doesNotMatch(useStore.getState().toasts.at(-1)!.text, /Reply stopped/)
+  } finally {
+    api.conversations.delete = realDelete
+    api.projects.list = realList
+    api.projects.globalStats = realStats
+  }
 })

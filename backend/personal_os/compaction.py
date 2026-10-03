@@ -209,6 +209,19 @@ def _stub(m: dict[str, Any], names: dict[str, str]) -> dict[str, Any] | None:
     return {"cleared": True, "tool": tool, "chars": len(content), "result_id": rid, "note": CLEARED_NOTE}
 
 
+MEMORY_NUDGE = ("Older tool results were just cleared from this context (read_tool_result still serves them). "
+                "If any holds a durable finding about the user worth keeping, save it now with save_memory.")
+
+
+def memory_nudge(n_cleared: int, already_nudged: bool, tool_schemas: list[dict[str, Any]]) -> str | None:
+    """The one-per-run reminder to save findings, only when results were just cleared and save_memory is offered."""
+    if not n_cleared or already_nudged:
+        return None
+    if not any((t.get("function") or {}).get("name") == "save_memory" for t in tool_schemas):
+        return None
+    return MEMORY_NUDGE
+
+
 def microcompact(messages: list[dict[str, Any]], keep: int, window_tokens: int, at_fraction: float) -> tuple[int, int]:
     """Replace old tool-result content in place with a stub once the context passes at_fraction of the window.
 

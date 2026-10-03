@@ -15,7 +15,6 @@ import hashlib
 import json
 import logging
 import math
-import math
 import sqlite3
 import threading
 import time
@@ -523,9 +522,9 @@ class Run:
 
     def info(self) -> dict[str, Any]:
         return {"run_id": self.run_id, "conversation_id": self.conversation_id, "message_id": self.message_id,
-                "seq": self.seq, "message_seq": self.message_seq, "started_at": self.started_at, "live": self.live, "answering": self.answering,
-                "status": self.status, "kind": self.kind, "desk_id": self.desk_id, "turn": self.turn,
-                "ended_at": self.ended_at, "error": self.error}
+                "seq": self.seq, "message_seq": self.message_seq, "started_at": self.started_at, "live": self.live,
+                "answering": self.answering, "status": self.status, "kind": self.kind, "desk_id": self.desk_id,
+                "turn": self.turn, "ended_at": self.ended_at, "error": self.error}
 
     def set_status(self, status: str) -> None:
         if status == self.status:
@@ -798,7 +797,6 @@ class RunBus:
                     log.debug("after hook failed for run %s", run.run_id, exc_info=True)
             run.end(status)
             self._retired.discard(run)
-            self.changed(run)
             self.changed(run)
 
     def _prune(self) -> None:

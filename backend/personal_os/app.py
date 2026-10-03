@@ -247,7 +247,6 @@ app.add_middleware(CORSMiddleware, allow_origins=ALLOWED_ORIGINS, allow_credenti
 run_store = RunStore(db)
 bus = RunBus(run_store)
 bus.on_change = lambda run: events.publish("run_state", run.info())  # `events` is bound below; read at call time
-bus.on_change = lambda run: events.publish("run_state", run.info())  # `events` is bound below; read at call time
 # Plan-level approvals (propose_plan): one card authorises a set of calls, each bound to its argument digest.
 plans = Plans(db)
 # A second, independent bus, keyed by MEETING id. Nothing in RunBus is conversation-specific - _runs

@@ -960,7 +960,7 @@ export const useStore = create<State>((set, get) => {
       refreshAll()
       // Runs did not survive the process: the conversation list, the live-run map and every session
       // that was not streaming (its in-flight reply may have been closed out as interrupted) are stale.
-      void get().refreshConversations()
+      void get().refreshConversations().catch(() => undefined)
       eventsSince = 0
       set({ liveRuns: {} })
       void seedLiveRuns()
@@ -1131,9 +1131,8 @@ export const useStore = create<State>((set, get) => {
     // is not the end of the desk's work and the pane re-attaches rather than going idle.
     let handoff: { desk_id: string; conversation_id: string; turn: number } | null = null
     clearHold(convId)
-    // Set when the stream kept closing without ever delivering an ending: what is stored is then the truth.
-    let gaveUp = false
-    // Set by the reply's final `done`: what is stored is then what this window already has.
+    // Set by the reply's final `done`: what is stored is then what this window already has. A stream that
+    // kept closing without ever delivering one leaves it false, and what is stored is then the truth.
     let settled = false
     patchSession(convId, (s) => {
       // Rebuilt from the tape, so what the fetch held of the in-flight message (possibly all of it, possibly a stale
@@ -1159,7 +1158,8 @@ export const useStore = create<State>((set, get) => {
       const events = backlog
       backlog = null
       if (!events?.length) return
-      patchSession(convId, (s) => events.reduce((acc, e) => (e.ev.event === 'title' ? acc : step(acc, e.ev, true, e.seq)), s))
+      // Abort-identity guarded like the `finally` below: a run that superseded this one mid-replay owns the session now.
+      patchSession(convId, (s) => (s.streaming?.abort !== abort ? s : events.reduce((acc, e) => (e.ev.event === 'title' ? acc : step(acc, e.ev, true, e.seq)), s)))
     }
     // The events that move something other than the transcript, so a replay still has to run them.
     const track = (ev: ChatEvent): void => {
@@ -1178,7 +1178,7 @@ export const useStore = create<State>((set, get) => {
       }
     }
     try {
-      for await (const ev of chatStream(convId, run.seq, abort.signal, run.run_id, () => { gaveUp = true })) {
+      for await (const ev of chatStream(convId, run.seq, abort.signal, run.run_id)) {
         // A frame with no usable body has nothing to apply; ignoring it beats throwing inside the loop.
         if (!ev || !isRecord(ev.data)) continue
         const seq = ev.seq
@@ -1191,8 +1191,6 @@ export const useStore = create<State>((set, get) => {
           continue
         }
         const focused = get().focusedConversationId === convId
-        const before = get().sessions[convId]
-        const answeredHere = !!before?.streaming?.messageId && (before.conversation.messages ?? []).some((m) => m.id === before.streaming?.messageId)
         patchSession(convId, (s) => step(s, ev, focused, seq))
         switch (ev.event) {
           case 'done':
@@ -1218,10 +1216,14 @@ export const useStore = create<State>((set, get) => {
           case 'learn_error':
             get().toast(`Auto-learn failed: ${ev.data.message}`, 'error')
             break
-          case 'error':
+          case 'error': {
             // A reply row on screen carries the error itself; the toast is for a chat nobody is looking at.
+            // The reducer leaves `streaming` in place on an error, so the row it stamped is still findable here.
+            const s = get().sessions[convId]
+            const answeredHere = !!s?.streaming?.messageId && (s.conversation.messages ?? []).some((m) => m.id === s.streaming?.messageId)
             if (!focused || !answeredHere) get().toast(ev.data.message, 'error')
             break
+          }
           default:
             track(ev)
         }
@@ -1659,10 +1661,14 @@ export const useStore = create<State>((set, get) => {
         // attaching to one would paint a caret and a Stop button over a reply `openSession` just
         // fetched whole.
         const run = runs?.find((r) => r.conversation_id === conversationId && r.answering)
+        // Already watching this run: the `run_state` frame for a reply this window just started usually
+        // lands before its POST returns, so this is the common case and not worth a transcript fetch.
+        if (run && get().sessions[conversationId]?.streaming?.runId === run.run_id) return
         await get().openSession(conversationId)
         const s = get().sessions[conversationId]
         if (!run || !s) return
-        // Already watching this run (a desk hand-off retry, a widget mount): attaching again would blank a live message.
+        // Checked again after the fetch (a desk hand-off retry, a widget mount): attaching to a run already
+        // being watched would blank a live message.
         if (s.streaming?.runId === run.run_id) return
         // Replay from the in-flight message's own `assistant_message`, so the window shows the whole reply and any
         // approval card published before it arrived. Not awaited: `watchRun` only resolves when the run ends, and

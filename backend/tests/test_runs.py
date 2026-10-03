@@ -574,6 +574,7 @@ def test_run_state_is_published_on_the_app_topic() -> None:
     check(seen[0]["answering"] is True, "a frame goes out when the run starts, answering")
     check(any(i["live"] and not i["answering"] for i in seen), "answering turns false at the reply's done, while the run is still live")
     check(not seen[-1]["live"] and seen[-1]["status"] == "done", "the last frame is the run's end")
+    check(sum(1 for i in seen if not i["live"]) == 1, "the run's end is announced once, not once per listener call")
     check(app_mod.events.seq > before, "the frames reach the app topic")
     # A status flip is a frame too, and so are a new segment and the final done.
     flips: list[str] = []
@@ -585,7 +586,7 @@ def test_run_state_is_published_on_the_app_topic() -> None:
     check(flips == ["awaiting_approval", "running"], f"only a real status change fires, got {flips}")
     r.publish("assistant_message", {"id": "m"})
     r.publish("done", {"segment": True})
-    check(len(flips) == 3 and not r.replied,"a segment done does not flip answering")
+    check(len(flips) == 3 and not r.replied, "a segment done does not flip answering")
     r.publish("done", {"id": "m"})
     check(len(flips) == 4 and r.replied and not r.answering, f"assistant_message and a final done each fire, got {len(flips)}")
 

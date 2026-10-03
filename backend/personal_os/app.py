@@ -6395,6 +6395,7 @@ def _lint_skill(name: str, description: str, procedure: str, skill_id: str | Non
 
 class SkillImportIn(BaseModel):
     text: str
+    references: dict[str, str] = {}
     project_id: str | None = None
 
 
@@ -6402,7 +6403,8 @@ class SkillImportIn(BaseModel):
 def import_skill_md(body: SkillImportIn) -> dict[str, Any]:
     """Paste a SKILL.md. It becomes a candidate, never an approved skill: approval stays the PATCH above."""
     try:
-        return skillmd.import_text(skills, _lint_skill, body.text, project_id=None if sid(body.project_id) == ALL else sid(body.project_id))
+        return skillmd.import_text(skills, _lint_skill, body.text, project_id=None if sid(body.project_id) == ALL else sid(body.project_id),
+                                references=body.references)
     except skillmd.ImportError_ as e:
         raise HTTPException(422, "; ".join(e.errors))
 

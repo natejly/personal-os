@@ -266,6 +266,8 @@ MAX_SKILL_NAME = 80
 MAX_SKILL_DESCRIPTION = 300
 MAX_SKILL_PROCEDURE = 4000
 MAX_INJECTED_SKILLS = 12
+MAX_SKILL_REFERENCE = 20000
+MAX_SKILL_REFERENCES = 20
 
 SKILLS_HEADER = (
     "## Approved procedures (procedural memory)\n"
@@ -338,6 +340,8 @@ class Skills:
         self.db = db
         with db.tx() as c:
             c.executescript(SKILL_SCHEMA)
+            if "references" not in {r["name"] for r in c.execute("PRAGMA table_info(skills)")}:
+                c.execute('ALTER TABLE skills ADD COLUMN "references" TEXT NOT NULL DEFAULT \'{}\'')
 
     def list(self, status: str | None = None, project_id: str | None = "__all__") -> list[dict[str, Any]]:
         where, args = [], []
@@ -352,24 +356,27 @@ class Skills:
                 args.append(project_id)
         sql = "SELECT * FROM skills" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY updated_at DESC"
         with self.db.tx() as c:
-            return [row_to_dict(r) for r in c.execute(sql, args).fetchall()]  # type: ignore[misc]
+            return [row_to_dict(r, ("references",)) for r in c.execute(sql, args).fetchall()]  # type: ignore[misc]
 
     def get(self, id: str) -> dict[str, Any] | None:
         with self.db.tx() as c:
-            return row_to_dict(c.execute("SELECT * FROM skills WHERE id=?", (id,)).fetchone())
+            return row_to_dict(c.execute("SELECT * FROM skills WHERE id=?", (id,)).fetchone(), ("references",))
 
     def propose(self, name: str, description: str, procedure: str, project_id: str | None = None,
-                conversation_id: str | None = None, source: str = "induced") -> dict[str, Any]:
-        """Store a candidate. Always 'candidate': no caller can create an approved skill directly."""
+                conversation_id: str | None = None, source: str = "induced",
+                references: dict[str, str] | None = None) -> dict[str, Any]:
+        """Store a candidate. Always 'candidate': no caller can create an approved skill directly.
+        `references` is inert text shown only by skill_view after approval; never part of the procedure."""
         sid = new_id()
         t = now()
         with self.db.tx() as c:
             c.execute(
-                "INSERT INTO skills(id,project_id,name,description,procedure,status,source,source_conversation_id,created_at,updated_at) "
-                "VALUES(?,?,?,?,?,'candidate',?,?,?,?)",
+                "INSERT INTO skills(id,project_id,name,description,procedure,status,source,source_conversation_id,created_at,updated_at,\"references\") "
+                "VALUES(?,?,?,?,?,'candidate',?,?,?,?,?)",
                 (sid, project_id, _fence_safe(name).strip()[:MAX_SKILL_NAME] or "Untitled procedure",
                  _fence_safe(description).strip()[:MAX_SKILL_DESCRIPTION], _fence_safe(procedure).strip()[:MAX_SKILL_PROCEDURE],
-                 source, conversation_id, t, t),
+                 source, conversation_id, t, t,
+                 json.dumps({str(k)[:200]: _fence_safe(v)[:MAX_SKILL_REFERENCE] for k, v in list((references or {}).items())[:MAX_SKILL_REFERENCES]})),
             )
         return self.get(sid)  # type: ignore[return-value]
 

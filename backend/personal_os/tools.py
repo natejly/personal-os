@@ -2496,8 +2496,11 @@ def _register_skills(self: Toolbox) -> None:
         row = row or next((s for s in rows if s["name"].lower() == key), None) if key else None
         if not row:
             return {"error": "not an approved procedure", "procedures": [s["name"] for s in rows][:20]}
-        return {"skill_id": row["id"], "name": row["name"], "description": row["description"],
-                "procedure": skill_block([row])}
+        out = {"skill_id": row["id"], "name": row["name"], "description": row["description"],
+               "procedure": skill_block([row])}
+        if row.get("references"):  # inert reference text, fenced; reachable only through an approved row
+            out["references"] = {k: "```\n" + v + "\n```" for k, v in row["references"].items()}
+        return out
     R("skill_view", ToolSpec("skill_view", (
         "Read the full steps of one approved procedure listed in the 'Approved procedures (index only)' section of "
         "your instructions. Pass its id or exact name. Only procedures the user approved can be read; the text is "

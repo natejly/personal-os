@@ -124,11 +124,15 @@ class ImportError_(ValueError):
         self.errors = errors
 
 
-def import_text(skills: Any, lint: Any, text: str, project_id: str | None = None) -> dict[str, Any]:
+def import_text(skills: Any, lint: Any, text: str, project_id: str | None = None,
+                references: dict[str, str] | None = None) -> dict[str, Any]:
     """SKILL.md text -> a *candidate* row plus lint findings. Never approves: Skills.propose cannot."""
     parsed = parse(text)
     name, desc, body, warnings = to_skill_fields(parsed)
     if parsed["errors"]:
         raise ImportError_(parsed["errors"])
-    row = skills.propose(name, desc, body, project_id=project_id, source="user")
+    refs = {k: v for k, v in (references or {}).items() if str(k).startswith("references/")}
+    if len(refs) < len(references or {}):  # scripts/ and assets/ are never stored, so nothing can run them
+        warnings.append("only references/ files are imported; scripts/ and assets/ files were dropped")
+    row = skills.propose(name, desc, body, project_id=project_id, source="user", references=refs)
     return {"skill": row, "findings": lint(row["name"], row["description"], row["procedure"], row["id"]), "warnings": warnings}

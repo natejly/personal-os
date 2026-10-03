@@ -1738,7 +1738,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
 
             async def run_one(name: str, args: dict[str, Any], ctx: dict[str, Any]) -> Any:
                 async with sem:
-                    if stop.is_set():  # Stop pressed while this waited its turn: the read never starts
+                    # Stop skips reads still queued for a slot; reads already running side by side are not interrupted.
+                    if stop.is_set():
                         return {"error": "Stopped by the user before this call ran; it was not executed."}
                     return await toolbox.call(name, args, ctx)
 

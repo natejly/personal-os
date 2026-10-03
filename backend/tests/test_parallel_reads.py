@@ -29,7 +29,7 @@ appmod.db.set_settings({"autoLearn": False, "baseUrl": ""})
 LOG: list[tuple[str, str, float]] = []   # (start|end, "tool:tag", monotonic time)
 ROUNDS: list[dict[str, Any]] = []
 SEEN: list[list[dict[str, Any]]] = []
-DELAY = 0.3
+DELAY = 0.2
 
 
 def _spec(name: str, danger: str, group: str = "knowledge") -> None:
@@ -89,8 +89,9 @@ def when(kind: str) -> dict[str, float]:
 
 
 def test_three_reads_overlap_and_keep_order() -> None:
-    events, wall = run([c("1", "pr_read", tag="a"), c("2", "pr_net", tag="b"), c("3", "pr_read", tag="c")])
-    assert wall < DELAY * 2, wall
+    events, _ = run([c("1", "pr_read", tag="a"), c("2", "pr_net", tag="b"), c("3", "pr_read", tag="c")])
+    st, en = when("start"), when("end")   # overlap measured on the tools themselves, not on chat setup time
+    assert max(en.values()) - min(st.values()) < DELAY * 2, (st, en)
     assert tool_msgs() == ["1", "2", "3"]
     assert [d["arguments"]["tag"] for e, d in events if e == "tool_result"] == ["a", "b", "c"]
 
@@ -157,3 +158,28 @@ def test_predicate() -> None:
     assert not parallel_safe(s["pr_read"], "pr_read", "ask")
     assert not parallel_safe(s["pr_write"], "pr_write", "on")
     assert not parallel_safe(s["pr_browse"], "pr_browse", "on")
+
+
+def test_stop_mid_segment_skips_the_queued_reads() -> None:
+    conv = appmod.convos.create(None, "t", "m")["id"]
+    appmod.db.set_settings({"parallelReads": 2})
+    LOG.clear()
+    ROUNDS[:] = [{"calls": [c("1", "pr_read", tag="a"), c("2", "pr_read", tag="b"), c("3", "pr_read", tag="c")]}]
+    stop = asyncio.Event()
+
+    events: list[tuple[str, Any]] = []
+
+    async def go() -> None:
+        async def press() -> None:
+            await asyncio.sleep(DELAY / 2)   # calls 1 and 2 are running, call 3 waits for a slot
+            stop.set()
+        t = asyncio.create_task(press())
+        events.extend([ev async for ev in appmod._chat_stream(conv, appmod.ChatIn(content="go"), stop)])
+        await t
+    prev, llm.stream_chat = llm.stream_chat, _stream
+    try:
+        asyncio.run(go())
+    finally:
+        llm.stream_chat = prev
+    assert "pr_read:c" not in [a for _, a, _ in LOG]   # reads already running side by side finish; queued ones never start
+    assert [d["arguments"]["tag"] for e, d in events if e == "tool_result"] == ["a"]  # the rest of the round is reported as not executed

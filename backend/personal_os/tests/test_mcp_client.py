@@ -245,6 +245,19 @@ class TestConnect(StubCase):
         await self.until(lambda: not self.stub_processes(), 10.0, "every stub process to exit")
 
 
+class TestListChanged(StubCase):
+    async def test_a_mid_session_tool_change_is_re_synced_without_reconnecting(self) -> None:
+        server = self.add("friendly")
+        await self.client.start()
+        await self.client.wait_ready(20.0)
+        versions = lambda: self.store.db.connect().execute(
+            "SELECT COUNT(*) FROM mcp_tool_versions WHERE tool_slug=?", ("mcp__friendly__echo",)).fetchone()[0]
+        self.assertEqual(versions(), 1)
+        await self.client.call("mcp__friendly__mutate", {})
+        await self.until(lambda: versions() == 2, 10.0, "the re-listed tool to be recorded as a second version")
+        self.assertEqual(self.client.status(server["id"])[0]["attempts"], 0)
+
+
 class TestMisbehaviour(StubCase):
     async def test_a_hanging_tool_times_out_and_does_not_block_the_next_call(self) -> None:
         self.add("hostile")

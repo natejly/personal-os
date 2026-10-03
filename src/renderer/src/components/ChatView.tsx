@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
-import { PanelLeftOpen, RefreshCw, Pencil, SlidersHorizontal } from 'lucide-react'
+import { PanelLeftOpen, Pencil, SlidersHorizontal, ArrowDown } from 'lucide-react'
 import { useStore, useProject, useConversation, useIsStreaming, useStreamingMessageId } from '../store'
 import ProjectChip from './ProjectChip'
 import MessageView from './Message'
+import RegenRow from './RegenRow'
 import Composer from './Composer'
 import ChatControls from './ChatControls'
 import ContextDrawer from './ContextDrawer'
@@ -13,6 +14,7 @@ import { fenced, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
 import { useOnboarding } from './onboarding/onboardingStore'
 import { FIRST_PROMPTS } from './onboarding/steps'
+import { useStickToBottom } from '../lib/stickToBottom'
 
 function greeting(): string {
   const h = new Date().getHours()
@@ -31,28 +33,22 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   const contextOpen = useStore((s) => s.contextOpen)
   const draftProjectId = useStore((s) => s.draftProjectId)
   const project = useProject(convo?.project_id ?? draftProjectId)
-  const { toggleSidebar, toggleContext, renameChat, regenerate, send } = useStore()
+  const toggleSidebar = useStore((s) => s.toggleSidebar)
+  const toggleContext = useStore((s) => s.toggleContext)
+  const renameChat = useStore((s) => s.renameChat)
+  const send = useStore((s) => s.send)
   const firstPrompts = useOnboarding((s) => s.firstPrompts && !conversationId)
   const setFirstPrompts = useOnboarding((s) => s.setFirstPrompts)
   // The chips are for the first empty chat only; once any conversation is open they are spent.
   useEffect(() => { if (conversationId) setFirstPrompts(false) }, [conversationId, setFirstPrompts])
   const scrollRef = useRef<HTMLDivElement>(null)
-  const [stick, setStick] = useState(true)
   const [editingTitle, setEditingTitle] = useState(false)
 
   const msgs = convo?.messages ?? []
   const lastLen = msgs[msgs.length - 1]?.content.length ?? 0
 
-  useEffect(() => {
-    if (stick) scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
-  }, [lastLen, convo?.id, msgs.length, stick])
-
-  const onScroll = (): void => {
-    const el = scrollRef.current
-    if (el) setStick(el.scrollHeight - el.scrollTop - el.clientHeight < 80)
-  }
-
   const last = msgs[msgs.length - 1]
+  const { stick, unseen, jump } = useStickToBottom(scrollRef, { resetKey: convo?.id ?? conversationId ?? null, tailUserId: last?.role === 'user' ? last.id : null })
 
   // Only the full-window chat is a "page"; a chat window on the canvas is one of many on screen.
   usePageContext(() => (conversationId ? undefined : {
@@ -91,7 +87,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
 
       <div className="chat-body">
         <div className="chat-main">
-          <div className="messages" ref={scrollRef} onScroll={onScroll}>
+          <div className="messages" ref={scrollRef}>
             {!convo ? (
               <div className="empty-state">
                 <h1>{greeting()}</h1>
@@ -104,15 +100,16 @@ export default function ChatView({ conversationId }: { conversationId?: string }
               </div>
             ) : (
               <div className="messages-inner">
-                {msgs.map((m) => <MessageView key={m.id} message={m} streaming={isStreamingHere && streamingMessageId === m.id} />)}
-                {!isStreamingHere && last?.role === 'assistant' && (
-                  <div className="regen-row">
-                    <button className="ghost-btn" onClick={() => void regenerate(conversationId)}><RefreshCw size={13} /> Regenerate</button>
-                  </div>
-                )}
+                {msgs.map((m) => <MessageView key={m.id} message={m} streaming={isStreamingHere && streamingMessageId === m.id} last={m.id === last?.id} />)}
+                <RegenRow conversationId={conversationId} last={last} streaming={isStreamingHere} />
               </div>
             )}
           </div>
+          {convo && !stick && (
+            <button className="jump-latest" onClick={jump} aria-label="Jump to latest">
+              <ArrowDown size={13} /> Jump to latest{unseen > 0 && <span className="jump-count">{unseen > 99 ? '99+' : unseen}</span>}
+            </button>
+          )}
           <PlanPanel conversationId={conversationId} />
           <Composer conversationId={conversationId} footer={<ChatControls conversationId={conversationId} />} />
         </div>

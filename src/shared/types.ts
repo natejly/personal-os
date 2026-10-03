@@ -504,6 +504,9 @@ export interface ContextMeter {
   summary: { summary: string; summarized_messages: number; tokens_before: number; tokens_after: number; updated_at: number } | null
 }
 
+export type MessageOutcome = 'stopped' | 'rounds' | 'tokens' | 'time' | 'cost' | 'loop' | 'interrupted' | 'length' | 'incomplete'
+export type ErrorKind = 'rate_limit' | 'quota' | 'auth' | 'not_found' | 'overflow' | 'unsupported_param' | 'content_filter' | 'overloaded' | 'server' | 'bad_request' | 'transport' | 'cancelled' | 'timeout'
+
 export interface Message {
   id: string
   conversation_id: string
@@ -517,8 +520,14 @@ export interface Message {
   /** A reasoning model's chain-of-thought. Never sent back to the model as history. */
   reasoning?: string | null
   created_at: number
-  /** Set when the reply ran out of budget or hit a breaker; not persisted. */
-  partial?: PartialReason | null
+  /** How the reply ended when it did not end normally; null = complete, or failed with error. */
+  outcome?: MessageOutcome | null
+  error_kind?: ErrorKind | null
+  /** Regenerate group: id of the first answer; the active member carries the group's ids. */
+  variant_of?: string | null
+  variants?: string[] | null
+  /** Set on a user message that replaced an earlier one (edit-and-resend). */
+  edited_from?: string | null
 }
 
 export type Effort = 'default' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
@@ -1208,7 +1217,7 @@ export type ChatEvent =
   | { event: 'tool_call'; data: { message_id: string; id: string; name: string; arguments: Record<string, unknown>; needs_approval?: boolean; forced?: boolean; permission?: PermissionCard | null; plan?: PlanStepRef | null; agent?: string } }
   | { event: 'tool_result'; data: ToolEvent & { message_id: string } }
   | { event: 'span'; data: { message_id: string; span: Span } }
-  | { event: 'done'; data: { id: string; error: string | null; context_used: ContextUsed; tool_events: ToolEvent[]; trace: Span[]; stopped: boolean; partial?: PartialReason | null; segment?: boolean; tainted?: boolean; taint_sources?: string[]; reasoning?: string | null } }
+  | { event: 'done'; data: { id: string | null; error: string | null; context_used: ContextUsed | null; tool_events: ToolEvent[]; trace: Span[]; stopped: boolean; partial?: PartialReason | null; segment?: boolean; tainted?: boolean; taint_sources?: string[]; reasoning?: string | null; outcome?: MessageOutcome | null; error_kind?: ErrorKind | null; notice?: string | null } }
   | { event: 'taint'; data: { message_id: string; source: string } }
   | { event: 'subagent'; data: SubagentInfo & { message_id: string | null } }
   /** artifact_create / artifact_update landed. Also on the run tape, so a reload replays it. */

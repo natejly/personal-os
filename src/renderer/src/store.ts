@@ -729,7 +729,7 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean): Cha
         return { ...m, trace: i >= 0 ? trace.map((sp, j) => (j === i ? ev.data.span : sp)) : [...trace, ev.data.span] }
       })
     case 'done': {
-      const done = mapMsg(ev.data.id, (m) => ({ ...m, error: ev.data.error, context_used: ev.data.context_used, tool_events: ev.data.tool_events?.length ? ev.data.tool_events : m.tool_events, trace: ev.data.trace?.length ? ev.data.trace : m.trace, reasoning: ev.data.reasoning ?? m.reasoning }))
+      const done = !ev.data.id ? s : mapMsg(ev.data.id, (m) => ({ ...m, error: ev.data.error, context_used: ev.data.context_used, tool_events: ev.data.tool_events?.length ? ev.data.tool_events : m.tool_events, trace: ev.data.trace?.length ? ev.data.trace : m.trace, reasoning: ev.data.reasoning ?? m.reasoning, outcome: ev.data.outcome ?? (ev.data.stopped ? 'stopped' : (ev.data.partial as Message['outcome']) ?? null), error_kind: ev.data.error_kind ?? null }))
       // The reply is whole and persisted here. The stream stays open for the auto-learn tail, so the
       // subscription is left alone and only `answering` drops.
       return { ...done, streaming: done.streaming && { ...done.streaming, answering: false }, finishedAt: Date.now() }

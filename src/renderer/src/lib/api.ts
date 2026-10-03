@@ -440,6 +440,8 @@ export const api = {
     const d = await req<{ run_id: string; resumable: boolean }>(`/runs/${rows[0].run_id}`)
     return { run_id: d.run_id, resumable: d.resumable }
   },
+  /** Whether the conversation's newest run can be resumed, and which message it would continue. */
+  resumableRun: (convId: string) => req<{ run_id: string | null; resumable: boolean; reason: string; message_id: string | null }>(`/conversations/${encodeURIComponent(convId)}/resumable`),
   /** The user's Undo for a local file write or move. A 409 message is JSON `{reason, conflict}`; `force` overrides a conflict. */
   restoreFileSnapshot: (id: string, force = false) => req<{ ok: boolean; path: string }>(`/file-snapshots/${id}/restore`, { method: 'POST', body: json({ force }) }),
   /** Folder changes a reply made (whole-folder snapshots), and the user's Undo / Redo of them. */

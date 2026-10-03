@@ -193,6 +193,38 @@ def test_six_regenerates_keep_five() -> None:
     check(n == 6, "older rows were pruned")
 
 
+def test_regenerate_over_an_empty_row_carries_the_group() -> None:
+    cid = answered("one")
+    old = msgs(cid)[-1]
+    T.SCRIPT["chunks"] = ["two"]
+    regen(cid)
+    blank = msgs(cid)[-1]
+    # A replacement that was kept empty (restore could not run): the next regenerate drops it, not the group.
+    with app_mod.db.tx() as c:
+        c.execute("UPDATE messages SET content='', error='boom' WHERE id=?", (blank["id"],))
+    T.SCRIPT["chunks"] = ["three"]
+    evs = regen(cid)
+    now = msgs(cid)
+    check(now[-1]["content"] == "three" and now[-1]["variants"] == [old["id"], now[-1]["id"]], "no empty variant, the first answer still reachable")
+    check(dict(evs)["assistant_message"].get("variants") == now[-1]["variants"], "the live event already carries the siblings")
+    with app_mod.db.tx() as c:
+        n = c.execute("SELECT COUNT(*) AS n FROM messages WHERE id=?", (blank["id"],)).fetchone()["n"]
+    check(n == 0, "the empty row is gone")
+
+
+def test_prune_keeps_the_answer_just_superseded() -> None:
+    cid = answered("v0")
+    first = msgs(cid)[-1]["id"]
+    for i in range(5):
+        T.SCRIPT["chunks"] = [f"v{i + 1}"]
+        regen(cid)
+    j("POST", f"/conversations/{cid}/messages/{first}/activate")  # back to the oldest answer, then replace it
+    use(_raises)
+    regen(cid)
+    use(OK_STREAM)
+    check(msgs(cid)[-1]["id"] == first, "the failed replacement restored the answer that was on screen, not an older prune victim")
+
+
 def test_human_export_one_answer_per_turn() -> None:
     cid = answered("exported-one")
     T.SCRIPT["chunks"] = ["exported-two"]

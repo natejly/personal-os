@@ -205,8 +205,11 @@ class Conversations:
                 (mid, conv_id, role, content, model, t, variant_of),
             )
             c.execute("UPDATE conversations SET updated_at=? WHERE id=?", (t, conv_id))
+            # A row opened into an existing regenerate group announces its siblings, so the switcher shows on
+            # the live event rather than after a reload.
+            variants = self._variant_groups(c, conv_id).get(variant_of) if variant_of else None
         return {"id": mid, "conversation_id": conv_id, "role": role, "content": content, "model": model, "created_at": t, "error": None, "context_used": None, "tool_events": None, "trace": None, "reasoning": None,
-                "outcome": None, "error_kind": None, "variant_of": variant_of}
+                "outcome": None, "error_kind": None, "variant_of": variant_of, "variants": variants}
 
     MAX_VARIANTS = 5
 
@@ -225,8 +228,11 @@ class Conversations:
                 "INSERT INTO messages(id,conversation_id,role,content,model,created_at,variant_of) VALUES(?,?,?,?,?,?,?)",
                 (mid, old["conversation_id"], "assistant", "", model, t, root),
             )
+            # Newest by when it was hidden, not by when it was written: the answer the user was just looking at
+            # (an old variant they switched back to) is the one a failed replacement must be able to restore.
             stale = c.execute(
-                "SELECT id FROM messages WHERE (id=? OR variant_of=?) AND superseded_at IS NOT NULL ORDER BY created_at DESC, rowid DESC",
+                "SELECT id FROM messages WHERE (id=? OR variant_of=?) AND superseded_at IS NOT NULL "
+                "ORDER BY superseded_at DESC, created_at DESC, rowid DESC",
                 (root, root)).fetchall()[self.MAX_VARIANTS:]
             for r in stale:
                 c.execute("DELETE FROM messages WHERE id=?", (r["id"],))

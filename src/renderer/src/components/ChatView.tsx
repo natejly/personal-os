@@ -4,6 +4,7 @@ import { useStore, useProject, useConversation, useIsStreaming, useStreamingMess
 import ProjectChip from './ProjectChip'
 import MessageView from './Message'
 import RegenRow from './RegenRow'
+import FindBar from './FindBar'
 import Composer from './Composer'
 import ChatControls from './ChatControls'
 import ContextDrawer from './ContextDrawer'
@@ -93,6 +94,8 @@ export default function ChatView({ conversationId }: { conversationId?: string }
 
       <div className="chat-body">
         <div className="chat-main">
+          {/* Highlight names are document-global, so only the full-window chat owns find. */}
+          {!conversationId && <FindBar scope={scrollRef} resetKey={convo?.id} />}
           <div className="messages" ref={scrollRef}>
             {!convo ? (
               <div className="empty-state">

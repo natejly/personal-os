@@ -15,7 +15,19 @@ import { useCanvas } from '../canvas/store'
 import { api } from '../lib/api'
 import { partitionChats } from '../lib/chatRows'
 import ChatRow from './ChatRow'
-import type { Conversation, Doc, WidgetKind } from '@shared/types'
+import type { ChatSearchHit, Conversation, Doc, WidgetKind } from '@shared/types'
+import { snippetParts } from '../lib/chatSearch'
+
+/** The first matching excerpt under a search result, with the matched words marked. */
+function Snippet({ hit }: { hit?: ChatSearchHit }): JSX.Element | null {
+  const s = hit?.snippets[0]
+  if (!s) return null
+  return (
+    <span className="convo-snippet">
+      {snippetParts(s.text).map((p, i) => (p.hit ? <mark key={i}>{p.text}</mark> : <span key={i}>{p.text}</span>))}
+    </span>
+  )
+}
 
 /** Rows shown under a project group before the "View all" link takes over. */
 const PROJECT_ROWS = 4
@@ -96,6 +108,20 @@ export default function Sidebar(): JSX.Element {
   const openConversation = (id: string): void => void selectChat(id)
   const [query, setQuery] = useState('')
   const [searching, setSearching] = useState(false)
+  // Full-text hits over message bodies, for queries of 3+ characters. Title matches stay instant; these
+  // arrive after a short debounce, and a stale reply is dropped by the sequence check.
+  const [hits, setHits] = useState<ChatSearchHit[]>([])
+  const searchSeq = useRef(0)
+  const composing = useRef(false)
+  useEffect(() => {
+    const q = query.trim()
+    const seq = ++searchSeq.current
+    if (q.length < 3) { setHits([]); return }
+    const t = setTimeout(() => {
+      api.conversations.search(q).then((r) => { if (seq === searchSeq.current) setHits(r) }).catch(() => undefined)
+    }, 250)
+    return () => clearTimeout(t)
+  }, [query])
   const searchRef = useRef<HTMLInputElement>(null)
   const [projectsOpen, setProjectsOpen] = useState(true)
   const [recentsOpen, setRecentsOpen] = useState(true)
@@ -126,6 +152,12 @@ export default function Sidebar(): JSX.Element {
   const { pinned, groups } = useMemo(() => partitionChats(conversations, query), [conversations, query])
   const projectDot = (c: Conversation): JSX.Element | null =>
     c.project_id && projectById[c.project_id] ? <span className="project-dot sm" style={{ background: projectById[c.project_id].color }} title={projectById[c.project_id].name} /> : null
+  const hitById = useMemo(() => new Map(hits.map((h) => [h.id, h])), [hits])
+  // Body-only hits: a chat already listed by its title (pinned or grouped) shows its excerpt in place.
+  const inMessages = useMemo(() => {
+    const titled = new Set([...pinned, ...groups.flatMap((g) => g.items)].map((c) => c.id))
+    return query.trim().length >= 3 ? hits.filter((h) => !titled.has(h.id)) : []
+  }, [pinned, groups, hits, query])
   // Archived chats are not in the store's list; loaded when the section opens and after each change.
   const [archivedOpen, setArchivedOpen] = useState(false)
   const [archived, setArchived] = useState<Conversation[]>([])
@@ -263,10 +295,14 @@ export default function Sidebar(): JSX.Element {
             aria-label="Search recents"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            onCompositionStart={() => { composing.current = true }}
+            onCompositionEnd={() => { composing.current = false }}
             onKeyDown={(e) => {
+              // Escape and Enter belong to the IME while a composition is open.
+              if (composing.current) return
               if (e.key === 'Escape') { setQuery(''); setSearching(false) }
               else if (e.key === 'Enter') {
-                const first = pinned[0] ?? groups[0]?.items[0]
+                const first = pinned[0] ?? groups[0]?.items[0] ?? inMessages[0]
                 if (first) { openConversation(first.id); setQuery(''); setSearching(false) }
               } else if (e.key === 'ArrowDown') {
                 e.preventDefault()
@@ -280,16 +316,32 @@ export default function Sidebar(): JSX.Element {
         {pinned.length > 0 && (
           <section>
             <h4 className="pinned-head"><Pin size={11} /> Pinned</h4>
-            {pinned.map((c) => <ChatRow key={c.id} conv={c} active={c.id === focusedId && view === 'chat'} lead={projectDot(c)} />)}
+            {pinned.map((c) => <ChatRow key={c.id} conv={c} active={c.id === focusedId && view === 'chat'} lead={projectDot(c)} trail={<Snippet hit={hitById.get(c.id)} />} />)}
           </section>
         )}
-        {groups.length === 0 && pinned.length === 0 && <p className="empty-hint">{query ? 'No matches.' : 'No personal chats yet.'}</p>}
+        {groups.length === 0 && pinned.length === 0 && inMessages.length === 0 && <p className="empty-hint">{query ? 'No matches.' : 'No personal chats yet.'}</p>}
         {groups.map((g) => (
           <section key={g.label}>
             <h4>{g.label}</h4>
-            {g.items.map((c) => <ChatRow key={c.id} conv={c} active={c.id === focusedId && view === 'chat'} lead={projectDot(c)} />)}
+            {g.items.map((c) => <ChatRow key={c.id} conv={c} active={c.id === focusedId && view === 'chat'} lead={projectDot(c)} trail={<Snippet hit={hitById.get(c.id)} />} />)}
           </section>
         ))}
+        {inMessages.length > 0 && (
+          <section>
+            <h4>In messages</h4>
+            {inMessages.map((h) => (
+              <div key={h.id} className={`convo-item ${h.id === focusedId && view === 'chat' ? 'active' : ''}`} onClick={() => openConversation(h.id)} role="button" tabIndex={0}
+                onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openConversation(h.id) } }}>
+                <span className="convo-title">
+                  {h.project_id && projectById[h.project_id] && <span className="project-dot sm" style={{ background: projectById[h.project_id].color }} title={projectById[h.project_id].name} />}
+                  {h.title}
+                  {h.hits > 1 && <span className="convo-hits">+{h.hits - 1}</span>}
+                  <Snippet hit={h} />
+                </span>
+              </div>
+            ))}
+          </section>
+        )}
         <section>
           <h4 className="archived-head"><button className="section-toggle" onClick={() => setArchivedOpen((o) => !o)}><ChevronRight size={11} className={archivedOpen ? 'rot90' : ''} /> Archived</button></h4>
           {archivedOpen && archived.length === 0 && <p className="empty-hint">Nothing archived.</p>}

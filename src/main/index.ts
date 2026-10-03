@@ -168,7 +168,19 @@ function buildMenu(): void {
             ])
       ]
     },
-    { role: 'editMenu' },
+    {
+      // The stock edit roles, spelled out so Find can sit beside them. The label stays 'Edit' so macOS
+      // still appends its own dictation and emoji items.
+      label: 'Edit',
+      submenu: [
+        { role: 'undo' }, { role: 'redo' }, { type: 'separator' },
+        { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'pasteAndMatchStyle' }, { role: 'delete' }, { role: 'selectAll' },
+        { type: 'separator' },
+        { label: 'Find…', accelerator: 'CmdOrCtrl+F', click: () => sendWindowMenu('chat:find') },
+        { label: 'Find Next', accelerator: 'CmdOrCtrl+G', click: () => sendWindowMenu('chat:find-next') },
+        { label: 'Find Previous', accelerator: 'Shift+CmdOrCtrl+G', click: () => sendWindowMenu('chat:find-prev') }
+      ]
+    },
     {
       label: 'View',
       submenu: [

@@ -2354,3 +2354,14 @@ select:focus-visible {
 }
 .msg-editor-row { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
 .msg-editor-note { margin-right: auto; font-size: 12px; color: var(--text-faint); }
+
+/* Search results: the matching excerpt sits under the chat title; find-in-chat bar and its highlights. */
+.convo-title > .convo-snippet { display: block; margin: 2px 0 0; font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; }
+.convo-snippet mark { background: color-mix(in srgb, var(--accent) 35%, transparent); color: inherit; border-radius: 2px; }
+.convo-hits { font-size: 10px; color: var(--text-muted); margin-left: 6px; }
+.find-bar { display: flex; align-items: center; gap: 6px; padding: 6px 14px; border-bottom: 1px solid var(--border); background: var(--bg-elev); }
+.find-bar input { flex: 0 1 260px; background: var(--bg-input); border: 1px solid var(--border-strong); border-radius: 6px; padding: 4px 8px; color: var(--text); outline: 0; }
+.find-count { font-size: 12px; color: var(--text-muted); min-width: 64px; }
+.find-hint { margin-left: auto; font-size: 11px; color: var(--text-faint); }
+::highlight(chat-find) { background-color: color-mix(in srgb, var(--accent) 40%, transparent); color: inherit; }
+::highlight(chat-find-current) { background-color: var(--accent-solid); color: #fff; }

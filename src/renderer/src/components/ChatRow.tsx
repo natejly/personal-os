@@ -9,9 +9,10 @@ import type { Conversation } from '@shared/types'
 /**
  * One chat row in the sidebar lists: click or Enter opens it, right-click or the "…" button opens
  * the row menu (rename, pin, move, archive, delete). The menu and the rename input stop their own
- * events so neither navigates the row or starts its drag.
+ * events so neither navigates the row or starts its drag. `lead` sits before the title (a project
+ * dot), `trail` after it (a search excerpt); neither shows while renaming.
  */
-export default function ChatRow({ conv, active, sub = false, lead }: { conv: Conversation; active: boolean; sub?: boolean; lead?: ReactNode }): JSX.Element {
+export default function ChatRow({ conv, active, sub = false, lead, trail }: { conv: Conversation; active: boolean; sub?: boolean; lead?: ReactNode; trail?: ReactNode }): JSX.Element {
   const selectChat = useStore((s) => s.selectChat)
   const deleteChat = useStore((s) => s.deleteChat)
   const renameChat = useStore((s) => s.renameChat)
@@ -79,7 +80,7 @@ export default function ChatRow({ conv, active, sub = false, lead }: { conv: Con
               }}
               onBlur={(e) => commit(e.currentTarget.value)}
             />
-          ) : conv.title}
+          ) : <>{conv.title}{trail}</>}
         </span>
         <button className="icon-btn ghost" aria-label={`Chat options: ${conv.title}`} title="More" aria-haspopup="menu" aria-expanded={!!menuAt}
           onClick={(e) => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); setMenuAt({ x: r.left, y: r.bottom }) }}><MoreHorizontal size={14} /></button>

@@ -194,10 +194,11 @@ class Artifacts:
         code = _check_code(code)
         aid = new_id()
         t = now()
+        title = " ".join(str(title or "").replace("\r", " ").split())[:200]
         with self.db.tx() as c:
             c.execute(
                 "INSERT INTO artifacts(id,project_id,title,kind,prompt,code,version,created_at,updated_at,conversation_id,run_id,message_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
-                (aid, project_id, title.strip()[:200], kind, prompt, "", 0, t, t, conversation_id, run_id, message_id),
+                (aid, project_id, title, kind, prompt, "", 0, t, t, conversation_id, run_id, message_id),
             )
         if code:
             return self.save_version(aid, code, prompt=prompt, source=source)  # type: ignore[return-value]
@@ -206,6 +207,8 @@ class Artifacts:
     def update(self, id: str, patch: dict[str, Any]) -> dict[str, Any] | None:
         """Metadata only. Code changes go through save_version so nothing is ever overwritten in place."""
         fields = {k: v for k, v in patch.items() if k in {"title", "project_id", "prompt"} and v is not None}
+        if "title" in fields:
+            fields["title"] = " ".join(str(fields["title"]).replace("\r", " ").split())[:200]
         if patch.get("clear_project"):
             fields["project_id"] = None
         if not fields:

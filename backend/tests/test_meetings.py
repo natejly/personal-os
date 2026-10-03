@@ -447,6 +447,17 @@ def test_context_block_is_opt_out_and_bounded() -> None:
     assert "confidential" not in svc.context_block()
 
 
+def test_a_token_in_meeting_notes_is_stripped_for_the_model() -> None:
+    repo, svc = _svc(_tmp())
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    mid = repo.create(title="Standup")["id"]
+    repo.patch(mid, {"notes": f"The key is {pat}", "summary": "Standup"})
+    svc.set_config({"enabled": True})
+    block = svc.context_block()
+    assert pat not in block and "[github-pat]" in block
+    assert pat in repo.get(mid)["notes"]
+
+
 # ---------------------------------------------------------------- capabilities and config
 
 

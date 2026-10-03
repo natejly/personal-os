@@ -849,7 +849,9 @@ def register(box: Any) -> None:
             return fail("fs_grep", e, field="pattern", example={"pattern": "TODO", "glob": "**/*.py"})
         await asyncio.to_thread(record_grep, conv_of(ctx), rows)
         hits = sum(1 for r in rows if not r.get("context"))
-        return {"root": str(base), "pattern": pattern, "matches": rows, "count": hits, "truncated": truncated,
+        from . import redact
+        shown = [{**r, "text": redact.scrub_command_output(r["text"])} if isinstance(r.get("text"), str) else r for r in rows]
+        return {"root": str(base), "pattern": pattern, "matches": shown, "count": hits, "truncated": truncated,
                 **({"note": f"stopped at {GREP_CAP} matches; narrow the pattern or pass glob"} if truncated else {})}
     R("fs_grep", ToolSpec("fs_grep", "Search file contents under a root with a regular expression. Returns path, line number and the line (cut at 400 characters), at most 200 matches; binary files and secret files are skipped. glob narrows the files (e.g. **/*.py); context adds lines around each match. Read a match's file with read_local_file, change it with fs_edit.",
         _obj({"pattern": {"type": "string", "description": "Regular expression"},

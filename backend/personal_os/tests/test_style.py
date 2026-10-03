@@ -266,6 +266,16 @@ class RelearnTests(unittest.TestCase):
                 self.assertTrue(fenced)
         self.assertFalse(fenced)
 
+    def test_a_token_in_a_sample_is_stripped_for_the_model(self) -> None:
+        pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+        text = f"{PROSE}\nThe key is {pat}."
+        self.style.add_sample(None, text, check=False)
+        self.relearn(force=True)
+        sent = self.calls[0][1]["content"]
+        self.assertNotIn(pat, sent)
+        self.assertIn("[github-pat]", sent)
+        self.assertIn(pat, self.style.samples(None)[0]["text"])
+
 
 class ContextTests(unittest.TestCase):
     """build_context's half: the block lands in the prompt, and both switches can turn it off."""

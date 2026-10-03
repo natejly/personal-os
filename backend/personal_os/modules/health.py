@@ -287,7 +287,8 @@ class HealthModule(Module):
                 if m or days <= 14:
                     row["daily"] = {p["day"]: _fmt(s, p["value"]) for p in s["series"] if p["value"] is not None}
                 if m:
-                    row["recent_entries"] = [{"id": e["id"], "day": e["day"], "value": e["value"], "note": e["note"]}
+                    row["recent_entries"] = [{"id": e["id"], "day": e["day"], "value": e["value"],
+                                             "note": store._note(e.get("note") or "")}
                                              for e in store.entries(m["key"], limit=20)]
                 out.append(row)
             return {"days": days, "metrics": out}

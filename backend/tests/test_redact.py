@@ -73,6 +73,8 @@ def test_other_rules() -> None:
     assert pat not in redact.scrub_secrets(pat) and "[github-pat]" in redact.scrub_secrets(pat)
     gkey = "AIzaSyA1234567890abcdefGHIJKLMNOPQRSTUV"  # 39 chars, the real key length
     assert gkey not in redact.scrub_secrets(gkey) and "[google-key]" in redact.scrub_secrets(gkey)
+    oauth = "ya29.a0AfH6SMCabcdefghijklmnopqrstuvwxyz"
+    assert oauth not in redact.scrub_secrets(oauth) and "[google-access]" in redact.scrub_secrets(oauth)
     hook = "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX"
     assert "hooks.slack.com" not in redact.scrub_secrets(hook)
     assert "[card-number]" in redact.scrub_secrets("4111 1111 1111 1111")
@@ -85,7 +87,7 @@ def test_rule_order_is_the_contract() -> None:
     """activity.Gate.scrub applies REDACTIONS positionally, so the dict order IS behaviour."""
     assert redact.ALL_RULES == (
         "private_key", "url_userinfo", "url_secret_param", "email", "card", "ssn", "token", "aws_key",
-        "github_pat", "google_api", "slack_webhook", "jwt", "phone", "entropy",
+        "github_pat", "google_api", "google_oauth", "slack_webhook", "jwt", "phone", "entropy",
     )
     assert redact.REDACTIONS == [redact.RULES[k] for k in redact.ALL_RULES]
     assert tuple(redact.RULES.values()) == tuple(redact.REDACTIONS)

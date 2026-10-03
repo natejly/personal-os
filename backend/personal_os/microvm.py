@@ -415,6 +415,9 @@ class Sandboxes:
                                              "stopped; only the end is shown.").strip()
         if self._net.get(name):
             out["network"] = True
+        from . import redact
+        out["stdout"] = redact.scrub_command_output(out["stdout"])
+        out["stderr"] = redact.scrub_command_output(out["stderr"])
         return out
 
     def write_file(self, conversation_id: str, path: str, content: str, append: bool = False) -> dict[str, Any]:
@@ -458,8 +461,10 @@ class Sandboxes:
             p = self._run([binary, "exec", name, "sh", "-c", f'tail -c +{off + 1} -- "$1" | head -c {ln}', "sh", gp], timeout=60)
             if p.returncode != 0:
                 raise SandboxError(f"could not read {gp}: {_line(p.stderr)}")
+            from . import redact
             out = {"path": gp, "total_bytes": total, "offset": off,
-                   "text": p.stdout.decode(errors="replace"), "truncated": off + len(p.stdout) < total}
+                   "text": redact.scrub_command_output(p.stdout.decode(errors="replace")),
+                   "truncated": off + len(p.stdout) < total}
         if self._net.get(name):
             out["network"] = True
         return out

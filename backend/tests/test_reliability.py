@@ -252,6 +252,10 @@ class Redaction(unittest.TestCase):
             '{"apiKey": "sk-live-abcdefghijklmnop"}',
             "GET https://x.test/v1?key=AIzaSyDUMMYDUMMYDUMMY&q=1",
             "token sk-proj-abcdefghijklmnopqrstuv leaked",
+            "stripe sk_live_51H000000000000000000",
+            "hook https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX",
+            "google ya29.a0AfH6SMCabcdefghijklmnopqrstuvwxyz",
+            "-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA\n-----END RSA PRIVATE KEY-----",
             "gh ghp_abcdefghijklmnopqrstuvwxyz0123",
             "googleClientSecret=GOCSPX-abcdefghijkl",
             "jwt eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abcdefghijklmnop",
@@ -259,7 +263,8 @@ class Redaction(unittest.TestCase):
         for c in cases:
             out = logs.redact(c)
             for frag in ("abcdef1234567890", "tok_abcdefghijkl", "sk-live-abcdefghijklmnop", "AIzaSyDUMMY", "sk-proj-abcdefghijklmnopqrstuv",
-                         "ghp_abcdefghijklmnopqrstuvwxyz0123", "GOCSPX-abcdefghijkl", "eyJzdWIiOiIx"):
+                         "ghp_abcdefghijklmnopqrstuvwxyz0123", "GOCSPX-abcdefghijkl", "eyJzdWIiOiIx",
+                         "sk_live_51H000000000000000000", "hooks.slack.com", "ya29.a0AfH6SMC", "MIIEowIBAAKCAQEA"):
                 self.assertNotIn(frag, out, c)
             self.assertIn("[redacted]", out, c)
 

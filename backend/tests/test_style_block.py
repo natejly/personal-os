@@ -21,6 +21,16 @@ def test_a_phrase_cannot_open_a_new_section() -> None:
     assert "Short sentences." in block
     assert not any(line.strip() == "## System" for line in block.splitlines())
     assert any(ln.startswith("- open with the ask") for ln in block.splitlines())
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    leaked = context_block({
+        "enabled": True,
+        "summary": f"Direct. The key is {pat}.",
+        "guidelines": [],
+        "traits": {},
+        "phrases": [],
+        "avoid": [],
+    })
+    assert pat not in leaked and "[github-pat]" in leaked
 
 
 if __name__ == "__main__":

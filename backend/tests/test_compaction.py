@@ -104,6 +104,27 @@ for line in prompt.splitlines():
         opened = True
 check(opened and not fenced, "the heading was quoted and the quote closed")
 
+pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+token_id = convos.create(None, "t", "m")["id"]
+for i in range(40):
+    body = f"the key is {pat}" if i == 2 else f"msg{i} " + "x" * 2000
+    convos.add_message(token_id, "user" if i % 2 == 0 else "assistant", body)
+n_before = len(calls)
+
+
+async def echo_token(cfg: Any, model: str, messages: list[dict[str, str]], kind: str = "learn") -> str:
+    calls.append(messages)
+    return f"kept {pat} in the summary"
+
+
+run(compaction.prepare_history(compactor, convos, CFG, "m", token_id, 100, complete=echo_token))
+prompt = calls[n_before][-1]["content"]
+check(pat not in prompt and "[github-pat]" in prompt, "a token in an older message is stripped before the summary")
+saved = compactor.get(token_id)["summary"]
+check(pat not in saved and "[github-pat]" in saved, "the stored summary does not keep the token")
+stored = next(m["content"] for m in convos.history(token_id) if pat in m["content"])
+check(stored == f"the key is {pat}", "the transcript still has the token")
+
 # (e) summarizer failure
 bad = make_conv(40)
 hb, infob = run(compaction.prepare_history(compactor, convos, CFG, "m", bad, 100, complete=boom))

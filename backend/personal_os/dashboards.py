@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 
-from . import llm
+from . import llm, redact
 from .db import Database, new_id, now, row_to_dict
 from .tools import UrlBlocked, guarded_request
 
@@ -291,12 +291,16 @@ def _fence(text: str) -> str:
     return "```\n" + str(text or "").replace("```", "'''") + "\n```"
 
 
+def _clip_public(blob: str, limit: int, suffix: str = "…") -> str:
+    """Credentials out, then the length cap. Scrubbing after the cut would leave a sliced token."""
+    blob = redact.scrub_command_output(blob)
+    return blob if len(blob) <= limit else blob[:limit] + suffix
+
+
 async def generate_widget_code(settings: dict[str, Any], model: str, prompt: str, sources: list[dict[str, Any]], base_url: str, width: int, height: int, samples: dict[str, Any]) -> str:
     src_lines = []
     for s in sources:
-        sample = json.dumps(samples.get(s["id"]), ensure_ascii=False, default=str)
-        if len(sample) > 1800:
-            sample = sample[:1800] + "…"
+        sample = _clip_public(json.dumps(samples.get(s["id"]), ensure_ascii=False, default=str), 1800)
         desc = _line(s.get("description"), 300) or "-"
         src_lines.append(f"- {_line(s.get('name'), 80)} ({_line(s.get('kind'), 40)}): fetch(\"{base_url}/sources/{s['id']}/fetch\")\n  description: {desc}\n  sample response: {sample}")
     user = f"Widget request:\n{_fence(prompt)}\n\nSize: about {width * 340}px wide × {height}px tall.\n\nData sources:\n" + ("\n".join(src_lines) if src_lines else "(none: build a static or self-computed widget)")
@@ -308,17 +312,13 @@ async def generate_widget_code(settings: dict[str, Any], model: str, prompt: str
 
 
 async def generate_summary(settings: dict[str, Any], model: str, prompt: str, data: dict[str, Any]) -> str:
-    blob = json.dumps(data, ensure_ascii=False, default=str)
-    if len(blob) > 24000:
-        blob = blob[:24000] + "…(truncated)"
+    blob = _clip_public(json.dumps(data, ensure_ascii=False, default=str), 24000, "…(truncated)")
     focus = prompt.strip() if isinstance(prompt, str) and prompt.strip() else "what matters most"
     return await llm.complete(settings, model, [{"role": "system", "content": SUMMARY_SYSTEM},
                                                  {"role": "user", "content": f"Focus:\n{_fence(focus)}\n\nData (JSON):\n{blob}"}])
 
 
 async def generate_recap(settings: dict[str, Any], model: str, facts: dict[str, Any]) -> str:
-    blob = json.dumps(facts, ensure_ascii=False, default=str)
-    if len(blob) > 20000:
-        blob = blob[:20000] + "…"
+    blob = _clip_public(json.dumps(facts, ensure_ascii=False, default=str), 20000)
     today = dt.date.today().strftime("%A, %B %d")
     return await llm.complete(settings, model, [{"role": "system", "content": RECAP_SYSTEM}, {"role": "user", "content": f"Today is {today}.\n\nFacts:\n{blob}"}])

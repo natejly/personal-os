@@ -125,7 +125,11 @@ def classify(thread: dict[str, Any], me: str, now: datetime, cfg: dict[str, Any]
 def _llm_payload(thread: dict[str, Any]) -> dict[str, str]:
     last = (thread.get("messages") or [{}])[-1]
     frm = _addr(last.get("from"))
-    return {"subject": thread.get("subject") or "", "domain": frm.split("@", 1)[1] if "@" in frm else "", "snippet": last.get("snippet") or ""}
+    domain = frm.split("@", 1)[1] if "@" in frm else ""
+    # Subject and snippet are someone else's text. One line each, so a newline cannot open a new section
+    # if a model is later shown this payload.
+    return {"subject": _line(thread.get("subject") or ""), "domain": _line(domain, 80),
+            "snippet": _line(last.get("snippet") or "", 300)}
 
 
 def refine(items: list[tuple[dict[str, Any], dict[str, Any]]], llm_fn: Callable[[list[dict[str, str]]], Any], me: str) -> list[dict[str, Any]]:

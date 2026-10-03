@@ -148,6 +148,76 @@ PAGE = ("<html><body><article><h1>Widgets</h1><p>" + "Widgets are small useful t
         + "Widgets are small useful things we make every day. " * 6 + "</p></article></body></html>")
 
 
+def test_a_calendar_note_and_a_doc_are_stripped() -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+
+    class G:
+        def calendar_get(self, event_id: str, calendar_id: str = "primary") -> dict[str, str]:
+            return {"id": event_id, "summary": "sync", "description": f"bring {pat}",
+                    "location": "https://example.com/a?token=secretvalue"}
+
+        def docs_get(self, document_id: str) -> dict[str, str]:
+            return {"id": document_id, "title": "Notes", "text": f"key {pat}"}
+
+        def drive_read(self, file_id: str, max_chars: int = 8000) -> dict[str, str]:
+            return {"id": file_id, "name": "a.txt", "content": pat}
+
+        def sheets_read(self, spreadsheet_id: str, cell_range: str | None = None) -> dict[str, Any]:
+            return {"id": spreadsheet_id, "title": "Budget", "values": [["ok", pat]]}
+
+    tb = Toolbox(None, None, None, lambda: {}, google=G())  # type: ignore[arg-type]
+    event = run(tb.specs["calendar_get"].fn({}, event_id="e1"))
+    assert pat not in event["description"] and "secretvalue" not in event["location"]
+    assert event["summary"] == "sync"
+    doc = run(tb.specs["google_docs_read"].fn({}, document_id="d1"))
+    assert pat not in doc["text"] and doc["title"] == "Notes"
+    drive = run(tb.specs["google_drive_read"].fn({}, file_id="f1"))
+    assert pat not in drive["content"] and drive["name"] == "a.txt"
+    sheet = run(tb.specs["google_sheets_read"].fn({}, spreadsheet_id="s1"))
+    assert pat not in sheet["values"][0][1] and sheet["values"][0][0] == "ok"
+
+
+def test_an_email_body_is_stripped() -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+
+    class G:
+        def gmail_get(self, message_id: str) -> dict[str, str]:
+            return {"id": message_id, "from": "a@b.com", "subject": "hi", "body": f"use {pat}"}
+
+        def gmail_search(self, query: str, n: int) -> list[dict[str, str]]:
+            return [{"id": "1", "from": "a@b.com", "subject": "hi", "snippet": pat}]
+
+    tb = Toolbox(None, None, None, lambda: {}, google=G())  # type: ignore[arg-type]
+    read = run(tb.specs["gmail_read"].fn({}, message_id="m1"))
+    assert pat not in read["body"] and read["from"] == "a@b.com" and "[github-pat]" in read["body"]
+    found = run(tb.specs["gmail_search"].fn({}, query="in:inbox", max_results=5))
+    assert pat not in found["messages"][0]["snippet"] and found["messages"][0]["from"] == "a@b.com"
+
+
+def test_github_file_text_is_stripped(box: Toolbox, monkeypatch: pytest.MonkeyPatch) -> None:
+    from personal_os import reach
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+
+    async def fake(*_a: Any, **_k: Any) -> dict[str, Any]:
+        return {"repo": "o/n", "path": "a.py", "text": f"token {pat}", "comments": [{"author": "a", "body": pat}]}
+
+    monkeypatch.setattr(reach, "github_read", fake)
+    out = run(box.specs["github_read"].fn({}, repo="o/n", path="a.py"))
+    assert pat not in out["text"] and pat not in out["comments"][0]["body"]
+    assert out["path"] == "a.py" and out["comments"][0]["author"] == "a"
+    assert "[github-pat]" in out["text"]
+
+
+def test_a_token_in_the_page_is_stripped(box: Toolbox) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    html = ("<html><body><article><p>The key is " + pat + ". "
+             + "Widgets are small useful things we make every day. " * 20 + "</p></article></body></html>")
+    Net.routes["https://a.com/secret"] = FakeResp("https://a.com/secret", html.encode(), "text/html")
+    out = fetch(box, url="https://a.com/secret")
+    assert pat not in out["text"] and "[github-pat]" in out["text"]
+    assert "Widgets are small" in out["text"]
+
+
 def test_second_fetch_is_cached_and_fresh_bypasses(box: Toolbox) -> None:
     Net.routes["https://a.com/p"] = FakeResp("https://a.com/p", PAGE.encode(), "text/html")
     first = fetch(box, url="https://a.com/p")

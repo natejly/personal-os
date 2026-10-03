@@ -25,6 +25,8 @@ FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 _secrets: set[str] = set()
 
 _PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    # A key block can span lines inside one log record (a traceback, a dumped config).
+    (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.S), "[redacted]"),
     # Header-shaped: "Authorization: Bearer abc", "X-Personal-OS-Token: abc", with or without quotes.
     (re.compile(r"(?i)(authorization|x-personal-os-token|x-api-key|api-key|proxy-authorization|cookie|set-cookie)(['\"]?\s*[:=]\s*['\"]?)(?:bearer\s+|basic\s+)?[^\s'\",;}]+"), r"\1\2[redacted]"),
     (re.compile(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{8,}"), r"\1 [redacted]"),
@@ -35,11 +37,13 @@ _PATTERNS: list[tuple[re.Pattern[str], str]] = [
     # Query-string credentials in a URL.
     (re.compile(r"(?i)([?&](?:key|api_key|apikey|token|access_token|auth|code|client_secret)=)[^&\s'\"]+"), r"\1[redacted]"),
     # Well-known provider token shapes, bare in a message.
-    (re.compile(r"\b(?:sk|pk|rk)-[A-Za-z0-9_-]{16,}\b"), "[redacted]"),
+    (re.compile(r"\b(?:sk|pk|rk)[-_][A-Za-z0-9_-]{16,}\b"), "[redacted]"),
     (re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr|github_pat)_[A-Za-z0-9_]{16,}\b"), "[redacted]"),
     (re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b"), "[redacted]"),
     (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "[redacted]"),
     (re.compile(r"\bya29\.[A-Za-z0-9._-]{20,}\b"), "[redacted]"),
+    (re.compile(r"\bAIza[0-9A-Za-z_\-]{35}\b"), "[redacted]"),
+    (re.compile(r"https://hooks\.slack\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/[A-Za-z0-9]+"), "[redacted]"),
     (re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"), "[redacted]"),
 ]
 

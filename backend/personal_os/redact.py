@@ -27,6 +27,7 @@ RULES: dict[str, tuple[re.Pattern[str], str]] = {
     "aws_key": (re.compile(r"\bAKIA[0-9A-Z]{16}\b"), "[aws-key]"),
     "github_pat": (re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}\b"), "[github-pat]"),
     "google_api": (re.compile(r"\bAIza[0-9A-Za-z_\-]{35}\b"), "[google-key]"),
+    "google_oauth": (re.compile(r"\bya29\.[A-Za-z0-9._-]{20,}\b"), "[google-access]"),
     "slack_webhook": (re.compile(r"https://hooks\.slack\.com/services/T[A-Z0-9]+/B[A-Z0-9]+/[A-Za-z0-9]+"), "[slack-webhook]"),
     "jwt": (re.compile(r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b"), "[jwt]"),
     "phone": (re.compile(r"\b(?:\+?\d{1,2}[ .-]?)?\(?\d{3}\)?[ .-]?\d{3}[ .-]?\d{4}\b"), "[phone]"),
@@ -53,7 +54,7 @@ ALL_RULES: tuple[str, ...] = tuple(RULES)
 # A leaked API key is a breach; a colleague's email address in their own meeting is the point.
 SECRET_RULES: tuple[str, ...] = (
     "private_key", "url_userinfo", "url_secret_param", "card", "ssn", "token", "aws_key",
-    "github_pat", "google_api", "slack_webhook", "jwt", "entropy",
+    "github_pat", "google_api", "google_oauth", "slack_webhook", "jwt", "entropy",
 )
 
 # The exact object activity.py used to define at module level, re-exported so nothing that
@@ -79,6 +80,19 @@ def scrub(text: str, rules: Iterable[str] = ALL_RULES, secret_assign: bool = Tru
         # Whatever follows a word like "password" is almost certainly the value itself.
         out = SECRET_ASSIGN.sub("[secret]", out)
     return out
+
+
+# What a command or script may print back into the model. No entropy or card rules: those eat
+# paths, commit hashes and build ids, which are most of that output.
+COMMAND_OUTPUT_RULES: tuple[str, ...] = (
+    "url_userinfo", "url_secret_param", "private_key", "aws_key", "jwt", "token",
+    "github_pat", "google_api", "google_oauth", "slack_webhook",
+)
+
+
+def scrub_command_output(text: str) -> str:
+    """Strip credentials from stdout/stderr before it is shown to the model."""
+    return scrub(text or "", COMMAND_OUTPUT_RULES, secret_assign=False)
 
 
 def scrub_secrets(text: str) -> str:

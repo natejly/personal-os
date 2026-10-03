@@ -49,6 +49,8 @@ SNIFF_BYTES = 8192
 WRITE_MODES = ("create", "overwrite", "append")
 # Formats whose extracted text, written out under a new name, is still the download.
 _EXTRACT_SUFFIXES = frozenset({".pdf", ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt", ".odt", ".rtf"})
+# A shorter shared opening is too common to treat as the same download.
+_CARRY_PREFIX = 80
 
 
 class WorkspaceError(Exception):
@@ -258,6 +260,11 @@ class Workspace:
                 noted.append(rel)
                 continue
             if any(raw == data and src_rel != rel for src_rel, raw in blobs):
+                self.note_fetch(desk_id, rel)
+                noted.append(rel)
+                continue
+            if any(src_rel != rel and len(raw) >= _CARRY_PREFIX and (data.startswith(raw) or (len(data) >= _CARRY_PREFIX and raw.startswith(data)))
+                   for src_rel, raw in blobs):
                 self.note_fetch(desk_id, rel)
                 noted.append(rel)
                 continue

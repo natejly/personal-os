@@ -202,6 +202,14 @@ def fake_open(responses: dict[str, httpx.Response], seen: list[str] | None = Non
     return opener
 
 
+def test_a_token_in_a_desk_file_is_stripped_for_the_model(box: Box) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    box.run("desk_write_file", path="work/secret.md", content=f"key {pat}\n")
+    got = box.run("desk_read_file", path="work/secret.md")
+    assert pat not in got["text"] and "[github-pat]" in got["text"]
+    assert (box.root / "work" / "secret.md").read_text() == f"key {pat}\n"
+
+
 def test_reading_a_download_taints_again_after_the_chat_is_cleared(box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
     url = "https://example.com/note.txt"
     monkeypatch.setattr(tools_mod, "_open_pinned_stream", fake_open({
@@ -237,6 +245,27 @@ def test_copying_a_download_to_a_new_path_stays_untrusted(box: Box, monkeypatch:
     got = box.run("desk_read_file", path=copied["path"])
     assert "hello from the web" in got["text"]
     assert box.ctx["tainted"] is True and "desk_read_file" in box.ctx["taint_sources"]
+
+
+def test_a_download_with_a_note_appended_stays_untrusted(box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
+    url = "https://example.com/long.txt"
+    body = b"hello from the web. " + (b"sentence " * 12)
+    assert len(body) >= 80
+    monkeypatch.setattr(tools_mod, "_open_pinned_stream", fake_open({
+        url: httpx.Response(200, content=body, headers={"content-type": "text/plain"}),
+    }))
+    box.run("desk_fetch_file", url=url)
+    box.ctx["tainted"] = False
+    box.ctx["taint_sources"] = []
+    copied = box.run("desk_write_file", path="work/noted.md", content=body.decode() + "\nMy note\n")
+    assert box.ws.was_fetched(DESK, copied["path"])
+    got = box.run("desk_read_file", path="work/noted.md")
+    assert "My note" in got["text"] and box.ctx["tainted"] is True
+    box.ctx["tainted"] = False
+    box.ctx["taint_sources"] = []
+    box.run("desk_write_file", path="work/own.md", content="mine\n")
+    box.run("desk_read_file", path="work/own.md")
+    assert box.ctx["tainted"] is False
 
 
 def test_writing_extracted_download_text_stays_untrusted(box: Box, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -2138,8 +2138,8 @@ class MeetingService:
             last = self.meetings.last_applied(m["id"])
             if last is not None and last["degraded"] and body == (last["after"] or "").strip():
                 body = (full.get("notes") or "").strip()
-            first = next((ln.strip() for ln in body.splitlines() if ln.strip() and not ln.startswith("#")), "")
-            head = " ".join((m["summary"] or m["title"] or "(untitled)").replace("\r", " ").replace("\n", " ").split())[:200] or "(untitled)"
+            first = redact.scrub_command_output(next((ln.strip() for ln in body.splitlines() if ln.strip() and not ln.startswith("#")), ""))
+            head = redact.scrub_command_output(" ".join((m["summary"] or m["title"] or "(untitled)").replace("\r", " ").replace("\n", " ").split()))[:200] or "(untitled)"
             parts.append(f"- {head}" + (f": {first[:200]}" if first else ""))
         return "\n".join(parts)[:max_chars]
 

@@ -193,8 +193,23 @@ def test_env_is_scrubbed(box: Box, monkeypatch: pytest.MonkeyPatch) -> None:
 def test_scrub_removes_credentials_but_not_ordinary_output() -> None:
     assert "AKIAABCDEFGHIJKLMNOP" not in shell._scrub("key AKIAABCDEFGHIJKLMNOP end")
     assert "-----BEGIN RSA PRIVATE KEY-----" not in shell._scrub("-----BEGIN RSA PRIVATE KEY-----\nabc\n-----END RSA PRIVATE KEY-----")
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    gkey = "AIzaSyA1234567890abcdefGHIJKLMNOPQRSTUV"
+    oauth = "ya29.a0AfH6SMCabcdefghijklmnopqrstuvwxyz"
+    assert pat not in shell._scrub(f"token {pat}")
+    assert gkey not in shell._scrub(gkey) and oauth not in shell._scrub(oauth)
+    assert "hunter2" not in shell._scrub("https://user:hunter2@example.com/x")
+    assert "secretvalue" not in shell._scrub("https://example.com/a?token=secretvalue")
     keep = "commit 3f2a91c7d8e0b1a2 src/app/main.py:42 password = os.environ['X']"
     assert shell._scrub(keep) == keep
+
+
+def test_run_python_strips_a_printed_token() -> None:
+    from personal_os.sandbox import run_python
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    out = run_python(f"print({pat!r})")
+    assert out["exit_code"] == 0
+    assert pat not in out["stdout"] and "[github-pat]" in out["stdout"]
 
 
 @needs_seatbelt

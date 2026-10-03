@@ -236,6 +236,15 @@ def test_mdfind_refuses_folders_outside_home(home: Path, monkeypatch: pytest.Mon
 
 
 # ---- read_local_file ----
+def test_a_token_in_a_local_file_is_stripped_for_the_model(home: Path) -> None:
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    (home / "Desktop" / "secret.md").write_text(f"key {pat}\n")
+    tb = Toolbox(None, None, None, lambda: {})  # type: ignore[arg-type]
+    out = asyncio.run(tb.call("read_local_file", {"path": "~/Desktop/secret.md"}, {}))
+    assert pat not in out["text"] and "[github-pat]" in out["text"]
+    assert (home / "Desktop" / "secret.md").read_text() == f"key {pat}\n"
+
+
 def test_read_local_pages_text_and_lists_folders(home: Path) -> None:
     (home / "Desktop" / "notes.md").write_text("a" * 50 + "b" * 50)
     out = mac.read_local("~/Desktop/notes.md", offset=50, length=20)

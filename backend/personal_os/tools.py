@@ -32,6 +32,7 @@ from . import plans
 from . import reach
 from . import mcp_search
 from .learn import skill_block
+from . import redact
 from . import webread
 from . import websearch
 from . import outbox as outbox_mod
@@ -45,6 +46,27 @@ from .sandbox import WORKSPACE_REPORT_CAP, run_python
 
 ToolFn = Callable[..., Awaitable[Any]]
 log = logging.getLogger(__name__)
+
+_PUBLIC_TEXT = frozenset({
+    "text", "body", "readme", "description", "summary", "title", "snippet", "subject", "content", "location",
+})
+
+
+def _scrub_public_text(value: Any) -> Any:
+    """Credentials in text that came from the public web, before the model sees it."""
+    if isinstance(value, list):
+        return [redact.scrub_command_output(v) if isinstance(v, str) else _scrub_public_text(v) for v in value]
+    if isinstance(value, dict):
+        out = {}
+        for key, item in value.items():
+            if isinstance(item, str) and key in _PUBLIC_TEXT:
+                out[key] = redact.scrub_command_output(item)
+            elif isinstance(item, (list, dict)):
+                out[key] = _scrub_public_text(item)
+            else:
+                out[key] = item
+        return out
+    return value
 
 
 # danger levels: safe (read-only, in-app) · writes (in-app write) · network (reads the internet)
@@ -68,6 +90,9 @@ PROMPT_WRITES = frozenset({
     "todo_add", "todo_delete", "todo_update",
     "board_add_card", "board_create", "board_move_card",
     "skill_draft", "skill_revise", "skill_from_run",
+    "health_log", "health_delete_entry",
+    "artifact_create", "artifact_update", "artifact_edit",
+    "convert_document",
 })
 PROPOSAL_ONLY_REFUSED = ("{name} does something outside the app, and this is an unattended background run, so it "
                          "cannot be executed here. It is recorded as a proposal the user accepts, edits or rejects; "
@@ -776,7 +801,7 @@ class Toolbox:
             rows = [{"source": h.get("source", "file"), "document_id": None if h.get("source") == "doc" else h["document_id"],
                      "doc_id": h.get("doc_id"), "document": h["name"], "chunk": h["idx"], "section": h.get("heading") or None,
                      "page": h.get("page"), "text": h["text"]} for h in hits]
-            return page(rows, offset=off, limit=lim, key="results")
+            return page(_scrub_public_text(rows), offset=off, limit=lim, key="results")
         R("search_documents", ToolSpec("search_documents", "Search (keywords and meaning) over the user's uploaded files AND their own Docs-editor notes (project + personal). Returns the best matching excerpts, each marked source 'file' (read it with read_document) or 'doc' (read it with doc_read, using doc_id). Use it when the user asks about something that may be in their files or notes; scope narrows it to 'files' or 'docs'.",
             _obj({"query": {"type": "string", "description": "Search terms or a short question"}, "limit": {"type": "integer", "default": 8}, "offset": {"type": "integer", "default": 0},
                   "scope": {"type": "string", "enum": ["all", "files", "docs"], "default": "all"}}, ["query"]), search_documents, "knowledge",
@@ -790,7 +815,8 @@ class Toolbox:
                                   example={"document_id": "doc_3f2a91", "offset": 0}, alternative=ALTERNATIVE["read_document"])
             text = d["text"]
             off = max(0, int(offset))
-            return {"name": d["name"], "total_chars": len(text), "offset": off, "text": text[off: off + min(int(length), 20000)]}
+            return _scrub_public_text({"name": d["name"], "total_chars": len(text), "offset": off,
+                                        "text": text[off: off + min(int(length), 20000)]})
         R("read_document", ToolSpec("read_document", "Read a slice of a document's full text by id (ids come from search_documents or the document list). Page through long documents with offset.",
             _obj({"document_id": {"type": "string"}, "offset": {"type": "integer", "default": 0}, "length": {"type": "integer", "default": 6000}}, ["document_id"]), read_document, "knowledge",
             examples=[{"document_id": "doc_3f2a91"}, {"document_id": "doc_3f2a91", "offset": 6000}, {"document_id": "doc_3f2a91", "offset": 0, "length": 2000}], taints=True))
@@ -897,7 +923,7 @@ class Toolbox:
                                   example={"query": query, "time_range": "week", "site": "sqlite.org"})
             for row in rows:
                 _allow_url(ctx, row.get("url"))
-            return page(rows, offset=off, limit=n, key="results", **meta)
+            return page(_scrub_public_text(rows), offset=off, limit=n, key="results", **meta)
         R("web_search", ToolSpec("web_search", "Search the web for current information. Returns titles, URLs and snippets; call fetch_url to read a result in full. "
                                  "time_range (day, week, month, year) limits to recent pages; site restricts to one domain.",
             _obj({"query": {"type": "string"}, "max_results": {"type": "integer", "default": 6}, "offset": {"type": "integer", "default": 0},
@@ -976,6 +1002,7 @@ class Toolbox:
             if links and rendered.links and via is None:
                 text += "\n\n## References\n" + webread.references(rendered.links)
             window, total, nxt = webread.page_window(text, offset, mc)
+            window = redact.scrub_command_output(window)
             # Link URLs are page content, so they are deliberately not _allow_url'd: a tainted run cannot follow them.
             out = {"url": final_url, "status": status, "content_type": ctype, "kind": kind, "text": window, "truncated": nxt is not None or body_truncated,
                    "total_chars": total, "next_offset": nxt, "cached": bool(hit), "redirects": hops}
@@ -1317,13 +1344,13 @@ def _register_google(self: Toolbox) -> None:
 
     async def calendar_events(ctx: dict[str, Any], days: int = 2, start: str | None = None, offset: int = 0, all_calendars: bool = False) -> Any:
         rows = await run(g.calendar_events, days, "primary", 30, start, ["all"] if all_calendars else None)
-        return page([_brief_event(e) for e in rows], offset=offset, limit=30, key="events")
+        return page(_scrub_public_text([_brief_event(e) for e in rows]), offset=offset, limit=30, key="events")
     R("calendar_events", ToolSpec("calendar_events", "List Google Calendar events (default: the next 2 days on the primary calendar). `start` is a local YYYY-MM-DD or YYYY-MM-DDTHH:MM to look from (default now); `days` is the window length. all_calendars includes every calendar. calendar_get has an event's full details.",
         _obj({"days": {"type": "integer", "default": 2}, "start": {"type": "string"}, "offset": {"type": "integer", "default": 0}, "all_calendars": {"type": "boolean", "default": False}}, []), calendar_events, "google",
         examples=[{}, {"days": 7, "all_calendars": True}, {"days": 1, "start": "2026-10-02T09:00"}], taints=True))
 
     async def calendar_get(ctx: dict[str, Any], event_id: str, calendar_id: str = "primary") -> Any:
-        return await run(g.calendar_get, event_id, calendar_id)
+        return _scrub_public_text(await run(g.calendar_get, event_id, calendar_id))
     R("calendar_get", ToolSpec("calendar_get", "Full details of one event by id (from calendar_events): recurrence, reminders, guests and their RSVPs, color, visibility.",
         _obj({"event_id": {"type": "string"}, "calendar_id": {"type": "string", "default": "primary"}}, ["event_id"]), calendar_get, "google",
         examples=[{"event_id": "7abc123def"}], taints=True))
@@ -1505,7 +1532,7 @@ def _register_google(self: Toolbox) -> None:
 
     async def gmail_search(ctx: dict[str, Any], query: str = "is:unread in:inbox newer_than:14d", max_results: int = 15, offset: int = 0) -> Any:
         off, n = max(0, int(offset)), max(1, min(int(max_results), 100))
-        rows = await run(g.gmail_search, query, off + n)
+        rows = _scrub_public_text(await run(g.gmail_search, query, off + n))
         return page(rows, offset=off, limit=n, key="messages")
     R("gmail_search", ToolSpec("gmail_search", "Search Gmail with Gmail query syntax (e.g. 'is:unread in:inbox', 'from:alice newer_than:7d', 'subject:invoice'). Returns headers and snippets.",
         _obj({"query": {"type": "string", "default": "is:unread in:inbox newer_than:14d"}, "max_results": {"type": "integer", "default": 15}, "offset": {"type": "integer", "default": 0}}, []), gmail_search, "google",
@@ -1513,7 +1540,7 @@ def _register_google(self: Toolbox) -> None:
                   {"query": "has:attachment newer_than:30d", "max_results": 15, "offset": 15}], taints=True))
 
     async def gmail_read(ctx: dict[str, Any], message_id: str) -> Any:
-        return await run(g.gmail_get, message_id)
+        return _scrub_public_text(await run(g.gmail_get, message_id))
     R("gmail_read", ToolSpec("gmail_read", "Read the full body of an email by id (from gmail_search).",
         _obj({"message_id": {"type": "string"}}, ["message_id"]), gmail_read, "google",
         examples=[{"message_id": "18f2c1a9b7e4d0aa"}], taints=True))
@@ -1605,7 +1632,7 @@ def _register_google(self: Toolbox) -> None:
         examples=[{}, {"query": "quarterly report"}, {"query": "invoice", "max_results": 10}], taints=True))
 
     async def gdrive_read(ctx: dict[str, Any], file_id: str, max_chars: int = 8000) -> Any:
-        return await run(g.drive_read, file_id, max_chars)
+        return _scrub_public_text(await run(g.drive_read, file_id, max_chars))
     R("google_drive_read", ToolSpec("google_drive_read", "Read a Drive file's text by id (from google_drive_search). Google Docs export as text, Sheets as CSV; binary files return only a link.",
         _obj({"file_id": {"type": "string"}, "max_chars": {"type": "integer", "default": 8000}}, ["file_id"]), gdrive_read, "google",
         examples=[{"file_id": "1r5tYw3xKj2mN8pQvLsHhGdE0aZcBfXo4"}], taints=True))
@@ -1618,7 +1645,7 @@ def _register_google(self: Toolbox) -> None:
         examples=[{}, {"query": "budget", "kind": "sheet"}, {"query": "notes"}], taints=True))
 
     async def gdocs_read(ctx: dict[str, Any], document_id: str) -> Any:
-        return await run(g.docs_get, document_id)
+        return _scrub_public_text(await run(g.docs_get, document_id))
     R("google_docs_read", ToolSpec("google_docs_read", "Read a Google Doc's text by id (from google_docs_search).",
         _obj({"document_id": {"type": "string"}}, ["document_id"]), gdocs_read, "google",
         examples=[{"document_id": "1aBcD_efGhIJ"}], taints=True))
@@ -1636,7 +1663,7 @@ def _register_google(self: Toolbox) -> None:
         examples=[{"document_id": "1aBcD_efGhIJ", "content": "Follow-ups:\n- book the room"}]))
 
     async def gsheets_read(ctx: dict[str, Any], spreadsheet_id: str, range: str | None = None) -> Any:
-        return await run(g.sheets_read, spreadsheet_id, range)
+        return _scrub_public_text(await run(g.sheets_read, spreadsheet_id, range))
     R("google_sheets_read", ToolSpec("google_sheets_read", "Read a Google Sheet by id (from google_docs_search). Default: the first tab; range as A1 notation like 'Sheet1!A1:D50'.",
         _obj({"spreadsheet_id": {"type": "string"}, "range": {"type": "string"}}, ["spreadsheet_id"]), gsheets_read, "google",
         examples=[{"spreadsheet_id": "1aBcD_efGhIJ"}, {"spreadsheet_id": "1aBcD_efGhIJ", "range": "Budget!A1:D50"}], taints=True))
@@ -1926,9 +1953,9 @@ def _register_docs(self: Toolbox) -> None:
         if not d:
             return _missing(doc)
         total = len(d["content"].splitlines())
-        return {"doc_id": d["id"], "title": d["title"], "total_lines": total, "words": d["words"],
-                "pending_edits": len(d["pending"]),
-                "text": _numbered(d["content"], from_line, total if to_line is None else int(to_line))}
+        return _scrub_public_text({"doc_id": d["id"], "title": d["title"], "total_lines": total, "words": d["words"],
+                                   "pending_edits": len(d["pending"]),
+                                   "text": _numbered(d["content"], from_line, total if to_line is None else int(to_line))})
     R("doc_read", ToolSpec("doc_read", "Read a doc's markdown with line numbers (LaTeX written as $…$ or $$…$$ is part of the text). Read before editing: doc_edit matches on exact text, so you need the real wording. Page through a long doc with from_line/to_line.",
         _obj({"doc": {"type": "string", "description": "Doc id or title"}, "from_line": {"type": "integer", "default": 1}, "to_line": {"type": "integer"}}, ["doc"]), doc_read, "docs"))
 
@@ -2163,7 +2190,7 @@ def _register_meetings(self: Toolbox) -> None:
             note = (note + " " if note else "") + "Enhanced notes for this meeting are waiting for the user's review."
         if note:
             out["note"] = note
-        return out
+        return _scrub_public_text(out)
     R("meeting_read", ToolSpec("meeting_read", (
         "Read one part of a meeting, as numbered lines. 'meeting' is an id from meeting_list/meeting_search, an "
         "exact title, or a unique part of a title. 'part' is 'enhanced' (the cleaned-up notes; falls back to the "
@@ -2228,7 +2255,7 @@ def _register_mac(self: Toolbox) -> None:
                 return early
             out = await asyncio.to_thread(mac.read_local, path, offset, length)
             fsx.post_read(self, ctx, path, out)
-            return out
+            return _scrub_public_text(out)
         except mac.LocalPathError as e:
             return tool_error(f"read_local_file: {e}", field="path", expected="a path find_files returned",
                               example={"path": "~/Documents/notes.txt"}, alternative=ALTERNATIVE["read_local_file"])
@@ -2344,7 +2371,12 @@ def _register_mac(self: Toolbox) -> None:
         except UrlBlocked as e:
             return tool_error(f"open_page refused {url}: {str(e).replace('fetch_url', 'open_page')}", field="url",
                               alternative=e.alternative or ALTERNATIVE["open_page"])
-        return await mac.page_bridge.open_page(cur, max_chars=max_chars)
+        opened = await mac.page_bridge.open_page(cur, max_chars=max_chars)
+        if isinstance(opened, dict):
+            for key in ("text", "title", "content"):
+                if isinstance(opened.get(key), str):
+                    opened[key] = redact.scrub_command_output(opened[key])
+        return opened
     R("open_page", ToolSpec("open_page", "Load a web page in an offscreen browser (its own cookies, separate from the user's) and return its title and visible text. Use it when a page needs JavaScript and fetch_url came back empty. Read-only: it never clicks or fills in forms.",
         _obj({"url": {"type": "string"}, "max_chars": {"type": "integer", "default": 20000}}, ["url"]), open_page, "web", "network",
         examples=[{"url": "https://example.com/app/pricing"}], taints=True))
@@ -2635,7 +2667,7 @@ def _register_cowork(self: Toolbox) -> None:
                 return _fail("desk_read_file", e)
             _note_read(ctx, desk_id, path, out)
             _taint_if_fetched(ctx, ws, desk_id, path)
-            return out
+            return _scrub_public_text(out)
         # Not plain text: PDF, office files, pictures, anything with NULs. extract_text returns a marker when it
         # cannot read a format, which is passed on rather than hidden.
         kind = TEXT_READ_KINDS.get(suffix) or ("image" if suffix in PICTURE_EXT else "binary")
@@ -2651,7 +2683,7 @@ def _register_cowork(self: Toolbox) -> None:
         if kind == "image":
             out["note"] = "This is a picture: use view_image to look at it. The text above is only what could be read off it."
         _taint_if_fetched(ctx, ws, desk_id, path)
-        return out
+        return _scrub_public_text(out)
     # Deliberately not taints=True: the workspace holds what this agent itself wrote, and marking it
     # untrusted would force every later external step of its own approved plan back to a card.
     R("desk_read_file", ToolSpec("desk_read_file", "Read a file from this desk's workspace. Text comes back as is; PDFs and office files (.docx, .xlsx, .pptx) come back as extracted text with a kind field; for a picture use view_image. The window is snapped to a line boundary and returns next_offset when there is more, so page through a long file rather than asking for all of it at once.",
@@ -2984,7 +3016,9 @@ def _register_reach(self: Toolbox) -> None:
             return failed("youtube_video", e)
         cap = max(2000, min(int(max_chars), 80000))
         t = out.get("transcript") or ""
-        out["transcript"], out["transcript_truncated"] = t[:cap], len(t) > cap
+        out["transcript"], out["transcript_truncated"] = redact.scrub_command_output(t[:cap]), len(t) > cap
+        if isinstance(out.get("description"), str):
+            out["description"] = redact.scrub_command_output(out["description"])
         return out
     R("youtube_video", ToolSpec("youtube_video", "Read a YouTube video: title, channel, description and the full transcript "
                                 "(subtitles, else auto captions), stamped [m:ss] about every 30 seconds.",
@@ -3024,8 +3058,9 @@ def _register_reach(self: Toolbox) -> None:
     async def github_read(ctx: dict[str, Any], repo: str, path: str = "", number: int | None = None, ref: str = "",
                           max_chars: int = 20000) -> Any:
         try:
-            return await reach.github_read(repo, path=path, number=number, ref=ref, token=reach.gh_token(self.settings()),
-                                           max_chars=max(2000, min(int(max_chars), 60000)))
+            return _scrub_public_text(await reach.github_read(
+                repo, path=path, number=number, ref=ref, token=reach.gh_token(self.settings()),
+                max_chars=max(2000, min(int(max_chars), 60000))))
         except (reach.ReachError, httpx.HTTPError, ValueError, KeyError) as e:
             return failed("github_read", e)
     R("github_read", ToolSpec("github_read", "Read from a GitHub repository. With just `repo`: description, stars, top-level files "
@@ -3056,7 +3091,7 @@ def _register_reach(self: Toolbox) -> None:
             return failed("read_feed", e)
         for it in out["items"]:
             _allow_url(ctx, it.get("url"))
-        return out
+        return _scrub_public_text(out)
     R("read_feed", ToolSpec("read_feed", "Read an RSS or Atom feed: the latest items with titles, links, dates and summaries.",
         _obj({"url": {"type": "string"}, "max_items": {"type": "integer", "default": 20}}, ["url"]), read_feed, "web", "network",
         examples=[{"url": "https://hnrss.org/frontpage"}, {"url": "https://simonwillison.net/atom/everything/", "max_items": 10}], taints=True))

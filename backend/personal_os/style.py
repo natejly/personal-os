@@ -25,7 +25,7 @@ import json
 import re
 from typing import Any
 
-from . import llm
+from . import llm, redact
 from .db import Database, new_id, now, row_to_dict
 
 SCHEMA = """
@@ -141,6 +141,11 @@ def _line(text: str, limit: int = 240) -> str:
     return " ".join(str(text or "").replace("\r", " ").replace("\n", " ").split())[:limit]
 
 
+def _voice(text: Any, limit: int = 240) -> str:
+    """One line, with credentials removed. The stored profile and samples stay as written."""
+    return _line(redact.scrub_command_output(str(text or "")), limit)
+
+
 STYLE_HEADER = "## How the user writes (their voice)"
 STYLE_FOOTER = (
     "Use this voice when you draft text the user will send or publish as their own — email, messages, "
@@ -201,14 +206,14 @@ def context_block(profile: dict[str, Any] | None) -> str:
         return ""
     parts: list[str] = []
     if profile.get("summary"):
-        parts.append(_line(profile["summary"], 1200))
+        parts.append(_voice(profile["summary"], 1200))
     traits = profile.get("traits") or {}
     if traits:
-        parts.append("Traits: " + "; ".join(f"{_line(k, 40)}: {_line(v, 160)}" for k, v in traits.items()))
+        parts.append("Traits: " + "; ".join(f"{_voice(k, 40)}: {_voice(v, 160)}" for k, v in traits.items()))
     for label, key in (("Follow these when drafting as the user:", "guidelines"), ("Their wordings:", "phrases"), ("They never:", "avoid")):
         items = profile.get(key) or []
         if items:
-            parts.append(label + "\n" + "\n".join(f"- {_line(i)}" for i in items))
+            parts.append(label + "\n" + "\n".join(f"- {_voice(i)}" for i in items))
     if not parts:
         return ""
     return f"{STYLE_HEADER}\n" + "\n\n".join(parts) + f"\n\n{STYLE_FOOTER}"
@@ -373,7 +378,8 @@ class WritingStyle:
             return None
         # Each sample stays in a quote. The old separator was a line of dashes, which a sample
         # could write itself and then tell the coach what guidelines to emit.
-        blob = "\n\n".join(f"[{_line(r.get('source') or 'sample', 40)}]\n{_fence(r['text'])}" for r in used)
+        blob = "\n\n".join(
+            f"[{_voice(r.get('source') or 'sample', 40)}]\n{_fence(redact.scrub_command_output(r['text']))}" for r in used)
         extraction_model = settings.get("extractionModel") or model
         prompt = ANALYSIS_PROMPT % {"max_guidelines": MAX_GUIDELINES, "max_traits": MAX_TRAITS, "max_phrases": MAX_PHRASES}
         raw = await llm.complete(

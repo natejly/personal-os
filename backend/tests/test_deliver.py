@@ -97,6 +97,13 @@ def env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Any:
 
 
 # ---- registration and gating ----
+def test_a_tainted_chat_asks_before_converting(env: Any) -> None:
+    assert env.tb.gate("convert_document", "on", {"tainted": True}) == "ask"
+    assert env.tb.gate("convert_document", "on", {}) == "on"
+    assert env.tb.gate("render_preview", "on", {"tainted": True}) == "on"
+    assert env.tb.gate("doc_guide", "on", {"tainted": True}) == "on"
+
+
 def test_registered_in_group_deliver_with_tiers(env: Any) -> None:
     for n, danger in (("convert_document", "writes"), ("render_preview", "writes"), ("doc_guide", "safe")):
         assert (env.tb.specs[n].group, env.tb.specs[n].danger) == ("deliver", danger)

@@ -464,6 +464,9 @@ def run_python(code: str, timeout: int = 30, python: str | None = None, bridge: 
         out["workspace_files"] = wfiles
     if images:
         out["images"] = images
+    from . import redact
+    out["stdout"] = redact.scrub_command_output(str(out.get("stdout") or ""))
+    out["stderr"] = redact.scrub_command_output(str(out.get("stderr") or ""))
     return out
 
 

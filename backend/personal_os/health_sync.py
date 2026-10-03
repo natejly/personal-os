@@ -11,10 +11,11 @@ Trust: an MCP server is third-party code. Two rules keep sync from widening what
   user re-confirms (the same shape-not-name rule as tool grants in mcp_servers);
 - output is only ever parsed for numbers and dates. No text from it reaches a prompt from here.
 
-Shapes: Garmin's server (Taxuspt/garmin_mcp) documents curated JSON per tool. COROS's official server
-publishes its schemas only after sign-in, so arguments are built from each tool's advertised input
-schema and fields are matched against candidate names. Whatever cannot be read is reported back with
-a short sample, rather than guessed at.
+Shapes: Garmin's server documents curated JSON per tool. COROS's official server publishes its
+schemas only after sign-in and answers in labeled text (a JSON string, not objects), so arguments
+come from each tool's input schema and the text is read for the same dates and numbers. A schema
+field marked required but described as optional or defaulted is left unset. Whatever cannot be
+read is reported back with a short sample, rather than guessed at.
 """
 from __future__ import annotations
 
@@ -136,13 +137,85 @@ def _json_text(text: str) -> Any:
 def parse_output(out: dict[str, Any]) -> Any:
     """An MCP result as JSON. Servers that return a JSON *string* from a tool get it wrapped by the SDK
     as structured `{"result": "<json>"}`, so string values are unwrapped, and the text content is the
-    fallback when the structured form holds nothing parseable."""
+    fallback when the structured form holds nothing parseable. A bare string is labeled text, not JSON."""
     s = out.get("structured")
     if isinstance(s, dict) and len(s) == 1 and isinstance(next(iter(s.values())), str):
         s = _json_text(next(iter(s.values())))
     if s is not None and not isinstance(s, str):
         return s
     return _json_text(out.get("content") or "")
+
+
+def _hours_phrase(text: str) -> float | None:
+    m = re.search(r"(?:(\d+)\s*h)?\s*(?:(\d+)\s*min)?", text, re.I)
+    if not m or (m.group(1) is None and m.group(2) is None):
+        return None
+    return int(m.group(1) or 0) + int(m.group(2) or 0) / 60
+
+
+def _hms_seconds(text: str) -> float | None:
+    """`22:48` is minutes:seconds; `1:00:30` is hours:minutes:seconds."""
+    m = re.fullmatch(r"(\d+):(\d{2})(?::(\d{2}))?", text.strip())
+    if not m:
+        return None
+    if m.group(3) is None:
+        return int(m.group(1)) * 60 + int(m.group(2))
+    return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3))
+
+
+def prose_records(text: str) -> list[dict[str, Any]]:
+    """Labeled fitness text as dated records the field plans already know how to read.
+
+    COROS returns this instead of JSON. Only lines with an explicit date and number are kept;
+    a header value with no day (`Resting HR: 49 bpm` above the days) is not copied onto every day.
+    """
+    if not text:
+        return []
+    recs: list[dict[str, Any]] = []
+    parts = re.split(r"-{2,}\s*(\d{8})\s*-{2,}", text)
+    it = iter(parts[1:])
+    for ds, body in zip(it, it):
+        d = parse_date(ds)
+        if d is None:
+            continue
+        rec: dict[str, Any] = {"date": d.isoformat()}
+        steps = re.search(r"Steps:\s*([\d,]+)", body)
+        if steps:
+            rec["steps"] = int(steps.group(1).replace(",", ""))
+        exercise = re.search(r"Exercise:\s*([^|\n]+)", body)
+        if exercise:
+            mins = _hours_phrase(exercise.group(1))
+            if mins:
+                rec["exerciseMinutes"] = mins * 60
+        if len(rec) > 1:
+            recs.append(rec)
+    for m in re.finditer(r"(?m)^(\d{4}-\d{2}-\d{2}):\s*(\d+(?:\.\d+)?)\s*bpm\b", text):
+        recs.append({"date": m.group(1), "restingHeartRate": float(m.group(2))})
+    day: date | None = None
+    for line in text.splitlines():
+        bare = line.strip()
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", bare):
+            day = parse_date(bare)
+            continue
+        if day is None:
+            continue
+        slept = re.search(r"Daily Sleep:\s*(.+)", bare)
+        if slept:
+            hours = _hours_phrase(slept.group(1))
+            if hours:
+                recs.append({"date": day.isoformat(), "sleepHours": hours})
+    day = None
+    for line in text.splitlines():
+        titled = re.search(r"\d+\.\s+.+[—–-]\s*(\d{4}-\d{2}-\d{2})\s*$", line.strip())
+        if titled:
+            day = parse_date(titled.group(1))
+            continue
+        duration = re.search(r"Duration:\s*(\d+:\d{2}(?::\d{2})?)", line)
+        if duration and day is not None:
+            secs = _hms_seconds(duration.group(1))
+            if secs:
+                recs.append({"date": day.isoformat(), "totalTimeSeconds": secs})
+    return recs
 
 
 # ---- provider plans --------------------------------------------------------------------------
@@ -229,8 +302,11 @@ PROVIDERS: dict[str, Provider] = {
             ToolPlan(("queryDailyHealthData",), [
                 Field("steps", ("steps", "step", "totalSteps", "total_steps", "stepCount", "dailySteps"), sane=STEPS),
                 Field("resting_hr", ("rhr", "restingHeartRate", "resting_heart_rate", "restingHr", "resting_hr"), sane=RHR),
+                # Day-level total. A workout list for the same day replaces it (that field is summed).
+                Field("exercise", ("exerciseMinutes",), sane=EXERCISE_MIN),
             ]),
-            ToolPlan(("querySleepData",), [
+            ToolPlan(("querySleepOverview", "querySleepData"), [
+                Field("sleep", ("sleepHours",), sane=SLEEP_H),
                 Field("sleep", ("totalSleepMinutes", "total_sleep_minutes", "sleepMinutes", "total_duration_minutes", "mainSleepMinutes"), _hours_from_minutes, sane=SLEEP_H),
                 Field("sleep", ("totalSleepSeconds", "sleepSeconds", "sleep_seconds", "totalSleepTime", "sleepTime", "duration"), _hours_from_seconds, sane=SLEEP_H),
             ]),
@@ -281,6 +357,12 @@ def _compact(prop: dict[str, Any]) -> bool:
     return prop.get("type") == "integer" or "yyyymmdd" in text or "\\d{8}" in text
 
 
+def _described_optional(prop: dict[str, Any]) -> bool:
+    """COROS marks every filter required, then says 'optional' or 'defaults to' in the description."""
+    text = (prop.get("description") or "").lower()
+    return "optional" in text or "default" in text
+
+
 def _fmt(d: date, prop: dict[str, Any]) -> Any:
     if _compact(prop):
         s = d.strftime("%Y%m%d")
@@ -293,13 +375,16 @@ def build_calls(schema: dict[str, Any], start: date, end: date) -> list[tuple[di
     Each comes with the date to file undated records under (None for a range). None = can't call it."""
     props: dict[str, Any] = schema.get("properties") or {}
     required = set(schema.get("required") or [])
+    must = {k for k in required if not _described_optional(props.get(k) or {})}
     for a, b in RANGE_PAIRS:
         if a in props and b in props:
             args = {a: _fmt(start, props[a]), b: _fmt(end, props[b])}
-            if required - set(args):
-                break
+            if must - set(args):
+                continue
             if "page_size" in props:
                 args["page_size"] = 100
+            if "limit" in props:
+                args["limit"] = 100  # ponytail: one page; raise if a window can hold more than 100 activities
             return [(args, None)]
     for k in SINGLE_KEYS:
         if k in props:
@@ -308,8 +393,8 @@ def build_calls(schema: dict[str, Any], start: date, end: date) -> list[tuple[di
             while d <= end:
                 calls.append(({k: _fmt(d, props[k])}, d))
                 d += timedelta(days=1)
-            return None if required - {k} else calls
-    if not required:
+            return None if must - {k} else calls
+    if not must:
         for k in ("days", "day_count", "size", "limit"):
             if k in props:
                 return [({k: (end - start).days + 1}, None)]
@@ -456,9 +541,11 @@ class HealthSources:
                     break
                 doc = parse_output(out)
                 sample = sample or (out.get("content") or "")[:240]
-                if doc is None:
-                    continue
-                for metric, d, v in _extract(tp.fields, doc, day):
+                points = list(_extract(tp.fields, doc, day)) if doc is not None and not isinstance(doc, str) else []
+                if not points:
+                    text = doc if isinstance(doc, str) else (out.get("content") or "")
+                    points = list(_extract(tp.fields, prose_records(text), day))
+                for metric, d, v in points:
                     if not start <= d <= end:
                         continue
                     if metric == "weight" and weight_unit in ("lb", "lbs", "pound", "pounds"):

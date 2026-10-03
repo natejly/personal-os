@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from personal_os.db import Database  # noqa: E402
 from personal_os.health import Health, HealthError  # noqa: E402
-from personal_os.health_sync import PROVIDERS, HealthSources, build_calls, parse_date  # noqa: E402
+from personal_os.health_sync import PROVIDERS, HealthSources, build_calls, parse_date, prose_records  # noqa: E402
 from personal_os.mcp_servers import McpServers  # noqa: E402
 
 TODAY = date(2026, 10, 1)
@@ -81,6 +81,33 @@ class Helpers(unittest.TestCase):
         self.assertIsNone(build_calls({"properties": {"athlete": {"type": "string"}}, "required": ["athlete"]}, start, end))
         compact = build_calls({"properties": {"day": {"type": "string", "pattern": "^\\\\d{8}$"}}}, end, end)
         self.assertEqual(compact[0][0], {"day": "20261001"})
+        # Filters described as optional stay required in the schema. Pass the dates anyway.
+        sport = build_calls({
+            "properties": {
+                "startDate": {"type": "string", "description": "Start date in yyyyMMdd format, defaults to 7 days ago"},
+                "endDate": {"type": "string", "description": "End date in yyyyMMdd format, defaults to today"},
+                "sportTypeCodes": {"type": "array", "description": "Optional sport type codes"},
+                "limit": {"type": "integer", "description": "Maximum number of records to return, default 20"},
+            },
+            "required": ["startDate", "endDate", "sportTypeCodes", "limit"],
+        }, start, end)
+        self.assertEqual(sport, [({"startDate": "20260929", "endDate": "20261001", "limit": 100}, None)])
+
+    def test_prose_records_read_labeled_days(self) -> None:
+        daily = prose_records(
+            "Daily Health Data | Resting HR: 49 bpm\n\n"
+            "--- 20261001 ---\nSteps: 3,190 | Exercise: 1h 14min\n"
+            "--- 20260930 ---\nSteps: 8,000 | Exercise: 0 min\n")
+        self.assertEqual(daily[0]["steps"], 3190)
+        self.assertEqual(daily[0]["exerciseMinutes"], 74)
+        self.assertNotIn("exerciseMinutes", daily[1])
+        self.assertFalse(any("restingHeartRate" in r for r in daily))
+        rhr = prose_records("2026-10-01: 52 bpm\n2026-09-30: No data\n")
+        self.assertEqual(rhr, [{"date": "2026-10-01", "restingHeartRate": 52.0}])
+        sleep = prose_records("2026-10-01\nDaily Sleep: 8h 52min (incl. naps)\n2026-09-30\nSleep detail for this day is not available yet.\n")
+        self.assertAlmostEqual(sleep[0]["sleepHours"], 8 + 52 / 60)
+        sport = prose_records("1. Indoor Cycling — 2026-10-01\n   Duration: 47:01\n2. Indoor Cycling — 2026-10-01\n   Duration: 1:00:30\n")
+        self.assertEqual([r["totalTimeSeconds"] for r in sport], [47 * 60 + 1, 3600 + 30])
 
 
 class SyncTests(unittest.IsolatedAsyncioTestCase):
@@ -163,6 +190,64 @@ class SyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.health.entries(), [])
         with self.assertRaises(HealthError):
             await self.sources.sync(self.src["id"], TODAY)
+
+
+COROS_TOOLS = [
+    tool("queryDailyHealthData", {"days": {"type": "integer", "description": "Number of recent days to query, default 7"}}, []),
+    tool("querySleepOverview", {
+        "startDate": {"type": "string", "description": "Optional start date in yyyyMMdd format"},
+        "endDate": {"type": "string", "description": "Optional end date in yyyyMMdd format"},
+        "days": {"type": "integer", "description": "Number of recent days, default 7"},
+    }, []),
+    tool("queryRestingHeartRate", {"days": {"type": "integer", "description": "Number of recent days, default 7"}}, []),
+    tool("querySportRecords", {
+        "startDate": {"type": "string", "description": "Start date in yyyyMMdd format, defaults to 7 days ago"},
+        "endDate": {"type": "string", "description": "End date in yyyyMMdd format, defaults to today"},
+        "sportTypeCodes": {"type": "array", "description": "Optional sport type codes"},
+        "limit": {"type": "integer", "description": "Maximum number of records to return, default 20"},
+    }, ["startDate", "endDate", "sportTypeCodes", "limit"]),
+]
+
+
+def _quoted(text: str) -> dict[str, Any]:
+    return {"content": json.dumps(text), "is_error": False}
+
+
+class CorosSyncTests(unittest.IsolatedAsyncioTestCase):
+    async def test_labeled_text_is_filed_and_workouts_replace_the_day_total(self) -> None:
+        db = Database(tempfile.mkdtemp(prefix="healthsync-"))
+        health = Health(db)
+        store = McpServers(db)
+        server = store.create_server("COROS", transport="http", url="https://mcpus.coros.com/mcp")
+        store.sync_tools(server["id"], COROS_TOOLS)
+        mcp = FakeMcp(store, {
+            "queryDailyHealthData": _quoted(
+                "Daily Health Data | Resting HR: 49 bpm\n\n"
+                "--- 20261001 ---\nSteps: 3,190 | Exercise: 1h 14min\n"
+                "--- 20260930 ---\nSteps: 8,000 | Exercise: 40 min\n"),
+            "querySleepOverview": _quoted("2026-10-01\nDaily Sleep: 8h 52min (incl. naps)\n"),
+            "queryRestingHeartRate": _quoted("2026-10-01: 52 bpm\n2026-09-30: No data\n"),
+            "querySportRecords": _quoted(
+                "1. Indoor Cycling — 2026-10-01\n   Duration: 47:01\n"
+                "2. Indoor Cycling — 2026-10-01\n   Duration: 25:01\n"),
+        })
+        sources = HealthSources(db, health, lambda: mcp)
+        src = sources.create("coros", server["id"])
+        sources.update(src["id"], {"days_back": 2})
+        sources.pin(src["id"])
+        res = await sources.sync(src["id"], TODAY)
+        self.assertEqual(res["problems"], [])
+        by_day = {m["key"]: {p["day"]: p["value"] for p in m["series"]} for m in health.summary(2, TODAY.isoformat())}
+        self.assertEqual(by_day["steps"][TODAY.isoformat()], 3190)
+        self.assertEqual(by_day["steps"]["2026-09-30"], 8000)
+        self.assertEqual(by_day["resting_hr"][TODAY.isoformat()], 52)
+        self.assertIsNone(by_day["resting_hr"]["2026-09-30"])
+        self.assertAlmostEqual(by_day["sleep"][TODAY.isoformat()], 8.9, places=1)
+        # 47:01 + 25:01 replaces the day's "1h 14min"; the other day keeps its own total.
+        self.assertEqual(by_day["exercise"][TODAY.isoformat()], 72)
+        self.assertEqual(by_day["exercise"]["2026-09-30"], 40)
+        sport = next(args for name, args in mcp.calls if name == "querySportRecords")
+        self.assertEqual(sport, {"startDate": "20260930", "endDate": "20261001", "limit": 100})
 
 
 class ProviderTests(unittest.TestCase):

@@ -230,6 +230,11 @@ class Health:
             raise HealthError(f"{m['label']} can't be negative.")
         return v
 
+    @staticmethod
+    def _note(text: str) -> str:
+        """One line. A note is stored and later shown back to the assistant."""
+        return " ".join(str(text or "").replace("\r", " ").split())[:2000]
+
     def log(self, metric: str, value: float, day: str | None = None, note: str = "", source: str = "manual") -> dict[str, Any]:
         m = self.metric(metric)
         if not m:
@@ -242,7 +247,7 @@ class Health:
             if m["kind"] == "check":
                 c.execute("DELETE FROM health_entries WHERE metric=? AND day=?", (metric, d))
             c.execute("INSERT INTO health_entries(id,metric,value,day,note,source,created_at) VALUES(?,?,?,?,?,?,?)",
-                      (eid, metric, v, d, note.strip(), source, now()))
+                      (eid, metric, v, d, self._note(note), source, now()))
         return self.entry(eid)  # type: ignore[return-value]
 
     def upsert_synced(self, metric: str, day: str, value: float, source: str, note: str = "") -> bool:
@@ -261,7 +266,7 @@ class Health:
                 return False
             c.execute("DELETE FROM health_entries WHERE metric=? AND day=? AND source=?", (metric, d, source))
             c.execute("INSERT INTO health_entries(id,metric,value,day,note,source,created_at) VALUES(?,?,?,?,?,?,?)",
-                      (new_id(), metric, v, d, note.strip(), source, now()))
+                      (new_id(), metric, v, d, self._note(note), source, now()))
         return True
 
     def entry(self, id: str) -> dict[str, Any] | None:
@@ -293,7 +298,7 @@ class Health:
         if patch.get("day") is not None:
             fields["day"] = parse_day(patch["day"]).isoformat()
         if patch.get("note") is not None:
-            fields["note"] = str(patch["note"]).strip()
+            fields["note"] = self._note(patch["note"])
         if fields:
             sets = ", ".join(f"{k}=?" for k in fields)
             with self.db.tx() as c:

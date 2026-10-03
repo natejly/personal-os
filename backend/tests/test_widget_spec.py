@@ -160,6 +160,30 @@ def test_source_labels_cannot_open_a_section() -> None:
     _quoted(seen[1])
 
 
+def test_a_token_in_dashboard_facts_is_stripped() -> None:
+    from personal_os import dashboards
+    pat = "github_pat_11AAAAAAA0AAAAAAAAAAAAAAAAAAAA"
+    seen: list[str] = []
+
+    async def grab(settings: Any, model: Any, messages: Any, **kw: Any) -> str:
+        seen.append(messages[-1]["content"])
+        return "ok"
+
+    saved = dashboards.llm.complete
+    dashboards.llm.complete = grab  # type: ignore[assignment]
+    try:
+        run(dashboards.generate_summary({}, "m", "balance", {"note": f"key {pat}"}))
+        run(dashboards.generate_recap({}, "m", {"memory": f"saved {pat}"}))
+        run(dashboards.generate_widget_code({}, "m", "show it", [{
+            "id": "s1", "name": "Feed", "kind": "http", "description": "weather",
+        }], "http://127.0.0.1:8765", 2, 2, {"s1": {"body": pat}}))
+    finally:
+        dashboards.llm.complete = saved  # type: ignore[assignment]
+    check(len(seen) == 3, "summary, recap and widget each asked the model once")
+    for text in seen:
+        check(pat not in text and "[github-pat]" in text, "a token in the facts is stripped")
+
+
 def test_generate_spec() -> None:
     src = {"id": "s1", "name": "S", "kind": "http", "description": ""}
     CALLS.clear()
@@ -308,7 +332,8 @@ def test_routes() -> None:
 
 
 TESTS = [test_resolve_path, test_transforms, test_validate_and_autofix, test_stat, test_generate_spec,
-         test_source_labels_cannot_open_a_section, test_bind_ttl_and_lifecycle, test_schema_migration, test_routes]
+         test_source_labels_cannot_open_a_section, test_a_token_in_dashboard_facts_is_stripped,
+         test_bind_ttl_and_lifecycle, test_schema_migration, test_routes]
 
 if __name__ == "__main__":
     failures = 0

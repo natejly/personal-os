@@ -191,10 +191,13 @@ def test_await_tool_helper_without_a_run() -> None:
         first = await appmod._await_tool(quick(), stop, grace=0)
         stop.set()
         second = await appmod._await_tool(quick(), stop, grace=0)  # already stopped: never started
-        return [first, second, len(ran)]
+        t0 = time.time()
+        third = await appmod._await_tool(quick(), stop, grace=3)  # a write is not started after Stop either, and no grace is spent
+        return [first, second, third, len(ran), time.time() - t0]
 
-    first, second, n = asyncio.run(go())
-    assert first == (7, False) and second == (None, True) and n == 1
+    first, second, third, n, took = asyncio.run(go())
+    assert first == (7, False) and second == (None, True) and third == (None, True) and n == 1
+    assert took < 0.5, took
 
 
 def test_cancelling_the_run_cancels_the_tool_and_runs_its_cleanup() -> None:

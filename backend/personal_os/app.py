@@ -1358,8 +1358,8 @@ async def _await_tool(coro: Any, stop: asyncio.Event, *, grace: float) -> tuple[
     cancel). A thread-backed body cannot be killed: its await is abandoned and it runs out its own limit in the
     background. If the run itself is cancelled (shutdown) the call is cancelled and awaited the same way before the
     cancel propagates, so cleanup handlers still run. The call's exception, if any, is always retrieved."""
-    if stop.is_set() and grace <= 0:
-        coro.close()  # Stop already landed: do not start it at all
+    if stop.is_set():
+        coro.close()  # Stop already landed (during the approval wait, or while the card event went out): never start it
         return None, True
     task = asyncio.ensure_future(coro)
     waiter = asyncio.ensure_future(stop.wait())
@@ -1371,11 +1371,15 @@ async def _await_tool(coro: Any, stop: asyncio.Event, *, grace: float) -> tuple[
             if not task.done():
                 task.cancel()
                 await asyncio.wait({task}, timeout=2)
+                if not task.done():  # abandoned (thread-backed): whatever it ends with later is still retrieved
+                    task.add_done_callback(lambda t: t.cancelled() or t.exception())
                 return None, True
         return task.result(), False
     except asyncio.CancelledError:
         task.cancel()
         await asyncio.wait({task}, timeout=2)
+        if not task.done():
+            task.add_done_callback(lambda t: t.cancelled() or t.exception())
         raise
     finally:
         waiter.cancel()

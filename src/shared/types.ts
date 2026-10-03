@@ -235,6 +235,8 @@ export interface PermissionCard {
   suggestions: string[]
   /** False for a forced card (taint, plan mode, doom loop): it can only be answered once. */
   session: boolean
+  /** The tool's danger tier; an 'external' write offers no whole-tool standing grant. */
+  danger?: string
 }
 
 /** Allow / ask / deny lists of `Tool(pattern)` rules (permrules.py). */

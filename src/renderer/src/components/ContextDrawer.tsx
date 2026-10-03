@@ -54,7 +54,11 @@ function ContextMeterView({ conversationId, refreshKey }: { conversationId: stri
 }
 
 function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
-  const { setView, openMemory, openSettings, memories, setSettingsOpen } = useStore()
+  const setView = useStore((s) => s.setView)
+  const openMemory = useStore((s) => s.openMemory)
+  const openSettings = useStore((s) => s.openSettings)
+  const memories = useStore((s) => s.memories)
+  const setSettingsOpen = useStore((s) => s.setSettingsOpen)
   const [showPrompt, setShowPrompt] = useState(false)
   const has = ctx.memories.length + ctx.nodes.length + ctx.chunks.length + (ctx.skills?.length ?? 0) > 0
     || Boolean(ctx.activity) || Boolean(ctx.page) || Boolean(ctx.style) || Boolean(ctx.meetings)
@@ -133,7 +137,11 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
   const settings = useStore((s) => s.settings)
   const projectId = convo?.project_id ?? draftProjectId
   const project = useProject(projectId)
-  const { toggleContext, setChatSettings, openProject, induceSkill, setContextTab: setTab } = useStore()
+  const toggleContext = useStore((s) => s.toggleContext)
+  const setChatSettings = useStore((s) => s.setChatSettings)
+  const openProject = useStore((s) => s.openProject)
+  const induceSkill = useStore((s) => s.induceSkill)
+  const setTab = useStore((s) => s.setContextTab)
   const tab = useStore((s) => s.contextTab)
   const traceMessageId = useStore((s) => s.traceMessageId)
   const streamingMessageId = useStreamingMessageId(conversationId)

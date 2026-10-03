@@ -541,6 +541,10 @@ kbd {
   color: var(--danger); font-size: 13px; margin-top: 8px;
   background: rgba(229, 72, 77, 0.1); padding: 8px 10px; border-radius: 8px;
 }
+.render-fallback {
+  white-space: pre-wrap; word-break: break-word; font: inherit; margin: 6px 0 0;
+  max-height: 280px; overflow: auto;
+}
 .regen-row { display: flex; justify-content: flex-start; padding-left: 38px; margin-top: -10px; }
 
 .thinking { display: inline-flex; gap: 4px; padding: 6px 0; }

@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
 import { ChevronRight, Globe, FileSearch, Brain, Share2, Terminal, Clock, Wrench, AlertCircle, Laptop, Zap, ListChecks, PenLine, ShieldAlert, ShieldCheck,
   FolderOpen, FileText, FilePen, Trash2, PackageCheck, CircleHelp, CircleCheck,
   Youtube, Github, Rss, Undo2, AppWindow, Bot, Eye, FileOutput, BookOpen, Download, MousePointerClick, Keyboard, ListFilter, ArrowDownUp, MonitorCog, Package, Search, Copy, FolderPlus, OctagonX, Hourglass, ShieldQuestion, CalendarDays, CalendarClock, CalendarSearch, CalendarPlus, CalendarX } from 'lucide-react'
@@ -7,6 +7,7 @@ import { api } from '../lib/api'
 import { useStore } from '../store'
 import DiffView from './DiffView'
 import PlanApproval from './PlanApproval'
+import RenderBoundary from './RenderBoundary'
 import ApprovalRules from './ApprovalRules'
 import { describeCall } from '../lib/toolDisplay'
 import { GenericApproval, GenericBody } from './toolcards/GenericCard'
@@ -280,11 +281,89 @@ function UndoButton({ snapshotId }: { snapshotId: string }): JSX.Element {
     : <button className="ghost-btn" disabled={state === 'busy'} onClick={() => void go(false)}><Undo2 size={12} /> Undo</button>
 }
 
-export default function ToolEvents({ events, conversationId }: { events: ToolEvent[]; conversationId: string }): JSX.Element {
+/**
+ * What a tool row degrades to when its card throws. It depends on nothing that could have thrown (no
+ * describeCall, no card code) and shows the raw call. While the call waits on approval the decision stays
+ * reachable as a one-shot click: Deny always, Allow except for the two calls whose approval carries a
+ * payload (plan steps, a typed answer). No standing grants, no edited arguments, and nothing decides on its own.
+ */
+function ToolFallback({ event, conversationId }: { event: ToolEvent; conversationId: string }): JSX.Element {
+  let args = ''
+  try { args = JSON.stringify(event.arguments, null, 2) ?? '' } catch { args = '' }
+  const asking = !!event.pending && !!event.needs_approval
+  const decide = (d: 'allow' | 'deny'): void => { void useStore.getState().approveTool(event.id, d, conversationId) }
+  return (
+    <div className="tool-event error">
+      <div className="tool-head">
+        <span className="tool-icon"><AlertCircle size={13} /></span>
+        <span className="tool-name">{event.name}</span>
+        <span className="tool-summary">This tool call could not be displayed</span>
+      </div>
+      {args && <pre className="render-fallback">{args}</pre>}
+      {asking && (
+        <div className="aplan-actions">
+          <button className="ghost-btn" onClick={() => decide('deny')}>Deny</button>
+          {event.name !== 'propose_plan' && event.name !== 'desk_ask' && <button className="primary-btn" onClick={() => decide('allow')}>Allow once</button>}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ToolEvents({ events, conversationId }: { events: ToolEvent[]; conversationId: string }): JSX.Element {
   const [open, setOpen] = useState<Record<string, boolean>>({})
   const approveTool = useStore((s) => s.approveTool)
   const decideFor = (t: ToolEvent) => async (approve: boolean, edited?: Record<string, unknown>): Promise<void> =>
     approveTool(t.id, approve ? 'allow' : 'deny', conversationId, edited ? { arguments: edited } : undefined)
+
+  /** The generic row: a header, then whatever the call produced. Used for every tool without a dedicated card. */
+  function genericRow(t: ToolEvent): JSX.Element {
+    const d = describeCall(t.name, t.arguments)
+    return (
+      <div className={`tool-event ${t.pending ? 'pending' : ''} ${t.error ? 'error' : ''}`}>
+        <button className="tool-head" onClick={() => setOpen((o) => ({ ...o, [t.id]: !o[t.id] }))}>
+          <ChevronRight size={12} className={open[t.id] ? 'rot90' : ''} />
+          <span className="tool-icon">{ICONS[t.name] ?? <Wrench size={13} />}</span>
+          <span className="tool-name human">{d.verb}</span>
+          {t.agent && <span className="tag" title="Raised by a subagent">via {t.agent}</span>}
+          <span className="tool-summary">{d.subject}</span>
+          <Verdict event={t} />
+          {t.plan ? (
+            <span className="tag plan" title={`Approved in the plan "${t.plan.title || 'untitled'}" (step ${t.plan.idx + 1})`}>in plan</span>
+          ) : t.approval && t.approval !== 'allow' && <span className="tag">{t.approval === 'deny' ? 'denied' : 'approved'}</span>}
+          {t.pending ? (t.needs_approval ? <span className="tag ask">needs approval</span> : <span className="thinking mini"><span /><span /><span /></span>) : t.error ? <AlertCircle size={12} /> : <span className="tool-ms">{t.duration_ms} ms</span>}
+        </button>
+        {t.images && t.images.length > 0 && (
+          <div className="tool-images">
+            {t.images.map((im) => (
+              <figure key={im.name}>
+                <img src={im.data} alt={im.name} />
+                <figcaption>{im.name} <a href={im.data} download={im.name}>save</a></figcaption>
+              </figure>
+            ))}
+          </div>
+        )}
+        {!t.pending && !t.error && t.undo?.snapshot_id && <UndoButton snapshotId={t.undo.snapshot_id} />}
+        {t.name === 'doc_edit' && !t.pending && !t.error && t.result_preview && <DocEditDiff preview={t.result_preview} />}
+        {t.name.startsWith('agent_') && !t.pending && t.result_preview && agentIds(t.result_preview).map((id) => <AgentRunCard key={id} id={id} />)}
+        {t.pending && t.needs_approval && t.name === 'propose_plan' && <PlanApproval event={t} conversationId={conversationId} />}
+        {/* A question is answered, not permitted, so desk_ask gets a text box instead of Allow/Deny. */}
+        {t.pending && t.needs_approval && t.name === 'desk_ask' && (
+          <AskAnswer callId={t.id} conversationId={conversationId}
+            question={String(((t.arguments ?? {}) as { question?: unknown }).question ?? '')}
+            context={String(((t.arguments ?? {}) as { context?: unknown }).context ?? '') || undefined} />
+        )}
+        {t.pending && t.needs_approval && t.name !== 'propose_plan' && t.name !== 'desk_ask' && (
+          <>
+            <GenericApproval event={t} decide={async (ok) => decideFor(t)(ok)} grant={(g) => approveTool(t.id, g, conversationId)} />
+            <ApprovalRules event={t} conversationId={conversationId} />
+          </>
+        )}
+        {open[t.id] && <GenericBody event={t} />}
+      </div>
+    )
+  }
+
   return (
     <div className="tool-events">
       {events.map((t) => {
@@ -292,60 +371,21 @@ export default function ToolEvents({ events, conversationId }: { events: ToolEve
         // reload (events replayed from the persisted run) shows the same card. propose_plan / desk_ask stay special.
         // A pending desk_ask keeps the answer box below; once it is answered (or running) its card shows the question and choices.
         const Card = t.name !== 'propose_plan' && !(t.name === 'desk_ask' && t.pending && t.needs_approval) ? TOOL_CARDS[t.name] : undefined
-        if (Card) {
-          return (
-            <Fragment key={t.id}>
-              <Card event={t} pending={!!t.pending && !!t.needs_approval} decide={decideFor(t)} />
-              {!t.pending && !t.error && t.undo?.snapshot_id && <UndoButton snapshotId={t.undo.snapshot_id} />}
-              {t.pending && t.needs_approval && <ApprovalRules event={t} conversationId={conversationId} />}
-            </Fragment>
-          )
-        }
-        const d = describeCall(t.name, t.arguments)
         return (
-        <div key={t.id} className={`tool-event ${t.pending ? 'pending' : ''} ${t.error ? 'error' : ''}`}>
-          <button className="tool-head" onClick={() => setOpen((o) => ({ ...o, [t.id]: !o[t.id] }))}>
-            <ChevronRight size={12} className={open[t.id] ? 'rot90' : ''} />
-            <span className="tool-icon">{ICONS[t.name] ?? <Wrench size={13} />}</span>
-            <span className="tool-name human">{d.verb}</span>
-            {t.agent && <span className="tag" title="Raised by a subagent">via {t.agent}</span>}
-            <span className="tool-summary">{d.subject}</span>
-            <Verdict event={t} />
-            {t.plan ? (
-              <span className="tag plan" title={`Approved in the plan "${t.plan.title || 'untitled'}" (step ${t.plan.idx + 1})`}>in plan</span>
-            ) : t.approval && t.approval !== 'allow' && <span className="tag">{t.approval === 'deny' ? 'denied' : 'approved'}</span>}
-            {t.pending ? (t.needs_approval ? <span className="tag ask">needs approval</span> : <span className="thinking mini"><span /><span /><span /></span>) : t.error ? <AlertCircle size={12} /> : <span className="tool-ms">{t.duration_ms} ms</span>}
-          </button>
-          {t.images && t.images.length > 0 && (
-            <div className="tool-images">
-              {t.images.map((im) => (
-                <figure key={im.name}>
-                  <img src={im.data} alt={im.name} />
-                  <figcaption>{im.name} <a href={im.data} download={im.name}>save</a></figcaption>
-                </figure>
-              ))}
-            </div>
-          )}
-          {!t.pending && !t.error && t.undo?.snapshot_id && <UndoButton snapshotId={t.undo.snapshot_id} />}
-          {t.name === 'doc_edit' && !t.pending && !t.error && t.result_preview && <DocEditDiff preview={t.result_preview} />}
-          {t.name.startsWith('agent_') && !t.pending && t.result_preview && agentIds(t.result_preview).map((id) => <AgentRunCard key={id} id={id} />)}
-          {t.pending && t.needs_approval && t.name === 'propose_plan' && <PlanApproval event={t} conversationId={conversationId} />}
-          {/* A question is answered, not permitted, so desk_ask gets a text box instead of Allow/Deny. */}
-          {t.pending && t.needs_approval && t.name === 'desk_ask' && (
-            <AskAnswer callId={t.id} conversationId={conversationId}
-              question={String(((t.arguments ?? {}) as { question?: unknown }).question ?? '')}
-              context={String(((t.arguments ?? {}) as { context?: unknown }).context ?? '') || undefined} />
-          )}
-          {t.pending && t.needs_approval && t.name !== 'propose_plan' && t.name !== 'desk_ask' && (
-            <>
-              <GenericApproval event={t} decide={async (ok) => decideFor(t)(ok)} grant={(g) => approveTool(t.id, g, conversationId)} />
-              <ApprovalRules event={t} conversationId={conversationId} />
-            </>
-          )}
-          {open[t.id] && <GenericBody event={t} />}
-        </div>
+          <RenderBoundary key={t.id} label={`tool ${t.name}`} resetKey={t} fallback={() => <ToolFallback event={t} conversationId={conversationId} />}>
+            {Card ? (
+              <>
+                <Card event={t} pending={!!t.pending && !!t.needs_approval} decide={decideFor(t)} />
+                {!t.pending && !t.error && t.undo?.snapshot_id && <UndoButton snapshotId={t.undo.snapshot_id} />}
+                {t.pending && t.needs_approval && <ApprovalRules event={t} conversationId={conversationId} />}
+              </>
+            ) : genericRow(t)}
+          </RenderBoundary>
         )
       })}
     </div>
   )
 }
+
+/** The tool rows of a streaming reply hold their identity across text deltas, so this skips those renders. */
+export default memo(ToolEvents)

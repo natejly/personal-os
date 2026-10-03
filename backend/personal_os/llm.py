@@ -576,7 +576,11 @@ def _headers(settings: dict[str, Any]) -> dict[str, str]:
     return h
 
 
-async def list_models(settings: dict[str, Any]) -> list[dict[str, str]]:
+# Ids that name a non-chat model when the proxy reports no `mode` for them.
+_NON_CHAT_ID = re.compile(r"embed|rerank|whisper|tts|moderation", re.I)
+
+
+async def list_models(settings: dict[str, Any]) -> list[dict[str, Any]]:
     url = _url(settings, "/models")
     async with httpx.AsyncClient(timeout=15) as client:
         r = await client.get(url, headers=_headers(settings))
@@ -584,7 +588,21 @@ async def list_models(settings: dict[str, Any]) -> list[dict[str, str]]:
         raise LLMError(f"{r.status_code}: {r.text[:300]}")
     data = r.json().get("data", [])
     note_vision_listing(data)
-    return sorted(({"id": m["id"]} for m in data if "id" in m), key=lambda m: m["id"])
+    out: list[dict[str, Any]] = []
+    for m in data:
+        if "id" not in m:
+            continue
+        caps = caps_lookup(m["id"])
+        row: dict[str, Any] = {"id": m["id"]}
+        mode = caps.get("mode")
+        if mode is None and _NON_CHAT_ID.search(m["id"]):
+            mode = "embedding" if re.search("embed|rerank", m["id"], re.I) else "audio" if re.search("whisper|tts", m["id"], re.I) else "moderation"
+        if mode is not None:
+            row["mode"] = mode
+        if effort_supported(m["id"], caps) is not None:
+            row["reasoning"] = effort_supported(m["id"], caps)
+        out.append(row)
+    return sorted(out, key=lambda m: m["id"])
 
 
 # Which models read images, as far as a provider's own model listing says so. Filled as a side effect of list_models
@@ -642,7 +660,18 @@ def _model_slug(model: str) -> str:
     return model.rsplit("/", 1)[-1].lower()
 
 
-def effort_param(model: str, effort: str) -> str | None:
+# Set to `Pricing.caps` by app.py: what the proxy says a model can do ({mode?, reasoning?, max_input_tokens?}).
+caps_lookup: Callable[[str], dict[str, Any]] = lambda _m: {}
+
+
+def effort_supported(model: str, caps: dict[str, Any] | None) -> bool | None:
+    """Whether the model takes a reasoning level: False for the Kimi K2 family, else what the proxy reports (None = unknown)."""
+    if _model_slug(model).startswith("kimi-k2"):
+        return False
+    return (caps or {}).get("reasoning")
+
+
+def effort_param(model: str, effort: str, caps: dict[str, Any] | None = None) -> str | None:
     """The `reasoning_effort` to send, or None to leave the field off.
 
     `'default'` always omits the field. That is a deliberate choice, not the starting level:
@@ -656,6 +685,8 @@ def effort_param(model: str, effort: str) -> str | None:
         return None
     if slug.startswith("kimi-k3"):
         return _KIMI_K3_EFFORT.get(effort, "high")
+    if (caps or {}).get("reasoning") is False:
+        return None
     return effort
 
 
@@ -797,7 +828,7 @@ async def stream_chat(
     body: dict[str, Any] = {"model": model, "messages": messages, "stream": True, "stream_options": {"include_usage": True}}
     # Only sent when the model accepts it. A missing field is not neutral: Kimi K3 reads it as max,
     # and a model that does not support the field rejects the whole request.
-    wired = effort_param(model, effort)
+    wired = effort_param(model, effort, caps=caps_lookup(model))
     if wired:
         body["reasoning_effort"] = wired
     if fast and supports_service_tier(settings):

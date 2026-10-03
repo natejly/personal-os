@@ -14,8 +14,7 @@ export default function ChatControls({ conversationId }: { conversationId?: stri
   const draftModel = useStore((s) => s.draftModel)
   const draftEffort = useStore((s) => s.draftEffort)
   const draftFast = useStore((s) => s.draftFast)
-  const setChatModel = useStore((s) => s.setChatModel)
-  const setChatSettings = useStore((s) => s.setChatSettings)
+  const setChatConfig = useStore((s) => s.setChatConfig)
   // A canvas window always names its chat; only the page's draft reads the parked values.
   const draft = !convo && !conversationId
   const model = convo?.model ?? (draft ? draftModel : null) ?? defaultModel
@@ -27,9 +26,7 @@ export default function ChatControls({ conversationId }: { conversationId?: stri
       effort={effort}
       fast={!!fast}
       placement="up"
-      onModel={(m) => void setChatModel(m, conversationId)}
-      onEffort={(e) => void setChatSettings({ effort: e }, conversationId)}
-      onFast={(f) => void setChatSettings({ fast: f }, conversationId)}
+      onChange={(c) => void setChatConfig(c, conversationId)}
     />
   )
 }

@@ -158,6 +158,10 @@ class Conversations:
             if "model" in patch and patch["model"]:
                 c.execute("UPDATE conversations SET model=? WHERE id=?", (patch["model"], id))
             if "settings" in patch and isinstance(patch["settings"], dict):
+                # The read-merge-write must hold the write lock from the read on, or two writers
+                # (a settings PATCH and the run's own taint mark) each merge into a stale copy.
+                if not c.in_transaction:
+                    c.execute("BEGIN IMMEDIATE")
                 cur = c.execute("SELECT settings FROM conversations WHERE id=?", (id,)).fetchone()
                 merged = {**json.loads(cur["settings"] if cur else "{}"), **patch["settings"]}
                 c.execute("UPDATE conversations SET settings=? WHERE id=?", (json.dumps(merged), id))

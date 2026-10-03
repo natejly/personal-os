@@ -18,6 +18,7 @@ import type {
   RunChanges, RunUndoResult,
   BackupInfo, DataOverview
 } from '@shared/types'
+import { ApiError } from './apiError'
 import type { ProviderInfo, SetupStatus, SetupTestResult } from '../components/onboarding/steps'
 
 export interface SetupBody { provider: string; baseUrl: string; apiKey: string | null; model: string }
@@ -64,7 +65,7 @@ export async function req<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {
       /* ignore */
     }
-    throw Object.assign(new Error(msg), { status: r.status })
+    throw new ApiError(msg, { status: r.status, kind: 'http' })
   }
   return (await r.json()) as T
 }

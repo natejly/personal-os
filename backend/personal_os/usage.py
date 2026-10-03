@@ -22,8 +22,13 @@ class Pricing:
 
     def __init__(self) -> None:
         self._proxy: dict[str, dict[str, float]] = {}
+        self._caps: dict[str, dict[str, Any]] = {}
         self._fetched = 0.0
         self._base = ""
+
+    def caps(self, model: str) -> dict[str, Any]:
+        """{mode?, reasoning?, max_input_tokens?} the proxy reports for a model; {} when unknown."""
+        return dict(self._caps.get(model) or {})
 
     async def refresh(self, settings: dict[str, Any], force: bool = False) -> None:
         base = str(settings.get("baseUrl") or "").rstrip("/")
@@ -31,6 +36,8 @@ class Pricing:
             return
         if not force and base == self._base and time.time() - self._fetched < PRICE_TTL:
             return
+        if base != self._base:
+            self._caps = {}
         self._base, self._fetched = base, time.time()
         headers = {"Authorization": f"Bearer {settings['apiKey']}"} if settings.get("apiKey") else {}
         try:
@@ -39,8 +46,15 @@ class Pricing:
             if r.status_code >= 400:
                 return
             out: dict[str, dict[str, float]] = {}
+            caps: dict[str, dict[str, Any]] = {}
             for m in r.json().get("data", []):
                 info = m.get("model_info") or {}
+                if m.get("model_name"):
+                    # Independent of prices: a model with no price row still reports what it can do.
+                    found = {k: v for k, v in (("mode", info.get("mode")), ("reasoning", info.get("supports_reasoning")),
+                                               ("max_input_tokens", info.get("max_input_tokens"))) if v is not None}
+                    if found:
+                        caps[m["model_name"]] = found
                 i, o = info.get("input_cost_per_token"), info.get("output_cost_per_token")
                 if m.get("model_name") and (i is not None or o is not None):
                     row = {"input": float(i or 0) * 1e6, "output": float(o or 0) * 1e6}
@@ -50,6 +64,7 @@ class Pricing:
                         row["cache_write"] = float(info["cache_creation_input_token_cost"]) * 1e6
                     out[m["model_name"]] = row
             self._proxy = out
+            self._caps = caps
         except Exception:  # noqa: BLE001 - pricing is best effort
             pass
 

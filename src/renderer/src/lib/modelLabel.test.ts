@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { modelChoices, modelLabel } from './modelLabel'
+import { chatModelIds, modelChoices, modelLabel, showsEffort } from './modelLabel'
 
 test('model labels drop the fireworks routing path', () => {
   assert.equal(modelLabel('accounts/fireworks/models/kimi-k3'), 'kimi-k3')
@@ -30,4 +30,18 @@ test('choices sort and collapse by the short name, keeping the alias', () => {
     'accounts/fireworks/models/kimi-k3'
   ])
   assert.deepEqual(modelChoices(ids, 'kimi', ''), ['kimi-k3'])
+})
+
+test('chatModelIds drops known non-chat modes and keeps unknown ones', () => {
+  const models = [{ id: 'a', mode: 'chat' }, { id: 'b', mode: 'embedding' }, { id: 'c' }, { id: 'd', mode: null }]
+  assert.deepEqual(chatModelIds(models), ['a', 'c', 'd'])
+})
+
+test('showsEffort is false only for an explicit reasoning:false', () => {
+  const models = [{ id: 'a', reasoning: false }, { id: 'b', reasoning: true }, { id: 'c' }, { id: 'd', reasoning: null }]
+  assert.equal(showsEffort(models, 'a'), false)
+  assert.equal(showsEffort(models, 'b'), true)
+  assert.equal(showsEffort(models, 'c'), true)
+  assert.equal(showsEffort(models, 'd'), true)
+  assert.equal(showsEffort(models, 'missing'), true)
 })

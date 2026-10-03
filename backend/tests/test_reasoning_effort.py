@@ -52,6 +52,14 @@ def test_kimi_k2_rejects_the_field() -> None:
     assert effort_param("kimi-k2.7-code", "high") is None
 
 
+def test_caps_without_reasoning_leave_the_field_off() -> None:
+    assert effort_param("gpt-x", "medium", {"reasoning": False}) is None
+    assert effort_param("gpt-x", "medium", {"reasoning": True}) == "medium"
+    assert effort_param("gpt-x", "medium", {}) == "medium"
+    # The Kimi mapping is decided before the capability check.
+    assert effort_param("kimi-k3", "medium", {"reasoning": False}) == "high"
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

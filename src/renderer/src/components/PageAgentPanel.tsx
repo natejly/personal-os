@@ -90,9 +90,10 @@ export default function PageAgentPanel(): JSX.Element {
             effort={convo?.settings?.effort ?? pageAgentEffort}
             fast={convo?.settings?.fast ?? pageAgentFast}
             placement="up"
-            onModel={(m) => void setPageAgentModel(m)}
-            onEffort={(e) => void setPageAgentParams({ effort: e })}
-            onFast={(f) => void setPageAgentParams({ fast: f })}
+            onChange={(c) => {
+              if (c.model) void setPageAgentModel(c.model)
+              if (c.effort !== undefined || c.fast !== undefined) void setPageAgentParams({ effort: c.effort, fast: c.fast })
+            }}
           />
         }
       />

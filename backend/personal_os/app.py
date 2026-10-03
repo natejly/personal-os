@@ -346,6 +346,7 @@ trash = Trash(db, todos, docs)
 app.include_router(trash_router(trash))
 usage = Usage(db)
 pricing = Pricing()
+llm.caps_lookup = pricing.caps
 app.include_router(otel_export.router(db, lambda: settings()))
 compactor = compaction.Compactor(db)
 app.include_router(compaction.router(compactor, convos, lambda: settings()))
@@ -746,9 +747,11 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
 
 
 @app.get("/models")
-async def models() -> list[dict[str, str]]:
+async def models() -> list[dict[str, Any]]:
     try:
-        return await llm.list_models(settings())
+        cfg = settings()
+        await pricing.refresh(cfg)
+        return await llm.list_models(cfg)
     except Exception as e:  # noqa: BLE001
         raise HTTPException(502, str(e)) from e
 

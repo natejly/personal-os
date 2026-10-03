@@ -2,6 +2,8 @@ import { create } from 'zustand'
 import type { ApprovalDecision, BackendInfo, BackendState, PlanEdit, PlanDecision, PlanRecord,
   Desk, DeskEvent, DeskFile, FullDesk, PromotionResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, Document, Effort, TrashKind, FullDoc, GraphData, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodoCalendarStatus, TodayDashboard, Recap, Job, Meeting, MeetingCandidate, MeetingCapability, MeetingConfig, MeetingPreflight, MeetingSegment, MeetingStatus, MeetingStatusInfo, MeetingStreamEvent, FullMeeting } from '@shared/types'
 import { daily as dailyNote } from './features/notes/api'
+import { ApiError } from './lib/apiError'
+import { installRejectionToasts } from './lib/rejections'
 import { api, backgroundStream, chatStream, meetingStream, setBase, type Scope } from './lib/api'
 import { currentSelection } from './lib/pageContext'
 import { DEFAULT_EFFORT, NEEDS_YOU } from '../../shared/types'
@@ -320,6 +322,8 @@ export interface State {
   deleteChat: (id: string) => Promise<void>
   renameChat: (id: string, title: string) => Promise<void>
   setChatModel: (model: string, conversationId?: string) => Promise<void>
+  /** Model, effort and fast in ONE request (the picker's Restore defaults); a draft parks them for `send`. Never rejects. */
+  setChatConfig: (change: { model?: string; effort?: Effort; fast?: boolean }, conversationId?: string) => Promise<void>
   setChatSettings: (patch: Partial<ConversationSettings>, conversationId?: string) => Promise<void>
   /** A library file was just attached to this chat, so the next reply treats its contents as untrusted. */
   noteUntrustedUpload: (conversationId?: string, pending?: 'draft' | 'page', source?: string) => Promise<void>
@@ -682,6 +686,8 @@ const share = (map: Map<string, Promise<void>>, key: string, fn: () => Promise<v
 let draftCreate: Promise<string | null> | null = null
 const loads = new Map<string, Promise<void>>()
 const attaches = new Map<string, Promise<void>>()
+/** The tail of each conversation's PATCH queue, so a send can wait for a model or effort change to land. */
+const convWrites = new Map<string, Promise<unknown>>()
 
 /** Every conversation mutation a stream event makes, as one new session. No side effects — exported for store.test.ts. */
 export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean): ChatSession => {
@@ -729,7 +735,7 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean): Cha
         return { ...m, trace: i >= 0 ? trace.map((sp, j) => (j === i ? ev.data.span : sp)) : [...trace, ev.data.span] }
       })
     case 'done': {
-      const done = mapMsg(ev.data.id, (m) => ({ ...m, error: ev.data.error, context_used: ev.data.context_used, tool_events: ev.data.tool_events?.length ? ev.data.tool_events : m.tool_events, trace: ev.data.trace?.length ? ev.data.trace : m.trace, reasoning: ev.data.reasoning ?? m.reasoning }))
+      const done = mapMsg(ev.data.id ?? '', (m) => ({ ...m, error: ev.data.error, context_used: ev.data.context_used, tool_events: ev.data.tool_events?.length ? ev.data.tool_events : m.tool_events, trace: ev.data.trace?.length ? ev.data.trace : m.trace, reasoning: ev.data.reasoning ?? m.reasoning }))
       // The reply is whole and persisted here. The stream stays open for the auto-learn tail, so the
       // subscription is left alone and only `answering` drops.
       return { ...done, streaming: done.streaming && { ...done.streaming, answering: false }, finishedAt: Date.now() }
@@ -1147,6 +1153,45 @@ export const useStore = create<State>((set, get) => {
     return true
   }
 
+  /**
+   * One PATCH at a time per conversation, in call order, each applying the row the server answered
+   * with — so the store ends equal to the last write and two quick changes cannot overwrite each
+   * other. Rejects on failure: the taint mark in `noteUntrustedUpload` depends on that.
+   */
+  const writeConversation = (id: string, body: { model?: string; settings?: Partial<ConversationSettings> }): Promise<Conversation> => {
+    const prev = convWrites.get(id)
+    const run = async (): Promise<Conversation> => {
+      await prev?.catch(() => undefined)
+      const c = await api.conversations.patch(id, body)
+      patchConversation(id, (cur) => ({ ...cur, model: c.model, settings: c.settings }))
+      return c
+    }
+    const p = run()
+    convWrites.set(id, p)
+    void p.catch(() => undefined).then(() => { if (convWrites.get(id) === p) convWrites.delete(id) })
+    return p
+  }
+
+  /** Run an action whose failure should be told to the user and nothing more. */
+  const guard = async (label: string, fn: () => Promise<unknown>): Promise<boolean> => {
+    try {
+      await fn()
+      return true
+    } catch (e) {
+      get().toast(`${label}: ${(e as Error).message}`, 'error')
+      return false
+    }
+  }
+
+  /** A chat the backend no longer has: drop the session, the sidebar row and the Home row. No network call. */
+  const forgetChat = (id: string): void => {
+    get().closeSession(id)
+    set((st) => ({
+      conversations: st.conversations.filter((c) => c.id !== id),
+      dashboard: st.dashboard && { ...st.dashboard, recent_conversations: st.dashboard.recent_conversations.filter((c) => c.id !== id) }
+    }))
+  }
+
   const patchChatSettings = async (patch: Partial<ConversationSettings>, conversationId?: string): Promise<void> => {
     const id = conversationId ?? get().focusedConversationId
     if (!id) {
@@ -1158,8 +1203,7 @@ export const useStore = create<State>((set, get) => {
       }))
       return
     }
-    const c = await api.conversations.patch(id, { settings: patch })
-    patchConversation(id, (cur) => ({ ...cur, settings: c.settings }))
+    await writeConversation(id, { settings: patch })
   }
 
   return {
@@ -1283,13 +1327,14 @@ export const useStore = create<State>((set, get) => {
       let settings: Settings, projects: Project[], personalStats: Project['stats'], conversations: Conversation[]
       try {
         ;[settings, projects, personalStats, conversations] = await Promise.all([
-          api.settings.get(), api.projects.list(), api.projects.globalStats(), api.conversations.list('all')
+          api.settings.get(), api.projects.list(), api.projects.globalStats().catch(() => undefined), api.conversations.list('all')
         ])
       } catch (e) {
         // Release the guard so a retry can run, and surface the failure instead of an empty window.
         inited = false
-        return set({ ready: true, backendError: (e as Error).message })
+        return set({ ready: true, backendError: 'The backend is running, but your data could not be loaded: ' + (e as Error).message })
       }
+      installRejectionToasts((m, kind) => get().toast(m, kind))
       // One-shot migration of the pre-spaces global mode: a user who left the app in canvas mode lands
       // in the canvas once, and the setting is reset so later launches open on Today. Only the main
       // window writes it back; a pop-out (`?surface=widget`) never renders App and must not touch settings.
@@ -1392,8 +1437,7 @@ export const useStore = create<State>((set, get) => {
       const id = get().pageAgentId
       if (!id) return
       try {
-        await api.conversations.patch(id, { model })
-        patchConversation(id, (c) => ({ ...c, model }))
+        await writeConversation(id, { model })
       } catch (e) {
         get().toast((e as Error).message, 'error')
       }
@@ -1405,8 +1449,11 @@ export const useStore = create<State>((set, get) => {
       }))
       const id = get().pageAgentId
       if (!id) return
-      const c = await api.conversations.patch(id, { settings: patch })
-      patchConversation(id, (cur) => ({ ...cur, settings: c.settings }))
+      try {
+        await writeConversation(id, { settings: patch })
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
     },
     setPageContext: (pageContext) => set((s) => (s.pageContext === pageContext ? {} : { pageContext })),
     setContextTab: (contextTab) => set({ contextTab }),
@@ -1436,7 +1483,7 @@ export const useStore = create<State>((set, get) => {
     },
 
     refreshProjects: async () => {
-      const [projects, personalStats] = await Promise.all([api.projects.list(), api.projects.globalStats()])
+      const [projects, personalStats] = await Promise.all([api.projects.list(), api.projects.globalStats().catch(() => undefined)])
       set({ projects, personalStats })
     },
     // `draftProjectId` is deliberately not set here: opening a project is looking at it, not
@@ -1503,10 +1550,24 @@ export const useStore = create<State>((set, get) => {
       get().clearSessionStatus(id)
       // A session mid-run holds content the backend has not persisted yet, so never refetch over it.
       if (get().sessions[id]?.streaming) return
-      const c = await api.conversations.get(id)
-      if (get().focusedConversationId !== id) return
-      putSession(c)
-      set({ draftProjectId: c.project_id })
+      try {
+        await get().attachSession(id)
+      } catch (e) {
+        // Never reject: the caller is a click. A slow failure for a chat the user has left is theirs no longer.
+        if (get().focusedConversationId !== id) return
+        if (e instanceof ApiError && e.status === 404) {
+          forgetChat(id)
+          get().toast('That chat was deleted', 'error')
+        } else if (!get().sessions[id]) {
+          set({ focusedConversationId: null })
+          get().toast(`Could not open chat: ${(e as Error).message}`, 'error', { label: 'Retry', run: () => void get().selectChat(id) })
+        } else {
+          get().toast(`Could not refresh chat: ${(e as Error).message}`, 'error')
+        }
+        return
+      }
+      const opened = get().sessions[id]
+      if (get().focusedConversationId === id && opened) set({ draftProjectId: opened.conversation.project_id })
     },
     openSession: async (conversationId) =>
       share(loads, conversationId, async () => {
@@ -1552,22 +1613,42 @@ export const useStore = create<State>((set, get) => {
       get().offerUndo(title ? `chat “${title}”` : 'chat', [{ type: 'conversation', id }])
     },
     renameChat: async (id, title) => {
-      if (!title.trim()) return
-      try {
-        await api.conversations.patch(id, { title: title.trim() })
-        patchConversation(id, (c) => ({ ...c, title: title.trim() }))
-        await get().refreshConversations()
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      }
+      const next = title.trim()
+      if (!next) return
+      const cur = get().sessions[id]?.conversation.title ?? get().conversations.find((c) => c.id === id)?.title
+      if (next === cur) return
+      // `update` does not touch updated_at, so the list order is unchanged and a local patch is the whole refresh.
+      await guard('Could not rename chat', async () => {
+        await api.conversations.patch(id, { title: next })
+        patchConversation(id, (c) => ({ ...c, title: next }))
+        set((st) => ({ conversations: st.conversations.map((c) => (c.id === id ? { ...c, title: next } : c)) }))
+      })
     },
     setChatModel: async (model, conversationId) => {
       const id = conversationId ?? get().focusedConversationId
       // A draft has no row yet: park the choice for `send`, as effort does, instead of changing the default.
       if (!id) return void set({ draftModel: model })
       try {
-        await api.conversations.patch(id, { model })
-        patchConversation(id, (c) => ({ ...c, model }))
+        await writeConversation(id, { model })
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
+    setChatConfig: async (change, conversationId) => {
+      const id = conversationId ?? get().focusedConversationId
+      if (!id) {
+        set((st) => ({
+          draftModel: change.model ?? st.draftModel,
+          draftEffort: change.effort ?? st.draftEffort,
+          draftFast: change.fast ?? st.draftFast
+        }))
+        return
+      }
+      const settings: Partial<ConversationSettings> = {}
+      if (change.effort !== undefined) settings.effort = change.effort
+      if (change.fast !== undefined) settings.fast = change.fast
+      try {
+        await writeConversation(id, { ...(change.model ? { model: change.model } : {}), ...(Object.keys(settings).length ? { settings } : {}) })
       } catch (e) {
         get().toast((e as Error).message, 'error')
       }
@@ -1623,7 +1704,16 @@ export const useStore = create<State>((set, get) => {
             // The run ended in the gap; fall through to a normal send.
           }
         }
-        if (!get().sessions[id]) await get().openSession(id)
+        if (!get().sessions[id]) {
+          try {
+            await get().openSession(id)
+          } catch (e) {
+            get().toast((e as Error).message, 'error')
+            return false
+          }
+        }
+        // A model or effort change made an instant ago is still in flight: the run reads the row.
+        await convWrites.get(id)?.catch(() => undefined)
         return runStream(id, { content: text })
       }
       // A second send while the draft's row is still being created (a quick follow-up, Enter then a
@@ -1750,7 +1840,15 @@ export const useStore = create<State>((set, get) => {
     regenerate: async (conversationId) => {
       const id = conversationId ?? get().focusedConversationId
       if (!id || get().sessions[id]?.streaming?.answering) return
-      if (!get().sessions[id]) await get().openSession(id)
+      if (!get().sessions[id]) {
+        try {
+          await get().openSession(id)
+        } catch (e) {
+          get().toast((e as Error).message, 'error')
+          return
+        }
+      }
+      await convWrites.get(id)?.catch(() => undefined)
       await runStream(id, {})
     },
     resumeRun: async (conversationId, runId) => {
@@ -2227,13 +2325,7 @@ export const useStore = create<State>((set, get) => {
         set({ deskBusy: false })
       }
     },
-    setPlanMode: async (convId, mode) => {
-      try {
-        await patchChatSettings({ planMode: mode }, convId)
-      } catch (e) {
-        get().toast((e as Error).message, 'error')
-      }
-    },
+    setPlanMode: (convId, mode) => get().setChatSettings({ planMode: mode }, convId),
     markDeskEventSeen: async (eventId) => {
       // Optimistic: the badge is the whole point, so it must not wait on a round trip.
       set((st) => ({ deskInbox: st.deskInbox.filter((e) => e.id !== eventId) }))

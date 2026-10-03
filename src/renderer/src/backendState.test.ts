@@ -9,6 +9,7 @@ import type { BackendInfo } from '@shared/types'
 
 let push: ((i: BackendInfo) => void) | null = null
 let statusCalls = 0
+let statusUrl: string | null = null
 const info = (state: BackendInfo['state'], error: string | null = null): BackendInfo =>
   ({ state, url: '', error, restarts: [], logDir: '', appVersion: '0', electron: '0' })
 
@@ -21,8 +22,9 @@ const info = (state: BackendInfo['state'], error: string | null = null): Backend
     },
     backendStatus: async () => {
       statusCalls++
-      return { url: null, error: 'Backend not running' }
+      return { url: statusUrl, error: statusUrl ? null : 'Backend not running' }
     },
+    backendToken: async () => '',
     restartBackend: async () => info('ready')
   }
 }
@@ -48,4 +50,28 @@ test('restarting is only a state; failed shows the error; ready re-runs init whe
 test('restartBackend asks the main process and applies its answer', async () => {
   await useStore.getState().restartBackend()
   assert.equal(useStore.getState().backendState, 'ready')
+})
+
+// Last: module-level `inited` / `loadedOnce` are shared across the file.
+test('a data-load failure after a healthy /health shows the error screen and stays retryable', async () => {
+  const realFetch = globalThis.fetch
+  const hits: string[] = []
+  globalThis.fetch = (async (url: string) => {
+    hits.push(String(url))
+    if (String(url).endsWith('/health')) return new Response(JSON.stringify({ ok: true }), { status: 200 })
+    if (String(url).includes('/conversations')) return new Response(JSON.stringify({ detail: 'db locked' }), { status: 500 })
+    return new Response(JSON.stringify([]), { status: 200 })
+  }) as typeof fetch
+  try {
+    useStore.setState({ ready: false, backendError: null })
+    statusUrl = 'http://127.0.0.1:1'
+    const before = statusCalls
+    await useStore.getState().init()
+    assert.equal(useStore.getState().ready, true)
+    assert.match(useStore.getState().backendError ?? '', /^The backend is running, but your data could not be loaded: db locked/)
+    await useStore.getState().init()
+    assert.equal(statusCalls, before + 2, 'the guard was released, so init ran the load again')
+  } finally {
+    globalThis.fetch = realFetch
+  }
 })

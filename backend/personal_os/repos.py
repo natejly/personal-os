@@ -112,14 +112,17 @@ class Conversations:
         self.db = db
 
     def list(self, project_id: str | None, include_jobs: bool = False,
-             include_desks: bool = False) -> list[dict[str, Any]]:
+             include_desks: bool = False, archived: bool = False) -> list[dict[str, Any]]:
         """A scheduled job's transcript is a conversation too, but it is indexed by the Agent Inbox, not the
         sidebar: one daily job would otherwise bury the user's own chats within a month. A desk's
         transcript is hidden on the same grounds and always — Cowork is its index, and a desk that
-        chains a dozen turns would otherwise own the whole of Recent."""
+        chains a dozen turns would otherwise own the whole of Recent. An archived chat is hidden from the list unless `archived` asks for exactly
+        those. Order stays recency: pinned rows are partitioned by the renderer, because the home and
+        recap callers slice this list and the sidebar groups it by date."""
         where, args = _scope_clause(project_id, include_global=False)
+        arch = "IS NOT NULL" if archived else "IS NULL"
         with self.db.tx() as c:
-            rows = c.execute(f"SELECT * FROM conversations WHERE {where} AND deleted_at IS NULL ORDER BY updated_at DESC", args).fetchall()
+            rows = c.execute(f"SELECT * FROM conversations WHERE {where} AND deleted_at IS NULL AND archived_at {arch} ORDER BY updated_at DESC", args).fetchall()
         out = [self._hydrate(r) for r in rows]
         if not include_desks:
             out = [c for c in out if not c["settings"].get("deskId")]
@@ -190,6 +193,17 @@ class Conversations:
                 cur = c.execute("SELECT settings FROM conversations WHERE id=?", (id,)).fetchone()
                 merged = {**json.loads(cur["settings"] if cur else "{}"), **patch["settings"]}
                 c.execute("UPDATE conversations SET settings=? WHERE id=?", (json.dumps(merged), id))
+            # None of these touch updated_at: filing a chat is not activity in it.
+            if "pinned" in patch:
+                c.execute("UPDATE conversations SET pinned_at=? WHERE id=?", (now() if patch["pinned"] else None, id))
+            if "archived" in patch:
+                # Archiving drops the pin, so an unarchived chat comes back as an ordinary one.
+                if patch["archived"]:
+                    c.execute("UPDATE conversations SET archived_at=?, pinned_at=NULL WHERE id=?", (now(), id))
+                else:
+                    c.execute("UPDATE conversations SET archived_at=NULL WHERE id=?", (id,))
+            if "project_id" in patch:
+                c.execute("UPDATE conversations SET project_id=? WHERE id=?", (patch["project_id"], id))
         return self.get(id, with_messages=False)
 
     def touch(self, id: str) -> None:

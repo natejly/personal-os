@@ -1084,14 +1084,18 @@ class ConvPatch(BaseModel):
     title: str | None = None
     model: str | None = None
     settings: dict[str, Any] | None = None
+    pinned: bool | None = None
+    archived: bool | None = None
+    # null means Personal, so a move is detected by the key being present (model_fields_set).
+    project_id: str | None = None
 
 
 @app.get("/conversations")
 def list_conversations(project_id: str | None = None, include_jobs: bool = False,
-                       include_desks: bool = False) -> list[dict[str, Any]]:
+                       include_desks: bool = False, archived: bool = False) -> list[dict[str, Any]]:
     """A scheduled job's own transcripts are left out unless asked for: the Agent Inbox is their
     index, and Cowork is a desk's. Both stay reachable through their own flag."""
-    return convos.list(sid(project_id), include_jobs, include_desks)
+    return convos.list(sid(project_id), include_jobs, include_desks, archived)
 
 
 @app.post("/conversations")
@@ -1110,6 +1114,20 @@ def get_conversation(id: str) -> dict[str, Any]:
 @app.patch("/conversations/{id}")
 def patch_conversation(id: str, body: ConvPatch) -> dict[str, Any]:
     patch = body.model_dump(exclude_none=True)
+    moving = "project_id" in body.model_fields_set
+    patch.pop("project_id", None)
+    if moving or body.archived:
+        row = convos.get(id, with_messages=False)
+        if not row:
+            raise HTTPException(404)
+        # live, not answering: the run reads the project for context and connector tooling, and its
+        # learn tail writes with it; a run parked on an approval must not be hidden either.
+        if bus.live(id):
+            raise HTTPException(409, "Stop the running reply first")
+        if moving:
+            if row["settings"].get("deskId") or row["settings"].get("job_id"):
+                raise HTTPException(409, "A desk or job transcript cannot be moved")
+            patch["project_id"] = wsid(body.project_id)
     settings_patch = patch.get("settings") if isinstance(patch.get("settings"), dict) else {}
     # Clearing the banner has to drop library text that was copied into the sandbox, or the next
     # command can print it back as if the chat were trusted again.
@@ -3194,8 +3212,12 @@ toolbox.shell.on_note = _shell_wake
 @app.post("/conversations/{id}/chat")
 async def chat(id: str, body: ChatIn) -> dict[str, Any]:
     """Start the reply as a background task. Watch it on GET /conversations/{id}/stream?since=seq."""
-    if not convos.get(id):
+    row = convos.get(id, with_messages=False)
+    if not row:
         raise HTTPException(404, "Conversation not found")
+    # A chat with a live run is never hidden: writing in an archived one brings it back.
+    if row.get("archived_at"):
+        convos.update(id, {"archived": False})
     # `answering`, not `live`: a run still auto-learning has finished its reply, and a new message
     # deserves a run of its own rather than a 409 the caller can only turn into a dropped steer.
     running = bus.answering(id)

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { PanelLeftOpen, Pencil, Sparkles, SlidersHorizontal, ArrowDown } from 'lucide-react'
 import { useStore, useProject, useConversation, useIsStreaming, useStreamingMessageId, usePendingSends } from '../store'
 import ProjectChip from './ProjectChip'
@@ -16,6 +16,7 @@ import AppSwitcher from './AppSwitcher'
 import { useOnboarding } from './onboarding/onboardingStore'
 import { FIRST_PROMPTS } from './onboarding/steps'
 import { useStickToBottom } from '../lib/stickToBottom'
+import { dayKey, dayLabel } from '../lib/chatMeta'
 
 function greeting(): string {
   const h = new Date().getHours()
@@ -112,7 +113,12 @@ export default function ChatView({ conversationId }: { conversationId?: string }
               </div>
             ) : (
               <div className="messages-inner">
-                {msgs.map((m) => <MessageView key={m.id} message={m} streaming={isStreamingHere && streamingMessageId === m.id} last={m.id === last?.id} editable={m.role === 'user' && !isStreamingHere} />)}
+                {msgs.map((m, i) => (
+                  <Fragment key={m.id}>
+                    {m.created_at > 0 && (i === 0 || dayKey(m.created_at) !== dayKey(msgs[i - 1].created_at)) && <div className="day-divider" role="separator">{dayLabel(m.created_at)}</div>}
+                    <MessageView message={m} streaming={isStreamingHere && streamingMessageId === m.id} last={m.id === last?.id} editable={m.role === 'user' && !isStreamingHere} />
+                  </Fragment>
+                ))}
                 {pending.map((p) => <PendingUserMessage key={p.key} text={p.text} />)}
                 {draftPending && <PendingUserMessage text={draftPending.text} />}
                 {/* From the click, and from user_message to the first assistant row (context assembly), nothing else shows work. */}

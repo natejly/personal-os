@@ -4,7 +4,8 @@ import { ToolOverrides } from './ToolPermissions'
 import TraceView from './TraceView'
 import { useStore, useProject, useConversation, useStreamingMessageId } from '../store'
 import { api } from '../lib/api'
-import { DEFAULT_EFFORT, type ContextMeter, type ContextUsed, type ConversationSettings } from '@shared/types'
+import { DEFAULT_EFFORT, type ContextMeter, type ContextUsed, type ConversationSettings, type ConversationUsage } from '@shared/types'
+import { fmtCost, usageLine } from '../lib/chatMeta'
 
 function Toggle({ label, hint, value, onChange, icon }: { label: string; hint: string; value: boolean; onChange: (v: boolean) => void; icon: JSX.Element }): JSX.Element {
   return (
@@ -18,13 +19,25 @@ function Toggle({ label, hint, value, onChange, icon }: { label: string; hint: s
 }
 
 /** Replayed history against the model window, with manual compaction and the summary it produced. */
-function ContextMeterView({ conversationId, refreshKey }: { conversationId: string; refreshKey: number }): JSX.Element | null {
+function ContextMeterView({ conversationId, refreshKey }: { conversationId: string; refreshKey: string }): JSX.Element | null {
   const [meter, setMeter] = useState<ContextMeter | null>(null)
+  const [spent, setSpent] = useState<ConversationUsage | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const load = (): void => { void api.contextMeter(conversationId).then(setMeter).catch(() => setMeter(null)) }
+  const load = (): void => {
+    void api.contextMeter(conversationId).then(setMeter).catch(() => setMeter(null))
+    // Its own catch: a failed usage read must leave the meter standing.
+    void api.conversationUsage(conversationId).then(setSpent).catch(() => setSpent(null))
+  }
   useEffect(load, [conversationId, refreshKey])
   if (!meter) return null
+  const spentLine = spent ? usageLine(spent) : null
+  const spentTitle = spent ? [
+    `${spent.totals.prompt_tokens.toLocaleString()} prompt (${(spent.totals.cached_tokens ?? 0).toLocaleString()} cached), ${spent.totals.completion_tokens.toLocaleString()} completion tokens over ${spent.totals.calls} calls`,
+    ...spent.by_kind.map((k) => `${k.kind}: ${k.calls} calls, ${k.calls > k.unpriced ? fmtCost(k.cost) : 'unpriced'}`),
+    spent.estimated ? `${spent.estimated} calls had estimated token counts` : '',
+    spent.since ? `Since ${new Date(spent.since * 1000).toLocaleString()} (older records may have been cleaned up)` : ''
+  ].filter(Boolean).join('\n') : undefined
   const frac = Math.min(1, meter.estimated_tokens / Math.max(1, meter.window))
   const act = async (fn: () => Promise<unknown>): Promise<void> => {
     setBusy(true)
@@ -41,6 +54,7 @@ function ContextMeterView({ conversationId, refreshKey }: { conversationId: stri
         <span>~{meter.estimated_tokens.toLocaleString()} of {meter.window.toLocaleString()} tokens</span>
         <button className="link" disabled={busy} onClick={() => void act(() => api.compactConversation(conversationId))}>{busy ? 'compacting…' : 'Compact now'}</button>
       </div>
+      {spentLine && <div className="ctx-usage" title={spentTitle}>{spentLine}</div>}
       {error && <p className="muted small">{error}</p>}
       {meter.summary && (
         <details className="ctx-summary">
@@ -197,7 +211,7 @@ export default function ContextDrawer({ conversationId }: { conversationId?: str
         </div>
       </section>
 
-      {convo && <ContextMeterView conversationId={convo.id} refreshKey={convo.messages?.length ?? 0} />}
+      {convo && <ContextMeterView conversationId={convo.id} refreshKey={`${convo.messages?.length ?? 0}:${streamingMessageId ?? ''}`} />}
 
       <section className="ctx-section">
         <h4>{convo ? 'This chat uses' : 'New chats use'}</h4>

@@ -127,6 +127,7 @@ CREATE TABLE IF NOT EXISTS usage_log (
   estimated INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS usage_log_created ON usage_log(created_at);
+CREATE INDEX IF NOT EXISTS idx_usage_conv ON usage_log(conversation_id, created_at);
 CREATE TABLE IF NOT EXISTS chunks (
   id TEXT PRIMARY KEY,
   document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,

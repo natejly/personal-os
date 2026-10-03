@@ -93,6 +93,31 @@ class Pricing:
                 + completion_tokens * p["output"]) / 1e6
 
 
+def _bucket() -> dict[str, Any]:
+    return {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "cached_tokens": 0, "reasoning_tokens": 0, "cost": 0.0, "unpriced": 0, "ms": 0, "chat_calls": 0, "learn_calls": 0, "other_calls": 0}
+
+
+def _add(b: dict[str, Any], r: dict[str, Any]) -> None:
+    b["calls"] += 1
+    b["prompt_tokens"] += r["prompt_tokens"]
+    b["completion_tokens"] += r["completion_tokens"]
+    b["cached_tokens"] += r["cached_tokens"]
+    b["reasoning_tokens"] += r["reasoning_tokens"]
+    b["ms"] += r["duration_ms"]
+    if r["cost"] is None:
+        b["unpriced"] += 1
+    else:
+        b["cost"] += r["cost"]
+    k = r["kind"] if r["kind"] in ("chat", "learn") else "other"
+    b[f"{k}_calls"] += 1
+
+
+def _finish(b: dict[str, Any]) -> dict[str, Any]:
+    return {**b, "cost": round(b["cost"], 6), "avg_ms": int(b["ms"] / b["calls"]) if b["calls"] else 0, "tokens": b["prompt_tokens"] + b["completion_tokens"],
+            "cache_hit_rate": round(b["cached_tokens"] / b["prompt_tokens"], 4) if b["prompt_tokens"] else 0,
+            "reasoning_share": round(b["reasoning_tokens"] / b["completion_tokens"], 4) if b["completion_tokens"] else 0}
+
+
 class Usage:
     def __init__(self, db: Database):
         self.db = db
@@ -118,6 +143,18 @@ class Usage:
                 n += 1
         return n
 
+    def conversation(self, conv_id: str) -> dict[str, Any]:
+        """Everything one chat spent, from the rows tagged with its id. A chat with no rows is a zeroed bucket."""
+        with self.db.tx() as c:
+            rows = [dict(r) for r in c.execute("SELECT * FROM usage_log WHERE conversation_id=? ORDER BY created_at", (conv_id,)).fetchall()]
+        total = _bucket()
+        by_kind: dict[str, dict[str, Any]] = {}
+        for r in rows:
+            _add(total, r)
+            _add(by_kind.setdefault(r["kind"], _bucket()), r)
+        return {"totals": _finish(total), "by_kind": [{"kind": k, **_finish(b)} for k, b in by_kind.items()],
+                "since": rows[0]["created_at"] if rows else None, "estimated": sum(1 for r in rows if r["estimated"])}
+
     def report(self, days: int = 30) -> dict[str, Any]:
         days = max(1, min(int(days), 365))
         start_day = (datetime.now() - timedelta(days=days - 1)).replace(hour=0, minute=0, second=0, microsecond=0)
@@ -126,57 +163,35 @@ class Usage:
             rows = [dict(r) for r in c.execute("SELECT * FROM usage_log WHERE created_at >= ? ORDER BY created_at", (since,)).fetchall()]
             projects = {r["id"]: r["name"] for r in c.execute("SELECT id, name FROM projects").fetchall()}
 
-        def bucket() -> dict[str, Any]:
-            return {"calls": 0, "prompt_tokens": 0, "completion_tokens": 0, "cached_tokens": 0, "reasoning_tokens": 0, "cost": 0.0, "unpriced": 0, "ms": 0, "chat_calls": 0, "learn_calls": 0, "other_calls": 0}
-
-        def add(b: dict[str, Any], r: dict[str, Any]) -> None:
-            b["calls"] += 1
-            b["prompt_tokens"] += r["prompt_tokens"]
-            b["completion_tokens"] += r["completion_tokens"]
-            b["cached_tokens"] += r["cached_tokens"]
-            b["reasoning_tokens"] += r["reasoning_tokens"]
-            b["ms"] += r["duration_ms"]
-            if r["cost"] is None:
-                b["unpriced"] += 1
-            else:
-                b["cost"] += r["cost"]
-            k = r["kind"] if r["kind"] in ("chat", "learn") else "other"
-            b[f"{k}_calls"] += 1
-
-        daily = {(start_day + timedelta(days=i)).strftime("%Y-%m-%d"): bucket() for i in range(days)}
+        daily = {(start_day + timedelta(days=i)).strftime("%Y-%m-%d"): _bucket() for i in range(days)}
         hourly = {h: 0 for h in range(24)}
         weekday = {d: 0 for d in range(7)}
         by_model: dict[str, dict[str, Any]] = {}
         by_kind: dict[str, dict[str, Any]] = {}
         by_project: dict[str, dict[str, Any]] = {}
-        total = bucket()
+        total = _bucket()
         for r in rows:
             t = datetime.fromtimestamp(r["created_at"])
-            add(total, r)
+            _add(total, r)
             day = t.strftime("%Y-%m-%d")
             if day in daily:
-                add(daily[day], r)
+                _add(daily[day], r)
             if r["kind"] == "chat":
                 hourly[t.hour] += 1
                 weekday[t.weekday()] += 1
-            add(by_model.setdefault(r["model"], bucket()), r)
-            add(by_kind.setdefault(r["kind"], bucket()), r)
-            add(by_project.setdefault(projects.get(r["project_id"], "Personal") if r["project_id"] else "Personal", bucket()), r)
-
-        def finish(b: dict[str, Any]) -> dict[str, Any]:
-            return {**b, "cost": round(b["cost"], 6), "avg_ms": int(b["ms"] / b["calls"]) if b["calls"] else 0, "tokens": b["prompt_tokens"] + b["completion_tokens"],
-                    "cache_hit_rate": round(b["cached_tokens"] / b["prompt_tokens"], 4) if b["prompt_tokens"] else 0,
-                    "reasoning_share": round(b["reasoning_tokens"] / b["completion_tokens"], 4) if b["completion_tokens"] else 0}
+            _add(by_model.setdefault(r["model"], _bucket()), r)
+            _add(by_kind.setdefault(r["kind"], _bucket()), r)
+            _add(by_project.setdefault(projects.get(r["project_id"], "Personal") if r["project_id"] else "Personal", _bucket()), r)
 
         return {
             "days": days,
-            "totals": finish(total),
-            "daily": [{"day": d, **finish(b)} for d, b in daily.items()],
+            "totals": _finish(total),
+            "daily": [{"day": d, **_finish(b)} for d, b in daily.items()],
             "hourly": [{"hour": h, "calls": n} for h, n in hourly.items()],
             "weekday": [{"weekday": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][d], "calls": n} for d, n in weekday.items()],
-            "by_model": sorted(({"model": m, **finish(b)} for m, b in by_model.items()), key=lambda x: -x["tokens"]),
-            "by_kind": [{"kind": k, **finish(b)} for k, b in by_kind.items()],
-            "by_project": sorted(({"project": p, **finish(b)} for p, b in by_project.items()), key=lambda x: -x["tokens"]),
+            "by_model": sorted(({"model": m, **_finish(b)} for m, b in by_model.items()), key=lambda x: -x["tokens"]),
+            "by_kind": [{"kind": k, **_finish(b)} for k, b in by_kind.items()],
+            "by_project": sorted(({"project": p, **_finish(b)} for p, b in by_project.items()), key=lambda x: -x["tokens"]),
         }
 
 

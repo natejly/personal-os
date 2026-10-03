@@ -591,6 +591,8 @@ class LearnWorker:
     async def _run(self, job: LearnJob) -> None:
         if self._alive is not None and not self._alive(job.conversation_id):
             return
+        # The worker is one serial task: set per job, so the extraction's usage rows belong to the chat that caused them.
+        llm.usage_context.set({"conversation_id": job.conversation_id, "project_id": job.project_id})
         tracer = Tracer(job.spans)
         span = tracer.start("learn", job.settings.get("extractionModel") or job.model)
         try:

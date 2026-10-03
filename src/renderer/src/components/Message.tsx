@@ -1,6 +1,6 @@
 import { Component, memo, useEffect, useRef, useState, type ReactNode } from 'react'
 import { AlertCircle, User, Sparkles, Brain, Share2, FileText, Activity, ChevronRight, Lightbulb, RotateCw, GraduationCap, Pencil } from 'lucide-react'
-import type { Message, RunChanges } from '@shared/types'
+import type { Message, MessageStatus, RunChanges } from '@shared/types'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import ToolEvents from './ToolEvents'
@@ -11,6 +11,8 @@ import { modelLabel } from '../lib/modelLabel'
 import { outcomeLabel } from '../lib/outcomeLabel'
 import { errorAction } from '../lib/errorAction'
 import MessageEditor from './MessageEditor'
+import { statusText, statusTicks } from '../lib/runStatus'
+import { clockTime, fullTime } from '../lib/chatMeta'
 
 /**
  * One message's body, fenced: a render error in its markdown or tool cards (a null field, a bad
@@ -164,6 +166,18 @@ function FilesChanged({ messageId }: { messageId: string }): JSX.Element | null 
   )
 }
 
+/** What a silent stretch of a reply is waiting on. The 1s timer lives here, only while a countdown runs, so nothing above re-renders. */
+function StatusLine({ status }: { status: MessageStatus }): JSX.Element {
+  const [now, setNow] = useState(() => Date.now())
+  const ticking = statusTicks(status, now)
+  useEffect(() => {
+    if (!ticking) return
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [ticking])
+  return <div className="run-status" role="status">{statusText(status, now)}</div>
+}
+
 // The store is read imperatively inside the handlers: any subscription here defeats the memo, and a
 // streamed token would re-render every message in every mounted transcript.
 const MessageView = memo(function MessageView({ message, streaming, last = false, editable = false }: { message: Message; streaming: boolean; last?: boolean; editable?: boolean }): JSX.Element {
@@ -175,6 +189,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
   const note = !streaming && message.role === 'assistant' && !message.error ? outcomeLabel(message.outcome) : null
   const bare = !streaming && message.role === 'assistant' && message.outcome === 'stopped' && !message.content && !message.tool_events?.length && !message.reasoning
   const trace = message.trace && message.trace.length > 0 ? traceSummary(message.trace) : null
+  const summarized = !isUser && message.trace?.some((sp) => sp.kind === 'compact' && sp.meta?.kind === 'history')
   return (
     <div className={`msg ${message.role}`}>
       <div className="avatar">{isUser ? <User size={14} /> : <Sparkles size={14} />}</div>
@@ -197,15 +212,22 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
               ) : null}
             </BodyBoundary>
             {streaming && message.content && <span className="cursor" />}
+            {streaming && message.status && <StatusLine status={message.status} />}
           </div>
         )}
         {message.error && <div className="msg-error"><AlertCircle size={14} /><span>{message.error}</span></div>}
+        {summarized && (
+          <button className="compact-note" title="Open the context panel, where the summary lives" onClick={() => { const s = useStore.getState(); if (!s.contextOpen) s.toggleContext() }}>
+            Earlier messages were summarized to fit the context window
+          </button>
+        )}
         {bare ? <div className="msg-partial">Stopped before any output</div> : note && <div className="msg-partial">{note}</div>}
         {last && !streaming && message.role === 'assistant' && message.error && message.error_kind && <div className="msg-error-actions"><ErrorAction conversationId={message.conversation_id} kind={message.error_kind} /></div>}
         {last && !streaming && message.role === 'assistant' && <ContinueButton conversationId={message.conversation_id} messageId={message.id} />}
         {!streaming && message.role === 'assistant' && message.tool_events?.some((t) => FILE_CHANGING.test(t.name)) && <FilesChanged messageId={message.id} />}
         {!streaming && !editing && (
           <div className="msg-actions">
+            {message.created_at > 0 && <time className="msg-time" dateTime={new Date(message.created_at * 1000).toISOString()} title={fullTime(message.created_at)}>{clockTime(message.created_at)}</time>}
             {message.model && (
               <span className="model-tag" title={message.model === modelLabel(message.model) ? undefined : message.model}>
                 {modelLabel(message.model)}

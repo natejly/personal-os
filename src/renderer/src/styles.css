@@ -543,6 +543,13 @@ kbd {
 .msg.user .msg-actions { justify-content: flex-end; }
 .files-changed { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-top: 6px; font-size: 12px; color: var(--muted, var(--text)); }
 .files-changed-note { margin-left: 6px; opacity: 0.8; }
+.msg-time { font-size: 11px; color: var(--text-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.day-divider { display: flex; align-items: center; gap: 10px; margin: 14px 0 4px; font-size: 11px; color: var(--text-faint); }
+.day-divider::before, .day-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+.run-status { margin-top: 6px; font-size: 12px; color: var(--text-faint); font-variant-numeric: tabular-nums; }
+.compact-note { display: block; margin-top: 6px; padding: 0; background: none; border: 0; font: inherit; font-size: 11px; color: var(--text-faint); cursor: pointer; text-align: left; }
+.compact-note:hover { color: var(--text); text-decoration: underline; }
+.ctx-usage { color: var(--text-faint); font-size: 11px; margin-bottom: 8px; }
 .model-tag { font-size: 11px; color: var(--text-faint); font-family: var(--mono); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .msg-error {
   display: flex; align-items: center; gap: 6px;

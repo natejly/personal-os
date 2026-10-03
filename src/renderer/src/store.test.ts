@@ -634,3 +634,19 @@ test('an over-long send is refused before any request, with the size notice', as
   assert.equal(useStore.getState().sessions.c1.pendingSends, undefined)
   assert.match(useStore.getState().toasts[0].text, /256,000/)
 })
+
+test('status: sets the live line, and a token, tool call, done or null clears it; an unknown id changes nothing', () => {
+  const retry = { event: 'status', data: { id: 'm1', kind: 'retry', attempt: 1, max: 3, until: 5000, reason: 'rate_limit' } } as ChatEvent
+  const held = applyEvent(session(), retry, true)
+  assert.deepEqual(held.conversation?.messages?.[0].status, { kind: 'retry', attempt: 1, max: 3, until: 5000, reason: 'rate_limit' })
+  const clears: ChatEvent[] = [
+    { event: 'delta', data: { id: 'm1', text: 'x' } },
+    { event: 'reasoning', data: { id: 'm1', text: 'x' } },
+    { event: 'tool_call', data: { message_id: 'm1', id: 't1', name: 'web_search', arguments: {} } },
+    { event: 'status', data: { id: 'm1', kind: null } },
+    DONE
+  ]
+  for (const ev of clears) assert.equal(applyEvent(held, ev, true).conversation?.messages?.[0].status ?? null, null, ev.event)
+  const other = applyEvent(session(), { event: 'status', data: { id: 'nope', kind: 'compacting' } } as ChatEvent, true)
+  assert.equal(other.conversation?.messages?.[0].status, undefined)
+})

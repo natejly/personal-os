@@ -95,7 +95,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # (permrules.py). Deny beats ask beats allow; a forced approval is never lifted by one.
     "permissionRules": {"allow": [], "ask": [], "deny": []},
     # "deny": a job run that would have to ask is refused with a recorded reason instead of waiting for someone.
-    "unattendedApprovals": "ask",
+    "unattendedApprovals": "deny",
     # Chats with no own skipPermissions follow this. Off: tools that ask still show a card. On: those
     # cards are skipped. Deny rules, plan cards, desk questions and scheduled jobs are unchanged.
     "skipPermissions": False,

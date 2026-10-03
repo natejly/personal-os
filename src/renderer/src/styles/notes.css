@@ -18,6 +18,7 @@
 .caret-menu-hint { color: var(--text-faint); font-family: var(--mono); font-size: 11px; flex: none; }
 
 /* Colour only: the mirror's metrics must not change. */
+.tk-tag { color: color-mix(in srgb, var(--accent) 65%, var(--text-muted)); }
 .tk-wikilink { color: color-mix(in srgb, var(--accent) 80%, var(--text)); }
 
 /* Status bar extras */

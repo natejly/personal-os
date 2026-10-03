@@ -59,3 +59,12 @@ test('without the wikilink option the output is the one the editor always produc
     '<span class="tk-strong">**b**</span> <span class="tk-em">_i_</span> <span class="tk-link">[t](u)</span> <span class="tk-math">$x$</span>'
   )
 })
+
+test('#tag tint is docs-only, skips code and headings, and keeps one output line per input line', () => {
+  const src = '# #head\nsee #todo/now and `#x`\n```\n#f\n```\nplain'
+  assert.ok(!highlight(src).includes('tk-tag'))
+  const on = highlight(src, true)
+  assert.equal(on.split('tk-tag').length - 1, 1)
+  assert.ok(on.includes('<span class="tk-tag">#todo/now</span>'))
+  assert.equal(on.split('\n').length, src.split('\n').length)
+})

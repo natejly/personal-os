@@ -1639,6 +1639,8 @@ export interface Doc {
   created_at: number
   updated_at: number
   words: number
+  /** Distinct lowercase #tags in the body (list rows only). */
+  tags?: string[]
   /** List rows carry a preview and a pending count; a fetched doc carries the body and the pending revisions. */
   preview?: string
   size?: number

@@ -7,6 +7,7 @@ import rehypeKatex from 'rehype-katex'
 import rehypeHighlight from 'rehype-highlight'
 import { Copy, Check } from 'lucide-react'
 import { normalizeMathBlocks } from '../lib/mathBlocks'
+import { repairStreamingMarkdown } from '../lib/streamRepair'
 import { splitMarkdown } from '../lib/splitMarkdown'
 import RenderBoundary from './RenderBoundary'
 import ChartBlock from './ChartBlock'
@@ -103,8 +104,14 @@ function Pre({ node, ...props }: React.HTMLAttributes<HTMLPreElement> & { node?:
   )
 }
 
+/** A table scrolls sideways inside its own wrapper instead of widening the message column. */
+function Table({ node, ...props }: React.TableHTMLAttributes<HTMLTableElement> & { node?: unknown }): JSX.Element {
+  void node
+  return <div className="md-table-scroll"><table {...props} /></div>
+}
+
 /** The one component map every plain render shares; its identity never changes. */
-export const MD_COMPONENTS: Components = { ...SAFE_MD, pre: Pre as Components['pre'] }
+export const MD_COMPONENTS: Components = { ...SAFE_MD, pre: Pre as Components['pre'], table: Table as Components['table'] }
 
 const REMARK = [remarkGfm, remarkMath]
 // `strict: false` keeps an unknown macro as red source text instead of throwing the whole render away,
@@ -157,7 +164,8 @@ const MdBlock = memo(function MdBlock({ source, streaming, remark, components }:
 
 const MarkdownInner = memo(function MarkdownInner({ source, streaming = false, onWikilink, knownTitles, onToggleTask }: MarkdownPreviewProps): JSX.Element {
   // `$$x$$` written on one line is display maths to everyone except remark-math; see mathBlocks.ts.
-  const md = useMemo(() => normalizeMathBlocks(source), [source])
+  // A streaming message first has its half-written tail closed (streamRepair.ts); a finished one is parsed as stored.
+  const md = useMemo(() => normalizeMathBlocks(streaming ? repairStreamingMarkdown(source) : source), [source, streaming])
   // Callers pass fresh lambdas every render; reading them through refs keeps `components` (and so every
   // chart and frame under it) from remounting each time.
   const wikiRef = useRef(onWikilink)

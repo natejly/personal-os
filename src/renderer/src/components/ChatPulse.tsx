@@ -1,4 +1,4 @@
-import { useChatPulse } from '../store'
+import { useChatPulse, useUnread } from '../store'
 import type { SessionStatus } from '@shared/types'
 
 const TITLE: Record<Exclude<SessionStatus, 'idle'>, string> = {
@@ -14,6 +14,8 @@ const TITLE: Record<Exclude<SessionStatus, 'idle'>, string> = {
  */
 export default function ChatPulse({ conversationId }: { conversationId: string }): JSX.Element | null {
   const status = useChatPulse(conversationId)
-  if (status === 'idle') return null
+  const unread = useUnread(conversationId)
+  // Idle with something to read: the reply finished while this chat was out of sight.
+  if (status === 'idle') return unread > 0 ? <span className="pulse unread" title="Unread reply" /> : null
   return <span className={`pulse ${status}`} title={TITLE[status]} />
 }

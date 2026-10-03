@@ -7,7 +7,9 @@ import { installRejectionToasts } from './lib/rejections'
 import { api, backgroundStream, chatStream, meetingStream, setBase, type Scope } from './lib/api'
 import { currentSelection } from './lib/pageContext'
 import { DEFAULT_EFFORT, NEEDS_YOU } from '../../shared/types'
-import { finishStatus, foldRunState, mergeConversation, pickEvictions, pulseStatus, reduceStatus, replayCursor, settleApprovals, type LiveRuns } from './sessionStatus'
+import { chatNotice, finishStatus, foldRunState, mergeConversation, onScreen, pickEvictions, pulseStatus, reduceStatus, replayCursor, settleApprovals, type LiveRuns } from './sessionStatus'
+import { createDeltaBuffer } from './lib/deltaBuffer'
+import { CHAT_NOTICE_BODY, notify } from './lib/notify'
 import { applyCursor, fetchSegmentPages, needsSegmentReload } from './lib/transcript'
 import { viewHidden } from './moduleToggles'
 import { chainTo, folderKey, groupShutKey } from './lib/docTree'
@@ -716,6 +718,20 @@ export const editCut = (messages: Message[], messageId: string): { removed: numb
   return { removed: hidden.length, ranTools: hidden.some((m) => m.role === 'assistant' && !!m.tool_events?.some((t) => !t.pending)) }
 }
 
+export type StopOutcome = 'accepted' | 'gone' | 'failed'
+
+/**
+ * What a Stop request amounts to. `ok: false` and a 404 both mean there was no live run left to stop, which
+ * is the result the user wanted; only a request that never landed (a timeout, a refused connection, a 5xx) failed.
+ */
+export const stopOutcome = (call: { ok: boolean } | { error: unknown }): StopOutcome => {
+  if ('error' in call) return call.error instanceof ApiError && call.error.status === 404 ? 'gone' : 'failed'
+  return call.ok ? 'accepted' : 'gone'
+}
+
+/** One in-flight Stop per run: a second press (the button, then Escape) joins the first instead of sending another. */
+const stops = new Map<string, Promise<StopOutcome>>()
+
 /**
  * A reply whose run died under it: the in-flight message carries the error, every tool call that never
  * returned is marked unknown (an approval card still waiting is left, it is a decision and not an outcome),
@@ -768,8 +784,7 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean, seq?
         runError: null,
         streaming: s.streaming && { ...s.streaming, messageId: ev.data.id, answering: true },
         // A steered run opens a new segment after a `done`; the green hold belongs to the real end.
-        finishedAt: null,
-        unread: focused || held ? s.unread : s.unread + 1
+        finishedAt: null
       }
     }
     case 'title':
@@ -801,7 +816,15 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean, seq?
       const done = !ev.data.id ? s : mapMsg(ev.data.id, (m) => ({ ...m, error: ev.data.error, context_used: ev.data.context_used, tool_events: ev.data.tool_events?.length ? ev.data.tool_events : m.tool_events, trace: ev.data.trace?.length ? ev.data.trace : m.trace, reasoning: ev.data.reasoning ?? m.reasoning, outcome: ev.data.outcome ?? (ev.data.stopped ? 'stopped' : (ev.data.partial as Message['outcome']) ?? null), error_kind: ev.data.error_kind ?? null }))
       // The reply is whole and persisted here. The stream stays open for the auto-learn tail, so the
       // subscription is left alone and only `answering` drops.
-      return { ...done, streaming: done.streaming && { ...done.streaming, answering: false }, finishedAt: Date.now() }
+      // `unread` counts the final done, not the first token: a chat that is mid-reply off-screen has nothing to read yet.
+      // A steer segment's done is not the end, so it neither counts nor clears a Stop that is still pending.
+      const final = !ev.data.segment
+      return {
+        ...done,
+        streaming: done.streaming && { ...done.streaming, answering: false, stopping: final ? false : done.streaming.stopping },
+        finishedAt: Date.now(),
+        unread: final && !focused ? done.unread + 1 : done.unread
+      }
     }
     case 'error': {
       // The run's terminal frame. Once `done` has gone out the reply is whole and there is nothing to settle;
@@ -1138,6 +1161,21 @@ export const useStore = create<State>((set, get) => {
   }
 
   /**
+   * Tell the user a chat they are not looking at needs them, at most once per run and kind. Not for a desk's
+   * conversation (the desk notifier owns those), and not while the window is in front with the chat on screen.
+   */
+  const announce = (convId: string, runId: string, kind: 'reply' | 'approval' | 'failed', visible: boolean, seen: Set<string>): void => {
+    const key = `${runId}:${kind}`
+    if (seen.has(key)) return
+    seen.add(key)
+    if (get().settings.chatNotify === false) return
+    if (visible && typeof document !== 'undefined' && document.hasFocus()) return
+    if (get().desks.some((d) => d.conversation_id === convId)) return
+    const title = get().sessions[convId]?.conversation.title || get().conversations.find((c) => c.id === convId)?.title || 'Chat'
+    notify(title.length > 60 ? title.slice(0, 57) + '…' : title, CHAT_NOTICE_BODY[kind], { tag: key, onClick: () => void get().selectChat(convId) })
+  }
+
+  /**
    * Consume one run's events into a session. `attached` means the run was started by someone else.
    *
    * `replay` is an attach that starts at the in-flight message: that message is blanked once, the tape up to
@@ -1180,6 +1218,15 @@ export const useStore = create<State>((set, get) => {
         runError: null
       }
     })
+    // Streamed text is applied at most once per interval. Events past the replay boundary only: the replay
+    // folds the tape in one patch already. Applied without a seq, which is safe because every other event
+    // flushes this first, so nothing with a seq can overtake a pending delta.
+    const buf = createDeltaBuffer((ev) => {
+      const visible = onScreen(convId, { view: get().view, focusedId: get().focusedConversationId, retained })
+      patchSession(convId, (s) => (s.streaming?.abort !== abort ? s : step(s, ev, visible, null)))
+    })
+    // Once per run and kind: an approval asked twice in a run is two kinds of news, a reply ending is one.
+    const notified = new Set<string>()
     let backlog: { ev: ChatEvent; seq: number | null }[] | null = replay ? [] : null
     const flush = (): void => {
       const events = backlog
@@ -1217,12 +1264,25 @@ export const useStore = create<State>((set, get) => {
           if (seq === null || (replay && seq >= replay.end)) flush()
           continue
         }
-        const focused = get().focusedConversationId === convId
+        if (ev.event === 'delta' || ev.event === 'reasoning') {
+          buf.push(ev)
+          continue
+        }
+        buf.flush()
+        const focused = onScreen(convId, { view: get().view, focusedId: get().focusedConversationId, retained })
+        const before = get().sessions[convId]?.status ?? 'idle'
         patchSession(convId, (s) => step(s, ev, focused, seq))
+        const kind = chatNotice(before, get().sessions[convId]?.status ?? before, ev)
+        if (kind) announce(convId, run.run_id, kind, focused, notified)
         switch (ev.event) {
           case 'done':
             if (!ev.data.error) hold(convId)
+            // Retried silently on the way (a provider hiccup before the first token): worth saying once, after the fact.
+            if (ev.data.notice) get().toast(ev.data.notice, 'info')
             void get().refreshConversations()
+            break
+          case 'restored_message':
+            if (ev.data.reason) get().toast(`Regenerate failed: ${ev.data.reason}. The previous answer is back.`, 'error')
             break
           // Only the `remember` tool reaches here now; auto-learn reports on `/events` instead.
           case 'learned': {
@@ -1258,11 +1318,46 @@ export const useStore = create<State>((set, get) => {
     } catch (e) {
       // An aborted signal is the user pressing Stop, not a failure.
       if (!abort.signal.aborted) {
-        get().toast((e as Error).message, 'error')
-        patchSession(convId, (s) => (s.streaming?.abort === abort ? { ...s, status: 'error', finishedAt: Date.now() } : s))
+        buf.flush()
+        const stalled = e instanceof ApiError && e.kind === 'stalled'
+        const s0 = get().sessions[convId]
+        const mine = s0?.streaming?.abort === abort
+        // After the reply's `done` only the auto-learn tail was lost, which leaves nothing to settle.
+        const live = mine && !!s0?.streaming?.answering
+        const bubble = live && !!s0?.streaming?.messageId && (s0.conversation.messages ?? []).some((m) => m.id === s0.streaming?.messageId)
+        const lost = 'Interrupted: lost the connection to the backend while this reply was streaming.'
+        if (live) {
+          patchSession(convId, (s) => {
+            if (s.streaming?.abort !== abort) return s
+            const settled = settleInterrupted(s, lost)
+            return { ...settled, status: 'error', runError: bubble ? s.runError : { message: lost, runId: run.run_id, interrupted: true } }
+          })
+        }
+        const visible = onScreen(convId, { view: get().view, focusedId: get().focusedConversationId, retained })
+        if (!live || !bubble || !visible) {
+          const text = stalled ? 'The backend stopped responding. Restart it from Settings > Support, then continue the reply.' : (e as Error).message
+          get().toast(text, 'error')
+        }
+        if (live) announce(convId, run.run_id, 'failed', visible, notified)
       }
     } finally {
+      buf.flush()
       flush()
+      // A stream that ended without its `done` is not a finished reply. When the run itself says it died, the
+      // transcript shows that here instead of waiting on the refetch below to find out.
+      if (!settled && !abort.signal.aborted && get().sessions[convId]?.streaming?.abort === abort && get().sessions[convId]?.streaming?.answering) {
+        const state = await api.runState(run.run_id).catch((err: unknown) => (err instanceof ApiError && err.status === 404 ? 'gone' as const : null))
+        const dead = state === 'gone' || (!!state && (state.status === 'interrupted' || state.status === 'error'))
+        if (dead) {
+          const msg = 'Interrupted: the reply ended before it finished.'
+          patchSession(convId, (s) => {
+            if (s.streaming?.abort !== abort) return s
+            const held = !!s.streaming.messageId && (s.conversation.messages ?? []).some((m) => m.id === s.streaming?.messageId)
+            const settledS = settleInterrupted(s, msg)
+            return { ...settledS, status: 'error', runError: held ? s.runError : { message: msg, runId: run.run_id, interrupted: true } }
+          })
+        }
+      }
       patchSession(convId, (s) => (s.streaming?.abort === abort ? { ...s, streaming: null, status: finishStatus(s.status) } : s))
       // An attached run wrote deltas this window never saw, and a stream that ended without its `done` left
       // the reply unfinished here: the persisted message is the whole reply.
@@ -1308,8 +1403,8 @@ export const useStore = create<State>((set, get) => {
         try {
           await api.steer(convId, body.content)
           return true
-        } catch {
-          get().toast('That chat is already replying — your message was not sent.', 'error')
+        } catch (e) {
+          get().toast(e instanceof ApiError && e.kind === 'timeout' ? 'The backend did not answer, so your message was not sent.' : 'That chat is already replying — your message was not sent.', 'error')
         }
       }
       return false
@@ -1557,6 +1652,11 @@ export const useStore = create<State>((set, get) => {
       if (cur === 'meetings' && view !== 'meetings') void get().flushMeetingNotes()
       if (view === 'canvas' && cur !== 'canvas') set({ view, lastClassicView: cur })
       else set({ view })
+      // Coming back to the chat view shows the focused conversation, so what it finished while away is read.
+      if (view === 'chat') {
+        const fid = get().focusedConversationId
+        if (fid && (get().sessions[fid]?.unread ?? 0) > 0) get().clearSessionStatus(fid)
+      }
       if (view === 'docs') {
         void get().refreshDocs()
         void get().refreshDocsPending()
@@ -1878,7 +1978,12 @@ export const useStore = create<State>((set, get) => {
           try {
             await api.steer(id, text)
             return true
-          } catch {
+          } catch (e) {
+            // A steer that hung is not a run that ended: falling through would start a second request that hangs too.
+            if (e instanceof ApiError && e.kind === 'timeout') {
+              get().toast('The backend did not answer, so your message was not sent.', 'error')
+              return false
+            }
             // The run ended in the gap; fall through to a normal send.
           }
         }
@@ -2063,13 +2168,31 @@ export const useStore = create<State>((set, get) => {
       const id = conversationId ?? get().focusedConversationId
       const st = id && get().sessions[id]?.streaming
       if (!id || !st) return
+      const runId = st.runId
+      // A press while one is in flight (the button, then Escape) joins it: one request, one verdict.
+      const pending = stops.get(runId)
+      if (pending) return void (await pending)
       // Aborting the fetch would only detach this window, so a stop is always a request to the run.
-      try {
-        if (st.messageId) await api.stop(st.messageId)
-        else await api.stopRun(id, st.runId)
-      } catch (e) {
-        // A 404 is a run that had already finished; anything else means Stop did not take.
-        if ((e as { status?: number }).status !== 404) get().toast(`Could not stop: ${(e as Error).message}`, 'error')
+      patchSession(id, (s) => (s.streaming?.runId === runId ? { ...s, streaming: { ...s.streaming, stopping: true } } : s))
+      let timedOut = false
+      let detail = ''
+      const call = (async (): Promise<StopOutcome> => {
+        try {
+          return stopOutcome(await api.stopRun(id, runId))
+        } catch (e) {
+          timedOut = e instanceof ApiError && e.kind === 'timeout'
+          detail = (e as Error).message
+          return stopOutcome({ error: e })
+        }
+      })()
+      stops.set(runId, call)
+      const outcome = await call
+      stops.delete(runId)
+      // Accepted keeps `stopping` up until the run's own `done` clears it. Anything else hands the button back.
+      if (outcome === 'accepted') return
+      patchSession(id, (s) => (s.streaming?.runId === runId ? { ...s, streaming: { ...s.streaming, stopping: false } } : s))
+      if (outcome === 'failed') {
+        get().toast(timedOut ? 'Stop did not reach the backend in time. The reply may still be running.' : `Could not stop: ${detail}`, 'error', { label: 'Retry', run: () => void get().stop(id) })
       }
     },
 
@@ -3493,7 +3616,10 @@ export const useStore = create<State>((set, get) => {
  * does not focus conversations, and a widget's loader effect only re-runs when its `ref_id` changes.
  */
 export const retainSession = (conversationId: string): (() => void) => {
+  const first = !retained.has(conversationId)
   retained.set(conversationId, (retained.get(conversationId) ?? 0) + 1)
+  // A surface mounting this conversation is where the user reads it, so what finished while it was away is read.
+  if (first && (useStore.getState().sessions[conversationId]?.unread ?? 0) > 0) useStore.getState().clearSessionStatus(conversationId)
   return () => {
     const n = (retained.get(conversationId) ?? 0) - 1
     if (n > 0) return void retained.set(conversationId, n)
@@ -3523,4 +3649,5 @@ export const useStreamingMessageId = (convId?: string): string | null =>
     const st = pick(s, convId)?.streaming
     return st?.answering ? st.messageId : null
   })
+export const useIsStopping = (convId?: string): boolean => useStore((s) => !!pick(s, convId)?.streaming?.stopping)
 export const useUnread = (convId?: string): number => useStore((s) => pick(s, convId)?.unread ?? 0)

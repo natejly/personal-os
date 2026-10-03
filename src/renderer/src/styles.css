@@ -334,6 +334,7 @@ kbd {
 }
 @keyframes pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
 .pulse.working { background: var(--warn); }
+.pulse.unread { background: var(--accent); animation: none; }
 .pulse.needs-approval { background: var(--accent); animation-duration: 1s; }
 .pulse.done { background: var(--ok); animation: none; }
 .pulse.error { background: var(--danger); animation: none; }
@@ -672,7 +673,8 @@ kbd {
 .send:disabled { opacity: 0.35; cursor: default; }
 .composer-actions { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .send.stop { background: var(--text); color: var(--bg); }
-.send.stop:hover { background: var(--text-muted); }
+.send.stop:hover:not(:disabled) { background: var(--text-muted); }
+.send.stop:disabled { opacity: 0.7; }
 
 /* ---------- Buttons ---------- */
 .icon-btn {

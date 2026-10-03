@@ -179,6 +179,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "notifyJobs": True,
     # A system notification when a desk needs you or finishes, while the window is not focused.
     "deskNotify": True,
+    "chatNotify": True,
     # Plan mode for ordinary chats when the chat has no setting of its own: off | auto | always.
     "planMode": "off",
     # Hosts fetch_url may still read once a reply has touched untrusted content (registrable-suffix match).

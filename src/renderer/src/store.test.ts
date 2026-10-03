@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { adoptServerDoc, applyEvent, editCut, settleInterrupted, useStore, type ChatSession } from './store'
+import { adoptServerDoc, applyEvent, editCut, settleInterrupted, stopOutcome, useStore, type ChatSession } from './store'
+import { ApiError } from './lib/apiError'
 import { api } from './lib/api'
 import { mergeConversation } from './sessionStatus'
 import type { ChatEvent, Message } from '@shared/types'
@@ -362,4 +363,209 @@ test('an edit cut folded through applyEvent leaves no hidden row, even when a st
   const remote = { ...s.conversation, messages: [rows[0], rows[1], msg({ id: 'u3', role: 'user' })] }
   const merged = mergeConversation(s.conversation, remote, true)
   assert.deepEqual(merged.messages?.map((m) => m.id), ['u1', 'a1', 'u3', 'a3'], 'keepUnsent keeps the live reply, not the cut')
+})
+
+// ---------------------------------------------------------------------------------------------
+// stream-settle: unread, stopping, a stream that ends without its `done`, coalesced deltas, notices
+// ---------------------------------------------------------------------------------------------
+
+const FINAL_DONE = ev({ event: 'done', data: { id: 'm1', error: null, context_used: null, tool_events: [], trace: [], stopped: false } })
+const SEG_DONE = ev({ event: 'done', data: { id: 'm1', error: null, context_used: null, tool_events: [], trace: [], stopped: false, segment: true } })
+
+test('unread counts the final done off-screen, never the first token, a steer segment or an on-screen chat', () => {
+  assert.equal(applyEvent(session(), ev({ event: 'assistant_message', data: msg({ id: 'm2', content: '' }) }), false).unread, 0, 'a reply that has only begun is nothing to read')
+  assert.equal(applyEvent(session(), SEG_DONE, false).unread, 0, 'a steer segment is not the end')
+  assert.equal(applyEvent(session(), FINAL_DONE, true).unread, 0, 'on screen')
+  assert.equal(applyEvent(session(), FINAL_DONE, false).unread, 1, 'off screen, final done')
+})
+
+test('a final done clears a pending Stop; a steer segment leaves it', () => {
+  const stopping = session({ streaming: { messageId: 'm1', runId: 'r1', abort: new AbortController(), answering: true, seq: 0, stopping: true } })
+  assert.equal(applyEvent(stopping, SEG_DONE, true).streaming?.stopping, true)
+  assert.equal(applyEvent(stopping, FINAL_DONE, true).streaming?.stopping, false)
+})
+
+test('stopOutcome: ok is accepted; nothing to stop or a 404 is gone; anything else failed', () => {
+  assert.equal(stopOutcome({ ok: true }), 'accepted')
+  assert.equal(stopOutcome({ ok: false }), 'gone')
+  assert.equal(stopOutcome({ error: new ApiError('No such run', { status: 404 }) }), 'gone')
+  assert.equal(stopOutcome({ error: new ApiError('slow', { kind: 'timeout' }) }), 'failed')
+  assert.equal(stopOutcome({ error: new ApiError('boom', { status: 500 }) }), 'failed')
+  assert.equal(stopOutcome({ error: new TypeError('Failed to fetch') }), 'failed')
+})
+
+test('Stop sets stopping once, a second press joins the first, and a failure hands the button back with a toast', async () => {
+  const calls: string[] = []
+  let release: (v: { ok: boolean }) => void = () => undefined
+  const real = api.stopRun
+  api.stopRun = ((_c: string, runId?: string) => { calls.push(runId ?? ''); return new Promise((r) => { release = r }) }) as never
+  try {
+    useStore.setState({ sessions: { c9: session({ streaming: { messageId: 'm1', runId: 'r9', abort: new AbortController(), answering: true, seq: 0, stopping: false } }) } as never, toasts: [] } as never)
+    const first = useStore.getState().stop('c9')
+    const second = useStore.getState().stop('c9')
+    assert.equal(useStore.getState().sessions.c9.streaming?.stopping, true)
+    release({ ok: true })
+    await Promise.all([first, second])
+    assert.deepEqual(calls, ['r9'], 'one request for two presses, addressed by run id')
+    assert.equal(useStore.getState().sessions.c9.streaming?.stopping, true, 'accepted: stays pending until the run reports its end')
+
+    api.stopRun = (async () => { throw new ApiError('slow', { kind: 'timeout' }) }) as never
+    useStore.setState({ sessions: { c9: session({ streaming: { messageId: 'm1', runId: 'r10', abort: new AbortController(), answering: true, seq: 0, stopping: false } }) } as never })
+    await useStore.getState().stop('c9')
+    assert.equal(useStore.getState().sessions.c9.streaming?.stopping, false)
+    const t = useStore.getState().toasts.at(-1)
+    assert.match(t?.text ?? '', /Stop did not reach/)
+    assert.equal(t?.action?.label, 'Retry')
+
+    api.stopRun = (async () => ({ ok: false })) as never
+    useStore.setState({ sessions: { c9: session({ streaming: { messageId: 'm1', runId: 'r11', abort: new AbortController(), answering: true, seq: 0, stopping: false } }) } as never, toasts: [] } as never)
+    await useStore.getState().stop('c9')
+    assert.equal(useStore.getState().toasts.length, 0, 'a run that had already ended is not an error')
+  } finally {
+    api.stopRun = real
+  }
+})
+
+test('setView back to the chat clears what finished while it was away', () => {
+  useStore.setState({ view: 'home', focusedConversationId: 'c9', sessions: { c9: session({ unread: 2, streaming: null }) } as never })
+  useStore.getState().setView('chat')
+  assert.equal(useStore.getState().sessions.c9.unread, 0)
+})
+
+interface Backend { push: (t: string) => void; close: () => void; restore: () => void; streams: string[] }
+const block = (seq: number, event: string, data: unknown): string => `id: ${seq}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`
+const tick = (ms = 30): Promise<void> => new Promise((r) => setTimeout(r, ms))
+
+/** A fake backend for one run: the run row, its state (`/runs/r1`), the stored conversation and an open SSE tape. */
+const backend = (state: Record<string, unknown>, tape: string): Backend => {
+  const real = globalThis.fetch
+  const enc = new TextEncoder()
+  const streams: string[] = []
+  let ctl: ReadableStreamDefaultController<Uint8Array> | null = null
+  const json = (v: unknown): Response => new Response(JSON.stringify(v), { status: 200, headers: { 'content-type': 'application/json' } })
+  const run = { run_id: 'r1', conversation_id: 'c1', message_id: 'a1', seq: 0, message_seq: null, started_at: 0, live: true, answering: true, status: 'running' }
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const url = String(input)
+    if (url.startsWith('/runs?')) return json([run])
+    if (url === '/runs/r1') return json({ ...run, ...state })
+    if (url.startsWith('/conversations/c1/stream')) {
+      streams.push(url)
+      return new Response(new ReadableStream<Uint8Array>({
+        start(c) {
+          ctl = c
+          c.enqueue(enc.encode(tape))
+          init?.signal?.addEventListener('abort', () => { try { c.close() } catch { /* closed */ } })
+        }
+      }), { status: 200 })
+    }
+    if (url === '/conversations/c1') return json({ id: 'c1', project_id: null, title: 'A chat', model: 'm', settings: {}, created_at: 0, updated_at: 0, messages: [msg({ id: 'u1', role: 'user', content: 'hi' }), msg({ id: 'a1', content: '' })] })
+    return json([])
+  }) as typeof fetch
+  return { streams, push: (t) => ctl?.enqueue(enc.encode(t)), close: () => { try { ctl?.close() } catch { /* closed */ } }, restore: () => { globalThis.fetch = real } }
+}
+
+const reset = (): void => {
+  useStore.getState().closeSession('c1')
+  useStore.setState({ view: 'home', focusedConversationId: null, toasts: [] } as never)
+}
+
+test('a stream that closes without its done, from a run that died, settles the open reply as interrupted', async () => {
+  const tape = [block(1, 'assistant_message', msg({ id: 'a1', content: '' })), block(2, 'delta', { id: 'a1', text: 'Half' }), block(3, 'tool_call', { message_id: 'a1', id: 't1', name: 'web_search', arguments: {} })].join('')
+  const fake = backend({ live: false, status: 'interrupted', seq: 3 }, tape)
+  try {
+    await useStore.getState().attachSession('c1')
+    await tick(50)
+    fake.close()
+    await tick(150)
+    const s = useStore.getState().sessions.c1
+    const a1 = s.conversation.messages?.find((m) => m.id === 'a1')
+    assert.match(a1?.error ?? '', /Interrupted/, 'never a silent finish')
+    assert.equal(a1?.tool_events?.[0].pending, false, 'the open tool row is closed')
+    assert.equal(s.streaming, null)
+    assert.equal(s.status, 'error')
+  } finally {
+    reset()
+    fake.restore()
+  }
+})
+
+test('a close without done from a LIVE run reconnects from the last seq', async () => {
+  const tape = [block(1, 'assistant_message', msg({ id: 'a1', content: '' })), block(2, 'delta', { id: 'a1', text: 'Hi' })].join('')
+  const fake = backend({ live: true, status: 'running', seq: 2 }, tape)
+  try {
+    await useStore.getState().attachSession('c1')
+    await tick(50)
+    fake.close()
+    await tick(100)
+    assert.ok(fake.streams.length >= 2, 'a second connection was opened')
+    assert.match(fake.streams[1], /since=2/, 'from where the first one left off')
+  } finally {
+    reset()
+    fake.restore()
+  }
+})
+
+test('deltas past the replay boundary are coalesced into far fewer patches than events', async () => {
+  const tape = block(1, 'assistant_message', msg({ id: 'a1', content: '' }))
+  const fake = backend({ live: true, status: 'running', seq: 1 }, tape)
+  let patches = 0
+  const unsub = useStore.subscribe((st) => { if (st.sessions.c1?.conversation.messages?.find((m) => m.id === 'a1')?.content) patches++ })
+  try {
+    await useStore.getState().attachSession('c1')
+    await tick(30)
+    patches = 0
+    fake.push(Array.from({ length: 40 }, (_, i) => block(2 + i, 'delta', { id: 'a1', text: 'x' })).join(''))
+    await tick(150)
+    assert.equal(useStore.getState().sessions.c1.conversation.messages?.find((m) => m.id === 'a1')?.content, 'x'.repeat(40), 'nothing lost')
+    assert.ok(patches > 0 && patches < 10, `40 deltas landed in ${patches} patches`)
+    fake.push(block(50, 'delta', { id: 'a1', text: '!' }) + block(51, 'done', { id: 'a1', error: null, context_used: null, tool_events: [], trace: [], stopped: false }))
+    await tick(80)
+    assert.equal(useStore.getState().sessions.c1.conversation.messages?.find((m) => m.id === 'a1')?.content, 'x'.repeat(40) + '!', 'the done flushed the pending text first')
+  } finally {
+    unsub()
+    reset()
+    fake.restore()
+  }
+})
+
+test('a reply finishing off-screen notifies once with a fixed body; a desk conversation and an unfocused-off setting stay quiet', async () => {
+  const made: Array<{ title: string; body?: string; tag?: string }> = []
+  const g = globalThis as unknown as { Notification?: unknown; document?: unknown }
+  const realN = g.Notification
+  const realD = g.document
+  g.Notification = class { static permission = 'granted'; onclick: (() => void) | null = null; constructor(title: string, o: { body?: string; tag?: string }) { made.push({ title, ...o }) } }
+  g.document = { hasFocus: () => false }
+  const done = block(2, 'done', { id: 'a1', error: null, context_used: null, tool_events: [], trace: [], stopped: false })
+  try {
+    for (const [label, setup, expected] of [
+      ['plain', () => undefined, 1],
+      ['setting off', () => useStore.setState({ settings: { ...useStore.getState().settings, chatNotify: false } } as never), 0],
+      ['desk-owned', () => useStore.setState({ settings: { ...useStore.getState().settings, chatNotify: true }, desks: [{ id: 'd1', conversation_id: 'c1' }] } as never), 0]
+    ] as Array<[string, () => void, number]>) {
+      made.length = 0
+      useStore.setState({ settings: { ...useStore.getState().settings, chatNotify: true }, desks: [] } as never)
+      setup()
+      const fake = backend({ live: true, status: 'running', seq: 1 }, block(1, 'assistant_message', msg({ id: 'a1', content: '' })))
+      try {
+        await useStore.getState().attachSession('c1')
+        await tick(30)
+        fake.push(done)
+        await tick(60)
+        assert.equal(made.length, expected, label)
+        if (expected) {
+          assert.equal(made[0].body, 'Reply ready')
+          assert.equal(made[0].tag, 'r1:reply')
+          assert.equal(useStore.getState().sessions.c1.unread, 1)
+        }
+      } finally {
+        fake.close()
+        reset()
+        fake.restore()
+      }
+    }
+  } finally {
+    g.Notification = realN
+    g.document = realD
+    useStore.setState({ desks: [] } as never)
+  }
 })

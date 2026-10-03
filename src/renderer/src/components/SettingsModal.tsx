@@ -361,6 +361,10 @@ export default function SettingsModal(): JSX.Element {
             {tab === 'behavior' && <section>
               <h3>Behavior</h3>
               <label><span>Global system prompt</span><textarea rows={4} value={draft.systemPrompt} onChange={(e) => patch({ systemPrompt: e.target.value })} /></label>
+              <label className="toggle-row plain">
+                <span className="toggle-text"><b>Notify me about chats</b><small>A system notification when a reply finishes, fails or needs your approval in a chat you are not looking at.</small></span>
+                <input type="checkbox" checked={draft.chatNotify !== false} onChange={(e) => patch({ chatNotify: e.target.checked })} /><span className="switch" />
+              </label>
               <label><span>Theme</span>
                 <select value={draft.theme} onChange={(e) => patch({ theme: e.target.value as Settings['theme'] })}>
                   <option value="dark">Dark</option><option value="light">Light</option><option value="system">System</option>

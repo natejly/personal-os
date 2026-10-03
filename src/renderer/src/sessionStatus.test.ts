@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { ChatEvent, Conversation, Message, RunInfo, Span, ToolEvent } from '@shared/types'
-import { finishStatus, foldRunState, mergeConversation, pickEvictions, pulseStatus, reduceStatus, replayCursor, settleApprovals } from './sessionStatus'
+import { chatNotice, finishStatus, foldRunState, mergeConversation, onScreen, pickEvictions, pulseStatus, reduceStatus, replayCursor, settleApprovals } from './sessionStatus'
 
 const ev = (event: string, data: Record<string, unknown> = {}): ChatEvent => ({ event, data }) as unknown as ChatEvent
 const done = (error: string | null, stopped = false): ChatEvent => ev('done', { id: 'm1', error, context_used: null, tool_events: [], trace: [], stopped })
@@ -192,6 +192,27 @@ test('a steer segment closing keeps the run working; the final done settles it',
   assert.equal(reduceStatus('working', seg, 0), 'working')
   const fin = { event: 'done', data: { id: 'm1', error: null, context_used: null, tool_events: [], trace: [], stopped: false } } as unknown as ChatEvent
   assert.equal(reduceStatus('working', fin, 0), 'done')
+})
+
+test('onScreen: the chat view showing it, or any surface that has it mounted', () => {
+  const retained = new Set(['w'])
+  assert.equal(onScreen('c1', { view: 'chat', focusedId: 'c1', retained }), true)
+  assert.equal(onScreen('c1', { view: 'home', focusedId: 'c1', retained }), false, 'focused but another view is showing')
+  assert.equal(onScreen('c1', { view: 'chat', focusedId: 'c2', retained }), false)
+  assert.equal(onScreen('w', { view: 'canvas', focusedId: null, retained }), true, 'a mounted window counts')
+})
+
+test('chatNotice: one kind per status transition, none for a stop or a steer segment', () => {
+  const seg = ev('done', { id: 'm1', error: null, context_used: null, tool_events: [], trace: [], stopped: false, segment: true })
+  assert.equal(chatNotice('working', 'done', done(null)), 'reply')
+  assert.equal(chatNotice('working', 'error', done('boom')), 'failed')
+  assert.equal(chatNotice('working', 'error', ev('error', { message: 'x' })), 'failed')
+  assert.equal(chatNotice('working', 'needs-approval', ev('tool_call', {})), 'approval')
+  assert.equal(chatNotice('needs-approval', 'needs-approval', ev('tool_call', {})), null, 'the status did not move')
+  assert.equal(chatNotice('error', 'error', ev('error', { message: 'x' })), null)
+  assert.equal(chatNotice('working', 'working', seg), null)
+  assert.equal(chatNotice('working', 'done', done(null, true)), null, 'a stopped reply is not news')
+  assert.equal(chatNotice('working', 'working', ev('delta', { id: 'm1', text: 'a' })), null)
 })
 
 test('a stale fetch keeps the local error and outcome the stream stamped', () => {

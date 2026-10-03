@@ -48,15 +48,45 @@ const auth = async (): Promise<Record<string, string>> => {
   return token ? { 'X-Personal-OS-Token': token } : {}
 }
 
-export async function req<T>(path: string, init?: RequestInit): Promise<T> {
+/** How long a control request (send, steer, resume, a run or conversation read) may take before the client gives up on it. */
+export const CONTROL_TIMEOUT_MS = 20_000
+/** Stop is the one control the user is waiting on, so it gives up sooner and says so. */
+export const STOP_TIMEOUT_MS = 5_000
+
+/** A signal that fires when either input does; plain AbortSignal.any where the runtime has it. */
+const anySignal = (a: AbortSignal, b?: AbortSignal | null): AbortSignal => {
+  if (!b) return a
+  const any = (AbortSignal as unknown as { any?: (s: AbortSignal[]) => AbortSignal }).any
+  if (any) return any([a, b])
+  const c = new AbortController()
+  const fire = (): void => c.abort()
+  if (a.aborted || b.aborted) c.abort()
+  else { a.addEventListener('abort', fire, { once: true }); b.addEventListener('abort', fire, { once: true }) }
+  return c.signal
+}
+
+export async function req<T>(path: string, init?: RequestInit, timeoutMs?: number): Promise<T> {
   // The token wait only suspends while setBase() is still resolving it. Once it is (or when there is no
   // sidecar at all, as in tests), a req() runs synchronously up to its fetch — the canvas store's
   // flush-before-space-switch depends on that.
   if (!token && tokenP) await tokenP
-  const r = await fetch(`${base}${path}`, {
-    ...init,
-    headers: { ...(init?.body && !(init.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}), ...(init?.headers ?? {}), ...(token ? { 'X-Personal-OS-Token': token } : {}) }
-  })
+  // An ordinary timer rather than AbortSignal.timeout: it is cleared the moment the response arrives.
+  const deadline = timeoutMs ? new AbortController() : null
+  const timer = deadline ? setTimeout(() => deadline.abort(), timeoutMs) : null
+  let r: Response
+  try {
+    r = await fetch(`${base}${path}`, {
+      ...init,
+      ...(deadline ? { signal: anySignal(deadline.signal, init?.signal) } : {}),
+      headers: { ...(init?.body && !(init.body instanceof FormData) ? { 'Content-Type': 'application/json' } : {}), ...(init?.headers ?? {}), ...(token ? { 'X-Personal-OS-Token': token } : {}) }
+    })
+  } catch (e) {
+    // Only our own deadline becomes a timeout; a caller's abort and a refused connection pass through.
+    if (deadline?.signal.aborted && !init?.signal?.aborted) throw new ApiError(`The backend did not answer within ${Math.round((timeoutMs ?? 0) / 1000)} seconds.`, { kind: 'timeout' })
+    throw e
+  } finally {
+    if (timer) clearTimeout(timer)
+  }
   if (!r.ok) {
     let msg = `${r.status} ${r.statusText}`
     try {
@@ -363,10 +393,10 @@ export const api = {
   },
   conversations: {
     list: (s: Scope = 'all') => req<Conversation[]>(`/conversations?${scope(s)}`),
-    get: (id: string) => req<Conversation>(`/conversations/${id}`),
-    create: (projectId: string | null, model?: string) => req<Conversation>('/conversations', { method: 'POST', body: json({ project_id: projectId, model }) }),
+    get: (id: string) => req<Conversation>(`/conversations/${id}`, undefined, CONTROL_TIMEOUT_MS),
+    create: (projectId: string | null, model?: string) => req<Conversation>('/conversations', { method: 'POST', body: json({ project_id: projectId, model }) }, CONTROL_TIMEOUT_MS),
     patch: (id: string, patch: { title?: string; model?: string; settings?: Partial<ConversationSettings> }) =>
-      req<Conversation>(`/conversations/${id}`, { method: 'PATCH', body: json(patch) }),
+      req<Conversation>(`/conversations/${id}`, { method: 'PATCH', body: json(patch) }, CONTROL_TIMEOUT_MS),
     delete: (id: string) => req<{ ok: boolean; stopped?: boolean }>(`/conversations/${id}`, { method: 'DELETE' }),
     deleteMessage: (id: string, mid: string) => req(`/conversations/${id}/messages/${mid}`, { method: 'DELETE' })
   },
@@ -425,12 +455,11 @@ export const api = {
       req<{ skill: Skill; findings: SkillFinding[]; warnings: string[] }>('/skills/import', { method: 'POST', body: json({ text }) }),
     exportMd: (id: string) => req<{ filename: string; text: string }>(`/skills/${id}/export`)
   },
-  stop: (mid: string) => req(`/messages/${mid}/stop`, { method: 'POST' }),
   /** Starts the reply as a background task and returns at once; watch it with `chatStream(convId, seq)`. Throws a 409 carrying a `RunConflict` when that conversation already has a live run. */
-  chat: (convId: string, body: { content?: string; model?: string; page_context?: PageContext; replace_from?: string }) => req<ChatRunStarted>(`/conversations/${convId}/chat`, { method: 'POST', body: json(body) }),
+  chat: (convId: string, body: { content?: string; model?: string; page_context?: PageContext; replace_from?: string }) => req<ChatRunStarted>(`/conversations/${convId}/chat`, { method: 'POST', body: json(body) }, CONTROL_TIMEOUT_MS),
   /** Injects a user message into a live run (steering). Throws a 409 when nothing is running. */
-  steer: (convId: string, content: string) => req<{ ok: boolean; run_id: string; message: Message }>(`/conversations/${convId}/steer`, { method: 'POST', body: json({ content }) }),
-  runs: (conversationId?: string) => req<RunInfo[]>('/runs' + (conversationId ? `?conversation_id=${encodeURIComponent(conversationId)}` : '')),
+  steer: (convId: string, content: string) => req<{ ok: boolean; run_id: string; message: Message }>(`/conversations/${convId}/steer`, { method: 'POST', body: json({ content }) }, CONTROL_TIMEOUT_MS),
+  runs: (conversationId?: string) => req<RunInfo[]>('/runs' + (conversationId ? `?conversation_id=${encodeURIComponent(conversationId)}` : ''), undefined, CONTROL_TIMEOUT_MS),
   /** A subagent's run row (status while it works) and its recorded tape (calls, results). */
   agentRun: (id: string) => req<{ run_id: string; status: string; budget?: Record<string, number> | null }>(`/runs/${encodeURIComponent(id)}`),
   agentTape: (id: string) => req<RunTapeEvent[]>(`/runs/${encodeURIComponent(id)}/events`),
@@ -451,9 +480,11 @@ export const api = {
   undoRun: (runId: string) => req<RunUndoResult>(`/runs/${runId}/undo`, { method: 'POST' }),
   redoRun: (runId: string) => req<RunUndoResult>(`/runs/${runId}/redo`, { method: 'POST' }),
   /** Starts a new run that continues an interrupted one. 409 with a reason when it cannot. */
-  resumeRun: (runId: string) => req<ChatRunStarted>(`/runs/${runId}/resume`, { method: 'POST' }),
+  resumeRun: (runId: string) => req<ChatRunStarted>(`/runs/${runId}/resume`, { method: 'POST' }, CONTROL_TIMEOUT_MS),
+  /** Where a run stands right now: whether its task is alive and the last seq on its tape. 404 when the run is unknown. */
+  runState: (runId: string) => req<{ run_id: string; live: boolean; seq: number; status?: string }>(`/runs/${encodeURIComponent(runId)}`, undefined, CONTROL_TIMEOUT_MS),
   /** Stops a run before its assistant message exists. Detaching the stream would only drop a viewer. */
-  stopRun: (convId: string, runId?: string) => req<{ ok: boolean }>(`/conversations/${convId}/stop${runId ? `?run_id=${encodeURIComponent(runId)}` : ''}`, { method: 'POST' }),
+  stopRun: (convId: string, runId?: string) => req<{ ok: boolean }>(`/conversations/${convId}/stop${runId ? `?run_id=${encodeURIComponent(runId)}` : ''}`, { method: 'POST' }, STOP_TIMEOUT_MS),
   usage: {
     report: (days = 30) => req<UsageReport>(`/usage?days=${days}`),
     setPrices: (modelPrices: Record<string, { input: number; output: number }>) =>
@@ -731,80 +762,154 @@ export const api = {
 }
 
 const STREAM_RETRIES = 8
+/** How long a stream may take to answer with its headers before the attempt is abandoned. */
+export const STREAM_CONNECT_MS = 10_000
+/**
+ * How long an open stream may stay silent. The backend sends a keepalive comment every runs.KEEPALIVE_S
+ * (15 s), so 45 s is three missed beats: a socket that has gone quiet without closing (a sleeping Mac, a
+ * wedged proxy) is detected here, since a clean close and a refused connection already surface by themselves.
+ */
+export const STREAM_IDLE_MS = 45_000
+
+const STALLED = 'The backend stopped responding.'
+
+/**
+ * One `reader.read()` that gives up after `ms` of silence. Any bytes, a keepalive comment included, count as
+ * life because each is a completed read. On a stall the reader is cancelled and an ApiError of kind 'stalled'
+ * is thrown; `ms <= 0` reads without a deadline.
+ */
+export async function readWithIdle<T>(reader: { read: () => Promise<ReadableStreamReadResult<T>>; cancel: (reason?: unknown) => Promise<void> }, ms: number): Promise<ReadableStreamReadResult<T>> {
+  if (!(ms > 0)) return reader.read()
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const stall = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new ApiError(STALLED, { kind: 'stalled' })), ms)
+  })
+  try {
+    return await Promise.race([reader.read(), stall])
+  } catch (e) {
+    if (e instanceof ApiError && e.kind === 'stalled') void reader.cancel().catch(() => undefined)
+    throw e
+  } finally {
+    clearTimeout(timer)
+  }
+}
 
 /** One SSE connection, parsed. `seq` is the event's `id:` line, which only the app topic sends. */
-async function* sseStream(path: string, signal?: AbortSignal): AsyncGenerator<{ event: string; data: unknown; seq: number | null }> {
-  const r = await fetch(`${base}${path}`, { signal, headers: await auth() })
-  if (!r.ok || !r.body) throw new Error(`${r.status} ${r.statusText}`)
+async function* sseStream(path: string, signal?: AbortSignal, idleMs = 0, connectMs = STREAM_CONNECT_MS): AsyncGenerator<{ event: string; data: unknown; seq: number | null }> {
+  // Bounds the wait for the response headers only; once the body is flowing the idle watchdog takes over.
+  const connect = new AbortController()
+  let connectTimedOut = false
+  const timer = setTimeout(() => { connectTimedOut = true; connect.abort() }, connectMs)
+  const onAbort = (): void => connect.abort()
+  signal?.addEventListener('abort', onAbort, { once: true })
+  if (signal?.aborted) connect.abort()
+  let r: Response
+  try {
+    r = await fetch(`${base}${path}`, { signal: connect.signal, headers: await auth() })
+  } catch (e) {
+    if (connectTimedOut && !signal?.aborted) throw new ApiError('The backend did not answer in time.', { kind: 'timeout' })
+    throw e
+  } finally {
+    clearTimeout(timer)
+  }
+  if (!r.ok || !r.body) {
+    signal?.removeEventListener('abort', onAbort)
+    throw new ApiError(`${r.status} ${r.statusText}`, { status: r.status, kind: 'http' })
+  }
   const reader = r.body.getReader()
   const dec = new TextDecoder()
   let buf = ''
-  while (true) {
-    const { value, done } = await reader.read()
-    if (done) break
-    buf += dec.decode(value, { stream: true })
-    let idx: number
-    while ((idx = buf.indexOf('\n\n')) >= 0) {
-      const block = buf.slice(0, idx)
-      buf = buf.slice(idx + 2)
-      let event = 'message'
-      let data = ''
-      let id = ''
-      for (const line of block.split('\n')) {
-        if (line.startsWith('event:')) event = line.slice(6).trim()
-        else if (line.startsWith('data:')) data += line.slice(5).trim()
-        else if (line.startsWith('id:')) id = line.slice(3).trim()
+  try {
+    while (true) {
+      const { value, done } = await readWithIdle(reader, idleMs)
+      if (done) break
+      buf += dec.decode(value, { stream: true })
+      let idx: number
+      while ((idx = buf.indexOf('\n\n')) >= 0) {
+        const block = buf.slice(0, idx)
+        buf = buf.slice(idx + 2)
+        let event = 'message'
+        let data = ''
+        let id = ''
+        for (const line of block.split('\n')) {
+          if (line.startsWith('event:')) event = line.slice(6).trim()
+          else if (line.startsWith('data:')) data += line.slice(5).trim()
+          else if (line.startsWith('id:')) id = line.slice(3).trim()
+        }
+        if (!data) continue
+        const seq = id ? Number(id) : null
+        let parsed: unknown
+        try {
+          parsed = JSON.parse(data)
+        } catch {
+          // A frame that is not JSON would throw before the caller's cursor moves, so every retry would
+          // fetch the same frame again. Skip it, but still hand the seq over so the cursor passes it.
+          console.warn('Skipped a stream frame that is not JSON:', event)
+          yield { event: 'malformed', data: null, seq }
+          continue
+        }
+        yield { event, data: parsed, seq }
       }
-      if (!data) continue
-      const seq = id ? Number(id) : null
-      let parsed: unknown
-      try {
-        parsed = JSON.parse(data)
-      } catch {
-        // A frame that is not JSON would throw before the caller's cursor moves, so every retry would
-        // fetch the same frame again. Skip it, but still hand the seq over so the cursor passes it.
-        yield { event: 'malformed', data: null, seq }
-        continue
-      }
-      yield { event, data: parsed, seq }
     }
+  } finally {
+    signal?.removeEventListener('abort', onAbort)
   }
 }
+
+/** Timings a test can shrink; production passes none. */
+export interface StreamTiming { idleMs?: number; connectMs?: number }
 
 /**
  * Attach to a conversation's run and iterate its server-sent events from `since`. Any number of clients may.
  * The stream is a tail on the run's stored tape, and every event carries its seq (`id:`), so with a `runId` a
  * dropped connection (a backend restart, the Mac waking up) reconnects from the last seq it saw instead of failing.
+ *
+ * A connection that closes cleanly without the run's end (`error`, or a `done` that is not a steer segment) is
+ * not an ending: the run is asked what it is doing. A dead run (or one the backend no longer knows) ends the
+ * stream and the caller settles from the stored row; a live one is re-attached at once when the last
+ * connection moved the cursor, and backed off when it did not.
  */
-export async function* chatStream(convId: string, since = 0, signal?: AbortSignal, runId?: string, onGiveUp?: () => void): AsyncGenerator<ChatEvent & { seq: number | null }> {
+export async function* chatStream(convId: string, since = 0, signal?: AbortSignal, runId?: string, onGiveUp?: () => void, timing: StreamTiming = {}): AsyncGenerator<ChatEvent & { seq: number | null }> {
   let last = since
   let failures = 0
-  // The events that end a turn. The server also closes a stream cleanly when this subscriber's queue
-  // overflowed, which is not an ending: without one of these, an EOF means "reconnect from `last`".
-  let terminal = false
+  let sawEnd = false
   let idle = 0
   while (true) {
-    let got = 0
+    const from = last
     try {
       const q = `since=${last}${runId ? `&run_id=${encodeURIComponent(runId)}` : ''}`
-      for await (const { event, data, seq } of sseStream(`/conversations/${convId}/stream?${q}`, signal)) {
+      for await (const { event, data, seq } of sseStream(`/conversations/${convId}/stream?${q}`, signal, timing.idleMs ?? STREAM_IDLE_MS, timing.connectMs)) {
         failures = 0
-        got++
         if (seq !== null && Number.isFinite(seq)) last = seq
         if (event === 'malformed') continue
-        if (event === 'done' || event === 'error' || event === 'parked') terminal = true
+        if (event === 'error' || event === 'parked' || (event === 'done' && !(data as { segment?: boolean } | null)?.segment)) sawEnd = true
         yield { event, data, seq } as ChatEvent & { seq: number | null }
       }
-      if (terminal || !runId || signal?.aborted) return
-      // Bounded: a run that really ended without a terminal event would otherwise be re-asked forever.
-      idle = got ? 0 : idle + 1
-      if (idle > 3) {
+      if (sawEnd || !runId || signal?.aborted) return
+      let live: boolean
+      try {
+        live = (await api.runState(runId)).live
+      } catch (e) {
+        // The run is unknown to the backend: there is nothing to reconnect to.
+        if (e instanceof ApiError && e.status === 404) return
+        live = true
+        failures++
+        if (failures > STREAM_RETRIES) throw e
+      }
+      if (!live) return
+      if (last > from) {
+        idle = 0
+        continue
+      }
+      // Bounded: a run that stays live but never advances would otherwise be re-asked forever.
+      if (++idle > 3) {
         onGiveUp?.()
         return
       }
       await new Promise((res) => setTimeout(res, Math.min(2000, 300 * 2 ** idle)))
       continue
     } catch (e) {
+      // A stalled or timed-out connection is reconnectable like a dropped one.
       if (signal?.aborted || !runId || ++failures > STREAM_RETRIES) throw e
       await new Promise((res) => setTimeout(res, Math.min(5000, 500 * 2 ** (failures - 1))))
     }
@@ -817,7 +922,7 @@ export async function* chatStream(convId: string, since = 0, signal?: AbortSigna
  * resume from, and the server's ring replays whatever happened while the socket was down.
  */
 export async function* backgroundStream(since = 0, signal?: AbortSignal): AsyncGenerator<BackgroundEvent & { seq: number | null }> {
-  for await (const { event, data, seq } of sseStream(`/events?since=${since}`, signal)) {
+  for await (const { event, data, seq } of sseStream(`/events?since=${since}`, signal, STREAM_IDLE_MS)) {
     yield { event, data, seq } as BackgroundEvent & { seq: number | null }
   }
 }

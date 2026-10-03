@@ -1,8 +1,8 @@
 import { useEffect, useRef, type ReactNode } from 'react'
-import { ArrowUp, Square, Paperclip } from 'lucide-react'
+import { ArrowUp, Square, Paperclip, Loader2 } from 'lucide-react'
 import PlanModeToggle from './PlanModeToggle'
 import { uploadNote } from '../lib/uploadNote'
-import { useStore, useIsStreaming } from '../store'
+import { useStore, useIsStreaming, useIsStopping } from '../store'
 import SmartTextarea from './SmartTextarea'
 import { useOnboarding } from './onboarding/onboardingStore'
 import { COMPOSER_INSERT_EVENT } from '../lib/composerInsert'
@@ -25,6 +25,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   const box = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const streaming = useIsStreaming(conversationId)
+  const stopping = useIsStopping(conversationId)
   const activeId = useStore((s) => conversationId ?? s.focusedConversationId)
   const draftProjectId = useStore((s) => s.draftProjectId)
   // The draft is read by key, so switching chats or views shows each one's own text and a refused
@@ -42,6 +43,11 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   const noteUntrustedUpload = useStore((s) => s.noteUntrustedUpload)
 
   useEffect(() => { box.current?.querySelector('textarea')?.focus() }, [activeId])
+
+  /** Stop, then hand the keyboard back: the button that was pressed is about to be replaced or disabled. */
+  const halt = (): void => {
+    void stop(conversationId).finally(() => box.current?.querySelector('textarea')?.focus())
+  }
 
   // A tool card's slot chip put its text in the drafts store already; the composer of the
   // conversation being looked at only takes focus so the next keystroke lands after it.
@@ -129,11 +135,17 @@ export default function Composer({ conversationId, footer, compact = false, onSe
           value={text}
           onChange={setText}
           placeholder={streaming ? 'Steer the reply…' : placeholder}
-          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void submit() } }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void submit() }
+            // Escape ends the reply; while an input method is composing it belongs to the method.
+            else if (e.key === 'Escape' && streaming && !e.nativeEvent.isComposing) { e.preventDefault(); halt() }
+          }}
         />
         <div className="composer-actions">
           {streaming && (
-            <button className="send stop" title="Stop" aria-label="Stop" onClick={() => void stop(conversationId)}><Square size={14} /></button>
+            <button className="send stop" title={stopping ? 'Stopping…' : 'Stop (Esc)'} aria-label={stopping ? 'Stopping' : 'Stop'} aria-busy={stopping} disabled={stopping} onClick={halt}>
+              {stopping ? <Loader2 size={14} className="spin" /> : <Square size={14} />}
+            </button>
           )}
           {(!streaming || text.trim()) && (
             <button className="send" title={streaming ? 'Steer the reply' : 'Send'} aria-label={streaming ? 'Steer the reply' : 'Send'} disabled={!text.trim()} onClick={() => void submit()}><ArrowUp size={16} /></button>

@@ -114,6 +114,26 @@ export const foldRunState = (map: LiveRuns, info: RunInfo): LiveRuns => {
   return rest
 }
 
+/**
+ * Whether a conversation is in front of the user: the chat view showing it, or any surface that has it
+ * mounted (a canvas window or a pop-out holds a `retained` pin for as long as it does).
+ */
+export const onScreen = (convId: string, where: { view: string; focusedId: string | null; retained: { has: (id: string) => boolean } }): boolean =>
+  (where.view === 'chat' && where.focusedId === convId) || where.retained.has(convId)
+
+export type ChatNoticeKind = 'reply' | 'approval' | 'failed'
+
+/**
+ * What an event just did to a chat that is worth a system notification, from the status before and after it.
+ * One kind per transition, so a status that did not move rings never. A reply the user stopped is not news to them.
+ */
+export const chatNotice = (prev: SessionStatus, next: SessionStatus, ev: ChatEvent): ChatNoticeKind | null => {
+  if (next === 'needs-approval' && prev !== 'needs-approval') return 'approval'
+  if (next === 'error' && prev !== 'error') return 'failed'
+  if (next === 'done' && ev.event === 'done' && !ev.data.segment && !ev.data.stopped) return 'reply'
+  return null
+}
+
 /** The sidebar pulse: a session's own status wins, and a conversation with no session falls back to its live run. */
 export const pulseStatus = (sessionStatus: SessionStatus, liveRun?: { status?: string } | null): SessionStatus => {
   if (sessionStatus !== 'idle') return sessionStatus

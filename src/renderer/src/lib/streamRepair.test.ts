@@ -46,6 +46,17 @@ test('open fences and math blocks are untouched', () => {
   assert.equal(fix('```\ncode\n```\nthen **bold'), '```\ncode\n```\nthen **bold**')
 })
 
+test('a maths block opens and closes the way the parser reads it', () => {
+  // `$$` mentioned mid-line (in code, or as a one-line formula) is not a block and must not stop later repair.
+  assert.equal(fix('use `$$` for blocks\n\nthen **bold'), 'use `$$` for blocks\n\nthen **bold**')
+  assert.equal(fix('inline $$x^2$$ then **bold'), 'inline $$x^2$$ then **bold**')
+  assert.equal(fix('$$x^2$$\nthen **bold'), '$$x^2$$\nthen **bold**')
+  assert.equal(fix('$$\nx^2\n$$\nthen **bold'), '$$\nx^2\n$$\nthen **bold**')
+  assert.equal(fix('$$\nx^2$$\nthen **bold'), '$$\nx^2$$\nthen **bold**')
+  for (const open of ['$$x^2\na * **b', '$$\nx^2\n\nstill **b', '\\[\na * **b'])
+    assert.equal(fix(open), open)
+})
+
 test('a lone dash or equals under text is held back', () => {
   assert.equal(fix('Options:\n-'), 'Options:')
   assert.equal(fix('Options:\n- '), 'Options:')

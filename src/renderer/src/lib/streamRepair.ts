@@ -19,21 +19,35 @@ const BARE_FENCE = /^\s*(`{1,2}|~{1,2})$/
 const isPipe = (l: string | undefined): boolean => l !== undefined && l.trimStart().startsWith('|')
 const isBlank = (l: string | undefined): boolean => l === undefined || l.trim() === ''
 
-/** Whether the text ends inside a code fence or a `$$` block. */
+/** Whether the text ends inside a code fence or a maths block, read the way normalizeMathBlocks reads them:
+ *  a block opens only on a line that starts with `$$` (or a bare `\[`) and closes on a line that ends with
+ *  its fence. A `$$` mid-line is inline maths or code and must not flip the state, or one mention of it
+ *  would leave the rest of the reply unrepaired. */
 function endsOpen(lines: string[]): boolean {
   let fence: { ch: string; len: number } | null = null
-  let math = false
+  let math: '$$' | '\\]' | null = null
   for (const l of lines) {
     if (fence) {
       const m = /^\s*(`+|~+)\s*$/.exec(l)
       if (m && m[1][0] === fence.ch && m[1].length >= fence.len) fence = null
       continue
     }
+    if (math) {
+      if (l.trimEnd().endsWith(math)) math = null
+      continue
+    }
     const f = FENCE.exec(l)
     if (f) { fence = { ch: f[1][0], len: f[1].length }; continue }
-    if (((l.match(/\$\$/g) ?? []).length & 1) === 1) math = !math
+    const m = /^\s*\$\$(.*)$/.exec(l)
+    if (m) {
+      const rest = m[1].trim()
+      // `$$x^2$$` on one line is a complete block; `$$` or `$$x^2` waits for its closer.
+      if (!(rest.endsWith('$$') && rest.length > 2)) math = '$$'
+      continue
+    }
+    if (/^\s*\\\[\s*$/.test(l)) math = '\\]'
   }
-  return fence !== null || math
+  return fence !== null || math !== null
 }
 
 const spaceAt = (s: string, i: number): boolean => i < 0 || i >= s.length || /\s/.test(s[i])

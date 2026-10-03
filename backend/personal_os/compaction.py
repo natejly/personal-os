@@ -100,6 +100,18 @@ def estimate_messages(msgs: list[dict[str, Any]]) -> int:
     return total
 
 
+def _with_tools(r: dict[str, Any]) -> list[dict[str, Any]]:
+    """An assistant row, preceded by the tool calls and results it stored (the text for_model produced)."""
+    out: list[dict[str, Any]] = []
+    evs = [e for e in (r.get("tool_events") or []) if isinstance(e, dict) and e.get("call_id") and isinstance(e.get("for_model"), str)]
+    if r["role"] == "assistant" and evs:
+        out.append({"role": "assistant", "content": None, "tool_calls": [
+            {"id": e["call_id"], "type": "function", "function": {"name": e.get("name") or "", "arguments": json.dumps(e.get("arguments") or {}, default=str)}}
+            for e in evs]})
+        out += [{"role": "tool", "tool_call_id": e["call_id"], "content": e["for_model"]} for e in evs]
+    return out + [{"role": r["role"], "content": r["content"]}]
+
+
 class Compactor:
     """One rolling summary per conversation."""
 
@@ -140,13 +152,15 @@ class Compactor:
         # The boundary message is gone (regenerate deleted it): fall back to time.
         return sum(1 for r in rows if r["created_at"] <= summary["upto_created"])
 
-    def build_history(self, rows: list[dict[str, Any]], summary: dict[str, Any] | None) -> list[dict[str, str]]:
+    def build_history(self, rows: list[dict[str, Any]], summary: dict[str, Any] | None) -> list[dict[str, Any]]:
+        start = self._tail_start(rows, summary) if summary else 0
         plain = [{"role": r["role"], "content": r["content"]} for r in rows]
+        # Tool results are replayed only for rows still on the tail; older ones live in the summary.
+        tail = [m for r in rows[start:] for m in _with_tools(r)]
         if not summary:
-            return plain
-        start = self._tail_start(rows, summary)
+            return tail
         head = plain[:1] if rows and rows[0]["role"] == "user" and start > 0 else []
-        return head + [{"role": "user", "content": SUMMARY_PREFIX + _fence(summary["summary"])}] + plain[start:]
+        return head + [{"role": "user", "content": SUMMARY_PREFIX + _fence(summary["summary"])}] + tail
 
     async def compact(self, cfg: dict[str, Any], model: str, conv_id: str, history_rows: list[dict[str, Any]],
                       focus: str | None = None, complete: Complete | None = None) -> dict[str, Any] | None:
@@ -178,7 +192,7 @@ class Compactor:
 
 
 async def prepare_history(compactor: Compactor, convos: Any, cfg: dict[str, Any], model: str, conv_id: str, system_tokens: int,
-                          complete: Complete | None = None) -> tuple[list[dict[str, str]], dict[str, Any]]:
+                          complete: Complete | None = None) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """The history to send, compacted first when it has outgrown `compactAt` of the window. Never raises."""
     info: dict[str, Any] = {"compacted": False}
     rows: list[dict[str, Any]] = []

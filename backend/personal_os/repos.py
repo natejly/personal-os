@@ -211,10 +211,10 @@ class Conversations:
         """history() with the ids and timestamps compaction needs to say where a summary ends."""
         with self.db.tx() as c:
             rows = c.execute(
-                "SELECT id, role, content, created_at FROM messages WHERE conversation_id=? AND content != '' ORDER BY created_at, rowid",
+                "SELECT id, role, content, created_at, tool_events FROM messages WHERE conversation_id=? AND content != '' ORDER BY created_at, rowid",
                 (conv_id,),
             ).fetchall()
-        return [dict(r) for r in rows]
+        return [row_to_dict(r, ("tool_events",)) for r in rows]
 
 
 # ---------------- Memories ----------------

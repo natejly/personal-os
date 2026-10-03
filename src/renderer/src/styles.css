@@ -569,6 +569,7 @@ kbd {
 .variant-switcher .icon-btn:disabled { opacity: 0.35; cursor: default; }
 .run-error-row { display: flex; align-items: center; gap: 10px; margin: 6px 0 0 38px; font-size: 13px; color: var(--text-muted); }
 
+.msg.user.pending .user-bubble { opacity: 0.6; }
 .thinking { display: inline-flex; gap: 4px; padding: 6px 0; }
 .thinking span {
   width: 6px; height: 6px; border-radius: 50%; background: var(--text-faint);

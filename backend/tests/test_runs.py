@@ -620,6 +620,33 @@ def test_sse_survives_non_finite_numbers() -> None:
     check(data == {"v": "nan", "xs": ["inf", 1.5]}, f"non-finite floats become strings, got {data}")
 
 
+def test_an_oversized_message_is_refused_before_it_is_stored() -> None:
+    """One message is bounded by the context window; the refusal writes no row and starts no run."""
+    cid = new_conv()
+    r = client.post(f"/conversations/{cid}/chat", json={"content": "x" * 600_000})
+    check(r.status_code == 413, f"chat refuses an oversized message, got {r.status_code}")
+    check(isinstance(r.json()["detail"], str) and "256,000" in r.json()["detail"], f"detail is a plain sentence naming the limit, got {r.json()}")
+    check(j("GET", f"/conversations/{cid}")["messages"] == [], "nothing was stored")
+    check(bus.get(cid) is None, "no run was started")
+    # Exactly at the limit is accepted.
+    script(2)
+    j("POST", f"/conversations/{cid}/chat", {"content": "x" * 256_000})
+    drain(cid)
+    check(len(j("GET", f"/conversations/{cid}")["messages"]) == 2, "an at-limit message is answered")
+
+    # Steer: refused while the run goes on to finish its reply.
+    script(30, 0.05)
+    cid = new_conv()
+    j("POST", f"/conversations/{cid}/chat", {"content": "hi"})
+    wait_until(lambda: bool(run_info(cid).get("message_id")), "the reply to start")
+    before = j("GET", f"/conversations/{cid}")["messages"]
+    r = client.post(f"/conversations/{cid}/steer", json={"content": "y" * 300_000})
+    check(r.status_code == 413 and isinstance(r.json()["detail"], str), f"steer refuses it too, got {r.status_code}")
+    check(len(j("GET", f"/conversations/{cid}")["messages"]) == len(before), "the steer added no row")
+    drain(cid)
+    check(message(cid)["content"].startswith("w0"), "the live reply finished normally")
+
+
 TESTS = [test_post_starts_a_background_run, test_second_post_conflicts, test_two_clients_see_the_same_events,
          test_late_client_replays_from_the_ring, test_event_names_are_the_chatevent_union, test_stop_ends_the_run,
          test_steer_folds_into_the_live_run, test_stop_and_steer_cut_a_blocked_provider_read,
@@ -628,7 +655,8 @@ TESTS = [test_post_starts_a_background_run, test_second_post_conflicts, test_two
          test_run_survives_every_subscriber_leaving, test_an_overflowed_subscriber_reconnects_without_a_gap,
          test_shutdown_cancels_a_live_run_and_keeps_its_text,
          test_run_info_carries_message_seq, test_message_seq_advances_with_a_steer_segment,
-         test_run_state_is_published_on_the_app_topic, test_sse_survives_non_finite_numbers]
+         test_run_state_is_published_on_the_app_topic, test_sse_survives_non_finite_numbers,
+         test_an_oversized_message_is_refused_before_it_is_stored]
 
 if __name__ == "__main__":
     failures = 0

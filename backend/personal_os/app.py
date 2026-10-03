@@ -363,6 +363,20 @@ def _int_setting(cfg: dict[str, Any], key: str, default: int) -> int:
         return default
 
 
+# One message may fill at most this share of the context window: past it the row would be replayed
+# on every later turn (the first user message always survives compaction) and the chat is unusable.
+MESSAGE_WINDOW_FRACTION = 0.5
+
+
+def _message_too_long(text: str, cfg: dict[str, Any]) -> str | None:
+    """A plain sentence when `text` is over the per-message bound, else None. Mirrors lib/messageLimit.ts."""
+    limit = int(_int_setting(cfg, "contextWindow", 128000) * 4 * MESSAGE_WINDOW_FRACTION)
+    if len(text) <= limit:
+        return None
+    return (f"That message is about {len(text):,} characters. One message can hold {limit:,} with the current "
+            "context window. Attach it as a file instead.")
+
+
 def _record_usage(ev: dict[str, Any]) -> None:
     """llm.on_usage listener: persist one row per model call with a best-effort cost."""
     try:
@@ -3223,6 +3237,9 @@ async def chat(id: str, body: ChatIn) -> dict[str, Any]:
     row = convos.get(id, with_messages=False)
     if not row:
         raise HTTPException(404, "Conversation not found")
+    # Before anything is persisted or a run exists; a string detail, so the client toasts it as is.
+    if body.content is not None and (too_long := _message_too_long(body.content, settings())):
+        raise HTTPException(413, too_long)
     # A chat with a live run is never hidden: writing in an archived one brings it back.
     if row.get("archived_at"):
         convos.update(id, {"archived": False})
@@ -3265,6 +3282,8 @@ async def steer_run(id: str, body: SteerIn) -> dict[str, Any]:
     text = (body.content or "").strip()
     if not text:
         raise HTTPException(400, "Empty message")
+    if too_long := _message_too_long(text, settings()):
+        raise HTTPException(413, too_long)
     # Only a run that is still answering can fold the message into a round; past its `done` the loop
     # is over, so accepting one here would store a message nothing ever replies to.
     run = bus.answering(id)

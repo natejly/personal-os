@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { PanelLeftOpen, Pencil, Sparkles, SlidersHorizontal, ArrowDown } from 'lucide-react'
-import { useStore, useProject, useConversation, useIsStreaming, useStreamingMessageId } from '../store'
+import { useStore, useProject, useConversation, useIsStreaming, useStreamingMessageId, usePendingSends } from '../store'
 import ProjectChip from './ProjectChip'
-import MessageView from './Message'
+import MessageView, { PendingUserMessage } from './Message'
 import RegenRow from './RegenRow'
 import FindBar from './FindBar'
 import Composer from './Composer'
@@ -30,6 +30,9 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   const convo = useConversation(conversationId)
   const isStreamingHere = useIsStreaming(conversationId)
   const streamingMessageId = useStreamingMessageId(conversationId)
+  const pending = usePendingSends(conversationId)
+  // A chat with no row yet: its first message is shown (with the dots) in place of the greeting.
+  const draftPending = useStore((s) => (!conversationId && s.focusedConversationId === null ? s.draftPendingSend : null))
   const sidebarOpen = useStore((s) => s.sidebarOpen)
   const contextOpen = useStore((s) => s.contextOpen)
   const draftProjectId = useStore((s) => s.draftProjectId)
@@ -50,7 +53,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   const lastLen = msgs[msgs.length - 1]?.content.length ?? 0
 
   const last = msgs[msgs.length - 1]
-  const { stick, unseen, jump } = useStickToBottom(scrollRef, { resetKey: convo?.id ?? conversationId ?? null, tailUserId: last?.role === 'user' ? last.id : null, rows: msgs.length })
+  const { stick, unseen, jump } = useStickToBottom(scrollRef, { resetKey: convo?.id ?? conversationId ?? null, tailUserId: last?.role === 'user' ? last.id : null, rows: msgs.length + pending.length + (draftPending ? 1 : 0) })
 
   // Only the full-window chat is a "page"; a chat window on the canvas is one of many on screen.
   usePageContext(() => (conversationId ? undefined : {
@@ -97,7 +100,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
           {/* Highlight names are document-global, so only the full-window chat owns find. */}
           {!conversationId && <FindBar scope={scrollRef} resetKey={convo?.id} />}
           <div className="messages" ref={scrollRef}>
-            {!convo ? (
+            {!convo && !draftPending ? (
               <div className="empty-state">
                 <h1>{greeting()}</h1>
                 {project && <p>New chat in {project.name}</p>}
@@ -110,11 +113,17 @@ export default function ChatView({ conversationId }: { conversationId?: string }
             ) : (
               <div className="messages-inner">
                 {msgs.map((m) => <MessageView key={m.id} message={m} streaming={isStreamingHere && streamingMessageId === m.id} last={m.id === last?.id} editable={m.role === 'user' && !isStreamingHere} />)}
-                <RegenRow conversationId={conversationId} last={last} streaming={isStreamingHere} />
+                {pending.map((p) => <PendingUserMessage key={p.key} text={p.text} />)}
+                {draftPending && <PendingUserMessage text={draftPending.text} />}
+                {/* From the click, and from user_message to the first assistant row (context assembly), nothing else shows work. */}
+                {(pending.length > 0 || draftPending || isStreamingHere) && streamingMessageId === null && (
+                  <div className="msg assistant"><div className="avatar"><Sparkles size={14} /></div><div className="bubble"><span className="thinking"><span /><span /><span /></span></div></div>
+                )}
+                {pending.length === 0 && !draftPending && <RegenRow conversationId={conversationId} last={last} streaming={isStreamingHere} />}
               </div>
             )}
           </div>
-          {convo && !stick && (
+          {(convo || draftPending) && !stick && (
             <button className="jump-latest" onClick={jump} aria-label="Jump to latest">
               <ArrowDown size={13} /> Jump to latest{unseen > 0 && <span className="jump-count">{unseen > 99 ? '99+' : unseen}</span>}
             </button>

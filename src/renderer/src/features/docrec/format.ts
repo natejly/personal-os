@@ -89,3 +89,5 @@ export const mergeTemplates = (custom: { id: string; name: string }[] = []): { i
 /** The focus line a recipe fills in, or the current one when the id is unknown (a deleted recipe). */
 export const applyRecipe = (recipes: { id: string; prompt?: string }[], id: string, current = ''): string =>
   recipes.find((r) => r.id === id)?.prompt ?? current
+/** The sentence copied for pasting into a call's chat, so the others hear about the recording from the person. */
+export const HEADS_UP_MESSAGE = "I'm taking notes with a local recorder; tell me if you'd rather I didn't."

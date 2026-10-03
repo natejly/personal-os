@@ -6,6 +6,7 @@ import {
 import type { Doc } from '@shared/types'
 import { useStore } from '../store'
 import type { DocHit } from '../lib/api'
+import { liveDoc } from '../features/docrec/segments'
 import {
   buildGroups, canDropDoc, canDropFolder, flattenGroups, folderKey, groupShutKey, joinPath, nameOf,
   parentOf, scopeOf, type Group, type Row, type TreeNode
@@ -67,6 +68,7 @@ export default function DocTree({ hits, docs, activeId, query, onQuery }: Props)
   const deleteDocFolder = useStore((s) => s.deleteDocFolder)
   const moveDoc = useStore((s) => s.moveDoc)
   const createDoc = useStore((s) => s.createDoc)
+  const recordingDocId = useStore((s) => liveDoc(s.meetingStatus)?.docId ?? '')
   const openDoc = useStore((s) => s.openDoc)
   const deleteDoc = useStore((s) => s.deleteDoc)
   const setDocStar = useStore((s) => s.setDocStar)
@@ -240,6 +242,7 @@ export default function DocTree({ hits, docs, activeId, query, onQuery }: Props)
       <span className="doc-row-main">
         <span className="doc-row-title">
           {d.title || 'Untitled'}
+          {d.id === recordingDocId && <span className="dr-dot" title="Recording" aria-label="Recording" style={{ display: 'inline-block', marginLeft: 6, background: 'var(--danger)' }} />}
           {typeof d.pending === 'number' && d.pending > 0 && (
             <span className="doc-pending" title={`${d.pending} assistant edit${d.pending === 1 ? '' : 's'} awaiting review`}>
               <Sparkles size={9} />{d.pending}

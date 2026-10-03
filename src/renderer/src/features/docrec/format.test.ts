@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { applyRecipe, fmtDuration, headlineTitle, isUntitled, mergeTemplates, modeLabel, pendingLabel, recordingWhen, summaryCopy } from './format'
+import { applyRecipe, fmtDuration, headlineTitle, HEADS_UP_MESSAGE, isUntitled, mergeTemplates, modeLabel, pendingLabel, recordingWhen, summaryCopy } from './format'
 
 test('fmtDuration steps from seconds to minutes to hours', () => {
   assert.equal(fmtDuration(42000), '42s')
@@ -67,4 +67,6 @@ test('applyRecipe fills the focus line and leaves it alone for an unknown id', (
   const recipes = [{ id: 'r_owners', prompt: 'owners only' }]
   assert.equal(applyRecipe(recipes, 'r_owners'), 'owners only')
   assert.equal(applyRecipe(recipes, 'r_gone', 'keep me'), 'keep me')
+test('the heads-up message is a plain sentence', () => {
+  assert.match(HEADS_UP_MESSAGE, /tell me if you'd rather I didn't\.$/)
 })

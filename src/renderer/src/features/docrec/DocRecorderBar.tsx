@@ -1,10 +1,10 @@
-import { AlertTriangle, Loader2, Pause, Play, Square } from 'lucide-react'
+import { AlertTriangle, Copy, Loader2, Pause, Play, Square } from 'lucide-react'
 import { useStore } from '../../store'
 import { formatOffset, recorderState } from '../../lib/transcript'
 import { useDocRec } from './store'
 import { useDocRecSync, useElapsed } from './hooks'
 import { behindLabel } from './behind'
-import { modeLabel } from './format'
+import { HEADS_UP_MESSAGE, modeLabel } from './format'
 import '../../styles/docrec.css'
 
 /**
@@ -50,6 +50,7 @@ export default function DocRecorderBar({ docId }: { docId: string }): JSX.Elemen
       {lag && <span className="dr-lag">{lag}</span>}
       {warning && <span className="dr-warn" title={warning}><AlertTriangle size={12} /> {warning}</span>}
       <span className="dr-bar-actions">
+        <button className="ghost-btn dr-small" title="Copy a message to paste into the call" onClick={() => void navigator.clipboard.writeText(HEADS_UP_MESSAGE).catch(() => undefined)}><Copy size={12} /> Copy heads-up</button>
         {state === 'recording' && (
           <button className="ghost-btn dr-small" disabled={busy} onClick={() => void useDocRec.getState().pause()}><Pause size={12} /> Pause</button>
         )}

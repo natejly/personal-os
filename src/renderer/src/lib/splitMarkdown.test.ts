@@ -1,8 +1,59 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import remarkMath from 'remark-math'
+import rehypeKatex from 'rehype-katex'
+import rehypeHighlight from 'rehype-highlight'
 import { splitMarkdown } from './splitMarkdown'
+import { normalizeMathBlocks } from './mathBlocks'
 
 const whole = (s: string): void => assert.equal(splitMarkdown(s).join(''), s)
+
+// The same plugin set MarkdownPreview uses, so a cut that changes meaning shows up as different HTML.
+const REMARK = [remarkGfm, remarkMath]
+const REHYPE = [[rehypeKatex, { strict: false, throwOnError: false }], rehypeHighlight] as never
+const render = (s: string): string =>
+  renderToStaticMarkup(createElement(ReactMarkdown, { remarkPlugins: REMARK, rehypePlugins: REHYPE, children: s })).replace(/>\s+</g, '><').trim()
+
+const CORPUS = [
+  '# H\n\npara one\nline two\n\n- a\n- b\n\n  - nested\n\n- c\n\n1. x\n2. y\n\n> quote\n> more\n\n> second quote\n\nafter',
+  'Intro\n\n```py\na = 1\n\nb = 2\n```\n\nAfter\n\n````\n```\ninner\n```\n````\n\ntext',
+  'Table\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n$$\nx^2\n\ny\n$$\n\nInline $x$ here.',
+  'para\n\n    indented code\n\n    more\n\nafter',
+  'Setext\n===\n\nAnother\n---\n\n***\n\ntext',
+  'unterminated\n\n```js\nlet a\n\nlet b',
+  '- item with fence\n\n  ```\n  code\n\n  still\n  ```\n\n- next',
+  'Text with `code $5` and $5 and $10 prices.\n\nMore $x^2$ and \\(y\\) and \\[\nz\n\\]',
+  'Title\n\n## Sub\n\n- [ ] task\n- [x] done\n\nend',
+  'a\n\n\n\nb\n\n\n',
+  '* a\n\n* b\n\n+ c\n\n2) d',
+  'Lazy\n\n- item\ncontinued lazily\n\nnot a list anymore\n\n   three-space para',
+  'Para ending with hard break  \nnext line\n\n```\n\n```\n\nc'
+]
+
+test('rendering the blocks one by one gives the same HTML as the whole document', () => {
+  for (const raw of CORPUS) {
+    const s = normalizeMathBlocks(raw)
+    const blocks = splitMarkdown(s)
+    assert.equal(blocks.join(''), s)
+    assert.equal(blocks.map(render).join(''), render(s), JSON.stringify(raw))
+  }
+})
+
+test('appending text changes only the last block: earlier blocks are stable once emitted', () => {
+  for (const raw of CORPUS) {
+    const s = normalizeMathBlocks(raw)
+    let prev: string[] = []
+    for (let i = 1; i <= s.length; i++) {
+      const b = splitMarkdown(s.slice(0, i))
+      for (let k = 0; k < Math.min(prev.length, b.length) - 1; k++) assert.equal(b[k], prev[k], `block ${k} changed at ${i} in ${JSON.stringify(raw)}`)
+      prev = b
+    }
+  }
+})
 
 test('paragraphs and headings split at blank lines', () => {
   const s = '# Title\n\nOne.\n\nTwo.\n\n## Next\n\nThree.'

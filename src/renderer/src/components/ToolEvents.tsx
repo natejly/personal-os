@@ -310,6 +310,11 @@ function ToolFallback({ event, conversationId }: { event: ToolEvent; conversatio
   )
 }
 
+/** Runs a row's render inside its boundary, so a throw while describing the call lands in that row's fallback. */
+function Row({ render }: { render: () => JSX.Element }): JSX.Element {
+  return render()
+}
+
 function ToolEvents({ events, conversationId }: { events: ToolEvent[]; conversationId: string }): JSX.Element {
   const [open, setOpen] = useState<Record<string, boolean>>({})
   const approveTool = useStore((s) => s.approveTool)
@@ -379,7 +384,7 @@ function ToolEvents({ events, conversationId }: { events: ToolEvent[]; conversat
                 {!t.pending && !t.error && t.undo?.snapshot_id && <UndoButton snapshotId={t.undo.snapshot_id} />}
                 {t.pending && t.needs_approval && <ApprovalRules event={t} conversationId={conversationId} />}
               </>
-            ) : genericRow(t)}
+            ) : <Row render={() => genericRow(t)} />}
           </RenderBoundary>
         )
       })}

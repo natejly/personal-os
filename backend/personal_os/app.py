@@ -1167,6 +1167,7 @@ Besides normal markdown, the UI renders three fenced code blocks inline:
 - ```mermaid — diagrams (flowchart, sequenceDiagram, gantt, mindmap, timeline, ...).
 - ```html — a self-contained HTML document or fragment (inline CSS/JS, no network, no external files). It is shown as a sandboxed live preview with a Code/Preview toggle and a "Save as artifact" button. Use it for a mock-up, a small interactive demo or a formatted layout. ```svg renders as an image.
 For anything larger or that the user will keep and revise (a calculator, a dashboard-like page, a game, a formatted report), call artifact_create with the full HTML instead; change it with artifact_edit (exact search/replace pairs) for small fixes, or artifact_update (full new HTML) when most of it changes; the chat shows it as a live card and keeps every version. Both run in a sandbox with no network, no external scripts/fonts/images (use data: URIs or inline SVG), no localStorage and no form submits.
+Maths renders when written inline as `$...$` and as a display block with `$$` on its own lines; do not use `\\(` `\\)` or `\\[` `\\]`.
 Only chart real values you have or computed; never invent data for decoration. Text before and after a block is shown as usual."""
 
 TOOLS_HINT = "You have tools. Use them when they would make the answer more accurate or current; otherwise answer directly. After using tools, write the final answer for the user."

@@ -8,6 +8,8 @@ import MarkdownPreview, { CopyButton } from './MarkdownPreview'
 export { SAFE_MD } from './MarkdownPreview'
 import { traceSummary, fmtMs } from './TraceView'
 import { modelLabel } from '../lib/modelLabel'
+import { outcomeLabel } from '../lib/outcomeLabel'
+import { errorAction } from '../lib/errorAction'
 
 /**
  * One message's body, fenced: a render error in its markdown or tool cards (a null field, a bad
@@ -67,22 +69,57 @@ function Reasoning({ text, live }: { text: string; live: boolean }): JSX.Element
   )
 }
 
-/** Offered under a reply the backend lost mid-run, only while its newest run is still resumable. */
-function ResumeButton({ conversationId }: { conversationId: string }): JSX.Element | null {
-  const [run, setRun] = useState<string | null>(null)
+/**
+ * Continue / Resume under the newest reply when the backend says its run can be picked up. Bound to
+ * its own message: a resumable run for some other message in the chat never shows here. The lookup
+ * is repeated when the backend comes back, because it fails while the sidecar is down, and again when
+ * the stream closes: at `done` the run row still reads `running` (its style-learning tail is on), and
+ * only the close that follows `Run.end` says how it ended.
+ */
+function ContinueButton({ conversationId, messageId }: { conversationId: string; messageId: string }): JSX.Element | null {
+  const backendState = useStore((s) => s.backendState)
+  const settled = useStore((s) => !s.sessions[conversationId]?.streaming)
+  const [run, setRun] = useState<{ id: string; reason: string } | null>(null)
   const [busy, setBusy] = useState(false)
   useEffect(() => {
     let live = true
-    api.interruptedRun(conversationId).then((r) => { if (live && r?.resumable) setRun(r.run_id) }).catch(() => undefined)
+    api.resumableRun(conversationId).then((r) => {
+      if (live) setRun(r.resumable && r.run_id && r.message_id === messageId ? { id: r.run_id, reason: r.reason } : null)
+    }).catch(() => undefined)
     return () => { live = false }
-  }, [conversationId])
+  }, [conversationId, messageId, backendState, settled])
   if (!run) return null
   return (
     <button className="ghost-btn" disabled={busy} onClick={() => {
       setBusy(true)
-      useStore.getState().resumeRun(conversationId, run).then(() => setRun(null)).catch((e) => { setBusy(false); useStore.getState().toast((e as Error).message, 'error') })
-    }}><RotateCw size={13} /> Resume</button>
+      useStore.getState().resumeRun(conversationId, run.id).then(() => setRun(null)).catch((e) => { setBusy(false); useStore.getState().toast((e as Error).message, 'error') })
+    }}><RotateCw size={13} /> {run.reason === 'interrupted' ? 'Resume' : 'Continue'}</button>
   )
+}
+
+/** The single action an error class earns, under the newest reply. */
+function ErrorAction({ conversationId, kind }: { conversationId: string; kind: string }): JSX.Element | null {
+  const [busy, setBusy] = useState(false)
+  const act = errorAction(kind)
+  if (!act) return null
+  const st = (): ReturnType<typeof useStore.getState> => useStore.getState()
+  const go = (): void => {
+    if (act.action === 'retry') void st().regenerate(conversationId)
+    else if (act.action === 'settings') st().openSettings('provider')
+    else if (act.action === 'models') {
+      // The model menu lives under the composer; settings is the fallback when no menu is mounted.
+      const trigger = document.querySelector<HTMLButtonElement>('.model-menu-trigger')
+      if (trigger) trigger.click()
+      else st().openSettings('provider')
+    } else {
+      setBusy(true)
+      api.compactConversation(conversationId)
+        .then(() => st().regenerate(conversationId), (e) => st().toast(`Could not compact: ${(e as Error).message}`, 'error'))
+        .catch((e) => st().toast((e as Error).message, 'error'))
+        .finally(() => setBusy(false))
+    }
+  }
+  return <button className="ghost-btn" disabled={busy} onClick={go}>{busy ? 'Working…' : act.label}</button>
 }
 
 // Tools that can change a granted folder; a reply without one never asks the backend for a change list.
@@ -132,6 +169,9 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
   const isUser = message.role === 'user'
   const ctx = message.context_used
   const ctxCount = ctx ? ctx.memories.length + ctx.nodes.length + ctx.chunks.length : 0
+  // An interrupted row carries both an `Interrupted:` error and the outcome; the error line says it once.
+  const note = !streaming && message.role === 'assistant' && !message.error ? outcomeLabel(message.outcome) : null
+  const bare = !streaming && message.role === 'assistant' && message.outcome === 'stopped' && !message.content && !message.tool_events?.length && !message.reasoning
   const trace = message.trace && message.trace.length > 0 ? traceSummary(message.trace) : null
   return (
     <div className={`msg ${message.role}`}>
@@ -154,7 +194,9 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
           </div>
         )}
         {message.error && <div className="msg-error"><AlertCircle size={14} /><span>{message.error}</span></div>}
-        {!streaming && message.role === 'assistant' && message.error?.startsWith('Interrupted:') && <ResumeButton conversationId={message.conversation_id} />}
+        {bare ? <div className="msg-partial">Stopped before any output</div> : note && <div className="msg-partial">{note}</div>}
+        {last && !streaming && message.role === 'assistant' && message.error && message.error_kind && <div className="msg-error-actions"><ErrorAction conversationId={message.conversation_id} kind={message.error_kind} /></div>}
+        {last && !streaming && message.role === 'assistant' && <ContinueButton conversationId={message.conversation_id} messageId={message.id} />}
         {!streaming && message.role === 'assistant' && message.tool_events?.some((t) => FILE_CHANGING.test(t.name)) && <FilesChanged messageId={message.id} />}
         {!streaming && (
           <div className="msg-actions">
@@ -178,7 +220,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
                 <span><Activity size={11} />{trace.steps} step{trace.steps === 1 ? '' : 's'} · {fmtMs(trace.total_ms)}{trace.tokens ? ` · ${trace.tokens.toLocaleString()} tok` : ''}</span>
               </button>
             )}
-            <CopyButton text={message.content} />
+            {!bare && <CopyButton text={message.content} />}
           </div>
         )}
       </div>

@@ -543,6 +543,17 @@ kbd {
   color: var(--danger); font-size: 13px; margin-top: 8px;
   background: rgba(229, 72, 77, 0.1); padding: 8px 10px; border-radius: 8px;
 }
+.msg-partial { color: var(--text-faint); font-size: 13px; margin-top: 8px; }
+.msg-error-actions { margin-top: 6px; }
+/* Sits in the chat column between the transcript and the composer, pulled up over the transcript's bottom edge. */
+.jump-latest {
+  position: relative; z-index: 2; align-self: center; flex: none; margin: -44px 0 12px;
+  display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--panel, var(--bg)); color: var(--text);
+  font-size: 12px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.18); cursor: pointer;
+}
+.jump-latest:hover { background: var(--hover); }
+.jump-count { min-width: 16px; padding: 0 5px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 11px; line-height: 16px; text-align: center; }
 .regen-row { display: flex; justify-content: flex-start; align-items: center; gap: 8px; padding-left: 38px; margin-top: -10px; }
 .variant-switcher { display: inline-flex; align-items: center; gap: 2px; font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .variant-switcher .icon-btn:disabled { opacity: 0.35; cursor: default; }

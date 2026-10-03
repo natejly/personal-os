@@ -63,6 +63,21 @@ test('a stopped reply is finished too: `done` carries the partial text and ends 
   assert.equal(after.streaming?.answering, false, 'Stop settles the composer at once, not when the tail closes')
 })
 
+const firstMsg = (s: ChatSession): Message => (s.conversation.messages as Message[])[0]
+
+test('`done` copies how the reply ended and its error class onto the message', () => {
+  const ev = { event: 'done', data: { id: 'm1', error: null, context_used: null, tool_events: [], trace: [], stopped: false, partial: 'rounds', outcome: 'length', error_kind: null } } as unknown as ChatEvent
+  assert.equal(firstMsg(applyEvent(session(), ev, true)).outcome, 'length')
+  const failed = { event: 'done', data: { id: 'm1', error: 'slow down', context_used: null, tool_events: [], trace: [], stopped: false, error_kind: 'rate_limit' } } as unknown as ChatEvent
+  assert.equal(firstMsg(applyEvent(session(), failed, true)).error_kind, 'rate_limit')
+})
+
+test('a stopped `done` without an outcome reads as stopped; a clean one has none', () => {
+  const stopped = { event: 'done', data: { id: 'm1', error: null, context_used: null, tool_events: [], trace: [], stopped: true } } as unknown as ChatEvent
+  assert.equal(firstMsg(applyEvent(session(), stopped, true)).outcome, 'stopped')
+  assert.equal(firstMsg(applyEvent(session(), DONE, true)).outcome, null)
+})
+
 /**
  * A new chat is personal unless the user said otherwise. Both regressions this pins were implicit:
  * ⌘N read the project behind whatever was on screen, and merely opening a project armed the draft.

@@ -1034,6 +1034,9 @@ button.tag:disabled { cursor: default; }
 .graph-canvas .link line { stroke: var(--border-strong); stroke-width: 1.4; }
 .graph-canvas .link text { font-size: 10px; fill: var(--text-faint); paint-order: stroke; stroke: var(--bg); stroke-width: 3px; }
 .graph-canvas .link.dim { opacity: 0.15; }
+.graph-canvas .link.ended { opacity: 0.55; }
+.graph-canvas .link.ended line { stroke-dasharray: 4 3; }
+.graph-canvas .link.ended text { font-style: italic; }
 .graph-canvas .node { cursor: pointer; transition: opacity 0.15s; }
 .graph-canvas .node circle { stroke: var(--bg); stroke-width: 2; }
 .graph-canvas .node.selected circle { stroke: var(--text); stroke-width: 3; }

@@ -663,6 +663,9 @@ export interface GraphEdge {
   relation: string
   properties: Record<string, unknown>
   created_at: number
+  fact?: string
+  valid_at?: number | null
+  invalid_at?: number | null
 }
 
 export interface GraphData {

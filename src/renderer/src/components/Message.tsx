@@ -239,4 +239,14 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
   )
 })
 
+/** A message sent and not yet confirmed by the run: the same bubble, dimmed, with no actions. */
+export function PendingUserMessage({ text }: { text: string }): JSX.Element {
+  return (
+    <div className="msg user pending" aria-busy="true">
+      <div className="avatar"><User size={14} /></div>
+      <div className="bubble"><div className="user-bubble"><div className="user-text">{text}</div></div></div>
+    </div>
+  )
+}
+
 export default MessageView

@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { messageCharLimit, tooLongNotice } from './lib/messageLimit'
 import type { ApprovalDecision, BackendInfo, BackendState, PlanEdit, PlanDecision, PlanRecord,
   Desk, DeskEvent, DeskFile, FullDesk, PromotionResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, Document, Effort, TrashKind, FullDoc, GraphData, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodoCalendarStatus, TodayDashboard, Recap, Job, Meeting, MeetingCandidate, MeetingCapability, MeetingConfig, MeetingPreflight, MeetingSegment, MeetingStatus, MeetingStatusInfo, MeetingStreamEvent, FullMeeting } from '@shared/types'
 import { daily as dailyNote } from './features/notes/api'
@@ -64,6 +65,11 @@ export interface Streaming {
   stopping: boolean
 }
 
+/** A message sent but not yet confirmed by the run's `user_message` event; shown dimmed in the transcript. */
+export interface PendingSend { key: number; text: string; at: number }
+const EMPTY_PENDING: readonly PendingSend[] = Object.freeze([])
+let pendingKeySeq = 0
+
 /** One live conversation. Store-local: a running AbortController must never cross the IPC bus. */
 export interface ChatSession {
   conversation: Conversation
@@ -79,6 +85,8 @@ export interface ChatSession {
   touchedAt: number
   /** The run died before it opened a reply (no message to stamp the error on): shown as a notice, cleared by the next message. */
   runError: { message: string; runId: string | null; interrupted: boolean } | null
+  /** Sends the run has not echoed back yet (optimistic bubbles); undefined when none. */
+  pendingSends?: PendingSend[]
 }
 
 interface Toast { id: number; text: string; kind: 'info' | 'error' | 'learned'; action?: { label: string; run: () => void } }
@@ -159,6 +167,8 @@ export interface State {
   /** A model picked on a draft chat. Null follows `settings.defaultModel`; picking one must not rewrite that default. */
   draftModel: string | null
   draftFast: boolean
+  /** The first message of a chat that has no row yet, shown until the row exists. */
+  draftPendingSend: PendingSend | null
   /** A file was attached before this draft had a row. `send` marks the new chat untrusted. */
   uploadTaintTarget: 'draft' | 'page' | null
   /** Why that pending mark exists: `upload` for a file, `email` for a message someone else wrote. */
@@ -771,7 +781,15 @@ export const applyEvent = (s: ChatSession, ev: ChatEvent, focused: boolean, seq?
     case 'user_message':
       // Merge by id: a steer is persisted and published by its endpoint, so an attach replay plus the
       // live stream (or a refetch) can both carry it.
-      return msgs.some((m) => m.id === ev.data.id) ? { ...s, runError: null } : { ...withMsgs([...msgs, ev.data]), runError: null }
+      // The optimistic bubble this message confirms goes in the same returned session (the backend stores the stripped text).
+      {
+        const pend = s.pendingSends
+        const at = pend ? pend.findIndex((p) => p.text.trim() === ev.data.content) : -1
+        const rest = at >= 0 && pend ? pend.filter((_, i) => i !== at) : pend
+        const pendingSends = rest && rest.length ? rest : undefined
+        if (msgs.some((m) => m.id === ev.data.id)) return at >= 0 ? { ...s, runError: null, pendingSends } : { ...s, runError: null }
+        return { ...withMsgs([...msgs, ev.data]), runError: null, pendingSends }
+      }
     case 'assistant_message': {
       // Merge by id: attaching to a run replays this event into a conversation row that may already
       // hold the message, and appending it twice is the duplicate the ring used to paint. The replay
@@ -947,6 +965,18 @@ export const useStore = create<State>((set, get) => {
       const next = fn(cur)
       return next === cur ? {} : { sessions: { ...st.sessions, [convId]: next } }
     })
+  const addPending = (convId: string, p: PendingSend): void =>
+    patchSession(convId, (s) => ({ ...s, pendingSends: [...(s.pendingSends ?? []), p] }))
+  const dropPending = (convId: string, key: number): void =>
+    patchSession(convId, (s) => {
+      if (!s.pendingSends?.some((p) => p.key === key)) return s
+      const rest = s.pendingSends.filter((p) => p.key !== key)
+      return { ...s, pendingSends: rest.length ? rest : undefined }
+    })
+  /** A steer's response carries the stored message: applied as the event, it settles the bubble now (the stream copy is a no-op by id). */
+  const settleSteer = (convId: string, message: Message | undefined): void => {
+    if (message) patchSession(convId, (s) => applyEvent(s, { event: 'user_message', data: message } as ChatEvent, get().focusedConversationId === convId))
+  }
   const putSession = (conversation: Conversation): void =>
     set((st) => {
       const cur = st.sessions[conversation.id]
@@ -1182,7 +1212,7 @@ export const useStore = create<State>((set, get) => {
    * `end` is buffered and folded in a single patch (so the window never paints a half-built reply), and the
    * replayed events raise no toast, hold or refetch. A replayed `title` is dropped: the fetched row is newer.
    */
-  const watchRun = async (convId: string, run: ChatRunStarted, from: { messageId: string | null; approvals: number; attached: boolean; replay?: { messageId: string | null; end: number } }): Promise<void> => {
+  const watchRun = async (convId: string, run: ChatRunStarted, from: { messageId: string | null; approvals: number; attached: boolean; pendingKey?: number; replay?: { messageId: string | null; end: number } }): Promise<void> => {
     // One subscription per conversation. A second subscription to the same run would apply every
     // delta twice, since `applyEvent` appends. A different run supersedes this one, so its viewer is
     // detached first: the old loop's `finally` is abort-identity guarded and will not undo us.
@@ -1344,6 +1374,8 @@ export const useStore = create<State>((set, get) => {
         if (live) announce(convId, run.run_id, 'failed', visible, notified)
       }
     } finally {
+      // Backstop: a stream that dies before `user_message` must not leave the dimmed bubble behind.
+      if (from.pendingKey !== undefined) dropPending(convId, from.pendingKey)
       buf.flush()
       flush()
       // A stream that ended without its `done` is not a finished reply. When the run itself says it died, the
@@ -1387,7 +1419,7 @@ export const useStore = create<State>((set, get) => {
    * `false` means the backend never accepted `body`, so the caller still owns the text it sent.
    * Resolves on that verdict, not at the end of the run: a composer is holding a draft on it.
    */
-  const runStream = async (convId: string, body: { content?: string; model?: string; page_context?: PageContext; replace_from?: string }): Promise<boolean> => {
+  const runStream = async (convId: string, body: { content?: string; model?: string; page_context?: PageContext; replace_from?: string }, pendingKey?: number): Promise<boolean> => {
     let run: ChatRunStarted
     try {
       run = await api.chat(convId, body)
@@ -1408,7 +1440,8 @@ export const useStore = create<State>((set, get) => {
       }
       if (body.content) {
         try {
-          await api.steer(convId, body.content)
+          const r = await api.steer(convId, body.content)
+          settleSteer(convId, r.message)
           return true
         } catch (e) {
           get().toast(e instanceof ApiError && e.kind === 'timeout' ? 'The backend did not answer, so your message was not sent.' : 'That chat is already replying — your message was not sent.', 'error')
@@ -1417,7 +1450,7 @@ export const useStore = create<State>((set, get) => {
       return false
     }
     // Synchronous up to its first await, so `streaming` is set before this returns.
-    void watchRun(convId, run, { messageId: null, approvals: 0, attached: false })
+    void watchRun(convId, run, { messageId: null, approvals: 0, attached: false, pendingKey })
     return true
   }
 
@@ -1501,6 +1534,7 @@ export const useStore = create<State>((set, get) => {
     draftEffort: DEFAULT_EFFORT,
     draftModel: null,
     draftFast: false,
+    draftPendingSend: null,
     uploadTaintTarget: null,
     uploadTaintSource: 'upload',
     libraryScope: 'all',
@@ -1966,15 +2000,28 @@ export const useStore = create<State>((set, get) => {
 
     send: async (text, conversationId) => {
       if (!text.trim()) return false
+      // Checked first: an oversized send creates no chat and never reaches the steer-then-409 fallthrough.
+      const tooLong = tooLongNotice(text.length, messageCharLimit(get().settings.contextWindow))
+      if (tooLong) {
+        get().toast(tooLong, 'error')
+        return false
+      }
       const id = conversationId ?? get().focusedConversationId
+      // The bubble is on screen before the first await; every refusal below takes it back.
+      const pend: PendingSend = { key: ++pendingKeySeq, text, at: Date.now() }
       if (id) {
+        if (get().sessions[id]) addPending(id, pend)
+        const fail = (): false => {
+          dropPending(id, pend.key)
+          return false
+        }
         if (get().uploadTaintTarget === 'draft') {
           try {
             await get().noteUntrustedUpload(id)
             set({ uploadTaintTarget: null, uploadTaintSource: 'upload' })
           } catch (e) {
             get().toast((e as Error).message, 'error')
-            return false
+            return fail()
           }
         }
         // Mid-reply sends steer the run: the message lands in the conversation now and the model
@@ -1983,13 +2030,15 @@ export const useStore = create<State>((set, get) => {
         // there would be stored and never replied to — so that tail takes an ordinary send instead.
         if (get().sessions[id]?.streaming?.answering) {
           try {
-            await api.steer(id, text)
+            const r = await api.steer(id, text)
+            settleSteer(id, r.message)
+            dropPending(id, pend.key)
             return true
           } catch (e) {
             // A steer that hung is not a run that ended: falling through would start a second request that hangs too.
             if (e instanceof ApiError && e.kind === 'timeout') {
               get().toast('The backend did not answer, so your message was not sent.', 'error')
-              return false
+              return fail()
             }
             // The run ended in the gap; fall through to a normal send.
           }
@@ -2001,10 +2050,11 @@ export const useStore = create<State>((set, get) => {
             get().toast((e as Error).message, 'error')
             return false
           }
+          addPending(id, pend)
         }
         // A model or effort change made an instant ago is still in flight: the run reads the row.
         await convWrites.get(id)?.catch(() => undefined)
-        return runStream(id, { content: text })
+        return (await runStream(id, { content: text }, pend.key)) || fail()
       }
       // A second send while the draft's row is still being created (a quick follow-up, Enter then a
       // click on Send) used to take this branch too and make a second chat with a second run. It
@@ -2013,6 +2063,7 @@ export const useStore = create<State>((set, get) => {
         const cid = await draftCreate
         return cid ? get().send(text, cid) : false
       }
+      set({ draftPendingSend: pend })
       let c: Conversation
       let created: (id: string | null) => void = () => undefined
       draftCreate = new Promise((r) => { created = r })
@@ -2021,6 +2072,7 @@ export const useStore = create<State>((set, get) => {
       } catch (e) {
         draftCreate = null
         created(null)
+        set({ draftPendingSend: null })
         // `send` never rejects: a caller holding the user's draft needs a verdict, not an exception.
         get().toast((e as Error).message, 'error')
         return false
@@ -2042,6 +2094,7 @@ export const useStore = create<State>((set, get) => {
         if (fromUpload && !patched?.settings?.tainted) {
           draftCreate = null
           created(null)
+          set({ draftPendingSend: null })
           get().toast('Could not mark this chat untrusted after the upload', 'error')
           return false
         }
@@ -2049,9 +2102,11 @@ export const useStore = create<State>((set, get) => {
       }
       c.messages = []
       putSession(c)
+      addPending(c.id, pend)
       // Listed now, not when the reply ends: the sidebar should show the chat you are in while it streams.
       const { messages: _m, ...row } = c
       set((s) => ({
+        draftPendingSend: null,
         focusedConversationId: c.id, view: 'chat', draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false,
         uploadTaintTarget: fromUpload ? null : uploadTaintTarget,
         uploadTaintSource: fromUpload ? 'upload' : uploadTaintSource,
@@ -2059,13 +2114,19 @@ export const useStore = create<State>((set, get) => {
       }))
       void get().refreshProjects()
       // Released once the run has started, so a waiting send sees it streaming and steers it.
-      const ok = await runStream(c.id, { content: text })
+      const ok = await runStream(c.id, { content: text }, pend.key)
+      if (!ok) dropPending(c.id, pend.key)
       draftCreate = null
       created(c.id)
       return ok
     },
     sendToPageAgent: async (text) => {
       if (!text.trim()) return false
+      const tooLong = tooLongNotice(text.length, messageCharLimit(get().settings.contextWindow))
+      if (tooLong) {
+        get().toast(tooLong, 'error')
+        return false
+      }
       const ctx = get().pageContext
       // The selection is read at send time, not when the view published itself: the user highlights
       // a paragraph and *then* reaches for ⌘I.
@@ -3650,6 +3711,9 @@ export const useSessionStatus = (convId?: string): SessionStatus => useStore((s)
 /** `useSessionStatus`, falling back to the app topic's live run for a chat with no session in this window. */
 export const useChatPulse = (convId?: string): SessionStatus =>
   useStore((s) => pulseStatus(pick(s, convId)?.status ?? 'idle', convId ? s.liveRuns[convId] : undefined))
+/** Sends the run has not confirmed yet, for the dimmed bubbles under the transcript. */
+export const usePendingSends = (convId?: string): readonly PendingSend[] => useStore((s) => pick(s, convId)?.pendingSends ?? EMPTY_PENDING)
+
 export const useIsStreaming = (convId?: string): boolean => useStore((s) => !!pick(s, convId)?.streaming?.answering)
 export const useStreamingMessageId = (convId?: string): string | null =>
   useStore((s) => {

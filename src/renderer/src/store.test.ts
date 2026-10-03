@@ -579,3 +579,58 @@ test('a reply finishing off-screen notifies once with a fixed body; a desk conve
     useStore.setState({ desks: [] } as never)
   }
 })
+
+// ---- optimistic user message ----
+
+const userEv = (id: string, content: string): ChatEvent => ({ event: 'user_message', data: msg({ id, role: 'user', content }) } as unknown as ChatEvent)
+
+test('a user_message settles the matching pending bubble in the same session', () => {
+  const s = session({ pendingSends: [{ key: 1, text: ' hello ', at: 0 }] })
+  const after = applyEvent(s, userEv('u1', 'hello'), true)
+  assert.equal(after.pendingSends, undefined)
+  assert.ok(after.conversation.messages?.some((m) => m.id === 'u1'))
+})
+
+test('a user_message with other content leaves the pending bubble alone', () => {
+  const after = applyEvent(session({ pendingSends: [{ key: 1, text: 'hello', at: 0 }] }), userEv('u1', 'other'), true)
+  assert.equal(after.pendingSends?.length, 1)
+})
+
+test('an already-held id clears its pending bubble without duplicating, and is a no-op otherwise', () => {
+  const held = session({ pendingSends: [{ key: 1, text: 'hello', at: 0 }] })
+  held.conversation.messages = [msg({ id: 'u1', role: 'user', content: 'hello' })]
+  const after = applyEvent(held, userEv('u1', 'hello'), true)
+  assert.equal(after.pendingSends, undefined)
+  assert.equal(after.conversation.messages?.length, 1)
+  const plain = session()
+  plain.conversation.messages = [msg({ id: 'u1', role: 'user', content: 'hello' })]
+  assert.equal(applyEvent(plain, userEv('u1', 'hello'), true).conversation.messages?.length, 1)
+})
+
+test('two identical pending texts and one event remove exactly one', () => {
+  const s = session({ pendingSends: [{ key: 1, text: 'a', at: 0 }, { key: 2, text: 'a', at: 0 }] })
+  assert.deepEqual(applyEvent(s, userEv('u1', 'a'), true).pendingSends?.map((p) => p.key), [2])
+})
+
+test('a send from a draft shows its bubble at once and takes it back when the chat cannot be created', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  useStore.setState({ sessions: {}, focusedConversationId: null, draftPendingSend: null, toasts: [] })
+  let release: (r: Response) => void = () => undefined
+  stubFetch(t, () => new Promise<Response>((r) => { release = r }) as never)
+  const p = useStore.getState().send('hi')
+  assert.equal(useStore.getState().draftPendingSend?.text, 'hi')
+  release(json({ detail: 'down' }, 500))
+  assert.equal(await p, false)
+  assert.equal(useStore.getState().draftPendingSend, null)
+})
+
+test('an over-long send is refused before any request, with the size notice', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  seed()
+  useStore.setState({ toasts: [] })
+  const { calls } = stubFetch(t, () => json({}))
+  assert.equal(await useStore.getState().send('x'.repeat(300_000), 'c1'), false)
+  assert.equal(calls.length, 0)
+  assert.equal(useStore.getState().sessions.c1.pendingSends, undefined)
+  assert.match(useStore.getState().toasts[0].text, /256,000/)
+})

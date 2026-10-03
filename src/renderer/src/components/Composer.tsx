@@ -6,6 +6,7 @@ import { useStore, useIsStreaming, useIsStopping } from '../store'
 import SmartTextarea from './SmartTextarea'
 import { useOnboarding } from './onboarding/onboardingStore'
 import { COMPOSER_INSERT_EVENT } from '../lib/composerInsert'
+import { classifyPaste, messageCharLimit } from '../lib/messageLimit'
 import { appendToDraft, clearRedirect, composerKey, dropDraft, getDraft, moveDraft, restoreDraft, useDraft } from '../lib/drafts'
 
 interface ComposerProps {
@@ -88,6 +89,32 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   }
 
   /**
+   * Paste: an image or file on the clipboard goes through `attach`, as a drop does; a text block
+   * longer than PASTE_AS_FILE_CHARS becomes a .txt attachment (its note lands in the draft); text
+   * that would push the draft past the message bound is refused with the notice. Everything else
+   * pastes natively. A text payload always wins over files (spreadsheets add an image rendition).
+   */
+  const onPaste = (e: React.ClipboardEvent<HTMLTextAreaElement>): void => {
+    const ta = e.currentTarget
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '')
+    const files = Array.from(e.clipboardData.files).map((f, i) =>
+      // A clipboard image arrives as a bare "image.png"; a name per paste keeps two uploads apart.
+      /^image\.\w+$/i.test(f.name) ? new File([f], `pasted-image-${stamp}${i ? `-${i + 1}` : ''}.${f.name.split('.').pop()}`, { type: f.type }) : f)
+    const action = classifyPaste({
+      text: e.clipboardData.getData('text/plain'), files, draftLength: text.length,
+      selectionLength: ta.selectionEnd - ta.selectionStart, limit: messageCharLimit(useStore.getState().settings.contextWindow), stamp
+    })
+    if (action.kind === 'native') return
+    e.preventDefault()
+    if (action.kind === 'block') useStore.getState().toast(action.notice, 'error')
+    else if (action.kind === 'files') void attach(action.files)
+    else {
+      useStore.getState().toast(`Pasted text was long, so it is attached as ${action.name} instead of inline.`, 'info')
+      void attach([new File([action.text], action.name, { type: 'text/plain' })])
+    }
+  }
+
+  /**
    * The draft is cleared optimistically and handed back if `send` refuses it. Typed text is never
    * dropped: a draft written since goes after the returned one, under the key the composer resolves
    * at that moment (a chat created by this send included). Mid-reply, `send` steers the live run
@@ -134,6 +161,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
           minChars={8}
           value={text}
           onChange={setText}
+          onPaste={onPaste}
           placeholder={streaming ? 'Steer the reply…' : placeholder}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void submit() }

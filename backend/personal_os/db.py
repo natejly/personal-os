@@ -551,6 +551,8 @@ class Database:
             "agent_runs": {"desk_id": "TEXT", "turn": "INTEGER NOT NULL DEFAULT 0", "resumed_from": "TEXT", "parent_run_id": "TEXT"},
             "usage_log": {"cached_tokens": "INTEGER NOT NULL DEFAULT 0", "cache_write_tokens": "INTEGER NOT NULL DEFAULT 0",
                           "reasoning_tokens": "INTEGER NOT NULL DEFAULT 0", "round": "INTEGER"},
+            # idem_key: opt-in "same proposal twice is one proposal" (jobs.Proposals.create), unique when set.
+            "proposals": {"idem_key": "TEXT"},
             "plan_steps": {"result_error": "TEXT", "title": "TEXT NOT NULL DEFAULT ''",
                            "danger": "TEXT NOT NULL DEFAULT 'safe'"},
         }
@@ -565,6 +567,7 @@ class Database:
         c.execute("CREATE INDEX IF NOT EXISTS idx_runs_desk ON agent_runs(desk_id, started_at DESC)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_runs_parent ON agent_runs(parent_run_id)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_approvals_desk ON approvals(desk_id, status)")
+        c.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_proposals_idem ON proposals(idem_key)")
         c.execute("CREATE INDEX IF NOT EXISTS idx_plans_desk ON action_plans(desk_id, created_at)")
         c.commit()
 

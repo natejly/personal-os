@@ -67,7 +67,7 @@ PROMPT_WRITES = frozenset({
     "save_memory", "graph_add", "save_writing_sample",
     "doc_create", "doc_edit",
     "todo_add", "todo_delete", "todo_update",
-    "board_add_card", "board_create", "board_move_card",
+    "board_add_card", "board_create", "board_move_card", "board_claim", "board_release", "board_comment",
     "skill_draft", "skill_revise", "skill_from_run",
 })
 PROPOSAL_ONLY_REFUSED = ("{name} does something outside the app, and this is an unattended background run, so it "
@@ -1704,7 +1704,7 @@ def _register_boards(self: Toolbox) -> None:
         examples=[{"board": "Work", "title": "Fix the login bug", "column": "To do", "priority": 1},
                   {"board": "Home", "title": "Book the plumber", "due": "2026-10-10"}]))
 
-    async def board_move_card(ctx: dict[str, Any], board: str, card: str, column: str) -> Any:
+    async def board_move_card(ctx: dict[str, Any], board: str, card: str, column: str, token: str | None = None) -> Any:
         b = self.boards.find_board(board)
         if not b:
             return tool_error(f"No board named '{board}'.", field="board", expected="a board name or id from board_list",
@@ -1716,11 +1716,47 @@ def _register_boards(self: Toolbox) -> None:
                               expected="a card title/id and a column name from board_list(board=...)",
                               example={"board": b["name"], "card": card, "column": b["columns"][0]["name"] if b["columns"] else "Done"},
                               alternative=f"board_list(board='{b['name']}') to see the exact titles and columns")
-        self.boards.move_card(c["id"], col["id"])
+        if token:
+            if not self.boards.agent_move(c["id"], token, col["id"]):
+                return tool_error("That claim token is wrong or its lease ran out; the card was not moved.", field="token",
+                                  expected="the token board_claim returned, still within its lease", alternative="board_claim again")
+        elif c.get("claim_token") and (c.get("lease_expires_at") or 0) > time.time():
+            return tool_error(f"'{c['title']}' is claimed by {c.get('claimed_by')}.", field="token",
+                              expected="the token board_claim returned", alternative="leave the card alone")
+        else:
+            self.boards.move_card(c["id"], col["id"])
         return {"moved": c["title"], "to": col["name"]}
-    R("board_move_card", ToolSpec("board_move_card", "Move a card (by title or id) to another column on a board.",
-        _obj({"board": {"type": "string"}, "card": {"type": "string"}, "column": {"type": "string"}}, ["board", "card", "column"]), board_move_card, "boards", "writes",
+    R("board_move_card", ToolSpec("board_move_card", "Move a card (by title or id) to another column on a board. Pass the claim token for a card you hold.",
+        _obj({"board": {"type": "string"}, "card": {"type": "string"}, "column": {"type": "string"}, "token": {"type": "string"}}, ["board", "card", "column"]), board_move_card, "boards", "writes",
         examples=[{"board": "Work", "card": "Fix the login bug", "column": "In progress"}, {"board": "Work", "card": "cd_7a1b90", "column": "Done"}]))
+
+    async def board_claim(ctx: dict[str, Any], card: str, ttl_s: float = 600) -> Any:
+        token = self.boards.claim(card, "agent", ttl_s)
+        if token is None:
+            return tool_error("That card is already claimed (or does not exist).", field="card", expected="a free card id",
+                              alternative="board_list to pick another card")
+        return {"claimed": card, "token": token, "ttl_s": ttl_s}
+    R("board_claim", ToolSpec("board_claim", "Claim a card for a lease (default 10 minutes). Returns a token that later board writes need. Moving the card by hand clears the claim.",
+        _obj({"card": {"type": "string"}, "ttl_s": {"type": "number", "default": 600}}, ["card"]), board_claim, "boards", "writes",
+        examples=[{"card": "cd_7a1b90"}]))
+
+    async def board_release(ctx: dict[str, Any], card: str, token: str, reason: str = "finished") -> Any:
+        try:
+            ok = self.boards.release(card, token, reason)
+        except ValueError as e:
+            return tool_error(str(e), field="reason", expected="finished | expired | preempted | cancelled", alternative="reason=finished")
+        return {"released": ok}
+    R("board_release", ToolSpec("board_release", "Release a card you claimed.",
+        _obj({"card": {"type": "string"}, "token": {"type": "string"}, "reason": {"type": "string", "default": "finished"}}, ["card", "token"]), board_release, "boards", "writes",
+        examples=[{"card": "cd_7a1b90", "token": "abc123"}]))
+
+    async def board_comment(ctx: dict[str, Any], card: str, token: str, text: str) -> Any:
+        ok = self.boards.event(card, token, "comment", {"text": text})
+        return {"commented": True} if ok else tool_error("That claim token is wrong or its lease ran out.", field="token",
+                                                         expected="the token board_claim returned", alternative="board_claim again")
+    R("board_comment", ToolSpec("board_comment", "Add a progress note to a card you hold. This cannot mark the card completed.",
+        _obj({"card": {"type": "string"}, "token": {"type": "string"}, "text": {"type": "string"}}, ["card", "token", "text"]), board_comment, "boards", "writes",
+        examples=[{"card": "cd_7a1b90", "token": "abc123", "text": "Drafted the outline"}]))
 
     async def board_create(ctx: dict[str, Any], name: str, columns: list[str] | None = None) -> Any:
         b = self.boards.create(name, ctx.get("project_id"), columns)

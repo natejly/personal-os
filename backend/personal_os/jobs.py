@@ -401,14 +401,20 @@ class Proposals:
 
     def create(self, *, run_id: str | None, tool: str, args: dict[str, Any], job_id: str | None = None,
                conversation_id: str | None = None, message_id: str | None = None, call_id: str | None = None,
-               at: float | None = None) -> dict[str, Any]:
+               at: float | None = None, scope: str | None = None) -> dict[str, Any]:
+        """`scope` (a card or conversation id) makes the insert idempotent: the same scope + tool + args digest
+        returns the first row instead of adding a second. Without it every call is a new proposal."""
         pid = new_id()
         t = at if at is not None else now()
+        digest = args_digest(args)
+        key = f"{scope}:{tool}:{digest}" if scope else None
         with self.db.tx() as c:
-            c.execute("INSERT INTO proposals(id, run_id, job_id, conversation_id, message_id, call_id, tool, args, args_digest, "
-                      "status, created_at) VALUES(?,?,?,?,?,?,?,?,?,'pending',?)",
+            c.execute("INSERT OR IGNORE INTO proposals(id, run_id, job_id, conversation_id, message_id, call_id, tool, args, args_digest, "
+                      "status, created_at, idem_key) VALUES(?,?,?,?,?,?,?,?,?,'pending',?,?)",
                       (pid, run_id, job_id, conversation_id, message_id, call_id, tool,
-                       json.dumps(args, ensure_ascii=False, default=str), args_digest(args), t))
+                       json.dumps(args, ensure_ascii=False, default=str), digest, t, key))
+            if key:
+                pid = c.execute("SELECT id FROM proposals WHERE idem_key=?", (key,)).fetchone()["id"]
         return self.get(pid)  # type: ignore[return-value]
 
     def get(self, id: str) -> dict[str, Any] | None:

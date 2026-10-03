@@ -154,6 +154,22 @@ def test_steer_before_the_first_token_swaps_the_untouched_row() -> None:
     assert [m["role"] for m in rows] == ["user", "user", "assistant"] and rows[-1]["id"] == new and rows[-1]["content"] == "answered"
 
 
+def test_a_steer_before_the_first_token_of_a_regenerate_keeps_the_group() -> None:
+    ROUNDS.extend([["one"], "wait", ["two"]])
+    cid, rid = start()
+    finished(rid)
+    first = j("GET", f"/conversations/{cid}")["messages"][-1]
+    rid2 = j("POST", f"/conversations/{cid}/chat", {})["run_id"]  # regenerate: the row is a sibling of `first`
+    wait_until(lambda: len(SEEN) == 2, "the regenerate's first request")
+    j("POST", f"/conversations/{cid}/steer", {"content": "again, differently"})
+    finished(rid2)
+    rows = j("GET", f"/conversations/{cid}")["messages"]
+    assert [m["role"] for m in rows] == ["user", "user", "assistant"] and rows[-1]["content"] == "two"
+    assert rows[-1]["variant_of"] == first["id"], "the swapped-in row stays in the regenerate group"
+    assert rows[-1]["variants"] == [first["id"], rows[-1]["id"]], "the answer being replaced survives the swap"
+    assert appmod.convos.activate_message(cid, first["id"]), "and can still be switched back to"
+
+
 def test_a_steer_already_in_the_context_is_not_sent_twice() -> None:
     real = compaction.prepare_history
 

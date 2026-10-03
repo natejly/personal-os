@@ -1943,9 +1943,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     # transcript reads user message, then answer. No segment closed, so no `done` and the
                     # tracer keeps its spans (the context span belongs to the reply, not to the row).
                     _active.pop(am["id"], None)
-                    convos.delete_message(am["id"])
+                    # Just this row: on a regenerate it is the open sibling of a group, and delete_message would take
+                    # the whole group (the answer being replaced) with it. The fresh row keeps the row's place in it.
+                    with db.tx() as c:
+                        c.execute("DELETE FROM messages WHERE id=?", (am["id"],))
                     yield "removed_message", {"id": am["id"]}
-                    am = convos.add_message(conv_id, "assistant", "", model=model)
+                    am = convos.add_message(conv_id, "assistant", "", model=model, variant_of=am.get("variant_of"))
                     _bind_stop(am["id"], stop, run)
                     tool_ctx["message_id"] = am["id"]
                     yield "assistant_message", {**am, "context_used": used, "trace": tracer.spans}
@@ -2136,31 +2139,27 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 if partial == "loop":  # every pending call still needs a tool message, executed or not
                     messages.append({"role": "tool", "tool_call_id": c["id"], "content": stop_text or LOOP_STOP.format(name=c["name"], n=REPEAT_LIMIT)})
                     continue
-                # A call that cannot run as sent (broken JSON, an unknown name, arguments the signature cannot take,
-                # a cut-off call) is answered here with what was wrong. It never reaches the gate, a rule, a plan
-                # claim, an approval card or the tool: nothing the user could approve would ever work.
+                # A call that cannot run as sent (broken JSON, an unknown name, a cut-off call) is answered here with
+                # what was wrong. It never reaches the gate, a rule, a plan claim, an approval card or the tool:
+                # nothing the user could approve would ever work. Arguments the signature cannot take are refused
+                # below instead, once the gate has spoken: a plan-mode or turned-off refusal comes first, as it did.
                 invalid = c["_invalid"]
-                bad: dict[str, Any] | None = None
                 if c["_problem"]:
                     bad = _invalid_call_error(c, toolbox.specs.get(c["name"]))
-                elif modes.get(c["name"], "off") != "off" and (bad := toolbox.precheck(c["name"], args)):
-                    invalid = "schema"
-                if bad is not None:
-                    shown = (c["_asked"] or c["name"]) if invalid == "name" else c["name"]
+                    shown = (c["_asked"] or c["name"])[:80] if invalid == "name" else c["name"]
                     uid = f"{am['id']}:{c['id']}"
                     if c["name"] in blocked:
                         bad = tools.denied(c["name"], f"failing {TOOL_ERROR_LIMIT} times in a row and disabled for the rest of this reply")
-                    shown_args = _short(args) if invalid == "schema" else {}
-                    yield "tool_call", {"message_id": am["id"], "id": uid, "name": shown, "arguments": shown_args,
+                    yield "tool_call", {"message_id": am["id"], "id": uid, "name": shown, "arguments": {},
                                         "needs_approval": False, "forced": False, "proposal": None, "permission": None, "plan": None}
-                    tspan = tracer.start("tool", shown, {"round": _round, "arguments": shown_args, "invalid": invalid}, parent=round_span)
+                    tspan = tracer.start("tool", shown, {"round": _round, "arguments": {}, "invalid": invalid}, parent=round_span)
                     yield "span", {"message_id": am["id"], "span": tspan}
                     preview, err = summarize_result(bad), bad.get("error")
                     tool_errors[c["name"]] = tool_errors.get(c["name"], 0) + 1
                     if tool_errors[c["name"]] >= TOOL_ERROR_LIMIT:
                         blocked.add(c["name"])
                     tracer.end(tspan, {"result_chars": len(preview), "invalid": invalid}, error=err)
-                    event = {"id": uid, "name": shown, "arguments": shown_args, "result_preview": preview, "duration_ms": 0,
+                    event = {"id": uid, "name": shown, "arguments": {}, "result_preview": preview, "duration_ms": 0,
                              "error": err, "images": None, "undo": None, "approval": None, "plan": None, "forced": False,
                              "tainted": False, "blocked": None, "breaker": partial, "proposal": None, "artifact": None,
                              "invalid": invalid}
@@ -2245,6 +2244,11 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 plan: dict[str, Any] | None = None     # this call's own proposed plan, when it is propose_plan
                 claimed: dict[str, Any] | None = None  # the approved plan step this call consumed instead of asking
                 pre: Any = None                        # a result settled before the gate: nothing to approve
+                if c["name"] != PLAN_TOOL and mode != "off" and (bad := toolbox.precheck(c["name"], args)) is not None:
+                    # Arguments the tool's signature cannot take: nothing the user could approve would ever run, so
+                    # no card opens and no plan step is spent on it. Not the plan tool: its placeholder function is
+                    # narrower than its schema, and normalize_plan below is its check.
+                    pre, invalid = bad, "schema"
                 if c["name"] == PLAN_TOOL and mode != "off":
                     # A plan is nothing but its card, so it asks whatever the mode says, and no standing grant
                     # below can turn that off. It is not a taint upgrade either, so it is not `forced`.
@@ -2267,7 +2271,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         # Its own event, because the card needs the whole plan with its steps and
                         # their digests; the tool_call event carries only the raw arguments.
                         yield "plan_card", {"message_id": am["id"], "call_id": uid, "plan": plan}
-                elif (plan_seen or active_plan) and c["name"] != PLAN_TOOL:
+                elif (plan_seen or active_plan) and c["name"] != PLAN_TOOL and pre is None:
                     # Digest binding: an approved step whose arguments hash to the same thing stands in for the
                     # modal, exactly once. A forced approval never consults a plan -- untrusted content in this
                     # reply must always reach the user -- and a claim only matches inside its own run.
@@ -2314,7 +2318,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                                     "plan": {"plan_id": claimed["plan_id"], "idx": claimed["idx"], "title": claimed["title"]} if claimed else None}
                 tspan = tracer.start("tool", c["name"], {"round": _round, "arguments": _short(args), "mode": mode, "forced": forced,
                                                          "plan_step": f"{claimed['plan_id']}#{claimed['idx']}" if claimed else None,
-                                                         **({"repaired": True} if c["_repaired"] else {})},
+                                                         **({"repaired": True} if c["_repaired"] else {}),
+                                                         **({"invalid": invalid} if invalid else {})},
                                  parent=round_span)
                 yield "span", {"message_id": am["id"], "span": tspan}
                 t0 = time.time()
@@ -2589,11 +2594,12 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 event = {"id": uid, "name": c["name"], "arguments": args, "result_preview": preview, "duration_ms": ms,
                          "error": err, "images": images or None, **edit_info,
                          "undo": result.get("undo") if isinstance(result, dict) and isinstance(result.get("undo"), dict) else None,
-                         "approval": (("plan" if claimed else decision) if mode == "ask" else None),
+                         "approval": (("plan" if claimed else decision) if mode == "ask" and not invalid else None),
                          "plan": {"plan_id": claimed["plan_id"], "idx": claimed["idx"], "title": claimed["title"]} if claimed else None,
                          "forced": forced, "tainted": tainted, "blocked": c["name"] if was_blocked else None, "breaker": partial,
                          **({"interrupted": True, "pending": False} if interrupted else {}),
                          **({"repaired": True} if c["_repaired"] else {}),
+                         **({"invalid": invalid} if invalid else {}),
                          "blocked_by": "plan_mode" if blocked_reason == PLAN_BLOCKED else None,
                          "proposal": (result.get("proposal_id") if proposing and isinstance(result, dict) else None),
                          # Persisted with the tool event, so the card finds its artifact again after a reload.

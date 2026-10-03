@@ -261,6 +261,17 @@ def test_signature_mismatch_is_refused_before_a_card() -> None:
     assert RAN == []
 
 
+def test_plan_mode_refuses_a_consequential_call_before_its_signature_is_checked() -> None:
+    ROUNDS.append({"tool_calls": [call("todo_add", '{"nope": 1}')]})
+    cid = j("POST", "/conversations", {})["id"]
+    j("PATCH", f"/conversations/{cid}", {"settings": {"planMode": "always", "tools": {"todo_add": "on"}}})
+    rid = j("POST", f"/conversations/{cid}/chat", {"content": "go"})["run_id"]
+    wait_until(lambda: (r := store.get(rid)) and r["status"] not in ("running", "awaiting_approval") and r, "the run to finish")
+    res = tool_msgs(SEEN[1])["c1"]
+    assert "planning" in res["error"] and "bad arguments" not in res["error"], res
+    assert [d.get("invalid") for e, d in tape(rid) if e == "tool_result"] == [None]
+
+
 def test_a_call_cut_at_the_output_limit_is_reported_and_nothing_runs() -> None:
     ROUNDS.append({"finish_reason": "length", "tool_calls": [call("t_echo", '{"text": "a long bo')]})
     cid, rid = run_chat({"t_echo": "on"})

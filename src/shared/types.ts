@@ -574,6 +574,16 @@ export interface ConversationSettings {
   job_id?: string
 }
 
+/** One conversation matched by GET /conversations/search. Matched words in `text` sit between \x02 and \x03. */
+export interface ChatSearchHit {
+  id: string
+  title: string
+  project_id: string | null
+  updated_at: number
+  hits: number
+  snippets: { message_id: string; role: string; created_at: number; text: string }[]
+}
+
 export interface Conversation {
   id: string
   project_id: string | null

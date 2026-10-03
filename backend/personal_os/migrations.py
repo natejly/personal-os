@@ -21,9 +21,25 @@ def _baseline(c: sqlite3.Connection) -> None:
     """Nothing to do: SCHEMA and Database._migrate have already produced the v1 shape."""
 
 
+def _messages_fts(c: sqlite3.Connection) -> None:
+    """Full-text index over message bodies. External-content, kept in step by triggers because message rows
+    also vanish through FK cascades (conversation, trash purge). `UPDATE OF content` reindexes a finished
+    reply; trace/reasoning writes do not touch it."""
+    c.execute("CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(content, content='messages', content_rowid='rowid', tokenize='porter unicode61')")
+    c.execute("CREATE TRIGGER IF NOT EXISTS messages_fts_ai AFTER INSERT ON messages BEGIN "
+              "INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content); END")
+    c.execute("CREATE TRIGGER IF NOT EXISTS messages_fts_ad AFTER DELETE ON messages BEGIN "
+              "INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', old.rowid, old.content); END")
+    c.execute("CREATE TRIGGER IF NOT EXISTS messages_fts_au AFTER UPDATE OF content ON messages BEGIN "
+              "INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', old.rowid, old.content); "
+              "INSERT INTO messages_fts(rowid, content) VALUES (new.rowid, new.content); END")
+    c.execute("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')")
+
+
 # (version, name, step). Versions are consecutive from 1; append, never edit or reorder.
 MIGRATIONS: list[tuple[int, str, Step]] = [
     (1, "baseline", _baseline),
+    (2, "messages_fts", _messages_fts),
 ]
 
 

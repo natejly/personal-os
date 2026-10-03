@@ -13,7 +13,19 @@ import { MODULES } from '../shell/registry'
 import { dragProps } from '../canvas/dnd'
 import { useCanvas } from '../canvas/store'
 import { api } from '../lib/api'
-import type { Conversation, Doc, WidgetKind } from '@shared/types'
+import type { ChatSearchHit, Conversation, Doc, WidgetKind } from '@shared/types'
+import { snippetParts } from '../lib/chatSearch'
+
+/** The first matching excerpt under a search result, with the matched words marked. */
+function Snippet({ hit }: { hit?: ChatSearchHit }): JSX.Element | null {
+  const s = hit?.snippets[0]
+  if (!s) return null
+  return (
+    <span className="convo-snippet">
+      {snippetParts(s.text).map((p, i) => (p.hit ? <mark key={i}>{p.text}</mark> : <span key={i}>{p.text}</span>))}
+    </span>
+  )
+}
 
 const DAY = 86_400_000
 /** Rows shown under a project group before the "View all" link takes over. */
@@ -106,6 +118,20 @@ export default function Sidebar(): JSX.Element {
   const openConversation = (id: string): void => void selectChat(id)
   const [query, setQuery] = useState('')
   const [searching, setSearching] = useState(false)
+  // Full-text hits over message bodies, for queries of 3+ characters. Title matches stay instant; these
+  // arrive after a short debounce, and a stale reply is dropped by the sequence check.
+  const [hits, setHits] = useState<ChatSearchHit[]>([])
+  const searchSeq = useRef(0)
+  const composing = useRef(false)
+  useEffect(() => {
+    const q = query.trim()
+    const seq = ++searchSeq.current
+    if (q.length < 3) { setHits([]); return }
+    const t = setTimeout(() => {
+      api.conversations.search(q).then((r) => { if (seq === searchSeq.current) setHits(r) }).catch(() => undefined)
+    }, 250)
+    return () => clearTimeout(t)
+  }, [query])
   const searchRef = useRef<HTMLInputElement>(null)
   const [projectsOpen, setProjectsOpen] = useState(true)
   const [recentsOpen, setRecentsOpen] = useState(true)
@@ -145,6 +171,11 @@ export default function Sidebar(): JSX.Element {
     }
     return out
   }, [conversations, query])
+  const hitById = useMemo(() => new Map(hits.map((h) => [h.id, h])), [hits])
+  const inMessages = useMemo(() => {
+    const titled = new Set(groups.flatMap((g) => g.items.map((c) => c.id)))
+    return query.trim().length >= 3 ? hits.filter((h) => !titled.has(h.id)) : []
+  }, [groups, hits, query])
 
   // Module badges are pure functions of the store; useShallow compares the array element-wise, so a
   // fresh array with the same counts does not re-render.
@@ -265,12 +296,14 @@ export default function Sidebar(): JSX.Element {
             aria-label="Search recents"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Escape') { setQuery(''); setSearching(false) } }}
+            onCompositionStart={() => { composing.current = true }}
+            onCompositionEnd={() => { composing.current = false }}
+            onKeyDown={(e) => { if (e.key === 'Escape' && !composing.current) { setQuery(''); setSearching(false) } }}
           />
         </label>
       )}
       <div className="convo-list">
-        {groups.length === 0 && <p className="empty-hint">{query ? 'No matches.' : 'No personal chats yet.'}</p>}
+        {groups.length === 0 && inMessages.length === 0 && <p className="empty-hint">{query ? 'No matches.' : 'No personal chats yet.'}</p>}
         {groups.map((g) => (
           <section key={g.label}>
             <h4>{g.label}</h4>
@@ -281,12 +314,28 @@ export default function Sidebar(): JSX.Element {
                   <ChatPulse conversationId={c.id} />
                   {c.project_id && projectById[c.project_id] && <span className="project-dot sm" style={{ background: projectById[c.project_id].color }} title={projectById[c.project_id].name} />}
                   {c.title}
+                  <Snippet hit={hitById.get(c.id)} />
                 </span>
                 <button className="icon-btn ghost" aria-label={`Delete chat: ${c.title}`} title="Delete" onClick={(e) => { e.stopPropagation(); void deleteChat(c.id) }}><Trash2 size={14} /></button>
               </div>
             ))}
           </section>
         ))}
+        {inMessages.length > 0 && (
+          <section>
+            <h4>In messages</h4>
+            {inMessages.map((h) => (
+              <div key={h.id} className={`convo-item ${h.id === focusedId && view === 'chat' ? 'active' : ''}`} onClick={() => openConversation(h.id)} role="button" tabIndex={0}>
+                <span className="convo-title">
+                  {h.project_id && projectById[h.project_id] && <span className="project-dot sm" style={{ background: projectById[h.project_id].color }} title={projectById[h.project_id].name} />}
+                  {h.title}
+                  {h.hits > 1 && <span className="convo-hits">+{h.hits - 1}</span>}
+                  <Snippet hit={h} />
+                </span>
+              </div>
+            ))}
+          </section>
+        )}
       </div>
       </>)}
       </div>

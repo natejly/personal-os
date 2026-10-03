@@ -125,6 +125,56 @@ class Conversations:
             out = [c for c in out if not c["settings"].get("deskId")]
         return out if include_jobs else [c for c in out if not c["settings"].get("job_id")]
 
+    def search(self, q: str, limit: int = 20, per_conv: int = 3) -> list[dict[str, Any]]:
+        """Conversations whose messages match `q`, best first, each with up to `per_conv` excerpts. Matched
+        words are wrapped in \\x02 / \\x03. FTS (AND of the words, prefix on the last) for ASCII queries;
+        a LIKE scan otherwise, because the tokenizer does not segment CJK. Trashed chats, superseded
+        replies, desk and job transcripts are left out, as `list` leaves them out."""
+        tokens = re.findall(r"\w+", q)
+        if not tokens:
+            return []
+        base = ("FROM {src} JOIN conversations c ON c.id = m.conversation_id "
+                "WHERE {cond} AND c.deleted_at IS NULL AND m.superseded_at IS NULL "
+                "AND COALESCE(json_extract(c.settings,'$.deskId'),'')='' AND COALESCE(json_extract(c.settings,'$.job_id'),'')=''")
+        cols = "m.id, m.conversation_id, m.role, m.created_at, c.title, c.project_id, c.updated_at"
+        rows: list[Any] = []
+        fts_ok = q.isascii() and any(len(t) >= 2 for t in tokens)
+        with self.db.tx() as c:
+            if fts_ok:
+                match = " ".join(f'"{t}"' for t in tokens) + "*"
+                try:
+                    rows = c.execute(
+                        f"SELECT {cols}, snippet(messages_fts,0,char(2),char(3),' … ',12) AS snip, bm25(messages_fts) AS score "
+                        + base.format(src="messages_fts f JOIN messages m ON m.rowid = f.rowid", cond="messages_fts MATCH ?")
+                        + " ORDER BY score LIMIT 300", (match,)).fetchall()
+                except Exception:
+                    rows = []
+                    fts_ok = False
+            if not fts_ok:
+                esc = q.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                rows = c.execute(
+                    f"SELECT {cols}, m.content AS snip, 0 AS score "
+                    + base.format(src="messages m", cond="m.content LIKE ? ESCAPE '\\'")
+                    + " ORDER BY m.created_at DESC LIMIT 300", (f"%{esc}%",)).fetchall()
+        needle = q.strip().lower()
+        out: dict[str, dict[str, Any]] = {}
+        for r in rows:
+            snip = r["snip"]
+            if not fts_ok:
+                i = snip.lower().find(needle)
+                a, b = max(0, i - 60), min(len(snip), i + len(needle) + 60)
+                snip = ("… " if a else "") + snip[a:i] + "\x02" + snip[i:i + len(needle)] + "\x03" + snip[i + len(needle):b] + (" …" if b < len(snip) else "")
+            item = out.get(r["conversation_id"])
+            if item is None:
+                if len(out) >= limit:
+                    continue
+                item = out[r["conversation_id"]] = {"id": r["conversation_id"], "title": r["title"], "project_id": r["project_id"],
+                                                    "updated_at": r["updated_at"], "hits": 0, "snippets": []}
+            item["hits"] += 1
+            if len(item["snippets"]) < per_conv:
+                item["snippets"].append({"message_id": r["id"], "role": r["role"], "created_at": r["created_at"], "text": snip})
+        return list(out.values())
+
     def _hydrate(self, r: Any) -> dict[str, Any]:
         d = row_to_dict(r, ("settings",)) or {}
         d["settings"] = {**DEFAULT_CONV_SETTINGS, **(d.get("settings") or {})}

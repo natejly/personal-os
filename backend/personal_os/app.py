@@ -1098,6 +1098,14 @@ def create_conversation(body: ConvIn) -> dict[str, Any]:
     return convos.create(wsid(body.project_id), body.title, body.model or settings()["defaultModel"])
 
 
+@app.get("/conversations/search")
+def search_conversations(q: str = "", limit: int = 20) -> list[dict[str, Any]]:
+    """Full-text search over what was said. Declared before `/conversations/{id}` so "search" is not an id."""
+    if len(q.strip()) < 2:
+        return []
+    return convos.search(q, max(1, min(limit, 50)))
+
+
 @app.get("/conversations/{id}")
 def get_conversation(id: str) -> dict[str, Any]:
     c = convos.get(id)

@@ -425,5 +425,117 @@ class BudgetDeadline(unittest.TestCase):
         self.assertTrue(10 < (app_llm.stream_deadline.get() or 0) - time.monotonic() <= 20)
 
 
+def err_body(message: str, code: str | None = None, typ: str | None = None) -> str:
+    return json.dumps({"error": {"message": message, "code": code, "type": typ}})
+
+
+class ErrorKinds(unittest.TestCase):
+    def test_classify_table(self) -> None:
+        table = [
+            (400, err_body("blocked by content policy"), "content_filter"),
+            (400, err_body("x", "content_policy_violation"), "content_filter"),
+            (400, err_body("This model's maximum context length is 128000 tokens"), "overflow"),
+            (413, "too big", "overflow"),
+            (400, err_body("x", "context_length_exceeded"), "overflow"),
+            (429, err_body("You exceeded your current quota"), "quota"),
+            (402, "pay", "quota"),
+            (429, err_body("x", "insufficient_quota"), "quota"),
+            (401, "no", "auth"),
+            (403, "no", "auth"),
+            (404, "no", "not_found"),
+            (400, err_body("Unsupported parameter: reasoning_effort"), "unsupported_param"),
+            (422, err_body("x", "unknown_parameter"), "unsupported_param"),
+            (429, err_body("quota"), "rate_limit"),  # the bare word alone is a plain rate limit
+            (429, "slow down", "rate_limit"),
+            (529, "busy", "overloaded"),
+            (503, err_body("The model is overloaded"), "overloaded"),
+            (503, "down", "server"),
+            (500, "boom", "server"),
+            (408, "slow", "server"),
+            (400, "plain", "bad_request"),
+            (None, '{"error": "broke"}', "bad_request"),
+            (None, err_body("context window of 8192 tokens exceeded"), "overflow"),
+        ]
+        for status, body, want in table:
+            self.assertEqual(llm.classify_error(status, body), want, (status, body))
+
+    def test_quota_429_is_not_retried(self) -> None:
+        with Provider(lambda req: httpx.Response(429, text=err_body("You exceeded your current quota"))) as p:
+            with self.assertRaises(llm.LLMError) as cm:
+                run(collect())
+        self.assertEqual(p.calls, 1)
+        self.assertEqual((cm.exception.kind, cm.exception.status), ("quota", 429))
+        self.assertNotIn("Wait a moment", str(cm.exception))
+
+    def test_plain_429_retries_honouring_retry_after_ms(self) -> None:
+        answers = [httpx.Response(429, headers={"retry-after-ms": "2500"}, text="slow"), httpx.Response(200, content=sse("ok"))]
+        with Provider(lambda req: answers.pop(0)) as p:
+            events = run(collect())
+        self.assertEqual(text_of(events), "ok")
+        self.assertGreaterEqual(p.sleeps[0], 2.5)
+
+    def test_overloaded_is_retried(self) -> None:
+        answers = [httpx.Response(529, text="busy"), httpx.Response(200, content=sse("ok"))]
+        with Provider(lambda req: answers.pop(0)) as p:
+            self.assertEqual(text_of(run(collect())), "ok")
+        self.assertEqual(p.calls, 2)
+
+    def test_terminal_statuses_are_not_retried(self) -> None:
+        for status, kind in ((401, "auth"), (404, "not_found"), (400, "bad_request")):
+            with Provider(lambda req, s=status: httpx.Response(s, text="no")) as p:
+                with self.assertRaises(llm.LLMError) as cm:
+                    run(collect())
+            self.assertEqual((p.calls, cm.exception.kind), (1, kind))
+
+    def test_overflow_carries_the_parsed_limit(self) -> None:
+        body = err_body("This model's maximum context length is 128000 tokens. However, you requested 140000 tokens.")
+        with Provider(lambda req: httpx.Response(400, text=body)):
+            with self.assertRaises(llm.ContextOverflowError) as cm:
+                run(collect())
+        self.assertEqual((cm.exception.kind, cm.exception.limit, cm.exception.status), ("overflow", 128000, 400))
+
+    def test_parse_context_limit(self) -> None:
+        for msg, want in (("maximum context length is 32,768 tokens", 32768), ("150000 tokens > 131072 maximum", 131072),
+                          ("context window of 200000 tokens", 200000), ("n_ctx=8192", 8192), ("maximum context length is 12", None),
+                          ("nothing here", None)):
+            self.assertEqual(llm.parse_context_limit(err_body(msg)), want, msg)
+
+    def test_in_stream_error_frame_is_classified(self) -> None:
+        def frame(msg: str) -> bytes:
+            return f"data: {json.dumps({'error': {'message': msg}})}\n\n".encode()
+
+        with Provider(lambda req: httpx.Response(200, content=frame("Your credit balance is too low"))):
+            with self.assertRaises(llm.LLMError) as cm:
+                run(collect())
+        self.assertEqual(cm.exception.kind, "quota")
+        self.assertIn("credit balance", str(cm.exception))
+        with Provider(lambda req: httpx.Response(200, content=frame("maximum context length is 8192 tokens"))):
+            with self.assertRaises(llm.ContextOverflowError) as cm:
+                run(collect())
+        self.assertEqual(cm.exception.limit, 8192)
+
+    def test_transport_failure_kind(self) -> None:
+        def boom(req: httpx.Request) -> httpx.Response:
+            raise httpx.ConnectError("down")
+
+        with Provider(boom):
+            with self.assertRaises(llm.LLMError) as cm:
+                run(collect({**SETTINGS, "llmRetries": 0}))
+        self.assertEqual(cm.exception.kind, "transport")
+
+    def test_retry_after_from_precedence(self) -> None:
+        f = llm.retry_after_from
+        self.assertEqual(f({"retry-after-ms": "1500", "retry-after": "9"}), 1.5)
+        self.assertEqual(f({"retry-after": "9", "x-ratelimit-reset-requests": "1s"}), 9.0)
+        self.assertEqual(f({"x-ratelimit-reset-requests": "6m0s", "x-ratelimit-reset-tokens": "250ms"}), 0.25)
+        self.assertEqual(f({"x-ratelimit-reset-requests": "1m30s"}), 90.0)
+        self.assertIsNone(f({}))
+        self.assertIsNone(f({"retry-after": "soon"}))
+
+    def test_llmerror_defaults(self) -> None:
+        e = llm.LLMError("x")
+        self.assertEqual((str(e), e.kind, e.status), ("x", None, None))
+
+
 if __name__ == "__main__":
     unittest.main()

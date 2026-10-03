@@ -540,7 +540,7 @@ class Database:
             "jobs": {"kind": "TEXT NOT NULL DEFAULT 'cron'", "run_at": "REAL",
                      "max_retries": "INTEGER NOT NULL DEFAULT 1", "consecutive_failures": "INTEGER NOT NULL DEFAULT 0",
                      "paused_reason": "TEXT", "last_skip_at": "REAL", "last_skip_reason": "TEXT",
-                     "allowed_tools": "TEXT"},
+                     "allowed_tools": "TEXT", "expires_at": "REAL"},
             "action_plans": {"desk_id": "TEXT", "intent": "TEXT NOT NULL DEFAULT ''",
                              "expected_taint": "TEXT NOT NULL DEFAULT '[]'"},
             "approvals": {"desk_id": "TEXT", "danger": "TEXT NOT NULL DEFAULT 'external'",

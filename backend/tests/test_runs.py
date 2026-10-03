@@ -30,7 +30,7 @@ from personal_os.runs import QUEUE_MAX, RING, Run  # noqa: E402
 
 # The ChatEvent union in src/shared/types.ts. Nothing may leave the bus that is not one of these.
 CHAT_EVENTS = {"user_message", "assistant_message", "removed_message", "restored_message", "title", "delta", "reasoning", "tool_call",
-               "tool_result", "span", "done", "learned", "learn_error", "error", "taint", "plan",
+               "tool_result", "span", "status", "done", "learned", "learn_error", "error", "taint", "plan",
                 "plan_card", "plan_decision", "parked", "desk_status", "desk_handoff"}
 
 client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
@@ -53,6 +53,8 @@ SCRIPT: dict[str, Any] = {"chunks": ["Hello", " ", "world"], "delay": 0.0}
 async def _scripted_stream(settings: dict[str, Any], model: str, messages: list[dict[str, Any]],
                            tools: list[dict[str, Any]] | None = None, kind: str = "chat",
                            effort: str = "default", tool_choice: str = "auto", fast: bool = False, cancel: asyncio.Event | None = None) -> Any:
+    for pre in SCRIPT.pop("pre", []):
+        yield pre
     for chunk in SCRIPT["chunks"]:
         if SCRIPT["delay"]:
             await asyncio.sleep(SCRIPT["delay"])
@@ -620,7 +622,24 @@ def test_sse_survives_non_finite_numbers() -> None:
     check(data == {"v": "nan", "xs": ["inf", 1.5]}, f"non-finite floats become strings, got {data}")
 
 
-TESTS = [test_post_starts_a_background_run, test_second_post_conflicts, test_two_clients_see_the_same_events,
+def test_retry_events_become_status_events() -> None:
+    script(2)
+    SCRIPT["pre"] = [{"type": "retry", "attempt": 1, "max": 3, "delay_s": 2.0, "reason": "rate_limit", "status": 429},
+                     {"type": "retry", "attempt": 0}]
+    cid = new_conv()
+    j("POST", f"/conversations/{cid}/chat", {"content": "hi"})
+    drain(cid)
+    evs = events(read_streams([f"/conversations/{cid}/stream?since=0"])[0])
+    names = [e for e, _ in evs]
+    st = [d for e, d in evs if e == "status"]
+    check(len(st) == 2 and st[0]["kind"] == "retry" and st[0]["attempt"] == 1 and st[0]["max"] == 3 and st[0]["reason"] == "rate_limit"
+          and st[0]["until"] > 0 and st[1]["kind"] is None, f"retry then clear, got {st}")
+    check(names.index("status") < names.index("delta"), "status precedes the first delta")
+    done = dict(evs)["done"]
+    check(done["error"] is None and message(cid)["content"] == "w0 w1", "a retried reply is the same reply, with no error")
+
+
+TESTS = [test_retry_events_become_status_events, test_post_starts_a_background_run, test_second_post_conflicts, test_two_clients_see_the_same_events,
          test_late_client_replays_from_the_ring, test_event_names_are_the_chatevent_union, test_stop_ends_the_run,
          test_steer_folds_into_the_live_run, test_stop_and_steer_cut_a_blocked_provider_read,
          test_reasoning_stays_out_of_the_reply, test_a_dropped_effort_is_noticed_once_on_the_final_done,

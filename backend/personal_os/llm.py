@@ -663,11 +663,18 @@ async def _close_cm(cm: Any) -> None:
             await cm.__aexit__(None, None, None)
 
 
-async def _send_with_retry(client: httpx.AsyncClient, settings: dict[str, Any], body: dict[str, Any], *, stream: bool,
-                           cancel: asyncio.Event | None = None, deadline_at: float | None = None,
-                           attempt: int = 0) -> tuple[httpx.Response, Any, int]:
-    """POST the completion request, retrying 429/5xx/connection failures. Returns (response, stream context or None,
-    retries used).
+def _retry_event(attempt: int, retries: int, delay: float, reason: str, status: int | None) -> dict[str, Any]:
+    """The `retry` event announcing a backoff that is about to start (display only; nothing reads it back)."""
+    return {"type": "retry", "attempt": attempt, "max": retries, "delay_s": delay, "reason": reason, "status": status}
+
+
+async def _send_attempts(client: httpx.AsyncClient, settings: dict[str, Any], body: dict[str, Any], *, stream: bool,
+                         cancel: asyncio.Event | None = None, deadline_at: float | None = None,
+                         attempt: int = 0) -> AsyncIterator[dict[str, Any]]:
+    """POST the completion request, retrying 429/5xx/connection failures. Yields a `retry` dict just before each
+    backoff (see `_retry_event`) and ends with {"type": "response", "response", "cm", "attempt"}: the response, the
+    stream context or None, and the retries used. Every response of a retried attempt is closed before its `retry` is
+    yielded, so a consumer that stops reading holds no socket.
 
     `attempt` is the retries already spent, so header-level and stream-level retries share the one `llmRetries` cap.
     A streamed response comes back open: the caller closes it through the context. A non-2xx answer that survives
@@ -704,13 +711,15 @@ async def _send_with_retry(client: httpx.AsyncClient, settings: dict[str, Any], 
                 raise LLMError(describe_transport_error(e, attempt), kind="transport") from e
             attempt += 1
             log.warning("provider connection failed (%s); retry %d/%d in %.1fs", type(e).__name__, attempt, retries, delay)
+            yield _retry_event(attempt, retries, delay, "connection", None)
             if not await _backoff(delay, cancel):
                 raise _Aborted("cancelled") from e
             continue
         if r.status_code < 400:
             if sent_effort and (stepped or dropped):
                 _learn_cap(settings, str(body.get("model") or ""), "none" if dropped else "high")
-            return r, cm, attempt
+            yield {"type": "response", "response": r, "cm": cm, "attempt": attempt}
+            return
         retry_after = retry_after_from(r.headers, status=r.status_code)
         kind = classify_error(r.status_code, r.text)
         await _close_cm(cm)
@@ -731,10 +740,21 @@ async def _send_with_retry(client: httpx.AsyncClient, settings: dict[str, Any], 
             if deadline_at is None or time.monotonic() + delay < deadline_at:
                 attempt += 1
                 log.warning("provider answered %d; retry %d/%d in %.1fs", r.status_code, attempt, retries, delay)
+                yield _retry_event(attempt, retries, delay, "rate_limit" if r.status_code == 429 else "provider_error", r.status_code)
                 if not await _backoff(delay, cancel):
                     raise _Aborted("cancelled")
                 continue
         raise _provider_error(describe_http_error(r.status_code, r.reason_phrase, r.text, attempt, retry_after, kind), kind, r.status_code, r.text)
+
+
+async def _send_with_retry(client: httpx.AsyncClient, settings: dict[str, Any], body: dict[str, Any], *, stream: bool,
+                           cancel: asyncio.Event | None = None, deadline_at: float | None = None,
+                           attempt: int = 0) -> tuple[httpx.Response, Any, int]:
+    """`_send_attempts` drained: (response, stream context or None, retries used), for callers with no use for the retry events."""
+    async for ev in _send_attempts(client, settings, body, stream=stream, cancel=cancel, deadline_at=deadline_at, attempt=attempt):
+        if ev["type"] == "response":
+            return ev["response"], ev["cm"], ev["attempt"]
+    raise RuntimeError("unreachable: _send_attempts always ends with a response")
 
 
 def _headers(settings: dict[str, Any]) -> dict[str, str]:
@@ -993,6 +1013,11 @@ async def stream_chat(
     {"type": "end", "finish_reason": str|None, "tool_calls": [{"id","name","arguments"}], "usage": {...}|None,
      "usage_est": {"prompt_tokens": int, "completion_tokens": int}, "incomplete": bool}.
 
+    While a provider failure is being retried it also yields {"type": "retry", "attempt": int, "max": int, "delay_s": float,
+    "reason": "rate_limit"|"provider_error"|"connection", "status": int|None} just before each backoff, then
+    {"type": "retry", "attempt": 0} once the next response arrives. Display only: consumers that do not care skip it
+    (match `end` by type, never by elimination).
+
     `delta.text` is always a str and never contains a leading think block (that goes out as reasoning). `incomplete` is
     True when the stream ended with neither a finish_reason nor [DONE] (a dropped connection); its tool calls are cleared.
 
@@ -1032,6 +1057,7 @@ async def stream_chat(
     deadline_at = stream_deadline.get()
     retries = _retries(settings)
     attempt = 0  # retries spent, header-level and stream-level together
+    announced = False  # a retry event is on screen until the next response arrives
     sent = True  # False when Stop or the deadline ended the call before any response arrived
     dropped = ""
     # read= bounds the wait for response headers (and backs up a chunk); the per-chunk idle limit is enforced below.
@@ -1046,7 +1072,16 @@ async def stream_chat(
             emitted = False  # the first content, reasoning or tool-call fragment ends the right to retry
             fail: tuple[str, bool, str | None, str] | None = None  # (message, retryable, kind, body)
             try:
-                r, cm, attempt = await _send_with_retry(client, settings, body, stream=True, cancel=cancel, deadline_at=deadline_at, attempt=attempt)
+                r = cm = None
+                async for sev in _send_attempts(client, settings, body, stream=True, cancel=cancel, deadline_at=deadline_at, attempt=attempt):
+                    if sev["type"] == "retry":
+                        announced = True
+                        yield sev
+                    else:
+                        r, cm, attempt = sev["response"], sev["cm"], sev["attempt"]
+                if announced:
+                    announced = False
+                    yield {"type": "retry", "attempt": 0}  # the clear: a slow first token must not keep saying "retrying"
             except _Aborted as a:
                 cancelled, timed_out, sent = a.reason == "cancelled", a.reason != "cancelled", False
                 break
@@ -1138,6 +1173,8 @@ async def stream_chat(
             if not emitted and retryable and attempt < retries and (deadline_at is None or time.monotonic() + delay < deadline_at):
                 attempt += 1
                 log.warning("provider failed before the first token (%s); retry %d/%d in %.1fs", message, attempt, retries, delay)
+                announced = True
+                yield _retry_event(attempt, retries, delay, "connection" if kind_f == "transport" else "provider_error", None)
                 if not await _backoff(delay, cancel):
                     cancelled = True
                     break

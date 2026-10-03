@@ -304,6 +304,24 @@ def bind_supported(complete: Complete, **kw: Any) -> Complete:
     return functools.partial(complete, **ok) if ok else complete
 
 
+def _over_limit(cfg: dict[str, Any], rows: list[dict[str, Any]], history: list[dict[str, str]], system_tokens: int,
+                window: int | None) -> bool:
+    limit = _float(cfg, "compactAt", 0.7) * (window or _int(cfg, "contextWindow", 128000))
+    return bool(cfg.get("autoCompact", True) and len(rows) > _int(cfg, "compactKeepRecent", 8) + 2
+                and estimate_messages(history) + system_tokens > limit)
+
+
+def needs_compaction(compactor: Compactor, convos: Any, cfg: dict[str, Any], conv_id: str, system_tokens: int, *,
+                     window: int | None = None) -> bool:
+    """Whether `prepare_history` would run the summarizer now, so the caller can say so first. Never raises."""
+    try:
+        rows = convos.history_rows(conv_id)
+        history = compactor.build_history(rows, compactor.get(conv_id), _tainted(convos, conv_id))
+        return _over_limit(cfg, rows, history, system_tokens, window)
+    except Exception:  # noqa: BLE001 - an announcement must never fail the reply
+        return False
+
+
 async def prepare_history(compactor: Compactor, convos: Any, cfg: dict[str, Any], model: str, conv_id: str, system_tokens: int,
                           complete: Complete | None = None, *, window: int | None = None, cancel: Any = None,
                           deadline: float | None = None) -> tuple[list[dict[str, str]], dict[str, Any]]:
@@ -319,9 +337,7 @@ async def prepare_history(compactor: Compactor, convos: Any, cfg: dict[str, Any]
         untrusted = _tainted(convos, conv_id)
         summary = compactor.get(conv_id)
         history = compactor.build_history(rows, summary, untrusted)
-        limit = _float(cfg, "compactAt", 0.7) * (window or _int(cfg, "contextWindow", 128000))
-        if (cfg.get("autoCompact", True) and len(rows) > _int(cfg, "compactKeepRecent", 8) + 2
-                and estimate_messages(history) + system_tokens > limit):
+        if _over_limit(cfg, rows, history, system_tokens, window):
             res = await compactor.compact(cfg, model, conv_id, rows, include_untrusted=untrusted,
                                           complete=bind_supported(complete or llm.complete, cancel=cancel, deadline=deadline))
             if res:

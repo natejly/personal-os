@@ -515,6 +515,15 @@ export interface ContextMeter {
 export type MessageOutcome = 'stopped' | 'rounds' | 'tokens' | 'time' | 'cost' | 'loop' | 'interrupted' | 'length' | 'incomplete'
 export type ErrorKind = 'rate_limit' | 'quota' | 'auth' | 'not_found' | 'overflow' | 'unsupported_param' | 'content_filter' | 'overloaded' | 'server' | 'bad_request' | 'transport' | 'cancelled' | 'timeout'
 
+/** A transient line under a streaming reply. `retry` counts down to `until` (epoch ms); `compacting` has no end time. */
+export interface MessageStatus {
+  kind: 'retry' | 'compacting'
+  attempt?: number
+  max?: number
+  until?: number
+  reason?: 'rate_limit' | 'provider_error' | 'connection'
+}
+
 export interface Message {
   id: string
   conversation_id: string
@@ -528,6 +537,8 @@ export interface Message {
   /** A reasoning model's chain-of-thought. Never sent back to the model as history. */
   reasoning?: string | null
   created_at: number
+  /** Live only, never persisted: what a streaming reply is waiting on (a provider retry, a history summary). Set and cleared by `status` events. */
+  status?: MessageStatus | null
   /** How the reply ended when it did not end normally; null = complete, or failed with error. */
   outcome?: MessageOutcome | null
   error_kind?: ErrorKind | null
@@ -1212,6 +1223,16 @@ export interface UsageBucket {
   reasoning_share?: number
 }
 
+/** What one chat has spent: the `usage_log` rows tagged with its id. `cost` leaves out `unpriced` calls. */
+export interface ConversationUsage {
+  totals: UsageBucket
+  by_kind: (UsageBucket & { kind: string })[]
+  /** First recorded call (epoch seconds); rows older than the retention window are gone. */
+  since: number | null
+  /** Calls whose token counts were estimated, not reported. */
+  estimated: number
+}
+
 export interface UsageReport {
   days: number
   totals: UsageBucket
@@ -1241,6 +1262,8 @@ export type ChatEvent =
   | { event: 'tool_call'; data: { message_id: string; id: string; name: string; arguments: Record<string, unknown>; needs_approval?: boolean; forced?: boolean; permission?: PermissionCard | null; plan?: PlanStepRef | null; agent?: string } }
   | { event: 'tool_result'; data: ToolEvent & { message_id: string } }
   | { event: 'span'; data: { message_id: string; span: Span } }
+  /** Transient progress for a reply that has no tokens yet: a provider retry (`until` is epoch ms) or a history summary. `kind: null` clears it. */
+  | { event: 'status'; data: { id: string; kind: MessageStatus['kind'] | null; attempt?: number; max?: number; until?: number; reason?: MessageStatus['reason'] } }
   | { event: 'done'; data: { id: string | null; error: string | null; context_used: ContextUsed | null; tool_events: ToolEvent[]; trace: Span[]; stopped: boolean; partial?: PartialReason | null; segment?: boolean; tainted?: boolean; taint_sources?: string[]; reasoning?: string | null; outcome?: MessageOutcome | null; error_kind?: ErrorKind | null; notice?: string | null } }
   | { event: 'taint'; data: { message_id: string; source: string } }
   | { event: 'subagent'; data: SubagentInfo & { message_id: string | null } }

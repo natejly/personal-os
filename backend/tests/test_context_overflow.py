@@ -198,5 +198,8 @@ def test_stop_during_context_assembly_ends_the_reply_as_stopped() -> None:
     finally:
         llm.stream_chat, llm.complete = prev_s, prev_c
     d = done_of(evs)
-    assert d["stopped"] is True and d["outcome"] == "stopped" and d["id"] is None and d["error"] is None
+    # The summary call announced itself (a status line), so a reply row was opened and is the one that ends stopped.
+    opened = [data["id"] for e, data in evs if e == "assistant_message"]
+    assert [data["kind"] for e, data in evs if e == "status"] == ["compacting"]
+    assert d["stopped"] is True and d["outcome"] == "stopped" and opened == [d["id"]] and d["error"] is None
     assert not SEEN, "the model was never asked"

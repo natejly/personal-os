@@ -183,6 +183,12 @@ except llm.LLMError:
 h, info = run(compaction.prepare_history(compactor, convos, CFG, "m", make_conv(40), 100, complete=cancelled))
 check(not info["compacted"] and info["row_ids"], "without a Stop a summarizer failure still sends the full history")
 
+# (f) the announcement predicate agrees with the branch prepare_history takes
+check(compaction.needs_compaction(compactor, convos, CFG, make_conv(40), 100) is True, "a long chat needs compaction")
+check(compaction.needs_compaction(compactor, convos, CFG, make_conv(2), 100) is False, "a short chat does not")
+check(compaction.needs_compaction(compactor, convos, {**CFG, "autoCompact": False}, make_conv(40), 100) is False, "auto-compact off never announces")
+check(compaction.needs_compaction(compactor, object(), CFG, "x", 100) is False, "a failing repo is False, not an error")
+
 check(estimate_tokens("a" * 40) == 10 and estimate_tokens("你" * 40) == 40 and estimate_tokens("") == 1, "non-ASCII counts a token a character")
 
 print(f"test_compaction: {passed} checks passed")

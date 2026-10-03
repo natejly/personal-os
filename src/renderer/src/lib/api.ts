@@ -1,5 +1,5 @@
 import type {
-  BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, DriveFile, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Artifact, ArtifactVersion, Recap, Conversation, ConversationSettings, ContextUsed, ContextMeter, Document, GraphData, GraphEdge, GraphNode, Message,
+  BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTask, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, DriveFile, Board, BoardCard, BoardColumn, DataSource, Dashboard, Widget, Artifact, ArtifactVersion, Recap, Conversation, ConversationSettings, ContextUsed, ContextMeter, ConversationUsage, Document, GraphData, GraphEdge, GraphNode, Message,
   ApprovalDecision, PermissionEvaluation, PlanEdit,
   Memory, MemoryProposal, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
   Command, Workflow, WorkflowRun, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
@@ -492,6 +492,7 @@ export const api = {
   },
   messageOtlp: (messageId: string) => req<unknown>(`/messages/${messageId}/otlp`),
   testTraceExport: () => req<{ sent: boolean; reason?: string; status: number | null; error: string | null }>('/traces/export-test', { method: 'POST' }),
+  conversationUsage: (conversationId: string) => req<ConversationUsage>(`/conversations/${conversationId}/usage`),
   contextMeter: (conversationId: string) => req<ContextMeter>(`/conversations/${conversationId}/context-meter`),
   compactConversation: (conversationId: string, focus?: string) =>
     req<{ compacted: boolean }>(`/conversations/${conversationId}/compact`, { method: 'POST', body: json({ focus: focus ?? null }) }),

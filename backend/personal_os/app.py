@@ -1490,6 +1490,14 @@ def _replay_args(raw: str | None) -> str:
     return raw or "{}" if isinstance(args, dict) else "{}"
 
 
+def _retry_status(message_id: str, ev: dict[str, Any]) -> dict[str, Any]:
+    """The `status` payload for a stream_chat `retry` event; attempt 0 is the clear."""
+    if not ev.get("attempt"):
+        return {"id": message_id, "kind": None}
+    return {"id": message_id, "kind": "retry", "attempt": ev["attempt"], "max": ev.get("max"),
+            "until": now_ms() + int(float(ev.get("delay_s") or 0) * 1000), "reason": ev.get("reason")}
+
+
 def _bind_stop(message_id: str, stop: asyncio.Event, run: Run | None) -> None:
     _active[message_id] = run if run is not None else stop
 
@@ -1613,17 +1621,39 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     # Older messages are folded into a rolling summary when the replay outgrows the window (compaction.py).
     # The window is this model's: the global setting, what the proxy reports, and what an overflow taught us.
     win = compaction.window_for(cfg, model, pricing.caps(model).get("max_input_tokens"))
+    # The summarizer call can take a while. When it is about to run, the reply row is opened first so the transcript
+    # can say what is happening (a `status` event); a turn that does not compact is unchanged.
+    pre_am: dict[str, Any] | None = None
+    if compaction.needs_compaction(compactor, convos, cfg, conv_id, used["tokens_estimate"], window=win):
+        pre_am = regen_am or convos.add_message(conv_id, "assistant", "", model=model, variant_of=carried_root)
+        _bind_stop(pre_am["id"], stop, run)
+        yield "assistant_message", {**pre_am, "context_used": used}
+        yield "status", {"id": pre_am["id"], "kind": "compacting"}
     try:
         history, cinfo = await compaction.prepare_history(compactor, convos, cfg, str(cfg.get("extractionModel") or model), conv_id,
                                                           used["tokens_estimate"], window=win, cancel=stop)
+    except asyncio.CancelledError:
+        if pre_am:
+            _active.pop(pre_am["id"], None)
+            convos.finish_message(pre_am["id"], "", "Cancelled", used, [], tracer.spans, None)
+            convos.touch(conv_id)
+        raise
     except llm.LLMError:
         if not stop.is_set():
+            if pre_am:
+                _active.pop(pre_am["id"], None)
             raise
-        # Stopped while the history was being summarized: no reply row exists yet, so there is nothing to persist.
-        yield "done", {"id": None, "error": None, "context_used": None, "tool_events": [], "trace": tracer.spans, "stopped": True,
+        # Stopped while the history was being summarized: a reply row exists only if the status line opened one.
+        if pre_am:
+            _active.pop(pre_am["id"], None)
+            convos.finish_message(pre_am["id"], "", None, used, [], tracer.spans, None, outcome="stopped")
+            convos.touch(conv_id)
+        yield "done", {"id": pre_am["id"] if pre_am else None, "error": None, "context_used": None, "tool_events": [], "trace": tracer.spans, "stopped": True,
                        "partial": None, "segment": False, "tainted": bool(conv["settings"].get("tainted")), "taint_sources": [],
                        "reasoning": None, "outcome": "stopped", "error_kind": None}
         return
+    if pre_am:
+        yield "status", {"id": pre_am["id"], "kind": None}
     tracer.end(cspan, {"memories": len(used["memories"]), "entities": len(used["nodes"]), "excerpts": len(used["chunks"]),
                        "history_messages": len(history)})
     compact_span: dict[str, Any] | None = None
@@ -1635,7 +1665,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     # budget). Without this the row stays blank with no error and its _active entry leaks.
     am: dict[str, Any] = {}
     try:
-        am = regen_am or convos.add_message(conv_id, "assistant", "", model=model, variant_of=carried_root)
+        am = pre_am or regen_am or convos.add_message(conv_id, "assistant", "", model=model, variant_of=carried_root)
 
         _bind_stop(am["id"], stop, run)
         buf: list[str] = []
@@ -2003,6 +2033,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 elif ev["type"] == "delta":
                     buf.append(ev["text"])
                     yield "delta", {"id": am["id"], "text": ev["text"]}
+                elif ev["type"] == "retry":
+                    yield "status", _retry_status(am["id"], ev)
                 else:
                     fin = ev
                     if ev.get("effort_dropped"):
@@ -2130,6 +2162,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         first_token = now_ms()
                     buf.append(ev["text"])
                     yield "delta", {"id": am["id"], "text": ev["text"]}
+                elif ev["type"] == "retry":
+                    yield "status", _retry_status(am["id"], ev)
                 else:
                     end = ev
                     if ev.get("effort_dropped"):
@@ -4133,6 +4167,13 @@ async def usage_report(days: int = 30) -> dict[str, Any]:
     cfg = settings()
     await pricing.refresh(cfg)
     return {**usage.report(days), "prices": pricing.table(cfg)}
+
+
+@app.get("/conversations/{id}/usage")
+async def conversation_usage(id: str) -> dict[str, Any]:
+    if not convos.get(id, with_messages=False):
+        raise HTTPException(404, "Conversation not found")
+    return usage.conversation(id)
 
 
 class PricesIn(BaseModel):

@@ -3,6 +3,7 @@ import {
   ResponsiveContainer, ComposedChart, BarChart, Bar, Line, Area, PieChart, Pie, Cell, ScatterChart, Scatter,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend
 } from 'recharts'
+import { parseJsonLoose } from '../lib/chartRepair'
 import { BarChart3, Table2, Code2, Copy, Check, AlertCircle } from 'lucide-react'
 
 /**
@@ -41,7 +42,7 @@ export function num(v: unknown): number | null {
 }
 
 export function parseSpec(source: string): Spec {
-  const raw = JSON.parse(source) as Record<string, unknown>
+  const raw = parseJsonLoose(source) as Record<string, unknown>
   if (!raw || typeof raw !== 'object') throw new Error('Chart spec must be a JSON object')
   let data: Row[] = []
   let x = typeof raw.x === 'string' ? raw.x : ''

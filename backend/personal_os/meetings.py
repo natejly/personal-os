@@ -2124,6 +2124,8 @@ class MeetingService:
                 "title": str(e.get("summary") or "(no title)"), "start": str(e.get("start") or ""),
                 "end": str(e.get("end") or ""), "attendee_count": count, "has_external": has_external,
                 "conference_link": _conference_link(e), "meeting_id": existing["id"] if existing else None,
+                "attendees": [{"email": a.get("email") or "", "name": a.get("name") or a.get("displayName") or ""}
+                              for a in details if not a.get("self")] or [{"email": x} for x in emails],
             })
         self._suggest = (now(), out)
         return out

@@ -1,5 +1,5 @@
 import { api, json, req } from '../../lib/api'
-import type { DocRecording, DocRecordingMode, DocRevision, FullMeeting } from '@shared/types'
+import type { Doc, DocRecording, DocRecordingMode, DocRevision, FullMeeting } from '@shared/types'
 
 /**
  * Typed wrappers for the doc-recording routes, plus the existing meeting calls the doc UI reuses.
@@ -25,6 +25,10 @@ export const docRecApi = {
    *  start leaves no row behind. */
   start: (docId: string, body: { mode?: DocRecordingMode; template?: string; title?: string } = {}) =>
     req<FullMeeting>(`/docs/${docId}/recordings`, { method: 'POST', body: json(body) }),
+  /** Calendar "Take notes": one doc for the event, with the recording started on it. Repeating it for the
+   *  same event returns the same doc (`existing`) without starting again. 409 leaves no doc behind. */
+  fromEvent: (body: { event_id: string; title: string; start: number | null; attendees: unknown[]; mode?: DocRecordingMode }) =>
+    req<{ doc: Doc; started: FullMeeting; existing: boolean }>('/docs/from-event', { method: 'POST', body: json(body) }),
   list: (docId: string) => req<DocRecording[]>(`/docs/${docId}/recordings`),
   /** A linked row that is not started, as the target for an audio import. */
   createLinked: (docId: string, title: string, mode: DocRecordingMode = 'record') =>

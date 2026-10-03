@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Home, Calendar, Mail, Brain, FolderKanban, Sparkles, RefreshCw, PanelLeftOpen, ExternalLink, Plus, MessageSquare, Mic, SlidersHorizontal, X, ListChecks, HardDrive } from 'lucide-react'
 import { useStore } from '../store'
+import { blockKey, blockWhen, mailWatchLines, pickedBlocks } from '../lib/todayCards'
+import type { PlannerBlock } from '@shared/types'
 import { api } from '../lib/api'
 import { formatOffset, offerableCandidates } from '../lib/transcript'
 import { HOME_MODULES, homeModuleOn } from '../modules'
@@ -160,6 +162,37 @@ function ConnectGoogle({ what, onConnect }: { what: string; onConnect: () => voi
   )
 }
 
+/** Today's proposed blocks. The only write is the confirm button, which posts the ticked blocks to /planner/apply. */
+function PlanCard({ blocks }: { blocks: PlannerBlock[] }): JSX.Element {
+  const toast = useStore((s) => s.toast)
+  const refreshDashboard = useStore((s) => s.refreshDashboard)
+  const [picked, setPicked] = useState<Set<string>>(() => new Set(blocks.map(blockKey)))
+  const [busy, setBusy] = useState(false)
+  useEffect(() => { setPicked(new Set(blocks.map(blockKey))) }, [blocks])
+  const confirm = async (): Promise<void> => {
+    setBusy(true)
+    try {
+      const { results } = await api.planner.apply(pickedBlocks(blocks, picked))
+      const failed = results.filter((r) => !r.ok)
+      if (failed.length) toast(`${results.length - failed.length} added, ${failed.length} failed: ${failed[0].error}`, 'error')
+      else toast(`${results.length} block${results.length === 1 ? '' : 's'} added to your calendar`)
+      await refreshDashboard()
+    } catch (e) { toast((e as Error).message, 'error') } finally { setBusy(false) }
+  }
+  return (
+    <section className="widget">
+      <header><Calendar size={14} /> Day plan <span className="muted small">proposed</span></header>
+      {blocks.map((b) => (
+        <label key={blockKey(b)} className="planner-row">
+          <input type="checkbox" checked={picked.has(blockKey(b))} onChange={() => setPicked((p) => { const n = new Set(p); n.has(blockKey(b)) ? n.delete(blockKey(b)) : n.add(blockKey(b)); return n })} />
+          <span>{b.title}</span><span className="planner-when">{blockWhen(b)}</span>
+        </label>
+      ))}
+      <button className="primary-btn" onClick={() => void confirm()} disabled={busy || picked.size === 0}>Add selected to calendar</button>
+    </section>
+  )
+}
+
 export default function HomeView(): JSX.Element {
   const TodosCard = moduleHome('todos')?.home?.Card
   const HealthCard = moduleHome('health')?.home?.Card
@@ -304,6 +337,13 @@ export default function HomeView(): JSX.Element {
               </ul>
             )}
           </section>}
+
+          {on('mailwatch') && d?.mail_watch && <section className="widget">
+            <header><Mail size={14} /> Waiting mail <button className="link small" onClick={() => setView('mail')}>View all</button></header>
+            {mailWatchLines(d.mail_watch).length === 0 ? <p className="muted">Nothing waiting.</p> : mailWatchLines(d.mail_watch).map((l) => <p key={l}>{l}</p>)}
+          </section>}
+
+          {on('plan') && google?.connected && (d?.planner_blocks?.length ?? 0) > 0 && <PlanCard blocks={d!.planner_blocks!} />}
 
           {on('gtasks') && <section className="widget">
             <header><ListChecks size={14} /> Google Tasks</header>

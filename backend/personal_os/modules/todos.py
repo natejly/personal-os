@@ -262,4 +262,6 @@ class TodosModule(Module):
                 await t
 
     def today(self) -> dict[str, Any]:
-        return {"todos": self.store.list("__all__", include_done=False)[:12], "todo_stats": self.store.stats()}
+        d = date.today()
+        rows = sorted(self.store.list("__all__", include_done=False), key=lambda t: -todo_rules.urgency(t, d))  # stable: ties keep the due order
+        return {"todos": rows[:12], "todo_stats": self.store.stats()}

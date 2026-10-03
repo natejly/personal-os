@@ -41,6 +41,10 @@ class ReadStore:
                 return None
             return copy.deepcopy(bucket[key])
 
+    def values(self, namespace: str) -> list[Any]:
+        with self._lock:
+            return copy.deepcopy(list((self._data.get(namespace) or {}).values()))
+
     def put(self, namespace: str, key: str, value: Any, *, flush: bool = True, cap: int | None = None) -> None:
         """Save one value. With `cap`, the namespace keeps only its `cap` most recently saved keys."""
         with self._lock:

@@ -1035,6 +1035,10 @@ export interface TodayDashboard {
   todo_stats: { open: number; overdue: number; today: number }
   /** Visible health metrics with today's value; missing from a backend without the health module. */
   health?: HealthToday[]
+  /** Mail-watch counts, from the table; absent without the module. */
+  mail_watch?: { to_reply: number; awaiting_reply_overdue: number }
+  /** The day plan the planner proposes from the saved calendar; nothing is written until confirmed. */
+  planner_blocks?: PlannerBlock[]
   projects: Project[]
   recent_memories: Memory[]
   recent_conversations: Conversation[]

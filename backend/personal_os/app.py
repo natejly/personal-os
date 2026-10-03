@@ -4445,6 +4445,10 @@ async def dashboard() -> dict[str, Any]:
         if _google_has(st, "drive.readonly"):
             fetches.append(fetch("drive", google.drive_files, "", 10))
         await asyncio.gather(*fetches)
+        # A synced task is already a native todo: show it once.
+        if out["tasks"] and tasks_sync.config()["enabled"]:
+            linked = {t["external_id"] for t in todos.list("__all__", True) if t.get("external_id")}
+            out["tasks"] = [t for t in out["tasks"] if t.get("id") not in linked]
     return out
 
 

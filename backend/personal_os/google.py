@@ -520,6 +520,15 @@ class Google:
             return listed
         return [ev for ev in stored.values() if _overlaps(ev, start, end)]
 
+    def calendar_saved(self, days: int) -> list[dict[str, Any]] | None:
+        """Events in the next `days` from the saved snapshots only; never calls Google. None when nothing was ever saved."""
+        snaps = [v for v in self._reads.values("calendar") if isinstance(v, dict) and isinstance(v.get("events"), dict)]
+        if not snaps:
+            return None
+        a = dt.datetime.now(dt.timezone.utc)
+        b = a + dt.timedelta(days=days)
+        return [ev for v in snaps for ev in v["events"].values() if _overlaps(ev, a, b)]
+
     def _drop_saved_event(self, calendar_id: str, event_id: str) -> None:
         """Take an event we are about to change out of the saved window.
 

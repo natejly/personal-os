@@ -2,13 +2,11 @@ import { useState } from 'react'
 import { CalendarClock } from 'lucide-react'
 import { api } from '../lib/api'
 import { useStore } from '../store'
+import { blockKey, blockWhen } from '../lib/todayCards'
 import type { PlannerBlock, PlannerSuggestion } from '@shared/types'
 
-const when = (b: PlannerBlock): string => {
-  const s = new Date(b.start), e = new Date(b.end)
-  return `${s.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })} ${s.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}–${e.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`
-}
-const key = (b: PlannerBlock): string => `${b.todo_id}:${b.start}`
+const when = blockWhen
+const key = blockKey
 const why = (b: PlannerBlock): string =>
   b.why ? `Score ${b.score.toFixed(2)}: due ${b.why.due.toFixed(2)}, priority ${b.why.priority.toFixed(2)}, energy ${b.why.energy.toFixed(2)}, time of day ${b.why.time.toFixed(2)}` : `Score ${b.score.toFixed(2)}`
 

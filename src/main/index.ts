@@ -186,6 +186,11 @@ function buildMenu(): void {
         { label: 'Meetings', accelerator: 'CmdOrCtrl+Shift+M', click: () => sendMenu('view:meetings') },
         { label: 'Cowork', accelerator: 'CmdOrCtrl+Shift+K', click: () => sendMenu('view:cowork') },
         { type: 'separator' },
+        // ⌘⇧[ / ⌘⇧] step through chats (⌃⌘[ / ⌃⌘] are pop-out transparency and ⌥⌘arrows are spaces).
+        { label: 'Previous Chat', accelerator: 'CmdOrCtrl+Shift+[', click: () => sendMenu('chat:prev') },
+        { label: 'Next Chat', accelerator: 'CmdOrCtrl+Shift+]', click: () => sendMenu('chat:next') },
+        { label: 'Search Chats', accelerator: 'CmdOrCtrl+Shift+F', click: () => sendMenu('chat:search') },
+        { type: 'separator' },
         { label: 'Toggle Spaces', accelerator: 'CmdOrCtrl+Shift+C', click: () => sendMenu('canvas:toggle') },
         { label: 'Toggle Sidebar', accelerator: 'CmdOrCtrl+B', click: () => sendMenu('toggle-sidebar') },
         // ⌘I is the Cursor reflex: ask about what is on screen. The chat's context inspector, which

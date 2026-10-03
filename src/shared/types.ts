@@ -582,6 +582,10 @@ export interface Conversation {
   settings: ConversationSettings
   created_at: number
   updated_at: number
+  /** Set while the chat is pinned (epoch seconds); archiving clears it. */
+  pinned_at?: number | null
+  /** Set while the chat is archived: hidden from the list, still opens by id. */
+  archived_at?: number | null
   messages?: Message[]
 }
 

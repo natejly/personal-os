@@ -309,6 +309,11 @@ kbd {
 /* The hover-only delete must not set the row height: at 28px it made chat rows 40px tall. */
 .convo-item .icon-btn { width: 22px; height: 22px; margin: -2px -4px -2px 0; flex-shrink: 0; }
 .convo-item .ghost:focus-visible { opacity: 1; }
+.convo-list h4.pinned-head { display: flex; align-items: center; gap: 5px; }
+.convo-list h4.archived-head { margin: 8px 0 2px; }
+.convo-list h4.archived-head .section-toggle { font: inherit; text-transform: inherit; letter-spacing: inherit; padding: 0; }
+.convo-item.archived { color: var(--text-muted); }
+.convo-rename { width: 100%; min-width: 0; font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; }
 .convo-item:hover .ghost { opacity: 1; }
 /* Block, not flex: a flex container ignores text-overflow, so the title used to
    hard-cut mid-glyph. The badges become inline-block so they keep their size. */

@@ -8,6 +8,7 @@ import { api, backgroundStream, chatStream, meetingStream, setBase, type Scope }
 import { currentSelection } from './lib/pageContext'
 import { DEFAULT_EFFORT, NEEDS_YOU } from '../../shared/types'
 import { chatNotice, finishStatus, foldRunState, mergeConversation, onScreen, pickEvictions, pulseStatus, reduceStatus, replayCursor, settleApprovals, type LiveRuns } from './sessionStatus'
+import { adjacentChatId } from './lib/chatRows'
 import { createDeltaBuffer } from './lib/deltaBuffer'
 import { CHAT_NOTICE_BODY, notify } from './lib/notify'
 import { applyCursor, fetchSegmentPages, needsSegmentReload } from './lib/transcript'
@@ -337,6 +338,14 @@ export interface State {
   /** Called on focus: clears unread and maps done/error back to idle, but never needs-approval. */
   clearSessionStatus: (conversationId: string) => void
   deleteChat: (id: string) => Promise<void>
+  pinChat: (id: string, on: boolean) => Promise<void>
+  archiveChat: (id: string, on: boolean) => Promise<void>
+  moveChat: (id: string, projectId: string | null) => Promise<void>
+  /** Chat above (-1) or below (1) the focused one in the list's own order; no-op in the canvas. */
+  stepChat: (dir: 1 | -1) => void
+  /** ⌘⇧F: opens the sidebar and bumps the tick the Sidebar watches to show and focus its search. */
+  searchChats: () => void
+  sidebarSearchTick: number
   renameChat: (id: string, title: string) => Promise<void>
   setChatModel: (model: string, conversationId?: string) => Promise<void>
   /** Model, effort and fast in ONE request (the picker's Restore defaults); a draft parks them for `send`. Never rejects. */
@@ -875,6 +884,8 @@ const applyMeetingEvent = (s: MeetingWatch, ev: MeetingStreamEvent): MeetingWatc
   }
 }
 
+export { adjacentChatId }
+
 export const useStore = create<State>((set, get) => {
   /**
    * App's init effect runs twice under React.StrictMode, so both of these are latched. A second
@@ -907,6 +918,9 @@ export const useStore = create<State>((set, get) => {
         if (s.view !== 'canvas') s.newChat(null)
       } else if (action === 'settings') s.setSettingsOpen(true)
       else if (action === 'toggle-sidebar') s.toggleSidebar()
+      else if (action === 'chat:next') s.stepChat(1)
+      else if (action === 'chat:prev') s.stepChat(-1)
+      else if (action === 'chat:search') s.searchChats()
       else if (action === 'toggle-context') s.toggleContext()
       else if (action === 'page-agent') s.togglePageAgent()
       else if (action === 'view:graph') s.openMemory('graph')
@@ -1529,6 +1543,7 @@ export const useStore = create<State>((set, get) => {
     meetingBusy: false,
     meetingConsentOpen: false,
     sidebarOpen: true,
+    sidebarSearchTick: 0,
     contextOpen: false,
     contextTab: 'last',
     libraryTab: 'skills',
@@ -1897,6 +1912,41 @@ export const useStore = create<State>((set, get) => {
       void get().refreshProjects()
       get().offerUndo(title ? `chat “${title}”` : 'chat', [{ type: 'conversation', id }], res?.stopped ? 'Reply stopped.' : undefined)
     },
+    pinChat: async (id, on) => {
+      await guard(on ? 'Could not pin chat' : 'Could not unpin chat', async () => {
+        const row = await api.conversations.patch(id, { pinned: on })
+        set((st) => ({ conversations: st.conversations.map((c) => (c.id === id ? { ...c, pinned_at: row.pinned_at ?? null } : c)) }))
+      })
+    },
+    archiveChat: async (id, on) => {
+      const ok = await guard(on ? 'Could not archive chat' : 'Could not unarchive chat', () => api.conversations.patch(id, { archived: on }))
+      if (!ok) return
+      if (!on) return void get().refreshConversations().catch(() => undefined)
+      get().closeSession(id)
+      set((st) => ({ conversations: st.conversations.filter((c) => c.id !== id) }))
+      void get().refreshProjects()
+      get().toast('Archived chat', 'info', { label: 'Undo', run: () => void get().archiveChat(id, false) })
+    },
+    moveChat: async (id, projectId) => {
+      // A 409 (live run, desk or job transcript) arrives as the server's message in the guard's toast.
+      await guard('Could not move chat', async () => {
+        const row = await api.conversations.patch(id, { project_id: projectId })
+        const next = row.project_id ?? null
+        patchConversation(id, (c) => ({ ...c, project_id: next }))
+        set((st) => ({
+          conversations: st.conversations.map((c) => (c.id === id ? { ...c, project_id: next } : c)),
+          draftProjectId: st.focusedConversationId === id ? next : st.draftProjectId
+        }))
+        void get().refreshProjects()
+      })
+    },
+    stepChat: (dir) => {
+      const s = get()
+      if (s.view === 'canvas') return
+      const next = adjacentChatId(s.conversations, s.focusedConversationId, dir)
+      if (next) void s.selectChat(next)
+    },
+    searchChats: () => set((s) => ({ sidebarOpen: true, sidebarSearchTick: s.sidebarSearchTick + 1 })),
     renameChat: async (id, title) => {
       const next = title.trim()
       if (!next) return

@@ -528,7 +528,7 @@ class Database:
             # Soft delete (trash.py): deleted_at hides a row from every read; deleted_with names the project
             # whose deletion took it along, so restoring the project brings back exactly those rows.
             "projects": {"tools": "TEXT NOT NULL DEFAULT '{}'", "deleted_at": "REAL"},
-            "conversations": {"deleted_at": "REAL", "deleted_with": "TEXT"},
+            "conversations": {"deleted_at": "REAL", "deleted_with": "TEXT", "pinned_at": "REAL", "archived_at": "REAL"},
             "memories": {"deleted_at": "REAL", "deleted_with": "TEXT", "valid_from": "REAL", "invalid_at": "REAL", "superseded_by": "TEXT",
                          "source_conversation_id": "TEXT", "source_message_id": "TEXT"},
             "documents": {"deleted_at": "REAL", "deleted_with": "TEXT", "content_hash": "TEXT NOT NULL DEFAULT ''"},

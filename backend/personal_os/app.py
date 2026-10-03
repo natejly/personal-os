@@ -4524,6 +4524,45 @@ def move_card(cid: str, body: MoveIn) -> dict[str, Any]:
     return c
 
 
+class ClaimIn(BaseModel):
+    holder: str
+    ttl_s: float = 600
+
+
+class ReleaseIn(BaseModel):
+    token: str
+    reason: str = "finished"
+
+
+@app.get("/boards/{id}/cards/{card}/events")
+def card_events(id: str, card: str) -> list[dict[str, Any]]:
+    return boards.events(card)
+
+
+@app.post("/boards/cards/{cid}/claim")
+def claim_card(cid: str, body: ClaimIn) -> dict[str, Any]:
+    token = boards.claim(cid, body.holder, body.ttl_s)
+    if token is None:
+        raise HTTPException(409, "That card is already claimed")
+    return {"token": token}
+
+
+@app.post("/boards/cards/{cid}/release")
+def release_card(cid: str, body: ReleaseIn) -> dict[str, bool]:
+    try:
+        return {"ok": boards.release(cid, body.token, body.reason)}
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.post("/boards/cards/{cid}/complete")
+def complete_card(cid: str) -> dict[str, bool]:
+    """The user accepting a card as done: the one check the HTTP surface may write."""
+    if not boards.complete(cid, "user_accepted", "user", by="user"):
+        raise HTTPException(404)
+    return {"ok": True}
+
+
 @app.delete("/boards/cards/{cid}")
 def delete_card(cid: str) -> dict[str, bool]:
     boards.delete_card(cid)

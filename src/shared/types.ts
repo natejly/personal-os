@@ -1360,7 +1360,9 @@ export interface BoardColumn { id: string; board_id: string; name: string; posit
 export interface BoardCard {
   id: string; board_id: string; column_id: string; title: string; description: string; position: number
   due: string | null; priority: number; labels: string[]; created_at: number; updated_at: number
+  claimed_by?: string | null; lease_expires_at?: number | null
 }
+export interface CardEvent { id: string; seq: number; card_id: string; actor: string; kind: string; payload: Record<string, unknown>; created_at: number }
 export interface Board { id: string; project_id: string | null; name: string; created_at: number; card_count?: number; columns: BoardColumn[]; cards: BoardCard[] }
 
 export interface DataSource {

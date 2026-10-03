@@ -408,6 +408,14 @@ export interface ToolEvent {
   proposal?: string | null
   /** Set when this call's arguments matched an approved plan step, so it ran without its own card. */
   plan?: PlanStepRef | null
+  /** Stopped mid-run or the app closed; the error text says which. */
+  interrupted?: boolean
+  /** Arguments were repaired before the call ran. */
+  repaired?: boolean
+  /** Refused before the gate: broken JSON, unknown name or signature mismatch. */
+  invalid?: 'arguments' | 'name' | 'schema'
+  /** Handle of the stored full result (read_tool_result). */
+  result_id?: string | null
   /** Set when a subagent made this call: its card rides the parent's stream, labelled with the child. */
   agent?: string
   /** write_local_file / move_local_file: the pre-image kept so the user can undo it (id is null when too large to keep). */

@@ -79,7 +79,7 @@ from . import shell as shell_tool
 from .subagents import AgentDefs, Subagents
 from .commands import Commands
 from .workflows import ApprovalError as WorkflowApprovalError, Engine as WorkflowEngine, Workflows
-from .runs import ACTIVE, PROMOTE_STEP, STATUSES, Run, RunBus, RunStore, Topic
+from .runs import ACTIVE, PROMOTE_STEP, STATUSES, Run, RunBus, RunStore, Topic, args_digest
 from .stuck import STUCK_NUDGE, STUCK_STOP, StuckDetector
 from .style import WritingStyle, learn_style_from_exchange, looks_like_prose
 from .modules import Module, ModuleContext, build_modules, get as module_get
@@ -261,7 +261,8 @@ _approvals: dict[str, asyncio.Future] = {}
 # Background work that outlives the run that queued it, and the topic it reports on.
 events = Topic()
 consolidator = Consolidator(db, memories, graph)
-learner = LearnWorker(memories=memories, graph=graph, set_trace=convos.set_trace, publish=events.publish, consolidator=consolidator)
+learner = LearnWorker(memories=memories, graph=graph, set_trace=convos.set_trace, publish=events.publish, consolidator=consolidator,
+                     alive=lambda cid: convos.get(cid, with_messages=False) is not None)
 
 
 ENV_SEED = {
@@ -1032,10 +1033,13 @@ def update_project(id: str, body: ProjectPatch) -> dict[str, Any]:
 
 
 @app.delete("/projects/{id}")
-def delete_project(id: str) -> dict[str, bool]:
+async def delete_project(id: str) -> dict[str, Any]:
+    # async so each run's stop Event is set on the loop that owns it. Stop is cooperative: the replies wind down and
+    # persist what they wrote, and the chats are still there to restore.
+    stopped = sum(1 for c in convos.list(id, include_jobs=True, include_desks=True) if bus.stop(c["id"]))
     trash.trash("project", id)  # its chats, memories and uploads go to the trash; docs and todos are demoted to personal
     canvases.delete_windows_for("project", id)  # ref_id has no foreign key: a deleted referent's windows are swept here
-    return {"ok": True}
+    return {"ok": True, "stopped": stopped}
 
 
 @app.get("/projects/global/stats")
@@ -1092,17 +1096,25 @@ def patch_conversation(id: str, body: ConvPatch) -> dict[str, Any]:
 
 
 @app.delete("/conversations/{id}")
-def delete_conversation(id: str) -> dict[str, bool]:
+async def delete_conversation(id: str) -> dict[str, Any]:
+    # Stop the live reply first (async, so its Event is set on the owning loop): a trashed chat must not keep calling
+    # tools, waiting on a card or feeding auto-learn. Idempotent: an already-trashed or idle chat answers ok.
+    stopped = bus.stop(id)
     trash.trash("conversation", id)
     canvases.delete_windows_for("chat", id)
-    return {"ok": True}
+    return {"ok": True, "stopped": stopped}
 
 
 @app.delete("/conversations/{id}/messages/{mid}")
-def delete_message(id: str, mid: str) -> dict[str, bool]:
+async def delete_message(id: str, mid: str) -> dict[str, bool]:
+    if not convos.get(id, with_messages=False):
+        raise HTTPException(404, "No such conversation")
+    if (run := bus.answering(id)) is not None:
+        raise HTTPException(409, {"message": "That conversation has a running reply", "run_id": run.run_id, "seq": run.seq})
     # The path's conversation must own the message: this used to delete it from whichever conversation held it.
-    conv = convos.get(id)
-    if not conv or not any(m["id"] == mid for m in conv["messages"]):
+    with db.tx() as c:
+        owned = c.execute("SELECT 1 FROM messages WHERE id=? AND conversation_id=?", (mid, id)).fetchone()
+    if not owned:
         raise HTTPException(404, "No such message in this conversation")
     convos.delete_message(mid)
     return {"ok": True}
@@ -1332,6 +1344,43 @@ async def _call_tool(run: Run | None, step: int, name: str, args: dict[str, Any]
         if spec.taints and not (isinstance(result, dict) and result.get("error")):
             ctx["tainted"] = True
     return result
+
+
+# How long a write that Stop caught mid-call is given to report its real outcome before it is cancelled.
+STOP_GRACE_SECONDS = 3.0
+
+
+async def _await_tool(coro: Any, stop: asyncio.Event, *, grace: float) -> tuple[Any, bool]:
+    """Await a tool call, but let Stop cut it short. Returns (result, interrupted).
+
+    Stop gives the call `grace` seconds to finish on its own (a write milliseconds from done then reports what
+    happened), then cancels it and waits at most 2 s for its cleanup (a foreground shell kills its process group on
+    cancel). A thread-backed body cannot be killed: its await is abandoned and it runs out its own limit in the
+    background. If the run itself is cancelled (shutdown) the call is cancelled and awaited the same way before the
+    cancel propagates, so cleanup handlers still run. The call's exception, if any, is always retrieved."""
+    if stop.is_set() and grace <= 0:
+        coro.close()  # Stop already landed: do not start it at all
+        return None, True
+    task = asyncio.ensure_future(coro)
+    waiter = asyncio.ensure_future(stop.wait())
+    try:
+        await asyncio.wait({task, waiter}, return_when=asyncio.FIRST_COMPLETED)
+        if not task.done():  # Stop fired first
+            if grace > 0:
+                await asyncio.wait({task}, timeout=grace)
+            if not task.done():
+                task.cancel()
+                await asyncio.wait({task}, timeout=2)
+                return None, True
+        return task.result(), False
+    except asyncio.CancelledError:
+        task.cancel()
+        await asyncio.wait({task}, timeout=2)
+        raise
+    finally:
+        waiter.cancel()
+        if task.done() and not task.cancelled():
+            task.exception()  # retrieved, so an abandoned failure is not logged as never awaited
 
 
 def _urls(text: str) -> set[str]:
@@ -2045,6 +2094,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 decision = "allow"
                 deny_note: str | None = None
                 edit_info: dict[str, Any] = {}
+                interrupted = False  # Stop cut this call short (see _await_tool)
                 if asks:
                     # Pause the reply until the user approves or denies this call (POST /approvals/{call_id}).
                     # The approval is a row, and it waits as long as it takes: there is no auto-deny.
@@ -2052,9 +2102,14 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     fut: asyncio.Future = asyncio.get_event_loop().create_future()
                     _approvals[uid] = fut
                     store = run.store if run is not None else None
+                    mine = False  # whether the row on file is the one this wait opened (a reused id returns the old row)
                     if store is not None:
-                        store.open_approval(uid, run.run_id, c["name"], args, conversation_id=conv_id, message_id=am["id"],
-                                           forced=forced, desk_id=run.desk_id, danger=danger)
+                        opened = store.open_approval(uid, run.run_id, c["name"], args, conversation_id=conv_id, message_id=am["id"],
+                                                     forced=forced, desk_id=run.desk_id, danger=danger)
+                        mine = bool(opened and opened.get("status") == "pending" and opened.get("run_id") == run.run_id
+                                    and opened.get("tool") == c["name"] and opened.get("args_digest") == args_digest(args))
+                        if not mine:
+                            log.warning("approval %s was already on file for another call; only a live answer will count", uid)
                         run.budget = budget.snapshot()
                         run.set_status("awaiting_approval")
                     awaiting = {"id": uid, "name": c["name"], "arguments": args, "result_preview": "", "duration_ms": 0,
@@ -2095,14 +2150,14 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                             except asyncio.TimeoutError:
                                 waited += 2
                                 row = store.approval(uid) if store is not None else None
-                                if row and row["status"] != "pending" and not fut.done():  # decided on the row alone
+                                if mine and row and row["status"] != "pending" and not fut.done():  # decided on the row alone
                                     fut.set_result(row["decision"])
                         decision = fut.result() if fut.done() else "deny"
                     finally:
                         _approvals.pop(uid, None)
                     deny_note = _approval_notes.pop(uid, None)
                     pending_card, awaiting = awaiting, None
-                    if decision != "deny" and store is not None and (arow := store.approval(uid)) and arow.get("edited_args"):
+                    if decision != "deny" and mine and store is not None and (arow := store.approval(uid)) and arow.get("edited_args"):
                         # The user rewrote this call on its card. approval_edits validated it in the route and the row's
                         # digest was re-bound to it; from here on the edited arguments are THE call: they run, are
                         # journaled, verified and queued (outbox) in place of the model's. Never read from the model's call.
@@ -2245,16 +2300,23 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     if proposal_only(run) and run is not None:
                         result = _propose(run, c["name"], args, uid, tool_ctx)
                     else:
-                        result = await _mcp_call(c["name"], args)
-                        mcp_ran = True
-                    ran = True
+                        result, interrupted = await _await_tool(_mcp_call(c["name"], args), stop,
+                                                                grace=STOP_GRACE_SECONDS if danger in IDEMPOTENT_DANGER else 0.0)
+                        mcp_ran = not interrupted
+                    ran = not interrupted
                 else:
                     tool_ctx["fs_outside_ok"] = fs_ask  # the user approved this write (or granted the folder)
                     try:
-                        result = await _call_tool(run, _round, c["name"], args, tool_ctx, uid)
+                        result, interrupted = await _await_tool(
+                            _call_tool(run, _round, c["name"], args, tool_ctx, uid), stop,
+                            grace=STOP_GRACE_SECONDS if danger in IDEMPOTENT_DANGER else 0.0)
                     finally:
                         tool_ctx["fs_outside_ok"] = False
-                    ran = True
+                    ran = not interrupted
+                if interrupted:
+                    # The journal row stays `started`, so a later identical call reports unknown_outcome rather than repeating it.
+                    result = tools.tool_error("Stopped by the user before it finished; whether it took effect is unknown."
+                                              if danger in IDEMPOTENT_DANGER else "Stopped by the user.")
                 hint = denials.note()
                 if hint and isinstance(result, dict):
                     result["permission_note"] = hint
@@ -2288,6 +2350,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                          "approval": (("plan" if claimed else decision) if mode == "ask" else None),
                          "plan": {"plan_id": claimed["plan_id"], "idx": claimed["idx"], "title": claimed["title"]} if claimed else None,
                          "forced": forced, "tainted": tainted, "blocked": c["name"] if was_blocked else None, "breaker": partial,
+                         **({"interrupted": True, "pending": False} if interrupted else {}),
                          "blocked_by": "plan_mode" if blocked_reason == PLAN_BLOCKED else None,
                          "proposal": (result.get("proposal_id") if proposing and isinstance(result, dict) else None),
                          # Persisted with the tool event, so the card finds its artifact again after a reload.
@@ -2337,6 +2400,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     tool_schemas = _schemas()
                 if tool_ctx.pop("plan_changed", None):
                     yield "plan", {"conversation_id": conv_id, "steps": (work_plans.get(conv_id) or {}).get("steps") or []}
+            if stop.is_set():  # no final round for a Stop: the existing stop path persists the reply
+                break
             if partial == "loop":
                 async for chunk in _final_round():
                     yield chunk
@@ -2392,7 +2457,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     # asked for, on text the user has not read yet. What it found belongs in its report and the inbox.
     # A tainted reply has read someone else's page or transcript. Mining it into memory would
     # plant that text in later chats. The user can still save a memory by approving the tool.
-    if (not error and text and not proposal_only(run) and not tool_ctx["tainted"]
+    # A chat deleted mid-reply is not mined: the exchange is the user's to discard (Undo restores it unlearned).
+    gone = convos.get(conv_id, with_messages=False) is None
+    if (not error and text and not gone and not proposal_only(run) and not tool_ctx["tainted"]
             and cfg.get("autoLearn", True) and conv["settings"].get("autoLearn", True)):
         learner.submit(LearnJob(
             conversation_id=conv_id, message_id=am["id"], project_id=conv["project_id"],
@@ -2407,7 +2474,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     # that did nothing — and never leaves a span open for the UI to show as still running.
     # Same bound as auto-learn: a message in a chat that has read someone else's page is not a
     # sample of how the user writes. The voice profile is injected into later chats.
-    if (not error and not tool_ctx["tainted"] and cfg.get("learnStyle", True)
+    if (not error and not gone and not tool_ctx["tainted"] and cfg.get("learnStyle", True)
             and conv["settings"].get("autoLearn", True) and looks_like_prose(user_text)):
         sspan = tracer.start("style", "Learn writing style")
         yield "span", {"message_id": am["id"], "span": sspan}
@@ -3027,6 +3094,11 @@ def _patch_tool_event(message_id: str | None, call_id: str, patch: dict[str, Any
             c.execute("UPDATE messages SET tool_events=? WHERE id=?", (json.dumps(evs), message_id))
 
 
+def _untrashed(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Pending cards of a trashed chat are hidden, not decided: Undo brings the chat and its cards back."""
+    return [a for a in rows if not a.get("conversation_id") or convos.get(a["conversation_id"], with_messages=False)]
+
+
 @app.get("/approvals")
 async def list_approvals(status: str | None = "pending", run_id: str | None = None, limit: int = 100,
                          desk_id: str | None = None) -> list[dict[str, Any]]:
@@ -3035,6 +3107,8 @@ async def list_approvals(status: str | None = "pending", run_id: str | None = No
     if status not in (None, "", "all", "pending", "approved", "denied"):
         raise HTTPException(400, "status must be pending, approved, denied or all")
     rows = run_store.approvals(None if status in (None, "", "all") else status, run_id, _clamp(limit), desk_id)
+    if status == "pending":
+        rows = _untrashed(rows)
     # A plan card is read back through its plan, not through the approval row: action_plans stays the
     # one place a plan lives, and the row carries only the id that gets you there.
     return [{**a, "live": a["call_id"] in _approvals,
@@ -3510,7 +3584,7 @@ def agent_inbox(hours: float = 72.0, limit: int = 20, include_dry: int = 0) -> d
     """
     cutoff = time.time() - max(0.0, float(hours)) * 3600
     pending_approvals = []
-    for a in run_store.approvals("pending", limit=100):
+    for a in _untrashed(run_store.approvals("pending", limit=100)):
         row = run_store.get(a["run_id"]) if a["run_id"] else None
         pending_approvals.append({**a, "live": a["call_id"] in _approvals, "run_kind": (row or {}).get("kind"),
                                   "job": ((row or {}).get("input") or {}).get("job")})

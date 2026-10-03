@@ -357,7 +357,7 @@ export const api = {
     list: () => req<Project[]>('/projects'),
     create: (s: Pick<Project, 'name' | 'description' | 'system_prompt' | 'color'>) => req<Project>('/projects', { method: 'POST', body: json(s) }),
     update: (id: string, patch: Partial<Project>) => req<Project>(`/projects/${id}`, { method: 'PUT', body: json(patch) }),
-    delete: (id: string) => req(`/projects/${id}`, { method: 'DELETE' }),
+    delete: (id: string) => req<{ ok: boolean; stopped?: number }>(`/projects/${id}`, { method: 'DELETE' }),
     globalStats: () => req<NonNullable<Project['stats']>>('/projects/global/stats')
   },
   conversations: {
@@ -366,7 +366,7 @@ export const api = {
     create: (projectId: string | null, model?: string) => req<Conversation>('/conversations', { method: 'POST', body: json({ project_id: projectId, model }) }),
     patch: (id: string, patch: { title?: string; model?: string; settings?: Partial<ConversationSettings> }) =>
       req<Conversation>(`/conversations/${id}`, { method: 'PATCH', body: json(patch) }),
-    delete: (id: string) => req(`/conversations/${id}`, { method: 'DELETE' }),
+    delete: (id: string) => req<{ ok: boolean; stopped?: boolean }>(`/conversations/${id}`, { method: 'DELETE' }),
     deleteMessage: (id: string, mid: string) => req(`/conversations/${id}/messages/${mid}`, { method: 'DELETE' })
   },
   /** The chat's plan artifact: the model writes it with `todo_write`, the user ticks steps off here. */

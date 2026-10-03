@@ -292,7 +292,7 @@ export interface State {
   setProjectModal: (m: State['projectModal']) => void
   toast: (text: string, kind?: Toast['kind'], action?: Toast['action']) => void
   /** After a soft delete: a toast with Undo (~8s) that restores it from the trash. */
-  offerUndo: (what: string, items: { type: TrashKind; id: string }[]) => void
+  offerUndo: (what: string, items: { type: TrashKind; id: string }[], note?: string) => void
   restoreTrashed: (items: { type: TrashKind; id: string }[]) => Promise<void>
 
   refreshProjects: () => Promise<void>
@@ -1421,8 +1421,8 @@ export const useStore = create<State>((set, get) => {
       set((s) => ({ toasts: [...s.toasts, { id, text, kind, action }] }))
       setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), action ? UNDO_MS : kind === 'error' ? 6000 : 3500)
     },
-    offerUndo: (what, items) => {
-      get().toast(`Deleted ${what}`, 'info', { label: 'Undo', run: () => void get().restoreTrashed(items) })
+    offerUndo: (what, items, note) => {
+      get().toast(`Deleted ${what}${note ? `. ${note}` : ''}`, 'info', { label: 'Undo', run: () => void get().restoreTrashed(items) })
     },
     restoreTrashed: async (items) => {
       try {
@@ -1453,7 +1453,9 @@ export const useStore = create<State>((set, get) => {
     },
     deleteProject: async (id) => {
       const name = get().projects.find((p) => p.id === id)?.name
-      await api.projects.delete(id)
+      const res = await api.projects.delete(id)
+      // Each chat of the project loses its viewer too: the backend has stopped their replies.
+      for (const [cid, x] of Object.entries(get().sessions)) if (x.conversation.project_id === id) get().closeSession(cid)
       set((s) => {
         const sessions = Object.fromEntries(Object.entries(s.sessions).filter(([, x]) => x.conversation.project_id !== id))
         const fid = s.focusedConversationId
@@ -1468,7 +1470,7 @@ export const useStore = create<State>((set, get) => {
         }
       })
       await Promise.all([get().refreshProjects(), get().refreshConversations(), get().refreshDocs(), get().refreshTodos()])
-      get().offerUndo(name ? `project “${name}”` : 'project', [{ type: 'project', id }])
+      get().offerUndo(name ? `project “${name}”` : 'project', [{ type: 'project', id }], res?.stopped ? 'Reply stopped.' : undefined)
     },
 
     setLibraryScope: async (libraryScope) => {
@@ -1545,11 +1547,11 @@ export const useStore = create<State>((set, get) => {
     },
     deleteChat: async (id) => {
       const title = get().conversations.find((c) => c.id === id)?.title
-      await api.conversations.delete(id)
+      const res = await api.conversations.delete(id)
       get().closeSession(id)
       set((s) => ({ conversations: s.conversations.filter((c) => c.id !== id) }))
       void get().refreshProjects()
-      get().offerUndo(title ? `chat “${title}”` : 'chat', [{ type: 'conversation', id }])
+      get().offerUndo(title ? `chat “${title}”` : 'chat', [{ type: 'conversation', id }], res?.stopped ? 'Reply stopped.' : undefined)
     },
     renameChat: async (id, title) => {
       if (!title.trim()) return

@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { adoptServerDoc, applyEvent, editCut, settleInterrupted, useStore, type ChatSession } from './store'
 import { api } from './lib/api'
+import { mergeConversation } from './sessionStatus'
 import type { ChatEvent, Message } from '@shared/types'
 
 /**
@@ -348,4 +349,17 @@ test('editAndResend refuses while the chat is answering and for empty text', asy
   } finally {
     api.chat = real
   }
+})
+
+test('an edit cut folded through applyEvent leaves no hidden row, even when a streaming refetch keeps unsent rows', () => {
+  const rows = [msg({ id: 'u1', role: 'user' }), msg({ id: 'a1' }), msg({ id: 'u2', role: 'user' }), msg({ id: 'a2' })]
+  let s = session({ conversation: { ...session().conversation, messages: rows } })
+  for (const id of ['u2', 'a2']) s = applyEvent(s, ev({ event: 'removed_message', data: { id } }), true)
+  s = applyEvent(s, ev({ event: 'user_message', data: msg({ id: 'u3', role: 'user', edited_from: 'u2' }) }), true)
+  s = applyEvent(s, ev({ event: 'assistant_message', data: msg({ id: 'a3', content: '' }) }), true)
+  assert.deepEqual(s.conversation.messages?.map((m) => m.id), ['u1', 'a1', 'u3', 'a3'])
+  // The server's copy mid-stream: the hidden rows are gone, the reply row is not stored yet.
+  const remote = { ...s.conversation, messages: [rows[0], rows[1], msg({ id: 'u3', role: 'user' })] }
+  const merged = mergeConversation(s.conversation, remote, true)
+  assert.deepEqual(merged.messages?.map((m) => m.id), ['u1', 'a1', 'u3', 'a3'], 'keepUnsent keeps the live reply, not the cut')
 })

@@ -1471,6 +1471,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             yield "error", {"message": "Empty message"}
             return
         edited_from: str | None = None
+        had_writes = False
         if body.replace_from:
             # Edit and resend: the cut happens here, inside the run, so a refused request (409) can never leave
             # a half-applied cut. Rows are hidden, not deleted; state derived from them is invalidated with them.
@@ -1495,11 +1496,16 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     if a["tool"] == PLAN_TOOL:
                         plans.decide(a["call_id"], "deny", by="stop", note="The message this plan was proposed for was edited.")
                     run_store.decide(a["call_id"], "deny", by="superseded", note="The message this call belonged to was edited.")
-            had_writes = any((sp := toolbox.specs.get(te.get("name"))) is not None and sp.danger in MUTATING
-                             for r in cut for te in r["tool_events"] if not te.get("pending"))
-            if cut[0]["id"] == next((m["id"] for m in conv["messages"] if m["role"] == "user"), None) and conv["title"] != "New chat":
+            # Connector tools are not in toolbox.specs but are external by construction (as the tool loop treats them).
+            ran = [str(te.get("name") or "") for r in cut for te in r["tool_events"] if not te.get("pending")]
+            had_writes = any((toolbox.specs[n].danger if n in toolbox.specs else (MCP_DANGER if mcp_is(n) else "safe")) in MUTATING
+                             for n in ran)
+            first_user = next((m for m in conv["messages"] if m["role"] == "user"), None)
+            conv = {**conv, "messages": [m for m in conv["messages"] if m["id"] not in hidden]}
+            # Cutting the first message re-titles the chat below, unless the user renamed it (an auto title is derived).
+            if first_user and first_user["id"] in hidden and conv["title"] == _title_from(first_user["content"]):
                 convos.update(conv_id, {"title": "New chat"})
-                conv = {**conv, "title": "New chat", "messages": []}
+                conv = {**conv, "title": "New chat"}
         um = convos.add_message(conv_id, "user", user_text)
         yield "user_message", {**um, **({"edited_from": edited_from, "had_writes": had_writes} if edited_from else {})}
         if conv["title"] == "New chat" and not [m for m in conv["messages"] if m["role"] == "user"]:

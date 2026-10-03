@@ -708,11 +708,6 @@ const attaches = new Map<string, Promise<void>>()
 /** The tail of each conversation's PATCH queue, so a send can wait for a model or effort change to land. */
 const convWrites = new Map<string, Promise<unknown>>()
 
-/**
- * A reply whose run died under it: the in-flight message carries the error, every tool call that never
- * returned is marked unknown (an approval card still waiting is left, it is a decision and not an outcome),
- * and the session stops answering. Pure, for the `error` event.
- */
 /** What editing `messageId` would hide: that row and every row after it, and whether any hidden reply ran tools. */
 export const editCut = (messages: Message[], messageId: string): { removed: number; ranTools: boolean } => {
   const at = messages.findIndex((m) => m.id === messageId)
@@ -721,6 +716,11 @@ export const editCut = (messages: Message[], messageId: string): { removed: numb
   return { removed: hidden.length, ranTools: hidden.some((m) => m.role === 'assistant' && !!m.tool_events?.some((t) => !t.pending)) }
 }
 
+/**
+ * A reply whose run died under it: the in-flight message carries the error, every tool call that never
+ * returned is marked unknown (an approval card still waiting is left, it is a decision and not an outcome),
+ * and the session stops answering. Pure, for the `error` event.
+ */
 export const settleInterrupted = (s: ChatSession, message: string): ChatSession => {
   const mid = s.streaming?.messageId
   const msgs = (s.conversation.messages ?? []).map((m) => m.id !== mid ? m : {
@@ -2034,7 +2034,12 @@ export const useStore = create<State>((set, get) => {
     editAndResend: async (messageId, text, conversationId) => {
       const id = conversationId ?? get().focusedConversationId
       const body = text.trim()
-      if (!id || !body || get().sessions[id]?.streaming?.answering) return false
+      if (!id || !body) return false
+      if (get().sessions[id]?.streaming?.answering) {
+        // The pencil is hidden while answering, but a reply can start under an open editor (another window, a steer).
+        get().toast('That chat is already replying — your edit was not sent.', 'error')
+        return false
+      }
       await convWrites.get(id)?.catch(() => undefined)
       return runStream(id, { content: body, replace_from: messageId })
     },

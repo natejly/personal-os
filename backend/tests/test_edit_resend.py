@@ -83,13 +83,32 @@ def test_edit_the_first_turn_supersedes_the_rest() -> None:
 
 def test_title_resets_when_the_first_message_is_cut() -> None:
     cid = three_turns()
-    app_mod.convos.update(cid, {"title": "Old title"})
+    check(j("GET", f"/conversations/{cid}")["title"] == "one", "the title was derived from the first message")
     edit(cid, msgs(cid)[0]["id"], "a brand new topic")
-    check(j("GET", f"/conversations/{cid}")["title"] != "Old title", "the title is re-derived from the new first message")
+    check(j("GET", f"/conversations/{cid}")["title"] == "a brand new topic", "the title is re-derived from the new first message")
+    check(("title", {"id": cid, "title": "a brand new topic"}) in tape(cid), "a title event announces it")
     cid2 = three_turns()
     app_mod.convos.update(cid2, {"title": "Keep me"})
     edit(cid2, msgs(cid2)[2]["id"], "second turn edited")
     check(j("GET", f"/conversations/{cid2}")["title"] == "Keep me", "a later cut leaves the title alone")
+    cid3 = three_turns()
+    app_mod.convos.update(cid3, {"title": "Renamed by hand"})
+    edit(cid3, msgs(cid3)[0]["id"], "a brand new topic")
+    check(j("GET", f"/conversations/{cid3}")["title"] == "Renamed by hand", "a user-renamed title survives a first-message cut")
+
+
+def test_had_writes_names_hidden_mutating_tool_runs() -> None:
+    from personal_os.plans import MUTATING
+    cid = three_turns()
+    ms = msgs(cid)
+    tool = next(n for n, s in app_mod.toolbox.specs.items() if s.danger in MUTATING)
+    ran = {"id": "t1", "name": tool, "arguments": {}, "result_preview": "", "duration_ms": 1, "error": None, "pending": False}
+    app_mod.convos.finish_message(ms[3]["id"], "did it", None, None, tool_events=[ran])
+    edit(cid, ms[4]["id"])
+    check(dict(tape(cid))["user_message"]["had_writes"] is False, "a cut below the tool run reports no writes")
+    edit(cid, msgs(cid)[2]["id"])
+    um = dict(tape(cid))["user_message"]
+    check(um["had_writes"] is True and um["edited_from"] == ms[2]["id"], f"a cut above it reports had_writes, got {um}")
 
 
 def _summary(cid: str, upto: dict[str, Any]) -> None:

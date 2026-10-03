@@ -693,6 +693,17 @@ export interface Document {
   text?: string
 }
 
+/** POST /documents: the stored row plus what the server could make of the file. */
+export interface UploadResult extends Document {
+  /** These exact bytes were already stored in this scope; the existing row came back. */
+  duplicate?: boolean
+  /** Some text came out of the file (false for a picture with no OCR text or a scan with no text layer). */
+  extracted?: boolean
+  /** False when a chat cannot read the file: it is stored, but the assistant cannot see what is in it. */
+  readable?: boolean
+  reason?: string | null
+}
+
 /** Recurring todo: completing it spawns the next instance (backend todo_rules.py). */
 export interface TodoRepeat {
   every: number

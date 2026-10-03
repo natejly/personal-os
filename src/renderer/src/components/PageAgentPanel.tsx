@@ -81,6 +81,7 @@ export default function PageAgentPanel(): JSX.Element {
 
       <Composer
         conversationId={threadId ?? NO_THREAD}
+        draftKey="page"
         compact
         onSend={sendToPageAgent}
         placeholder={ctx ? `Ask about ${ctx.label}…` : 'Ask…'}

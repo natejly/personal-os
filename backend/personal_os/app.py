@@ -30,7 +30,7 @@ from . import activity, approval_edits, assist, backups, llm, mac, mcp_drift, mc
 from . import compaction, otel_export
 from .context import build_context, estimate_tokens, layout_messages
 from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
-from .extract_text import MAX_UPLOAD_BYTES, extract_structured, extract_text, for_index, safe_upload_name
+from .extract_text import MAX_UPLOAD_BYTES, extract_structured, extract_text, for_index, has_readable_text, safe_upload_name
 from .consolidate import Consolidator
 from .learn import MAX_INJECTED_SKILLS, LearnJob, LearnWorker, Skills, induce_skill, run_transcript, skill_block
 from .embed import Embedder
@@ -4235,7 +4235,7 @@ def _store_upload(project_id: str | None, name: str, mime: str, data: bytes) -> 
     digest = hashlib.sha256(data).hexdigest()
     dup = documents.find_by_hash(pid, digest)
     if dup:
-        return {**dup, "duplicate": True}
+        return {**dup, "duplicate": True, "extracted": has_readable_text(dup.get("text") or "")}
     text = for_index(extract_text(safe, data, mime))
     try:
         blocks = extract_structured(safe, data, mime)
@@ -4244,21 +4244,30 @@ def _store_upload(project_id: str | None, name: str, mime: str, data: bytes) -> 
     dest = db.data_dir / "uploads" / f"{new_id()}-{safe}"
     dest.write_bytes(data)
     try:
-        return documents.create(pid, safe, mime, len(data), str(dest), text, blocks=blocks, content_hash=digest)
+        row = documents.create(pid, safe, mime, len(data), str(dest), text, blocks=blocks, content_hash=digest)
     except BaseException:
         dest.unlink(missing_ok=True)
         raise
+    return {**row, "extracted": has_readable_text(text)}
+
+
+UNREADABLE_UPLOAD = ("No readable text came out of this file. It is stored and can be referred to by name, "
+                     "but the assistant cannot see what is in it.")
 
 
 @app.post("/documents")
 async def upload_document(file: UploadFile = File(...), project_id: str | None = Form(None)) -> dict[str, Any]:
     data = await _read_upload(file)
     try:
-        return await asyncio.to_thread(_store_upload, project_id, file.filename or "untitled", file.content_type or "", data)
+        row = await asyncio.to_thread(_store_upload, project_id, file.filename or "untitled", file.content_type or "", data)
     except HTTPException:
         raise
     except Exception as e:  # noqa: BLE001
         raise HTTPException(400, str(e)) from e
+    # Stored either way; the client must not call a file the model cannot read an upload that worked.
+    if row.get("extracted"):
+        return {**row, "readable": True}
+    return {**row, "readable": False, "reason": UNREADABLE_UPLOAD}
 
 
 class ReindexIn(BaseModel):

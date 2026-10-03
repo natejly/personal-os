@@ -13,6 +13,8 @@ import { viewHidden } from './moduleToggles'
 import { chainTo, folderKey, groupShutKey } from './lib/docTree'
 import { clearViews } from './lib/viewCache'
 import { emailAsk } from './lib/emailAsk'
+import type { UploadResult } from '@shared/types'
+import { uploadToast, type UploadOutcome } from './lib/uploadNote'
 
 /**
  * Settings as the renderer holds them: without the legacy `mode`, which only init() reads. Kept out
@@ -471,7 +473,8 @@ export interface State {
   addTodo: (t: Parameters<typeof api.todos.create>[0]) => Promise<void>
   updateTodo: (id: string, patch: Parameters<typeof api.todos.update>[1]) => Promise<void>
   deleteTodo: (id: string) => Promise<void>
-  uploadDocuments: (files: FileList | File[], projectId: string | null) => Promise<string[]>
+  /** Stores each file and says which ones the assistant can read; the composer builds its note from that. */
+  uploadDocuments: (files: FileList | File[], projectId: string | null) => Promise<UploadOutcome[]>
   deleteDocument: (id: string) => Promise<void>
 
   refreshDocs: (q?: string) => Promise<void>
@@ -3213,12 +3216,15 @@ export const useStore = create<State>((set, get) => {
       }
     },
     uploadDocuments: async (files, projectId) => {
-      const saved: string[] = []
+      const saved: UploadOutcome[] = []
       for (const f of Array.from(files)) {
         try {
-          const doc = await api.documents.upload(projectId, f)
-          saved.push(doc.name || f.name)
-          get().toast(`Uploaded ${doc.name || f.name}`)
+          const doc = (await api.documents.upload(projectId, f)) as UploadResult
+          // An older backend says nothing about readability; its files count as readable, as before.
+          const r: UploadOutcome = { name: doc.name || f.name, readable: doc.readable !== false, reason: doc.reason ?? null }
+          saved.push(r)
+          const t = uploadToast(r)
+          get().toast(t.text, t.kind)
         } catch (e) {
           get().toast(`${f.name}: ${(e as Error).message}`, 'error')
         }

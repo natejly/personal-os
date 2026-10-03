@@ -14,8 +14,9 @@
 
 What does not count: a run the user stopped (it ends `done`, or `stopped`/`cancelled`, never `error`); a manual
 "Run now" (the user is watching, and a manual failure should not switch off the schedule); a dry run.
-A run left `interrupted` by a backend restart is never retried either: the watcher died with the process, a
-restart is not a model failure, and the outcome of the half-finished run is unknown. Nothing re-attaches on boot.
+A run left `interrupted` by a backend restart lost its watcher with the process, so nothing follows it live.
+`boot_retry` is the one place that picks it up again: once, on start, only if it is the job's latest run, it is
+`interrupted` (a user stop ends `done`), and its stored `attempt` is under the job's `max_retries`.
 
 There is no heartbeat here: a watcher exists only while a run it launched is live, and it polls that one row.
 """
@@ -132,6 +133,28 @@ class JobPolicy:
             raise
         except Exception:  # noqa: BLE001 - a watcher bug must never reach the scheduler
             log.warning("job watcher for %s failed", run_id, exc_info=True)
+
+    async def boot_retry(self) -> list[str]:
+        """On process start: relaunch, once, an enabled job's latest run if it was left `interrupted` with retries
+        to spare. The retry is an ordinary job run (proposal-only) carrying attempt+1 and `retry_of`, and being
+        the new latest run it keeps a second boot from retrying the same slot again."""
+        out: list[str] = []
+        for job in self.jobs.list():
+            last = next(iter(self.runs.of_job(job["id"], limit=1)), None)
+            inp = last.get("input") if last and isinstance(last.get("input"), dict) else {}
+            if (not job["enabled"] or not last or last.get("status") != "interrupted" or inp.get("manual")
+                    or inp.get("dry_run") or self.live_run(job["id"])):
+                continue
+            attempt = int(inp.get("attempt") or 0)
+            if attempt >= int(job.get("max_retries") or 0):
+                continue
+            retry = {**inp, "attempt": max(attempt, 1) + 1, "retry_of": last["run_id"], "late": False}
+            rid = await self.launch(job, retry)
+            if rid:
+                self.jobs.mark_launched(job["id"], rid)
+                self.watch_soon(job, retry, rid)
+                out.append(rid)
+        return out
 
     async def settle(self, job: dict[str, Any], fire: dict[str, Any], run_id: str, row: dict[str, Any]) -> None:
         jid = job["id"]

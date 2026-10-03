@@ -48,7 +48,7 @@ from . import cache as google_cache
 from .google import Google, GoogleNotConnected, json_safe
 from . import job_history, job_tools
 from .jobs_policy import JobPolicy
-from .jobs import (KINDS, PROPOSAL_STATUSES, Jobs, Proposals, Scheduler, local_tz_name, spent, valid_cron,
+from .jobs import (KINDS, PowerWake, check_watch_dir, PROPOSAL_STATUSES, Jobs, Proposals, Scheduler, local_tz_name, spent, valid_cron,
                    valid_tz)
 from . import meeting_import, skillbuild, skillmd
 from . import mail_edits  # noqa: F401 - mail_edits registers the gmail validators
@@ -3264,7 +3264,7 @@ async def _launch_job(job: dict[str, Any], fire: dict[str, Any]) -> str | None:
 
 
 job_policy = JobPolicy(jobs, run_store, _launch_job, settings=settings)
-scheduler = Scheduler(jobs, _launch_job, policy=job_policy)
+scheduler = Scheduler(jobs, _launch_job, policy=job_policy, wake=PowerWake())
 
 
 class JobIn(BaseModel):
@@ -3281,6 +3281,8 @@ class JobIn(BaseModel):
     max_retries: int = Field(default=1, ge=0, le=5)
     # None = every tool, as before. A list narrows the run to exactly those tools (job_tools).
     allowed_tools: list[str] | None = None
+    # kind='watch': a folder under the home folder; each pass that finds new or touched files in it fires one run.
+    watch_dir: str | None = Field(default=None, max_length=1000)
 
 
 class JobPatch(BaseModel):
@@ -3294,6 +3296,7 @@ class JobPatch(BaseModel):
     project_id: str | None = None
     max_retries: int | None = Field(default=None, ge=0, le=5)
     allowed_tools: list[str] | None = None  # an explicit null resets to "every tool"
+    watch_dir: str | None = Field(default=None, max_length=1000)
 
 
 # How far in the past a one-off may be set, on a write. The scheduler is happy to run a late task — that is the
@@ -3301,7 +3304,8 @@ class JobPatch(BaseModel):
 BACKDATE_GRACE_S = 120.0
 
 
-def _check_schedule(kind: str, expr: str | None, tz: str | None, run_at: float | None, *, fresh_time: bool) -> None:
+def _check_schedule(kind: str, expr: str | None, tz: str | None, run_at: float | None, *, fresh_time: bool,
+                    watch_dir: str | None = None) -> None:
     """Reject a schedule the scheduler could not read. Always checked against the schedule the row would *end up*
     with, so switching kind without supplying the other field is a 400 and not a crash in the arming code.
 
@@ -3312,6 +3316,14 @@ def _check_schedule(kind: str, expr: str | None, tz: str | None, run_at: float |
         raise HTTPException(400, f"'{kind}' is not a schedule kind ('cron' for a repeating job, 'once' for a one-off)")
     if tz and not valid_tz(tz):
         raise HTTPException(400, f"'{tz}' is not a timezone name (e.g. 'Europe/Berlin')")
+    if kind == "watch":
+        if expr and not valid_cron(expr):
+            raise HTTPException(400, f"'{expr}' is not a cron expression I can read (five fields, or leave it empty)")
+        try:
+            check_watch_dir(watch_dir)
+        except Exception as e:  # noqa: BLE001 - LocalPathError or a missing folder: say why
+            raise HTTPException(400, f"A directory job needs a folder under your home folder: {e}") from e
+        return
     if kind == "cron":
         if not valid_cron(expr or ""):
             raise HTTPException(400, f"'{expr}' is not a cron expression I can read (five fields, e.g. '30 7 * * *')"
@@ -3341,11 +3353,12 @@ def list_jobs() -> list[dict[str, Any]]:
 
 @app.post("/jobs")
 def create_job(body: JobIn) -> dict[str, Any]:
-    _check_schedule(body.kind, body.cron, body.timezone, body.run_at, fresh_time=True)
+    _check_schedule(body.kind, body.cron, body.timezone, body.run_at, fresh_time=True, watch_dir=body.watch_dir)
     _check_allowed_tools(body.allowed_tools)
     return jobs.create(body.name, body.cron, body.prompt, kind=body.kind, run_at=body.run_at,
                        timezone=body.timezone, enabled=body.enabled, project_id=wsid(body.project_id),
-                       max_retries=body.max_retries, allowed_tools=body.allowed_tools)
+                       max_retries=body.max_retries, allowed_tools=body.allowed_tools,
+                       watch_dir=body.watch_dir and check_watch_dir(body.watch_dir) if body.kind == "watch" else None)
 
 
 @app.patch("/jobs/{id}")
@@ -3359,7 +3372,7 @@ def update_job(id: str, body: JobPatch) -> dict[str, Any]:
     merged = {**cur, **patch}
     _check_allowed_tools(patch.get("allowed_tools"))
     _check_schedule(merged["kind"], merged["cron"], patch.get("timezone"), merged["run_at"],
-                    fresh_time="run_at" in patch)
+                    fresh_time="run_at" in patch, watch_dir=merged.get("watch_dir"))
     # Switching a spent one-off back on is the one re-arm that cannot work: it has no instant left to wait for,
     # so say that instead of leaving the toggle on with nothing scheduled behind it.
     if patch.get("enabled") and merged["kind"] == "once" and "run_at" not in patch and spent(cur):
@@ -3580,6 +3593,7 @@ async def _jobs_startup() -> None:
     try:
         jobs.seed()
         jobs.arm(time.time())
+        await job_policy.boot_retry()
     except Exception:  # noqa: BLE001 - a bad job row must not stop the backend from starting
         log.warning("could not prepare scheduled jobs", exc_info=True)
     app.state.jobs_task = asyncio.create_task(scheduler.loop(), name="job-scheduler")

@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS thread_status (
   age_days REAL,
   dismissed INTEGER NOT NULL DEFAULT 0,
   followup_todo_id TEXT,
-  updated_at REAL
+  updated_at REAL,
+  snoozed_until REAL
 );
 """
 
@@ -157,6 +158,8 @@ class MailWatch:
         self.db = db
         with db.tx() as c:
             c.executescript(SCHEMA)
+            if "snoozed_until" not in {r["name"] for r in c.execute("PRAGMA table_info(thread_status)")}:
+                c.execute("ALTER TABLE thread_status ADD COLUMN snoozed_until REAL")
 
     def refresh(self, rows: list[tuple[dict[str, Any], dict[str, Any]]]) -> int:
         """Upsert (thread, classification) pairs. A changed last message un-dismisses the thread."""
@@ -165,15 +168,17 @@ class MailWatch:
             for thread, res in rows:
                 msgs = thread.get("messages") or []
                 last = msgs[-1] if msgs else {}
-                old = c.execute("SELECT last_msg_id, dismissed, followup_todo_id FROM thread_status WHERE thread_id=?", (thread["thread_id"],)).fetchone()
-                dismissed = int(old["dismissed"]) if old and old["last_msg_id"] == last.get("id") else 0
+                old = c.execute("SELECT last_msg_id, dismissed, followup_todo_id, snoozed_until FROM thread_status WHERE thread_id=?", (thread["thread_id"],)).fetchone()
+                same = bool(old) and old["last_msg_id"] == last.get("id")
+                dismissed = int(old["dismissed"]) if same else 0
+                snooze = old["snoozed_until"] if same else None  # a new message wakes the thread
                 c.execute(
                     "INSERT INTO thread_status(thread_id,subject,status,reason,last_msg_id,last_from,last_date,age_days,dismissed,followup_todo_id,updated_at) "
                     "VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(thread_id) DO UPDATE SET subject=excluded.subject, status=excluded.status, "
                     "reason=excluded.reason, last_msg_id=excluded.last_msg_id, last_from=excluded.last_from, last_date=excluded.last_date, "
-                    "age_days=excluded.age_days, dismissed=excluded.dismissed, updated_at=excluded.updated_at",
+                    "age_days=excluded.age_days, dismissed=excluded.dismissed, updated_at=excluded.updated_at, snoozed_until=?",
                     (thread["thread_id"], thread.get("subject") or "", res["status"], res["reason"], last.get("id"), res["last_from"],
-                     last.get("date"), res["age_days"], dismissed, old["followup_todo_id"] if old else None, t))
+                     last.get("date"), res["age_days"], dismissed, old["followup_todo_id"] if old else None, t, snooze))
         return len(rows)
 
     def list(self, status: str | None = None, include_dismissed: bool = False, at: datetime | None = None) -> list[dict[str, Any]]:
@@ -181,6 +186,8 @@ class MailWatch:
         args: list[Any] = [] if status is None else [status]
         if not include_dismissed:
             where.append("dismissed = 0")
+        where.append("(snoozed_until IS NULL OR snoozed_until <= ?)")
+        args.append((_aware(at) if at else datetime.now(timezone.utc)).timestamp())
         with self.db.tx() as c:
             rows = [dict(r) for r in c.execute(f"SELECT * FROM thread_status WHERE {' AND '.join(where)} ORDER BY last_date DESC", args).fetchall()]
         if at is not None:  # age is relative to the last message, so recompute it at read time
@@ -196,6 +203,12 @@ class MailWatch:
     def dismiss(self, thread_id: str, dismissed: bool) -> bool:
         with self.db.tx() as c:
             return c.execute("UPDATE thread_status SET dismissed=? WHERE thread_id=?", (int(dismissed), thread_id)).rowcount > 0
+
+    def snooze(self, thread_id: str, until: datetime | None) -> bool:
+        """Hide a thread from list() until `until` (None clears). Local only; Gmail is untouched."""
+        with self.db.tx() as c:
+            return c.execute("UPDATE thread_status SET snoozed_until=? WHERE thread_id=?",
+                             (_aware(until).timestamp() if until else None, thread_id)).rowcount > 0
 
     def counts(self, cfg: dict[str, Any], at: datetime) -> dict[str, int]:
         to_reply = len(self.list("to_reply", at=at))

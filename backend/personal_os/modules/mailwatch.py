@@ -30,6 +30,10 @@ class DismissIn(BaseModel):
     dismissed: bool = True
 
 
+class SnoozeIn(BaseModel):
+    until: datetime | None = None  # None clears the snooze
+
+
 class MailWatchConfigIn(BaseModel):
     enabled: bool | None = None
     awaitingAfterDays: int | None = None
@@ -116,6 +120,15 @@ class MailWatchModule(Module):
         @r.put("/mail/watch/{thread_id}")
         def dismiss(thread_id: str, body: DismissIn) -> dict[str, Any]:
             if not self.store.dismiss(thread_id, body.dismissed):
+                raise HTTPException(404)
+            return self.store.get(thread_id)  # type: ignore[return-value]
+
+        @r.put("/mail/watch/{thread_id}/snooze")
+        def snooze(thread_id: str, body: SnoozeIn) -> dict[str, Any]:
+            until = mw._aware(body.until) if body.until else None  # a naive stamp is read as UTC
+            if until is not None and until <= self.clock():
+                raise HTTPException(422, "until must be in the future")
+            if not self.store.snooze(thread_id, until):
                 raise HTTPException(404)
             return self.store.get(thread_id)  # type: ignore[return-value]
 

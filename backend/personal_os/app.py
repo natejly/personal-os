@@ -2513,7 +2513,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     mode = "ask"
                 # untrusted content in this reply upgraded on -> ask; so does a call that may never run unasked
                 # (shell_run outside its sandbox), which no standing grant can then buy off
-                forced = mode != raw_mode or (mode == "ask" and toolbox.forces_ask(c["name"], args))
+                forced = mode != raw_mode or (mode == "ask" and toolbox.forces_ask(c["name"], args, tool_ctx))
                 # A sandboxed shell_run inside this desk's own workspace needs no card when the tool is still on its default
                 # `ask` (shell.auto_ok). Everything below (plan mode, desk autonomy, permission rules, doom-loop) can still ask.
                 if (c["name"] == "shell_run" and mode == "ask" and raw_mode == "ask" and not forced and desk_id
@@ -3047,6 +3047,13 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         _active.pop(am["id"], None)
         for t in warm_tasks:
             t.cancel()
+        # Every exit persists taint (normal end, a parked card's return, a cancel), so the next turn starts tainted.
+        if tool_ctx["tainted"]:
+            # Asking about the screen taints this turn only. Storing it would make Clear come back
+            # on the next question, because the screen is sent again.
+            srcs = sorted(s for s in set(tool_ctx["taint_sources"]) if s != "context:page")
+            if srcs and (not conv["settings"].get("tainted") or srcs != sorted(set(conv["settings"].get("taint_sources") or []))):
+                convos.update(conv_id, {"settings": {"tainted": True, "taint_sources": srcs}})
 
     text = "".join(buf).strip()
     if not text and not error and not stop.is_set() and not tool_events and not desk_id:
@@ -3057,12 +3064,6 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                           outcome=outcome, error_kind=error_kind)
     convos.touch(conv_id)
     otel_export.export_in_background(cfg, conv_id, am["id"], model, project["name"] if project else None, tracer.spans, used, text)
-    if tool_ctx["tainted"]:
-        # Asking about the screen taints this turn only. Storing it would make Clear come back
-        # on the next question, because the screen is sent again.
-        srcs = sorted(s for s in set(tool_ctx["taint_sources"]) if s != "context:page")
-        if srcs and (not conv["settings"].get("tainted") or srcs != sorted(set(conv["settings"].get("taint_sources") or []))):
-            convos.update(conv_id, {"settings": {"tainted": True, "taint_sources": srcs}})
     if run is not None:
         # What this reply spent, for whoever is supervising it. A desk turn chains on these; an
         # ordinary chat never reads them back.

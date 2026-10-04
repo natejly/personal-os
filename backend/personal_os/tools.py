@@ -120,7 +120,7 @@ class ToolSpec:
         self.examples, self.taints = examples or [], taints
         self.default: str | None = None  # overrides the danger tier's default mode (shell_run is `executes` but asks)
         # args -> True when this particular call must ask whatever the mode says (shell_run's escape from the sandbox)
-        self.force_ask: Callable[[dict[str, Any]], bool] | None = None
+        self.force_ask: Callable[[dict[str, Any], dict[str, Any]], bool] | None = None
         # () -> False while the thing this tool needs is missing (a binary, the desktop bridge); it is then not offered
         self.available_fn: Callable[[], bool] | None = None
 
@@ -763,10 +763,10 @@ class Toolbox:
         """True when a file-writing call targets somewhere the user did not grant (fsx.py), so the reply loop shows a card."""
         return fsx.needs_ask(self, name, args, ctx)
 
-    def forces_ask(self, name: str, args: dict[str, Any]) -> bool:
-        """True when this call, with these arguments, may never run without a card (and no standing grant buys it off)."""
+    def forces_ask(self, name: str, args: dict[str, Any], ctx: dict[str, Any] | None = None) -> bool:
+        """True when this call, with these arguments in this run, may never run without a card (and no standing grant buys it off)."""
         spec = self.specs.get(name)
-        return bool(spec and spec.force_ask and spec.force_ask(args))
+        return bool(spec and spec.force_ask and spec.force_ask(args, ctx or {}))
 
     def _networked_sandbox_call(self, spec: ToolSpec, ctx: dict[str, Any]) -> bool:
         """True for a sandbox_* tool whose sandbox can reach the internet (or will, once created)."""
@@ -791,7 +791,7 @@ class Toolbox:
                 spec.danger in ("external", "network", "schedules") or name in PROMPT_WRITES
                 or self._networked_sandbox_call(spec, ctx) or cancel_send):
             return "ask"
-        if mode == "on" and args is not None and self.forces_ask(name, args):
+        if mode == "on" and args is not None and self.forces_ask(name, args, ctx):
             return "ask"
         return mode
 

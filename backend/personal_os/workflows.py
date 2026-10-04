@@ -851,7 +851,7 @@ class Engine:
         fs_ask = self.toolbox.fs_needs_ask(name, args, ctx)
         if fs_ask and mode == "on":
             mode = "ask"
-        forced = mode != raw or (mode == "ask" and self.toolbox.forces_ask(name, args))
+        forced = mode != raw or (mode == "ask" and self.toolbox.forces_ask(name, args, ctx))
         cfg = self.settings()
         roots = [r for r in (cfg.get("workspaceRoots") or []) if isinstance(r, str) and r]
         perm = permrules.resolve(name, args, mode, forced, rules=cfg.get("permissionRules"), roots=roots)

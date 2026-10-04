@@ -61,6 +61,12 @@ def test_registered_ask_by_default_and_never_unsandboxed_unasked(box: Box) -> No
     assert box.tb.gate("shell_run", "on", {}, {"command": "ls", "unsandboxed": True}) == "ask"
     assert box.tb.forces_ask("shell_run", {"command": "ls", "unsandboxed": True})
     assert not box.tb.forces_ask("shell_run", {"command": "ls"})
+    # a tainted reply whose command could reach out is forced too, so a grant or allow rule cannot skip the card
+    tainted = {"tainted": True, "settings": {**box.settings, "shellNetwork": True}}
+    assert box.tb.forces_ask("shell_run", {"command": "ls"}, tainted)
+    assert box.tb.gate("shell_run", "on", tainted, {"command": "ls"}) == "ask"
+    offline = {"tainted": True, "settings": {**box.settings, "shellNetwork": False, "shellRegistryAccess": False, "shellAllowedDomains": []}}
+    assert not box.tb.forces_ask("shell_run", {"command": "ls"}, offline)
     from personal_os import llm
     assert llm.DEFAULT_SETTINGS["workspaceRoots"] == [] and llm.DEFAULT_SETTINGS["shellNetwork"] is False
     assert (llm.DEFAULT_SETTINGS["shellTimeoutSec"], llm.DEFAULT_SETTINGS["shellMaxBackground"]) == (120, 4)

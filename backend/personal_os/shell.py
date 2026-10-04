@@ -131,6 +131,12 @@ def resolve_cwd(cwd: str | None, roots: list[Path]) -> tuple[Path, Path]:
                      "Ask the user to add it under Settings (Workspace roots).")
 
 
+def reaches_out(settings: dict[str, Any]) -> bool:
+    """True when a sandboxed command could send something off this Mac: open network, or a proxy with any allowed host."""
+    return bool(settings.get("shellNetwork")) or bool(
+        egress.allowed_set(settings.get("shellRegistryAccess", True), settings.get("shellAllowedDomains")))
+
+
 def auto_ok(args: dict[str, Any], ctx: dict[str, Any], settings: dict[str, Any], roots: list[Any]) -> bool:
     """True when this shell_run call may skip its card: it is the default `ask` of the tool (the user never set one), it runs
     in a desk, sandboxed, with its working folder inside that desk's workspace (`roots`), and `deskShellAuto` is on.
@@ -147,7 +153,7 @@ def auto_ok(args: dict[str, Any], ctx: dict[str, Any], settings: dict[str, Any],
     layers = [settings.get("tools") or {}, ctx.get("tool_overrides") or {}]
     if any(Toolbox._norm(layer.get("shell_run")) is not None for layer in layers if isinstance(layer, dict)):
         return False  # the user set a mode for this tool somewhere: that choice stands
-    if ctx.get("tainted") and egress.allowed_set(settings.get("shellRegistryAccess", True), settings.get("shellAllowedDomains")):
+    if ctx.get("tainted") and reaches_out(settings):
         return False
     real = [_real(r) for r in roots]
     raw = str(args.get("cwd") or "").strip() or remembered_cwd(ctx.get("conversation_id")) or None
@@ -763,7 +769,9 @@ def register(tb: Any) -> None:
                               {"command": "npm test", "cwd": "app", "timeout_s": 300},
                               {"command": "python3 -m http.server 8000", "background": True}])
     spec.default = "ask"
-    spec.force_ask = lambda args: bool(args.get("unsandboxed"))
+    # Unsandboxed always asks; so does a reply that read untrusted content while a command could reach out, and no
+    # standing grant, session grant or allow rule buys that card off (it is forced).
+    spec.force_ask = lambda args, ctx: bool(args.get("unsandboxed")) or (bool(ctx.get("tainted")) and reaches_out(cfg(ctx)))
     R("shell_run", spec)
 
     async def shell_poll(ctx: dict[str, Any], job_id: str) -> Any:

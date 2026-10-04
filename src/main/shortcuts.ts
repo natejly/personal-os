@@ -1,5 +1,5 @@
 /**
- * The global gather shortcut. `globalShortcut.register` throws on a malformed accelerator and returns
+ * The global gather and quick-capture shortcuts. `globalShortcut.register` throws on a malformed accelerator and returns
  * false when another app already owns it, so both paths are handled and reported to the renderer.
  */
 import { app, BrowserWindow, globalShortcut } from 'electron'
@@ -14,6 +14,13 @@ export const DEFAULT_CAPTURE = 'CommandOrControl+Shift+Space'
 let current: ShortcutState = { accelerator: DEFAULT_GATHER, ok: false, message: null }
 let registered = ''
 let getMain: () => BrowserWindow | null = () => null
+
+/** A failure is pushed as it happens; one at startup can beat the window, so Settings also pulls the state. */
+const report = (s: ShortcutState): void => {
+  if (s.ok) return
+  const m = getMain()
+  if (m && !m.isDestroyed()) m.webContents.send('shortcuts:failed', s)
+}
 
 const apply = (accelerator: string): ShortcutState => {
   const accel = accelerator.trim() || DEFAULT_GATHER
@@ -30,11 +37,8 @@ const apply = (accelerator: string): ShortcutState => {
     message = `${accel} is not a valid shortcut: ${(e as Error).message}`
   }
   if (ok) registered = accel
-  current = { accelerator: accel, ok, message }
-  if (!ok) {
-    const m = getMain()
-    if (m && !m.isDestroyed()) m.webContents.send('shortcuts:failed', current)
-  }
+  current = { accelerator: accel, ok, message, which: 'gather' }
+  report(current)
   return current
 }
 
@@ -57,7 +61,8 @@ const applyCapture = (accelerator: string): ShortcutState => {
     message = `${accel} is not a valid shortcut: ${(e as Error).message}`
   }
   if (ok) captureRegistered = accel
-  capture = { accelerator: accel, ok, message }
+  capture = { accelerator: accel, ok, message, which: 'capture' }
+  report(capture)
   return capture
 }
 

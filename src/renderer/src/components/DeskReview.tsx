@@ -31,7 +31,7 @@ function PromotedLink({ kind, id, docId }: { kind: string; id: string | null; do
   const go: Record<string, [string, () => void] | undefined> = {
     doc: id ? ['open the note', () => void s().openDoc(id)] : undefined,
     doc_append: docId ? ['open the note', () => void s().openDoc(docId)] : undefined,
-    document: ['open uploads', () => s().openSettings('knowledge', 'documents')],
+    document: ['open uploads', () => s().openFiles('uploads')],
     todo: ['open Todos', () => s().setView('todos')],
     mail_draft: ['open Mail', () => s().setView('mail')],
     artifact: id ? ['open the page', () => setPage(true)] : undefined

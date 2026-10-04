@@ -84,7 +84,7 @@ export default function SupportSettings({ draft, patch }: { draft: Settings; pat
 
       <h4>Reliability</h4>
       <Num label="Provider retries" hint="rate limits, 5xx and dropped connections, before a reply starts; 0 turns it off" value={draft.llmRetries ?? 3} min={0} max={10} onChange={(v) => patch({ llmRetries: v })} />
-      <Num label="Stream idle timeout (seconds)" hint="a reply that goes silent this long is abandoned" value={draft.llmIdleSeconds ?? 90} min={10} max={3600} onChange={(v) => patch({ llmIdleSeconds: v })} />
+      <Num label="Stream idle timeout (seconds)" hint="a reply that goes silent this long is abandoned" value={draft.llmIdleSeconds ?? 300} min={10} max={3600} onChange={(v) => patch({ llmIdleSeconds: v })} />
 
       <h4>History kept</h4>
       <p className="muted small">A daily sweep trims bookkeeping only. Your messages, memories, documents and notes are never deleted.</p>

@@ -105,6 +105,15 @@ def allowed_path(raw: str) -> Path:
     return p
 
 
+def allowed_root(raw: str) -> Path:
+    """`allowed_path`, minus the home folder itself: a granted root is writable by the shell and the file tools, and the
+    home folder holds the rc files, ~/Library and ~/.ssh, and is never snapshotted, so writes there could not be undone."""
+    p = allowed_path(raw)
+    if p == home():
+        raise LocalPathError("the whole home folder cannot be granted; pick a folder inside it")
+    return p
+
+
 def in_roots(path: str | Path, roots: list[Path]) -> bool:
     """True when `path` (symlinks resolved) sits inside one of the granted folders. A symlink in a root that
     points outside it is therefore not inside."""

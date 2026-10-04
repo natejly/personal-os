@@ -54,6 +54,10 @@ const auth = async (): Promise<Record<string, string>> => {
 export const CONTROL_TIMEOUT_MS = 20_000
 /** Stop is the one control the user is waiting on, so it gives up sooner and says so. */
 export const STOP_TIMEOUT_MS = 5_000
+/** Every other request: past this a hung backend reads as an error instead of a spinner that never ends. */
+export const REQUEST_TIMEOUT_MS = 60_000
+/** For calls that do model work, sync, upload or install, where a minute is a normal answer time. */
+export const NO_TIMEOUT = 0
 
 /** A signal that fires when either input does; plain AbortSignal.any where the runtime has it. */
 const anySignal = (a: AbortSignal, b?: AbortSignal | null): AbortSignal => {
@@ -67,7 +71,7 @@ const anySignal = (a: AbortSignal, b?: AbortSignal | null): AbortSignal => {
   return c.signal
 }
 
-export async function req<T>(path: string, init?: RequestInit, timeoutMs?: number): Promise<T> {
+export async function req<T>(path: string, init?: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
   // The token wait only suspends while setBase() is still resolving it. Once it is (or when there is no
   // sidecar at all, as in tests), a req() runs synchronously up to its fetch — the canvas store's
   // flush-before-space-switch depends on that.
@@ -140,14 +144,14 @@ export const api = {
   setup: {
     status: () => req<SetupStatus>('/setup/status'),
     providers: () => req<{ providers: ProviderInfo[] }>('/setup/providers'),
-    test: (body: SetupBody) => req<SetupTestResult>('/setup/test', { method: 'POST', body: json(body) }),
+    test: (body: SetupBody) => req<SetupTestResult>('/setup/test', { method: 'POST', body: json(body) }, NO_TIMEOUT),
     complete: (body: SetupBody) => req<SetupStatus>('/setup/complete', { method: 'POST', body: json(body) }),
     reset: () => req<SetupStatus>('/setup/reset', { method: 'POST' })
   },
   models: () => req<ModelInfo[]>('/models'),
   tools: () => req<{ tools: ToolInfo[]; enabled: Record<string, boolean> }>('/tools'),
   dashboard: () => req<TodayDashboard>('/dashboard'),
-  recap: (force = false) => req<Recap>(`/recap?force=${force}`),
+  recap: (force = false) => req<Recap>(`/recap?force=${force}`, undefined, NO_TIMEOUT),
   // `steps` / `note` are for a propose_plan card: the steps the user is authorising (with any edited arguments,
   // whose digests the backend re-derives), and one line back to the model.
   approve: (callId: string, decision: ApprovalDecision, opts?: { steps?: PlanEdit[] | null; note?: string; rules?: string[]; arguments?: Record<string, unknown> | null }) =>
@@ -226,7 +230,7 @@ export const api = {
     version: (id: string, n: number) => req<ArtifactVersion>(`/artifacts/${id}/versions/${n}`),
     restore: (id: string, n: number) => req<Artifact>(`/artifacts/${id}/restore/${n}`, { method: 'POST' }),
     /** Regenerate the whole document from a plain-language instruction (a model call), saved as a new version. */
-    revise: (id: string, instruction: string) => req<Artifact>(`/artifacts/${id}/revise`, { method: 'POST', body: json({ instruction }) }),
+    revise: (id: string, instruction: string) => req<Artifact>(`/artifacts/${id}/revise`, { method: 'POST', body: json({ instruction }) }, NO_TIMEOUT),
     /** Absolute URL for the sandboxed iframe; `path` is the signed render_path the backend handed out. */
     renderUrl: (path: string) => `${base}${path}`
   },
@@ -243,8 +247,8 @@ export const api = {
     /** A declarative widget's rows: the cache inside its refresh_minutes, a re-bind after. Never a model call. */
     data: (id: string) => req<Widget>(`/widgets/${id}/data`),
     update: (id: string, patch: Record<string, unknown>) => req<Widget>(`/widgets/${id}`, { method: 'PUT', body: json(patch) }),
-    refresh: (id: string, regenerate = false) => req<Widget>(`/widgets/${id}/refresh?regenerate=${regenerate}`, { method: 'POST' }),
-    revise: (id: string, instruction: string) => req<Widget>(`/widgets/${id}/revise`, { method: 'POST', body: json({ instruction }) }),
+    refresh: (id: string, regenerate = false) => req<Widget>(`/widgets/${id}/refresh?regenerate=${regenerate}`, { method: 'POST' }, NO_TIMEOUT),
+    revise: (id: string, instruction: string) => req<Widget>(`/widgets/${id}/revise`, { method: 'POST', body: json({ instruction }) }, NO_TIMEOUT),
     delete: (id: string) => req(`/widgets/${id}`, { method: 'DELETE' })
   },
   todos: {
@@ -278,12 +282,12 @@ export const api = {
     plan: (id: string) => req<HealthSourcePlan>(`/health/sources/${id}/plan`),
     /** Approve the source's tools exactly as its server offers them now. */
     approve: (id: string) => req<HealthSourcePlan>(`/health/sources/${id}/approve`, { method: 'POST' }),
-    sync: (id: string, today: string) => req<HealthSyncResult>(`/health/sources/${id}/sync?today=${today}`, { method: 'POST' }),
+    sync: (id: string, today: string) => req<HealthSyncResult>(`/health/sources/${id}/sync?today=${today}`, { method: 'POST' }, NO_TIMEOUT),
     updateSource: (id: string, patch: { enabled?: boolean; days_back?: number }) => req<HealthSource>(`/health/sources/${id}`, { method: 'PUT', body: json(patch) }),
     disconnect: (id: string, keepData = true) => req(`/health/sources/${id}?keep_data=${keepData}&remove_server=true`, { method: 'DELETE' })
   },
   planner: {
-    suggest: (days?: number) => req<PlannerSuggestion>('/planner/suggest', { method: 'POST', body: json({ days }) }),
+    suggest: (days?: number) => req<PlannerSuggestion>('/planner/suggest', { method: 'POST', body: json({ days }) }, NO_TIMEOUT),
     /** The one write: the user pressed "Add selected to calendar". */
     apply: (blocks: PlannerBlock[]) => req<PlannerApplyResult>('/planner/apply', { method: 'POST', body: json({ blocks }) })
   },
@@ -310,16 +314,16 @@ export const api = {
     update: (id: string, patch: Partial<McpServerDraft> & { enabled?: boolean; clear_secrets?: string[] }) =>
       req<McpServer>(`/mcp/servers/${id}`, { method: 'PATCH', body: json(patch) }),
     remove: (id: string) => req<{ ok: boolean }>(`/mcp/servers/${id}`, { method: 'DELETE' }),
-    restart: (id: string) => req<McpServer>(`/mcp/servers/${id}/restart`, { method: 'POST' }),
+    restart: (id: string) => req<McpServer>(`/mcp/servers/${id}/restart`, { method: 'POST' }, NO_TIMEOUT),
     /** Remote servers: start a browser sign-in (open `auth_url`), poll it, or forget the tokens. */
     signIn: (id: string) => req<McpSignIn>(`/mcp/servers/${id}/sign-in`, { method: 'POST' }),
     signInStatus: (id: string) => req<McpSignIn>(`/mcp/servers/${id}/sign-in`),
     signOut: (id: string) => req<McpSignIn>(`/mcp/servers/${id}/sign-in`, { method: 'DELETE' }),
     logs: (id: string) => req<{ server_id: string; stderr: string[] }>(`/mcp/servers/${id}/logs`),
     /** Probe + static check of a saved server; files the report as its latest. */
-    check: (id: string) => req<McpReport>(`/mcp/servers/${id}/check`, { method: 'POST' }),
+    check: (id: string) => req<McpReport>(`/mcp/servers/${id}/check`, { method: 'POST' }, NO_TIMEOUT),
     /** The same check on a config that has not been saved, so trust can be decided first. */
-    checkDraft: (d: Partial<McpServerDraft>) => req<McpReport>('/mcp/check', { method: 'POST', body: json(d) }),
+    checkDraft: (d: Partial<McpServerDraft>) => req<McpReport>('/mcp/check', { method: 'POST', body: json(d) }, NO_TIMEOUT),
     tools: () => req<{ tools: McpTool[] }>('/mcp/tools'),
     setGrant: (slug: string, mode: ToolMode, scope: 'global' | 'project' | 'chat' = 'global', scopeId?: string) =>
       req<McpEffective>(`/mcp/tools/${encodeURIComponent(slug)}/grant`, { method: 'PUT', body: json({ mode, scope, scope_id: scopeId ?? null }) }),
@@ -357,11 +361,11 @@ export const api = {
     tasksSync: () => req<TasksSyncStatus>('/integrations/google/tasks-sync'),
     tasksSyncConfig: (patch: { enabled?: boolean; tasklist?: string; intervalMinutes?: number }) =>
       req<TasksSyncStatus>('/integrations/google/tasks-sync', { method: 'PUT', body: json(patch) }),
-    tasksSyncRun: () => req<TasksSyncStatus>('/integrations/google/tasks-sync/run', { method: 'POST' }),
+    tasksSyncRun: () => req<TasksSyncStatus>('/integrations/google/tasks-sync/run', { method: 'POST' }, NO_TIMEOUT),
     todoCalendar: () => req<TodoCalendarStatus>('/integrations/google/todo-calendar'),
     todoCalendarConfig: (patch: { enabled?: boolean; calendarId?: string; calendarName?: string; intervalMinutes?: number; keepCompleted?: boolean }) =>
       req<TodoCalendarStatus>('/integrations/google/todo-calendar', { method: 'PUT', body: json(patch) }),
-    todoCalendarRun: () => req<TodoCalendarStatus>('/integrations/google/todo-calendar/run', { method: 'POST' }),
+    todoCalendarRun: () => req<TodoCalendarStatus>('/integrations/google/todo-calendar/run', { method: 'POST' }, NO_TIMEOUT),
     drive: (q = '', maxResults = 20) => req<DriveFile[]>(`/integrations/google/drive?q=${encodeURIComponent(q)}&max_results=${maxResults}`),
     gmailGet: (id: string) => req<GmailFullMessage>(`/integrations/google/gmail/${id}`),
     gmailLabels: () => req<GmailLabel[]>('/integrations/google/gmail/labels'),
@@ -369,7 +373,7 @@ export const api = {
       proven(req<{ ok: boolean } & Verified>(`/integrations/google/gmail/${id}/modify`, { method: 'POST', body: json(patch) })),
     /** Free slots as draft text; creates no draft or event. */
     suggestTimes: (m: { window_start: string; window_end: string; duration_minutes?: number }) =>
-      req<{ body: string }>('/integrations/google/gmail/suggest-times', { method: 'POST', body: json(m) }),
+      req<{ body: string }>('/integrations/google/gmail/suggest-times', { method: 'POST', body: json(m) }, NO_TIMEOUT),
     gmailDraft: (m: { to: string; subject: string; body: string; reply_to_message_id?: string | null }) =>
       proven(req<{ draft_id: string } & Verified>('/integrations/google/gmail/draft', { method: 'POST', body: json(m) })),
     /** Queues the send behind its undo hold; it has NOT gone out when this resolves. */
@@ -381,10 +385,10 @@ export const api = {
   /** Backups, restore and export (backend backups.py). */
   data: {
     overview: () => req<DataOverview>('/data'),
-    backUp: () => req<BackupInfo>('/data/backups', { method: 'POST' }),
-    restore: (name: string) => req<{ name: string; restart_required: boolean }>(`/data/backups/${encodeURIComponent(name)}/restore`, { method: 'POST' }),
+    backUp: () => req<BackupInfo>('/data/backups', { method: 'POST' }, NO_TIMEOUT),
+    restore: (name: string) => req<{ name: string; restart_required: boolean }>(`/data/backups/${encodeURIComponent(name)}/restore`, { method: 'POST' }, NO_TIMEOUT),
     cancelRestore: () => req<{ ok: boolean }>('/data/restore', { method: 'DELETE' }),
-    exportTo: (dest: string) => req<{ path: string; size: number }>('/data/export', { method: 'POST', body: json({ dest }) })
+    exportTo: (dest: string) => req<{ path: string; size: number }>('/data/export', { method: 'POST', body: json({ dest }) }, NO_TIMEOUT)
   },
   /** Emails waiting out their undo hold (backend outbox.py). */
   outbox: {
@@ -398,7 +402,7 @@ export const api = {
     cleanDictation: (text: string) =>
       req<{ text: string }>('/docs/dictation/clean', { method: 'POST', body: json({ text }) }),
     mailReview: (p: { to?: string; subject?: string; body: string; reply_context?: string }) =>
-      req<{ feedback: string[]; revised: string }>('/assist/mail-review', { method: 'POST', body: json(p) })
+      req<{ feedback: string[]; revised: string }>('/assist/mail-review', { method: 'POST', body: json(p) }, NO_TIMEOUT)
   },
   projects: {
     list: () => req<Project[]>('/projects'),
@@ -414,7 +418,7 @@ export const api = {
     patch: (id: string, patch: { title?: string; model?: string; settings?: Partial<ConversationSettings>; pinned?: boolean; archived?: boolean; project_id?: string | null }) =>
       req<Conversation>(`/conversations/${id}`, { method: 'PATCH', body: json(patch) }, CONTROL_TIMEOUT_MS),
     /** Ask for a fresh model-written title (replaces a typed one: it was asked for). */
-    retitle: (id: string) => req<Conversation>(`/conversations/${id}/title`, { method: 'POST' }),
+    retitle: (id: string) => req<Conversation>(`/conversations/${id}/title`, { method: 'POST' }, NO_TIMEOUT),
     listArchived: () => req<Conversation[]>('/conversations?project_id=all&archived=true'),
     delete: (id: string) => req<{ ok: boolean; stopped?: boolean }>(`/conversations/${id}`, { method: 'DELETE' }),
     deleteMessage: (id: string, mid: string) => req(`/conversations/${id}/messages/${mid}`, { method: 'DELETE' }),
@@ -469,13 +473,13 @@ export const api = {
       req<Skill>(`/skills/${id}`, { method: 'PATCH', body: json(patch) }),
     delete: (id: string) => req<{ ok: boolean }>(`/skills/${id}`, { method: 'DELETE' }),
     /** Distil a conversation into a candidate for review. Never enables anything. */
-    induce: (convId: string, messageId?: string) => req<{ candidate: Skill | null; reason: string | null }>(`/conversations/${convId}/skills/induce`, { method: 'POST', body: json({ message_id: messageId ?? null }) }),
+    induce: (convId: string, messageId?: string) => req<{ candidate: Skill | null; reason: string | null }>(`/conversations/${convId}/skills/induce`, { method: 'POST', body: json({ message_id: messageId ?? null }) }, NO_TIMEOUT),
     /** Review a draft without saving it. `blocking` is what `update({status:'approved'})` would refuse. */
     lint: (d: { name?: string; description?: string; procedure?: string; skill_id?: string }) =>
       req<{ findings: SkillFinding[]; blocking: SkillFinding[] }>('/skills/lint', { method: 'POST', body: json(d) }),
     /** Draft a procedure from a line of intent. Stores nothing — the user edits the text first. */
     draft: (intent: string, conversationId?: string | null) =>
-      req<SkillDraftResult>('/skills/draft', { method: 'POST', body: json({ intent, conversation_id: conversationId ?? null }) }),
+      req<SkillDraftResult>('/skills/draft', { method: 'POST', body: json({ intent, conversation_id: conversationId ?? null }) }, NO_TIMEOUT),
     /** What a chat in this scope is actually shown. 'all' is not a scope any one chat sees. */
     preview: (scope: Scope = 'personal') => req<SkillPreview>(`/skills/preview?project_id=${encodeURIComponent(scope)}`),
     /** Paste a SKILL.md. Always lands as a candidate; `findings` are the lint results, `warnings` what was ignored. */
@@ -523,7 +527,7 @@ export const api = {
   conversationUsage: (conversationId: string) => req<ConversationUsage>(`/conversations/${conversationId}/usage`),
   contextMeter: (conversationId: string) => req<ContextMeter>(`/conversations/${conversationId}/context-meter`),
   compactConversation: (conversationId: string, focus?: string) =>
-    req<{ compacted: boolean }>(`/conversations/${conversationId}/compact`, { method: 'POST', body: json({ focus: focus ?? null }) }),
+    req<{ compacted: boolean }>(`/conversations/${conversationId}/compact`, { method: 'POST', body: json({ focus: focus ?? null }) }, NO_TIMEOUT),
   activateMessage: (conversationId: string, messageId: string) =>
     req<Conversation>(`/conversations/${conversationId}/messages/${messageId}/activate`, { method: 'POST' }),
   discardSummary: (conversationId: string) => req<{ removed: boolean }>(`/conversations/${conversationId}/summary`, { method: 'DELETE' }),
@@ -538,7 +542,7 @@ export const api = {
     /** Every row including superseded / forgotten ones. */
     listWithHistory: (s: Scope) => req<Memory[]>(`/memories?${scope(s)}&include_invalid=true`),
     restore: (id: string) => req<Memory>(`/memories/${id}/restore`, { method: 'POST' }),
-    consolidate: (projectId: string | null) => req<MemoryProposal[]>('/memories/consolidate', { method: 'POST', body: json({ project_id: projectId }) }),
+    consolidate: (projectId: string | null) => req<MemoryProposal[]>('/memories/consolidate', { method: 'POST', body: json({ project_id: projectId }) }, NO_TIMEOUT),
     proposals: (s: Scope) => req<MemoryProposal[]>(`/memories/proposals?status=pending&${scope(s)}`),
     applyProposal: (id: string) => req<MemoryProposal>(`/memories/proposals/${id}/apply`, { method: 'POST' }),
     dismissProposal: (id: string) => req<MemoryProposal>(`/memories/proposals/${id}/dismiss`, { method: 'POST' })
@@ -547,7 +551,7 @@ export const api = {
     get: (s: Scope) => req<StyleState>(`/style?project_id=${encodeURIComponent(s === 'all' ? 'personal' : s)}`),
     update: (projectId: string | null, patch: Partial<Pick<StyleProfile, 'summary' | 'guidelines' | 'traits' | 'phrases' | 'avoid'>> & { enabled?: boolean }) =>
       req<StyleState>('/style', { method: 'PUT', body: json({ project_id: projectId, ...patch }) }),
-    learn: (projectId: string | null, model?: string) => req<StyleState>('/style/learn', { method: 'POST', body: json({ project_id: projectId, model }) }),
+    learn: (projectId: string | null, model?: string) => req<StyleState>('/style/learn', { method: 'POST', body: json({ project_id: projectId, model }) }, NO_TIMEOUT),
     reset: (projectId: string | null, withSamples = false) =>
       req<StyleState>(`/style?project_id=${encodeURIComponent(projectId ?? 'personal')}&with_samples=${withSamples}`, { method: 'DELETE' }),
     samples: (s: Scope) => req<StyleSample[]>(`/style/samples?project_id=${encodeURIComponent(s === 'all' ? 'personal' : s)}`),
@@ -572,7 +576,7 @@ export const api = {
       const fd = new FormData()
       fd.append('file', file)
       if (projectId) fd.append('project_id', projectId)
-      return req<Document>('/documents', { method: 'POST', body: fd })
+      return req<Document>('/documents', { method: 'POST', body: fd }, NO_TIMEOUT)
     },
     delete: (id: string) => req(`/documents/${id}`, { method: 'DELETE' }),
     indexStatus: () => req<{ chunks: number; embedded: number; doc_chunks?: number; doc_embedded?: number; model: string | null; mode: string }>('/documents/index-status')
@@ -591,8 +595,8 @@ export const api = {
     summaries: (days = 7) => req<ActivitySummary[]>(`/activity/summaries?days=${days}`),
     deleteSummary: (id: string) => req(`/activity/summaries/${id}`, { method: 'DELETE' }),
     /** Summarize what is pending now instead of waiting for the interval. */
-    rollup: () => req<{ summary: ActivitySummary | null; status: ActivityStatus }>('/activity/rollup', { method: 'POST' }),
-    refreshProfile: () => req<{ profile: string }>('/activity/profile', { method: 'POST' }),
+    rollup: () => req<{ summary: ActivitySummary | null; status: ActivityStatus }>('/activity/rollup', { method: 'POST' }, NO_TIMEOUT),
+    refreshProfile: () => req<{ profile: string }>('/activity/profile', { method: 'POST' }, NO_TIMEOUT),
     context: () => req<ActivityContextFile>('/activity/context'),
     devices: () => req<{ index: string; name: string }[]>('/activity/devices'),
     permissions: () => req<ActivityCapability[]>('/activity/permissions'),
@@ -607,8 +611,8 @@ export const api = {
     /** Habits and automation suggestions mined from the same data. */
     insights: () => req<ActivityInsights>('/activity/insights'),
     /** Re-mine the patterns with no model call: free, offline, and the evidence the panel shows. */
-    mineInsights: () => req<ActivityInsights>('/activity/insights/mine', { method: 'POST' }),
-    refreshInsights: () => req<ActivityInsights & { ok: boolean }>('/activity/insights/refresh', { method: 'POST' }),
+    mineInsights: () => req<ActivityInsights>('/activity/insights/mine', { method: 'POST' }, NO_TIMEOUT),
+    refreshInsights: () => req<ActivityInsights & { ok: boolean }>('/activity/insights/refresh', { method: 'POST' }, NO_TIMEOUT),
     setInsightStatus: (id: string, status: InsightStatus, note = '', snoozeDays = 7) =>
       req<ActivitySuggestion>(`/activity/insights/${id}/status`, { method: 'POST', body: json({ status, note, snooze_days: snoozeDays }) }),
     applyInsight: (id: string) => req<ActivityApplyResult>(`/activity/insights/${id}/apply`, { method: 'POST' }),
@@ -660,7 +664,7 @@ export const api = {
     /** The shared Python environment desks run code in. `setup` builds it and takes minutes. */
     env: {
       status: () => req<{ ready: boolean; python: string | null; packages: string[]; installer: string; error: string | null }>('/cowork/env'),
-      setup: () => req<{ ready: boolean; python: string | null; packages: string[]; installer: string; error: string | null }>('/cowork/env/setup', { method: 'POST' })
+      setup: () => req<{ ready: boolean; python: string | null; packages: string[]; installer: string; error: string | null }>('/cowork/env/setup', { method: 'POST' }, NO_TIMEOUT)
     },
     inbox: {
       list: (limit = 40) => req<DeskEvent[]>(`/cowork/inbox?limit=${limit}`),
@@ -752,7 +756,7 @@ export const api = {
       req<{ meeting_id: string; text: string; lines: string[]; total: number; offset: number; count: number; has_more: boolean }>(`/meetings/${id}/transcript?offset=${offset}&limit=${limit}`),
     /** Returns the REVISION. An auto-applied one comes back `applied` with the meeting's `pending` null, so re-fetch the meeting. */
     enhance: (id: string, force = false, template?: string) =>
-      req<MeetingRevision>(`/meetings/${id}/enhance?force=${force}${template ? `&template=${encodeURIComponent(template)}` : ''}`, { method: 'POST' }),
+      req<MeetingRevision>(`/meetings/${id}/enhance?force=${force}${template ? `&template=${encodeURIComponent(template)}` : ''}`, { method: 'POST' }, NO_TIMEOUT),
     revisions: (id: string, limit = 100) => req<MeetingRevision[]>(`/meetings/${id}/revisions?limit=${limit}`),
     accept: (revId: string) => req<FullMeeting>(`/meetings/revisions/${revId}/accept`, { method: 'POST' }),
     reject: (revId: string) => req<FullMeeting>(`/meetings/revisions/${revId}/reject`, { method: 'POST' }),
@@ -761,7 +765,7 @@ export const api = {
     addTodos: (id: string, ids: string[] = [], projectId?: string | null) =>
       req<MeetingActionItem[]>(`/meetings/${id}/actions/add-todos`, { method: 'POST', body: json({ ids, project_id: projectId ?? null }) }),
     dismissAction: (id: string, actionId: string) => req<MeetingActionItem>(`/meetings/${id}/actions/${actionId}/dismiss`, { method: 'POST' }),
-    retranscribe: (id: string, limit = 20) => req<{ settled: number; meeting: FullMeeting }>(`/meetings/${id}/retranscribe?limit=${limit}`, { method: 'POST' }),
+    retranscribe: (id: string, limit = 20) => req<{ settled: number; meeting: FullMeeting }>(`/meetings/${id}/retranscribe?limit=${limit}`, { method: 'POST' }, NO_TIMEOUT),
     /** A kept segment's wav as an object URL (the audio element cannot send the token header). */
     segmentAudio: async (id: string, segId: string): Promise<string> => {
       const r = await fetch(`${base}${audioPath(id, segId)}`, { headers: await auth() })
@@ -776,12 +780,12 @@ export const api = {
     setSpeakers: (id: string, names: Record<string, string>) =>
       req<FullMeeting>(`/meetings/${id}/speakers`, { method: 'PUT', body: json({ names }) }),
     /** Re-run speaker separation on retained audio. ok=false with a note when nothing can run. */
-    diarize: (id: string) => req<{ ok: boolean; note: string; speakers: number; meeting: FullMeeting }>(`/meetings/${id}/diarize`, { method: 'POST' }),
+    diarize: (id: string) => req<{ ok: boolean; note: string; speakers: number; meeting: FullMeeting }>(`/meetings/${id}/diarize`, { method: 'POST' }, NO_TIMEOUT),
     /** Transcribe an existing recording into this meeting. 202: progress arrives through the segments poll. */
     importAudio: (id: string, file: File) => {
       const fd = new FormData()
       fd.append('file', file)
-      return req<FullMeeting>(`/meetings/${id}/import-audio`, { method: 'POST', body: fd })
+      return req<FullMeeting>(`/meetings/${id}/import-audio`, { method: 'POST', body: fd }, NO_TIMEOUT)
     }
   },
   notes: {
@@ -838,7 +842,7 @@ export async function readWithIdle<T>(reader: { read: () => Promise<ReadableStre
 }
 
 /** One SSE connection, parsed. `seq` is the event's `id:` line, which only the app topic sends. */
-async function* sseStream(path: string, signal?: AbortSignal, idleMs = 0, connectMs = STREAM_CONNECT_MS): AsyncGenerator<{ event: string; data: unknown; seq: number | null }> {
+async function* sseStream(path: string, signal?: AbortSignal, idleMs = 0, connectMs = STREAM_CONNECT_MS, onOpen?: () => void): AsyncGenerator<{ event: string; data: unknown; seq: number | null }> {
   // Bounds the wait for the response headers only; once the body is flowing the idle watchdog takes over.
   const connect = new AbortController()
   let connectTimedOut = false
@@ -861,6 +865,7 @@ async function* sseStream(path: string, signal?: AbortSignal, idleMs = 0, connec
     void r.body?.cancel().catch(() => undefined)
     throw new ApiError(`${r.status} ${r.statusText}`, { status: r.status, kind: 'http' })
   }
+  onOpen?.()
   const reader = r.body.getReader()
   const dec = new TextDecoder()
   let buf = ''
@@ -966,8 +971,8 @@ export async function* chatStream(convId: string, since = 0, signal?: AbortSigna
  * stream never completes on its own, so the caller reconnects: each event carries the seq to
  * resume from, and the server's ring replays whatever happened while the socket was down.
  */
-export async function* backgroundStream(since = 0, signal?: AbortSignal): AsyncGenerator<BackgroundEvent & { seq: number | null }> {
-  for await (const { event, data, seq } of sseStream(`/events?since=${since}`, signal, STREAM_IDLE_MS)) {
+export async function* backgroundStream(since = 0, signal?: AbortSignal, onOpen?: () => void): AsyncGenerator<BackgroundEvent & { seq: number | null }> {
+  for await (const { event, data, seq } of sseStream(`/events?since=${since}`, signal, STREAM_IDLE_MS, STREAM_CONNECT_MS, onOpen)) {
     yield { event, data, seq } as BackgroundEvent & { seq: number | null }
   }
 }

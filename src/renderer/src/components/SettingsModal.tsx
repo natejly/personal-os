@@ -91,6 +91,23 @@ export default function SettingsModal(): JSX.Element {
   // Closing discards `draft` — Escape and the backdrop are exactly the Cancel button.
   const { titleId, backdrop, modal } = useModal(() => setSettingsOpen(false))
 
+  // The backend changes settings on its own (an "always allow" writes a permission rule, a tool toggle),
+  // so the store's copy can be stale. Re-read it, and seed the draft from it unless editing has begun.
+  // `base` is what the draft was seeded from, so Save sends only the fields edited here.
+  const base = useRef(settings)
+  useEffect(() => {
+    const initial = base.current
+    api.settings.get().then((fresh) => {
+      delete fresh.mode
+      useStore.setState({ settings: fresh })
+      setDraft((d) => {
+        if (d !== initial) return d
+        base.current = fresh
+        return fresh
+      })
+    }).catch(() => undefined)
+  }, [])
+
   // A shortcut that another app owns fails at startup, long before this modal mounts, so the current
   // state is pulled as well as watched.
   useEffect(() => {
@@ -114,8 +131,8 @@ export default function SettingsModal(): JSX.Element {
 
   const testConnection = async (): Promise<void> => {
     setTest({ state: 'testing' })
-    await saveSettings({ baseUrl: draft.baseUrl, apiKey: draft.apiKey })
     try {
+      await saveSettings({ baseUrl: draft.baseUrl, apiKey: draft.apiKey })
       const list = await api.models()
       setReplacingKey(false)
       setTest({ state: 'ok', msg: `Connected. ${list.length} model${list.length === 1 ? '' : 's'} available.` })
@@ -135,8 +152,12 @@ export default function SettingsModal(): JSX.Element {
     // A cleared or out-of-range rounds field is clamped here: 0 would mean unlimited to the backend.
     const rounds = Number.isFinite(draft.maxToolRounds) && draft.maxToolRounds >= 1
       ? Math.min(60, Math.round(draft.maxToolRounds)) : settings.maxToolRounds
+    const next: Settings = { ...draft, maxToolRounds: rounds, gatherShortcut: applied?.accelerator ?? draft.gatherShortcut, quickCaptureShortcut: capApplied?.accelerator ?? draft.quickCaptureShortcut }
+    // Only what was edited here: a whole-draft PUT would put back anything the backend changed since it was taken.
+    const seed = base.current as unknown as Record<string, unknown>
+    const changed = Object.fromEntries(Object.entries(next).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify(seed[k]))) as Partial<Settings>
     try {
-      await saveSettings({ ...draft, maxToolRounds: rounds, gatherShortcut: applied?.accelerator ?? draft.gatherShortcut, quickCaptureShortcut: capApplied?.accelerator ?? draft.quickCaptureShortcut })
+      if (Object.keys(changed).length) await saveSettings(changed)
     } catch (e) {
       // The dialog stays open with the draft intact, so nothing typed is lost.
       return toast((e as Error).message, 'error')

@@ -16,6 +16,7 @@ import PendingSends from './components/PendingSends'
 import PageAgentPanel from './components/PageAgentPanel'
 import LibraryView from './components/LibraryView'
 import CoworkView from './components/CoworkView'
+import RenderBoundary from './components/RenderBoundary'
 import { collectNotices } from './lib/deskNotify'
 import { notify } from './lib/notify'
 import SettingsModal from './components/SettingsModal'
@@ -204,7 +205,20 @@ export default function App(): JSX.Element {
       {inCanvas ? (
         <Canvas />
       ) : (
-        <>
+        // One view's render error stays in that view: the sidebar survives, and switching views tries again.
+        <RenderBoundary
+          label={`view ${view}`}
+          resetKey={view}
+          fallback={(e, retry) => (
+            <main className="page">
+              <div className="empty-state">
+                <h2>This view hit an error</h2>
+                <p>{e.message}</p>
+                <button className="primary-btn" onClick={retry}>Try again</button>
+              </div>
+            </main>
+          )}
+        >
           {view === 'home' && <HomeView />}
           {view === 'chat' && <ChatView />}
           {ModView && <ModView />}
@@ -218,7 +232,7 @@ export default function App(): JSX.Element {
           {view === 'library' && <LibraryView />}
           {view === 'cowork' && <CoworkView />}
           {view === 'project' && <ProjectView />}
-        </>
+        </RenderBoundary>
       )}
       {pageAgentOpen && <PageAgentPanel />}
       {settingsOpen && <SettingsModal />}

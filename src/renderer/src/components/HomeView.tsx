@@ -223,6 +223,17 @@ export default function HomeView(): JSX.Element {
   }
 
   useEffect(() => { void refreshDashboard() }, [refreshDashboard])
+  // Today left open overnight: coming back to the window re-reads it, and a new day also brings a new recap.
+  useEffect(() => {
+    let day = new Date().toDateString()
+    const onFocus = (): void => {
+      void refreshDashboard()
+      const now = new Date().toDateString()
+      if (now !== day) { day = now; void refreshRecap() }
+    }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [refreshDashboard, refreshRecap])
 
   const brief = async (): Promise<void> => {
     newChat(null)

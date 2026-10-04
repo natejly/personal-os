@@ -339,7 +339,7 @@ CREATE TABLE IF NOT EXISTS desks (
   workspace       TEXT NOT NULL,                   -- "cowork/<id>", RELATIVE to db.data_dir
   turn            INTEGER NOT NULL DEFAULT 0,
   cost            REAL NOT NULL DEFAULT 0,
-  budget          TEXT NOT NULL DEFAULT '{}',      -- {maxTurns, maxCost} overriding the global caps
+  budget          TEXT NOT NULL DEFAULT '{}',      -- {maxTurns} overriding the global cap
   last_error      TEXT,
   archived        INTEGER NOT NULL DEFAULT 0,
   created_at      REAL NOT NULL,
@@ -1235,7 +1235,7 @@ export interface ActionPlan { plan_id: string; call_id: string | null; conversat
   status: 'pending'|'approved'|'rejected'|'superseded'; tainted: boolean
   expected_taint: string[]; note: string; decided_by: string | null
   created_at: number; decided_at: number | null; steps: ActionPlanStep[] }
-export interface DeskBudget { maxTurns?: number; maxCost?: number }
+export interface DeskBudget { maxTurns?: number }
 export interface Desk { id: string; conversation_id: string; project_id: string | null; title: string
   brief: string; status: DeskStatus; status_reason: string; headline: string; question: string
   autonomy: DeskAutonomy; plan_id: string | null; run_id: string | null; turn: number; cost: number

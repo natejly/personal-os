@@ -134,7 +134,7 @@ def reset() -> None:
     appmod.subagent_mgr.children.clear()
     engine.tasks.clear()
     engine.stops.clear()
-    appmod.db.set_settings({"workflowMaxFanOut": 50, "workflowMaxCost": 1.0, "subagentMaxConcurrent": 4, "workspaceRoots": []})
+    appmod.db.set_settings({"workflowMaxFanOut": 50, "subagentMaxConcurrent": 4, "workspaceRoots": []})
     with appmod.db.tx() as c:
         c.execute("DELETE FROM workflow_runs")
         c.execute("DELETE FROM workflows")

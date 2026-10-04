@@ -93,10 +93,10 @@ def test_create() -> None:
 
 
 def test_update_and_list() -> None:
-    d = fresh(brief="budget desk", budget={"maxTurns": 3, "maxCost": 1.0})
-    check(d["budget"] == {"maxTurns": 3, "maxCost": 1.0}, "the budget round-trips")
-    upd = desks.update(d["id"], {"budget": {"maxCost": 0.5}})
-    check(upd["budget"] == {"maxTurns": 3, "maxCost": 0.5}, "budget merges rather than replaces")
+    d = fresh(brief="budget desk", budget={"maxTurns": 3})
+    check(d["budget"] == {"maxTurns": 3}, "the budget round-trips")
+    upd = desks.update(d["id"], {"budget": {"maxTurns": 5}})
+    check(upd["budget"] == {"maxTurns": 5}, "budget merges rather than replaces")
     upd = desks.update(d["id"], {"title": "Renamed", "status": "done", "cost": 99})
     check(upd["title"] == "Renamed", "a whitelisted field is written")
     check(upd["status"] == "draft" and upd["cost"] == 0, "status and cost are not patchable from update()")

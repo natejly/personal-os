@@ -8,7 +8,7 @@ Everything runs offline against a scripted llm.stream_chat. The claims worth a t
   - several read-only spawns in one round run side by side, through the real reply loop;
   - the report comes back wrapped as untrusted data and taints the parent;
   - background spawn then wait, stop cascades and still returns partial output, a stale child is stopped;
-  - at its step limit a child is forced into one tool-free summary; the cost cap is a hard stop;
+  - at its step limit a child is forced into one tool-free summary;
   - a child's approval card rides the parent's stream and decides the call;
   - writers never share a root; user-authored definitions are inert until approved;
   - desk_start always asks and only ever creates a plan-mode desk.

@@ -3,7 +3,7 @@ import {
   FileText, Files, PanelLeftOpen, PanelRight, X, Columns2, Eye, Pencil,
   Sparkles, Save, Link2, Link2Off, ChevronDown, Folder, FolderKanban, FolderTree, Focus, AlignVerticalSpaceAround
 } from 'lucide-react'
-import { useStore } from '../store'
+import { flushDocOnUnload, restoreDocTabs, useStore } from '../store'
 import { api, type DocHit } from '../lib/api'
 import type { Doc } from '@shared/types'
 import MarkdownEditor from './MarkdownEditor'
@@ -96,6 +96,7 @@ export default function DocsView(): JSX.Element {
   const previewRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => { void refreshDocs(query) }, [refreshDocs, query])
+  useEffect(() => { void restoreDocTabs() }, [])
   // Ranked hits with a snippet for the tree's search; null until the (debounced) answer arrives.
   const [hits, setHits] = useState<DocHit[] | null>(null)
   useEffect(() => {
@@ -109,10 +110,10 @@ export default function DocsView(): JSX.Element {
   // Anything still buffered belongs on disk before this view goes away — and before the window does.
   useEffect(() => {
     const flush = (): void => { void flushDoc() }
-    window.addEventListener('pagehide', flush)
+    window.addEventListener('pagehide', flushDocOnUnload)
     window.addEventListener('blur', flush)
     return () => {
-      window.removeEventListener('pagehide', flush)
+      window.removeEventListener('pagehide', flushDocOnUnload)
       window.removeEventListener('blur', flush)
       flush()
     }
@@ -322,7 +323,7 @@ export default function DocsView(): JSX.Element {
                 {tabDocs.map((d) => (
                   <button key={d.id} className={`doc-tab ${d.id === activeDoc.id ? 'active' : ''}`} onClick={() => void openDoc(d.id)}>
                     <FileText size={11} />{d.title || 'Untitled'}
-                    <span className="tab-x" role="button" title="Close" onClick={(e) => { e.stopPropagation(); closeDocTab(d.id) }}><X size={10} /></span>
+                    <span className="tab-x" role="button" title="Close" onClick={(e) => { e.stopPropagation(); void closeDocTab(d.id) }}><X size={10} /></span>
                   </button>
                 ))}
               </div>

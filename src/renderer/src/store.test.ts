@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readDocMode, adoptServerDoc, applyEvent, editCut, settleInterrupted, stopOutcome, useStore, PAGE_AGENT_DRAFT, type ChatSession } from './store'
+import { readDocMode, adoptServerDoc, flushDocOnUnload, applyEvent, editCut, settleInterrupted, stopOutcome, useStore, PAGE_AGENT_DRAFT, type ChatSession } from './store'
 import { insertIntoComposer } from './lib/composerInsert'
 import { getDraft } from './lib/drafts'
 import { ApiError } from './lib/apiError'
@@ -194,6 +194,70 @@ test('overlapping flushes run one after another, so the second finds nothing lef
     assert.deepEqual(bases, [1])
   } finally {
     Object.assign(docs, orig)
+  }
+})
+
+test('text typed while a save is in flight is sent by the next flush, not marked saved', async () => {
+  const docs = api.docs as unknown as Stubs
+  const orig = { ...docs }
+  const sent: unknown[] = []
+  let release: () => void = () => undefined
+  docs.save = async (_id, p) => {
+    const c = (p as { content: string }).content
+    sent.push(c)
+    if (sent.length === 1) await new Promise<void>((r) => { release = r })
+    return docFull({ content: c, updated_at: 1 + sent.length })
+  }
+  docs.list = async () => []
+  docs.revisions = async () => []
+  try {
+    useStore.setState({ activeDoc: docFull({}) as never, docDraft: 'b', docTitleDraft: null })
+    const first = useStore.getState().flushDoc()
+    await new Promise((r) => setTimeout(r, 0))
+    useStore.setState({ docDraft: 'bc' })
+    release()
+    await first
+    await useStore.getState().flushDoc()
+    assert.deepEqual(sent, ['b', 'bc'])
+    assert.equal(useStore.getState().docDraft, null)
+  } finally {
+    Object.assign(docs, orig)
+  }
+})
+
+test('closing the last tab or re-opening the active doc saves the buffered draft first', async () => {
+  const docs = api.docs as unknown as Stubs
+  const orig = { ...docs }
+  const sent: unknown[] = []
+  docs.save = async (_id, p) => { sent.push((p as { content: string }).content); return docFull({ content: (p as { content: string }).content, updated_at: 9 }) }
+  docs.get = async () => docFull({ content: 'server', updated_at: 9 })
+  docs.list = async () => []
+  docs.revisions = async () => []
+  try {
+    useStore.setState({ activeDoc: docFull({}) as never, docTabs: ['d1'], docDraft: 'typed', docTitleDraft: null })
+    await useStore.getState().openDoc('d1')
+    useStore.setState({ docDraft: 'closing' })
+    await useStore.getState().closeDocTab('d1')
+    assert.deepEqual(sent, ['typed', 'closing'])
+    assert.equal(useStore.getState().activeDoc, null)
+  } finally {
+    Object.assign(docs, orig)
+  }
+})
+
+test('flushDocOnUnload sends the buffered draft as a keepalive PUT', () => {
+  const g = globalThis as { fetch: typeof fetch }
+  const prev = g.fetch
+  const calls: RequestInit[] = []
+  g.fetch = (async (_u: unknown, init: RequestInit) => { calls.push(init); return new Response('{}') }) as typeof fetch
+  try {
+    useStore.setState({ activeDoc: docFull({}) as never, docDraft: 'last', docTitleDraft: null })
+    flushDocOnUnload()
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0].keepalive, true)
+    assert.deepEqual(JSON.parse(calls[0].body as string), { content: 'last', base_updated_at: 1 })
+  } finally {
+    g.fetch = prev
   }
 })
 

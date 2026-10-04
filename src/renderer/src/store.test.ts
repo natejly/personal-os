@@ -1,6 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readDocMode, adoptServerDoc, applyEvent, editCut, settleInterrupted, stopOutcome, useStore, type ChatSession } from './store'
+import { readDocMode, adoptServerDoc, applyEvent, editCut, settleInterrupted, stopOutcome, useStore, PAGE_AGENT_DRAFT, type ChatSession } from './store'
+import { insertIntoComposer } from './lib/composerInsert'
+import { getDraft } from './lib/drafts'
 import { ApiError } from './lib/apiError'
 import { api } from './lib/api'
 import { mergeConversation } from './sessionStatus'
@@ -734,4 +736,62 @@ test('status: sets the live line, and a token, tool call, done or null clears it
   for (const ev of clears) assert.equal(applyEvent(held, ev, true).conversation?.messages?.[0].status ?? null, null, ev.event)
   const other = applyEvent(session(), { event: 'status', data: { id: 'nope', kind: 'compacting' } } as ChatEvent, true)
   assert.equal(other.conversation?.messages?.[0].status, undefined)
+})
+
+test('skip permissions on a chat with no row is parked for that chat, never written as the global default', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  useStore.setState({ sessions: {}, toasts: [], focusedConversationId: null, draftChatSettings: {}, pageAgentChatSettings: {}, uploadTaintTarget: null, draftPendingSend: null })
+  const { calls } = stubFetch(t, (m, p, b) => {
+    if (m === 'POST' && p.endsWith('/conversations')) return json(row({ id: 'c9', settings: {} }))
+    if (m === 'PATCH') return json(row({ id: 'c9', settings: b.settings }))
+    if (m === 'POST') return json({ detail: 'down' }, 500)
+    return json([])
+  })
+  await useStore.getState().setChatSettings({ skipPermissions: true })
+  await useStore.getState().setChatSettings({ planMode: 'always', skipPermissions: true }, PAGE_AGENT_DRAFT)
+  assert.equal(calls.length, 0)
+  assert.deepEqual(useStore.getState().draftChatSettings, { skipPermissions: true })
+  assert.deepEqual(useStore.getState().pageAgentChatSettings, { planMode: 'always', skipPermissions: true })
+  await useStore.getState().send('hi')
+  assert.deepEqual(calls.find((c) => c.method === 'PATCH')?.body, { settings: { skipPermissions: true } })
+  assert.equal(calls.some((c) => c.path.includes('/settings')), false)
+  assert.deepEqual(useStore.getState().draftChatSettings, {})
+})
+
+test('a send while Stop is pending waits for the run to end and starts a reply instead of steering', async () => {
+  const realSteer = api.steer
+  const realChat = api.chat
+  const steers: string[] = []
+  const chats: string[] = []
+  api.steer = (async (_c: string, text: string) => { steers.push(text); return { ok: true } }) as never
+  api.chat = (async (_c: string, b: { content?: string }) => { chats.push(b.content ?? ''); throw new ApiError('down', { status: 500 }) }) as never
+  try {
+    useStore.setState({ toasts: [], uploadTaintTarget: null, sessions: { c1: session({ streaming: { messageId: 'm1', runId: 'r1', abort: new AbortController(), answering: true, stopping: true } } as unknown as Partial<ChatSession>) } })
+    setTimeout(() => useStore.setState((s) => ({ sessions: { ...s.sessions, c1: { ...s.sessions.c1, streaming: null } } })), 30)
+    await useStore.getState().send('do X instead', 'c1')
+    assert.deepEqual(steers, [])
+    assert.deepEqual(chats, ['do X instead'])
+  } finally {
+    api.steer = realSteer
+    api.chat = realChat
+  }
+})
+
+test('a timed-out chat POST with no run behind it says the message may not have been sent', async (t) => {
+  const realChat = api.chat
+  api.chat = (async () => { throw new ApiError('slow', { kind: 'timeout' }) }) as never
+  t.after(() => { api.chat = realChat })
+  seed()
+  stubFetch(t, (_m, p) => (p.includes('/runs') ? json([]) : json({ ...row(), messages: [] })))
+  assert.equal(await useStore.getState().send('hi', 'c1'), false)
+  assert.match(useStore.getState().toasts[0].text, /may not have been sent/)
+})
+
+test("a slot chip inserts into the draft of the chat the card is in; the open ⌘I thread's is the panel's", () => {
+  useStore.setState({ focusedConversationId: 'other', pageAgentOpen: true, pageAgentId: 'c7' })
+  insertIntoComposer('Tue 3pm', { conversationId: 'c7' })
+  insertIntoComposer('Wed 4pm', { conversationId: 'c8' })
+  assert.equal(getDraft('page')?.text, 'Tue 3pm')
+  assert.equal(getDraft('c:c8')?.text, 'Wed 4pm')
+  assert.equal(getDraft('c:other'), undefined)
 })

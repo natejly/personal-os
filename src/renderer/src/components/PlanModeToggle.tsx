@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { ListChecks } from 'lucide-react'
-import { useStore } from '../store'
+import { PAGE_AGENT_DRAFT, useStore } from '../store'
 import '../styles/cowork.css'
 
 type Mode = 'off' | 'auto' | 'always'
@@ -23,7 +23,9 @@ const LABEL: Record<Mode, string> = {
 export default function PlanModeToggle({ conversationId }: { conversationId?: string }): JSX.Element {
   const convId = useStore((s) => conversationId ?? s.focusedConversationId)
   const focused = useStore((s) => s.focusedConversationId)
-  const convMode = useStore((s) => s.sessions[conversationId ?? s.focusedConversationId ?? '']?.conversation.settings.planMode ?? null)
+  // The ⌘I panel before its first message parks the mode for the thread its send creates.
+  const convMode = useStore((s) => (conversationId === PAGE_AGENT_DRAFT ? s.pageAgentChatSettings.planMode
+    : s.sessions[conversationId ?? s.focusedConversationId ?? '']?.conversation.settings.planMode) ?? null)
   const globalMode = useStore((s) => s.settings.planMode ?? 'off')
   const setPlanMode = useStore((s) => s.setPlanMode)
   const saveSettings = useStore((s) => s.saveSettings)

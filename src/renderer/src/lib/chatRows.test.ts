@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { Conversation } from '@shared/types'
-import { adjacentChatId, partitionChats } from './chatRows'
+import { adjacentChatId, partitionChats, sidebarOrder } from './chatRows'
 
 const NOW = new Date('2026-10-02T12:00:00').getTime()
 const t = (daysAgo: number): number => (NOW - daysAgo * 86_400_000) / 1000
@@ -25,6 +25,13 @@ test('a query filters pinned and groups across scopes', () => {
   const { pinned, groups } = partitionChats(list, 'alp', NOW)
   assert.deepEqual(pinned.map((x) => x.id), ['alps'])
   assert.deepEqual(groups.flatMap((g) => g.items.map((x) => x.id)), ['alpha'])
+})
+
+test('sidebarOrder steps pinned, then Recents, then project chats', () => {
+  const list = [c('proj', 0, { project_id: 'p' }), c('a', 0.1), c('d', 3, { pinned_at: 20 }), c('e', 40)]
+  const order = sidebarOrder(list, NOW).map((x) => x.id)
+  assert.deepEqual(order, ['d', 'a', 'e', 'proj'])
+  assert.equal(adjacentChatId(sidebarOrder(list, NOW), 'd', 1), 'a')
 })
 
 test('adjacentChatId clamps and starts from the first row', () => {

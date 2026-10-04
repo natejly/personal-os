@@ -16,6 +16,8 @@ export interface ToolCardProps {
    * exactly those arguments; a Deny never carries an edit.
    */
   decide: (approve: boolean, editedArgs?: Record<string, unknown>) => Promise<void>
+  /** The chat the card is shown in: where a card's insert-into-composer chip writes. */
+  conversationId?: string
 }
 
 /** Tool name -> card. A registered card replaces the generic row and ask card for that tool, pending and finished. */

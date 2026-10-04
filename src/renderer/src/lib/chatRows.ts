@@ -33,6 +33,14 @@ export function partitionChats(conversations: Conversation[], query: string, now
   return { pinned, groups }
 }
 
+/** Chats in the order the sidebar lists them: pinned, then Recents, then project chats (shown under Projects). */
+export function sidebarOrder(conversations: Conversation[], now = Date.now()): Conversation[] {
+  const { pinned, groups } = partitionChats(conversations, '', now)
+  const listed = [...pinned, ...groups.flatMap((g) => g.items)]
+  const seen = new Set(listed.map((c) => c.id))
+  return [...listed, ...conversations.filter((c) => !seen.has(c.id))]
+}
+
 /** Neighbour of the focused chat in list order; clamps at the ends. From a draft, next is the first row. */
 export function adjacentChatId(conversations: { id: string }[], focusedId: string | null, dir: 1 | -1): string | null {
   if (conversations.length === 0) return null

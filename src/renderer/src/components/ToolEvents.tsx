@@ -382,7 +382,7 @@ function ToolEvents({ events, conversationId, streaming = false }: { events: Too
       <RenderBoundary key={t.id} label={`tool ${t.name}`} resetKey={t} fallback={() => <ToolFallback event={t} conversationId={conversationId} />}>
         {Card ? (
           <>
-            <Card event={t} pending={!!t.pending && !!t.needs_approval} decide={decideFor(t)} />
+            <Card event={t} pending={!!t.pending && !!t.needs_approval} decide={decideFor(t)} conversationId={conversationId} />
             {!t.pending && !t.error && t.undo?.snapshot_id && <UndoButton snapshotId={t.undo.snapshot_id} />}
             {t.pending && t.needs_approval && <ApprovalRules event={t} conversationId={conversationId} />}
           </>

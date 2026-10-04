@@ -9,7 +9,7 @@ import { api, backgroundStream, chatStream, meetingStream, setBase, type Scope }
 import { currentSelection } from './lib/pageContext'
 import { DEFAULT_EFFORT, NEEDS_YOU } from '../../shared/types'
 import { chatNotice, finishStatus, foldRunState, mergeConversation, onScreen, pickEvictions, pulseStatus, reduceStatus, replayCursor, settleApprovals, type LiveRuns } from './sessionStatus'
-import { adjacentChatId } from './lib/chatRows'
+import { adjacentChatId, sidebarOrder } from './lib/chatRows'
 import { createDeltaBuffer } from './lib/deltaBuffer'
 import { CHAT_NOTICE_BODY, notify } from './lib/notify'
 import { applyCursor, fetchSegmentPages, needsSegmentReload } from './lib/transcript'
@@ -175,6 +175,8 @@ export interface State {
   /** A model picked on a draft chat. Null follows `settings.defaultModel`; picking one must not rewrite that default. */
   draftModel: string | null
   draftFast: boolean
+  /** Plan mode and skip permissions picked on a draft chat; `send` writes them onto the row it creates. */
+  draftChatSettings: Pick<ConversationSettings, 'planMode' | 'skipPermissions'>
   /** The first message of a chat that has no row yet, shown until the row exists. */
   draftPendingSend: PendingSend | null
   /** A file was attached before this draft had a row. `send` marks the new chat untrusted. */
@@ -199,6 +201,8 @@ export interface State {
   pageAgentModel: string | null
   pageAgentEffort: Effort
   pageAgentFast: boolean
+  /** Plan mode and skip permissions picked in the ⌘I panel before its thread exists. */
+  pageAgentChatSettings: Pick<ConversationSettings, 'planMode' | 'skipPermissions'>
   pageContext: PageContext | null
   /** Message whose execution trace the Trace tab shows (null = latest assistant reply). */
   traceMessageId: string | null
@@ -918,6 +922,15 @@ const applyMeetingEvent = (s: MeetingWatch, ev: MeetingStreamEvent): MeetingWatc
 
 export { adjacentChatId }
 
+/** The id the ⌘I panel's composer carries before its thread has a row. */
+export const PAGE_AGENT_DRAFT = '\u0000page-agent'
+
+/** The per-chat switches a row-less chat parks until `send` creates its row. */
+const parkable = (p: Partial<ConversationSettings>): Pick<ConversationSettings, 'planMode' | 'skipPermissions'> => ({
+  ...(p.planMode !== undefined ? { planMode: p.planMode } : {}),
+  ...(p.skipPermissions !== undefined ? { skipPermissions: p.skipPermissions } : {})
+})
+
 export const useStore = create<State>((set, get) => {
   /**
    * App's init effect runs twice under React.StrictMode, so both of these are latched. A second
@@ -1467,6 +1480,17 @@ export const useStore = create<State>((set, get) => {
       run = await api.chat(convId, body)
     } catch (e) {
       const conflict = runConflict(e)
+      if (!conflict && e instanceof ApiError && e.kind === 'timeout') {
+        // A slow backend may still have started the run: adopt it rather than hand back text it already has.
+        await get().attachSession(convId).catch(() => undefined)
+        if (get().sessions[convId]?.streaming) {
+          if (pendingKey !== undefined) dropPending(convId, pendingKey)
+          return true
+        }
+        get().toast('The backend did not answer, so your message may not have been sent. Check the chat before sending it again.', 'error')
+        patchSession(convId, (s) => ({ ...s, status: 'error', finishedAt: Date.now() }))
+        return false
+      }
       if (!conflict) {
         get().toast((e as Error).message, 'error')
         patchSession(convId, (s) => ({ ...s, status: 'error', finishedAt: Date.now() }))
@@ -1515,6 +1539,11 @@ export const useStore = create<State>((set, get) => {
     return p
   }
 
+  /** Resolves once a stopped run has reached its `done` (which clears `stopping`), or after 10s. */
+  const untilStopped = async (id: string): Promise<void> => {
+    for (let i = 0; i < 100 && get().sessions[id]?.streaming?.stopping; i++) await new Promise((r) => setTimeout(r, 100))
+  }
+
   /** Run an action whose failure should be told to the user and nothing more. */
   const guard = async (label: string, fn: () => Promise<unknown>): Promise<boolean> => {
     try {
@@ -1537,12 +1566,23 @@ export const useStore = create<State>((set, get) => {
 
   const patchChatSettings = async (patch: Partial<ConversationSettings>, conversationId?: string): Promise<void> => {
     const id = conversationId ?? get().focusedConversationId
+    const parked = parkable(patch)
     if (!id) {
-      // No conversation to PATCH yet. Effort and fast mode are the settings a draft can still carry,
-      // so park them and let `send` apply them to the conversation it is about to create.
+      // No conversation to PATCH yet. Park what a draft can carry and let `send` apply it to the
+      // conversation it is about to create.
       set((s) => ({
         draftEffort: patch.effort ?? s.draftEffort,
-        draftFast: patch.fast ?? s.draftFast
+        draftFast: patch.fast ?? s.draftFast,
+        draftChatSettings: { ...s.draftChatSettings, ...parked }
+      }))
+      return
+    }
+    if (id === PAGE_AGENT_DRAFT) {
+      // The ⌘I panel before its first message: `sendToPageAgent` applies these to the thread it creates.
+      set((s) => ({
+        pageAgentEffort: patch.effort ?? s.pageAgentEffort,
+        pageAgentFast: patch.fast ?? s.pageAgentFast,
+        pageAgentChatSettings: { ...s.pageAgentChatSettings, ...parked }
       }))
       return
     }
@@ -1576,6 +1616,7 @@ export const useStore = create<State>((set, get) => {
     draftEffort: DEFAULT_EFFORT,
     draftModel: null,
     draftFast: false,
+    draftChatSettings: {},
     draftPendingSend: null,
     uploadTaintTarget: null,
     uploadTaintSource: 'upload',
@@ -1622,6 +1663,7 @@ export const useStore = create<State>((set, get) => {
     pageAgentModel: null,
     pageAgentEffort: DEFAULT_EFFORT,
     pageAgentFast: false,
+    pageAgentChatSettings: {},
     pageContext: null,
     traceMessageId: null,
     settingsOpen: false,
@@ -1883,7 +1925,7 @@ export const useStore = create<State>((set, get) => {
     },
 
     refreshConversations: async () => set({ conversations: await api.conversations.list('all') }),
-    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, view: 'chat', settingsOpen: false }),
+    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftChatSettings: {}, view: 'chat', settingsOpen: false }),
     createConversation: async (projectId) => {
       try {
         const c = await api.conversations.create(projectId, get().settings.defaultModel)
@@ -2005,7 +2047,7 @@ export const useStore = create<State>((set, get) => {
     stepChat: (dir) => {
       const s = get()
       if (s.view === 'canvas') return
-      const next = adjacentChatId(s.conversations, s.focusedConversationId, dir)
+      const next = adjacentChatId(sidebarOrder(s.conversations), s.focusedConversationId, dir)
       if (next) void s.selectChat(next)
     },
     searchChats: () => set((s) => ({ sidebarOpen: true, sidebarSearchTick: s.sidebarSearchTick + 1 })),
@@ -2066,7 +2108,7 @@ export const useStore = create<State>((set, get) => {
       }
     },
     noteUntrustedUpload: async (conversationId, pending = 'draft', source = 'upload') => {
-      const id = conversationId && conversationId !== '\u0000page-agent' ? conversationId : undefined
+      const id = conversationId && conversationId !== PAGE_AGENT_DRAFT ? conversationId : undefined
       if (!id) {
         set({ uploadTaintTarget: pending, uploadTaintSource: source })
         return
@@ -2112,7 +2154,9 @@ export const useStore = create<State>((set, get) => {
         // drops the completion it was writing and answers the steer. Only a run that is still
         // *answering* can take one — in its auto-learn tail the loop is over, and a steer accepted
         // there would be stored and never replied to — so that tail takes an ordinary send instead.
-        if (get().sessions[id]?.streaming?.answering) {
+        // A stopping run never reads a steer, so the message waits for it to end and starts its own reply.
+        if (get().sessions[id]?.streaming?.stopping) await untilStopped(id)
+        else if (get().sessions[id]?.streaming?.answering) {
           try {
             const r = await api.steer(id, text)
             settleSteer(id, r.message)
@@ -2162,8 +2206,8 @@ export const useStore = create<State>((set, get) => {
         return false
       }
       // Effort and fast mode chosen on the draft land before the first run, so they apply to this reply.
-      const { draftEffort: effort, draftFast: fast, uploadTaintTarget, uploadTaintSource } = get()
-      const settings: { effort?: Effort; fast?: boolean; tainted?: boolean; taint_sources?: string[] } = {}
+      const { draftEffort: effort, draftFast: fast, draftChatSettings, uploadTaintTarget, uploadTaintSource } = get()
+      const settings: Partial<ConversationSettings> = { ...draftChatSettings }
       // Low is already what a new row hydrates to. Anything else, including the omit-the-field
       // choice, has to be written or the server would fill low back in.
       if (effort !== DEFAULT_EFFORT) settings.effort = effort
@@ -2173,7 +2217,7 @@ export const useStore = create<State>((set, get) => {
         settings.tainted = true
         settings.taint_sources = [uploadTaintSource || 'upload']
       }
-      if (effort !== DEFAULT_EFFORT || fast || fromUpload) {
+      if (Object.keys(settings).length) {
         const patched = await api.conversations.patch(c.id, { settings }).catch(() => null)
         if (fromUpload && !patched?.settings?.tainted) {
           draftCreate = null
@@ -2191,7 +2235,7 @@ export const useStore = create<State>((set, get) => {
       const { messages: _m, ...row } = c
       set((s) => ({
         draftPendingSend: null,
-        focusedConversationId: c.id, view: 'chat', draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false,
+        focusedConversationId: c.id, view: 'chat', draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftChatSettings: {},
         uploadTaintTarget: fromUpload ? null : uploadTaintTarget,
         uploadTaintSource: fromUpload ? 'upload' : uploadTaintSource,
         conversations: [row as Conversation, ...s.conversations.filter((x) => x.id !== c.id)]
@@ -2220,11 +2264,19 @@ export const useStore = create<State>((set, get) => {
       if (id) {
         // Mid-reply the panel steers, exactly as the composer does in a chat. The auto-learn tail
         // is still `streaming` but no longer answering, and a steer there 409s.
-        if (get().sessions[id]?.streaming?.answering) {
+        if (get().sessions[id]?.streaming?.stopping) await untilStopped(id)
+        else if (get().sessions[id]?.streaming?.answering) {
           try {
             await api.steer(id, text)
             return true
-          } catch { /* the run ended in the gap */ }
+          } catch (e) {
+            // As in `send`: a hung steer may have landed, and falling through would steer the text twice.
+            if (e instanceof ApiError && e.kind === 'timeout') {
+              get().toast('The backend did not answer, so your message was not sent.', 'error')
+              return false
+            }
+            // The run ended in the gap; fall through to a normal send.
+          }
         }
         // The thread can have been deleted from the chat list since; fall back to a fresh one.
         if (!get().sessions[id]) await get().openSession(id).catch(() => { id = null })
@@ -2246,8 +2298,8 @@ export const useStore = create<State>((set, get) => {
           get().toast((e as Error).message, 'error')
           return false
         }
-        const { pageAgentEffort, pageAgentFast, uploadTaintTarget, uploadTaintSource } = get()
-        const pageSettings: { effort?: Effort; fast?: boolean; tainted?: boolean; taint_sources?: string[] } = {}
+        const { pageAgentEffort, pageAgentFast, pageAgentChatSettings, uploadTaintTarget, uploadTaintSource } = get()
+        const pageSettings: Partial<ConversationSettings> = { ...pageAgentChatSettings }
         if (pageAgentEffort !== DEFAULT_EFFORT) pageSettings.effort = pageAgentEffort
         if (pageAgentFast) pageSettings.fast = true
         const fromUpload = uploadTaintTarget === 'page'
@@ -2255,7 +2307,7 @@ export const useStore = create<State>((set, get) => {
           pageSettings.tainted = true
           pageSettings.taint_sources = [uploadTaintSource || 'upload']
         }
-        if (pageAgentEffort !== DEFAULT_EFFORT || pageAgentFast || fromUpload) {
+        if (Object.keys(pageSettings).length) {
           const patched = await api.conversations.patch(c.id, { settings: pageSettings }).catch(() => null)
           if (fromUpload && !patched?.settings?.tainted) {
             get().toast('Could not mark this chat untrusted after the upload', 'error')
@@ -2267,7 +2319,7 @@ export const useStore = create<State>((set, get) => {
         c.messages = []
         putSession(c)
         id = c.id
-        set({ pageAgentId: id })
+        set({ pageAgentId: id, pageAgentChatSettings: {} })
         void get().refreshProjects()
       }
       // The panel's model menu writes through the same queue as the chat page's: let a change land first.

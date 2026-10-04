@@ -489,7 +489,7 @@ function AwaitingRead({ decide }: Pick<ToolCardProps, 'decide'>): JSX.Element {
   )
 }
 
-function SlotsView({ event }: { event: ToolEvent }): JSX.Element {
+function SlotsView({ event, conversationId }: { event: ToolEvent; conversationId?: string }): JSX.Element {
   const r = useMemo(() => parseResult(event.name, event.result_preview, event.error), [event])
   const slots = parseSlots(r.data)
   const args = event.arguments as { duration_minutes?: number; attendees?: string[] }
@@ -508,7 +508,7 @@ function SlotsView({ event }: { event: ToolEvent }): JSX.Element {
           <div className="ccard-slots">
             {g.items.map((s) => (
               <button key={s.start} className="ccard-slot" title={slotReplyText(s.start, s.end)}
-                onClick={() => insertIntoComposer(slotReplyText(s.start, s.end))}>
+                onClick={() => insertIntoComposer(slotReplyText(s.start, s.end), { conversationId })}>
                 {fmtTime(toDate(s.start))} – {fmtTime(toDate(s.end))}
               </button>
             ))}
@@ -550,7 +550,7 @@ function EventsView({ event }: { event: ToolEvent }): JSX.Element {
   )
 }
 
-function ReadCard({ event, pending, decide }: ToolCardProps): JSX.Element {
+function ReadCard({ event, pending, decide, conversationId }: ToolCardProps): JSX.Element {
   const state = cardState(event.name, event, pending)
   const isSlots = event.name === 'calendar_find_time'
   const miss = notConnected(event.error)
@@ -567,7 +567,7 @@ function ReadCard({ event, pending, decide }: ToolCardProps): JSX.Element {
       </header>
       {miss ? <ConnectNotice /> : state === 'failed' ? <div className="ccard-warn bad"><AlertCircle size={12} /> {event.error}</div> : null}
       {state === 'awaiting' && <AwaitingRead decide={decide} />}
-      {state === 'done' && (isSlots ? <SlotsView event={event} /> : <EventsView event={event} />)}
+      {state === 'done' && (isSlots ? <SlotsView event={event} conversationId={conversationId} /> : <EventsView event={event} />)}
       <Details event={event} />
     </section>
   )

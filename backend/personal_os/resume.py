@@ -118,3 +118,15 @@ def build_resume_note(run: dict[str, Any], events: list[tuple[int, str, Any]], e
         parts.append("It had not done anything yet.")
     tag = reason or reason_tag(run) or "interrupted"
     return RESUME_NOTE.format(reason=REASONS.get(tag, REASONS["interrupted"]), body="\n\n".join(parts))
+
+
+REGEN_NOTE = """## Regenerating a reply
+The reply being replaced already made these changes, and they still stand:
+{body}
+Do NOT repeat them. Refer to what already exists; do it again only if the user asks for another."""
+
+
+def build_regen_note(done: list[dict[str, Any]], max_preview: int = 300) -> str:
+    """What the superseded answer already changed; `done` is its finished, error-free write calls."""
+    return REGEN_NOTE.format(body="\n".join(
+        f"- {d.get('name')} {_args(d.get('arguments'))}: {_clip(d.get('result_preview') or '', max_preview)}" for d in done))

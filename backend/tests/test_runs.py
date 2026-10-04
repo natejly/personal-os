@@ -289,6 +289,19 @@ def test_steer_folds_into_the_live_run() -> None:
     j("POST", "/conversations/nope/steer", {"content": "x"}, expect=404)
 
 
+def test_a_stopping_run_refuses_a_steer() -> None:
+    """Its loop breaks before it reads steers, so an accepted one would be stored and never answered."""
+    script(40, 0.05)
+    cid = new_conv()
+    j("POST", f"/conversations/{cid}/chat", {"content": "hi"})
+    wait_until(lambda: run_info(cid).get("seq", 0) >= 5, "a few deltas to be produced")
+    bus.get(cid).stop.set()  # stop requested; the run has not reached its `done` yet
+    r = client.post(f"/conversations/{cid}/steer", json={"content": "do X instead"})
+    check(r.status_code == 409, f"a steer into a stopping run is refused, got {r.status_code}")
+    drain(cid)
+    check(len(j("GET", f"/conversations/{cid}")["messages"]) == 2, "and it left no unanswered message behind")
+
+
 def test_the_learn_tail_does_not_hold_the_conversation() -> None:
     """Auto-learn no longer runs inside the run: the exchange goes to learn.LearnWorker and the run
     ends at its `done` (see test_learn_async.py). So a held-up extraction must not keep the

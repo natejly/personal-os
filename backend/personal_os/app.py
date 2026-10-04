@@ -900,6 +900,16 @@ class McpProbeIn(BaseModel):
     cwd: str = ""
     env: dict[str, str] = Field(default_factory=dict)
     secrets: dict[str, str] = Field(default_factory=dict)
+    url: str = ""
+    headers: dict[str, str] = Field(default_factory=dict)
+
+
+def _mcp_transport_ok(transport: str | None) -> None:
+    """Only stdio and streamable HTTP connect; an sse server would be saved only to fail every time."""
+    if transport == "sse":
+        raise HTTPException(400, "sse is not supported: use the server's streamable HTTP endpoint")
+    if transport is not None and transport not in ("stdio", "http"):
+        raise HTTPException(400, "transport must be stdio or http")
 
 
 class McpGrantIn(BaseModel):
@@ -916,9 +926,8 @@ def mcp_servers() -> list[dict[str, Any]]:
 
 @app.post("/mcp/servers")
 async def mcp_create_server(body: McpServerIn) -> dict[str, Any]:
-    if body.transport not in ("stdio", "sse", "http"):
-        raise HTTPException(400, "transport must be stdio, sse or http")
-    row = mcp_store.create_server(name=body.name, transport=body.transport, command=body.command, args=body.args,
+    _mcp_transport_ok(body.transport)
+    row =mcp_store.create_server(name=body.name, transport=body.transport, command=body.command, args=body.args,
                                  env=body.env, secrets=body.secrets, cwd=body.cwd, url=body.url, headers=body.headers,
                                  description=body.description, enabled=body.enabled)
     await mcp.sync()
@@ -929,6 +938,7 @@ async def mcp_create_server(body: McpServerIn) -> dict[str, Any]:
 async def mcp_update_server(id: str, body: McpServerPatch) -> dict[str, Any]:
     if mcp_store.server(id) is None:
         raise HTTPException(404, "No such MCP server")
+    _mcp_transport_ok(body.transport)
     row = mcp_store.update_server(id, body.model_dump(exclude_none=True))
     await mcp.sync()  # a changed launch config restarts the supervisor; an unchanged one is left alone
     return _mcp_server_view(mcp_store.server(id) or row or {})
@@ -1008,6 +1018,7 @@ async def mcp_check_server(id: str) -> dict[str, Any]:
 @app.post("/mcp/check")
 async def mcp_check_config(body: McpProbeIn) -> dict[str, Any]:
     """Evaluate a config that has not been saved: the decision to trust comes before the decision to use."""
+    _mcp_transport_ok(body.transport)
     cfg = body.model_dump()
     # Same precedence as McpServers.launch_env: a secret wins over a plain env var of the same name.
     cfg["env"] = {**(cfg.get("env") or {}), **cfg.pop("secrets", {})}

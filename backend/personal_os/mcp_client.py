@@ -119,9 +119,12 @@ def _config_from(store: McpServers, server_id: str) -> _Config | None:
     row = store.server(server_id)
     if not row:
         return None
+    env = store.launch_env(server_id)
+    # The row keeps header names; their values live in the secret store under the same name.
+    headers = {k: v or env.get(k, "") for k, v in headers_of(row.get("headers")).items()}
     return _Config(id=row["id"], slug=row["slug"], name=row["name"], transport=row["transport"],
                    command=row["command"], args=[str(a) for a in (row["args"] or [])], cwd=row["cwd"] or "",
-                   env=store.launch_env(server_id), url=row.get("url") or "", headers=headers_of(row.get("headers")))
+                   env=env, url=row.get("url") or "", headers=headers)
 
 
 @contextlib.asynccontextmanager

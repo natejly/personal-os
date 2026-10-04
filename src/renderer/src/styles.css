@@ -1541,6 +1541,10 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .mcp-tool .toggle-text .mono { font-size: 10px; }
 .mcp-add .mcp-head { border-bottom: 1px solid var(--border); }
 .mcp-add label { margin: 0; }
+.mcp-add .seg { align-self: flex-start; }
+.mcp-headers { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; font-size: 12px; }
+.mcp-header-row { display: flex; gap: 6px; align-items: center; width: 100%; }
+.mcp-header-row input { flex: 1; min-width: 0; }
 .mcp-foot { display: flex; align-items: flex-start; gap: 5px; font-size: 11px; }
 .mcp-foot svg { flex-shrink: 0; margin-top: 2px; }
 

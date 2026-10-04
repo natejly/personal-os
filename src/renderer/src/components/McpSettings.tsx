@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  AlertTriangle, Check, ChevronDown, ChevronRight, Plug, Plus, RefreshCw, ScrollText, ShieldAlert, Trash2, X
+  AlertTriangle, Check, ChevronDown, ChevronRight, ExternalLink, LogOut, Plug, Plus, RefreshCw, ScrollText, ShieldAlert, Trash2, X
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { useStore } from '../store'
@@ -9,9 +9,10 @@ import type { McpReport, McpServer, McpServerDraft, McpTool, ToolMode } from '@s
 /** A connector that is coming up gets polled; one that has settled does not. */
 const POLL_MS = 2500
 
-const EMPTY: McpServerDraft & { secretsText: string; envText: string; argv: string } = {
-  name: '', transport: 'stdio', command: '', args: [], cwd: '', env: {}, secrets: {}, description: '',
-  argv: '', envText: '', secretsText: ''
+type HeaderRow = { k: string; v: string }
+const EMPTY: McpServerDraft & { secretsText: string; envText: string; argv: string; headerRows: HeaderRow[] } = {
+  name: '', transport: 'stdio', command: '', args: [], cwd: '', env: {}, secrets: {}, url: '', headers: {}, description: '',
+  argv: '', envText: '', secretsText: '', headerRows: []
 }
 
 /** Split a pasted command line into argv, honouring simple quoting. */
@@ -42,9 +43,13 @@ const envToText = (env: Record<string, string>): string =>
 
 /**
  * Accept a `claude_desktop_config.json`-style block, which is how MCP servers are published:
- * `{"mcpServers": {"name": {"command": …, "args": […]}}}`, or just the inner object.
+ * `{"mcpServers": {"name": {"command": …, "args": […]}}}`, or just the inner object. A remote entry
+ * carries `{"url": …, "headers": {…}}` instead of a command.
  */
-export function fromConfigJson(text: string): { name?: string; argv: string; envText: string } | null {
+export function fromConfigJson(text: string):
+  | { name?: string; argv: string; envText: string }
+  | { name?: string; url: string; headers: Record<string, string> }
+  | null {
   let j: unknown
   try {
     j = JSON.parse(text)
@@ -62,6 +67,10 @@ export function fromConfigJson(text: string): { name?: string; argv: string; env
     name = k
     entry = v as Record<string, any>
   }
+  if (typeof entry?.url === 'string' && entry.url.trim()) {
+    const headers = entry.headers && typeof entry.headers === 'object' ? entry.headers as Record<string, unknown> : {}
+    return { name, url: entry.url.trim(), headers: Object.fromEntries(Object.entries(headers).map(([k, v]) => [k, String(v)])) }
+  }
   if (typeof entry?.command !== 'string') return null
   const args = Array.isArray(entry.args) ? entry.args.map(String) : []
   return { name, argv: joinArgv(entry.command, args), envText: envToText((entry.env ?? {}) as Record<string, string>) }
@@ -71,6 +80,8 @@ const DOT: Record<string, string> = { ready: 'ok', connecting: 'warn', error: 'b
 const STATUS_WORD: Record<string, string> = {
   ready: 'connected', connecting: 'connecting…', error: 'failed', disabled: 'off', idle: 'not running'
 }
+/** The supervisor stops with this detail when only a browser sign-in can help; it is not a failure. */
+const needsSignIn = (s: McpServer): boolean => s.transport === 'http' && s.live.status === 'error' && s.live.detail === 'sign-in required'
 const VERDICT: Record<string, string> = {
   pass: 'nothing suspicious found', warn: 'worth a look', fail: 'problems found', error: 'could not check'
 }
@@ -180,6 +191,8 @@ export default function McpSettings(): JSX.Element {
   const [busy, setBusy] = useState<string>('')
   const [confirmDel, setConfirmDel] = useState<string | null>(null)
   const nameRef = useRef<HTMLInputElement>(null)
+  const signPoll = useRef<ReturnType<typeof setInterval> | null>(null)
+  useEffect(() => () => { if (signPoll.current) clearInterval(signPoll.current) }, [])
 
   const refresh = useCallback(async (): Promise<McpServer[]> => {
     try {
@@ -216,12 +229,20 @@ export default function McpSettings(): JSX.Element {
   const applyPaste = (text: string): boolean => {
     const parsed = fromConfigJson(text)
     if (!parsed) return false
-    setDraft((d) => ({ ...d, name: d.name || (parsed.name ?? ''), argv: parsed.argv, envText: parsed.envText || d.envText }))
+    setDraft((d) => 'url' in parsed
+      ? { ...d, name: d.name || (parsed.name ?? ''), transport: 'http', url: parsed.url,
+          headerRows: Object.entries(parsed.headers).map(([k, v]) => ({ k, v })) }
+      : { ...d, name: d.name || (parsed.name ?? ''), transport: 'stdio', argv: parsed.argv, envText: parsed.envText || d.envText })
     toast('Loaded from config JSON')
     return true
   }
 
   const draftConfig = (): Partial<McpServerDraft> => {
+    if (draft.transport === 'http') {
+      const url = draft.url.trim()
+      const headers = Object.fromEntries(draft.headerRows.filter((h) => h.k.trim()).map((h) => [h.k.trim(), h.v]))
+      return { name: draft.name.trim() || url.replace(/^https?:\/\//, '').split('/')[0], transport: 'http', url, headers, description: draft.description }
+    }
     const [command = '', ...args] = tokenize(draft.argv)
     return {
       name: draft.name.trim() || command, transport: 'stdio', command, args, cwd: draft.cwd.trim(),
@@ -229,17 +250,42 @@ export default function McpSettings(): JSX.Element {
     }
   }
 
+  const draftReady = (cfg: Partial<McpServerDraft>): void => {
+    if (cfg.transport === 'http' ? !/^https?:\/\/\S+$/.test(cfg.url ?? '') : !cfg.command)
+      throw new Error(cfg.transport === 'http' ? "Enter the server's https:// URL" : 'Enter the command that starts the server')
+  }
+
   const checkDraft = (): Promise<void> =>
     run('draft-check', async () => {
       const cfg = draftConfig()
-      if (!cfg.command) throw new Error('Enter the command that starts the server')
+      draftReady(cfg)
       setDraftReport(await api.mcp.checkDraft(cfg))
     })
+
+  /** Open the server's sign-in page in the browser, then poll until the backend has the answer. */
+  const signIn = (s: McpServer): Promise<void> =>
+    run(`sign-${s.id}`, async () => {
+      const st = await api.mcp.signIn(s.id)
+      if (st.status === 'error') throw new Error(st.error)
+      if (st.auth_url) window.open(st.auth_url, '_blank')
+      if (signPoll.current) clearInterval(signPoll.current)
+      signPoll.current = setInterval(() => {
+        void api.mcp.signInStatus(s.id).then(async (x) => {
+          if (x.status === 'waiting' || x.status === 'starting') return
+          if (signPoll.current) clearInterval(signPoll.current)
+          if (x.status === 'error') toast(`${s.name} sign-in failed: ${x.error}`, 'error')
+          await refresh()
+        }).catch(() => undefined)
+      }, 2000)
+    })
+
+  const signOut = (s: McpServer): Promise<void> =>
+    run(`sign-${s.id}`, async () => { await api.mcp.signOut(s.id); await refresh() })
 
   const addServer = (): Promise<void> =>
     run('draft-add', async () => {
       const cfg = draftConfig()
-      if (!cfg.command) throw new Error('Enter the command that starts the server')
+      draftReady(cfg)
       const created = await api.mcp.create({ ...cfg, name: cfg.name || 'MCP server', enabled: true })
       setDraft(EMPTY)
       setDraftReport(null)
@@ -265,15 +311,16 @@ export default function McpSettings(): JSX.Element {
     <div className="mcp">
       <p className="muted">
         Connectors are <a href="https://modelcontextprotocol.io/" target="_blank" rel="noreferrer">MCP</a> servers:
-        other people&apos;s programs that hand the assistant extra tools. They run on this machine, under your account,
-        with whatever access you give them. Nothing is added or enabled unless you do it here, and every tool from a
+        other people&apos;s programs that hand the assistant extra tools. A local one runs on this machine, under your
+        account; a remote one is a web address, reached with the headers or sign-in you give it. Nothing is added or enabled unless you do it here, and every tool from a
         connector <b>asks before it runs</b> until you say otherwise.
       </p>
 
       {servers.length === 0 && !adding && <p className="muted empty">No connectors yet.</p>}
 
       {servers.map((s) => {
-        const dot = DOT[s.live.status] ?? 'off'
+        const signin = needsSignIn(s)
+        const dot = signin ? 'warn' : DOT[s.live.status] ?? 'off'
         const expanded = open === s.id
         const live = s.tools.filter((t) => !t.missing_since)
         return (
@@ -286,7 +333,7 @@ export default function McpSettings(): JSX.Element {
               <span className="mcp-name">
                 <b>{s.name}</b>
                 <small className="muted">
-                  {STATUS_WORD[s.live.status] ?? s.live.status}
+                  {signin ? 'needs sign-in' : STATUS_WORD[s.live.status] ?? s.live.status}
                   {s.live.server_info?.version ? ` · ${s.live.server_info.name} ${s.live.server_info.version}` : ''}
                   {live.length ? ` · ${live.length} tool${live.length === 1 ? '' : 's'}` : ''}
                 </small>
@@ -296,6 +343,11 @@ export default function McpSettings(): JSX.Element {
                   <AlertTriangle size={11} /> {s.eval.status}
                 </span>
               )}
+              {signin && (
+                <button className="primary-btn small" disabled={busy === `sign-${s.id}`} onClick={() => void signIn(s)}>
+                  <ExternalLink size={12} /> Sign in
+                </button>
+              )}
               <label className="switch-wrap" title={s.enabled ? 'Turn this connector off' : 'Turn this connector on'}>
                 <input type="checkbox" checked={s.enabled} disabled={busy === `tog-${s.id}`}
                   onChange={(e) => void run(`tog-${s.id}`, async () => { await api.mcp.update(s.id, { enabled: e.target.checked }); await refresh() })} />
@@ -303,19 +355,28 @@ export default function McpSettings(): JSX.Element {
               </label>
             </div>
 
-            {s.live.status === 'error' && s.live.detail && (
+            {s.live.status === 'error' && s.live.detail && !signin && (
               <p className="test-msg fail mcp-detail">{s.live.detail}</p>
             )}
 
             {expanded && (
               <div className="mcp-body">
                 <div className="mcp-meta">
-                  <code className="mono">{joinArgv(s.command, s.args)}</code>
+                  <code className="mono">{s.transport === 'http' ? s.url : joinArgv(s.command, s.args)}</code>
                   {s.cwd && <small className="muted">in {s.cwd}</small>}
-                  {s.secret_keys.length > 0 && <small className="muted">secrets: {s.secret_keys.join(', ')} (stored in the backend, never shown)</small>}
+                  {s.secret_keys.length > 0 && (
+                    <small className="muted">{s.transport === 'http' ? 'headers' : 'secrets'}: {s.secret_keys.join(', ')} (stored in the backend, never shown)</small>
+                  )}
+                  {s.signed_in && <small className="muted">signed in</small>}
                 </div>
 
                 <div className="mcp-actions">
+                  {/* Sign in is offered in the header once the server asks for it; a header-only server never does. */}
+                  {s.signed_in && (
+                    <button className="ghost-btn" disabled={busy === `sign-${s.id}`} onClick={() => void signOut(s)}>
+                      <LogOut size={13} /> Sign out
+                    </button>
+                  )}
                   <button className="ghost-btn" disabled={busy === `chk-${s.id}`}
                     onClick={() => void run(`chk-${s.id}`, async () => {
                       const report = await api.mcp.check(s.id)
@@ -377,23 +438,65 @@ export default function McpSettings(): JSX.Element {
             <label><span>Name</span>
               <input ref={nameRef} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="Filesystem" spellCheck={false} />
             </label>
-            <label><span>Command <small className="muted">(or paste the server&apos;s config JSON here)</small></span>
-              <input value={draft.argv} spellCheck={false} placeholder="npx -y @modelcontextprotocol/server-filesystem ~/Documents"
-                onChange={(e) => setDraft({ ...draft, argv: e.target.value })}
-                onPaste={(e) => {
-                  const text = e.clipboardData.getData('text')
-                  if (text.trim().startsWith('{') && applyPaste(text)) e.preventDefault()
-                }} />
-            </label>
-            <label><span>Working directory <small className="muted">(optional)</small></span>
-              <input value={draft.cwd} onChange={(e) => setDraft({ ...draft, cwd: e.target.value })} placeholder="~/code/project" spellCheck={false} />
-            </label>
-            <label><span>Environment <small className="muted">(KEY=value, one per line)</small></span>
-              <textarea rows={2} value={draft.envText} onChange={(e) => setDraft({ ...draft, envText: e.target.value })} spellCheck={false} />
-            </label>
-            <label><span>Secrets <small className="muted">(KEY=value; kept in the backend and never sent to a model or shown again)</small></span>
-              <textarea rows={2} value={draft.secretsText} onChange={(e) => setDraft({ ...draft, secretsText: e.target.value })} spellCheck={false} />
-            </label>
+            <div className="seg" role="group" aria-label="Where the server runs">
+              {(['stdio', 'http'] as const).map((t) => (
+                <button key={t} className={draft.transport === t ? 'on' : ''} aria-pressed={draft.transport === t}
+                  onClick={() => { setDraft({ ...draft, transport: t }); setDraftReport(null) }}>
+                  {t === 'stdio' ? 'Local' : 'Remote'}
+                </button>
+              ))}
+            </div>
+            {draft.transport === 'http' ? (
+              <>
+                <label><span>URL <small className="muted">(the streamable HTTP endpoint, or paste the server&apos;s config JSON here)</small></span>
+                  <input value={draft.url} spellCheck={false} placeholder="https://example.com/mcp"
+                    onChange={(e) => setDraft({ ...draft, url: e.target.value })}
+                    onPaste={(e) => {
+                      const text = e.clipboardData.getData('text')
+                      if (text.trim().startsWith('{') && applyPaste(text)) e.preventDefault()
+                    }} />
+                </label>
+                <div className="mcp-headers">
+                  <span>Headers <small className="muted">(optional; values are kept in the backend and never shown again)</small></span>
+                  {draft.headerRows.map((h, i) => {
+                    const set = (patch: Partial<HeaderRow>): void =>
+                      setDraft({ ...draft, headerRows: draft.headerRows.map((r, j) => (j === i ? { ...r, ...patch } : r)) })
+                    return (
+                      <div key={i} className="mcp-header-row">
+                        <input aria-label="Header name" value={h.k} placeholder="Authorization" spellCheck={false} onChange={(e) => set({ k: e.target.value })} />
+                        <input aria-label="Header value" type="password" value={h.v} placeholder="Bearer …" autoComplete="off" onChange={(e) => set({ v: e.target.value })} />
+                        <button className="icon-btn" aria-label="Remove header"
+                          onClick={() => setDraft({ ...draft, headerRows: draft.headerRows.filter((_, j) => j !== i) })}><X size={13} /></button>
+                      </div>
+                    )
+                  })}
+                  <button className="ghost-btn small" onClick={() => setDraft({ ...draft, headerRows: [...draft.headerRows, { k: '', v: '' }] })}>
+                    <Plus size={12} /> Add header
+                  </button>
+                  <small className="muted">A server that uses a browser sign-in shows a Sign in button once it is added.</small>
+                </div>
+              </>
+            ) : (
+              <>
+                <label><span>Command <small className="muted">(or paste the server&apos;s config JSON here)</small></span>
+                  <input value={draft.argv} spellCheck={false} placeholder="npx -y @modelcontextprotocol/server-filesystem ~/Documents"
+                    onChange={(e) => setDraft({ ...draft, argv: e.target.value })}
+                    onPaste={(e) => {
+                      const text = e.clipboardData.getData('text')
+                      if (text.trim().startsWith('{') && applyPaste(text)) e.preventDefault()
+                    }} />
+                </label>
+                <label><span>Working directory <small className="muted">(optional)</small></span>
+                  <input value={draft.cwd} onChange={(e) => setDraft({ ...draft, cwd: e.target.value })} placeholder="~/code/project" spellCheck={false} />
+                </label>
+                <label><span>Environment <small className="muted">(KEY=value, one per line)</small></span>
+                  <textarea rows={2} value={draft.envText} onChange={(e) => setDraft({ ...draft, envText: e.target.value })} spellCheck={false} />
+                </label>
+                <label><span>Secrets <small className="muted">(KEY=value; kept in the backend and never sent to a model or shown again)</small></span>
+                  <textarea rows={2} value={draft.secretsText} onChange={(e) => setDraft({ ...draft, secretsText: e.target.value })} spellCheck={false} />
+                </label>
+              </>
+            )}
             <div className="mcp-actions">
               <button className="ghost-btn" disabled={busy === 'draft-check'} onClick={() => void checkDraft()}>
                 <ShieldAlert size={13} /> {busy === 'draft-check' ? 'Checking…' : 'Check it first'}

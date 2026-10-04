@@ -81,4 +81,41 @@ with db.tx() as c:
     c.execute("UPDATE chunks SET blurb=''")  # force the route to redo the pass, with the setting still off
 r = client.post("/documents/embed-backfill").json()
 check(r["embedded"] >= 1 and not any("zeppelin" in t for t in seen) and len(calls) == n, "setting off: backfill adds no blurbs")
+
+
+# ---- the background run after an upload writes blurbs when the setting is on, also in bm25 mode ----
+async def scheduled(cfg: dict[str, Any]) -> None:
+    retriever.schedule(lambda: cfg)
+    await asyncio.gather(*list(retriever._tasks))
+
+
+def blurbs() -> list[str]:
+    with db.tx() as c:
+        return [r["blurb"] for r in c.execute("SELECT blurb FROM chunks")]
+
+
+with db.tx() as c:
+    c.execute("UPDATE chunks SET blurb=''")
+n = len(calls)
+run(scheduled({**S, "contextualChunks": False}))
+check(len(calls) == n and not any(blurbs()), "setting off: scheduled run never calls the model")
+
+seen.clear()
+run(scheduled(S))
+check(all(b.startswith("Quarterly") for b in blurbs()), "setting on: scheduled run writes every blurb")
+check(any("Quarterly" in t for t in seen), "blurb is in the text that gets embedded")
+
+with db.tx() as c:
+    c.execute("UPDATE chunks SET blurb=''")
+seen.clear()
+run(scheduled({**S, "retrievalMode": "bm25"}))
+check(all(b.startswith("Quarterly") for b in blurbs()) and not seen, "bm25 mode: blurbs written, nothing embedded")
+
+# ---- a large upload is finished, not left at one 64-chunk pass ----
+with db.tx() as c:
+    c.execute("UPDATE chunks SET blurb=''")
+    did = c.execute("SELECT document_id FROM chunks LIMIT 1").fetchone()["document_id"]
+    for i in range(70):
+        c.execute("INSERT INTO chunks(id, document_id, idx, text, blurb) VALUES(?,?,?,?, '')", (f"big{i}", did, 100 + i, f"part {i}"))
+check(run(retriever.contextualize_all(S)) >= 71 and all(blurbs()), "contextualize_all drains past one pass")
 print(f"test_contextual: {passed} checks passed")

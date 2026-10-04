@@ -745,6 +745,10 @@ NUMERIC_SETTING_RANGES: dict[str, tuple[float, float]] = {
     "parallelReads": (1, 8),
     "browserMaxTabs": (1, 12),
     "browserIdleSeconds": (30, 86_400),
+    "retrievalMinSimilarity": (0, 1),
+    "retrievalPerDocCap": (1, 10),
+    "retrievalCandidates": (5, 50),
+    "fetchCacheSeconds": (0, 86_400),
 }
 
 
@@ -791,6 +795,8 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
             clean[k] = _check_permission_rules(v)
         elif k == "unattendedApprovals" and v not in ("ask", "deny"):
             raise HTTPException(422, "unattendedApprovals must be 'ask' or 'deny'")
+        elif k == "retrievalMode" and v not in ("hybrid", "bm25"):
+            raise HTTPException(422, "retrievalMode must be 'hybrid' or 'bm25'")
         elif k == "workspaceRoots":
             if not (isinstance(v, list) and all(isinstance(x, str) for x in v)):
                 raise HTTPException(422, "workspaceRoots must be a list of folders")
@@ -4954,7 +4960,7 @@ async def embed_backfill() -> dict[str, Any]:
     current model. Idempotent."""
     docs.backfill_chunks()
     embedder.reset()  # the user asked for it now, so a back-off from an earlier failure does not apply
-    await retriever.contextualize_pending(settings())  # no-op unless contextualChunks; never raises
+    await retriever.contextualize_all(settings())  # no-op unless contextualChunks; never raises
     return await retriever.embed_pending(settings())
 
 

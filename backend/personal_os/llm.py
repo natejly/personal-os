@@ -276,7 +276,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "meetingEmbeddings": False,
     "retrievalPerDocCap": 3,
     "retrievalCandidates": 20,
-    # Off by default, one model call per chunk: embed-backfill writes a short blurb situating each chunk in
+    # Off by default, one model call per chunk: new uploads and embed-backfill (Rebuild index) write a short blurb situating each chunk in
     # its document, which is then indexed and embedded with the chunk. Rerank: reorder the fused candidates
     # with a rerank model (/v1/rerank, else one completion) before trimming; blank model = off.
     "contextualChunks": False,

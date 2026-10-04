@@ -83,7 +83,8 @@ class Retriever:
                 break
         return embedded, None
 
-    async def contextualize_pending(self, settings: dict[str, Any], limit: int = 64) -> int:
+    async def contextualize_pending(self, settings: dict[str, Any], limit: int = 64,
+                                    stores: tuple[str, ...] = ALL_SOURCES) -> int:
         """Write a model-made blurb for up to `limit` chunks per store that have none, re-index it with the
         chunk and drop the chunk's vector so embed_pending re-makes it. Off unless contextualChunks; a model
         error stops the pass and leaves the chunk as it was. Returns blurbs written. Never raises."""
@@ -91,7 +92,7 @@ class Retriever:
         if not settings.get("contextualChunks") or not model:
             return 0
         done = 0
-        for store in ALL_SOURCES:
+        for store in stores:
             if store == "docs" and self.docs is None:
                 continue
             s = _STORE[store]
@@ -129,6 +130,13 @@ class Retriever:
                 done += 1
         return done
 
+    async def contextualize_all(self, settings: dict[str, Any], stores: tuple[str, ...] = ALL_SOURCES) -> int:
+        """contextualize_pending until a pass writes nothing, so a large upload is not left part-done. Never raises."""
+        total = 0
+        while n := await self.contextualize_pending(settings, stores=stores):
+            total += n
+        return total
+
     async def embed_pending(self, settings: dict[str, Any], document_id: str | None = None, limit: int = 256,
                             stores: tuple[str, ...] = ALL_SOURCES) -> dict[str, Any]:
         """Embed chunks that have no vector for the current model. Idempotent; returns {embedded, remaining}.
@@ -153,8 +161,13 @@ class Retriever:
             out["error"] = error
         return out
 
-    def _kick(self, coro_fn: Any, settings_fn: Any) -> None:
-        if settings_fn().get("retrievalMode", "hybrid") != "hybrid" or not self.embedder.available(settings_fn()):
+    def _embeds(self, settings: dict[str, Any]) -> bool:
+        return settings.get("retrievalMode", "hybrid") == "hybrid" and self.embedder.available(settings)
+
+    def _kick(self, coro_fn: Any, settings_fn: Any, contextual: bool = False) -> None:
+        s = settings_fn()
+        # Blurbs also go into the keyword index, so they are written even with no embedder or in bm25 mode.
+        if not self._embeds(s) and not (contextual and s.get("contextualChunks") and s.get("defaultModel")):
             return
 
         def start(loop: asyncio.AbstractEventLoop) -> None:
@@ -169,14 +182,20 @@ class Retriever:
                 self._loop.call_soon_threadsafe(start, self._loop)
 
     def schedule(self, settings_fn: Any, document_id: str | None = None) -> None:
-        """Fire-and-forget background embedding of an uploaded file. Never raises or blocks the caller."""
+        """Fire-and-forget background blurbs (contextualChunks) and embedding of an uploaded file. Never raises or
+        blocks the caller."""
         async def run() -> None:
             try:
-                await self.embed_pending(settings_fn(), document_id, stores=("files",))
+                # Before embedding: a blurb drops the chunk's vector, so the other order embeds it twice.
+                await self.contextualize_all(settings_fn(), stores=("files",))
+                if self._embeds(settings_fn()):
+                    await self.embed_pending(settings_fn(), document_id, stores=("files",))
             except Exception:  # noqa: BLE001 - rows simply stay unembedded
                 log.exception("background embedding failed")
 
-        self._kick(run, settings_fn)
+        # Docs are not contextualised here: every edit re-chunks and empties their blurbs, so doing it per edit
+        # burst would call the model for every chunk again. Rebuild index (embed-backfill) covers them.
+        self._kick(run, settings_fn, contextual=True)
 
     def schedule_docs(self, settings_fn: Any) -> None:
         """Debounced background embedding of edited Docs: one pending task covers every edit in the window."""

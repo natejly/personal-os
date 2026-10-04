@@ -253,7 +253,7 @@ class TasksSync:
 
         # Local todos never synced -> new remote tasks.
         for td in self.todos.all_for_sync():
-            if td.get("external_id"):
+            if td.get("external_id") or td.get("done"):  # finished history (e.g. migrated board cards) is not pushed
                 continue
             try:
                 rt = self.google.tasks_insert(_remote_body(td), tasklist)

@@ -31,7 +31,7 @@ export interface WidgetDef {
   statusful?: boolean
   /** counts against the 6-slot concurrent-live cap: iframes, d3, pollers */
   heavy?: boolean
-  /** cannot open without a ref_id: chat, board, note, dashboard-widget, project */
+  /** cannot open without a ref_id: chat, note, dashboard-widget, project */
   needsRef?: boolean
   defaultConfig?: Record<string, unknown>
   /** drag payload kinds this widget accepts as a drop target */

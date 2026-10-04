@@ -59,7 +59,7 @@ from .mcp_servers import MODES as MCP_MODES, RESERVED_PREFIX as MCP_PREFIX, SCOP
 from .meeting_recorder import RecorderBusy
 from .meetings import MeetingBlocked, Meetings, MeetingService
 from .cowork import (AUTONOMY, DESK_HINT, DESK_NUDGE, DESK_PLAN_HINT, LIVE as DESK_LIVE, continue_message, desk_manual, read_notes,
-                     STATUSES as DESK_STATUSES, UNDECIDED_OUTPUTS, DeskRuntime, Desks,
+                     STATUSES as DESK_STATUSES, TERMINAL as DESK_TERMINAL, UNDECIDED_OUTPUTS, DeskRuntime, Desks,
                      origin_report, parked_report)
 from .workspace import MAX_PREVIEW, Workspace, WorkspaceError
 from .envs import WorkEnv
@@ -4068,6 +4068,15 @@ def _job_desk(job_id: str, due_at: float) -> dict[str, Any] | None:
     return desks.get(r["id"], False) if r else None
 
 
+def _job_open_desk(job_id: str) -> dict[str, Any] | None:
+    """The job's newest desk that has not finished, if any: like a run job, a desk job has at most one instance."""
+    with db.tx() as c:
+        r = c.execute("SELECT d.id FROM desks d JOIN conversations c ON c.id=d.conversation_id "
+                      f"WHERE json_extract(c.settings,'$.jobId')=? AND d.status NOT IN ({','.join('?' * len(DESK_TERMINAL))}) "
+                      "ORDER BY d.created_at DESC LIMIT 1", (job_id, *DESK_TERMINAL)).fetchone()
+    return desks.get(r["id"], False) if r else None
+
+
 async def _launch_desk_job(job: dict[str, Any], fire: dict[str, Any]) -> str | None:
     """A desk job's fire: the same creation desk_start and the REST route use, with the job's prompt as the brief, in
     plan or propose autonomy. Writes stay behind the plan or the approval cards and outputs still need Accept.
@@ -4076,6 +4085,9 @@ async def _launch_desk_job(job: dict[str, Any], fire: dict[str, Any]) -> str | N
     due = float(fire["due_at"])
     if (prev := _job_desk(job["id"], due)) is not None:
         return prev.get("run_id")
+    if (open_desk := _job_open_desk(job["id"])) is not None:
+        jobs.record_skip(job["id"], f"previous desk still open ({open_desk['status']})")
+        return None
     capped = _over_live_cap()
     out = await _create_desk(DeskIn(brief=_job_prompt(job, fire), title=f"{job['name']} · {_stamp(due)}",
                                     project_id=job["project_id"], autonomy=job.get("desk_autonomy") or "plan",
@@ -4086,7 +4098,7 @@ async def _launch_desk_job(job: dict[str, Any], fire: dict[str, Any]) -> str | N
     if run_id:
         desks.event(desk_id, "note", f"Started on schedule by “{job['name']}”.", needs_you=True, job_id=job["id"])
     else:
-        why = "too many desks running: the desk was created but not started"
+        why = ("too many desks running" if capped else "the desk could not be started") + ": it was created but not started"
         jobs.record_skip(job["id"], why)
         desks.event(desk_id, "note", f"Scheduled by “{job['name']}”, but {why}. Start it when another desk finishes.",
                     needs_you=True, job_id=job["id"], queued=True)
@@ -4137,9 +4149,12 @@ class JobPatch(BaseModel):
     desk_budget: dict[str, Any] | None = None
 
 
-def _check_target(target: str | None, autonomy: str | None) -> None:
+def _check_target(target: str | None, autonomy: str | None, allowed_tools: list[str] | None = None) -> None:
     if target not in TARGETS:
         raise HTTPException(400, f"'{target}' is not a job target ('run' or 'desk')")
+    # A desk needs its own desk_* and planning tools, so an allowlist cannot narrow it; refuse rather than drop it.
+    if target == "desk" and allowed_tools is not None:
+        raise HTTPException(400, "A desk job cannot narrow its tools: clear allowed_tools or keep it a run job")
     if target == "desk" and (autonomy or "plan") not in DESK_JOB_AUTONOMY:
         raise HTTPException(400, "A scheduled desk plans first or proposes at the end ('plan' or 'propose'), "
                                  f"not {autonomy!r}: nobody is there to answer its cards as it goes")
@@ -4201,7 +4216,7 @@ def list_jobs() -> list[dict[str, Any]]:
 def create_job(body: JobIn) -> dict[str, Any]:
     _check_schedule(body.kind, body.cron, body.timezone, body.run_at, fresh_time=True, watch_dir=body.watch_dir)
     _check_allowed_tools(body.allowed_tools)
-    _check_target(body.target, body.desk_autonomy)
+    _check_target(body.target, body.desk_autonomy, body.allowed_tools)
     return jobs.create(body.name, body.cron, body.prompt, kind=body.kind, run_at=body.run_at,
                        timezone=body.timezone, enabled=body.enabled, project_id=wsid(body.project_id),
                        max_retries=body.max_retries, allowed_tools=body.allowed_tools,
@@ -4219,9 +4234,13 @@ def update_job(id: str, body: JobPatch) -> dict[str, Any]:
     cur = jobs.get(id)
     if not cur:
         raise HTTPException(404, "No such job")
+    # Turning a narrowed run job into a desk job drops its allowlist (a desk cannot honour one); sending a list
+    # with the switch, or onto a desk job, is still refused below.
+    if patch.get("target") == "desk" and "allowed_tools" not in patch:
+        patch["allowed_tools"] = None
     merged = {**cur, **patch}
     _check_allowed_tools(patch.get("allowed_tools"))
-    _check_target(merged.get("target") or "run", merged.get("desk_autonomy"))
+    _check_target(merged.get("target") or "run", merged.get("desk_autonomy"), merged.get("allowed_tools"))
     if merged.get("target") == "desk" and not merged.get("desk_autonomy"):
         patch["desk_autonomy"] = "plan"
     _check_schedule(merged["kind"], merged["cron"], patch.get("timezone"), merged["run_at"],

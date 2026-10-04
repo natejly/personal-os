@@ -829,3 +829,29 @@ def test_a_desk_job_catch_up_opens_exactly_one_desk() -> None:
     assert made[0]["brief"].startswith("[This run was scheduled for") and made[0]["brief"].endswith("Tidy the inbox folder")
     assert again == made[0]["run_id"]
 
+
+def test_a_desk_job_has_at_most_one_open_desk() -> None:
+    job = make_desk_job("hourly desk job")
+    with desk_cap(0):
+        tick(T0 + HOUR + 10)
+        first = job_desks(job["id"])
+        assert len(first) == 1 and first[0]["status"] not in ("done", "failed", "stopped")
+        tick(T0 + 2 * HOUR + 10)
+        assert len(job_desks(job["id"])) == 1, "an open desk (even one waiting on its plan) blocks the next slot"
+        assert "previous desk still open" in (jobs.get(job["id"])["last_skip_reason"] or "")
+        with appmod.db.tx() as c:
+            c.execute("UPDATE desks SET status='done' WHERE id=?", (first[0]["id"],))
+        tick(T0 + 3 * HOUR + 10)
+    assert len(job_desks(job["id"])) == 2, "once the previous desk finished, the next slot opens a new one"
+
+
+def test_a_desk_job_cannot_carry_a_tool_allowlist() -> None:
+    base = {"name": "narrow", "cron": "15 6 * * *", "prompt": "do it", "timezone": "UTC"}
+    j("POST", "/jobs", {**base, "target": "desk", "allowed_tools": ["current_time"]}, expect=400)
+    narrowed = j("POST", "/jobs", {**base, "allowed_tools": ["current_time"]})
+    j("PATCH", f"/jobs/{narrowed['id']}", {"target": "desk", "allowed_tools": ["current_time"]}, expect=400)
+    switched = j("PATCH", f"/jobs/{narrowed['id']}", {"target": "desk"})
+    assert switched["target"] == "desk" and switched["allowed_tools"] is None, "the allowlist is cleared, not kept unenforced"
+    j("PATCH", f"/jobs/{narrowed['id']}", {"allowed_tools": ["current_time"]}, expect=400)
+    j("DELETE", f"/jobs/{narrowed['id']}")
+

@@ -324,7 +324,9 @@ class TestServers(McpTestCase):
 
     def test_remote_fields_are_stored_but_default_to_stdio(self) -> None:
         s = self.mcp.create_server("Remote", transport="sse", url="https://example.test/sse", headers={"X": "1"})
-        self.assertEqual((s["transport"], s["url"], s["headers"]), ("sse", "https://example.test/sse", {"X": "1"}))
+        # Header values are credentials: the row keeps only the names, the value lives in the secret store.
+        self.assertEqual((s["transport"], s["url"], s["headers"]), ("sse", "https://example.test/sse", {"X": ""}))
+        self.assertEqual(self.mcp.server(s["id"], with_secrets=True)["secrets"], {"X": "1"})
         self.assertEqual(self.mcp.create_server("Junk", transport="telepathy")["transport"], "stdio")
 
     def test_status_and_tool_count(self) -> None:

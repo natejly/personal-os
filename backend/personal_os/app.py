@@ -6484,7 +6484,7 @@ class RecordEverythingIn(BaseModel):
     on: bool = True
 
 
-@app.post("/activity/palantir")
+@app.post("/activity/record-everything")
 def activity_record_everything(body: RecordEverythingIn) -> dict[str, Any]:
     """Record everything, or put back what was there before. The gate's discretionary filters go
     down with it, so the panel spells out what it does before anyone presses it."""

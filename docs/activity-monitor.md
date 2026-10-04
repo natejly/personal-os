@@ -335,7 +335,7 @@ The assistant gets two tools when the monitor exists:
 | `GET /activity/permissions` | The six macOS permission rows on their own. Never prompts |
 | `POST /activity/permissions/request` | Ask macOS for one - the only route that can show a dialog |
 | `POST /activity/permissions/open` | Open that permission's Privacy & Security pane |
-| `POST /activity/palantir` | Record everything, or restore what the mode replaced |
+| `POST /activity/record-everything` | Record everything, or restore what the mode replaced |
 | `GET /activity/categories` · `PUT /activity/categories` | Effective rules (and whether default); replace them (`rules: null` resets). 400 names the bad index |
 | `GET /activity/categories/report?days=7` | Category seconds per day, totals, productivity (-2..2) and top uncategorized apps |
 | `POST /activity/redact/test` | Run a string through the current redaction config; nothing is stored |

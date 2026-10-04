@@ -589,7 +589,7 @@ export const api = {
     setCategories: (rules: ActivityCategoryRule[] | null) => req<{ rules: ActivityCategoryRule[]; default: boolean }>('/activity/categories', { method: 'PUT', body: json({ rules }) }),
     categoryReport: (days = 7) => req<ActivityCategoryReport>(`/activity/categories/report?days=${days}`),
     redactTest: (text: string) => req<ActivityRedactTest>('/activity/redact/test', { method: 'POST', body: json({ text }) }),
-    palantir: (on: boolean) => req<ActivityStatus>('/activity/palantir', { method: 'POST', body: json({ on }) }),
+    recordEverything: (on: boolean) => req<ActivityStatus>('/activity/record-everything', { method: 'POST', body: json({ on }) }),
     purge: (scope: 'expired' | 'events' | 'summaries' | 'all') => req<{ deleted: { events: number; summaries: number }; status: ActivityStatus }>('/activity/purge', { method: 'POST', body: json({ scope }) }),
     /** Habits and automation suggestions mined from the same data. */
     insights: () => req<ActivityInsights>('/activity/insights'),

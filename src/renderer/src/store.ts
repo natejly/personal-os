@@ -3434,7 +3434,7 @@ export const useStore = create<State>((set, get) => {
     },
     setRecordEverything: async (on) => {
       try {
-        set({ activity: await api.activity.palantir(on) })
+        set({ activity: await api.activity.recordEverything(on) })
         get().toast(on ? 'Recording everything' : 'Stopped recording everything — previous settings restored')
       } catch (e) {
         get().toast((e as Error).message, 'error')

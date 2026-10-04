@@ -164,7 +164,7 @@ def build_context(
     # Two lists so a caller can keep the stable prefix byte-identical turn to turn (prompt caching):
     # `parts` holds what does not depend on the query, `volatile` what does. `system` is both, as shown to the user.
     parts: list[str] = [global_system_prompt.strip()] if global_system_prompt.strip() else []
-    hidden = [str(v).title() for v in settings.get("hiddenViews") or () if isinstance(v, str)]
+    hidden = [{"docs": "Files"}.get(v, v.title()) for v in settings.get("hiddenViews") or () if isinstance(v, str)]  # the sidebar labels 'docs' Files
     if hidden:
         # Without this the model sends users to views they cannot see (approvals end in Library, for one).
         parts.append(f"Hidden in this app right now: {', '.join(hidden)}. Before pointing the user at one of them, "

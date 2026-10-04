@@ -5,7 +5,7 @@ import type { ApprovalDecision, BackendInfo, BackendState, PlanEdit, PlanDecisio
 import { daily as dailyNote } from './features/notes/api'
 import { ApiError } from './lib/apiError'
 import { installRejectionToasts } from './lib/rejections'
-import { api, backgroundStream, chatStream, meetingStream, setBase, type Scope } from './lib/api'
+import { api, backgroundStream, chatStream, getBase, getToken, meetingStream, setBase, type Scope } from './lib/api'
 import { currentSelection } from './lib/pageContext'
 import { DEFAULT_EFFORT, NEEDS_YOU } from '../../shared/types'
 import { chatNotice, finishStatus, foldRunState, mergeConversation, onScreen, pickEvictions, pulseStatus, reduceStatus, replayCursor, settleApprovals, type LiveRuns } from './sessionStatus'
@@ -513,7 +513,7 @@ export interface State {
   refreshDocs: (q?: string) => Promise<void>
   refreshDocsPending: () => Promise<void>
   openDoc: (id: string) => Promise<void>
-  closeDocTab: (id: string) => void
+  closeDocTab: (id: string) => Promise<void>
   createDoc: (d?: { title?: string; content?: string; project_id?: string | null; folder?: string }) => Promise<void>
   /** Retitle the open doc as it is typed, on the same debounce as the body. */
   editDocTitle: (title: string) => void
@@ -589,6 +589,14 @@ let flushChain: Promise<void> = Promise.resolve()
 /** Autosave debounce for the doc editor: long enough to be one history entry, short enough to trust. */
 const SAVE_DEBOUNCE_MS = 1200
 let saveTimer: ReturnType<typeof setTimeout> | null = null
+/** What a doc save would send: each field only when it differs from the saved copy. */
+const docEdits = (doc: FullDoc, docDraft: string | null, docTitleDraft: string | null): { content?: string; title?: string } | null => {
+  // A title of only whitespace is a slip of the hand, not an edit: hold the saved one.
+  const title = docTitleDraft !== null && docTitleDraft.trim() && docTitleDraft !== doc.title
+    ? docTitleDraft.trim() : undefined
+  const content = docDraft !== null && docDraft !== doc.content ? docDraft : undefined
+  return content === undefined && title === undefined ? null : { content, title }
+}
 
 /**
  * The state after a request that replaced the doc body (accept, restore). `sent` is the draft right
@@ -2357,7 +2365,10 @@ export const useStore = create<State>((set, get) => {
       } catch { /* a badge is not worth a toast */ }
     },
     openDoc: async (id) => {
-      if (get().activeDoc?.id !== id) await get().flushDoc()
+      await get().flushDoc()
+      // A draft the flush could not save (a 409) is the user's to keep or Reload; a refetch would drop it.
+      const cur = get()
+      if (cur.activeDoc?.id === id && (cur.docDraft !== null || cur.docTitleDraft !== null)) return set({ view: 'docs' })
       set((st) => ({ view: 'docs', docTabs: st.docTabs.includes(id) ? st.docTabs : [...st.docTabs, id] }))
       try {
         const doc = await api.docs.get(id)
@@ -2368,9 +2379,10 @@ export const useStore = create<State>((set, get) => {
         get().toast((e as Error).message, 'error')
       }
     },
-    closeDocTab: (id) => {
+    closeDocTab: async (id) => {
+      // Awaited: the flush is queued, and clearing activeDoc first would leave it nothing to save.
+      if (get().activeDoc?.id === id) await get().flushDoc()
       const st = get()
-      if (st.activeDoc?.id === id) void st.flushDoc()
       const tabs = st.docTabs.filter((t) => t !== id)
       set({ docTabs: tabs })
       if (st.activeDoc?.id === id) {
@@ -2427,21 +2439,19 @@ export const useStore = create<State>((set, get) => {
       }
       const { activeDoc: doc, docDraft, docTitleDraft } = get()
       if (!doc) return set({ docDraft: null, docTitleDraft: null })
-      // A title of only whitespace is a slip of the hand, not an edit: hold the saved one.
-      const title = docTitleDraft !== null && docTitleDraft.trim() && docTitleDraft !== doc.title
-        ? docTitleDraft.trim() : undefined
-      const content = docDraft !== null && docDraft !== doc.content ? docDraft : undefined
-      if (content === undefined && title === undefined) return set({ docDraft: null, docTitleDraft: null })
+      const edits = docEdits(doc, docDraft, docTitleDraft)
+      if (!edits) return set({ docDraft: null, docTitleDraft: null })
       set({ docSaving: true })
       try {
-        const saved = await api.docs.save(doc.id, { content, title, base_updated_at: doc.updated_at })
-        // Keep whatever was typed while the request was in flight; adopt only the server's metadata.
+        const saved = await api.docs.save(doc.id, { ...edits, base_updated_at: doc.updated_at })
+        // Keep whatever was typed while the request was in flight as the draft. activeDoc stays the
+        // server's copy, so the next flush still sees that draft differ and sends it.
         set((st) => {
           if (st.activeDoc?.id !== doc.id) return { docSaving: false }
           const newer = st.docDraft !== null && st.docDraft !== docDraft
           const newerTitle = st.docTitleDraft !== null && st.docTitleDraft !== docTitleDraft
           return {
-            activeDoc: newer ? { ...saved, content: st.docDraft as string } : saved,
+            activeDoc: saved,
             docDraft: newer ? st.docDraft : null,
             docTitleDraft: newerTitle ? st.docTitleDraft : null,
             docSaving: false
@@ -2513,6 +2523,8 @@ export const useStore = create<State>((set, get) => {
     },
     deleteDocFolder: async (path, deleteDocs = false, scope = '') => {
       try {
+        // Buffered edits go in before the folder's docs are trashed: a trashed doc can no longer be saved.
+        await get().flushDoc()
         // Which docs this takes with it, so the Undo can bring each one back.
         const doomed = deleteDocs
           ? get().docs.filter((d) => (d.project_id ?? '') === scope && (d.folder === path || d.folder.startsWith(path + '/')))
@@ -2521,7 +2533,7 @@ export const useStore = create<State>((set, get) => {
         if (doomed.length) get().offerUndo(`${doomed.length} doc${doomed.length === 1 ? '' : 's'}`, doomed.map((d) => ({ type: 'doc' as const, id: d.id })))
         await get().refreshDocs()
         const open = get().activeDoc
-        if (open && deleteDocs && !get().docs.some((d) => d.id === open.id)) get().closeDocTab(open.id)
+        if (open && deleteDocs && !get().docs.some((d) => d.id === open.id)) await get().closeDocTab(open.id)
         else if (open) void get().openDoc(open.id)
       } catch (e) {
         get().toast((e as Error).message, 'error')
@@ -2543,8 +2555,10 @@ export const useStore = create<State>((set, get) => {
     }),
     deleteDoc: async (id) => {
       const title = get().docs.find((d) => d.id === id)?.title
+      // Save buffered edits first: once trashed the doc 404s on save, and Undo should bring them back.
+      if (get().activeDoc?.id === id) await get().flushDoc()
       await api.docs.delete(id)
-      get().closeDocTab(id)
+      await get().closeDocTab(id)
       await Promise.all([get().refreshDocs(), get().refreshDocsPending()])
       get().offerUndo(title ? `“${title}”` : 'doc', [{ type: 'doc', id }])
     },
@@ -3791,6 +3805,44 @@ export const useStore = create<State>((set, get) => {
  * session is never an LRU victim, which is the only protection a canvas window has: the canvas view
  * does not focus conversations, and a widget's loader effect only re-runs when its `ref_id` changes.
  */
+/**
+ * pagehide cannot await, and a plain fetch dies with the page, so the buffered doc edits go out as a
+ * keepalive PUT. ponytail: keepalive bodies cap at 64 KB, so a longer doc still loses its last
+ * second on reload/quit; a main-process flush on before-quit would lift that.
+ */
+export const flushDocOnUnload = (): void => {
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null }
+  const { activeDoc: doc, docDraft, docTitleDraft } = useStore.getState()
+  const edits = doc && docEdits(doc, docDraft, docTitleDraft)
+  if (!doc || !edits) return
+  void fetch(`${getBase()}/docs/${doc.id}`, {
+    method: 'PUT',
+    keepalive: true,
+    headers: { 'Content-Type': 'application/json', ...(getToken() ? { 'X-Personal-OS-Token': getToken() } : {}) },
+    body: JSON.stringify({ ...edits, base_updated_at: doc.updated_at })
+  }).catch(() => undefined)
+}
+
+// Open doc tabs survive a reload: written whenever the tabs or the active doc change.
+const DOC_TABS_KEY = 'grain.docTabs'
+useStore.subscribe((s, prev) => {
+  if (s.docTabs === prev.docTabs && s.activeDoc?.id === prev.activeDoc?.id) return
+  try { localStorage.setItem(DOC_TABS_KEY, JSON.stringify({ tabs: s.docTabs, active: s.activeDoc?.id ?? null })) } catch { /* private window */ }
+})
+
+/** Reopens the tabs saved by the subscriber above, dropping any doc that no longer exists. */
+export const restoreDocTabs = async (): Promise<void> => {
+  if (useStore.getState().docTabs.length) return
+  let saved: { tabs?: unknown; active?: unknown }
+  try { saved = JSON.parse(localStorage.getItem(DOC_TABS_KEY) ?? '{}') } catch { return }
+  if (!Array.isArray(saved.tabs) || !saved.tabs.length) return
+  const live = new Set((await api.docs.list('all', '').catch(() => [] as Doc[])).map((d) => d.id))
+  const tabs = saved.tabs.filter((t): t is string => typeof t === 'string' && live.has(t))
+  if (!tabs.length || useStore.getState().docTabs.length) return
+  useStore.setState({ docTabs: tabs })
+  await useStore.getState().openDoc(typeof saved.active === 'string' && tabs.includes(saved.active) ? saved.active : tabs[tabs.length - 1])
+}
+
 export const retainSession = (conversationId: string): (() => void) => {
   const first = !retained.has(conversationId)
   retained.set(conversationId, (retained.get(conversationId) ?? 0) + 1)

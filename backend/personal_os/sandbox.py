@@ -13,6 +13,7 @@ from __future__ import annotations
 import base64
 import mimetypes
 import os
+import re
 import resource
 import shutil
 import signal
@@ -81,13 +82,27 @@ def _paths() -> tuple[str, str, str]:
     return home, root, data
 
 
+def _sbpl_re(p: str) -> str:
+    """A literal path inside an SBPL regex."""
+    return re.sub(r'([.^$*+?()\[\]{}|\\"])', r"\\\1", p)
+
+
+# Files that run code or configure tools the next time the user, git, an editor or an agent opens the folder. No shell
+# write may touch them under any root, a desk workspace included: the block goes last, so it beats every allow above it.
+_PROTECTED_WRITES = r"""(deny file-write* (regex #"/\.(zshrc|zprofile|zshenv|zlogin|bashrc|bash_profile|profile|envrc|gitconfig|mcp\.json)$")
+                  (regex #"/\.git/(hooks|config|info)(/|$)") (regex #"/\.vscode/(tasks|settings)\.json$")
+                  (regex #"/\.husky(/|$)") (regex #"/\.auth_token$") (regex #"/personal-os\.db"))
+"""
+
+
 def shell_profile(writable: list[str], network: bool = False, proxy_port: int | None = None) -> str:
     """Seatbelt profile for the host shell (shell.py): blanket deny, then what a shell needs, then targeted denies.
 
     Unlike run_python's allowlist, a shell has to run whatever the user's toolchain is, so reads are open and the
     *secrets* are the denylist: ssh/gpg/aws/gcloud/keychains, any .env, the app's own data dir and database. Writes
-    are confined to `writable` (the folder the command runs in, a per-run tmp dir) and never to a repo's hooks or
-    config, where a write would run later outside the sandbox. Network is off unless `network`; with `proxy_port` (and
+    are confined to `writable` (the folder the command runs in, a per-run tmp dir) and never reach the app's data dir
+    or code, ~/Library, home dotfiles, or anything in `_PROTECTED_WRITES` (rc files, git hooks and config, editor tasks),
+    where a write would run later outside the sandbox. Network is off unless `network`; with `proxy_port` (and
     not `network`) the one thing it may connect to is the allowlisting proxy on localhost at that port (egress.py).
     """
     home, root, data = _paths()
@@ -107,12 +122,14 @@ def shell_profile(writable: list[str], network: bool = False, proxy_port: int | 
         late = f"(allow file-read* (subpath {_q(os.path.realpath(os.path.dirname(wb)))}))\n"
     # A desk workspace lives inside the app data dir, which the deny above covers. Re-allow only those
     # writable folders, then repeat the secret-name denies so a database or .env still loses.
-    data_real = os.path.realpath(data)
+    creds = " ".join([*(f"(subpath {_q(os.path.join(home, d))})" for d in (".docker", ".azure")),
+                      *(f"(literal {_q(os.path.join(home, f))})" for f in (".netrc", ".npmrc", ".pypirc", ".git-credentials", ".pgpass"))])
+    data_real, home_real = os.path.realpath(data), os.path.realpath(home)
     inside = list(dict.fromkeys(rp for p in writable if (rp := os.path.realpath(p)).startswith(data_real + os.sep)))
     if inside:
         w_in = " ".join(f"(subpath {_q(p)})" for p in inside)
         late += f"(allow file-read* file-write* {w_in})\n"
-        late += '(deny file-read* (regex #"/\\.env($|\\.)") (regex #"/\\.auth_token$") (regex #"/personal-os\\.db"))\n'
+        late += '(deny file-read* file-write* (regex #"/\\.env($|\\.)") (regex #"/\\.auth_token$") (regex #"/personal-os\\.db"))\n'
     return f"""(version 1)
 (deny default)
 {net}
@@ -128,15 +145,17 @@ def shell_profile(writable: list[str], network: bool = False, proxy_port: int | 
 (allow ipc-posix-shm)
 (allow pseudo-tty)
 (deny appleevent-send)
-(deny file-write* (regex #"/\\.git/hooks(/|$)") (regex #"/\\.git/config$"))
+(deny file-write* (subpath {_q(data)}) (subpath {_q(data_real)}) (literal {_q(os.path.join(root, ".env"))})
+                  (subpath {_q(os.path.join(root, "backend", "personal_os"))})
+                  (subpath {_q(os.path.join(home_real, "Library"))}) (regex #"^{_sbpl_re(home_real)}/\\.[^/]+"))
 (deny file-read* (subpath {_q(data)}) (literal {_q(os.path.join(root, ".env"))})
                  (subpath {_q(os.path.join(root, "backend", "personal_os"))})
                  (subpath {_q(os.path.join(home, ".ssh"))}) (subpath {_q(os.path.join(home, ".gnupg"))})
                  (subpath {_q(os.path.join(home, ".aws"))}) (subpath {_q(os.path.join(home, ".config", "gcloud"))})
-                 (subpath {_q(os.path.join(home, ".kube"))})
+                 (subpath {_q(os.path.join(home, ".kube"))}) {creds}
                  (subpath {_q(os.path.join(home, "Library", "Keychains"))})
                  (regex #"/\\.env($|\\.)") (regex #"/\\.auth_token$") (regex #"/personal-os\\.db"))
-{late}"""
+{late}{_PROTECTED_WRITES}"""
 
 
 def _mac_profile(work: str, py: str, socket_path: str | None = None, workspace: str | None = None) -> str:
@@ -397,12 +416,13 @@ def _limits_for(cpu_seconds: int):  # type: ignore[no-untyped-def]
 
 
 def run_python(code: str, timeout: int = 30, python: str | None = None, bridge: Any = None,
-               workspace: str | None = None) -> dict[str, Any]:
+               workspace: str | None = None, keep: Any = None) -> dict[str, Any]:
     """Run `code` in the sandbox. With `workspace` (a cowork desk's folder) the script runs *in* that folder, may read
     and write it, and the result lists what it created or changed there (`workspace_files`); the script itself and the
     scratch HOME/TMPDIR stay in the per-run temp dir, which is still deleted afterwards. `bridge` (toolbridge.Bridge) lets the script call app tools over its Unix socket:
     its client module is dropped next to the script, the socket is the one network path the profile allows, and the
-    wall clock stops while the bridge is waiting on an approval card (`bridge.paused_for()`)."""
+    wall clock stops while the bridge is waiting on an approval card (`bridge.paused_for()`). `keep` (outside a desk) is
+    called with the temp dir's `outputs/` before the temp dir is deleted, and what it returns is the result's `outputs`."""
     work = tempfile.mkdtemp(prefix="pos-sandbox-")
     script = os.path.join(work, "main.py")
     with open(script, "w", encoding="utf-8") as f:
@@ -458,7 +478,10 @@ def run_python(code: str, timeout: int = 30, python: str | None = None, bridge: 
         wfiles = _workspace_changes(cwd, started_ns) if workspace else []
         if wfiles:
             images += _collect_images(cwd, wfiles)[: max(0, MAX_IMAGES - len(images))]
+        kept = keep(os.path.join(work, "outputs")) if keep is not None and not workspace else None
         shutil.rmtree(work, ignore_errors=True)
+    if kept:
+        out = {"outputs": kept, **out}  # first, so a card still finds it when a long stdout cuts the stored preview
     out["files_created"] = files[:50]
     if workspace:
         out["workspace_files"] = wfiles

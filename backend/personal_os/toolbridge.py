@@ -190,9 +190,7 @@ class Bridge:
                 return self._refuse(name, f"the user declined {name}.")
         result = await self.tb.call(name, args, self.ctx)
         if self.tb.taints(name) and not (isinstance(result, dict) and result.get("error")):
-            srcs = self.ctx.setdefault("taint_sources", [])
-            if name not in srcs:
-                srcs.append(name)
+            self.ctx.setdefault("taint_sources", []).append(name)  # appended every time: the fence reads growth
         self.log.append({"tool": name, "ok": not (isinstance(result, dict) and result.get("error"))})
         return {"ok": True, "result": result}
 

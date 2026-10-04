@@ -28,8 +28,8 @@ needs_seatbelt = pytest.mark.skipif(not HAVE_SEATBELT, reason="sandbox-exec is n
 
 class Box:
     def __init__(self, tmp: Path, **settings: Any):
-        self.root = (tmp / "work").resolve()
-        self.root.mkdir()
+        self.root = (tmp / "home" / "work").resolve()  # a granted root must sit inside the home folder (the fixture below)
+        self.root.mkdir(parents=True)
         self.settings: dict[str, Any] = {"workspaceRoots": [str(self.root)], **settings}
         self.db = Database(tmp / "data")
         with self.db.tx() as c:  # stored tool results hang off a conversation row
@@ -45,6 +45,14 @@ class Box:
 
     async def arun(self, name: str, **args: Any) -> Any:
         return await self.tb.call(name, args, self.ctx)
+
+
+@pytest.fixture(autouse=True)
+def fake_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    h = (tmp_path / "home").resolve()
+    h.mkdir(exist_ok=True)
+    monkeypatch.setenv("HOME", str(h))
+    return h
 
 
 @pytest.fixture
@@ -137,6 +145,95 @@ def test_repo_hooks_and_config_are_not_writable(box: Box) -> None:
     assert not (box.root / ".git" / "hooks" / "pre-commit").exists()
     assert (box.root / ".git" / "config").read_text() == "[core]\n"
     assert (box.root / ".git" / "HEAD").read_text().strip() == "z"  # the rest of .git is ordinary workspace
+
+
+PROTECTED = (".zshrc", ".bash_profile", ".envrc", ".gitconfig", ".mcp.json", ".git/info/exclude",
+             ".vscode/tasks.json", ".vscode/settings.json", ".husky/pre-commit")
+
+
+@needs_seatbelt
+def test_rc_files_and_tool_config_are_not_writable_inside_a_root(box: Box) -> None:
+    for rel in PROTECTED:
+        (box.root / rel).parent.mkdir(parents=True, exist_ok=True)
+        (box.root / rel).write_text("orig\n")
+    cmd = "; ".join(f"echo x >> {rel}" for rel in PROTECTED) + "; echo ok > ok.txt; echo done"
+    r = box.run("shell_run", command=cmd)
+    assert "done" in r["output"] and r["exit_code"] == 0
+    for rel in PROTECTED:
+        assert (box.root / rel).read_text() == "orig\n", rel
+    assert (box.root / "ok.txt").read_text() == "ok\n"
+    r = box.run("shell_run", command="echo x >> .zshrc")
+    assert r["exit_code"] != 0  # the shell sees the refusal
+
+
+@needs_seatbelt
+def test_desk_under_the_data_dir_stays_writable_but_its_database_does_not(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    data = (tmp_path / "appdata").resolve()
+    desk = data / "desks" / "d1"
+    desk.mkdir(parents=True)
+    (data / "personal-os.db").write_text("live")
+    (desk / "personal-os.db").write_text("live")
+    monkeypatch.setenv("PERSONAL_OS_DATA_DIR", str(data))
+    b = Box(tmp_path, workspaceRoots=[])
+
+    class Ws:
+        def ensure(self, desk_id: str) -> Path:
+            return desk
+    b.tb.workspace = Ws()
+    b.ctx["desk_id"] = "d1"
+    r = b.run("shell_run", command="touch made.txt; echo x > personal-os.db; echo x > ../../personal-os.db; "
+                                   "echo x > .zshrc; touch ../../stray; echo done")
+    assert "done" in r["output"] and (desk / "made.txt").exists()
+    assert (desk / "personal-os.db").read_text() == "live" and (data / "personal-os.db").read_text() == "live"
+    assert not (desk / ".zshrc").exists() and not (data / "stray").exists()
+
+
+def test_profile_write_denies_sit_around_the_desk_reallow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    data = (tmp_path / "appdata").resolve()
+    (data / "desks" / "d1").mkdir(parents=True)
+    monkeypatch.setenv("PERSONAL_OS_DATA_DIR", str(data))
+    p = sandbox.shell_profile([str(data / "desks" / "d1")])
+    reallow = p.index("(allow file-read* file-write* (subpath")
+    assert p.index(f'(deny file-write* (subpath "{data}")') < reallow  # the data dir loses its write allow ...
+    assert p.index('(deny file-read* file-write* (regex #"/\\.env') > reallow  # ... the desk gets it back, minus its secrets
+    assert p.rindex("(deny file-write*") > reallow and "zshrc|" in p[p.rindex("(deny file-write*"):]  # rc files lose last
+    home = os.path.realpath(os.path.expanduser("~"))
+    assert f'(subpath "{os.path.join(home, "Library")}")' in p and "/\\.[^/]+" in p
+
+
+def test_home_and_non_home_roots_are_never_granted(tmp_path: Path, fake_home: Path) -> None:
+    from personal_os import fsx, mac
+    (fake_home / "proj").mkdir()
+    stored = {"workspaceRoots": [str(fake_home), "~", "/", str(tmp_path), str(fake_home / "proj")]}
+    assert shell.granted_roots(stored, None) == [fake_home / "proj"]
+
+    class B:
+        workspace = None
+
+        def settings(self) -> dict[str, Any]:
+            return stored
+    assert fsx.grants_for(B(), {}).roots == [fake_home / "proj"]
+    with pytest.raises(mac.LocalPathError, match="home folder"):
+        mac.allowed_root("~")
+    assert mac.allowed_path("~") == fake_home  # the file tools may still read under home
+
+
+def test_a_root_around_the_data_dir_is_never_granted(fake_home: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from personal_os import fsx, mac
+    (fake_home / "proj" / "data").mkdir(parents=True)
+    (fake_home / "other").mkdir()
+    monkeypatch.setenv("PERSONAL_OS_DATA_DIR", str(fake_home / "proj" / "data"))
+    with pytest.raises(mac.LocalPathError, match="contains the app's own data folder"):
+        mac.allowed_root(str(fake_home / "proj"))
+    stored = {"workspaceRoots": [str(fake_home / "proj"), str(fake_home / "other")]}
+    assert shell.granted_roots(stored, None) == [fake_home / "other"]
+
+    class B:
+        workspace = None
+
+        def settings(self) -> dict[str, Any]:
+            return stored
+    assert fsx.grants_for(B(), {}).roots == [fake_home / "other"]
 
 
 @needs_seatbelt
@@ -401,6 +498,36 @@ def test_restart_marks_survivors_orphaned_and_never_adopts_them(tmp_path: Path, 
     asyncio.run(go())
 
 
+def test_running_view_lists_tails_without_moving_the_poll_cursor_and_kills(tmp_path: Path) -> None:
+    jobs = shell.ShellJobs()
+    changes: list[int] = []
+    jobs.on_change = lambda: changes.append(1)
+
+    async def go() -> None:
+        old = shell.Job("old", "x", "/", "c1", None, True, False, 10)
+        old.status, old.finished, old.started = "exited", time.time(), 1.0
+        jobs.jobs["old"] = old
+        j = await jobs.start(["/bin/sh", "-c", "echo one; sleep 30"], command="echo one; sleep 30", cwd=str(tmp_path),
+                             env=dict(os.environ), tmp=None, conversation_id="c1", run_id=None, background=True,
+                             notify=False, timeout=60, max_background=4)
+        assert changes == [1]
+        listed = jobs.list()
+        assert [r["job_id"] for r in listed] == [j.id, "old"]  # live first
+        assert listed[0]["status"] == "running" and listed[0]["background"] is True and listed[0]["cwd"] == str(tmp_path)
+        for _ in range(40):
+            if "one" in jobs.tail(j)["output"]:
+                break
+            await asyncio.sleep(0.1)
+        assert "one" in jobs.tail(j)["output"] and jobs.tail(j)["total"] >= 4
+        assert "one" in jobs.poll(j)["output"], "the user's tail must leave the model's new output unread"
+        await jobs.kill(j)
+        assert j.status == "killed" and len(changes) >= 2
+        await asyncio.sleep(0.2)
+        with pytest.raises(ProcessLookupError):
+            os.killpg(j.pgid, 0)
+    asyncio.run(go())
+
+
 def test_dead_or_recycled_pids_are_not_listed_as_orphans(tmp_path: Path) -> None:
     state = tmp_path / "s.json"
     state.write_text(json.dumps([{"job_id": "gone", "pid": 2_999_999, "pgid": 2_999_999, "cwd": "/", "run_id": None},
@@ -444,6 +571,8 @@ def test_shell_profile_shape() -> None:
     p = sandbox.shell_profile(["/tmp/w"], network=False)
     assert "(deny network*)" in p and "(allow network*)" not in p and "(deny default)" in p
     assert ".ssh" in p and "Keychains" in p and "gcloud" in p and r"\.env" in p
+    for secret in (".docker", ".azure", ".netrc", ".npmrc", ".pypirc", ".git-credentials"):
+        assert os.path.join(os.path.expanduser("~"), secret) in p, secret
     assert "hooks" in p and "/tmp/w" in p
     assert "(allow network*)" in sandbox.shell_profile(["/tmp/w"], network=True)
 
@@ -549,7 +678,8 @@ def test_contacted_hosts_taint_the_reply_like_open_network(box: Box) -> None:
     ctx: dict[str, Any] = {"tainted": False, "taint_sources": []}
     shell.taint(ctx, "shell_run:network")
     shell.taint(ctx, "shell_run:network")
-    assert ctx["tainted"] is True and ctx["taint_sources"] == ["shell_run:network"]
+    # Listed every time: the chat loop fences a result when the list grew during that call.
+    assert ctx["tainted"] is True and ctx["taint_sources"] == ["shell_run:network", "shell_run:network"]
     assert "Settings" in shell.net_blocked_note(["a.com"]) and "desk_ask" in shell.net_blocked_note(["a.com"])
 
 
@@ -612,6 +742,8 @@ def test_cd_persists_between_calls_and_an_explicit_cwd_wins(box: Box) -> None:
 
 @needs_seatbelt
 def test_timeout_moves_the_command_to_the_background_by_default(box: Box) -> None:
+    box.ctx["desk_id"] = "d1"  # only a desk's jobs outlive the reply
+
     async def go() -> None:  # one loop: the job's watcher lives on it
         t0 = time.time()
         r = await box.arun("shell_run", command="echo started; sleep 3; echo finished", timeout_s=1)
@@ -630,12 +762,23 @@ def test_timeout_moves_the_command_to_the_background_by_default(box: Box) -> Non
 def test_timeout_kills_when_asked_or_when_no_slot_is_free(box: Box) -> None:
     r = box.run("shell_run", command="sleep 30", timeout_s=1, on_timeout="kill")
     assert r["timed_out"] is True and "still_running" not in r
+    box.ctx["desk_id"] = "d1"
     box.settings["shellMaxBackground"] = 1
     first = box.run("shell_run", command="sleep 30", background=True)
     r = box.run("shell_run", command="sleep 30", timeout_s=1)
     assert r["timed_out"] is True and "process group" in r["note"]
     box.run("shell_kill", job_id=first["job_id"])
     assert "on_timeout" in box.run("shell_run", command="true", on_timeout="later")["error"]
+
+
+@needs_seatbelt
+def test_outside_a_desk_jobs_end_with_the_reply(box: Box) -> None:
+    """A chat kills its jobs when the reply ends, so a timeout kills and a background job says it will be stopped."""
+    r = box.run("shell_run", command="sleep 30", timeout_s=1)  # on_timeout=background is the default
+    assert r["timed_out"] is True and "still_running" not in r
+    r = box.run("shell_run", command="sleep 30", background=True)
+    assert "stopped when this reply ends" in r["note"] and "told when it finishes" not in r["note"]
+    box.run("shell_kill", job_id=r["job_id"])
 
 
 def test_the_tool_describes_its_network_modes_and_timeout_choice(box: Box) -> None:

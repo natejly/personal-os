@@ -1,5 +1,7 @@
-import { Globe } from 'lucide-react'
+import { useState } from 'react'
+import { Eye, EyeOff, Globe } from 'lucide-react'
 import { hostPath } from '../../lib/browserApproval'
+import DeskBrowser from '../DeskBrowser'
 import { browserLine, num, str, strList } from '../../lib/toolResult'
 import CardShell from './CardShell'
 import { ErrorLine, Meta, MonoBlock, unreadable, useParsed } from './blocks'
@@ -7,7 +9,10 @@ import { registerToolCard, type ToolCardProps } from './registry'
 
 const NAMES = ['browser_open', 'browser_snapshot', 'browser_click', 'browser_type', 'browser_select', 'browser_press', 'browser_scroll', 'browser_manage']
 
-/** browser_*: one line for what was done, the page it left the browser on, any notes, and the page text behind a disclosure. */
+/**
+ * browser_*: one line for what was done, the page it left the browser on, any notes, and the page text behind a
+ * disclosure. The transcript's last browser card can also show the chat's browser live, with Take over and Hide.
+ */
 export default function BrowserCard(props: ToolCardProps): JSX.Element {
   const { event } = props
   const p = useParsed(event)
@@ -17,6 +22,7 @@ export default function BrowserCard(props: ToolCardProps): JSX.Element {
   const notes = d ? strList(d.notes) : []
   const shot = event.name === 'browser_manage' && str(d?.path) ? str(d?.path) : ''
   const tabs = num(d?.tabs)
+  const [watch, setWatch] = useState(false)
   return (
     <CardShell {...props} icon={<Globe size={14} />} title={line.action} subject={line.subject || undefined} hideResult={!unreadable(p, event)}>
       {d && (str(d.title) || str(d.url)) && (
@@ -37,6 +43,17 @@ export default function BrowserCard(props: ToolCardProps): JSX.Element {
         </details>
       )}
       <ErrorLine event={event} />
+      {props.browserSession && window.os?.agentBrowser && (
+        <>
+          <button type="button" className="link small" aria-expanded={watch} onClick={() => setWatch((w) => !w)}>
+            {watch ? <EyeOff size={12} /> : <Eye size={12} />} {watch ? 'Stop watching' : 'Watch the browser'}
+          </button>
+          {watch && (
+            <DeskBrowser session={props.browserSession} live={!!props.streaming}
+              emptyText="This browser is closed (it shuts after a few idle minutes)." />
+          )}
+        </>
+      )}
     </CardShell>
   )
 }

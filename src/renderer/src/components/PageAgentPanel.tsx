@@ -5,6 +5,7 @@ import Composer from './Composer'
 import ResizeHandle from './ResizeHandle'
 import MessageView from './Message'
 import ModelMenu from './ModelMenu'
+import { chatBrowserSession, latestBrowserMessage } from '../lib/browserApproval'
 
 /** `pick()` falls back to the focused chat on an undefined id, so an empty panel needs a dead key. */
 const NO_THREAD = '\u0000page-agent'
@@ -34,6 +35,7 @@ export default function PageAgentPanel(): JSX.Element {
   const [stick, setStick] = useState(true)
 
   const msgs = convo?.messages ?? []
+  const watchId = latestBrowserMessage(msgs)
   const lastLen = msgs[msgs.length - 1]?.content.length ?? 0
   useEffect(() => {
     if (stick) scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
@@ -75,7 +77,8 @@ export default function PageAgentPanel(): JSX.Element {
             ))}
           </div>
         ) : (
-          msgs.map((m) => <MessageView key={m.id} message={m} streaming={streaming && streamingMessageId === m.id} />)
+          msgs.map((m) => <MessageView key={m.id} message={m} streaming={streaming && streamingMessageId === m.id}
+            browserSession={m.id === watchId ? chatBrowserSession(m.conversation_id) : undefined} />)
         )}
       </div>
 

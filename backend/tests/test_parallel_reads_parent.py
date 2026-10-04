@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from personal_os import llm  # noqa: E402
 from personal_os import app as appmod  # noqa: E402
+appmod.db.set_settings({"toolDeferAbove": 0})  # these tests drive their own tools; deferral is test_tool_search.py
 from personal_os.runs import Run  # noqa: E402
 from personal_os.tools import ToolSpec, _obj  # noqa: E402
 
@@ -68,7 +69,9 @@ def c(i: int, name: str, k: str = "") -> dict[str, Any]:
     return {"id": f"c{i}", "name": name, "arguments": json.dumps({"k": k})}
 
 
-def drive(calls: list[dict[str, Any]], release_after: str | None = None, stop_first: bool = False) -> tuple[list[tuple[str, Any]], int]:
+def drive(calls: list[dict[str, Any]], release_after: str | None = None, stop_first: bool = False,
+          approve: int = 0) -> tuple[list[tuple[str, Any]], int]:
+    """`approve`: how many approval cards to answer 'allow' (an external tool asks even when set to on)."""
     appmod.db.set_settings({"autoLearn": False, "baseUrl": "", "workspaceRoots": [], "permissionRules": {"allow": [], "ask": [], "deny": []}})
     cid = appmod.convos.create(None, "t", "m")["id"]
     appmod.convos.update(cid, {"settings": {"tools": {n: "on" for n in ("rd_a", "rd_b", "rd_stop", "wr", "ext")}}})
@@ -90,9 +93,22 @@ def drive(calls: list[dict[str, Any]], release_after: str | None = None, stop_fi
                 await asyncio.sleep(0.05)
             GO.set()
 
+        async def approver() -> None:
+            left = approve
+            for _ in range(1000):
+                if not left:
+                    return
+                for a in appmod.run_store.approvals(run_id=run.run_id):
+                    if a["call_id"] in appmod._approvals:
+                        await appmod.approve_tool_call(a["call_id"], appmod.ApprovalIn(decision="allow"))
+                        left -= 1
+                await asyncio.sleep(0.01)
+
         t = asyncio.create_task(releaser())
+        ap = asyncio.create_task(approver())
         out = [ev async for ev in appmod._chat_stream(cid, appmod.ChatIn(content="go"), STOP if stop_first else asyncio.Event(), run=run)]
         await t
+        await ap
         row = appmod.run_store._one("SELECT count(*) AS n FROM executed_calls WHERE run_id=?", (run.run_id,))
         return out, row["n"]
 
@@ -126,7 +142,7 @@ def test_write_between_reads_waits_and_is_the_only_journaled_call() -> None:
 
 
 def test_external_stays_out_of_the_gather() -> None:
-    drive([c(0, "rd_a", "1"), c(1, "ext", "e"), c(2, "rd_b", "2")], release_after="rd_a:1")
+    drive([c(0, "rd_a", "1"), c(1, "ext", "e"), c(2, "rd_b", "2")], release_after="rd_a:1", approve=1)
     check(LOG.index("start:ext:e") > LOG.index("end:rd_a:1") and LOG.index("start:rd_b:2") > LOG.index("end:ext:e"), "external ran alone, in order")
 
 

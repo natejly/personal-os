@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS projects (
   system_prompt TEXT NOT NULL DEFAULT '',
   color TEXT NOT NULL DEFAULT '#d97757',
   tools TEXT NOT NULL DEFAULT '{}',
+  memory_mode TEXT NOT NULL DEFAULT 'shared',
   created_at REAL NOT NULL
 );
 
@@ -324,6 +325,22 @@ CREATE TABLE IF NOT EXISTS file_snapshots (
 );
 CREATE INDEX IF NOT EXISTS idx_filesnap_conv ON file_snapshots(conversation_id, created_at);
 
+-- Undo for the agent's Google Calendar / Tasks writes (extundo.py): the created id or the pre-image, and the
+-- etag (or task `updated`) the object had right after the write, so an undo refuses once someone edited it.
+CREATE TABLE IF NOT EXISTS external_undo (
+  id TEXT PRIMARY KEY,
+  run_id TEXT,
+  message_id TEXT,
+  conversation_id TEXT,
+  tool TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  payload TEXT NOT NULL,
+  after_etag TEXT,
+  status TEXT NOT NULL DEFAULT 'live',
+  created_at REAL NOT NULL,
+  undone_at REAL
+);
+
 -- Scheduled background work (see jobs.Jobs / jobs.Scheduler). A job fires one run with kind='job'.
 -- next_due_at is the slot the scheduler is waiting for; last_due_at is the slot the last launch was *for*,
 -- so last_fired_at - last_due_at is how late that fire was (the machine was asleep, or the backend was down).
@@ -350,9 +367,20 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_due ON jobs(enabled, next_due_at);
 
+-- A slot a job did not run, kept as history (jobs.last_skip_* only holds the latest). Only overlap skips land here:
+-- slots missed while the app was closed are on the late run's input.missed_slots. Capped per job (jobs.SKIP_KEEP).
+CREATE TABLE IF NOT EXISTS job_skips (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+  due_at REAL,
+  reason TEXT NOT NULL,
+  at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_job_skips_job ON job_skips(job_id, at);
+
 -- An outward-facing tool call a background run was not allowed to make: recorded here instead of executed
 -- (see app.PROPOSAL_ONLY_KINDS). Accepting one is a user action and is what actually runs it, exactly once.
--- status: pending | accepted | rejected
+-- status: pending | accepted | rejected | expired (left pending past settings.proposalExpireDays)
 CREATE TABLE IF NOT EXISTS proposals (
   id TEXT PRIMARY KEY,
   run_id TEXT REFERENCES agent_runs(run_id) ON DELETE CASCADE,
@@ -425,6 +453,12 @@ CREATE TABLE IF NOT EXISTS plan_steps (
   UNIQUE(plan_id, idx)
 );
 CREATE INDEX IF NOT EXISTS idx_plan_steps_claim ON plan_steps(tool, args_digest, status);
+
+-- Which job runs the user has read in the Agent Inbox. No foreign key: a run's row can go and leave this behind harmlessly.
+CREATE TABLE IF NOT EXISTS inbox_seen (
+  run_id TEXT PRIMARY KEY,
+  seen_at REAL NOT NULL
+);
 
 -- fetch_url's response cache (webread.WebCache); rows are disposable.
 CREATE TABLE IF NOT EXISTS web_cache (
@@ -528,7 +562,7 @@ class Database:
         wanted = {
             # Soft delete (trash.py): deleted_at hides a row from every read; deleted_with names the project
             # whose deletion took it along, so restoring the project brings back exactly those rows.
-            "projects": {"tools": "TEXT NOT NULL DEFAULT '{}'", "deleted_at": "REAL"},
+            "projects": {"tools": "TEXT NOT NULL DEFAULT '{}'", "deleted_at": "REAL", "memory_mode": "TEXT NOT NULL DEFAULT 'shared'"},
             "conversations": {"deleted_at": "REAL", "deleted_with": "TEXT", "pinned_at": "REAL", "archived_at": "REAL"},
             "memories": {"deleted_at": "REAL", "deleted_with": "TEXT", "valid_from": "REAL", "invalid_at": "REAL", "superseded_by": "TEXT",
                          "source_conversation_id": "TEXT", "source_message_id": "TEXT"},
@@ -541,7 +575,13 @@ class Database:
             "jobs": {"kind": "TEXT NOT NULL DEFAULT 'cron'", "run_at": "REAL",
                      "max_retries": "INTEGER NOT NULL DEFAULT 1", "consecutive_failures": "INTEGER NOT NULL DEFAULT 0",
                      "paused_reason": "TEXT", "last_skip_at": "REAL", "last_skip_reason": "TEXT",
-                     "allowed_tools": "TEXT", "expires_at": "REAL", "watch_dir": "TEXT", "watch_seen": "TEXT"},
+                     "allowed_tools": "TEXT", "expires_at": "REAL", "watch_dir": "TEXT", "watch_seen": "TEXT",
+                     "model": "TEXT", "budget": "TEXT",
+                     # When a run of this job is worth an OS notification: 'problems' | 'always' | 'never'.
+                     "notify": "TEXT NOT NULL DEFAULT 'problems'",
+                     "mail_query": "TEXT", "mail_seen": "TEXT",
+                     # target='desk': a fire starts a desk (desk_autonomy plan|propose, desk_budget JSON) instead of a run.
+                     "target": "TEXT NOT NULL DEFAULT 'run'", "desk_autonomy": "TEXT", "desk_budget": "TEXT"},
             "action_plans": {"desk_id": "TEXT", "intent": "TEXT NOT NULL DEFAULT ''",
                              "expected_taint": "TEXT NOT NULL DEFAULT '[]'"},
             "approvals": {"desk_id": "TEXT", "danger": "TEXT NOT NULL DEFAULT 'external'",

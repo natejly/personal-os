@@ -176,7 +176,8 @@ class MailWatch:
                 msgs = thread.get("messages") or []
                 last = msgs[-1] if msgs else {}
                 old = c.execute("SELECT last_msg_id, dismissed, followup_todo_id, snoozed_until FROM thread_status WHERE thread_id=?", (thread["thread_id"],)).fetchone()
-                same = bool(old) and old["last_msg_id"] == last.get("id")
+                # A row snooze() made has no last message yet: its first refresh is not new mail.
+                same = bool(old) and old["last_msg_id"] in (None, last.get("id"))
                 dismissed = int(old["dismissed"]) if same else 0
                 snooze = old["snoozed_until"] if same else None  # a new message wakes the thread
                 c.execute(

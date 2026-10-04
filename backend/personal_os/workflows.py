@@ -36,6 +36,7 @@ from typing import Any, Callable
 
 from . import permrules
 from .db import new_id, now
+from .tools import ASK_LOCKED_DANGER
 
 log = logging.getLogger(__name__)
 
@@ -49,7 +50,7 @@ RESERVED_IDS = frozenset({"item", "index", "params", "result"})
 # the user something mid-run. A workflow expresses delegation with `agent` and `fan_out` steps instead.
 TOOL_BLOCK = frozenset({
     "workflow_run", "workflow_resume", "workflow_list", "command_run", "command_list", "propose_plan", "agent_spawn", "agent_wait",
-    "agent_stop", "desk_start", "desk_ask", "desk_done", "desk_deliver", "schedule_task", "cancel_scheduled_task", "todo_write",
+    "agent_stop", "desk_start", "desk_ask", "ask_user", "desk_done", "desk_deliver", "schedule_task", "cancel_scheduled_task", "todo_write",
 })
 
 REF = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+|\[\d+\])*)\s*\}\}")
@@ -870,6 +871,9 @@ class Engine:
         if fs_ask and mode == "on":
             mode = "ask"
         forced = mode != raw or (mode == "ask" and self.toolbox.forces_ask(name, args))
+        # Those tools top out at ask (Toolbox.effective), so gate() no longer turns an 'on' into a forced card for
+        # them: a tainted run forces it here instead, and no allow rule lifts it.
+        forced = forced or (spec.danger in ASK_LOCKED_DANGER and bool(ctx.get("tainted")))
         cfg = self.settings()
         roots = [r for r in (cfg.get("workspaceRoots") or []) if isinstance(r, str) and r]
         perm = permrules.resolve(name, args, mode, forced, rules=cfg.get("permissionRules"), roots=roots)
@@ -927,8 +931,7 @@ class Engine:
             if not ch.finished.is_set():
                 self.subagents.stop_tree(ch.id)
         ctx["tainted"] = True
-        if "workflow:agent" not in ctx["taint_sources"]:
-            ctx["taint_sources"].append("workflow:agent")
+        ctx["taint_sources"].append("workflow:agent")  # appended every time: the chat loop's fence reads growth
         if ch.state == "error" or ch.exit_reason in ("interrupted", "stale"):
             raise _StepFailed(f"the {ch.role.name} subagent ended: {ch.exit_reason or ch.error}")
         return ch.text

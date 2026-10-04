@@ -112,7 +112,8 @@ def list_backups(data_dir: Path) -> list[dict[str, Any]]:
 
 def delete(data_dir: Path, name: str) -> None:
     d = backup_dir(data_dir)
-    (d / name).unlink(missing_ok=True)
+    for suffix in ("", "-wal", "-shm"):  # a raw prerestore copy carries its sidecars
+        (d / (name + suffix)).unlink(missing_ok=True)
     (d / (name[:-3] + ".json")).unlink(missing_ok=True)
 
 
@@ -177,6 +178,17 @@ def cancel_restore(data_dir: Path) -> None:
     (backup_dir(data_dir) / PENDING).unlink(missing_ok=True)
 
 
+def _copy_aside(data_dir: Path, why: Exception) -> None:
+    """The prerestore fallback when VACUUM cannot read the live file: its raw bytes, WAL and all."""
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    dest = backup_dir(data_dir) / f"grain-{stamp}-prerestore.db"
+    for suffix in ("", "-wal", "-shm"):
+        src = data_dir / (DB_NAME + suffix)
+        if src.exists():
+            shutil.copy2(src, Path(str(dest) + suffix))
+    log.warning("could not snapshot the live database before restoring (%s); kept a raw copy as %s", why, dest.name)
+
+
 def apply_pending_restore(data_dir: Path) -> str | None:
     """Startup, before the database is opened. Returns the restored backup's name, or None.
 
@@ -196,7 +208,10 @@ def apply_pending_restore(data_dir: Path) -> str | None:
         _check(src)
         live = data_dir / DB_NAME
         if live.exists():
-            create(data_dir, "prerestore")
+            try:
+                create(data_dir, "prerestore")
+            except Exception as e:  # noqa: BLE001 - a corrupt live DB is the usual reason to restore at all
+                _copy_aside(data_dir, e)
         tmp = data_dir / (DB_NAME + ".restoring")
         shutil.copyfile(src, tmp)
         for suffix in ("-wal", "-shm", "-journal"):
@@ -227,24 +242,80 @@ def _rows(c: sqlite3.Connection, sql: str) -> list[dict[str, Any]]:
     return [dict(r) for r in c.execute(sql)]
 
 
+def _when(t: float) -> str:
+    return datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M")
+
+
+def _json_list(v: Any) -> list[Any]:
+    if isinstance(v, str):
+        try:
+            v = json.loads(v)
+        except ValueError:
+            return []
+    return v if isinstance(v, list) else []
+
+
+def _tool_line(ev: dict[str, Any]) -> str:
+    """One line per call: name and how it ended. Never the arguments or the result body."""
+    if ev.get("approval") == "deny":
+        how = "declined"
+    elif ev.get("blocked"):
+        how = "blocked"
+    elif ev.get("interrupted"):
+        how = "interrupted"
+    elif ev.get("error"):
+        how = "failed: " + str(ev["error"]).strip().splitlines()[0][:160]
+    else:
+        how = "ok"
+    return f"- Tool `{ev.get('name') or '?'}` ({how})"
+
+
+def render_conversation_md(conv: dict[str, Any], msgs: list[dict[str, Any]], project: str, exported: float | None = None) -> str:
+    """One chat as Markdown. `msgs` are the active rows (superseded_at IS NULL) in order. With `exported`,
+    the chat stands alone and opens with front matter; without it, it is one section of the whole-app export."""
+    out: list[str] = []
+    if exported is not None:
+        out.append(f"---\nid: {conv['id']}\nproject: {project}\nmodel: {conv.get('model') or ''}\n"
+                   f"created: {_when(conv['created_at'])}\nexported: {_when(exported)}\n---\n\n")
+    out.append(f"# {conv.get('title') or 'Untitled'}\n\n")
+    if exported is None:
+        out.append(f"{project} · {conv.get('model') or ''} · {_when(conv['created_at'])}\n\n")
+    for m in msgs:
+        who = "You" if m["role"] == "user" else "Grain"
+        head = f"## {who} · {_when(m['created_at'])}" + (f" · {m['model']}" if m["role"] != "user" and m.get("model") else "")
+        out.append(head + "\n\n")
+        if any(isinstance(sp, dict) and sp.get("kind") == "compact" and (sp.get("meta") or {}).get("kind") == "history"
+               for sp in _json_list(m.get("trace"))):
+            out.append("> Earlier messages were summarized to fit the context window.\n\n")
+        tools = [ev for ev in _json_list(m.get("tool_events")) if isinstance(ev, dict)]
+        if tools:
+            out.append("\n".join(_tool_line(ev) for ev in tools) + "\n\n")
+        if (m.get("content") or "").strip():
+            out.append(m["content"].rstrip() + "\n\n")
+        if m.get("error"):
+            out.append(f"> Error: {m['error']}\n\n")
+    return "".join(out)
+
+
 def human_export(db_path: Path) -> dict[str, tuple[str, Any]]:
     """{base name: (markdown, json-able)} for conversations, memories and documents."""
     c = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     c.row_factory = sqlite3.Row
     try:
         projects = {r["id"]: r["name"] for r in c.execute("SELECT id, name FROM projects")}
-        convs = _rows(c, "SELECT id, project_id, title, model, created_at, updated_at FROM conversations ORDER BY created_at")
-        # Regenerated answers are kept as superseded rows; the export reads one answer per turn. A snapshot
-        # taken before the migration has no such column.
-        live = "WHERE superseded_at IS NULL " if any(r["name"] == "superseded_at" for r in c.execute("PRAGMA table_info(messages)")) else ""
-        msgs = _rows(c, f"SELECT conversation_id, role, content, model, created_at FROM messages {live}ORDER BY created_at")
+        # A snapshot taken before a migration may lack the newer columns.
+        ccols = {r["name"] for r in c.execute("PRAGMA table_info(conversations)")}
+        mcols = {r["name"] for r in c.execute("PRAGMA table_info(messages)")}
+        trashed = "WHERE deleted_at IS NULL " if "deleted_at" in ccols else ""
+        convs = _rows(c, f"SELECT id, project_id, title, model, created_at, updated_at FROM conversations {trashed}ORDER BY created_at")
+        # Regenerated answers are kept as superseded rows; the export reads one answer per turn.
+        live = "WHERE superseded_at IS NULL " if "superseded_at" in mcols else ""
+        extra = "".join(f", {k}" for k in ("error", "tool_events", "trace") if k in mcols)
+        msgs = _rows(c, f"SELECT conversation_id, role, content, model, created_at{extra} FROM messages {live}ORDER BY created_at, rowid")
         mems = _rows(c, "SELECT id, project_id, content, kind, source, pinned, created_at FROM memories ORDER BY created_at")
         docs = _rows(c, "SELECT id, project_id, name, mime, size, text, created_at FROM documents ORDER BY created_at")
     finally:
         c.close()
-
-    def when(t: float) -> str:
-        return datetime.fromtimestamp(t).strftime("%Y-%m-%d %H:%M")
 
     def scope(pid: str | None) -> str:
         return projects.get(pid, "") if pid else "(global)"
@@ -252,22 +323,23 @@ def human_export(db_path: Path) -> dict[str, tuple[str, Any]]:
     by_conv: dict[str, list[dict[str, Any]]] = {}
     for m in msgs:
         by_conv.setdefault(m["conversation_id"], []).append(m)
-    md = ["# Conversations\n"]
+    md: list[str] = []
     for cv in convs:
         cv["project"] = scope(cv["project_id"])
         cv["messages"] = by_conv.get(cv["id"], [])
-        md.append(f"\n## {cv['title']}\n\n{cv['project']} · {cv['model']} · {when(cv['created_at'])}\n")
-        for m in cv["messages"]:
-            md.append(f"\n**{m['role']}** ({when(m['created_at'])})\n\n{m['content']}\n")
+        md.append(render_conversation_md(cv, cv["messages"], cv["project"]))
+        for m in cv["messages"]:  # the JSON keeps the text, not tool payloads or traces
+            for k in ("tool_events", "trace"):
+                m.pop(k, None)
     mmd = ["# Memories\n\n"]
     for m in mems:
         m["project"] = scope(m["project_id"])
-        mmd.append(f"- [{m['kind']}] {m['content']} ({m['project']}, {when(m['created_at'])})\n")
+        mmd.append(f"- [{m['kind']}] {m['content']} ({m['project']}, {_when(m['created_at'])})\n")
     dmd = ["# Documents\n"]
     for d in docs:
         d["project"] = scope(d["project_id"])
-        dmd.append(f"\n## {d['name']}\n\n{d['project']} · {when(d['created_at'])}\n\n{d['text']}\n")
-    return {"conversations": ("".join(md), convs), "memories": ("".join(mmd), mems), "documents": ("".join(dmd), docs)}
+        dmd.append(f"\n## {d['name']}\n\n{d['project']} · {_when(d['created_at'])}\n\n{d['text']}\n")
+    return {"conversations": ("---\n\n".join(md), convs), "memories": ("".join(mmd), mems), "documents": ("".join(dmd), docs)}
 
 
 def export_zip(data_dir: Path, dest: Path) -> dict[str, Any]:

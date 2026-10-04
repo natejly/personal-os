@@ -20,6 +20,8 @@ from dataclasses import dataclass, field
 from email.utils import getaddresses
 from typing import Any, Iterable
 
+# Rule names that are not tool names: the subject kinds `subject_for` emits.
+PSEUDO_TOOLS = frozenset({"Bash", "Read", "Edit", "Agent", "external_directory"})
 # Verdicts: 'deny' | 'ask' | 'allow' | None (no opinion: the tool's own mode stands).
 MAX_SUGGESTIONS = 5
 # Matches a call that has just been refused this many times in a row (permission refusals and user denials).
@@ -27,13 +29,13 @@ DENIAL_LIMIT = 3
 # The call that would be this many identical ones in a row (counting those that ran) gets a card no rule lifts.
 DOOM_LIMIT = 3
 # Cards that are the user answering, not granting a tool. Skip-permissions does not settle these.
-STILL_ASK = frozenset({"propose_plan", "desk_ask"})
+STILL_ASK = frozenset({"propose_plan", "desk_ask", "ask_user"})
 HARD_STOP = ("Three calls in a row were refused. Stop attempting variations of them; tell the user what you were trying "
              "to do and ask how they would like to proceed.")
 
 READ_TOOLS = {"read_local_file", "fs_glob", "fs_grep"}
 EDIT_TOOLS = {"write_local_file", "fs_edit", "fs_copy", "fs_mkdir", "move_local_file", "trash_local_file"}
-MAIL_TOOLS = {"gmail_send", "gmail_draft", "gmail_reply", "gmail_forward"}
+MAIL_TOOLS = {"gmail_send", "gmail_draft"}
 CALENDAR_TOOLS = {"calendar_create", "calendar_update", "calendar_delete", "calendar_propose"}
 PATH_KEYS = ("path", "root", "directory", "dir", "file_path", "folder")
 SRC_KEYS = ("src", "source", "from")
@@ -987,6 +989,19 @@ class SessionGrants:
 
     def clear(self, conv: str | None = None) -> None:
         self._g.pop(conv, None) if conv else self._g.clear()
+
+    def remove(self, conv: str, key: str) -> bool:
+        """Revoke one key; the chat's other grants stand. False when it was not granted."""
+        ks = self._g.get(conv)
+        if not ks or key not in ks:
+            return False
+        ks.discard(key)
+        if not ks:
+            del self._g[conv]
+        return True
+
+    def list(self) -> dict[str, list[str]]:
+        return {c: sorted(ks) for c, ks in self._g.items() if ks}
 
 
 SESSION = SessionGrants()

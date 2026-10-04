@@ -94,6 +94,11 @@
 .tc-meta dt { color: var(--text-faint); }
 .tc-meta dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .tc-statusrow { display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+/* files a plain chat's tool saved for the user */
+.tc-outputs { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin: 4px 0 8px; padding: 8px 12px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--bg-input); }
+.tc-output { display: flex; align-items: center; gap: 8px; max-width: 100%; }
+.tc-output-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .tc-badge { display: inline-flex; align-items: center; font-size: 11px; padding: 2px 8px; border-radius: 10px; background: var(--hover); color: var(--text-muted); }
 .tc-badge.ok { background: rgba(70,167,88,0.15); color: var(--ok); }
 .tc-badge.warn { background: color-mix(in srgb, var(--warn) 22%, transparent); color: var(--text); }

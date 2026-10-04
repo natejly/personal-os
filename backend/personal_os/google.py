@@ -34,7 +34,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import verify
-from .cache import TTLCache, bypassing, cached, invalidates
+from .cache import TTLCache, bypassing, cached, dont_cache, invalidates
 from .google_store import ReadStore
 
 # Google lists the scopes it actually granted in the token response, and that set rarely
@@ -89,6 +89,10 @@ TTL = {
 
 class GoogleNotConnected(Exception):
     pass
+
+
+class NotSent(Exception):
+    """gmail_send failed before Gmail was asked to send, so the mail certainly did not go out."""
 
 
 # A saved calendar window older than this is listed again in full. Younger than this,
@@ -622,6 +626,32 @@ class Google:
         out = _event_out(e, calendar_id, full=True)
         return verify.attach(out, self._verify_rsvp(calendar_id, event_id, response))
 
+    def calendar_raw(self, event_id: str, calendar_id: str = "primary") -> dict[str, Any] | None:
+        """The API resource as stored, uncached; None when Google no longer has it. A deleted event
+        usually comes back as a cancelled tombstone rather than None."""
+        try:
+            return self._svc("calendar", "v3").events().get(calendarId=calendar_id, eventId=event_id).execute()
+        except Exception as e:  # noqa: BLE001
+            if verify.is_missing(e):
+                return None
+            raise
+
+    @invalidates("calendar")
+    def calendar_restore(self, event_id: str | None, body: dict[str, Any], calendar_id: str = "primary", send_updates: str = "none") -> dict[str, Any]:
+        """Write a raw API body back: patch `event_id`, or insert when it is None. Used only by the
+        user's undo (extundo.py), which builds the body from a pre-image this module read."""
+        svc = self._svc("calendar", "v3").events()
+        kwargs: dict[str, Any] = {"calendarId": calendar_id, "body": body, "sendUpdates": _send_updates(send_updates)}
+        if "conferenceData" in body:
+            kwargs["conferenceDataVersion"] = 1
+        if event_id:
+            self._drop_saved_event(calendar_id, event_id)
+            e = svc.patch(eventId=event_id, **kwargs).execute()
+        else:
+            e = svc.insert(**kwargs).execute()
+        out = _event_out(e, calendar_id, full=True)
+        return verify.attach(out, self._verify_event(calendar_id, out["id"], out, body))
+
     # ---------- Calendar read-backs ----------
     # Each one re-fetches from the server rather than trusting the write's own echo, and names in
     # `compared` exactly which fields it proved.
@@ -663,7 +693,9 @@ class Google:
     def _event_body(self, f: dict[str, Any], patch: bool = False) -> dict[str, Any]:
         """Translate our flat event fields into a Calendar API body (insert or patch)."""
         body: dict[str, Any] = {}
-        for src, dst in (("summary", "summary"), ("description", "description"), ("location", "location"),
+        # id and status: only the todo calendar mirror sets them (a deterministic id, and undeleting it).
+        for src, dst in (("id", "id"), ("status", "status"),
+                         ("summary", "summary"), ("description", "description"), ("location", "location"),
                          ("visibility", "visibility"), ("transparency", "transparency"),
                          ("guests_can_invite_others", "guestsCanInviteOthers"), ("guests_can_modify", "guestsCanModify"),
                          ("guests_can_see_other_guests", "guestsCanSeeOtherGuests")):
@@ -768,22 +800,8 @@ class Google:
         return [by_id[i] for i in ids if i in by_id]
 
     def _gmail_batch_meta(self, svc: Any, ids: list[str]) -> dict[str, dict[str, Any]]:
-        by_id: dict[str, dict[str, Any]] = {}
-
-        def _cb(_request_id: str, response: Any, exception: Exception | None) -> None:
-            if exception or not isinstance(response, dict):
-                if exception:
-                    log.warning("gmail batch get failed: %s", exception)
-                return
-            mid = response.get("id")
-            if mid:
-                by_id[mid] = _gmail_meta(response)
-
-        batch = svc.new_batch_http_request(callback=_cb)
-        for mid in ids:
-            batch.add(svc.users().messages().get(userId="me", id=mid, format="metadata", metadataHeaders=["From", "Subject", "Date"]))
-        batch.execute()
-        return by_id
+        return _gmail_batch(svc, ids, lambda mid: svc.users().messages().get(
+            userId="me", id=mid, format="metadata", metadataHeaders=["From", "Subject", "Date"]), _gmail_meta)
 
     def _note_gmail_labels(self, message_id: str, add: list[str], rem: list[str]) -> None:
         """Keep the saved header in step with a label change we just made, so the next
@@ -814,20 +832,8 @@ class Google:
         ids = [t["id"] for t in res.get("threads") or []]
         if not ids:
             return []
-        by_id: dict[str, dict[str, Any]] = {}
-
-        def _cb(_request_id: str, response: Any, exception: Exception | None) -> None:
-            if exception or not isinstance(response, dict):
-                if exception:
-                    log.warning("gmail thread batch get failed: %s", exception)
-                return
-            if response.get("id"):
-                by_id[response["id"]] = _gmail_thread_meta(response)
-
-        batch = svc.new_batch_http_request(callback=_cb)
-        for tid in ids:
-            batch.add(svc.users().threads().get(userId="me", id=tid, format="metadata", metadataHeaders=_THREAD_HEADERS))
-        batch.execute()
+        by_id = _gmail_batch(svc, ids, lambda tid: svc.users().threads().get(
+            userId="me", id=tid, format="metadata", metadataHeaders=_THREAD_HEADERS), _gmail_thread_meta)
         return [by_id[i] for i in ids if i in by_id]
 
     @cached("gmail", TTL["gmail_message"])
@@ -872,15 +878,24 @@ class Google:
 
     @invalidates("gmail")
     def gmail_send(self, to: str, subject: str, body: str, reply_to_message_id: str | None = None) -> dict[str, Any]:
-        """Send now. Callers go through outbox.py instead, which holds the send so it can be undone."""
-        svc = self._svc("gmail", "v1")
-        message: dict[str, Any] = {}
-        headers: dict[str, str] = {}
-        if reply_to_message_id:
-            tid, headers = self._reply_headers(reply_to_message_id)
-            if tid:
-                message["threadId"] = tid
-        message["raw"] = _raw_message(to, subject, body, **headers)
+        """Send now. Callers go through outbox.py instead, which holds the send so it can be undone.
+
+        Anything that fails before messages().send() is raised as NotSent (or GoogleNotConnected,
+        kept as is for the callers that map it): nothing went out.
+        """
+        try:
+            svc = self._svc("gmail", "v1")
+            message: dict[str, Any] = {}
+            headers: dict[str, str] = {}
+            if reply_to_message_id:
+                tid, headers = self._reply_headers(reply_to_message_id)
+                if tid:
+                    message["threadId"] = tid
+            message["raw"] = _raw_message(to, subject, body, **headers)
+        except GoogleNotConnected:
+            raise
+        except Exception as e:  # noqa: BLE001
+            raise NotSent(f"{type(e).__name__}: {e}") from e
         m = svc.users().messages().send(userId="me", body=message).execute()
         out = {"sent": m.get("id"), "to": to, "subject": subject, "thread_id": m.get("threadId")}
         return verify.attach(out, self._verify_sent(m.get("id") or "", to, subject, m.get("threadId")))
@@ -1338,6 +1353,33 @@ def _parse_opt(value: Any) -> dt.datetime | None:
     return t
 
 
+def _gmail_batch(svc: Any, ids: list[str], request: Callable[[str], Any],
+                 shape: Callable[[dict[str, Any]], dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """One batched get per id. Items the batch refused (a per-item 429) are asked for once
+    more on their own; anything still missing marks the read incomplete, so it is not cached."""
+    out: dict[str, dict[str, Any]] = {}
+    for _ in range(2):
+        failed: list[str] = []
+
+        def _cb(request_id: str, response: Any, exception: Exception | None) -> None:
+            if exception or not isinstance(response, dict) or not response.get("id"):
+                if exception:
+                    log.warning("gmail batch get %s failed: %s", request_id, exception)
+                failed.append(request_id)
+                return
+            out[response["id"]] = shape(response)
+
+        batch = svc.new_batch_http_request(callback=_cb)
+        for i in ids:
+            batch.add(request(i), request_id=i)
+        batch.execute()
+        if not failed:
+            return out
+        ids = failed
+    dont_cache()
+    return out
+
+
 def _overlaps(ev: dict[str, Any], start: dt.datetime, end: dt.datetime) -> bool:
     """True when an event's span meets [start, end). Unparseable times are kept."""
     sraw, eraw = ev.get("start") or "", ev.get("end") or ""
@@ -1345,8 +1387,9 @@ def _overlaps(ev: dict[str, Any], start: dt.datetime, end: dt.datetime) -> bool:
         return True
     try:
         if len(sraw) == 10:
-            es = dt.datetime.fromisoformat(sraw).replace(tzinfo=dt.timezone.utc)
-            ee = dt.datetime.fromisoformat(eraw).replace(tzinfo=dt.timezone.utc) if isinstance(eraw, str) and len(eraw) == 10 else es + dt.timedelta(days=1)
+            # An all-day date is the user's local day, not a UTC one (that ended it at 5pm in California).
+            es = dt.datetime.fromisoformat(sraw).astimezone()
+            ee = dt.datetime.fromisoformat(eraw).astimezone() if isinstance(eraw, str) and len(eraw) == 10 else es + dt.timedelta(days=1)
         else:
             es = _parse_iso(sraw)
             ee = _parse_iso(eraw) if isinstance(eraw, str) and eraw else es

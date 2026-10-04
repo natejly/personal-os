@@ -41,7 +41,7 @@ const VERBS: Record<string, string> = {
   skill_list: 'List skills', skill_draft: 'Draft skill', skill_revise: 'Revise skill',
   save_writing_sample: 'Save writing sample', writing_style: 'Read writing style',
   desk_list_files: 'List desk files', desk_read_file: 'Read desk file', desk_write_file: 'Write desk file',
-  desk_trash_file: 'Trash desk file', desk_deliver: 'Deliver to desk', desk_ask: 'Ask a question', desk_done: 'Finish desk task',
+  desk_trash_file: 'Trash desk file', desk_deliver: 'Deliver to desk', desk_ask: 'Ask a question', ask_user: 'Ask a question', desk_done: 'Finish desk task',
   desk_import_sandbox: 'Import from sandbox',
   sandbox_exec: 'Run in sandbox', sandbox_write_file: 'Write sandbox file', sandbox_read_file: 'Read sandbox file',
   sandbox_list_files: 'List sandbox files', sandbox_put_document: 'Copy document to sandbox', sandbox_export_file: 'Export sandbox file', sandbox_reset: 'Reset sandbox',
@@ -95,7 +95,7 @@ export function describeCall(name: string, args: Record<string, unknown> | null 
     case 'agent_stop': return { verb, subject: str('id') }
     case 'agent_wait': return { verb, subject: Array.isArray(a.ids) && a.ids.length ? a.ids.map(String).join(', ') : 'all' }
     case 'desk_fetch_file': return { verb, subject: hostPath(str('url')) }
-    case 'desk_ask': return { verb, subject: clip(str('question'), 80) }
+    case 'desk_ask': case 'ask_user': return { verb, subject: clip(str('question'), 80) }
     case 'desk_done': return { verb, subject: clip(str('summary'), 80) }
     case 'view_image': return { verb, subject: str('path') }
     case 'convert_document': return { verb, subject: str('path') && str('to') ? `${str('path')} → ${str('to')}` : str('path') }
@@ -112,6 +112,7 @@ export function describeCall(name: string, args: Record<string, unknown> | null 
       const b = browserLine(name, a, null)
       return { verb, subject: clip(name === 'browser_manage' ? `${b.action} ${b.subject}`.trim() : b.subject, 80) }
     }
+    case 'schedule_task': return { verb, subject: [clip(str('name'), 50), str('watch_dir') ? `when files change in ${clip(str('watch_dir'), 40)}` : ''].filter(Boolean).join(' ') }
     case 'gmail_send':
     case 'gmail_draft': return { verb, subject: str('to') ? `to ${clip(str('to'), 50)}` : '' }
   }
@@ -263,7 +264,10 @@ export function errorLine(error: string): string {
   return clip(first, 80)
 }
 
-const OWN_BODY = new Set(['propose_plan', 'desk_ask', 'doc_edit'])
+/** Tools whose card is a question: answered with a typed or picked answer, never Allow/Deny. */
+export const QUESTION_TOOLS = new Set(['desk_ask', 'ask_user'])
+
+const OWN_BODY = new Set(['propose_plan', ...QUESTION_TOOLS, 'doc_edit'])
 
 /**
  * Only a finished, plain row may fold into a group: no approval state, plan tag, verdict, undo, image or
@@ -271,7 +275,7 @@ const OWN_BODY = new Set(['propose_plan', 'desk_ask', 'doc_edit'])
  */
 export function isFoldable(t: ToolEvent, hasCard: (name: string) => boolean): boolean {
   return !hasCard(t.name) && !t.pending && !t.error && !t.needs_approval && !t.approval && !t.plan && !t.proposal
-    && !t.agent && !t.blocked && !t.breaker && !(t.images?.length) && !t.undo?.snapshot_id
+    && !t.agent && !t.blocked && !t.breaker && !(t.images?.length) && !t.undo?.snapshot_id && !t.undo?.external_id
     && readVerdict(t.result_preview) === null && !OWN_BODY.has(t.name) && !t.name.startsWith('agent_')
 }
 
@@ -322,4 +326,20 @@ export function appendPage(prev: FullOutput, page: { text: string; offset: numbe
 export function displayFullOutput(text: string, complete: boolean): string {
   if (!complete) return text
   try { return JSON.stringify(JSON.parse(text), null, 2) } catch { return text }
+}
+
+/** Past chats search_memory(include_chats) recalled, so the card can open each one. Titles come from the parsed
+ *  JSON; a preview cut short (or nested as a string) still yields the ids, labelled generically. */
+export function recalledChats(preview: string | null | undefined): { id: string; title: string }[] {
+  const raw = preview ?? ''
+  try {
+    const convs = (JSON.parse(raw) as { conversations?: unknown }).conversations
+    if (Array.isArray(convs)) {
+      return convs.filter((c): c is { conversation_id: string; title?: unknown } => typeof c?.conversation_id === 'string')
+        .map((c) => ({ id: c.conversation_id, title: typeof c.title === 'string' && c.title ? c.title : 'Untitled chat' }))
+    }
+  } catch { /* cut short: fall through to the ids */ }
+  const out: { id: string; title: string }[] = []
+  for (const m of raw.matchAll(/conversation_id\\?"\s*:\s*\\?"([0-9a-f]{8,})/g)) if (!out.some((c) => c.id === m[1])) out.push({ id: m[1], title: 'Past chat' })
+  return out
 }

@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
-import type { Settings } from '@shared/types'
+import type { AgentBrowserSignIn, Settings } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore } from '../store'
-import { clampSetting, hostError, networkMode, networkPatch, normalizeHost, type NetworkMode } from '../lib/coworkSettings'
+import { clampSetting, hostError, networkMode, networkPatch, normalizeHost, sandboxNetMode, type NetworkMode, type SandboxNetMode } from '../lib/coworkSettings'
 
 /**
  * The Cowork section of Settings: how long and how costly a desk may run, what its shell and browser may reach,
@@ -18,6 +18,43 @@ const Toggle = ({ title, help, checked, onChange }: { title: string; help: strin
     <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} /><span className="switch" />
   </label>
 )
+
+/**
+ * What the agent's browser remembers: sites with saved cookies, mostly sign-ins made while the user took over.
+ * An action on the machine like the environment build, so it applies at once rather than on Save.
+ */
+function SignIns(): JSX.Element | null {
+  const ab = window.os?.agentBrowser
+  const [rows, setRows] = useState<AgentBrowserSignIn[] | null>(null)
+  const [error, setError] = useState('')
+  const load = (): void => { ab?.signIns().then(setRows, (e: Error) => setError(e.message)) }
+  useEffect(load, [ab])
+  if (!ab) return null
+  const clear = (domain?: string): void => {
+    if (!domain && !confirm('Sign the agent browser out of every site? Open agent browsers close.')) return
+    setError('')
+    ab.clearSignIns(domain).then(load, (e: Error) => setError(e.message))
+  }
+  return (
+    <div className="workspace-roots">
+      <span><b>Browser sign-ins</b></span>
+      <p className="muted small">Sites the agent's browser keeps cookies for, mostly from when you took over to sign in. Page reads use the same store, so removing a site signs both out.</p>
+      {rows && rows.length === 0 && <p className="muted small">Nothing saved.</p>}
+      {rows && rows.length > 0 && (
+        <ul className="plain-list">
+          {rows.map((r) => (
+            <li key={r.domain} className="chip-check-row">
+              <code>{r.domain}</code> <span className="muted small">{r.count} cookie{r.count === 1 ? '' : 's'}</span>
+              <button type="button" aria-label={`Remove ${r.domain}`} title="Remove" onClick={() => clear(r.domain)}><X size={12} /></button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {rows && rows.length > 0 && <div className="workspace-roots-add"><button type="button" onClick={() => clear()}>Clear all</button></div>}
+      {error && <p className="cowork-error" role="alert">{error}</p>}
+    </div>
+  )
+}
 
 /** A number the user can clear while typing; it is clamped into the backend's range once they leave the field. */
 function NumField({ title, help, settingKey, value, fallback, step = 1, onCommit }: {
@@ -41,7 +78,7 @@ function NumField({ title, help, settingKey, value, fallback, step = 1, onCommit
 }
 
 /** A list of hostnames, following WorkspaceRoots: type, Enter or Add, remove with the x. An entry also allows its subdomains. */
-function HostList({ title, help, value, onChange }: { title: string; help: string; value: string[]; onChange: (next: string[]) => void }): JSX.Element {
+export function HostList({ title, help, value, onChange }: { title: string; help: string; value: string[]; onChange: (next: string[]) => void }): JSX.Element {
   const [text, setText] = useState('')
   const [error, setError] = useState<string | null>(null)
   const add = (): void => {
@@ -85,6 +122,17 @@ const NETWORK_HELP: Record<NetworkMode, string> = {
   off: 'Commands a desk runs have no network at all.',
   registries: 'Commands can reach package registries and the hosts listed below, and nothing else.',
   open: 'Commands can reach any address.'
+}
+
+const SANDBOX_NET: { mode: SandboxNetMode; label: string }[] = [
+  { mode: 'off', label: 'Off' },
+  { mode: 'proxy', label: 'Registries and allowed hosts' },
+  { mode: 'open', label: 'Open' }
+]
+const SANDBOX_NET_HELP: Record<SandboxNetMode, string> = {
+  off: 'The Linux sandbox has no network at all.',
+  proxy: 'The sandbox can reach package registries and the allowed hosts above, through a proxy that is its only way out. Results count as untrusted once it reaches a host that is not a registry.',
+  open: 'The sandbox can reach any address, and everything it returns counts as untrusted.'
 }
 
 /** What a build of the work environment is doing: nothing yet, running, or failed with the reason. */
@@ -170,6 +218,7 @@ export default function CoworkSettings({ draft, patch }: { draft: Settings; patc
   const mode = networkMode(draft)
   const hosts = draft.shellAllowedDomains ?? []
   const pickMode = (m: NetworkMode): void => patch(networkPatch(m, m === 'off' ? [] : hosts))
+  const sbxMode = sandboxNetMode(draft.sandboxNetwork)
   return (
     <div className="cowork-settings">
       <h4>Desks</h4>
@@ -178,7 +227,9 @@ export default function CoworkSettings({ draft, patch }: { draft: Settings; patc
       <NumField title="Spend per desk ($)" settingKey="deskMaxCost" value={draft.deskMaxCost} fallback={2} step={0.5}
         help="A desk stops when its cost passes this. 0 means no limit." onCommit={(n) => patch({ deskMaxCost: n })} />
       <NumField title="Desks working at once" settingKey="deskMaxLive" value={draft.deskMaxLive} fallback={4}
-        help="More desks than this wait their turn. 0 means no limit." onCommit={(n) => patch({ deskMaxLive: n })} />
+        help="More desks than this wait in a queue and start, oldest first, as others finish. 0 means no limit." onCommit={(n) => patch({ deskMaxLive: n })} />
+      <Toggle title="Resume desks after a restart" help="Carry on desks the app was running when it quit. A desk with an action whose outcome is unknown, or one waiting on your approval or plan, still waits for you."
+        checked={draft.deskAutoResume === true} onChange={(deskAutoResume) => patch({ deskAutoResume })} />
       <NumField title="Wait for an unwatched card (seconds)" settingKey="parkAfterSeconds" value={draft.parkAfterSeconds} fallback={180}
         help="How long a desk holds a question or approval nobody is looking at before it lets go. 0 waits forever." onCommit={(n) => patch({ parkAfterSeconds: n })} />
       <Toggle title="Notify me" help="A system notification when a desk needs you or finishes, while the window is not in front."
@@ -200,10 +251,20 @@ export default function CoworkSettings({ draft, patch }: { draft: Settings; patc
         </div>
         {mode === 'open' && <p className="cowork-error">Open network lets a command send files off this Mac, and whatever it downloads is untrusted text. Prefer allowed hosts.</p>}
       </div>
-      {mode !== 'off' && (
+      {(mode !== 'off' || sbxMode === 'proxy') && (
         <HostList title="Allowed hosts" help="Hostnames a command may reach, such as pypi.org. A name also allows its subdomains. No scheme, path, wildcard or IP address."
           value={hosts} onChange={(shellAllowedDomains) => patch({ shellAllowedDomains })} />
       )}
+
+      <h4>Sandbox</h4>
+      <div className="send-hold cowork-net">
+        <span className="toggle-text"><b>Network for the Linux sandbox</b><small>{SANDBOX_NET_HELP[sbxMode]} A change applies to new sandboxes; reset one to pick it up.</small></span>
+        <div className="seg" role="group" aria-label="Network for the Linux sandbox">
+          {SANDBOX_NET.map((n) => (
+            <button key={n.mode} type="button" className={sbxMode === n.mode ? 'on' : ''} aria-pressed={sbxMode === n.mode} onClick={() => patch({ sandboxNetwork: n.mode })}>{n.label}</button>
+          ))}
+        </div>
+      </div>
 
       <h4>Browser</h4>
       <Toggle title="Let desks use a browser" help="Gives desks a browser they can read and click in. It asks before submitting forms, entering passwords or uploading."
@@ -212,6 +273,7 @@ export default function CoworkSettings({ draft, patch }: { draft: Settings; patc
         help="Between 1 and 12. A desk past this has to close a tab first." onCommit={(n) => patch({ browserMaxTabs: n })} />
       <HostList title="Allowed sites" help="Sites a desk may open even when a link came from something it read, instead of being asked. A name also allows its subdomains."
         value={draft.browserAllowlist ?? []} onChange={(browserAllowlist) => patch({ browserAllowlist })} />
+      <SignIns />
 
       <h4>Vision</h4>
       <label>

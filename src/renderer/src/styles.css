@@ -550,6 +550,8 @@ kbd {
 .compact-note { display: block; margin-top: 6px; padding: 0; background: none; border: 0; font: inherit; font-size: 11px; color: var(--text-faint); cursor: pointer; text-align: left; }
 .compact-note:hover { color: var(--text); text-decoration: underline; }
 .ctx-usage { color: var(--text-faint); font-size: 11px; margin-bottom: 8px; }
+.ctx-compact-focus { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+.ctx-compact-focus input { flex: 1; min-width: 0; font-size: 12px; }
 .model-tag { font-size: 11px; color: var(--text-faint); font-family: var(--mono); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .msg-error {
   display: flex; align-items: center; gap: 6px;
@@ -633,6 +635,14 @@ kbd {
   font-size: 13px; color: var(--text-muted); text-align: center; margin-bottom: 8px;
 }
 .link { color: var(--accent); text-decoration: underline; padding: 0; }
+.queue-tray {
+  display: flex; flex-direction: column; gap: 2px; margin-bottom: 6px; padding: 6px 8px;
+  border: 1px solid var(--border); border-radius: 12px; background: var(--bg-input);
+}
+.queue-tray-head { display: flex; justify-content: space-between; font-size: 11.5px; color: var(--text-faint); }
+.queue-item { display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--text-muted); }
+.queue-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.queue-confirm { text-align: left; }
 .composer {
   display: flex; align-items: flex-end; gap: 8px;
   background: var(--bg-input);
@@ -667,6 +677,9 @@ kbd {
 .chat-control:hover { color: var(--text); background: var(--hover); border-color: var(--border); }
 .composer-wrap:not(.compact) .composer-footer { padding: 6px 8px 0; }
 .skip-perms.on { color: var(--danger); }
+.private-chat.on { color: var(--accent); }
+.convo-private { flex: none; color: var(--text-faint); }
+.private-banner { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; font-size: 12px; color: var(--text-muted); }
 .composer-wrap:not(.compact) .chat-control { font-size: 12px; height: 24px; }
 /* Size each select to its value, so the chevron sits by the text instead of at the end of a fixed box. */
 .chat-control { field-sizing: content; }
@@ -675,6 +688,9 @@ kbd {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent);
 }
 .composer .smart-ta { min-width: 0; min-height: 24px; }
+/* The saved-command menu a leading '/' opens (CaretMenu without an anchor) hangs above the text box. */
+.composer { position: relative; }
+.composer > .caret-menu { bottom: calc(100% + 4px); left: 8px; }
 .composer .smart-ta textarea,
 .composer .smart-ta-mirror { padding: 4px 0; max-height: 240px; }
 .composer textarea {
@@ -693,6 +709,9 @@ kbd {
 .send.stop { background: var(--text); color: var(--bg); }
 .send.stop:hover:not(:disabled) { background: var(--text-muted); }
 .send.stop:disabled { opacity: 0.7; }
+.mic-btn.recording { color: var(--danger); }
+.mic-pill { font-size: 12px; font-variant-numeric: tabular-nums; color: var(--danger); display: inline-flex; align-items: center; gap: 5px; }
+.mic-pill::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--danger); animation: pulse-dot 1.2s ease-in-out infinite; }
 
 /* ---------- Buttons ---------- */
 .icon-btn {
@@ -759,6 +778,7 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .modal label.toggle-row { flex-direction: row; align-items: center; gap: 16px; }
 .modal label.toggle-row .toggle-text { gap: 2px; font-size: 13px; }
 .modal label.toggle-row .toggle-text small { font-size: 12px; line-height: 1.45; }
+.modal label.memory-mode-opt { flex-direction: row; align-items: baseline; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .modal .toggle-row input { width: 1px; padding: 0; border: 0; }
 .accent-picks { display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 0 2px; }
 .accent-swatch {
@@ -966,6 +986,18 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .ctx-chip { display: inline-flex; gap: 8px; align-items: center; font-size: 11px; color: var(--text-faint); padding: 2px 8px; border-radius: 10px; background: var(--hover); }
 .ctx-chip span { display: inline-flex; align-items: center; gap: 3px; }
 .ctx-chip:hover { color: var(--text); }
+/* An inline [n] citation in a reply: opens the passage it came from. */
+.cite-chip { display: inline-flex; align-items: center; justify-content: center; min-width: 16px; height: 16px; padding: 0 4px; margin: 0 1px; vertical-align: 2px; font-size: 10px; font-weight: 600; line-height: 1; color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); border: none; border-radius: 8px; cursor: pointer; }
+.cite-chip:hover, .cite-chip:focus-visible { background: color-mix(in srgb, var(--accent) 28%, transparent); }
+.cite-chip.weak { text-decoration: underline dotted; text-underline-offset: 2px; }
+.sources { margin-top: 8px; font-size: 12px; }
+.sources summary { cursor: pointer; color: var(--text-muted); width: fit-content; }
+.sources ul { list-style: none; margin: 4px 0 0; padding: 0; }
+.sources li button { background: none; border: none; padding: 2px 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.sources li button:hover { text-decoration: underline; }
+.sources li.cited { font-weight: 600; }
+.sources li.consulted { color: var(--text-faint); }
+.sources-n { color: var(--accent); }
 .muted.small, .small { font-size: 12px; }
 
 /* ---------- Generic pages ---------- */
@@ -1560,6 +1592,10 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .mcp-tool .toggle-text .mono { font-size: 10px; }
 .mcp-add .mcp-head { border-bottom: 1px solid var(--border); }
 .mcp-add label { margin: 0; }
+.mcp-add .seg { align-self: flex-start; }
+.mcp-headers { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; font-size: 12px; }
+.mcp-header-row { display: flex; gap: 6px; align-items: center; width: 100%; }
+.mcp-header-row input { flex: 1; min-width: 0; }
 .mcp-foot { display: flex; align-items: flex-start; gap: 5px; font-size: 11px; }
 .mcp-foot svg { flex-shrink: 0; margin-top: 2px; }
 
@@ -1596,6 +1632,9 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .inbox-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .inbox-item { border: 1px solid var(--border); border-radius: 10px; padding: 8px 10px; }
 .inbox-item-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; }
+/* A read run: one line, quieter. */
+.inbox-item.seen { padding: 4px 10px; color: var(--text-muted); }
+.inbox-item.seen .inbox-item-head { flex-wrap: nowrap; overflow: hidden; white-space: nowrap; }
 .inbox-tool { font-family: var(--mono, ui-monospace, monospace); font-size: 12px; color: var(--text); }
 .inbox-job { font-weight: 600; }
 .inbox-args {
@@ -1622,7 +1661,7 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .job-tools-group { display: flex; flex-direction: column; gap: 2px; min-width: 150px; }
 .inbox-jobs li code { font-size: 11.5px; }
 .inbox-jobs > p { margin: 8px 0 0; line-height: 1.5; }
-.inbox-jobs h5 { display: flex; align-items: center; gap: 8px; }
+.inbox-jobs h5, .inbox-group h5 { display: flex; align-items: center; gap: 8px; }
 .inbox-jobs li.spent .ev-title { color: var(--text-muted); }
 .new-task { display: flex; flex-direction: column; gap: 6px; margin: 8px 0 4px; }
 .new-task input, .new-task textarea {
@@ -1951,8 +1990,12 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .mail-review ul { margin: 0 0 10px; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
 .mail-review .doc-text { padding: 10px 12px; background: var(--bg-input); border-radius: 8px; max-height: 220px; overflow: auto; margin-bottom: 10px; }
 
-/* Nav badge for assistant doc edits awaiting review (Docs). */
-.nav-item .count.pending {
+/* Nav badge for assistant doc edits awaiting review (Docs), and memory tidy-up suggestions. */
+.settings-btn .count.pending, .settings-tabs .count.pending, .primary-btn .count.pending {
+  margin-left: auto; font-size: 11px; font-variant-numeric: tabular-nums; padding: 0 6px; border-radius: 999px;
+}
+.primary-btn .count.pending { margin-left: 4px; background: var(--on-accent); color: var(--accent-solid); font-weight: 600; }
+.nav-item .count.pending, .settings-btn .count.pending, .settings-tabs .count.pending {
   background: var(--accent-solid);
   color: var(--on-accent);
   font-weight: 600;
@@ -2332,6 +2375,13 @@ select:focus-visible {
   padding: 8px 10px; outline: 0; color: var(--text); font: inherit;
 }
 .skill-body textarea { resize: vertical; line-height: 1.55; font-family: var(--mono, ui-monospace, monospace); font-size: 12px; }
+.skill-findings { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: 12px; }
+.skill-findings li { padding-left: 8px; border-left: 2px solid var(--warn); }
+.skill-findings li.error { border-left-color: var(--danger); }
+.skill-intent { display: flex; gap: 6px; }
+.skill-intent input { flex: 1; min-width: 0; }
+.skill-intent button { display: inline-flex; align-items: center; gap: 4px; }
+.skill-preview { margin: 0; max-height: 320px; overflow: auto; white-space: pre-wrap; font-size: 12px; font-family: var(--mono, ui-monospace, monospace); }
 .skill-body input:focus, .skill-body textarea:focus { border-color: var(--accent); }
 .row-actions { display: flex; align-items: center; gap: 8px; }
 .row-actions button.small { font-size: 12px; padding: 5px 11px; border-radius: 7px; border: 1px solid var(--border-strong); }
@@ -2370,6 +2420,7 @@ select:focus-visible {
 .perm-rule-group ul { list-style: none; margin: 4px 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .perm-rule-group li { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 12px; }
 .perm-rule-add { display: flex; gap: 6px; align-items: center; }
+.perm-rule-add select { flex: none; }
 .perm-rule-test { display: flex; flex-direction: column; gap: 6px; }
 .workspace-roots { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
 .workspace-roots .plain-list { list-style: none; margin: 0; padding: 0; }

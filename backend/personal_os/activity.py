@@ -1934,14 +1934,13 @@ class Monitor:
 
     # ---- what chat actually sees ----
     def context_block(self, max_chars: int = 4000) -> str:
-        """The compact version injected into a chat's system prompt. Empty when off or opted out."""
+        """The compact version injected into a chat's system prompt. Empty when stopped or opted out."""
         cfg = self.config()
-        if cfg.get("enabled") is not True or not cfg.get("injectContext", True):
+        # Off or stopped means no injection: the stored profile would still taint every turn as activity context.
+        if cfg.get("enabled") is not True or not self.running or not cfg.get("injectContext", True):
             return ""
         prof = self.store.profile()["content"].strip()
         recent = self.store.summaries(since=now() - 86400, limit=6)
-        if not prof and not recent and not self.running:
-            return ""
         parts = [
             "## What the user has been doing (from their activity monitor)",
             "This is observed computer activity, recorded locally with the user's consent. Use it to be "

@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from personal_os import llm  # noqa: E402
 from personal_os import app as appmod  # noqa: E402
+appmod.db.set_settings({"toolDeferAbove": 0})  # these tests drive their own tools; deferral is test_tool_search.py
 from personal_os import permrules  # noqa: E402
 from personal_os.runs import Run  # noqa: E402
 from personal_os.tools import ToolSpec, _obj  # noqa: E402
@@ -264,6 +265,14 @@ def test_settings_validation_and_evaluate_route() -> None:
     check(appmod.evaluate_permission(appmod.PermissionEvalIn(command="git log"))["action"] == "allow", "allowed")
     check(appmod.evaluate_permission(appmod.PermissionEvalIn(rule="Bash(x)"))["ok"] is True, "rule validation")
     check(appmod.evaluate_permission(appmod.PermissionEvalIn(rule="((("))["ok"] is False, "rule validation rejects")
+    for bad in ("allowlist", True, None):
+        try:
+            appmod.put_settings({"sandboxNetwork": bad})
+            check(False, f"sandboxNetwork={bad!r} rejected")
+        except appmod.HTTPException as e:
+            check(e.status_code == 422, f"422 on sandboxNetwork={bad!r}")
+    appmod.put_settings({"sandboxNetwork": "proxy"})
+    check(appmod.settings()["sandboxNetwork"] == "proxy", "the sandbox network mode is stored")
 
 
 def main() -> int:

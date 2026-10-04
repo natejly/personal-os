@@ -7,6 +7,7 @@ import Composer from '../../components/Composer'
 import ChatControls from '../../components/ChatControls'
 import { api } from '../../lib/api'
 import { uploadNote } from '../../lib/uploadNote'
+import { chatBrowserSession, latestBrowserMessage } from '../../lib/browserApproval'
 import { retainSession, useConversation, useIsStreaming, useStore, useStreamingMessageId } from '../../store'
 import { useDropTarget } from '../dnd'
 import type { WidgetDef, WidgetProps } from '../registry'
@@ -227,6 +228,7 @@ function ChatWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
   }
 
   const last = msgs[msgs.length - 1]
+  const watchId = latestBrowserMessage(msgs)
   const onScroll = (): void => {
     const el = scroll.current
     if (el) setStick(el.scrollHeight - el.scrollTop - el.clientHeight < 80)
@@ -236,7 +238,8 @@ function ChatWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
       <ChatTitle convId={convId} title={convo?.title ?? ''} switcher={<ChatSwitcher win={win} convId={convId} />} />
       <div className="messages" ref={scroll} onScroll={onScroll}>
         <div className="messages-inner">
-          {msgs.map((m) => <MessageView key={m.id} message={m} streaming={streaming && streamingId === m.id} last={m.id === last?.id} />)}
+          {msgs.map((m) => <MessageView key={m.id} message={m} streaming={streaming && streamingId === m.id} last={m.id === last?.id}
+            browserSession={m.id === watchId ? chatBrowserSession(m.conversation_id) : undefined} />)}
           <RegenRow conversationId={convId} last={last} streaming={streaming} />
           {!msgs.length && <p className="widget-sub">No messages yet.</p>}
         </div>

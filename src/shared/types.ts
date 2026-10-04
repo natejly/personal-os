@@ -7,8 +7,38 @@ export interface Project {
   system_prompt: string
   color: string
   tools: Record<string, ToolOverride>
+  /** 'isolated' = chats here see no personal memory, graph, docs, skills or voice, and save nothing personal. */
+  memory_mode: 'shared' | 'isolated'
   created_at: number
   stats?: { conversations: number; memories: number; nodes: number; documents: number }
+}
+
+/**
+ * A cited source. An excerpt has chunk_id; a read span (kind 'range': a pinned file, a read_document slice, doc or
+ * meeting lines) has start/end into the text its viewer loads; a web page (source 'web') has url and opens in the browser.
+ */
+export interface Citation {
+  name: string
+  text: string
+  n?: number
+  source?: string
+  chunk_id?: string
+  document_id?: string
+  doc_id?: string | null
+  idx?: number
+  heading?: string
+  page?: number | null
+  kind?: 'range'
+  start?: number
+  end?: number
+  meeting_id?: string
+  part?: string
+  url?: string
+  title?: string
+  domain?: string
+  /** Set once the reply is saved: the excerpt sentence that best matches the citing sentence, and how well. */
+  quote?: string
+  support?: 'ok' | 'weak' | 'invalid'
 }
 
 export interface ContextUsed {
@@ -16,7 +46,8 @@ export interface ContextUsed {
   memories: { id: string; content: string; project_id: string | null }[]
   nodes: { id: string; label: string; type: string }[]
   edges: { id: string; relation: string; source_id: string; target_id: string }[]
-  chunks: { chunk_id: string; document_id: string; name: string; idx: number; text: string; source?: string; doc_id?: string | null }[]
+  /** Every source the reply may cite. `n` is its citation number ("[n]"); absent on messages saved before citations. */
+  chunks: Citation[]
   /** The activity-monitor block, verbatim; null when the monitor is off or the chat opted out. */
   activity: string | null
   /** Approved skills injected as procedural memory. Absent on messages written before skills existed. */
@@ -31,6 +62,8 @@ export interface ContextUsed {
   pinned?: { document_id: string; name: string }[]
   /** Items dropped per section because it hit its token budget (contextBudget). */
   trimmed?: Record<string, number>
+  /** Built-in tools held out of the request until tool_search loads them (toolDeferAbove). Absent on older messages. */
+  tools_deferred?: number
   system_prompt: string
   tokens_estimate: number
 }
@@ -132,6 +165,8 @@ export interface PageContext {
 
 export type ToolMode = 'on' | 'ask' | 'off'
 export type ToolOverride = 'inherit' | ToolMode
+/** Danger tiers whose mode tops out at 'ask' (tools.ASK_LOCKED_DANGER): no map can switch them on, and no card grants them whole-tool. */
+export const askLocked = (danger: string | undefined): boolean => danger === 'external' || danger === 'schedules'
 
 export interface ToolInfo {
   name: string
@@ -241,12 +276,36 @@ export interface PermissionCard {
   suggestions: string[]
   /** False for a forced card (taint, plan mode, doom loop): it can only be answered once. */
   session: boolean
-  /** The tool's danger tier; an 'external' write offers no whole-tool standing grant. */
+  /** The tool's danger tier; an 'external' or 'schedules' call offers no whole-tool standing grant. */
   danger?: string
 }
 
 /** Allow / ask / deny lists of `Tool(pattern)` rules (permrules.py). */
 export interface PermissionRules { allow: string[]; ask: string[]; deny: string[] }
+
+/** A remembered MCP tool mode (`mcp_grants`), bound to the schema it approved. scope_id is '' for global. */
+export interface McpGrant {
+  id: string
+  tool_slug: string
+  scope: 'global' | 'project' | 'chat'
+  scope_id: string
+  mode: ToolMode
+  schema_hash: string
+  granted_by: string
+  created_at: number
+  updated_at: number
+}
+
+/** GET /permissions/grants: every standing grant, so one view shows what runs without asking. */
+export interface PermissionGrants {
+  /** 'Allow for this chat session' keys, in memory until restart. */
+  session: { conversation_id: string; title: string; keys: string[] }[]
+  chat_overrides: { conversation_id: string; title: string; tool: string; mode: ToolMode }[]
+  project_overrides: { project_id: string; title: string; tool: string; mode: ToolMode }[]
+  global: Record<string, ToolMode>
+  mcp: McpGrant[]
+  rules: PermissionRules
+}
 
 export interface PermissionEvaluation {
   action: 'allow' | 'ask' | 'deny' | 'none'
@@ -377,17 +436,23 @@ export interface McpServer {
   }
   tools: McpTool[]
   eval: McpEvalRecord | null
+  /** Remote servers only: whether a browser sign-in left a token. null for a local server. */
+  signed_in: boolean | null
 }
 
 /** A launch config, as the add form holds it and as /mcp/check takes it. */
 export interface McpServerDraft {
   name: string
-  transport: 'stdio' | 'sse' | 'http'
+  /** sse is refused by the API; a remote server is streamable HTTP. */
+  transport: 'stdio' | 'http'
   command: string
   args: string[]
   cwd: string
   env: Record<string, string>
   secrets: Record<string, string>
+  /** Remote servers. Header values are stored as secrets; reads return the names with empty values. */
+  url: string
+  headers: Record<string, string>
   description: string
 }
 
@@ -426,8 +491,11 @@ export interface ToolEvent {
   result_id?: string | null
   /** Set when a subagent made this call: its card rides the parent's stream, labelled with the child. */
   agent?: string
-  /** write_local_file / move_local_file: the pre-image kept so the user can undo it (id is null when too large to keep). */
-  undo?: { snapshot_id: string | null; reason?: string | null } | null
+  /**
+   * write_local_file / move_local_file: the pre-image kept so the user can undo it (id is null when too large to keep).
+   * Calendar / Google Tasks writes carry `external_id` instead; `notifies` means undoing emails the guests too.
+   */
+  undo?: { snapshot_id?: string | null; reason?: string | null; external_id?: string; notifies?: boolean } | null
   /** Set when the user rewrote the arguments on the approval card (approval_edits.py). `arguments` is then what ran. */
   edited_by?: 'user' | null
   /** What the model originally asked for, kept beside the edit so a card can show what changed. */
@@ -567,6 +635,9 @@ export interface ConversationSettings {
   effort: Effort
   /** Priority processing (`service_tier: priority`). Off sends nothing, so a model that rejects it is unaffected. */
   fast?: boolean
+  /** Set only when the chat is created. Memory, graph, voice and auto-learn are then forced off for good,
+   *  and the chat is left out of chat search. */
+  private?: boolean
   useMemory: boolean
   useGraph: boolean
   useDocuments: boolean
@@ -597,6 +668,10 @@ export interface ConversationSettings {
   /** Set when this conversation is a scheduled job's transcript. Such chats are indexed by the Agent
    *  Inbox and left out of the sidebar list (GET /conversations?include_jobs=true includes them). */
   job_id?: string
+  /** Set when this conversation is a desk's transcript. Desk and job transcripts cannot be branched. */
+  deskId?: string
+  /** The chat this one was branched from (POST /conversations/{id}/fork). */
+  forkedFrom?: string
 }
 
 /** One conversation matched by GET /conversations/search. Matched words in `text` sit between \x02 and \x03. */
@@ -1142,8 +1217,23 @@ export interface Settings {
   systemPrompt: string
   extractionModel: string
   autoLearn: boolean
-  /** Embed-backfill writes a model-made context blurb per chunk (one call each). */
+  /** New uploads and Rebuild index write a model-made context blurb per chunk (one call each). */
   contextualChunks?: boolean
+  /** Document search: 'hybrid' (keywords + embeddings) or 'bm25' (keywords only). */
+  retrievalMode?: 'hybrid' | 'bm25'
+  /** Reorder fused candidates with retrievalRerankModel before trimming. */
+  retrievalRerank?: boolean
+  retrievalRerankModel?: string
+  /** 0-1: vector-only hits below this similarity are dropped. */
+  retrievalMinSimilarity?: number
+  /** 1-10 passages per document in one search. */
+  retrievalPerDocCap?: number
+  /** 5-50 candidates per ranker before fusion. */
+  retrievalCandidates?: number
+  /** Also retrieve from the user's own Docs, not just uploaded files. */
+  useDocsInContext?: boolean
+  /** Embed meeting text for by-meaning meeting search (sends it to the embedding provider). */
+  meetingEmbeddings?: boolean
   /** Write a short model title after the first reply (uses the extraction model). */
   autoTitle: boolean
   /** Bank long messages and saved docs as writing samples, and keep the voice profile current. */
@@ -1169,6 +1259,10 @@ export interface Settings {
   maxToolRounds: number
   /** Connector tool count above which schemas are deferred behind tool search; 0 keeps every schema in the request. */
   mcpDeferAbove?: number
+  /** Built-in tool count above which only the core tools plus tool_search are sent; 0 sends every schema. */
+  toolDeferAbove?: number
+  /** Put the notes each connected connector server sends at initialize into the prompt, fenced and scanned. Default on. */
+  mcpServerNotes?: boolean
   /** Characters of skill bodies inlined into the prompt before falling back to a manifest. */
   skillsInlineBudget?: number
   /** Embedding model id used by memory and document retrieval. Changing it re-embeds both stores. */
@@ -1208,10 +1302,21 @@ export interface Settings {
   retainApprovalDays?: number
   /** Hosts fetch_url may still read once the reply has seen untrusted content. */
   fetchAllowlist?: string[]
+  /** Snapshot granted folders before a reply changes them, so Undo covers shell effects. Missing means on. */
+  snapshotsEnabled?: boolean
+  /** Reported by GET /settings, never stored: folder snapshots need a version-control binary on this Mac. */
+  snapshotsAvailable?: boolean
   /** Folders where fs_edit / fs_copy / fs_mkdir run without asking (absolute paths inside the home folder). */
   workspaceRoots?: string[]
   /** Mount the active desk's workspace at /workspace/desk in its sandbox container. Missing means on. */
   sandboxMountDesk?: boolean
+  /** Linux sandbox containers: the image a fresh one starts from, the CLI. */
+  sandboxImage?: string
+  sandboxRuntime?: 'docker' | 'podman' | 'nerdctl'
+  /** A stopped sandbox nobody came back to is removed after this many days (0 = never). */
+  sandboxKeepDays?: number
+  /** The Linux sandbox's network: none, an allowlisting proxy (registries plus shellAllowedDomains), or open. A legacy stored true reads as open. */
+  sandboxNetwork?: 'off' | 'proxy' | 'open' | boolean
   /** Host shell. shellNetwork opens the network entirely; off, only the allowlist below is reachable. */
   shellNetwork?: boolean
   shellTimeoutSec?: number
@@ -1254,6 +1359,8 @@ export interface Settings {
   deskMaxTurns?: number
   deskMaxCost?: number
   deskMaxLive?: number
+  /** Relaunch desks a restart interrupted mid-turn. Never one with an unknown-outcome call or a pending card. Off by default. */
+  deskAutoResume?: boolean
   /** How long a desk waits on a card nobody is watching before the run lets go. 0 = wait forever. */
   parkAfterSeconds?: number
   /** A native notification when a desk stops and cannot go on without you. Missing reads as on. */
@@ -1372,7 +1479,10 @@ export interface Learned {
   memories: Memory[]
   /** Durable preferences auto-learn superseded or dropped, rather than adding a near-duplicate. */
   updated?: Memory[]
+  /** The rows auto-learn dropped; their ids are the ones Undo restores. */
   removed?: Memory[]
+  /** Each update that replaced a row: `old_id` is the wording Undo brings back. A pinned row is rewritten in place and has no entry. */
+  superseded?: { old_id: string; new_id: string }[]
   nodes: GraphNode[]
   edges: GraphEdge[]
   conversation_id?: string
@@ -1386,6 +1496,10 @@ export interface Learned {
 export type BackgroundEvent =
   | { event: 'learned'; data: Learned }
   | { event: 'learn_error'; data: { conversation_id?: string; message_id?: string; message: string } }
+  /** Auto tidy-up queued memory proposals. `count` is only the new ones: re-read the pending list for the badge. */
+  | { event: 'proposals'; data: { count: number } }
+  /** The learn worker re-read a scope's writing samples into a new voice profile. */
+  | { event: 'style_learned'; data: { project_id: string | null; profile: StyleProfile } }
   | { event: 'job_finished'; data: { run_id: string; job_id: string } }
   | { event: 'usage_alert'; data: { period: 'daily' | 'monthly'; spent: number; limit: number } }
   /** Auto-learn queued memory tidy-up proposals (they change nothing until applied). */
@@ -1399,6 +1513,24 @@ export type BackgroundEvent =
   | { event: 'run_state'; data: RunInfo }
   /** A conversation's title was rewritten off the run (model title or regenerate). */
   | { event: 'conversation_changed'; data: { id: string; title?: string; /** A message was added outside a run (a desk's report): re-read the chat. */ reload?: boolean } }
+  /** A shell job started, ended or was killed: the Running list refetches. */
+  | { event: 'shell_jobs'; data: { live: number } }
+
+/** A shell command the agent started (GET /shell/jobs). `orphaned` = left by an earlier run of the app. */
+export interface ShellJobInfo {
+  job_id: string; pid: number | null; pgid: number | null; cwd: string; run_id: string | null
+  conversation_id: string | null; command: string
+  status: 'running' | 'exited' | 'killed' | 'timed_out' | 'orphaned' | 'failed'
+  exit_code: number | null; started: number; finished: number | null; background: boolean; total: number
+}
+export interface ShellJobTail extends ShellJobInfo { output: string; note?: string }
+
+/** One sandbox container (GET /sandboxes). conversation_id is null for one made before containers were labelled. */
+export interface SandboxInfo {
+  name: string; conversation_id: string | null; title: string | null; status: string; created: string
+  last_used: number | null; networked: boolean | null; holds_import: boolean; checkpoints: string[]
+}
+export interface SandboxStatus { available: boolean; runtime: string; reason: string; items: SandboxInfo[] }
 
 export interface BackupInfo {
   name: string; kind: 'daily' | 'manual' | 'premigrate' | 'prerestore'; created_at: number; size: number
@@ -1463,6 +1595,8 @@ export interface GrainApi {
   /** Data folder helpers for Settings → Data (native dialog, Finder, restart to apply a restore). */
   data: {
     chooseExportPath: () => Promise<string | null>
+    /** Native open dialog for files to hand a desk as inputs; [] when cancelled. */
+    chooseInputFiles: () => Promise<string[]>
     reveal: (path: string) => Promise<boolean>
     relaunch: () => Promise<void>
   }
@@ -1471,6 +1605,8 @@ export interface GrainApi {
   minimizeSelf: () => void
   /** A native notification about a desk, shown by main only while the window is unfocused; clicking opens that desk. */
   deskNotify: (payload: { title: string; body: string; deskId?: string }) => void
+  /** macOS microphone access for this app, asking once when it was never decided. Always 'granted' off macOS. */
+  micAccess: () => Promise<'granted' | 'denied' | 'restricted' | 'not-determined' | 'unknown'>
   /** The agent's interactive browser (hidden windows owned by main). The renderer never gets the bridge secret. */
   agentBrowser: {
     list: () => Promise<AgentBrowserSession[]>
@@ -1478,7 +1614,16 @@ export interface GrainApi {
     hide: (session: string) => Promise<void>
     /** Live JPEG frames after each action and at most every ~1.5 s while subscribed; returns the unsubscribe. */
     subscribe: (session: string, cb: (frame: AgentBrowserFrame) => void) => () => void
+    /** Sites with cookies saved in the agent browser (sign-ins from handoffs; page fetches share the same store). */
+    signIns: () => Promise<AgentBrowserSignIn[]>
+    /** Forgets one site's cookies and storage, or with no domain everything, closing open agent browsers first. */
+    clearSignIns: (domain?: string) => Promise<void>
   }
+}
+
+export interface AgentBrowserSignIn {
+  domain: string
+  count: number
 }
 
 export interface AgentBrowserSession {
@@ -1534,7 +1679,7 @@ export interface Recap { day: string; content: string; created_at: number; cache
  */
 
 export type DeskStatus = 'draft' | 'planning' | 'awaiting_plan' | 'working' | 'needs_approval' | 'blocked'
-  | 'paused' | 'interrupted' | 'review' | 'done' | 'failed' | 'stopped'
+  | 'paused' | 'interrupted' | 'review' | 'done' | 'failed' | 'stopped' | 'queued'
 
 /** Mirrors `cowork.NEEDS_YOU`: the statuses that put a desk in the rail's "Needs you" section. */
 export const NEEDS_YOU: DeskStatus[] = ['awaiting_plan', 'needs_approval', 'blocked', 'interrupted', 'review']
@@ -1550,6 +1695,10 @@ export interface PlanEdit { idx: number; arguments?: Record<string, unknown>; dr
 
 
 export interface DeskBudget { maxTurns?: number; maxCost?: number }
+/** Something the user hands a desk: a doc, an uploaded document, or a local file under the home folder. */
+export type DeskInputRef = { kind: 'doc'; id: string } | { kind: 'document'; id: string } | { kind: 'path'; path: string }
+
+export type DeskAction = 'start' | 'pause' | 'resume' | 'stop' | 'message' | 'delete'
 
 export interface Desk {
   id: string
@@ -1577,10 +1726,17 @@ export interface Desk {
   live: boolean
   /** Derived: unseen `needs_you` events on this desk. */
   unseen: number
+  /** Derived from the backend's transition tables: what may be done to the desk in this status. */
+  actions: DeskAction[]
   created_at: number
   updated_at: number
   ended_at: number | null
+  /** Set while the desk waits for a free slot under `deskMaxLive` (status `queued`); the queue is oldest first. */
+  queued_at?: number | null
 }
+
+/** What start/resume/message/create answer for a desk that joined the queue instead of starting. */
+export interface DeskQueued { queued: true; position: number; live: number; max: number }
 
 /** GET /cowork/desks/{id}: the desk plus everything the detail pane opens with. */
 export interface FullDesk extends Desk {
@@ -1617,6 +1773,8 @@ export interface DeskOutput {
   decided_at: number | null
   /** Set by GET .../outputs when the file could not be re-hashed at all. */
   error?: string
+  /** Undecided rows only: the file on disk no longer matches `sha256`. Survives a refused promotion. */
+  stale?: boolean
 }
 
 export type DeskFileState = 'new' | 'modified' | 'unchanged'
@@ -1632,6 +1790,9 @@ export interface DeskFile {
 
 /** GET /cowork/desks/{id}/files */
 export interface DeskFileTree { files: DeskFile[]; usage: { files: number; bytes: number } }
+
+/** GET /conversations/{id}/outputs: what a plain chat's tools saved for the user. `folder` is for Show in Finder. */
+export interface ChatOutputs extends DeskFileTree { folder: string }
 
 /** GET /cowork/desks/{id}/file — a character window, or a named-and-sized stub for a binary. */
 export interface DeskFilePreview {
@@ -1926,14 +2087,20 @@ export interface RunInfo {
 
 // ---------------- scheduled jobs + the Agent Inbox ----------------
 
+export type JobKind = 'cron' | 'once' | 'watch' | 'mail'
+
 /** One scheduled job (`jobs` table). `cron` is read in `timezone`, so it follows the wall clock through DST. */
 export interface Job {
   id: string
   name: string
-  /** 'cron' repeats on `cron` forever; 'once' fires at `run_at` and then switches itself off. */
-  kind: 'cron' | 'once'
-  /** Empty for a one-off. */
+  /** 'cron' repeats on `cron` forever; 'once' fires at `run_at` and then switches itself off; 'watch' fires when
+   *  files appear or change in `watch_dir` (and on `cron` too, when it has one); 'mail' fires when a thread
+   *  matching `mail_query` is new or has a new message. */
+  kind: JobKind
+  /** Empty for a one-off, for a mail job, and for a folder job with no clock. */
   cron: string
+  /** A Gmail search, for kind 'mail'. Polled at most every five minutes. */
+  mail_query?: string | null
   /** The single instant a one-off runs at; null for a repeating job. */
   run_at: number | null
   timezone: string
@@ -1959,7 +2126,28 @@ export interface Job {
   last_skip_reason: string | null
   /** The only tools this job's runs may use. null = every tool (the default); it can only narrow, never widen. */
   allowed_tools: string[] | null
+  /** When a run is worth an OS notification: failures, pauses and proposals ('problems'), also plain successes, or never. */
+  notify: JobNotifyMode
+  /** The folder a 'watch' job watches; null for the others. */
+  watch_dir: string | null
+  /** The model this job's runs use. null = the default model. */
+  model: string | null
+  /** Caps this job tightens below the fixed job budget; each one can only go down. null = the job budget as is. */
+  budget: JobBudget | null
+  /** 'desk': each fire opens a desk with `prompt` as its brief, instead of a proposal-only chat run. */
+  target: 'run' | 'desk'
+  /** A scheduled desk plans first or proposes at the end; 'ask' is refused (nobody is there to answer). */
+  desk_autonomy: Exclude<DeskAutonomy, 'ask'> | null
+  desk_budget: Record<string, number> | null
 }
+
+export interface JobBudget {
+  maxRunTokens?: number
+  maxRunSeconds?: number
+  maxRunCost?: number
+}
+
+export type JobNotifyMode = 'problems' | 'always' | 'never'
 
 /** An outward-facing call a background run recorded instead of making. Accepting it is what runs it. */
 export interface AgentProposal {
@@ -1972,11 +2160,14 @@ export interface AgentProposal {
   tool: string
   args: Record<string, unknown>
   args_digest: string
-  status: 'pending' | 'accepted' | 'rejected'
+  /** 'expired': left pending past settings.proposalExpireDays; it can no longer be accepted. */
+  status: 'pending' | 'accepted' | 'rejected' | 'expired'
   result: unknown
   error: string | null
   /** The user changed the arguments before accepting. */
   edited: boolean
+  /** Accept takes edited arguments for this tool (approval_edits.EDITABLE_TOOLS); otherwise it runs as proposed. */
+  editable?: boolean
   created_at: number
   decided_at: number | null
   /** Who proposed it (GET /inbox only): the job, or the desk whose run did. */
@@ -1990,7 +2181,7 @@ export interface JobRunSummary {
   status: 'running' | 'awaiting_approval' | 'done' | 'error' | 'interrupted'
   job_id: string | null
   job: string
-  kind: 'cron' | 'once'
+  kind: JobKind
   due_at: number | null
   fired_at: number
   late: boolean
@@ -2006,6 +2197,8 @@ export interface JobRunSummary {
   tool_calls: number
   proposals: number
   pending_proposals: number
+  /** Marked read in the Agent Inbox (inbox_seen). A read card collapses to one line. */
+  seen: boolean
   /** The run's own report, from the event tape. Shown as the body; nothing is parsed out of it. */
   summary: string
 }
@@ -2031,7 +2224,19 @@ export interface JobRunRecord {
   summary: string
 }
 
+/** A slot the job turned away (job_skips), listed among its runs. `started_at` is when it was skipped. */
+export interface JobSkipRecord {
+  run_id: string
+  conversation_id: null
+  status: 'skipped'
+  reason: string
+  due_at: number | null
+  started_at: number
+}
+
 export interface JobStats {
+  /** Skipped slots in the window; never counted in `runs` or `success_rate`. */
+  skipped?: number
   runs: number
   ok: number
   failed: number
@@ -2044,10 +2249,12 @@ export interface JobStats {
 /** One OS-notification-worthy job event (GET /inbox/notify). Names and counts only, never reply text. */
 export interface JobNotifyEvent {
   id: string
-  kind: 'job_failed' | 'job_done_with_proposals' | 'job_paused' | 'proposal_pending'
+  kind: 'job_failed' | 'job_done' | 'job_done_with_proposals' | 'job_paused' | 'proposal_pending'
   title: string
   body: string
   at: number
+  /** Where a click goes: 'inbox' (Today's Agent Inbox) or 'run:<conversation_id>' (that run's transcript). */
+  target: string
 }
 
 export type InboxQueueKey = 'doc_edits' | 'meetings' | 'skills' | 'workflows' | 'memory' | 'suggestions'
@@ -2063,8 +2270,9 @@ export interface AgentInbox {
     elsewhere?: { key: InboxQueueKey; label: string; count: number }[]
   }
   while_you_were_away: JobRunSummary[]
-  counts: { needs_you: number; approvals: number; proposals: number; paused_jobs: number; runs: number; late: number; failed: number }
-  scheduler: { last_tick: number | null; fires: number; next_due_at: number | null; timezone: string }
+  counts: { needs_you: number; approvals: number; proposals: number; paused_jobs: number; runs: number; unseen_runs: number; late: number; failed: number }
+  /** wake_unavailable: the OS refused to book a wake, so jobs only run while the Mac is awake and the app is open. */
+  scheduler: { last_tick: number | null; fires: number; next_due_at: number | null; timezone: string; wake_unavailable?: boolean }
 }
 
 /** A tool call waiting on the user (`approvals` table). */
@@ -2089,6 +2297,9 @@ export interface PendingApproval {
   parked_at?: number | null
   /** A run in this process is waiting on it right now. */
   live?: boolean
+  /** What the user said with the answer. */
+  note?: string | null
+  conversation_title?: string | null
 }
 
 /** 409 detail of POST /conversations/{id}/chat when that conversation already has a live run. */

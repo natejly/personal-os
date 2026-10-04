@@ -22,7 +22,7 @@ from typing import Any, Callable
 
 from . import llm, redact
 from .db import Database, new_id, now, row_to_dict
-from .repos import Graph, Memories
+from .repos import Graph, Memories, _scope_clause
 from .trace import Tracer
 
 log = logging.getLogger("personal_os")
@@ -51,6 +51,7 @@ Rules:
 - Never create an entity for the user themselves ("User", "me", their name); facts about the user belong in memories instead.
 - Convert relative dates (tomorrow, next month, this Friday) to absolute dates using today's date, which is given below. Keep the original wording only when no date can be inferred.
 - When the user says a relationship has ended or changed (left a job, moved, broke up), list it in "ended"; when a new relation replaces an old one (works at Beta instead of Acme), set "replaces" on the new relation. Ended relations are kept as history, just no longer current.
+- Never store credentials: passwords, PINs, passcodes, API keys, tokens, recovery codes or card numbers, even when the user states them.
 - Return empty arrays when nothing durable was said. Never invent facts.
 """
 
@@ -80,6 +81,12 @@ def absolutize(text: str, today: date) -> str | None:
 
     out = REL_DATE_RE.sub(sub, text)
     return out if ok else None
+
+
+def normalize_memory(text: str, today: date) -> str | None:
+    """What every memory write applies first: credentials scrubbed, relative dates made absolute.
+    None when a relative date cannot be resolved, so the caller drops it instead of storing it to rot."""
+    return absolutize(redact.scrub_secrets(text), today)
 
 
 SELF_LABELS = {"user", "the user", "me", "myself", "i"}
@@ -160,7 +167,7 @@ async def learn_from_exchange(
         if not isinstance(u, dict):
             continue
         target = tagged.get(_s(u.get("id")))
-        content = _s(u.get("content"))
+        content = normalize_memory(_s(u.get("content")), today) or ""
         if not target or len(content) < 6 or content == target["content"]:
             continue
         # The snapshot predates the model call: re-read so a memory the user pinned or reworded
@@ -193,8 +200,8 @@ async def learn_from_exchange(
 
     added_memories = []
     for m in _list(data.get("memories")):
-        content = _s(m.get("content")) if isinstance(m, dict) else _s(m)
-        content = absolutize(content, today) or ""  # a relative date the store cannot resolve is dropped, not kept to rot
+        # A credential the user typed must never become a memory; a relative date the store cannot resolve is dropped.
+        content = normalize_memory(_s(m.get("content")) if isinstance(m, dict) else _s(m), today) or ""
         if len(content) < 6:
             continue
         kind = m.get("kind", "fact") if isinstance(m, dict) else "fact"
@@ -398,8 +405,9 @@ class Skills:
             if project_id is None:
                 where.append("project_id IS NULL")
             else:
-                where.append("(project_id = ? OR project_id IS NULL)")
-                args.append(project_id)
+                w, a = _scope_clause(project_id)  # project + personal, unless the project is isolated
+                where.append(w)
+                args += a
         sql = "SELECT * FROM skills" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY updated_at DESC"
         with self.db.tx() as c:
             return [row_to_dict(r, ("references",)) for r in c.execute(sql, args).fetchall()]  # type: ignore[misc]
@@ -578,6 +586,15 @@ class LearnJob:
     spans: list[dict[str, Any]]
 
 
+@dataclass
+class StyleJob:
+    """Re-read one scope's writing samples. Not tied to a chat: docs and pasted samples queue it too."""
+
+    project_id: str | None
+    settings: dict[str, Any]
+    model: str
+
+
 class LearnWorker:
     """Auto-learn, off the reply's critical path.
 
@@ -598,7 +615,11 @@ class LearnWorker:
         depth: int = 32,
         consolidator: Any = None,
         alive: Callable[[str], bool] | None = None,
+        style: Any = None,
     ) -> None:
+        self._style = style  # style.WritingStyle: StyleJobs relearn through it
+        self._style_queued: set[str] = set()  # scopes with a StyleJob waiting; one is enough, relearn reads them all
+        self._loop: asyncio.AbstractEventLoop | None = None
         self._alive = alive  # False for a conversation that has since been trashed: its queued job is dropped
         self._consolidator = consolidator  # consolidate.Consolidator: only ever asked to *propose*
         self._since_tidy = 0
@@ -607,8 +628,12 @@ class LearnWorker:
         self._graph = graph
         self._set_trace = set_trace
         self._publish = publish
-        self._q: asyncio.Queue[LearnJob] = asyncio.Queue(depth)
+        self._q: asyncio.Queue[LearnJob | StyleJob] = asyncio.Queue(depth)
         self._task: asyncio.Task[None] | None = None
+
+    def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
+        """The app's loop, so a sync route running in the threadpool can still queue a StyleJob."""
+        self._loop = loop
 
     def start(self) -> None:
         if self._task is None or self._task.done():
@@ -632,17 +657,45 @@ class LearnWorker:
             log.warning("auto-learn queue full; dropping message %s", job.message_id)
             return False
 
+    def submit_style(self, project_id: str | None, settings: dict[str, Any], model: str) -> None:
+        """Queue a relearn of the scope's voice. Safe from a threadpool route; a scope already queued is not queued twice."""
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            if self._loop is not None and self._loop.is_running():
+                self._loop.call_soon_threadsafe(self.submit_style, project_id, settings, model)
+            return
+        if self._style is None or (project_id or "") in self._style_queued:
+            return
+        self.start()
+        try:
+            self._q.put_nowait(StyleJob(project_id, settings, model))
+            self._style_queued.add(project_id or "")
+        except asyncio.QueueFull:
+            log.warning("auto-learn queue full; dropping style relearn")
+
     async def _drain(self) -> None:
         while True:
             job = await self._q.get()
             try:
-                await self._run(job)
+                if isinstance(job, StyleJob):
+                    self._style_queued.discard(job.project_id or "")
+                    await self._run_style(job)
+                else:
+                    await self._run(job)
             except asyncio.CancelledError:
                 raise
             except Exception:  # noqa: BLE001 - one bad exchange must not take the worker down
-                log.exception("auto-learn failed for message %s", job.message_id)
+                log.exception("auto-learn failed for %s", getattr(job, "message_id", "style relearn"))
             finally:
                 self._q.task_done()
+
+    async def _run_style(self, job: StyleJob) -> None:
+        """relearn applies the pending-sample threshold and the hand-edit freeze itself: most jobs end without a call."""
+        llm.usage_context.set({"project_id": job.project_id})
+        profile = await self._style.relearn(settings=job.settings, project_id=job.project_id, model=job.model)
+        if profile:
+            self._publish("style_learned", {"project_id": job.project_id, "profile": profile})
 
     async def _maybe_consolidate(self, job: LearnJob, added: int) -> None:
         """Every N new auto memories, queue tidy-up *proposals*. Creating them changes nothing; the user applies them."""

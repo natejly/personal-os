@@ -113,6 +113,8 @@ export default function MailView(): JSX.Element {
       if (seq.current !== mine) return
       writeView(key, out)
       setMessages(out)
+      // Snoozes wake (and get made elsewhere) between loads, so the hidden set is re-read with the list.
+      api.mailWatch.snoozed().then((r) => { if (seq.current === mine) setSnoozed(r.thread_ids) }).catch(() => {})
     } catch (e) {
       if (seq.current === mine) setError((e as Error).message)
     } finally {
@@ -125,7 +127,6 @@ export default function MailView(): JSX.Element {
     api.google.gmailLabels().then(setLabels).catch(() => setLabels([]))
   }, [google?.connected])
 
-  useEffect(() => { api.mailWatch.snoozed().then((r) => setSnoozed(r.thread_ids)).catch(() => setSnoozed([])) }, [google?.connected])
   const snooze = async (m: GmailMessage): Promise<void> => {
     const t = new Date(); t.setDate(t.getDate() + 1); t.setHours(8, 0, 0, 0)
     try {

@@ -16,6 +16,7 @@ from typing import Any, AsyncIterator, Callable
 import httpx
 
 from . import providers
+from .microvm import DEFAULT_IMAGE
 log = logging.getLogger("personal_os.llm")
 
 # Usage accounting. The app registers a listener; callers that know the chat/project set usage_context.
@@ -143,6 +144,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "otelExport": {"enabled": False, "endpoint": "", "headers": {}, "includeContent": False, "allowRemote": False, "timeoutSeconds": 5},
     # Offer MCP tools through mcp_tool_search once more than this many are ready (0 = always send every schema).
     "mcpDeferAbove": 12,
+    # Past this many built-in tools, offer the core set plus tool_search instead of every schema (0 = send them all).
+    "toolDeferAbove": 40,
+    # Put the notes each connected MCP server sends at initialize into the prompt (fenced, scanned, capped).
+    "mcpServerNotes": True,
     # Approved skills are inlined in the system prompt up to this many characters; past it, an index + skill_view.
     "skillsInlineBudget": 6000,
     # Per-section token budgets for the retrieval blocks of a turn (0 = unlimited). Past a budget the
@@ -172,6 +177,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "deskMaxTurns": 12,
     "deskMaxCost": 2.0,
     "deskMaxLive": 4,
+    # Relaunch desks a restart interrupted mid-turn. Off by default: a desk with a call whose outcome is
+    # unknown, or one waiting on an approval or its plan, is never relaunched either way.
+    "deskAutoResume": False,
     # Subagents (subagents.py): how many may run at once across the app, how deep they may nest, and
     # each one's own round and cost caps (also charged to the reply that spawned it). A child with no
     # model or tool activity for subagentStaleSeconds, or stuck inside one tool for subagentToolSeconds,
@@ -190,6 +198,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # 30 min) and how many consecutive failed fires switch a job off.
     "jobRetryBackoffS": 120,
     "jobFailureStreakLimit": 3,
+    "proposalExpireDays": 7,  # a job's pending proposal turns 'expired' (no longer acceptable) after this many days; 0 = never
     "jobExpireDays": 0,  # recurring jobs pause (reason "expired") after one last fire this many days after arming; 0 = never
     # OS notification when an unattended job fails, is paused, or leaves proposals (only while the app is hidden).
     "notifyJobs": True,
@@ -216,11 +225,18 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "githubToken": "",
     # A stopped sandbox (containers are stopped, not removed, at app quit) is deleted after this many idle days.
     "sandboxKeepDays": 14,
+    # The sandbox_* containers: the image a fresh one starts from, and the CLI that drives them (docker, podman or
+    # nerdctl). Their network is sandboxNetwork below.
+    "sandboxImage": DEFAULT_IMAGE,
+    "sandboxRuntime": "docker",
     # Folders (absolute paths inside the home folder) where fs_edit / fs_copy / fs_mkdir run without asking. A desk's
     # own workspace is always granted; anywhere else those tools ask first.
     "workspaceRoots": [],
     # Mount the active desk's workspace read-write at /workspace/desk in that desk's sandbox container.
     "sandboxMountDesk": True,
+    # The Linux sandbox's network: "off" (none), "proxy" (an internal-only network whose one way out is an allowlisting
+    # proxy: package registries plus shellAllowedDomains), "open" (every result taints). A stored true reads as "open".
+    "sandboxNetwork": "off",
     # fs_edit and an overwriting write_local_file refuse a file this conversation has not read (or that changed since).
     "requireReadBeforeWrite": True,
     # Host shell (shell.py): shell_run runs in a Seatbelt sandbox inside the desk workspace or a workspace root.
@@ -276,7 +292,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "meetingEmbeddings": False,
     "retrievalPerDocCap": 3,
     "retrievalCandidates": 20,
-    # Off by default, one model call per chunk: embed-backfill writes a short blurb situating each chunk in
+    # Off by default, one model call per chunk: new uploads and embed-backfill (Rebuild index) write a short blurb situating each chunk in
     # its document, which is then indexed and embedded with the chunk. Rerank: reorder the fused candidates
     # with a rerank model (/v1/rerank, else one completion) before trimming; blank model = off.
     "contextualChunks": False,
@@ -492,6 +508,8 @@ _OVERFLOW_MSG = re.compile(r"context (length|window)|maximum context|prompt is t
 _QUOTA_MSG = re.compile(r"exceeded your current quota|insufficient (quota|credits?|balance)|credit balance|billing|payment required")
 _PARAM_MSG = re.compile(r"unsupported (parameter|value)|unknown parameter|unrecognized request argument|does not support")
 _OVERLOAD_MSG = re.compile(r"overloaded|at capacity")
+# A LiteLLM proxy answers 400 "No connected db." when the key is not its master key.
+_AUTH_MSG = re.compile(r"no connected db|invalid api key|authentication")
 
 
 def classify_error(status: int | None, body: str) -> str:
@@ -504,7 +522,7 @@ def classify_error(status: int | None, body: str) -> str:
         return "overflow"
     if status == 402 or code == "insufficient_quota" or typ == "insufficient_quota" or code.startswith("billing") or typ.startswith("billing") or _QUOTA_MSG.search(msg):
         return "quota"
-    if status in (401, 403):
+    if status in (401, 403) or typ == "no_db_connection" or _AUTH_MSG.search(msg):
         return "auth"
     if status == 404:
         return "not_found"
@@ -557,7 +575,7 @@ def describe_http_error(status: int, reason: str, body: str, retried: int = 0, r
         wait = f" The provider asked to wait {int(retry_after)}s." if retry_after else ""
         more = f" {detail}" if detail and kind == "rate_limit" else ""
         return f"The provider is rate-limiting you (429).{tail}{wait} Wait a moment and try again, or pick another model.{more}"
-    if status in (401, 403):
+    if kind == "auth" or status in (401, 403):
         return f"The provider rejected your API key or access ({status}). Check the API key in Settings. {detail}".strip()
     if status == 404:
         return f"The provider does not know that model or route (404). Check the model name in Settings. {detail}".strip()

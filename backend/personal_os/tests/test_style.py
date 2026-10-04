@@ -235,11 +235,13 @@ class RelearnTests(unittest.TestCase):
         self.assertEqual(self.style.stats(None)["samples"], 0)
         self.assertEqual(self.calls, [])
 
-    def test_exchange_hook_banks_prose_and_learns(self) -> None:
+    def test_exchange_hook_banks_prose_without_calling_the_model(self) -> None:
+        # The relearn is the learn worker's job now; the hook on the reply's run only banks.
         banked = run(learn_style_from_exchange(settings={}, style=self.style, project_id=None, user_text=PROSE, model="m"))
         self.assertIsNotNone(banked)
-        self.assertEqual(banked["profile"]["summary"], "Direct and plain.")
+        self.assertIsNone(banked["profile"])
         self.assertEqual(self.style.stats(None)["samples"], 1)
+        self.assertEqual(self.calls, [])
 
     def test_analysis_prompt_carries_the_samples(self) -> None:
         self.style.add_sample(None, PROSE)

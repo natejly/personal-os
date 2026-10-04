@@ -299,6 +299,8 @@ def test_context_block_is_empty_when_off_and_when_opted_out() -> None:
     m.store.set_profile("### Tools\n- Lives in Cursor")
     assert m.context_block() == ""                      # a saved profile stays out while the monitor is off
     _enable(m)
+    assert m.context_block() == ""                      # and while enabled but stopped
+    m.running = True
     assert "Lives in Cursor" in m.context_block()
 
     m.set_config({"injectContext": False})

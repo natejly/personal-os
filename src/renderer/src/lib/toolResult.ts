@@ -20,7 +20,7 @@ export interface Parsed {
 
 const STRING_KEYS = ['output', 'stdout', 'stderr', 'cwd', 'job_id', 'status', 'url', 'title', 'snapshot', 'path', 'output_path', 'converter', 'description',
   'text', 'note', 'model', 'error', 'answer', 'choice', 'summary', 'question', 'format']
-const NUMBER_KEYS = ['exit_code', 'duration_s', 'bytes', 'width', 'height', 'tab', 'total_pages']
+const NUMBER_KEYS = ['exit_code', 'duration_s', 'bytes', 'width', 'height', 'tab', 'total_pages', 'total_bytes']
 const BOOL_KEYS = ['timed_out', 'still_running', 'background', 'ocr', 'truncated']
 
 /** A JSON string body that may stop mid-way: decode what is there, dropping a dangling escape. */
@@ -106,6 +106,38 @@ export function shellState(name: string, d: Fields | null, pending: boolean): { 
   return { label: code === 0 ? 'exit 0' : `exit ${code}`, tone: code === 0 ? 'ok' : 'bad' }
 }
 
+/** A sandbox_list_files row. */
+export interface SandboxEntry { type: 'dir' | 'file'; bytes: number; path: string }
+
+/** The rows of a sandbox_list_files result (the backend drops trailing rows rather than cutting one). */
+export function sandboxEntries(d: Fields | null): SandboxEntry[] {
+  const rows: unknown[] = Array.isArray(d?.entries) ? d.entries : []
+  return rows.flatMap((r) => {
+    const e = (r && typeof r === 'object' ? r : {}) as Fields
+    return str(e.path) ? [{ type: e.type === 'dir' ? 'dir' as const : 'file' as const, bytes: num(e.bytes) ?? 0, path: str(e.path) }] : []
+  })
+}
+
+/** The one-line outcome of a sandbox write, export or checkpoint call; '' when the result says nothing readable. */
+export function sandboxLine(name: string, d: Fields | null): string {
+  if (!d) return ''
+  const bytes = num(d.bytes)
+  const size = bytes === null ? '' : `${bytes.toLocaleString('en-US')} bytes `
+  switch (name) {
+    case 'sandbox_write_file':
+    case 'sandbox_put_document':
+      return str(d.written) ? `${d.appended === true ? 'appended' : 'wrote'} ${size}to ${str(d.written)}` : ''
+    case 'sandbox_export_file': return str(d.saved) ? `saved ${size}to ${str(d.saved)}` : ''
+    case 'sandbox_checkpoint': {
+      const kept = strList(d.kept)
+      return str(d.checkpoint) ? `saved checkpoint “${str(d.checkpoint)}”${kept.length > 1 ? ` (keeping ${kept.join(', ')})` : ''}` : ''
+    }
+    case 'sandbox_restore': return str(d.restored) ? `restored checkpoint “${str(d.restored)}”` : ''
+    case 'sandbox_reset': return d.reset === true ? 'reset; the next call starts from a fresh container' : ''
+    default: return ''
+  }
+}
+
 /** "1.4 s", "2 min 5 s". */
 export function fmtSeconds(s: number | null): string {
   if (s === null) return ''
@@ -166,4 +198,38 @@ export function gateProblems(error: string | null | undefined): { lead: string; 
   const [lead, ...rest] = e.split('\n')
   const items = rest.map((l) => l.replace(/^\s*\d+[.)]\s*/, '').trim()).filter(Boolean)
   return { lead: lead.replace(/^desk_done refused:?\s*/i, '').replace(/[:.]\s*$/, ''), problems: items }
+}
+
+/** One file a plain chat's tool saved for the user (backend `Workspace.output_entry`); path is relative to the chat's files. */
+export interface OutputFile { name: string; size: number; path: string }
+
+const OUTPUT_ENTRY = /\{\s*"name":\s*"((?:[^"\\]|\\.)*)",\s*"size":\s*(\d+),\s*"path":\s*"((?:[^"\\]|\\.)*)"\s*\}/g
+
+const isOutput = (f: unknown): f is OutputFile => !!f && typeof f === 'object' && typeof (f as Fields).name === 'string' &&
+  typeof (f as Fields).size === 'number' && typeof (f as Fields).path === 'string'
+
+/**
+ * The `outputs` a result lists (sandbox_export_file, run_python, a browser download in a chat). The backend puts the key
+ * first, so when the preview was cut the complete entries at its start are still read.
+ */
+export function outputFiles(preview: string | null | undefined): OutputFile[] {
+  let text = (preview ?? '').trim()
+  try {
+    const o = JSON.parse(text) as Fields
+    if (!o || typeof o !== 'object' || Array.isArray(o)) return []
+    if (Array.isArray(o.outputs)) return o.outputs.filter(isOutput)
+    if (o.truncated !== true || typeof o.preview !== 'string') return []
+    text = o.preview
+  } catch { /* cut JSON: read it loosely below */ }
+  const head = /^\{\s*"outputs":\s*\[/.exec(text)
+  if (!head) return []
+  const body = text.slice(head[0].length)
+  const out: OutputFile[] = []
+  let at = 0
+  for (const m of body.matchAll(OUTPUT_ENTRY)) {
+    if (body.slice(at, m.index).replace(/[\s,]/g, '')) break // past the array: something else sits between entries
+    out.push({ name: decodeLoose(m[1]), size: Number(m[2]), path: decodeLoose(m[3]) })
+    at = (m.index ?? 0) + m[0].length
+  }
+  return out
 }

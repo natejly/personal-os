@@ -953,15 +953,25 @@ class Meetings:
         with self.db.tx() as c:
             return [row_to_dict(r, JSON_FIELDS) for r in c.execute(sql + " ORDER BY created_at", args).fetchall()]  # type: ignore[misc]
 
-    def failed_segments(self, meeting_id: str = "", limit: int = 200) -> list[dict[str, Any]]:
+    def failed_segments(self, meeting_id: str = "", limit: int = 200, replayable: bool = False) -> list[dict[str, Any]]:
+        """`replayable` keeps only rows retranscribe can still act on, so spent ones cannot fill the window."""
         sql = "SELECT * FROM meeting_segments WHERE state='failed'"
         args: list[Any] = []
+        if replayable:
+            sql += " AND wav_path<>'' AND attempts<?"
+            args.append(RETRANSCRIBE_MAX_ATTEMPTS)
         if meeting_id:
             sql += " AND meeting_id=?"
             args.append(meeting_id)
         args.append(max(1, int(limit)))
         with self.db.tx() as c:
             return [row_to_dict(r, JSON_FIELDS) for r in c.execute(sql + " ORDER BY created_at LIMIT ?", args).fetchall()]  # type: ignore[misc]
+
+    def reset_attempts(self, meeting_id: str) -> None:
+        """A manual retry: failed segments whose wav is still on disk get a fresh attempt budget."""
+        with self.db.tx() as c:
+            c.execute("UPDATE meeting_segments SET attempts=0 WHERE meeting_id=? AND state='failed' AND wav_path<>''",
+                      (meeting_id,))
 
     def segments_end(self, meeting_id: str) -> float:
         """Absolute epoch seconds of the last sample any segment of this meeting holds.
@@ -2077,7 +2087,7 @@ class MeetingService:
         live = self.pool.live()
         touched: set[str] = set()
         done = 0
-        for seg in self.meetings.failed_segments(meeting_id, limit=limit * 10):
+        for seg in self.meetings.failed_segments(meeting_id, limit=limit * 10, replayable=True):
             if done >= max(1, int(limit)):
                 break
             # The worker owns the segments of a meeting that is still recording.
@@ -2428,10 +2438,10 @@ class MeetingService:
                 continue
             if live is not None and live.meeting_id == m["id"]:
                 continue
-            replayable = [s for s in self.meetings.failed_segments(m["id"])
-                          if s["wav_path"] and int(s["attempts"] or 0) < RETRANSCRIBE_MAX_ATTEMPTS]
+            # Spent segments too: a manual Retranscribe can still replay them until retention runs out.
+            failed_with_wav = any(s["wav_path"] for s in self.meetings.failed_segments(m["id"]))
             stale = now() - float(m["ended_at"] or m["updated_at"] or 0) > AUDIO_RETENTION_SECONDS
-            if replayable and not stale:
+            if failed_with_wav and not stale:
                 continue
             self.meetings.delete_audio(m["id"])
             swept += 1

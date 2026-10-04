@@ -48,11 +48,11 @@ RESERVED_TOOL_NAMES = frozenset({
     "graph_search", "graph_traverse", "graph_add",
     "web_search", "fetch_url",
     "youtube_video", "youtube_search", "github_search", "github_read", "read_feed",
-    "run_python", "current_time", "propose_plan",
+    "run_python", "current_time", "propose_plan", "ask_user",
     "agent_spawn", "agent_wait", "agent_stop", "desk_start",
     "workflow_list", "workflow_run", "workflow_resume", "command_list", "command_run",
     "todo_write", "read_tool_result", "search_tool_results", "skill_list", "skill_draft", "skill_revise", "skill_view", "skill_from_run",
-    "mcp_tool_search",
+    "mcp_tool_search", "tool_search",
     "fs_glob", "fs_grep", "fs_edit", "fs_copy", "fs_mkdir",
     "todo_list", "todo_add", "todo_update", "todo_delete",
     "health_summary", "health_log", "health_delete_entry",
@@ -304,7 +304,9 @@ class McpServers:
                       enabled: bool = True) -> dict[str, Any]:
         sid = new_id()
         t = now()
-        plain = {k: str(v) for k, v in (secrets or {}).items() if v}
+        # Every header value is kept as a secret and the row keeps only header names, so a credential in
+        # an oddly named header can never sit in the table as plaintext.
+        plain = {k: str(v) for k, v in {**(secrets or {}), **(headers or {})}.items() if v}
         for attempt in range(SLUG_ATTEMPTS):
             try:
                 with self.db.tx() as c:
@@ -314,7 +316,7 @@ class McpServers:
                         " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,'',?,?)",
                         (sid, slugify(name, taken), name.strip() or "MCP server",
                          transport if transport in TRANSPORTS else "stdio", command.strip(), json.dumps(args or []),
-                         cwd, json.dumps(env or {}), json.dumps({k: "" for k in plain}), url.strip(), json.dumps(headers or {}),
+                         cwd, json.dumps(env or {}), json.dumps({k: "" for k in plain}), url.strip(), json.dumps({k: "" for k in headers or {}}),
                          description, 1 if enabled else 0, "idle" if enabled else "disabled", t, t),
                     )
                 break
@@ -329,6 +331,13 @@ class McpServers:
         fields: dict[str, Any] = {k: v for k, v in patch.items() if k in _SERVER_FIELDS and v is not None}
         if "transport" in fields and fields["transport"] not in TRANSPORTS:
             del fields["transport"]
+        incoming = dict(patch["secrets"]) if isinstance(patch.get("secrets"), dict) else {}
+        dropped = list(patch.get("clear_secrets") or [])
+        if isinstance(fields.get("headers"), dict):  # header values become secrets, as on create
+            old = (self.server(id) or {}).get("headers") or {}
+            dropped += [k for k in old if k not in fields["headers"]]
+            incoming.update({k: v for k, v in fields["headers"].items() if v})
+            fields["headers"] = {k: "" for k in fields["headers"]}
         for k in ("args", "env", "headers"):
             if k in fields:
                 fields[k] = json.dumps(fields[k])
@@ -340,13 +349,11 @@ class McpServers:
             if fields:
                 fields["updated_at"] = now()
                 c.execute(f"UPDATE mcp_servers SET {', '.join(f'{k}=?' for k in fields)} WHERE id=?", (*fields.values(), id))
-            incoming = patch.get("secrets") if isinstance(patch.get("secrets"), dict) else None
-            dropped = list(patch.get("clear_secrets") or [])
             if incoming or dropped:
                 row = c.execute("SELECT secrets FROM mcp_servers WHERE id=?", (id,)).fetchone()
                 if row:
                     merged = self._load_secrets(id)
-                    for k, v in (incoming or {}).items():
+                    for k, v in incoming.items():
                         if v in (None, ""):  # an empty value means "leave it alone", as in dashboards
                             continue
                         merged[k] = str(v)
@@ -510,10 +517,11 @@ class McpServers:
                           (slug, scope, scope_id or "")).fetchone()
         return row_to_dict(r)  # type: ignore[return-value]
 
-    def clear_grant(self, tool_slug: str, scope: str = "global", scope_id: str | None = None) -> None:
+    def clear_grant(self, tool_slug: str, scope: str = "global", scope_id: str | None = None) -> int:
+        """Rows deleted: 0 means the (scope, scope_id) named no grant."""
         with self.db.tx() as c:
-            c.execute("DELETE FROM mcp_grants WHERE lower(tool_slug)=lower(?) AND scope=? AND scope_id=?",
-                      (tool_slug, scope, scope_id or ""))
+            return c.execute("DELETE FROM mcp_grants WHERE lower(tool_slug)=lower(?) AND scope=? AND scope_id=?",
+                             (tool_slug, scope, scope_id or "")).rowcount
 
     def effective_mode(self, tool_slug: str, project_id: str | None = None, conversation_id: str | None = None) -> dict[str, Any]:
         """chat grant → project grant → global grant → tool default, then the stale-schema veto.

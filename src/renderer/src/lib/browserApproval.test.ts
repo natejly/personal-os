@@ -1,6 +1,29 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { browserAllowLabel, browserApprovalSentence, browserSentence, hostPath } from './browserApproval'
+import { browserAllowLabel, browserApprovalSentence, browserSentence, chatBrowserSession, deskBrowserSession, hostPath, latestBrowserCall, latestBrowserMessage } from './browserApproval'
+
+test('a plain chat watches conv:<conversation>, a desk transcript watches desk:<desk> (browser.py session_of)', () => {
+  assert.equal(chatBrowserSession('c1'), 'conv:c1')
+  assert.equal(deskBrowserSession('d1'), 'desk:d1')
+})
+
+test('only the last browser call in a reply gets the viewer', () => {
+  assert.equal(latestBrowserCall([{ id: 'a', name: 'browser_open' }, { id: 'b', name: 'browser_click' }, { id: 'c', name: 'web_search' }]), 'b')
+  assert.equal(latestBrowserCall([{ id: 'a', name: 'web_search' }]), null)
+})
+
+test('only the latest reply that used the browser offers the viewer, not every past one', () => {
+  const b = (id: string) => [{ id, name: 'browser_open' }]
+  const msgs = [
+    { id: 'm1', tool_events: b('a') },
+    { id: 'm2', tool_events: b('b') },
+    { id: 'm3', tool_events: [{ id: 'c', name: 'web_search' }] },
+    { id: 'm4' },
+    { id: 'm5', tool_events: null }
+  ]
+  assert.equal(latestBrowserMessage(msgs), 'm2')
+  assert.equal(latestBrowserMessage([{ id: 'm1' }]), null)
+})
 
 const text = (a: Record<string, unknown>): string => { const s = browserSentence(a); return s.before + s.host + s.after }
 

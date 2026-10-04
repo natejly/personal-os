@@ -36,7 +36,15 @@ test('fromConfigJson also accepts the bare inner entry', () => {
     { name: undefined, argv: 'uvx mcp-server-git', envText: '' })
 })
 
+test('fromConfigJson reads a remote entry as a url plus headers', () => {
+  const got = fromConfigJson(JSON.stringify({
+    mcpServers: { tracker: { url: 'https://mcp.example.com/mcp', headers: { Authorization: 'Bearer abc', 'X-Retries': 3 } } }
+  }))
+  assert.deepEqual(got, { name: 'tracker', url: 'https://mcp.example.com/mcp', headers: { Authorization: 'Bearer abc', 'X-Retries': '3' } })
+  assert.deepEqual(fromConfigJson('{"url":"https://x.test/mcp"}'), { name: undefined, url: 'https://x.test/mcp', headers: {} })
+})
+
 test('fromConfigJson returns null for anything that is not a launch config', () => {
-  for (const bad of ['not json', '[]', '{}', '{"mcpServers":{}}', '{"mcpServers":{"a":{"url":"http://x"}}}', 'null'])
+  for (const bad of ['not json', '[]', '{}', '{"mcpServers":{}}', '{"mcpServers":{"a":{"url":""}}}', 'null'])
     assert.equal(fromConfigJson(bad), null, bad)
 })

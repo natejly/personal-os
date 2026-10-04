@@ -1,9 +1,39 @@
-import { useState } from 'react'
-import { Check, ChevronDown, ChevronRight, Download, Plus, Trash2, Undo2, Upload, X } from 'lucide-react'
+import { useEffect, useMemo, useState } from 'react'
+import { Check, ChevronDown, ChevronRight, Download, Eye, Plus, Sparkles, Trash2, Undo2, Upload, X } from 'lucide-react'
 import { useStore } from '../store'
-import type { Skill } from '@shared/types'
+import type { Skill, SkillFinding, SkillPreview } from '@shared/types'
 import ProjectChip from './ProjectChip'
 import { api } from '../lib/api'
+import { debounceLatest, LINT_DELAY_MS, skillDisclosure } from '../lib/skillLint'
+
+type SkillText = { name: string; description: string; procedure: string }
+
+/** The backend lint for the text being edited, re-run as typing pauses. Null until the first reply. */
+function useSkillLint(d: SkillText, enabled: boolean, skillId?: string): SkillFinding[] | null {
+  const [findings, setFindings] = useState<SkillFinding[] | null>(null)
+  const lint = useMemo(() => debounceLatest((x: SkillText & { skill_id?: string }) => api.skills.lint(x), LINT_DELAY_MS,
+    (r) => setFindings(r ? r.findings : null)), [])
+  useEffect(() => lint.cancel, [lint])
+  useEffect(() => {
+    if (enabled) lint.call({ ...d, skill_id: skillId })
+    else lint.cancel()
+  }, [enabled, d.name, d.description, d.procedure, skillId, lint])
+  return enabled ? findings : null
+}
+
+function Findings({ findings }: { findings: SkillFinding[] | null }): JSX.Element | null {
+  if (!findings?.length) return null
+  return (
+    <ul className="skill-findings" aria-live="polite">
+      {findings.map((f, i) => (
+        <li key={i} className={f.level}>
+          <strong>{f.level === 'error' ? 'Blocks approval' : 'Check'}</strong> {f.message}
+          {f.hint && <span className="muted"> {f.hint}</span>}
+        </li>
+      ))}
+    </ul>
+  )
+}
 
 /** Why a procedure exists, in the user's terms. 'proposed' is reserved for the assistant asking directly. */
 const SOURCE_LABEL: Record<Skill['source'], string> = {
@@ -22,9 +52,12 @@ const SECTION: Record<Skill['status'], { title: string; blurb: string }> = {
 function SkillRow({ skill }: { skill: Skill }): JSX.Element {
   const { updateSkill, deleteSkill, toast } = useStore()
   const [open, setOpen] = useState(false)
-  const [draft, setDraft] = useState<{ name: string; description: string; procedure: string } | null>(null)
+  const [draft, setDraft] = useState<SkillText | null>(null)
 
   const edit = draft ?? { name: skill.name, description: skill.description, procedure: skill.procedure }
+  const findings = useSkillLint(edit, open, skill.id)
+  // The same check the approve PATCH refuses on (approval_blockers), shown before the click.
+  const blocked = !!findings?.some((f) => f.level === 'error')
   const dirty = draft !== null && (draft.name !== skill.name || draft.description !== skill.description || draft.procedure !== skill.procedure)
   const save = async (): Promise<void> => {
     if (dirty) await updateSkill(skill.id, draft!)
@@ -56,7 +89,8 @@ function SkillRow({ skill }: { skill: Skill }): JSX.Element {
         {!!skill.use_count && <small className="muted" title="Times the assistant read this procedure">used {skill.use_count}×</small>}
         <div className="skill-actions no-drag" onClick={(e) => e.stopPropagation()}>
           {skill.status !== 'approved' && (
-            <button className="primary-btn small" title="Let the assistant use this procedure"
+            <button className="primary-btn small" disabled={blocked}
+              title={blocked ? 'Fix what blocks approval first' : 'Let the assistant use this procedure'}
               onClick={() => void updateSkill(skill.id, { status: 'approved' })}><Check size={13} /> Approve</button>
           )}
           {skill.status === 'approved' && (
@@ -78,6 +112,7 @@ function SkillRow({ skill }: { skill: Skill }): JSX.Element {
           <label>Procedure
             <textarea rows={10} value={edit.procedure} onChange={(e) => setDraft({ ...edit, procedure: e.target.value })} />
           </label>
+          <Findings findings={findings} />
           <div className="row-actions">
             <button className="primary-btn small" disabled={!dirty} onClick={() => void save()}>Save</button>
             {dirty && <button className="small" onClick={() => setDraft(null)}>Cancel</button>}
@@ -96,6 +131,33 @@ export default function SkillsPanel(): JSX.Element {
   const [importing, setImporting] = useState(false)
   const [mdText, setMdText] = useState('')
   const [form, setForm] = useState({ name: '', description: '', procedure: '' })
+  const formFindings = useSkillLint(form, adding)
+  const [intent, setIntent] = useState('')
+  const [drafting, setDrafting] = useState(false)
+  const budget = useStore((s) => s.settings.skillsInlineBudget ?? 6000)
+  const [preview, setPreview] = useState<SkillPreview | null>(null)
+
+  const draftFromIntent = async (): Promise<void> => {
+    setDrafting(true)
+    try {
+      const r = await api.skills.draft(intent)
+      if (r.draft) setForm({ name: r.draft.name, description: r.draft.description, procedure: r.draft.procedure })
+      else toast(r.reason || 'No draft came back.', 'error')
+    } catch (e) {
+      toast((e as Error).message, 'error')
+    } finally {
+      setDrafting(false)
+    }
+  }
+
+  const togglePreview = async (): Promise<void> => {
+    if (preview) return setPreview(null)
+    try {
+      setPreview(await api.skills.preview())
+    } catch (e) {
+      toast((e as Error).message, 'error')
+    }
+  }
 
   const add = async (): Promise<void> => {
     if (!form.name.trim()) return
@@ -122,8 +184,23 @@ export default function SkillsPanel(): JSX.Element {
       <div className="add-row">
         <button className="primary-btn" onClick={() => setAdding(!adding)}><Plus size={14} /> New procedure</button>
         <button onClick={() => setImporting(!importing)}><Upload size={14} /> Import SKILL.md</button>
+        <button aria-pressed={!!preview} onClick={() => void togglePreview()}><Eye size={14} /> What the assistant sees</button>
         <span className="muted small">A way of doing a task. It stays off until you approve it.</span>
       </div>
+      {preview && (
+        <div className="skill-body standalone">
+          {preview.block ? (
+            <p className="muted small">
+              {preview.included.length} approved procedure{preview.included.length === 1 ? '' : 's'}, about {preview.tokens_estimate} tokens.{' '}
+              {skillDisclosure(preview.block, budget) === 'inline'
+                ? `Under the ${budget}-character budget, so each chat gets the full text below.`
+                : `Over the ${budget}-character budget, so chats get only names and one-line descriptions and open a procedure when it fits. Below is the full text.`}
+              {preview.omitted.length > 0 && ` Past the procedure limit and left out: ${preview.omitted.map((o) => o.name).join(', ')}.`}
+            </p>
+          ) : <p className="muted small">No approved procedures, so chats see nothing from here.</p>}
+          {preview.block && <pre className="skill-preview">{preview.block}</pre>}
+        </div>
+      )}
       {importing && (
         <div className="skill-body standalone">
           <label>Paste a SKILL.md
@@ -138,9 +215,17 @@ export default function SkillsPanel(): JSX.Element {
       )}
       {adding && (
         <div className="skill-body standalone">
+          <div className="skill-intent">
+            <input value={intent} placeholder="Draft from a sentence: “when I ask for a weekly review, …”"
+              onChange={(e) => setIntent(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter' && intent.trim() && !drafting) void draftFromIntent() }} />
+            <button className="small" disabled={!intent.trim() || drafting} onClick={() => void draftFromIntent()}>
+              <Sparkles size={13} /> {drafting ? 'Drafting…' : 'Draft'}</button>
+          </div>
           <label>Name<input autoFocus value={form.name} placeholder="Weekly review" onChange={(e) => setForm({ ...form, name: e.target.value })} /></label>
           <label>When it applies<input value={form.description} placeholder="when I ask for a weekly review" onChange={(e) => setForm({ ...form, description: e.target.value })} /></label>
           <label>Procedure<textarea rows={8} value={form.procedure} placeholder={'1. Pull this week\'s done todos.\n2. Check the calendar for what slipped.\n3. Draft the summary as bullets.'} onChange={(e) => setForm({ ...form, procedure: e.target.value })} /></label>
+          {(form.name || form.procedure) && <Findings findings={formFindings} />}
           <div className="row-actions">
             <button className="primary-btn small" disabled={!form.name.trim()} onClick={() => void add()}>Add as candidate</button>
             <button className="small" onClick={() => setAdding(false)}>Cancel</button>

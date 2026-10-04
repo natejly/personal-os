@@ -1,5 +1,5 @@
 import type { FullDoc } from '@shared/types'
-import { req, json, getBase, getToken } from '../../lib/api'
+import { req, json, getBase, getToken, NO_TIMEOUT } from '../../lib/api'
 import { isoDate } from './dates'
 
 export interface Backlink {
@@ -29,7 +29,7 @@ export const appendDaily = (text: string, date: Date | string = new Date()): Pro
 export const uploadDocAsset = (id: string, file: File): Promise<{ url: string }> => {
   const fd = new FormData()
   fd.append('file', file, file.name || 'image')
-  return req(`/docs/${encodeURIComponent(id)}/assets`, { method: 'POST', body: fd })
+  return req(`/docs/${encodeURIComponent(id)}/assets`, { method: 'POST', body: fd }, NO_TIMEOUT)
 }
 
 export const linkTitle = (url: string): Promise<{ title: string | null }> =>

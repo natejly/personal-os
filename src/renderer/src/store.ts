@@ -4,11 +4,13 @@ import type { ApprovalDecision, BackendInfo, BackendState, PlanEdit, PlanDecisio
   Desk, DeskEvent, DeskFile, FullDesk, PromotionResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityInsights, ActivitySignal, ActivityStatus, ActivitySummary, InsightStatus, AgentInbox, ChatEvent, ChatRunStarted, Conversation, ConversationSettings, Doc, DocFolder, DocRevision, Document, Effort, TrashKind, FullDoc, GraphData, Learned, Memory, Message, ModelInfo, PageContext, PlanStep, Settings, Project, RunConflict, SessionStatus, Skill, StyleProfile, StyleSample, StyleState, ToolInfo, Todo, GoogleStatus, TasksSyncStatus, TodoCalendarStatus, TodayDashboard, Recap, Job, Meeting, MeetingCandidate, MeetingCapability, MeetingConfig, MeetingPreflight, MeetingSegment, MeetingStatus, MeetingStatusInfo, FullMeeting } from '@shared/types'
 import { daily as dailyNote } from './features/notes/api'
 import { ApiError } from './lib/apiError'
+import { markRunsSeen } from './lib/inboxBadge'
+import { acceptToast } from './lib/proposalToast'
 import { installRejectionToasts } from './lib/rejections'
 import { api, backgroundStream, chatStream, setBase, type Scope } from './lib/api'
 import { currentSelection } from './lib/pageContext'
 import { DEFAULT_EFFORT, NEEDS_YOU } from '../../shared/types'
-import { chatNotice, finishStatus, foldRunState, mergeConversation, onScreen, pickEvictions, pulseStatus, reduceStatus, replayCursor, settleApprovals, type LiveRuns } from './sessionStatus'
+import { chatNotice, finishStatus, foldRunState, followRun, mergeConversation, onScreen, pickEvictions, pulseStatus, reduceStatus, replayCursor, settleApprovals, type LiveRuns } from './sessionStatus'
 import { adjacentChatId } from './lib/chatRows'
 import { createDeltaBuffer } from './lib/deltaBuffer'
 import { CHAT_NOTICE_BODY, notify } from './lib/notify'
@@ -20,6 +22,7 @@ import { emailAsk } from './lib/emailAsk'
 import { insertIntoComposer } from './lib/composerInsert'
 import type { UploadResult } from '@shared/types'
 import { uploadToast, type UploadOutcome } from './lib/uploadNote'
+import { pauseQueue, sendNext, updateQueue, type DoneInfo } from './lib/followQueue'
 
 /**
  * Settings as the renderer holds them: without the legacy `mode`, which only init() reads. Kept out
@@ -179,6 +182,8 @@ export interface State {
   draftFast: boolean
   /** Every other per-chat setting picked on a draft (plan mode, skip permissions, context toggles). `send` applies it. */
   draftChatSettings: Partial<ConversationSettings>
+  /** The next new chat is private: it is created with `private`, which only creation can set. */
+  draftPrivate: boolean
   /** The first message of a chat that has no row yet, shown until the row exists. */
   draftPendingSend: PendingSend | null
   /** A file was attached before this draft had a row. `send` marks the new chat untrusted. */
@@ -336,7 +341,7 @@ export interface State {
 
   refreshProjects: () => Promise<void>
   openProject: (id: string) => void
-  createProject: (p: Pick<Project, 'name' | 'description' | 'system_prompt' | 'color'>) => Promise<void>
+  createProject: (p: Pick<Project, 'name' | 'description' | 'system_prompt' | 'color'> & Partial<Pick<Project, 'memory_mode'>>) => Promise<void>
   updateProject: (id: string, patch: Partial<Project>) => Promise<void>
   deleteProject: (id: string) => Promise<void>
 
@@ -384,6 +389,8 @@ export interface State {
   /** Replace a sent user message: it and everything after it is hidden (not deleted) in the run that answers the new text. */
   editAndResend: (messageId: string, text: string, conversationId?: string) => Promise<boolean>
   activateVariant: (conversationId: string, messageId: string) => Promise<void>
+  /** Branch into a new chat holding the transcript up to `messageId`, and focus it. The source is untouched. */
+  forkChat: (conversationId: string, messageId: string) => Promise<Conversation | null>
   /** Continue an interrupted reply in a new run (always the user's click). Rejects with the backend's reason when it cannot. */
   resumeRun: (conversationId: string, runId: string) => Promise<void>
   stop: (conversationId?: string) => Promise<void>
@@ -486,13 +493,19 @@ export interface State {
   refreshDashboard: () => Promise<void>
   refreshRecap: (force?: boolean) => Promise<void>
   refreshAgentInbox: () => Promise<void>
+  /** Mark one "While you were away" run read, or every run in the window when `runId` is null. Optimistic. */
+  markInboxRunSeen: (runId: string | null) => Promise<void>
   refreshJobs: () => Promise<void>
   /** Schedule a task: a one-off (kind 'once' + run_at) or a repeating job (cron). True if it was created. */
   createJob: (input: Parameters<typeof api.jobs.create>[0]) => Promise<boolean>
   deleteJob: (id: string) => Promise<void>
   setJobEnabled: (id: string, enabled: boolean) => Promise<void>
+  /** PATCH a job; resolves to the backend's refusal text, or null when it saved. The caller shows the refusal inline. */
+  updateJob: (id: string, patch: Parameters<typeof api.jobs.update>[1]) => Promise<string | null>
   runJobNow: (id: string) => Promise<void>
-  decideProposal: (id: string, accept: boolean, args?: Record<string, unknown>) => Promise<void>
+  /** Resolves to the refusal message when the server turned the decision down (the proposal stays pending), else null. */
+  decideProposal: (id: string, accept: boolean, args?: Record<string, unknown>) => Promise<string | null>
+  rejectJobProposals: (jobId: string) => Promise<void>
   /** `opts` carries a propose_plan card's answer: the steps being authorised (with any edits) and a note. */
   approveTool: (callId: string, decision: ApprovalDecision, conversationId?: string, opts?: { steps?: PlanEdit[] | null; note?: string; rules?: string[]; arguments?: Record<string, unknown> | null }) => Promise<void>
   refreshGoogle: () => Promise<void>
@@ -515,8 +528,12 @@ export interface State {
 
   refreshDocs: (q?: string) => Promise<void>
   refreshDocsPending: () => Promise<void>
-  openDoc: (id: string) => Promise<void>
-  closeDocTab: (id: string) => void
+  /** `at.line` scrolls the editor to that line once the doc is open (a cited passage). */
+  openDoc: (id: string, at?: { line: number }) => Promise<void>
+  /** A line DocsView still has to jump to in `docId`; it clears this once it has. */
+  docJump: { docId: string; line: number } | null
+  /** Refuses (with a toast) while the open doc holds edits its last save could not write. */
+  closeDocTab: (id: string) => Promise<void>
   createDoc: (d?: { title?: string; content?: string; project_id?: string | null; folder?: string }) => Promise<void>
   /** Retitle the open doc as it is typed, on the same debounce as the body. */
   editDocTitle: (title: string) => void
@@ -554,6 +571,11 @@ export interface State {
   /** Status only — cheap enough to poll, and it keeps its own 5s tick while a recording is live. */
   refreshMeetingStatus: () => Promise<void>
   refreshMeetingsPending: () => Promise<void>
+  /** Pending memory tidy-up proposals in every scope: the Settings and Tidy-up badge. */
+  memoryProposals: number
+  refreshMemoryProposals: () => Promise<void>
+  /** Toast one learn pass with an Undo, and refresh what it touched. */
+  onLearned: (l: Learned) => void
   openMeeting: (id: string) => Promise<void>
   /** No id creates a meeting first. Opens the consent modal instead when the notice is unacknowledged. */
   startRecording: (meetingId?: string) => Promise<void>
@@ -885,6 +907,16 @@ const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 
 export { adjacentChatId }
 
+/** The toast for one learn pass, and whether anything changed. Updates and forgets count: they edit open lists too. */
+export const learnedText = (l: Learned): { text: string; changed: boolean } => {
+  const { memories, nodes, edges, updated = [], removed = [] } = l
+  const parts = [`Learned ${memories.length} memor${memories.length === 1 ? 'y' : 'ies'}`]
+  if (updated.length) parts.push(`updated ${updated.length}`)
+  if (removed.length) parts.push(`forgot ${removed.length}`)
+  parts.push(`${nodes.length} entities, ${edges.length} relations`)
+  return { text: parts.join(', '), changed: memories.length + updated.length + removed.length + nodes.length + edges.length > 0 }
+}
+
 export const useStore = create<State>((set, get) => {
   /**
    * App's init effect runs twice under React.StrictMode, so both of these are latched. A second
@@ -963,6 +995,7 @@ export const useStore = create<State>((set, get) => {
         : st.desks.some((x) => x.id === d.id) ? st.desks.map((x) => (x.id === d.id ? d : x)) : st.desks,
       activeDesk: st.activeDesk?.id === d.id ? { ...st.activeDesk, ...d } : st.activeDesk
     }))
+  const queuedNote = (position: number): string => `Queued #${position}: it starts when another desk finishes`
   /** The conversation a desk owns, from whichever copy of the row is loaded. */
   const deskConv = (id: string): string | undefined => {
     const st = get()
@@ -1015,15 +1048,6 @@ export const useStore = create<State>((set, get) => {
     void get().refreshProjects()
   }
   const reviewMemories = { label: 'Review', run: () => get().openMemory('list') }
-  // Both paths a learn pass reports on (the `remember` tool's stream, auto-learn's `/events`) say it the same way.
-  const announceLearned = ({ memories, nodes, edges, updated = [], removed = [] }: Learned): void => {
-    const parts = [`Learned ${memories.length} memor${memories.length === 1 ? 'y' : 'ies'}`]
-    if (updated.length) parts.push(`updated ${updated.length}`)
-    if (removed.length) parts.push(`forgot ${removed.length}`)
-    parts.push(`${nodes.length} entities, ${edges.length} relations`)
-    get().toast(parts.join(', '), 'learned', reviewMemories)
-    refreshAll()
-  }
 
   /** True once init has loaded the app's data at least once; a recovered backend then needs a refresh, not a re-init. */
   let loadedOnce = false
@@ -1114,20 +1138,26 @@ export const useStore = create<State>((set, get) => {
     await seedLiveRuns()
     for (;;) {
       try {
-        for await (const ev of backgroundStream(eventsSince)) {
+        // Reset on open, not on an event: a quiet stream that drops after an hour is not a failing backend.
+        for await (const ev of backgroundStream(eventsSince, undefined, () => { backoff = 1000 })) {
           if (ev.seq !== null) eventsSince = ev.seq
-          backoff = 1000
           if (ev.event === 'learned') {
-            announceLearned(ev.data)
+            get().onLearned(ev.data)
           } else if (ev.event === 'proposals') {
             const n = ev.data.count
             get().toast(`${n} memory tidy-up suggestion${n === 1 ? '' : 's'}`, 'learned', reviewMemories)
+            void get().refreshMemoryProposals()
             void get().refreshAgentInbox()
           } else if (ev.event === 'learn_error') {
             get().toast(`Auto-learn failed: ${ev.data.message}`, 'error')
+          } else if (ev.event === 'style_learned') {
+            get().toast('Updated how you write', 'learned', { label: 'Review', run: () => get().openMemory('style') })
+            void get().refreshStyle()
           } else if (ev.event === 'job_finished') {
             void get().refreshAgentInbox()
             window.dispatchEvent(new Event('grain-job-finished'))
+          } else if (ev.event === 'shell_jobs') {
+            window.dispatchEvent(new Event('grain-shell-jobs'))
           } else if (ev.event === 'usage_alert') {
             get().toast(`Spend ${ev.data.period === 'daily' ? 'today' : 'this month'} is $${ev.data.spent.toFixed(2)}, over your $${ev.data.limit.toFixed(2)} alert`, 'error')
           } else if (ev.event === 'desk_status') {
@@ -1139,11 +1169,10 @@ export const useStore = create<State>((set, get) => {
             const info = ev.data
             set((st) => ({ liveRuns: foldRunState(st.liveRuns, info) }))
             const sess = get().sessions[info.conversation_id]
-            // A reply this window did not start: follow it, or, once it ends, read what it persisted.
-            if (sess && sess.streaming?.runId !== info.run_id) {
-              if (info.answering) void get().attachSession(info.conversation_id).catch(() => undefined)
-              else if (!sess.streaming) void get().openSession(info.conversation_id).catch(() => undefined)
-            }
+            // A reply this window did not start: follow it if it is on screen, or, once it ends, read what it persisted.
+            const next = sess && followRun(sess.streaming, info, onScreen(info.conversation_id, { view: get().view, focusedId: get().focusedConversationId, retained }))
+            if (next === 'attach') void get().attachSession(info.conversation_id).catch(() => undefined)
+            else if (next === 'open') void get().openSession(info.conversation_id).catch(() => undefined)
           } else if (ev.event === 'conversation_changed') {
             if (ev.data.title) applyTitle(ev.data.id, ev.data.title)
             if (ev.data.reload) {
@@ -1189,6 +1218,20 @@ export const useStore = create<State>((set, get) => {
    * flush the unconditional `meetingNotesDraft: null` that follows eats everything typed since the
    * click. Returns the saved row when it flushed one, so the caller can adopt its notes.
    */
+  const docUnsaved = (): boolean => {
+    const { activeDoc: d, docDraft, docTitleDraft } = get()
+    const left = !!d && ((docDraft !== null && docDraft !== d.content) || (docTitleDraft !== null && !!docTitleDraft.trim() && docTitleDraft !== d.title))
+    // Leaving would reset the drafts, and they are the only copy of what the failed save held.
+    if (left) get().toast('This doc has edits that could not be saved. Copy them out or retry before leaving it.', 'error')
+    return left
+  }
+  const meetingUnsaved = (): boolean => {
+    const { activeMeeting: m, meetingNotesDraft: draft } = get()
+    const left = !!m && draft !== null && draft !== m.notes
+    if (left) get().toast('These notes could not be saved. Copy them out or retry before leaving the meeting.', 'error')
+    return left
+  }
+
   const flushOutgoing = async (outgoing: string | null): Promise<FullMeeting | null> => {
     if (outgoing === null || get().activeMeeting?.id !== outgoing || get().meetingNotesDraft === null) return null
     await get().flushMeetingNotes()
@@ -1256,6 +1299,13 @@ export const useStore = create<State>((set, get) => {
     const title = get().sessions[convId]?.conversation.title || get().conversations.find((c) => c.id === convId)?.title || 'Chat'
     notify(title.length > 60 ? title.slice(0, 57) + '…' : title, CHAT_NOTICE_BODY[kind], { tag: key, onClick: () => void get().selectChat(convId) })
   }
+
+  /**
+   * A run's final `done`: the next queued follow-up (lib/followQueue.ts) goes out as its own turn, through the
+   * ordinary send, which by now is not a steer since the run has stopped answering. A refused send goes back
+   * to the front and the queue pauses, so a failure never fires the rest.
+   */
+  const sendQueued = (convId: string, done: DoneInfo): void => sendNext(convId, done, (text) => get().send(text, convId))
 
   /**
    * Consume one run's events into a session. `attached` means the run was started by someone else.
@@ -1362,17 +1412,17 @@ export const useStore = create<State>((set, get) => {
             // Retried silently on the way (a provider hiccup before the first token): worth saying once, after the fact.
             if (ev.data.notice) get().toast(ev.data.notice, 'info')
             void get().refreshConversations()
+            if (!ev.data.segment) sendQueued(convId, ev.data)
             break
           case 'restored_message':
             if (ev.data.reason) get().toast(`Regenerate failed: ${ev.data.reason}. The previous answer is back.`, 'error')
             break
           // Only the `remember` tool reaches here now; auto-learn reports on `/events` instead.
           case 'learned':
-            announceLearned(ev.data)
+            get().onLearned(ev.data)
             break
           case 'style_learned':
-            // A banked sample is quiet; a refreshed voice profile is worth saying once.
-            if (ev.data.profile) get().toast('Updated how you write', 'learned', { label: 'Review', run: () => get().openMemory('style') })
+            // A banked sample is quiet; the refreshed profile, if any, is announced from `/events`.
             void get().refreshStyle()
             break
           case 'learn_error':
@@ -1384,6 +1434,8 @@ export const useStore = create<State>((set, get) => {
             const s = get().sessions[convId]
             const answeredHere = !!s?.streaming?.messageId && (s.conversation.messages ?? []).some((m) => m.id === s.streaming?.messageId)
             if (!focused || !answeredHere) get().toast(ev.data.message, 'error')
+            // After the final `done` the queue has already moved on; only a run that died mid-reply pauses it.
+            if (!settled) updateQueue(convId, pauseQueue)
             break
           }
           default:
@@ -1416,7 +1468,10 @@ export const useStore = create<State>((set, get) => {
               : 'The backend stopped responding. Restart it from Settings > Support.'
           get().toast(text, 'error')
         }
-        if (live) announce(convId, run.run_id, 'failed', visible, notified)
+        if (live) {
+          announce(convId, run.run_id, 'failed', visible, notified)
+          updateQueue(convId, pauseQueue)
+        }
       }
     } finally {
       // Backstop: a stream that dies before `user_message` must not leave the dimmed bubble behind.
@@ -1439,6 +1494,7 @@ export const useStore = create<State>((set, get) => {
           // Settled here rather than by an `error` frame, so the one notice that frame would have raised is raised here.
           if (get().sessions[convId]?.streaming?.abort === abort) {
             announce(convId, run.run_id, 'failed', onScreen(convId, { view: get().view, focusedId: get().focusedConversationId, retained }), notified)
+            updateQueue(convId, pauseQueue)
           }
         }
       }
@@ -1542,11 +1598,13 @@ export const useStore = create<State>((set, get) => {
     const id = conversationId ?? get().focusedConversationId
     if (!id) {
       // No conversation to PATCH yet: park the patch and let `send` apply it to the conversation it is
-      // about to create. Never the global settings: a draft's toggle is about that one chat.
-      const { effort, fast, ...rest } = patch
+      // about to create. Never the global settings: a draft's toggle is about that one chat. Private is
+      // set at creation, which is the only time it can be.
+      const { effort, fast, private: priv, ...rest } = patch
       set((s) => ({
         draftEffort: effort ?? s.draftEffort,
         draftFast: fast ?? s.draftFast,
+        draftPrivate: priv ?? s.draftPrivate,
         draftChatSettings: { ...s.draftChatSettings, ...rest }
       }))
       return
@@ -1582,6 +1640,7 @@ export const useStore = create<State>((set, get) => {
     draftModel: null,
     draftFast: false,
     draftChatSettings: {},
+    draftPrivate: false,
     draftPendingSend: null,
     uploadTaintTarget: null,
     uploadTaintSource: 'upload',
@@ -1598,6 +1657,7 @@ export const useStore = create<State>((set, get) => {
     docDraft: null,
     docTitleDraft: null,
     docSaving: false,
+    docJump: null,
     meetings: [],
     activeMeeting: null,
     meetingStatus: null,
@@ -1605,6 +1665,7 @@ export const useStore = create<State>((set, get) => {
     meetingCursor: 0,
     meetingPreflight: null,
     meetingsPending: 0,
+    memoryProposals: 0,
     meetingQuery: '',
     meetingNotesDraft: null,
     meetingSaving: false,
@@ -1720,6 +1781,7 @@ export const useStore = create<State>((set, get) => {
       // `refreshMeetingStatus` also starts the live tick, so a meeting a crash left running is visible.
       void get().refreshMeetingsPending()
       void get().refreshMeetingStatus()
+      void get().refreshMemoryProposals()
     },
 
     restartBackend: async () => {
@@ -1891,7 +1953,7 @@ export const useStore = create<State>((set, get) => {
     },
 
     refreshConversations: async () => set({ conversations: await api.conversations.list('all') }),
-    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftChatSettings: {}, view: 'chat', settingsOpen: false }),
+    newChat: (projectId = null) => set({ focusedConversationId: null, draftProjectId: projectId, draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftPrivate: false, draftChatSettings: {}, view: 'chat', settingsOpen: false }),
     createConversation: async (projectId) => {
       try {
         const c = await api.conversations.create(projectId, get().settings.defaultModel)
@@ -2160,7 +2222,7 @@ export const useStore = create<State>((set, get) => {
       let created: (id: string | null) => void = () => undefined
       draftCreate = new Promise((r) => { created = r })
       try {
-        c = await api.conversations.create(get().draftProjectId, get().draftModel ?? get().settings.defaultModel)
+        c = await api.conversations.create(get().draftProjectId, get().draftModel ?? get().settings.defaultModel, get().draftPrivate)
       } catch (e) {
         draftCreate = null
         created(null)
@@ -2203,7 +2265,7 @@ export const useStore = create<State>((set, get) => {
       const { messages: _m, ...row } = c
       set((s) => ({
         draftPendingSend: null,
-        focusedConversationId: c.id, view: 'chat', draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftChatSettings: {},
+        focusedConversationId: c.id, view: 'chat', draftEffort: DEFAULT_EFFORT, draftModel: null, draftFast: false, draftPrivate: false, draftChatSettings: {},
         uploadTaintTarget: fromUpload ? null : uploadTaintTarget,
         uploadTaintSource: fromUpload ? 'upload' : uploadTaintSource,
         conversations: [row as Conversation, ...s.conversations.filter((x) => x.id !== c.id)]
@@ -2322,6 +2384,22 @@ export const useStore = create<State>((set, get) => {
         get().toast((e as Error).message, 'error')
       }
     },
+    forkChat: async (conversationId, messageId) => {
+      let c: Conversation
+      try {
+        c = await api.conversations.fork(conversationId, messageId)
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+        return null
+      }
+      putSession(c)
+      // A fresh copy has no run to attach to, so it is focused directly rather than refetched through selectChat.
+      set((s) => ({ conversations: [c, ...s.conversations.filter((x) => x.id !== c.id)], view: 'chat', settingsOpen: false,
+                     traceMessageId: null, focusedConversationId: c.id, draftProjectId: c.project_id }))
+      const from = get().sessions[conversationId]?.conversation.title ?? get().conversations.find((x) => x.id === conversationId)?.title
+      get().toast(`Branched from ${from || 'the original chat'}`, 'info', { label: 'Open original', run: () => void get().selectChat(conversationId) })
+      return c
+    },
     resumeRun: async (conversationId, runId) => {
       if (get().sessions[conversationId]?.streaming?.answering) return
       if (!get().sessions[conversationId]) await get().openSession(conversationId)
@@ -2368,8 +2446,12 @@ export const useStore = create<State>((set, get) => {
         set({ docsPending: (await api.docs.pending()).pending })
       } catch { /* a badge is not worth a toast */ }
     },
-    openDoc: async (id) => {
-      if (get().activeDoc?.id !== id) await get().flushDoc()
+    openDoc: async (id, at) => {
+      if (get().activeDoc?.id !== id) {
+        await get().flushDoc()
+        if (docUnsaved()) return
+      }
+      if (at) set({ docJump: { docId: id, line: at.line } })
       set((st) => ({ view: 'docs', filesSection: 'notes', docTabs: st.docTabs.includes(id) ? st.docTabs : [...st.docTabs, id] }))
       try {
         const doc = await api.docs.get(id)
@@ -2380,9 +2462,12 @@ export const useStore = create<State>((set, get) => {
         get().toast((e as Error).message, 'error')
       }
     },
-    closeDocTab: (id) => {
+    closeDocTab: async (id) => {
+      if (get().activeDoc?.id === id) {
+        await get().flushDoc()
+        if (docUnsaved()) return
+      }
       const st = get()
-      if (st.activeDoc?.id === id) void st.flushDoc()
       const tabs = st.docTabs.filter((t) => t !== id)
       set({ docTabs: tabs })
       if (st.activeDoc?.id === id) {
@@ -2464,7 +2549,28 @@ export const useStore = create<State>((set, get) => {
         void get().refreshDocRevisions(doc.id)
       } catch (e) {
         set({ docSaving: false })
-        // Stale base: another window saved first. The draft stays on screen; reloading is the user's call.
+        // Stale base. When the server body is still the draft's base (a pin, a metadata patch) or that
+        // base with something appended (a quick capture, an accepted section), rebase onto it and save
+        // again; the retry queues behind this flush. Anything else is a real conflict.
+        if ((e as { status?: number }).status === 409) {
+          const server = await api.docs.get(doc.id).catch(() => null)
+          const st = get()
+          if (server && st.activeDoc?.id === doc.id && server.updated_at > doc.updated_at) {
+            if (server.content === doc.content) {
+              set({ activeDoc: server })
+              void get().flushDoc()
+              return
+            }
+            if (st.docDraft !== null && server.content.startsWith(doc.content)) {
+              const tail = server.content.slice(doc.content.length)
+              const sep = st.docDraft.endsWith('\n') || tail.startsWith('\n') ? '' : '\n'
+              set({ activeDoc: server, docDraft: st.docDraft + sep + tail })
+              void get().flushDoc()
+              return
+            }
+          }
+        }
+        // A real conflict: another window saved first. The draft stays on screen; reloading is the user's call.
         if ((e as { status?: number }).status === 409) {
           get().toast('This doc changed elsewhere. Your edits are kept here and not saved.', 'error',
             { label: 'Reload', run: () => { set({ docDraft: null, docTitleDraft: null }); void get().openDoc(doc.id) } })
@@ -2482,7 +2588,8 @@ export const useStore = create<State>((set, get) => {
       await get().refreshDocs()
     },
     setDocPin: async (id, pinned) => {
-      await api.docs.patch(id, { pinned })
+      const d = await api.docs.patch(id, { pinned })
+      set((st) => ({ activeDoc: st.activeDoc?.id === id ? { ...st.activeDoc, pinned: d.pinned, updated_at: d.updated_at } : st.activeDoc }))
       await get().refreshDocs()
     },
     moveDoc: async (id, scope, folder) => {
@@ -2534,7 +2641,10 @@ export const useStore = create<State>((set, get) => {
         if (doomed.length) get().offerUndo(`${doomed.length} doc${doomed.length === 1 ? '' : 's'}`, doomed.map((d) => ({ type: 'doc' as const, id: d.id })))
         await get().refreshDocs()
         const open = get().activeDoc
-        if (open && deleteDocs && !get().docs.some((d) => d.id === open.id)) get().closeDocTab(open.id)
+        if (open && deleteDocs && !get().docs.some((d) => d.id === open.id)) {
+          set({ docDraft: null, docTitleDraft: null })  // nothing left to save them into
+          void get().closeDocTab(open.id)
+        }
         else if (open) void get().openDoc(open.id)
       } catch (e) {
         get().toast((e as Error).message, 'error')
@@ -2557,7 +2667,8 @@ export const useStore = create<State>((set, get) => {
     deleteDoc: async (id) => {
       const title = get().docs.find((d) => d.id === id)?.title
       await api.docs.delete(id)
-      get().closeDocTab(id)
+      if (get().activeDoc?.id === id) set({ docDraft: null, docTitleDraft: null })  // nothing left to save them into
+      await get().closeDocTab(id)
       await Promise.all([get().refreshDocs(), get().refreshDocsPending()])
       get().offerUndo(title ? `“${title}”` : 'doc', [{ type: 'doc', id }])
     },
@@ -2659,7 +2770,15 @@ export const useStore = create<State>((set, get) => {
     openDesk: async (id) => {
       // The files belong to the desk that was open, so they go now rather than
       // after the fetch: the Files tab must never paint another desk's workspace for a frame.
-      if (get().activeDeskId !== id) set({ activeDeskId: id, activeDesk: null, deskFiles: [] })
+      if (get().activeDeskId !== id) {
+        // The desk being left stops streaming: each one held a connection, and clicking through a
+        // few live desks queued every other request behind them. Its run's end refetches it.
+        const left = get().activeDesk?.conversation_id
+        if (left && (retained.get(left) ?? 0) <= 1 && !onScreen(left, { view: get().view, focusedId: get().focusedConversationId, retained: new Set() })) {
+          get().sessions[left]?.streaming?.abort.abort()
+        }
+        set({ activeDeskId: id, activeDesk: null, deskFiles: [] })
+      }
       try {
         const desk = await api.cowork.desks.get(id)
         // A slower fetch must not clobber a desk the user has since switched away from.
@@ -2677,7 +2796,8 @@ export const useStore = create<State>((set, get) => {
     createDesk: async (p) => {
       set({ deskBusy: true })
       try {
-        const { desk, conversation_id, run_id, seq } = await api.cowork.desks.create(p)
+        const { desk, conversation_id, run_id, seq, position } = await api.cowork.desks.create(p)
+        if (position) get().toast(queuedNote(position))
         await get().refreshDesks()
         await get().openDesk(desk.id)
         // Start returns the run outright, so the pane paints without waiting for `GET /runs` to
@@ -2694,9 +2814,10 @@ export const useStore = create<State>((set, get) => {
     },
     startDesk: async (id) => {
       try {
-        const { run_id, seq, conversation_id } = await api.cowork.desks.start(id)
+        const out = await api.cowork.desks.start(id)
         await get().openDesk(id)
-        void watchRun(conversation_id, { run_id, seq }, { messageId: null, approvals: 0, attached: true })
+        if ('queued' in out) get().toast(queuedNote(out.position))
+        else void watchRun(out.conversation_id, { run_id: out.run_id, seq: out.seq }, { messageId: null, approvals: 0, attached: true })
       } catch (e) {
         get().toast((e as Error).message, 'error')
       }
@@ -2704,9 +2825,10 @@ export const useStore = create<State>((set, get) => {
     resumeDesk: async (id, reason) => {
       const convId = deskConv(id)
       try {
-        const { run_id, seq } = await api.cowork.desks.resume(id, reason)
+        const out = await api.cowork.desks.resume(id, reason)
         await get().openDesk(id)
-        if (convId) void watchRun(convId, { run_id, seq }, { messageId: null, approvals: 0, attached: true })
+        if ('queued' in out) get().toast(queuedNote(out.position))
+        else if (convId) void watchRun(convId, { run_id: out.run_id, seq: out.seq }, { messageId: null, approvals: 0, attached: true })
       } catch (e) {
         get().toast((e as Error).message, 'error')
       }
@@ -2728,7 +2850,8 @@ export const useStore = create<State>((set, get) => {
     messageDesk: async (id, text) => {
       if (!text.trim()) return false
       try {
-        await api.cowork.desks.message(id, text.trim())
+        const out = await api.cowork.desks.message(id, text.trim())
+        if (out.position) get().toast(queuedNote(out.position))
         // Awake it steered the live reply, asleep it woke a new turn — either way the row has moved
         // (the question is answered, the status is live again), and `openDesk` re-attaches.
         await get().openDesk(id)
@@ -2913,6 +3036,29 @@ export const useStore = create<State>((set, get) => {
         }
       } catch { /* the panel shows whatever it last had; a failed poll is not worth a toast */ }
     },
+    refreshMemoryProposals: async () => {
+      try {
+        set({ memoryProposals: (await api.memories.proposals('all')).length })
+      } catch { /* a badge is not worth a toast */ }
+    },
+    onLearned: (l) => {
+      const { text, changed } = learnedText(l)
+      // Undo puts back what this pass replaced or dropped and trashes what it added. Graph rows stay: they
+      // merge into existing entities, so removing them could take the user's own relations with them.
+      const added = l.memories.map((m) => m.id)
+      const back = [...(l.superseded ?? []).map((x) => x.old_id), ...(l.removed ?? []).map((m) => m.id)]
+      const undo = added.length + back.length ? {
+        label: 'Undo',
+        run: () => void (async () => {
+          try {
+            await Promise.all([...back.map((id) => api.memories.restore(id)), ...added.map((id) => api.memories.delete(id))])
+          } catch (e) { get().toast(`Undo failed: ${(e as Error).message}`, 'error') }
+          refreshAll()
+        })()
+      } : undefined
+      get().toast(text, 'learned', undo)
+      if (changed) refreshAll()
+    },
     refreshMeetingsPending: async () => {
       try {
         set({ meetingsPending: (await api.meetings.pending()).pending })
@@ -2920,7 +3066,10 @@ export const useStore = create<State>((set, get) => {
     },
     openMeeting: async (id) => {
       const outgoing = get().activeMeeting?.id ?? null
-      if (outgoing !== id) await get().flushMeetingNotes()
+      if (outgoing !== id) {
+        await get().flushMeetingNotes()
+        if (meetingUnsaved()) return
+      }
       openingMeeting = id
       set({ view: 'meetings' })
       try {
@@ -3570,6 +3719,15 @@ export const useStore = create<State>((set, get) => {
         void e
       }
     },
+    markInboxRunSeen: async (runId) => {
+      // Optimistic, like the desk inbox: the badge must not wait on a round trip.
+      set((st) => (st.agentInbox ? { agentInbox: markRunsSeen(st.agentInbox, runId === null ? null : [runId]) } : {}))
+      try {
+        await (runId === null ? api.inboxSeenAll() : api.inboxRunSeen(runId))
+      } catch {
+        void get().refreshAgentInbox()
+      }
+    },
     refreshJobs: async () => {
       try {
         set({ jobs: await api.jobs.list() })
@@ -3607,10 +3765,21 @@ export const useStore = create<State>((set, get) => {
         get().toast(`Jobs: ${(e as Error).message}`, 'error')
       }
     },
+    updateJob: async (id, patch) => {
+      try {
+        const job = await api.jobs.update(id, patch)
+        set((s) => ({ jobs: s.jobs.map((x) => (x.id === id ? job : x)) }))
+        void get().refreshAgentInbox()
+        return null
+      } catch (e) {
+        return (e as Error).message
+      }
+    },
     runJobNow: async (id) => {
       try {
-        const { run_id } = await api.jobs.runNow(id)
-        get().toast(run_id ? 'Job started. It will show up under “While you were away”.' : 'Job did not start', run_id ? 'info' : 'error')
+        const { run_id, desk_id } = await api.jobs.runNow(id)
+        if (desk_id) get().toast(run_id ? 'Desk started. Open it under Desks.' : 'Desk created, not started: too many desks are running.', 'info')
+        else get().toast(run_id ? 'Job started. It will show up under “While you were away”.' : 'Job did not start', run_id ? 'info' : 'error')
         void get().refreshJobs()
       } catch (e) {
         get().toast(`Jobs: ${(e as Error).message}`, 'error')
@@ -3618,12 +3787,26 @@ export const useStore = create<State>((set, get) => {
     },
     decideProposal: async (id, accept, args) => {
       try {
-        const res = accept ? await api.proposals.accept(id, args) : await api.proposals.reject(id)
-        if (accept && !res.ok) get().toast(`That did not go through: ${res.proposal.error ?? 'unknown error'}`, 'error')
-        else if (accept && res.proposal.tool === 'gmail_send') {
-          get().toast('Queued — it sends after the undo window.', 'info')
-          window.dispatchEvent(new Event('grain-outbox-changed'))
-        } else get().toast(accept ? 'Done — that one actually ran.' : 'Dropped.', 'info')
+        if (!accept) {
+          await api.proposals.reject(id)
+          get().toast('Dropped.', 'info')
+          return null
+        }
+        const res = await api.proposals.accept(id, args)
+        const t = acceptToast(res)
+        get().toast(t.text, t.kind)
+        if (res.queued) window.dispatchEvent(new Event('grain-outbox-changed'))
+        return null
+      } catch (e) {
+        return (e as Error).message
+      } finally {
+        void get().refreshAgentInbox()
+      }
+    },
+    rejectJobProposals: async (jobId) => {
+      try {
+        const { rejected } = await api.proposals.rejectAll(jobId)
+        get().toast(`Dropped ${rejected} proposal${rejected === 1 ? '' : 's'}.`, 'info')
       } catch (e) {
         get().toast((e as Error).message, 'error')
       } finally {

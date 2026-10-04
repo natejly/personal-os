@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Check, ChevronRight, FileCheck2, TriangleAlert, X } from 'lucide-react'
 import type { DeskOutput, FullDesk, PromotionKind, PromotionResult } from '@shared/types'
-import { api, getBase, getToken } from '../lib/api'
+import { api, saveDownload } from '../lib/api'
+import { defaultDest } from '../lib/deskFiles'
 import { useStore } from '../store'
 import ArtifactViewer from './ArtifactViewer'
 import InlineNote from './InlineNote'
@@ -46,9 +47,10 @@ function PromotedLink({ kind, id, docId }: { kind: string; id: string | null; do
   )
 }
 
-/** A retried row re-offers the destination that failed, so a retry means the same thing it did. */
-const defaultDest = (o: DeskOutput): PromotionKind =>
-  DESTINATIONS.some((d) => d.value === o.promoted_kind && (!d.only || d.only.test(o.path))) ? (o.promoted_kind as PromotionKind) : 'doc'
+/** A retried row re-offers the destination that failed (when it still fits the file), so a retry means the
+ *  same thing it did; otherwise the file type picks (defaultDest). */
+const destFor = (o: DeskOutput): PromotionKind =>
+  DESTINATIONS.some((d) => d.value === o.promoted_kind && (!d.only || d.only.test(o.path))) ? (o.promoted_kind as PromotionKind) : defaultDest(o)
 
 const fmtBytes = (n: number): string =>
   n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1024 / 1024).toFixed(1)} MB`
@@ -61,24 +63,9 @@ const fmtBytes = (n: number): string =>
  */
 const DECIDED: DeskOutput['status'][] = ['accepted', 'promoted', 'rejected']
 
-/**
- * The `download` destination promises the file itself, and the backend now serves it from GET
- * /cowork/desks/{id}/download. A bare <a href> 401s — the auth middleware reads the token header
- * only, there is no query-param token — so the bytes are fetched with the header and handed over
- * through an object URL.
- */
-async function saveDownload(deskId: string, ref: string): Promise<void> {
-  const r = await fetch(`${getBase()}/cowork/desks/${deskId}/download?path=${encodeURIComponent(ref)}`, {
-    headers: getToken() ? { 'X-Personal-OS-Token': getToken() } : {}
-  })
-  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
-  const url = URL.createObjectURL(await r.blob())
-  const a = document.createElement('a')
-  a.href = url
-  a.download = ref.split('/').pop() || 'download'
-  a.click()
-  URL.revokeObjectURL(url)
-}
+/** The `download` destination promises the file itself, served from GET /cowork/desks/{id}/download. */
+const saveDeskDownload = (deskId: string, ref: string): Promise<void> =>
+  saveDownload(`/cowork/desks/${deskId}/download?path=${encodeURIComponent(ref)}`, ref)
 
 /** The first few hundred characters of the nominated file, fetched only when the row is opened. */
 function Excerpt({ deskId, path }: { deskId: string; path: string }): JSX.Element {
@@ -95,20 +82,24 @@ function Excerpt({ deskId, path }: { deskId: string; path: string }): JSX.Elemen
   return <pre className="desk-output-excerpt">{text ?? 'Reading…'}</pre>
 }
 
-function OutputCard({ desk, output, picked, destination, docId, result, onPick, onDestination, onDocId }: {
+function OutputCard({ desk, output, picked, destination, docId, result, busy, onPick, onDestination, onDocId, onAcceptCurrent }: {
   desk: FullDesk
   output: DeskOutput
   picked: boolean
   destination: PromotionKind
   docId: string
   result: PromotionResult | undefined
+  busy: boolean
   onPick: (v: boolean) => void
   onDestination: (d: PromotionKind) => void
   onDocId: (id: string) => void
+  onAcceptCurrent: () => void
 }): JSX.Element {
   const docs = useStore((s) => s.docs)
   const [open, setOpen] = useState(false)
   const decided = DECIDED.includes(output.status)
+  // A row refused for changed bytes is promote_failed, and still stale: the flag outlives the status.
+  const stale = !decided && (output.status === 'stale' || Boolean(output.stale))
 
   return (
     <article className={`desk-output ${output.status}`}>
@@ -118,7 +109,7 @@ function OutputCard({ desk, output, picked, destination, docId, result, onPick, 
           <b>{output.title || output.path}</b>
           <span className="muted small">{output.path} · {fmtBytes(output.bytes)}</span>
         </div>
-        {output.status === 'stale' && <span className="tag ask" title="The agent rewrote this file after nominating it">stale</span>}
+        {stale && <span className="tag ask" title="The agent rewrote this file after nominating it">stale</span>}
         {output.status === 'promoted' && (
           output.verified
             ? <span className="desk-verified"><Check size={12} /> verified{!result && <PromotedLink kind={output.promoted_kind ?? ''} id={output.promoted_id} />}</span>
@@ -143,6 +134,12 @@ function OutputCard({ desk, output, picked, destination, docId, result, onPick, 
               <button key={d.value} className={destination === d.value ? 'on' : ''} title={d.hint} onClick={() => onDestination(d.value)}>{d.label}</button>
             ))}
           </div>
+          {stale && (
+            <button className="ghost-btn" disabled={busy || (destination === 'doc_append' && !docId)}
+              title="Promote the file as it is now, not as it was delivered" onClick={onAcceptCurrent}>
+              Accept current file
+            </button>
+          )}
           {destination === 'doc_append' && (
             <label className="model-picker">
               <select value={docId} onChange={(e) => onDocId(e.target.value)}>
@@ -178,15 +175,18 @@ export default function DeskReview({ desk }: { desk: FullDesk }): JSX.Element {
 
   const undecided = desk.outputs.filter((o) => !DECIDED.includes(o.status))
   const selection = undecided.filter((o) => picked.includes(o.id))
-  const blocked = selection.some((o) => (dest[o.id] ?? defaultDest(o)) === 'doc_append' && !docIds[o.id])
+  const blocked = selection.some((o) => (dest[o.id] ?? destFor(o)) === 'doc_append' && !docIds[o.id])
 
-  const accept = async (): Promise<void> => {
-    const sel = selection.map((o) => ({
+  // A stale row in the selection is sent as delivered and refused with "changed"; only its own
+  // "Accept current file" button ships the bytes that are there now.
+  const accept = async (rows: DeskOutput[] = selection, acceptStale = false): Promise<void> => {
+    const sel = rows.map((o) => ({
       output_id: o.id,
-      destination: dest[o.id] ?? defaultDest(o),
+      destination: dest[o.id] ?? destFor(o),
       title: o.title || o.path,
       doc_id: docIds[o.id] || undefined,
-      project_id: desk.project_id
+      project_id: desk.project_id,
+      ...(acceptStale ? { accept_stale: true } : {})
     }))
     const out = await acceptOutputs(desk.id, sel)
     // The per-output verdict only exists in this response: the refreshed row carries `verified:
@@ -198,7 +198,7 @@ export default function DeskReview({ desk }: { desk: FullDesk }): JSX.Element {
     for (const x of out) {
       if (x.kind !== 'download' || !x.ok || !x.ref) continue
       try {
-        await saveDownload(desk.id, x.ref)
+        await saveDeskDownload(desk.id, x.ref)
       } catch (e) {
         toast(`Could not download ${x.ref}: ${(e as Error).message}`, 'error')
       }
@@ -243,12 +243,14 @@ export default function DeskReview({ desk }: { desk: FullDesk }): JSX.Element {
           desk={desk}
           output={o}
           picked={picked.includes(o.id)}
-          destination={dest[o.id] ?? defaultDest(o)}
+          destination={dest[o.id] ?? destFor(o)}
           docId={docIds[o.id] ?? ''}
           result={results[o.id]}
+          busy={busy}
           onPick={(v) => setPicked((p) => (v ? [...p, o.id] : p.filter((x) => x !== o.id)))}
           onDestination={(d) => setDest((x) => ({ ...x, [o.id]: d }))}
           onDocId={(id) => setDocIds((x) => ({ ...x, [o.id]: id }))}
+          onAcceptCurrent={() => void accept([o], true)}
         />
       ))}
 

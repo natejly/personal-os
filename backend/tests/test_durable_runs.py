@@ -191,7 +191,7 @@ def test_approval_row_lifecycle() -> None:
 
     j("POST", f"/approvals/{a['call_id']}", {"decision": "sideways"}, expect=400)
     res = j("POST", f"/approvals/{a['call_id']}", {"decision": "allow"})
-    assert res == {"ok": True, "live": True, "resumed": False, "status": "approved"}
+    assert res == {"ok": True, "live": True, "resumed": False, "queued": False, "status": "approved"}
     row = drain(rid)
     assert row["status"] == "done"
     decided = store.approval(a["call_id"])
@@ -273,6 +273,41 @@ def test_idempotency_failed_and_unknown_outcomes() -> None:
     assert [r["attempts"] for r in store.executed(run.run_id) if r["step"] == 1] == [2]
 
 
+def test_an_unverified_write_replays_instead_of_writing_again() -> None:
+    cid = j("POST", "/conversations", {})["id"]
+    run = Run(cid, store)
+    calls: list[str] = []
+    unverified = {"error": "UNVERIFIED: could not read it back", "verification": {"status": "unverified"}}
+
+    async def send() -> dict[str, Any]:
+        calls.append("send")
+        return unverified
+
+    async def go() -> tuple[Any, Any]:
+        a = await store.call_once(run.run_id, 1, "gmail_send", {"to": "x"}, send)
+        b = await store.call_once(run.run_id, 1, "gmail_send", {"to": "x"}, send)
+        return a, b
+
+    a, b = asyncio.run(go())
+    assert a == (unverified, False) and b == (unverified, True)
+    assert calls == ["send"], "the write may have landed, so it never runs twice"
+    assert [r["status"] for r in store.executed(run.run_id)] == ["done"]
+
+
+def test_recovery_parks_a_desks_pending_card_so_one_answer_is_enough() -> None:
+    cid = j("POST", "/conversations", {})["id"]
+    run = Run(cid, store)
+    args = {"to": "x@example.com"}
+    store.open_approval(f"{run.run_id}:d", run.run_id, "gmail_send", args, conversation_id=cid, desk_id="desk_recover")
+    store.open_approval(f"{run.run_id}:c", run.run_id, "gmail_send", args, conversation_id=cid)
+    store.recover()
+    desk_card, chat_card = store.approval(f"{run.run_id}:d"), store.approval(f"{run.run_id}:c")
+    assert desk_card["status"] == "pending" and desk_card["parked_at"], "still answerable, and no run holds it"
+    assert not chat_card["parked_at"], "a chat card is not a desk's"
+    store.decide(f"{run.run_id}:d", "allow")
+    assert store.claim_parked("desk_recover", "gmail_send", args, "next:call_0"), "the desk's next turn runs it with no second card"
+
+
 def test_a_duplicate_write_in_one_round_runs_once_end_to_end() -> None:
     title = f"durable dup {time.time()}"
     ROUNDS.append({"tool_calls": [call("todo_add", {"title": title}, "call_0"), call("todo_add", {"title": title}, "call_1")]})
@@ -337,7 +372,7 @@ def test_startup_marks_orphaned_runs_interrupted_and_keeps_the_approval_answerab
     assert pend and pend[0]["status"] == "pending" and pend[0]["live"] is False
     res = j("POST", f"/approvals/{uid}", {"decision": "allow"})
     # `resumed` is the desk half of the answer: a chat approval never resumes anything.
-    assert res == {"ok": True, "live": False, "resumed": False, "status": "approved"}
+    assert res == {"ok": True, "live": False, "resumed": False, "queued": False, "status": "approved"}
     assert store.approval(uid)["decision"] == "allow"
     card = [t for t in j("GET", f"/conversations/{cid}")["messages"][-1]["tool_events"] if t["id"] == uid][0]
     assert card["pending"] is False and card["needs_approval"] is False and card["approval"] == "allow"

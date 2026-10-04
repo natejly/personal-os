@@ -12,8 +12,14 @@ Security posture (same threat model as sandbox.py: the commands are model-writte
 the model's context routinely holds untrusted text, and stdout flows straight back
 into that context):
   * no bind mounts — the only files inside are ones the tools put there
-  * network detached by default; settings sandboxNetwork attaches it, and then every
-    result that carries guest-produced bytes taints the run exactly like fetch_url
+  * network detached by default. settings sandboxNetwork is off | proxy | open:
+    - proxy puts the container on its own `--internal` docker network whose only other
+      member is a sidecar running egress.py (also attached to the bridge). That proxy is the
+      only way out, so a program that ignores HTTP(S)_PROXY simply has no route. It admits
+      the registry preset plus shellAllowedDomains, and results taint only once the sandbox
+      has reached a host outside the registries (the sidecar's contacted report says so)
+    - open attaches the bridge, and then every result that carries guest-produced bytes
+      taints the run exactly like fetch_url
   * library text copied in with sandbox_put_document marks the sandbox on the host;
     later command output taints until that container is removed
   * capabilities dropped, no-new-privileges, memory / cpu / pids caps
@@ -23,8 +29,10 @@ into that context):
 from __future__ import annotations
 
 import hashlib
+import json
 import posixpath
 import re
+import secrets
 import shutil
 import subprocess
 import threading
@@ -33,12 +41,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from . import egress
 from .sandbox import IMAGE_EXT, MAX_IMAGE_BYTES, capped_run
 
 WORKSPACE = "/workspace"
 DESK_MOUNT = "/workspace/desk"  # where an active desk's own workspace appears inside its container
 DEFAULT_IMAGE = "python:3.12-slim"
 LABEL = "personal-os.sandbox"
+CONV_LABEL = "personal-os.conv"  # which conversation a container belongs to; survives an app restart
 MAX_SANDBOXES = 5           # LRU-reaped: a desktop should not quietly accumulate VMs
 CKPT_REPO = "pos-sbx-ckpt"  # checkpoint images: pos-sbx-ckpt/<container suffix>:<label>
 MAX_CKPTS = 3               # per conversation, oldest evicted
@@ -47,6 +57,20 @@ STDOUT_CAP = 20_000
 STDERR_CAP = 8_000
 MAX_EXEC_S = 600
 AVAILABLE_TTL_S = 120
+NET_PREFIX = "pos-sbx-net-"     # a proxy-mode sandbox's own internal network
+PX_PREFIX = "pos-sbx-px-"       # and the sidecar that is its only way out
+PROXY_LABEL = "personal-os.sandbox-proxy"
+PROXY_VARS = ("HTTP_PROXY", "HTTPS_PROXY", "http_proxy", "https_proxy", "NO_PROXY", "no_proxy", "ALL_PROXY", "all_proxy")
+PROXY_ALIAS = "egress"          # the sidecar's name on the internal network
+PROXY_PORT = 3128
+PROXY_LOG = "/tmp/egress.json"  # in the sidecar's own filesystem: survives stop/start, goes with the container
+
+
+def net_mode(v: Any) -> str:
+    """The sandboxNetwork setting as off | proxy | open. A stored true (the old on/off switch) means open."""
+    if v is True:
+        return "open"
+    return v if v in ("proxy", "open") else "off"
 
 Runner = Callable[..., "subprocess.CompletedProcess[bytes]"]
 
@@ -124,10 +148,13 @@ class Sandboxes:
         self._run = runner or _run
         self._import_dir = Path(import_dir) if import_dir else None
         self._avail: tuple[float, bool] | None = None
+        self._avail_reason = ""              # why available() said no, for the Settings status line
         self._lock = threading.Lock()   # ensure() can race between parallel runs
         self._last: dict[str, float] = {}    # container name -> last use, for LRU reaping
         self._shell: dict[str, str] = {}     # container name -> bash|sh
-        self._net: dict[str, bool] = {}      # container name -> created with network
+        self._net: dict[str, str] = {}       # container name -> off | proxy | open, as created
+        self._reached: set[str] = set()      # proxy-mode containers that reached a non-registry host (sticky)
+        self._seen: dict[str, dict[str, list[str]]] = {}  # last proxy report per container, for per-call deltas
         self._stale_checked = False          # _reap_stale runs once per app run
         # conversation id -> host path of that conversation's desk workspace, or None. Set by the app, which owns the desks.
         self.desk_workspace: Callable[[str], str | None] | None = None
@@ -149,14 +176,39 @@ class Sandboxes:
         if self._avail and now - self._avail[0] < AVAILABLE_TTL_S:
             return self._avail[1]
         binary = self._bin()
-        ok = False
+        ok, reason = False, f"{binary} is not on PATH"
         if shutil.which(binary):
             try:
-                ok = self._run([binary, "info", "--format", "{{.ServerVersion}}"], timeout=4).returncode == 0
-            except Exception:  # noqa: BLE001 - a hung daemon means "not available", not a crash
-                ok = False
-        self._avail = (now, ok)
+                p = self._run([binary, "info", "--format", "{{.ServerVersion}}"], timeout=4)
+                ok = p.returncode == 0
+                reason = "" if ok else f"`{binary} info` failed: {_line(p.stderr) or 'the daemon is not responding'}"
+            except Exception as e:  # noqa: BLE001 - a hung daemon means "not available", not a crash
+                reason = f"`{binary} info` failed: {type(e).__name__}"
+        self._avail, self._avail_reason = (now, ok), reason
         return ok
+
+    def status(self) -> dict[str, Any]:
+        ok = self.available()
+        return {"available": ok, "runtime": self._bin(), "reason": "" if ok else self._avail_reason}
+
+    def list(self) -> list[dict[str, Any]]:
+        """Every labeled container, stopped ones included, for the Settings view. Containers made before the
+        conversation label existed report conversation_id None and can still be reset by name."""
+        binary = self._bin()
+        fmt = "{{.Names}}\t{{.State}}\t{{.CreatedAt}}\t{{.Label \"" + CONV_LABEL + "\"}}"
+        p = self._run([binary, "ps", "-a", "--filter", f"label={LABEL}=1", "--format", fmt], timeout=10)
+        if p.returncode != 0:
+            raise SandboxError(f"could not list sandboxes: {_line(p.stderr)}")
+        items = []
+        for ln in p.stdout.decode(errors="replace").splitlines():
+            name, state, created, conv = (ln.split("\t") + ["", "", ""])[:4]
+            name = name.strip()
+            if not name:
+                continue
+            items.append({"name": name, "conversation_id": conv.strip() or None, "status": state.strip(),
+                          "created": created.strip(), "last_used": self._last.get(name), "networked": None if self._net.get(name) is None else self._net[name] != "off",
+                          "holds_import": self._holds(name), "checkpoints": [t for t, _ in self._ckpt_tags(binary, name)]})
+        return items
 
     def _name(self, conversation_id: str) -> str:
         return "pos-sbx-" + hashlib.sha1(conversation_id.encode()).hexdigest()[:12]
@@ -170,22 +222,34 @@ class Sandboxes:
             self._reap_stale(binary, keep=name)
             p = self._run([binary, "inspect", "-f", "{{.State.Running}}", name], timeout=10)
             if p.returncode == 0:
-                if p.stdout.strip() != b"true":
+                woke = p.stdout.strip() != b"true"
+                if woke:
                     s = self._run([binary, "start", name], timeout=30)
                     if s.returncode != 0:
                         raise SandboxError(f"sandbox would not restart: {_line(s.stderr)}")
                 if name not in self._net:  # container survived an app restart: recover its facts
+                    woke = True
                     n = self._run([binary, "inspect", "-f", "{{.HostConfig.NetworkMode}}", name], timeout=10)
-                    self._net[name] = n.returncode == 0 and n.stdout.strip() != b"none"
+                    mode = n.stdout.decode(errors="replace").strip() if n.returncode == 0 else "none"
+                    self._net[name] = "off" if mode == "none" else "proxy" if mode.startswith(NET_PREFIX) else "open"
                     self._probe_shell(binary, name)
+                if woke and self._net.get(name) == "proxy":
+                    s = self._run([binary, "start", PX_PREFIX + self._sfx(name)], timeout=30)
+                    if s.returncode != 0:
+                        raise SandboxError(f"the sandbox's network proxy would not start ({_line(s.stderr)}); "
+                                           "sandbox_reset starts a fresh sandbox")
                 self._last[name] = time.time()
                 self._start_reaper()
                 return name
             self._reap(binary)
             cfg = self.settings()
-            self._create(binary, name, str(cfg.get("sandboxImage") or DEFAULT_IMAGE), bool(cfg.get("sandboxNetwork")),
-                         self._desk_mount(conversation_id))
+            self._create(binary, name, str(cfg.get("sandboxImage") or DEFAULT_IMAGE), net_mode(cfg.get("sandboxNetwork")),
+                         self._desk_mount(conversation_id), conversation_id)
             return name
+
+    @staticmethod
+    def _sfx(name: str) -> str:
+        return name[len("pos-sbx-"):]
 
     def _desk_mount(self, conversation_id: str) -> str | None:
         """Host folder to bind at /workspace/desk: only a desk's own workspace, and only when sandboxMountDesk is on."""
@@ -197,41 +261,115 @@ class Sandboxes:
             return None
         return str(path) if path else None
 
-    def _run_args(self, binary: str, name: str, image: str, net: bool, mount: str | None = None) -> list[str]:
+    def _run_args(self, binary: str, name: str, image: str, net: Any, mount: str | None = None,
+                  env: dict[str, str] | None = None, conv: str | None = None) -> list[str]:
         """One place for the isolation flags, shared by a fresh create and a checkpoint restore."""
-        args = [binary, "run", "-d", "--name", name, "--label", f"{LABEL}=1", "--hostname", "sandbox",
+        # --init: `sleep` as PID 1 ignores SIGTERM, so without it every stop waits out the whole grace period.
+        args = [binary, "run", "-d", "--init", "--name", name, "--label", f"{LABEL}=1", "--hostname", "sandbox",
                 "-w", WORKSPACE, "--memory", "1g", "--cpus", "2", "--pids-limit", "256",
                 "--cap-drop", "ALL", "--security-opt", "no-new-privileges"]
-        if not net:
+        if conv:
+            args += ["--label", f"{CONV_LABEL}={conv}"]
+        mode = net_mode(net)
+        if mode == "off":
             args += ["--network", "none"]
+        elif mode == "proxy":  # internal-only: the sidecar is the one reachable address
+            args += ["--network", NET_PREFIX + self._sfx(name)]
+        for k, v in (env or {}).items():
+            args += ["-e", f"{k}={v}"]
         if mount:  # the one bind mount there is: a desk's workspace, nothing else of the host
             args += ["-v", f"{mount}:{DESK_MOUNT}:rw"]
         return args + [image, "sleep", "infinity"]
 
-    def _create(self, binary: str, name: str, image: str, net: bool, mount: str | None = None) -> None:
-        p = self._run(self._run_args(binary, name, image, net, mount), timeout=240)  # generous: the first run of an image pulls it
+    def _create(self, binary: str, name: str, image: str, net: Any, mount: str | None = None,
+                conv: str | None = None) -> None:
+        mode = net_mode(net)
+        # Not proxy: blank the proxy variables, since a checkpoint committed in proxy mode carries them in its image
+        # and they would point at a sidecar that no longer exists.
+        env = self._start_proxy(binary, name) if mode == "proxy" else dict.fromkeys(PROXY_VARS, "")
+        p = self._run(self._run_args(binary, name, image, mode, mount, env, conv), timeout=240)  # generous: the first run of an image pulls it
         if p.returncode != 0 and b"already in use" not in p.stderr:
             raise SandboxError(f"could not start the sandbox ({image}): {_line(p.stderr)}")
-        self._net[name] = net
+        self._net[name] = mode
         self._probe_shell(binary, name)
         self._last[name] = time.time()
         self._start_reaper()
+
+    def _start_proxy(self, binary: str, name: str) -> dict[str, str]:
+        """Create the internal network and the egress sidecar for a proxy-mode sandbox; returns the sandbox's proxy env.
+        The token lives only in the two containers' environments. Any failure is a failed create: no proxy, no sandbox."""
+        sfx = self._sfx(name)
+        net, px = NET_PREFIX + sfx, PX_PREFIX + sfx
+        token = secrets.token_urlsafe(18)
+        allow = egress.allowed_set(True, self.settings().get("shellAllowedDomains"))
+        self._run([binary, "rm", "-f", px], timeout=30)  # a leftover from a crash holds an old token
+        n = self._run([binary, "network", "create", "--internal", "--label", f"{PROXY_LABEL}=1", net], timeout=30)
+        if n.returncode != 0 and b"already exists" not in n.stderr:
+            raise SandboxError(f"could not create the sandbox's network: {_line(n.stderr)}")
+        src = Path(egress.__file__).read_text()
+        r = self._run([binary, "run", "-d", "--init", "--name", px, "--label", f"{PROXY_LABEL}=1", "--hostname", "egress",
+                       "--user", "65534:65534", "--memory", "128m", "--cpus", "0.5", "--pids-limit", "64",
+                       "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+                       "-e", f"GRAIN_PROXY_TOKEN={token}", "-e", "GRAIN_PROXY_ALLOW=" + ",".join(allow),
+                       "-e", f"GRAIN_PROXY_PORT={PROXY_PORT}", "-e", f"GRAIN_PROXY_LOG={PROXY_LOG}",
+                       DEFAULT_IMAGE, "python3", "-c", src], timeout=240)
+        if r.returncode != 0:
+            raise SandboxError(f"could not start the sandbox's network proxy: {_line(r.stderr)}")
+        c = self._run([binary, "network", "connect", "--alias", PROXY_ALIAS, net, px], timeout=30)
+        if c.returncode != 0:
+            self._rm_proxy(binary, name)
+            raise SandboxError(f"could not attach the sandbox's network proxy: {_line(c.stderr)}")
+        return egress.proxy_env(PROXY_ALIAS, PROXY_PORT, token)
+
+    def _rm_proxy(self, binary: str, name: str) -> None:
+        self._run([binary, "rm", "-f", PX_PREFIX + self._sfx(name)], timeout=30)
+        self._run([binary, "network", "rm", NET_PREFIX + self._sfx(name)], timeout=30)
+
+    def _rm(self, binary: str, name: str) -> "subprocess.CompletedProcess[bytes]":
+        """Remove a sandbox (and, in proxy mode, its sidecar and network). A sandbox whose mode this app run has not
+        recovered yet is checked for a sidecar by name."""
+        p = self._run([binary, "rm", "-f", name], timeout=30)
+        mode = self._net.get(name)
+        if mode == "proxy" or (mode is None and PX_PREFIX + self._sfx(name) in self._live(binary, label=PROXY_LABEL)):
+            self._rm_proxy(binary, name)
+        self._forget(name)
+        return p
+
+    def _proxy_seen(self, binary: str, name: str) -> dict[str, list[str]] | None:
+        """The sidecar's cumulative contacted / blocked report; None when it cannot be read (callers then assume the worst)."""
+        p = self._run([binary, "exec", PX_PREFIX + self._sfx(name), "cat", PROXY_LOG], timeout=10)
+        if p.returncode != 0:
+            return {"contacted": [], "blocked": []} if b"No such file" in (p.stderr or b"") else None
+        try:
+            d = json.loads(p.stdout)
+            return {"contacted": [str(h) for h in d["contacted"]], "blocked": [str(h) for h in d["blocked"]]}
+        except (ValueError, KeyError, TypeError):
+            return None
+
+    def _note_reach(self, name: str, seen: dict[str, list[str]] | None) -> bool:
+        """True (and remembered) once a proxy-mode sandbox has reached a host outside the registry preset."""
+        if name in self._reached:
+            return True
+        if seen is None or any(not egress.host_allowed(h, egress.REGISTRY_HOSTS) for h in seen["contacted"]):
+            if seen is not None:
+                self._reached.add(name)
+            return True
+        return False
 
     def _probe_shell(self, binary: str, name: str) -> None:
         p = self._run([binary, "exec", name, "sh", "-c", "command -v bash"], timeout=10)
         self._shell[name] = "bash" if p.returncode == 0 and p.stdout.strip() else "sh"
 
-    def _live(self, binary: str, running_only: bool = False) -> list[str]:
-        p = self._run([binary, "ps", *([] if running_only else ["-a"]), "--filter", f"label={LABEL}=1", "--format", "{{.Names}}"], timeout=10)
+    def _live(self, binary: str, running_only: bool = False, label: str = LABEL) -> list[str]:
+        p = self._run([binary, "ps", *([] if running_only else ["-a"]), "--filter", f"label={label}=1", "--format", "{{.Names}}"], timeout=10)
         return [n for n in p.stdout.decode(errors="replace").split() if n] if p.returncode == 0 else []
 
     def _reap(self, binary: str) -> None:
         names = self._live(binary)
         while len(names) >= MAX_SANDBOXES:
             oldest = min(names, key=lambda n: self._last.get(n, 0.0))
-            self._run([binary, "rm", "-f", oldest], timeout=30)
+            self._rm(binary, oldest)
             names.remove(oldest)
-            self._forget(oldest)
             self._clear_import(oldest)
 
     def _reap_stale(self, binary: str, keep: str = "") -> None:
@@ -240,10 +378,8 @@ class Sandboxes:
             return
         self._stale_checked = True
         days = float(self.settings().get("sandboxKeepDays", DEFAULT_KEEP_DAYS) or 0)
-        if days <= 0:
-            return
         cutoff = time.time() - days * 86400
-        for n in self._live(binary):
+        for n in self._live(binary) if days > 0 else []:
             if n == keep:
                 continue
             p = self._run([binary, "inspect", "-f", "{{.State.Running}} {{.State.FinishedAt}}", n], timeout=10)
@@ -252,8 +388,11 @@ class Sandboxes:
             running, _, fin = p.stdout.decode(errors="replace").strip().partition(" ")
             ts = _finished_at(fin)
             if running != "true" and ts is not None and ts < cutoff:
-                self._run([binary, "rm", "-f", n], timeout=30)
-                self._forget(n)
+                self._rm(binary, n)
+        live = set(self._live(binary))  # a sidecar whose sandbox is gone (removed while its mode was unknown) goes too
+        for px in self._live(binary, label=PROXY_LABEL):
+            if px.startswith(PX_PREFIX) and "pos-sbx-" + px[len(PX_PREFIX):] not in live:
+                self._rm_proxy(binary, "pos-sbx-" + px[len(PX_PREFIX):])
 
     def stop_idle(self, now: float | None = None) -> list[str]:
         """Stop (not remove) running sandboxes idle for IDLE_STOP_S. ensure() restarts one on its next use, so this only
@@ -271,6 +410,8 @@ class Sandboxes:
                     continue
                 if self._run([binary, "stop", "-t", "3", n], timeout=30).returncode == 0:
                     stopped.append(n)
+                    if self._net.get(n) == "proxy":
+                        self._run([binary, "stop", "-t", "3", PX_PREFIX + self._sfx(n)], timeout=30)
         return stopped
 
     def _start_reaper(self) -> None:
@@ -291,6 +432,8 @@ class Sandboxes:
         self._last.pop(name, None)
         self._shell.pop(name, None)
         self._net.pop(name, None)
+        self._reached.discard(name)
+        self._seen.pop(name, None)
 
     def note_import(self, conversation_id: str) -> None:
         """Library text is now inside this sandbox. The guest cannot clear the mark."""
@@ -302,7 +445,9 @@ class Sandboxes:
         (self._import_dir / name).write_text("1")
 
     def holds_import(self, conversation_id: str) -> bool:
-        name = self._name(conversation_id)
+        return self._holds(self._name(conversation_id))
+
+    def _holds(self, name: str) -> bool:
         if name in self._imported:
             return True
         if self._import_dir and (self._import_dir / name).is_file():
@@ -316,10 +461,11 @@ class Sandboxes:
             (self._import_dir / name).unlink(missing_ok=True)
 
     def reset(self, conversation_id: str) -> dict[str, Any]:
-        name = self._name(conversation_id)
+        return self.reset_name(self._name(conversation_id))
+
+    def reset_name(self, name: str) -> dict[str, Any]:
         binary = self._bin()
-        p = self._run([binary, "rm", "-f", name], timeout=30)
-        self._forget(name)
+        p = self._rm(binary, name)
         # Keep the mark if the container is still there: its files are still readable.
         if p.returncode == 0 or b"No such" in (p.stderr or b""):
             self._clear_import(name)
@@ -337,6 +483,8 @@ class Sandboxes:
         try:
             for name in self._live(binary, running_only=True):
                 self._run([binary, "stop", "-t", "3", name], timeout=30)
+                if self._net.get(name) == "proxy":
+                    self._run([binary, "stop", "-t", "3", PX_PREFIX + self._sfx(name)], timeout=30)
         except Exception:  # noqa: BLE001 - shutdown must not fail the app
             pass
 
@@ -380,15 +528,38 @@ class Sandboxes:
         if slug not in have:
             raise SandboxError(f"no checkpoint named {label or '(empty)'}; have: {', '.join(have) or 'none'}")
         with self._lock:
-            self._run([binary, "rm", "-f", name], timeout=30)
-            self._forget(name)
+            self._rm(binary, name)
             # Networking is decided now, from current settings: a checkpoint cannot re-enable it.
-            self._create(binary, name, f"{CKPT_REPO}/{name[len('pos-sbx-'):]}:{slug}", bool(self.settings().get("sandboxNetwork")),
-                         self._desk_mount(conversation_id))
+            self._create(binary, name, f"{CKPT_REPO}/{name[len('pos-sbx-'):]}:{slug}", net_mode(self.settings().get("sandboxNetwork")),
+                         self._desk_mount(conversation_id), conversation_id)
         return {"restored": slug}
 
     def networked(self, conversation_id: str) -> bool:
-        return bool(self._net.get(self._name(conversation_id)))
+        """True when what this sandbox returns may carry internet bytes: open network, or a proxy that let it reach a
+        host outside the registry preset (or whose report cannot be read)."""
+        name = self._name(conversation_id)
+        mode = self._net.get(name)
+        if mode == "proxy":
+            return self._note_reach(name, None if name in self._reached else self._proxy_seen(self._bin(), name))
+        return mode == "open"
+
+    def reaches_out(self, conversation_id: str) -> bool:
+        """True when the container was created with any route out (proxy or open), whatever it has reached so far."""
+        return self._net.get(self._name(conversation_id), "off") != "off"
+
+    def _egress_report(self, name: str, out: dict[str, Any]) -> None:
+        """Fold the hosts the proxy saw since the previous call into a result, and taint-flag it when it must."""
+        seen = self._proxy_seen(self._bin(), name)
+        prev = self._seen.get(name) or {"contacted": [], "blocked": []}
+        if seen is not None:
+            self._seen[name] = seen
+        new = {k: [h for h in (seen or {}).get(k, []) if h not in prev[k]] for k in ("contacted", "blocked")}
+        out["egress"] = {"mode": "allowlist", **new}
+        if new["blocked"]:
+            out["note"] = (f"The sandbox's network proxy blocked: {', '.join(new['blocked'][:8])}. The user can allow a host "
+                           "under Settings (shell allowed domains); a new sandbox (sandbox_reset) picks it up.")
+        if self._note_reach(name, seen):
+            out["network"] = True
 
     # ---- the tool surface ----
     def exec(self, conversation_id: str, command: str, timeout: int = 60) -> dict[str, Any]:
@@ -414,7 +585,9 @@ class Sandboxes:
             out["truncated"] = True
             out["stderr"] = (out["stderr"] + f"\nOutput passed {EXEC_HARD_CAP // 1_000_000} MB and the command was "
                                              "stopped; only the end is shown.").strip()
-        if self._net.get(name):
+        if self._net.get(name) == "proxy":
+            self._egress_report(name, out)
+        elif self._net.get(name) == "open":
             out["network"] = True
         from . import redact
         out["stdout"] = redact.scrub_command_output(out["stdout"])
@@ -466,7 +639,7 @@ class Sandboxes:
             out = {"path": gp, "total_bytes": total, "offset": off,
                    "text": redact.scrub_command_output(p.stdout.decode(errors="replace")),
                    "truncated": off + len(p.stdout) < total}
-        if self._net.get(name):
+        if self.networked(conversation_id):
             out["network"] = True
         return out
 
@@ -501,6 +674,6 @@ class Sandboxes:
             if len(parts) == 3 and parts[2] != gp:
                 entries.append({"type": "dir" if parts[0] == "d" else "file", "bytes": int(parts[1] or 0), "path": parts[2]})
         out: dict[str, Any] = {"path": gp, "entries": entries, "total": len(entries), "truncated": len(entries) >= 399}
-        if self._net.get(name):
+        if self.networked(conversation_id):
             out["network"] = True
         return out

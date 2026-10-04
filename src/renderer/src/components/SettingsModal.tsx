@@ -11,8 +11,11 @@ import type { Settings, ShortcutState } from '@shared/types'
 import { ToolGlobalToggles } from './ToolPermissions'
 import PermissionRules from './PermissionRules'
 import StandingGrants from './StandingGrants'
+import GrantsPanel from './GrantsPanel'
 import { WorkspaceRoots } from './WorkspaceRoots'
 import CoworkSettings from './CoworkSettings'
+import RunSafetySettings from './RunSafetySettings'
+import SandboxSettings from './SandboxSettings'
 import GoogleSettings from './GoogleSettings'
 import MeetingSettings from './MeetingSettings'
 import SupportSettings from './SupportSettings'
@@ -22,6 +25,7 @@ import MemoryPanel from './MemoryPanel'
 import ScopeSelect from './ScopeSelect'
 import DataSettings from './DataSettings'
 import TrashPanel from './TrashPanel'
+import AdvancedRetrieval, { rebuildIndex } from './AdvancedRetrieval'
 
 type Tab = SettingsTab
 
@@ -36,25 +40,29 @@ const TABS: { id: Tab; label: string; icon: LucideIcon }[] = [
   { id: 'data', label: 'Data', icon: Database }
 ]
 
-/** How much of the library has vectors for the current embedding model, and the button that fills the gap. */
+/** The backend's defaults (llm.DEFAULT_SETTINGS); a cleared field saves these. */
+const CONTEXT_DEFAULTS = { contextWindow: 128000, compactAt: 0.7, compactKeepRecent: 8 }
+
+/** How much of the library has vectors for the current embedding model, and the button that rebuilds it. */
 function IndexStatusLine(): JSX.Element | null {
   const toast = useStore((s) => s.toast)
   const [st, setSt] = useState<Awaited<ReturnType<typeof api.documents.indexStatus>> | null>(null)
   const [busy, setBusy] = useState(false)
   const load = (): void => { api.documents.indexStatus().then(setSt).catch(() => undefined) }
   useEffect(load, [])
-  // One backfill call embeds a batch; what is left shows in the status line, and another press continues.
+  // Re-chunk with the current chunker, then embed; what is left shows in the status line, and another press continues.
   const rebuild = async (): Promise<void> => {
     setBusy(true)
     try {
-      const r = await api.documents.embedBackfill()
+      const r = await rebuildIndex()
       if (r.error) toast(r.error, 'error')
       else toast(`Embedded ${r.embedded} passage${r.embedded === 1 ? '' : 's'}${r.remaining ? `, ${r.remaining} left. Press again to continue.` : '.'}`)
     } catch (e) {
       toast((e as Error).message, 'error')
+    } finally {
+      setBusy(false)
+      load()
     }
-    setBusy(false)
-    load()
   }
   if (!st) return null
   const total = st.chunks + (st.doc_chunks ?? 0)
@@ -80,6 +88,7 @@ export default function SettingsModal(): JSX.Element {
   const [shortcut, setShortcut] = useState<ShortcutState | null>(null)
   const [capShortcut, setCapShortcut] = useState<ShortcutState | null>(null)
   const [tab, setTab] = useState<Tab>(() => useStore.getState().settingsTab)
+  const memoryProposals = useStore((s) => s.memoryProposals)
   const libraryScope = useStore((s) => s.libraryScope)
   const { setLibraryScope } = useStore()
   const tabRefs = useRef<Partial<Record<Tab, HTMLButtonElement | null>>>({})
@@ -96,6 +105,23 @@ export default function SettingsModal(): JSX.Element {
   }
   // Closing discards `draft` — Escape and the backdrop are exactly the Cancel button.
   const { titleId, backdrop, modal } = useModal(() => setSettingsOpen(false))
+
+  // The backend changes settings on its own (an "always allow" writes a permission rule, a tool toggle),
+  // so the store's copy can be stale. Re-read it, and seed the draft from it unless editing has begun.
+  // `base` is what the draft was seeded from, so Save sends only the fields edited here.
+  const base = useRef(settings)
+  useEffect(() => {
+    const initial = base.current
+    api.settings.get().then((fresh) => {
+      delete fresh.mode
+      useStore.setState({ settings: fresh })
+      setDraft((d) => {
+        if (d !== initial) return d
+        base.current = fresh
+        return fresh
+      })
+    }).catch(() => undefined)
+  }, [])
 
   // A shortcut that another app owns fails at startup, long before this modal mounts, so the current
   // state is pulled as well as watched.
@@ -121,8 +147,8 @@ export default function SettingsModal(): JSX.Element {
 
   const testConnection = async (): Promise<void> => {
     setTest({ state: 'testing' })
-    await saveSettings({ baseUrl: draft.baseUrl, apiKey: draft.apiKey })
     try {
+      await saveSettings({ baseUrl: draft.baseUrl, apiKey: draft.apiKey })
       const list = await api.models()
       setReplacingKey(false)
       setTest({ state: 'ok', msg: `Connected. ${list.length} model${list.length === 1 ? '' : 's'} available.` })
@@ -143,8 +169,14 @@ export default function SettingsModal(): JSX.Element {
     // A cleared or out-of-range rounds field is clamped here: 0 would mean unlimited to the backend.
     const rounds = Number.isFinite(draft.maxToolRounds) && draft.maxToolRounds >= 1
       ? Math.min(60, Math.round(draft.maxToolRounds)) : settings.maxToolRounds
+    // A cleared context field goes back to the default; out-of-range numbers are refused by the backend (422, toasted).
+    const next: Settings = { ...draft, maxToolRounds: rounds,
+      contextWindow: draft.contextWindow ?? CONTEXT_DEFAULTS.contextWindow, compactKeepRecent: draft.compactKeepRecent ?? CONTEXT_DEFAULTS.compactKeepRecent,gatherShortcut: applied?.accelerator ?? draft.gatherShortcut, quickCaptureShortcut: capApplied?.accelerator ?? draft.quickCaptureShortcut }
+    // Only what was edited here: a whole-draft PUT would put back anything the backend changed since it was taken.
+    const seed = base.current as unknown as Record<string, unknown>
+    const changed = Object.fromEntries(Object.entries(next).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify(seed[k]))) as Partial<Settings>
     try {
-      await saveSettings({ ...draft, maxToolRounds: rounds, gatherShortcut: applied?.accelerator ?? draft.gatherShortcut, quickCaptureShortcut: capApplied?.accelerator ?? draft.quickCaptureShortcut })
+      if (Object.keys(changed).length) await saveSettings(changed)
     } catch (e) {
       // The dialog stays open with the draft intact, so nothing typed is lost.
       return toast((e as Error).message, 'error')
@@ -186,6 +218,7 @@ export default function SettingsModal(): JSX.Element {
               <button key={id} ref={(el) => { tabRefs.current[id] = el }} role="tab" id={`settings-tab-${id}`} aria-controls="settings-pane"
                 aria-selected={tab === id} tabIndex={tab === id ? 0 : -1} className={tab === id ? 'active' : undefined} onClick={() => setTab(id)}>
                 <Icon size={15} /><span>{label}</span>
+                {id === 'memory' && memoryProposals > 0 && <span className="count pending" title="Memory tidy-up suggestions to review">{memoryProposals}</span>}
               </button>
             ))}
           </nav>
@@ -267,8 +300,27 @@ export default function SettingsModal(): JSX.Element {
               <label><span>Suggest a memory tidy-up every <small className="muted">(new auto memories; 0 = manual only)</small></span><input type="number" min={0} value={draft.consolidateEvery ?? 25} onChange={(e) => patch({ consolidateEvery: Math.max(0, Number(e.target.value) || 0) })} /></label>
               <IndexStatusLine />
               <label className="toggle-row plain">
-                <span className="toggle-text"><b>Contextual chunks</b><small>When you rebuild the search index, ask the model to write one sentence situating each chunk in its document, and index it with the chunk. Costs one model call per chunk. Off by default.</small></span>
+                <span className="toggle-text"><b>Contextual chunks</b><small>Ask the model to write one sentence situating each chunk in its document, and index it with the chunk. Applies to new and re-indexed passages; Rebuild search index covers the rest. Costs one model call per chunk. Off by default.</small></span>
                 <input type="checkbox" checked={draft.contextualChunks === true} onChange={(e) => patch({ contextualChunks: e.target.checked })} /><span className="switch" />
+              </label>
+              <AdvancedRetrieval draft={draft} patch={patch} models={models} />
+              <h3 id="context-settings">Context</h3>
+              <p className="muted">How much chat history is replayed, and when older messages are summarized. Type <code>/compact</code> in a chat, or use Compact now in its context panel, to summarize on demand.</p>
+              <label><span>Context window <small className="muted">(tokens; blank = 128,000. A model with a smaller limit uses its own)</small></span>
+                <input type="number" min={1000} max={4000000} step={1000} value={draft.contextWindow ?? ''} placeholder="128000"
+                  onChange={(e) => patch({ contextWindow: e.target.value === '' ? undefined : Number(e.target.value) })} />
+              </label>
+              <label className="toggle-row plain">
+                <span className="toggle-text"><b>Compact automatically</b><small>Summarize older messages once the history fills the share of the window below. Off means only on demand.</small></span>
+                <input type="checkbox" checked={draft.autoCompact !== false} onChange={(e) => patch({ autoCompact: e.target.checked })} /><span className="switch" />
+              </label>
+              <label><span>Compact at <small className="muted">({Math.round((draft.compactAt ?? CONTEXT_DEFAULTS.compactAt) * 100)}% of the window)</small></span>
+                <input type="range" min={0.5} max={0.9} step={0.05} aria-label="Compact at share of the window" disabled={draft.autoCompact === false}
+                  value={draft.compactAt ?? CONTEXT_DEFAULTS.compactAt} onChange={(e) => patch({ compactAt: Number(e.target.value) })} />
+              </label>
+              <label><span>Keep recent messages verbatim <small className="muted">(2–200; never summarized)</small></span>
+                <input type="number" min={2} max={200} value={draft.compactKeepRecent ?? ''} placeholder={String(CONTEXT_DEFAULTS.compactKeepRecent)}
+                  onChange={(e) => patch({ compactKeepRecent: e.target.value === '' ? undefined : Number(e.target.value) })} />
               </label>
             </section>}
 
@@ -330,6 +382,8 @@ export default function SettingsModal(): JSX.Element {
               <ToolGlobalToggles value={draft.tools ?? {}} onChange={(tools) => patch({ tools })} />
               <PermissionRules value={draft.permissionRules} onChange={(permissionRules) => patch({ permissionRules })} />
               <StandingGrants draft={draft} patch={patch} />
+              <GrantsPanel />
+              <RunSafetySettings draft={draft} patch={patch} />
               <label className="toggle-row plain">
                 <span className="toggle-text"><b>Cache-friendly prompt layout</b><small>Keep the system prompt identical between turns and send per-turn memories, graph and excerpts next to your newest message, so the provider's prompt cache keeps hitting.</small></span>
                 <input type="checkbox" checked={draft.cacheLayout !== false} onChange={(e) => patch({ cacheLayout: e.target.checked })} /><span className="switch" />
@@ -342,16 +396,14 @@ export default function SettingsModal(): JSX.Element {
                   <option value="always">Always: every turn drafts a plan you approve first</option>
                 </select>
               </label>
+              <SandboxSettings draft={draft} patch={patch} />
+              <label><span>Load built-in tools on demand above <small className="muted">(tool count; 0 = always send every schema)</small></span><input type="number" min={0} value={draft.toolDeferAbove ?? 40} onChange={(e) => patch({ toolDeferAbove: Math.max(0, Number(e.target.value) || 0) })} /></label>
               <label><span>Defer connector tools above <small className="muted">(tool count; 0 = always send every schema)</small></span><input type="number" min={0} value={draft.mcpDeferAbove ?? 12} onChange={(e) => patch({ mcpDeferAbove: Math.max(0, Number(e.target.value) || 0) })} /></label>
               <label><span>Skill text inlined per reply <small className="muted">(characters; beyond it skills show as a list)</small></span><input type="number" min={0} step={500} value={draft.skillsInlineBudget ?? 6000} onChange={(e) => patch({ skillsInlineBudget: Math.max(0, Number(e.target.value) || 0) })} /></label>
               <label><span>Max tool rounds per reply</span><input type="number" min={1} max={60} value={draft.maxToolRounds} onChange={(e) => patch({ maxToolRounds: Number(e.target.value) })} /></label>
               <h3 id="cowork-settings">Cowork</h3>
               <p className="muted">Limits and reach for desks: the parallel sessions that work on a task in their own folder.</p>
               <CoworkSettings draft={draft} patch={patch} />
-              <label className="toggle-row plain">
-                <span className="toggle-text"><b>Share the desk folder with its sandbox</b><small>A desk's Linux sandbox sees that desk's workspace at /workspace/desk. Nothing else of your Mac is shared.</small></span>
-                <input type="checkbox" checked={draft.sandboxMountDesk !== false} onChange={(e) => patch({ sandboxMountDesk: e.target.checked })} /><span className="switch" />
-              </label>
             </section>}
 
             {tab === 'data' && <>
@@ -395,6 +447,10 @@ export default function SettingsModal(): JSX.Element {
               <label className="toggle-row plain">
                 <span className="toggle-text"><b>Notify me about chats</b><small>A system notification when a reply finishes, fails or needs your approval in a chat you are not looking at.</small></span>
                 <input type="checkbox" checked={draft.chatNotify !== false} onChange={(e) => patch({ chatNotify: e.target.checked })} /><span className="switch" />
+              </label>
+              <label className="toggle-row plain">
+                <span className="toggle-text"><b>Notify me about scheduled jobs</b><small>A system notification when a job fails, is paused or leaves something for you while the app is in the background. Each job can also be set to always or never notify.</small></span>
+                <input type="checkbox" checked={draft.notifyJobs !== false} onChange={(e) => patch({ notifyJobs: e.target.checked })} /><span className="switch" />
               </label>
               <label><span>Theme</span>
                 <select value={draft.theme} onChange={(e) => patch({ theme: e.target.value as Settings['theme'] })}>

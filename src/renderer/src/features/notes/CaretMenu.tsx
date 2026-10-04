@@ -7,22 +7,23 @@ export interface CaretMenuItem { key: string; label: string; hint?: string }
 /**
  * A listbox that hangs off the caret. The slash menu and the wikilink picker share it. It lives inside
  * the editor surface, so `anchor` and `bounds` are in the surface's coordinates, and it flips above the
- * caret or slides left when the surface has no room below or to the right.
+ * caret or slides left when the surface has no room below or to the right. Without an anchor the host's
+ * CSS places it (the chat composer hangs it above the text box).
  */
 export default function CaretMenu({ items, active, anchor, bounds, label, onPick, onHover }: {
   items: CaretMenuItem[]
   active: number
-  anchor: CaretRect
-  bounds: { w: number; h: number }
+  anchor?: CaretRect
+  bounds?: { w: number; h: number }
   label: string
   onPick: (index: number) => void
   onHover: (index: number) => void
 }): JSX.Element {
   const box = useRef<HTMLDivElement>(null)
-  const [pos, setPos] = useState({ top: anchor.top + anchor.height, left: anchor.left })
+  const [pos, setPos] = useState({ top: (anchor?.top ?? 0) + (anchor?.height ?? 0), left: anchor?.left ?? 0 })
   useLayoutEffect(() => {
     const el = box.current
-    if (!el) return
+    if (!el || !anchor || !bounds) return
     const p = placePopup(anchor, { w: el.offsetWidth, h: el.offsetHeight }, bounds)
     setPos((cur) => (cur.top === p.top && cur.left === p.left ? cur : { top: p.top, left: p.left }))
   }, [anchor, bounds, items.length])
@@ -33,7 +34,7 @@ export default function CaretMenu({ items, active, anchor, bounds, label, onPick
   }, [active])
 
   return (
-    <div ref={box} className="caret-menu" role="listbox" aria-label={label} style={{ top: pos.top, left: pos.left }}
+    <div ref={box} className="caret-menu" role="listbox" aria-label={label} style={anchor ? { top: pos.top, left: pos.left } : undefined}
       // Pointer-down must not steal focus from the textarea, or the caret (and the menu's trigger) is lost.
       onMouseDown={(e) => e.preventDefault()}>
       {items.map((it, i) => (

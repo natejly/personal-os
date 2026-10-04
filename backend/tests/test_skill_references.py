@@ -63,6 +63,21 @@ class RefsTest(unittest.TestCase):
         with self.assertRaises(skillmd.ImportError_):
             skillmd.import_text(self.skills, self.lint, "---\nname: big\ndescription: d\n---\n" + "x" * 4001, references=REFS)
 
+    def test_connector_slugs_are_linted(self) -> None:
+        known = {"gmail_search", "mcp__tracker__create_issue"}
+        proc = "1. Call mcp__tracker__create_issue with the title.\n2. Then mcp__x__y to finish.\n"
+        unknown = [f["excerpt"] for f in skillbuild.lint_skill("File it", "when filing", proc, known_tools=known)
+                   if f["code"] == "unknown_tool"]
+        self.assertEqual(unknown, ["mcp__x__y"])
+
+    def test_skill_draft_tool_lints_against_wired_known_tools(self) -> None:
+        self.box.known_tools = lambda: set(self.box.specs) | {"mcp__tracker__create_issue"}
+        out = asyncio.run(self.box.call("skill_draft", {
+            "name": "File an issue", "description": "when filing a bug",
+            "procedure": "1. Call mcp__tracker__create_issue.\n2. Call mcp__tracker__close_it.\n"}, {"project_id": None}))
+        unknown = [f["excerpt"] for f in out["findings"] if f["code"] == "unknown_tool"]
+        self.assertEqual(unknown, ["mcp__tracker__close_it"])
+
 
 if __name__ == "__main__":
     unittest.main()

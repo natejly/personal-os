@@ -143,15 +143,7 @@ export function flushDrafts(): void {
 /** Another window wrote or cleared a key. A key this window is still typing in keeps its own text. */
 function onStorage(e: StorageEvent): void {
   if (!e.key || !e.key.startsWith(DRAFT_PREFIX)) return
-  const key = e.key.slice(DRAFT_PREFIX.length)
-  if (timers.has(key)) return
-  const entry = readItem(key)
-  useDrafts.setState((s) => {
-    const drafts = { ...s.drafts }
-    if (entry) drafts[key] = entry
-    else delete drafts[key]
-    return { drafts }
-  })
+  refreshDraft(e.key.slice(DRAFT_PREFIX.length))
 }
 
 /**
@@ -202,6 +194,25 @@ function put(key: string, text: string, taint?: string): void {
 export function setDraft(key: string, next: string | ((cur: string) => string)): void {
   const cur = getDraft(key)?.text ?? ''
   put(key, typeof next === 'function' ? next(cur) : next)
+}
+
+/** Sets and writes at once, for a key another window may act on before the debounce would fire. */
+export function setDraftNow(key: string, text: string): void {
+  put(key, text)
+  writeNow(key)
+}
+
+/** Re-reads `key` from storage, so this window sees another window's latest write before acting on it. */
+export function refreshDraft(key: string): void {
+  hydrate()
+  if (!hasWindow() || timers.has(key)) return
+  const entry = readItem(key)
+  useDrafts.setState((s) => {
+    const drafts = { ...s.drafts }
+    if (entry) drafts[key] = entry
+    else delete drafts[key]
+    return { drafts }
+  })
 }
 
 /** Adds text on its own line (or, with `paragraph`, after a blank one). `taint` marks a row-less draft. */

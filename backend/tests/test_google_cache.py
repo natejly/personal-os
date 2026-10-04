@@ -103,6 +103,24 @@ class TTLCacheTests(unittest.TestCase):
         self.assertEqual(c.get("gmail:a"), (True, 3))
         self.assertEqual(c.invalidate(), 1)
 
+    def test_a_read_overtaken_by_a_write_is_not_stored(self) -> None:
+        class _Api:
+            def __init__(self) -> None:
+                self._cache = cache.TTLCache()
+                self.calls = 0
+
+            @cache.cached("calendar", 60)
+            def read(self) -> int:
+                self.calls += 1
+                if self.calls == 1:
+                    self._cache.invalidate("calendar")  # a write lands while this read is in flight
+                return self.calls
+
+        api = _Api()
+        self.assertEqual(api.read(), 1)
+        self.assertEqual(api.read(), 2)  # the stale first answer was not kept
+        self.assertEqual(api.read(), 2)
+
     def test_callers_cannot_mutate_a_cached_value(self) -> None:
         c = cache.TTLCache()
         c.put("ns:k", {"items": [1, 2]}, 60)
@@ -299,17 +317,22 @@ class _MsgReq:
 
 
 class _GmailBatch:
-    def __init__(self, callback: Any, messages: dict[str, dict[str, Any]]):
+    def __init__(self, callback: Any, messages: dict[str, dict[str, Any]], throttle: dict[str, int]):
         self._callback = callback
         self._messages = messages
-        self._ids: list[str] = []
+        self._throttle = throttle  # id -> how many more times that item answers 429
+        self._ids: list[tuple[str, str]] = []
 
-    def add(self, req: _MsgReq) -> None:
-        self._ids.append(req.mid)
+    def add(self, req: _MsgReq, request_id: str | None = None) -> None:
+        self._ids.append((request_id or str(len(self._ids)), req.mid))
 
     def execute(self) -> None:
-        for i, mid in enumerate(self._ids):
-            self._callback(str(i), self._messages[mid], None)
+        for rid, mid in self._ids:
+            if self._throttle.get(mid, 0) > 0:
+                self._throttle[mid] -= 1
+                self._callback(rid, None, RuntimeError("429 rateLimitExceeded"))
+            else:
+                self._callback(rid, self._messages[mid], None)
 
 
 def _mail(mid: str, subject: str) -> dict[str, Any]:
@@ -330,6 +353,7 @@ class _Gmail:
         self.gets: list[str] = []
         self.records: list[dict[str, Any]] = []
         self.history_id = "5"
+        self.throttle: dict[str, int] = {}
 
     def users(self) -> _Gmail:
         return self
@@ -350,7 +374,7 @@ class _Gmail:
         return _MsgReq(kw["id"])
 
     def new_batch_http_request(self, callback: Any) -> _GmailBatch:
-        return _GmailBatch(callback, self.rows)
+        return _GmailBatch(callback, self.rows, self.throttle)
 
 
 class IncrementalTests(unittest.TestCase):
@@ -425,6 +449,25 @@ class IncrementalTests(unittest.TestCase):
         third = g.gmail_search("in:inbox", 10)
         self.assertEqual([m["id"] for m in third], ["a", "c"])
         self.assertEqual(svc.gets, ["a", "b", "c"])
+
+    def test_a_throttled_batch_item_is_asked_for_again(self) -> None:
+        svc = _Gmail()
+        svc.throttle = {"b": 1}
+        g = Google(dict, lambda _s: None)
+        g._svc = lambda name, version: svc  # type: ignore[method-assign]
+        self.assertEqual([m["id"] for m in g.gmail_search("in:inbox", 10)], ["a", "b"])
+        self.assertEqual(svc.gets, ["a", "b", "b"])
+
+    def test_a_list_missing_messages_is_not_cached(self) -> None:
+        svc = _Gmail()
+        svc.throttle = {"b": 2}
+        g = Google(dict, lambda _s: None)
+        g._svc = lambda name, version: svc  # type: ignore[method-assign]
+        self.assertEqual([m["id"] for m in g.gmail_search("in:inbox", 10)], ["a"])
+        # No invalidate: an incomplete answer must not be served for the rest of the TTL.
+        self.assertEqual([m["id"] for m in g.gmail_search("in:inbox", 10)], ["a", "b"])
+        self.assertEqual([m["id"] for m in g.gmail_search("in:inbox", 10)], ["a", "b"])
+        self.assertEqual(svc.gets, ["a", "b", "b", "b"])
 
     def test_a_saved_message_body_is_not_fetched_again(self) -> None:
         svc = _Gmail()

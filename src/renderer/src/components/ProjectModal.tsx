@@ -3,9 +3,13 @@ import { X, Trash2 } from 'lucide-react'
 import { useStore } from '../store'
 import { useModal } from '../lib/useModal'
 import { ToolOverrides } from './ToolPermissions'
-import type { ToolOverride } from '@shared/types'
+import type { Project, ToolOverride } from '@shared/types'
 
 const COLORS = ['#d97757', '#e5484d', '#e5a13b', '#46a758', '#3b9edb', '#8e6fdb', '#d95c9e', '#8b8b8b']
+const MEMORY_MODES: { value: Project['memory_mode']; label: string; hint: string }[] = [
+  { value: 'shared', label: 'Shared with personal', hint: 'Chats here also use your personal memory, docs, skills and voice.' },
+  { value: 'isolated', label: 'This project only', hint: 'Chats here see only this project, and save nothing to personal. You can change this later.' }
+]
 const COLOR_NAMES = ['Terracotta', 'Red', 'Amber', 'Green', 'Blue', 'Purple', 'Pink', 'Gray']
 
 export default function ProjectModal(): JSX.Element {
@@ -15,6 +19,7 @@ export default function ProjectModal(): JSX.Element {
   const [name, setName] = useState(existing?.name ?? '')
   const [description, setDescription] = useState(existing?.description ?? '')
   const [color, setColor] = useState(existing?.color ?? COLORS[0])
+  const [memoryMode, setMemoryMode] = useState<Project['memory_mode']>(existing?.memory_mode ?? 'shared')
   const [tools, setTools] = useState<Record<string, ToolOverride>>(existing?.tools ?? {})
   const globalToolsRaw = useStore((s) => s.settings.tools)
   const allTools = useStore((s) => s.tools)
@@ -24,9 +29,9 @@ export default function ProjectModal(): JSX.Element {
 
   const save = async (): Promise<void> => {
     if (!name.trim()) return
-    if (existing) await updateProject(existing.id, { name: name.trim(), description, color, tools })
+    if (existing) await updateProject(existing.id, { name: name.trim(), description, color, tools, memory_mode: memoryMode })
     else {
-      await createProject({ name: name.trim(), description, system_prompt: '', color })
+      await createProject({ name: name.trim(), description, system_prompt: '', color, memory_mode: memoryMode })
       const created = useStore.getState().projects.find((p) => p.name === name.trim())
       if (created && Object.keys(tools).length) await updateProject(created.id, { tools })
     }
@@ -43,6 +48,17 @@ export default function ProjectModal(): JSX.Element {
           <label><span>Color</span>
             <div className="color-row">{COLORS.map((c, i) => <button key={c} type="button" className={`swatch ${c === color ? 'on' : ''}`} style={{ background: c }} aria-label={COLOR_NAMES[i]} aria-pressed={c === color} title={COLOR_NAMES[i]} onClick={() => setColor(c)} />)}</div>
           </label>
+        </section>
+        <section>
+          <h3>Memory</h3>
+          <div role="radiogroup" aria-label="Memory" className="memory-mode">
+            {MEMORY_MODES.map((m) => (
+              <label key={m.value} className="memory-mode-opt">
+                <input type="radio" name="memory-mode" checked={memoryMode === m.value} onChange={() => setMemoryMode(m.value)} />
+                <b>{m.label}</b> <small className="muted">{m.hint}</small>
+              </label>
+            ))}
+          </div>
         </section>
         <section>
           <h3>Tools</h3>

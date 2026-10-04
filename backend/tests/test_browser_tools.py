@@ -118,7 +118,12 @@ def test_session_id_and_open_payload(env) -> None:
     route, body = env.fake.calls[-1]
     assert route == "snapshot" and body["session"] == "conv:c1" and body["query"] == "go" and body["full"] is True
     env.run("browser_open", ctx=env.ctx(desk_id=None), url="https://example.com/b", new_tab=True)
-    assert "downloadDir" not in env.fake.calls[-1][1] and env.fake.calls[-1][1]["newTab"] is True
+    # A plain chat downloads into its own files, not a desk's.
+    chat_dl = env.ws.root.parent / "chats" / "c1" / "outputs" / "downloads"
+    assert env.fake.calls[-1][1]["downloadDir"] == str(chat_dl) and env.fake.calls[-1][1]["newTab"] is True
+    # With no conversation there is nowhere to put a download: none is offered.
+    env.run("browser_open", ctx=env.ctx(desk_id=None, conversation_id=None), url="https://example.com/c")
+    assert "downloadDir" not in env.fake.calls[-1][1]
 
 
 def test_scroll_payload(env) -> None:
@@ -315,6 +320,25 @@ def test_downloads_reported_relative(env) -> None:
     env.fake.replies["act"] = page(notes=[f"downloaded: {root / 'work' / 'downloads' / 'a.pdf'}"])
     env.fake.replies["preview"] = preview("none")
     assert env.run("browser_click", ref="e1")["downloaded"] == ["work/downloads/a.pdf"]
+
+
+def test_chat_download_needs_approval_and_lands_in_chat_files(env) -> None:
+    ctx = env.ctx(desk_id=None)
+    env.run("browser_open", ctx=ctx, url="https://example.com/a")
+    dl = Path(env.fake.calls[-1][1]["downloadDir"])
+    assert dl == env.tb.chat_outputs.desk_root("c1") / "outputs" / "downloads"
+    (dl / "a.pdf").write_bytes(b"%PDF-1")
+    env.fake.replies["preview"] = preview("download")
+    env.fake.replies["act"] = page(notes=[f"downloaded: {dl / 'a.pdf'}"])
+    env.answers.append(False)  # declined: the act is never sent
+    env.fake.calls.clear()
+    out = env.run("browser_click", ctx=ctx, ref="e1")
+    assert "error" in out and env.fake.routes() == ["preview"] and env.cards[-1]["action"] == "click"
+    env.fake.calls.clear()
+    out = env.run("browser_click", ctx=env.ctx(desk_id=None), ref="e1")
+    assert env.fake.calls[1][1]["allowDownload"] is True
+    assert out["downloaded"] == ["outputs/downloads/a.pdf"]
+    assert out["outputs"] == [{"name": "a.pdf", "size": 6, "path": "outputs/downloads/a.pdf"}]
 
 
 def test_register_route_accepts_capabilities() -> None:

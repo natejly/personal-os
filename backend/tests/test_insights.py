@@ -343,6 +343,33 @@ def test_rerunning_updates_the_same_habit_instead_of_duplicating_it() -> None:
     assert len(m.insights.memories.list(None)) == 1       # and no near-duplicate beside it
 
 
+def test_a_trashed_pinned_or_edited_habit_memory_is_left_to_the_user() -> None:
+    m = _monitor(REPLY)
+    _seeded(m)
+    asyncio.run(m.insights.refresh(force=True))
+    mid = m.insights.get_habit_by_key("habit-mornings-in-cursor")["memory_id"]  # type: ignore[index]
+    rerun = json.dumps({"habits": [{"key": "habit-mornings-in-cursor", "statement": "User writes code in Cursor at dawn.",
+                                    "kind": "fact", "confidence": 0.9}], "suggestions": []})
+    m.insights._complete = _monitor(rerun)._complete
+
+    m.insights.memories.update(mid, {"content": "I code in Cursor before work."})   # the user's own words
+    asyncio.run(m.insights.refresh(force=True))
+    assert m.insights.memories.get(mid)["content"] == "I code in Cursor before work."  # type: ignore[index]
+
+    m.insights.memories.update(mid, {"content": "User writes code in Cursor at dawn.", "pinned": True})
+    with m.db.tx() as c:  # line the habit's statement up with the row, so only the pin protects it
+        c.execute("UPDATE activity_habits SET statement=? WHERE memory_id=?", ("User writes code in Cursor at dawn.", mid))
+    m.insights._complete = _monitor(REPLY)._complete
+    asyncio.run(m.insights.refresh(force=True))
+    assert m.insights.memories.get(mid)["content"] == "User writes code in Cursor at dawn."  # type: ignore[index]
+
+    m.insights.memories.update(mid, {"pinned": False})
+    with m.db.tx() as c:  # what the trash does to a memory
+        c.execute("UPDATE memories SET deleted_at=? WHERE id=?", (time.time(), mid))
+    asyncio.run(m.insights.refresh(force=True))
+    assert m.insights.memories.list(None) == []           # not recreated beside the trashed row
+
+
 def test_supersedes_retires_the_old_habit_and_its_memory() -> None:
     m = _monitor(REPLY)
     _seeded(m)

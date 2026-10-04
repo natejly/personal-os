@@ -18,7 +18,7 @@ SQLITE_BUSY_SNAPSHOT instead of making it wait.
 `needs_you=1` rows are what the rail's Needs you section and the Today card are built from, so a desk
 that finished or broke while the app was closed is still visible without a poller. `recover()` is the
 other half of that: on boot every LIVE desk becomes `interrupted` with a needs_you event, and nothing
-is ever auto-resumed — the user presses Resume.
+is auto-resumed unless deskAutoResume is on — otherwise the user presses Resume.
 
 `desks.workspace` stores the RELATIVE `cowork/<id>` that `Workspace.rel_root` builds, never an
 absolute path, so moving the data directory does not strand every desk.
@@ -108,13 +108,41 @@ CREATE TABLE IF NOT EXISTS desk_outputs (
 """
 
 STATUSES = ("draft", "planning", "awaiting_plan", "working", "needs_approval", "blocked",
-            "paused", "interrupted", "review", "done", "failed", "stopped")
+            "paused", "interrupted", "review", "done", "failed", "stopped", "queued")
 NEEDS_YOU = ("awaiting_plan", "needs_approval", "blocked", "interrupted", "review")
 LIVE = ("planning", "working", "needs_approval")
 # What a restart has to sweep. `awaiting_plan` is not LIVE, but the card it is waiting on was held
 # open by an in-process run that died with the process, so a boot that left it alone would strand
 # the desk in a state nothing can wake.
 RECOVER_FROM = (*LIVE, "awaiting_plan")
+# What auto-resume (deskAutoResume) may relaunch after a restart. `awaiting_plan` is swept by recover()
+# but never auto-resumed: its next step is the user's plan decision, not another turn.
+AUTO_RESUME_FROM = LIVE
+# Which statuses each entry point may claim a desk out of. `claim_run`'s rowcount is the lock, so a
+# double-clicked Start makes one run, not two.
+START_FROM = ("draft",)
+# `awaiting_plan` is resumable too: a restart strands a desk on a plan card nobody is waiting on,
+# and Desks.recover() sweeps that status, so Resume has to be able to claim out of it.
+RESUME_FROM = ("awaiting_plan", "blocked", "paused", "interrupted", "review")
+# A typed message may also wake a desk the user had let finish — the same box, awake or not.
+# A message to a queued desk is appended to what it will wake with; Start on one is not (it holds the brief already).
+MESSAGE_FROM = (*START_FROM, *RESUME_FROM, "done", "failed", "stopped", "queued")
+# Pause holds a desk that is doing something; pausing one in review or done would make it resumable
+# work it is not. Stop ends anything not already over.
+PAUSE_FROM = (*LIVE, "awaiting_plan")
+STOP_FROM = ("draft", *LIVE, "awaiting_plan", "blocked", "paused", "interrupted", "queued")
+# A desk can be deleted once nothing is mid-flight: never while a run or a card holds it.
+DELETE_FROM = ("draft", "interrupted", "done", "failed", "stopped")
+_ACTIONS = (("start", START_FROM), ("pause", PAUSE_FROM), ("resume", RESUME_FROM), ("stop", STOP_FROM),
+            ("message", MESSAGE_FROM), ("delete", DELETE_FROM))
+
+
+def desk_actions(status: str) -> list[str]:
+    """What the desk pane may offer for this status, read off the same tables the routes enforce,
+    so a button and its route can never disagree."""
+    return [name for name, allowed in _ACTIONS if status in allowed]
+
+
 AUTONOMY = ("plan", "ask", "propose")
 OUTPUT_KINDS = ("doc", "doc_append", "document", "download", "todo", "artifact", "mail_draft")
 DESK_JSON, EVENT_JSON = ("budget",), ("data",)
@@ -213,6 +241,13 @@ def desk_manual(offered: set[str], facts: dict[str, Any]) -> str:
         return any(n in offered for n in names)
 
     out = ["## What you can do here"]
+    inputs = facts.get("inputs") or []
+    if inputs:
+        names = ", ".join(f"`{_line(e['path'], 120)}`" + (" (changed since it was handed in)" if e.get("state") == "modified" else "")
+                          for e in inputs[:40])
+        more = f" and {len(inputs) - 40} more" if len(inputs) > 40 else ""
+        out.append(f"- Inputs the user handed you, read-only snapshot copies with their sources in `inputs/MANIFEST.md`: "
+                   f"{names}{more}. Read them first; write your own copies under `work/`.")
     if has("desk_list_files", "desk_read_file", "desk_write_file"):
         out.append("- Workspace: `work/` is scratch, `outputs/` is for deliverables. `desk_list_files`, `desk_read_file` and "
                    "`desk_write_file` handle whole text files.")
@@ -310,11 +345,12 @@ _STATUS_BODY = {
     "needs_approval": "Waiting for your approval.",
     "blocked": "Blocked.",
     "paused": "Paused.",
-    "interrupted": "Interrupted when the app stopped. Nothing was resumed for you.",
+    "interrupted": "Interrupted when the app stopped.",
     "review": "Finished. Outputs are waiting for review.",
     "done": "Done.",
     "failed": "Failed.",
     "stopped": "Stopped.",
+    "queued": "Waiting for a free slot.",
 }
 # A status whose own event kind is more specific than "status".
 _STATUS_KIND = {"awaiting_plan": "plan", "blocked": "blocked", "interrupted": "interrupted",
@@ -365,6 +401,12 @@ class Desks:
             cols = {r[1] for r in c.execute("PRAGMA table_info(desks)")}
             if "origin_conversation_id" not in cols:  # the chat that started it (desk_start); NULL for the Cowork form
                 c.execute("ALTER TABLE desks ADD COLUMN origin_conversation_id TEXT")
+            # A desk waiting for a free slot under deskMaxLive: when it joined, and the content of the turn
+            # it will start with (a resume message, a typed message, background-job results).
+            if "queued_at" not in cols:
+                c.execute("ALTER TABLE desks ADD COLUMN queued_at REAL")
+            if "queued_message" not in cols:
+                c.execute("ALTER TABLE desks ADD COLUMN queued_message TEXT NOT NULL DEFAULT ''")
 
     # ---------------- views ----------------
     @staticmethod
@@ -382,6 +424,7 @@ class Desks:
         d["archived"] = bool(d["archived"])
         d["live"] = d["status"] in LIVE
         d["unseen"] = unseen
+        d["actions"] = desk_actions(d["status"])
         return d
 
     @staticmethod
@@ -551,7 +594,8 @@ class Desks:
         with self.db.tx() as c:
             cur = c.execute(
                 "UPDATE desks SET status = CASE WHEN COALESCE(plan_id,'')='' THEN 'planning' ELSE 'working' END,"
-                " status_reason='', run_id=NULL, last_error=NULL, ended_at=NULL, updated_at=?"
+                " status_reason='', run_id=NULL, last_error=NULL, ended_at=NULL, queued_at=NULL, queued_message='',"
+                " updated_at=?"
                 f" WHERE id=? AND status IN ({marks})",
                 (t, id, *from_statuses),
             )
@@ -611,17 +655,58 @@ class Desks:
             marks = ",".join("?" for _ in LIVE)
             return int(c.execute(f"SELECT COUNT(*) FROM desks WHERE status IN ({marks})", LIVE).fetchone()[0])
 
-    def recover(self) -> int:
+    @_notifies
+    def enqueue(self, id: str, message: str, from_statuses: tuple[str, ...]) -> dict[str, Any] | None:
+        """Wait for a free slot under deskMaxLive instead of being refused. Atomic like claim_run: None
+        means the desk was not in `from_statuses`. A desk already queued keeps its place in line, and
+        the new message is appended to the one it holds, so nothing that woke it is lost. Only callers
+        that pass 'queued' in `from_statuses` (a message, a shell result) append to a queued desk."""
+        marks = ",".join("?" for _ in from_statuses)
+        t = now()
+        msg = (message or "").strip()
+        with self.db.tx() as c:
+            prev = c.execute("SELECT status FROM desks WHERE id=?", (id,)).fetchone()
+            cur = c.execute(
+                "UPDATE desks SET"
+                " queued_message = CASE WHEN ?='' THEN queued_message"
+                "   WHEN status='queued' AND queued_message<>'' THEN queued_message || char(10) || char(10) || ?"
+                "   ELSE ? END,"
+                " queued_at = CASE WHEN status='queued' THEN queued_at ELSE ? END,"
+                " status='queued', status_reason='', run_id=NULL, ended_at=NULL, updated_at=?"
+                f" WHERE id=? AND status IN ({marks})",
+                (msg, msg, msg, t, t, id, *from_statuses),
+            )
+            if not cur.rowcount:
+                return None
+            if prev and prev["status"] != "queued":
+                self._event(c, id, "status", _body("queued", "", None), needs_you=False, run_id=None,
+                            data={"status": "queued", "reason": "", "error": None}, t=t)
+            return self._one(c, id)
+
+    def queued(self) -> list[dict[str, Any]]:
+        """The queue, oldest first: the order desks are launched in as slots free up."""
+        with self.db.tx() as c:
+            rows = c.execute("SELECT * FROM desks WHERE status='queued' ORDER BY queued_at, rowid").fetchall()
+        return [self._desk_view(r, 0) for r in rows]
+
+    def queue_position(self, id: str) -> int:
+        """1-based place in the queue; 0 when the desk is not queued."""
+        return next((i for i, d in enumerate(self.queued(), 1) if d["id"] == id), 0)
+
+    def recover(self) -> list[tuple[str, str]]:
         """Startup: every row whose status is in RECOVER_FROM becomes 'interrupted' with a needs_you
-        event. No desk is ever auto-resumed at startup, and a desk the user parked (paused, blocked)
-        is left exactly as it is — only a state whose in-process run died is swept."""
+        event. Returns (id, status before the restart) for each desk swept. Nothing is resumed here
+        (the caller relaunches some only when deskAutoResume is on), and a desk the user parked
+        (paused, blocked) or one waiting in the queue is left exactly as it is: only a state whose
+        in-process run died is swept."""
         with self.db.tx() as c:
             marks = ",".join("?" for _ in RECOVER_FROM)
-            ids = [r["id"] for r in
-                   c.execute(f"SELECT id FROM desks WHERE status IN ({marks})", RECOVER_FROM).fetchall()]
-        for did in ids:
+            rows = [(r["id"], r["status"]) for r in
+                    c.execute(f"SELECT id, status FROM desks WHERE status IN ({marks}) ORDER BY created_at, rowid",
+                              RECOVER_FROM).fetchall()]
+        for did, _ in rows:
             self.set_status(did, "interrupted", reason="restart", headline="")
-        return len(ids)
+        return rows
 
     def delete(self, id: str) -> None:
         with self.db.tx() as c:
@@ -736,8 +821,9 @@ class Desks:
         return self._output_view(r)
 
     def finish_output(self, output_id: str, *, kind: str, ref: str | None,
-                      verified: bool) -> dict[str, Any] | None:
-        """An unverified promotion is `promote_failed`, never a tick: the read-back is the evidence."""
+                      verified: bool, sha256: str | None = None) -> dict[str, Any] | None:
+        """An unverified promotion is `promote_failed`, never a tick: the read-back is the evidence.
+        `sha256` replaces the delivered digest when the user accepted a file changed since delivery."""
         if kind not in OUTPUT_KINDS:
             raise ValueError(f"Unknown output destination: {kind}")
         t = now()
@@ -745,8 +831,8 @@ class Desks:
         with self.db.tx() as c:
             cur = c.execute(
                 "UPDATE desk_outputs SET status=?, promoted_kind=?, promoted_id=?, verified=?, updated_at=?,"
-                " decided_at=COALESCE(decided_at, ?) WHERE id=?",
-                (status, kind, ref, int(bool(verified)), t, t, output_id),
+                " decided_at=COALESCE(decided_at, ?), sha256=COALESCE(?, sha256) WHERE id=?",
+                (status, kind, ref, int(bool(verified)), t, t, sha256, output_id),
             )
             if not cur.rowcount:
                 return None

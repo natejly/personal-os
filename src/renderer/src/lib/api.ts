@@ -1,22 +1,22 @@
 import type {
   BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, Board, BoardCard, BoardColumn, CardEvent, DataSource, Dashboard, Widget, Artifact, ArtifactVersion, Recap, Conversation, ConversationSettings, ContextUsed, ContextMeter, ConversationUsage, Document, GraphData, GraphEdge, GraphNode, Message,
-  ApprovalDecision, PermissionEvaluation, PlanEdit,
+  ApprovalDecision, PermissionEvaluation, PermissionGrants, PendingApproval, McpGrant, PlanEdit,
   Memory, MemoryProposal, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
-  Command, AgentDef, BuiltinAgent, Workflow, WorkflowRun, Plan, PlanStep, Skill, SkillStatus, SkillFinding, ToolResultHandle,
+  Command, AgentDef, BuiltinAgent, Workflow, WorkflowRun, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
   Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
-  Desk, DeskAutonomy, DeskBudget, DeskDiff, DeskEvent, DeskFilePreview, DeskFileTree, DeskRichPreview,
-  DeskStatus, FullDesk, PromotionKind, PromotionResult,
-  AgentInbox, AgentProposal, Job, JobNotifyEvent, JobRunRecord, JobStats,
+  Desk, DeskAutonomy, DeskBudget, DeskDiff, DeskEvent, DeskInputRef, DeskFilePreview, DeskFileTree, DeskOutput, DeskRichPreview,
+  DeskQueued, DeskStatus, FullDesk, PlanRecord, PromotionKind, PromotionResult,
+  AgentInbox, AgentProposal, Job, JobNotifyEvent, JobRunRecord, JobSkipRecord, JobStats,
   Doc, DocFolder, FullDoc, DocRevision,
   HealthEntry, HealthMetric, HealthProvider, HealthSource, HealthSourcePlan, HealthSummary, HealthSyncResult, McpSignIn,
-  TrashKind, TrashListing, ChatSearchHit,
+  TrashKind, TrashListing, ChatSearchHit, ChatOutputs,
   McpEffective, McpReport, McpServer, McpServerDraft, McpTool, ToolMode,
   ActivityApplyResult, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityGrantResult,
   ActivityCategoryReport, ActivityCategoryRule, ActivityInsights, ActivityRedactTest, ActivityStatus, ActivitySuggestion, ActivitySummary, InsightStatus,
   PendingSend, SendHoldConfig, Verification, Verified,
   Meeting, FullMeeting, MeetingActionItem, MeetingCandidate, MeetingConfig, MeetingPreflight, MeetingRevision, MeetingSegment, MeetingStatusInfo,
   RunChanges, RunUndoResult,
-  BackupInfo, DataOverview
+  BackupInfo, DataOverview, SandboxStatus, ShellJobInfo, ShellJobTail
 } from '@shared/types'
 import { ApiError } from './apiError'
 import type { ProviderInfo, SetupStatus, SetupTestResult } from '../components/onboarding/steps'
@@ -54,6 +54,10 @@ const auth = async (): Promise<Record<string, string>> => {
 export const CONTROL_TIMEOUT_MS = 20_000
 /** Stop is the one control the user is waiting on, so it gives up sooner and says so. */
 export const STOP_TIMEOUT_MS = 5_000
+/** Every other request: past this a hung backend reads as an error instead of a spinner that never ends. */
+export const REQUEST_TIMEOUT_MS = 60_000
+/** For calls that do model work, sync, upload or install, where a minute is a normal answer time. */
+export const NO_TIMEOUT = 0
 
 /** A signal that fires when either input does; plain AbortSignal.any where the runtime has it. */
 const anySignal = (a: AbortSignal, b?: AbortSignal | null): AbortSignal => {
@@ -67,7 +71,7 @@ const anySignal = (a: AbortSignal, b?: AbortSignal | null): AbortSignal => {
   return c.signal
 }
 
-export async function req<T>(path: string, init?: RequestInit, timeoutMs?: number): Promise<T> {
+export async function req<T>(path: string, init?: RequestInit, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
   // The token wait only suspends while setBase() is still resolving it. Once it is (or when there is no
   // sidecar at all, as in tests), a req() runs synchronously up to its fetch — the canvas store's
   // flush-before-space-switch depends on that.
@@ -104,6 +108,21 @@ export async function req<T>(path: string, init?: RequestInit, timeoutMs?: numbe
 
 export const json = (v: unknown): string => JSON.stringify(v)
 
+/**
+ * Save a file the backend serves as octet-stream. A bare <a href> 401s (the auth middleware reads the token header
+ * only), so the bytes are fetched with the header and handed to the browser through an object URL.
+ */
+export async function saveDownload(path: string, name: string): Promise<void> {
+  const r = await fetch(`${base}${path}`, { headers: await auth() })
+  if (!r.ok) throw new ApiError(`${r.status} ${r.statusText}`, { status: r.status, kind: 'http' })
+  const url = URL.createObjectURL(await r.blob())
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name.split('/').pop() || 'download'
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 /** Human sentence for a read-back that did not prove the write (mirrors verify.summary_text). */
 export function verificationMessage(v: Verification): string {
   if (v.status === 'mismatch' && v.reason === 'still_present') return `It may not have been deleted: ${v.what} is still there.`
@@ -123,6 +142,16 @@ async function proven<T extends Verified>(p: Promise<T>): Promise<T> {
 
 /** Skips the backend's short-lived Google read cache; for user-initiated reloads only. */
 const fresh = (refresh: boolean): string => (refresh ? '&refresh=true' : '')
+
+/**
+ * An autosave PUT that outlives the page: the pagehide flush on quit would otherwise be dropped with the
+ * document, losing the last debounce window of typing. keepalive bodies are capped at 64KB in flight, so a
+ * bigger one goes as an ordinary request.
+ */
+const autosave = (body: unknown): RequestInit => {
+  const s = json(body)
+  return { method: 'PUT', body: s, keepalive: new Blob([s]).size < 60_000 }
+}
 /** Scope filter: 'all' = everything, 'personal' = items in no project, or a project id (that project only). */
 export type Scope = 'all' | 'personal' | string
 const scope = (s: Scope): string => `project_id=${encodeURIComponent(s)}&include_global=false`
@@ -140,14 +169,19 @@ export const api = {
   setup: {
     status: () => req<SetupStatus>('/setup/status'),
     providers: () => req<{ providers: ProviderInfo[] }>('/setup/providers'),
-    test: (body: SetupBody) => req<SetupTestResult>('/setup/test', { method: 'POST', body: json(body) }),
+    test: (body: SetupBody) => req<SetupTestResult>('/setup/test', { method: 'POST', body: json(body) }, NO_TIMEOUT),
     complete: (body: SetupBody) => req<SetupStatus>('/setup/complete', { method: 'POST', body: json(body) }),
     reset: () => req<SetupStatus>('/setup/reset', { method: 'POST' })
   },
   models: () => req<ModelInfo[]>('/models'),
   tools: () => req<{ tools: ToolInfo[]; enabled: Record<string, boolean> }>('/tools'),
+  shellJobs: () => req<{ jobs: ShellJobInfo[] }>('/shell/jobs'),
+  shellJobTail: (id: string, limit = 4000) => req<ShellJobTail>(`/shell/jobs/${encodeURIComponent(id)}/tail?limit=${limit}`),
+  killShellJob: (id: string) => req<ShellJobInfo>(`/shell/jobs/${encodeURIComponent(id)}/kill`, { method: 'POST' }),
+  sandboxes: () => req<SandboxStatus>('/sandboxes'),
+  resetSandbox: (key: string) => req<{ reset: boolean; note: string }>(`/sandboxes/${encodeURIComponent(key)}/reset`, { method: 'POST' }),
   dashboard: () => req<TodayDashboard>('/dashboard'),
-  recap: (force = false) => req<Recap>(`/recap?force=${force}`),
+  recap: (force = false) => req<Recap>(`/recap?force=${force}`, undefined, NO_TIMEOUT),
   // `steps` / `note` are for a propose_plan card: the steps the user is authorising (with any edited arguments,
   // whose digests the backend re-derives), and one line back to the model.
   approve: (callId: string, decision: ApprovalDecision, opts?: { steps?: PlanEdit[] | null; note?: string; rules?: string[]; arguments?: Record<string, unknown> | null }) =>
@@ -155,20 +189,36 @@ export const api = {
   /** What the saved permission rules say about one call (nothing runs). `rule` validates one rule string instead. */
   evaluatePermission: (body: { tool?: string; command?: string; args?: Record<string, unknown>; rule?: string }) =>
     req<PermissionEvaluation & { ok?: boolean; error?: string }>('/permissions/evaluate', { method: 'POST', body: json(body) }),
+  /** Every standing grant: session keys, chat/project/global tool modes, MCP grants and the rules. */
+  permissionGrants: () => req<PermissionGrants>('/permissions/grants'),
+  /** Revoke 'allow for this chat session': one key, or all of the chat's keys when `key` is omitted. */
+  revokeSessionGrant: (convId: string, key?: string) =>
+    req<{ ok: boolean; keys: string[] }>(`/permissions/session/${encodeURIComponent(convId)}${key ? `?key=${encodeURIComponent(key)}` : ''}`, { method: 'DELETE' }),
+  /** Answered approvals, the latest decision first. */
+  decidedApprovals: (limit = 50) => req<PendingApproval[]>(`/approvals?status=decided&order=desc&limit=${limit}`),
   /** The Agent Inbox: pending approvals and proposals, plus what the scheduled jobs did. Built from journal rows. */
   inbox: (hours = 72) => req<AgentInbox>(`/inbox?hours=${hours}`),
+  /** Read state for "While you were away" cards. seen_all marks the same window GET /inbox lists. */
+  inboxRunSeen: (runId: string) => req(`/inbox/runs/${encodeURIComponent(runId)}/seen`, { method: 'POST' }),
+  inboxSeenAll: (hours = 72) => req<{ ok: boolean; marked: number }>(`/inbox/seen_all?hours=${hours}`, { method: 'POST' }),
   jobs: {
     list: () => req<Job[]>('/jobs'),
-    /** A repeating job passes `cron`; a one-off passes kind:'once' and `run_at` (unix seconds, must be future). */
-    create: (j: { name: string; prompt: string; kind?: 'cron' | 'once'; cron?: string; run_at?: number | null; timezone?: string; enabled?: boolean; project_id?: string | null; allowed_tools?: string[] | null }) =>
+    /** A repeating job passes `cron`; a one-off passes kind:'once' and `run_at` (unix seconds, must be future);
+     *  a folder job passes kind:'watch' and `watch_dir` (under home, not hidden, or a 400 saying why);
+     *  a mail job passes kind:'mail' and `mail_query`. target:'desk' makes each fire open a desk instead of a run. */
+    create: (j: { name: string; prompt: string; kind?: Job['kind']; cron?: string; run_at?: number | null; mail_query?: string; timezone?: string; enabled?: boolean; project_id?: string | null; allowed_tools?: string[] | null; watch_dir?: string | null; model?: string | null; budget?: Job['budget']; target?: Job['target']; desk_autonomy?: Job['desk_autonomy']; desk_budget?: Job['desk_budget'] }) =>
       req<Job>('/jobs', { method: 'POST', body: json(j) }),
-    update: (id: string, patch: Partial<Pick<Job, 'name' | 'kind' | 'cron' | 'run_at' | 'prompt' | 'timezone' | 'enabled' | 'project_id' | 'max_retries' | 'allowed_tools'>>) =>
+    update: (id: string, patch: Partial<Pick<Job, 'name' | 'kind' | 'cron' | 'run_at' | 'mail_query' | 'prompt' | 'timezone' | 'enabled' | 'project_id' | 'max_retries' | 'allowed_tools' | 'notify' | 'watch_dir' | 'model' | 'budget' | 'target' | 'desk_autonomy' | 'desk_budget'>>) =>
       req<Job>(`/jobs/${id}`, { method: 'PATCH', body: json(patch) }),
     delete: (id: string) => req(`/jobs/${id}`, { method: 'DELETE' }),
+    /** The next fires of a cron expression in a zone (default: this machine's), before anything is saved. Writes nothing. */
+    preview: (cron: string, timezone?: string, n = 5) =>
+      req<{ ok: boolean; error?: string; timezone?: string; next: number[] }>(
+        `/jobs/preview?${new URLSearchParams({ cron, n: String(n), ...(timezone ? { timezone } : {}) })}`),
     /** Fire it now by hand. Still proposal-only and on the job budget; the cron schedule is untouched. */
     /** Preview: the same prompt with every non-read-only tool off. Makes no proposals; hidden from the inbox. */
     dryRun: (id: string) => req<{ ok: boolean; run_id: string | null; conversation_id: string | null }>(`/jobs/${id}/dry_run`, { method: 'POST' }),
-    runs: (id: string, limit = 50) => req<JobRunRecord[]>(`/jobs/${id}/runs?limit=${limit}`),
+    runs: (id: string, limit = 50) => req<(JobRunRecord | JobSkipRecord)[]>(`/jobs/${id}/runs?limit=${limit}`),
     stats: (id: string, days = 30) => req<JobStats>(`/jobs/${id}/stats?days=${days}`),
     /** The run history as CSV text, fetched with the auth header (a plain link could not carry it). */
     csv: async (id: string): Promise<string> => {
@@ -176,15 +226,18 @@ export const api = {
       if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
       return r.text()
     },
-    runNow: (id: string) => req<{ ok: boolean; run_id: string | null; conversation_id: string | null }>(`/jobs/${id}/run`, { method: 'POST' })
+    /** A desk job answers with the desk it opened (`desk_id`); `run_id` is null when the desk cap left it unstarted. */
+    runNow: (id: string) => req<{ ok: boolean; run_id: string | null; conversation_id: string | null; desk_id?: string | null }>(`/jobs/${id}/run`, { method: 'POST' })
   },
   /** OS-notification-worthy job events newer than `since` (unix seconds). */
   inboxNotify: (since: number) => req<JobNotifyEvent[]>(`/inbox/notify?since=${since}`),
   proposals: {
     /** Executes it, as the user. `args` replaces the call's arguments first. Accepting twice is a 409, never a resend. */
     accept: (id: string, args?: Record<string, unknown>) =>
-      req<{ ok: boolean; proposal: AgentProposal; replayed: boolean; result: string }>(`/proposals/${id}/accept`, { method: 'POST', body: json({ args: args ?? null }) }),
-    reject: (id: string) => req<{ ok: boolean; proposal: AgentProposal }>(`/proposals/${id}/reject`, { method: 'POST' })
+      req<{ ok: boolean; proposal: AgentProposal; replayed: boolean; result: string; queued?: boolean; sends_in_seconds?: number | null }>(`/proposals/${id}/accept`, { method: 'POST', body: json({ args: args ?? null }) }, NO_TIMEOUT),
+    reject: (id: string) => req<{ ok: boolean; proposal: AgentProposal }>(`/proposals/${id}/reject`, { method: 'POST' }),
+    /** Rejects every pending proposal of one job. */
+    rejectAll: (jobId: string) => req<{ ok: boolean; rejected: number }>(`/proposals/reject_all?job_id=${encodeURIComponent(jobId)}`, { method: 'POST' })
   },
   boards: {
     list: () => req<Board[]>('/boards'),
@@ -227,7 +280,7 @@ export const api = {
     version: (id: string, n: number) => req<ArtifactVersion>(`/artifacts/${id}/versions/${n}`),
     restore: (id: string, n: number) => req<Artifact>(`/artifacts/${id}/restore/${n}`, { method: 'POST' }),
     /** Regenerate the whole document from a plain-language instruction (a model call), saved as a new version. */
-    revise: (id: string, instruction: string) => req<Artifact>(`/artifacts/${id}/revise`, { method: 'POST', body: json({ instruction }) }),
+    revise: (id: string, instruction: string) => req<Artifact>(`/artifacts/${id}/revise`, { method: 'POST', body: json({ instruction }) }, NO_TIMEOUT),
     /** Absolute URL for the sandboxed iframe; `path` is the signed render_path the backend handed out. */
     renderUrl: (path: string) => `${base}${path}`
   },
@@ -244,8 +297,8 @@ export const api = {
     /** A declarative widget's rows: the cache inside its refresh_minutes, a re-bind after. Never a model call. */
     data: (id: string) => req<Widget>(`/widgets/${id}/data`),
     update: (id: string, patch: Record<string, unknown>) => req<Widget>(`/widgets/${id}`, { method: 'PUT', body: json(patch) }),
-    refresh: (id: string, regenerate = false) => req<Widget>(`/widgets/${id}/refresh?regenerate=${regenerate}`, { method: 'POST' }),
-    revise: (id: string, instruction: string) => req<Widget>(`/widgets/${id}/revise`, { method: 'POST', body: json({ instruction }) }),
+    refresh: (id: string, regenerate = false) => req<Widget>(`/widgets/${id}/refresh?regenerate=${regenerate}`, { method: 'POST' }, NO_TIMEOUT),
+    revise: (id: string, instruction: string) => req<Widget>(`/widgets/${id}/revise`, { method: 'POST', body: json({ instruction }) }, NO_TIMEOUT),
     delete: (id: string) => req(`/widgets/${id}`, { method: 'DELETE' })
   },
   todos: {
@@ -275,18 +328,18 @@ export const api = {
     deleteEntry: (id: string) => req(`/health/entries/${id}`, { method: 'DELETE' }),
     providers: () => req<HealthProvider[]>('/health/providers'),
     sources: () => req<HealthSource[]>('/health/sources'),
-    connect: (provider: string, form: Record<string, string>) => req<HealthSource>('/health/sources', { method: 'POST', body: json({ provider, form }) }),
+    connect: (provider: string, form: Record<string, string>) => req<HealthSource>('/health/sources', { method: 'POST', body: json({ provider, form }) }, NO_TIMEOUT),
     plan: (id: string) => req<HealthSourcePlan>(`/health/sources/${id}/plan`),
     /** Approve the source's tools exactly as its server offers them now. */
-    approve: (id: string) => req<HealthSourcePlan>(`/health/sources/${id}/approve`, { method: 'POST' }),
-    sync: (id: string, today: string) => req<HealthSyncResult>(`/health/sources/${id}/sync?today=${today}`, { method: 'POST' }),
+    approve: (id: string) => req<HealthSourcePlan>(`/health/sources/${id}/approve`, { method: 'POST' }, NO_TIMEOUT),
+    sync: (id: string, today: string) => req<HealthSyncResult>(`/health/sources/${id}/sync?today=${today}`, { method: 'POST' }, NO_TIMEOUT),
     updateSource: (id: string, patch: { enabled?: boolean; days_back?: number }) => req<HealthSource>(`/health/sources/${id}`, { method: 'PUT', body: json(patch) }),
     disconnect: (id: string, keepData = true) => req(`/health/sources/${id}?keep_data=${keepData}&remove_server=true`, { method: 'DELETE' })
   },
   planner: {
-    suggest: (days?: number) => req<PlannerSuggestion>('/planner/suggest', { method: 'POST', body: json({ days }) }),
+    suggest: (days?: number) => req<PlannerSuggestion>('/planner/suggest', { method: 'POST', body: json({ days }) }, NO_TIMEOUT),
     /** The one write: the user pressed "Add selected to calendar". */
-    apply: (blocks: PlannerBlock[]) => req<PlannerApplyResult>('/planner/apply', { method: 'POST', body: json({ blocks }) })
+    apply: (blocks: PlannerBlock[]) => req<PlannerApplyResult>('/planner/apply', { method: 'POST', body: json({ blocks }) }, NO_TIMEOUT)
   },
   mailWatch: {
     list: (status?: 'to_reply' | 'awaiting_reply') => req<MailWatchList>(`/mail/watch${status ? `?status=${status}` : ''}`),
@@ -306,22 +359,22 @@ export const api = {
   },
   mcp: {
     servers: () => req<McpServer[]>('/mcp/servers'),
-    create: (s: Partial<McpServerDraft> & { name: string; enabled?: boolean }) => req<McpServer>('/mcp/servers', { method: 'POST', body: json(s) }),
+    create: (s: Partial<McpServerDraft> & { name: string; enabled?: boolean }) => req<McpServer>('/mcp/servers', { method: 'POST', body: json(s) }, NO_TIMEOUT),
     /** A secret left as '' keeps the stored value; `clear_secrets` removes keys outright. */
     update: (id: string, patch: Partial<McpServerDraft> & { enabled?: boolean; clear_secrets?: string[] }) =>
       req<McpServer>(`/mcp/servers/${id}`, { method: 'PATCH', body: json(patch) }),
     remove: (id: string) => req<{ ok: boolean }>(`/mcp/servers/${id}`, { method: 'DELETE' }),
-    restart: (id: string) => req<McpServer>(`/mcp/servers/${id}/restart`, { method: 'POST' }),
+    restart: (id: string) => req<McpServer>(`/mcp/servers/${id}/restart`, { method: 'POST' }, NO_TIMEOUT),
     /** Remote servers: start a browser sign-in (open `auth_url`), poll it, or forget the tokens. */
     signIn: (id: string) => req<McpSignIn>(`/mcp/servers/${id}/sign-in`, { method: 'POST' }),
     signInStatus: (id: string) => req<McpSignIn>(`/mcp/servers/${id}/sign-in`),
     signOut: (id: string) => req<McpSignIn>(`/mcp/servers/${id}/sign-in`, { method: 'DELETE' }),
     logs: (id: string) => req<{ server_id: string; stderr: string[] }>(`/mcp/servers/${id}/logs`),
     /** Probe + static check of a saved server; files the report as its latest. */
-    check: (id: string) => req<McpReport>(`/mcp/servers/${id}/check`, { method: 'POST' }),
+    check: (id: string) => req<McpReport>(`/mcp/servers/${id}/check`, { method: 'POST' }, NO_TIMEOUT),
     /** The same check on a config that has not been saved, so trust can be decided first. */
-    checkDraft: (d: Partial<McpServerDraft>) => req<McpReport>('/mcp/check', { method: 'POST', body: json(d) }),
-    tools: () => req<{ tools: McpTool[]; grants: { tool_slug: string; scope: 'global' | 'project' | 'chat'; scope_id: string; mode: ToolMode }[] }>('/mcp/tools'),
+    checkDraft: (d: Partial<McpServerDraft>) => req<McpReport>('/mcp/check', { method: 'POST', body: json(d) }, NO_TIMEOUT),
+    tools: () => req<{ tools: McpTool[]; grants: McpGrant[] }>('/mcp/tools'),
     setGrant: (slug: string, mode: ToolMode, scope: 'global' | 'project' | 'chat' = 'global', scopeId?: string) =>
       req<McpEffective>(`/mcp/tools/${encodeURIComponent(slug)}/grant`, { method: 'PUT', body: json({ mode, scope, scope_id: scopeId ?? null }) }),
     /** The user read the diff: releases a quarantined tool without touching its grant. */
@@ -356,18 +409,18 @@ export const api = {
     tasksSync: () => req<TasksSyncStatus>('/integrations/google/tasks-sync'),
     tasksSyncConfig: (patch: { enabled?: boolean; tasklist?: string; intervalMinutes?: number }) =>
       req<TasksSyncStatus>('/integrations/google/tasks-sync', { method: 'PUT', body: json(patch) }),
-    tasksSyncRun: () => req<TasksSyncStatus>('/integrations/google/tasks-sync/run', { method: 'POST' }),
+    tasksSyncRun: () => req<TasksSyncStatus>('/integrations/google/tasks-sync/run', { method: 'POST' }, NO_TIMEOUT),
     todoCalendar: () => req<TodoCalendarStatus>('/integrations/google/todo-calendar'),
     todoCalendarConfig: (patch: { enabled?: boolean; calendarId?: string; calendarName?: string; intervalMinutes?: number; keepCompleted?: boolean }) =>
       req<TodoCalendarStatus>('/integrations/google/todo-calendar', { method: 'PUT', body: json(patch) }),
-    todoCalendarRun: () => req<TodoCalendarStatus>('/integrations/google/todo-calendar/run', { method: 'POST' }),
+    todoCalendarRun: () => req<TodoCalendarStatus>('/integrations/google/todo-calendar/run', { method: 'POST' }, NO_TIMEOUT),
     gmailGet: (id: string) => req<GmailFullMessage>(`/integrations/google/gmail/${id}`),
     gmailLabels: () => req<GmailLabel[]>('/integrations/google/gmail/labels'),
     gmailModify: (id: string, patch: { mark_read?: boolean; archive?: boolean; star?: boolean }) =>
       proven(req<{ ok: boolean } & Verified>(`/integrations/google/gmail/${id}/modify`, { method: 'POST', body: json(patch) })),
     /** Free slots as draft text; creates no draft or event. */
     suggestTimes: (m: { window_start: string; window_end: string; duration_minutes?: number }) =>
-      req<{ body: string }>('/integrations/google/gmail/suggest-times', { method: 'POST', body: json(m) }),
+      req<{ body: string }>('/integrations/google/gmail/suggest-times', { method: 'POST', body: json(m) }, NO_TIMEOUT),
     gmailDraft: (m: { to: string; subject: string; body: string; reply_to_message_id?: string | null }) =>
       proven(req<{ draft_id: string } & Verified>('/integrations/google/gmail/draft', { method: 'POST', body: json(m) })),
     /** Queues the send behind its undo hold; it has NOT gone out when this resolves. */
@@ -377,10 +430,10 @@ export const api = {
   /** Backups, restore and export (backend backups.py). */
   data: {
     overview: () => req<DataOverview>('/data'),
-    backUp: () => req<BackupInfo>('/data/backups', { method: 'POST' }),
-    restore: (name: string) => req<{ name: string; restart_required: boolean }>(`/data/backups/${encodeURIComponent(name)}/restore`, { method: 'POST' }),
+    backUp: () => req<BackupInfo>('/data/backups', { method: 'POST' }, NO_TIMEOUT),
+    restore: (name: string) => req<{ name: string; restart_required: boolean }>(`/data/backups/${encodeURIComponent(name)}/restore`, { method: 'POST' }, NO_TIMEOUT),
     cancelRestore: () => req<{ ok: boolean }>('/data/restore', { method: 'DELETE' }),
-    exportTo: (dest: string) => req<{ path: string; size: number }>('/data/export', { method: 'POST', body: json({ dest }) })
+    exportTo: (dest: string) => req<{ path: string; size: number }>('/data/export', { method: 'POST', body: json({ dest }) }, NO_TIMEOUT)
   },
   /** Emails waiting out their undo hold (backend outbox.py). */
   outbox: {
@@ -393,27 +446,42 @@ export const api = {
       req<{ completion: string }>('/assist/complete', { method: 'POST', body: json(p) }),
     cleanDictation: (text: string) =>
       req<{ text: string }>('/docs/dictation/clean', { method: 'POST', body: json({ text }) }),
+    /** One mic clip (WAV, at most 2 minutes) through the meetings transcription backend. A backend failure is `error`, not a throw. */
+    transcribe: (audio: Blob, prompt = '') => {
+      const fd = new FormData()
+      fd.append('audio', audio, 'clip.wav')
+      fd.append('prompt', prompt)
+      return req<{ text: string; backend: string; error: string; ms: number }>('/stt/transcribe', { method: 'POST', body: fd }, NO_TIMEOUT)
+    },
     mailReview: (p: { to?: string; subject?: string; body: string; reply_context?: string }) =>
-      req<{ feedback: string[]; revised: string }>('/assist/mail-review', { method: 'POST', body: json(p) })
+      req<{ feedback: string[]; revised: string }>('/assist/mail-review', { method: 'POST', body: json(p) }, NO_TIMEOUT)
   },
   projects: {
     list: () => req<Project[]>('/projects'),
-    create: (s: Pick<Project, 'name' | 'description' | 'system_prompt' | 'color'>) => req<Project>('/projects', { method: 'POST', body: json(s) }),
+    create: (s: Pick<Project, 'name' | 'description' | 'system_prompt' | 'color'> & Partial<Pick<Project, 'memory_mode'>>) => req<Project>('/projects', { method: 'POST', body: json(s) }),
     update: (id: string, patch: Partial<Project>) => req<Project>(`/projects/${id}`, { method: 'PUT', body: json(patch) }),
     delete: (id: string) => req<{ ok: boolean; stopped?: number }>(`/projects/${id}`, { method: 'DELETE' })
   },
   conversations: {
     list: (s: Scope = 'all') => req<Conversation[]>(`/conversations?${scope(s)}`),
     get: (id: string) => req<Conversation>(`/conversations/${id}`, undefined, CONTROL_TIMEOUT_MS),
-    create: (projectId: string | null, model?: string) => req<Conversation>('/conversations', { method: 'POST', body: json({ project_id: projectId, model }) }, CONTROL_TIMEOUT_MS),
+    create: (projectId: string | null, model?: string, isPrivate = false) => req<Conversation>('/conversations', { method: 'POST', body: json({ project_id: projectId, model, ...(isPrivate ? { private: true } : {}) }) }, CONTROL_TIMEOUT_MS),
     patch: (id: string, patch: { title?: string; model?: string; settings?: Partial<ConversationSettings>; pinned?: boolean; archived?: boolean; project_id?: string | null }) =>
       req<Conversation>(`/conversations/${id}`, { method: 'PATCH', body: json(patch) }, CONTROL_TIMEOUT_MS),
     /** Ask for a fresh model-written title (replaces a typed one: it was asked for). */
-    retitle: (id: string) => req<Conversation>(`/conversations/${id}/title`, { method: 'POST' }),
+    retitle: (id: string) => req<Conversation>(`/conversations/${id}/title`, { method: 'POST' }, NO_TIMEOUT),
     listArchived: () => req<Conversation[]>('/conversations?project_id=all&archived=true'),
     delete: (id: string) => req<{ ok: boolean; stopped?: boolean }>(`/conversations/${id}`, { method: 'DELETE' }),
     deleteMessage: (id: string, mid: string) => req(`/conversations/${id}/messages/${mid}`, { method: 'DELETE' }),
-    search: (q: string, limit = 20) => req<ChatSearchHit[]>(`/conversations/search?q=${encodeURIComponent(q)}&limit=${limit}`)
+    /** A new chat holding this chat's live transcript up to and including `messageId`; the source is untouched. */
+    fork: (id: string, messageId: string) =>
+      req<Conversation>(`/conversations/${id}/fork`, { method: 'POST', body: json({ message_id: messageId }) }, CONTROL_TIMEOUT_MS),
+    /** The chat as Markdown: active rows in order, tool calls as one-line summaries. */
+    exportMd: (id: string) => req<{ title: string; text: string }>(`/conversations/${id}/export`),
+    search: (q: string, limit = 20) => req<ChatSearchHit[]>(`/conversations/search?q=${encodeURIComponent(q)}&limit=${limit}`),
+    /** Files the chat's tools saved for the user (sandbox exports, browser downloads, run_python outputs/). */
+    outputs: (id: string) => req<ChatOutputs>(`/conversations/${id}/outputs`),
+    downloadOutput: (id: string, path: string) => saveDownload(`/conversations/${id}/outputs/download?path=${encodeURIComponent(path)}`, path)
   },
   /** The chat's plan artifact: the model writes it with `todo_write`, the user ticks steps off here. */
   plan: {
@@ -437,8 +505,8 @@ export const api = {
     runs: (workflowId?: string) => req<WorkflowRun[]>(`/workflow-runs${workflowId ? `?workflow_id=${encodeURIComponent(workflowId)}` : ''}`),
     run: (runId: string) => req<WorkflowRun>(`/workflow-runs/${runId}`),
     approveRun: (runId: string, planDigest: string) =>
-      req<WorkflowRun>(`/workflow-runs/${runId}/approve`, { method: 'POST', body: json({ plan_digest: planDigest }) }),
-    resumeRun: (runId: string) => req<WorkflowRun>(`/workflow-runs/${runId}/resume`, { method: 'POST' }),
+      req<WorkflowRun>(`/workflow-runs/${runId}/approve`, { method: 'POST', body: json({ plan_digest: planDigest }) }, NO_TIMEOUT),
+    resumeRun: (runId: string) => req<WorkflowRun>(`/workflow-runs/${runId}/resume`, { method: 'POST' }, NO_TIMEOUT),
     cancelRun: (runId: string) => req<{ ok: boolean }>(`/workflow-runs/${runId}/cancel`, { method: 'POST' })
   },
   /** Saved prompt templates ($ARGUMENTS, $1..$n). */
@@ -464,7 +532,15 @@ export const api = {
       req<Skill>(`/skills/${id}`, { method: 'PATCH', body: json(patch) }),
     delete: (id: string) => req<{ ok: boolean }>(`/skills/${id}`, { method: 'DELETE' }),
     /** Distil a conversation into a candidate for review. Never enables anything. */
-    induce: (convId: string, messageId?: string) => req<{ candidate: Skill | null; reason: string | null }>(`/conversations/${convId}/skills/induce`, { method: 'POST', body: json({ message_id: messageId ?? null }) }),
+    induce: (convId: string, messageId?: string) => req<{ candidate: Skill | null; reason: string | null }>(`/conversations/${convId}/skills/induce`, { method: 'POST', body: json({ message_id: messageId ?? null }) }, NO_TIMEOUT),
+    /** Review a draft without saving it. `blocking` is what `update({status:'approved'})` would refuse. */
+    lint: (d: { name?: string; description?: string; procedure?: string; skill_id?: string }) =>
+      req<{ findings: SkillFinding[]; blocking: SkillFinding[] }>('/skills/lint', { method: 'POST', body: json(d) }),
+    /** Draft a procedure from a line of intent. Stores nothing — the user edits the text first. */
+    draft: (intent: string, conversationId?: string | null) =>
+      req<SkillDraftResult>('/skills/draft', { method: 'POST', body: json({ intent, conversation_id: conversationId ?? null }) }, NO_TIMEOUT),
+    /** What a chat in this scope is actually shown. 'all' is not a scope any one chat sees. */
+    preview: (scope: Scope = 'personal') => req<SkillPreview>(`/skills/preview?project_id=${encodeURIComponent(scope)}`),
     /** Paste a SKILL.md. Always lands as a candidate; `findings` are the lint results, `warnings` what was ignored. */
     importMd: (text: string) =>
       req<{ skill: Skill; findings: SkillFinding[]; warnings: string[] }>('/skills/import', { method: 'POST', body: json({ text }) }),
@@ -489,6 +565,8 @@ export const api = {
   resumableRun: (convId: string) => req<{ run_id: string | null; resumable: boolean; reason: string; message_id: string | null }>(`/conversations/${encodeURIComponent(convId)}/resumable`),
   /** The user's Undo for a local file write or move. A 409 message is JSON `{reason, conflict}`; `force` overrides a conflict. */
   restoreFileSnapshot: (id: string, force = false) => req<{ ok: boolean; path: string }>(`/file-snapshots/${id}/restore`, { method: 'POST', body: json({ force }) }),
+  /** The user's Undo for a calendar or Google Tasks write. A 409 message is JSON `{reason, conflict}`; there is no force. */
+  undoExternal: (id: string) => req<{ ok: boolean; kind: string }>(`/external-undo/${encodeURIComponent(id)}`, { method: 'POST' }),
   /** Folder changes a reply made (whole-folder snapshots), and the user's Undo / Redo of them. */
   runChanges: (runId: string) => req<RunChanges>(`/runs/${runId}/changes`),
   messageChanges: (messageId: string) => req<RunChanges>(`/messages/${messageId}/changes`),
@@ -510,7 +588,7 @@ export const api = {
   conversationUsage: (conversationId: string) => req<ConversationUsage>(`/conversations/${conversationId}/usage`),
   contextMeter: (conversationId: string) => req<ContextMeter>(`/conversations/${conversationId}/context-meter`),
   compactConversation: (conversationId: string, focus?: string) =>
-    req<{ compacted: boolean }>(`/conversations/${conversationId}/compact`, { method: 'POST', body: json({ focus: focus ?? null }) }),
+    req<{ compacted: boolean }>(`/conversations/${conversationId}/compact`, { method: 'POST', body: json({ focus: focus ?? null }) }, NO_TIMEOUT),
   activateMessage: (conversationId: string, messageId: string) =>
     req<Conversation>(`/conversations/${conversationId}/messages/${messageId}/activate`, { method: 'POST' }),
   discardSummary: (conversationId: string) => req<{ removed: boolean }>(`/conversations/${conversationId}/summary`, { method: 'DELETE' }),
@@ -525,7 +603,7 @@ export const api = {
     /** Every row including superseded / forgotten ones. */
     listWithHistory: (s: Scope) => req<Memory[]>(`/memories?${scope(s)}&include_invalid=true`),
     restore: (id: string) => req<Memory>(`/memories/${id}/restore`, { method: 'POST' }),
-    consolidate: (projectId: string | null) => req<MemoryProposal[]>('/memories/consolidate', { method: 'POST', body: json({ project_id: projectId }) }),
+    consolidate: (projectId: string | null) => req<MemoryProposal[]>('/memories/consolidate', { method: 'POST', body: json({ project_id: projectId }) }, NO_TIMEOUT),
     proposals: (s: Scope) => req<MemoryProposal[]>(`/memories/proposals?status=pending&${scope(s)}`),
     applyProposal: (id: string) => req<MemoryProposal>(`/memories/proposals/${id}/apply`, { method: 'POST' }),
     dismissProposal: (id: string) => req<MemoryProposal>(`/memories/proposals/${id}/dismiss`, { method: 'POST' })
@@ -534,7 +612,7 @@ export const api = {
     get: (s: Scope) => req<StyleState>(`/style?project_id=${encodeURIComponent(s === 'all' ? 'personal' : s)}`),
     update: (projectId: string | null, patch: Partial<Pick<StyleProfile, 'summary' | 'guidelines' | 'traits' | 'phrases' | 'avoid'>> & { enabled?: boolean }) =>
       req<StyleState>('/style', { method: 'PUT', body: json({ project_id: projectId, ...patch }) }),
-    learn: (projectId: string | null, model?: string) => req<StyleState>('/style/learn', { method: 'POST', body: json({ project_id: projectId, model }) }),
+    learn: (projectId: string | null, model?: string) => req<StyleState>('/style/learn', { method: 'POST', body: json({ project_id: projectId, model }) }, NO_TIMEOUT),
     reset: (projectId: string | null, withSamples = false) =>
       req<StyleState>(`/style?project_id=${encodeURIComponent(projectId ?? 'personal')}&with_samples=${withSamples}`, { method: 'DELETE' }),
     samples: (s: Scope) => req<StyleSample[]>(`/style/samples?project_id=${encodeURIComponent(s === 'all' ? 'personal' : s)}`),
@@ -559,12 +637,14 @@ export const api = {
       const fd = new FormData()
       fd.append('file', file)
       if (projectId) fd.append('project_id', projectId)
-      return req<Document>('/documents', { method: 'POST', body: fd })
+      return req<Document>('/documents', { method: 'POST', body: fd }, NO_TIMEOUT)
     },
     delete: (id: string) => req(`/documents/${id}`, { method: 'DELETE' }),
     indexStatus: () => req<{ chunks: number; embedded: number; doc_chunks?: number; doc_embedded?: number; model: string | null; mode: string }>('/documents/index-status'),
-    /** Embed a batch of passages that have no vector for the current model; `remaining` is what is left. */
-    embedBackfill: () => req<{ embedded: number; remaining: number; error?: string }>('/documents/embed-backfill', { method: 'POST' })
+    /** Re-chunk every uploaded file with the current chunker. */
+    reindexAll: () => req<{ chunks: number }>('/documents/reindex', { method: 'POST', body: json({}) }, NO_TIMEOUT),
+    /** Blurb (when contextualChunks) and embed every passage still missing them. Runs as long as the library takes. */
+    embedBackfill: () => req<{ embedded: number; remaining: number; error?: string }>('/documents/embed-backfill', { method: 'POST' }, NO_TIMEOUT)
   },
   /** Character span of a cited chunk in its source text (start -1 when not found verbatim). */
   chunkSpan: (isDoc: boolean, id: string, chunkId: string) => req<{ text: string; start: number; end: number }>(`/${isDoc ? 'docs' : 'documents'}/${id}/chunks/${chunkId}`),
@@ -580,8 +660,8 @@ export const api = {
     summaries: (days = 7) => req<ActivitySummary[]>(`/activity/summaries?days=${days}`),
     deleteSummary: (id: string) => req(`/activity/summaries/${id}`, { method: 'DELETE' }),
     /** Summarize what is pending now instead of waiting for the interval. */
-    rollup: () => req<{ summary: ActivitySummary | null; status: ActivityStatus }>('/activity/rollup', { method: 'POST' }),
-    refreshProfile: () => req<{ profile: string }>('/activity/profile', { method: 'POST' }),
+    rollup: () => req<{ summary: ActivitySummary | null; status: ActivityStatus }>('/activity/rollup', { method: 'POST' }, NO_TIMEOUT),
+    refreshProfile: () => req<{ profile: string }>('/activity/profile', { method: 'POST' }, NO_TIMEOUT),
     context: () => req<ActivityContextFile>('/activity/context'),
     requestPermission: (id: string, browser = '') => req<{ result: ActivityGrantResult; status: ActivityStatus }>('/activity/permissions/request', { method: 'POST', body: json({ id, browser }) }),
     openPermissionSettings: (id: string) => req<{ ok: boolean }>('/activity/permissions/open', { method: 'POST', body: json({ id }) }),
@@ -594,8 +674,8 @@ export const api = {
     /** Habits and automation suggestions mined from the same data. */
     insights: () => req<ActivityInsights>('/activity/insights'),
     /** Re-mine the patterns with no model call: free, offline, and the evidence the panel shows. */
-    mineInsights: () => req<ActivityInsights>('/activity/insights/mine', { method: 'POST' }),
-    refreshInsights: () => req<ActivityInsights & { ok: boolean }>('/activity/insights/refresh', { method: 'POST' }),
+    mineInsights: () => req<ActivityInsights>('/activity/insights/mine', { method: 'POST' }, NO_TIMEOUT),
+    refreshInsights: () => req<ActivityInsights & { ok: boolean }>('/activity/insights/refresh', { method: 'POST' }, NO_TIMEOUT),
     setInsightStatus: (id: string, status: InsightStatus, note = '', snoozeDays = 7) =>
       req<ActivitySuggestion>(`/activity/insights/${id}/status`, { method: 'POST', body: json({ status, note, snooze_days: snoozeDays }) }),
     applyInsight: (id: string) => req<ActivityApplyResult>(`/activity/insights/${id}/apply`, { method: 'POST' }),
@@ -606,17 +686,21 @@ export const api = {
       list: (s: Scope = 'all', status: DeskStatus | '' = '', archived = false) =>
         req<Desk[]>(`/cowork/desks?project_id=${encodeURIComponent(s)}&status=${encodeURIComponent(status)}&archived=${archived}`),
       get: (id: string) => req<FullDesk>(`/cowork/desks/${id}`),
-      /** `start: false` leaves the desk a draft. Throws a 409 carrying `{live, max}` over `deskMaxLive`. */
-      create: (d: { brief: string; title?: string; project_id?: string | null; autonomy?: DeskAutonomy; budget?: DeskBudget; start?: boolean }) =>
-        req<{ desk: Desk; conversation_id: string; run_id?: string; seq?: number }>('/cowork/desks', { method: 'POST', body: json(d) }),
+      /** `start: false` leaves the desk a draft. Over `deskMaxLive` the desk is queued: no run_id, `queued: true`. */
+      create: (d: { brief: string; title?: string; project_id?: string | null; autonomy?: DeskAutonomy; budget?: DeskBudget; start?: boolean; inputs?: DeskInputRef[] }) =>
+        req<{ desk: Desk; conversation_id: string; run_id?: string; seq?: number } & Partial<DeskQueued>>('/cowork/desks', { method: 'POST', body: json(d) }),
+      /** Snapshot copies into the desk's read-only inputs/ folder; the desk's next turn is told about them. */
+      addInputs: (id: string, inputs: DeskInputRef[]) =>
+        req<{ added: { path: string; bytes: number; source: string }[] }>(`/cowork/desks/${id}/inputs`, { method: 'POST', body: json({ inputs }) }),
       patch: (id: string, patch: { title?: string; autonomy?: DeskAutonomy; project_id?: string | null; archived?: boolean; budget?: DeskBudget; clear_project?: boolean }) =>
         req<Desk>(`/cowork/desks/${id}`, { method: 'PATCH', body: json(patch) }),
       /** The workspace is kept unless `purge`: a deleted desk's files are the one thing the user cannot regenerate. */
       delete: (id: string, purge = false) => req<{ ok: boolean }>(`/cowork/desks/${id}?purge=${purge}`, { method: 'DELETE' }),
-      start: (id: string) => req<{ run_id: string; seq: number; conversation_id: string }>(`/cowork/desks/${id}/start`, { method: 'POST' }),
-      resume: (id: string, reason?: string) => req<{ run_id: string; seq: number }>(`/cowork/desks/${id}/resume`, { method: 'POST', body: json({ reason }) }),
+      /** Over `deskMaxLive` these queue the desk and answer `DeskQueued` instead of a run. */
+      start: (id: string) => req<({ run_id: string; seq: number } | DeskQueued) & { conversation_id: string }>(`/cowork/desks/${id}/start`, { method: 'POST' }),
+      resume: (id: string, reason?: string) => req<{ run_id: string; seq: number } | DeskQueued>(`/cowork/desks/${id}/resume`, { method: 'POST', body: json({ reason }) }),
       /** The same box awake or asleep: live it steers the running reply, otherwise it is the next turn's content. */
-      message: (id: string, content: string) => req<{ ok: boolean; steered: boolean; run_id?: string }>(`/cowork/desks/${id}/message`, { method: 'POST', body: json({ content }) }),
+      message: (id: string, content: string) => req<{ ok: boolean; steered: boolean; run_id?: string } & Partial<DeskQueued>>(`/cowork/desks/${id}/message`, { method: 'POST', body: json({ content }) }),
       /** Marks every unseen needs-you event of ONE desk read — opening the desk is the acknowledgement. */
       seen: (id: string) => req<Desk>(`/cowork/desks/${id}/seen`, { method: 'POST' }),
       pause: (id: string) => req<Desk>(`/cowork/desks/${id}/pause`, { method: 'POST' }),
@@ -628,7 +712,7 @@ export const api = {
         req<DeskRichPreview>(`/cowork/desks/${id}/preview?path=${encodeURIComponent(path)}&offset=${offset}`),
       diff: (id: string, path: string) => req<DeskDiff>(`/cowork/desks/${id}/diff?path=${encodeURIComponent(path)}`),
       /** Exactly-once per output: a double-clicked Accept promotes once. `verified` is read, never assumed. */
-      accept: (id: string, outputs: { output_id: string; destination: PromotionKind; title?: string; doc_id?: string; project_id?: string | null }[]) =>
+      accept: (id: string, outputs: { output_id: string; destination: PromotionKind; title?: string; doc_id?: string; project_id?: string | null; accept_stale?: boolean }[]) =>
         req<{ results: PromotionResult[] }>(`/cowork/desks/${id}/accept`, { method: 'POST', body: json({ outputs }) }),
       /** No `output_ids` rejects every undecided output. */
       reject: (id: string, output_ids?: string[], note?: string) =>
@@ -637,7 +721,7 @@ export const api = {
     /** The shared Python environment desks run code in. `setup` builds it and takes minutes. */
     env: {
       status: () => req<{ ready: boolean; python: string | null; packages: string[]; installer: string; error: string | null }>('/cowork/env'),
-      setup: () => req<{ ready: boolean; python: string | null; packages: string[]; installer: string; error: string | null }>('/cowork/env/setup', { method: 'POST' })
+      setup: () => req<{ ready: boolean; python: string | null; packages: string[]; installer: string; error: string | null }>('/cowork/env/setup', { method: 'POST' }, NO_TIMEOUT)
     },
     inbox: {
       list: (limit = 40) => req<DeskEvent[]>(`/cowork/inbox?limit=${limit}`),
@@ -670,7 +754,7 @@ export const api = {
     get: (id: string) => req<FullDoc>(`/docs/${id}`),
     create: (d: { title?: string; content?: string; folder?: string; project_id?: string | null }) => req<FullDoc>('/docs', { method: 'POST', body: json(d) }),
     /** Autosave. Records a revision, folding a burst of keystrokes into one history entry. */
-    save: (id: string, patch: { content?: string; title?: string; summary?: string; base_updated_at?: number }) => req<FullDoc>(`/docs/${id}`, { method: 'PUT', body: json(patch) }),
+    save: (id: string, patch: { content?: string; title?: string; summary?: string; base_updated_at?: number }) => req<FullDoc>(`/docs/${id}`, autosave(patch)),
     /** Title, folder, star and project moves — metadata, so it stays out of the history. */
     patch: (id: string, patch: { title?: string; folder?: string; starred?: boolean; pinned?: boolean; project_id?: string | null; clear_project?: boolean; scope?: string }) =>
       req<FullDoc>(`/docs/${id}`, { method: 'PATCH', body: json(patch) }),
@@ -702,7 +786,7 @@ export const api = {
       req<FullMeeting>('/meetings', { method: 'POST', body: json(m) }),
     /** PUT, not PATCH — notes autosave through here, and `status` is the service's to write, not a body's. */
     patch: (id: string, patch: { title?: string; notes?: string; enhanced?: string; summary?: string; template?: string; keep_audio?: boolean; conversation_id?: string | null; project_id?: string | null; clear_project?: boolean }) =>
-      req<FullMeeting>(`/meetings/${id}`, { method: 'PUT', body: json(patch) }),
+      req<FullMeeting>(`/meetings/${id}`, autosave(patch)),
     del: (id: string) => req<{ ok: boolean }>(`/meetings/${id}`, { method: 'DELETE' }),
     status: () => req<MeetingStatusInfo>('/meetings/status'),
     /** Registered under both verbs; a GET keeps the ten-minute cache honest in the devtools network log. */
@@ -724,7 +808,7 @@ export const api = {
     segments: (id: string, since = 0, limit = 200) => req<MeetingSegment[]>(`/meetings/${id}/segments?since=${since}&limit=${limit}`),
     /** Returns the REVISION. An auto-applied one comes back `applied` with the meeting's `pending` null, so re-fetch the meeting. */
     enhance: (id: string, force = false, template?: string) =>
-      req<MeetingRevision>(`/meetings/${id}/enhance?force=${force}${template ? `&template=${encodeURIComponent(template)}` : ''}`, { method: 'POST' }),
+      req<MeetingRevision>(`/meetings/${id}/enhance?force=${force}${template ? `&template=${encodeURIComponent(template)}` : ''}`, { method: 'POST' }, NO_TIMEOUT),
     accept: (revId: string) => req<FullMeeting>(`/meetings/revisions/${revId}/accept`, { method: 'POST' }),
     reject: (revId: string) => req<FullMeeting>(`/meetings/revisions/${revId}/reject`, { method: 'POST' }),
     actions: (id: string) => req<MeetingActionItem[]>(`/meetings/${id}/actions`),
@@ -732,7 +816,7 @@ export const api = {
     addTodos: (id: string, ids: string[] = [], projectId?: string | null) =>
       req<MeetingActionItem[]>(`/meetings/${id}/actions/add-todos`, { method: 'POST', body: json({ ids, project_id: projectId ?? null }) }),
     dismissAction: (id: string, actionId: string) => req<MeetingActionItem>(`/meetings/${id}/actions/${actionId}/dismiss`, { method: 'POST' }),
-    retranscribe: (id: string, limit = 20) => req<{ settled: number; meeting: FullMeeting }>(`/meetings/${id}/retranscribe?limit=${limit}`, { method: 'POST' }),
+    retranscribe: (id: string, limit = 20) => req<{ settled: number; meeting: FullMeeting }>(`/meetings/${id}/retranscribe?limit=${limit}`, { method: 'POST' }, NO_TIMEOUT),
     /** A kept segment's wav as an object URL (the audio element cannot send the token header). */
     segmentAudio: async (id: string, segId: string): Promise<string> => {
       const r = await fetch(`${base}${audioPath(id, segId)}`, { headers: await auth() })
@@ -747,12 +831,12 @@ export const api = {
     setSpeakers: (id: string, names: Record<string, string>) =>
       req<FullMeeting>(`/meetings/${id}/speakers`, { method: 'PUT', body: json({ names }) }),
     /** Re-run speaker separation on retained audio. ok=false with a note when nothing can run. */
-    diarize: (id: string) => req<{ ok: boolean; note: string; speakers: number; meeting: FullMeeting }>(`/meetings/${id}/diarize`, { method: 'POST' }),
+    diarize: (id: string) => req<{ ok: boolean; note: string; speakers: number; meeting: FullMeeting }>(`/meetings/${id}/diarize`, { method: 'POST' }, NO_TIMEOUT),
     /** Transcribe an existing recording into this meeting. 202: progress arrives through the segments poll. */
     importAudio: (id: string, file: File) => {
       const fd = new FormData()
       fd.append('file', file)
-      return req<FullMeeting>(`/meetings/${id}/import-audio`, { method: 'POST', body: fd })
+      return req<FullMeeting>(`/meetings/${id}/import-audio`, { method: 'POST', body: fd }, NO_TIMEOUT)
     }
   },
   notes: {
@@ -808,7 +892,7 @@ export async function readWithIdle<T>(reader: { read: () => Promise<ReadableStre
 }
 
 /** One SSE connection, parsed. `seq` is the event's `id:` line, which only the app topic sends. */
-async function* sseStream(path: string, signal?: AbortSignal, idleMs = 0, connectMs = STREAM_CONNECT_MS): AsyncGenerator<{ event: string; data: unknown; seq: number | null }> {
+async function* sseStream(path: string, signal?: AbortSignal, idleMs = 0, connectMs = STREAM_CONNECT_MS, onOpen?: () => void): AsyncGenerator<{ event: string; data: unknown; seq: number | null }> {
   // Bounds the wait for the response headers only; once the body is flowing the idle watchdog takes over.
   const connect = new AbortController()
   let connectTimedOut = false
@@ -831,6 +915,7 @@ async function* sseStream(path: string, signal?: AbortSignal, idleMs = 0, connec
     void r.body?.cancel().catch(() => undefined)
     throw new ApiError(`${r.status} ${r.statusText}`, { status: r.status, kind: 'http' })
   }
+  onOpen?.()
   const reader = r.body.getReader()
   const dec = new TextDecoder()
   let buf = ''
@@ -936,8 +1021,8 @@ export async function* chatStream(convId: string, since = 0, signal?: AbortSigna
  * stream never completes on its own, so the caller reconnects: each event carries the seq to
  * resume from, and the server's ring replays whatever happened while the socket was down.
  */
-export async function* backgroundStream(since = 0, signal?: AbortSignal): AsyncGenerator<BackgroundEvent & { seq: number | null }> {
-  for await (const { event, data, seq } of sseStream(`/events?since=${since}`, signal, STREAM_IDLE_MS)) {
+export async function* backgroundStream(since = 0, signal?: AbortSignal, onOpen?: () => void): AsyncGenerator<BackgroundEvent & { seq: number | null }> {
+  for await (const { event, data, seq } of sseStream(`/events?since=${since}`, signal, STREAM_IDLE_MS, STREAM_CONNECT_MS, onOpen)) {
     yield { event, data, seq } as BackgroundEvent & { seq: number | null }
   }
 }

@@ -105,13 +105,13 @@ check("unknown project -> 404", r.status_code == 404, r.text)
 
 # 6. Injection into a chat's context
 conv = c.post("/conversations", json={"project_id": None, "model": "m"}).json()
-ctx = c.post("/context/preview", json={"query": "draft an email to Sam"}).json()
+ctx = c.post("/context/preview", json={"query": "draft an email to Sam", "conv_settings": {"draftMode": True}}).json()
 check("style block injected", "How the user writes" in ctx["system_prompt"], ctx["system_prompt"][:200])
 check("style recorded in context_used", ctx["style"] and ctx["style"]["guidelines"] == ["say it in one line"], ctx.get("style"))
 ctx = c.post("/context/preview", json={"query": "draft an email", "conv_settings": {"useStyle": False}}).json()
 check("chat can opt out", "How the user writes" not in ctx["system_prompt"] and ctx["style"] is None, ctx.get("style"))
 
-# 7. A chat turn banks prose and relearns; a short instruction does not
+# 7. A chat turn banks prose (the relearn is queued on the learn worker); a short instruction does not
 before = c.get("/style").json()["stats"]["samples"]
 
 

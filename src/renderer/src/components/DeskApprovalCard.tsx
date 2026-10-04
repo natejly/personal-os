@@ -3,7 +3,7 @@ import { CircleHelp, Globe } from 'lucide-react'
 import type { PendingApproval, ToolEvent } from '@shared/types'
 import { useStore } from '../store'
 import { browserAllowLabel, browserSentence } from '../lib/browserApproval'
-import { describeCall } from '../lib/toolDisplay'
+import { describeCall, QUESTION_TOOLS } from '../lib/toolDisplay'
 import ApprovalRules from './ApprovalRules'
 import { GenericApproval } from './toolcards/GenericCard'
 import { ArgListOf } from './toolcards/parts'
@@ -34,7 +34,7 @@ export default function DeskApprovalCard({ approval, conversationId, event }: {
   const parked = approval.parked_at && !approval.live
   const note = parked ? <p className="muted small">The desk let go of this while it waited. Answering wakes it.</p> : null
 
-  if (ev.name === 'desk_ask') return <DeskAsk event={ev} conversationId={conversationId} note={note} />
+  if (QUESTION_TOOLS.has(ev.name)) return <AskQuestion event={ev} conversationId={conversationId} note={note} />
   if (ev.name === 'browser') return <BrowserApproval event={ev} decide={decide} conversationId={conversationId} note={note} />
 
   const Card = TOOL_CARDS[ev.name]
@@ -47,8 +47,13 @@ export default function DeskApprovalCard({ approval, conversationId, event }: {
   )
 }
 
-/** A question from the agent: a text answer, and one button per suggested option. The answer rides back as the approval's note. */
-function DeskAsk({ event, conversationId, note }: { event: ToolEvent; conversationId: string; note: JSX.Element | null }): JSX.Element {
+/**
+ * A pending question from the agent (desk_ask, ask_user), in a desk pane or inline in a chat: one button per suggested
+ * option and a free-text answer. The run is waiting on the call's approval, so the answer is the DECISION: it rides back
+ * as the approval's note. The store is read in the handler, never subscribed to: inline, this mounts inside a streaming
+ * message.
+ */
+export function AskQuestion({ event, conversationId, note = null }: { event: ToolEvent; conversationId: string; note?: JSX.Element | null }): JSX.Element {
   const a = event.arguments as { question?: unknown; context?: unknown; options?: unknown }
   const options = Array.isArray(a.options) ? a.options.map(String).filter(Boolean).slice(0, 4) : []
   const [text, setText] = useState('')

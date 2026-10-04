@@ -164,3 +164,55 @@ def test_notify_setting_round_trips() -> None:
     assert client.put("/settings", json={"notifyJobs": False}).status_code == 200
     assert client.get("/settings").json()["notifyJobs"] is False
     client.put("/settings", json={"notifyJobs": True})
+
+
+def _row(run_id: str, job_id: str, status: str, at: float, *, pending: int = 0, cid: str | None = "conv1") -> dict[str, Any]:
+    return {"run_id": run_id, "conversation_id": cid, "job_id": job_id, "job": "J", "status": status, "ended_at": at,
+            "dry_run": False, "manual": False, "attempt": 1, "proposals": {"pending": pending, "accepted": 0, "rejected": 0}}
+
+
+def test_per_job_notify_mode_and_click_targets() -> None:
+    t = 1000.0
+    jobs = {m: {"id": m, "name": m, "enabled": True, "max_retries": 0, "notify": m} for m in ("problems", "always", "never")}
+    jobs["never"].update(enabled=False, paused_reason="paused", updated_at=t + 5)
+    runs = [_row(f"{m}-{s}", m, s, t + 1) for m in jobs for s in ("done", "error")]
+    runs.append(_row("always-prop", "always", "done", t + 2, pending=1))
+    runs.append(_row("always-nocid", "always", "done", t + 3, cid=None))
+    pending = [{"id": "p1", "run_id": "x", "job_id": "never", "created_at": t + 4}]
+    ev = {e["id"]: e for e in job_history.notify_events(runs, jobs, pending, t)}
+    kinds = {(e["kind"], e["id"].split(":")[1].split("-")[0]) for e in ev.values()}
+    # a plain success notifies only for 'always'; 'never' silences failures, proposals and pauses too
+    assert ("job_done", "always") in kinds and ("job_done", "problems") not in kinds
+    assert not [e for e in ev.values() if "never" in e["id"] or e["kind"] in ("job_paused", "proposal_pending")]
+    assert ("job_failed", "problems") in kinds and ("job_failed", "always") in kinds
+    assert all(e["target"] for e in ev.values())
+    assert ev["run:always-done:done"]["target"] == "run:conv1"
+    assert ev["run:problems-error:error"]["target"] == "run:conv1"
+    assert ev["run:always-prop:done"]["target"] == "inbox"
+    assert ev["run:always-nocid:done"]["target"] == "inbox"
+    # a job row without the column behaves as before ('problems')
+    old = {"j": {"id": "j", "name": "j", "enabled": True, "max_retries": 0}}
+    assert job_history.notify_events([_row("r", "j", "done", t + 1)], old, [], t) == []
+
+
+def test_notify_field_round_trips_and_is_validated() -> None:
+    j = client.post("/jobs", json={"name": "loud", "prompt": "p", "cron": "0 * * * *", "notify": "always"}).json()
+    assert j["notify"] == "always"
+    assert client.patch(f"/jobs/{j['id']}", json={"notify": "never"}).json()["notify"] == "never"
+    assert client.patch(f"/jobs/{j['id']}", json={"notify": None}).json()["notify"] == "never"
+    assert client.patch(f"/jobs/{j['id']}", json={"notify": "sometimes"}).status_code == 422
+    assert mkjob("plain")["notify"] == "problems"
+
+
+def test_runs_listing_interleaves_skips_and_stats_leave_them_out() -> None:
+    j = mkjob()
+    add_run(j["id"], "done", start=NOW - 300)
+    appmod.jobs.record_skip(j["id"], "previous run still running", NOW - 200, NOW - 200)
+    add_run(j["id"], "error", start=NOW - 100)
+    body = client.get(f"/jobs/{j['id']}/runs").json()
+    assert [r["status"] for r in body] == ["error", "skipped", "done"]
+    assert body[1]["reason"] == "previous run still running" and body[1]["due_at"] == NOW - 200
+    assert len(client.get(f"/jobs/{j['id']}/runs?limit=2").json()) == 2
+    st = client.get(f"/jobs/{j['id']}/stats").json()
+    assert st["runs"] == 2 and st["success_rate"] == 0.5 and st["skipped"] == 1
+    assert "skipped" not in client.get(f"/jobs/{j['id']}/runs.csv").text, "the CSV stays one row per run"

@@ -9,7 +9,7 @@ import json
 import sys
 import tempfile
 import unittest
-from datetime import date
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from personal_os.db import Database  # noqa: E402
 from personal_os.health import Health, HealthError  # noqa: E402
-from personal_os.health_sync import PROVIDERS, HealthSources, build_calls, parse_date, prose_records  # noqa: E402
+from personal_os.health_sync import MAX_DAYS, PROVIDERS, HealthSources, build_calls, parse_date, prose_records  # noqa: E402
 from personal_os.mcp_servers import McpServers  # noqa: E402
 
 TODAY = date(2026, 10, 1)
@@ -168,6 +168,28 @@ class SyncTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("No stats", probs["get_stats"]["sample"])
         self.assertIn("garmin-mcp-auth", probs["get_weigh_ins"]["error"])
         self.assertEqual(self.health.summary(1, TODAY.isoformat(), metric="sleep")[0]["today"], 7.0)  # others still landed
+
+    async def test_a_gap_since_the_last_good_sync_is_filled_and_a_failure_is_not_a_sync(self) -> None:
+        self.sources.pin(self.src["id"])
+        sid = self.src["id"]
+
+        def last_sync(ts: float | None) -> None:
+            with self.sources.db.tx() as c:
+                c.execute("UPDATE health_sources SET last_sync_at=? WHERE id=?", (ts, sid))
+
+        noon = lambda d: datetime.combine(d, datetime.min.time()).timestamp() + 12 * 3600  # noqa: E731
+        last_sync(noon(TODAY - timedelta(days=5)))  # offline for five days: days_back (2) alone would miss three
+        res = await self.sources.sync(sid, TODAY)
+        self.assertEqual(res["from"], (TODAY - timedelta(days=5)).isoformat())
+        last_sync(noon(TODAY - timedelta(days=200)))  # a long gap is capped at MAX_DAYS
+        res = await self.sources.sync(sid, TODAY)
+        self.assertEqual(res["from"], (TODAY - timedelta(days=MAX_DAYS - 1)).isoformat())
+
+        before = noon(TODAY - timedelta(days=3))
+        last_sync(before)
+        self.mcp.answers["get_weigh_ins"] = {"content": "Error: down", "is_error": True, "error": "down"}
+        await self.sources.sync(sid, TODAY)
+        self.assertEqual(self.sources.get(sid)["last_sync_at"], before)  # the failed call's days are fetched next time
 
     async def test_sdk_wrapped_structured_output_is_unwrapped(self) -> None:
         # A FastMCP-style server returning a JSON string arrives as structured {"result": "<json>"}.

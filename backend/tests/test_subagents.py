@@ -32,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from personal_os import llm  # noqa: E402
 from personal_os import app as appmod  # noqa: E402
+appmod.db.set_settings({"toolDeferAbove": 0})  # these tests drive their own tools; deferral is test_tool_search.py
 from personal_os import subagents as sa  # noqa: E402
 from personal_os.tools import call_key  # noqa: E402
 
@@ -489,6 +490,49 @@ def test_child_approval_rides_the_parent_stream() -> None:
         check(out["state"] == "completed", f"{decision}: the child carried on")
 
 
+def test_child_ask_is_refused_when_nobody_can_answer() -> None:
+    """A background (proposal-only) run is refused at once with no card; a parent whose reply ends while the
+    card waits lets the child go with a deny. Neither rewrites the parent's finished row."""
+    for label in ("background run", "parent ended"):
+        reset()
+        spec = appmod.toolbox.specs["fetch_url"]
+        real, hits = spec.fn, []
+
+        async def fake(ctx: dict[str, Any], **kw: Any) -> Any:
+            hits.append(kw)
+            return {"url": kw.get("url"), "text": "page"}
+
+        spec.fn = fake
+        try:
+            SCRIPTS["browse"] = [{"text": "", "calls": [call("f1", "fetch_url", {"url": "https://example.com/a"})]}, {"text": "fetched"}]
+            fr = FakeRun()
+            modes = appmod.toolbox.effective({}, None, None)
+            modes["fetch_url"] = "ask"
+            ctx = mkctx(new_conv(), modes=modes, run=fr, message_id=None, proposal_only=label == "background run")
+            ctx["allowed_urls"] = {"https://example.com/a"}
+
+            async def go() -> Any:
+                task = asyncio.create_task(appmod.toolbox.call("agent_spawn", {"task": "browse"}, ctx))
+                for _ in range(200):
+                    if task.done() or any(k.endswith(":f1") for k in appmod._approvals):
+                        break
+                    await asyncio.sleep(0.02)
+                fr.live = False  # the parent's reply ends; nobody answers the card
+                return await asyncio.wait_for(task, 10)
+
+            out = run(go())
+        finally:
+            spec.fn = real
+        cards = [d for e, d in fr.events if e == "tool_call" and d.get("needs_approval")]
+        check(not hits, f"{label}: the call did not run")
+        if label == "background run":
+            check(not cards and not fr.statuses and out["state"] == "completed", f"{label}: refused without a card, child carried on")
+        else:
+            row = appmod.run_store.approval(cards[0]["id"]) if cards else None
+            check(row is not None and row["status"] != "pending", f"{label}: the card is settled, not left waiting")
+            check("running" not in fr.statuses, f"{label}: the ended parent's status is not rewritten")
+
+
 def test_child_calls_obey_permission_rules() -> None:
     """A child's calls go through the same argument-pattern rules as the parent's: deny refuses before the tool
     runs, and an allow rule lifts a plain ask without a card."""
@@ -558,6 +602,37 @@ def test_child_skip_permissions_lifts_plain_ask_only() -> None:
         cards = [d for e, d in fr.events if e == "tool_call" and d.get("needs_approval")]
         check(bool(hits) is expect_ran and bool(cards) is not expect_ran, f"{rules}: skip {'lifted the plain ask' if expect_ran else 'left the ask-rule card, declined'}")
         check(out["state"] == "completed", f"{rules}: the child carried on")
+
+
+def test_tainted_child_external_ask_stays_forced() -> None:
+    """On a tainted child, an allow rule cannot lift the ask on an external tool: the card is still raised."""
+    root = tempfile.mkdtemp()
+    reset(workspaceRoots=[root], permissionRules={"allow": ["write_local_file"], "ask": [], "deny": []})
+    target = os.path.join(root, "note.txt")
+    try:
+        SCRIPTS["taintw"] = [{"text": "", "calls": [call("w1", "write_local_file", {"path": target, "content": "x"})]}, {"text": "done"}]
+        fr = FakeRun()
+        modes = {**appmod.toolbox.effective({}, None, None), "write_local_file": "ask"}
+        ctx = mkctx(new_conv(), modes=modes, run=fr, message_id=None)
+        ctx["tainted"] = True
+
+        async def go() -> Any:
+            task = asyncio.create_task(appmod.toolbox.call("agent_spawn", {"task": "taintw", "role": "worker", "root": root}, ctx))
+            for _ in range(100):
+                if task.done() or any(k.endswith(":w1") for k in appmod._approvals):
+                    break
+                await asyncio.sleep(0.02)
+            for k in [k for k in appmod._approvals if k.endswith(":w1")]:
+                appmod.run_store.decide(k, "deny")
+                appmod._approvals[k].set_result("deny")
+            return await task
+
+        run(go())
+    finally:
+        appmod.db.set_settings({"permissionRules": {"allow": [], "ask": [], "deny": []}})
+    cards = [d for e, d in fr.events if e == "tool_call" and d.get("needs_approval")]
+    check(len(cards) == 1 and cards[0].get("forced") is True, "the tainted child's external write raised a forced card")
+    check(not os.path.exists(target), "declined, so nothing was written")
 
 
 def test_tainted_parent_taints_child_externals() -> None:
@@ -740,7 +815,10 @@ def test_desk_start_asks_and_plans() -> None:
     try:
         appmod.desks.live_count = lambda: 5  # type: ignore[method-assign]
         capped = run(appmod.toolbox.call("desk_start", {"title": "x", "brief": "y"}, mkctx(new_conv())))
-        check("error" in capped, "desk_start counts against deskMaxLive")
+        check("error" not in capped and capped.get("queued") is True and capped.get("position") == 1,
+              f"desk_start counts against deskMaxLive: over it the desk is queued, not refused, got {capped}")
+        check("queued (position 1)" in capped["note"], "and the note tells the chat it is waiting")
+        appmod.desks.delete(capped["desk_id"])
     finally:
         del appmod.desks.live_count
         appmod.db.set_settings({"deskMaxLive": llm.DEFAULT_SETTINGS["deskMaxLive"]})

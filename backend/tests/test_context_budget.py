@@ -97,7 +97,9 @@ check("Pinned documents" not in sys_, "useDocuments off drops pins")
 # a retrieval hit for a pinned document is not repeated
 dup = [{"chunk_id": "k", "document_id": mine["id"], "name": "mine.txt", "idx": 0, "text": "DUPLICATE", "source": "file"}]
 sys_, used = build(project_id=proj["id"], doc_hits=dup)
-check("DUPLICATE" not in sys_ and used["chunks"] == [], "pinned doc not retrieved twice")
+check("DUPLICATE" not in sys_ and all(c.get("kind") == "range" for c in used["chunks"]), "pinned doc not retrieved twice")
+check([(c["n"], c["document_id"]) for c in used["chunks"]] == [(i, p["document_id"]) for i, p in enumerate(used["pinned"], 1)]
+      and "### [1] " in sys_, "each pinned doc is citable, numbered first")
 documents.set_pinned(mine["id"], False)
 documents.set_pinned(glob["id"], False)
 sys_, used = build(project_id=proj["id"])

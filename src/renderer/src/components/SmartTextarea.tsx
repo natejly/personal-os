@@ -31,6 +31,8 @@ interface Props {
   onBlur?: () => void
   onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void
   onPaste?: (e: React.ClipboardEvent<HTMLTextAreaElement>) => void
+  /** No ghost text while true: the composer's slash menu owns Tab and Esc then. */
+  noGhost?: boolean
 }
 
 const DEBOUNCE_MS = 600
@@ -38,7 +40,7 @@ const MIN_CHARS = 15
 
 export default function SmartTextarea({
   value, onChange, kind, context = '', variant = 'field', sharedStyle, placeholder, autoFocus, onBlur, onKeyDown, onPaste,
-  rows = 2, className = '', minChars = MIN_CHARS, autoGrow = false, maxHeight = 240
+  rows = 2, className = '', minChars = MIN_CHARS, autoGrow = false, maxHeight = 240, noGhost = false
 }: Props): JSX.Element {
   const [ghost, setGhost] = useState('')
   const taRef = useRef<HTMLTextAreaElement>(null)
@@ -48,7 +50,7 @@ export default function SmartTextarea({
   useEffect(() => {
     setGhost('')
     const mine = ++seq.current
-    if (value.trim().length < minChars) return
+    if (noGhost || value.trim().length < minChars) return
     const t = setTimeout(() => {
       const ta = taRef.current
       if (!ta || document.activeElement !== ta || ta.selectionStart !== value.length || ta.selectionEnd !== value.length) return
@@ -58,7 +60,7 @@ export default function SmartTextarea({
         .catch(() => undefined) // ghost text is a nicety; never surface its errors
     }, DEBOUNCE_MS)
     return (): void => clearTimeout(t)
-  }, [value, kind, context, minChars])
+  }, [value, kind, context, minChars, noGhost])
 
   useEffect(() => {
     if (!autoGrow) return
@@ -83,6 +85,12 @@ export default function SmartTextarea({
     }
     if (ghost && e.key === 'Escape') {
       e.preventDefault()
+      setGhost('')
+      return
+    }
+    // With a suggestion showing, an arrow only moves the caret (and drops the ghost): the host's own
+    // arrow handling (the composer's prompt recall) waits until the box is plain text again.
+    if (ghost && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
       setGhost('')
       return
     }

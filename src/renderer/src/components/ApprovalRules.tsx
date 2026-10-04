@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { ApprovalDecision, ToolEvent } from '@shared/types'
+import { askLocked, type ApprovalDecision, type ToolEvent } from '@shared/types'
 import { useStore } from '../store'
 
 /** The one action row of an ask card: why it asked, Approve / Deny (only when `decide` is given; a dedicated card
@@ -19,7 +19,7 @@ export default function ApprovalRules({ event, conversationId, decide }: {
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const canSave = !event.forced && rules.length > 0
-  const wholeTool = !event.forced && perm?.danger !== 'external' && danger !== 'external'
+  const wholeTool = !event.forced && !askLocked(perm?.danger) && !askLocked(danger)
   const run = (fn: () => Promise<void>) => async (): Promise<void> => {
     if (busy) return
     setBusy(true)

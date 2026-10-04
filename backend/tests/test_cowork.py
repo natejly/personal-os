@@ -48,6 +48,8 @@ from personal_os.cowork import LIVE, NEEDS_YOU, checklist_items  # noqa: E402
 from personal_os.plans import PLAN_TOOL  # noqa: E402
 from personal_os.runs import Run  # noqa: E402
 
+db.set_settings({"toolDeferAbove": 0})  # desks drive their own tools; deferral is test_tool_search.py
+
 client = TestClient(app, headers={"X-Personal-OS-Token": AUTH_TOKEN})
 passed = 0
 
@@ -310,23 +312,42 @@ def test_three_desks_run_at_once() -> None:
     check(set(landed.values()) == {"stopped"}, f"and all three stop independently, got {landed}")
 
 
-def test_the_live_desk_cap_409s() -> None:
-    script(delay=0.05)
+def test_the_live_desk_cap_queues() -> None:
+    script(delay=0.5)
     busy = make_desk("The only desk allowed")
     settings_patch(deskMaxLive=1)
+    over: dict[str, Any] = {}
     try:
         wait_until(lambda: desk(busy["desk"]["id"])["status"] in LIVE, "the first desk to be live")
-        over = client.post("/cowork/desks", json={"brief": "One too many", "start": True})
-        check(over.status_code == 409, f"creating a fifth live desk 409s, got {over.status_code}")
-        check(over.json()["detail"]["max"] == 1, "the 409 says what the cap was")
-        queued = make_desk("Queued for later", start=False)
-        check(queued["desk"]["status"] == "draft", "but a draft can still be queued: a draft is not live")
-        started = client.post(f"/cowork/desks/{queued['desk']['id']}/start")
-        check(started.status_code == 409, f"starting it is what 409s, got {started.status_code}")
-    finally:
-        settings_patch(deskMaxLive=4)
+        over = make_desk("One too many")
+        oid = over["desk"]["id"]
+        check(over.get("queued") is True and over["position"] == 1 and over["max"] == 1 and "run_id" not in over,
+              f"a desk started over the cap is queued, not refused: {over}")
+        check(over["desk"]["status"] == "queued" and not runs_of(oid), "it waits without a run")
+        later = make_desk("Queued for later", start=False)
+        started = j("POST", f"/cowork/desks/{later['desk']['id']}/start")
+        check(started["queued"] is True and started["position"] == 2, f"Start on a draft queues it behind, got {started}")
+        twice = j("POST", f"/cowork/desks/{later['desk']['id']}/start")
+        check(twice["queued"] is True and twice["position"] == 2, f"a second Start leaves it where it was, got {twice}")
+        check(desks.get(later["desk"]["id"])["queued_message"] == "Queued for later",
+              "…holding the brief once, not twice")
+        stopped = j("POST", f"/cowork/desks/{later['desk']['id']}/stop")
+        check(stopped["status"] == "stopped", "a queued desk can be stopped")
+        check([d["id"] for d in desks.queued()] == [oid], "…which takes it out of the queue")
         j("POST", f"/cowork/desks/{busy['desk']['id']}/stop")
         quiet(busy["desk"]["id"])
+        wait_until(lambda: len(run_store.list(desk_id=oid, statuses=None)) == 1,
+                   "the queued desk to launch once the slot frees")
+        check(desk(oid)["status"] != "queued", "it left the queue when it launched")
+        first = run_store.list(desk_id=oid, statuses=None)[0]
+        check(first["input"]["content"] == "One too many", "with the turn it was queued with")
+    finally:
+        settings_patch(deskMaxLive=4)
+        for did in (busy["desk"]["id"], (over.get("desk") or {}).get("id")):
+            if did and desk(did)["status"] in (*LIVE, "queued"):
+                j("POST", f"/cowork/desks/{did}/stop")
+            if did:
+                quiet(did)
 
 
 def test_a_double_start_makes_one_run() -> None:
@@ -766,10 +787,76 @@ def test_delete_keeps_the_workspace_unless_purge() -> None:
     check(not proot.exists(), "purge=true is the only thing that removes the directory")
 
 
+def _rewrite(did: str) -> None:
+    """The agent edits its delivered file after nominating it: the bytes on disk are no longer the
+    ones the user reviewed."""
+    (workspace.desk_root(did) / "outputs" / "report.md").write_text(REPORT + "\nA late edit.\n")
+
+
+def test_a_stale_output_is_not_promoted_without_saying_so() -> None:
+    """Review happens on the delivered bytes. Every destination checks them, not only download, and
+    shipping the current file instead takes an explicit accept_stale."""
+    for dest in ("doc", "download"):
+        state = delivering_desk(f"Stale {dest}")
+        did, oid = state["id"], state["outputs"][0]["id"]
+        _rewrite(did)
+        row = next(o for o in j("GET", f"/cowork/desks/{did}/outputs") if o["id"] == oid)
+        check(row["status"] == "stale" and row["stale"] is True, f"the review shows it stale, got {row}")
+
+        body = {"outputs": [{"output_id": oid, "destination": dest}]}
+        refused = j("POST", f"/cowork/desks/{did}/accept", body)["results"][0]
+        check(refused["ok"] is False and "changed" in (refused.get("error") or ""),
+              f"{dest}: the changed file is refused, got {refused}")
+        row = next(o for o in j("GET", f"/cowork/desks/{did}/outputs") if o["id"] == oid)
+        check(row["status"] == "promote_failed" and row["stale"] is True,
+              f"{dest}: the row is retryable and still says why, got {row}")
+
+        body["outputs"][0]["accept_stale"] = True
+        took = j("POST", f"/cowork/desks/{did}/accept", body)["results"][0]
+        check(took["ok"] is True and took["verified"] is True,
+              f"{dest}: with accept_stale the current file is promoted, not the cached refusal, got {took}")
+        if dest == "doc":
+            check("A late edit." in docs.get(took["ref"])["content"], "and it is the current bytes that shipped")
+        row = next(o for o in j("GET", f"/cowork/desks/{did}/outputs") if o["id"] == oid)
+        check(row["status"] == "promoted" and row["sha256"] != state["outputs"][0]["sha256"],
+              f"{dest}: the row records the digest that actually shipped, got {row}")
+
+
+def _xlsx(text: str) -> bytes:
+    """The smallest workbook the stdlib extractor reads: one sheet, one inline string."""
+    import io
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("xl/workbook.xml", '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+                   '<sheets><sheet name="Model" sheetId="1"/></sheets></workbook>')
+        z.writestr("xl/worksheets/sheet1.xml", '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+                   f'<sheetData><row r="1"><c r="A1" t="inlineStr"><is><t>{text}</t></is></c></row></sheetData></worksheet>')
+    return buf.getvalue()
+
+
+def test_a_text_file_and_a_workbook_promote_to_their_own_destinations() -> None:
+    """What the review pane's defaults send for a desk with a .md and a .xlsx: the text becomes a
+    doc and the workbook an uploaded document. A workbook sent to `doc` fails as not text."""
+    import hashlib
+    state = delivering_desk("Two kinds of output")
+    did = state["id"]
+    data = _xlsx("Widget")
+    (workspace.desk_root(did) / "outputs" / "model.xlsx").write_bytes(data)
+    sheet = desks.declare_output(did, "outputs/model.xlsx", "The model", "", hashlib.sha256(data).hexdigest(),
+                                 len(data), None)
+    md = state["outputs"][0]["id"]
+    got = j("POST", f"/cowork/desks/{did}/accept",
+            {"outputs": [{"output_id": md, "destination": "doc"},
+                         {"output_id": sheet["id"], "destination": "document"}]})["results"]
+    check(all(r["ok"] and r["verified"] for r in got), f"both are promoted and read back, got {got}")
+    check(desk(did)["status"] == "done", "and nothing is left to decide")
+
+
 TESTS = [test_a_desk_is_a_conversation_the_chat_list_hides,
          test_a_desk_is_told_it_is_a_desk_and_why_a_plan_comes_first,
          test_three_desks_run_at_once,
-         test_the_live_desk_cap_409s,
+         test_the_live_desk_cap_queues,
          test_a_double_start_makes_one_run,
          test_an_unanswered_card_parks_rather_than_auto_denying,
          test_deciding_a_parked_card_resumes_the_desk,
@@ -791,7 +878,9 @@ TESTS = [test_a_desk_is_a_conversation_the_chat_list_hides,
          test_a_checklist_becomes_one_todo_per_line,
          test_an_html_file_becomes_a_page_and_markdown_does_not,
          test_a_mail_file_becomes_a_gmail_draft_never_a_send,
-         test_delete_keeps_the_workspace_unless_purge]
+         test_delete_keeps_the_workspace_unless_purge,
+         test_a_stale_output_is_not_promoted_without_saying_so,
+         test_a_text_file_and_a_workbook_promote_to_their_own_destinations]
 
 
 def _system_text(round_messages: list[dict[str, Any]]) -> str:
@@ -808,6 +897,16 @@ def test_a_desk_is_told_it_is_a_desk() -> None:
     quiet(did)
     check("## This is a cowork desk" in _system_text(SCRIPT["messages"][0]),
           "DESK_HINT reaches the model, so it knows about outputs/, desk_deliver, desk_ask and desk_done")
+
+
+def test_a_desk_is_told_its_inputs() -> None:
+    """The wiring, not desk_manual alone: the first round's system context lists what was handed in."""
+    script({"text": "Read them."})
+    d = docs.create("Input Brief", "Acme, Globex")
+    did = make_desk("Read the inputs", inputs=[{"kind": "doc", "id": d["id"]}])["desk"]["id"]
+    quiet(did)
+    first = _system_text(SCRIPT["messages"][0])
+    check("inputs/Input Brief.md" in first and "MANIFEST.md" in first, "the desk's first turn lists its inputs")
 
 
 def test_a_woken_desk_sees_its_approved_plan_and_what_the_user_said() -> None:
@@ -980,6 +1079,7 @@ def test_a_reply_that_just_ends_gets_exactly_one_nudge() -> None:
 TESTS += [test_a_planning_desk_is_not_offered_desk_done_or_desk_start,
          test_a_reply_that_just_ends_gets_exactly_one_nudge,
          test_a_desk_is_told_it_is_a_desk,
+         test_a_desk_is_told_its_inputs,
          test_a_woken_desk_sees_its_approved_plan_and_what_the_user_said,
          test_an_approved_parked_call_runs_on_the_next_turn_without_a_second_card,
          test_answering_a_desk_ask_card_carries_on_in_the_same_turn,

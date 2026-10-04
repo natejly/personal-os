@@ -5,9 +5,11 @@ Run: PERSONAL_OS_DATA_DIR=/tmp/x python backend/tests/test_desk_chain.py   (or v
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 import tempfile
+from types import SimpleNamespace
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +17,7 @@ os.environ.setdefault("PERSONAL_OS_DATA_DIR", tempfile.mkdtemp(prefix="deskchain
 os.environ.setdefault("PERSONAL_OS_AUTH_TOKEN", "test-token")
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+import personal_os.app as A  # noqa: E402
 from personal_os.app import _chain_kind, _desk_message, _should_chain  # noqa: E402
 from personal_os.cowork import (DESK_CONTINUE, DESK_HINT, DESK_NUDGE, DESK_PLAN_HINT, DESK_RESUME, NOTES_CAP,  # noqa: E402
                                 continue_message, desk_manual, parked_report, read_notes)
@@ -158,8 +161,169 @@ def test_plan_hint_and_footer() -> None:
     check(PLAN_FOOTER in plan_block(steps), "chat footer unchanged")
 
 
+# ---- the deskMaxLive queue and auto-resume: real rows, no run started ----
+def _desk(status: str = "draft", reason: str = "") -> dict[str, Any]:
+    conv = A.convos.create(None, "desk", "test-model")
+    d = A.desks.create(conversation_id=conv["id"], brief="Write the brief")
+    if status != "draft":
+        A.desks.set_status(d["id"], status, reason=reason)
+    return A.desks.get(d["id"], with_outputs=False)
+
+
+def _clear() -> None:
+    for d in A.desks.list():
+        if d["status"] in ("planning", "working", "needs_approval", "awaiting_plan", "queued"):
+            A.desks.set_status(d["id"], "stopped")
+
+
+def _fake_launches() -> tuple[list[tuple[str, str]], Any]:
+    """bus.start and the supervisor swapped for recorders, so a launch claims the row and records its content."""
+    started: list[tuple[str, str]] = []
+    real = (A.bus.start, A._desk_supervisor)
+
+    def start(conv_id: str, runner: Any, **kw: Any) -> Any:
+        started.append((kw["desk_id"], kw["input"]["content"]))
+        return SimpleNamespace(run_id=f"r{len(started)}", seq=0)
+
+    async def supervisor(desk_id: str, run: Any) -> None:
+        return None
+
+    A.bus.start, A._desk_supervisor = start, supervisor  # type: ignore[assignment]
+
+    def restore() -> None:
+        A.bus.start, A._desk_supervisor = real  # type: ignore[assignment]
+    return started, restore
+
+
+def test_over_the_cap_every_way_in_queues() -> None:
+    _clear()
+    A.db.set_settings({"deskMaxLive": 1})
+    try:
+        _desk("working")
+        d = _desk()
+        out = A._launch_desk(d["id"], "Write the brief", A.START_FROM)
+        check(isinstance(out, dict) and out["status"] == "queued" and out["queued_message"] == "Write the brief",
+              "a start over the cap queues the desk instead of refusing it")
+        intr = _desk("interrupted")
+        woke = A._wake_desk(intr["id"])
+        check(isinstance(woke, dict) and woke["queued_message"].startswith(DESK_RESUME),
+              "a resume (or a decided approval) over the cap queues with the resume message")
+        blocked = _desk("blocked", reason="approval")
+        check(A._missed_wake(blocked["id"]) is None, "the missed-wake retry does not claim over the cap")
+        row = A.desks.get(blocked["id"], with_outputs=False)
+        check(row["status"] == "queued" and row["queued_message"].startswith(DESK_CONTINUE), "…it queues instead")
+        done = _desk("done")
+        A.toolbox.shell.notes[done["conversation_id"]] = ["Background shell job j1 finished (exited, exit code 0)."]
+        A._shell_wake(done["conversation_id"])
+        row = A.desks.get(done["id"], with_outputs=False)
+        check(row["status"] == "queued" and "job j1 finished" in row["queued_message"],
+              "background-job results that arrive at the cap ride on the queued turn rather than being dropped")
+        A.toolbox.shell.notes[done["conversation_id"]] = ["Background shell job j2 finished."]
+        A._shell_wake(done["conversation_id"])
+        row = A.desks.get(done["id"], with_outputs=False)
+        check("j1" in row["queued_message"] and "j2" in row["queued_message"], "…and a second result is appended")
+        check([q["id"] for q in A.desks.queued()] == [d["id"], intr["id"], blocked["id"], done["id"]],
+              "in the order they arrived")
+        check(A.desks.live_count() == 1, "and nothing went over the cap")
+    finally:
+        A.db.set_settings({"deskMaxLive": 4})
+        _clear()
+
+
+def test_the_drain_launches_oldest_first_up_to_the_cap() -> None:
+    _clear()
+    A.db.set_settings({"deskMaxLive": 2})
+    started, restore = _fake_launches()
+    try:
+        _desk("working")
+        first, second = _desk(), _desk()
+        A.desks.enqueue(first["id"], "first brief", ("draft",))
+        A.desks.enqueue(second["id"], "second brief", ("draft",))
+
+        async def go() -> None:
+            A._drain_queue()
+        asyncio.run(go())
+        check(started == [(first["id"], "first brief")], f"one slot, the oldest desk, with its queued turn; got {started}")
+        check(A.desks.get(first["id"], False)["status"] == "planning", "it is claimed out of the queue")
+        check(A.desks.queue_position(second["id"]) == 1, "the other waits, now first in line")
+
+        A.db.set_settings({"deskMaxLive": 3})
+
+        async def msg() -> None:
+            A._launch_desk(second["id"], "and also this", A.MESSAGE_FROM)
+        asyncio.run(msg())
+        check(started[-1] == (second["id"], "second brief\n\nand also this"),
+              f"a message to a queued desk with room starts it carrying both; got {started[-1]}")
+    finally:
+        restore()
+        A.db.set_settings({"deskMaxLive": 4})
+        _clear()
+
+
+def test_auto_resume_relaunches_only_what_is_safe() -> None:
+    _clear()
+    woken: list[str] = []
+    real_wake = A._wake_desk
+    A._wake_desk = lambda did: woken.append(did)  # type: ignore[assignment]
+    try:
+        clean = _desk("working")
+        unknown = _desk("working")
+        A.run_store.create(old := f"old-{unknown['id']}", unknown["conversation_id"], kind="desk", desk_id=unknown["id"])
+        with A.db.tx() as c:
+            c.execute("INSERT INTO executed_calls(key, run_id, step, tool, args_digest, call_id, status, created_at) "
+                      "VALUES(?,?,0,'gmail_send','d','c1','started',0)", (f"k-{old}", old))
+        asking = _desk("needs_approval")
+        A.run_store.open_approval(f"c-{asking['id']}", None, "gmail_send", {}, desk_id=asking["id"])
+        planned = _desk("awaiting_plan")
+        paused = _desk("paused")
+
+        A.db.set_settings({"deskAutoResume": False})
+        asyncio.run(A._cowork_startup())
+        check(woken == [], "setting off: nothing is relaunched")
+        check(A.desks.get(clean["id"], False)["status"] == "interrupted", "…every live desk is interrupted, as before")
+
+        for did in (clean["id"], unknown["id"], asking["id"]):
+            A.desks.set_status(did, "working")
+        A.desks.set_status(planned["id"], "awaiting_plan")
+        A.db.set_settings({"deskAutoResume": True})
+        asyncio.run(A._cowork_startup())
+        check(woken == [clean["id"]], f"setting on: only the clean desk is relaunched, got {woken}")
+        bodies = [e["body"] for e in A.desks.events(unknown["id"])]
+        check(any("outcome is unknown" in b for b in bodies) and A.desks.get(unknown["id"], False)["status"] == "interrupted",
+              "a desk with a started call in an earlier run stays interrupted and says why")
+        bodies = [e["body"] for e in A.desks.events(asking["id"])]
+        check(any("waiting on your approval" in b for b in bodies), "a desk with a pending card stays interrupted and says why")
+        check(planned["id"] not in woken and A.desks.get(planned["id"], False)["status"] == "interrupted",
+              "a desk waiting on its plan is the user's move, not relaunched")
+        check(A.desks.get(paused["id"], False)["status"] == "paused", "a paused desk is untouched")
+    finally:
+        A._wake_desk = real_wake  # type: ignore[assignment]
+        A.db.set_settings({"deskAutoResume": False})
+        _clear()
+
+
+def test_auto_resume_respects_the_cap() -> None:
+    """Through the real _wake_desk: two clean desks, room for one, so the other waits in the queue."""
+    _clear()
+    started, restore = _fake_launches()
+    a, b = _desk("working"), _desk("working")
+    A.db.set_settings({"deskAutoResume": True, "deskMaxLive": 1})
+    try:
+        asyncio.run(A._cowork_startup())
+        check([s[0] for s in started] == [a["id"]] and started[0][1].startswith(DESK_RESUME),
+              f"one desk relaunches with the resume message, got {started}")
+        check(A.desks.get(b["id"], False)["status"] == "queued", "the other is queued rather than over the cap")
+        check(A.desks.live_count() == 1, "the cap holds")
+    finally:
+        restore()
+        A.db.set_settings({"deskAutoResume": False, "deskMaxLive": 4})
+        _clear()
+
+
 def main() -> None:
-    for t in (test_every_budget_stop_chains_on_progress, test_guards, test_ask_desk_without_a_plan_is_working, test_single_nudge, test_manual, test_parked_report_cannot_open_a_section, test_plan_hint_and_footer):
+    for t in (test_every_budget_stop_chains_on_progress, test_guards, test_ask_desk_without_a_plan_is_working, test_single_nudge, test_manual, test_parked_report_cannot_open_a_section, test_plan_hint_and_footer,
+              test_over_the_cap_every_way_in_queues, test_the_drain_launches_oldest_first_up_to_the_cap,
+              test_auto_resume_relaunches_only_what_is_safe, test_auto_resume_respects_the_cap):
         t()
     test_continue_message(Path(tempfile.mkdtemp()))
     print(f"inner totals: {passed} passed")

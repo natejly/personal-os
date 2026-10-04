@@ -1,6 +1,42 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { builtinCommands, detectSlash, filterCommands, snippet } from './slash'
+import { builtinCommands, composerSlash, COMPOSER_SLASH_MAX, detectSlash, filterCommands, slashMenuKey, snippet } from './slash'
+
+const saved = [
+  { name: 'standup', description: 'Summarise yesterday' },
+  { name: 'redraft', description: 'Rewrite a draft' },
+  { name: 'draft-reply', description: 'Reply to mail' }
+]
+
+test('composer: a leading slash lists every saved command', () => {
+  assert.deepEqual(composerSlash('/', saved)?.map((c) => c.name), ['standup', 'redraft', 'draft-reply'])
+})
+
+test('composer: a name prefix ranks above a substring', () => {
+  assert.deepEqual(composerSlash('/dr', saved)?.map((c) => c.name), ['draft-reply', 'redraft'])
+})
+
+test('composer: a space or a slash later in the draft opens no menu', () => {
+  assert.equal(composerSlash('/standup ', saved), null)
+  assert.equal(composerSlash('hello /st', saved), null)
+  assert.equal(composerSlash('line\n/st', saved), null)
+  assert.equal(composerSlash('plain', saved), null)
+})
+
+test('composer: the list is capped at 8', () => {
+  const many = Array.from({ length: 12 }, (_, i) => ({ name: `c${i}`, description: '' }))
+  assert.equal(composerSlash('/', many)?.length, COMPOSER_SLASH_MAX)
+  assert.equal(COMPOSER_SLASH_MAX, 8)
+})
+
+test('composer: Enter and Tab pick while the menu is open; arrows wrap; Esc closes; other keys pass', () => {
+  assert.deepEqual(slashMenuKey('Enter', 0, 3), { kind: 'pick' })
+  assert.deepEqual(slashMenuKey('Tab', 0, 3), { kind: 'pick' })
+  assert.deepEqual(slashMenuKey('ArrowUp', 0, 3), { kind: 'move', active: 2 })
+  assert.deepEqual(slashMenuKey('ArrowDown', 2, 3), { kind: 'move', active: 0 })
+  assert.deepEqual(slashMenuKey('Escape', 1, 3), { kind: 'close' })
+  assert.equal(slashMenuKey('a', 0, 3), null)
+})
 
 test('a slash at line start opens the menu with an empty query', () => {
   assert.deepEqual(detectSlash('/', 1), { start: 0, query: '' })

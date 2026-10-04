@@ -65,7 +65,7 @@
 .desk-ring-planning, .desk-ring-awaiting_plan { --ring: var(--chart-7, var(--accent)); }
 .desk-ring-working { --ring: var(--accent); }
 .desk-ring-needs_approval, .desk-ring-blocked { --ring: var(--warn); }
-.desk-ring-paused { --ring: var(--text-faint); }
+.desk-ring-paused, .desk-ring-queued { --ring: var(--text-faint); }
 .desk-ring-interrupted, .desk-ring-failed { --ring: var(--danger); }
 .desk-ring-review { --ring: var(--chart-4, var(--accent)); }
 .desk-ring-done { --ring: var(--chart-3, var(--text-muted)); }
@@ -147,6 +147,10 @@
   background: var(--bg); color: var(--text); font: inherit; }
 .desk-limits input:focus { border-color: var(--accent); outline: none; }
 .desk-limits small { flex-basis: 100%; }
+.desk-inputs { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 12.5px; }
+.desk-inputs select { padding: 4px 6px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font: inherit; max-width: 220px; }
+.desk-input-chip { display: inline-flex; align-items: center; gap: 2px; max-width: 240px; padding: 2px 2px 2px 9px; border-radius: 12px;
+  background: var(--active); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .desk-pane { flex: 1; min-height: 0; padding: 12px 16px; }
 .desk-pane.scroll { overflow-y: auto; }

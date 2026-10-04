@@ -85,13 +85,15 @@ class JobPolicy:
             return True, None
         why = "previous run still running"
         if not fire.get("manual"):
-            self.jobs.record_skip(job["id"], why, self.clock())
+            self.jobs.record_skip(job["id"], why, self.clock(), fire.get("due_at"))
         return False, why
 
     # ---- the watcher ----
     def watch_soon(self, job: dict[str, Any], fire: dict[str, Any], run_id: str) -> None:
         """Follow a launched run in the background. Manual and dry runs are not watched (see module docstring)."""
-        if fire.get("manual") or fire.get("dry_run"):
+        # A desk job's fire is a desk: retrying it would be a second desk for the slot. A desk that fails is
+        # resumed from the desk itself.
+        if fire.get("manual") or fire.get("dry_run") or job.get("target") == "desk":
             return
         t = asyncio.ensure_future(self.watch(job, fire, run_id))
         self._tasks.add(t)
@@ -142,7 +144,8 @@ class JobPolicy:
         for job in self.jobs.list():
             last = next(iter(self.runs.of_job(job["id"], limit=1)), None)
             inp = last.get("input") if last and isinstance(last.get("input"), dict) else {}
-            if (not job["enabled"] or not last or last.get("status") != "interrupted" or inp.get("manual")
+            # A one-off is disabled the moment it fires, yet still owns its retries.
+            if (not (job["enabled"] or job["kind"] == "once") or not last or last.get("status") != "interrupted" or inp.get("manual")
                     or inp.get("dry_run") or self.live_run(job["id"])):
                 continue
             attempt = int(inp.get("attempt") or 0)
@@ -168,10 +171,10 @@ class JobPolicy:
         if cur is None:
             return
         retries = int(cur.get("max_retries") or 0)
-        if attempt <= retries and cur["enabled"] and self.live_run(jid) is None:
+        if attempt <= retries and (cur["enabled"] or cur["kind"] == "once") and self.live_run(jid) is None:
             await self._nap(self.backoff(attempt))
             cur = self.jobs.get(jid)
-            if cur is not None and cur["enabled"] and self.live_run(jid) is None:
+            if cur is not None and (cur["enabled"] or cur["kind"] == "once") and self.live_run(jid) is None:
                 retry = {**fire, "attempt": attempt + 1, "retry_of": run_id, "late": False}
                 nxt = await self.launch(cur, retry)
                 if nxt:

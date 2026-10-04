@@ -86,6 +86,8 @@ def test_overlap_skips_and_consumes_the_slot() -> None:
         got = r.jobs.get(jb["id"])
         assert got["last_skip_reason"] and got["last_skip_at"] == T0 + 7200
         assert got["next_due_at"] == T0 + 3 * 3600  # advanced: the slot was consumed
+        assert [(k["reason"], k["due_at"], k["at"]) for k in r.jobs.skips(jb["id"])] == \
+            [("previous run still running", T0 + 7200, T0 + 7200)], "the skip is kept as history, not only on the job"
         r.finish("run0", "done")
         assert await r.fire(T0 + 7300) == []  # no catch-up after the long run ends
         await r.policy.drain()
@@ -300,6 +302,45 @@ def test_inbox_shows_expired_pause() -> None:
     appmod.jobs.delete(jb["id"])
 
 
+def test_a_failed_one_off_is_retried_and_a_good_one_retires() -> None:
+    """A one-off is disabled the moment it fires; its retry budget still holds, and a success stays retired."""
+    for outcome, want in (("error", 2), ("done", 1)):
+        r = Rig()
+        jb = r.jobs.create("once", "", "p", kind="once", run_at=T0 + 60, timezone="UTC", enabled=True, at=T0, max_retries=1)
+
+        def flip(s: float, r: Rig = r, outcome: str = outcome) -> None:
+            if s < 120:
+                for i in range(len(r.launched)):
+                    if r.store.get(f"run{i}")["status"] == "running":
+                        r.finish(f"run{i}", outcome, "boom" if outcome == "error" else None)
+
+        r.on_sleep = flip
+
+        async def go(r: Rig = r) -> None:
+            await r.fire(T0 + 120)
+            await r.policy.drain()
+            assert await r.fire(T0 + 7200) == []  # retired: never fires again
+
+        asyncio.run(go())
+        assert len(r.launched) == want, (outcome, len(r.launched))
+        got = r.jobs.get(jb["id"])
+        assert not got["enabled"] and got["next_due_at"] is None
+
+    # boot_retry: an interrupted one-off is relaunched once, too
+    r = Rig()
+    r.jobs.create("once", "", "p", kind="once", run_at=T0 + 60, timezone="UTC", enabled=True, at=T0, max_retries=1)
+    asyncio.run(r.fire(T0 + 120))
+    r.finish("run0", "interrupted", "Interrupted")
+
+    async def boot() -> list[str]:
+        out = await r.policy.boot_retry()
+        for t in list(r.policy._tasks):  # noqa: SLF001
+            t.cancel()
+        return out
+
+    assert len(asyncio.run(boot())) == 1 and r.launched[1]["retry_of"] == "run0"
+
+
 def test_inbox_lists_desks_and_every_review_queue() -> None:
     conv = appmod.convos.create(None, "desk", "m")
     desk = appmod.desks.create(conversation_id=conv["id"], brief="b", title="Waiting desk")
@@ -316,3 +357,20 @@ def test_inbox_lists_desks_and_every_review_queue() -> None:
     appmod.desks.mark_desk_seen(desk["id"])
     assert all(d["desk_id"] != desk["id"] for d in client.get("/inbox").json()["needs_you"]["desks"]), "seen clears it"
     appmod.desks.delete(desk["id"])
+
+
+def test_skip_history_keeps_the_last_200_per_job() -> None:
+    r = Rig()
+    a, b = r.job(), r.job()
+    for i in range(205):
+        r.jobs.record_skip(a["id"], "previous run still running", T0 + i, T0 + i)
+    r.jobs.record_skip(b["id"], "previous run still running", T0)
+    with r.db.tx() as c:
+        n = c.execute("SELECT COUNT(*) AS n FROM job_skips WHERE job_id=?", (a["id"],)).fetchone()["n"]
+    assert n == 200
+    kept = r.jobs.skips(a["id"], 500)
+    assert len(kept) == 200 and kept[0]["at"] == T0 + 204 and kept[-1]["at"] == T0 + 5, "the oldest go first"
+    assert len(r.jobs.skips(b["id"])) == 1, "another job's history is untouched"
+    r.jobs.delete(a["id"])
+    with r.db.tx() as c:
+        assert c.execute("SELECT COUNT(*) AS n FROM job_skips WHERE job_id=?", (a["id"],)).fetchone()["n"] == 0

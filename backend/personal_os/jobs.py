@@ -9,6 +9,11 @@ Three pieces, all of them rows:
                  · `once` — a single instant, `run_at`. "Tomorrow at 3pm, do this." It fires one time and then
                    switches itself off, so a spent one-off stays in the list as a record of what it did rather
                    than as a chore the user has to come back and delete.
+                 · `watch` — a folder; new or touched files in it fire a run.
+                 · `mail` — a Gmail search; a matching thread that is new or has a new message fires a run.
+                   Its `next_due_at` is the next poll (every MAIL_POLL_S), not a slot, and never books an OS wake.
+               Separately, `target` says what a fire starts: 'run' (a proposal-only chat run) or 'desk' (a desk with
+               the prompt as its brief, in plan or propose autonomy; see app._launch_desk_job).
 - `Proposals` — the `proposals` table: an outward-facing tool call a background run was not allowed to
                make. Accepting one is a user action, and is what actually executes it, once.
 - `Scheduler` — a clock, not a heartbeat. It wakes on the earliest `next_due_at` (capped, so a config
@@ -26,6 +31,7 @@ it skipped, which is what the Agent Inbox shows as "ran late".
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import itertools
 import json
 import logging
@@ -38,7 +44,9 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from croniter import CroniterBadCronError, CroniterBadDateError, croniter
 
+from .approval_edits import EDITABLE_TOOLS
 from .db import Database, new_id, now, row_to_dict
+from .google import GoogleNotConnected
 from .runs import args_digest
 
 log = logging.getLogger(__name__)
@@ -54,10 +62,20 @@ LATE_GRACE_S = 90.0
 # Upper bound on how many skipped slots are counted, so a job asleep for a year does not walk a million dates.
 MAX_MISSED_COUNTED = 500
 
-PROPOSAL_STATUSES = ("pending", "accepted", "rejected")
-KINDS = ("cron", "once", "watch")
+PROPOSAL_STATUSES = ("pending", "accepted", "rejected", "expired")
+# Skipped slots kept per job in job_skips; older ones are dropped as new ones arrive.
+SKIP_KEEP = 200
+KINDS = ("cron", "once", "watch", "mail")
+# A mail job asks Gmail at most this often, and reads at most this many matching threads per look.
+MAIL_POLL_S = 300.0
+MAIL_MAX_THREADS = 20
+# What a fire starts: a proposal-only chat run, or a desk. A desk job keeps any schedule kind; it only changes the
+# target. A scheduled desk may plan first or propose at the end, never 'ask' (cards each change while nobody watches).
+TARGETS = ("run", "desk")
+DESK_JOB_AUTONOMY = ("plan", "propose")
 # A directory trigger lists one folder (not its subfolders) and remembers at most this many entries.
 WATCH_MAX_ENTRIES = 2000
+WATCH_CHANGED_NAMES = 50  # names a directory fire hands the run; past this, only the count
 
 # What a job run is launched with. The three the user asked for; seeded disabled, because an unattended
 # run costs money and nobody opted in yet (the Agent Inbox offers the toggle).
@@ -207,6 +225,8 @@ def valid_schedule(kind: str, cron: str | None, run_at: float | None) -> bool:
         return run_at is not None
     if kind == "watch":
         return not cron or valid_cron(cron)  # a directory job may have no clock at all
+    if kind == "mail":
+        return not cron  # the search is its only trigger; next_due_at is the poll, not a slot
     return valid_cron(cron or "")
 
 
@@ -217,6 +237,11 @@ def check_watch_dir(raw: str | None) -> str:
     if not p.is_dir():
         raise mac.LocalPathError(f"{p} is not a folder")
     return str(p)
+
+
+def _changed(names: list[str]) -> dict[str, Any]:
+    """What a directory fire carries: how many entries changed, and the first WATCH_CHANGED_NAMES of their names."""
+    return {"collapsed": len(names), "changed": names[:WATCH_CHANGED_NAMES]}
 
 
 def scan_dir(path: str) -> dict[str, int]:
@@ -231,15 +256,25 @@ def scan_dir(path: str) -> dict[str, int]:
 
 
 class PowerWake:
-    """The real wake sink: asks the macOS power scheduler to wake the Mac at an instant. It needs privileges and
-    may not exist, so it fails quietly; the next wake then catches up late, which is how it worked before."""
+    """The real wake sink: asks the macOS power scheduler to wake the Mac at an instant. That needs root, which the
+    app does not have, so the first refusal marks it `unavailable` for good and every later call is a no-op. Missed
+    slots then catch up when the Mac next wakes (see Scheduler.nudge), and the inbox says jobs need the Mac awake."""
 
-    @staticmethod
-    def _pmset(*args: str) -> None:
+    def __init__(self, runner: Callable[..., Any] = subprocess.run) -> None:
+        self._run = runner
+        self.unavailable = False
+
+    def _pmset(self, *args: str) -> None:
+        if self.unavailable:
+            return
         try:
-            subprocess.run(["pmset", "schedule", *args], capture_output=True, timeout=10, check=False)
+            done = self._run(["pmset", "schedule", *args], capture_output=True, timeout=10, check=False)
+            ok = done.returncode == 0
         except Exception:  # noqa: BLE001 - never a scheduler fault
-            log.debug("pmset schedule failed", exc_info=True)
+            ok = False
+        if not ok:
+            self.unavailable = True
+            log.info("pmset schedule is not available here; jobs will run when the Mac is awake")
 
     @staticmethod
     def _stamp(at: float) -> str:
@@ -270,6 +305,8 @@ def next_due_for(job: dict[str, Any], after: float) -> float | None:
         return None if spent(job) or job.get("run_at") is None else float(job["run_at"])
     if job.get("kind") == "watch" and not job.get("cron"):
         return None  # a directory-only job has no clock slot; the folder is its trigger
+    if job.get("kind") == "mail":
+        return after  # poll as soon as it is armed; that first look only takes the baseline
     return next_fire(job["cron"], job["timezone"], after)
 
 
@@ -277,11 +314,14 @@ class Jobs:
     """CRUD over the `jobs` table. Every writer keeps `next_due_at` in step with the schedule and `enabled`."""
 
     FIELDS = ("name", "kind", "cron", "run_at", "timezone", "enabled", "prompt", "project_id", "max_retries",
-              "allowed_tools", "watch_dir")
+              "allowed_tools", "watch_dir", "notify", "model", "budget", "mail_query", "target", "desk_autonomy",
+              "desk_budget")
     # Changing any of these re-arms the job: a new schedule must not inherit the old one's pending slot.
-    RE_ARM = frozenset({"kind", "cron", "run_at", "timezone", "enabled"})
+    RE_ARM = frozenset({"kind", "cron", "run_at", "timezone", "enabled", "mail_query"})
     # Taking a baseline listing when these change is what makes "idle until a file appears" true.
     WATCH_FIELDS = frozenset({"watch_dir", "enabled", "kind"})
+    # Same for a mail search: the next look is a fresh baseline, so mail already there never fires.
+    MAIL_FIELDS = frozenset({"mail_query", "enabled", "kind"})
 
     def __init__(self, db: Database):
         self.db = db
@@ -291,6 +331,7 @@ class Jobs:
         d = row_to_dict(r)
         if d is not None:
             d.pop("watch_seen", None)  # the folder listing is bookkeeping, not part of the job
+            d.pop("mail_seen", None)  # so is the thread baseline
             d["enabled"] = bool(d["enabled"])
             # NULL = inherit every tool (what every job did before this column); otherwise a JSON list of names.
             raw = d.get("allowed_tools")
@@ -298,6 +339,15 @@ class Jobs:
                 d["allowed_tools"] = json.loads(raw) if raw else None
             except ValueError:
                 d["allowed_tools"] = None
+            # NULL = JOB_BUDGET as is; otherwise a JSON object of the caps this job tightens.
+            try:
+                d["budget"] = json.loads(d["budget"]) if d.get("budget") else None
+            except ValueError:
+                d["budget"] = None
+            try:
+                d["desk_budget"] = json.loads(d["desk_budget"]) if d.get("desk_budget") else None
+            except ValueError:
+                d["desk_budget"] = None
         return d
 
     def list(self) -> list[dict[str, Any]]:
@@ -312,20 +362,27 @@ class Jobs:
     def create(self, name: str, cron: str, prompt: str, *, kind: str = "cron", run_at: float | None = None,
                timezone: str | None = None, enabled: bool = False, project_id: str | None = None,
                at: float | None = None, max_retries: int = 1, allowed_tools: list[str] | None = None,
-               watch_dir: str | None = None) -> dict[str, Any]:
+               watch_dir: str | None = None, notify: str = "problems", model: str | None = None,
+               budget: dict[str, Any] | None = None, mail_query: str | None = None, target: str = "run",
+               desk_autonomy: str | None = None, desk_budget: dict[str, Any] | None = None) -> dict[str, Any]:
         tz = timezone or local_tz_name()
         t = at if at is not None else now()
         jid = new_id()
         kind = kind if kind in KINDS else "cron"
-        cron = "" if kind == "once" else cron
+        target = target if target in TARGETS else "run"
+        cron = "" if kind in ("once", "mail") else cron
         fresh = {"kind": kind, "cron": cron, "run_at": run_at, "timezone": tz, "last_due_at": None}
         nxt = next_due_for(fresh, t) if enabled else None
         with self.db.tx() as c:
             c.execute("INSERT INTO jobs(id, name, kind, cron, run_at, timezone, enabled, prompt, project_id, next_due_at, "
-                      "created_at, updated_at, max_retries, allowed_tools, watch_dir, watch_seen) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                      "created_at, updated_at, max_retries, allowed_tools, watch_dir, watch_seen, notify, model, budget, "
+                      "mail_query, target, desk_autonomy, desk_budget) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                       (jid, name, kind, cron, run_at, tz, int(enabled), prompt, project_id, nxt, t, t, int(max_retries),
                        None if allowed_tools is None else json.dumps(list(allowed_tools)), watch_dir,
-                       json.dumps(scan_dir(watch_dir)) if watch_dir else None))
+                       json.dumps(scan_dir(watch_dir)) if watch_dir else None, notify, model,
+                       json.dumps(budget) if budget else None, mail_query, target,
+                       (desk_autonomy or "plan") if target == "desk" else desk_autonomy,
+                       json.dumps(desk_budget) if desk_budget else None))
         return self.get(jid)  # type: ignore[return-value]
 
     def update(self, id: str, patch: dict[str, Any], at: float | None = None) -> dict[str, Any] | None:
@@ -336,10 +393,16 @@ class Jobs:
         cols = {k: v for k, v in patch.items() if k in self.FIELDS}
         if "enabled" in cols:
             cols["enabled"] = int(bool(cols["enabled"]))
-        if cols.get("kind") == "once":
+        if cols.get("kind") in ("once", "mail"):
             cols["cron"] = ""
         if "allowed_tools" in cols:
             cols["allowed_tools"] = None if cols["allowed_tools"] is None else json.dumps(list(cols["allowed_tools"]))
+        if "budget" in cols:
+            cols["budget"] = json.dumps(cols["budget"]) if cols["budget"] else None
+        if "model" in cols:
+            cols["model"] = cols["model"] or None
+        if "desk_budget" in cols:
+            cols["desk_budget"] = json.dumps(cols["desk_budget"]) if cols["desk_budget"] else None
         if "enabled" in cols:
             # Any explicit switch is the user acknowledging an auto-pause: the reason and the streak start over.
             cols["paused_reason"] = None
@@ -357,6 +420,8 @@ class Jobs:
             return job
         if self.WATCH_FIELDS & cols.keys() and merged.get("watch_dir"):
             cols["watch_seen"] = json.dumps(scan_dir(merged["watch_dir"]))
+        if self.MAIL_FIELDS & cols.keys():
+            cols["mail_seen"] = None
         sets = ", ".join(f"{k}=?" for k in cols)
         with self.db.tx() as c:
             c.execute(f"UPDATE jobs SET {sets}, updated_at=? WHERE id=?", (*cols.values(), t, id))
@@ -374,8 +439,11 @@ class Jobs:
         return [d for d in (self._row(r) for r in rows) if d]
 
     def earliest_due(self) -> float | None:
+        """The next slot worth waking for. A mail poll is not one: the capped loop sleep already reaches it, and
+        waking a sleeping Mac every few minutes to read mail would be the heartbeat this scheduler is not."""
         with self.db.tx() as c:
-            r = c.execute("SELECT MIN(next_due_at) AS t FROM jobs WHERE enabled=1 AND next_due_at IS NOT NULL").fetchone()
+            r = c.execute("SELECT MIN(next_due_at) AS t FROM jobs WHERE enabled=1 AND next_due_at IS NOT NULL "
+                          "AND kind<>'mail'").fetchone()
         return float(r["t"]) if r and r["t"] is not None else None
 
     def watching(self) -> list[dict[str, Any]]:
@@ -385,13 +453,13 @@ class Jobs:
                              "AND watch_dir<>''").fetchall()
         return [d for d in (self._row(r) for r in rows) if d]
 
-    def poll_dir(self, job: dict[str, Any]) -> int:
-        """How many entries are new or touched in the job's folder since the last look, and remember this look.
+    def poll_dir(self, job: dict[str, Any]) -> list[str]:
+        """The entries new or touched in the job's folder since the last look, and remember this look.
         The first look (no baseline yet) only records one."""
         try:
             check_watch_dir(job["watch_dir"])
         except Exception:  # noqa: BLE001 - a folder that left the guard (moved, now hidden) just goes quiet
-            return 0
+            return []
         new = scan_dir(job["watch_dir"])
         with self.db.tx() as c:
             r = c.execute("SELECT watch_seen FROM jobs WHERE id=?", (job["id"],)).fetchone()
@@ -400,7 +468,24 @@ class Jobs:
         if old is None or new != old:
             with self.db.tx() as c:
                 c.execute("UPDATE jobs SET watch_seen=? WHERE id=?", (json.dumps(new), job["id"]))
-        return 0 if old is None else sum(1 for k, v in new.items() if old.get(k) != v)
+        return [] if old is None else sorted(k for k, v in new.items() if old.get(k) != v)
+
+    def poll_mail(self, job: dict[str, Any], threads: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """The threads that are new, or whose newest message changed, since the last look, and remember this
+        look. The first look (no baseline yet) only records one. A thread whose newest message is the user's
+        own (SENT) is not news."""
+        new = {t["thread_id"]: (t.get("messages") or [{}])[-1].get("id") for t in threads if t.get("thread_id")}
+        with self.db.tx() as c:
+            r = c.execute("SELECT mail_seen FROM jobs WHERE id=?", (job["id"],)).fetchone()
+            raw = r["mail_seen"] if r else None
+            old = json.loads(raw) if raw else None
+            # Merged, so a thread that drops out of the newest N and comes back unchanged is not news again.
+            # ponytail: grows by every thread the search ever matched; prune if a broad search makes it large.
+            c.execute("UPDATE jobs SET mail_seen=? WHERE id=?", (json.dumps({**(old or {}), **new}), job["id"]))
+        if old is None:
+            return []
+        return [t for t in threads if t.get("thread_id") in new and old.get(t["thread_id"]) != new[t["thread_id"]]
+                and "SENT" not in ((t.get("messages") or [{}])[-1].get("labels") or [])]
 
     def arm(self, at: float) -> int:
         """Give every enabled job with no armed slot one, from now. A job armed this way has nothing to catch up.
@@ -441,10 +526,21 @@ class Jobs:
             r = c.execute("SELECT consecutive_failures AS n FROM jobs WHERE id=?", (id,)).fetchone()
         return int(r["n"]) if r else 0
 
-    def record_skip(self, id: str, reason: str, at: float | None = None) -> None:
+    def record_skip(self, id: str, reason: str, at: float | None = None, due_at: float | None = None) -> None:
+        """The latest skip on the job row (the list chip) and one history row, keeping the last SKIP_KEEP."""
+        t = at if at is not None else now()
         with self.db.tx() as c:
-            c.execute("UPDATE jobs SET last_skip_at=?, last_skip_reason=? WHERE id=?",
-                      (at if at is not None else now(), reason, id))
+            c.execute("UPDATE jobs SET last_skip_at=?, last_skip_reason=? WHERE id=?", (t, reason, id))
+            c.execute("INSERT INTO job_skips(job_id, due_at, reason, at) VALUES(?,?,?,?)", (id, due_at, reason, t))
+            c.execute("DELETE FROM job_skips WHERE job_id=? AND id NOT IN "
+                      "(SELECT id FROM job_skips WHERE job_id=? ORDER BY at DESC, id DESC LIMIT ?)", (id, id, SKIP_KEEP))
+
+    def skips(self, id: str, limit: int = 50, since: float | None = None) -> list[dict[str, Any]]:
+        """Newest first."""
+        with self.db.tx() as c:
+            rows = c.execute("SELECT id, due_at, reason, at FROM job_skips WHERE job_id=? AND at>=? ORDER BY at DESC, id DESC LIMIT ?",
+                             (id, since if since is not None else 0.0, max(1, min(int(limit), SKIP_KEEP)))).fetchall()
+        return [dict(r) for r in rows]
 
     def pause(self, id: str, reason: str, at: float | None = None) -> None:
         """Switch a job off and say why. Not `update`: that clears the reason, which is the user's acknowledgement."""
@@ -479,6 +575,7 @@ class Proposals:
         d = row_to_dict(r, ("args", "result"))
         if d is not None:
             d["edited"] = bool(d["edited"])
+            d["editable"] = d["tool"] in EDITABLE_TOOLS  # the inbox offers an edit only where accept would take one
         return d
 
     def create(self, *, run_id: str | None, tool: str, args: dict[str, Any], job_id: str | None = None,
@@ -550,6 +647,24 @@ class Proposals:
                           (at if at is not None else now(), id)).rowcount
         return self.get(id) if n else None
 
+    def reject_job(self, job_id: str, note: str | None = None, at: float | None = None) -> int:
+        """Reject every pending proposal of one job. `note` says why, in `error` (rejected rows have no result)."""
+        with self.db.tx() as c:
+            return c.execute("UPDATE proposals SET status='rejected', decided_at=?, error=? WHERE job_id=? AND status='pending'",
+                             (at if at is not None else now(), note, job_id)).rowcount
+
+    def expire(self, before: float, at: float | None = None) -> int:
+        """Pending proposals created before `before` stop being actionable. Accepting one is then a 409."""
+        with self.db.tx() as c:
+            return c.execute("UPDATE proposals SET status='expired', decided_at=? WHERE status='pending' AND created_at<?",
+                             (at if at is not None else now(), before)).rowcount
+
+    def reopen(self, id: str) -> dict[str, Any] | None:
+        """Put an accepted proposal back to 'pending', for an accept whose call failed before writing anything."""
+        with self.db.tx() as c:
+            c.execute("UPDATE proposals SET status='pending', decided_at=NULL WHERE id=? AND status='accepted'", (id,))
+        return self.get(id)
+
     def record(self, id: str, result: Any, error: str | None = None) -> dict[str, Any] | None:
         with self.db.tx() as c:
             c.execute("UPDATE proposals SET result=?, error=? WHERE id=?",
@@ -557,10 +672,10 @@ class Proposals:
         return self.get(id)
 
 
-def _expire_days(policy: Any) -> float:
-    """`jobExpireDays` (0 = recurring jobs never expire)."""
+def _expire_days(policy: Any, key: str = "jobExpireDays") -> float:
+    """`jobExpireDays` / `proposalExpireDays` (0 = never)."""
     try:
-        return max(0.0, float(policy.settings().get("jobExpireDays") or 0)) if policy is not None else 0.0
+        return max(0.0, float(policy.settings().get(key) or 0)) if policy is not None else 0.0
     except (TypeError, ValueError):
         return 0.0
 
@@ -573,7 +688,8 @@ class Scheduler:
 
     def __init__(self, jobs: Jobs, launch: Callable[[dict[str, Any], dict[str, Any]], Awaitable[str | None]],
                  clock: Callable[[], float] = time.time,
-                 sleep: Callable[[float], Awaitable[None]] | None = None, policy: Any = None, wake: Any = None) -> None:
+                 sleep: Callable[[float], Awaitable[None]] | None = None, policy: Any = None, wake: Any = None,
+                 mail: Callable[[str], list[dict[str, Any]]] | None = None) -> None:
         self.jobs = jobs
         self.launch = launch
         # Optional run policy (jobs_policy.JobPolicy): the overlap guard before a launch, the watcher after it.
@@ -582,12 +698,30 @@ class Scheduler:
         self._sleep = sleep
         # Optional OS wake sink with schedule(at) / cancel(at): asks the machine to be awake for the next slot.
         self.wake = wake
+        # Blocking Gmail search -> thread metadata (Google.gmail_threads_recent shape), run off the event loop.
+        # It raises when Google is not connected. None = mail jobs never fire.
+        self.mail = mail
         self._woken: float | None = None
+        # Set by nudge() (the Mac woke or unlocked): cuts the current nap short so a missed slot fires now.
+        self._poke = asyncio.Event()
         self.last_tick: float | None = None
         self.fires = 0
 
     async def _nap(self, seconds: float) -> None:
-        await (self._sleep(seconds) if self._sleep is not None else asyncio.sleep(seconds))
+        if self._sleep is not None:
+            await self._sleep(seconds)
+        else:
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(self._poke.wait(), seconds)
+        self._poke.clear()
+
+    def nudge(self) -> None:
+        """Run the next pass now instead of at the end of the nap. On the event loop."""
+        self._poke.set()
+
+    @property
+    def wake_unavailable(self) -> bool:
+        return bool(getattr(self.wake, "unavailable", False))
 
     def sync_wake(self) -> None:
         """Keep one OS wake booked for the earliest due slot: none when nothing is due, and an unchanged instant
@@ -636,7 +770,11 @@ class Scheduler:
             with self.jobs.db.tx() as c:
                 c.execute("UPDATE jobs SET expires_at=? WHERE enabled=1 AND kind!='once' AND expires_at IS NULL",
                           (at + days * 86400,))
+        if (pdays := _expire_days(self.policy, "proposalExpireDays")) > 0:
+            Proposals(self.jobs.db).expire(at - pdays * 86400, at)
         due = self.jobs.due(at)
+        mail_due = [j for j in due if j["kind"] == "mail"]
+        due = [j for j in due if j["kind"] != "mail"]
         # Directory jobs: one listing each. A job that is also clock-due is still one launch this tick.
         seen = {j["id"] for j in due}
         hits = {j["id"]: n for j in self.jobs.watching() if (n := self.jobs.poll_dir(j))}
@@ -648,7 +786,7 @@ class Scheduler:
                         "timezone": job["timezone"], "due_at": at, "fired_at": at, "late_seconds": 0.0,
                         "missed_slots": 0, "late": False}
                 self.jobs.mark_fired(job["id"], fired_at=at, due_at=at, next_due_at=None)
-                await self._start(job, {**fire, "trigger": "dir", "collapsed": hits[job["id"]]}, fired)
+                await self._start(job, {**fire, "trigger": "dir", **_changed(hits[job["id"]])}, fired)
                 continue
             if not valid_schedule(job["kind"], job["cron"], job["run_at"]):
                 bad = "has no time to run at" if once else f"'{job['cron']}' is not a cron expression this can read"
@@ -662,13 +800,41 @@ class Scheduler:
             # Advance the clock bookkeeping before launching: a launch that throws must not re-fire next pass.
             self.jobs.mark_fired(job["id"], fired_at=at, due_at=fire["due_at"], next_due_at=nxt, disable=once)
             if job["id"] in hits:
-                fire = {**fire, "trigger": "clock+dir", "collapsed": hits[job["id"]]}
+                fire = {**fire, "trigger": "clock+dir", **_changed(hits[job["id"]])}
             if days > 0 and job.get("expires_at") is not None and at >= float(job["expires_at"]):
                 # One last fire (this one), then the job stops until the user switches it back on.
                 self.jobs.pause(job["id"], "expired", at)
             await self._start(job, fire, fired)
+        for job in mail_due:
+            threads = await self._poll_mail(job, at)
+            if not threads:
+                continue
+            fire = {"job_id": job["id"], "job": job["name"], "kind": "mail", "cron": "", "timezone": job["timezone"],
+                    "due_at": at, "fired_at": at, "late_seconds": 0.0, "missed_slots": 0, "late": False,
+                    "trigger": "mail", "collapsed": len(threads),
+                    "mail": [{"thread_id": t["thread_id"], "subject": t.get("subject") or "",
+                              "from": ((t.get("messages") or [{}])[-1].get("from") or "")} for t in threads]}
+            self.jobs.mark_fired(job["id"], fired_at=at, due_at=at, next_due_at=at + MAIL_POLL_S)
+            if days > 0 and job.get("expires_at") is not None and at >= float(job["expires_at"]):
+                self.jobs.pause(job["id"], "expired", at)
+            await self._start(job, fire, fired)
         self.sync_wake()
         return fired
+
+    async def _poll_mail(self, job: dict[str, Any], at: float) -> list[dict[str, Any]]:
+        """One Gmail look for a mail job (the next is booked either way). Fails closed: no Google, no fire."""
+        with self.jobs.db.tx() as c:
+            c.execute("UPDATE jobs SET next_due_at=? WHERE id=?", (at + MAIL_POLL_S, job["id"]))
+        if self.mail is None or not (job.get("mail_query") or "").strip():
+            return []
+        try:
+            threads = await asyncio.to_thread(self.mail, job["mail_query"])
+        except Exception as e:  # noqa: BLE001 - a failed look skips this pass, it never fires blind
+            log.info("mail job %s skipped: %s", job["name"], e)
+            self.jobs.record_skip(job["id"], "google_disconnected" if isinstance(e, GoogleNotConnected)
+                                  else "mail_unreachable", at)
+            return []
+        return self.jobs.poll_mail(job, threads)
 
     async def _start(self, job: dict[str, Any], fire: dict[str, Any], fired: list[dict[str, Any]]) -> None:
         """Admit and launch one fire, after its clock bookkeeping is already safe."""

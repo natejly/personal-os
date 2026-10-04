@@ -22,7 +22,7 @@ from typing import Any
 from .chunker import chunk_blocks
 from .db import Database, new_id, now, row_to_dict
 from .extract_text import markdown_blocks, safe_upload_name
-from .repos import ALL, _scope_clause, fts_query
+from .repos import ALL, _scope_clause, cjk_like, fts_query, is_isolated
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS docs (
@@ -371,16 +371,28 @@ class Docs:
         """BM25 over doc chunks, in the same hit shape as Documents.search plus source='doc'.
         Scope matches files: a project sees its own docs plus personal ones."""
         fq = fts_query(query)
-        if not fq:
+        like, largs = cjk_like("ch.text", query)
+        if not fq and not like:
             return []
         where, args = _scope_clause(project_id)
+        scope = where.replace('project_id', 'd.project_id')
+        rows: list[Any] = []
         with self.db.tx() as c:
-            rows = c.execute(
-                f"""SELECT f.chunk_id, f.doc_id, d.title, ch.idx, ch.text, ch.heading, bm25(doc_chunks_fts) AS score
-                    FROM doc_chunks_fts f JOIN docs d ON d.id=f.doc_id JOIN doc_chunks ch ON ch.id=f.chunk_id
-                    WHERE doc_chunks_fts MATCH ? AND d.deleted_at IS NULL AND {where.replace('project_id', 'd.project_id')}
-                    ORDER BY score LIMIT ?""", (fq, *args, limit)).fetchall()
-        return [doc_hit(r) for r in rows]
+            if fq:
+                rows = c.execute(
+                    f"""SELECT f.chunk_id, f.doc_id, d.title, ch.idx, ch.text, ch.heading, bm25(doc_chunks_fts) AS score
+                        FROM doc_chunks_fts f JOIN docs d ON d.id=f.doc_id JOIN doc_chunks ch ON ch.id=f.chunk_id
+                        WHERE doc_chunks_fts MATCH ? AND d.deleted_at IS NULL AND {scope}
+                        ORDER BY score LIMIT ?""", (fq, *args, limit)).fetchall()
+            if like and len(rows) < limit:  # CJK: a word inside an unspaced run (see cjk_like)
+                rows += c.execute(
+                    f"""SELECT ch.id AS chunk_id, ch.doc_id, d.title, ch.idx, ch.text, ch.heading, 0 AS score
+                        FROM doc_chunks ch JOIN docs d ON d.id=ch.doc_id
+                        WHERE {like} AND d.deleted_at IS NULL AND {scope} LIMIT ?""", (*largs, *args, limit)).fetchall()
+        out: dict[str, Any] = {}
+        for r in rows:
+            out.setdefault(r["chunk_id"], r)
+        return [doc_hit(r) for r in list(out.values())[:limit]]
 
     # ---- reads ----
     def list(self, project_id: str | None = "__all__", q: str = "") -> list[dict[str, Any]]:
@@ -449,6 +461,7 @@ class Docs:
         if not q:
             return []
         match = " OR ".join(f'"{w}"' for w in re.findall(r"\w+", q)) or f'"{q}"'
+        isolated = is_isolated(self.db, project_id)
         with self.db.tx() as c:
             try:
                 rows = c.execute(
@@ -463,8 +476,8 @@ class Docs:
                 d = c.execute("SELECT id, title, project_id FROM docs WHERE id=? AND deleted_at IS NULL", (r["doc_id"],)).fetchone()
                 if not d:
                     continue
-                if project_id != "__all__" and d["project_id"] not in (None, project_id):  # a project sees its own plus personal
-                    continue
+                if project_id != "__all__" and d["project_id"] != project_id and (d["project_id"] is not None or isolated):
+                    continue  # a project sees its own plus personal, or only its own when isolated
                 out.append({"doc_id": d["id"], "title": d["title"], "snippet": (r["snippet"] or "").strip()})
                 if len(out) >= limit:
                     break
@@ -515,7 +528,9 @@ class Docs:
             last = c.execute(
                 "SELECT * FROM doc_revisions WHERE doc_id=? AND status='applied' ORDER BY created_at DESC LIMIT 1", (id,)).fetchone()
             fold = (coalesce and last is not None and last["author"] == author
-                    and t - last["created_at"] < COALESCE_SECONDS and not last["summary"].startswith("Restored"))
+                    and t - last["created_at"] < COALESCE_SECONDS and not last["summary"].startswith("Restored")
+                    # A big cut gets its own entry, so the text before it stays one restore away.
+                    and len(new_content) >= 0.7 * len(last["after"]))
             if fold:
                 c.execute("UPDATE doc_revisions SET after=?, title_after=?, created_at=?, resolved_at=?, summary=? WHERE id=?",
                           (new_content, new_title, t, t, summary or last["summary"], last["id"]))

@@ -44,6 +44,8 @@ class Retriever:
         self._tasks: set[asyncio.Task[Any]] = set()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._docs_pending = False
+        # One blurb pass at a time: overlapping passes would select the same blurb='' rows and call the model twice.
+        self._ctx_lock = asyncio.Lock()
         self.complete: Any = llm.complete  # tests stub this
         self.rerank_fn: Any = None  # tests stub this; None = retrieval_rerank.rerank
 
@@ -83,23 +85,26 @@ class Retriever:
                 break
         return embedded, None
 
-    async def contextualize_pending(self, settings: dict[str, Any], limit: int = 64) -> int:
+    async def contextualize_pending(self, settings: dict[str, Any], limit: int = 64,
+                                    stores: tuple[str, ...] = ALL_SOURCES, document_id: str | None = None) -> int:
         """Write a model-made blurb for up to `limit` chunks per store that have none, re-index it with the
         chunk and drop the chunk's vector so embed_pending re-makes it. Off unless contextualChunks; a model
-        error stops the pass and leaves the chunk as it was. Returns blurbs written. Never raises."""
+        error stops the pass and leaves the chunk as it was. `document_id` narrows to one uploaded file (and skips
+        Docs). Returns blurbs written. Never raises."""
         model = settings.get("defaultModel")
         if not settings.get("contextualChunks") or not model:
             return 0
         done = 0
-        for store in ALL_SOURCES:
-            if store == "docs" and self.docs is None:
+        for store in stores:
+            if store == "docs" and (document_id or self.docs is None):
                 continue
             s = _STORE[store]
+            where, args = (f"AND ch.{s['fk']}=?", [document_id]) if document_id else ("", [])
             with self.db.tx() as c:
                 rows = c.execute(
                     f"""SELECT ch.id, ch.{s['fk']} AS parent_id, ch.text, ch.heading, p.{s['name']} AS name FROM {s['chunks']} ch
-                        JOIN {s['parent']} p ON p.id=ch.{s['fk']} WHERE ch.blurb='' AND p.deleted_at IS NULL
-                        ORDER BY ch.{s['fk']}, ch.idx LIMIT ?""", (limit,)).fetchall()
+                        JOIN {s['parent']} p ON p.id=ch.{s['fk']} WHERE ch.blurb='' AND p.deleted_at IS NULL {where}
+                        ORDER BY ch.{s['fk']}, ch.idx LIMIT ?""", (*args, limit)).fetchall()
             docs_text: dict[str, str] = {}
             for r in rows:
                 try:
@@ -129,6 +134,15 @@ class Retriever:
                 done += 1
         return done
 
+    async def contextualize_all(self, settings: dict[str, Any], stores: tuple[str, ...] = ALL_SOURCES,
+                                document_id: str | None = None) -> int:
+        """contextualize_pending until a pass writes nothing, so a large upload is not left part-done. Never raises."""
+        total = 0
+        async with self._ctx_lock:
+            while n := await self.contextualize_pending(settings, stores=stores, document_id=document_id):
+                total += n
+        return total
+
     async def embed_pending(self, settings: dict[str, Any], document_id: str | None = None, limit: int = 256,
                             stores: tuple[str, ...] = ALL_SOURCES) -> dict[str, Any]:
         """Embed chunks that have no vector for the current model. Idempotent; returns {embedded, remaining}.
@@ -153,8 +167,13 @@ class Retriever:
             out["error"] = error
         return out
 
-    def _kick(self, coro_fn: Any, settings_fn: Any) -> None:
-        if settings_fn().get("retrievalMode", "hybrid") != "hybrid" or not self.embedder.available(settings_fn()):
+    def _embeds(self, settings: dict[str, Any]) -> bool:
+        return settings.get("retrievalMode", "hybrid") == "hybrid" and self.embedder.available(settings)
+
+    def _kick(self, coro_fn: Any, settings_fn: Any, contextual: bool = False) -> None:
+        s = settings_fn()
+        # Blurbs also go into the keyword index, so they are written even with no embedder or in bm25 mode.
+        if not self._embeds(s) and not (contextual and s.get("contextualChunks") and s.get("defaultModel")):
             return
 
         def start(loop: asyncio.AbstractEventLoop) -> None:
@@ -169,14 +188,20 @@ class Retriever:
                 self._loop.call_soon_threadsafe(start, self._loop)
 
     def schedule(self, settings_fn: Any, document_id: str | None = None) -> None:
-        """Fire-and-forget background embedding of an uploaded file. Never raises or blocks the caller."""
+        """Fire-and-forget background blurbs (contextualChunks) and embedding of an uploaded file. Never raises or
+        blocks the caller."""
         async def run() -> None:
             try:
-                await self.embed_pending(settings_fn(), document_id, stores=("files",))
+                # Before embedding: a blurb drops the chunk's vector, so the other order embeds it twice.
+                await self.contextualize_all(settings_fn(), stores=("files",), document_id=document_id)
+                if self._embeds(settings_fn()):
+                    await self.embed_pending(settings_fn(), document_id, stores=("files",))
             except Exception:  # noqa: BLE001 - rows simply stay unembedded
                 log.exception("background embedding failed")
 
-        self._kick(run, settings_fn)
+        # Docs are not contextualised here: every edit re-chunks and empties their blurbs, so doing it per edit
+        # burst would call the model for every chunk again. Rebuild index (embed-backfill) covers them.
+        self._kick(run, settings_fn, contextual=True)
 
     def schedule_docs(self, settings_fn: Any) -> None:
         """Debounced background embedding of edited Docs: one pending task covers every edit in the window."""
@@ -270,7 +295,7 @@ class Retriever:
             bm25_lists.append(keys)
         hybrid = (settings.get("retrievalMode", "hybrid") == "hybrid" and self.embedder.available(settings)
                   and bool(query.strip()) and self._has_vectors(stores, self.embedder.model(settings)))
-        qv = await self.embedder.embed(settings, [query]) if hybrid else None
+        qv = await self.embedder.embed(settings, [query[:2000]]) if hybrid else None  # a long paste would 400 the embed route
         vec_lists: list[list[str]] = []
         sims: dict[str, float] = {}
         if qv:

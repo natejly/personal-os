@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readDocMode, adoptServerDoc, applyEvent, editCut, settleInterrupted, stopOutcome, useStore, type ChatSession } from './store'
+import { readDocMode, adoptServerDoc, applyEvent, editCut, learnedText, settleInterrupted, stopOutcome, useStore, type ChatSession } from './store'
 import { ApiError } from './lib/apiError'
 import { api } from './lib/api'
 import { mergeConversation } from './sessionStatus'
@@ -139,6 +139,7 @@ test('doc autosave: a 409 keeps the draft and offers Reload; each save and move 
     return docFull({ content: (p as { content: string }).content, updated_at: ++n })
   }
   docs.move = async () => docFull({ folder: 'x', updated_at: 10 })
+  docs.get = async () => docFull({ content: 'rewritten elsewhere', updated_at: 11 })
   docs.list = async () => []
   docs.folders = async () => []
   docs.revisions = async () => []
@@ -171,6 +172,121 @@ test('doc autosave: starring refreshes the base too', async () => {
     assert.equal(useStore.getState().activeDoc?.updated_at, 7)
   } finally {
     Object.assign(docs, orig)
+  }
+})
+
+test('doc autosave: pinning refreshes the base too', async () => {
+  const { api } = await import('./lib/api')
+  const docs = api.docs as unknown as Stubs
+  const orig = { ...docs }
+  docs.patch = async () => docFull({ pinned: 1, updated_at: 8 })
+  docs.list = async () => []
+  try {
+    useStore.setState({ activeDoc: docFull({}) as never })
+    await useStore.getState().setDocPin('d1', true)
+    assert.equal(useStore.getState().activeDoc?.updated_at, 8)
+  } finally {
+    Object.assign(docs, orig)
+  }
+})
+
+test('doc autosave: a 409 over an unchanged or appended body rebases and saves again', async () => {
+  const { api } = await import('./lib/api')
+  const docs = api.docs as unknown as Stubs
+  const orig = { ...docs }
+  const sent: { content: string; base: number }[] = []
+  let server = docFull({ content: 'notes\n', updated_at: 1 })
+  docs.save = async (_id, p) => {
+    const { content, base_updated_at: base } = p as { content: string; base_updated_at: number }
+    sent.push({ content, base })
+    if (base < server.updated_at) throw Object.assign(new Error('stale'), { status: 409 })
+    server = docFull({ content, updated_at: server.updated_at + 1 })
+    return server
+  }
+  docs.get = async () => server
+  docs.list = async () => []
+  docs.revisions = async () => []
+  try {
+    // Metadata only (a pin from another window): same body, newer stamp.
+    server = docFull({ content: 'notes\n', updated_at: 5 })
+    useStore.setState({ activeDoc: docFull({ content: 'notes\n', updated_at: 1 }) as never, docDraft: 'notes\nmine', docTitleDraft: null, toasts: [] })
+    await useStore.getState().flushDoc()
+    await useStore.getState().flushDoc()
+    assert.deepEqual(sent.map((s) => s.base), [1, 5])
+    assert.equal(server.content, 'notes\nmine')
+    assert.equal(useStore.getState().docDraft, null)
+
+    // A quick capture appended a line: the typing and the line both land.
+    sent.length = 0
+    const base = server.content
+    server = docFull({ content: base + '\n- 10:00 call back\n', updated_at: 20 })
+    useStore.setState({ docDraft: base + ' more' })
+    await useStore.getState().flushDoc()
+    await useStore.getState().flushDoc()
+    assert.equal(server.content, 'notes\nmine more\n- 10:00 call back\n')
+    assert.ok(!useStore.getState().toasts.some((t) => t.action?.label === 'Reload'), 'no conflict was shown')
+  } finally {
+    Object.assign(docs, orig)
+  }
+})
+
+test('a doc whose save failed is not navigated away from, so the draft survives', async () => {
+  const { api } = await import('./lib/api')
+  const docs = api.docs as unknown as Stubs
+  const orig = { ...docs }
+  let opened = 0
+  docs.save = async () => { throw new Error('offline') }
+  docs.get = async () => { opened++; return docFull({ id: 'd2' }) }
+  try {
+    useStore.setState({ activeDoc: docFull({}) as never, docTabs: ['d1'], docDraft: 'unsaved', docTitleDraft: null, toasts: [] })
+    await useStore.getState().openDoc('d2')
+    await useStore.getState().closeDocTab('d1')
+    const st = useStore.getState()
+    assert.equal(opened, 0)
+    assert.equal(st.activeDoc?.id, 'd1')
+    assert.equal(st.docDraft, 'unsaved')
+    assert.deepEqual(st.docTabs, ['d1'])
+  } finally {
+    Object.assign(docs, orig)
+  }
+})
+
+test('opening a doc at a cited line leaves the jump for the editor', async () => {
+  const { api } = await import('./lib/api')
+  const docs = api.docs as unknown as Stubs
+  const orig = { ...docs }
+  docs.get = async () => docFull({ id: 'd2' })
+  docs.revisions = async () => []
+  try {
+    useStore.setState({ activeDoc: null, docTabs: [], docDraft: null, docTitleDraft: null, docJump: null })
+    await useStore.getState().openDoc('d2', { line: 7 })
+    const st = useStore.getState()
+    assert.equal(st.activeDoc?.id, 'd2')
+    assert.equal(st.view, 'docs')
+    assert.deepEqual(st.docJump, { docId: 'd2', line: 7 })
+    useStore.setState({ docJump: null })
+    await useStore.getState().openDoc('d2')
+    assert.equal(useStore.getState().docJump, null, 'a plain open asks for no jump')
+  } finally {
+    Object.assign(docs, orig)
+  }
+})
+
+test('a meeting whose notes failed to save is not navigated away from', async () => {
+  const { api } = await import('./lib/api')
+  const meetings = api.meetings as unknown as Stubs
+  const orig = { ...meetings }
+  let opened = 0
+  meetings.patch = async () => { throw new Error('offline') }
+  meetings.get = async () => { opened++; return { id: 'm2', notes: '' } }
+  try {
+    useStore.setState({ activeMeeting: { id: 'm1', notes: 'a' } as never, meetingNotesDraft: 'a typed', toasts: [] })
+    await useStore.getState().openMeeting('m2')
+    assert.equal(opened, 0)
+    assert.equal(useStore.getState().activeMeeting?.id, 'm1')
+    assert.equal(useStore.getState().meetingNotesDraft, 'a typed')
+  } finally {
+    Object.assign(meetings, orig)
   }
 })
 
@@ -760,4 +876,106 @@ test('status: sets the live line, and a token, tool call, done or null clears it
   for (const ev of clears) assert.equal(applyEvent(held, ev, true).conversation?.messages?.[0].status ?? null, null, ev.event)
   const other = applyEvent(session(), { event: 'status', data: { id: 'nope', kind: 'compacting' } } as ChatEvent, true)
   assert.equal(other.conversation?.messages?.[0].status, undefined)
+})
+
+test('forkChat focuses the new branch, keeps the source session, and offers the original back', async () => {
+  const real = api.conversations.fork
+  const branch = { ...session().conversation, id: 'c2', title: 't (branch)', settings: { forkedFrom: 'c1' }, messages: [msg({ conversation_id: 'c2', id: 'm9' })] }
+  const calls: unknown[][] = []
+  api.conversations.fork = (async (...a: unknown[]) => { calls.push(a); return branch }) as never
+  useStore.setState({ toasts: [], conversations: [], focusedConversationId: 'c1', sessions: { c1: session({ streaming: null } as never) } })
+  try {
+    const c = await useStore.getState().forkChat('c1', 'm1')
+    const st = useStore.getState()
+    assert.deepEqual(calls, [['c1', 'm1']])
+    assert.equal(c?.id, 'c2')
+    assert.equal(st.focusedConversationId, 'c2')
+    assert.equal(st.view, 'chat')
+    assert.equal(st.conversations[0].id, 'c2')
+    assert.deepEqual(st.sessions.c2.conversation.messages?.map((m) => m.id), ['m9'])
+    assert.ok(st.sessions.c1, 'the source session stays')
+    assert.equal(st.toasts.at(-1)?.text, 'Branched from t')
+    assert.equal(st.toasts.at(-1)?.action?.label, 'Open original')
+
+    api.conversations.fork = (async () => { throw new Error('That message was replaced') }) as never
+    assert.equal(await useStore.getState().forkChat('c1', 'm1'), null)
+    assert.equal(useStore.getState().focusedConversationId, 'c2', 'a failed branch leaves focus alone')
+    assert.equal(useStore.getState().toasts.at(-1)?.kind, 'error')
+  } finally {
+    api.conversations.fork = real
+  }
+})
+
+test('an update-only learn pass toasts "updated 1", refreshes, and Undo restores the old wording', async () => {
+  const mem = api.memories as Record<string, unknown>
+  const orig = { ...mem }
+  const restored: string[] = []
+  const deleted: string[] = []
+  let refreshed = 0
+  mem.restore = async (id: string) => { restored.push(id); return {} }
+  mem.delete = async (id: string) => { deleted.push(id); return {} }
+  const bump = async (): Promise<void> => { refreshed++ }
+  const before = useStore.getState()
+  useStore.setState({ toasts: [], refreshMemories: bump, refreshGraph: bump, refreshDocuments: bump, refreshProjects: bump })
+  try {
+    useStore.getState().onLearned({ memories: [], updated: [{ id: 'new' }], superseded: [{ old_id: 'old', new_id: 'new' }], removed: [{ id: 'gone' }], nodes: [], edges: [] } as never)
+    const t = useStore.getState().toasts.at(-1)
+    assert.match(t?.text ?? '', /updated 1/)
+    assert.match(t?.text ?? '', /forgot 1/)
+    assert.ok(refreshed > 0, 'an update with no new rows still refreshes the open lists')
+    assert.equal(t?.action?.label, 'Undo')
+    refreshed = 0
+    t!.action!.run()
+    await new Promise((r) => setTimeout(r, 0))
+    assert.deepEqual(restored.sort(), ['gone', 'old'])
+    assert.deepEqual(deleted, [], 'nothing was added, so nothing is trashed')
+    assert.ok(refreshed > 0)
+
+    useStore.getState().onLearned({ memories: [{ id: 'fresh' }], nodes: [], edges: [] } as never)
+    useStore.getState().toasts.at(-1)!.action!.run()
+    await new Promise((r) => setTimeout(r, 0))
+    assert.deepEqual(deleted, ['fresh'], 'Undo trashes a memory the pass created')
+
+    useStore.getState().onLearned({ memories: [], nodes: [{ id: 'n' }], edges: [] } as never)
+    assert.equal(useStore.getState().toasts.at(-1)?.action, undefined, 'graph-only passes offer no Undo')
+  } finally {
+    Object.assign(mem, orig)
+    useStore.setState({ refreshMemories: before.refreshMemories, refreshGraph: before.refreshGraph, refreshDocuments: before.refreshDocuments, refreshProjects: before.refreshProjects, toasts: [] })
+  }
+})
+
+test('the memory proposals badge counts every pending proposal', async () => {
+  const mem = api.memories as Record<string, unknown>
+  const orig = mem.proposals
+  const asked: string[] = []
+  mem.proposals = async (s: string) => { asked.push(s); return [{ id: 'p1' }, { id: 'p2' }] }
+  try {
+    useStore.setState({ memoryProposals: 0 })
+    await useStore.getState().refreshMemoryProposals()
+    assert.equal(useStore.getState().memoryProposals, 2)
+    assert.deepEqual(asked, ['all'])
+  } finally {
+    mem.proposals = orig
+  }
+})
+
+test('learnedText counts updates and forgets as changes', () => {
+  assert.deepEqual(learnedText({ memories: [], nodes: [], edges: [] }), { text: 'Learned 0 memories, 0 entities, 0 relations', changed: false })
+  const r = learnedText({ memories: [], removed: [{}], nodes: [], edges: [] } as never)
+  assert.equal(r.changed, true)
+  assert.equal(r.text, 'Learned 0 memories, forgot 1, 0 entities, 0 relations')
+})
+
+test('the Private switch on a draft is parked and sent with the create, then cleared by a new chat', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  useStore.getState().newChat()
+  useStore.setState({ toasts: [], uploadTaintTarget: null })
+  await useStore.getState().setChatSettings({ private: true })
+  assert.equal(useStore.getState().draftPrivate, true)
+  const { calls } = stubFetch(t, () => json({ detail: 'down' }, 500))
+  assert.equal(await useStore.getState().send('hi'), false)
+  const create = calls.find((c) => c.method === 'POST' && c.path.endsWith('/conversations'))
+  assert.equal(create?.body.private, true)
+  useStore.getState().newChat()
+  assert.equal(useStore.getState().draftPrivate, false)
 })

@@ -8,7 +8,8 @@ import { api } from '../lib/api'
 const KINDS = ['fact', 'preference', 'goal', 'note']
 
 function MemoryRow({ m, showProject }: { m: Memory; showProject: boolean }): JSX.Element {
-  const { updateMemory, deleteMemory, selectChat } = useStore()
+  const { updateMemory, deleteMemory, selectChat, projects } = useStore()
+  const isolated = projects.some((p) => p.id === m.project_id && p.memory_mode === 'isolated')
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(m.content)
   const commit = (): void => {
@@ -29,7 +30,7 @@ function MemoryRow({ m, showProject }: { m: Memory; showProject: boolean }): JSX
           <select aria-label="Memory kind" value={m.kind} onChange={(e) => void updateMemory(m.id, { kind: e.target.value })}>{KINDS.map((k) => <option key={k}>{k}</option>)}</select>
           <span className="tag" title={m.source === 'auto' ? 'Extracted automatically' : 'Added by you'}>{m.source === 'auto' ? <Wand2 size={10} /> : <User size={10} />}{m.source}</span>
           {showProject && <ProjectChip projectId={m.project_id} showPersonal />}
-          {m.project_id && <button className="link small" title="Make this memory available in every chat" onClick={() => void updateMemory(m.id, { move_to_global: true })}>make personal</button>}
+          {m.project_id && !isolated && <button className="link small" title="Make this memory available in every chat" onClick={() => void updateMemory(m.id, { move_to_global: true })}>make personal</button>}
           {m.source_conversation_id && <button className="link small" title="Open the chat this was learned from" onClick={() => void selectChat(m.source_conversation_id as string)}>from chat</button>}
           <span className="muted">{new Date(m.updated_at * 1000).toLocaleDateString()}</span>
         </div>
@@ -107,7 +108,9 @@ export default function MemoryView({ projectId, query = '' }: { projectId?: stri
   const [tidying, setTidying] = useState(false)
   const [tidyNote, setTidyNote] = useState('')
   const [labels, setLabels] = useState<Map<string, string>>(new Map())
+  const proposalCount = useStore((s) => s.memoryProposals)
   const loadProposals = (): void => {
+    void useStore.getState().refreshMemoryProposals()
     void api.memories.proposals(scope).then(async (ps) => {
       setProposals(ps)
       if (ps.length) setAll(await api.memories.listWithHistory(scope).catch(() => []))
@@ -117,7 +120,8 @@ export default function MemoryView({ projectId, query = '' }: { projectId?: stri
       }
     }).catch(() => setProposals([]))
   }
-  useEffect(() => { loadProposals() }, [scope]) // eslint-disable-line react-hooks/exhaustive-deps
+  // The count moves when auto tidy-up queues proposals in the background: re-pull the list then too.
+  useEffect(() => { loadProposals() }, [scope, proposalCount]) // eslint-disable-line react-hooks/exhaustive-deps
   const tidy = async (): Promise<void> => {
     setTidying(true); setTidyNote('')
     try {
@@ -157,6 +161,7 @@ export default function MemoryView({ projectId, query = '' }: { projectId?: stri
       </label>
       <button className="primary-btn" onClick={() => void tidy()} disabled={tidying} title="Look for duplicates and stale dates. Nothing changes until you apply a suggestion.">
         <Sparkles size={14} /> {tidying ? 'Looking…' : 'Tidy up'}
+        {proposalCount > 0 && <span className="count pending" title={`${proposalCount} suggestion${proposalCount === 1 ? '' : 's'} to review`}>{proposalCount}</span>}
       </button>
       {tidyNote && <span className="muted small"> {tidyNote}</span>}
       {proposals.map((p) => <ProposalRow key={p.id} p={p} byId={byId} labels={labels} onApply={() => void decide(p, true)} onDismiss={() => void decide(p, false)} />)}

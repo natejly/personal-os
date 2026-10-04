@@ -121,6 +121,17 @@ export const foldRunState = (map: LiveRuns, info: RunInfo): LiveRuns => {
 export const onScreen = (convId: string, where: { view: string; focusedId: string | null; retained: { has: (id: string) => boolean } }): boolean =>
   (where.view === 'chat' && where.focusedId === convId) || where.retained.has(convId)
 
+/**
+ * What a `run_state` frame for a reply this window did not start asks of a loaded session. A stream holds one
+ * of the renderer's six connections to the backend, so only a session on screen follows a live run; one off
+ * screen reads what the run persisted once it ends.
+ */
+export const followRun = (streaming: { runId: string } | null, info: Pick<RunInfo, 'run_id' | 'answering'>, visible: boolean): 'attach' | 'open' | null => {
+  if (streaming?.runId === info.run_id) return null
+  if (info.answering) return visible ? 'attach' : null
+  return streaming ? null : 'open'
+}
+
 export type ChatNoticeKind = 'reply' | 'approval' | 'failed'
 
 /**

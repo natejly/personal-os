@@ -57,7 +57,7 @@ class OAuthStore:
 
     def _row(self, server_id: str) -> dict[str, Any]:
         with self.db.tx() as c:
-            r = c.execute("SELECT tokens, client FROM mcp_oauth WHERE server_id=?", (server_id,)).fetchone()
+            r = c.execute("SELECT tokens, client, updated_at FROM mcp_oauth WHERE server_id=?", (server_id,)).fetchone()
         return dict(r) if r else {}
 
     def _put(self, server_id: str, col: str, value: str | None) -> None:
@@ -68,6 +68,14 @@ class OAuthStore:
     def tokens(self, server_id: str) -> OAuthToken | None:
         raw = self._row(server_id).get("tokens")
         return OAuthToken.model_validate_json(raw) if raw else None
+
+    def token_expiry(self, server_id: str) -> float | None:
+        """When the stored access token expires: written at `updated_at`, good for `expires_in` from then."""
+        row = self._row(server_id)
+        tok = OAuthToken.model_validate_json(row["tokens"]) if row.get("tokens") else None
+        if tok is None or tok.expires_in is None:
+            return None
+        return float(row["updated_at"]) + float(tok.expires_in)
 
     def client(self, server_id: str) -> OAuthClientInformationFull | None:
         raw = self._row(server_id).get("client")
@@ -102,6 +110,19 @@ class _Storage(TokenStorage):
 
     async def set_client_info(self, client_info: OAuthClientInformationFull) -> None:
         self.store.set_client(self.server_id, client_info)
+
+
+class _Provider(OAuthClientProvider):
+    """The SDK loads stored tokens without their expiry, so after a restart an expired access token passes as valid,
+    draws a 401 and starts a browser sign-in. Restoring the expiry lets it use the refresh grant instead."""
+
+    def __init__(self, *a: Any, store: OAuthStore, server_id: str, **kw: Any):
+        super().__init__(*a, **kw)
+        self._store, self._server_id = store, server_id
+
+    async def _initialize(self) -> None:
+        await super()._initialize()
+        self.context.token_expiry_time = self._store.token_expiry(self._server_id)
 
 
 @dataclass
@@ -152,8 +173,8 @@ class OAuthFlows:
         meta = OAuthClientMetadata(client_name="Grain", redirect_uris=[uri],  # type: ignore[list-item]
                                    grant_types=["authorization_code", "refresh_token"], response_types=["code"],
                                    token_endpoint_auth_method="none")
-        return OAuthClientProvider(url, meta, _Storage(self.store, server_id),
-                                   redirect_handler=redirect, callback_handler=callback)
+        return _Provider(url, meta, _Storage(self.store, server_id), redirect_handler=redirect,
+                         callback_handler=callback, store=self.store, server_id=server_id)
 
     async def begin(self, server_id: str, run: Callable[[SignIn], Awaitable[None]]) -> SignIn:
         """Start (or join) a sign-in. `run` makes one interactive connection with `self.provider(..., sign_in=s)`.

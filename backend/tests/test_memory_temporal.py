@@ -167,3 +167,97 @@ def test_prompt_carries_todays_date(stores, monkeypatch) -> None:
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))
+
+
+def test_neighborhood_matches_whole_words_and_keeps_seeds(stores) -> None:
+    _, _, graph = stores
+    ai = graph.upsert_node(None, "AI", "topic")
+    assert graph.neighborhood(None, "check my email")["nodes"] == []          # "ai" inside "email" is not a mention
+    assert [n["id"] for n in graph.neighborhood(None, "what about AI?")["nodes"]] == [ai["id"]]
+    # 40 neighbours older than the second seed: the 30-node cap still keeps both seeds
+    hub = graph.upsert_node(None, "Hub")
+    for i in range(40):
+        graph.upsert_edge(None, hub["id"], graph.upsert_node(None, f"Leaf{i}")["id"], "links")
+    seed = graph.upsert_node(None, "Zephyr")
+    graph.upsert_edge(None, seed["id"], hub["id"], "near")
+    ids = [n["id"] for n in graph.neighborhood(None, "tell me about Zephyr and Hub")["nodes"]]
+    assert len(ids) == 30 and ids[:2] == [hub["id"], seed["id"]]
+
+
+def test_pins_lead_the_keyword_fallback(stores) -> None:
+    _, memories, _ = stores
+    pin = memories.create(None, "Always answer in metric units", pinned=True)
+    for i in range(30):
+        memories.create(None, f"note {i} about coffee")
+    got = memories.for_context(None, "coffee", limit=10)
+    assert got[0]["id"] == pin["id"] and len(got) == 10
+
+
+# ---- save_memory: the in-chat tool normalises like auto-learn and can correct or forget by id ----
+def _save(memories: Memories, graph: Graph, **args: Any) -> tuple[Any, dict[str, Any]]:
+    from personal_os.tools import Toolbox
+    tb = Toolbox(memories, graph, None, lambda: {})  # type: ignore[arg-type]
+    ctx: dict[str, Any] = {"project_id": None, "conversation_id": "c1", "message_id": "m1"}
+    return asyncio.run(tb.specs["save_memory"].fn(ctx, **args)), ctx
+
+
+def test_save_memory_scrubs_secrets_and_records_provenance(stores) -> None:
+    _, memories, graph = stores
+    out, _ = _save(memories, graph, content="User API key is sk-live-abc123def456ghi789jkl")
+    m = memories.get(out["saved"])
+    assert "sk-live" not in m["content"]
+    assert m["source_conversation_id"] == "c1" and m["source_message_id"] == "m1"
+
+
+def test_save_memory_absolutizes_dates_and_refuses_unresolvable(stores) -> None:
+    from datetime import date, timedelta
+    _, memories, graph = stores
+    out, _ = _save(memories, graph, content="User has a dentist appointment tomorrow")
+    assert (date.today() + timedelta(days=1)).isoformat() in memories.get(out["saved"])["content"]
+    bad, bad_ctx = _save(memories, graph, content="User starts the new job next month")
+    assert "learned" not in bad_ctx  # a refused save emits no "learned" event
+    assert "error" in bad and all("next month" not in m["content"] for m in memories.list(None))
+
+
+def test_save_memory_replaces_keeps_history(stores) -> None:
+    _, memories, graph = stores
+    old = memories.create(None, "User lives in Porto", kind="fact", source="auto")
+    out, ctx = _save(memories, graph, replaces=old["id"], content="User lives in Lisbon")
+    assert memories.get(old["id"])["superseded_by"] == out["saved"]
+    assert [m["id"] for m in memories.history(out["saved"])] == [old["id"], out["saved"]]
+    assert memories.get(out["saved"])["source_conversation_id"] == "c1"
+    assert [m["id"] for m in ctx["learned"]["updated"]] == [out["saved"]]
+
+
+def test_save_memory_forget_and_pinned_refusals(stores) -> None:
+    _, memories, graph = stores
+    plain = memories.create(None, "User drinks oat milk", source="auto")
+    out, ctx = _save(memories, graph, replaces=plain["id"], forget=True)
+    assert out["forgotten"] == plain["id"] and memories.get(plain["id"])["invalid_at"] is not None
+    assert [m["id"] for m in ctx["learned"]["removed"]] == [plain["id"]]
+    pinned = memories.create(None, "User's name is Sam", source="user", pinned=True)
+    refused, refused_ctx = _save(memories, graph, replaces=pinned["id"], forget=True)
+    assert "error" in refused and "learned" not in refused_ctx
+    assert "error" in _save(memories, graph, replaces=pinned["id"], content="User's name is Samuel")[0]
+    row = memories.get(pinned["id"])
+    assert row["content"] == "User's name is Sam" and row["invalid_at"] is None
+
+
+def test_save_memory_refuses_an_id_from_another_project(stores) -> None:
+    db, memories, graph = stores
+    with db.tx() as c:
+        c.execute("INSERT INTO projects(id,name,created_at) VALUES('p2','Other',0)")
+    other = memories.create("p2", "User prefers tabs in this repo", source="auto")
+    out, _ = _save(memories, graph, replaces=other["id"], content="User prefers spaces")
+    assert "error" in out and memories.get(other["id"])["invalid_at"] is None
+    assert "error" in _save(memories, graph, replaces=other["id"], forget=True)[0]
+
+
+def test_supersede_keep_pinned_versions_a_pinned_row(stores) -> None:
+    _, memories, _ = stores
+    old = memories.create(None, "User's office is on floor 3", source="user", pinned=True)
+    new = memories.supersede(old["id"], "User's office is on floor 4", source="user", keep_pinned=True)
+    assert new["id"] != old["id"] and new["pinned"]
+    assert memories.get(old["id"])["superseded_by"] == new["id"]
+    # Without the flag a pinned row is still rewritten in place (model and consolidation callers).
+    assert memories.supersede(new["id"], "User's office is on floor 5")["id"] == new["id"]

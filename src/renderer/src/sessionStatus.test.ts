@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { ChatEvent, Conversation, Message, RunInfo, Span, ToolEvent } from '@shared/types'
-import { chatNotice, finishStatus, foldRunState, mergeConversation, onScreen, pickEvictions, pulseStatus, reduceStatus, replayCursor, settleApprovals } from './sessionStatus'
+import { chatNotice, finishStatus, foldRunState, followRun, mergeConversation, onScreen, pickEvictions, pulseStatus, reduceStatus, replayCursor, settleApprovals } from './sessionStatus'
 
 const ev = (event: string, data: Record<string, unknown> = {}): ChatEvent => ({ event, data }) as unknown as ChatEvent
 const done = (error: string | null, stopped = false): ChatEvent => ev('done', { id: 'm1', error, context_used: null, tool_events: [], trace: [], stopped })
@@ -200,6 +200,16 @@ test('onScreen: the chat view showing it, or any surface that has it mounted', (
   assert.equal(onScreen('c1', { view: 'home', focusedId: 'c1', retained }), false, 'focused but another view is showing')
   assert.equal(onScreen('c1', { view: 'chat', focusedId: 'c2', retained }), false)
   assert.equal(onScreen('w', { view: 'canvas', focusedId: null, retained }), true, 'a mounted window counts')
+})
+
+test('followRun: only a session on screen streams a run it did not start', () => {
+  const live = { run_id: 'r2', answering: true }
+  const ended = { run_id: 'r2', answering: false }
+  assert.equal(followRun(null, live, true), 'attach')
+  assert.equal(followRun(null, live, false), null, 'off screen: no stream, the end refetches')
+  assert.equal(followRun({ runId: 'r2' }, live, true), null, 'already watching it')
+  assert.equal(followRun(null, ended, false), 'open')
+  assert.equal(followRun({ runId: 'r1' }, ended, true), null, 'its own run is still streaming')
 })
 
 test('chatNotice: one kind per status transition, none for a stop or a steer segment', () => {

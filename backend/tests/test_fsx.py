@@ -295,6 +295,24 @@ def test_copy_and_mkdir(home: Path, tmp_path: Path) -> None:
     assert call(tb, "fs_copy", ctx, src=str(p / "missing"), dst=str(p / "q"))["error"]
 
 
+def test_folder_copy_reports_what_it_left_out_and_cleans_up_a_failure(home: Path, tmp_path: Path,
+                                                                      monkeypatch: pytest.MonkeyPatch) -> None:
+    tb, _ = make(home, tmp_path)
+    src = home / "proj" / "site"
+    (src / ".git").mkdir(parents=True)
+    (src / "node_modules").mkdir()
+    (src / "index.html").write_text("hi")
+    (src / "more.txt").write_text("x")
+    (src / "link").symlink_to(src / "index.html")
+    ctx = {"conversation_id": "c1"}
+    out = call(tb, "fs_copy", ctx, src=str(src), dst=str(home / "proj" / "copy"))
+    assert out["files"] == 2 and out["skipped"] == 3
+    assert set(out["skipped_sample"]) == {".git/", "node_modules/", "link"}
+    monkeypatch.setattr(fsx, "COPY_MAX_FILES", 1)
+    big = call(tb, "fs_copy", ctx, src=str(src), dst=str(home / "proj" / "copy2"))
+    assert "larger than" in big["error"] and not (home / "proj" / "copy2").exists()  # no half-copied folder left
+
+
 def test_syntax_check_after_write(home: Path, tmp_path: Path) -> None:
     tb, _ = make(home, tmp_path)
     f = home / "proj" / "s.py"

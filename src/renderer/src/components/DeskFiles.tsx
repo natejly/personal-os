@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChevronRight, Columns2, FileImage, FileText, Folder, PackageCheck, RefreshCw } from 'lucide-react'
+import { ChevronRight, Columns2, FileImage, FilePlus, FileText, Folder, PackageCheck, RefreshCw } from 'lucide-react'
 import { DESK_LIVE, type DeskDiff, type DeskFile, type DeskRichPreview, type FullDesk } from '@shared/types'
 import { api } from '../lib/api'
 import { wordDiff, type Op, type WordPart } from '../lib/diff'
@@ -21,7 +21,7 @@ const LIVE_REFRESH_MS = 5000
 /** The top-level folder a path belongs to, which is the only grouping the tree needs. */
 const topOf = (p: string): string => (p.includes('/') ? p.split('/')[0] : '')
 
-const GROUP_ORDER = ['outputs', '', 'work']
+const GROUP_ORDER = ['outputs', 'inputs', '', 'work']
 const groupRank = (g: string): number => {
   const i = GROUP_ORDER.indexOf(g)
   return i < 0 ? GROUP_ORDER.length : i
@@ -227,6 +227,18 @@ export default function DeskFiles({ desk }: { desk: FullDesk }): JSX.Element {
   }, [showDiff, path, diff, desk.id, toast])
 
   const open = (p: string): void => { setShowDiff(false); setPath(p) }
+  // Snapshot copies into the read-only inputs/ folder; the desk's next turn is told about them.
+  const addInputs = async (): Promise<void> => {
+    const paths = await window.os.data.chooseInputFiles()
+    if (!paths.length) return
+    try {
+      const r = await api.cowork.desks.addInputs(desk.id, paths.map((path) => ({ kind: 'path' as const, path })))
+      toast(`Added ${r.added.map((a) => a.path).join(', ')}`)
+      void loadDeskFiles(desk.id, '', true)
+    } catch (e) {
+      toast((e as Error).message, 'error')
+    }
+  }
 
   return (
     <div className="desk-files">
@@ -234,6 +246,7 @@ export default function DeskFiles({ desk }: { desk: FullDesk }): JSX.Element {
         <div className="desk-tree-head">
           <span className="muted small">{files.filter((f) => !f.is_dir).length} files</span>
           <span className="spacer" />
+          <button className="icon-btn ghost xs" title="Add input files (copied into the read-only inputs/ folder)" onClick={() => void addInputs()}><FilePlus size={12} /></button>
           <button className="icon-btn ghost xs" title="Reload" onClick={() => void loadDeskFiles(desk.id)}><RefreshCw size={12} /></button>
         </div>
         {files.length === 0 && <p className="empty-hint">Nothing in the workspace yet.</p>}

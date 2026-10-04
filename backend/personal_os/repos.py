@@ -13,15 +13,29 @@ from .db import Database, new_id, now, row_to_dict
 ALL = "__all__"  # sentinel: every scope (used by the library views)
 
 
+MEMORY_MODES = ("shared", "isolated")
+# An isolated project ("this project only") never sees personal rows. Every scoped read goes through
+# _scope_clause, so the check lives in its SQL rather than in each caller.
+_ISOLATED_SQL = "EXISTS (SELECT 1 FROM projects WHERE id=? AND memory_mode='isolated')"
+
+
 def _scope_clause(project_id: str | None, include_global: bool = True) -> tuple[str, list[Any]]:
-    """Items visible in a scope: the project's own items plus (optionally) global ones."""
+    """Items visible in a scope: the project's own items plus (optionally) global ones, unless the project is isolated."""
     if project_id == ALL:
         return "1=1", []
     if project_id is None:
         return "project_id IS NULL", []
     if include_global:
-        return "(project_id = ? OR project_id IS NULL)", [project_id]
+        return f"(project_id = ? OR (project_id IS NULL AND NOT {_ISOLATED_SQL}))", [project_id, project_id]
     return "project_id = ?", [project_id]
+
+
+def is_isolated(db: Database, project_id: str | None) -> bool:
+    """Whether a chat in this project must keep personal memory, docs, skills and voice out (and write none)."""
+    if not project_id or project_id == ALL:
+        return False
+    with db.tx() as c:
+        return bool(c.execute(f"SELECT {_ISOLATED_SQL}", (project_id,)).fetchone()[0])
 
 
 def fts_query(text: str, max_terms: int = 12, prefix: bool = False) -> str:
@@ -30,15 +44,32 @@ def fts_query(text: str, max_terms: int = 12, prefix: bool = False) -> str:
     With prefix=True each term also matches longer words that start with it, so
     a search box filters as you type ("lite" finds "LiteLLM").
     """
-    terms = re.findall(r"[A-Za-z0-9_][A-Za-z0-9_'-]{2,}", text)
     seen: list[str] = []
-    for t in terms:
-        t = t.lower().strip("'-")
-        if t and t not in seen:
+    for raw in re.findall(r"\w[\w'-]*", text):
+        raw = raw.strip("'-_")
+        # Short words are mostly noise ("of", "an"), except an acronym (AI), a code with a digit (Q3) or any
+        # non-Latin word (café, Zürich, 会議), which the tokenizer indexes like any other.
+        if not (len(raw) >= 3 or (len(raw) == 2 and (raw.isupper() or any(ch.isdigit() for ch in raw))) or not raw.isascii()):
+            continue
+        t = raw.lower()
+        if t not in seen:
             seen.append(t)
     seen = seen[:max_terms]
     star = "*" if prefix else ""
     return " OR ".join(f'"{t}"{star}' for t in seen)
+
+
+_CJK = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uac00-\ud7af]+")
+
+
+def cjk_like(col: str, text: str) -> tuple[str, list[str]]:
+    """A LIKE clause matching any CJK run of `text` inside `col`, or ("", []) when there is none. The tokenizer
+    indexes a whole unspaced run as one token, so FTS never finds a word inside it.
+    ponytail: LIKE scan over the scope; add a trigram FTS table if the corpus makes the scan slow."""
+    runs = list(dict.fromkeys(_CJK.findall(text)))[:6]
+    if not runs:
+        return "", []
+    return "(" + " OR ".join(f"{col} LIKE ?" for _ in runs) + ")", [f"%{r}%" for r in runs]
 
 
 # ---------------- Projects ----------------
@@ -55,17 +86,18 @@ class Projects:
         with self.db.tx() as c:
             return row_to_dict(c.execute("SELECT * FROM projects WHERE id=? AND deleted_at IS NULL", (id,)).fetchone(), ("tools",))
 
-    def create(self, name: str, description: str = "", system_prompt: str = "", color: str = "#d97757") -> dict[str, Any]:
+    def create(self, name: str, description: str = "", system_prompt: str = "", color: str = "#d97757",
+               memory_mode: str = "shared") -> dict[str, Any]:
         sid = new_id()
         with self.db.tx() as c:
             c.execute(
-                "INSERT INTO projects(id,name,description,system_prompt,color,created_at) VALUES(?,?,?,?,?,?)",
-                (sid, name, description, system_prompt, color, now()),
+                "INSERT INTO projects(id,name,description,system_prompt,color,memory_mode,created_at) VALUES(?,?,?,?,?,?,?)",
+                (sid, name, description, system_prompt, color, memory_mode if memory_mode in MEMORY_MODES else "shared", now()),
             )
         return self.get(sid)  # type: ignore[return-value]
 
     def update(self, id: str, patch: dict[str, Any]) -> dict[str, Any] | None:
-        allowed = {k: v for k, v in patch.items() if k in {"name", "description", "system_prompt", "color", "tools"} and v is not None}
+        allowed = {k: v for k, v in patch.items() if k in {"name", "description", "system_prompt", "color", "tools", "memory_mode"} and v is not None}
         if "tools" in allowed:
             allowed["tools"] = json.dumps(allowed["tools"])
         if allowed:
@@ -105,6 +137,10 @@ class Projects:
 DEFAULT_EFFORT = "low"
 DEFAULT_CONV_SETTINGS = {"effort": DEFAULT_EFFORT, "fast": False, "useMemory": True, "useGraph": True, "useDocuments": True, "useActivity": True,
                          "useStyle": True, "draftMode": False, "useMeetings": True, "autoLearn": True, "useTools": True, "tools": {}}
+# A private chat neither reads nor writes what carries over to other chats. `private` is set only at
+# creation; _hydrate forces these off on every read, so no later PATCH can turn them back on.
+# Style banking needs no flag of its own: it is gated on the chat's autoLearn.
+PRIVATE_OFF = {"useMemory": False, "useGraph": False, "useStyle": False, "autoLearn": False}
 
 
 class Conversations:
@@ -128,18 +164,33 @@ class Conversations:
             out = [c for c in out if not c["settings"].get("deskId")]
         return out if include_jobs else [c for c in out if not c["settings"].get("job_id")]
 
-    def search(self, q: str, limit: int = 20, per_conv: int = 3) -> list[dict[str, Any]]:
+    def search(self, q: str, limit: int = 20, per_conv: int = 3, project_id: str | None = ALL,
+               exclude_ids: list[str] | None = None) -> list[dict[str, Any]]:
         """Conversations whose messages match `q`, best first, each with up to `per_conv` excerpts. Matched
         words are wrapped in \\x02 / \\x03. FTS (AND of the words, prefix on the last) for ASCII queries;
         a LIKE scan otherwise, because the tokenizer does not segment CJK. Trashed chats, superseded
-        replies, desk and job transcripts are left out, as `list` leaves them out."""
+        replies, desk and job transcripts are left out, as `list` leaves them out, and so are private chats.
+
+        A `project_id` other than ALL is the agent's recall (search_memory include_chats): that project's chats
+        plus personal ones (None = personal only), minus `exclude_ids` and chats with memory off. Filtered in
+        SQL, so the 300-row cap cannot be spent on another project's matches."""
         tokens = re.findall(r"\w+", q)
         if not tokens:
             return []
+        scope, sargs = "", []
+        if project_id != ALL:
+            where, sargs = _scope_clause(project_id, include_global=True)
+            scope = " AND " + where.replace("project_id", "c.project_id") + " AND COALESCE(json_extract(c.settings,'$.useMemory'),1) != 0"
+            ex = [str(i) for i in exclude_ids or []]
+            if ex:
+                scope += f" AND c.id NOT IN ({','.join('?' * len(ex))})"
+                sargs = [*sargs, *ex]
         base = ("FROM {src} JOIN conversations c ON c.id = m.conversation_id "
                 "WHERE {cond} AND c.deleted_at IS NULL AND m.superseded_at IS NULL "
-                "AND COALESCE(json_extract(c.settings,'$.deskId'),'')='' AND COALESCE(json_extract(c.settings,'$.job_id'),'')=''")
-        cols = "m.id, m.conversation_id, m.role, m.created_at, c.title, c.project_id, c.updated_at"
+                "AND COALESCE(json_extract(c.settings,'$.deskId'),'')='' AND COALESCE(json_extract(c.settings,'$.job_id'),'')='' "
+                "AND COALESCE(json_extract(c.settings,'$.private'),0)=0" + scope)
+        cols = ("m.id, m.conversation_id, m.role, m.created_at, c.title, c.project_id, c.updated_at, "
+                "COALESCE(json_extract(c.settings,'$.tainted'),0) AS tainted")
         rows: list[Any] = []
         fts_ok = q.isascii() and any(len(t) >= 2 for t in tokens)
         with self.db.tx() as c:
@@ -149,7 +200,7 @@ class Conversations:
                     rows = c.execute(
                         f"SELECT {cols}, snippet(messages_fts,0,char(2),char(3),' … ',12) AS snip, bm25(messages_fts) AS score "
                         + base.format(src="messages_fts f JOIN messages m ON m.rowid = f.rowid", cond="messages_fts MATCH ?")
-                        + " ORDER BY score LIMIT 300", (match,)).fetchall()
+                        + " ORDER BY score LIMIT 300", (match, *sargs)).fetchall()
                 except Exception:
                     rows = []
                     fts_ok = False
@@ -158,7 +209,7 @@ class Conversations:
                 rows = c.execute(
                     f"SELECT {cols}, m.content AS snip, 0 AS score "
                     + base.format(src="messages m", cond="m.content LIKE ? ESCAPE '\\'")
-                    + " ORDER BY m.created_at DESC LIMIT 300", (f"%{esc}%",)).fetchall()
+                    + " ORDER BY m.created_at DESC LIMIT 300", (f"%{esc}%", *sargs)).fetchall()
         # Located by a case-insensitive regex, not by lowercasing: lower() can change a string's length
         # (a dotted capital I becomes two characters) and shift every offset.
         needle = re.compile(re.escape(q.strip()), re.IGNORECASE)
@@ -178,7 +229,7 @@ class Conversations:
                 if len(out) >= limit:
                     continue
                 item = out[r["conversation_id"]] = {"id": r["conversation_id"], "title": r["title"], "project_id": r["project_id"],
-                                                    "updated_at": r["updated_at"], "hits": 0, "snippets": []}
+                                                    "updated_at": r["updated_at"], "tainted": bool(r["tainted"]), "hits": 0, "snippets": []}
             item["hits"] += 1
             if len(item["snippets"]) < per_conv:
                 item["snippets"].append({"message_id": r["id"], "role": r["role"], "created_at": r["created_at"], "text": snip})
@@ -187,6 +238,8 @@ class Conversations:
     def _hydrate(self, r: Any) -> dict[str, Any]:
         d = row_to_dict(r, ("settings",)) or {}
         d["settings"] = {**DEFAULT_CONV_SETTINGS, **(d.get("settings") or {})}
+        if d["settings"].get("private"):
+            d["settings"].update(PRIVATE_OFF)
         return d
 
     def get(self, id: str, with_messages: bool = True) -> dict[str, Any] | None:
@@ -225,13 +278,13 @@ class Conversations:
             if root in groups and m["id"] in groups[root]:
                 m["variants"] = groups[root]
 
-    def create(self, project_id: str | None, title: str, model: str) -> dict[str, Any]:
+    def create(self, project_id: str | None, title: str, model: str, private: bool = False) -> dict[str, Any]:
         cid = new_id()
         t = now()
         with self.db.tx() as c:
             c.execute(
                 "INSERT INTO conversations(id,project_id,title,model,settings,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
-                (cid, project_id, title, model, "{}", t, t),
+                (cid, project_id, title, model, json.dumps({"private": True}) if private else "{}", t, t),
             )
         return self.get(cid)  # type: ignore[return-value]
 
@@ -247,7 +300,8 @@ class Conversations:
                 if not c.in_transaction:
                     c.execute("BEGIN IMMEDIATE")
                 cur = c.execute("SELECT settings FROM conversations WHERE id=?", (id,)).fetchone()
-                merged = {**json.loads(cur["settings"] if cur else "{}"), **patch["settings"]}
+                # `private` is fixed at creation: a PATCH can neither set nor clear it.
+                merged = {**json.loads(cur["settings"] if cur else "{}"), **{k: v for k, v in patch["settings"].items() if k != "private"}}
                 c.execute("UPDATE conversations SET settings=? WHERE id=?", (json.dumps(merged), id))
             # None of these touch updated_at: filing a chat is not activity in it.
             if "pinned" in patch:
@@ -365,6 +419,13 @@ class Conversations:
     def finish_message(self, mid: str, content: str, error: str | None, context_used: dict[str, Any] | None, tool_events: list[dict[str, Any]] | None = None,
                        trace: list[dict[str, Any]] | None = None, reasoning: str | None = None, *,
                        outcome: str | None = None, error_kind: str | None = None) -> None:
+        if context_used and context_used.get("chunks"):
+            # Every saved reply goes through here: check its [n] against the full excerpts (adding quote/support in
+            # place, so the 'done' event carries them too), then save a trimmed copy. The live refs keep their full
+            # text, so a second finish on the same ledger (a parked card, a steer's next segment) checks the same.
+            from .context import cite_check, cite_slim
+            cite_check(content, context_used["chunks"])
+            context_used = cite_slim(context_used)
         with self.db.tx() as c:
             c.execute(
                 "UPDATE messages SET content=?, error=?, context_used=?, tool_events=?, trace=?, reasoning=?, "
@@ -402,6 +463,42 @@ class Conversations:
             c.execute(f"UPDATE messages SET superseded_at=? WHERE id IN ({','.join('?' * len(cut))})", (t, *[r["id"] for r in cut]))
             hidden = [row_to_dict(r, ("tool_events",)) or {} for r in cut]
         return [{"id": r["id"], "created_at": r["created_at"], "role": r["role"], "tool_events": r.get("tool_events") or []} for r in hidden]
+
+    # Settings a branch carries over. The rest stays behind on purpose: standing tool grants (the `tools` map's
+    # "on" entries), skipPermissions, titles, and the desk/job markers.
+    FORK_KEYS = (*[k for k in DEFAULT_CONV_SETTINGS if k != "tools"], "planMode", "useSkills", "tainted", "taint_sources")
+
+    def fork(self, conv_id: str, upto_mid: str) -> dict[str, Any]:
+        """A new chat holding the live transcript up to and including `upto_mid`; the source is untouched. Only rows a
+        reader sees are copied (superseded rows and inactive variants are not), with fresh ids and no variant links.
+        Raises KeyError for a message not in this chat, ValueError for a superseded one."""
+        cid = new_id()
+        t = now()
+        with self.db.tx() as c:
+            c.execute("BEGIN IMMEDIATE")  # one snapshot: a reply finishing mid-copy must not split the prefix
+            src = c.execute("SELECT * FROM conversations WHERE id=? AND deleted_at IS NULL", (conv_id,)).fetchone()
+            tgt = c.execute("SELECT superseded_at FROM messages WHERE id=? AND conversation_id=?", (upto_mid, conv_id)).fetchone()
+            if not src or not tgt:
+                raise KeyError(upto_mid)
+            if tgt["superseded_at"] is not None:
+                raise ValueError(upto_mid)
+            rows = c.execute("SELECT * FROM messages WHERE conversation_id=? AND superseded_at IS NULL ORDER BY created_at, rowid",
+                             (conv_id,)).fetchall()
+            rows = rows[:[r["id"] for r in rows].index(upto_mid) + 1]
+            ss = self._hydrate(src)["settings"]
+            st = {k: ss[k] for k in self.FORK_KEYS if k in ss}
+            st["tools"] = {k: v for k, v in (ss.get("tools") or {}).items() if v != "on"}
+            st.update(titleSource="auto", titleTurns=sum(r["role"] == "user" for r in rows), forkedFrom=conv_id)
+            c.execute(
+                "INSERT INTO conversations(id,project_id,title,model,settings,created_at,updated_at) VALUES(?,?,?,?,?,?,?)",
+                (cid, src["project_id"], f"{src['title']} (branch)", src["model"], json.dumps(st), t, t))
+            # Original timestamps keep the order (and the inserts keep rowid ties in order); later turns sort after.
+            c.executemany(
+                "INSERT INTO messages(id,conversation_id,role,content,model,error,context_used,tool_events,created_at,outcome,error_kind) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                [(new_id(), cid, r["role"], r["content"], r["model"], r["error"], r["context_used"], r["tool_events"],
+                  r["created_at"], r["outcome"], r["error_kind"]) for r in rows])
+        return self.get(cid)  # type: ignore[return-value]
 
     def history(self, conv_id: str) -> list[dict[str, str]]:
         with self.db.tx() as c:
@@ -488,24 +585,25 @@ class Memories:
 
     # ---- non-destructive changes: the old row stays as history, only `invalid_at` says it no longer holds ----
     def supersede(self, old_id: str, new_content: str, kind: str | None = None, source: str = "auto",
-                  provenance: dict[str, Any] | None = None) -> dict[str, Any] | None:
+                  provenance: dict[str, Any] | None = None, keep_pinned: bool = False) -> dict[str, Any] | None:
         """Replace a memory with a new version, keeping the old one as history. Returns the new row.
 
-        A pinned memory is user-curated: it is rewritten in place and stays valid, never archived.
+        A pinned memory is user-curated: it is rewritten in place and stays valid, never archived, unless
+        `keep_pinned` (the user's own edit), which versions it like any other row and pins the new one.
         """
         old = self.get(old_id)
         new_content = new_content.strip()
         if not old or old["invalid_at"] is not None or not new_content:
             return None
-        if old["pinned"]:
+        if old["pinned"] and not keep_pinned:
             return self.update(old_id, {"content": new_content, **({"kind": kind} if kind else {})})
         prov = provenance or {}
         mid, t = new_id(), now()
         with self.db.tx() as c:
             c.execute(
                 "INSERT INTO memories(id,project_id,content,kind,source,pinned,created_at,updated_at,valid_from,source_conversation_id,source_message_id) "
-                "VALUES(?,?,?,?,?,0,?,?,?,?,?)",
-                (mid, old["project_id"], new_content, kind or old["kind"], source, t, t, t,
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (mid, old["project_id"], new_content, kind or old["kind"], source, int(bool(old["pinned"])), t, t, t,
                  prov.get("conversation_id"), prov.get("message_id")),
             )
             c.execute("INSERT INTO memories_fts(content, memory_id) VALUES(?,?)", (new_content, mid))
@@ -603,12 +701,17 @@ class Memories:
                         WHERE memories_fts MATCH ? AND m.deleted_at IS NULL AND {where.replace('project_id', 'm.project_id')} AND m.invalid_at IS NULL ORDER BY bm25(memories_fts) LIMIT 15""",
                     (fq, *args),
                 ).fetchall()
+            like, largs = cjk_like("content", query)
+            if like:
+                hits += c.execute(f"SELECT * FROM memories WHERE {like} AND {where} AND invalid_at IS NULL AND deleted_at IS NULL "
+                                  "ORDER BY updated_at DESC LIMIT 15", (*largs, *args)).fetchall()
         out: dict[str, dict[str, Any]] = {}
         for r in [*hits, *base]:
             d = row_to_dict(r)
             if d:
                 out.setdefault(d["id"], d)
-        return list(out.values())[:limit]
+        # Pins lead (stable sort keeps hit order behind them) so neither the limit nor a budget trim drops one.
+        return sorted(out.values(), key=lambda d: not d.get("pinned"))[:limit]
 
 
 # ---------------- Knowledge graph ----------------
@@ -724,13 +827,13 @@ class Graph:
             c.execute("DELETE FROM kg_edges WHERE id=?", (id,))
 
     def neighborhood(self, project_id: str | None, query: str, max_nodes: int = 30) -> dict[str, list[dict[str, Any]]]:
-        """Nodes whose label appears in the query (or vice-versa), plus 1-hop neighbours."""
+        """Nodes whose label appears in the query as whole words (or vice-versa), plus 1-hop neighbours."""
         g = self.get(project_id)
         q = query.lower()
         words = set(re.findall(r"[a-z0-9][a-z0-9'-]{2,}", q))
         seeds = [
             n for n in g["nodes"]
-            if n["label"].lower() in q or (len(n["label"]) > 3 and any(w == n["label"].lower() or w in n["label"].lower().split() for w in words))
+            if re.search(rf"(?<!\w){re.escape(n['label'].lower())}(?!\w)", q) or (len(n["label"]) > 3 and any(w == n["label"].lower() or w in n["label"].lower().split() for w in words))
         ]
         if not seeds:
             return {"nodes": [], "edges": []}
@@ -740,7 +843,8 @@ class Graph:
         for e in edges:
             keep.add(e["source_id"])
             keep.add(e["target_id"])
-        nodes = [n for n in g["nodes"] if n["id"] in keep][:max_nodes]
+        # Seeds first, so the cap trims neighbours rather than the entities the query named.
+        nodes = (seeds + [n for n in g["nodes"] if n["id"] in keep and n["id"] not in seed_ids])[:max_nodes]
         kept_ids = {n["id"] for n in nodes}
         edges = [e for e in edges if e["source_id"] in kept_ids and e["target_id"] in kept_ids]
         return {"nodes": nodes, "edges": edges}
@@ -898,15 +1002,29 @@ class Documents:
 
     def search(self, project_id: str | None, query: str, limit: int = 6) -> list[dict[str, Any]]:
         fq = fts_query(query)
-        if not fq:
+        like, largs = cjk_like("ch.text", query)
+        if not fq and not like:
             return []
         where, args = _scope_clause(project_id)
+        scope = where.replace('project_id', 'd.project_id')
+        rows: list[Any] = []
         with self.db.tx() as c:
-            rows = c.execute(
-                f"""SELECT f.chunk_id, f.document_id, d.name, ch.idx, ch.text, ch.heading, ch.page, bm25(chunks_fts) AS score
-                    FROM chunks_fts f JOIN documents d ON d.id=f.document_id JOIN chunks ch ON ch.id=f.chunk_id
-                    WHERE chunks_fts MATCH ? AND d.deleted_at IS NULL AND {where.replace('project_id', 'd.project_id')}
-                    ORDER BY score LIMIT ?""",
-                (fq, *args, limit),
-            ).fetchall()
-        return [dict(r) for r in rows]
+            if fq:
+                rows = c.execute(
+                    f"""SELECT f.chunk_id, f.document_id, d.name, ch.idx, ch.text, ch.heading, ch.page, bm25(chunks_fts) AS score
+                        FROM chunks_fts f JOIN documents d ON d.id=f.document_id JOIN chunks ch ON ch.id=f.chunk_id
+                        WHERE chunks_fts MATCH ? AND d.deleted_at IS NULL AND {scope}
+                        ORDER BY score LIMIT ?""",
+                    (fq, *args, limit),
+                ).fetchall()
+            if like and len(rows) < limit:
+                rows += c.execute(
+                    f"""SELECT ch.id AS chunk_id, ch.document_id, d.name, ch.idx, ch.text, ch.heading, ch.page, 0 AS score
+                        FROM chunks ch JOIN documents d ON d.id=ch.document_id
+                        WHERE {like} AND d.deleted_at IS NULL AND {scope} LIMIT ?""",
+                    (*largs, *args, limit),
+                ).fetchall()
+        out: dict[str, dict[str, Any]] = {}
+        for r in rows:  # FTS rank first, LIKE hits after
+            out.setdefault(r["chunk_id"], dict(r))
+        return list(out.values())[:limit]

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, Menu, shell } from 'electron'
+import { app, BrowserWindow, dialog, Menu, powerMonitor, shell, systemPreferences } from 'electron'
 import { existsSync, statSync } from 'fs'
 import { join } from 'path'
 import { backendInfo, backendStatus, backendToken, backendUrl, onBackendState, restartBackend, startBackend, stopBackend } from './backend'
@@ -85,6 +85,16 @@ function showMain(): void {
   if (win.isMinimized()) win.restore()
   win.show()
   win.focus()
+}
+
+/** The Mac woke or unlocked: have the job scheduler run its pass now, so a slot missed asleep fires at once. */
+function nudgeScheduler(): void {
+  const base = backendUrl()
+  if (!base) return
+  const token = backendToken()
+  fetch(`${base}/jobs/wake`, { method: 'POST', headers: token ? { 'X-Personal-OS-Token': token } : {} }).catch(() => {
+    // The backend is down or restarting; its own loop catches up within a minute anyway.
+  })
 }
 
 /** The stored accelerators, so a gather or capture shortcut the user chose is still registered after a relaunch. */
@@ -324,6 +334,10 @@ if (gotLock) app.whenReady().then(async () => {
     const r = await dialog.showSaveDialog({ title: 'Export all data', defaultPath: join(app.getPath('documents'), `grain-export-${stamp}.zip`), filters: [{ name: 'Zip archive', extensions: ['zip'] }] })
     return r.canceled || !r.filePath ? null : r.filePath
   })
+  handle('data:choose-input-files', async () => {
+    const r = await dialog.showOpenDialog({ title: 'Add inputs to the desk', defaultPath: app.getPath('home'), properties: ['openFile', 'multiSelections'] })
+    return r.canceled ? [] : r.filePaths
+  })
   // Folders only: openPath on a file or .app would run it.
   handle('data:reveal', async (_e, path: string) => {
     const p = String(path)
@@ -332,6 +346,13 @@ if (gotLock) app.whenReady().then(async () => {
   })
   // A staged restore is applied by the backend at its next start, so relaunching the whole app does it.
   handle('data:relaunch', () => { app.relaunch(); app.quit() })
+  // The composer's mic: macOS shows its prompt once, from here; after a denial only System Settings can change it.
+  handle('media:mic-access', async () => {
+    if (!isMac) return 'granted'
+    const st = systemPreferences.getMediaAccessStatus('microphone')
+    if (st !== 'not-determined') return st
+    return (await systemPreferences.askForMediaAccess('microphone')) ? 'granted' : 'denied'
+  })
   on('window:close-self', (e) => BrowserWindow.fromWebContents(e.sender)?.close())
   on('window:minimize-self', (e) => BrowserWindow.fromWebContents(e.sender)?.minimize())
   registerPopouts(() => win)
@@ -356,6 +377,8 @@ if (gotLock) app.whenReady().then(async () => {
   createWindow()
   void restorePopouts()
   startUpdater()
+  powerMonitor.on('resume', nudgeScheduler)
+  powerMonitor.on('unlock-screen', nudgeScheduler)
   app.on('activate', showMain)
 })
 

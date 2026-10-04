@@ -11,10 +11,13 @@ import { useEffect, useState } from 'react'
 import { AlertTriangle, ArrowRight, Check, ChevronDown, ChevronRight, Clock, Eye, History, Inbox, Pencil, Play, Plus, Timer, Trash2, Users, Wrench, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import type { AgentProposal, InboxQueueKey, Job, JobRunRecord, JobRunSummary, JobStats } from '@shared/types'
+import type { AgentProposal, InboxQueueKey, Job, JobNotifyMode, JobRunRecord, JobRunSummary, JobSkipRecord, JobStats } from '@shared/types'
 import { useStore } from '../store'
 import { api } from '../lib/api'
+import { DAYS, DEFAULT_SCHEDULE, type Preset, type Schedule, cronPreset, diffJob, presetCron, toLocalInput } from '../lib/jobSchedule'
+import { chatModelIds, modelLabel } from '../lib/modelLabel'
 import { SAFE_MD } from './Message'
+import { AUTONOMY } from './DeskRail'
 
 const fmtClock = (ts: number): string => new Date(ts * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
 const fmtWhen = (ts: number): string => {
@@ -41,12 +44,14 @@ function ProposalCard({ p, onOpen }: { p: AgentProposal; onOpen?: () => void }):
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState(false)
-  const editable = TEXT_KEYS.filter((k) => typeof p.args[k] === 'string')
+  const [err, setErr] = useState<string | null>(null)
+  const editable = p.editable ? TEXT_KEYS.filter((k) => typeof p.args[k] === 'string') : []
 
   const decide = async (accept: boolean): Promise<void> => {
     setBusy(true)
     const args = editing && Object.keys(draft).length ? { ...p.args, ...draft } : undefined
-    await decideProposal(p.id, accept, args)
+    // A refused decision leaves the proposal pending: the message shows here and the draft stays open to fix.
+    setErr(await decideProposal(p.id, accept, args))
     setBusy(false)
   }
 
@@ -59,7 +64,7 @@ function ProposalCard({ p, onOpen }: { p: AgentProposal; onOpen?: () => void }):
         </span>
         {onOpen && <button className="link small" onClick={onOpen}>Open</button>}
         <span style={{ flex: 1 }} />
-        <button className="icon-btn sm" title={editing ? 'Stop editing' : 'Edit before accepting'} disabled={!editable.length || busy}
+        <button className="icon-btn sm" title={!editable.length ? 'This one runs as proposed' : editing ? 'Stop editing' : 'Edit before accepting'} disabled={!editable.length || busy}
           onClick={() => setEditing((v) => !v)}><Pencil size={13} /></button>
         <button className="ghost-btn sm" disabled={busy} onClick={() => void decide(false)}><X size={13} /> Reject</button>
         <button className="primary-btn sm" disabled={busy} onClick={() => void decide(true)}><Check size={13} /> Accept</button>
@@ -78,17 +83,20 @@ function ProposalCard({ p, onOpen }: { p: AgentProposal; onOpen?: () => void }):
       ) : (
         <pre className="inbox-args">{argText(p.args)}</pre>
       )}
+      {err && <p className="error small" role="alert">{err}</p>}
     </li>
   )
 }
 
 function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
   const selectChat = useStore((s) => s.selectChat)
-  const [open, setOpen] = useState(r.late || r.status === 'error' || r.pending_proposals > 0)
+  const markInboxRunSeen = useStore((s) => s.markInboxRunSeen)
+  const [open, setOpen] = useState(!r.seen && (r.late || r.status === 'error' || r.pending_proposals > 0))
   const failed = r.status === 'error' || r.status === 'interrupted'
+  useEffect(() => { if (r.seen) setOpen(false) }, [r.seen])  // read collapses it, Mark all read included
 
   return (
-    <li className="inbox-item">
+    <li className={`inbox-item ${r.seen ? 'seen' : ''}`}>
       <div className="inbox-item-head">
         <button className="icon-btn sm" aria-label={open ? 'Collapse' : 'Expand'} onClick={() => setOpen((v) => !v)}>
           {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
@@ -106,6 +114,11 @@ function RunCard({ r }: { r: JobRunSummary }): JSX.Element {
         <span style={{ flex: 1 }} />
         <span className="muted small">{fmtWhen(r.fired_at)}</span>
         {r.conversation_id && <button className="link small" onClick={() => void selectChat(r.conversation_id as string)}>open</button>}
+        {!r.seen && (
+          <button className="icon-btn sm" title="Mark read" aria-label={`Mark ${r.job} read`} onClick={() => void markInboxRunSeen(r.run_id)}>
+            <Check size={13} />
+          </button>
+        )}
       </div>
       {open && (
         <>
@@ -125,11 +138,12 @@ const fmtDur = (s: number | null): string => (s === null ? '' : s < 90 ? `${Math
 const STATUS_LABEL: Record<JobRunRecord['status'], string> = {
   running: 'running', done: 'done', error: 'failed', interrupted: 'interrupted', timed_out: 'timed out'
 }
+const skipReason = (why: string): string => why.replace('previous run still running', 'still running')
 
 /** A job's last 50 runs from rows: a success-rate strip, then one line per run with a link to its transcript. */
 function JobHistory({ job }: { job: Job }): JSX.Element {
   const selectChat = useStore((s) => s.selectChat)
-  const [runs, setRuns] = useState<JobRunRecord[] | null>(null)
+  const [runs, setRuns] = useState<(JobRunRecord | JobSkipRecord)[] | null>(null)
   const [stats, setStats] = useState<JobStats | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
@@ -163,18 +177,30 @@ function JobHistory({ job }: { job: Job }): JSX.Element {
           {` · ${stats.runs} run${stats.runs === 1 ? '' : 's'}`}
           {stats.median_duration_s !== null && ` · median ${fmtDur(stats.median_duration_s)}`}
           {stats.total_cost > 0 && ` · $${stats.total_cost.toFixed(2)}`}
+          {!!stats.skipped && ` · ${stats.skipped} skipped`}
           <span style={{ flex: 1 }} />
           <button className="link small" onClick={() => void exportCsv()}>Export CSV</button>
         </div>
       )}
       {runs && runs.length === 0 && <p className="muted small">Not run yet.</p>}
-      {runs && runs.map((r) => (
+      {runs && runs.map((r) => r.status === 'skipped' ? (
+        <div key={r.run_id} className="job-history-run small muted" title={`Skipped ${fmtDate(r.started_at)}`}>
+          <span className="chip">skipped</span>
+          <span>{fmtDate(r.due_at ?? r.started_at)}</span>
+          <span>{skipReason(r.reason)}</span>
+        </div>
+      ) : (
         <div key={r.run_id} className="job-history-run small">
           <span className={`chip ${r.status === 'done' ? '' : r.status === 'running' ? 'warn' : 'bad'}`}>{STATUS_LABEL[r.status]}</span>
           <span>{fmtDate(r.started_at)}</span>
           <span className="muted">{fmtDur(r.duration_s)}</span>
           {r.attempt > 1 && <span className="chip warn">retry {r.attempt}</span>}
           {r.manual && <span className="chip">by hand</span>}
+          {r.late && (
+            <span className="chip warn" title={r.due_at ? `Due ${fmtDate(r.due_at)}` : undefined}>
+              late{r.missed_slots > 0 ? ` · ${r.missed_slots} slot${r.missed_slots === 1 ? '' : 's'} missed` : ''}
+            </span>
+          )}
           <span className="muted">{r.tool_calls} call{r.tool_calls === 1 ? '' : 's'}</span>
           {r.proposals.pending + r.proposals.accepted + r.proposals.rejected > 0 && (
             <span className="muted">{r.proposals.accepted}/{r.proposals.pending + r.proposals.accepted + r.proposals.rejected} proposals accepted</span>
@@ -215,6 +241,7 @@ function JobRow({ job }: { job: Job }): JSX.Element {
   const { setJobEnabled, runJobNow, deleteJob, refreshJobs, selectChat, toast } = useStore()
   const [history, setHistory] = useState(false)
   const [toolsOpen, setToolsOpen] = useState(false)
+  const [editing, setEditing] = useState(false)
 
   const preview = async (): Promise<void> => {
     try {
@@ -225,9 +252,18 @@ function JobRow({ job }: { job: Job }): JSX.Element {
       toast(`Jobs: ${(e as Error).message}`, 'error')
     }
   }
-  const saveTools = async (allowed: string[] | null): Promise<void> => {
+  const saveTools = (allowed: string[] | null): Promise<void> => save({ allowed_tools: allowed })
+  const save = async (patch: Parameters<typeof api.jobs.update>[1]): Promise<void> => {
     try {
-      await api.jobs.update(job.id, { allowed_tools: allowed })
+      await api.jobs.update(job.id, patch)
+      await refreshJobs()
+    } catch (e) {
+      toast(`Jobs: ${(e as Error).message}`, 'error')
+    }
+  }
+  const saveNotify = async (notify: JobNotifyMode): Promise<void> => {
+    try {
+      await api.jobs.update(job.id, { notify })
       await refreshJobs()
     } catch (e) {
       toast(`Jobs: ${(e as Error).message}`, 'error')
@@ -251,23 +287,44 @@ function JobRow({ job }: { job: Job }): JSX.Element {
       )}
       {once
         ? <span className="muted small">{job.run_at ? fmtDate(job.run_at) : 'no time set'}</span>
-        : <code className="muted small">{job.cron}</code>}
+        : job.kind === 'watch'
+          ? <span className="muted small" title={job.watch_dir ?? ''}>watching {tildePath(job.watch_dir ?? '')}{job.cron && <> · <code>{job.cron}</code></>}</span>
+          : job.kind === 'mail'
+            ? <code className="muted small" title="Runs when matching mail arrives">{job.mail_query}</code>
+          : <code className="muted small">{job.cron}</code>}
       <span className="muted small">
         {spent
           ? `ran ${fmtWhen(job.last_fired_at as number)}`
-          : job.enabled && job.next_due_at ? `next ${fmtWhen(job.next_due_at)}` : 'off'}
+          : job.enabled && job.next_due_at ? `next ${fmtWhen(job.next_due_at)}` : job.enabled && job.kind === 'watch' ? 'on' : 'off'}
       </span>
       {job.last_skip_reason && job.last_skip_at && (
-        <span className="muted small" title={`Slot at ${fmtWhen(job.last_skip_at)} was skipped`}>skipped: {job.last_skip_reason.replace('previous run still running', 'still running')}</span>
+        <span className="muted small" title={`Slot at ${fmtWhen(job.last_skip_at)} was skipped`}>skipped: {skipReason(job.last_skip_reason)}</span>
       )}
-      <button className={`icon-btn sm ${toolsOpen ? 'on' : ''}`} title={job.allowed_tools ? `${job.allowed_tools.length} tools allowed` : 'All tools'}
-        aria-label={`Tools for ${job.name}`} onClick={() => setToolsOpen((v) => !v)}>
-        <Wrench size={12} />
-      </button>
-      <button className="icon-btn sm" title="Preview: run it read-only, nothing is proposed or changed" aria-label={`Preview ${job.name}`}
-        onClick={() => void preview()}>
-        <Eye size={12} />
-      </button>
+      {(job.kind === 'cron' || job.kind === 'once') && (
+        <button className={`icon-btn sm ${editing ? 'on' : ''}`} title={spent ? 'Run again at…' : 'Edit'}
+          aria-label={`Edit ${job.name}`} onClick={() => setEditing((v) => !v)}>
+          <Pencil size={12} />
+        </button>
+      )}
+      <select className="small" value={job.notify ?? 'problems'} aria-label={`Notifications for ${job.name}`}
+        title="When a run of this job sends a system notification"
+        onChange={(e) => void saveNotify(e.target.value as JobNotifyMode)}>
+        <option value="problems">Notify on problems</option>
+        <option value="always">Notify every run</option>
+        <option value="never">Never notify</option>
+      </select>
+      {job.target !== 'desk' && (
+        <button className={`icon-btn sm ${toolsOpen ? 'on' : ''}`} title={(job.allowed_tools ? `${job.allowed_tools.length} tools allowed` : 'All tools') + (job.model ? ` · ${job.model}` : '')}
+          aria-label={`Tools for ${job.name}`} onClick={() => setToolsOpen((v) => !v)}>
+          <Wrench size={12} />
+        </button>
+      )}
+      {job.target === 'desk'
+        ? <span className="muted small" title="Each fire opens a desk with this prompt as its brief">desk · {AUTONOMY.find((a) => a.value === (job.desk_autonomy ?? 'plan'))?.label}</span>
+        : <button className="icon-btn sm" title="Preview: run it read-only, nothing is proposed or changed" aria-label={`Preview ${job.name}`}
+            onClick={() => void preview()}>
+            <Eye size={12} />
+          </button>}
       <button className={`icon-btn sm ${history ? 'on' : ''}`} title="Run history" aria-label={`History of ${job.name}`}
         onClick={() => setHistory((v) => !v)}>
         <History size={12} />
@@ -292,35 +349,163 @@ function JobRow({ job }: { job: Job }): JSX.Element {
         {job.allowed_tools !== null && <ToolPicker value={job.allowed_tools} onChange={(n) => void saveTools(n)} />}
         <p className="muted small">A run can only use tools it is given here, on top of your own tool settings. Anything
           that leaves the app is still a proposal.</p>
+        <JobRunSettings job={job} save={save} />
       </li>
     )}
+    {editing && <li className="job-history"><NewTask job={job} onDone={() => setEditing(false)} /></li>}
     {history && <JobHistory job={job} />}
     </>
   )
 }
 
-const BLANK = { name: '', prompt: '', when: '', cron: '', repeat: false, onlyTools: false }
+/** The fixed caps of every scheduled run (backend JOB_BUDGET). A job may only set its own lower. */
+const JOB_MAX_COST = 0.2
+const JOB_MAX_MINUTES = 4
 
-/** Schedule a task by hand: a one-off instant by default, a cron expression if it should repeat. */
-function NewTask({ onDone }: { onDone: () => void }): JSX.Element {
-  const createJob = useStore((s) => s.createJob)
-  const [f, setF] = useState(BLANK)
+/** Which model a job's runs use, and the tighter caps it may set for itself. */
+function JobRunSettings({ job, save }: { job: Job; save: (patch: Parameters<typeof api.jobs.update>[1]) => Promise<void> }): JSX.Element {
+  const models = useStore((s) => s.models)
+  const ids = chatModelIds(models)
+  if (job.model && !ids.includes(job.model)) ids.unshift(job.model)
+  const budget = job.budget ?? {}
+  // A cleared or out-of-range field drops that cap, so the job falls back to the fixed one.
+  const setCap = (key: 'maxRunCost' | 'maxRunSeconds', raw: string, scale: number, max: number): void => {
+    const n = Number(raw) * scale
+    const next = { ...budget }
+    if (raw.trim() && n > 0 && n <= max * scale) next[key] = n
+    else delete next[key]
+    if (next[key] === budget[key]) return
+    void save({ budget: Object.keys(next).length ? next : null })
+  }
+  return (
+    <div className="job-run-settings">
+      <label className="small">
+        <span className="muted">Model</span>{' '}
+        <select value={job.model ?? ''} aria-label={`Model for ${job.name}`}
+          onChange={(e) => void save({ model: e.target.value || null })}>
+          <option value="">Default model</option>
+          {ids.map((id) => <option key={id} value={id}>{modelLabel(id)}</option>)}
+        </select>
+      </label>
+      <details>
+        <summary className="muted small">Advanced: a tighter budget per run</summary>
+        <label className="small">
+          <span className="muted">Max cost ($)</span>{' '}
+          <input key={`c${budget.maxRunCost ?? ''}`} type="number" min={0.01} max={JOB_MAX_COST} step={0.01}
+            placeholder={String(JOB_MAX_COST)} defaultValue={budget.maxRunCost ?? ''} aria-label={`Max cost per run of ${job.name}`}
+            onBlur={(e) => setCap('maxRunCost', e.target.value, 1, JOB_MAX_COST)} />
+        </label>{' '}
+        <label className="small">
+          <span className="muted">Max minutes</span>{' '}
+          <input key={`s${budget.maxRunSeconds ?? ''}`} type="number" min={0.5} max={JOB_MAX_MINUTES} step={0.5}
+            placeholder={String(JOB_MAX_MINUTES)} defaultValue={budget.maxRunSeconds ? budget.maxRunSeconds / 60 : ''}
+            aria-label={`Max minutes per run of ${job.name}`}
+            onBlur={(e) => setCap('maxRunSeconds', e.target.value, 60, JOB_MAX_MINUTES)} />
+        </label>
+        <p className="muted small">Every scheduled run already stops at ${JOB_MAX_COST.toFixed(2)} or {JOB_MAX_MINUTES} minutes; these can
+          only lower that, and your own settings still win when they are stricter.</p>
+      </details>
+    </div>
+  )
+}
+
+const BLANK = { name: '', prompt: '', when: '', dir: '', query: '', mode: 'once' as 'once' | 'repeat' | 'folder' | 'mail', onlyTools: false, desk: false, autonomy: 'plan' as 'plan' | 'propose' }
+
+/** `/Users/me/Downloads` -> `~/Downloads`, for display. */
+function tildePath(p: string): string {
+  return p.replace(/^\/Users\/[^/]+(?=\/|$)/, '~')
+}
+
+/** Hourly / daily / weekdays / weekly presets that compile to cron, with Custom for the raw field, and the next fires. */
+function SchedulePicker({ value, onChange, timezone }: { value: Schedule; onChange: (s: Schedule) => void; timezone?: string }): JSX.Element {
+  const cron = presetCron(value)
+  const [preview, setPreview] = useState<{ next: number[]; error?: string } | null>(null)
+  useEffect(() => {
+    if (!cron) { setPreview(null); return }
+    let live = true
+    const t = setTimeout(() => {
+      api.jobs.preview(cron, timezone)
+        .then((r) => { if (live) setPreview(r) })
+        .catch((e: Error) => { if (live) setPreview({ next: [], error: e.message }) })
+    }, 300)
+    return () => { live = false; clearTimeout(t) }
+  }, [cron, timezone])
+  const timed = value.preset !== 'hourly' && value.preset !== 'custom'
+  return (
+    <>
+      <select value={value.preset} aria-label="How often" onChange={(e) => onChange({ ...value, preset: e.target.value as Preset })}>
+        <option value="hourly">Hourly</option>
+        <option value="daily">Daily</option>
+        <option value="weekdays">Weekdays</option>
+        <option value="weekly">Weekly</option>
+        <option value="custom">Custom cron</option>
+      </select>
+      {value.preset === 'weekly' && (
+        <select value={value.day} aria-label="Day of the week" onChange={(e) => onChange({ ...value, day: Number(e.target.value) })}>
+          {DAYS.map((d, i) => <option key={d} value={i}>{d}</option>)}
+        </select>
+      )}
+      {timed && <input type="time" value={value.time} aria-label="At" onChange={(e) => onChange({ ...value, time: e.target.value })} />}
+      {value.preset === 'custom' && (
+        <input type="text" placeholder="cron, e.g. 0 17 * * 5" value={value.cron} aria-label="Cron expression"
+          onChange={(e) => onChange({ ...value, cron: e.target.value })} />
+      )}
+      {preview && (
+        <span className={preview.error ? 'msg-error small' : 'muted small'}>
+          {preview.error ?? `Next: ${preview.next.map(fmtWhen).join(', ')}`}
+        </span>
+      )}
+    </>
+  )
+}
+
+/** Schedule a task by hand (a one-off instant by default, a repeating schedule if it should repeat, or a folder to
+ * watch: a typed path the backend refuses outside home or hidden, and the toast says why, or a Gmail search to run on
+ * as matching mail arrives), or, given `job`, edit that
+ * one: only the changed fields are sent. A spent one-off is offered a new time to run again at. */
+function NewTask({ onDone, job }: { onDone: () => void; job?: Job }): JSX.Element {
+  const { createJob, updateJob } = useStore()
+  const spent = !!job && job.kind === 'once' && job.last_fired_at !== null && job.next_due_at === null
+  const [f, setF] = useState(job
+    ? { ...BLANK, name: job.name, prompt: job.prompt, mode: job.kind === 'cron' ? 'repeat' as const : job.kind === 'mail' ? 'mail' as const : 'once' as const, when: job.run_at && !spent ? toLocalInput(job.run_at) : '', query: job.mail_query ?? '' }
+    : BLANK)
+  const [sched, setSched] = useState<Schedule>(job?.kind === 'cron' ? cronPreset(job.cron) : DEFAULT_SCHEDULE)
   const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
   const [picked, setPicked] = useState<string[]>(['current_time'])
-  const ready = !!f.name.trim() && !!f.prompt.trim() && (f.repeat ? !!f.cron.trim() : !!f.when)
+  const cron = presetCron(sched)
+  const ready = !!f.name.trim() && !!f.prompt.trim() && (f.mode === 'repeat' ? !!cron : f.mode === 'folder' ? !!f.dir.trim() : f.mode === 'mail' ? !!f.query.trim() : !!f.when)
 
   const submit = async (e: React.FormEvent): Promise<void> => {
     e.preventDefault()
     if (!ready || busy) return
     setBusy(true)
-    const common = { name: f.name.trim(), prompt: f.prompt.trim(), enabled: true, allowed_tools: f.onlyTools ? picked : null }
+    setErr(null)
+    const common = { name: f.name.trim(), prompt: f.prompt.trim() }
     // datetime-local has no zone, so Date.parse reads it as local time — which is what the user typed.
-    const ok = await createJob(f.repeat
-      ? { ...common, kind: 'cron' as const, cron: f.cron.trim() }
-      : { ...common, kind: 'once' as const, run_at: Math.round(Date.parse(f.when) / 1000) })
+    const schedule = f.mode === 'repeat'
+      ? { kind: 'cron' as const, cron }
+      : f.mode === 'folder'
+        ? { kind: 'watch' as const, watch_dir: f.dir.trim() }
+        : f.mode === 'mail'
+          ? { kind: 'mail' as const, mail_query: f.query.trim() }
+          // An untouched time keeps the job's exact instant: the input only holds minutes, and a re-sent past instant is a 400.
+          : { kind: 'once' as const, run_at: job?.run_at && f.when === toLocalInput(job.run_at) ? job.run_at : Math.round(Date.parse(f.when) / 1000) }
+    let ok: boolean
+    if (job) {
+      const patch = diffJob<Job>(job, { ...common, ...schedule })
+      // A one-off that already ran is switched back on by giving it a new time; the backend refuses `enabled` alone.
+      if (spent) patch.enabled = true
+      const refused = Object.keys(patch).length ? await updateJob(job.id, patch) : null
+      setErr(refused)
+      ok = refused === null
+    } else {
+      ok = await createJob({ ...common, ...schedule, enabled: true, allowed_tools: f.onlyTools && !f.desk ? picked : null,
+        ...(f.desk ? { target: 'desk' as const, desk_autonomy: f.autonomy } : {}) })
+    }
     setBusy(false)
     if (ok) {
-      setF(BLANK)
+      if (!job) setF(BLANK)
       onDone()
     }
   }
@@ -332,34 +517,61 @@ function NewTask({ onDone }: { onDone: () => void }): JSX.Element {
       <textarea rows={2} placeholder="What should it do? It runs in a fresh chat, so write it so it stands alone."
         value={f.prompt} maxLength={8000} onChange={(e) => setF({ ...f, prompt: e.target.value })} />
       <div className="new-task-when">
-        <label className="chip-check-row">
-          <input type="checkbox" checked={f.repeat} onChange={(e) => setF({ ...f, repeat: e.target.checked })} />
-          <span>Repeat</span>
-        </label>
-        {f.repeat
-          ? <input type="text" placeholder="cron, e.g. 0 17 * * 5" value={f.cron} aria-label="Cron expression"
-              onChange={(e) => setF({ ...f, cron: e.target.value })} />
-          : <input type="datetime-local" value={f.when} aria-label="When it should run"
-              onChange={(e) => setF({ ...f, when: e.target.value })} />}
-        <button className="primary-btn sm" type="submit" disabled={!ready || busy}>Schedule</button>
+        <select value={f.mode} aria-label="When it runs" onChange={(e) => setF({ ...f, mode: e.target.value as typeof f.mode })}>
+          <option value="once">Once</option>
+          <option value="repeat">Repeat</option>
+          {!job && <option value="folder">When files appear in a folder</option>}
+          <option value="mail">When matching mail arrives</option>
+        </select>
+        {f.mode === 'repeat'
+          ? <SchedulePicker value={sched} onChange={setSched} timezone={job?.timezone} />
+          : f.mode === 'folder'
+            ? <input type="text" placeholder="Folder, e.g. ~/Downloads" value={f.dir} aria-label="Folder to watch"
+                onChange={(e) => setF({ ...f, dir: e.target.value })} />
+            : f.mode === 'mail'
+            ? <input type="text" placeholder="Gmail search, e.g. from:landlord" value={f.query} maxLength={500}
+                aria-label="Gmail search" title="Checked every five minutes; mail already there when you save does not count"
+                onChange={(e) => setF({ ...f, query: e.target.value })} />
+            : <>
+                {spent && <span className="muted small">Run again at…</span>}
+                <input type="datetime-local" value={f.when} aria-label={spent ? 'Run again at' : 'When it should run'}
+                  onChange={(e) => setF({ ...f, when: e.target.value })} />
+              </>}
+        {job && <button className="ghost-btn sm" type="button" onClick={onDone}>Cancel</button>}
+        <button className="primary-btn sm" type="submit" disabled={!ready || busy}>{job ? 'Save' : 'Schedule'}</button>
       </div>
-      <label className="chip-check-row small">
-        <input type="checkbox" checked={f.onlyTools} onChange={(e) => setF({ ...f, onlyTools: e.target.checked })} />
-        <span>Only allow some tools</span>
-      </label>
-      {f.onlyTools && <ToolPicker value={picked} onChange={setPicked} />}
+      {err && <p className="msg-error">{err}</p>}
+      {!job && (
+        <label className="chip-check-row small">
+          <input type="checkbox" checked={f.desk} onChange={(e) => setF({ ...f, desk: e.target.checked })} />
+          <span>Start a desk</span>
+        </label>
+      )}
+      {!job && f.desk && (
+        <select value={f.autonomy} aria-label="How the desk works"
+          onChange={(e) => setF({ ...f, autonomy: e.target.value as 'plan' | 'propose' })}>
+          {AUTONOMY.filter((a) => a.value !== 'ask').map((a) => <option key={a.value} value={a.value} title={a.hint}>{a.label}</option>)}
+        </select>
+      )}
+      {!job && !f.desk && (
+        <label className="chip-check-row small">
+          <input type="checkbox" checked={f.onlyTools} onChange={(e) => setF({ ...f, onlyTools: e.target.checked })} />
+          <span>Only allow some tools</span>
+        </label>
+      )}
+      {!job && f.onlyTools && !f.desk && <ToolPicker value={picked} onChange={setPicked} />}
     </form>
   )
 }
 
 /** Cards a bare Allow cannot decide: a plan has steps to read and edit, a question wants an answer. These, and any card
  * of a desk, open where they are decided instead. */
-const OPEN_ONLY = new Set(['propose_plan', 'desk_ask'])
+const OPEN_ONLY = new Set(['propose_plan', 'desk_ask', 'ask_user'])
 
 export default function AgentInbox(): JSX.Element | null {
   const box = useStore((s) => s.agentInbox)
   const jobs = useStore((s) => s.jobs)
-  const { approveTool, refreshJobs, setJobEnabled, setView, openFiles, openDoc, openDesk, selectChat, setLibraryTab, setMemoryMode, openSettings, markDeskSeen } = useStore()
+  const { approveTool, refreshJobs, setJobEnabled, setView, openFiles, openDoc, openDesk, selectChat, setLibraryTab, setMemoryMode, openSettings, markDeskSeen, markInboxRunSeen, rejectJobProposals } = useStore()
   const [showJobs, setShowJobs] = useState(false)
   const [adding, setAdding] = useState(false)
   useEffect(() => { void refreshJobs() }, [refreshJobs])  // once, so the Scheduled count is real before it is opened
@@ -369,6 +581,14 @@ export default function AgentInbox(): JSX.Element | null {
   const paused = box.needs_you.paused_jobs ?? []
   const deskRows = box.needs_you.desks ?? []
   const elsewhere = box.needs_you.elsewhere ?? []
+  // A job with several pending proposals gets one "Reject all" row, so a noisy job is one click to clear.
+  const perJob = new Map<string, { name: string; n: number }>()
+  for (const p of proposals) {
+    if (!p.job_id) continue
+    const g = perJob.get(p.job_id) ?? { name: p.source?.name ?? 'A deleted job', n: 0 }
+    perJob.set(p.job_id, { ...g, n: g.n + 1 })
+  }
+  const bulk = [...perJob.entries()].filter(([, g]) => g.n > 1)
 
   const goDesk = (deskId: string): void => {
     setView('cowork')
@@ -406,6 +626,7 @@ export default function AgentInbox(): JSX.Element | null {
         {box.counts.needs_you > 0 && <span className="chip">{box.counts.needs_you} need you</span>}
         <span style={{ flex: 1 }} />
         {box.scheduler.next_due_at && <span className="muted small"><Timer size={11} /> next job {fmtWhen(box.scheduler.next_due_at)}</span>}
+        {box.scheduler.wake_unavailable && <span className="muted small" title="This Mac is not woken for a job; a slot missed while asleep runs as soon as it wakes">Jobs run while the Mac is awake and Grain is open</span>}
         <button className={`ghost-btn sm ${showJobs ? 'on' : ''}`} aria-expanded={showJobs} onClick={toggleJobs}>
           Scheduled ({jobs.length})
         </button>
@@ -482,6 +703,19 @@ export default function AgentInbox(): JSX.Element | null {
                 </div>
               </li>
             ))}
+            {bulk.map(([jobId, g]) => (
+              <li className="inbox-item" key={`bulk-${jobId}`}>
+                <div className="inbox-item-head">
+                  <span className="inbox-job">{g.name}</span>
+                  <span className="chip">{g.n} proposals</span>
+                  <span style={{ flex: 1 }} />
+                  <button className="ghost-btn sm"
+                    onClick={() => { if (confirm(`Reject all ${g.n} proposals from “${g.name}”?`)) void rejectJobProposals(jobId) }}>
+                    <X size={13} /> Reject all from {g.name}
+                  </button>
+                </div>
+              </li>
+            ))}
             {proposals.map((p) => (
               <ProposalCard key={p.id} p={p} onOpen={
                 p.source?.kind === 'desk' ? () => goDesk((p.source as { id: string }).id)
@@ -505,7 +739,10 @@ export default function AgentInbox(): JSX.Element | null {
         <div className="inbox-group">
           <h5>While you were away <span className="muted small">
             {box.counts.late > 0 ? `${box.counts.late} late · ` : ''}{box.counts.failed > 0 ? `${box.counts.failed} failed · ` : ''}
-            {away.length} run{away.length === 1 ? '' : 's'}</span></h5>
+            {away.length} run{away.length === 1 ? '' : 's'}</span>
+            {(box.counts.unseen_runs ?? 0) > 0 && (
+              <button className="link small" style={{ marginLeft: 'auto' }} onClick={() => void markInboxRunSeen(null)}>Mark all read</button>
+            )}</h5>
           <ul className="inbox-list">{away.map((r) => <RunCard key={r.run_id} r={r} />)}</ul>
         </div>
       )}

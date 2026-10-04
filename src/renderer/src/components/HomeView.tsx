@@ -8,6 +8,7 @@ import { api } from '../lib/api'
 import { formatOffset, offerableCandidates } from '../lib/transcript'
 import { HOME_MODULES, homeModuleOn } from '../modules'
 import AgentInbox from './AgentInbox'
+import { inboxBadge } from '../lib/inboxBadge'
 import type { Meeting, MeetingCandidate } from '@shared/types'
 import { moduleHome } from '../shell/registry'
 import ProjectChip from './ProjectChip'
@@ -190,6 +191,7 @@ export default function HomeView(): JSX.Element {
   const [watchBusy, setWatchBusy] = useState(false)
 
   const on = (key: string): boolean => homeModuleOn(settings, key)
+  const inboxNew = useStore((s) => inboxBadge(s.agentInbox))
   const toggleModule = (key: string): void => {
     void saveSettings({ homeWidgets: { ...(settings.homeWidgets ?? {}), [key]: !on(key) } })
   }
@@ -198,6 +200,17 @@ export default function HomeView(): JSX.Element {
     void refreshDashboard()
     if (!useStore.getState().tasksSync) void useStore.getState().refreshTasksSync()
   }, [refreshDashboard])
+  // Today left open overnight: coming back to the window re-reads it, and a new day also brings a new recap.
+  useEffect(() => {
+    let day = new Date().toDateString()
+    const onFocus = (): void => {
+      void refreshDashboard()
+      const now = new Date().toDateString()
+      if (now !== day) { day = now; void refreshRecap() }
+    }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [refreshDashboard, refreshRecap])
 
   const brief = async (): Promise<void> => {
     newChat(null)
@@ -282,7 +295,8 @@ export default function HomeView(): JSX.Element {
           </div>
         </div>
 
-        {on('agent') && <AgentInbox />}
+        {/* The sidebar badge points here, so a hidden inbox still shows while it has something to show. */}
+        {(on('agent') || inboxNew > 0) && <AgentInbox />}
 
         {on('recap') && recapOpen && !hasModelKey(settings) && (
           <p className="muted widget-connect">The daily recap needs a model API key. <button className="link" onClick={() => useStore.getState().openSettings('provider')}>Add a key</button></p>

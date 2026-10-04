@@ -1,15 +1,25 @@
-import { useEffect, useRef, type ReactNode } from 'react'
-import { ArrowUp, Square, Paperclip, Loader2 } from 'lucide-react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import type { Command } from '@shared/types'
+import { api } from '../lib/api'
+import CaretMenu from '../features/notes/CaretMenu'
+import { composerSlash, slashMenuKey } from '../features/notes/slash'
+import { ArrowUp, Square, Paperclip, Loader2, EyeOff } from 'lucide-react'
 import PlanModeToggle from './PlanModeToggle'
 import SkipPermissionsToggle from './SkipPermissionsToggle'
 import { uploadNote } from '../lib/uploadNote'
 import { hasModelKey } from '../lib/modelLabel'
 import { useStore, useIsStreaming, useIsStopping } from '../store'
 import SmartTextarea from './SmartTextarea'
+import MicButton from './MicButton'
+import { dictationText } from '../features/docrec/dictation'
 import { useOnboarding } from './onboarding/onboardingStore'
 import { COMPOSER_INSERT_EVENT } from '../lib/composerInsert'
 import { classifyPaste, messageCharLimit } from '../lib/messageLimit'
+import { compactCommand, compactNow } from '../lib/compact'
 import { appendToDraft, clearRedirect, composerKey, dropDraft, getDraft, moveDraft, restoreDraft, useDraft } from '../lib/drafts'
+import { promptList, recallKey, step, type Recall } from '../lib/promptHistory'
+import { enqueue, enterAction, removeQueued, requeueFront, sendNext, updateQueue, type QueuedItem } from '../lib/followQueue'
+import QueueTray from './QueueTray'
 
 interface ComposerProps {
   conversationId?: string
@@ -44,8 +54,48 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   const openWizard = useOnboarding((s) => s.openWizard)
   const uploadDocuments = useStore((s) => s.uploadDocuments)
   const noteUntrustedUpload = useStore((s) => s.noteUntrustedUpload)
+  // The follow-up queue is a chat's: the page agent panel (`onSend`) keeps steering on Enter.
+  const queueId = !onSend && activeId ? activeId : null
+  const cardPending = useStore((s) => !!queueId && (s.sessions[queueId]?.pendingApprovals ?? 0) > 0)
+  const desk = useStore((s) => !!queueId && s.desks.some((d) => d.conversation_id === queueId))
+  /** A steer that would decline an open card, waiting on the user's yes. `item` when it came from the tray. */
+  const [confirm, setConfirm] = useState<{ item?: QueuedItem } | null>(null)
+  useEffect(() => { if (!cardPending) setConfirm(null) }, [cardPending])
+  // Private is fixed when the chat is created, so it is a switch only on a draft and a label after.
+  const chatPrivate = useStore((s) => (activeId ? !!s.sessions[activeId]?.conversation.settings.private : s.draftPrivate))
+  const setChatSettings = useStore((s) => s.setChatSettings)
 
   useEffect(() => { box.current?.querySelector('textarea')?.focus() }, [activeId])
+
+  // Saved commands for the '/' menu, read once per mount. Picking one types `/name `; the backend fills the
+  // template when the turn goes to the model (commands.expand), so nothing runs until the user sends.
+  const [commands, setCommands] = useState<Command[]>([])
+  useEffect(() => { api.commands.list().then(setCommands).catch(() => undefined) }, [])
+  const [slashActive, setSlashActive] = useState(0)
+  const [slashClosedAt, setSlashClosedAt] = useState<string | null>(null) // Esc hides the menu until the text changes
+  const found = slashClosedAt === text ? null : composerSlash(text, commands)
+  const slash = found?.length ? found : null
+  useEffect(() => setSlashActive(0), [text])
+
+  /** Up/Down through this chat's earlier prompts (lib/promptHistory.ts); null when not recalling. */
+  const recall = useRef<Recall | null>(null)
+  useEffect(() => { recall.current = null }, [key])
+
+  /** Handles the key when it is a recall step; returns whether it did. */
+  const onRecallKey = (e: React.KeyboardEvent<HTMLTextAreaElement>): boolean => {
+    if (e.nativeEvent.isComposing) return false
+    const ta = e.currentTarget
+    const act = recallKey(e.key, { value: text, selStart: ta.selectionStart, selEnd: ta.selectionEnd, streaming, modified: e.shiftKey || e.altKey || e.metaKey || e.ctrlKey }, recall.current)
+    if (act === 'exit') { recall.current = null; e.preventDefault(); return true }
+    if (!act) return false
+    const s = useStore.getState()
+    const next = step(promptList(s.sessions[conversationId ?? s.focusedConversationId ?? '']?.conversation.messages ?? []), recall.current, text, act)
+    if (!next) return false
+    e.preventDefault()
+    recall.current = next.recall
+    setText(next.text)
+    return true
+  }
 
   /** Stop, then hand the keyboard back: the button that was pressed is about to be replaced or disabled. */
   const halt = (): void => {
@@ -116,22 +166,48 @@ export default function Composer({ conversationId, footer, compact = false, onSe
     }
   }
 
+  /** A dictated clip goes in at the caret, read from the box as it is now (the clip took a while). Never sent. */
+  const dictate = (raw: string): void => {
+    const ta = box.current?.querySelector('textarea')
+    const cur = ta?.value ?? text
+    const at = Math.min(ta?.selectionStart ?? cur.length, cur.length)
+    const ins = dictationText(raw, cur.slice(0, at))
+    if (!ins) return
+    setText(cur.slice(0, at) + ins + cur.slice(at))
+    requestAnimationFrame(() => { ta?.focus(); ta?.setSelectionRange(at + ins.length, at + ins.length) })
+  }
+
   /**
    * The draft is cleared optimistically and handed back if `send` refuses it. Typed text is never
    * dropped: a draft written since goes after the returned one, under the key the composer resolves
    * at that moment (a chat created by this send included). Mid-reply, `send` steers the live run
    * instead of refusing, so the composer stays open while the assistant works.
    */
-  const submit = async (): Promise<void> => {
-    if (!text.trim()) return
+  const deliver = async (): Promise<void> => {
     const k0 = key
-    const t = text
+    const t = getDraft(k0)?.text ?? ''
+    if (!t.trim()) return
+    // "/compact [focus]" summarizes this chat's history instead of sending a message.
+    const focus = onSend ? null : compactCommand(t)
+    if (focus !== null) {
+      const { toast } = useStore.getState()
+      if (!activeId) return toast('Nothing to compact yet: this chat has no history.', 'info')
+      try {
+        const res = await compactNow(activeId, focus)
+        dropDraft(k0)
+        toast(res.compacted ? 'Earlier messages were summarized.' : 'Nothing old enough to compact yet.', 'info')
+      } catch (e) {
+        toast(`Could not compact: ${(e as Error).message}`, 'error')
+      }
+      return
+    }
     const entry = getDraft(k0)
     // The untrusted mark an upload left on a row-less draft is consumed by the next send; after a
     // relaunch only the draft remembers it, so it is re-armed here before the send reads it.
     if (entry?.taint && useStore.getState().uploadTaintTarget === null) {
       useStore.setState({ uploadTaintTarget: onSend ? 'page' : 'draft', uploadTaintSource: entry.taint })
     }
+    recall.current = null
     clearRedirect(k0)
     dropDraft(k0)
     const ok = await (onSend ? onSend(t) : send(t, conversationId)).catch(() => false)
@@ -141,10 +217,73 @@ export default function Composer({ conversationId, footer, compact = false, onSe
     if (!ok) restoreDraft(k1, t)
   }
 
+  /** A queued item sent ahead of its turn: a steer while the reply runs. Refused, it goes back in front. */
+  const deliverItem = async (item: QueuedItem): Promise<void> => {
+    if (!queueId) return
+    updateQueue(queueId, (q) => removeQueued(q, item.id))
+    const ok = await send(item.text, conversationId ?? queueId).catch(() => false)
+    if (!ok) updateQueue(queueId, (q) => requeueFront(q, item))
+  }
+
+  /**
+   * Enter (and the send button) while a reply runs queues the text as the next turn; ⌘Enter steers the
+   * live reply. A steer while a card waits declines that card, so it asks first (lib/followQueue.ts).
+   */
+  const submit = (mod = false): void => {
+    if (!text.trim()) return
+    // "/compact" runs now, never queued: it is not a message for the reply.
+    const action = queueId && compactCommand(text) === null ? enterAction({ busy: streaming, mod, cardPending, desk }) : 'send'
+    if (action === 'queue' && queueId) {
+      updateQueue(queueId, (q) => enqueue(q, text, crypto.randomUUID()))
+      clearRedirect(key)
+      dropDraft(key)
+    } else if (action === 'confirm-steer') setConfirm({})
+    else void deliver()
+  }
+
+  const sendNow = (item: QueuedItem): void => {
+    if (streaming && cardPending && !desk) setConfirm({ item })
+    else void deliverItem(item)
+  }
+
+  const resume = (): void => {
+    if (!queueId) return
+    updateQueue(queueId, (q) => ({ ...q, paused: false }))
+    // Idle, nothing will finish to pull the next one: it goes now.
+    if (!streaming) sendNext(queueId, {}, (t) => send(t, conversationId ?? queueId))
+  }
+
+  const confirmSteer = (): void => {
+    const c = confirm
+    setConfirm(null)
+    if (c?.item) void deliverItem(c.item)
+    else void deliver()
+  }
+
+  const queueInstead = (): void => {
+    const c = confirm
+    setConfirm(null)
+    if (!c?.item) submit(false)
+  }
+
+  const sendLabel = !streaming ? 'Send' : queueId ? 'Queue a follow-up (⌘↵ steers now)' : 'Steer the reply'
+
   return (
     <div className={compact ? 'composer-wrap compact' : 'composer-wrap'}>
       {!hasKey && (
         <div className="notice">Finish setup to start chatting. <button className="link" onClick={openWizard}>Finish setup</button></div>
+      )}
+      {queueId && (
+        <QueueTray conversationId={queueId} busy={streaming} onSendNow={sendNow} onResume={resume}
+          onEdit={(t) => { appendToDraft(key, t); box.current?.querySelector('textarea')?.focus() }} />
+      )}
+      {confirm && (
+        <div className="notice queue-confirm" role="alertdialog" aria-label="Decline the open card?">
+          Sending now declines the open card and tells the assistant why. To change the card instead (add a cc, move a time), edit it in place.{' '}
+          <button className="link danger" onClick={confirmSteer}>Decline and send</button>{' '}
+          {!confirm.item && <><button className="link" onClick={queueInstead}>Queue instead</button>{' '}</>}
+          <button className="link" onClick={() => setConfirm(null)}>Cancel</button>
+        </div>
       )}
       <div
         className="composer"
@@ -162,23 +301,39 @@ export default function Composer({ conversationId, footer, compact = false, onSe
           maxHeight={240}
           minChars={8}
           value={text}
-          onChange={setText}
+          onChange={(v) => { recall.current = null; setText(v) }}
           onPaste={onPaste}
-          placeholder={streaming ? 'Steer the reply…' : placeholder}
+          placeholder={streaming ? (queueId ? 'Queue a follow-up… ⌘↵ to steer now' : 'Steer the reply…') : placeholder}
+          noGhost={!!slash}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void submit() }
-            // Escape ends the reply; while an input method is composing it belongs to the method.
+            const act = slash && !e.shiftKey && !e.nativeEvent.isComposing ?slashMenuKey(e.key, slashActive, slash.length) : null
+            if (act) {
+              e.preventDefault()
+              if (act.kind === 'move') setSlashActive(act.active)
+              else if (act.kind === 'pick') setText(`/${slash![slashActive].name} `)
+              else setSlashClosedAt(text)
+            }
+            else if (onRecallKey(e)) return
+            else if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit(e.metaKey || e.ctrlKey) }
+            // Escape closes the decline prompt first, then ends the reply; while an input method is composing it belongs to the method.
+            else if (e.key === 'Escape' && confirm && !e.nativeEvent.isComposing) { e.preventDefault(); setConfirm(null) }
             else if (e.key === 'Escape' && streaming && !e.nativeEvent.isComposing) { e.preventDefault(); halt() }
           }}
         />
+        {slash && (
+          <CaretMenu label="Saved commands" active={slashActive} onHover={setSlashActive}
+            onPick={(i) => setText(`/${slash[i].name} `)}
+            items={slash.map((c) => ({ key: c.id, label: `/${c.name}`, hint: ((c.subtask ? 'subtask · ' : '') + c.description).slice(0, 48) }))} />
+        )}
         <div className="composer-actions">
+          <MicButton scope={box} onText={dictate} />
           {streaming && (
             <button className="send stop" title={stopping ? 'Stopping…' : 'Stop (Esc)'} aria-label={stopping ? 'Stopping' : 'Stop'} aria-busy={stopping} disabled={stopping} onClick={halt}>
               {stopping ? <Loader2 size={14} className="spin" /> : <Square size={14} />}
             </button>
           )}
           {(!streaming || text.trim()) && (
-            <button className="send" title={streaming ? 'Steer the reply' : 'Send'} aria-label={streaming ? 'Steer the reply' : 'Send'} disabled={!text.trim()} onClick={() => void submit()}><ArrowUp size={16} /></button>
+            <button className="send" title={sendLabel} aria-label={sendLabel} disabled={!text.trim()} onClick={() => submit()}><ArrowUp size={16} /></button>
           )}
         </div>
       </div>
@@ -191,6 +346,11 @@ export default function Composer({ conversationId, footer, compact = false, onSe
             <SkipPermissionsToggle conversationId={conversationId} />
           </>
         )}
+        {!onSend && (activeId
+          ? chatPrivate && <span className="ghost-btn private-chat on" title="Nothing in this chat is remembered, learned from, or found by chat search"><EyeOff size={13} /> Private</span>
+          : <button className={`ghost-btn private-chat ${chatPrivate ? 'on' : ''}`} aria-pressed={chatPrivate}
+              title="Private: this chat reads no memories and teaches nothing, and chat search skips it. Fixed once the first message is sent."
+              onClick={() => void setChatSettings({ private: !chatPrivate })}><EyeOff size={13} /> Private</button>)}
         {footer}
       </div>
     </div>

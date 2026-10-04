@@ -22,6 +22,7 @@ import { WIKI_HREF, titleKey } from '../features/notes/wikilinks'
 import RecordingChip from '../features/docrec/RecordingChip'
 import { recordingIdFromHref } from '../features/docrec/recordingBlock'
 import { taskLineMap } from '../features/notes/tasks'
+import remarkCites, { citeNumber, citeTitle, type CiteInfo } from '../lib/remarkCites'
 import '../styles/notes.css'
 import 'katex/dist/katex.min.css'
 
@@ -166,6 +167,9 @@ export interface MarkdownPreviewProps {
   onToggleTask?: (line: number) => void
   /** Opt in to recording blocks (`grain-recording:ID` links) as live chips; called with the recording id. */
   onRecording?: (id: string) => void
+  /** Excerpt numbers this reply may cite: `[n]` for one of them becomes a chip that calls onCite. */
+  cites?: ReadonlyMap<number, CiteInfo>
+  onCite?: (n: number) => void
 }
 
 /** One top-level block of the source. Memoised on its text, so finished blocks cost nothing per token. */
@@ -185,7 +189,7 @@ const MdBlock = memo(function MdBlock({ source, streaming, remark, components, u
   )
 })
 
-const MarkdownInner = memo(function MarkdownInner({ source, streaming = false, onWikilink, knownTitles, onToggleTask, onRecording }: MarkdownPreviewProps): JSX.Element {
+const MarkdownInner = memo(function MarkdownInner({ source, streaming = false, onWikilink, knownTitles, onToggleTask, onRecording, cites, onCite }: MarkdownPreviewProps): JSX.Element {
   // `$$x$$` written on one line is display maths to everyone except remark-math; see mathBlocks.ts.
   // A streaming message first has its half-written tail closed (streamRepair.ts); a finished one is parsed as stored.
   const md = useMemo(() => normalizeMathBlocks(streaming ? repairStreamingMarkdown(source) : source), [source, streaming])
@@ -197,8 +201,11 @@ const MarkdownInner = memo(function MarkdownInner({ source, streaming = false, o
   taskRef.current = onToggleTask
   const recRef = useRef(onRecording)
   recRef.current = onRecording
+  const citeRef = useRef(onCite)
+  citeRef.current = onCite
   const rec = !!onRecording
   const wiki = !!onWikilink
+  const cite = !!onCite && !!cites?.size
   const tasks = !!onToggleTask
   const known = useMemo(() => (knownTitles ? new Set([...knownTitles].map(titleKey)) : null), [knownTitles])
   const lineMap = useMemo(() => (tasks ? taskLineMap(source, md) : null), [tasks, source, md])
@@ -206,12 +213,20 @@ const MarkdownInner = memo(function MarkdownInner({ source, streaming = false, o
   // Task toggles address a line of the whole source, so a document with live checkboxes stays one block.
   const blocks = useMemo(() => (tasks ? [md] : splitMarkdown(md)), [tasks, md])
 
-  const remark = useMemo(() => (wiki ? [...REMARK, remarkWikilinks] : REMARK), [wiki])
+  const remark = useMemo((): PluggableList => [...REMARK, ...(wiki ? [remarkWikilinks] : []),
+    ...(cite ? [[remarkCites, { known: new Set(cites!.keys()) }] as never] : [])], [wiki, cite, cites])
   const components = useMemo((): Components => {
-    if (!wiki && !tasks && !rec) return MD_COMPONENTS
+    if (!wiki && !tasks && !rec && !cite) return MD_COMPONENTS
     const c: Components = { ...MD_COMPONENTS }
-    if (wiki || rec) {
+    if (wiki || rec || cite) {
       c.a = (p) => {
+        const n = cite ? citeNumber(p.href) : null
+        if (n !== null) {
+          return (
+            <button type="button" className={`cite-chip${cites?.get(n)?.weak ? ' weak' : ''}`} title={citeTitle(cites?.get(n))} aria-label={`Source ${n}: ${citeTitle(cites?.get(n))}`}
+              onClick={() => citeRef.current?.(n)}>{n}</button>
+          )
+        }
         const recId = rec ? recordingIdFromHref(p.href) : null
         if (recId) return <RecordingChip id={recId} label={textOf(p.children)} onOpen={(i) => recRef.current?.(i)} />
         const target = wikiTarget(p.href)
@@ -234,7 +249,7 @@ const MarkdownInner = memo(function MarkdownInner({ source, streaming = false, o
       }
     }
     return c
-  }, [wiki, rec, tasks, known, lineMap])
+  }, [wiki, rec, tasks, cite, cites, known, lineMap])
 
   const body = (
     <>

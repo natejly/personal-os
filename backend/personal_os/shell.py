@@ -30,7 +30,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from . import egress, redact, sandbox
+from . import egress, mac, redact, sandbox
 from .db import new_id
 
 log = logging.getLogger(__name__)
@@ -58,8 +58,8 @@ class ShellError(Exception):
 def taint(ctx: dict[str, Any], src: str) -> None:
     """Mark the reply as having read untrusted text, with the source named so an approved plan can predict it."""
     ctx["tainted"] = True
-    if src not in ctx.setdefault("taint_sources", []):
-        ctx["taint_sources"].append(src)
+    # Appended even when already listed: the chat loop fences a result when this list grew during the call.
+    ctx.setdefault("taint_sources", []).append(src)
 
 
 def net_blocked_note(hosts: list[str]) -> str:
@@ -104,11 +104,15 @@ def _remember_cwd(conversation_id: str | None, p: str) -> None:
 
 
 def granted_roots(settings: dict[str, Any], desk_root: Path | None) -> list[Path]:
-    """Desk workspace first, then each workspaceRoots entry that exists as an absolute folder."""
+    """Desk workspace first, then each workspaceRoots entry that exists as an absolute folder `mac.allowed_root` accepts,
+    so a root stored before that check (the home folder, "/") never widens what the shell may write."""
     out: list[Path] = [_real(desk_root)] if desk_root else []
     for r in settings.get("workspaceRoots") or []:
         if isinstance(r, str) and r.strip() and os.path.isabs(os.path.expanduser(r.strip())):
-            p = _real(r.strip())
+            try:
+                p = mac.allowed_root(r)
+            except mac.LocalPathError:
+                continue
             if p.is_dir() and p not in out:
                 out.append(p)
     return out
@@ -251,7 +255,8 @@ class Job:
     def info(self) -> dict[str, Any]:
         return {"job_id": self.id, "pid": self.pid, "pgid": self.pgid, "cwd": self.cwd, "run_id": self.run_id,
                 "conversation_id": self.conversation_id, "command": self.command[:200], "status": self.status,
-                "exit_code": self.exit_code, "started": self.started}
+                "exit_code": self.exit_code, "started": self.started, "finished": self.finished,
+                "background": self.background, "total": self.total}
 
 
 class ShellJobs:
@@ -262,6 +267,7 @@ class ShellJobs:
         self.jobs: dict[str, Job] = {}
         self.notes: dict[str, list[str]] = {}
         self.on_note: Any = None       # called with the conversation id when a completion note is queued (wakes an idle desk)
+        self.on_change: Any = None     # called with no arguments when a job starts, ends or is killed (the Running list)
         self.sandbox_failed = False    # the OS refused to apply the profile once: unsandboxed may now be asked for
         self.egress = egress.Egress()  # the allowlisting proxy; binds its port on first use
         self.state_path = state_path
@@ -328,6 +334,25 @@ class ShellJobs:
             return None  # one chat cannot poll or kill another chat's job
         return j
 
+    def list(self) -> list[dict[str, Any]]:
+        """Every tracked job for the user's Running view: live and orphaned first, newest first within each."""
+        return [j.info() for j in sorted(self.jobs.values(),
+                                         key=lambda j: (j.status not in ("running", "orphaned"), -j.started))]
+
+    def tail(self, job: Job, limit: int = 4000) -> dict[str, Any]:
+        """The last `limit` chars of a job's output. Reads the buffer directly, so the model's poll cursor stays put."""
+        out = {**job.info(), "output": _scrub(job.buf[-limit:]) if limit > 0 else ""}
+        if job.status == "orphaned":
+            out["note"] = "Started by an earlier run of the app: its output is gone. Kill stops it."
+        return out
+
+    def _changed(self) -> None:
+        if self.on_change:
+            try:
+                self.on_change()
+            except Exception:  # noqa: BLE001 - a UI refresh must never fail a shell job
+                pass
+
     def running_background(self) -> int:
         return sum(1 for j in self.jobs.values() if j.background and j.status in ("running", "orphaned"))
 
@@ -358,6 +383,7 @@ class ShellJobs:
         job.pgid = job.pid  # start_new_session makes the child its own group leader
         self.jobs[job.id] = job
         self._persist()
+        self._changed()
         job.pump = asyncio.create_task(self._pump(job))
         job.watch = asyncio.create_task(self._watch(job, timeout))
         return job
@@ -407,6 +433,7 @@ class ShellJobs:
         job.finished = time.time()
         self._cleanup(job)
         self._persist()
+        self._changed()
         job.promoted.set()
         if job.notify and not job.notified and job.status != "killed":
             job.notified = True
@@ -477,8 +504,9 @@ class ShellJobs:
                 _signal_group(job.pgid, signal.SIGKILL)
             job.status, job.finished = "killed", time.time()
             self._persist()
+            self._changed()
             return job.status
-        if job.live():
+        if job.live():  # _watch publishes the end
             job.status = "killed"
             await self._terminate(job)
             if job.watch:
@@ -607,6 +635,10 @@ def register(tb: Any) -> None:
             return tool_error("shell_run needs a command.", field="command", example={"command": "ls -la"})
         if on_timeout not in ("background", "kill"):
             return tool_error("on_timeout must be 'background' or 'kill'.", field="on_timeout", example={"on_timeout": "kill"})
+        # A chat's background jobs end with its reply (only a desk's outlive a turn), so in a chat a timeout kills.
+        in_desk = bool(ctx.get("desk_id"))
+        if not in_desk:
+            on_timeout = "kill"
         # Where it runs: an explicit cwd wins; otherwise where the last command in this conversation ended, when that is
         # still inside a granted root (the roots may have changed since), otherwise the default folder.
         roots = granted_roots(s, desk_root(ctx))
@@ -694,7 +726,8 @@ def register(tb: Any) -> None:
         if background:
             return {"job_id": job.id, "pid": job.pid, "background": True, **base,
                     "note": "Running in the background. shell_poll(job_id) reads new output; shell_kill(job_id) stops it."
-                            + (" You are told when it finishes." if job.notify else "")}
+                            + (" You are told when it finishes." if job.notify and in_desk else "")
+                            + ("" if in_desk else " It is stopped when this reply ends, so finish with it before replying.")}
         t0 = time.time()
         try:
             await jobs.wait(job)
@@ -752,6 +785,7 @@ def register(tb: Any) -> None:
                     "behind result_id. Default timeout 120s (max 600s); then the command keeps running as a background job "
                     "(on_timeout=background, the default; poll it with shell_poll) or, with on_timeout=kill, the whole process "
                     "group is killed. For anything long-running pass background=true, then shell_poll and shell_kill with the job_id. "
+                    "Outside a desk, background jobs are stopped when the reply ends and a timeout always kills. "
                     "unsandboxed=true escapes the sandbox and always asks the user.",
                     _obj({"command": {"type": "string"}, "cwd": {"type": "string", "description": "A folder inside the working folder"},
                           "timeout_s": {"type": "integer", "default": 120}, "background": {"type": "boolean", "default": False},

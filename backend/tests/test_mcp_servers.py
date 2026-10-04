@@ -155,8 +155,8 @@ def test_transcripts_taint_the_run() -> None:
 def test_meeting_list_arms_the_external_gate() -> None:
     """A calendar-invite title reaching the model must force external tools to ask.
 
-    `gate` only matters for an external tool a chat or global override pinned to "on" (app.py's
-    always_chat/always_global): an untainted run leaves it at "on" and sends with no approval card.
+    Toolbox.effective caps every external tool at "ask", so `gate` sees "on" only from a caller that bypasses
+    effective() and passes a raw mode in; for that caller a tainted run must still turn it into a card.
     """
     tb = full_toolbox(MeetingRepo())
     ctx: dict[str, Any] = {"project_id": "p1"}

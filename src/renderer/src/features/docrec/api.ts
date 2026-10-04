@@ -1,4 +1,4 @@
-import { api, json, req } from '../../lib/api'
+import { api, json, NO_TIMEOUT, req } from '../../lib/api'
 import type { Doc, DocRecording, DocRecordingMode, DocRevision, FullMeeting } from '@shared/types'
 
 /**
@@ -34,7 +34,7 @@ export const docRecApi = {
   createLinked: (docId: string, title: string, mode: DocRecordingMode = 'record') =>
     req<FullMeeting>('/meetings', { method: 'POST', body: json({ title, doc_id: docId, doc_mode: mode }) }),
   summarize: (meetingId: string, body: SummarizeBody = {}) =>
-    req<SummarizeResult>(`/meetings/${meetingId}/summarize`, { method: 'POST', body: json(body) }),
+    req<SummarizeResult>(`/meetings/${meetingId}/summarize`, { method: 'POST', body: json(body) }, NO_TIMEOUT),
   /** The existing import: 202, and progress arrives through the segments poll. */
   importAudio: api.meetings.importAudio,
   // Re-exports of the meeting calls this feature uses, so components import from one place.

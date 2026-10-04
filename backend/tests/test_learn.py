@@ -66,6 +66,21 @@ def test_extracts_new_preference(monkeypatch: Any) -> None:
         assert out["updated"] == [] and out["removed"] == []
 
 
+def test_a_credential_never_lands_in_a_memory(monkeypatch: Any) -> None:
+    assert "Never store credentials" in learn.EXTRACT_PROMPT
+    with tempfile.TemporaryDirectory() as tmp:
+        db = Database(tmp)
+        memories, graph = Memories(db), Graph(db)
+        memories.create(None, "User banks with a credit union", kind="fact", source="auto")
+        out = _run(memories, graph, {
+            "memories": [{"content": "User's bank password is hunter2xyz", "kind": "fact"}],
+            "updates": [{"id": "M1", "content": "User banks with a credit union, password: s3cretPass", "kind": "fact"}],
+        }, monkeypatch)
+        stored = " ".join(m["content"] for m in memories.list(None))
+        assert out["memories"] and out["updated"]
+        assert "hunter2xyz" not in stored and "s3cretPass" not in stored and "[secret]" in stored
+
+
 def test_update_supersedes_instead_of_duplicating(monkeypatch: Any) -> None:
     with tempfile.TemporaryDirectory() as tmp:
         db = Database(tmp)

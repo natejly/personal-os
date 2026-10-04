@@ -9,6 +9,7 @@ that are mapped back server-side, so it cannot name a row it was not shown.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -68,7 +69,10 @@ def _norm_tokens(text: str) -> set[str]:
 
 
 def jaccard(a: str, b: str) -> float:
-    ta, tb = _norm_tokens(a), _norm_tokens(b)
+    return _jaccard_sets(_norm_tokens(a), _norm_tokens(b))
+
+
+def _jaccard_sets(ta: set[str], tb: set[str]) -> float:
     return len(ta & tb) / len(ta | tb) if ta and tb else 0.0
 
 
@@ -173,8 +177,9 @@ class Consolidator:
         rows = [m for m in self.memories.list(project_id, include_global=project_id != ALL) if not m["pinned"]]
         out: list[dict[str, Any]] = []
         uf = _UF()
+        toks = {m["id"]: _norm_tokens(m["content"]) for m in rows}  # once per memory, not once per pair
         for a, b in combinations(rows, 2):
-            if a["project_id"] == b["project_id"] and jaccard(a["content"], b["content"]) >= JACCARD:
+            if a["project_id"] == b["project_id"] and _jaccard_sets(toks[a["id"]], toks[b["id"]]) >= JACCARD:
                 uf.union(a["id"], b["id"])
         groups: dict[str, list[dict[str, Any]]] = {}
         for m in rows:
@@ -207,7 +212,8 @@ class Consolidator:
     # ---------------- propose ----------------
     async def propose(self, settings: dict[str, Any], project_id: str | None, model: str) -> list[dict[str, Any]]:
         """Ask the model about each batch of candidates and store what survives validation as *pending*."""
-        cands = self.candidates(project_id)
+        # The pair scans are O(n^2): off the event loop so a long memory list never stalls streaming replies.
+        cands = await asyncio.to_thread(self.candidates, project_id)
         created: list[dict[str, Any]] = []
         known = self._known_sets()
         for i in range(0, len(cands), BATCH):

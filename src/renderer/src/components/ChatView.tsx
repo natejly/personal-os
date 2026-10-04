@@ -17,6 +17,7 @@ import { useOnboarding } from './onboarding/onboardingStore'
 import { firstPrompts } from './onboarding/steps'
 import { useStickToBottom } from '../lib/stickToBottom'
 import { dayKey, dayLabel } from '../lib/chatMeta'
+import { chatBrowserSession, latestBrowserMessage } from '../lib/browserApproval'
 
 function greeting(): string {
   const h = new Date().getHours()
@@ -55,6 +56,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
   const lastLen = msgs[msgs.length - 1]?.content.length ?? 0
 
   const last = msgs[msgs.length - 1]
+  const watchId = latestBrowserMessage(msgs)
   const { stick, unseen, jump } = useStickToBottom(scrollRef, { resetKey: convo?.id ?? conversationId ?? null, tailUserId: last?.role === 'user' ? last.id : null, rows: msgs.length + pending.length + (draftPending ? 1 : 0) })
 
   // Only the full-window chat is a "page"; a chat window on the canvas is one of many on screen.
@@ -117,7 +119,9 @@ export default function ChatView({ conversationId }: { conversationId?: string }
                 {msgs.map((m, i) => (
                   <Fragment key={m.id}>
                     {m.created_at > 0 && (i === 0 || dayKey(m.created_at) !== dayKey(msgs[i - 1].created_at)) && <div className="day-divider" role="separator">{dayLabel(m.created_at)}</div>}
-                    <MessageView message={m} streaming={isStreamingHere && streamingMessageId === m.id} last={m.id === last?.id} editable={m.role === 'user' && !isStreamingHere} showContextChips />
+                    <MessageView message={m} streaming={isStreamingHere && streamingMessageId === m.id} last={m.id === last?.id} editable={m.role === 'user' && !isStreamingHere} showContextChips
+                      branchable={m.created_at > 0 && !convo?.settings.deskId && !convo?.settings.job_id}
+                      browserSession={m.id === watchId ? chatBrowserSession(m.conversation_id) : undefined} />
                   </Fragment>
                 ))}
                 {pending.map((p) => <PendingUserMessage key={p.key} text={p.text} />)}

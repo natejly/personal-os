@@ -442,6 +442,55 @@ def test_accepting_a_proposal_executes_it_once_and_re_accepting_does_not_double_
     j("POST", "/proposals/nope/accept", expect=404)
 
 
+def _refused_edit_leaves_it_pending(pid: str, args: dict[str, Any], expect: int) -> str:
+    detail = j("POST", f"/proposals/{pid}/accept", {"args": args}, expect=expect)["detail"]
+    row = proposals.get(pid)
+    assert row["status"] == "pending" and row["edited"] is False, "a refused edit decides nothing"
+    assert SENT == []
+    return detail
+
+
+def test_an_edited_proposal_faces_the_same_checks_as_an_edited_card() -> None:
+    p = _one_proposal("gmail_send", {"to": "a@example.com", "subject": "Hi", "body": "Body."})
+    assert p["editable"] is True
+    _refused_edit_leaves_it_pending(p["id"], {"to": "not an address", "subject": "Hi", "body": "Body."}, 400)
+    _refused_edit_leaves_it_pending(p["id"], {"to": "a@example.com", "subject": "Hi", "body": "Body.", "bcc_all": True}, 400)
+
+    doc = proposals.create(run_id=None, tool="gdocs_append", args={"document_id": "d1", "content": "notes"})
+    assert doc["editable"] is False, "the inbox offers no edit the accept would refuse"
+    _refused_edit_leaves_it_pending(doc["id"], {"document_id": "d2", "content": "other"}, 400)
+
+
+def test_an_edit_that_adds_a_denied_recipient_is_refused() -> None:
+    j("PUT", "/settings", {"permissionRules": {"allow": [], "ask": [], "deny": ["gmail_send(*@blocked.example)"]}})
+    try:
+        p = _one_proposal("gmail_send", {"to": "a@example.com", "subject": "Hi", "body": "Body."})
+        detail = _refused_edit_leaves_it_pending(
+            p["id"], {"to": "a@example.com, eve@blocked.example", "subject": "Hi", "body": "Body."}, 403)
+        assert "gmail_send(*@blocked.example)" in detail
+        assert j("POST", f"/proposals/{p['id']}/accept")["ok"] is True, "as proposed, it still goes through"
+        _flush_outbox()
+        assert SENT[0][1]["args"][0] == "a@example.com"
+    finally:
+        j("PUT", "/settings", {"permissionRules": {"allow": [], "ask": [], "deny": []}})
+
+
+def test_an_accept_that_fails_before_writing_goes_back_to_pending() -> None:
+    p = _one_proposal("calendar_create", {"summary": "Standup", "start": "2026-10-01T09:00"})
+
+    def expired(*args: Any, **kw: Any) -> Any:
+        raise RuntimeError("token expired")
+
+    appmod.google.calendar_create = expired
+    res = j("POST", f"/proposals/{p['id']}/accept")
+    assert res["ok"] is False and res["proposal"]["status"] == "pending", "nothing was written, so it can be accepted again"
+    assert any(x["id"] == p["id"] for x in proposals.list("pending"))
+    appmod.google.calendar_create = _recorder("calendar_create")
+    res = j("POST", f"/proposals/{p['id']}/accept")
+    assert res["ok"] is True and res["proposal"]["status"] == "accepted"
+    assert [n for n, _ in SENT] == ["calendar_create"]
+
+
 def test_a_proposal_can_be_edited_before_it_is_accepted_or_simply_rejected() -> None:
     p = _one_proposal("gmail_send", {"to": "a@example.com", "subject": "Draft", "body": "Too blunt."})
     edited = {"to": "a@example.com", "subject": "Draft", "body": "Warmer, and shorter."}
@@ -509,6 +558,35 @@ def test_a_propose_desk_files_an_external_call_as_a_proposal() -> None:
     j("POST", f"/proposals/{mine[0]['id']}/accept")
     _flush_outbox()
     assert [n for n, _ in SENT] == ["gmail_send"], "accepting it runs the call, outside the desk"
+
+
+def test_inbox_runs_carry_a_read_state_the_user_can_clear() -> None:
+    j("POST", "/inbox/seen_all")  # earlier tests' runs are in the same window
+    job = make_job("readstate", "0 * * * *", at=T0)
+    tick(T0 + HOUR)
+    rid = job_runs(job["id"])[0]["run_id"]
+
+    box = j("GET", "/inbox")
+    entry = next(e for e in box["while_you_were_away"] if e["run_id"] == rid)
+    assert entry["seen"] is False and box["counts"]["unseen_runs"] == 1
+
+    assert j("POST", f"/inbox/runs/{rid}/seen")["ok"] is True
+    box = j("GET", "/inbox")
+    assert next(e for e in box["while_you_were_away"] if e["run_id"] == rid)["seen"] is True
+    assert box["counts"]["unseen_runs"] == 0
+    j("POST", f"/inbox/runs/{rid}/seen")  # twice is fine
+
+    j("POST", "/inbox/runs/no-such-run/seen", expect=404)
+    chat = next((r for r in store.list(None, limit=500) if r["kind"] != "job"), None)
+    if chat:
+        j("POST", f"/inbox/runs/{chat['run_id']}/seen", expect=404)
+
+    tick(T0 + 2 * HOUR)
+    tick(T0 + 3 * HOUR)
+    assert j("GET", "/inbox")["counts"]["unseen_runs"] == 2
+    assert j("POST", "/inbox/seen_all")["marked"] >= 3
+    box = j("GET", "/inbox")
+    assert box["counts"]["unseen_runs"] == 0 and all(e["seen"] for e in box["while_you_were_away"])
 
 
 def test_a_failed_job_shows_up_as_a_failure_and_a_pending_approval_needs_you() -> None:
@@ -635,6 +713,49 @@ def test_a_spent_one_off_is_never_re_armed_and_is_rescheduled_by_moving_its_time
     assert len(job_runs(job["id"])) == 2
 
 
+def test_editing_a_job_over_the_api_re_arms_it_and_a_spent_one_off_runs_again_at_a_new_time() -> None:
+    made = j("POST", "/jobs", {"name": "edit me", "cron": "0 9 * * *", "prompt": "old", "timezone": "UTC", "enabled": True})
+    edited = j("PATCH", f"/jobs/{made['id']}", {"prompt": "new", "cron": "30 7 * * 1-5", "timezone": "America/New_York",
+                                                 "max_retries": 3, "name": "edited"})
+    assert (edited["prompt"], edited["name"], edited["max_retries"]) == ("new", "edited", 3)
+    assert edited["next_due_at"] == next_fire("30 7 * * 1-5", "America/New_York", edited["updated_at"])
+    assert edited["next_due_at"] != made["next_due_at"]
+    assert j("DELETE", f"/jobs/{made['id']}") == {"ok": True}
+
+    ROUNDS.append(["first"])
+    once = once_job("spent api", T0 + HOUR, at=T0)
+    tick(T0 + HOUR)
+    assert "already ran" in j("PATCH", f"/jobs/{once['id']}", {"enabled": True}, expect=400)["detail"]
+    later = time.time() + 2 * HOUR
+    again = j("PATCH", f"/jobs/{once['id']}", {"run_at": later, "enabled": True})
+    assert again["enabled"] is True and again["next_due_at"] == later and spent(again) is False
+
+
+def test_the_schedule_preview_lists_the_next_fires_in_the_zone_and_writes_nothing() -> None:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    before = len(j("GET", "/jobs"))
+    r = j("GET", "/jobs/preview?cron=30%207%20*%20*%201-5&timezone=America/New_York&n=5")
+    assert r["ok"] is True and len(r["next"]) == 5 and r["next"] == sorted(set(r["next"]))
+    for ts in r["next"]:
+        d = datetime.fromtimestamp(ts, ZoneInfo("America/New_York"))
+        assert (d.hour, d.minute) == (7, 30) and d.weekday() < 5, d
+    assert r["next"][0] > time.time()
+    # Across the fall-back day an ambiguous wall time fires once, not twice.
+    fall_back = datetime(2026, 11, 1, 0, 0, tzinfo=ZoneInfo("America/New_York")).timestamp()
+    t, fires = fall_back, []
+    for _ in range(3):
+        t = next_fire("30 1 * * *", "America/New_York", t)
+        fires.append(t)
+    assert len({datetime.fromtimestamp(x, ZoneInfo("America/New_York")).date() for x in fires}) == 3
+    assert j("GET", "/jobs/preview?cron=*%20*%20*%20*%20*&n=500")["next"].__len__() == 10, "n is capped"
+
+    bad = j("GET", "/jobs/preview?cron=every%20morning")
+    assert bad["ok"] is False and "not a cron expression" in bad["error"] and bad["next"] == []
+    assert j("GET", "/jobs/preview?cron=0%209%20*%20*%20*&timezone=Mars/Olympus")["ok"] is False
+    assert len(j("GET", "/jobs")) == before
+
+
 def test_a_one_off_with_no_time_at_all_is_disarmed_rather_than_spun_on() -> None:
     job = once_job("broken", T0 + HOUR, at=T0)
     with appmod.db.tx() as c:  # a row hand-edited into nonsense
@@ -738,4 +859,248 @@ def test_a_scheduled_run_cannot_schedule_more_work_and_proposes_instead() -> Non
     booked = next(x for x in jobs.list() if x["name"] == args["name"])
     assert booked["kind"] == "once" and booked["enabled"] is True and booked["next_due_at"] is not None
     j("POST", f"/proposals/{pending[0]['id']}/accept", expect=409)
+
+
+# ---------------- per-job model and budget ----------------
+async def _listing(cfg: dict[str, Any]) -> list[dict[str, Any]]:
+    return [{"id": "cheap-model"}, {"id": "embedder", "mode": "embedding"}]
+
+
+def _run_by_hand(job_id: str) -> dict[str, Any]:
+    ROUNDS.append(["done"])
+    return wait_done(j("POST", f"/jobs/{job_id}/run")["run_id"])
+
+
+def test_a_job_runs_on_its_own_model_and_an_unknown_one_is_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(llm, "list_models", _listing)
+    base = {"name": "Triage", "cron": "0 6 * * *", "prompt": "triage", "timezone": "UTC"}
+    j("POST", "/jobs", {**base, "model": "no-such-model"}, expect=422)
+    j("POST", "/jobs", {**base, "model": "embedder"}, expect=422)
+    made = j("POST", "/jobs", {**base, "model": "cheap-model"})
+    assert made["model"] == "cheap-model"
+    row = _run_by_hand(made["id"])
+    assert j("GET", f"/conversations/{row['conversation_id']}")["model"] == "cheap-model"
+
+    j("PATCH", f"/jobs/{made['id']}", {"model": "nope"}, expect=422)
+    assert j("PATCH", f"/jobs/{made['id']}", {"model": None})["model"] is None, "null resets to the default"
+    row = _run_by_hand(made["id"])
+    assert j("GET", f"/conversations/{row['conversation_id']}")["model"] == (appmod.settings().get("defaultModel") or "")
+
+
+def test_a_job_budget_only_tightens_the_job_caps() -> None:
+    base = {"name": "Cheap", "cron": "0 6 * * *", "prompt": "x", "timezone": "UTC"}
+    j("POST", "/jobs", {**base, "budget": {"maxRunCost": 5}}, expect=422)  # above JOB_BUDGET
+    j("POST", "/jobs", {**base, "budget": {"maxToolRounds": 3}}, expect=422)  # the round cap is not the job's to set
+    j("POST", "/jobs", {**base, "budget": {"maxRunCost": 0}}, expect=422)  # 0 would mean unlimited
+    j("POST", "/jobs", {**base, "budget": {"maxRunSeconds": "60"}}, expect=422)
+    made = j("POST", "/jobs", {**base, "budget": {"maxRunCost": 0.05, "maxRunSeconds": 60}})
+    assert made["budget"] == {"maxRunCost": 0.05, "maxRunSeconds": 60}
+    b = _run_by_hand(made["id"])["budget"]
+    assert b["max_cost"] == 0.05 and b["max_seconds"] == 60
+    assert b["max_tokens"] <= appmod.JOB_BUDGET["maxRunTokens"]
+    j("PATCH", f"/jobs/{made['id']}", {"budget": {"maxRunCost": 1}}, expect=422)
+    assert j("PATCH", f"/jobs/{made['id']}", {"budget": None})["budget"] is None
+
+    # A row written behind the API's back still cannot loosen the job caps: the runner clamps again.
+    with appmod.db.tx() as c:
+        c.execute("UPDATE jobs SET budget=? WHERE id=?",
+                  (json.dumps({"maxRunCost": 50, "maxRunTokens": 0, "maxToolRounds": 99}), made["id"]))
+    b = _run_by_hand(made["id"])["budget"]
+    assert b["max_cost"] == appmod.JOB_BUDGET["maxRunCost"] and b["max_rounds"] <= appmod.JOB_BUDGET["maxToolRounds"]
+    assert 0 < b["max_tokens"] <= appmod.JOB_BUDGET["maxRunTokens"]
+
+
+def test_a_job_budget_never_loosens_the_users_own_stricter_setting() -> None:
+    caps = appmod._job_caps({"maxRunCost": 0.01, "maxRunSeconds": 0}, {"maxRunCost": 0.1, "maxRunSeconds": 0})  # noqa: SLF001
+    assert caps["maxRunCost"] == 0.01, "the user's stricter cap wins"
+    assert caps["maxRunSeconds"] == appmod.JOB_BUDGET["maxRunSeconds"], "a 0 in the job budget is not 'unlimited'"
+
+
+# ---------------- proposal hygiene ----------------
+def _bare_proposal(job_id: str | None, *, at: float | None = None) -> dict[str, Any]:
+    return proposals.create(run_id=None, tool="calendar_create", args={"summary": f"x {time.time()}"}, job_id=job_id, at=at)
+
+
+def test_a_stale_proposal_expires_on_a_tick_and_cannot_be_accepted() -> None:
+    now = time.time()
+    old = _bare_proposal("jx", at=now - 8 * 86400)
+    fresh = _bare_proposal("jx", at=now - 6 * 86400)
+    sched = Scheduler(jobs, appmod._launch_job, clock=lambda: now, policy=appmod.job_policy)  # noqa: SLF001 - default 7 days
+    tick(now, sched)
+    assert proposals.get(old["id"])["status"] == "expired" and proposals.get(fresh["id"])["status"] == "pending"
+    r = client.post(f"/proposals/{old['id']}/accept")
+    assert r.status_code == 409 and "expired" in r.text
+    assert SENT == [], "an expired proposal never runs"
+    assert all(p["id"] != old["id"] for p in j("GET", "/inbox")["needs_you"]["proposals"])
+    assert any(p["id"] == old["id"] for p in j("GET", "/proposals?status=expired"))
+    proposals.reject(fresh["id"])
+
+
+def test_deleting_a_job_rejects_its_pending_proposals() -> None:
+    jb = make_job("doomed", "0 * * * *", at=T0, enabled=False)
+    mine, other = _bare_proposal(jb["id"]), _bare_proposal("someone-else")
+    assert any(p["id"] == mine["id"] and p["source"]["name"] == jb["name"] for p in j("GET", "/inbox")["needs_you"]["proposals"])
+    j("DELETE", f"/jobs/{jb['id']}")
+    row = proposals.get(mine["id"])
+    assert row["status"] == "rejected" and row["error"] == "job deleted"
+    assert proposals.get(other["id"])["status"] == "pending"
+    proposals.reject(other["id"])
+
+
+def test_reject_all_only_touches_that_jobs_pending_proposals() -> None:
+    a1, a2, b = _bare_proposal("job-a"), _bare_proposal("job-a"), _bare_proposal("job-b")
+    done = _bare_proposal("job-a")
+    proposals.reject(done["id"], at=1.0)
+    assert j("POST", "/proposals/reject_all?job_id=job-a")["rejected"] == 2
+    assert proposals.get(a1["id"])["status"] == proposals.get(a2["id"])["status"] == "rejected"
+    assert proposals.get(b["id"])["status"] == "pending" and proposals.get(done["id"])["decided_at"] == 1.0
+    proposals.reject(b["id"])
+
+
+def test_accepting_a_send_says_it_is_queued_not_sent() -> None:
+    p = _one_proposal("gmail_send", {"to": "a@example.com", "subject": "Hi", "body": "B."})
+    res = j("POST", f"/proposals/{p['id']}/accept")
+    assert res["ok"] is True and res["queued"] is True and res["sends_in_seconds"] > 0
+    assert SENT == [] and any(r["status"] == "holding" for r in appmod.outbox.list())
+    q = _one_proposal("calendar_create", {"summary": "Standup", "start": "2026-10-01T09:00"})
+    res = j("POST", f"/proposals/{q['id']}/accept")
+    assert res["ok"] is True and res["queued"] is False and res["sends_in_seconds"] is None
+
+
+# ---------------- desk jobs: a fire that opens a desk ----------------
+def make_desk_job(name: str, prompt: str = "Write the weekly report folder", **kw: Any) -> dict[str, Any]:
+    return jobs.create(f"{name} {time.time()}", "0 * * * *", prompt, timezone="UTC", enabled=True, at=T0,
+                       target="desk", **kw)
+
+
+def job_desks(job_id: str) -> list[dict[str, Any]]:
+    with appmod.db.tx() as c:
+        rows = c.execute("SELECT d.id FROM desks d JOIN conversations c ON c.id=d.conversation_id "
+                         "WHERE json_extract(c.settings,'$.jobId')=?", (job_id,)).fetchall()
+    return [appmod.desks.get(r["id"], False) for r in rows]
+
+
+@contextlib.contextmanager
+def desk_cap(n: int):  # type: ignore[no-untyped-def]
+    before = appmod.settings().get("deskMaxLive")
+    client.put("/settings", json={"deskMaxLive": n})
+    try:
+        yield
+    finally:
+        client.put("/settings", json={"deskMaxLive": before})
+
+
+def test_a_desk_job_fire_opens_one_desk_with_the_brief_in_plan_mode() -> None:
+    job = make_desk_job("desk job")
+    assert job["target"] == "desk" and job["desk_autonomy"] == "plan", "a desk job plans first unless told otherwise"
+    with desk_cap(0):
+        fired = tick(T0 + HOUR + 10)
+    assert len(fired) == 1 and fired[0]["run_id"]
+    made = job_desks(job["id"])
+    assert len(made) == 1, "one slot, one desk"
+    desk = made[0]
+    assert desk["brief"] == "Write the weekly report folder" and desk["autonomy"] == "plan"
+    assert desk["status"] != "draft", "it was started, not left for the user to start"
+    assert job_runs(job["id"]) == [], "a desk job does not also fire a chat run"
+    conv = appmod.convos.get(desk["conversation_id"], with_messages=False)
+    assert conv["settings"]["deskId"] == desk["id"] and conv["settings"]["jobDueAt"] == T0 + HOUR
+    assert any(e["desk_id"] == desk["id"] for e in j("GET", "/inbox")["needs_you"]["desks"]), "the inbox links the desk"
+
+
+def test_a_desk_job_refuses_ask_autonomy_and_unknown_targets() -> None:
+    base = {"name": "desk api", "cron": "15 6 * * *", "prompt": "do it", "timezone": "UTC", "target": "desk"}
+    j("POST", "/jobs", {**base, "desk_autonomy": "ask"}, expect=400)
+    j("POST", "/jobs", {**base, "target": "rocket"}, expect=400)
+    made = j("POST", "/jobs", {**base, "desk_autonomy": "propose", "desk_budget": {"maxTurns": 3}})
+    assert made["target"] == "desk" and made["desk_autonomy"] == "propose" and made["desk_budget"] == {"maxTurns": 3}
+    j("PATCH", f"/jobs/{made['id']}", {"desk_autonomy": "ask"}, expect=400)
+    plain = j("POST", "/jobs", {**base, "target": "run"})
+    assert plain["target"] == "run"
+    j("PATCH", f"/jobs/{plain['id']}", {"target": "desk", "desk_autonomy": "ask"}, expect=400)
+    assert j("PATCH", f"/jobs/{plain['id']}", {"target": "desk"})["desk_autonomy"] == "plan"
+    j("POST", f"/jobs/{plain['id']}/dry_run", expect=400)
+    for x in (made, plain):
+        j("DELETE", f"/jobs/{x['id']}")
+
+
+def test_a_desk_job_at_the_live_cap_creates_its_desk_unstarted_and_says_so() -> None:
+    job = make_desk_job("capped desk job")
+    conv = appmod.convos.create(None, "busy", "test-model")
+    busy = appmod.desks.create(conversation_id=conv["id"], brief="already working")
+    with appmod.db.tx() as c:
+        c.execute("UPDATE desks SET status='working' WHERE id=?", (busy["id"],))
+    try:
+        with desk_cap(1):
+            fired = tick(T0 + HOUR + 10)
+    finally:
+        with appmod.db.tx() as c:
+            c.execute("UPDATE desks SET status='stopped' WHERE id=?", (busy["id"],))
+    assert len(fired) == 1 and fired[0]["run_id"] is None
+    made = job_desks(job["id"])
+    assert len(made) == 1 and made[0]["status"] == "draft", "the slot is not dropped: the desk waits to be started"
+    assert "not started" in (jobs.get(job["id"])["last_skip_reason"] or "")
+    notes = [e for e in appmod.desks.events(made[0]["id"]) if e["kind"] == "note"]
+    assert notes and notes[-1]["needs_you"] and notes[-1]["data"].get("queued") is True
+
+
+def test_a_desk_job_catch_up_opens_exactly_one_desk() -> None:
+    job = make_desk_job("late desk job", "Tidy the inbox folder")
+    with desk_cap(0):
+        fired = tick(T0 + 5 * HOUR + 600)  # four missed slots and the current one
+        assert len(fired) == 1 and fired[0]["missed_slots"] == 4
+        assert tick(T0 + 5 * HOUR + 700) == [], "the gap is closed, not replayed"
+        # The same slot launched again (a retry, a second pass) finds the desk it already opened.
+        again = asyncio.run(appmod._launch_desk_job(jobs.get(job["id"]), fired[0]))  # noqa: SLF001
+    made = job_desks(job["id"])
+    assert len(made) == 1, "one gap, one desk"
+    assert made[0]["brief"].startswith("[This run was scheduled for") and made[0]["brief"].endswith("Tidy the inbox folder")
+    assert again == made[0]["run_id"]
+
+
+def test_a_desk_job_has_at_most_one_open_desk() -> None:
+    job = make_desk_job("hourly desk job")
+    with desk_cap(0):
+        tick(T0 + HOUR + 10)
+        first = job_desks(job["id"])
+        assert len(first) == 1 and first[0]["status"] not in ("done", "failed", "stopped")
+        tick(T0 + 2 * HOUR + 10)
+        assert len(job_desks(job["id"])) == 1, "an open desk (even one waiting on its plan) blocks the next slot"
+        assert "previous desk still open" in (jobs.get(job["id"])["last_skip_reason"] or "")
+        with appmod.db.tx() as c:
+            c.execute("UPDATE desks SET status='done' WHERE id=?", (first[0]["id"],))
+        tick(T0 + 3 * HOUR + 10)
+    assert len(job_desks(job["id"])) == 2, "once the previous desk finished, the next slot opens a new one"
+
+
+def test_an_archived_desk_does_not_block_its_job() -> None:
+    job = make_desk_job("archived desk job")
+    with desk_cap(0):
+        tick(T0 + HOUR + 10)
+        first = job_desks(job["id"])
+        assert len(first) == 1 and first[0]["status"] not in ("done", "failed", "stopped")
+        j("PATCH", f"/cowork/desks/{first[0]['id']}", {"archived": True})
+        tick(T0 + 2 * HOUR + 10)
+    assert len(job_desks(job["id"])) == 2, "an archived desk is out of sight, so it does not block the next slot"
+
+
+def test_run_now_with_a_desk_still_open_is_a_409_and_records_no_skip() -> None:
+    job = make_desk_job("manual desk job")
+    with desk_cap(0):
+        tick(T0 + HOUR + 10)
+        before = jobs.get(job["id"])["last_skip_reason"]
+        r = j("POST", f"/jobs/{job['id']}/run", expect=409)
+    assert "previous desk still open" in r["detail"]
+    assert jobs.get(job["id"])["last_skip_reason"] == before, "a manual run has no slot to record a skip on"
+    assert len(job_desks(job["id"])) == 1
+
+
+def test_a_desk_job_cannot_carry_a_tool_allowlist() -> None:
+    base = {"name": "narrow", "cron": "15 6 * * *", "prompt": "do it", "timezone": "UTC"}
+    j("POST", "/jobs", {**base, "target": "desk", "allowed_tools": ["current_time"]}, expect=400)
+    narrowed = j("POST", "/jobs", {**base, "allowed_tools": ["current_time"]})
+    j("PATCH", f"/jobs/{narrowed['id']}", {"target": "desk", "allowed_tools": ["current_time"]}, expect=400)
+    switched = j("PATCH", f"/jobs/{narrowed['id']}", {"target": "desk"})
+    assert switched["target"] == "desk" and switched["allowed_tools"] is None, "the allowlist is cleared, not kept unenforced"
+    j("PATCH", f"/jobs/{narrowed['id']}", {"allowed_tools": ["current_time"]}, expect=400)
+    j("DELETE", f"/jobs/{narrowed['id']}")
 

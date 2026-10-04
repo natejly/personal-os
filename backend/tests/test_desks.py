@@ -24,7 +24,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from personal_os.cowork import (  # noqa: E402
     AUTONOMY, DESK_CONTINUE, DESK_HINT, DESK_RESUME, HEADLINE_FLUSH_S, LIVE, NEEDS_YOU,
-    OUTPUT_KINDS, RECOVER_FROM, STATUSES, DeskRuntime, Desks,
+    DELETE_FROM, MESSAGE_FROM, OUTPUT_KINDS, PAUSE_FROM, RECOVER_FROM, RESUME_FROM, START_FROM, STATUSES,
+    STOP_FROM, DeskRuntime, Desks, desk_actions,
 )
 from personal_os.db import Database  # noqa: E402
 from personal_os.repos import Conversations  # noqa: E402
@@ -68,6 +69,24 @@ def test_constants() -> None:
         check(frag and frag == frag.strip(), "the prompt fragments are non-empty and unpadded")
     check("desk_deliver" in DESK_HINT and "desk_ask" in DESK_HINT and "desk_done" in DESK_HINT,
           "DESK_HINT names the three tools that end a turn honestly")
+
+
+def test_actions_are_read_off_the_transition_tables() -> None:
+    tables = {"start": START_FROM, "pause": PAUSE_FROM, "resume": RESUME_FROM, "stop": STOP_FROM,
+              "message": MESSAGE_FROM, "delete": DELETE_FROM}
+    for status in STATUSES:
+        want = {name for name, allowed in tables.items() if status in allowed}
+        check(set(desk_actions(status)) == want, f"{status}: {desk_actions(status)} != {sorted(want)}")
+    # The cases the pane's own status lists used to get wrong.
+    check("resume" in desk_actions("review") and "resume" in desk_actions("awaiting_plan"), "review/awaiting_plan resume")
+    check("pause" in desk_actions("needs_approval") and "pause" in desk_actions("awaiting_plan"), "needs_approval pauses")
+    check("stop" in desk_actions("interrupted") and "stop" in desk_actions("draft"), "interrupted and draft stop")
+    check(desk_actions("done") == ["message", "delete"], "a finished desk can only be woken or deleted")
+    d = fresh()
+    check(d["actions"] == desk_actions("draft") and desks.get(d["id"])["actions"] == d["actions"],
+          "every desk row carries its actions")
+    desks.set_status(d["id"], "review")
+    check(desks.get(d["id"])["actions"] == desk_actions("review"), "and they follow the status")
 
 
 def test_create() -> None:
@@ -307,8 +326,10 @@ def test_recover() -> None:
     quiet = fresh()
     desks.set_status(quiet["id"], "paused")
 
-    n = desks.recover()
-    check(n >= len(live), f"recover() reports what it interrupted, got {n}")
+    swept = dict(desks.recover())
+    check(set(live) <= set(swept), f"recover() reports what it interrupted, got {swept}")
+    check(swept[carded["id"]] == "awaiting_plan" and swept[live[0]] == LIVE[0],
+          "…with the status each desk had before the restart, which is what auto-resume decides on")
     for did in live:
         row = desks.get(did)
         check(row["status"] == "interrupted", "every desk whose run died is interrupted at boot")
@@ -318,7 +339,43 @@ def test_recover() -> None:
               "…and a needs_you event, so a desk that died while the app was closed is still visible")
     check(desks.get(quiet["id"])["status"] == "paused", "a desk that was not live is untouched")
     check(desks.live_count() == 0, "nothing is live after recovery")
-    check(desks.recover() == 0, "recovery is idempotent: no desk is auto-resumed")
+    check(desks.recover() == [], "recovery is idempotent: no desk is auto-resumed")
+    waiting = fresh()
+    desks.enqueue(waiting["id"], "go", ("draft",))
+    check(waiting["id"] not in dict(desks.recover()) and desks.get(waiting["id"])["status"] == "queued",
+          "a queued desk is not swept: it is launched from the queue at startup instead")
+    desks.set_status(waiting["id"], "stopped")
+
+
+def test_queue() -> None:
+    for d in desks.queued():
+        desks.set_status(d["id"], "stopped")
+    a, b = fresh(), fresh()
+    check(desks.enqueue(a["id"], "x", ("blocked",)) is None, "enqueue is claim-like: only from the statuses given")
+    qa = desks.enqueue(a["id"], "Write the brief", ("draft",))
+    check(qa["status"] == "queued" and qa["queued_message"] == "Write the brief" and qa["live"] is False,
+          "a queued desk holds the turn it will start with and is not live, so it does not count against the cap")
+    check(kinds(a["id"])[-1] == "status" and desks.events(a["id"])[-1]["needs_you"] is False,
+          "joining the queue is a timeline row, not a needs-you one")
+    desks.set_status(b["id"], "interrupted")
+    desks.enqueue(b["id"], DESK_RESUME, ("interrupted",))
+    check([d["id"] for d in desks.queued()] == [a["id"], b["id"]], "the queue is oldest first")
+    check(desks.queue_position(b["id"]) == 2 and desks.queue_position(fresh()["id"]) == 0, "positions are 1-based")
+    n_events = len(desks.events(a["id"]))
+    check(desks.enqueue(a["id"], "Write the brief", ("draft",)) is None,
+          "a queued desk is only appended to by a caller that names 'queued' (a second Start does not)")
+    again = desks.enqueue(a["id"], "job finished", ("queued",))
+    check(again["queued_message"] == "Write the brief\n\njob finished",
+          "a second wake while queued appends, so nothing that woke it is lost")
+    check(again["queued_at"] == qa["queued_at"] and desks.queue_position(a["id"]) == 1, "…and keeps its place in line")
+    check(len(desks.events(a["id"])) == n_events, "…without a second timeline row")
+    check(desks.enqueue(a["id"], "", ("queued",))["queued_message"] == again["queued_message"], "an empty wake changes nothing")
+    claimed = desks.claim_run(a["id"], ("queued",))
+    check(claimed["status"] == "planning" and claimed["queued_message"] == "" and claimed["queued_at"] is None,
+          "claiming out of the queue clears what it held")
+    check(desks.set_status(b["id"], "stopped")["status"] == "stopped" and desks.queued() == [],
+          "a stopped desk leaves the queue")
+    desks.set_status(a["id"], "stopped")
 
 
 def test_events_and_inbox() -> None:
@@ -409,10 +466,10 @@ def test_runtime_debounce() -> None:
     check(HEADLINE_FLUSH_S == 1.0, "the window is the documented one")
 
 
-TESTS = [test_constants, test_create, test_update_and_list, test_set_status_writes_column_and_event,
+TESTS = [test_constants, test_actions_are_read_off_the_transition_tables, test_create, test_update_and_list, test_set_status_writes_column_and_event,
          test_set_status_is_one_transaction, test_claim_run_is_a_lock,
          test_claim_run_targets_working_once_a_plan_exists, test_claim_output_is_a_lock,
-         test_outputs_lifecycle, test_settle, test_live_count_and_charge, test_recover,
+         test_outputs_lifecycle, test_settle, test_live_count_and_charge, test_recover, test_queue,
          test_events_and_inbox, test_delete, test_runtime_debounce]
 
 if __name__ == "__main__":

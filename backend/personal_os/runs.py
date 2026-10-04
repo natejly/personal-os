@@ -206,6 +206,23 @@ class RunStore:
                          "ORDER BY started_at DESC, rowid DESC LIMIT ?", (job_id, since, max(1, min(int(limit), 200))))
         return [r for r in (self._run_row(x) for x in rows) if r]
 
+    def seen(self, run_ids: Iterable[str]) -> set[str]:
+        """Which of `run_ids` the user has marked read in the Agent Inbox."""
+        ids = list(run_ids)
+        if not ids:
+            return set()
+        return {r["run_id"] for r in self._all(f"SELECT run_id FROM inbox_seen WHERE run_id IN ({','.join('?' * len(ids))})", ids)}
+
+    def mark_seen(self, run_ids: Iterable[str]) -> None:
+        t = time.time()
+        with self._lock:
+            try:
+                self._c.executemany("INSERT OR IGNORE INTO inbox_seen(run_id, seen_at) VALUES(?,?)", [(r, t) for r in run_ids])
+                self._c.commit()
+            except Exception:
+                self._c.rollback()
+                raise
+
     # ---- events ----
     def append(self, run_id: str, seq: int, event: str, data: Any) -> bool:
         try:
@@ -315,9 +332,11 @@ class RunStore:
         return self.approval(r["call_id"]) if n else None
 
     def approvals(self, status: str | None = "pending", run_id: str | None = None, limit: int = 100,
-                  desk_id: str | None = None) -> list[dict[str, Any]]:
+                  desk_id: str | None = None, newest_first: bool = False) -> list[dict[str, Any]]:
         where, params = [], []
-        if status:
+        if status == "decided":
+            where.append("status<>'pending'")
+        elif status:
             where.append("status=?")
             params.append(status)
         if run_id:
@@ -326,7 +345,8 @@ class RunStore:
         if desk_id:
             where.append("desk_id=?")
             params.append(desk_id)
-        sql = "SELECT call_id FROM approvals" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY created_at LIMIT ?"
+        sql = "SELECT call_id FROM approvals" + (" WHERE " + " AND ".join(where) if where else "") + (
+            " ORDER BY COALESCE(decided_at, created_at) DESC" if newest_first else " ORDER BY created_at") + " LIMIT ?"
         return [a for a in (self.approval(r["call_id"]) for r in self._all(sql, (*params, max(1, min(int(limit), 500))))) if a]
 
     # ---- idempotency ----
@@ -340,7 +360,7 @@ class RunStore:
 
         done    -> the recorded result, fn not called.
         started -> the process died mid-call last time; the outcome is unknown, so fn is NOT called again.
-        error   -> the last attempt failed cleanly; fn is called again.
+        error   -> the last attempt failed cleanly; fn is called again. An unverified write is not clean: it is done.
         """
         digest = args_digest(args)
         key = idempotency_key(run_id or "", step, tool, digest)
@@ -371,7 +391,8 @@ class RunStore:
             self._exec("UPDATE executed_calls SET status='error', result=?, finished_at=? WHERE key=?",
                        (_dumps({"error": f"{type(e).__name__}: {e}"}), time.time(), key))
             raise
-        failed = isinstance(result, dict) and bool(result.get("error"))
+        # An UNVERIFIED write may have landed: record it as done so a resume replays it instead of writing twice.
+        failed = isinstance(result, dict) and bool(result.get("error")) and "verification" not in result
         self._exec("UPDATE executed_calls SET status=?, result=?, finished_at=? WHERE key=?",
                    ("error" if failed else "done", _dumps(result), time.time(), key))
         return result, False
@@ -387,6 +408,12 @@ class RunStore:
             if isinstance(r.get("result"), str):
                 r["result"] = json.loads(r["result"])
         return rows
+
+    def unsettled_calls(self, desk_id: str) -> list[dict[str, Any]]:
+        """A desk's journal rows, over every run it has had, still `started`: after a restart, calls whose
+        outcome nobody knows. Auto-resume never relaunches a desk that has one."""
+        return self._all("SELECT e.key, e.run_id, e.tool, e.call_id FROM executed_calls e JOIN agent_runs r ON r.run_id=e.run_id "
+                         "WHERE r.desk_id=? AND e.status IN ('started','unknown')", (desk_id,))
 
     # ---- recovery ----
     def transcript(self, run_id: str, message_id: str) -> tuple[str, list[dict[str, Any]]]:
@@ -411,7 +438,7 @@ class RunStore:
     def recover(self, live: Iterable[str] = ()) -> list[dict[str, Any]]:
         """At startup: every run still marked active, but not running in this process, died with the last one.
         Mark it interrupted and append an `error` event saying so (naming any approval it was blocked on).
-        Pending approvals stay pending: the UI can still show the card and record the decision.
+        Pending approvals stay pending: the UI can still show the card and record the decision. A desk's are parked.
         Also drops the event tape of runs that ended more than EVENTS_RETAIN_S ago."""
         keep = set(live)
         out = []
@@ -419,6 +446,9 @@ class RunStore:
             if r["run_id"] in keep:
                 continue
             pending = self.approvals("pending", run_id=r["run_id"])
+            for a in pending:
+                if a.get("desk_id"):
+                    self.park(a["call_id"])  # the desk's next turn picks the answer up, with no second card
             msg = "Interrupted: the backend stopped while this reply was running."
             if pending:
                 msg += " It was waiting on your approval of " + ", ".join(f"{a['tool']} ({a['call_id']})" for a in pending) + "."

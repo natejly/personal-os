@@ -38,7 +38,9 @@ class _FakeGoogle:
 
     def calendar_create(self, event: dict[str, Any], calendar_id: str = "primary") -> dict[str, Any]:
         self.n += 1
-        eid = f"e{self.n}"
+        eid = event.get("id") or f"e{self.n}"
+        if eid in self.events and self.events[eid]["calendar_id"] == calendar_id:  # ids are unique per calendar
+            raise RuntimeError("409 The requested identifier already exists.")
         self.events[eid] = {"id": eid, "calendar_id": calendar_id, "summary": event.get("summary", ""),
                             "description": event.get("description", ""), "start": str(event["start"]),
                             "transparency": event.get("transparency", "opaque")}
@@ -93,6 +95,17 @@ class MirrorTests(unittest.TestCase):
         return self.g.events[td["calendar_event_id"]]
 
     # ---- creating ----
+    def test_an_insert_whose_link_was_lost_is_adopted_not_duplicated(self) -> None:
+        td = self.todos.create("Renew visa", due="2026-11-01")
+        real = self.todos.set_calendar_state
+        self.todos.set_calendar_state = lambda *a, **k: None  # type: ignore[method-assign]  # the write-back is lost
+        self.mirror.sync_once()
+        self.todos.set_calendar_state = real  # type: ignore[method-assign]
+        self.assertEqual(len(self.g.events), 1)
+        self.mirror.sync_once()
+        self.assertEqual(len(self.g.events), 1)  # the 409 on the same id links it instead
+        self.assertEqual((self.todos.get(td["id"]) or {})["calendar_event_id"], next(iter(self.g.events)))
+
     def test_due_todo_becomes_an_all_day_event(self) -> None:
         td = self.todos.create("Buy milk", due="2026-10-02", notes="2%")
         counts = self.mirror.sync_once()
@@ -250,7 +263,8 @@ class MirrorTests(unittest.TestCase):
         self.assertEqual(self.mirror.sync_once()["created"], 1)
         row = self.todos.get(td["id"]) or {}
         self.assertEqual(row["calendar_id"], "primary")
-        self.assertNotEqual(row["calendar_event_id"], first)
+        self.assertEqual(self.g.events[row["calendar_event_id"]]["calendar_id"], "primary")
+        self.assertEqual(row["calendar_event_id"], first)  # derived from the todo; unique per calendar only
 
     def test_untitled_todo_still_gets_a_summary(self) -> None:
         td = self.todos.create("x", due="2026-10-02")

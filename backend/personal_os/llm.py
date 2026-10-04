@@ -221,6 +221,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "workspaceRoots": [],
     # Mount the active desk's workspace read-write at /workspace/desk in that desk's sandbox container.
     "sandboxMountDesk": True,
+    # The Linux sandbox's network: "off" (none), "proxy" (an internal-only network whose one way out is an allowlisting
+    # proxy: package registries plus shellAllowedDomains), "open" (every result taints). A stored true reads as "open".
+    "sandboxNetwork": "off",
     # fs_edit and an overwriting write_local_file refuse a file this conversation has not read (or that changed since).
     "requireReadBeforeWrite": True,
     # Host shell (shell.py): shell_run runs in a Seatbelt sandbox inside the desk workspace or a workspace root.

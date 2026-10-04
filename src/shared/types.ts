@@ -1213,6 +1213,8 @@ export interface Settings {
   workspaceRoots?: string[]
   /** Mount the active desk's workspace at /workspace/desk in its sandbox container. Missing means on. */
   sandboxMountDesk?: boolean
+  /** The Linux sandbox's network: none, an allowlisting proxy (registries plus shellAllowedDomains), or open. A legacy stored true reads as open. */
+  sandboxNetwork?: 'off' | 'proxy' | 'open' | boolean
   /** Host shell. shellNetwork opens the network entirely; off, only the allowlist below is reachable. */
   shellNetwork?: boolean
   shellTimeoutSec?: number

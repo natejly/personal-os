@@ -175,7 +175,7 @@ class TestExecAndFiles(unittest.TestCase):
         self.assertIn("Timed out after 5s", out["stderr"])
 
     def test_networked_exec_is_flagged(self) -> None:
-        self.m._net[self.m._name("conv1")] = True
+        self.m._net[self.m._name("conv1")] = "open"
         out = self.m.exec("conv1", "curl example.com")
         self.assertTrue(out.get("network"))
 

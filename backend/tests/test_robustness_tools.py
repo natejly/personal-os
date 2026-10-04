@@ -148,10 +148,13 @@ def test_reserved_desk_folders_are_reserved_in_any_case() -> None:
 
 # ---- 7 taint gate ----
 class FakeSandboxes:
-    def __init__(self, net: bool = False, setting: bool = False):
+    def __init__(self, net: bool = False, setting: Any = False):
         self.net, self.setting = net, setting
 
     def networked(self, cid: str) -> bool:
+        return self.net
+
+    def reaches_out(self, cid: str) -> bool:
         return self.net
 
     def settings(self) -> dict[str, Any]:
@@ -178,6 +181,9 @@ def test_taint_gate_covers_schedules_and_networked_sandboxes() -> None:
     assert box.gate("sandbox_exec", "on", clean) == "on"
     assert _box_with(FakeSandboxes(setting=True)).gate("sandbox_exec", "on", tainted) == "ask"
     assert _box_with(FakeSandboxes()).gate("sandbox_exec", "on", tainted) == "on"  # no network: nothing to leak through
+    # the allowlisting proxy still lets a command reach a host, so a tainted reply asks there too; "off" is no network
+    assert _box_with(FakeSandboxes(setting="proxy")).gate("sandbox_exec", "on", tainted) == "ask"
+    assert _box_with(FakeSandboxes(setting="off")).gate("sandbox_exec", "on", tainted) == "on"
 
 
 def test_proposal_only_runs_refuse_a_networked_sandbox() -> None:

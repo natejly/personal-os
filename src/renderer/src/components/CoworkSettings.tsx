@@ -3,7 +3,7 @@ import { X } from 'lucide-react'
 import type { Settings } from '@shared/types'
 import { api } from '../lib/api'
 import { useStore } from '../store'
-import { clampSetting, hostError, networkMode, networkPatch, normalizeHost, type NetworkMode } from '../lib/coworkSettings'
+import { clampSetting, hostError, networkMode, networkPatch, normalizeHost, sandboxNetMode, type NetworkMode, type SandboxNetMode } from '../lib/coworkSettings'
 
 /**
  * The Cowork section of Settings: how long and how costly a desk may run, what its shell and browser may reach,
@@ -85,6 +85,17 @@ const NETWORK_HELP: Record<NetworkMode, string> = {
   off: 'Commands a desk runs have no network at all.',
   registries: 'Commands can reach package registries and the hosts listed below, and nothing else.',
   open: 'Commands can reach any address.'
+}
+
+const SANDBOX_NET: { mode: SandboxNetMode; label: string }[] = [
+  { mode: 'off', label: 'Off' },
+  { mode: 'proxy', label: 'Registries and allowed hosts' },
+  { mode: 'open', label: 'Open' }
+]
+const SANDBOX_NET_HELP: Record<SandboxNetMode, string> = {
+  off: 'The Linux sandbox has no network at all.',
+  proxy: 'The sandbox can reach package registries and the allowed hosts above, through a proxy that is its only way out. Results count as untrusted once it reaches a host that is not a registry.',
+  open: 'The sandbox can reach any address, and everything it returns counts as untrusted.'
 }
 
 /** What a build of the work environment is doing: nothing yet, running, or failed with the reason. */
@@ -170,6 +181,7 @@ export default function CoworkSettings({ draft, patch }: { draft: Settings; patc
   const mode = networkMode(draft)
   const hosts = draft.shellAllowedDomains ?? []
   const pickMode = (m: NetworkMode): void => patch(networkPatch(m, m === 'off' ? [] : hosts))
+  const sbxMode = sandboxNetMode(draft.sandboxNetwork)
   return (
     <div className="cowork-settings">
       <h4>Desks</h4>
@@ -200,10 +212,20 @@ export default function CoworkSettings({ draft, patch }: { draft: Settings; patc
         </div>
         {mode === 'open' && <p className="cowork-error">Open network lets a command send files off this Mac, and whatever it downloads is untrusted text. Prefer allowed hosts.</p>}
       </div>
-      {mode !== 'off' && (
+      {(mode !== 'off' || sbxMode === 'proxy') && (
         <HostList title="Allowed hosts" help="Hostnames a command may reach, such as pypi.org. A name also allows its subdomains. No scheme, path, wildcard or IP address."
           value={hosts} onChange={(shellAllowedDomains) => patch({ shellAllowedDomains })} />
       )}
+
+      <h4>Sandbox</h4>
+      <div className="send-hold cowork-net">
+        <span className="toggle-text"><b>Network for the Linux sandbox</b><small>{SANDBOX_NET_HELP[sbxMode]} A change applies to new sandboxes; reset one to pick it up.</small></span>
+        <div className="seg" role="group" aria-label="Network for the Linux sandbox">
+          {SANDBOX_NET.map((n) => (
+            <button key={n.mode} type="button" className={sbxMode === n.mode ? 'on' : ''} aria-pressed={sbxMode === n.mode} onClick={() => patch({ sandboxNetwork: n.mode })}>{n.label}</button>
+          ))}
+        </div>
+      </div>
 
       <h4>Browser</h4>
       <Toggle title="Let desks use a browser" help="Gives desks a browser they can read and click in. It asks before submitting forms, entering passwords or uploading."

@@ -264,6 +264,14 @@ def test_settings_validation_and_evaluate_route() -> None:
     check(appmod.evaluate_permission(appmod.PermissionEvalIn(command="git log"))["action"] == "allow", "allowed")
     check(appmod.evaluate_permission(appmod.PermissionEvalIn(rule="Bash(x)"))["ok"] is True, "rule validation")
     check(appmod.evaluate_permission(appmod.PermissionEvalIn(rule="((("))["ok"] is False, "rule validation rejects")
+    for bad in ("allowlist", True, None):
+        try:
+            appmod.put_settings({"sandboxNetwork": bad})
+            check(False, f"sandboxNetwork={bad!r} rejected")
+        except appmod.HTTPException as e:
+            check(e.status_code == 422, f"422 on sandboxNetwork={bad!r}")
+    appmod.put_settings({"sandboxNetwork": "proxy"})
+    check(appmod.settings()["sandboxNetwork"] == "proxy", "the sandbox network mode is stored")
 
 
 def main() -> int:

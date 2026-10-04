@@ -33,6 +33,8 @@ class FakeDocker:
         self.images: dict[str, str] = {}   # tag -> created string
         self.commit_error = ""
         self.clock = 0
+        self.networks: set[str] = set()
+        self.px_log: tuple[int, str] | None = None  # (rc, stdout) of reading the proxy sidecar's report
 
     def __call__(self, argv: list[str], *, input: bytes | None = None, timeout: float = 60) -> "subprocess.CompletedProcess[bytes]":
         self.argv.append(list(argv))
@@ -50,10 +52,19 @@ class FakeDocker:
             if "Running" in fmt:
                 return cp(0, "true" if c["running"] else "false")
             if "NetworkMode" in fmt:
-                return cp(0, "default" if c["net"] else "none")
+                a = c.get("argv", [])
+                return cp(0, a[a.index("--network") + 1] if "--network" in a else "default")
         if cmd == "ps":
             running_only = "-a" not in argv
-            return cp(0, "\n".join(n for n, c in self.containers.items() if c["running"] or not running_only))
+            label = argv[argv.index("--filter") + 1][len("label="):]
+            return cp(0, "\n".join(n for n, c in self.containers.items() if (c["running"] or not running_only)
+                                   and label in c.get("argv", [f"{microvm.LABEL}=1"])))
+        if cmd == "network":
+            if argv[2] == "create":
+                self.networks.add(argv[-1])
+            elif argv[2] == "rm":
+                self.networks.discard(argv[-1])
+            return cp(0)
         if cmd == "run":
             name = argv[argv.index("--name") + 1]
             image = argv[-3]
@@ -70,6 +81,8 @@ class FakeDocker:
             self.containers.pop(argv[-1], None)
             return cp(0)
         if cmd == "exec":
+            if argv[2].startswith(microvm.PX_PREFIX):  # the sidecar's report
+                return cp(1, "", "cat: /tmp/egress.json: No such file or directory") if self.px_log is None else cp(*self.px_log)
             return cp(0, "/usr/bin/bash")
         if cmd == "commit":
             if self.commit_error:
@@ -263,3 +276,118 @@ def test_export_file_read_passes_the_export_cap_to_the_real_runner(monkeypatch: 
     monkeypatch.setattr(sb, "ensure", lambda cid: "c")
     assert len(sb.export_file("c1", "big.bin")[1]) == size
     assert seen[-1] > size
+
+
+# ---- sandboxNetwork: off | proxy | open ----
+def _env(argv: list[str]) -> dict[str, str]:
+    return dict(argv[i + 1].split("=", 1) for i, a in enumerate(argv) if a == "-e")
+
+
+def test_network_setting_is_a_tri_state_and_a_stored_true_means_open() -> None:
+    assert [microvm.net_mode(v) for v in (True, False, None, "off", "proxy", "open", "bogus", 1)] == \
+        ["open", "off", "off", "off", "proxy", "open", "off", "off"]
+    assert llm.DEFAULT_SETTINGS["sandboxNetwork"] == "off"
+    for setting, flag in ((False, ["--network", "none"]), ("off", ["--network", "none"]), (True, None), ("open", None)):
+        sb, d = make({"sandboxNetwork": setting})
+        sb.ensure("c1")
+        (run,) = d.cmds("run")
+        got = run[run.index("--network"):run.index("--network") + 2] if "--network" in run else None
+        assert got == flag, setting
+        assert not d.networks and sb.networked("c1") is (flag is None)
+
+
+def test_proxy_mode_puts_the_sandbox_on_an_internal_network_whose_only_way_out_is_the_sidecar() -> None:
+    sb, d = make({"sandboxNetwork": "proxy", "shellAllowedDomains": ["example.com", "10.0.0.1"]})
+    name = sb.ensure("c1")
+    sfx = name[len("pos-sbx-"):]
+    net, px = microvm.NET_PREFIX + sfx, microvm.PX_PREFIX + sfx
+    create = next(a for a in d.cmds("network") if a[2] == "create")
+    assert "--internal" in create and create[-1] == net and net in d.networks
+    connect = next(a for a in d.cmds("network") if a[2] == "connect")
+    assert connect[-2:] == [net, px] and connect[connect.index("--alias") + 1] == microvm.PROXY_ALIAS
+    side, box = [a for a in d.cmds("run") if a[a.index("--name") + 1] == px][0], d.containers[name]["argv"]
+    assert "--network" not in side and side[-4:-1] == [microvm.DEFAULT_IMAGE, "python3", "-c"]  # bridge only, runs egress.py
+    assert "def sidecar()" in side[-1] and "--cap-drop" in side and "no-new-privileges" in side
+    assert f"{microvm.PROXY_LABEL}=1" in side and f"{microvm.LABEL}=1" not in side  # never counted, reaped or stopped as a sandbox
+    se, be = _env(side), _env(box)
+    allow = se["GRAIN_PROXY_ALLOW"].split(",")
+    assert "pypi.org" in allow and "example.com" in allow and "10.0.0.1" not in allow
+    assert box[box.index("--network") + 1] == net and "none" not in box
+    tok = se["GRAIN_PROXY_TOKEN"]
+    assert len(tok) > 16 and be["HTTPS_PROXY"] == be["http_proxy"] == f"http://grain:{tok}@{microvm.PROXY_ALIAS}:{microvm.PROXY_PORT}"
+    assert be["NO_PROXY"] == "" and sb.reaches_out("c1") and sb.networked("c1") is False
+    assert [n for n in sb._live("docker")] == [name]
+
+
+def test_proxy_mode_taints_only_after_a_host_outside_the_registries_and_reports_per_call() -> None:
+    import json
+    sb, d = make({"sandboxNetwork": "proxy"})
+    out = sb.exec("c1", "true")
+    assert out["egress"] == {"mode": "allowlist", "contacted": [], "blocked": []} and "network" not in out
+    d.px_log = (0, json.dumps({"contacted": ["pypi.org", "files.pythonhosted.org"], "blocked": ["evil.io"]}))
+    out = sb.exec("c1", "pip download requests")
+    assert out["egress"]["contacted"] == ["pypi.org", "files.pythonhosted.org"] and out["egress"]["blocked"] == ["evil.io"]
+    assert "network" not in out and "evil.io" in out["note"] and sb.networked("c1") is False
+    out = sb.exec("c1", "true")
+    assert out["egress"] == {"mode": "allowlist", "contacted": [], "blocked": []} and "note" not in out  # only what is new
+    d.px_log = (0, json.dumps({"contacted": ["pypi.org", "files.pythonhosted.org", "example.com"], "blocked": ["evil.io"]}))
+    out = sb.exec("c1", "curl https://example.com")
+    assert out["egress"]["contacted"] == ["example.com"] and out["network"] is True and sb.networked("c1") is True
+    assert sb.list_files("c1").get("network") is True
+    d.px_log = (0, json.dumps({"contacted": [], "blocked": []}))  # sticky: a reset report cannot launder what was fetched
+    assert sb.networked("c1") is True and sb.exec("c1", "true")["network"] is True
+
+
+def test_proxy_mode_treats_an_unreadable_report_as_tainted() -> None:
+    sb, d = make({"sandboxNetwork": "proxy"})
+    sb.ensure("c1")
+    d.px_log = (1, "")  # the sidecar is gone or wedged: nothing says what the sandbox reached
+    assert sb.networked("c1") is True and sb.exec("c1", "true")["network"] is True
+    d.px_log = None
+    assert sb.networked("c1") is False  # not remembered: only a real report of an outside host is sticky
+
+
+def test_tool_result_taints_through_the_proxy_only_on_an_outside_host() -> None:
+    import asyncio
+    import json
+    sb, d = make({"sandboxNetwork": "proxy"})
+    tb = Toolbox(None, None, None, lambda: {}, sandboxes=sb)  # type: ignore[arg-type]
+    ctx: dict[str, Any] = {"conversation_id": "c1"}
+    d.px_log = (0, json.dumps({"contacted": ["pypi.org"], "blocked": []}))
+    asyncio.run(tb.specs["sandbox_exec"].fn(ctx, command="pip install x"))
+    assert not ctx.get("tainted")
+    assert tb.gate("sandbox_exec", "on", {**ctx, "tainted": True}) == "ask"  # an allowed host can still carry data out
+    d.px_log = (0, json.dumps({"contacted": ["pypi.org", "example.com"], "blocked": []}))
+    asyncio.run(tb.specs["sandbox_exec"].fn(ctx, command="curl example.com"))
+    assert ctx["tainted"] is True and ctx["taint_sources"] == ["sandbox_exec"]
+
+
+def test_proxy_sidecar_follows_the_sandbox_through_stop_restart_restore_and_reset() -> None:
+    sb, d = make({"sandboxNetwork": "proxy"})
+    name = sb.ensure("c1")
+    sfx = name[len("pos-sbx-"):]
+    px, net = microvm.PX_PREFIX + sfx, microvm.NET_PREFIX + sfx
+    sb.shutdown()
+    assert [a[-1] for a in d.cmds("stop")] == [name, px] and not d.containers[px]["running"]
+    sb._net.clear()  # an app restart: the mode is recovered from the container itself
+    sb.ensure("c1")
+    assert d.containers[px]["running"] and sb._net[name] == "proxy"
+    sb.checkpoint("c1", "clean")
+    sb._settings["sandboxNetwork"] = "off"  # type: ignore[attr-defined]
+    sb.restore("c1", "clean")  # the mode is re-applied from current settings: the sidecar and its network go
+    assert px not in d.containers and net not in d.networks and sb.reaches_out("c1") is False
+    sb._settings["sandboxNetwork"] = "proxy"  # type: ignore[attr-defined]
+    sb.restore("c1", "clean")
+    assert px in d.containers and net in d.networks and sb._net[name] == "proxy"
+    sb.reset("c1")
+    assert name not in d.containers and px not in d.containers and net not in d.networks
+
+
+def test_an_orphaned_sidecar_is_swept_once_per_app_run() -> None:
+    sb, d = make({"sandboxNetwork": "proxy"})
+    name = sb.ensure("c1")
+    px = microvm.PX_PREFIX + name[len("pos-sbx-"):]
+    d.containers.pop(name)  # removed while this app run never knew its mode
+    sb2 = Sandboxes(lambda: {"sandboxNetwork": "off"}, runner=d)
+    sb2.ensure("c2")
+    assert px not in d.containers and not d.networks

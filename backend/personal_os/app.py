@@ -791,6 +791,8 @@ def put_settings(patch: dict[str, Any]) -> dict[str, Any]:
             clean[k] = _check_permission_rules(v)
         elif k == "unattendedApprovals" and v not in ("ask", "deny"):
             raise HTTPException(422, "unattendedApprovals must be 'ask' or 'deny'")
+        elif k == "sandboxNetwork" and v not in ("off", "proxy", "open"):
+            raise HTTPException(422, "sandboxNetwork must be 'off', 'proxy' or 'open'")
         elif k == "workspaceRoots":
             if not (isinstance(v, list) and all(isinstance(x, str) for x in v)):
                 raise HTTPException(422, "workspaceRoots must be a list of folders")

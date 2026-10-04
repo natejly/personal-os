@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { clampSetting, hostError, networkMode, networkPatch, normalizeHost } from './coworkSettings'
+import { clampSetting, hostError, networkMode, networkPatch, normalizeHost, sandboxNetMode } from './coworkSettings'
 
 test('hostnames pass, everything else is refused with a reason', () => {
   for (const ok of ['pypi.org', 'files.pythonhosted.org', 'Example.COM', '.github.com']) assert.equal(hostError(ok), null, ok)
@@ -23,6 +23,14 @@ test('missing flags read as registries; open beats the registry flag; hosts alon
   assert.equal(networkMode({}), 'registries')
   assert.equal(networkMode({ shellNetwork: true, shellRegistryAccess: false }), 'open')
   assert.equal(networkMode({ shellNetwork: false, shellRegistryAccess: false, shellAllowedDomains: ['a.com'] }), 'registries')
+})
+
+test('sandbox network: a legacy true reads as open, unknown or missing reads as off', () => {
+  assert.equal(sandboxNetMode(true), 'open')
+  assert.equal(sandboxNetMode(false), 'off')
+  assert.equal(sandboxNetMode(undefined), 'off')
+  assert.equal(sandboxNetMode('proxy'), 'proxy')
+  assert.equal(sandboxNetMode('open'), 'open')
 })
 
 test('numbers are clamped to the backend range, blank keeps the fallback', () => {

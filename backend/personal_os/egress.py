@@ -6,6 +6,11 @@ policy. Each shell run carries a random token as proxy credentials (`http://grai
 is how a connection is tied to the run (and so to that run's allowed hosts) and how a run's `contacted` / `blocked`
 lists are kept. A request without a live token is refused; a token is revoked when its run ends.
 
+The Linux sandbox (microvm.py) runs this same file as a sidecar container: `sidecar()` binds every interface of a
+container that sits on both the internet bridge and the sandbox's internal-only network, with one long-lived token,
+and writes its contacted / blocked report to a file the host reads back. Binding beyond loopback changes nothing
+about the checks below: no token, no tunnel, and IP literals and private addresses stay refused.
+
 What it speaks: HTTP `CONNECT host:port` tunnels and plain-HTTP absolute-URI requests. No TLS interception (the
 tunnel is opaque bytes, so nothing here can read or alter what a command sends), no SOCKS. Only ports 80 and 443.
 
@@ -19,6 +24,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import ipaddress
+import json
+import os
 import secrets
 import socket
 from dataclasses import dataclass, field
@@ -116,19 +123,32 @@ class Run:
     contacted: list[str] = field(default_factory=list)
     blocked: list[str] = field(default_factory=list)
     tunnels: int = 0
+    log: str = ""   # the sidecar's report file; written before the client hears back, so a reader never misses a host
 
     def note(self, lst: list[str], host: str) -> None:
         if host not in lst:
             lst.append(host)
+            if self.log:
+                with open(self.log + ".tmp", "w") as f:
+                    json.dump({"contacted": self.contacted, "blocked": self.blocked}, f)
+                os.replace(self.log + ".tmp", self.log)
 
 
 class Denied(Exception):
     pass
 
 
+def proxy_env(host: str, port: int | None, token: str) -> dict[str, str]:
+    """What a command needs to use the proxy. ALL_PROXY stays unset (no SOCKS here), NO_PROXY is empty so nothing bypasses."""
+    url = f"http://grain:{token}@{host}:{port}"
+    return {"HTTP_PROXY": url, "HTTPS_PROXY": url, "http_proxy": url, "https_proxy": url, "NO_PROXY": "", "no_proxy": "",
+            "PIP_DISABLE_PIP_VERSION_CHECK": "1"}
+
+
 class Egress:
-    def __init__(self) -> None:
+    def __init__(self, bind: str = "127.0.0.1", port: int = 0) -> None:
         self.runs: dict[str, Run] = {}
+        self.bind, self._want_port = bind, port
         self.port: int | None = None
         self.idle_s = IDLE_S
         self._server: asyncio.AbstractServer | None = None
@@ -145,7 +165,7 @@ class Egress:
         assert self._lock is not None
         async with self._lock:
             if self._server is None:
-                self._server = await asyncio.start_server(self._client, "127.0.0.1", 0)
+                self._server = await asyncio.start_server(self._client, self.bind, self._want_port)
                 self.port = self._server.sockets[0].getsockname()[1]
         return int(self.port or 0)
 
@@ -174,10 +194,7 @@ class Egress:
         return {"contacted": list(r.contacted), "blocked": list(r.blocked)} if r else {"contacted": [], "blocked": []}
 
     def env(self, token: str) -> dict[str, str]:
-        """What a command needs to use the proxy. ALL_PROXY stays unset (no SOCKS here), NO_PROXY is empty so nothing bypasses."""
-        url = f"http://grain:{token}@127.0.0.1:{self.port}"
-        return {"HTTP_PROXY": url, "HTTPS_PROXY": url, "http_proxy": url, "https_proxy": url, "NO_PROXY": "", "no_proxy": "",
-                "PIP_DISABLE_PIP_VERSION_CHECK": "1"}
+        return proxy_env(self.bind, self.port, token)
 
     # -- the proxy itself --
     async def _client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -332,3 +349,27 @@ class Egress:
             for t in tasks:
                 t.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
+
+
+def sidecar() -> None:
+    """Entry point inside a sandbox's proxy container (`python3 -c <this file>`): one token, one allowed list, and a
+    report file that survives a container stop/start, so a restart never forgets a host the sandbox already reached."""
+    log = os.environ.get("GRAIN_PROXY_LOG") or "/tmp/egress.json"
+    run = Run(tuple(h for h in os.environ.get("GRAIN_PROXY_ALLOW", "").split(",") if h), log=log)
+    try:
+        with open(log) as f:
+            seen = json.load(f)
+        run.contacted, run.blocked = [str(h) for h in seen["contacted"]], [str(h) for h in seen["blocked"]]
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    eg = Egress("0.0.0.0", int(os.environ.get("GRAIN_PROXY_PORT") or 3128))
+    eg.runs[os.environ["GRAIN_PROXY_TOKEN"]] = run
+
+    async def main() -> None:
+        await eg.ensure()
+        await asyncio.Event().wait()
+    asyncio.run(main())
+
+
+if __name__ == "__main__":
+    sidecar()

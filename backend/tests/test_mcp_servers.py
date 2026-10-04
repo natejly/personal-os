@@ -155,8 +155,8 @@ def test_transcripts_taint_the_run() -> None:
 def test_meeting_list_arms_the_external_gate() -> None:
     """A calendar-invite title reaching the model must force external tools to ask.
 
-    `gate` only matters for a call whose mode reached it as "on": Toolbox.effective caps every external tool at
-    "ask", so that is a patterned allow rule (permrules) lifting the card, and a tainted run puts the card back.
+    Toolbox.effective caps every external tool at "ask", so `gate` sees "on" only from a caller that bypasses
+    effective() and passes a raw mode in; for that caller a tainted run must still turn it into a card.
     """
     tb = full_toolbox(MeetingRepo())
     ctx: dict[str, Any] = {"project_id": "p1"}

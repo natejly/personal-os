@@ -2567,10 +2567,13 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         mode, forced = "ask", True
                 # Argument-pattern rules, session grants and the doom-loop card (permrules.py). A deny refuses; a
                 # forced approval (taint, plan mode) is never downgraded; MCP tools keep their schema-bound grants.
+                # External and schedules tools top out at ask (Toolbox.effective), so gate() no longer turns an 'on'
+                # into a forced card for them: a tainted run forces it here, so the card buys no grant or allow rule.
+                forced = forced or (mode == "ask" and danger in ASK_LOCKED_DANGER and bool(tool_ctx["tainted"]))
                 perm = permrules.Resolution(mode, forced)
                 if c["name"] != PLAN_TOOL and mode != "off" and not mcp_is(c["name"]):
                     perm = permrules.resolve(
-                        c["name"], args, mode, forced or (danger in ASK_LOCKED_DANGER and bool(tool_ctx["tainted"])),
+                        c["name"], args, mode, forced,
                         rules=perm_rules, roots=_perm_roots(cfg, desk_id), conv=conv_id,
                         doom=detector is not None and detector.repeat_count(c["name"], args) >= permrules.DOOM_LIMIT - 1)
                     mode = perm.mode

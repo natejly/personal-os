@@ -162,8 +162,13 @@ export default function SettingsModal(): JSX.Element {
     // A cleared or out-of-range rounds field is clamped here: 0 would mean unlimited to the backend.
     const rounds = Number.isFinite(draft.maxToolRounds) && draft.maxToolRounds >= 1
       ? Math.min(60, Math.round(draft.maxToolRounds)) : settings.maxToolRounds
+    // Day plan and reply tracker save through their own routes (PlannerMailSettings), so the draft's copies
+    // are stale and must not be sent back over them.
+    const payload: Record<string, unknown> = { ...draft, maxToolRounds: rounds, gatherShortcut: applied?.accelerator ?? draft.gatherShortcut, quickCaptureShortcut: capApplied?.accelerator ?? draft.quickCaptureShortcut }
+    delete payload.planner
+    delete payload.mailWatch
     try {
-      await saveSettings({ ...draft, maxToolRounds: rounds, gatherShortcut: applied?.accelerator ?? draft.gatherShortcut, quickCaptureShortcut: capApplied?.accelerator ?? draft.quickCaptureShortcut })
+      await saveSettings(payload as Partial<Settings>)
     } catch (e) {
       // The dialog stays open with the draft intact, so nothing typed is lost.
       return toast((e as Error).message, 'error')

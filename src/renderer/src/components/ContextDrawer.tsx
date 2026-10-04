@@ -82,6 +82,7 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
       <div className="ctx-meta">
         ~{ctx.tokens_estimate} tokens of context
         {ctx.trimmed && Object.keys(ctx.trimmed).length > 0 && <span className="muted"> · trimmed {Object.entries(ctx.trimmed).map(([k, n]) => `${k} ${n}`).join(', ')}</span>}
+        {(ctx.tools_deferred ?? 0) > 0 && <span className="muted" title="Held out of the request until the assistant searches for them"> · {ctx.tools_deferred} tools loaded on demand</span>}
         <button className="link" onClick={() => setShowPrompt((v) => !v)}>{showPrompt ? 'hide' : 'view full system prompt'}</button>
       </div>
       {showPrompt && <pre className="ctx-prompt">{ctx.system_prompt}</pre>}

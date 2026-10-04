@@ -88,11 +88,17 @@ def should_defer(n_tools: int, threshold: int) -> bool:
     return threshold > 0 and n_tools > threshold
 
 
-def catalog_hint(servers_with_counts: Iterable[tuple[str, int]]) -> str:
+def catalog_hint(servers_with_counts: Iterable[tuple[str, int]],
+                 lead: str = "MCP connectors available via mcp_tool_search: ") -> str:
     parts = [f"{name} ({n} tool{'s' if n != 1 else ''})" for name, n in servers_with_counts]
     if not parts:
         return ""
-    return "MCP connectors available via mcp_tool_search: " + ", ".join(parts) + "."
+    return lead + ", ".join(parts) + "."
+
+
+def group_hint(groups_with_counts: Iterable[tuple[str, int]]) -> str:
+    """The built-in groups held back this reply, so the model knows what tool_search can load."""
+    return catalog_hint(groups_with_counts, "Also available via tool_search: ")
 
 
 def select_schemas(all_schemas: list[dict[str, Any]], loaded: Iterable[str], defer: bool) -> list[dict[str, Any]]:

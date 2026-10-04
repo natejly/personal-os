@@ -658,6 +658,7 @@ class Toolbox:
         fsx.register(self)  # fs_glob / fs_grep / fs_edit / fs_copy / fs_mkdir
         self._register_reach()
         self._register_mcp_search()
+        self._register_tool_search()
         if jobs is not None:
             self._register_schedule()
         if style is not None:
@@ -3397,3 +3398,42 @@ def _register_mcp_search(self: Toolbox) -> None:
 
 
 Toolbox._register_mcp_search = _register_mcp_search  # type: ignore[attr-defined]
+
+
+# Always offered while built-in tools are deferred (app._schemas): the day-to-day reading and bookkeeping tools,
+# so a plain question never costs a search round. Everything else waits for tool_search.
+CORE_GROUPS = frozenset({"memory", "docs", "todos", "knowledge", "plan", "utility", "context", "desk", "mcp"})
+CORE_TOOLS = frozenset({"calendar_events", "calendar_get", "gmail_search", "gmail_read", "web_search", "fetch_url",
+                        "skill_list", "skill_view"})
+
+
+def is_core(spec: ToolSpec) -> bool:
+    return spec.group in CORE_GROUPS or spec.name in CORE_TOOLS
+
+
+def _register_tool_search(self: Toolbox) -> None:
+    """tool_search: loads built-in tools that were held out of this reply's schemas to keep the list short.
+
+    'safe' and not tainting: it reads the app's own tool descriptions. Loading a tool changes nothing about
+    whether it may run: its mode, grants, plan mode and taint rules apply to the call exactly as before.
+    """
+    async def tool_search(ctx: dict[str, Any], query: str, limit: int = 5) -> Any:
+        catalog = ctx.get("tool_catalog")
+        tools_ = catalog() if callable(catalog) else []
+        hits = mcp_search.bm25_search(mcp_search.build_docs(tools_), str(query or ""), limit=int(limit or 5))
+        if not hits:
+            return {"matches": [], "hint": "try different keywords, or a group name from the list in your instructions"}
+        by_slug = {t["slug"]: t for t in tools_}
+        ctx.setdefault("tool_loaded", set()).update(slug for slug, _ in hits)
+        return {"matches": [{"name": slug, "group": by_slug[slug].get("server") or "",
+                             "summary": str(by_slug[slug].get("description") or "")[:160]} for slug, _ in hits],
+                "note": "These tools are now callable from your next step on."}
+    self.specs["tool_search"] = ToolSpec("tool_search", (
+        "Find and load more of your own tools by keyword. Only the common tools are listed until you search; "
+        "describe the task ('move a file to the trash', 'run python', 'create a calendar event') or name a group."),
+        _obj({"query": {"type": "string", "description": "What you want to do, in plain words, or a group name"},
+              "limit": {"type": "integer", "default": 5, "description": "Tools to load (1-10)"}}, ["query"]),
+        tool_search, "utility", "safe", examples=[{"query": "move a file to the trash"}])
+
+
+Toolbox._register_tool_search = _register_tool_search  # type: ignore[attr-defined]

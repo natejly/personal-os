@@ -1215,7 +1215,6 @@ export interface Settings {
   contextBudget?: Record<string, number>
   maxRunTokens?: number
   maxRunSeconds?: number
-  maxRunCost?: number
   /** Provider resilience and retention (backend llm.py / retention.py); missing means the shipped default. */
   llmRetries?: number
   llmIdleSeconds?: number
@@ -1269,7 +1268,6 @@ export interface Settings {
   usageAlerts?: { dailyCost: number; monthlyCost: number }
   /** Cowork desk budgets. 0 on either axis means unlimited; a desk may tighten them, never loosen. */
   deskMaxTurns?: number
-  deskMaxCost?: number
   deskMaxLive?: number
   /** How long a desk waits on a card nobody is watching before the run lets go. 0 = wait forever. */
   parkAfterSeconds?: number
@@ -1554,7 +1552,7 @@ export interface PlanEdit { idx: number; arguments?: Record<string, unknown>; dr
 
 
 
-export interface DeskBudget { maxTurns?: number; maxCost?: number }
+export interface DeskBudget { maxTurns?: number }
 
 export interface Desk {
   id: string

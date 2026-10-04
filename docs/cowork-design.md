@@ -54,7 +54,7 @@ Four consequences we accept deliberately:
    that a restart silently orphans.
 3. **Long autonomy is bought by chaining bounded replies, never by raising `maxToolRounds`.** `maxToolRounds`
    stays 25 (`llm.py:54`). A desk that exhausts a reply's budget mid-plan starts a *fresh* bounded run against
-   the same approved plan, guarded by a desk-level turn and cost budget. That is a standing project anti-goal
+   the same approved plan, guarded by a desk-level turn budget. That is a standing project anti-goal
    honoured, not dodged.
 4. **The plan binds arguments, not intentions.** Approving step 3 approves `sha256(canonical(args))` for that
    one call, once. A different argument, a second use, or an unplanned call still shows a card.
@@ -339,7 +339,7 @@ CREATE TABLE IF NOT EXISTS desks (
   workspace       TEXT NOT NULL,                   -- "cowork/<id>", RELATIVE to db.data_dir
   turn            INTEGER NOT NULL DEFAULT 0,
   cost            REAL NOT NULL DEFAULT 0,
-  budget          TEXT NOT NULL DEFAULT '{}',      -- {maxTurns, maxCost} overriding the global caps
+  budget          TEXT NOT NULL DEFAULT '{}',      -- {maxTurns} overriding the global cap
   last_error      TEXT,
   archived        INTEGER NOT NULL DEFAULT 0,
   created_at      REAL NOT NULL,
@@ -1235,7 +1235,7 @@ export interface ActionPlan { plan_id: string; call_id: string | null; conversat
   status: 'pending'|'approved'|'rejected'|'superseded'; tainted: boolean
   expected_taint: string[]; note: string; decided_by: string | null
   created_at: number; decided_at: number | null; steps: ActionPlanStep[] }
-export interface DeskBudget { maxTurns?: number; maxCost?: number }
+export interface DeskBudget { maxTurns?: number }
 export interface Desk { id: string; conversation_id: string; project_id: string | null; title: string
   brief: string; status: DeskStatus; status_reason: string; headline: string; question: string
   autonomy: DeskAutonomy; plan_id: string | null; run_id: string | null; turn: number; cost: number
@@ -1578,8 +1578,8 @@ from `GET /conversations` and present with `?include_desks=true`; three desks ru
 unanswered approval with **zero watchers** parks after `parkAfterSeconds` and the desk goes `blocked` with the
 run ended and no task alive; the same approval with a watcher attached does **not** park; deciding it resumes
 the desk through the same `resume()` the recovery path uses; a chained turn publishes `desk_handoff` before
-`done`; `_should_chain` refuses a turn that consumed no step and lands in `failed`; the desk cost budget caps
-the chain even when turns remain; `desk_ask` / `desk_done` set `blocked` / `review`; accept is exactly-once
+`done`; `_should_chain` refuses a turn that consumed no step and lands in `failed`; the desk turn budget caps
+the chain; `desk_ask` / `desk_done` set `blocked` / `review`; accept is exactly-once
 under a repeated POST and read-back verification turns a truncated write into `promote_failed`; `doc_append`
 creates a pending revision and does not touch the doc; deleting without `purge` leaves the workspace on disk.
 
@@ -1605,8 +1605,8 @@ creates a pending revision and does not touch the doc; deleting without `purge` 
    `RESERVED_TOOL_NAMES` is still maintained because its test enforces it.
 6. **No faithful tool-message replay on resume.** A resumed desk gets a prose ledger (§3.11), not reconstructed
    `assistant(tool_calls)` / `tool` pairs.
-7. **No cross-desk cost accounting.** Each desk has its own turn and cost budget; four desks can spend four
-   budgets concurrently. A shared parent budget is a later increment.
+7. **No spend limits.** Cost is reported (desk and Usage) but never stops a run; desks are bounded by turns,
+   rounds, time and tokens.
 8. **No raising `maxToolRounds`, no auto-enabled skills, no heartbeat, no pixel clicking.** Standing project
    anti-goals. The notification in §7.7 fires on a transition from an event already flowing, and the re-attach
    in §7.4 is a bounded retry on a known handoff — neither is a poller.

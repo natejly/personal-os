@@ -8,7 +8,7 @@ Everything runs offline against a scripted llm.stream_chat. The claims worth a t
   - several read-only spawns in one round run side by side, through the real reply loop;
   - the report comes back wrapped as untrusted data and taints the parent;
   - background spawn then wait, stop cascades and still returns partial output, a stale child is stopped;
-  - at its step limit a child is forced into one tool-free summary; the cost cap is a hard stop;
+  - at its step limit a child is forced into one tool-free summary;
   - a child's approval card rides the parent's stream and decides the call;
   - writers never share a root; user-authored definitions are inert until approved;
   - desk_start always asks and only ever creates a plan-mode desk.
@@ -46,7 +46,7 @@ def check(cond: Any, label: str) -> None:
 
 
 appmod.db.set_settings({"autoLearn": False, "baseUrl": ""})
-DEFAULTS = {k: llm.DEFAULT_SETTINGS[k] for k in ("subagentMaxConcurrent", "subagentMaxDepth", "subagentMaxRounds", "subagentMaxCost",
+DEFAULTS = {k: llm.DEFAULT_SETTINGS[k] for k in ("subagentMaxConcurrent", "subagentMaxDepth", "subagentMaxRounds",
                                                   "subagentStaleSeconds", "subagentToolSeconds")}
 
 # ---- a scripted model ----------------------------------------------------------------------------
@@ -243,8 +243,8 @@ def test_identical_spawns_dedupe() -> None:
     check(b.get("duplicate") and b["agent_id"] == a["agent_id"], "the repeat is answered with the first result, marked as such")
 
 
-def test_budget_rollup_and_cost_cap() -> None:
-    reset(subagentMaxCost=0.25)
+def test_budget_rollup() -> None:
+    reset()
     prev = appmod.pricing.cost
     appmod.pricing.cost = lambda cfg, model, pt, ct, *a, **k: (pt + ct) / 1000.0
     try:
@@ -253,25 +253,7 @@ def test_budget_rollup_and_cost_cap() -> None:
         ctx = mkctx(new_conv())
         out = run(appmod.toolbox.call("agent_spawn", {"task": "spend"}, ctx))
         check(abs(ctx["budget"].cost - 0.3) < 1e-9 and ctx["budget"].tokens == 300, "the child's cost and tokens land on the parent's budget")
-        check(out["state"] == "completed" or out["exit_reason"] == "cost_cap", "it ended")
-
-        # the cost cap is a hard stop, not a summary turn
-        reset(subagentMaxCost=0.2)
-        SCRIPTS["burn"] = [{"text": "step", "calls": [call("c1", "current_time", {})], "usage": {"prompt_tokens": 150, "completion_tokens": 100}},
-                           {"text": "never", "calls": [call("c2", "current_time", {})]}]
-        out = run(appmod.toolbox.call("agent_spawn", {"task": "burn"}, mkctx(new_conv())))
-        check(out["exit_reason"] == "cost_cap" and out["state"] == "partial", "over its own cost cap the child stops")
-        check(len([s for s in SEEN if s["child"]]) == 1, "and no further model call is made")
-        check("step" in out["report"], "the partial output is returned")
-
-        # the parent's own cost limit stops its children too
-        reset()
-        pctx = mkctx(new_conv())
-        pctx["budget"].max_cost = 0.05
-        SCRIPTS["over"] = [{"text": "x", "calls": [call("c1", "current_time", {})], "usage": {"prompt_tokens": 80, "completion_tokens": 20}},
-                           {"text": "y", "calls": [call("c2", "current_time", {})]}]
-        out = run(appmod.toolbox.call("agent_spawn", {"task": "over"}, pctx))
-        check(out["exit_reason"] == "cost_cap", "a child stops when the parent's budget is spent")
+        check(out["state"] == "completed", "it ended")
     finally:
         appmod.pricing.cost = prev
 
@@ -826,7 +808,7 @@ def test_settings_and_routes() -> None:
     for k, v in DEFAULTS.items():
         check(llm.DEFAULT_SETTINGS[k] == v, f"default {k}")
     check(llm.DEFAULT_SETTINGS["subagentMaxConcurrent"] == 4 and llm.DEFAULT_SETTINGS["subagentMaxDepth"] == 2
-          and llm.DEFAULT_SETTINGS["subagentMaxRounds"] == 12 and llm.DEFAULT_SETTINGS["subagentMaxCost"] == 0.25, "the specified defaults")
+          and llm.DEFAULT_SETTINGS["subagentMaxRounds"] == 12, "the specified defaults")
     reset()
     store = appmod.run_store
     store.create("parent_r", None, "chat")

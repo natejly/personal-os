@@ -719,11 +719,9 @@ NUMERIC_SETTING_RANGES: dict[str, tuple[float, float]] = {
     "maxToolRounds": (1, 60),
     "maxRunTokens": (0, 10_000_000),
     "maxRunSeconds": (0, 86_400),
-    "maxRunCost": (0, 1_000),
     "subagentMaxConcurrent": (1, 20),
     "subagentMaxDepth": (0, 3),
     "subagentMaxRounds": (1, 60),
-    "subagentMaxCost": (0, 100),
     "subagentStaleSeconds": (0, 86_400),
     "subagentToolSeconds": (0, 86_400),
     "fileSnapshotMaxBytes": (0, 100_000_000),
@@ -1334,7 +1332,7 @@ EFFORT_DROPPED_NOTICE = "This model does not accept a reasoning effort; it was s
 FINAL_ROUND_SECONDS = 90.0
 # Hard ceiling on an unattended run end to end (model, tools, everything), a backstop for a hang the budget cannot see.
 JOB_HARD_SECONDS = 1800.0
-JOB_BUDGET = {"maxToolRounds": 8, "maxRunTokens": 60_000, "maxRunSeconds": 240, "maxRunCost": 0.20}
+JOB_BUDGET = {"maxToolRounds": 8, "maxRunTokens": 60_000, "maxRunSeconds": 240}
 JOB_HINT = ("## This is a scheduled background run\nNobody is watching it. Anything that reaches outside this app "
             "(sending or drafting mail, calendar writes, Google Docs/Sheets/Tasks) cannot be executed here: such a "
             "call is recorded as a proposal for the user to accept, edit or reject, and that is enforced outside your "
@@ -1343,7 +1341,7 @@ JOB_HINT = ("## This is a scheduled background run\nNobody is watching it. Anyth
             "schedule further runs from in here: that too becomes a proposal.")
 
 
-_DESK_CAPS = ("deskMaxTurns", "deskMaxCost", "deskMaxLive")
+_DESK_CAPS = ("deskMaxTurns", "deskMaxLive")
 
 
 def _desk_caps(cfg: dict[str, Any], override: dict[str, Any] | None) -> dict[str, Any]:
@@ -1353,7 +1351,7 @@ def _desk_caps(cfg: dict[str, Any], override: dict[str, Any] | None) -> dict[str
     the whole desk, across turns. 0 = unlimited, so it loses to any positive limit.
     """
     out = {k: cfg.get(k, llm.DEFAULT_SETTINGS[k]) for k in _DESK_CAPS}
-    for key, src in (("deskMaxTurns", "maxTurns"), ("deskMaxCost", "maxCost")):
+    for key, src in (("deskMaxTurns", "maxTurns"),):
         want = (override or {}).get(src)
         if want is None:
             continue
@@ -1365,7 +1363,6 @@ def _desk_caps(cfg: dict[str, Any], override: dict[str, Any] | None) -> dict[str
         if want > 0 and (have <= 0 or want < have):
             out[key] = want
     out["deskMaxTurns"] = int(out["deskMaxTurns"] or 0)
-    out["deskMaxCost"] = float(out["deskMaxCost"] or 0)
     out["deskMaxLive"] = int(out["deskMaxLive"] or 0)
     return out
 
@@ -1392,7 +1389,7 @@ def _num(cfg: dict[str, Any], key: str) -> float:
 
 
 class Budget:
-    """Rounds / tokens / wall-clock / USD for one reply. 0 on any axis means unlimited; approval waits do not count."""
+    """Rounds / tokens / wall-clock for one reply (cost is tracked, never a limit). 0 on any axis means unlimited; approval waits do not count."""
 
     def __init__(self, cfg: dict[str, Any]):
         # A junk value already stored (from before PUT /settings validated) falls back to the default
@@ -1400,7 +1397,6 @@ class Budget:
         self.max_rounds = int(_num(cfg, "maxToolRounds"))
         self.max_tokens = int(_num(cfg, "maxRunTokens"))
         self.max_seconds = _num(cfg, "maxRunSeconds")
-        self.max_cost = _num(cfg, "maxRunCost")
         self.t0, self.paused = time.monotonic(), 0.0
         self.rounds = self.tokens = 0
         self.cost = 0.0
@@ -1415,7 +1411,7 @@ class Budget:
 
     def _ratios(self) -> dict[str, float]:
         return {k: v / lim for k, v, lim in (("rounds", self.rounds, self.max_rounds), ("tokens", self.tokens, self.max_tokens),
-                                             ("time", self.elapsed(), self.max_seconds), ("cost", self.cost, self.max_cost)) if lim > 0}
+                                             ("time", self.elapsed(), self.max_seconds)) if lim > 0}
 
     def fraction(self) -> float:
         return max(self._ratios().values(), default=0.0)
@@ -1434,7 +1430,7 @@ class Budget:
     def snapshot(self) -> dict[str, Any]:
         """What agent_runs.budget stores: the limits and how much of each the run has used."""
         return {"max_rounds": self.max_rounds, "max_tokens": self.max_tokens, "max_seconds": self.max_seconds,
-                "max_cost": self.max_cost, "rounds": self.rounds, "tokens": self.tokens, "cost": round(self.cost, 6),
+                "rounds": self.rounds, "tokens": self.tokens, "cost": round(self.cost, 6),
                 "seconds": round(self.elapsed(), 3), "paused_seconds": round(self.paused, 3)}
 
 
@@ -3292,7 +3288,7 @@ async def _run_desk(run: Run, desk_id: str, body: ChatIn) -> dict[str, Any]:
     return settled
 
 
-BUDGET_STOPS = ("rounds", "tokens", "time", "cost")  # per-reply window stops; not "loop" (stuck) or "blocked" (a card)
+BUDGET_STOPS = ("rounds", "tokens", "time")  # per-reply window stops; not "loop" (stuck) or "blocked" (a card)
 
 
 def _chain_kind(desk: dict[str, Any], run: Run, error: str | None = None) -> str | None:
@@ -3305,14 +3301,13 @@ def _chain_kind(desk: dict[str, Any], run: Run, error: str | None = None) -> str
     re-reading the same file. nudge: the reply simply ended (no stop, no desk_done/desk_ask); one more
     turn tells the model to finish or ask, never two in a row. Caps hold for both."""
     caps = _desk_caps(settings(), desk.get("budget"))
-    turns, cost = caps["deskMaxTurns"], caps["deskMaxCost"]
+    turns = caps["deskMaxTurns"]
     # claim_run puts a desk with no plan into `planning` whatever its autonomy, and only a plan-autonomy desk
     # is actually held in plan mode (see _chat_stream); an ask/propose desk works from its first turn.
     live = desk.get("status") == "working" or (desk.get("status") == "planning" and desk.get("autonomy") != "plan")
     if not (live and not run.stop.is_set() and not error and not run.error
-            # 0 on either axis means unlimited, the same reading _caps gives it.
-            and (turns <= 0 or int(desk.get("turn") or 0) + 1 < turns)
-            and (cost <= 0 or float(desk.get("cost") or 0) < cost)):
+            # 0 means unlimited, the same reading _caps gives it.
+            and (turns <= 0 or int(desk.get("turn") or 0) + 1 < turns)):
         return None
     if run.partial in BUDGET_STOPS:
         return "continue" if (run.steps_consumed > 0 or run.tool_ok > 0) else None

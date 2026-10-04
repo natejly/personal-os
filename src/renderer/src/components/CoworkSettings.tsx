@@ -175,8 +175,6 @@ export default function CoworkSettings({ draft, patch }: { draft: Settings; patc
       <h4>Desks</h4>
       <NumField title="Turns per desk" settingKey="deskMaxTurns" value={draft.deskMaxTurns} fallback={12}
         help="How many chained replies a desk may take before it stops and asks. 0 means no limit." onCommit={(n) => patch({ deskMaxTurns: n })} />
-      <NumField title="Spend per desk ($)" settingKey="deskMaxCost" value={draft.deskMaxCost} fallback={2} step={0.5}
-        help="A desk stops when its cost passes this. Calls to a model with no price (set one in Usage) count as $0. 0 means no limit." onCommit={(n) => patch({ deskMaxCost: n })} />
       <NumField title="Desks working at once" settingKey="deskMaxLive" value={draft.deskMaxLive} fallback={4}
         help="More desks than this wait their turn. 0 means no limit." onCommit={(n) => patch({ deskMaxLive: n })} />
       <NumField title="Wait for an unwatched card (seconds)" settingKey="parkAfterSeconds" value={draft.parkAfterSeconds} fallback={180}

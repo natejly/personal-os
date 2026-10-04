@@ -544,12 +544,9 @@ def test_the_desk_budget_caps_the_chain_even_with_turns_left() -> None:
     run.partial, run.steps_consumed = "rounds", 1
     try:
         check(_should_chain(base, run) is True, "the baseline turn would chain")
-        check(_should_chain({**base, "cost": 99.0}, run) is False, "the cost cap stops it with turns left over")
+        check(_should_chain({**base, "cost": 99.0}, run) is True, "spend never stops a desk")
         check(_should_chain({**base, "turn": 99}, run) is False, "so does the turn cap")
-        check(_should_chain({**base, "cost": 0.001, "budget": {"maxCost": 0.0001}}, run) is False,
-              "a desk's own budget may make the user's settings stricter")
-        check(_should_chain({**base, "cost": 0.001}, run) is True,
-              "and the same spend is nothing against the default cap")
+        check(_should_chain({**base, "budget": {"maxTurns": 1}}, run) is False, "a desk's own budget may make the user's settings stricter")
         run.steps_consumed = 0
         check(_should_chain(base, run) is False, "a turn that consumed no step is not progress")
         run.steps_consumed = 1

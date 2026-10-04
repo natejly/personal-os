@@ -185,7 +185,8 @@ function StatusLine({ status }: { status: MessageStatus }): JSX.Element {
 
 // The store is read imperatively inside the handlers: any subscription here defeats the memo, and a
 // streamed token would re-render every message in every mounted transcript.
-const MessageView = memo(function MessageView({ message, streaming, last = false, editable = false }: { message: Message; streaming: boolean; last?: boolean; editable?: boolean }): JSX.Element {
+// `browserSession`: the agent browser this transcript drives, passed only to its latest reply that used the browser.
+const MessageView = memo(function MessageView({ message, streaming, last = false, editable = false, browserSession }: { message: Message; streaming: boolean; last?: boolean; editable?: boolean; browserSession?: string }): JSX.Element {
   const [editing, setEditing] = useState(false)
   const isUser = message.role === 'user'
   const ctx = message.context_used
@@ -214,7 +215,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
           <div className="markdown">
             {message.reasoning && <Reasoning text={message.reasoning} live={streaming && !message.content} />}
             <BodyBoundary resetKey={message.id}>
-              {message.tool_events && message.tool_events.length > 0 && <ToolEvents events={message.tool_events} conversationId={message.conversation_id} streaming={streaming} />}
+              {message.tool_events && message.tool_events.length > 0 && <ToolEvents events={message.tool_events} conversationId={message.conversation_id} streaming={streaming} browserSession={browserSession} />}
               {message.content ? (
                 <MarkdownPreview source={message.content} streaming={streaming} cites={cites} onCite={onCite} />
               ) : streaming && !message.reasoning && !message.tool_events?.some((t) => t.pending) ? (

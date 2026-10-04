@@ -20,8 +20,11 @@ export interface ToolCardProps {
   conversationId?: string
   /** The reply is still streaming, so the run is in progress. */
   streaming?: boolean
-  /** The last browser_* call in its reply: the one card that offers to watch the agent's browser. */
-  latestBrowser?: boolean
+  /**
+   * The agent browser session this card may watch (`conv:<id>` for a chat, `desk:<id>` for a desk). Set only on the
+   * transcript's last browser_* call, so one card offers the viewer.
+   */
+  browserSession?: string
 }
 
 /** Tool name -> card. A registered card replaces the generic row and ask card for that tool, pending and finished. */

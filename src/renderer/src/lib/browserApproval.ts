@@ -92,8 +92,20 @@ export function hostPath(url: string): string {
 /** The agent browser session a plain chat drives (browser.py `session_of`; a desk's is `desk:<id>`). */
 export const chatBrowserSession = (conversationId: string): string => `conv:${conversationId}`
 
-/** The last browser_* call in a reply: only that card offers to watch the browser, so a long run shows one viewer. */
+/** A desk's browser session: its own conversation's calls run under `desk:<id>`, never `conv:`. */
+export const deskBrowserSession = (deskId: string): string => `desk:${deskId}`
+
+/** The last browser_* call in a reply. */
 export function latestBrowserCall(events: ReadonlyArray<{ id: string; name: string }>): string | null {
   for (let i = events.length - 1; i >= 0; i--) if (events[i].name.startsWith('browser_')) return events[i].id
+  return null
+}
+
+/**
+ * The latest reply in a transcript that used the browser. Only its last browser card offers to watch, so the whole
+ * conversation shows one viewer, not one per past reply.
+ */
+export function latestBrowserMessage(messages: ReadonlyArray<{ id: string; tool_events?: ReadonlyArray<{ id: string; name: string }> | null }>): string | null {
+  for (let i = messages.length - 1; i >= 0; i--) if (latestBrowserCall(messages[i].tool_events ?? [])) return messages[i].id
   return null
 }

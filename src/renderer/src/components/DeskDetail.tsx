@@ -7,6 +7,7 @@ import DeskPlan from './DeskPlan'
 import DeskFiles from './DeskFiles'
 import DeskBrowser from './DeskBrowser'
 import { defaultDeskTab, type DeskTab } from '../lib/deskFiles'
+import { deskBrowserSession, latestBrowserMessage } from '../lib/browserApproval'
 import DeskReview from './DeskReview'
 import DeskApprovalCard from './DeskApprovalCard'
 import InlineNote from './InlineNote'
@@ -173,6 +174,7 @@ export default function DeskDetail(): JSX.Element | null {
   const status = desk?.status
   const session = useSession(convId)
   const messages = session?.conversation.messages ?? []
+  const watchId = latestBrowserMessage(messages)
   useTick(Boolean(desk?.live))
 
   // The 12-session LRU evicts by `touchedAt` and a desk pane is never `focusedConversationId`, so the
@@ -371,7 +373,8 @@ export default function DeskDetail(): JSX.Element | null {
             <Timeline events={desk.events} />
             {messages.length === 0
               ? <p className="empty-hint">{desk.status === 'draft' ? 'Not started yet.' : 'Nothing said yet.'}</p>
-              : <div className="messages-inner">{messages.map((m) => <MessageView key={m.id} message={m} streaming={session?.streaming?.messageId === m.id} />)}</div>}
+              : <div className="messages-inner">{messages.map((m) => <MessageView key={m.id} message={m} streaming={session?.streaming?.messageId === m.id}
+                  browserSession={m.id === watchId ? deskBrowserSession(desk.id) : undefined} />)}</div>}
           </div>
           {/* MESSAGE_FROM is wider than RESUME_FROM: it also covers done|failed|stopped, so a
               message is how you pick a finished — or failed, or stopped — desk back up. A draft is
@@ -390,7 +393,7 @@ export default function DeskDetail(): JSX.Element | null {
       )}
       {tab === 'plan' && <div className="desk-pane scroll"><DeskPlan desk={desk} /></div>}
       {tab === 'files' && <DeskFiles desk={desk} />}
-      {tab === 'browser' && <DeskBrowser session={`desk:${desk.id}`} live={DESK_LIVE.includes(desk.status)} />}
+      {tab === 'browser' && <DeskBrowser session={deskBrowserSession(desk.id)} live={DESK_LIVE.includes(desk.status)} />}
       {tab === 'output' && <div className="desk-pane scroll"><DeskReview desk={desk} /></div>}
     </section>
   )

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Eye, EyeOff, Globe } from 'lucide-react'
-import { chatBrowserSession, hostPath } from '../../lib/browserApproval'
+import { hostPath } from '../../lib/browserApproval'
 import DeskBrowser from '../DeskBrowser'
 import { browserLine, num, str, strList } from '../../lib/toolResult'
 import CardShell from './CardShell'
@@ -11,7 +11,7 @@ const NAMES = ['browser_open', 'browser_snapshot', 'browser_click', 'browser_typ
 
 /**
  * browser_*: one line for what was done, the page it left the browser on, any notes, and the page text behind a
- * disclosure. The reply's last browser card can also show the chat's browser live, with Take over and Hide.
+ * disclosure. The transcript's last browser card can also show the chat's browser live, with Take over and Hide.
  */
 export default function BrowserCard(props: ToolCardProps): JSX.Element {
   const { event } = props
@@ -43,14 +43,14 @@ export default function BrowserCard(props: ToolCardProps): JSX.Element {
         </details>
       )}
       <ErrorLine event={event} />
-      {props.latestBrowser && props.conversationId && window.os?.agentBrowser && (
+      {props.browserSession && window.os?.agentBrowser && (
         <>
           <button type="button" className="link small" aria-expanded={watch} onClick={() => setWatch((w) => !w)}>
             {watch ? <EyeOff size={12} /> : <Eye size={12} />} {watch ? 'Stop watching' : 'Watch the browser'}
           </button>
           {watch && (
-            <DeskBrowser session={chatBrowserSession(props.conversationId)} live={!!props.streaming}
-              emptyText="This chat's browser is closed (it shuts after a few idle minutes)." />
+            <DeskBrowser session={props.browserSession} live={!!props.streaming}
+              emptyText="This browser is closed (it shuts after a few idle minutes)." />
           )}
         </>
       )}

@@ -12,6 +12,7 @@ import { GRID_SIZES } from '../canvas/snapping'
 import { useCanvas } from '../canvas/store'
 import { ToolGlobalToggles } from './ToolPermissions'
 import PermissionRules from './PermissionRules'
+import StandingGrants from './StandingGrants'
 import { WorkspaceRoots } from './WorkspaceRoots'
 import CoworkSettings from './CoworkSettings'
 import GoogleSettings from './GoogleSettings'
@@ -315,6 +316,7 @@ export default function SettingsModal(): JSX.Element {
               </div>
               <ToolGlobalToggles value={draft.tools ?? {}} onChange={(tools) => patch({ tools })} />
               <PermissionRules value={draft.permissionRules} onChange={(permissionRules) => patch({ permissionRules })} />
+              <StandingGrants draft={draft} patch={patch} />
               <label className="toggle-row plain">
                 <span className="toggle-text"><b>Cache-friendly prompt layout</b><small>Keep the system prompt identical between turns and send per-turn memories, graph and excerpts next to your newest message, so the provider's prompt cache keeps hitting.</small></span>
                 <input type="checkbox" checked={draft.cacheLayout !== false} onChange={(e) => patch({ cacheLayout: e.target.checked })} /><span className="switch" />

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { CONTROL_TIMEOUT_MS, STOP_TIMEOUT_MS, req } from './api'
+import { CONTROL_TIMEOUT_MS, STOP_TIMEOUT_MS, api, req } from './api'
 import { ApiError } from './apiError'
 
 const withFetch = async (impl: typeof fetch, run: () => Promise<void>): Promise<void> => {
@@ -61,4 +61,14 @@ test('a request with no deadline sends no signal of its own', async () => {
 test('control timeouts: Stop gives up sooner than the rest', () => {
   assert.equal(CONTROL_TIMEOUT_MS, 20_000)
   assert.equal(STOP_TIMEOUT_MS, 5_000)
+})
+
+test('clearGrant names the scope id, so a chat or project grant can be revoked', async () => {
+  const urls: string[] = []
+  await withFetch((async (i: RequestInfo | URL) => { urls.push(String(i)); return new Response('{}', { status: 200 }) }) as typeof fetch, async () => {
+    await api.mcp.clearGrant('mcp__s__t', 'chat', 'c 1')
+    await api.mcp.clearGrant('mcp__s__t')
+  })
+  assert.ok(urls[0].endsWith('/mcp/tools/mcp__s__t/grant?scope=chat&scope_id=c%201'))
+  assert.ok(urls[1].endsWith('/mcp/tools/mcp__s__t/grant?scope=global'))
 })

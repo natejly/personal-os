@@ -11,9 +11,9 @@ import { TOOL_CARDS } from './toolcards'
 
 /**
  * One pending approval in a desk pane, answered with the same pieces a chat uses: the registered card for the
- * tool when there is one, otherwise the generic approval, then `ApprovalRules` (session grant, saved rule, deny
- * with a note). The decision goes through `approveTool` — the call a chat makes — so a card here and a card in
- * the transcript are the same decision.
+ * tool when there is one (with `ApprovalRules` under it for the grants and a deny note), otherwise the generic
+ * approval, whose one row holds both. The decision goes through `approveTool` — the call a chat makes — so a card
+ * here and a card in the transcript are the same decision.
  *
  * `event` is the transcript's own tool event when the desk's conversation has it (it carries the rule
  * suggestions); a parked card whose message has not loaded falls back to one built from the approval row, which
@@ -41,8 +41,8 @@ export default function DeskApprovalCard({ approval, conversationId, event }: {
   return (
     <div className="desk-approval">
       {note}
-      {Card ? <Card event={ev} pending decide={decide} /> : <GenericApproval event={ev} decide={(ok) => decide(ok)} grant={(g) => approveTool(ev.id, g, conversationId)} />}
-      <ApprovalRules event={ev} conversationId={conversationId} />
+      {Card ? <><Card event={ev} pending decide={decide} /><ApprovalRules event={ev} conversationId={conversationId} /></>
+        : <GenericApproval event={ev} conversationId={conversationId} decide={(ok) => decide(ok)} />}
     </div>
   )
 }

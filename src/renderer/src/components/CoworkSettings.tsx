@@ -224,8 +224,6 @@ export default function CoworkSettings({ draft, patch }: { draft: Settings; patc
       <h4>Desks</h4>
       <NumField title="Turns per desk" settingKey="deskMaxTurns" value={draft.deskMaxTurns} fallback={12}
         help="How many chained replies a desk may take before it stops and asks. 0 means no limit." onCommit={(n) => patch({ deskMaxTurns: n })} />
-      <NumField title="Spend per desk ($)" settingKey="deskMaxCost" value={draft.deskMaxCost} fallback={2} step={0.5}
-        help="A desk stops when its cost passes this. 0 means no limit." onCommit={(n) => patch({ deskMaxCost: n })} />
       <NumField title="Desks working at once" settingKey="deskMaxLive" value={draft.deskMaxLive} fallback={4}
         help="More desks than this wait in a queue and start, oldest first, as others finish. 0 means no limit." onCommit={(n) => patch({ deskMaxLive: n })} />
       <Toggle title="Resume desks after a restart" help="Carry on desks the app was running when it quit. A desk with an action whose outcome is unknown, or one waiting on your approval or plan, still waits for you."

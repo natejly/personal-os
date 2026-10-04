@@ -51,7 +51,7 @@ export default function ProjectView(): JSX.Element {
   const st = project.stats
 
   const TABS: { key: Tab; label: string; icon: JSX.Element; n?: number }[] = [
-    { key: 'chats', label: 'Chats & notes', icon: <MessageSquare size={14} />, n: rows.length },
+    { key: 'chats', label: 'Chats & files', icon: <MessageSquare size={14} />, n: rows.length },
     { key: 'instructions', label: 'Instructions', icon: <BookOpen size={14} /> },
     { key: 'knowledge', label: 'Uploads', icon: <FileText size={14} />, n: st?.documents },
     { key: 'memory', label: 'Memory', icon: <Brain size={14} />, n: (st?.memories ?? 0) + (st?.nodes ?? 0) }
@@ -85,7 +85,7 @@ export default function ProjectView(): JSX.Element {
         <div className="page-body">
           {rows.length === 0 && (
             <div className="empty-hint big">
-              <p>No chats or notes yet.</p>
+              <p>No chats or files yet.</p>
               <button className="primary-btn" onClick={() => newChat(id)}><MessageSquarePlus size={14} /> Start one</button>
             </div>
           )}

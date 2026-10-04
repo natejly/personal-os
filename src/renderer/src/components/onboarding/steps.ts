@@ -50,6 +50,8 @@ export type WizardAction =
   | { type: 'field'; patch: Partial<Pick<WizardState, 'baseUrl' | 'apiKey' | 'model'>> }
   | { type: 'test'; test: WizardState['test'] }
   | { type: 'about'; about: string }
+  /** The configured setup, applied only while the user has not picked anything yet. */
+  | { type: 'seed'; provider: ProviderInfo; baseUrl: string; model: string }
 
 /** Providers where the user, not us, decides where the endpoint lives. */
 const EDITABLE_BASE = new Set(['litellm', 'custom', 'ollama'])
@@ -75,6 +77,8 @@ export function reduce(s: WizardState, a: WizardAction, provider?: ProviderInfo)
       // Switching provider drops the old key and model: they belong to the other service.
       if (a.provider.id === s.providerId) return s
       return { ...s, providerId: a.provider.id, baseUrl: a.provider.baseUrl, apiKey: '', model: a.provider.defaultModel, test: { state: 'idle' } }
+    case 'seed':
+      return s.providerId ? s : { ...s, providerId: a.provider.id, baseUrl: a.baseUrl, model: a.model }
     case 'field':
       // Any edit invalidates a previous test: it vouched for different inputs.
       return { ...s, ...a.patch, test: { state: 'idle' } }

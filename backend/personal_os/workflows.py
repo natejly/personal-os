@@ -436,10 +436,9 @@ def expand(defn: dict[str, Any], params: dict[str, Any]) -> list[dict[str, Any]]
 
 
 class RunBudget:
-    """What the subagents of one workflow run are charged to: tokens and cost, with a cost cap (0 = none)."""
+    """What the subagents of one workflow run are charged to: tokens and cost (reported, never a limit)."""
 
-    def __init__(self, cap: float = 0.0) -> None:
-        self.cap = cap
+    def __init__(self) -> None:
         self.tokens, self.cost, self.paused = 0, 0.0, 0.0
         self.t0 = time.monotonic()
 
@@ -448,7 +447,7 @@ class RunBudget:
         self.cost += cost or 0.0
 
     def exceeded(self) -> str | None:
-        return "cost" if self.cap > 0 and self.cost >= self.cap else None
+        return None
 
 
 # ---- storage ------------------------------------------------------------------------------------
@@ -735,13 +734,9 @@ class Engine:
             except Exception:  # noqa: BLE001
                 project = None
         modes = self.toolbox.effective(cfg.get("tools") or {}, (project or {}).get("tools"), None)
-        try:
-            cap = float(cfg.get("workflowMaxCost") or 0)
-        except (TypeError, ValueError):
-            cap = 0.0
         return {"project_id": run.get("project_id"), "conversation_id": run.get("conversation_id"), "message_id": None,
                 "tainted": False, "taint_sources": [], "allowed_urls": set(), "settings": cfg, "modes": modes, "depth": 0,
-                "agent_run_id": run["id"], "model": cfg.get("defaultModel"), "stop": stop, "budget": RunBudget(max(0.0, cap)),
+                "agent_run_id": run["id"], "model": cfg.get("defaultModel"), "stop": stop, "budget": RunBudget(),
                 "workflow_run_id": run["id"], "proposal_only": False}
 
     # ---- the loop
@@ -870,7 +865,7 @@ class Engine:
         fs_ask = self.toolbox.fs_needs_ask(name, args, ctx)
         if fs_ask and mode == "on":
             mode = "ask"
-        forced = mode != raw or (mode == "ask" and self.toolbox.forces_ask(name, args))
+        forced = mode != raw or (mode == "ask" and self.toolbox.forces_ask(name, args, ctx))
         # Those tools top out at ask (Toolbox.effective), so gate() no longer turns an 'on' into a forced card for
         # them: a tainted run forces it here instead, and no allow rule lifts it.
         forced = forced or (spec.danger in ASK_LOCKED_DANGER and bool(ctx.get("tainted")))

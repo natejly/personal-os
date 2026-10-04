@@ -112,10 +112,10 @@ def test_create() -> None:
 
 
 def test_update_and_list() -> None:
-    d = fresh(brief="budget desk", budget={"maxTurns": 3, "maxCost": 1.0})
-    check(d["budget"] == {"maxTurns": 3, "maxCost": 1.0}, "the budget round-trips")
-    upd = desks.update(d["id"], {"budget": {"maxCost": 0.5}})
-    check(upd["budget"] == {"maxTurns": 3, "maxCost": 0.5}, "budget merges rather than replaces")
+    d = fresh(brief="budget desk", budget={"maxTurns": 3})
+    check(d["budget"] == {"maxTurns": 3}, "the budget round-trips")
+    upd = desks.update(d["id"], {"budget": {"maxTurns": 5}})
+    check(upd["budget"] == {"maxTurns": 5}, "budget merges rather than replaces")
     upd = desks.update(d["id"], {"title": "Renamed", "status": "done", "cost": 99})
     check(upd["title"] == "Renamed", "a whitelisted field is written")
     check(upd["status"] == "draft" and upd["cost"] == 0, "status and cost are not patchable from update()")
@@ -418,9 +418,9 @@ class _CountingDesks:
     def __init__(self, inner: Desks) -> None:
         self.inner, self.writes = inner, 0
 
-    def set_headline(self, id: str, headline: str) -> None:
+    def set_headline(self, id: str, headline: str, live_only: bool = False) -> None:
         self.writes += 1
-        self.inner.set_headline(id, headline)
+        self.inner.set_headline(id, headline, live_only)
 
     def get(self, id: str, with_outputs: bool = True) -> dict[str, Any] | None:
         return self.inner.get(id, with_outputs)
@@ -428,6 +428,7 @@ class _CountingDesks:
 
 def test_runtime_debounce() -> None:
     d = fresh()
+    desks.set_status(d["id"], "working")
     spy = _CountingDesks(desks)
     clock = [0.0]
     rt = DeskRuntime(spy, d["id"], clock=lambda: clock[0])  # type: ignore[arg-type]
@@ -464,6 +465,11 @@ def test_runtime_debounce() -> None:
           "…but an unchanged label publishes nothing")
     check(desks.get(d["id"])["headline"] == "waiting on your plan", "the row holds the last flushed label")
     check(HEADLINE_FLUSH_S == 1.0, "the window is the documented one")
+
+    desks.set_status(d["id"], "review", headline="")
+    clock[0] = 20.0
+    rt.observe("tool_result", {"name": "desk_done"})
+    check(desks.get(d["id"])["headline"] == "", "a tool_result after the desk settled does not relabel it 'thinking'")
 
 
 TESTS = [test_constants, test_actions_are_read_off_the_transition_tables, test_create, test_update_and_list, test_set_status_writes_column_and_event,

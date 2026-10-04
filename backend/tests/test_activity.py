@@ -400,6 +400,19 @@ def test_pause_blocks_recording_and_expires_on_its_own() -> None:
         assert "In Cursor" in m.now_line()
 
 
+def test_a_config_restart_keeps_the_pause() -> None:
+    m = _monitor(Path(tempfile.mkdtemp()))
+    m.db.set_settings({"activity": {**m.config(), "signals": {"apps": False}}})
+    m.running = True
+    m.pause(minutes=30)
+    m.restart()                              # what set_config does on any settings edit
+    try:
+        assert m.status()["paused"] is True, "a settings edit silently resumed recording"
+    finally:
+        m.stop()
+    assert m.paused is False                 # an explicit stop does end it
+
+
 def test_now_line_reports_being_away_once_input_stops() -> None:
     m = _monitor(Path(tempfile.mkdtemp()))
     m.running = True
@@ -488,34 +501,34 @@ def test_requesting_an_unknown_permission_is_refused_without_prompting() -> None
     assert activity.SETTINGS_URLS["accessibility"].endswith("Privacy_Accessibility")
 
 
-def test_palantir_mode_turns_everything_on_and_stands_the_gate_down() -> None:
+def test_record_everything_mode_turns_everything_on_and_stands_the_gate_down() -> None:
     m = _monitor(Path(tempfile.mkdtemp()))
     m.set_config({"excludeApps": ["1Password", "Signal"], "signals": {"apps": True, "text": False}})
-    m.set_palantir(True)
+    m.set_record_everything(True)
     cfg = m.config()
     assert all(cfg["signals"][s] for s in activity.SIGNALS)   # every signal, including the heavy ones
     assert cfg["redact"] is False
     assert cfg["excludeApps"] == [] and cfg["excludeTitlePatterns"] == []
-    assert cfg["palantir"] is True
-    assert m.status()["palantir"] is True
+    assert cfg["recordEverything"] is True
+    assert m.status()["recordEverything"] is True
     # and the gate really does stop filtering
     assert m.gate.excluded("1Password", "vault") is False
     assert m.gate.scrub("my password is hunter2") == "my password is hunter2"
 
 
-def test_palantir_mode_puts_back_exactly_what_it_replaced() -> None:
+def test_record_everything_mode_puts_back_exactly_what_it_replaced() -> None:
     m = _monitor(Path(tempfile.mkdtemp()))
     m.set_config({"excludeApps": ["Signal"], "excludeTitlePatterns": ["payroll"],
                   "signals": {"apps": True, "input": False, "text": False}})
     before = m.config()
-    m.set_palantir(True)
-    m.set_palantir(True)          # a repeat enable must not snapshot the flattened values
-    m.set_palantir(False)
+    m.set_record_everything(True)
+    m.set_record_everything(True)          # a repeat enable must not snapshot the flattened values
+    m.set_record_everything(False)
     after = m.config()
     for k in ("signals", "redact", "excludeApps", "excludeTitlePatterns"):
         assert after[k] == before[k], k
-    assert after["palantir"] is False
-    assert after["palantirRestore"] == {}
+    assert after["recordEverything"] is False
+    assert after["recordEverythingRestore"] == {}
     assert m.gate.excluded("Signal") is True
     assert "[secret]" in m.gate.scrub("my password is hunter2")
 

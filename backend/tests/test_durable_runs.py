@@ -308,6 +308,25 @@ def test_recovery_parks_a_desks_pending_card_so_one_answer_is_enough() -> None:
     assert store.claim_parked("desk_recover", "gmail_send", args, "next:call_0"), "the desk's next turn runs it with no second card"
 
 
+def test_an_unverified_write_is_replayed_never_written_again() -> None:
+    cid = j("POST", "/conversations", {})["id"]
+    run, resumed = Run(cid, store), Run(cid, store)
+    calls: list[int] = []
+
+    async def create() -> dict[str, Any]:
+        calls.append(1)
+        return {"id": "ev1", "verification": {"status": "unverified"}, "error": "UNVERIFIED - do not retry"}
+
+    async def go() -> tuple[Any, Any]:
+        await store.call_once(run.run_id, 1, "calendar_create", {"t": 1}, create)
+        again = await store.call_once(run.run_id, 1, "calendar_create", {"t": 1}, create)
+        resume = await store.call_once(resumed.run_id, 1, "calendar_create", {"t": 1}, create, inherit=run.run_id)
+        return again, resume
+
+    again, resume = asyncio.run(go())
+    assert again[1] is True and resume[1] is True and calls == [1]
+
+
 def test_a_duplicate_write_in_one_round_runs_once_end_to_end() -> None:
     title = f"durable dup {time.time()}"
     ROUNDS.append({"tool_calls": [call("todo_add", {"title": title}, "call_0"), call("todo_add", {"title": title}, "call_1")]})

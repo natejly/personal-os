@@ -368,9 +368,43 @@ def test_inline_rows() -> None:
     check(r.status_code == 200 and r.json()["spec"]["inline_rows"][0]["n"] == "a" and r.json()["data"]["rows"], "POST persists the inline spec and binds it")
 
 
+def test_source_keys_stay_out_of_sqlite_and_fetch_errors() -> None:
+    import httpx
+
+    from personal_os import dashboards as dmod
+
+    d = tempfile.mkdtemp(prefix="widgetspec-secret-")
+    store = Dashboards(Database(d))
+    src = store.create_source("S", "http", {"url": "https://api.example.com/v1", "auth_in": "query", "auth_param": "appid"}, "SECRET123abc")
+    with store.db.tx() as c:
+        c.execute("INSERT INTO data_sources(id,name,kind,config,secret,created_at) VALUES('old','O','http','{}','LEGACYKEY99',1)")
+        check("SECRET123abc" not in str([tuple(r) for r in c.execute("SELECT * FROM data_sources")]), "a new key is not written to SQLite")
+    store = Dashboards(store.db)  # startup migration
+    with store.db.tx() as c:
+        check("LEGACYKEY99" not in str([tuple(r) for r in c.execute("SELECT * FROM data_sources")]), "a legacy plaintext key is moved out")
+    check(store.source("old", with_secret=True)["secret"] == "LEGACYKEY99" and store.source("old")["has_secret"], "and still reads back")  # type: ignore[index]
+    check(store.source(src["id"], with_secret=True)["secret"] == "SECRET123abc" and "secret" not in store.source(src["id"]), "secret only on request")  # type: ignore[index, operator]
+
+    async def unauthorized(c: Any, method: str, url: str, **kw: Any) -> httpx.Response:
+        return httpx.Response(401, request=httpx.Request(method, url, params=kw.get("params")))
+
+    real, dmod.guarded_request = dmod.guarded_request, unauthorized  # type: ignore[assignment]
+    try:
+        run(store.fetch_source(src["id"]))
+        check(False, "a 401 raises")
+    except Exception as e:  # noqa: BLE001
+        check("SECRET123abc" not in str(e) and "401" in str(e), "the error names the status, not the keyed URL")
+    finally:
+        dmod.guarded_request = real  # type: ignore[assignment]
+    check("SECRET123abc" not in (store.source(src["id"]) or {}).get("last_status", ""), "last_status carries no key")
+    store.delete_source(src["id"])
+    check(store.db.secrets.get(f"source:{src['id']}") is None, "deleting a source drops its key")
+
+
 TESTS = [test_resolve_path, test_transforms, test_validate_and_autofix, test_stat, test_generate_spec,
          test_source_labels_cannot_open_a_section, test_a_token_in_dashboard_facts_is_stripped,
-         test_bind_ttl_and_lifecycle, test_schema_migration, test_routes, test_inline_rows]
+         test_bind_ttl_and_lifecycle, test_schema_migration, test_routes, test_inline_rows,
+         test_source_keys_stay_out_of_sqlite_and_fetch_errors]
 
 if __name__ == "__main__":
     failures = 0

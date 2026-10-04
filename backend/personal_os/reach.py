@@ -1,4 +1,4 @@
-"""Agent Reach: per-platform read and search paths.
+"""Platform readers: per-platform read and search paths.
 
 Each platform gets its most reliable upstream path (Jina Reader for any page, Exa for search, yt-dlp for
 YouTube, the GitHub API, feedparser for RSS). The routing lives here as plain functions that tools.py exposes

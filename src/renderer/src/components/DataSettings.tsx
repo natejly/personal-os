@@ -61,7 +61,7 @@ export default function DataSettings(): JSX.Element {
   return (
     <section>
       <h3>Data</h3>
-      <p className="muted">Everything Grain knows is one database plus your uploaded files, stored on this Mac. Grain snapshots it daily and before any update that changes its structure, and keeps the newest of each.</p>
+      <p className="muted">Grain keeps a database plus folders of files (uploads, pasted images, kept meeting audio, desk outputs) on this Mac. Backups snapshot the database only, daily and before any update that changes its structure, keeping the newest of each. Export also takes the files.</p>
 
       <div className="data-row">
         <span className="toggle-text">
@@ -75,6 +75,13 @@ export default function DataSettings(): JSX.Element {
         <p className="muted" role="status">
           A restore is waiting for the next start. <button className="ghost-btn" onClick={() => void window.os.data.relaunch()}>Restart now</button>{' '}
           <button className="ghost-btn" onClick={() => void cancelRestore()}>Cancel restore</button>
+        </p>
+      )}
+
+      {info?.restore_failed && !info.pending_restore && (
+        <p className="muted" role="alert">
+          The restore staged before the last start could not be applied ({info.restore_failed.error}), so your data was left as it was.{' '}
+          <button className="ghost-btn" onClick={() => void cancelRestore()}>Dismiss</button>
         </p>
       )}
 
@@ -93,7 +100,7 @@ export default function DataSettings(): JSX.Element {
       )}
 
       <div className="data-row">
-        <span className="toggle-text"><b>Export all data</b><small>A zip with a full database copy, your uploads, and conversations, memories and documents as readable Markdown and JSON. API keys and tokens stay in your Keychain and are not included, but the export holds everything else Grain knows, so keep it private.</small></span>
+        <span className="toggle-text"><b>Export all data</b><small>A zip with a full database copy, your uploads, pasted images, kept meeting audio, desk outputs, and conversations, memories and files as readable Markdown and JSON. API keys and tokens stay in your Keychain and are not included. The export still holds your personal data, so keep it private.</small></span>
         <button className="ghost-btn" onClick={() => void exportAll()} disabled={busy !== null}><Download size={14} /> {busy === 'export' ? 'Exporting…' : 'Export all data…'}</button>
       </div>
 

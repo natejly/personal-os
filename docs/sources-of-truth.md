@@ -52,7 +52,7 @@ in `gtasks.py`.
 **C. Local-only; Google is import/export.**
 Google has no equivalent model, so it is never the source of truth. *Docs* (our
 revision history, pending assistant diffs and accept/reject flow have no Drive
-counterpart), notes, boards, memory, the graph. A doc may hold an optional Drive
+counterpart), notes, memory, the graph. A doc may hold an optional Drive
 link for a manual push or pull; that is a copy, and the UI should say so.
 
 **D. Google-required.**

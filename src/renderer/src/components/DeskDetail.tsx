@@ -136,14 +136,12 @@ function WaitingCards({ cards, conversationId, events }: { cards: PendingApprova
 function DeskSettings({ desk, onClose }: { desk: FullDesk; onClose: () => void }): JSX.Element {
   const patchDesk = useStore((s) => s.patchDesk)
   const maxTurnsDefault = useStore((s) => s.settings.deskMaxTurns ?? 12)
-  const maxCostDefault = useStore((s) => s.settings.deskMaxCost ?? 2)
   const [autonomy, setAutonomy] = useState<DeskAutonomy>(desk.autonomy)
   const [turns, setTurns] = useState(desk.budget.maxTurns ? String(desk.budget.maxTurns) : '')
-  const [cost, setCost] = useState(desk.budget.maxCost ? String(desk.budget.maxCost) : '')
   const save = async (): Promise<void> => {
     await patchDesk(desk.id, {
       ...(autonomy !== desk.autonomy ? { autonomy } : {}),
-      budget: { maxTurns: Number(turns) > 0 ? Number(turns) : undefined, maxCost: Number(cost) > 0 ? Number(cost) : undefined }
+      budget: { maxTurns: Number(turns) > 0 ? Number(turns) : undefined }
     })
     onClose()
   }
@@ -160,7 +158,6 @@ function DeskSettings({ desk, onClose }: { desk: FullDesk; onClose: () => void }
       </div>
       <div className="desk-limits">
         <label>Turns <input type="number" min={1} step={1} placeholder={String(maxTurnsDefault)} value={turns} onChange={(e) => setTurns(e.target.value)} /></label>
-        <label>Spend $ <input type="number" min={0.05} step={0.05} placeholder={String(maxCostDefault)} value={cost} onChange={(e) => setCost(e.target.value)} /></label>
         <small className="muted">Takes effect on its next turn. Limits can only be tighter than your Settings caps.</small>
       </div>
       <div className="approval-actions">

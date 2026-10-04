@@ -87,3 +87,10 @@ test('first prompts only name Google surfaces once Google is connected', () => {
   assert.ok(!/calendar|mail/i.test(off), off)
   assert.match(firstPrompts(true).join(' '), /calendar/i)
 })
+
+test('seed fills a re-run from the configured setup, but never overrides a pick', () => {
+  const s = reduce(at('welcome'), { type: 'seed', provider: ol, baseUrl: 'http://box:11434/v1', model: 'qwen3' })
+  assert.deepEqual([s.providerId, s.baseUrl, s.model], ['ollama', 'http://box:11434/v1', 'qwen3'])
+  const picked = reduce(at('provider'), { type: 'pick', provider: fw })
+  assert.equal(reduce(picked, { type: 'seed', provider: ol, baseUrl: 'x', model: 'y' }), picked)
+})

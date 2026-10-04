@@ -66,15 +66,16 @@ def register(box: Any, store: Dashboards, canvases: Any, fetch: Callable[[str], 
             return tool_error(f"widget_place: no widget {widget_id}", field="widget_id")
         spaces = canvases.list()
         c = next((x for x in spaces if space and (x["id"] == space or x["name"].lower() == space.lower())), None) \
-            or (None if space or not spaces else spaces[0])
+            or (None if space else next((x for x in spaces if not x.get("locked")), None))
         if not c:
-            return tool_error(f"widget_place: no space {space!r}" if space else "widget_place: there are no spaces yet",
-                              field="space", expected="a space name or id; omit for the first space")
+            msg = (f"widget_place: no space {space!r}" if space else
+                   "widget_place: every space is locked by the user" if spaces else "widget_place: there are no spaces yet")
+            return tool_error(msg, field="space", expected="a space name or id; omit for the first unlocked space")
         if c.get("locked"):  # the same rule space_add_widget keeps: a locked space is the user's frozen view
             return tool_error(f"The space {c['name']!r} is locked by the user; ask them to unlock it.", field="space")
         win = canvases.add_window(c["id"], "dashboard-widget", ref_id=w["id"], title=w["title"], w=420, h=320,
                                   config={"dashboard_id": w.get("dashboard_id")} if w.get("dashboard_id") else None)
         return {"placed": True, "window_id": win["id"], "space": c["name"], "widget_id": w["id"]}
     R("widget_place", ToolSpec(
-        "widget_place", "Put a widget made with widget_create on a space (canvas) as a window. Omit space for the first one.",
+        "widget_place", "Put a widget made with widget_create on a space (canvas) as a window. Omit space for the first unlocked one.",
         _obj({"widget_id": {"type": "string"}, "space": {"type": "string"}}, ["widget_id"]), widget_place, "widgets", "writes"))

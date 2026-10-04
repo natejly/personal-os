@@ -42,14 +42,14 @@ export default function NewDocMenu({ onCreate, onDaily }: {
 
   return (
     <div className="newdoc" ref={root}>
-      <button className="newdoc-main ghost-btn" title="New doc" onClick={() => make('blank')}><Plus size={13} /> New</button>
+      <button className="newdoc-main ghost-btn" title="New file" onClick={() => make('blank')}><Plus size={13} /> New</button>
       <button className="newdoc-chev ghost-btn" aria-haspopup="menu" aria-expanded={open} aria-label="New from template" onClick={() => setOpen((o) => !o)}>
         <ChevronDown size={12} />
       </button>
       {open && (
         <div className="notes-menu" role="menu">
           <button role="menuitem" className="notes-menu-row" onClick={() => { setOpen(false); onDaily() }}>
-            <CalendarDays size={13} /> Today's note
+            <CalendarDays size={13} /> Today's file
           </button>
           <div className="notes-menu-sep" />
           <div className="notes-menu-label">From template</div>

@@ -10,7 +10,7 @@ export interface Project {
   /** 'isolated' = chats here see no personal memory, graph, docs, skills or voice, and save nothing personal. */
   memory_mode: 'shared' | 'isolated'
   created_at: number
-  stats?: { conversations: number; memories: number; nodes: number; documents: number }
+  stats?: { conversations: number; memories: number; nodes: number; documents: number; docs?: number }
 }
 
 /**
@@ -420,6 +420,8 @@ export interface McpServer {
   headers: Record<string, string>
   description: string
   enabled: boolean
+  /** Remote servers only: whether a browser sign-in is stored. null for stdio. */
+  signed_in?: boolean | null
   status: string
   status_detail: string
   last_connected_at: number | null
@@ -436,8 +438,6 @@ export interface McpServer {
   }
   tools: McpTool[]
   eval: McpEvalRecord | null
-  /** Remote servers only: whether a browser sign-in left a token. null for a local server. */
-  signed_in: boolean | null
 }
 
 /** A launch config, as the add form holds it and as /mcp/check takes it. */
@@ -862,6 +862,12 @@ export interface Todo {
   tags?: string[]
   /** Set on a subtask; the list nests it under this todo. */
   parent_id?: string | null
+  /** The named list (what a kanban board used to be) this todo sits on; null = none. */
+  list_name: string | null
+  /** Board column: Backlog, To do, In progress, Done, or any column a migrated board had. Done completes the todo. */
+  status: string
+  /** Order within a board column. */
+  position: number
   /** Ids of open todos this one waits on. */
   depends_on?: string[]
   blocked_count?: number
@@ -1292,7 +1298,6 @@ export interface Settings {
   contextBudget?: Record<string, number>
   maxRunTokens?: number
   maxRunSeconds?: number
-  maxRunCost?: number
   /** Provider resilience and retention (backend llm.py / retention.py); missing means the shipped default. */
   llmRetries?: number
   llmIdleSeconds?: number
@@ -1357,7 +1362,6 @@ export interface Settings {
   usageAlerts?: { dailyCost: number; monthlyCost: number }
   /** Cowork desk budgets. 0 on either axis means unlimited; a desk may tighten them, never loosen. */
   deskMaxTurns?: number
-  deskMaxCost?: number
   deskMaxLive?: number
   /** Relaunch desks a restart interrupted mid-turn. Never one with an unknown-outcome call or a pending card. Off by default. */
   deskAutoResume?: boolean
@@ -1539,6 +1543,8 @@ export interface BackupInfo {
 export interface DataOverview {
   data_dir: string; backups: BackupInfo[]; last_backup: number | null
   pending_restore: { name: string } | null; schema_version: number; app_version: string
+  /** A staged restore that could not be applied at the last start; the live data was left as it was. */
+  restore_failed?: { name: string | null; error: string; at: number } | null
 }
 /** The sidecar's lifecycle, as the main process supervises it. */
 export type BackendState = 'starting' | 'ready' | 'restarting' | 'failed'
@@ -1643,18 +1649,6 @@ export interface AgentBrowserFrame {
   at: number
 }
 
-export interface BoardColumn { id: string; board_id: string; name: string; position: number; wip_limit: number | null }
-export interface BoardCard {
-  id: string; board_id: string; column_id: string; title: string; description: string; position: number
-  due: string | null; priority: number; labels: string[]; created_at: number; updated_at: number
-  over_limit?: boolean
-  claimed_by?: string | null; lease_expires_at?: number | null
-  /** A `completed` event exists for this card (Boards.complete). */
-  completed?: boolean
-}
-export interface CardEvent { id: string; seq: number; card_id: string; actor: string; kind: string; payload: Record<string, unknown>; created_at: number }
-export interface Board { id: string; project_id: string | null; name: string; created_at: number; card_count?: number; columns: BoardColumn[]; cards: BoardCard[] }
-
 export interface DataSource {
   id: string; name: string; kind: 'http' | 'rss' | 'internal' | string; config: Record<string, unknown>; description: string
   has_secret: boolean; last_status: string | null; last_fetched_at: number | null; created_at: number
@@ -1694,7 +1688,7 @@ export interface PlanEdit { idx: number; arguments?: Record<string, unknown>; dr
 
 
 
-export interface DeskBudget { maxTurns?: number; maxCost?: number }
+export interface DeskBudget { maxTurns?: number }
 /** Something the user hands a desk: a doc, an uploaded document, or a local file under the home folder. */
 export type DeskInputRef = { kind: 'doc'; id: string } | { kind: 'document'; id: string } | { kind: 'path'; path: string }
 
@@ -1857,7 +1851,7 @@ export interface PromotionResult {
 
 /** Every widget a canvas window can host. Source of truth for `WIDGET_KINDS` in backend/personal_os/canvas.py. */
 export type WidgetKind =
-  | 'chat' | 'todos' | 'calendar' | 'board' | 'note' | 'dashboard-widget'
+  | 'chat' | 'todos' | 'calendar' | 'note' | 'dashboard-widget'
   | 'memory' | 'graph' | 'documents' | 'recap' | 'project' | 'usage' | 'activity' | 'web' | 'artifact'
 
 export type WindowState = 'normal' | 'minimized' | 'maximized' | 'popped'
@@ -2023,7 +2017,7 @@ export interface CanvasPreset {
 /** POST /canvas-presets/{id}/instantiate: the new canvas plus how many preset windows were dropped (dangling refs). */
 export type InstantiatedCanvas = Canvas & { skipped: number }
 
-export type DragKind = 'conversation' | 'todo' | 'document' | 'memory' | 'board-card' | 'project' | 'widget' | 'note' | 'file' | 'nav'
+export type DragKind = 'conversation' | 'todo' | 'document' | 'memory' | 'project' | 'widget' | 'note' | 'file' | 'nav'
 
 export interface DragPayload {
   kind: DragKind
@@ -2144,7 +2138,6 @@ export interface Job {
 export interface JobBudget {
   maxRunTokens?: number
   maxRunSeconds?: number
-  maxRunCost?: number
 }
 
 export type JobNotifyMode = 'problems' | 'always' | 'never'
@@ -2217,6 +2210,8 @@ export interface JobRunRecord {
   attempt: number
   retry_of: string | null
   manual: boolean
+  /** A read-only preview, not a real run; left out of the stats. */
+  dry_run: boolean
   tool_calls: number
   proposals: { pending: number; accepted: number; rejected: number }
   cost: number | null
@@ -2377,8 +2372,8 @@ export interface ActivityConfig {
   /** Blank falls back to the extraction model, then the default model. */
   summaryModel: string
   profileEveryHours: number
-  /** Palantir mode: every signal on, redaction off, both exclusion lists emptied. */
-  palantir: boolean
+  /** Record-everything mode: every signal on, redaction off, both exclusion lists emptied. */
+  recordEverything: boolean
   insights: ActivityInsightConfig
 }
 
@@ -2540,8 +2535,8 @@ export interface ActivityStatus {
   audio_devices: { index: string; name: string }[]
   /** True while macOS reports a password field focused; keystrokes are dropped meanwhile. */
   secure_input: boolean
-  /** Palantir mode is on: every signal recording and the gate's filters down. */
-  palantir: boolean
+  /** Record-everything mode is on: every signal recording and the gate's filters down. */
+  recordEverything: boolean
   /** Redactions so far today, by entity. Counts only. */
   redactions?: Record<string, number>
 }

@@ -3,7 +3,7 @@ import {
   FileText, Files, PanelLeftOpen, PanelRight, X, Columns2, Eye, Pencil,
   Sparkles, Save, Link2, Link2Off, ChevronDown, Folder, FolderKanban, FolderTree, Focus, AlignVerticalSpaceAround
 } from 'lucide-react'
-import { useStore, type FilesSection } from '../store'
+import { flushDocOnUnload, restoreDocTabs, useStore, type FilesSection } from '../store'
 import { api, type DocHit } from '../lib/api'
 import type { Doc } from '@shared/types'
 import MarkdownEditor from './MarkdownEditor'
@@ -60,6 +60,7 @@ export default function DocsView(): JSX.Element {
   const docRevisions = useStore((s) => s.docRevisions)
   const docMode = useStore((s) => s.docMode)
   const docSaving = useStore((s) => s.docSaving)
+  const docFocusId = useStore((s) => s.docFocusId)
   const sidebarOpen = useStore((s) => s.sidebarOpen)
   const section = useStore((s) => s.filesSection)
   const libraryScope = useStore((s) => s.libraryScope)
@@ -103,7 +104,19 @@ export default function DocsView(): JSX.Element {
   const [folderDraft, setFolderDraft] = useState<string | null>(null)
   const previewRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => { void refreshDocs(query) }, [refreshDocs, query])
+  useEffect(() => { void refreshDocs() }, [refreshDocs])
+  useEffect(() => { void restoreDocTabs() }, [])
+  // The narrowed list lives here, not in the store: tabs, folders, links and templates read the full `docs`.
+  const [matches, setMatches] = useState<Doc[] | null>(null)
+  // Re-asked when `docs` changes too, so a doc deleted or renamed mid-search leaves the list. The last
+  // answer stays up while the next loads, rather than flashing "No matches." on every keystroke.
+  useEffect(() => {
+    const q = query.trim()
+    if (!q) return setMatches(null)
+    let stale = false
+    api.docs.list('all', q).then((d) => { if (!stale) setMatches(d) }).catch(() => { /* keep the last answer */ })
+    return () => { stale = true }
+  }, [query, docs])
   // Ranked hits with a snippet for the tree's search; null until the (debounced) answer arrives.
   const [hits, setHits] = useState<DocHit[] | null>(null)
   useEffect(() => {
@@ -117,10 +130,10 @@ export default function DocsView(): JSX.Element {
   // Anything still buffered belongs on disk before this view goes away — and before the window does.
   useEffect(() => {
     const flush = (): void => { void flushDoc() }
-    window.addEventListener('pagehide', flush)
+    window.addEventListener('pagehide', flushDocOnUnload)
     window.addEventListener('blur', flush)
     return () => {
-      window.removeEventListener('pagehide', flush)
+      window.removeEventListener('pagehide', flushDocOnUnload)
       window.removeEventListener('blur', flush)
       flush()
     }
@@ -149,6 +162,13 @@ export default function DocsView(): JSX.Element {
     return [...set].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
   }, [docFolders, docs, activeDoc, scope])
 
+  // A doc just made by New or Today's note gets the caret, at its end, so typing can start at once.
+  useEffect(() => {
+    if (!docFocusId || docFocusId !== activeDoc?.id) return
+    if (docMode !== 'preview') editor.current?.jumpToLine(Number.MAX_SAFE_INTEGER)
+    useStore.setState({ docFocusId: null })
+  }, [docFocusId, activeDoc?.id, docMode])
+
   // Linked scrolling: the preview follows the editor's fraction of the way down.
   useEffect(() => {
     const el = previewRef.current
@@ -174,8 +194,8 @@ export default function DocsView(): JSX.Element {
   const extraCommands = useMemo((): SlashCommand[] => (docId
     ? ([
         { id: 'record', label: 'Record and summarize', hint: 'mic', keywords: ['record', 'transcribe', 'meeting', 'summary'], run: () => void useDocRec.getState().start(docId, 'record') },
-        { id: 'dictate', label: 'Dictate into note', hint: 'mic', keywords: ['dictate', 'speak', 'voice', 'talk'], run: () => void useDocRec.getState().start(docId, 'dictate') },
-        { id: 'daily', label: 'Daily note', hint: 'today', keywords: ['today', 'journal', 'daily'], run: () => void openDailyNote() }
+        { id: 'dictate', label: 'Dictate into file', hint: 'mic', keywords: ['dictate', 'speak', 'voice', 'talk'], run: () => void useDocRec.getState().start(docId, 'dictate') },
+        { id: 'daily', label: 'Daily file', hint: 'today', keywords: ['today', 'journal', 'daily'], run: () => void openDailyNote() }
       ] as SlashCommand[])
     : [] as SlashCommand[]).concat(userTpls.map((t): SlashCommand => ({
       id: `tpl-${t.id}`, label: `Template: ${t.title || 'Untitled'}`, hint: 'template', keywords: ['template', t.title],
@@ -281,17 +301,17 @@ export default function DocsView(): JSX.Element {
   usePageContext(() => (activeDoc
     ? {
         view: 'docs',
-        label: `Doc “${oneLine(activeDoc.title || 'Untitled', 80)}”`,
+        label: `File “${oneLine(activeDoc.title || 'Untitled', 80)}”`,
         detail: `Open${dirty ? ', unsaved edits' : ''}. ${projectName ? `Project “${oneLine(projectName, 80)}”` : 'Personal'}${activeDoc.folder ? ` / ${oneLine(activeDoc.folder, 80)}` : ''}. Id \`${oneLine(activeDoc.id, 80)}\`. ${liveHere ? `Being ${liveHere.mode === 'dictate' ? 'dictated into' : 'recorded'} now (recording \`${oneLine(liveHere.meetingId, 80)}\`). ` : ''}${recordingCount ? `${recordingCount} recording${recordingCount === 1 ? '' : 's'} linked to this doc${recList ? `: ${oneLine(recList, 600)}` : ''}. ` : ''}Revise with doc_edit. The user reviews the diff unless document edits are set to accept all.\n\n${fenced(body)}`,
         refs: [{ kind: 'doc', id: activeDoc.id, name: activeDoc.title }],
-        hints: ['Summarise this doc', 'Tighten the writing', 'Pull out the action items as todos']
+        hints: ['Summarise this file', 'Tighten the writing', 'Pull out the action items as todos']
       }
     : {
         view: 'docs',
         label: 'Files',
-        detail: `No doc is open. Files are grouped by project — Personal plus one folder per project. The list shows:\n${lines(docs, (d) => `“${d.title || 'Untitled'}” (\`${d.id}\`)${d.project_id ? ` in project ${d.project_id}` : ' in Personal'}${d.folder ? `/${d.folder}` : ''}`)}`,
+        detail: `No file is open. Files are grouped by project — Personal plus one folder per project. The list shows:\n${lines(docs, (d) => `“${d.title || 'Untitled'}” (\`${d.id}\`)${d.project_id ? ` in project ${d.project_id}` : ' in Personal'}${d.folder ? `/${d.folder}` : ''}`)}`,
         refs: docs.slice(0, 40).map((d) => ({ kind: 'doc', id: d.id, name: d.title })),
-        hints: ['What have I been writing about?', 'Start a doc for this week’s plan']
+        hints: ['What have I been writing about?', 'Start a file for this week’s plan']
       }), [activeDoc?.id, activeDoc?.title, activeDoc?.folder, projectName, body, dirty, docs, liveHere?.meetingId, liveHere?.mode, recordingCount, recList])
 
   return (
@@ -322,7 +342,7 @@ export default function DocsView(): JSX.Element {
         {treeOpen && (
           <>
             <aside className="docs-side">
-              <DocTree hits={hits} docs={docs} activeId={activeDoc?.id ?? null} query={query} onQuery={setQuery} />
+              <DocTree hits={hits} docs={query.trim() ? (matches ?? docs) : docs} activeId={activeDoc?.id ?? null} query={query} onQuery={setQuery} />
             </aside>
             <ResizeHandle id="docs-tree-w" defaultSize={240} min={170} max={480} grows="right" onCollapse={() => setTreeOpen(false)} label="File tree width" className="docs-tree-edge" />
           </>
@@ -345,7 +365,7 @@ export default function DocsView(): JSX.Element {
                 {tabDocs.map((d) => (
                   <button key={d.id} className={`doc-tab ${d.id === activeDoc.id ? 'active' : ''}`} onClick={() => void openDoc(d.id)}>
                     <FileText size={11} />{d.title || 'Untitled'}
-                    <span className="tab-x" role="button" title="Close" onClick={(e) => { e.stopPropagation(); closeDocTab(d.id) }}><X size={10} /></span>
+                    <span className="tab-x" role="button" title="Close" onClick={(e) => { e.stopPropagation(); void closeDocTab(d.id) }}><X size={10} /></span>
                   </button>
                 ))}
               </div>
@@ -531,7 +551,7 @@ export default function DocsView(): JSX.Element {
                 {applied.length === 0 && pending.length === 0 && <p className="empty-hint">No revisions yet.</p>}
                 {applied.map((r) => (
                   <DiffView key={r.id} revision={r} onRestore={() => {
-                    if (confirm('Restore the document to this version? The current text is kept in the history.')) void restoreRevision(r.id)
+                    if (confirm('Restore the file to this version? The current text is kept in the history.')) void restoreRevision(r.id)
                   }} />
                 ))}
               </>

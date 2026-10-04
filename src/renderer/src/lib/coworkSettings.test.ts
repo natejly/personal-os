@@ -36,7 +36,7 @@ test('sandbox network: a legacy true reads as open, unknown or missing reads as 
 test('numbers are clamped to the backend range, blank keeps the fallback', () => {
   assert.equal(clampSetting('browserMaxTabs', '99', 4), 12)
   assert.equal(clampSetting('browserMaxTabs', '0', 4), 1)
-  assert.equal(clampSetting('deskMaxCost', '-3', 2), 0)
-  assert.equal(clampSetting('deskMaxCost', '', 2), 2)
-  assert.equal(clampSetting('deskMaxCost', 'abc', 2), 2)
+  assert.equal(clampSetting('deskMaxLive', '-3', 4), 0)
+  assert.equal(clampSetting('deskMaxLive', '', 4), 4)
+  assert.equal(clampSetting('deskMaxLive', 'abc', 4), 4)
 })

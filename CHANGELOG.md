@@ -2,6 +2,34 @@
 
 All notable changes to Grain (formerly Personal OS). Dates are the days the work landed on `main`. There are no version tags yet, so everything sits under Unreleased.
 
+## Unreleased — 2026-10-03
+
+This section also catches up on work merged between 2026-10-01 and 2026-10-03 that the entries below left out.
+
+### Changed
+
+- **Boards are now todos.** Todos has a board view (columns by status or by list) next to the list view; the Boards page, the `board_*` tools and the board canvas window are gone, and `todo_add`, `todo_update` and `todo_list` take `list_name` and `status`. A migration turns each existing board into a list and each card into a todo (title, notes, due date, priority, labels as tags, project, order and done state kept). The old tables are kept as `legacy_*`. Per-card agent claims and leases were dropped.
+
+### Added
+
+- **Onboarding.** A first-run wizard that picks a model provider, plus an "about you" step that seeds a pinned memory. The first suggested prompts match what is connected.
+- **Direct providers.** Fireworks AI, OpenAI, Anthropic, OpenRouter, a local Ollama, a LiteLLM proxy or any OpenAI-compatible endpoint, with no proxy required. The packaged app bundles its own Python (see `docs/releasing.md`).
+- **Keychain secrets.** API keys, Google tokens and the OAuth client secret live in the macOS Keychain, with a 0600 file in the data folder as the fallback.
+- **Backups, export and Trash.** Daily database snapshots with restore, a zip export of the data, and a Trash that soft-deletes chats, docs, memories, uploads and projects.
+- **Library.** Skills and MCP connectors in one view. MCP connectors are now a user-facing feature (this supersedes the 2026-09-30 note below); tool results from connectors have credentials scrubbed.
+- **Health.** A Health page with daily metrics, a Today card, `health_*` tools and fitness-account sync. See `docs/health.md`.
+- **Ask about this page** (⌘I). A side panel that sees the current view. The context panel moved to ⌃⌘I.
+- **Files.** The docs view is now Files, with nested folders that each project owns.
+- **Chat hardening.** Regenerate variants, edit-and-resend, pin and archive, full-text chat search, auto-titles, stop and delete while a reply runs, and retries.
+
+### Changed
+
+- **One name: Files.** What the UI, the assistant's tool descriptions and its prompt called Docs, Documents or Notes is now "file": the files you write in the editor and the files you upload alike (uploads show as "Uploads" where a short label is needed). Sticky notes on the canvas keep their name. Routes, tables and tool names are unchanged. A project's "View all" tab and the Today project card now count editor files as well as uploads.
+
+### Security
+
+- Besides `/health`, sidecar auth skips only the OAuth callbacks (`/integrations/google/callback`, `/mcp/oauth/callback`) and artifact render paths.
+
 ## Unreleased — 2026-10-02
 
 ### Added
@@ -149,7 +177,7 @@ All notable changes to Grain (formerly Personal OS). Dates are the days the work
 
 ### Security
 
-- Sidecar auth on every route except `/health`; CORS limited to the Vite dev ports.
+- Sidecar auth on every route except `/health` and the OAuth callbacks; CORS limited to the Vite dev ports.
 - SSRF guard on `fetch_url` (no loopback/private after DNS; redirects re-checked).
 - Hardened macOS `sandbox-exec` profile; each rlimit applied on its own so one unsupported limit does not disable the rest.
 - Taint tracking: once a run has read untrusted mail or web, external tools that were `on` are forced to `ask`, and standing grants cannot be bought from a tainted reply.

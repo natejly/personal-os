@@ -222,8 +222,15 @@ def resegment_argv(ff: str, src: str, out_pattern: str, segment_seconds: int) ->
 
 
 def device_input(index: str) -> list[str]:
-    """Capture an avfoundation input by index. Resolve it through resolve_device first."""
-    return ["-f", "avfoundation", "-i", f":{index}"]
+    """Capture an avfoundation input by index. Resolve it through resolve_device first.
+
+    The device list holds native uniqueIDs whenever AVFoundation is importable, and ffmpeg's
+    avfoundation input takes only its own numeric index or a device name, so a uid is passed by
+    the name it is listed under."""
+    idx = str(index)
+    if not idx.isdigit():
+        idx = next((d["name"] for d in audio_devices() if d["index"] == idx), idx)
+    return ["-f", "avfoundation", "-i", f":{idx}"]
 
 
 def synthetic_input(freq: int = 440) -> list[str]:

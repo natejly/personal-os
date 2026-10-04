@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS desks (
   workspace       TEXT NOT NULL,                   -- "cowork/<id>", RELATIVE to db.data_dir
   turn            INTEGER NOT NULL DEFAULT 0,
   cost            REAL NOT NULL DEFAULT 0,
-  budget          TEXT NOT NULL DEFAULT '{}',      -- {maxTurns, maxCost} overriding the global caps
+  budget          TEXT NOT NULL DEFAULT '{}',      -- {maxTurns} overriding the global cap
   last_error      TEXT,
   archived        INTEGER NOT NULL DEFAULT 0,
   created_at      REAL NOT NULL,
@@ -515,7 +515,7 @@ class Desks:
             if not row:
                 return None
             if isinstance(patch.get("budget"), dict):
-                # Merge, so sending {maxCost} does not silently drop maxTurns.
+                # Merge, so sending one key does not silently drop maxTurns.
                 fields["budget"] = json.dumps({**json.loads(row["budget"] or "{}"), **patch["budget"]})
             if fields:
                 fields["updated_at"] = now()
@@ -553,6 +553,9 @@ class Desks:
             if not prev:
                 return None
             c.execute(f"UPDATE desks SET {sets} WHERE id=?", (*fields.values(), id))
+            if status not in NEEDS_YOU:
+                # Answered somewhere else (an approval in the Agent inbox, say): the old ask is not waiting any more.
+                c.execute("UPDATE desk_events SET seen=1 WHERE desk_id=? AND seen=0 AND needs_you=1", (id,))
             if event:
                 # A failure is not in NEEDS_YOU (the rail files it elsewhere), but it must still reach the inbox:
                 # otherwise a desk that died overnight was only a notification the user may never have seen.
@@ -569,10 +572,16 @@ class Desks:
         return row
 
     @_notifies
-    def set_headline(self, id: str, headline: str) -> None:
-        """Debounced by the caller (see DeskRuntime, §3.5). Never called from a delta."""
+    def set_headline(self, id: str, headline: str, live_only: bool = False) -> None:
+        """Debounced by the caller (see DeskRuntime, §3.5). Never called from a delta.
+        `live_only`: a run's tool label lands only while the desk is LIVE, so a tool_result that arrives
+        after desk_done settled the desk cannot put "thinking" back over "waiting on your review"."""
         with self.db.tx() as c:
-            c.execute("UPDATE desks SET headline=? WHERE id=?", (headline, id))
+            if live_only:
+                c.execute(f"UPDATE desks SET headline=? WHERE id=? AND status IN ({','.join('?' * len(LIVE))})",
+                          (headline, id, *LIVE))
+            else:
+                c.execute("UPDATE desks SET headline=? WHERE id=?", (headline, id))
 
     def update_run(self, id: str, run_id: str | None) -> dict[str, Any] | None:
         """Which run is driving the desk right now. Not a status change, so no event."""
@@ -637,7 +646,7 @@ class Desks:
         elif partial == "blocked":
             target, reason = "blocked", "approval"
         elif partial:
-            # rounds | tokens | time | cost from Budget.exceeded(), or "loop" from the repeat breaker.
+            # rounds | tokens | time from Budget.exceeded(), or "loop" from the repeat breaker.
             target, reason = "review", "budget" if partial != "loop" else "loop"
         else:
             # The reply ended without `desk_done`. A terminal state is a decision, not an inference,
@@ -1002,5 +1011,5 @@ class DeskRuntime:
         if event not in _IMMEDIATE and t - self._flushed_at < HEADLINE_FLUSH_S:
             return None
         self._flushed_at, self._pending = t, False
-        self.desks.set_headline(self.desk_id, self.headline)
+        self.desks.set_headline(self.desk_id, self.headline, live_only=event in ("tool_call", "tool_result"))
         return self.desks.get(self.desk_id, with_outputs=False)

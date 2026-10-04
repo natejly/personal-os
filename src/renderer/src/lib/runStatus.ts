@@ -17,3 +17,10 @@ export const statusText = (status: MessageStatus, nowMs: number): string => {
 
 /** Whether the line changes on its own (a countdown), so the view only runs a timer while it must. */
 export const statusTicks = (status: MessageStatus, nowMs: number): boolean => status.kind === 'retry' && !!status.until && status.until > nowMs
+
+/** What a bare wait says after `ms` with nothing streamed: nothing for the first 5s, then the elapsed time. */
+export const waitText = (ms: number): string | null => {
+  const s = Math.floor(ms / 1000)
+  if (s < 5) return null
+  return s < 30 ? `Thinking… ${s}s` : `Still waiting on the model… ${s}s`
+}

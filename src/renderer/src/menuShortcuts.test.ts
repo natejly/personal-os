@@ -184,3 +184,25 @@ test('chat:next and chat:prev step through the list, clamp, and ignore the canva
   fire('chat:next')
   assert.equal(useStore.getState().focusedConversationId, 'a')
 })
+
+test("the doc editor's chords are not menu accelerators, which would swallow them", async () => {
+  const { readFileSync } = await import('node:fs')
+  const menu = readFileSync('src/main/index.ts', 'utf8')
+  const editor = readFileSync('src/renderer/src/components/MarkdownEditor.tsx', 'utf8')
+  // The hint bar is the list the editor advertises; each chord must be free in the menu.
+  const hints = /className="md-hints">([^<]+)</.exec(editor)?.[1] ?? ''
+  const accel: Record<string, string> = {
+    '⌘B': 'CmdOrCtrl+B', '⇧⌘B': 'CmdOrCtrl+Shift+B', '⌘I': 'CmdOrCtrl+I', '⇧⌘I': 'CmdOrCtrl+Shift+I',
+    '⌘K': 'CmdOrCtrl+K', '⇧⌘M': 'CmdOrCtrl+Shift+M', '⌃⌘M': 'Control+Command+M', '⇧⌘E': 'CmdOrCtrl+Shift+E'
+  }
+  const chords = hints.split('·').map((h) => h.trim().split(' ')[0]).filter((c) => c.includes('⌘'))
+  assert.ok(chords.length >= 4, hints)
+  // A menu item may share a chord only when its handler hands the key to a focused editor first (store.ts toEditor).
+  const store = readFileSync('src/renderer/src/store.ts', 'utf8')
+  const forwarded: Record<string, string> = { '⌘K': "toEditor('k', false)", '⌘B': "toEditor('b', false)", '⇧⌘M': "toEditor('M', true)" }
+  for (const c of chords) {
+    assert.ok(accel[c], `map ${c} to its accelerator here`)
+    if (forwarded[c] && store.includes(forwarded[c])) continue
+    assert.ok(!menu.includes(`'${accel[c]}'`), `${c} is a menu accelerator`)
+  }
+})

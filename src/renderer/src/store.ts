@@ -7,16 +7,16 @@ import { ApiError } from './lib/apiError'
 import { markRunsSeen } from './lib/inboxBadge'
 import { acceptToast } from './lib/proposalToast'
 import { installRejectionToasts } from './lib/rejections'
-import { api, backgroundStream, chatStream, setBase, type Scope } from './lib/api'
+import { api, backgroundStream, chatStream, getBase, getToken, setBase, type Scope } from './lib/api'
 import { currentSelection } from './lib/pageContext'
 import { DEFAULT_EFFORT, NEEDS_YOU } from '../../shared/types'
 import { chatNotice, finishStatus, foldRunState, followRun, mergeConversation, onScreen, pickEvictions, pulseStatus, reduceStatus, replayCursor, settleApprovals, type LiveRuns } from './sessionStatus'
-import { adjacentChatId } from './lib/chatRows'
+import { adjacentChatId, sidebarOrder } from './lib/chatRows'
 import { createDeltaBuffer } from './lib/deltaBuffer'
 import { CHAT_NOTICE_BODY, notify } from './lib/notify'
 import { applyCursor, fetchSegmentPages, needsSegmentReload } from './lib/transcript'
 import { homeModuleOn, viewHidden } from './moduleToggles'
-import { chainTo, folderKey, groupShutKey } from './lib/docTree'
+import { chainTo, folderKey, groupShutKey, renameKeys } from './lib/docTree'
 import { clearViews } from './lib/viewCache'
 import { emailAsk } from './lib/emailAsk'
 import { insertIntoComposer } from './lib/composerInsert'
@@ -36,7 +36,7 @@ const withoutLegacyMode = (s: Settings): Settings => {
 }
 
 /** `'canvas'` is the spaces desktop: one destination among the views, not a separate shell. */
-export type View = 'home' | 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'boards' | 'dashboards' | 'docs' | 'meetings' | 'activity' | 'library' | 'cowork' | 'project' | 'canvas'
+export type View = 'home' | 'chat' | 'todos' | 'health' | 'calendar' | 'mail' | 'dashboards' | 'docs' | 'meetings' | 'activity' | 'library' | 'cowork' | 'project' | 'canvas'
 /** Which shelf of the Library is showing. Kept in the store so leaving and coming back lands you where you were. */
 export type LibraryTab = 'skills' | 'workflows' | 'connectors' | 'agents' | 'commands'
 export type FilesSection = 'notes' | 'uploads' | 'pages'
@@ -99,6 +99,11 @@ export interface ChatSession {
   runError: { message: string; runId: string | null; interrupted: boolean } | null
   /** Sends the run has not echoed back yet (optimistic bubbles); undefined when none. */
   pendingSends?: PendingSend[]
+}
+
+/** Where an accepted desk output went, for the toast. */
+const PROMOTED_TO: Record<string, string> = {
+  doc: 'Files', doc_append: 'Files (as an edit to review)', document: 'uploaded files', download: 'your Mac'
 }
 
 interface Toast { id: number; text: string; kind: 'info' | 'error' | 'learned'; action?: { label: string; run: () => void } }
@@ -208,6 +213,8 @@ export interface State {
   pageAgentModel: string | null
   pageAgentEffort: Effort
   pageAgentFast: boolean
+  /** Plan mode and skip permissions picked in the ⌘I panel before its thread exists. */
+  pageAgentChatSettings: Pick<ConversationSettings, 'planMode' | 'skipPermissions'>
   pageContext: PageContext | null
   /** Message whose execution trace the Trace tab shows (null = latest assistant reply). */
   traceMessageId: string | null
@@ -261,6 +268,8 @@ export interface State {
   /** The same for the title, which autosaves on the same debounce rather than only on blur. */
   docTitleDraft: string | null
   docSaving: boolean
+  /** A doc just made by New or Today's note: DocsView puts the caret in its editor once, then clears it. */
+  docFocusId: string | null
 
   /** Meetings: recorded calls. List rows, plus the one open in the notepad. */
   meetings: Meeting[]
@@ -335,6 +344,9 @@ export interface State {
   openSettings: (tab: SettingsTab) => void
   setProjectModal: (m: State['projectModal']) => void
   toast: (text: string, kind?: Toast['kind'], action?: Toast['action']) => void
+  dismissToast: (id: number) => void
+  /** Pointer or focus is on the toast stack: stop every toast's clock until it leaves. */
+  holdToasts: (on: boolean) => void
   /** After a soft delete: a toast with Undo (~8s) that restores it from the trash. */
   offerUndo: (what: string, items: { type: TrashKind; id: string }[], note?: string) => void
   restoreTrashed: (items: { type: TrashKind; id: string }[]) => Promise<void>
@@ -391,6 +403,7 @@ export interface State {
   activateVariant: (conversationId: string, messageId: string) => Promise<void>
   /** Branch into a new chat holding the transcript up to `messageId`, and focus it. The source is untouched. */
   forkChat: (conversationId: string, messageId: string) => Promise<Conversation | null>
+  deleteMessage: (conversationId: string, messageId: string) => Promise<void>
   /** Continue an interrupted reply in a new run (always the user's click). Rejects with the backend's reason when it cannot. */
   resumeRun: (conversationId: string, runId: string) => Promise<void>
   stop: (conversationId?: string) => Promise<void>
@@ -480,8 +493,8 @@ export interface State {
   /** Ask macOS for one permission. Returns the note to show; '' when it went through silently. */
   grantActivityPermission: (id: string, browser?: string) => Promise<void>
   openActivitySettings: (id: string) => Promise<void>
-  /** Record everything, or put back the settings palantir mode replaced. */
-  setPalantirMode: (on: boolean) => Promise<void>
+  /** Record everything, or put back the settings record-everything mode replaced. */
+  setRecordEverything: (on: boolean) => Promise<void>
   /** Habits noticed and automations on offer. */
   loadActivityInsights: () => Promise<void>
   /** `deep` runs the model pass; without it the patterns are just re-mined locally, for free. */
@@ -526,7 +539,7 @@ export interface State {
   deleteDocument: (id: string) => Promise<void>
   pinDocument: (id: string, pinned: boolean) => Promise<void>
 
-  refreshDocs: (q?: string) => Promise<void>
+  refreshDocs: () => Promise<void>
   refreshDocsPending: () => Promise<void>
   /** `at.line` scrolls the editor to that line once the doc is open (a cited passage). */
   openDoc: (id: string, at?: { line: number }) => Promise<void>
@@ -608,10 +621,38 @@ export interface State {
 }
 
 let toastSeq = 0
+
+const count = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`
+/** What a `learned` event says in its toast: zero counts left out, '' when nothing changed. */
+export function learnedText(d: { memories: unknown[]; nodes: unknown[]; edges: unknown[]; updated?: unknown[]; removed?: unknown[] }): string {
+  const parts: string[] = []
+  if (d.memories.length) parts.push(`Learned ${count(d.memories.length, 'memory', 'memories')}`)
+  if (d.updated?.length) parts.push(`updated ${d.updated.length}`)
+  if (d.removed?.length) parts.push(`forgot ${d.removed.length}`)
+  if (d.nodes.length) parts.push(count(d.nodes.length, 'entity', 'entities'))
+  if (d.edges.length) parts.push(count(d.edges.length, 'relation', 'relations'))
+  const text = parts.join(', ')
+  return text && text[0].toUpperCase() + text.slice(1)
+}
+/** Each live toast's remaining time; `at` is when its running timer started (unset while held). */
+const toastClocks = new Map<number, { left: number; at?: number; timer?: ReturnType<typeof setTimeout> }>()
+let toastsHeld = false
 let flushChain: Promise<void> = Promise.resolve()
 /** Autosave debounce for the doc editor: long enough to be one history entry, short enough to trust. */
 const SAVE_DEBOUNCE_MS = 1200
 let saveTimer: ReturnType<typeof setTimeout> | null = null
+/** What a doc save would send: each field only when it differs from the saved copy. */
+const docEdits = (doc: FullDoc, docDraft: string | null, docTitleDraft: string | null): { content?: string; title?: string } | null => {
+  const content = docDraft !== null && docDraft !== doc.content ? docDraft : undefined
+  // Until the title is named by hand it follows the body's first `# ` heading (the placeholder's promise).
+  const h1 = (t: string): string | undefined => /^#\s+(.+)$/m.exec(t)?.[1].trim().slice(0, 200)
+  const follows = docTitleDraft === null && content !== undefined && (doc.title === 'Untitled' || doc.title === h1(doc.content))
+  const heading = follows ? h1(content) : undefined
+  // A title of only whitespace is a slip of the hand, not an edit: hold the saved one.
+  const title = docTitleDraft !== null && docTitleDraft.trim() && docTitleDraft !== doc.title
+    ? docTitleDraft.trim() : heading && heading !== doc.title ? heading : undefined
+  return content === undefined && title === undefined ? null : { content, title }
+}
 
 /**
  * The state after a request that replaced the doc body (accept, restore). `sent` is the draft right
@@ -907,15 +948,14 @@ const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 
 export { adjacentChatId }
 
-/** The toast for one learn pass, and whether anything changed. Updates and forgets count: they edit open lists too. */
-export const learnedText = (l: Learned): { text: string; changed: boolean } => {
-  const { memories, nodes, edges, updated = [], removed = [] } = l
-  const parts = [`Learned ${memories.length} memor${memories.length === 1 ? 'y' : 'ies'}`]
-  if (updated.length) parts.push(`updated ${updated.length}`)
-  if (removed.length) parts.push(`forgot ${removed.length}`)
-  parts.push(`${nodes.length} entities, ${edges.length} relations`)
-  return { text: parts.join(', '), changed: memories.length + updated.length + removed.length + nodes.length + edges.length > 0 }
-}
+/** The id the ⌘I panel's composer carries before its thread has a row. */
+export const PAGE_AGENT_DRAFT = '\u0000page-agent'
+
+/** The per-chat switches a row-less chat parks until `send` creates its row. */
+const parkable = (p: Partial<ConversationSettings>): Pick<ConversationSettings, 'planMode' | 'skipPermissions'> => ({
+  ...(p.planMode !== undefined ? { planMode: p.planMode } : {}),
+  ...(p.skipPermissions !== undefined ? { skipPermissions: p.skipPermissions } : {})
+})
 
 export const useStore = create<State>((set, get) => {
   /**
@@ -1263,6 +1303,21 @@ export const useStore = create<State>((set, get) => {
     void get().refreshMeetingsPending()
   }
 
+  /** An assistant edit proposed on the open doc: its review banner and badge show now, not on the next open. */
+  const adoptDocProposal = (preview: string): void => {
+    let id: unknown
+    try { id = (JSON.parse(preview) as { doc_id?: unknown }).doc_id } catch { return }
+    void get().refreshDocsPending()
+    if (typeof id !== 'string' || get().activeDoc?.id !== id) return
+    void api.docs.get(id).then((d) => {
+      // With unsaved typing only `pending` is taken; otherwise the whole doc, so an edit applied
+      // straight away (docEditMode "apply") shows and the next save does not write the old body back.
+      set((st) => (st.activeDoc?.id !== id ? {} : st.docDraft === null && st.docTitleDraft === null
+        ? { activeDoc: d } : { activeDoc: { ...st.activeDoc, pending: d.pending } }))
+      void get().refreshDocRevisions(id)
+    }).catch(() => { /* the banner appears on the next open */ })
+  }
+
   /** One stream event folded into a session: the reducer plus the approval recount and the status verdict. */
   const step = (s: ChatSession, ev: ChatEvent, visible: boolean, seq: number | null): ChatSession => {
     const next = applyEvent(s, ev, visible, seq)
@@ -1372,6 +1427,12 @@ export const useStore = create<State>((set, get) => {
       switch (ev.event) {
         case 'plan':
           set((st) => ({ plans: { ...st.plans, [convId]: ev.data.steps } }))
+          // A step finishing is not a status change, so the open desk's plan would otherwise lag.
+          // Only the row is refetched: openDesk would also re-attach the session on every step.
+          if (get().activeDesk?.conversation_id === convId) {
+            const id = get().activeDesk!.id
+            void api.cowork.desks.get(id).then((d) => { if (get().activeDeskId === id) set({ activeDesk: d }) }).catch(() => {})
+          }
           break
         case 'desk_status':
           putDesk(ev.data)
@@ -1380,6 +1441,10 @@ export const useStore = create<State>((set, get) => {
           break
         case 'desk_handoff':
           handoff = ev.data
+          break
+        // The sidebar's Files count and pending badge read the store, which only the Files view refreshed.
+        case 'tool_result':
+          if (ev.data.name === 'doc_create' || ev.data.name === 'doc_edit') { get().refreshDocs().catch(() => undefined); void get().refreshDocsPending() }
           break
       }
     }
@@ -1406,6 +1471,7 @@ export const useStore = create<State>((set, get) => {
         patchSession(convId, (s) => step(s, ev, focused, seq))
         const kind = chatNotice(before, get().sessions[convId]?.status ?? before, ev)
         if (kind) announce(convId, run.run_id, kind, focused, notified)
+        if (ev.event === 'tool_result' && ev.data.name === 'doc_edit') adoptDocProposal(ev.data.result_preview)
         switch (ev.event) {
           case 'done':
             if (!ev.data.error) hold(convId)
@@ -1415,7 +1481,7 @@ export const useStore = create<State>((set, get) => {
             if (!ev.data.segment) sendQueued(convId, ev.data)
             break
           case 'restored_message':
-            if (ev.data.reason) get().toast(`Regenerate failed: ${ev.data.reason}. The previous answer is back.`, 'error')
+            get().toast(ev.data.reason ? `Regenerate failed: ${ev.data.reason}. The previous answer is back.` : 'Regenerate stopped. The previous answer is back.', ev.data.reason ? 'error' : 'info')
             break
           // Only the `remember` tool reaches here now; auto-learn reports on `/events` instead.
           case 'learned':
@@ -1464,8 +1530,8 @@ export const useStore = create<State>((set, get) => {
         if (!live || !bubble || !visible) {
           // After `done` the reply is whole, so there is nothing to continue: only the auto-learn tail was lost.
           const text = !stalled ? (e as Error).message
-            : live ? 'The backend stopped responding. Restart it from Settings > Support, then continue the reply.'
-              : 'The backend stopped responding. Restart it from Settings > Support.'
+            : live ? 'The backend stopped responding. Restart it from Settings > Behavior > Support, then continue the reply.'
+              : 'The backend stopped responding. Restart it from Settings > Behavior > Support.'
           get().toast(text, 'error')
         }
         if (live) {
@@ -1526,6 +1592,17 @@ export const useStore = create<State>((set, get) => {
       run = await api.chat(convId, body)
     } catch (e) {
       const conflict = runConflict(e)
+      if (!conflict && e instanceof ApiError && e.kind === 'timeout') {
+        // A slow backend may still have started the run: adopt it rather than hand back text it already has.
+        await get().attachSession(convId).catch(() => undefined)
+        if (get().sessions[convId]?.streaming) {
+          if (pendingKey !== undefined) dropPending(convId, pendingKey)
+          return true
+        }
+        get().toast('The backend did not answer, so your message may not have been sent. Check the chat before sending it again.', 'error')
+        patchSession(convId, (s) => ({ ...s, status: 'error', finishedAt: Date.now() }))
+        return false
+      }
       if (!conflict) {
         get().toast((e as Error).message, 'error')
         patchSession(convId, (s) => ({ ...s, status: 'error', finishedAt: Date.now() }))
@@ -1574,6 +1651,11 @@ export const useStore = create<State>((set, get) => {
     return p
   }
 
+  /** Resolves once a stopped run has reached its `done` (which clears `stopping`), or after 10s. */
+  const untilStopped = async (id: string): Promise<void> => {
+    for (let i = 0; i < 100 && get().sessions[id]?.streaming?.stopping; i++) await new Promise((r) => setTimeout(r, 100))
+  }
+
   /** Run an action whose failure should be told to the user and nothing more. */
   const guard = async (label: string, fn: () => Promise<unknown>): Promise<boolean> => {
     try {
@@ -1596,6 +1678,7 @@ export const useStore = create<State>((set, get) => {
 
   const patchChatSettings = async (patch: Partial<ConversationSettings>, conversationId?: string): Promise<void> => {
     const id = conversationId ?? get().focusedConversationId
+    const parked = parkable(patch)
     if (!id) {
       // No conversation to PATCH yet: park the patch and let `send` apply it to the conversation it is
       // about to create. Never the global settings: a draft's toggle is about that one chat. Private is
@@ -1606,6 +1689,15 @@ export const useStore = create<State>((set, get) => {
         draftFast: fast ?? s.draftFast,
         draftPrivate: priv ?? s.draftPrivate,
         draftChatSettings: { ...s.draftChatSettings, ...rest }
+      }))
+      return
+    }
+    if (id === PAGE_AGENT_DRAFT) {
+      // The ⌘I panel before its first message: `sendToPageAgent` applies these to the thread it creates.
+      set((s) => ({
+        pageAgentEffort: patch.effort ?? s.pageAgentEffort,
+        pageAgentFast: patch.fast ?? s.pageAgentFast,
+        pageAgentChatSettings: { ...s.pageAgentChatSettings, ...parked }
       }))
       return
     }
@@ -1658,6 +1750,7 @@ export const useStore = create<State>((set, get) => {
     docTitleDraft: null,
     docSaving: false,
     docJump: null,
+    docFocusId: null,
     meetings: [],
     activeMeeting: null,
     meetingStatus: null,
@@ -1689,6 +1782,7 @@ export const useStore = create<State>((set, get) => {
     pageAgentModel: null,
     pageAgentEffort: DEFAULT_EFFORT,
     pageAgentFast: false,
+    pageAgentChatSettings: {},
     pageContext: null,
     traceMessageId: null,
     settingsOpen: false,
@@ -1889,7 +1983,29 @@ export const useStore = create<State>((set, get) => {
     toast: (text, kind = 'info', action) => {
       const id = ++toastSeq
       set((s) => ({ toasts: [...s.toasts, { id, text, kind, action }] }))
-      setTimeout(() => set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), action ? UNDO_MS : kind === 'error' ? 6000 : 3500)
+      toastClocks.set(id, { left: action ? UNDO_MS : kind === 'error' ? 6000 : 3500 })
+      if (!toastsHeld) get().holdToasts(false)
+    },
+    dismissToast: (id) => {
+      clearTimeout(toastClocks.get(id)?.timer)
+      toastClocks.delete(id)
+      // A removed toast takes the focus with it and may never send focusout; an empty stack holds nothing.
+      if (!toastClocks.size) toastsHeld = false
+      set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }))
+    },
+    holdToasts: (on) => {
+      toastsHeld = on
+      const now = Date.now()
+      for (const [id, c] of toastClocks) {
+        if (on) {
+          clearTimeout(c.timer)
+          if (c.at !== undefined) c.left -= now - c.at
+          c.at = c.timer = undefined
+        } else if (c.at === undefined) {
+          c.at = now
+          c.timer = setTimeout(() => get().dismissToast(id), Math.max(c.left, 0))
+        }
+      }
     },
     offerUndo: (what, items, note) => {
       get().toast(`Deleted ${what}${note ? `. ${note}` : ''}`, 'info', { label: 'Undo', run: () => void get().restoreTrashed(items) })
@@ -2075,7 +2191,7 @@ export const useStore = create<State>((set, get) => {
     stepChat: (dir) => {
       const s = get()
       if (s.view === 'canvas') return
-      const next = adjacentChatId(s.conversations, s.focusedConversationId, dir)
+      const next = adjacentChatId(sidebarOrder(s.conversations), s.focusedConversationId, dir)
       if (next) void s.selectChat(next)
     },
     searchChats: () => set((s) => ({ sidebarOpen: true, sidebarSearchTick: s.sidebarSearchTick + 1 })),
@@ -2136,7 +2252,7 @@ export const useStore = create<State>((set, get) => {
       }
     },
     noteUntrustedUpload: async (conversationId, pending = 'draft', source = 'upload') => {
-      const id = conversationId && conversationId !== '\u0000page-agent' ? conversationId : undefined
+      const id = conversationId && conversationId !== PAGE_AGENT_DRAFT ? conversationId : undefined
       if (!id) {
         set({ uploadTaintTarget: pending, uploadTaintSource: source })
         return
@@ -2182,7 +2298,9 @@ export const useStore = create<State>((set, get) => {
         // drops the completion it was writing and answers the steer. Only a run that is still
         // *answering* can take one — in its auto-learn tail the loop is over, and a steer accepted
         // there would be stored and never replied to — so that tail takes an ordinary send instead.
-        if (get().sessions[id]?.streaming?.answering) {
+        // A stopping run never reads a steer, so the message waits for it to end and starts its own reply.
+        if (get().sessions[id]?.streaming?.stopping) await untilStopped(id)
+        else if (get().sessions[id]?.streaming?.answering) {
           try {
             const r = await api.steer(id, text)
             settleSteer(id, r.message)
@@ -2294,11 +2412,19 @@ export const useStore = create<State>((set, get) => {
       if (id) {
         // Mid-reply the panel steers, exactly as the composer does in a chat. The auto-learn tail
         // is still `streaming` but no longer answering, and a steer there 409s.
-        if (get().sessions[id]?.streaming?.answering) {
+        if (get().sessions[id]?.streaming?.stopping) await untilStopped(id)
+        else if (get().sessions[id]?.streaming?.answering) {
           try {
             await api.steer(id, text)
             return true
-          } catch { /* the run ended in the gap */ }
+          } catch (e) {
+            // As in `send`: a hung steer may have landed, and falling through would steer the text twice.
+            if (e instanceof ApiError && e.kind === 'timeout') {
+              get().toast('The backend did not answer, so your message was not sent.', 'error')
+              return false
+            }
+            // The run ended in the gap; fall through to a normal send.
+          }
         }
         // The thread can have been deleted from the chat list since; fall back to a fresh one.
         if (!get().sessions[id]) await get().openSession(id).catch(() => { id = null })
@@ -2320,8 +2446,8 @@ export const useStore = create<State>((set, get) => {
           get().toast((e as Error).message, 'error')
           return false
         }
-        const { pageAgentEffort, pageAgentFast, uploadTaintTarget, uploadTaintSource } = get()
-        const pageSettings: { effort?: Effort; fast?: boolean; tainted?: boolean; taint_sources?: string[] } = {}
+        const { pageAgentEffort, pageAgentFast, pageAgentChatSettings, uploadTaintTarget, uploadTaintSource } = get()
+        const pageSettings: Partial<ConversationSettings> = { ...pageAgentChatSettings }
         if (pageAgentEffort !== DEFAULT_EFFORT) pageSettings.effort = pageAgentEffort
         if (pageAgentFast) pageSettings.fast = true
         const fromUpload = uploadTaintTarget === 'page'
@@ -2329,7 +2455,7 @@ export const useStore = create<State>((set, get) => {
           pageSettings.tainted = true
           pageSettings.taint_sources = [uploadTaintSource || 'upload']
         }
-        if (pageAgentEffort !== DEFAULT_EFFORT || pageAgentFast || fromUpload) {
+        if (Object.keys(pageSettings).length) {
           const patched = await api.conversations.patch(c.id, { settings: pageSettings }).catch(() => null)
           if (fromUpload && !patched?.settings?.tainted) {
             get().toast('Could not mark this chat untrusted after the upload', 'error')
@@ -2341,7 +2467,7 @@ export const useStore = create<State>((set, get) => {
         c.messages = []
         putSession(c)
         id = c.id
-        set({ pageAgentId: id })
+        set({ pageAgentId: id, pageAgentChatSettings: {} })
         void get().refreshProjects()
       }
       // The panel's model menu writes through the same queue as the chat page's: let a change land first.
@@ -2400,6 +2526,16 @@ export const useStore = create<State>((set, get) => {
       get().toast(`Branched from ${from || 'the original chat'}`, 'info', { label: 'Open original', run: () => void get().selectChat(conversationId) })
       return c
     },
+    deleteMessage: async (conversationId, messageId) => {
+      if (get().sessions[conversationId]?.streaming?.answering) return
+      try {
+        await api.conversations.deleteMessage(conversationId, messageId)
+        const c = await api.conversations.get(conversationId)
+        patchConversation(conversationId, (cur) => ({ ...cur, messages: c.messages }))
+      } catch (e) {
+        get().toast((e as Error).message, 'error')
+      }
+    },
     resumeRun: async (conversationId, runId) => {
       if (get().sessions[conversationId]?.streaming?.answering) return
       if (!get().sessions[conversationId]) await get().openSession(conversationId)
@@ -2440,18 +2576,19 @@ export const useStore = create<State>((set, get) => {
 
     // Always every scope: the Files tree shows Personal and each project as its own group, so a doc
     // can never be created into a scope the list is filtered away from and look like it vanished.
-    refreshDocs: async (q = '') => set({ docs: await api.docs.list('all', q) }),
+    refreshDocs: async () => set({ docs: await api.docs.list('all') }),
     refreshDocsPending: async () => {
       try {
         set({ docsPending: (await api.docs.pending()).pending })
       } catch { /* a badge is not worth a toast */ }
     },
     openDoc: async (id, at) => {
-      if (get().activeDoc?.id !== id) {
-        await get().flushDoc()
-        if (docUnsaved()) return
-      }
+      await get().flushDoc()
+      if (get().activeDoc?.id !== id && docUnsaved()) return
       if (at) set({ docJump: { docId: id, line: at.line } })
+      // A draft the flush could not save (a 409) is the user's to keep or Reload; a refetch would drop it.
+      const cur = get()
+      if (cur.activeDoc?.id === id && (cur.docDraft !== null || cur.docTitleDraft !== null)) return set({ view: 'docs', filesSection: 'notes' })
       set((st) => ({ view: 'docs', filesSection: 'notes', docTabs: st.docTabs.includes(id) ? st.docTabs : [...st.docTabs, id] }))
       try {
         const doc = await api.docs.get(id)
@@ -2487,7 +2624,8 @@ export const useStore = create<State>((set, get) => {
           filesSection: 'notes',
           docTabs: st.docTabs.includes(doc.id) ? st.docTabs : [...st.docTabs, doc.id],
           activeDoc: doc,
-          docDraft: null
+          docDraft: null,
+          docFocusId: doc.id
         }))
         void get().refreshDocRevisions(doc.id)
       } catch (e) {
@@ -2499,6 +2637,7 @@ export const useStore = create<State>((set, get) => {
         const { doc } = await dailyNote()
         await get().refreshDocs()
         get().expandTo(doc.project_id ?? '', doc.folder)
+        set({ docFocusId: doc.id })
         await get().openDoc(doc.id)
       } catch (e) {
         get().toast((e as Error).message, 'error')
@@ -2525,21 +2664,19 @@ export const useStore = create<State>((set, get) => {
       }
       const { activeDoc: doc, docDraft, docTitleDraft } = get()
       if (!doc) return set({ docDraft: null, docTitleDraft: null })
-      // A title of only whitespace is a slip of the hand, not an edit: hold the saved one.
-      const title = docTitleDraft !== null && docTitleDraft.trim() && docTitleDraft !== doc.title
-        ? docTitleDraft.trim() : undefined
-      const content = docDraft !== null && docDraft !== doc.content ? docDraft : undefined
-      if (content === undefined && title === undefined) return set({ docDraft: null, docTitleDraft: null })
+      const edits = docEdits(doc, docDraft, docTitleDraft)
+      if (!edits) return set({ docDraft: null, docTitleDraft: null })
       set({ docSaving: true })
       try {
-        const saved = await api.docs.save(doc.id, { content, title, base_updated_at: doc.updated_at })
-        // Keep whatever was typed while the request was in flight; adopt only the server's metadata.
+        const saved = await api.docs.save(doc.id, { ...edits, base_updated_at: doc.updated_at })
+        // Keep whatever was typed while the request was in flight as the draft. activeDoc stays the
+        // server's copy, so the next flush still sees that draft differ and sends it.
         set((st) => {
           if (st.activeDoc?.id !== doc.id) return { docSaving: false }
           const newer = st.docDraft !== null && st.docDraft !== docDraft
           const newerTitle = st.docTitleDraft !== null && st.docTitleDraft !== docTitleDraft
           return {
-            activeDoc: newer ? { ...saved, content: st.docDraft as string } : saved,
+            activeDoc: saved,
             docDraft: newer ? st.docDraft : null,
             docTitleDraft: newerTitle ? st.docTitleDraft : null,
             docSaving: false
@@ -2572,7 +2709,7 @@ export const useStore = create<State>((set, get) => {
         }
         // A real conflict: another window saved first. The draft stays on screen; reloading is the user's call.
         if ((e as { status?: number }).status === 409) {
-          get().toast('This doc changed elsewhere. Your edits are kept here and not saved.', 'error',
+          get().toast('This file changed elsewhere. Your edits are kept here and not saved.', 'error',
             { label: 'Reload', run: () => { set({ docDraft: null, docTitleDraft: null }); void get().openDoc(doc.id) } })
         } else get().toast(`Could not save: ${(e as Error).message}`, 'error')
       }
@@ -2626,6 +2763,7 @@ export const useStore = create<State>((set, get) => {
         await get().refreshDocs()
         const open = get().activeDoc
         if (open) void get().openDoc(open.id)
+        set((st) => ({ expandedFolders: writeExpanded(renameKeys(st.expandedFolders, scope, path, newPath)) }))
         get().expandTo(scope, newPath)
       } catch (e) {
         get().toast((e as Error).message, 'error')
@@ -2633,12 +2771,14 @@ export const useStore = create<State>((set, get) => {
     },
     deleteDocFolder: async (path, deleteDocs = false, scope = '') => {
       try {
+        // Buffered edits go in before the folder's docs are trashed: a trashed doc can no longer be saved.
+        await get().flushDoc()
         // Which docs this takes with it, so the Undo can bring each one back.
         const doomed = deleteDocs
           ? get().docs.filter((d) => (d.project_id ?? '') === scope && (d.folder === path || d.folder.startsWith(path + '/')))
           : []
         set({ docFolders: await api.docs.deleteFolder(path, deleteDocs, scope) })
-        if (doomed.length) get().offerUndo(`${doomed.length} doc${doomed.length === 1 ? '' : 's'}`, doomed.map((d) => ({ type: 'doc' as const, id: d.id })))
+        if (doomed.length) get().offerUndo(`${doomed.length} file${doomed.length === 1 ? '' : 's'}`, doomed.map((d) => ({ type: 'doc' as const, id: d.id })))
         await get().refreshDocs()
         const open = get().activeDoc
         if (open && deleteDocs && !get().docs.some((d) => d.id === open.id)) {
@@ -2666,11 +2806,13 @@ export const useStore = create<State>((set, get) => {
     }),
     deleteDoc: async (id) => {
       const title = get().docs.find((d) => d.id === id)?.title
+      // Save buffered edits first: once trashed the doc 404s on save, and Undo should bring them back.
+      if (get().activeDoc?.id === id) await get().flushDoc()
       await api.docs.delete(id)
       if (get().activeDoc?.id === id) set({ docDraft: null, docTitleDraft: null })  // nothing left to save them into
       await get().closeDocTab(id)
       await Promise.all([get().refreshDocs(), get().refreshDocsPending()])
-      get().offerUndo(title ? `“${title}”` : 'doc', [{ type: 'doc', id }])
+      get().offerUndo(title ? `“${title}”` : 'file', [{ type: 'doc', id }])
     },
     setDocMode: (docMode) => {
       try { localStorage.setItem(DOC_MODE_KEY, docMode) } catch { /* private window */ }
@@ -2714,7 +2856,7 @@ export const useStore = create<State>((set, get) => {
         const base = sent ?? get().activeDoc?.content ?? ''
         const doc = await api.docs.restore(revId)
         set((st) => adoptServerDoc(st.docDraft, doc, sent, base))
-        get().toast('Document restored')
+        get().toast('File restored')
         await Promise.all([get().refreshDocRevisions(doc.id), get().refreshDocs()])
       } catch (e) {
         get().toast((e as Error).message, 'error')
@@ -2901,7 +3043,11 @@ export const useStore = create<State>((set, get) => {
         // `verified` is read from the response, never assumed: a promotion the backend could not
         // read back is a red row, not a tick.
         const bad = results.filter((r) => !r.ok || !r.verified).length
-        get().toast(bad ? `${bad} of ${results.length} could not be verified` : `Promoted ${results.length} output${results.length === 1 ? '' : 's'}`, bad ? 'error' : 'info')
+        const where = [...new Set(results.map((r) => PROMOTED_TO[r.kind] ?? r.kind))].join(', ')
+        const doc = results.length === 1 && results[0].kind === 'doc' ? results[0].ref : null
+        get().toast(bad ? `${bad} of ${results.length} could not be verified` : `Saved ${results.length} output${results.length === 1 ? '' : 's'} to ${where}`,
+          bad ? 'error' : 'info', doc ? { label: 'Open', run: () => void get().openDoc(doc) } : undefined)
+        if (results.some((r) => r.ok && r.kind === 'doc')) void get().refreshDocs()
         await get().openDesk(id)
         return results
       } catch (e) {
@@ -3042,7 +3188,8 @@ export const useStore = create<State>((set, get) => {
       } catch { /* a badge is not worth a toast */ }
     },
     onLearned: (l) => {
-      const { text, changed } = learnedText(l)
+      // Updates and forgets count as changes: they edit open lists too.
+      const text = learnedText(l)
       // Undo puts back what this pass replaced or dropped and trashes what it added. Graph rows stay: they
       // merge into existing entities, so removing them could take the user's own relations with them.
       const added = l.memories.map((m) => m.id)
@@ -3056,8 +3203,9 @@ export const useStore = create<State>((set, get) => {
           refreshAll()
         })()
       } : undefined
+      if (!text) return
       get().toast(text, 'learned', undo)
-      if (changed) refreshAll()
+      refreshAll()
     },
     refreshMeetingsPending: async () => {
       try {
@@ -3547,10 +3695,10 @@ export const useStore = create<State>((set, get) => {
         get().toast((e as Error).message, 'error')
       }
     },
-    setPalantirMode: async (on) => {
+    setRecordEverything: async (on) => {
       try {
-        set({ activity: await api.activity.palantir(on) })
-        get().toast(on ? 'Palantir mode on — recording everything' : 'Palantir mode off — previous settings restored')
+        set({ activity: await api.activity.recordEverything(on) })
+        get().toast(on ? 'Record everything on' : 'Record everything off — previous settings restored')
       } catch (e) {
         get().toast((e as Error).message, 'error')
       }
@@ -3689,7 +3837,7 @@ export const useStore = create<State>((set, get) => {
       await api.documents.delete(id)
       set((s) => ({ documents: s.documents.filter((d) => d.id !== id) }))
       void get().refreshProjects()
-      get().offerUndo(name ? `“${name}”` : 'document', [{ type: 'document', id }])
+      get().offerUndo(name ? `“${name}”` : 'file', [{ type: 'document', id }])
     },
 
     refreshDashboard: async () => {
@@ -3942,15 +4090,55 @@ export const useStore = create<State>((set, get) => {
       const t = await api.todos.update(id, patch)
       if (recurs) void get().refreshTodos()  // the next instance was just created server-side
       set((s) => ({ todos: s.todos.map((x) => (x.id === id ? t : x)), dashboard: s.dashboard && { ...s.dashboard, todos: s.dashboard.todos.map((x) => (x.id === id ? t : x)).filter((x) => !x.done) } }))
+      if ('done' in patch || 'due' in patch || 'clear_due' in patch) void get().refreshDashboard()  // todo_stats: the nav badge and Today card
     },
     deleteTodo: async (id) => {
       const title = get().todos.find((x) => x.id === id)?.title
       await api.todos.delete(id)
       set((s) => ({ todos: s.todos.filter((x) => x.id !== id), dashboard: s.dashboard && { ...s.dashboard, todos: s.dashboard.todos.filter((x) => x.id !== id) } }))
+      void get().refreshDashboard()
       get().offerUndo(title ? `todo “${title}”` : 'todo', [{ type: 'todo', id }])
     }
   }
 })
+
+/**
+ * pagehide cannot await, and a plain fetch dies with the page, so the buffered doc edits go out as a
+ * keepalive PUT. ponytail: keepalive bodies cap at 64 KB, so a longer doc still loses its last
+ * second on reload/quit; a main-process flush on before-quit would lift that.
+ */
+export const flushDocOnUnload = (): void => {
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null }
+  const { activeDoc: doc, docDraft, docTitleDraft } = useStore.getState()
+  const edits = doc && docEdits(doc, docDraft, docTitleDraft)
+  if (!doc || !edits) return
+  void fetch(`${getBase()}/docs/${doc.id}`, {
+    method: 'PUT',
+    keepalive: true,
+    headers: { 'Content-Type': 'application/json', ...(getToken() ? { 'X-Personal-OS-Token': getToken() } : {}) },
+    body: JSON.stringify({ ...edits, base_updated_at: doc.updated_at })
+  }).catch(() => undefined)
+}
+
+// Open doc tabs survive a reload: written whenever the tabs or the active doc change.
+const DOC_TABS_KEY = 'grain.docTabs'
+useStore.subscribe((s, prev) => {
+  if (s.docTabs === prev.docTabs && s.activeDoc?.id === prev.activeDoc?.id) return
+  try { localStorage.setItem(DOC_TABS_KEY, JSON.stringify({ tabs: s.docTabs, active: s.activeDoc?.id ?? null })) } catch { /* private window */ }
+})
+
+/** Reopens the tabs saved by the subscriber above, dropping any doc that no longer exists. */
+export const restoreDocTabs = async (): Promise<void> => {
+  if (useStore.getState().docTabs.length) return
+  let saved: { tabs?: unknown; active?: unknown }
+  try { saved = JSON.parse(localStorage.getItem(DOC_TABS_KEY) ?? '{}') } catch { return }
+  if (!Array.isArray(saved.tabs) || !saved.tabs.length) return
+  const live = new Set((await api.docs.list('all', '').catch(() => [] as Doc[])).map((d) => d.id))
+  const tabs = saved.tabs.filter((t): t is string => typeof t === 'string' && live.has(t))
+  if (!tabs.length || useStore.getState().docTabs.length) return
+  useStore.setState({ docTabs: tabs })
+  await useStore.getState().openDoc(typeof saved.active === 'string' && tabs.includes(saved.active) ? saved.active : tabs[tabs.length - 1])
+}
 
 /**
  * Pin a session for as long as a surface is showing it, and release it on unmount. A retained

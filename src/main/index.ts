@@ -5,6 +5,7 @@ import { backendInfo, backendStatus, backendToken, backendUrl, onBackendState, r
 import { registerBus } from './bus'
 import { handle, on } from './ipc'
 import { hookConsole, initLogs, logDir } from './logging'
+import { isAppUrl } from './appUrl'
 import { attachWidgetRenderAuth, guardNavigation, guardWebWidgetSession } from './navigation'
 import { registerAgentBrowserIpc } from './agentBrowser'
 import { registerDeskNotify } from './deskNotify'
@@ -137,7 +138,14 @@ const sendMenu = (action: string): void => deliver(win, action)
  * its own pin itself. App-wide actions keep using `sendMenu`, which the canvas only ever hosts.
  */
 const sendWindowMenu = (action: string): void => {
-  deliver(BrowserWindow.getFocusedWindow() ?? win, action)
+  const target = BrowserWindow.getFocusedWindow() ?? win
+  // A focused window that is not the renderer (the shown agent browser) has no preload to hear 'menu'.
+  if (target && !target.isDestroyed() && !isAppUrl(target.webContents.getURL())) {
+    if (action === 'close-window') target.close()
+    else if (action === 'minimize-window') target.minimize()
+    return
+  }
+  deliver(target, action)
 }
 
 const SPACES: Electron.MenuItemConstructorOptions[] = Array.from({ length: 9 }, (_, i) => ({
@@ -168,8 +176,8 @@ function buildMenu(): void {
       submenu: [
         { label: 'New Chat', accelerator: 'CmdOrCtrl+N', click: () => sendMenu('new-chat') },
         // Not an OS-global shortcut: nothing outside the app acts. Files gets a doc in the default place.
-        { label: 'New Note', accelerator: 'CmdOrCtrl+Shift+N', click: () => sendMenu('new-note') },
-        { label: "Today's Note", accelerator: 'CmdOrCtrl+Shift+D', click: () => sendMenu('daily-note') },
+        { label: 'New File', accelerator: 'CmdOrCtrl+Shift+N', click: () => sendMenu('new-note') },
+        { label: "Today's File", accelerator: 'CmdOrCtrl+Shift+D', click: () => sendMenu('daily-note') },
         { label: 'Upload File…', accelerator: 'CmdOrCtrl+U', click: () => sendMenu('upload') },
         // ⌘W lives in the Window menu now: `role: 'close'` here could not be intercepted by the canvas.
         ...(isMac
@@ -204,7 +212,6 @@ function buildMenu(): void {
         { label: 'Chats', accelerator: 'CmdOrCtrl+1', click: () => sendMenu('view:chat') },
         { label: 'Todos', accelerator: 'CmdOrCtrl+2', click: () => sendMenu('view:todos') },
         { label: 'Calendar', accelerator: 'CmdOrCtrl+3', click: () => sendMenu('view:calendar') },
-        { label: 'Boards', accelerator: 'CmdOrCtrl+4', click: () => sendMenu('view:boards') },
         { label: 'Dashboards', accelerator: 'CmdOrCtrl+5', click: () => sendMenu('view:dashboards') },
         { label: 'Memory…', accelerator: 'CmdOrCtrl+6', click: () => sendMenu('view:memory') },
         { label: 'Knowledge Graph…', accelerator: 'CmdOrCtrl+7', click: () => sendMenu('view:graph') },

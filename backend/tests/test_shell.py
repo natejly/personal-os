@@ -69,6 +69,12 @@ def test_registered_ask_by_default_and_never_unsandboxed_unasked(box: Box) -> No
     assert box.tb.gate("shell_run", "on", {}, {"command": "ls", "unsandboxed": True}) == "ask"
     assert box.tb.forces_ask("shell_run", {"command": "ls", "unsandboxed": True})
     assert not box.tb.forces_ask("shell_run", {"command": "ls"})
+    # a tainted reply whose command could reach out is forced too, so a grant or allow rule cannot skip the card
+    tainted = {"tainted": True, "settings": {**box.settings, "shellNetwork": True}}
+    assert box.tb.forces_ask("shell_run", {"command": "ls"}, tainted)
+    assert box.tb.gate("shell_run", "on", tainted, {"command": "ls"}) == "ask"
+    offline = {"tainted": True, "settings": {**box.settings, "shellNetwork": False, "shellRegistryAccess": False, "shellAllowedDomains": []}}
+    assert not box.tb.forces_ask("shell_run", {"command": "ls"}, offline)
     from personal_os import llm
     assert llm.DEFAULT_SETTINGS["workspaceRoots"] == [] and llm.DEFAULT_SETTINGS["shellNetwork"] is False
     assert (llm.DEFAULT_SETTINGS["shellTimeoutSec"], llm.DEFAULT_SETTINGS["shellMaxBackground"]) == (120, 4)
@@ -234,6 +240,37 @@ def test_a_root_around_the_data_dir_is_never_granted(fake_home: Path, monkeypatc
         def settings(self) -> dict[str, Any]:
             return stored
     assert fsx.grants_for(B(), {}).roots == [fake_home / "other"]
+
+
+@needs_seatbelt
+def test_home_as_writable_folder_cannot_write_dotfiles_or_library(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The home folder is never granted as a root (mac.allowed_root), but should one reach the profile anyway, the
+    targeted denies still beat the blanket write allow."""
+    import subprocess
+    home = (tmp_path / "home").resolve()
+    (home / "Library").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(home))
+    prof = sandbox.shell_profile([str(home)])
+    subprocess.run(["sandbox-exec", "-p", prof, "/bin/sh", "-c", "echo x >> .zshrc; echo y > Library/agent.plist; echo z > ok.txt"],
+                   cwd=home, capture_output=True, timeout=30)
+    assert (home / "ok.txt").exists()
+    assert not (home / ".zshrc").exists() and not (home / "Library" / "agent.plist").exists()
+
+
+@needs_seatbelt
+def test_background_leader_exit_kills_its_leftover_children(box: Box) -> None:
+    async def go() -> None:
+        r = await box.arun("shell_run", command="sleep 30 & echo pid=$!", background=True)
+        for _ in range(50):
+            p = await box.arun("shell_poll", job_id=r["job_id"])
+            if p["status"] != "running":
+                break
+            await asyncio.sleep(0.1)
+        pid =int(box.tb.shell.jobs[r["job_id"]].buf.split("pid=")[1].split()[0])
+        await asyncio.sleep(0.2)
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
+    asyncio.run(go())
 
 
 @needs_seatbelt
@@ -814,3 +851,18 @@ def test_run_python_profile_allows_the_mime_tables_python_reads_at_import() -> N
     died under the profile with PermissionError."""
     prof = sandbox._mac_profile("/tmp/w", sys.executable)
     assert '(literal "/private/etc/apache2/mime.types")' in prof and '(literal "/private/etc/mime.types")' in prof
+
+
+@needs_seatbelt
+def test_matplotlib_warm_up_runs_the_work_venv_under_seatbelt(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The venv's site-packages (and their .pth files) run at import, so the warm-up must be sandboxed too, and still work."""
+    pytest.importorskip("matplotlib")
+    import subprocess
+    seen: list[list[str]] = []
+    real = subprocess.run
+    monkeypatch.setattr(sandbox.subprocess, "run", lambda cmd, **kw: (seen.append(cmd), real(cmd, **kw))[1])
+    monkeypatch.setattr(sandbox, "MPL_CACHE", str(tmp_path))
+    monkeypatch.setattr(sandbox, "_mpl_warmed", False)
+    sandbox._warm_mpl(sys.executable)
+    assert seen and seen[0][0] == "sandbox-exec"
+    assert any(n.startswith("fontlist-") for n in os.listdir(tmp_path))

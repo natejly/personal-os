@@ -16,7 +16,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from personal_os import extract_text as et  # noqa: E402
 from personal_os import learn, style as style_mod  # noqa: E402
-from personal_os.boards import Boards  # noqa: E402
 from personal_os.db import Database  # noqa: E402
 from personal_os.docs import Docs  # noqa: E402
 from personal_os.repos import Documents, Graph, Memories, Projects  # noqa: E402
@@ -71,29 +70,6 @@ def test_docx_zip_bomb_refused(monkeypatch: Any) -> None:
     out = et.extract_text("x.docx", buf.getvalue())
     assert "No text could be extracted" in out
     assert et._parsed(".docx", "", b"not a zip") is None
-
-
-def test_board_columns_must_belong_to_board() -> None:
-    with tempfile.TemporaryDirectory() as tmp:
-        boards = Boards(Database(tmp))
-        b1, b2 = boards.create("one"), boards.create("two")
-        card = boards.add_card(b1["id"], None, "c")
-        other_col = b2["columns"][0]["id"]
-        with pytest.raises(ValueError):
-            boards.move_card(card["id"], other_col)
-        with pytest.raises(ValueError):
-            boards.update_card(card["id"], {"column_id": other_col})
-        with pytest.raises(ValueError):
-            boards.add_card(b1["id"], other_col, "x")
-        with pytest.raises(KeyError):
-            boards.move_card(card["id"], "nope")
-        with pytest.raises(KeyError):
-            boards.move_card("nope", b1["columns"][0]["id"])
-        with pytest.raises(KeyError):
-            boards.add_card("nope", None, "x")
-        ok = boards.move_card(card["id"], b1["columns"][1]["id"])
-        assert ok["column_id"] == b1["columns"][1]["id"]
-        assert boards.delete_column(b1["columns"][1]["id"]) == 1
 
 
 def test_relearn_discards_when_hand_edited_during_call(monkeypatch: Any) -> None:
@@ -180,15 +156,3 @@ def test_memory_update_refuses_blank() -> None:
             memories.update(m["id"], {"content": "   "})
 
 
-def test_board_wip_limit_warns_without_blocking() -> None:
-    with tempfile.TemporaryDirectory() as tmp:
-        boards = Boards(Database(tmp))
-        b = boards.create("w")
-        todo, doing = b["columns"][1]["id"], b["columns"][2]["id"]
-        a = boards.add_card(b["id"], doing, "a")
-        assert a["over_limit"] is False  # no limit set
-        boards.update_column(doing, {"wip_limit": 1})
-        assert boards.add_card(b["id"], doing, "b")["over_limit"] is True
-        c = boards.add_card(b["id"], todo, "c")
-        assert c["over_limit"] is False
-        assert boards.move_card(c["id"], doing)["over_limit"] is True

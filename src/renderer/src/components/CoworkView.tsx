@@ -18,9 +18,7 @@ function NewDeskCard({ scope, onDone }: { scope: Scope; onDone: () => void }): J
   const [autonomy, setAutonomy] = useState<DeskAutonomy>('plan')
   const [start, setStart] = useState(true)
   const [maxTurns, setMaxTurns] = useState('')
-  const [maxCost, setMaxCost] = useState('')
   const maxTurnsDefault = useStore((s) => s.settings.deskMaxTurns ?? 12)
-  const maxCostDefault = useStore((s) => s.settings.deskMaxCost ?? 2)
   const docs = useStore((s) => s.docs)
   const documents = useStore((s) => s.documents)
   const refreshDocuments = useStore((s) => s.refreshDocuments)
@@ -41,8 +39,7 @@ function NewDeskCard({ scope, onDone }: { scope: Scope; onDone: () => void }): J
       autonomy,
       // Only what the user typed: an empty box means "the Settings cap", and a desk may only tighten it.
       budget: {
-        ...(Number(maxTurns) > 0 ? { maxTurns: Number(maxTurns) } : {}),
-        ...(Number(maxCost) > 0 ? { maxCost: Number(maxCost) } : {})
+        ...(Number(maxTurns) > 0 ? { maxTurns: Number(maxTurns) } : {})
       },
       start,
       inputs: inputs.map((x) => x.ref)
@@ -116,7 +113,6 @@ function NewDeskCard({ scope, onDone }: { scope: Scope; onDone: () => void }): J
           <span>Limits</span>
           <div className="desk-limits">
             <label>Turns <input type="number" min={1} step={1} placeholder={String(maxTurnsDefault)} value={maxTurns} onChange={(e) => setMaxTurns(e.target.value)} /></label>
-            <label>Spend $ <input type="number" min={0.05} step={0.05} placeholder={String(maxCostDefault)} value={maxCost} onChange={(e) => setMaxCost(e.target.value)} /></label>
             <small className="muted">Blank uses your Settings caps. A desk can only be held tighter than those.</small>
           </div>
         </div>

@@ -9,7 +9,7 @@ from .db import Database, new_id, now, row_to_dict
 
 # Mirrors the WidgetKind union in src/shared/types.ts, which is the source of truth.
 WIDGET_KINDS = (
-    "chat", "todos", "calendar", "board", "note", "dashboard-widget",
+    "chat", "todos", "calendar", "note", "dashboard-widget",
     "memory", "graph", "documents", "recap", "project", "usage", "activity", "web", "artifact",
 )
 WINDOW_STATES = ("normal", "minimized", "maximized", "popped")
@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS canvas_windows (
   id TEXT PRIMARY KEY,
   canvas_id TEXT NOT NULL REFERENCES canvases(id) ON DELETE CASCADE,
   kind TEXT NOT NULL,                       -- WidgetKind
-  ref_id TEXT,                              -- conversation / board / dashboard / note id, no foreign key
+  ref_id TEXT,                              -- conversation / dashboard / note id, no foreign key
   project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
   title TEXT NOT NULL DEFAULT '',           -- '' = derive from the underlying object
   x REAL NOT NULL, y REAL NOT NULL, w REAL NOT NULL, h REAL NOT NULL,

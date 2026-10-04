@@ -1,5 +1,5 @@
 import type {
-  BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, Board, BoardCard, BoardColumn, CardEvent, DataSource, Dashboard, Widget, Artifact, ArtifactVersion, Recap, Conversation, ConversationSettings, ContextUsed, ContextMeter, ConversationUsage, Document, GraphData, GraphEdge, GraphNode, Message,
+  BackgroundEvent, ChatEvent, ToolInfo, Todo, TodoFilter, TodoRepeat, PlannerBlock, PlannerSuggestion, PlannerApplyResult, MailWatchList, MailWatchThread, GoogleStatus, TodayDashboard, CalendarEvent, CalendarColors, EventPayload, GoogleCalendar, GmailMessage, GmailFullMessage, GmailLabel, GoogleTaskList, TasksSyncStatus, TodoCalendarStatus, DataSource, Dashboard, Widget, Artifact, ArtifactVersion, Recap, Conversation, ConversationSettings, ContextUsed, ContextMeter, ConversationUsage, Document, GraphData, GraphEdge, GraphNode, Message,
   ApprovalDecision, PermissionEvaluation, PermissionGrants, PendingApproval, McpGrant, PlanEdit,
   Memory, MemoryProposal, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
   Command, AgentDef, BuiltinAgent, Workflow, WorkflowRun, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
@@ -22,6 +22,10 @@ import { ApiError } from './apiError'
 import type { ProviderInfo, SetupStatus, SetupTestResult } from '../components/onboarding/steps'
 
 export interface SetupBody { provider: string; baseUrl: string; apiKey: string | null; model: string }
+/** Day plan settings (modules/planner.py). workDays: 1 = Monday … 7 = Sunday. */
+export interface PlannerConfig { workStart: string; workEnd: string; workDays: number[]; bufferMin: number; minBlockMin: number; maxBlockMin: number; slotStepMin: number; lookaheadDays: number; calendarName: string }
+/** Reply tracker settings (modules/mailwatch.py). */
+export interface MailWatchConfig { enabled: boolean; awaitingAfterDays: number; needsReplyAfterHours: number; useLLM: boolean; query: string; proposeFollowups: boolean }
 
 let base = ''
 let token = ''
@@ -156,6 +160,8 @@ const autosave = (body: unknown): RequestInit => {
 export type Scope = 'all' | 'personal' | string
 const scope = (s: Scope): string => `project_id=${encodeURIComponent(s)}&include_global=false`
 
+export interface MemoryExport { grain_memories: number; memories: { content: string; kind: string; pinned: boolean }[] }
+
 export interface DocHit { doc_id: string; title: string; snippet: string; via?: 'recording' }
 
 export const api = {
@@ -239,23 +245,6 @@ export const api = {
     /** Rejects every pending proposal of one job. */
     rejectAll: (jobId: string) => req<{ ok: boolean; rejected: number }>(`/proposals/reject_all?job_id=${encodeURIComponent(jobId)}`, { method: 'POST' })
   },
-  boards: {
-    list: () => req<Board[]>('/boards'),
-    get: (id: string) => req<Board>(`/boards/${id}`),
-    create: (b: { name: string; project_id?: string | null; columns?: string[] }) => req<Board>('/boards', { method: 'POST', body: json(b) }),
-    update: (id: string, patch: { name?: string; project_id?: string | null }) => req<Board>(`/boards/${id}`, { method: 'PUT', body: json(patch) }),
-    delete: (id: string) => req(`/boards/${id}`, { method: 'DELETE' }),
-    addColumn: (id: string, name: string) => req<BoardColumn>(`/boards/${id}/columns`, { method: 'POST', body: json({ name }) }),
-    updateColumn: (cid: string, patch: { name?: string; position?: number; wip_limit?: number | null }) => req(`/boards/columns/${cid}`, { method: 'PUT', body: json(patch) }),
-    deleteColumn: (cid: string) => req(`/boards/columns/${cid}`, { method: 'DELETE' }),
-    addCard: (id: string, c: { title: string; column_id?: string | null; description?: string; due?: string | null; priority?: number; labels?: string[] }) => req<BoardCard>(`/boards/${id}/cards`, { method: 'POST', body: json(c) }),
-    updateCard: (cid: string, patch: { title?: string; description?: string; due?: string; priority?: number; labels?: string[]; clear_due?: boolean }) => req<BoardCard>(`/boards/cards/${cid}`, { method: 'PUT', body: json(patch) }),
-    cardEvents: (bid: string, cid: string) => req<CardEvent[]>(`/boards/${bid}/cards/${cid}/events`),
-    moveCard: (cid: string, column_id: string, before_card_id: string | null = null) => req<BoardCard>(`/boards/cards/${cid}/move`, { method: 'POST', body: json({ column_id, before_card_id }) }),
-    deleteCard: (cid: string) => req(`/boards/cards/${cid}`, { method: 'DELETE' }),
-    /** The user accepting a card as done: the only HTTP writer of its `completed` event. */
-    complete: (cid: string) => req<{ ok: boolean }>(`/boards/cards/${cid}/complete`, { method: 'POST' })
-  },
   sources: {
     list: () => req<{ sources: DataSource[]; internal: string[] }>('/sources'),
     create: (s: { name: string; kind: string; config: Record<string, unknown>; secret?: string; description?: string }) => req<DataSource>('/sources', { method: 'POST', body: json(s) }),
@@ -302,12 +291,14 @@ export const api = {
     delete: (id: string) => req(`/widgets/${id}`, { method: 'DELETE' })
   },
   todos: {
-    list: (s: Scope = 'all', includeDone = false, q = '', sort: 'due' | 'urgency' = 'due', tag = '') => req<Todo[]>(`/todos?project_id=${encodeURIComponent(s)}&include_done=${includeDone}&q=${encodeURIComponent(q)}&sort=${sort}&tag=${encodeURIComponent(tag)}`),
+    list: (s: Scope = 'all', includeDone = false, q = '', sort: 'due' | 'urgency' = 'due', tag = '', list = '') => req<Todo[]>(`/todos?project_id=${encodeURIComponent(s)}&include_done=${includeDone}&q=${encodeURIComponent(q)}&sort=${sort}&tag=${encodeURIComponent(tag)}&list_name=${encodeURIComponent(list)}`),
+    lists: () => req<string[]>('/todo-lists'),
+    move: (id: string, status: string, before_id: string | null = null) => req<Todo>(`/todos/${id}/move`, { method: 'POST', body: json({ status, before_id }) }),
     filters: () => req<TodoFilter[]>('/todo-filters'),
     saveFilter: (f: { name: string; tag?: string; q?: string; project_id?: string | null }) => req<TodoFilter>('/todo-filters', { method: 'POST', body: json(f) }),
     deleteFilter: (id: string) => req(`/todo-filters/${id}`, { method: 'DELETE' }),
-    create: (t: { title: string; project_id?: string | null; notes?: string; due?: string | null; priority?: number; repeat?: TodoRepeat | null; estimate_min?: number | null; tags?: string[]; parent_id?: string | null }) => req<Todo>('/todos', { method: 'POST', body: json(t) }),
-    update: (id: string, patch: { title?: string; notes?: string; due?: string | null; priority?: number; done?: boolean; project_id?: string | null; clear_due?: boolean; clear_project?: boolean; repeat?: TodoRepeat; clear_repeat?: boolean; estimate_min?: number | null; clear_estimate?: boolean; calendar_event_id?: string | null; calendar_link?: string | null; calendar_id?: string | null; tags?: string[]; parent_id?: string | null; clear_parent?: boolean; depends_on?: string[] }) =>
+    create: (t: { title: string; project_id?: string | null; notes?: string; due?: string | null; priority?: number; repeat?: TodoRepeat | null; estimate_min?: number | null; tags?: string[]; parent_id?: string | null; list_name?: string | null; status?: string }) => req<Todo>('/todos', { method: 'POST', body: json(t) }),
+    update: (id: string, patch: { title?: string; notes?: string; due?: string | null; priority?: number; done?: boolean; project_id?: string | null; clear_due?: boolean; clear_project?: boolean; repeat?: TodoRepeat; clear_repeat?: boolean; estimate_min?: number | null; clear_estimate?: boolean; calendar_event_id?: string | null; calendar_link?: string | null; calendar_id?: string | null; tags?: string[]; parent_id?: string | null; clear_parent?: boolean; depends_on?: string[]; list_name?: string | null; clear_list?: boolean; status?: string }) =>
       req<Todo>(`/todos/${id}`, { method: 'PUT', body: json(patch) }),
     delete: (id: string) => req(`/todos/${id}`, { method: 'DELETE' })
   },
@@ -324,7 +315,6 @@ export const api = {
       req<HealthSummary[]>(`/health/summary?days=${days}&today=${today}&include_hidden=${includeHidden}`),
     entries: (metric?: string, limit = 50) => req<HealthEntry[]>(`/health/entries?limit=${limit}${metric ? `&metric=${encodeURIComponent(metric)}` : ''}`),
     log: (e: { metric: string; value: number; day?: string; note?: string }) => req<HealthEntry>('/health/entries', { method: 'POST', body: json(e) }),
-    updateEntry: (id: string, patch: { value?: number; day?: string; note?: string }) => req<HealthEntry>(`/health/entries/${id}`, { method: 'PUT', body: json(patch) }),
     deleteEntry: (id: string) => req(`/health/entries/${id}`, { method: 'DELETE' }),
     providers: () => req<HealthProvider[]>('/health/providers'),
     sources: () => req<HealthSource[]>('/health/sources'),
@@ -339,7 +329,9 @@ export const api = {
   planner: {
     suggest: (days?: number) => req<PlannerSuggestion>('/planner/suggest', { method: 'POST', body: json({ days }) }, NO_TIMEOUT),
     /** The one write: the user pressed "Add selected to calendar". */
-    apply: (blocks: PlannerBlock[]) => req<PlannerApplyResult>('/planner/apply', { method: 'POST', body: json({ blocks }) }, NO_TIMEOUT)
+    apply: (blocks: PlannerBlock[]) => req<PlannerApplyResult>('/planner/apply', { method: 'POST', body: json({ blocks }) }, NO_TIMEOUT),
+    config: () => req<PlannerConfig>('/planner/config'),
+    setConfig: (patch: Partial<PlannerConfig>) => req<PlannerConfig>('/planner/config', { method: 'PUT', body: json(patch) })
   },
   mailWatch: {
     list: (status?: 'to_reply' | 'awaiting_reply') => req<MailWatchList>(`/mail/watch${status ? `?status=${status}` : ''}`),
@@ -348,7 +340,9 @@ export const api = {
     followup: (id: string) => req<Todo>(`/mail/watch/${encodeURIComponent(id)}/followup`, { method: 'POST' }),
     /** Local only: hides the thread in the mail list until `until` (ISO). */
     snooze: (id: string, until: string | null) => req<{ until: string | null }>(`/mail/threads/${encodeURIComponent(id)}/snooze`, { method: 'POST', body: json({ until }) }),
-    snoozed: () => req<{ thread_ids: string[] }>('/mail/snoozed')
+    snoozed: () => req<{ thread_ids: string[] }>('/mail/snoozed'),
+    config: () => req<MailWatchConfig>('/mail/watch/config'),
+    setConfig: (patch: Partial<MailWatchConfig>) => req<MailWatchConfig>('/mail/watch/config', { method: 'PUT', body: json(patch) })
   },
   /** Soft delete: every DELETE above lands here first; these restore it or erase it for good. */
   trash: {
@@ -554,13 +548,6 @@ export const api = {
   /** A subagent's run row (status while it works) and its recorded tape (calls, results). */
   agentRun: (id: string) => req<{ run_id: string; status: string; budget?: Record<string, number> | null }>(`/runs/${encodeURIComponent(id)}`),
   agentTape: (id: string) => req<RunTapeEvent[]>(`/runs/${encodeURIComponent(id)}/events`),
-  /** The newest interrupted run of a conversation, with whether it can still be resumed. */
-  interruptedRun: async (convId: string): Promise<{ run_id: string; resumable: boolean } | null> => {
-    const rows = await req<RunInfo[]>(`/runs?conversation_id=${encodeURIComponent(convId)}&status=interrupted&limit=1`)
-    if (!rows[0]) return null
-    const d = await req<{ run_id: string; resumable: boolean }>(`/runs/${rows[0].run_id}`)
-    return { run_id: d.run_id, resumable: d.resumable }
-  },
   /** Whether the conversation's newest run can be resumed, and which message it would continue. */
   resumableRun: (convId: string) => req<{ run_id: string | null; resumable: boolean; reason: string; message_id: string | null }>(`/conversations/${encodeURIComponent(convId)}/resumable`),
   /** The user's Undo for a local file write or move. A 409 message is JSON `{reason, conflict}`; `force` overrides a conflict. */
@@ -603,6 +590,9 @@ export const api = {
     /** Every row including superseded / forgotten ones. */
     listWithHistory: (s: Scope) => req<Memory[]>(`/memories?${scope(s)}&include_invalid=true`),
     restore: (id: string) => req<Memory>(`/memories/${id}/restore`, { method: 'POST' }),
+    history: (id: string) => req<Memory[]>(`/memories/${id}/history`),
+    exportFile: (s: Scope) => req<MemoryExport>(`/memories/export?${scope(s)}`),
+    importFile: (file: unknown, projectId: string | null) => req<{ added: number; skipped: number }>('/memories/import', { method: 'POST', body: json({ file, project_id: projectId }) }),
     consolidate: (projectId: string | null) => req<MemoryProposal[]>('/memories/consolidate', { method: 'POST', body: json({ project_id: projectId }) }, NO_TIMEOUT),
     proposals: (s: Scope) => req<MemoryProposal[]>(`/memories/proposals?status=pending&${scope(s)}`),
     applyProposal: (id: string) => req<MemoryProposal>(`/memories/proposals/${id}/apply`, { method: 'POST' }),
@@ -669,7 +659,7 @@ export const api = {
     setCategories: (rules: ActivityCategoryRule[] | null) => req<{ rules: ActivityCategoryRule[]; default: boolean }>('/activity/categories', { method: 'PUT', body: json({ rules }) }),
     categoryReport: (days = 7) => req<ActivityCategoryReport>(`/activity/categories/report?days=${days}`),
     redactTest: (text: string) => req<ActivityRedactTest>('/activity/redact/test', { method: 'POST', body: json({ text }) }),
-    palantir: (on: boolean) => req<ActivityStatus>('/activity/palantir', { method: 'POST', body: json({ on }) }),
+    recordEverything: (on: boolean) => req<ActivityStatus>('/activity/record-everything', { method: 'POST', body: json({ on }) }),
     purge: (scope: 'expired' | 'events' | 'summaries' | 'all') => req<{ deleted: { events: number; summaries: number }; status: ActivityStatus }>('/activity/purge', { method: 'POST', body: json({ scope }) }),
     /** Habits and automation suggestions mined from the same data. */
     insights: () => req<ActivityInsights>('/activity/insights'),
@@ -854,7 +844,9 @@ export const api = {
     update: (id: string, patch: { name?: string }) => req<CanvasPreset>(`/canvas-presets/${id}`, { method: 'PUT', body: json(patch) }),
     delete: (id: string) => req<{ ok: boolean }>(`/canvas-presets/${id}`, { method: 'DELETE' }),
     /** Creates a NEW canvas; `skipped` counts windows whose referent no longer exists. */
-    instantiate: (id: string, opts: { name?: string } = {}) => req<InstantiatedCanvas>(`/canvas-presets/${id}/instantiate`, { method: 'POST', body: json(opts) })
+    instantiate: (id: string, opts: { name?: string } = {}) => req<InstantiatedCanvas>(`/canvas-presets/${id}/instantiate`, { method: 'POST', body: json(opts) }),
+    exportFile: (id: string) => req<Record<string, unknown>>(`/canvas-presets/${id}/export`),
+    importFile: (file: unknown) => req<{ preset: CanvasPreset }>('/canvas-presets/import', { method: 'POST', body: json({ file, instantiate: false }) })
   }
 }
 

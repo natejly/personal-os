@@ -8,8 +8,8 @@ import { daysLeft } from '../lib/trashLabels'
 const GROUPS: { key: keyof TrashListing['groups']; label: string }[] = [
   { key: 'projects', label: 'Projects' },
   { key: 'conversations', label: 'Chats' },
-  { key: 'docs', label: 'Docs' },
-  { key: 'documents', label: 'Uploaded documents' },
+  { key: 'docs', label: 'Files' },
+  { key: 'documents', label: 'Uploaded files' },
   { key: 'memories', label: 'Memories' },
   { key: 'todos', label: 'Todos' }
 ]
@@ -60,7 +60,7 @@ export default function TrashPanel(): JSX.Element {
       <h3>Trash</h3>
       <p className="muted small">
         Deleted chats, projects, docs, memories and todos wait here for {list?.retention_days ?? 30} days, then are erased.
-        Deleting a project sends its chats, memories and uploads here too; its docs and todos move to Personal.
+        Deleting a project sends its chats, memories and uploads here too; its files and todos move to Personal.
       </p>
       {list && list.total === 0 && <p className="empty-state">Nothing in the trash.</p>}
       {list && GROUPS.map(({ key, label }) => list.groups[key].length > 0 && (

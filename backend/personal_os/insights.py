@@ -681,12 +681,12 @@ def digest(pat: dict[str, Any]) -> str:
 SURFACE = """\
 - Chat with tools: the assistant can search and write memories and the knowledge graph, search
   documents, read and propose edits to docs, search the web and read pages, run Python, manage
-  todos and kanban boards, and (when Google is connected) read the calendar, triage Gmail, draft
+  todos (also shown as a kanban board), and (when Google is connected) read the calendar, triage Gmail, draft
   mail and manage Google Tasks. Tools are per-tool on / ask / off.
 - Projects: a group of chats with their own instructions, knowledge files and memories.
 - Documents and docs: uploads that get indexed, and docs the user writes that the assistant can
   propose diffs against.
-- Todos, a week calendar, kanban boards, notes.
+- Todos, a week calendar, notes.
 - Dashboards: register a data source (HTTP API, RSS, or the app's own todos/calendar/mail) and
   describe a widget in plain English; the model writes the widget. "AI summary" widgets turn any
   source into a short briefing.
@@ -1071,11 +1071,12 @@ class Insights:
                     # Trashed rows included: once the user trashed, forgot, pinned or edited the memory, it is theirs.
                     with self.db.tx() as c:
                         mem = row_to_dict(c.execute("SELECT * FROM memories WHERE id=?", (mem_id,)).fetchone())
-                    if (mem and not mem["deleted_at"] and mem["invalid_at"] is None and not mem["pinned"]
-                            and mem["content"] == prev["statement"]):
+                    if (mem and mem.get("source") == MEMORY_SOURCE and not mem["deleted_at"] and mem["invalid_at"] is None
+                            and not mem["pinned"] and mem["content"] == prev["statement"]):
                         self.memories.update(mem_id, {"content": statement, "kind": kind})
-                else:
-                    mem_id = created_mem = self.memories.create(None, statement, kind=kind, source=MEMORY_SOURCE)["id"]
+                else:  # create dedupes on content: a user's own row comes back, and a habit never adopts (or later rewrites) it
+                    row = self.memories.create(None, statement, kind=kind, source=MEMORY_SOURCE)
+                    mem_id = created_mem = row["id"] if row.get("source") == MEMORY_SOURCE else ""
             elif mem_id and not auto_memory:
                 self._drop_memory(mem_id)
                 mem_id = ""

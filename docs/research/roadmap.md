@@ -405,12 +405,12 @@ Suggested order: **G1–G4 first and immediately** (live defects, all S). Then t
 
 ## Combined next steps
 
-Track 5 reorders this list. Four live defects (G1–G4) outrank every feature below, and the durable-run
+Track 5 reorders this list. Four defects (G1–G4) outranked every feature below (all fixed 2026-09-29), and the durable-run
 spine (G5–G11) turns out to be the shared prerequisite for L1, L3, L4, A8 and A9 — all of which were
 previously listed as independent.
 
-0. **Before anything else:** G1 sandbox profile, G2 SSRF guard, G3 sidecar auth, G4 CSP images. All S,
-   all live today. G1 and G2 together currently allow an injected web page or email to read the
+0. **Done 2026-09-29:** G1 sandbox profile, G2 SSRF guard, G3 sidecar auth, G4 CSP images. All S.
+   Before the fix, G1 and G2 together allowed an injected web page or email to read the
    Fireworks key and the whole database and send it out, with no approval card shown.
 1. **Cheap wins this week:** G27 tool-use examples (72%→90% on parameter handling), G29 error
    messages that steer, G30 pagination replacing blind truncation, G31 stop injecting `off` tools,

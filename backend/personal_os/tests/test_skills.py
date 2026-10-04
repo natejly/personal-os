@@ -162,7 +162,7 @@ class SkillsTestCase(unittest.TestCase):
 
         seen: dict[str, str] = {}
 
-        async def fake(_settings: dict[str, Any], _model: str, messages: list[dict[str, Any]], **_kw: Any) -> str:
+        async def fake(_settings: dict[str, Any], _model: str, messages: list[dict[str, Any]], _kind: str = "other", **_kw: Any) -> str:
             seen["content"] = messages[-1]["content"]
             return '{"skip": true}'
 

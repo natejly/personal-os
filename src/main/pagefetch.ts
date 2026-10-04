@@ -8,8 +8,8 @@
 import { BrowserWindow, session } from 'electron'
 import { randomBytes, timingSafeEqual } from 'crypto'
 import { createServer, IncomingMessage, Server, ServerResponse } from 'http'
-import { backendToken, backendUrl } from './backend'
-import { hostBlocked, isPrivateHost } from './pageGuard'
+import { backendToken, backendUrl, onBackendState } from './backend'
+import { hostBlocked, isPrivateHost, isPrivateIp, sessionResolver } from './pageGuard'
 import { closeAllAgentBrowsers, configureAgentBrowser, handleAgentDownload, routeBrowser } from './agentBrowser'
 
 const PARTITION = 'persist:agent'
@@ -27,6 +27,7 @@ const secret = randomBytes(32).toString('base64url')
 let active = 0
 let sessionReady = false
 let timer: NodeJS.Timeout | null = null
+let unsubscribe: (() => void) | null = null
 
 type PageResult = { url: string; title: string; text: string; truncated: boolean; timedOut: boolean; links?: { text: string; href: string }[] }
 const MAX_LINKS = 40
@@ -47,6 +48,7 @@ function agentSession(): Electron.Session {
   const ses = session.fromPartition(PARTITION)
   if (sessionReady) return ses
   sessionReady = true
+  const resolve = sessionResolver(ses)
   ses.setPermissionRequestHandler((_wc, _perm, cb) => cb(false))
   ses.setPermissionCheckHandler(() => false)
   // /page loads never download; the interactive browser may, but only when its act said so (agentBrowser decides).
@@ -62,8 +64,19 @@ function agentSession(): Electron.Session {
     if (u.protocol === 'data:' || u.protocol === 'blob:') return cb({})
     if (!(isHttp(u) || u.protocol === 'ws:' || u.protocol === 'wss:')) return cb({ cancel: true })
     // Redirects and subresources included. A name is resolved here: the backend only checked the first URL.
-    void hostBlocked(u.hostname).then(
+    void hostBlocked(u.hostname, resolve).then(
       (blocked) => cb({ cancel: blocked }),
+      () => cb({ cancel: true })
+    )
+  })
+  // The address actually dialled, checked before the body reaches the page: the pre-check above can
+  // still lose a race with DNS rebinding. Electron fills `ip` here though its typings omit it.
+  // Behind a proxy `ip` is the proxy's address, so only direct connections are judged.
+  ses.webRequest.onHeadersReceived((details, cb) => {
+    const ip = ((details as { ip?: string }).ip ?? '').replace(/^\[|\]$/g, '')
+    if (!ip || !isPrivateIp(ip)) return cb({})
+    void ses.resolveProxy(details.url).then(
+      (proxy) => cb({ cancel: proxy === 'DIRECT' }),
       () => cb({ cancel: true })
     )
   })
@@ -228,7 +241,7 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   }
   if (!isHttp(target)) return send(res, 400, { error: `only http(s) pages can be opened, got ${target.protocol}` })
   if (target.username || target.password) return send(res, 400, { error: 'credentials in the URL are not allowed' })
-  if (await hostBlocked(target.hostname)) return send(res, 400, { error: `${target.hostname} is not a public address` })
+  if (await hostBlocked(target.hostname, sessionResolver(agentSession()))) return send(res, 400, { error: `${target.hostname} is not a public address` })
   if (active >= MAX_ACTIVE) return send(res, 429, { error: 'the page loader is busy; try again in a moment' })
   const maxChars = Math.max(1000, Math.min(Number(body.maxChars) || 20_000, MAX_CHARS))
   const timeoutMs = Math.max(3_000, Math.min(Number(body.timeoutMs) || 20_000, MAX_TIMEOUT_MS))
@@ -277,6 +290,8 @@ export function startPageBridge(): Promise<void> {
       if (addr && typeof addr === 'object') bridgeUrl = `http://127.0.0.1:${addr.port}`
       void register()
       timer = setInterval(() => void register(), REGISTER_EVERY_MS)
+      // A restarted backend (crash, manual restart, new port) has no bridge until it is told again.
+      unsubscribe = onBackendState((i) => { if (i.state === 'ready') void register() })
       resolve()
     })
   })
@@ -290,6 +305,8 @@ export function stopPageBridge(): void {
   closeAllAgentBrowsers() // every interactive session's windows die with the app
   if (timer) clearInterval(timer)
   timer = null
+  unsubscribe?.()
+  unsubscribe = null
   server?.close()
   server = null
 }

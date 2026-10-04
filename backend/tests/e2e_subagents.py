@@ -70,7 +70,7 @@ def main() -> int:
     summary.unlink(missing_ok=True)
     # Three web researchers plus the summary outrun the default run clock (300 s), run cost ($0.50) and
     # per-child cap ($0.25), which would end the parent before it can write the file; raise them for the test.
-    g.put("/settings", {"workspaceRoots": [str(work)], "maxRunSeconds": 1500, "maxRunCost": 5, "subagentMaxCost": 1.0})
+    g.put("/settings", {"workspaceRoots": [str(work)], "maxRunSeconds": 1500})
 
     cid = g.post("/conversations", {"title": "e2e subagents"})["id"]
     prompt = ("Use agent_spawn to start three researchers in parallel (background=true), one per topic: "

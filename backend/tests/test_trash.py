@@ -55,6 +55,14 @@ class ReadPathTests(_Base):
         back = self.convos.get(c["id"])
         self.assertEqual((back["title"], back["messages"][0]["content"]), ("Plan the launch", "hello"))
 
+    def test_project_stats_count_written_docs_apart_from_uploads(self) -> None:
+        p = self.projects.create("P")
+        d = self.docs.create("Notes", project_id=p["id"])
+        self.docs.create("Other", project_id=p["id"])
+        self.assertEqual((self.projects.stats(p["id"])["docs"], self.projects.stats(p["id"])["documents"]), (2, 0))
+        self.trash.trash("doc", d["id"])
+        self.assertEqual(self.projects.stats(p["id"])["docs"], 1)
+
     def test_memory_context_search_and_dedup(self) -> None:
         m = self.memories.create(None, "Prefers oat milk in coffee")
         self.trash.trash("memory", m["id"])
@@ -172,6 +180,21 @@ class ProjectCascadeTests(_Base):
         self.assertEqual(self.todos.get(self.todo["id"])["title"], "Atlas todo")
         # The chat trashed on its own before the project keeps its own retention window.
         self.assertTrue(self.trash.restore("conversation", self.other_conv["id"]))
+
+    def test_purge_project_spares_items_trashed_on_their_own(self) -> None:
+        pid = self.p["id"]
+        f = Path(self.tmp.name) / "own.txt"
+        f.write_text("x")
+        own = self.documents.create(pid, "own.txt", "text/plain", 1, str(f), "walrus facts")
+        mem = self.memories.create(pid, "Atlas walrus budget")
+        self.trash.trash("document", own["id"])
+        self.trash.trash("memory", mem["id"])
+        self.trash.trash("project", pid)
+        self.trash.purge("project", pid)
+        self.assertTrue(f.exists())
+        self.assertTrue(self.trash.restore("document", own["id"]))
+        self.assertTrue(self.trash.restore("memory", mem["id"]))
+        self.assertEqual([m["id"] for m in self.memories.list(None, q="walrus")], [mem["id"]])
 
     def test_purge_refuses_live_items(self) -> None:
         self.assertFalse(self.trash.purge("project", self.p["id"]))

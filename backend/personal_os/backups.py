@@ -41,6 +41,7 @@ log = logging.getLogger("personal_os")
 APP_VERSION = "0.1.0"
 DB_NAME = "personal-os.db"
 PENDING = "restore.pending"
+FAILED = "restore.failed"  # {name, error, at}: a staged restore that could not be applied at the last start
 KINDS = ("daily", "manual", "premigrate", "prerestore")
 DAILY_KEEP, WEEKLY_KEEP, MANUAL_KEEP, SAFETY_KEEP = 7, 4, 10, 3
 DAY = 24 * 3600.0
@@ -134,6 +135,8 @@ def rotate(data_dir: Path) -> list[str]:
     drop += [b["name"] for b in by_kind.get("manual", [])[MANUAL_KEEP:]]
     for kind in ("premigrate", "prerestore"):
         drop += [b["name"] for b in by_kind.get(kind, [])[SAFETY_KEEP:]]
+    staged = (pending_restore(data_dir) or {}).get("name")
+    drop = [n for n in drop if n != staged]  # a backup waiting to be restored outlives retention
     for n in drop:
         delete(data_dir, n)
     return drop
@@ -164,6 +167,7 @@ def stage_restore(data_dir: Path, name: str) -> dict[str, Any]:
     if _schema_version(d / name) > migrations.latest():
         raise ValueError("this backup was made by a newer version of the app")
     (d / PENDING).write_text(json.dumps({"name": name, "staged_at": time.time()}))
+    restore_failed(data_dir, clear=True)
     return {"name": name}
 
 
@@ -189,11 +193,22 @@ def _copy_aside(data_dir: Path, why: Exception) -> None:
     log.warning("could not snapshot the live database before restoring (%s); kept a raw copy as %s", why, dest.name)
 
 
+def restore_failed(data_dir: Path, clear: bool = False) -> dict[str, Any] | None:
+    f = backup_dir(data_dir) / FAILED
+    if clear:
+        f.unlink(missing_ok=True)
+        return None
+    try:
+        return json.loads(f.read_text())
+    except (OSError, ValueError):
+        return None
+
+
 def apply_pending_restore(data_dir: Path) -> str | None:
     """Startup, before the database is opened. Returns the restored backup's name, or None.
 
-    A staged backup that has since vanished or is corrupt is dropped with a log line: the app must
-    still start on the current database.
+    A staged backup that has since vanished or is corrupt is dropped with a log line and recorded in
+    backups/restore.failed for Settings → Data: the app must still start on the current database.
     """
     data_dir = Path(data_dir)
     if not (data_dir / "backups" / PENDING).exists():
@@ -204,16 +219,16 @@ def apply_pending_restore(data_dir: Path) -> str | None:
         name = (p or {})["name"]
         src = data_dir / "backups" / name
         if not _NAME.match(name) or not src.is_file():
-            raise FileNotFoundError(name)
+            raise FileNotFoundError(f"the backup {name} no longer exists")
         _check(src)
         live = data_dir / DB_NAME
+        tmp = data_dir / (DB_NAME + ".restoring")
+        shutil.copyfile(src, tmp)  # before the prerestore backup, whose rotation may drop an old prerestore `src`
         if live.exists():
             try:
                 create(data_dir, "prerestore")
             except Exception as e:  # noqa: BLE001 - a corrupt live DB is the usual reason to restore at all
                 _copy_aside(data_dir, e)
-        tmp = data_dir / (DB_NAME + ".restoring")
-        shutil.copyfile(src, tmp)
         for suffix in ("-wal", "-shm", "-journal"):
             (data_dir / (DB_NAME + suffix)).unlink(missing_ok=True)
         os.replace(tmp, live)
@@ -221,6 +236,8 @@ def apply_pending_restore(data_dir: Path) -> str | None:
         return name
     except Exception as e:  # noqa: BLE001
         log.error("staged restore abandoned: %s", e)
+        (data_dir / (DB_NAME + ".restoring")).unlink(missing_ok=True)
+        (backup_dir(data_dir) / FAILED).write_text(json.dumps({"name": (p or {}).get("name"), "error": str(e) or type(e).__name__, "at": time.time()}))
         return None
 
 
@@ -228,9 +245,12 @@ def apply_pending_restore(data_dir: Path) -> str | None:
 _README = """Grain data export
 =================
 grain.db            A complete SQLite snapshot (open with any SQLite tool, or restore it in Grain).
-                    It includes your settings, which can hold API keys: keep this file private.
+                    API keys are stored outside the database and are not included, but it
+                    holds your conversations, memories and documents: keep this file private.
 uploads/            Files you added to the knowledge base, as stored.
 doc_assets/         Images pasted into your documents, one folder per document.
+recordings/         Meeting audio you chose to keep, one folder per meeting.
+cowork/             Each desk's outputs/ folder: the deliverables it handed in.
 export/             The same content as plain text:
   conversations.md / conversations.json
   memories.md / memories.json
@@ -365,11 +385,14 @@ def _write_zip(part: Path, snap: Path, data_dir: Path) -> None:
         for base, (md, js) in human_export(snap).items():
             z.writestr(f"export/{base}.md", md)
             z.writestr(f"export/{base}.json", json.dumps(js, indent=2, ensure_ascii=False))
-        for sub in ("uploads", "doc_assets"):
+        for sub in ("uploads", "doc_assets", "recordings", "cowork"):
             up = data_dir / sub
             for f in sorted(up.rglob("*")) if up.exists() else []:
+                rel = f.relative_to(up).as_posix()
+                if sub == "cowork" and rel.split("/")[1:2] != ["outputs"]:
+                    continue  # a desk's work/ is scratch; only its outputs/ are deliverables
                 if f.is_file() and not f.is_symlink():
-                    z.write(f, f"{sub}/{f.relative_to(up).as_posix()}")
+                    z.write(f, f"{sub}/{rel}")
 
 
 # ---- scheduler + routes ----
@@ -404,7 +427,7 @@ def router(data_dir: Path) -> Any:
     def overview() -> dict[str, Any]:
         bs = list_backups(data_dir)
         return {"data_dir": str(data_dir), "backups": bs, "last_backup": bs[0]["created_at"] if bs else None,
-                "pending_restore": pending_restore(data_dir), "schema_version": migrations.latest(), "app_version": APP_VERSION}
+                "pending_restore": pending_restore(data_dir), "restore_failed": restore_failed(data_dir), "schema_version": migrations.latest(), "app_version": APP_VERSION}
 
     @r.post("/backups")
     async def backup_now() -> dict[str, Any]:
@@ -422,6 +445,7 @@ def router(data_dir: Path) -> Any:
     @r.delete("/restore")
     def unstage() -> dict[str, Any]:
         cancel_restore(data_dir)
+        restore_failed(data_dir, clear=True)
         return {"ok": True}
 
     @r.post("/export")

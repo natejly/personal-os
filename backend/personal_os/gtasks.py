@@ -39,6 +39,11 @@ def _line(text: str, limit: int = 2000) -> str:
     return " ".join(str(text or "").replace("\r", " ").split())[:limit]
 
 
+def _notes(text: str) -> str:
+    """Notes keep their line breaks; Google allows 8192 characters."""
+    return str(text or "").replace("\r\n", "\n").replace("\r", "\n")[:8192]
+
+
 def _remote_wins(rt: dict[str, Any], td: dict[str, Any]) -> bool:
     try:
         return _parse_iso(rt.get("updated") or "").timestamp() >= float(td["updated_at"])
@@ -237,7 +242,7 @@ class TasksSync:
 
         # Remote tasks nothing points at yet -> new local todos. Untitled ones are usually
         # rows someone is still typing into; skip them until they have a name.
-        unlinked = [td for td in self.todos.all_for_sync() if not td.get("external_id")]
+        unlinked = [td for td in self.todos.all_for_sync() if not td.get("external_id") and td.get("source") != "board"]
         for eid, rt in remote.items():
             title = _line(rt.get("title") or "", 500)
             if eid in linked or rt.get("deleted") or not title:
@@ -249,7 +254,7 @@ class TasksSync:
                 unlinked.remove(twin)
                 self.todos.set_sync_state(twin["id"], eid, rt.get("updated"), twin["updated_at"])
                 continue
-            td = self.todos.create(title, notes=_line(rt.get("notes") or ""), due=_date_only(rt.get("due")),
+            td = self.todos.create(title, notes=_notes(rt.get("notes") or ""), due=_date_only(rt.get("due")),
                                    source="google", external_id=eid, notify=False)
             if rt.get("status") == "completed":
                 td = self.todos.update(td["id"], {"done": True}, notify=False) or td
@@ -258,7 +263,7 @@ class TasksSync:
 
         # Local todos never synced -> new remote tasks.
         for td in self.todos.all_for_sync():
-            if td.get("external_id"):
+            if td.get("external_id") or td.get("source") == "board":  # cards moved in from boards stay local; they never lived in Google
                 continue
             try:
                 rt = self.google.tasks_insert(_remote_body(td), tasklist)
@@ -308,7 +313,7 @@ class TasksSync:
         title = _line(rt.get("title") or "", 500)
         if title and title != td["title"]:
             patch["title"] = title
-        notes = _line(rt.get("notes") or "")
+        notes = _notes(rt.get("notes") or "")
         if notes != (td.get("notes") or ""):
             patch["notes"] = notes
         if _date_only(rt.get("due")) != td["due"]:
@@ -324,9 +329,9 @@ class TasksSync:
 
     def _push(self, td: dict[str, Any], remote: dict[str, Any], tasklist: str) -> None:
         body = _remote_body(td)
-        if (td.get("notes") or "") == _line(remote.get("notes") or ""):
-            # Unchanged here: the local copy is the flattened pull, so sending it would rewrite
-            # Google's multi-line (or longer) notes.
+        if (td.get("notes") or "") == _notes(remote.get("notes") or ""):
+            # Unchanged here: the local copy is the pull, so sending it again could only rewrite
+            # Google's notes (CRLF line ends, or notes past the local cap).
             body.pop("notes")
         rt = self.google.tasks_update(remote["id"], body, tasklist)
         self.todos.set_sync_state(td["id"], remote["id"], rt.get("updated"), td["updated_at"])

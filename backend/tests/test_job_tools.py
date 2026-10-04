@@ -39,6 +39,7 @@ async def _scripted(settings: dict[str, Any], model: str, messages: list[dict[st
                     effort: str = "default", tool_choice: str = "auto", fast: bool = False, cancel: asyncio.Event | None = None) -> Any:
     SEEN_TOOLS.append([t["function"]["name"] for t in tools or []])
     SEEN_PROMPTS.append(next((m["content"] for m in reversed(messages) if m["role"] == "user"), ""))
+    SEEN_SYSTEMS.append("\n".join(str(m.get("content") or "") for m in messages if m["role"] == "system"))
     step = ROUNDS.pop(0) if ROUNDS else ["ok"]
     if isinstance(step, dict):
         yield {"type": "end", "finish_reason": "tool_calls", "tool_calls": step["tool_calls"], "usage": None}
@@ -50,6 +51,7 @@ async def _scripted(settings: dict[str, Any], model: str, messages: list[dict[st
 
 SEEN_TOOLS: list[list[str]] = []
 SEEN_PROMPTS: list[str] = []
+SEEN_SYSTEMS: list[str] = []
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -72,6 +74,7 @@ def _script():  # type: ignore[no-untyped-def]
     SENT.clear()
     SEEN_TOOLS.clear()
     SEEN_PROMPTS.clear()
+    SEEN_SYSTEMS.clear()
     with appmod.db.tx() as c:
         c.execute("UPDATE jobs SET enabled=0, next_due_at=NULL")
 
@@ -197,7 +200,8 @@ def test_dry_run_is_read_only_and_invisible() -> None:
     run = wait_ended(r.json()["run_id"])
     assert run["input"]["dry_run"] is True and run["status"] == "done"
     assert "todo_add" not in SEEN_TOOLS[0] and "gmail_send" not in SEEN_TOOLS[0] and "current_time" in SEEN_TOOLS[0]
-    assert SEEN_PROMPTS[0].startswith("This is a preview.") and "report" in SEEN_PROMPTS[0]
+    # The preview instruction is a system hint, not the transcript's first user message.
+    assert "This is a preview." in SEEN_SYSTEMS[0] and "This is a preview." not in str(SEEN_PROMPTS[0])
     assert [bool(x["error"]) for x in results(run["run_id"])] == [True, True, False]
     assert appmod.proposals.list(None, run_id=run["run_id"]) == [] and SENT == []
     assert run["run_id"] not in [a["run_id"] for a in client.get("/inbox").json()["while_you_were_away"]]

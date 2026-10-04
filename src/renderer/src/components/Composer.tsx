@@ -8,12 +8,12 @@ import PlanModeToggle from './PlanModeToggle'
 import SkipPermissionsToggle from './SkipPermissionsToggle'
 import { uploadNote } from '../lib/uploadNote'
 import { hasModelKey } from '../lib/modelLabel'
-import { useStore, useIsStreaming, useIsStopping } from '../store'
+import { PAGE_AGENT_DRAFT, useStore, useIsStreaming, useIsStopping } from '../store'
 import SmartTextarea from './SmartTextarea'
 import MicButton from './MicButton'
 import { dictationText } from '../features/docrec/dictation'
 import { useOnboarding } from './onboarding/onboardingStore'
-import { COMPOSER_INSERT_EVENT } from '../lib/composerInsert'
+import { COMPOSER_INSERT_EVENT, type ComposerInsertDetail } from '../lib/composerInsert'
 import { classifyPaste, messageCharLimit } from '../lib/messageLimit'
 import { compactCommand, compactNow } from '../lib/compact'
 import { appendToDraft, clearRedirect, composerKey, dropDraft, getDraft, moveDraft, restoreDraft, useDraft } from '../lib/drafts'
@@ -34,7 +34,7 @@ interface ComposerProps {
   draftKey?: string
 }
 
-export default function Composer({ conversationId, footer, compact = false, onSend, placeholder, draftKey }: ComposerProps): JSX.Element {
+export default function Composer({ conversationId, footer, compact = false, onSend, placeholder = 'Message Grain…', draftKey }: ComposerProps): JSX.Element {
   const box = useRef<HTMLDivElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
   const streaming = useIsStreaming(conversationId)
@@ -102,17 +102,16 @@ export default function Composer({ conversationId, footer, compact = false, onSe
     void stop(conversationId).finally(() => box.current?.querySelector('textarea')?.focus())
   }
 
-  // A tool card's slot chip put its text in the drafts store already; the composer of the
-  // conversation being looked at only takes focus so the next keystroke lands after it.
+  // A tool card's slot chip put its text in the drafts store already; the composer holding that
+  // draft only takes focus so the next keystroke lands after it.
   useEffect(() => {
-    if (onSend) return
-    const onInsert = (): void => {
-      if ((conversationId ?? activeId) !== useStore.getState().focusedConversationId) return
+    const onInsert = (e: Event): void => {
+      if ((e as CustomEvent<ComposerInsertDetail>).detail?.key !== key) return
       box.current?.querySelector('textarea')?.focus()
     }
     window.addEventListener(COMPOSER_INSERT_EVENT, onInsert)
     return () => window.removeEventListener(COMPOSER_INSERT_EVENT, onInsert)
-  }, [activeId, conversationId, onSend])
+  }, [key])
 
   /** The key as it stands now: a send from the not-yet-created chat ends with the created one focused. */
   const keyNow = (): string => {
@@ -130,9 +129,11 @@ export default function Composer({ conversationId, footer, compact = false, onSe
     const list = Array.from(files)
     if (!list.length) return
     const k0 = key
+    // The chat on screen when the files were picked, as `key` resolves it: the main view passes no id,
+    // and a mark left for "the next send" would land on whichever chat sends next.
+    const real = activeId && activeId !== PAGE_AGENT_DRAFT ? activeId : undefined
     const saved = await uploadDocuments(list, uploadTarget)
     if (!saved.length) return
-    const real = conversationId && conversationId !== '\u0000page-agent' ? conversationId : undefined
     await noteUntrustedUpload(real, onSend ? 'page' : 'draft').catch((e: unknown) => {
       useStore.getState().toast((e as Error).message, 'error')
     })
@@ -305,6 +306,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
           onPaste={onPaste}
           placeholder={streaming ? (queueId ? 'Queue a follow-up… ⌘↵ to steer now' : 'Steer the reply…') : placeholder}
           noGhost={!!slash}
+          ariaLabel="Message"
           onKeyDown={(e) => {
             const act = slash && !e.shiftKey && !e.nativeEvent.isComposing ?slashMenuKey(e.key, slashActive, slash.length) : null
             if (act) {

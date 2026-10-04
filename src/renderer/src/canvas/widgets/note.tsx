@@ -32,9 +32,17 @@ function NoteWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
   const [note, setNote] = useState<Note | null>(null)
   const [body, setBody] = useState('')
   const [editing, setEditing] = useState(false)
+  /** A failed load: there is no note to show. */
   const [error, setError] = useState('')
   // A pop-out never loads the canvas store, so it cannot see the space lock: deleting lives on the canvas.
   const onCanvas = useCanvas((s) => !!s.canvases[win.canvas_id]?.windows.some((x) => x.id === win.id))
+  /** A failed save or recolour: the editor stays up with a Retry, and the text stays pending. */
+  const [saveError, setSaveError] = useState('')
+  /** Saves in flight, and whether one has finished, so the label never says 'saved' before the server does. */
+  const inFlight = useRef(0)
+  /** Number of the newest save, so an older save failing late never puts back text a newer save replaced. */
+  const lastSave = useRef(0)
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle')
   /** Unsaved body, or null when the note on the server matches what is on screen. */
   const pending = useRef<string | null>(null)
   /** The last window title this widget derived, so a hand-renamed window is never overwritten. */
@@ -49,7 +57,18 @@ function NoteWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
       derived.current = line
       onTitle(line)
     }
-    void api.notes.update(id, { body: next }).then(setNote).catch((e) => setError((e as Error).message))
+    inFlight.current++
+    const seq = ++lastSave.current
+    setSaveState('saving')
+    void api.notes.update(id, { body: next })
+      .then((n) => { setNote(n); setSaveError('') })
+      .catch((e) => {
+        // Put the text back so Retry, the next keystroke or closing the window sends it again.
+        if (seq !== lastSave.current) return
+        if (pending.current === null) pending.current = next
+        setSaveError((e as Error).message || 'Could not save this note')
+      })
+      .finally(() => { if (--inFlight.current === 0) setSaveState('saved') })
   }, [id, onTitle])
 
   useEffect(() => {
@@ -80,6 +99,14 @@ function NoteWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
 
   // Closing the window mid-edit still writes: the effect above only ever cleared its timer.
   useEffect(() => () => { if (pending.current !== null) save(pending.current) }, [save])
+
+  /** Copies the note into Files; the note widget itself stays as it is. */
+  const saveToFiles = (): void => {
+    const st = useStore.getState()
+    void api.docs.create({ title: firstLine(body) || 'Note', content: body })
+      .then((d) => st.toast('Saved to Files', 'info', { label: 'Open', run: () => { st.setView('docs'); void useStore.getState().openDoc(d.id) } }))
+      .catch((e) => st.toast(`Could not save to Files: ${(e as Error).message}`, 'error'))
+  }
 
   const skin = COLORS[note?.color ?? 'yellow'] ?? COLORS.yellow
 
@@ -118,10 +145,20 @@ function NoteWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
               width: 12, height: 12, borderRadius: 999, background: COLORS[k].bg,
               border: `1px solid ${note?.color === k ? skin.ink : 'rgba(0,0,0,0.2)'}`
             }}
-            onClick={() => void api.notes.update(id, { color: k }).then(setNote).catch(() => setError('Could not recolour this note'))} />
+            onClick={() => void api.notes.update(id, { color: k }).then(setNote).catch(() => setSaveError('Could not recolour this note'))} />
         ))}
         <span className="spacer" />
-        <span style={{ fontSize: 10, opacity: 0.55 }}>{pending.current === null ? 'saved' : 'saving…'}</span>
+        <button style={{ font: 'inherit', fontSize: 10, textDecoration: 'underline', color: 'inherit' }}
+          disabled={!body.trim()} onClick={saveToFiles}>Save to Files</button>
+        {saveError ? (
+          <span style={{ fontSize: 10 }} title={saveError}>
+            Not saved{' '}
+            <button style={{ font: 'inherit', textDecoration: 'underline', color: 'inherit' }}
+              onClick={() => { setSaveError(''); if (pending.current !== null) save(pending.current) }}>Retry</button>
+          </span>
+        ) : (pending.current !== null || saveState !== 'idle') && (
+          <span style={{ fontSize: 10, opacity: 0.55 }}>{pending.current === null && saveState === 'saved' ? 'saved' : 'saving…'}</span>
+        )}
         {onCanvas && <button className="icon-btn ghost sm" title="Delete sticky note" aria-label="Delete sticky note" style={{ color: 'inherit' }} onClick={() => void remove()}><Trash2 size={12} /></button>}
       </div>
 

@@ -3,12 +3,13 @@
  * server. Each one goes connect → (sign in, for a remote server) → approve its tools → sync.
  * Approval is per tool shape: if the server later changes a tool, sync skips it and this panel says so.
  */
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { AlertTriangle, Check, ChevronDown, ChevronRight, ExternalLink, Link2, RefreshCw, Trash2 } from 'lucide-react'
 import type { HealthProvider, HealthSource, HealthSourcePlan, HealthSyncResult } from '@shared/types'
 import { useStore } from '../../store'
 import { api } from '../../lib/api'
 import { localDay } from '../../components/CalendarWeek'
+import { signInMcp } from '../../components/McpSettings'
 
 const ago = (t: number | null): string => {
   if (!t) return 'never'
@@ -114,8 +115,6 @@ function SourceRow({ s, reload, onSynced, toast }: { s: HealthSource; reload: ()
   const [signing, setSigning] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [showProblems, setShowProblems] = useState(false)
-  const poll = useRef<ReturnType<typeof setInterval> | null>(null)
-  useEffect(() => () => { if (poll.current) clearInterval(poll.current) }, [])
 
   const status = s.server?.status ?? 'missing'
   const remote = s.server?.transport === 'http'
@@ -130,21 +129,13 @@ function SourceRow({ s, reload, onSynced, toast }: { s: HealthSource; reload: ()
     if (!s.server) return
     setSigning(true)
     try {
-      const st = await api.mcp.signIn(s.server.id)
-      if (st.status === 'error') throw new Error(st.error)
-      if (st.auth_url) window.open(st.auth_url, '_blank')
-      poll.current = setInterval(() => {
-        void api.mcp.signInStatus(s.server!.id).then(async (x) => {
-          if (x.status === 'waiting') return
-          if (poll.current) clearInterval(poll.current)
-          setSigning(false)
-          if (x.status === 'error') toast(`${s.label} sign-in failed: ${x.error}`, 'error')
-          await reload()
-        })
-      }, 2000)
+      const x = await signInMcp(s.server.id)
+      if (x.status === 'error') toast(`${s.label} sign-in failed: ${x.error}`, 'error')
+      await reload()
     } catch (e) {
-      setSigning(false)
       toast((e as Error).message, 'error')
+    } finally {
+      setSigning(false)
     }
   }
   const approve = async (): Promise<void> => {

@@ -2,6 +2,7 @@ import type { ToolEvent } from '@shared/types'
 import { argRows, changedKeys, describeCall, wasEdited } from '../../lib/toolDisplay'
 import ApprovalRules from '../ApprovalRules'
 import { ArgList, RawDetails, ResultBlock } from './parts'
+import { useStore } from '../../store'
 import './toolcards.css'
 
 /**
@@ -24,12 +25,17 @@ export function GenericBody({ event }: { event: ToolEvent }): JSX.Element {
  * The approval for a call with no dedicated card: a plain-language statement of what will happen, the arguments
  * as a list, and one action row (ApprovalRules): Approve / Deny, a note, and the standing grants.
  */
-export function GenericApproval({ event, conversationId, decide }: {
+export function GenericApproval({ event, conversationId, decide, onWhy }: {
   event: ToolEvent
   conversationId: string
   decide: (approve: boolean) => Promise<void>
+  /** Opens the context panel (it lists the taint sources and has Clear); only where that panel shows this chat. */
+  onWhy?: () => void
 }): JSX.Element {
   const d = describeCall(event.name, event.arguments)
+  // A doc tool names its doc by id; show the title the user knows it by.
+  const docTitle = useStore((s) => s.docs.find((x) => x.id === event.arguments?.doc)?.title)
+  const args = docTitle ? { ...event.arguments, doc: docTitle } : event.arguments
   return (
     <div
       className="approval tc-approval"
@@ -39,10 +45,11 @@ export function GenericApproval({ event, conversationId, decide }: {
     >
       <div className="approval-text">
         <b>{d.verb}</b>{d.subject ? <> {d.subject}</> : null}. {event.forced
-          ? 'This reply read untrusted content, so it needs your OK each time.'
+          ? <>This chat has read untrusted content, so this needs your OK each time.
+            {onWhy && <>{' '}<button type="button" className="link small" onClick={onWhy}>See why</button></>}</>
           : 'This acts outside the app.'}
       </div>
-      <ArgList rows={argRows(event.arguments)} />
+      <ArgList rows={argRows(args)} />
       <ApprovalRules event={event} conversationId={conversationId} decide={decide} />
     </div>
   )

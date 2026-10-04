@@ -121,3 +121,15 @@ def test_garbage_ids_and_kinds_are_ignored(monkeypatch: Any) -> None:
         }, monkeypatch)
         assert len(out["memories"]) == 1 and out["memories"][0]["kind"] == "fact"
         assert out["updated"] == [] and out["removed"] == []
+
+
+def test_non_string_kinds_do_not_abort_the_extraction(monkeypatch: Any) -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        db = Database(tmp)
+        memories, graph = Memories(db), Graph(db)
+        memories.create(None, "User prefers dark mode", kind="preference", source="auto")
+        out = _run(memories, graph, {
+            "updates": [{"id": "M1", "content": "User prefers light mode", "kind": ["preference"]}],
+            "memories": [{"content": "User codes in Zig daily", "kind": {"x": 1}}],
+        }, monkeypatch)
+        assert len(out["updated"]) == 1 and [m["kind"] for m in out["memories"]] == ["fact"]

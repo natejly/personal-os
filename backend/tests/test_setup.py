@@ -157,6 +157,23 @@ class TestRouteTests(unittest.TestCase):
         self.assertFalse(r["ok"])
         self.assertEqual(r["error"], "Model nope not found.")
 
+    def test_blank_key_uses_saved_key_only_for_saved_host(self) -> None:
+        db.set_settings({"baseUrl": "https://api.openai.com/v1/", "apiKey": "sk-saved"})
+        seen: list[str | None] = []
+
+        def h(req: httpx.Request) -> httpx.Response:
+            seen.append(req.headers.get("authorization"))
+            return httpx.Response(200, json={"data": [], "choices": []})
+        _mock(h)
+        try:
+            self.assertTrue(self._post(apiKey="")["ok"])
+            self.assertEqual(set(seen), {"Bearer sk-saved"})
+            seen.clear()
+            self._post(apiKey=None, baseUrl="http://elsewhere:9/v1")
+            self.assertEqual(set(seen), {None})
+        finally:
+            _clear()
+
     def test_missing_fields_never_500(self) -> None:
         self.assertFalse(self._post(baseUrl="")["ok"])
         self.assertFalse(self._post(model="")["ok"])
@@ -196,6 +213,28 @@ class CompleteTests(unittest.TestCase):
         r = client.post("/setup/complete", json={"provider": "ollama", "baseUrl": "", "apiKey": None, "model": "llama3.2"})
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["baseUrl"], "http://localhost:11434/v1")
+
+    def test_keyless_rerun_keeps_saved_key_for_same_endpoint(self) -> None:
+        db.set_settings({"provider": "litellm", "baseUrl": "http://localhost:4000", "apiKey": "sk-proxy"})
+        seen: list[str | None] = []
+
+        def h(req: httpx.Request) -> httpx.Response:
+            seen.append(req.headers.get("authorization"))
+            return httpx.Response(200, json={"data": [], "choices": []})
+        _mock(h)
+        try:
+            body = {"provider": "litellm", "baseUrl": "http://localhost:4000/", "apiKey": None, "model": "kimi-k3"}
+            self.assertTrue(client.post("/setup/test", json=body).json()["ok"])
+            self.assertEqual(set(seen), {"Bearer sk-proxy"})
+            seen.clear()
+            client.post("/setup/test", json={**body, "baseUrl": "http://other:4000"})
+            self.assertEqual(set(seen), {None})
+        finally:
+            setup._transport = None
+        self.assertEqual(client.post("/setup/complete", json=body).status_code, 200)
+        self.assertEqual(db.get_settings()["apiKey"], "sk-proxy")
+        client.post("/setup/complete", json={**body, "provider": "custom", "baseUrl": "http://other:8080"})
+        self.assertEqual(db.get_settings()["apiKey"], "")
 
 
 if __name__ == "__main__":

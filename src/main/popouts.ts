@@ -59,6 +59,8 @@ const setFronted = (on: boolean): boolean => {
 }
 /** Set in before-quit so the 'closed' handler does not erase state:'popped' before relaunch reads it. */
 let quitting = false
+/** The update restart closes every window before before-quit fires, so it marks the quit itself. */
+export const markQuitting = (): void => { quitting = true }
 let getMain: () => BrowserWindow | null = () => null
 
 const state = (): GatherState => ({ gathered, popped: [...popouts.keys()] })

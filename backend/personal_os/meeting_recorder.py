@@ -132,7 +132,8 @@ class ChannelCapture(_RecorderThread):
     def __init__(self, channel: str, input_spec: list[str], out_dir: Path, segment_seconds: int,
                  max_seconds: int, halt: threading.Event,
                  on_segment: Callable[[str, int, Path], None], *,
-                 cut_on_silence: bool = False, min_segment_seconds: float = 2.0):
+                 cut_on_silence: bool = False, min_segment_seconds: float = 2.0,
+                 paused_fn: Callable[[], bool] | None = None):
         super().__init__(f"capture-{channel}", halt)
         self.channel = channel
         self.input_spec = list(input_spec)
@@ -150,6 +151,10 @@ class ChannelCapture(_RecorderThread):
         # reads it in _segment; empty means "use the fixed grid", exactly as before.
         self.offsets: dict[int, tuple[float, float]] = {}
         self._pos_samples = 0
+        # Native only: a segment is closed at every pause toggle, so each wav is wholly paused or
+        # wholly live, and seq -> paused says which. The session reads it in _segment.
+        self.paused_fn = paused_fn
+        self.seg_paused: dict[int, bool] = {}
         self.proc: subprocess.Popen[bytes] | None = None
         self._native: Any = None
         # Shared with each native Capture this channel opens, so it survives a restart.
@@ -261,8 +266,9 @@ class ChannelCapture(_RecorderThread):
             if remaining <= 0.05:
                 break
             secs = min(float(self.segment_seconds), remaining)
-            if self.cut_on_silence:
-                pcm = self._read_until_pause(cap, secs)
+            was_paused = self._paused()
+            if self.cut_on_silence or self.paused_fn is not None:
+                pcm = self._read_until_pause(cap, secs, was_paused)
             else:
                 pcm = cap.read_seconds(secs, self.halt)
             if self.stopping or self.halt.is_set():
@@ -294,6 +300,7 @@ class ChannelCapture(_RecorderThread):
             if not audiocap.write_pcm16_wav(path, pcm):
                 raise RuntimeError("could not write segment wav")
             self._note_offsets(seq, len(pcm))
+            self.seg_paused[seq] = was_paused
             self._emit_direct(seq, path)
             seq += 1
         extra = cap.drain()
@@ -301,13 +308,20 @@ class ChannelCapture(_RecorderThread):
             path = self.out_dir / f"{self.channel}-{seq:05d}.wav"
             if audiocap.write_pcm16_wav(path, extra):
                 self._note_offsets(seq, len(extra))
+                self.seg_paused[seq] = self._paused()
                 self._emit_direct(seq, path)
 
-    def _read_until_pause(self, cap: Any, cap_seconds: float) -> bytes:
-        """Read small steps until `meeting_vad.find_cut` says to close, or the audio stops coming.
+    def _paused(self) -> bool:
+        return bool(self.paused_fn()) if self.paused_fn is not None else False
+
+    def _read_until_pause(self, cap: Any, cap_seconds: float, was_paused: bool = False) -> bytes:
+        """Read small steps until `meeting_vad.find_cut` says to close, the user pauses or resumes,
+        or the audio stops coming.
 
         A halt or stop returns whatever has accumulated, like the fixed-length read does, so the
-        final partial flush behaves the same."""
+        final partial flush behaves the same.
+        ponytail: the toggle is seen at CUT_STEP_SECONDS granularity, so up to one step of audio
+        lands on the old side of a pause; a finer step is the knob if that ever matters."""
         buf = bytearray()
         cap_bytes = int(cap_seconds * 16000) * 2
         while not self.halt.is_set() and not self.stopping:
@@ -318,6 +332,10 @@ class ChannelCapture(_RecorderThread):
             buf.extend(chunk)
             if cap.error and not chunk:
                 break
+            if self._paused() != was_paused:
+                break
+            if not self.cut_on_silence:
+                continue
             cut = meeting_vad.find_cut(
                 bytes(buf), min_seconds=self.min_segment_seconds, max_seconds=cap_seconds,
                 pause_seconds=CUT_PAUSE_SECONDS)
@@ -326,11 +344,12 @@ class ChannelCapture(_RecorderThread):
         return bytes(buf)
 
     def _note_offsets(self, seq: int, pcm_bytes: int) -> None:
-        """Advance the recording clock by a written segment's samples. Only when cutting on silence."""
+        """Advance the recording clock by a written segment's samples and record where it sits.
+
+        Native segments vary in length (silence cuts, pause toggles), so the fixed grid would lie."""
         start = self._pos_samples
         self._pos_samples += pcm_bytes // 2
-        if self.cut_on_silence:
-            self.offsets[seq] = (start / 16000.0, self._pos_samples / 16000.0)
+        self.offsets[seq] = (start / 16000.0, self._pos_samples / 16000.0)
 
     def _emit_direct(self, seq: int, path: Path) -> None:
         with self._emit_lock:
@@ -519,8 +538,8 @@ class TranscribeWorker(_RecorderThread):
 
     def _transcribe_one(self, channel: str, seq: int, path: Path, paused: bool) -> None:
         if paused:
-            # `paused` is the state when the audio was RECORDED, handed over on the queue, not
-            # the live flag read now. Pause does not kill ffmpeg - the seq numbering has to stay
+            # `paused` says whether the segment's recording window touched a pause (decided in
+            # RecordingSession._segment), handed over on the queue, not the live flag read now. Pause does not kill ffmpeg - the seq numbering has to stay
             # monotonic - so paused segments arrive here and are thrown away on purpose; but the
             # queue is normally a transcription round trip behind, so re-reading the flag here
             # transcribed the aside the user paused for (they resumed before the worker caught
@@ -669,6 +688,11 @@ class RecordingSession:
         self.stop_event = threading.Event()
         self.q: queue.Queue[tuple[str, int, Path, bool]] = queue.Queue()
         self.paused = False
+        # Bumped on every pause. Per channel, (pauses, paused) as of when its current segment
+        # opened: an ffmpeg segment whose window saw any pause is discarded whole, since its
+        # muxer owns the boundaries and cannot be cut at the toggle the way native capture is.
+        self._pauses = 0
+        self._window: dict[str, tuple[int, bool]] = {}
         self.stopping = False
         # True from construction until start() has the threads up. The pool registers a session
         # before it can possibly be alive, and `alive` means "a thread is running", so without
@@ -697,7 +721,8 @@ class RecordingSession:
                 cap = ChannelCapture(channel, spec, self.out_dir, self.segment_seconds,
                                      self.max_seconds, self.stop_event, self._segment,
                                      cut_on_silence=self.cut_on_silence,
-                                     min_segment_seconds=self.min_segment_seconds)
+                                     min_segment_seconds=self.min_segment_seconds,
+                                     paused_fn=lambda: self.paused)
                 self.captures[channel] = cap
                 if channel == "mic" and self.preview is not None:
                     cap.tap_hooks.append(self.preview.feed)
@@ -711,6 +736,8 @@ class RecordingSession:
 
     def pause(self, paused: bool) -> None:
         """Stop keeping audio without stopping ffmpeg, so seq numbering stays monotonic."""
+        if paused and not self.paused:
+            self._pauses += 1
         self.paused = bool(paused)
         if self.preview is not None:
             self.preview.muted = self.paused
@@ -805,9 +832,14 @@ class RecordingSession:
             t_start = real[0]
         else:
             t_start = float(seq * self.segment_seconds)
-        # Read once, here, and handed to the worker on the queue: the row's state and the
-        # worker's keep-or-discard decision have to be the same decision.
-        paused = self.paused
+        # Decided once, here, and handed to the worker on the queue: the row's state and the
+        # worker's keep-or-discard decision have to be the same decision. It is about the audio's
+        # whole window, not the flag at close: native capture says (it cuts at each toggle);
+        # otherwise any pause between this segment opening and closing discards it.
+        native = cap.seg_paused.pop(seq, None) if cap is not None else None
+        pauses0, paused0 = self._window.get(channel, (0, False))
+        paused = native if native is not None else (paused0 or self._pauses != pauses0)
+        self._window[channel] = (self._pauses, self.paused)
         info = {
             "state": "discarded" if paused else "recorded",
             "t_start": t_start,

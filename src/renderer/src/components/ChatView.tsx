@@ -2,7 +2,7 @@ import { Fragment, useEffect, useRef, useState } from 'react'
 import { PanelLeftOpen, Pencil, Sparkles, SlidersHorizontal, ArrowDown } from 'lucide-react'
 import { useStore, useProject, useConversation, useIsStreaming, useStreamingMessageId, usePendingSends } from '../store'
 import ProjectChip from './ProjectChip'
-import MessageView, { PendingUserMessage } from './Message'
+import MessageView, { PendingUserMessage, Thinking } from './Message'
 import RegenRow from './RegenRow'
 import FindBar from './FindBar'
 import Composer from './Composer'
@@ -119,7 +119,7 @@ export default function ChatView({ conversationId }: { conversationId?: string }
                 {msgs.map((m, i) => (
                   <Fragment key={m.id}>
                     {m.created_at > 0 && (i === 0 || dayKey(m.created_at) !== dayKey(msgs[i - 1].created_at)) && <div className="day-divider" role="separator">{dayLabel(m.created_at)}</div>}
-                    <MessageView message={m} streaming={isStreamingHere && streamingMessageId === m.id} last={m.id === last?.id} editable={m.role === 'user' && !isStreamingHere} showContextChips
+                    <MessageView message={m} streaming={isStreamingHere && streamingMessageId === m.id} last={m.id === last?.id} editable={!isStreamingHere} showContextChips
                       branchable={m.created_at > 0 && !convo?.settings.deskId && !convo?.settings.job_id}
                       browserSession={m.id === watchId ? chatBrowserSession(m.conversation_id) : undefined} />
                   </Fragment>
@@ -128,9 +128,9 @@ export default function ChatView({ conversationId }: { conversationId?: string }
                 {draftPending && <PendingUserMessage text={draftPending.text} />}
                 {/* From the click, and from user_message to the first assistant row (context assembly), nothing else shows work. */}
                 {(pending.length > 0 || draftPending || isStreamingHere) && streamingMessageId === null && (
-                  <div className="msg assistant"><div className="avatar"><Sparkles size={14} /></div><div className="bubble"><span className="thinking"><span /><span /><span /></span></div></div>
+                  <div className="msg assistant"><div className="avatar"><Sparkles size={14} /></div><div className="bubble"><Thinking /></div></div>
                 )}
-                {pending.length === 0 && !draftPending && <RegenRow conversationId={conversationId} last={last} streaming={isStreamingHere} />}
+                {pending.length === 0 && !draftPending && <RegenRow conversationId={convo?.id ?? conversationId} last={last} streaming={isStreamingHere} />}
               </div>
             )}
           </div>

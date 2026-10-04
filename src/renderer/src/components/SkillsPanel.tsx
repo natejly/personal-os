@@ -45,7 +45,7 @@ const SOURCE_LABEL: Record<Skill['source'], string> = {
 const ORDER: Skill['status'][] = ['candidate', 'approved', 'rejected']
 const SECTION: Record<Skill['status'], { title: string; blurb: string }> = {
   candidate: { title: 'Waiting for you', blurb: 'Nothing here is in use. Read it, edit it if you like, then approve or discard.' },
-  approved: { title: 'In use', blurb: 'Injected into chats that have procedures turned on, as reference material the assistant may follow.' },
+  approved: { title: 'In use', blurb: 'Injected into chats that have skills turned on, as reference material the assistant may follow.' },
   rejected: { title: 'Discarded', blurb: 'Kept so the same suggestion is recognisable if it comes back.' }
 }
 
@@ -86,15 +86,15 @@ function SkillRow({ skill }: { skill: Skill }): JSX.Element {
         <span className="skill-desc muted">{skill.description}</span>
         <ProjectChip projectId={skill.project_id} showPersonal />
         <small className="muted">{SOURCE_LABEL[skill.source]}</small>
-        {!!skill.use_count && <small className="muted" title="Times the assistant read this procedure">used {skill.use_count}×</small>}
+        {!!skill.use_count && <small className="muted" title="Times the assistant read this skill">used {skill.use_count}×</small>}
         <div className="skill-actions no-drag" onClick={(e) => e.stopPropagation()}>
           {skill.status !== 'approved' && (
             <button className="primary-btn small" disabled={blocked}
-              title={blocked ? 'Fix what blocks approval first' : 'Let the assistant use this procedure'}
+              title={blocked ? 'Fix what blocks approval first' : 'Let the assistant use this skill'}
               onClick={() => void updateSkill(skill.id, { status: 'approved' })}><Check size={13} /> Approve</button>
           )}
           {skill.status === 'approved' && (
-            <button className="small" title="Stop injecting this procedure"
+            <button className="small" title="Stop injecting this skill"
               onClick={() => void updateSkill(skill.id, { status: 'candidate' })}><Undo2 size={13} /> Revoke</button>
           )}
           {skill.status === 'candidate' && (
@@ -182,8 +182,8 @@ export default function SkillsPanel(): JSX.Element {
   return (
     <div className="library-panel">
       <div className="add-row">
-        <button className="primary-btn" onClick={() => setAdding(!adding)}><Plus size={14} /> New procedure</button>
-        <button onClick={() => setImporting(!importing)}><Upload size={14} /> Import SKILL.md</button>
+        <button className="primary-btn" onClick={() => setAdding(!adding)}><Plus size={14} /> New skill</button>
+        <button onClick={() => setImporting(!importing)}><Upload size={14} /> Import skill file</button>
         <button aria-pressed={!!preview} onClick={() => void togglePreview()}><Eye size={14} /> What the assistant sees</button>
         <span className="muted small">A way of doing a task. It stays off until you approve it.</span>
       </div>
@@ -191,7 +191,7 @@ export default function SkillsPanel(): JSX.Element {
         <div className="skill-body standalone">
           {preview.block ? (
             <p className="muted small">
-              {preview.included.length} approved procedure{preview.included.length === 1 ? '' : 's'}, about {preview.tokens_estimate} tokens.{' '}
+              {preview.included.length} approved skill{preview.included.length === 1 ? '' : 's'}, about {preview.tokens_estimate} tokens.{' '}
               {skillDisclosure(preview.block, budget) === 'inline'
                 ? `Under the ${budget}-character budget, so each chat gets the full text below.`
                 : `Over the ${budget}-character budget, so chats get only names and one-line descriptions and open a procedure when it fits. Below is the full text.`}
@@ -209,7 +209,7 @@ export default function SkillsPanel(): JSX.Element {
           <div className="row-actions">
             <button className="primary-btn small" disabled={!mdText.trim()} onClick={() => void importMd()}>Import as candidate</button>
             <button className="small" onClick={() => setImporting(false)}>Cancel</button>
-            <span className="muted small">Imported procedures wait for your approval; allowed-tools and bundled files are ignored.</span>
+            <span className="muted small">Imported skills wait for your approval; allowed-tools and bundled files are ignored.</span>
           </div>
         </div>
       )}
@@ -235,7 +235,7 @@ export default function SkillsPanel(): JSX.Element {
       )}
       {skills.length === 0 && !adding && (
         <div className="empty-hint big">
-          <p>No procedures yet.</p>
+          <p>No skills yet.</p>
           <p className="muted small">Write one here, or save a reply that used tools.</p>
         </div>
       )}

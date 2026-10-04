@@ -18,10 +18,11 @@ import { SAFE_MD } from './Message'
 import { fenced, lines, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
 import PlannerPanel from './PlannerPanel'
+import { withoutTodoEvents } from './CalendarWeek'
 
 function greeting(): string {
   const h = new Date().getHours()
-  return h < 5 ? 'Still up?' : h < 12 ? 'Good morning' : h < 18 ? 'Good afternoon' : 'Good evening'
+  return h < 5 ? 'Still up?' : h < 12 ? 'Good morning.' : h < 18 ? 'Good afternoon.' : 'Good evening.'
 }
 const fmtTime = (iso: string, allDay: boolean): string => (allDay ? 'All day' : new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }))
 const dayKey = (iso: string): string => new Date(iso.length === 10 ? iso + 'T00:00:00' : iso).toDateString()
@@ -119,9 +120,9 @@ function MeetingsCard(): JSX.Element {
                 take notes
               </button>
               <button className="link small" disabled={docBusy || meetingBusy || active !== null || recorderOff}
-                title={recorderOff ? OFF_TITLE : 'Create a doc for this event and record into it'}
+                title={recorderOff ? OFF_TITLE : 'Create a file for this event and record into it'}
                 onClick={() => { setView('meetings'); void startFromEvent(c) }}>
-                in a doc
+                in a file
               </button>
             </li>
           ))}
@@ -175,6 +176,7 @@ export default function HomeView(): JSX.Element {
   const TodosCard = moduleHome('todos')?.home?.Card
   const HealthCard = moduleHome('health')?.home?.Card
   const d = useStore((s) => s.dashboard)
+  const allTodos = useStore((s) => s.todos)
   const google = useStore((s) => s.google)
   const tasksSync = useStore((s) => s.tasksSync)
   const sidebarOpen = useStore((s) => s.sidebarOpen)
@@ -214,7 +216,10 @@ export default function HomeView(): JSX.Element {
 
   const brief = async (): Promise<void> => {
     newChat(null)
-    await send('Give me my daily brief: check my calendar for today and tomorrow, scan unread email for anything that needs a reply, list my open todos (flag overdue ones), and end with the 3 things I should do first. Be concise and use headers.')
+    // Without Google there is no calendar or mail to read; ask for what Grain can see instead of a run that says so.
+    await send(google?.connected
+      ? 'Give me my daily brief: check my calendar for today and tomorrow, scan unread email for anything that needs a reply, list my open todos (flag overdue ones), and end with the 3 things I should do first. Be concise and use headers.'
+      : 'Give me my daily brief from my open todos (flag overdue ones) and end with the 3 things I should do first. My calendar and email are not connected, so do not look for them; mention once, at the end, that connecting Google in Settings adds them. Be concise and use headers.')
   }
   const refresh = async (): Promise<void> => { setBusy(true); await refreshDashboard(); setBusy(false) }
   const rescanMail = async (): Promise<void> => {
@@ -223,12 +228,18 @@ export default function HomeView(): JSX.Element {
   }
   const quickAdd = async (): Promise<void> => {
     if (!quick.trim()) return
-    await addTodo({ title: quick })
-    setQuick('')
+    try {
+      await addTodo({ title: quick })
+      setQuick('')
+      useStore.getState().toast('Added to todos')
+    } catch (e) {
+      useStore.getState().toast((e as Error).message, 'error')
+    }
   }
 
   const today = new Date().toDateString()
-  const events = d?.calendar ?? []
+  // A due todo is already in the Todos card; its all-day mirror event would list it twice.
+  const events = withoutTodoEvents(d?.calendar ?? [], [...allTodos, ...(d?.todos ?? [])])
   const todayEvents = events.filter((e) => dayKey(e.start) === today)
   const laterEvents = events.filter((e) => dayKey(e.start) !== today)
 
@@ -277,13 +288,13 @@ export default function HomeView(): JSX.Element {
               </>
             )}
           </div>
-          <button className="primary-btn" onClick={() => void brief()}><Sparkles size={14} /> Brief me</button>
+          <button className="primary-btn" onClick={() => void brief()} title={google?.connected ? undefined : 'Todos only. Connect Google in Settings to add mail and calendar.'}><Sparkles size={14} /> Brief me</button>
         </div>
         <AppSwitcher />
       </header>
       <div className="page-body wide">
         <div className="home-hero">
-          <h1 role="heading" aria-level={2}>{greeting()}.</h1>
+          <h1 role="heading" aria-level={2}>{greeting()}</h1>
           <div className="quick-ask">
             <MessageSquare size={16} />
             <input placeholder="Ask anything…" value={quick} onChange={(e) => setQuick(e.target.value)}
@@ -334,7 +345,7 @@ export default function HomeView(): JSX.Element {
           {on('health') && HealthCard && <HealthCard data={d} />}
 
           {on('inbox') && <section className="widget">
-            <header><Mail size={14} /> Inbox {google?.connected && <span className="muted small">unread, 14 days</span>}<button className="link small" onClick={() => setView('mail')}>View all</button></header>
+            <header><Mail size={14} /> Unread mail {google?.connected && <span className="muted small">last 14 days</span>}<button className="link small" onClick={() => setView('mail')}>View all</button></header>
             {!google?.connected ? <ConnectGoogle what="unread mail" onConnect={() => useStore.getState().openSettings('integrations')} /> : d?.errors.gmail ? <p className="msg-error">{d.errors.gmail}</p> : (d?.gmail?.length ?? 0) === 0 ? <p className="muted">Inbox zero.</p> : (
               <ul className="mails">
                 {d!.gmail!.slice(0, 8).map((m) => (
@@ -403,7 +414,7 @@ export default function HomeView(): JSX.Element {
                 {d!.projects.map((p) => (
                   <li key={p.id} onClick={() => openProject(p.id)}>
                     <span className="project-dot" style={{ background: p.color }} /><span className="ev-title">{p.name}</span>
-                    <span className="muted small">{plural(p.stats?.conversations ?? 0, 'chat')} · {plural(p.stats?.documents ?? 0, 'doc')}</span>
+                    <span className="muted small">{plural(p.stats?.conversations ?? 0, 'chat')} · {plural((p.stats?.docs ?? 0) + (p.stats?.documents ?? 0), 'file')}</span>
                   </li>
                 ))}
               </ul>

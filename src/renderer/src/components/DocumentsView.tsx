@@ -62,7 +62,7 @@ export default function DocumentsView({ projectId }: { projectId?: string; embed
         <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) setOpen(null) }}
           onKeyDown={(e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); setOpen(null) } }}>
           <div className="modal wide" onMouseDown={(e) => e.stopPropagation()}>
-            <header><h2>{open.name}</h2><button autoFocus className="icon-btn" aria-label="Close document" onClick={() => setOpen(null)}><X size={16} /></button></header>
+            <header><h2>{open.name}</h2><button autoFocus className="icon-btn" aria-label="Close file" onClick={() => setOpen(null)}><X size={16} /></button></header>
             <pre className="doc-text">{open.text}</pre>
           </div>
         </div>

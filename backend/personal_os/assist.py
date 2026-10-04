@@ -59,10 +59,13 @@ def _parse_json(text: str) -> dict[str, Any]:
 
 
 def ghost_text(raw: str) -> str:
-    """One line. A completion is inserted with Tab, so it cannot carry a second instruction."""
-    text = raw.strip().strip('"').strip()
-    text = " ".join(text.replace("\r", " ").replace("\n", " ").split())
-    return text[:280]
+    """One line. A completion is inserted with Tab, so it cannot carry a second instruction.
+
+    A leading space is kept (as one space): it is how the model starts a new word after the user's last one."""
+    text = raw.strip().strip('"')
+    lead = raw[:1].isspace() or text[:1].isspace()
+    text = " ".join(text.split())
+    return ((" " if lead and text else "") + text)[:280]
 
 
 async def complete_text(settings: dict[str, Any], kind: str, before: str, after: str = "", context: str = "") -> str:
@@ -78,10 +81,17 @@ async def complete_text(settings: dict[str, Any], kind: str, before: str, after:
         user += "\nText after the cursor (do not repeat it):\n" + _fence(after[:1000])
     out = await llm.complete(settings, model, [{"role": "system", "content": COMPLETE_PROMPT}, {"role": "user", "content": user}], kind="assist")
     out = ghost_text(out)
-    # Models love to restate the tail of the prompt; drop the longest echoed overlap.
+    if not before or before[-1:].isspace():
+        out = out.lstrip()
+    # Models love to restate the tail of the prompt; drop the longest echoed overlap, but only whole words:
+    # "at the" + "every" shares an "e" by chance, not an echo.
     low_b, low_o = before.lower(), out.lower()
     for i in range(min(len(low_b), len(low_o), 200), 0, -1):
-        if low_b.endswith(low_o[:i]):
+        if not low_b.endswith(low_o[:i]):
+            continue
+        starts = i == len(before) or not before[-i - 1].isalnum() or not out[0].isalnum()
+        ends = i == len(out) or not out[i].isalnum() or not out[i - 1].isalnum()
+        if starts and ends:
             out = out[i:]
             break
     return out

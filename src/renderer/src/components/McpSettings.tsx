@@ -4,7 +4,7 @@ import {
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { useStore } from '../store'
-import type { McpGrant, McpReport, McpServer, McpServerDraft, McpTool, ToolMode } from '@shared/types'
+import type { McpGrant, McpReport, McpServer, McpServerDraft, McpSignIn, McpTool, ToolMode } from '@shared/types'
 
 /** A connector that is coming up gets polled; one that has settled does not. */
 const POLL_MS = 2500
@@ -13,6 +13,19 @@ type HeaderRow = { k: string; v: string }
 const EMPTY: McpServerDraft & { secretsText: string; envText: string; argv: string; headerRows: HeaderRow[] } = {
   name: '', transport: 'stdio', command: '', args: [], cwd: '', env: {}, secrets: {}, url: '', headers: {}, description: '',
   argv: '', envText: '', secretsText: '', headerRows: []
+}
+
+/** Start a remote server's browser sign-in and resolve once it settles: done, error, or given up after 5 minutes. */
+export async function signInMcp(id: string): Promise<McpSignIn> {
+  const st = await api.mcp.signIn(id)
+  if (st.status === 'error') throw new Error(st.error)
+  if (st.auth_url) window.open(st.auth_url, '_blank')
+  for (let i = 0; i < 150; i++) {
+    await new Promise((r) => setTimeout(r, 2000))
+    const x = await api.mcp.signInStatus(id)
+    if (x.status !== 'waiting' && x.status !== 'starting') return x
+  }
+  return { ...st, status: 'error', error: 'sign-in timed out' }
 }
 
 /** Split a pasted command line into argv, honouring simple quoting. */
@@ -133,7 +146,7 @@ function DriftBanner({ tool, onAccept }: { tool: McpTool; onAccept: () => void }
   return (
     <details className={`mcp-drift ${d.quarantined ? 'quarantined' : ''}`} open={d.quarantined}>
       <summary>
-        <b>{d.quarantined ? 'Quarantined: definition changed' : 'Definition changed'}</b>
+        <b>{d.quarantined ? `Quarantined: ${d.previous.schema_hash ? 'definition changed' : 'new tool'}` : 'Definition changed'}</b>
         {d.quarantined && <span className="muted"> — withheld from the assistant until you accept it</span>}
       </summary>
       {diff.description.length > 0 && (
@@ -148,7 +161,7 @@ function DriftBanner({ tool, onAccept }: { tool: McpTool; onAccept: () => void }
         </ul>
       )}
       <div className="row-actions">
-        <button className="primary-btn small" onClick={onAccept}>{d.quarantined ? 'Accept change' : 'Mark as reviewed'}</button>
+        <button className="primary-btn small" onClick={onAccept}>{d.quarantined ? (d.previous.schema_hash ? 'Accept change' : 'Accept tool') : 'Mark as reviewed'}</button>
         <span className="muted small">Accepting does not turn the tool on: it still asks first.</span>
       </div>
     </details>

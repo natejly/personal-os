@@ -379,8 +379,8 @@ Logic lives in `meeting_import.py`; progress is the existing segments poll.
 In the UI: the **Meetings** view (⌘⇧M, or the sidebar row), an **Upcoming
 meetings** card on Today, and a live-recording indicator in the sidebar visible
 from every view. The sidebar badge is the number of enhance proposals awaiting
-review, not a meeting count. The sidebar row and the Today card both ship off
-and are turned on in Settings → Modules; *recording* is a separate switch
+review, not a meeting count. The sidebar row and the Today card both start
+hidden; turn them on in Settings → Modules. *Recording* is a separate switch
 (`meetings.enabled` plus the consent acknowledgement) and is off.
 
 ## Limits

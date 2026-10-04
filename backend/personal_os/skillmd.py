@@ -49,7 +49,8 @@ def parse(text: str) -> dict[str, Any]:
             errors.append(f"cannot read frontmatter line: {raw.strip()[:60]}")
             continue
         if indented and current == "metadata":
-            fm["metadata"][key.strip()] = _unquote(val)
+            if isinstance(fm.get("metadata"), dict):  # `metadata: x` then a child: the map check below reports it
+                fm["metadata"][key.strip()] = _unquote(val)
             continue
         current = key.strip()
         if current == "metadata" and not val.strip():

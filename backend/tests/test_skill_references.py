@@ -78,6 +78,10 @@ class RefsTest(unittest.TestCase):
         unknown = [f["excerpt"] for f in out["findings"] if f["code"] == "unknown_tool"]
         self.assertEqual(unknown, ["mcp__tracker__close_it"])
 
+    def test_scalar_metadata_with_a_child_is_a_parse_error(self) -> None:
+        out = skillmd.parse("---\nname: a\ndescription: b\nmetadata: x\n  source: y\n---\nbody")
+        self.assertIn("metadata must be a map of strings", out["errors"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -31,7 +31,7 @@ from . import compaction, otel_export, titles
 from .fsx import sensitive_reason
 from .context import build_context, cite_slim, context_taints, estimate_tokens, layout_messages, retrieval_query
 from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
-from .extract_text import MAX_UPLOAD_BYTES, extract_structured, extract_text, for_index, has_readable_text, safe_upload_name
+from .extract_text import MAX_UPLOAD_BYTES, extract_both, extract_text, for_index, has_readable_text, safe_upload_name
 from .consolidate import Consolidator
 from .learn import MAX_INJECTED_SKILLS, LearnJob, LearnWorker, Skills, induce_skill, run_transcript, skill_block
 from .embed import Embedder
@@ -41,7 +41,6 @@ from .retrieval import Retriever
 from .repos import ALL, Conversations, Documents, Graph, Memories, Projects, is_isolated
 from .artifact_routes import is_render_path as _is_artifact_render, make_router as artifact_router
 from .artifacts import Artifacts
-from .boards import Boards
 from .canvas import FALLBACK_NAME, SNAP_MODES, WIDGET_KINDS, WINDOW_STATES, Canvases
 from .dashboards import Dashboards, WidgetCodeRejected, generate_recap, generate_summary, generate_widget_code
 from .docs import ASSET_MIMES, asset_path, AssetError, Docs, save_asset, unified_diff
@@ -80,7 +79,7 @@ from . import resume
 from . import permrules
 from . import egress
 from . import shell as shell_tool
-from .subagents import AgentDefs, Subagents, parallel_safe
+from .subagents import UNATTENDED_KINDS, AgentDefs, Subagents, parallel_safe
 from .commands import Commands
 from .commands import expand as expand_command
 from .commands import expand_history as expand_commands
@@ -344,7 +343,6 @@ def settings() -> dict[str, Any]:
 
 jobs = Jobs(db)
 proposals = Proposals(db)
-boards = Boards(db)
 dashboards = Dashboards(db)
 artifacts = Artifacts(db)
 google = Google(settings, db.set_settings, cache_dir=db.data_dir)
@@ -518,7 +516,7 @@ docs.on_delete = meeting_store.purge_doc
 docs.recording_search = lambda q, n: [h for h in meeting_store.search(q, limit=n) if h["doc_id"]]
 # A doc that changes project takes its recordings along, or project-scoped meeting search shows them under the old one.
 docs.on_move = meeting_store.move_doc
-toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=google, boards=boards, sandboxes=sandboxes, docs=docs, activity=monitor,
+toolbox = Toolbox(memories, graph, documents, settings, modules=modules, google=google, sandboxes=sandboxes, docs=docs, activity=monitor,
                   outbox=outbox, work_plans=work_plans, results=tool_results, skills=skills, jobs=jobs,
                   style=style, meetings=meeting_svc, desks=desks, workspace=workspace, filesnap=filesnap, artifacts=artifacts,
                   conversations=convos, extundo=extundo)
@@ -575,6 +573,11 @@ def mcp_is(name: str) -> bool:
     return name.startswith(MCP_PREFIX)
 
 
+def _mutates(name: str) -> bool:
+    """Does this tool change something? Connector tools are not in toolbox.specs but are external by construction."""
+    return (toolbox.specs[name].danger if name in toolbox.specs else (MCP_DANGER if mcp_is(name) else "safe")) in MUTATING
+
+
 def _mcp_tooling(project_id: str | None, conversation_id: str | None) -> tuple[dict[str, str], list[dict[str, Any]]]:
     """Modes + tool schemas for MCP tools whose server is connected right now.
 
@@ -629,8 +632,6 @@ def _gate(name: str, mode: str, ctx: dict[str, Any], args: dict[str, Any] | None
 
 # The note a user typed with a denial, handed from POST /approvals to the run waiting on that call.
 _approval_notes: dict[str, str] = {}
-# Run kinds that have nobody at the keyboard; with unattendedApprovals = "deny" a call that would ask is refused.
-UNATTENDED_KINDS = ("job", "scheduled")
 # Tools whose card is a question: answered with a note, never granted, and a message written while one waits answers it.
 QUESTION_TOOLS = frozenset({"desk_ask", "ask_user"})
 
@@ -745,11 +746,9 @@ NUMERIC_SETTING_RANGES: dict[str, tuple[float, float]] = {
     "maxToolRounds": (1, 60),
     "maxRunTokens": (0, 10_000_000),
     "maxRunSeconds": (0, 86_400),
-    "maxRunCost": (0, 1_000),
     "subagentMaxConcurrent": (1, 20),
     "subagentMaxDepth": (0, 3),
     "subagentMaxRounds": (1, 60),
-    "subagentMaxCost": (0, 100),
     "subagentStaleSeconds": (0, 86_400),
     "subagentToolSeconds": (0, 86_400),
     "fileSnapshotMaxBytes": (0, 100_000_000),
@@ -1473,9 +1472,10 @@ EFFORT_DROPPED_NOTICE = "This model does not accept a reasoning effort; it was s
 FINAL_ROUND_SECONDS = 90.0
 # Hard ceiling on an unattended run end to end (model, tools, everything), a backstop for a hang the budget cannot see.
 JOB_HARD_SECONDS = 1800.0
-JOB_BUDGET = {"maxToolRounds": 8, "maxRunTokens": 60_000, "maxRunSeconds": 240, "maxRunCost": 0.20}
+JOB_BUDGET = {"maxToolRounds": 8, "maxRunTokens": 60_000, "maxRunSeconds": 240}
 # What one job may tighten for itself. Never maxToolRounds: the round cap stays fixed for every unattended run.
-JOB_BUDGET_KEYS = ("maxRunTokens", "maxRunSeconds", "maxRunCost")
+# No cost key: cost is reported, never a limit.
+JOB_BUDGET_KEYS = ("maxRunTokens", "maxRunSeconds")
 JOB_HINT = ("## This is a scheduled background run\nNobody is watching it. Anything that reaches outside this app "
             "(sending or drafting mail, calendar writes, Google Docs/Sheets/Tasks) cannot be executed here: such a "
             "call is recorded as a proposal for the user to accept, edit or reject, and that is enforced outside your "
@@ -1484,7 +1484,7 @@ JOB_HINT = ("## This is a scheduled background run\nNobody is watching it. Anyth
             "schedule further runs from in here: that too becomes a proposal.")
 
 
-_DESK_CAPS = ("deskMaxTurns", "deskMaxCost", "deskMaxLive")
+_DESK_CAPS = ("deskMaxTurns", "deskMaxLive")
 
 
 def _desk_caps(cfg: dict[str, Any], override: dict[str, Any] | None) -> dict[str, Any]:
@@ -1494,7 +1494,7 @@ def _desk_caps(cfg: dict[str, Any], override: dict[str, Any] | None) -> dict[str
     the whole desk, across turns. 0 = unlimited, so it loses to any positive limit.
     """
     out = {k: cfg.get(k, llm.DEFAULT_SETTINGS[k]) for k in _DESK_CAPS}
-    for key, src in (("deskMaxTurns", "maxTurns"), ("deskMaxCost", "maxCost")):
+    for key, src in (("deskMaxTurns", "maxTurns"),):
         want = (override or {}).get(src)
         if want is None:
             continue
@@ -1506,7 +1506,6 @@ def _desk_caps(cfg: dict[str, Any], override: dict[str, Any] | None) -> dict[str
         if want > 0 and (have <= 0 or want < have):
             out[key] = want
     out["deskMaxTurns"] = int(out["deskMaxTurns"] or 0)
-    out["deskMaxCost"] = float(out["deskMaxCost"] or 0)
     out["deskMaxLive"] = int(out["deskMaxLive"] or 0)
     return out
 
@@ -1543,7 +1542,7 @@ def _num(cfg: dict[str, Any], key: str) -> float:
 
 
 class Budget:
-    """Rounds / tokens / wall-clock / USD for one reply. 0 on any axis means unlimited; approval waits do not count."""
+    """Rounds / tokens / wall-clock for one reply (cost is tracked, never a limit). 0 on any axis means unlimited; approval waits do not count."""
 
     def __init__(self, cfg: dict[str, Any]):
         # A junk value already stored (from before PUT /settings validated) falls back to the default
@@ -1551,7 +1550,6 @@ class Budget:
         self.max_rounds = int(_num(cfg, "maxToolRounds"))
         self.max_tokens = int(_num(cfg, "maxRunTokens"))
         self.max_seconds = _num(cfg, "maxRunSeconds")
-        self.max_cost = _num(cfg, "maxRunCost")
         self.t0, self.paused = time.monotonic(), 0.0
         self.rounds = self.tokens = 0
         self.cost = 0.0
@@ -1566,7 +1564,7 @@ class Budget:
 
     def _ratios(self) -> dict[str, float]:
         return {k: v / lim for k, v, lim in (("rounds", self.rounds, self.max_rounds), ("tokens", self.tokens, self.max_tokens),
-                                             ("time", self.elapsed(), self.max_seconds), ("cost", self.cost, self.max_cost)) if lim > 0}
+                                             ("time", self.elapsed(), self.max_seconds)) if lim > 0}
 
     def fraction(self) -> float:
         return max(self._ratios().values(), default=0.0)
@@ -1585,7 +1583,7 @@ class Budget:
     def snapshot(self) -> dict[str, Any]:
         """What agent_runs.budget stores: the limits and how much of each the run has used."""
         return {"max_rounds": self.max_rounds, "max_tokens": self.max_tokens, "max_seconds": self.max_seconds,
-                "max_cost": self.max_cost, "rounds": self.rounds, "tokens": self.tokens, "cost": round(self.cost, 6),
+                "rounds": self.rounds, "tokens": self.tokens, "cost": round(self.cost, 6),
                 "seconds": round(self.elapsed(), 3), "paused_seconds": round(self.paused, 3)}
 
 
@@ -1777,6 +1775,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
     if body.model and body.model != conv["model"]:
         convos.update(conv_id, {"model": body.model})
     regen_am: dict[str, Any] | None = None  # set when a regenerate superseded the trailing answer
+    regen_done: list[dict[str, Any]] = []  # the write calls that superseded answer already made
     placeholder_title: str | None = None  # set when this turn wrote the instant title; the model title replaces it
     carried_root: str | None = None
 
@@ -1813,8 +1812,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                     run_store.decide(a["call_id"], "deny", by="superseded", note="The message this call belonged to was edited.")
             # Connector tools are not in toolbox.specs but are external by construction (as the tool loop treats them).
             ran = [str(te.get("name") or "") for r in cut for te in r["tool_events"] if not te.get("pending")]
-            had_writes = any((toolbox.specs[n].danger if n in toolbox.specs else (MCP_DANGER if mcp_is(n) else "safe")) in MUTATING
-                             for n in ran)
+            had_writes = any(_mutates(n) for n in ran)
             first_user = next((m for m in conv["messages"] if m["role"] == "user"), None)
             conv = {**conv, "messages": [m for m in conv["messages"] if m["id"] not in hidden]}
             # Cutting the first message re-titles the chat below, unless the user renamed it (an auto title is derived).
@@ -1851,6 +1849,16 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 with db.tx() as c:
                     c.execute("DELETE FROM messages WHERE id=?", (last["id"],))
                 carried_root = last.get("variant_of")
+            # Every superseded answer in the group leaves history, so without a note the model would make
+            # its doc or todo again. All of them, not only the last: a second regenerate follows one that
+            # (told so) did not repeat the write.
+            group = (regen_am or {}).get("variant_of") or carried_root
+            if group:
+                with db.tx() as c:
+                    rows = c.execute("SELECT tool_events FROM messages WHERE (id=? OR variant_of=?) AND tool_events IS NOT NULL "
+                                     "ORDER BY created_at, rowid", (group, group)).fetchall()
+                regen_done = [te for r in rows for te in json.loads(r["tool_events"]) or []
+                              if not te.get("pending") and not te.get("error") and _mutates(str(te.get("name") or ""))]
             yield "removed_message", {"id": last["id"]}
         user_text = users[-1]["content"]
 
@@ -2008,18 +2016,32 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 return False
             bridge_n += 1
             uid = f"{am['id']}:bridge{bridge_n}"
-            fut: asyncio.Future = asyncio.get_event_loop().create_future()
-            _approvals[uid] = fut
             spec = toolbox.specs.get(name)
             run.store.open_approval(uid, run.run_id, name, args, conversation_id=conv_id, message_id=am["id"], forced=forced,
                                     desk_id=run.desk_id, danger=spec.danger if spec else "external")
+            if proposal_only(run) or (run.kind in UNATTENDED_KINDS and cfg.get("unattendedApprovals") == "deny"):
+                # Nobody is at the keyboard: refuse with a recorded reason, as the reply loop does, rather than park.
+                run.store.decide(uid, "deny", by="unattended", note="no one is available to approve it in a background run")
+                return False
+            fut: asyncio.Future = asyncio.get_event_loop().create_future()
+            _approvals[uid] = fut
             run.publish("tool_call", {"message_id": am["id"], "id": uid, "name": name, "arguments": args,
                                       "needs_approval": True, "forced": forced, "proposal": None, "plan": None})
             decision = "deny"
+            # The wait is the user's time, not the run's: off the wall clock, and the run shows as waiting.
+            budget, waited_from = tool_ctx.get("budget"), time.time()
+            if budget is not None:
+                run.budget = budget.snapshot()
+            run.set_status("awaiting_approval")
             try:
                 while not fut.done():
                     if stop.is_set():
                         run.store.decide(uid, "deny", by="stop")
+                        fut.set_result("deny")
+                        break
+                    if steers and not tool_ctx.get("desk_id"):
+                        # The user wrote instead of answering: a no; the loop folds their message in afterwards.
+                        run.store.decide(uid, "deny", by="steer", note=str(steers[-1]["content"]).strip()[:500])
                         fut.set_result("deny")
                         break
                     try:
@@ -2031,6 +2053,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 decision = fut.result() if fut.done() else "deny"
             finally:
                 _approvals.pop(uid, None)
+                if budget is not None:
+                    budget.paused += time.time() - waited_from
+                run.set_status("running")
             allowed = decision in ("allow", "always_chat", "always_global")
             run.publish("tool_result", {"message_id": am["id"], "id": uid, "name": name, "arguments": args,
                                         "result_preview": "", "duration_ms": 0,
@@ -2039,6 +2064,14 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             return allowed
 
         tool_ctx["bridge_approve"] = _bridge_approve
+
+        def _bridge_call(name: str, args: dict[str, Any], ctx: dict[str, Any]) -> Any:
+            """A script's bridged call through _call_tool, so it gets the undo snapshot and the idempotency journal."""
+            nonlocal bridge_n
+            bridge_n += 1
+            return _call_tool(run, _round, name, args, ctx, f"{am['id']}:bridgecall{bridge_n}")
+
+        tool_ctx["bridge_call"] = _bridge_call
         # The same one-shot card, for a tool that has to ask about part of what it was called to do (a browser form
         # submit, a host the shell may not reach). Absent in lanes with nobody to ask: a tool treats that as "no".
         tool_ctx["approve"] = _bridge_approve
@@ -2119,6 +2152,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             if desk_id:
                 m.pop("desk_start", None)  # a desk starting another desk is never offered (it would plan under its own budget)
                 m.pop("ask_user", None)  # a desk asks with desk_ask, which also moves it to Needs you
+            if "cowork" in (cfg.get("hiddenViews") or []):
+                m.pop("desk_start", None)  # with Cowork hidden a started desk would have no row to come back to
             # Past toolDeferAbove the model gets the core tools, what earlier searches loaded and tool_search; the
             # rest waits for a search. Applied last, after plan mode, desk and off. `modes` itself is untouched:
             # the run_python bridge, agent_spawn and a plan's step check read every enabled tool from it.
@@ -2171,6 +2206,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             # turn (deferred or not). Kept with tools_hint so it stays in the cacheable prefix.
             tools_hint = "\n\n".join(p for p in (tools_hint, _mcp_server_notes(set(mcp_modes))) if p)
         hints = (RENDER_HINT, tools_hint, JOB_HINT if proposal_only(run) else "",
+                 job_tools.DRY_RUN_HINT if run is not None and run.input.get("dry_run") else "",
                  DESK_HINT + _desk_manual_text() if desk else "", DESK_PLAN_HINT if planning and desk else "",
                  CHAT_PLAN_HINT if chat_plan_mode in ("auto", "always") and tool_schemas else "")
         used["volatile_blocks"] = [*used["volatile_blocks"], _today_hint()]  # the date changes daily: keep it out of the cacheable prefix
@@ -2188,6 +2224,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         run_notes: list[dict[str, Any]] = []  # system notes that follow the history, whichever history it is
         if parked_note:
             run_notes.append({"role": "system", "content": parked_note})
+        if regen_done:
+            run_notes.append({"role": "system", "content": resume.build_regen_note(regen_done)})
         if body.resume_of:
             old = run_store.get(body.resume_of) or {}
             old_events = run_store.events(body.resume_of)
@@ -2552,7 +2590,7 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 # The provider outran maxRunSeconds mid-stream. Keep what arrived and mark the reply partial.
                 # A reply that already ran tools has something to close out with (see below), so it does not raise.
                 if not "".join(buf).strip() and not any(m.get("role") == "tool" for m in messages):
-                    raise llm.LLMError(f"This reply hit its {int(budget.max_seconds)}s time limit before the model produced anything. Try again, or raise maxRunSeconds in Settings.")
+                    raise llm.LLMError(f"This reply hit its {int(budget.max_seconds)}s time limit before the model produced anything. Try again, or raise 'Time limit per reply' in Settings → Tools.")
                 partial = "time"
             u = end.get("usage") or end.get("usage_est") or {}
             pt, ct = int(u.get("prompt_tokens") or 0), int(u.get("completion_tokens") or 0)
@@ -2736,8 +2774,8 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 if fs_ask and mode == "on":
                     mode = "ask"
                 # untrusted content in this reply upgraded on -> ask; so does a call that may never run unasked
-                # (shell_run outside its sandbox), which no standing grant can then buy off
-                forced = mode != raw_mode or (mode == "ask" and toolbox.forces_ask(c["name"], args))
+                # (shell_run outside its sandbox, or able to reach out in a tainted reply), which no standing grant can then buy off
+                forced = mode != raw_mode or (mode == "ask" and toolbox.forces_ask(c["name"], args, tool_ctx))
                 # A sandboxed shell_run inside this desk's own workspace needs no card when the tool is still on its default
                 # `ask` (shell.auto_ok). Everything below (plan mode, desk autonomy, permission rules, doom-loop) can still ask.
                 if (c["name"] == "shell_run" and mode == "ask" and raw_mode == "ask" and not forced and desk_id
@@ -3305,6 +3343,13 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
         _active.pop(am["id"], None)
         for t in warm_tasks:
             t.cancel()
+        # Every exit persists taint (normal end, a parked card's return, a cancel), so the next turn starts tainted.
+        if tool_ctx["tainted"]:
+            # Asking about the screen taints this turn only. Storing it would make Clear come back
+            # on the next question, because the screen is sent again.
+            srcs = sorted(s for s in set(tool_ctx["taint_sources"]) if s != "context:page")
+            if srcs and (not conv["settings"].get("tainted") or srcs != sorted(set(conv["settings"].get("taint_sources") or []))):
+                convos.update(conv_id, {"settings": {"tainted": True, "taint_sources": srcs}})
 
     text = "".join(buf).strip()
     if not text and not error and not stop.is_set() and not tool_events and not desk_id:
@@ -3315,12 +3360,6 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                           outcome=outcome, error_kind=error_kind)
     convos.touch(conv_id)
     otel_export.export_in_background(cfg, conv_id, am["id"], model, project["name"] if project else None, tracer.spans, used, text)
-    if tool_ctx["tainted"]:
-        # Asking about the screen taints this turn only. Storing it would make Clear come back
-        # on the next question, because the screen is sent again.
-        srcs = sorted(s for s in set(tool_ctx["taint_sources"]) if s != "context:page")
-        if srcs and (not conv["settings"].get("tainted") or srcs != sorted(set(conv["settings"].get("taint_sources") or []))):
-            convos.update(conv_id, {"settings": {"tainted": True, "taint_sources": srcs}})
     if run is not None:
         # What this reply spent, for whoever is supervising it. A desk turn chains on these; an
         # ordinary chat never reads them back.
@@ -3391,6 +3430,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 title_jobs.spawn(conv_id, conv["project_id"], placeholder_title, user_texts, model, cfg, len(user_texts))
         elif (fresh and fs.get("titleSource") == "auto" and len(user_texts) >= titles.RETITLE_AT
               and int(fs.get("titleTurns") or 0) < titles.RETITLE_AT):
+            title_jobs.spawn(conv_id, conv["project_id"], fresh["title"], user_texts, model, cfg, len(user_texts))
+        elif fresh and not fs.get("titleSource") and fresh["title"] == titles.placeholder(user_texts[0]):
+            # The first title job failed (model error, shutdown, an errored first turn): retry on a later turn.
             title_jobs.spawn(conv_id, conv["project_id"], fresh["title"], user_texts, model, cfg, len(user_texts))
 
 
@@ -3504,7 +3546,7 @@ async def _run_desk(run: Run, desk_id: str, body: ChatIn) -> dict[str, Any]:
     return settled
 
 
-BUDGET_STOPS = ("rounds", "tokens", "time", "cost")  # per-reply window stops; not "loop" (stuck) or "blocked" (a card)
+BUDGET_STOPS = ("rounds", "tokens", "time")  # per-reply window stops; not "loop" (stuck) or "blocked" (a card)
 
 
 def _chain_kind(desk: dict[str, Any], run: Run, error: str | None = None) -> str | None:
@@ -3517,14 +3559,13 @@ def _chain_kind(desk: dict[str, Any], run: Run, error: str | None = None) -> str
     re-reading the same file. nudge: the reply simply ended (no stop, no desk_done/desk_ask); one more
     turn tells the model to finish or ask, never two in a row. Caps hold for both."""
     caps = _desk_caps(settings(), desk.get("budget"))
-    turns, cost = caps["deskMaxTurns"], caps["deskMaxCost"]
+    turns = caps["deskMaxTurns"]
     # claim_run puts a desk with no plan into `planning` whatever its autonomy, and only a plan-autonomy desk
     # is actually held in plan mode (see _chat_stream); an ask/propose desk works from its first turn.
     live = desk.get("status") == "working" or (desk.get("status") == "planning" and desk.get("autonomy") != "plan")
     if not (live and not run.stop.is_set() and not error and not run.error
-            # 0 on either axis means unlimited, the same reading _caps gives it.
-            and (turns <= 0 or int(desk.get("turn") or 0) + 1 < turns)
-            and (cost <= 0 or float(desk.get("cost") or 0) < cost)):
+            # 0 means unlimited, the same reading _caps gives it.
+            and (turns <= 0 or int(desk.get("turn") or 0) + 1 < turns)):
         return None
     if run.partial in BUDGET_STOPS:
         return "continue" if (run.steps_consumed > 0 or run.tool_ok > 0) else None
@@ -3796,6 +3837,9 @@ async def steer_run(id: str, body: SteerIn) -> dict[str, Any]:
     run = bus.answering(id)
     if not run:
         raise HTTPException(409, {"message": "No running reply to steer"})
+    # A stopping run breaks out of its loop before it reads steers: one taken here would never be answered.
+    if run.stop.is_set():
+        raise HTTPException(409, {"message": "That reply is stopping", "stopping": True})
     um = convos.add_message(id, "user", text)
     run.publish("user_message", um)
     run.steers.append(um)
@@ -4462,7 +4506,9 @@ async def _launch_job(job: dict[str, Any], fire: dict[str, Any]) -> str | None:
         conv_settings["tools"] = job_tools.tool_modes(job["allowed_tools"], _all_tool_infos())
     convos.update(conv["id"], {"settings": conv_settings})
     prompt = _job_prompt(job, fire)
-    body = ChatIn(content=(job_tools.DRY_RUN_HINT + "\n\n" + prompt) if fire.get("dry_run") else prompt)
+    # A preview's instruction rides in the system prompt (see the hints in the chat runner), so the transcript's
+    # first user turn is the job's own prompt.
+    body = ChatIn(content=prompt)
     run = bus.start(conv["id"], lambda r: _run_job(r, body), input={**fire, "conversation_id": conv["id"]}, kind="job")
     log.info("job %s fired for %s as run %s", job["name"], _stamp(fire["due_at"]), run.run_id)
     # Runs after _drive has ended the run, so the row the renderer then asks about is final. Ids only: the
@@ -5216,6 +5262,34 @@ async def consolidate_memories(body: ConsolidateIn) -> list[dict[str, Any]]:
     return await consolidator.propose(cfg, sid(body.project_id), body.model or cfg["defaultModel"])
 
 
+@app.get("/memories/export")
+def export_memories(project_id: str | None = None, include_global: bool = True) -> dict[str, Any]:
+    """The live memories of one scope as a portable file (content, kind, pinned). Ids and project links stay behind."""
+    rows = memories.list(sid(project_id), "", include_global)
+    return {"grain_memories": 1, "memories": [{"content": m["content"], "kind": m["kind"], "pinned": bool(m["pinned"])} for m in rows]}
+
+
+class MemoryImportIn(BaseModel):
+    file: dict[str, Any]
+    project_id: str | None = None
+
+
+@app.post("/memories/import")
+def import_memories(body: MemoryImportIn) -> dict[str, int]:
+    """Add each memory of an export file to one scope. A memory already there (same text) is skipped by `create`."""
+    items = body.file.get("memories")
+    if body.file.get("grain_memories") != 1 or not isinstance(items, list):
+        raise HTTPException(400, "Not a memory export file")
+    pid = wsid(body.project_id)
+    before = len(memories.list(pid, "", False))
+    for m in items:
+        if isinstance(m, dict) and isinstance(m.get("content"), str) and m["content"].strip():
+            kind = m.get("kind") if m.get("kind") in ("fact", "preference", "goal", "note") else "fact"
+            memories.create(pid, m["content"], kind, "user", bool(m.get("pinned")))
+    added = len(memories.list(pid, "", False)) - before
+    return {"added": added, "skipped": len(items) - added}
+
+
 @app.get("/memories/proposals")
 def list_memory_proposals(status: str = "pending", project_id: str | None = "all") -> list[dict[str, Any]]:
     return consolidator.list(status or None, sid(project_id))
@@ -5579,11 +5653,8 @@ def _store_upload(project_id: str | None, name: str, mime: str, data: bytes) -> 
     dup = documents.find_by_hash(pid, digest)
     if dup:
         return {**dup, "duplicate": True, "extracted": has_readable_text(dup.get("text") or "")}
-    text = for_index(extract_text(safe, data, mime))
-    try:
-        blocks = extract_structured(safe, data, mime)
-    except Exception:  # noqa: BLE001 - the chunker falls back to the plain text
-        blocks = None
+    text, blocks = extract_both(safe, data, mime)
+    text = for_index(text)
     dest = db.data_dir / "uploads" / f"{new_id()}-{safe}"
     dest.write_bytes(data)
     try:
@@ -5727,7 +5798,7 @@ def google_calendars(refresh: bool = False) -> Any:
 @app.get("/integrations/google/calendar")
 def google_calendar(days: int = 2, start: str | None = None, calendars: str = "primary", refresh: bool = False) -> Any:
     ids = None if calendars in ("", "primary") else [c.strip() for c in calendars.split(",") if c.strip()]
-    return _gcall(google.calendar_events, days, "primary", 60, start, ids, refresh=refresh)
+    return _gcall(google.calendar_events, days, "primary", 0, start, ids, refresh=refresh)
 
 
 class AttendeeIn(BaseModel):
@@ -6030,158 +6101,6 @@ async def dashboard() -> dict[str, Any]:
     return out
 
 
-# ---------------- boards (kanban) ----------------
-class BoardIn(BaseModel):
-    name: str
-    project_id: str | None = None
-    columns: list[str] | None = None
-
-
-class BoardPatch(BaseModel):
-    name: str | None = None
-    project_id: str | None = None
-
-
-class ColumnIn(BaseModel):
-    name: str
-
-
-class ColumnPatch(BaseModel):
-    name: str | None = None
-    position: int | None = None
-    wip_limit: int | None = None
-
-
-class CardIn(BaseModel):
-    title: str
-    column_id: str | None = None
-    description: str = ""
-    due: str | None = None
-    priority: int = 2
-    labels: list[str] = []
-
-
-class CardPatch(BaseModel):
-    title: str | None = None
-    description: str | None = None
-    due: str | None = None
-    priority: int | None = None
-    labels: list[str] | None = None
-    clear_due: bool = False
-
-
-class MoveIn(BaseModel):
-    column_id: str
-    before_card_id: str | None = None
-
-
-@app.get("/boards")
-def list_boards() -> list[dict[str, Any]]:
-    return boards.list()
-
-
-@app.post("/boards")
-def create_board(body: BoardIn) -> dict[str, Any]:
-    return boards.create(body.name, wsid(body.project_id), body.columns)
-
-
-@app.get("/boards/{id}")
-def get_board(id: str) -> dict[str, Any]:
-    b = boards.get(id)
-    if not b:
-        raise HTTPException(404)
-    return b
-
-
-@app.put("/boards/{id}")
-def update_board(id: str, body: BoardPatch) -> dict[str, Any]:
-    b = boards.update(id, body.model_dump(exclude_none=True))
-    if not b:
-        raise HTTPException(404)
-    return b
-
-
-def _board_op(fn: Any, *a: Any) -> Any:
-    """A board write with a bad id or an empty board is the caller's mistake (400/404), never a 500."""
-    try:
-        return fn(*a)
-    except KeyError as e:
-        raise HTTPException(404, str(e.args[0]) if e.args else "Not found") from e
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
-    except sqlite3.IntegrityError as e:  # an id that matches no row, caught by the foreign key
-        raise HTTPException(404, "No such board, column or card") from e
-
-
-@app.delete("/boards/{id}")
-def delete_board(id: str) -> dict[str, bool]:
-    boards.delete(id)
-    canvases.delete_windows_for("board", id)
-    return {"ok": True}
-
-
-@app.post("/boards/{id}/columns")
-def add_column(id: str, body: ColumnIn) -> dict[str, Any]:
-    return _board_op(boards.add_column, id, body.name)
-
-
-@app.put("/boards/columns/{cid}")
-def update_column(cid: str, body: ColumnPatch) -> dict[str, bool]:
-    _board_op(boards.update_column, cid, body.model_dump(exclude_none=True))
-    return {"ok": True}
-
-
-@app.delete("/boards/columns/{cid}")
-def delete_column(cid: str) -> dict[str, bool]:
-    boards.delete_column(cid)
-    return {"ok": True}
-
-
-@app.post("/boards/{id}/cards")
-def add_card(id: str, body: CardIn) -> dict[str, Any]:
-    if not body.title.strip():
-        raise HTTPException(400, "Empty title")
-    return _board_op(boards.add_card, id, body.column_id, body.title, body.description, body.due, body.priority, body.labels)
-
-
-@app.put("/boards/cards/{cid}")
-def update_card(cid: str, body: CardPatch) -> dict[str, Any]:
-    patch = body.model_dump(exclude_none=True, exclude={"clear_due"})
-    if body.clear_due:
-        patch["due"] = None
-    c = _board_op(boards.update_card, cid, patch)
-    if not c:
-        raise HTTPException(404)
-    return c
-
-
-@app.post("/boards/cards/{cid}/move")
-def move_card(cid: str, body: MoveIn) -> dict[str, Any]:
-    c = _board_op(boards.move_card, cid, body.column_id, body.before_card_id)
-    if not c:
-        raise HTTPException(404)
-    return c
-
-
-@app.get("/boards/{id}/cards/{card}/events")
-def card_events(id: str, card: str) -> list[dict[str, Any]]:
-    return boards.events(card)
-
-
-@app.post("/boards/cards/{cid}/complete")
-def complete_card(cid: str) -> dict[str, bool]:
-    """The user accepting a card as done: the one check the HTTP surface may write."""
-    if not boards.complete(cid, "user_accepted", "user", by="user"):
-        raise HTTPException(404)
-    return {"ok": True}
-
-
-@app.delete("/boards/cards/{cid}")
-def delete_card(cid: str) -> dict[str, bool]:
-    boards.delete_card(cid)
-    return {"ok": True}
-
-
 # ---------------- dashboards, data sources, widgets, recap ----------------
 class SourceIn(BaseModel):
     name: str
@@ -6238,8 +6157,8 @@ async def _internal_data() -> dict[str, Any]:
         "todos": todos.list("__all__", include_done=False),
         "memories": memories.list(ALL)[:40],
         "projects": [{**p, "stats": projects.stats(p["id"])} for p in projects.list()],
-        "boards": [{**b, **{"cards": (boards.get(b["id"]) or {}).get("cards", [])}} for b in boards.list()],
         "calendar": [], "gmail": [], "tasks": [], "drive": [],
+        "google_connected": bool(st["connected"]),
     }
     if st["connected"]:
         try:
@@ -6264,7 +6183,7 @@ async def _internal_data() -> dict[str, Any]:
 
 @app.get("/sources")
 def list_sources() -> dict[str, Any]:
-    return {"sources": dashboards.sources(), "internal": ["todos", "calendar", "gmail", "tasks", "drive", "memories", "projects", "boards"]}
+    return {"sources": dashboards.sources(), "internal": ["todos", "calendar", "gmail", "tasks", "drive", "memories", "projects"]}
 
 
 @app.post("/sources")
@@ -6476,7 +6395,7 @@ async def recap(force: bool = False) -> dict[str, Any]:
         if cached:
             return {**cached, "cached": True}
     cfg = settings()
-    if not cfg.get("apiKey"):
+    if not cfg.get("defaultModel"):  # keyless providers (a local server, a proxy with no key) still recap
         return {"day": day, "content": "", "cached": False}
     since = time.time() - 36 * 3600
     recent_convs = [c for c in convos.list(ALL) if c["updated_at"] >= since][:10]
@@ -6488,8 +6407,13 @@ async def recap(force: bool = False) -> dict[str, Any]:
         "projects": [{"name": p["name"], **projects.stats(p["id"])} for p in projects.list()],
     }
     internal = await _internal_data()
-    facts["calendar_next_3_days"] = internal.get("calendar")
-    facts["unread_mail"] = [{"from": m["from"], "subject": m["subject"]} for m in (internal.get("gmail") or [])][:10]
+    # An empty list reads as "nothing on" to the model; a source Grain cannot see must say so instead.
+    unseen = "not connected (unknown; Google is not connected in Settings)"
+    facts["calendar_next_3_days"] = (unseen if not internal["google_connected"] else
+                                     f"unavailable: {internal['calendar_error']}" if internal.get("calendar_error") else internal.get("calendar"))
+    facts["unread_mail"] = (unseen if not internal["google_connected"] else
+                            f"unavailable: {internal['gmail_error']}" if internal.get("gmail_error") else
+                            [{"from": m["from"], "subject": m["subject"]} for m in (internal.get("gmail") or [])][:10])
     try:
         content = await generate_recap(cfg, cfg.get("extractionModel") or cfg["defaultModel"], facts)
     except Exception as e:  # noqa: BLE001
@@ -7017,7 +6941,7 @@ def save_doc(id: str, body: DocSave) -> dict[str, Any]:
     if body.base_updated_at is not None:
         cur = docs.get(id)
         if cur and cur["updated_at"] > body.base_updated_at:
-            raise HTTPException(409, "This doc changed elsewhere since you opened it.")
+            raise HTTPException(409, "This file changed elsewhere since you opened it.")
     d = docs.save(id, body.content, body.title, body.summary)
     if not d:
         raise HTTPException(404)
@@ -7120,7 +7044,7 @@ class ActivityConfigIn(BaseModel):
     audio: dict[str, Any] | None = None
     summaryModel: str | None = None
     profileEveryHours: float | None = None
-    palantir: bool | None = None
+    recordEverything: bool | None = None
     insights: dict[str, Any] | None = None
 
 
@@ -7140,13 +7064,13 @@ def activity_status() -> dict[str, Any]:
 @app.put("/activity/config")
 def activity_config(body: ActivityConfigIn) -> dict[str, Any]:
     patch = body.model_dump(exclude_none=True)
-    # Palantir mode never travels as a plain field: it has to go through set_palantir, which
+    # Record-everything mode never travels as a plain field: it has to go through set_record_everything, which
     # snapshots the settings it is about to flatten so they can be put back.
-    palantir = patch.pop("palantir", None)
+    recordEverything = patch.pop("recordEverything", None)
     if patch:
         monitor.set_config(patch)
-    if palantir is not None and bool(palantir) != bool(monitor.config().get("palantir")):
-        monitor.set_palantir(bool(palantir))
+    if recordEverything is not None and bool(recordEverything) != bool(monitor.config().get("recordEverything")):
+        monitor.set_record_everything(bool(recordEverything))
     return monitor.status()
 
 
@@ -7186,17 +7110,17 @@ def activity_redact_test(body: RedactTestIn) -> dict[str, Any]:
     return activity.redact_preview(monitor.config(), body.text)
 
 
-class PalantirIn(BaseModel):
+class RecordEverythingIn(BaseModel):
     on: bool = True
 
 
-@app.post("/activity/palantir")
-def activity_palantir(body: PalantirIn) -> dict[str, Any]:
+@app.post("/activity/record-everything")
+def activity_record_everything(body: RecordEverythingIn) -> dict[str, Any]:
     """Record everything, or put back what was there before. The gate's discretionary filters go
     down with it, so the panel spells out what it does before anyone presses it."""
     if body.on and not activity.IS_MAC:
         raise HTTPException(400, "The activity collectors are macOS-only.")
-    return monitor.set_palantir(bool(body.on))
+    return monitor.set_record_everything(bool(body.on))
 
 
 class PermissionIn(BaseModel):
@@ -7622,7 +7546,7 @@ def create_meeting(body: MeetingIn) -> dict[str, Any]:
     if body.doc_id:
         doc = docs.get(body.doc_id)  # None when missing or trashed
         if not doc:
-            raise HTTPException(404, "That doc does not exist or is in the trash.")
+            raise HTTPException(404, "That file does not exist or is in the trash.")
         if body.doc_mode not in (None, "record", "dictate"):
             raise HTTPException(400, "doc_mode must be 'record' or 'dictate'")
         doc_project = doc["project_id"]
@@ -7812,7 +7736,7 @@ async def enhance_meeting(id: str, force: bool = False, template: str | None = N
     if not m:
         raise HTTPException(404)
     if m.get("doc_id"):
-        raise HTTPException(400, "This is a recording of a doc: use /meetings/{id}/summarize.")
+        raise HTTPException(400, "This is a recording of a file: use /meetings/{id}/summarize.")
     rev = await meeting_svc.enhance(id, force, template)
     if not rev:
         raise HTTPException(502, meeting_svc.last_error or "The enhance pass produced no revision")
@@ -7828,7 +7752,7 @@ async def summarize_meeting(id: str, body: MeetingSummarizeIn) -> dict[str, Any]
     if not m:
         raise HTTPException(404)
     if not m.get("doc_id"):
-        raise HTTPException(400, "Only a recording made in a doc can be summarized into it.")
+        raise HTTPException(400, "Only a recording made in a file can be summarized into it.")
     return await meeting_svc.summarize_into_doc(id, template=body.template, focus=body.focus, force=body.force)
 
 
@@ -8284,7 +8208,8 @@ class DeskResumeIn(BaseModel):
 
 class AcceptItem(BaseModel):
     output_id: str
-    destination: str                      # one of cowork.OUTPUT_KINDS
+    # cowork.OUTPUT_KINDS; checked before the claim
+    destination: Literal["doc", "doc_append", "document", "download", "todo", "artifact", "mail_draft"]
     title: str | None = None
     doc_id: str | None = None
     project_id: str | None = None
@@ -8680,7 +8605,8 @@ async def message_desk(id: str, body: DeskMessageIn) -> dict[str, Any]:
         desks.set_status(id, desk["status"], reason=desk["status_reason"], question="", event=False)
     conv_id = desk["conversation_id"]
     run = bus.answering(conv_id)
-    if run is not None:
+    # A stopping run never reads its steers; wait it out below and start a turn with the message instead.
+    if run is not None and not run.stop.is_set():
         um = convos.add_message(conv_id, "user", text)
         run.publish("user_message", um)
         run.steers.append(um)
@@ -8963,13 +8889,13 @@ async def _promote_to(desk_id: str, rel: str, title: str, item: AcceptItem) -> d
         doc = docs.create(title, content, wsid(item.project_id) if item.project_id else None)
         fresh = docs.get(doc["id"])
         ok = bool(fresh) and fresh["content"] == content
-        return {"ref": doc["id"], "verified": ok, "error": None if ok else "the saved doc does not match the file"}
+        return {"ref": doc["id"], "verified": ok, "error": None if ok else "the saved file does not match what was delivered"}
     if dest == "doc_append":
         if not item.doc_id:
             return {"ref": None, "verified": False, "error": "doc_append needs a doc_id"}
         cur = docs.get(item.doc_id)
         if not cur:
-            return {"ref": None, "verified": False, "error": "no such doc"}
+            return {"ref": None, "verified": False, "error": "no such file"}
         after = (cur["content"].rstrip() + "\n\n" + content) if cur["content"].strip() else content
         # propose, never apply: the doc the user wrote is untouched until they accept the revision
         # in the existing Docs review UI. An agent never overwrites a document the user wrote.

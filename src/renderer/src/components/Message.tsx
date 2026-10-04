@@ -2,7 +2,7 @@ import { Component, memo, useCallback, useEffect, useMemo, useRef, useState, typ
 import ChunkViewer, { type ChunkRef } from './ChunkViewer'
 import SourcesList from './SourcesList'
 import { citeInfo, openCite } from '../lib/remarkCites'
-import { AlertCircle, User, Sparkles, Brain, Share2, FileText, Activity, ChevronRight, Lightbulb, RotateCw, GraduationCap, Pencil, GitBranch } from 'lucide-react'
+import { AlertCircle, User, Sparkles, Brain, Share2, FileText, Activity, ChevronRight, Lightbulb, Play, RotateCw, GraduationCap, Pencil, GitBranch, Trash2 } from 'lucide-react'
 import type { Message, MessageStatus, RunChanges } from '@shared/types'
 import { useStore } from '../store'
 import { api } from '../lib/api'
@@ -14,7 +14,7 @@ import { modelLabel } from '../lib/modelLabel'
 import { outcomeLabel } from '../lib/outcomeLabel'
 import { errorAction } from '../lib/errorAction'
 import MessageEditor from './MessageEditor'
-import { statusText, statusTicks } from '../lib/runStatus'
+import { statusText, statusTicks, waitText } from '../lib/runStatus'
 import { clockTime, fullTime } from '../lib/chatMeta'
 
 /**
@@ -99,7 +99,7 @@ function ContinueButton({ conversationId, messageId }: { conversationId: string;
     <button className="ghost-btn" disabled={busy} onClick={() => {
       setBusy(true)
       useStore.getState().resumeRun(conversationId, run.id).then(() => setRun(null)).catch((e) => { setBusy(false); useStore.getState().toast((e as Error).message, 'error') })
-    }}><RotateCw size={13} /> {run.reason === 'interrupted' ? 'Resume' : 'Continue'}</button>
+    }}><Play size={13} /> {run.reason === 'interrupted' ? 'Resume' : 'Continue'}</button>
   )
 }
 
@@ -181,6 +181,18 @@ function StatusLine({ status }: { status: MessageStatus }): JSX.Element {
   return <div className="run-status" role="status">{statusText(status, now)}</div>
 }
 
+/** The three dots for a reply with nothing to show yet; past 5s they gain the elapsed time, so a slow model does not look hung. */
+export function Thinking(): JSX.Element {
+  const [start] = useState(() => Date.now())
+  const [now, setNow] = useState(start)
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(t)
+  }, [])
+  const text = waitText(now - start)
+  return <><span className="thinking"><span /><span /><span /></span>{text && <div className="run-status" role="status">{text}</div>}</>
+}
+
 // The store is read imperatively inside the handlers: any subscription here defeats the memo, and a
 // streamed token would re-render every message in every mounted transcript.
 /** `showContextChips`: only ChatView mounts the context drawer, so only it shows chips that open it.
@@ -218,7 +230,7 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
               {message.content ? (
                 <MarkdownPreview source={message.content} streaming={streaming} cites={cites} onCite={onCite} />
               ) : streaming && !message.reasoning && !message.tool_events?.some((t) => t.pending) ? (
-                <span className="thinking"><span /><span /><span /></span>
+                <Thinking />
               ) : null}
             </BodyBoundary>
             {!streaming && chunks && <SourcesList content={message.content} chunks={chunks} onOpen={(c) => openCite(c, setCiting)} />}
@@ -270,6 +282,12 @@ const MessageView = memo(function MessageView({ message, streaming, last = false
               <button type="button" className="ctx-chip" title="Branch in new chat: a copy of the conversation up to here; this one is left as it is"
                 aria-label="Branch in new chat" onClick={() => void useStore.getState().forkChat(message.conversation_id, message.id)}>
                 <GitBranch size={11} />
+              </button>
+            )}
+            {editable && (
+              <button type="button" className="ctx-chip" title="Delete this message (and its other regenerated versions)" aria-label="Delete message"
+                onClick={() => { if (window.confirm('Delete this message? This cannot be undone.')) void useStore.getState().deleteMessage(message.conversation_id, message.id) }}>
+                <Trash2 size={11} />
               </button>
             )}
           </div>

@@ -52,6 +52,15 @@ class MigrationTests(unittest.TestCase):
         self.assertEqual(_version(self.d), migrations.latest())
         self.assertEqual(backups.list_backups(self.d), [])
 
+    def test_activity_keys_are_renamed_and_values_kept(self) -> None:
+        db = Database(self.d)
+        old = {"pal" "antir": True, "pal" "antirRestore": {"redact": True}, "enabled": True}
+        with db.tx() as c:
+            c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('activity', ?)", (json.dumps(old),))
+            migrations._activity_record_everything_keys(c)
+        cfg = db.get_settings()["activity"]
+        self.assertEqual(cfg, {"recordEverything": True, "recordEverythingRestore": {"redact": True}, "enabled": True})
+
     def test_existing_database_is_adopted_without_data_loss(self) -> None:
         _old_db(self.d)
         self.assertEqual(_version(self.d), 0)
@@ -209,7 +218,16 @@ class BackupTests(unittest.TestCase):
         backups.delete(self.d, m["name"])
         self.assertIsNone(backups.apply_pending_restore(self.d))
         self.assertIsNone(backups.pending_restore(self.d))
+        self.assertIn("no longer exists", backups.restore_failed(self.d)["error"])  # Settings → Data can say so
         Database(self.d)  # still opens
+
+    def test_staged_backup_outlives_rotation_and_its_own_prerestore(self) -> None:
+        pre = [backups.create(self.d, "prerestore", now=1000 + i)["name"] for i in range(backups.SAFETY_KEEP)]
+        backups.stage_restore(self.d, pre[0])  # the oldest kept prerestore: "undo an earlier restore"
+        backups.create(self.d, "prerestore", now=2000)  # rotation would drop it
+        self.assertIn(pre[0], [b["name"] for b in backups.list_backups(self.d)])
+        self.assertEqual(backups.apply_pending_restore(self.d), pre[0])
+        self.assertIsNone(backups.restore_failed(self.d))
 
     def test_failed_export_leaves_no_part_file_or_dest(self) -> None:
         dest = self.d / "out.zip"
@@ -221,12 +239,17 @@ class BackupTests(unittest.TestCase):
 
     def test_export_zip_contents(self) -> None:
         (self.d / "uploads" / "a.txt").write_text("uploaded")
+        for rel in ("cowork/d1/outputs/report.md", "cowork/d1/work/scratch.txt", "recordings/m1/audio.wav"):
+            (self.d / rel).parent.mkdir(parents=True, exist_ok=True)
+            (self.d / rel).write_text("x")
         dest = self.d / "out.zip"
         backups.export_zip(self.d, dest)
         with zipfile.ZipFile(dest) as z:
             names = set(z.namelist())
             self.assertTrue({"README.txt", "grain.db", "uploads/a.txt", "export/conversations.md",
-                             "export/memories.json", "export/documents.md"} <= names)
+                             "export/memories.json", "export/documents.md",
+                             "cowork/d1/outputs/report.md", "recordings/m1/audio.wav"} <= names)
+            self.assertNotIn("cowork/d1/work/scratch.txt", names)
             convs = json.loads(z.read("export/conversations.json"))
             self.assertEqual(convs[0]["messages"][0]["content"], "hi there")
             self.assertIn("hi there", z.read("export/conversations.md").decode())

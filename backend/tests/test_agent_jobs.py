@@ -159,6 +159,8 @@ def test_the_shipped_jobs_are_seeded_once_and_disabled() -> None:
         assert valid_cron(row["cron"]) and row["prompt"]
         assert row["enabled"] is False and row["next_due_at"] is None, "an unattended run costs money: the user opts in"
     assert fresh.seed(at=T0) == 0, "seeding again adds nothing"
+    fresh.delete(seeded["Weekly review"]["id"])
+    assert fresh.seed(at=T0) == 0 and "Weekly review" not in {j["name"] for j in fresh.list()}, "a deleted shipped job stays deleted"
     assert [s["name"] for s in SEED_JOBS] == ["Morning brief", "Scan unread and draft replies", "Weekly review"]
 
 
@@ -398,7 +400,6 @@ def test_a_job_run_is_told_it_is_a_job_and_runs_on_a_tighter_budget() -> None:
     cfg = appmod.settings()
     assert b["max_rounds"] == min(cfg["maxToolRounds"], appmod.JOB_BUDGET["maxToolRounds"]) < cfg["maxToolRounds"]
     assert b["max_tokens"] < cfg["maxRunTokens"] and b["max_seconds"] < cfg["maxRunSeconds"]
-    assert b["max_cost"] < cfg["maxRunCost"]
     assert appmod._caps({"maxToolRounds": 3}, appmod.JOB_BUDGET)["maxToolRounds"] == 3, "a stricter setting wins"  # noqa: SLF001
     assert appmod._caps({"maxRunSeconds": 0}, appmod.JOB_BUDGET)["maxRunSeconds"] == 240, "0 means unlimited: capped"  # noqa: SLF001
     system = next(d for _, e, d in store.events(run["run_id"]) if e == "assistant_message")["context_used"]["system_prompt"]
@@ -889,30 +890,31 @@ def test_a_job_runs_on_its_own_model_and_an_unknown_one_is_refused(monkeypatch: 
 
 def test_a_job_budget_only_tightens_the_job_caps() -> None:
     base = {"name": "Cheap", "cron": "0 6 * * *", "prompt": "x", "timezone": "UTC"}
-    j("POST", "/jobs", {**base, "budget": {"maxRunCost": 5}}, expect=422)  # above JOB_BUDGET
+    j("POST", "/jobs", {**base, "budget": {"maxRunTokens": 10**9}}, expect=422)  # above JOB_BUDGET
     j("POST", "/jobs", {**base, "budget": {"maxToolRounds": 3}}, expect=422)  # the round cap is not the job's to set
-    j("POST", "/jobs", {**base, "budget": {"maxRunCost": 0}}, expect=422)  # 0 would mean unlimited
+    j("POST", "/jobs", {**base, "budget": {"maxRunCost": 0.05}}, expect=422)  # cost is reported, never a limit
+    j("POST", "/jobs", {**base, "budget": {"maxRunTokens": 0}}, expect=422)  # 0 would mean unlimited
     j("POST", "/jobs", {**base, "budget": {"maxRunSeconds": "60"}}, expect=422)
-    made = j("POST", "/jobs", {**base, "budget": {"maxRunCost": 0.05, "maxRunSeconds": 60}})
-    assert made["budget"] == {"maxRunCost": 0.05, "maxRunSeconds": 60}
+    made = j("POST", "/jobs", {**base, "budget": {"maxRunTokens": 5000, "maxRunSeconds": 60}})
+    assert made["budget"] == {"maxRunTokens": 5000, "maxRunSeconds": 60}
     b = _run_by_hand(made["id"])["budget"]
-    assert b["max_cost"] == 0.05 and b["max_seconds"] == 60
-    assert b["max_tokens"] <= appmod.JOB_BUDGET["maxRunTokens"]
-    j("PATCH", f"/jobs/{made['id']}", {"budget": {"maxRunCost": 1}}, expect=422)
+    assert b["max_tokens"] == 5000 and b["max_seconds"] == 60 and "max_cost" not in b
+    j("PATCH", f"/jobs/{made['id']}", {"budget": {"maxRunSeconds": 10_000}}, expect=422)
     assert j("PATCH", f"/jobs/{made['id']}", {"budget": None})["budget"] is None
 
-    # A row written behind the API's back still cannot loosen the job caps: the runner clamps again.
+    # A row written behind the API's back still cannot loosen the job caps: the runner clamps again, and a cost
+    # cap stored before caps were removed is ignored.
     with appmod.db.tx() as c:
         c.execute("UPDATE jobs SET budget=? WHERE id=?",
                   (json.dumps({"maxRunCost": 50, "maxRunTokens": 0, "maxToolRounds": 99}), made["id"]))
     b = _run_by_hand(made["id"])["budget"]
-    assert b["max_cost"] == appmod.JOB_BUDGET["maxRunCost"] and b["max_rounds"] <= appmod.JOB_BUDGET["maxToolRounds"]
+    assert "max_cost" not in b and b["max_rounds"] <= appmod.JOB_BUDGET["maxToolRounds"]
     assert 0 < b["max_tokens"] <= appmod.JOB_BUDGET["maxRunTokens"]
 
 
 def test_a_job_budget_never_loosens_the_users_own_stricter_setting() -> None:
-    caps = appmod._job_caps({"maxRunCost": 0.01, "maxRunSeconds": 0}, {"maxRunCost": 0.1, "maxRunSeconds": 0})  # noqa: SLF001
-    assert caps["maxRunCost"] == 0.01, "the user's stricter cap wins"
+    caps = appmod._job_caps({"maxRunTokens": 1000, "maxRunSeconds": 0}, {"maxRunTokens": 5000, "maxRunSeconds": 0})  # noqa: SLF001
+    assert caps["maxRunTokens"] == 1000, "the user's stricter cap wins"
     assert caps["maxRunSeconds"] == appmod.JOB_BUDGET["maxRunSeconds"], "a 0 in the job budget is not 'unlimited'"
 
 

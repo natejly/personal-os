@@ -70,6 +70,12 @@ export const groupShutKey = (scope: Scope): string => `!${scope}`
 export const isInside = (path: string, maybeAncestor: string): boolean =>
   maybeAncestor === '' || path === maybeAncestor || path.startsWith(`${maybeAncestor}/`)
 
+/** After `from` is renamed to `to` in `scope`: the open keys of it and its subfolders follow it. */
+export const renameKeys = (keys: string[], scope: Scope, from: string, to: string): string[] => {
+  const pre = folderKey(scope, from)
+  return keys.map((k) => (k === pre || k.startsWith(`${pre}/`) ? folderKey(scope, to) + k.slice(pre.length) : k))
+}
+
 /**
  * A folder cannot be dropped on itself, on its own subtree (that would orphan what it carries), or on
  * the parent it is already in. Nor into another project: a folder's docs each carry their own

@@ -83,7 +83,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "onboardedAt": None,
     "systemPrompt": (
         "You are the assistant inside the user's personal AI OS. Be direct, concise, and useful. "
-        "Use markdown when it helps. You may be given memories, a knowledge graph, and document "
+        "Use markdown when it helps. You may be given memories, a knowledge graph, and file "
         "excerpts as context; use them when relevant and don't mention them unless asked."
     ),
     "extractionModel": "",
@@ -115,7 +115,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "gatherShortcut": "Control+Alt+Command+Space",
     # Global quick capture: a small window that appends a timestamped bullet to today's daily note.
     "quickCaptureShortcut": "CommandOrControl+Shift+Space",
-    # Hold this in the Docs editor to dictate while held; a quick tap latches it on.
+    # Hold this in the Files editor to dictate while held; a quick tap latches it on.
     "dictationChord": "Control+Alt+D",
     # Shell modularity: Today-screen cards ({key: bool}, missing = shown) and sidebar views the user removed.
     # Meetings / Activity ship off (they record); Settings → Modules turns them back on.
@@ -156,7 +156,6 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Per-reply budgets; 0 = unlimited. A run that hits one still writes a final answer, marked partial.
     "maxRunTokens": 200_000,
     "maxRunSeconds": 300,
-    "maxRunCost": 0.50,
     # Provider resilience (retry/backoff section below). Retries only happen before a reply's first token;
     # llmIdleSeconds is how long a stream may go without a byte before it is abandoned with a clear error.
     "llmRetries": 3,
@@ -169,31 +168,27 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "retainToolResultDays": 30,
     "retainApprovalDays": 90,
     # Cowork desks. A desk runs bounded turns unattended, so both axes are caps on the whole
-    # desk rather than on one reply; 0 on either means unlimited. deskMaxLive bounds how many
+    # desk rather than on one reply; 0 means unlimited. deskMaxLive bounds how many
     # desks may be running at once, which is the cap the user actually feels.
     # How long a desk waits on a card nobody is watching before letting the run go. The card stays
     # pending and decidable; only the run lets go. 0 = wait forever, which is what a chat does.
     "parkAfterSeconds": 180,
     "deskMaxTurns": 12,
-    "deskMaxCost": 2.0,
     "deskMaxLive": 4,
     # Relaunch desks a restart interrupted mid-turn. Off by default: a desk with a call whose outcome is
     # unknown, or one waiting on an approval or its plan, is never relaunched either way.
     "deskAutoResume": False,
     # Subagents (subagents.py): how many may run at once across the app, how deep they may nest, and
-    # each one's own round and cost caps (also charged to the reply that spawned it). A child with no
+    # each one's own round cap (its cost is also charged to the reply that spawned it). A child with no
     # model or tool activity for subagentStaleSeconds, or stuck inside one tool for subagentToolSeconds,
     # is stopped and returns what it had.
     "subagentMaxConcurrent": 4,
     "subagentMaxDepth": 2,
     "subagentMaxRounds": 12,
-    "subagentMaxCost": 0.25,
     "subagentStaleSeconds": 450,
     "subagentToolSeconds": 1200,
-    # Workflows (workflows.py): the most items one fan-out step may map over, and a cost cap per run
-    # (0 = none) over every subagent the run starts.
+    # Workflows (workflows.py): the most items one fan-out step may map over.
     "workflowMaxFanOut": 50,
-    "workflowMaxCost": 1.0,
     # Scheduled-job run policy (jobs_policy.py): retry backoff base in seconds (doubles per attempt, capped at
     # 30 min) and how many consecutive failed fires switch a job off.
     "jobRetryBackoffS": 120,
@@ -298,7 +293,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "contextualChunks": False,
     "retrievalRerank": False,
     "retrievalRerankModel": "",
-    # Also retrieve from the user's own Docs (not just uploaded files) when a chat has useDocuments on.
+    # Also retrieve from the user's own editor files (not just uploaded files) when a chat has useDocuments on.
     "useDocsInContext": True,
     # Reply tracker (mailwatch.py); MailWatchModule.config() merges stored values over these defaults.
     "mailWatch": {"awaitingAfterDays": 3, "needsReplyAfterHours": 24, "useLLM": False,
@@ -1329,7 +1324,7 @@ def _finish_calls(calls: dict[int, dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
-async def complete(settings: dict[str, Any], model: str, messages: list[dict[str, Any]], kind: str = "learn", *,
+async def complete(settings: dict[str, Any], model: str, messages: list[dict[str, Any]], kind: str = "other", *,
                    effort: str = "default", cancel: asyncio.Event | None = None, deadline: float | None = None) -> str:
     """Non-streaming completion (used for extraction, and for vision: `content` may be a list of text/image_url parts).
 

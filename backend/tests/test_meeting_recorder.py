@@ -183,6 +183,24 @@ def test_cut_on_silence_with_no_pauses_cuts_at_the_cap_with_contiguous_offsets()
         prev_end = b
 
 
+def test_native_capture_cuts_a_segment_at_the_pause_toggle() -> None:
+    # Pausing 1 s into a 3 s segment must close the live part there, so the paused audio is its
+    # own segment and the live second before it is kept.
+    start = time.time()
+    seen: list[int] = []
+    cap = meeting_recorder.ChannelCapture(
+        "mic", audiocap.native_sine_input(), _tmp(), 3, 3, threading.Event(),
+        lambda c, s, p: seen.append(s), paused_fn=lambda: time.time() - start > 1.0)
+    offsets = cap.offsets
+    cap.start()
+    cap.join(timeout=20)
+    assert cap.error == "", cap.error
+    flags = [cap.seg_paused[s] for s in seen]
+    assert flags[0] is False and True in flags, flags
+    a, b = offsets[seen[0]]
+    assert b - a < 1.6, f"the live segment ran {b - a}s past the pause"
+
+
 def test_the_session_reports_the_measured_offsets_when_cutting_on_silence() -> None:
     session = meeting_recorder.RecordingSession(
         "mtg-cut", _tmp(), {"mic": ["x"]}, settings_fn=lambda: dict(SETTINGS), config_fn=lambda: dict(CFG),
@@ -782,9 +800,11 @@ def test_a_segment_carries_the_pause_state_it_was_recorded_with() -> None:
     second = _wav(out / "mic-00001.wav")
     session.captures["mic"] = meeting_recorder.ChannelCapture(
         "mic", [], out, 1, 4, session.stop_event, session._segment)
+    # A pause and resume INSIDE segment 0's window: the flag is False again when it closes, but
+    # the aside spoken in between is in that wav, so the whole segment goes.
     session.pause(True)
-    session._segment("mic", 0, first)
     session.pause(False)
+    session._segment("mic", 0, first)
     session._segment("mic", 1, second)
 
     assert [r["state"] for r in recorded] == ["discarded", "recorded"], recorded

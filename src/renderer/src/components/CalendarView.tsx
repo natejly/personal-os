@@ -162,10 +162,11 @@ export default function CalendarView(): JSX.Element {
     const todo = useStore.getState().todos.find((t) => t.id === todoId)
     if (!todo) return
     try {
-      await updateTodo(todoId, { due: day })
-      if (google?.connected) {
+      // scheduleTodo writes the due date with the event link, so the mirror never sees one without the other.
+      if (!google?.connected) await updateTodo(todoId, { due: day })
+      else {
         const start = hour === null ? day : `${day}T${String(hour).padStart(2, '0')}:00:00`
-        await scheduleTodo({ ...todo, due: day }, start)
+        await scheduleTodo(todo, start)
         if (hour !== null) await load()
       }
       toast(hour === null ? `Due ${day}` : `Scheduled ${hour}:00`)

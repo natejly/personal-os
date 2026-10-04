@@ -165,7 +165,7 @@ function ChatWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
       // Contract §12.4: there is no per-conversation attachment, so the nearest real action is an
       // instruction the model can execute itself.
       case 'document':
-        draft(`Read document ${p.id} ("${p.label}") with read_document and use it as context.`)
+        draft(`Read uploaded file ${p.id} ("${p.label}") with read_document and use it as context.`)
         break
       case 'memory':
         await app.updateMemory(p.id, { pinned: true })

@@ -287,6 +287,9 @@ class TestGrants(McpTestCase):
         self.assertTrue(m["stale"])
         self.assertNotEqual(m["approved_hash"], m["schema_hash"])
         self.mcp.set_grant(self.read, "on")
+        self.assertTrue(self.mcp.effective_mode(self.read)["stale"], "a re-grant before the drift is reviewed stays stale")
+        self.mcp.mark_reviewed(self.read)
+        self.mcp.set_grant(self.read, "on")
         again = self.mcp.effective_mode(self.read)
         self.assertEqual((again["mode"], again["stale"]), ("on", False))
 

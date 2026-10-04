@@ -120,6 +120,9 @@ async def run(svc: Any, meeting_id: str, src_path: Path | str, *, cleanup_src: b
         from .db import now
         started = now() - total
         svc.meetings.mark_import(meeting_id, str(out_dir), started)
+        keep = svc.keeps_audio(meeting_id, cfg)
+        if keep and not m.get("keep_audio"):
+            svc.meetings.patch(meeting_id, {"keep_audio": True})   # the wavs are kept, so the row says so (playback gates on it)
         prior_status = m["status"]
         try:
             wavs = await asyncio.to_thread(_cut, src, out_dir, n)
@@ -135,10 +138,10 @@ async def run(svc: Any, meeting_id: str, src_path: Path | str, *, cleanup_src: b
             # Diarization needs the wavs after transcription, so they are held until it has run.
             split = bool(cfg.get("diarize")) and diarize.resolve_backend(cfg, svc.data_dir) != "none"
             await asyncio.to_thread(_transcribe_all, svc, meeting_id, out_dir, items,
-                                    {**cfg, "keepAudio": bool(cfg.get("keepAudio")) or split})
+                                    {**cfg, "keepAudio": keep or split})
             if split:
                 await asyncio.to_thread(svc.diarize_segments, meeting_id)
-                if not cfg.get("keepAudio"):
+                if not keep:
                     svc.meetings.drop_done_audio(meeting_id)
         except Exception as e:  # noqa: BLE001 - say so on the meeting instead of leaving it 'transcribing'
             log.warning("meetings: import of %s failed: %s", meeting_id, e)

@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Plus, Pin, PinOff, Trash2, Wand2, User, History, Undo2, Sparkles, Check, X } from 'lucide-react'
+import { Plus, Pin, PinOff, Trash2, Wand2, User, History, Undo2, Sparkles, Check, X, Download, Upload } from 'lucide-react'
 import { useStore, type Scope } from '../store'
 import type { Memory, MemoryProposal } from '@shared/types'
 import ProjectChip from './ProjectChip'
 import { api } from '../lib/api'
+import { downloadJson, pickJson } from '../lib/jsonFile'
 
 const KINDS = ['fact', 'preference', 'goal', 'note']
 
@@ -12,6 +13,11 @@ function MemoryRow({ m, showProject }: { m: Memory; showProject: boolean }): JSX
   const isolated = projects.some((p) => p.id === m.project_id && p.memory_mode === 'isolated')
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(m.content)
+  const [versions, setVersions] = useState<Memory[] | null>(null)
+  const toggleVersions = (): void => {
+    if (versions) setVersions(null)
+    else void api.memories.history(m.id).then(setVersions).catch(() => setVersions([]))
+  }
   const commit = (): void => {
     setEditing(false)
     if (draft.trim() && draft !== m.content) void updateMemory(m.id, { content: draft })
@@ -34,8 +40,12 @@ function MemoryRow({ m, showProject }: { m: Memory; showProject: boolean }): JSX
           {m.source_conversation_id && <button className="link small" title="Open the chat this was learned from" onClick={() => void selectChat(m.source_conversation_id as string)}>from chat</button>}
           <span className="muted">{new Date(m.updated_at * 1000).toLocaleDateString()}</span>
         </div>
+        {versions && (versions.length < 2
+          ? <p className="muted small">No earlier versions.</p>
+          : versions.map((v) => <p key={v.id} className="muted small" style={v.id === m.id ? { fontWeight: 600 } : { textDecoration: 'line-through' }}>{new Date(v.created_at * 1000).toLocaleDateString()} · {v.content}</p>))}
       </div>
       <div className="mem-actions">
+        <button className="icon-btn" aria-label={`Show past versions of memory: ${m.content.slice(0, 60)}`} title="Past versions" aria-pressed={!!versions} onClick={toggleVersions}><History size={14} /></button>
         <button className="icon-btn" aria-label={m.pinned ? `Unpin memory: ${m.content.slice(0, 60)}` : `Pin memory (always in context): ${m.content.slice(0, 60)}`} title={m.pinned ? 'Unpin' : 'Pin (always in context)'} onClick={() => void updateMemory(m.id, { pinned: !m.pinned })}>{m.pinned ? <PinOff size={14} /> : <Pin size={14} />}</button>
         <button className="icon-btn danger" aria-label={`Forget memory: ${m.content.slice(0, 60)}`} title="Forget" onClick={() => void deleteMemory(m.id)}><Trash2 size={14} /></button>
       </div>
@@ -137,6 +147,23 @@ export default function MemoryView({ projectId, query = '' }: { projectId?: stri
   }
   const restore = async (id: string): Promise<void> => { await api.memories.restore(id); await refreshMemories(query); loadHistory() }
 
+  const { toast } = useStore()
+  const exportMemories = async (): Promise<void> => {
+    try {
+      const f = await api.memories.exportFile(scope)
+      downloadJson('grain-memories.json', f)
+      toast(`Exported ${f.memories.length} memor${f.memories.length === 1 ? 'y' : 'ies'}`)
+    } catch (e) { toast((e as Error).message, 'error') }
+  }
+  const importMemories = async (): Promise<void> => {
+    try {
+      const file = await pickJson()
+      if (!file) return
+      const r = await api.memories.importFile(file, targetProject)
+      toast(`Imported ${r.added}${r.skipped ? `, skipped ${r.skipped} already there` : ''}`)
+      await refreshMemories(query)
+    } catch (e) { toast((e as Error).message, 'error') }
+  }
   const targetProject = scope === 'all' || scope === 'personal' ? null : scope
   const add = async (): Promise<void> => {
     if (!draft.trim()) return
@@ -163,6 +190,8 @@ export default function MemoryView({ projectId, query = '' }: { projectId?: stri
         <Sparkles size={14} /> {tidying ? 'Looking…' : 'Tidy up'}
         {proposalCount > 0 && <span className="count pending" title={`${proposalCount} suggestion${proposalCount === 1 ? '' : 's'} to review`}>{proposalCount}</span>}
       </button>
+      <button className="ghost-btn" onClick={() => void exportMemories()} title="Save the memories in this scope to a JSON file"><Download size={14} /> Export</button>
+      <button className="ghost-btn" onClick={() => void importMemories()} title={`Add memories from an exported JSON file${targetProject ? ' to this project' : ' to your personal memories'}`}><Upload size={14} /> Import</button>
       {tidyNote && <span className="muted small"> {tidyNote}</span>}
       {proposals.map((p) => <ProposalRow key={p.id} p={p} byId={byId} labels={labels} onApply={() => void decide(p, true)} onDismiss={() => void decide(p, false)} />)}
       {memories.length === 0 && <p className="empty-hint big">{query ? 'No memories match.' : 'No memories yet.'}</p>}

@@ -55,6 +55,11 @@ def test_widget_create_and_place_never_leak_the_secret(monkeypatch: pytest.Monke
     placed = run(box.specs["widget_place"].fn({}, widget_id=w["id"]))
     win = canvases.window(placed["window_id"])
     assert win["kind"] == "dashboard-widget" and win["ref_id"] == w["id"]
+    first = canvases.list()[0]
+    canvases.update(first["id"], {"locked": True})
+    other = canvases.create("Open")
+    assert run(box.specs["widget_place"].fn({}, widget_id=w["id"], space=first["name"]))["field"] == "space"  # a locked space refuses
+    assert run(box.specs["widget_place"].fn({}, widget_id=w["id"]))["space"] == other["name"]  # the default skips it
 
     n = len(llm_calls)
     fresh = run(widget_spec.run_widget(store, store.widget(w["id"]), {}, "m", fetch))  # a plain refresh is a re-bind

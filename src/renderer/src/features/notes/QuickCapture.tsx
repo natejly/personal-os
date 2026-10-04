@@ -34,7 +34,7 @@ export default function QuickCapture(): JSX.Element {
         autoFocus
         value={text}
         disabled={busy}
-        placeholder="Add to today's note. Enter to save, Esc to close."
+        placeholder="Add to today's file. Enter to save, Esc to close."
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
           if (e.key === 'Escape') window.os.closeSelf()

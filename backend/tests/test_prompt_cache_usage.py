@@ -56,7 +56,7 @@ def ctx(q: str):
 
 s1, u1 = ctx("tea")
 s2, u2 = ctx("coffee")
-check(u1["stable_system"] == u2["stable_system"] == "You are Grain.", "stable part query-independent")
+check(u1["stable_system"] == u2["stable_system"] and u1["stable_system"].startswith("You are Grain."), "stable part query-independent")
 check(len(u1["volatile_blocks"]) >= 1 and u1["volatile_blocks"] != u2["volatile_blocks"], "volatile differs per query/page")
 check(u1["system_prompt"] == "\n\n".join([u1["stable_system"], *u1["volatile_blocks"]]) == s1, "system_prompt = stable + volatile")
 

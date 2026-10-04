@@ -507,7 +507,7 @@ export function MeetingIndicator(): JSX.Element | null {
       onClick={() => (docId ? void openDoc(docId) : setView('meetings'))}
       title={docId ? (active.doc_mode === 'dictate' ? 'Dictating into a doc. Click to open it' : 'Recording into a doc. Click to open it') : INDICATOR_TITLE[state]}>
       <span className="act-dot" />
-      {docId ? (active.doc_mode === 'dictate' ? 'Dictating' : 'Recording doc') : 'Meeting'} {formatOffset(active.elapsed_ms / 1000)}
+      {docId ? (active.doc_mode === 'dictate' ? 'Dictating' : 'Recording file') : 'Meeting'} {formatOffset(active.elapsed_ms / 1000)}
     </button>
   )
 }

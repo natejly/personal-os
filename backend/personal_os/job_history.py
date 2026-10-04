@@ -12,6 +12,8 @@ import io
 import statistics
 from typing import Any, Iterable
 
+from .jobs import retryable
+
 FAILED = ("error", "interrupted", "timed_out")
 SUMMARY_CHARS = 400
 NOTIFY_CAP = 20
@@ -136,7 +138,7 @@ def notify_events(runs: Iterable[dict[str, Any]], jobs: dict[str, dict[str, Any]
         name = job.get("name") or r.get("job") or "A scheduled job"
         pend = r["proposals"]["pending"]
         if r["status"] in FAILED:
-            final = r["manual"] or r["attempt"] > int(job.get("max_retries") or 0) or not job.get("enabled", True)
+            final = r["manual"] or r["attempt"] > int(job.get("max_retries") or 0) or not (retryable(job) if job else True)
             if final:
                 out.append({"id": f"run:{r['run_id']}:error", "kind": "job_failed", "title": f"{name} failed",
                             "body": "The run did not finish." + (f" Attempt {r['attempt']}." if r["attempt"] > 1 else ""),
@@ -153,9 +155,10 @@ def notify_events(runs: Iterable[dict[str, Any]], jobs: dict[str, dict[str, Any]
         if mode(j["id"]) == "never":
             continue
         if not j.get("enabled") and j.get("paused_reason") and (j.get("updated_at") or 0) > since:
+            body = ("Its schedule expired. Switch it back on to keep it running." if j["paused_reason"] == "expired"
+                    else f"{j.get('consecutive_failures') or 0} failed runs in a row.")
             out.append({"id": f"job:{j['id']}:paused:{int(j['updated_at'])}", "kind": "job_paused",
-                        "title": f"{j['name']} was paused", "body": f"{j.get('consecutive_failures') or 0} failed runs in a row.",
-                        "at": j["updated_at"], "target": "inbox"})
+                        "title": f"{j['name']} was paused", "body": body, "at": j["updated_at"], "target": "inbox"})
     for p in pending:
         if p["created_at"] > since and p.get("run_id") not in covered and p.get("job_id") and mode(p["job_id"]) != "never":
             name = (jobs.get(p["job_id"]) or {}).get("name") or "A scheduled job"

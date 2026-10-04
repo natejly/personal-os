@@ -391,7 +391,8 @@ class RunStore:
             self._exec("UPDATE executed_calls SET status='error', result=?, finished_at=? WHERE key=?",
                        (_dumps({"error": f"{type(e).__name__}: {e}"}), time.time(), key))
             raise
-        # An UNVERIFIED write may have landed: record it as done so a resume replays it instead of writing twice.
+        # An unverified write (an error that still carries `verification`) may have landed: record it as done, so a
+        # retry or a resume replays it instead of writing again.
         failed = isinstance(result, dict) and bool(result.get("error")) and "verification" not in result
         self._exec("UPDATE executed_calls SET status=?, result=?, finished_at=? WHERE key=?",
                    ("error" if failed else "done", _dumps(result), time.time(), key))

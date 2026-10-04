@@ -16,8 +16,8 @@ import InlineNote from './InlineNote'
 
 /** `only` limits a destination to the files it can take; the backend refuses the rest anyway. */
 const DESTINATIONS: { value: PromotionKind; label: string; hint: string; only?: RegExp }[] = [
-  { value: 'doc', label: 'New note', hint: 'Creates a new note, searchable immediately' },
-  { value: 'doc_append', label: 'Append to note', hint: 'Proposes an edit to an existing note; you accept it in Files' },
+  { value: 'doc', label: 'New file', hint: 'Creates a new file, searchable immediately' },
+  { value: 'doc_append', label: 'Append to a file', hint: 'Proposes an edit to an existing file; you accept it in Files' },
   { value: 'document', label: 'Upload', hint: 'Adds the file to your uploads' },
   { value: 'todo', label: 'Todos', hint: 'One todo per checklist or list line' },
   { value: 'artifact', label: 'Page', hint: 'Saves it as a page you can open from here', only: /\.(html?|svg)$/i },
@@ -143,7 +143,7 @@ function OutputCard({ desk, output, picked, destination, docId, result, busy, on
           {destination === 'doc_append' && (
             <label className="model-picker">
               <select value={docId} onChange={(e) => onDocId(e.target.value)}>
-                <option value="">Pick a note…</option>
+                <option value="">Pick a file…</option>
                 {docs.map((d) => <option key={d.id} value={d.id}>{d.title || 'Untitled'}</option>)}
               </select>
             </label>
@@ -260,8 +260,8 @@ export default function DeskReview({ desk }: { desk: FullDesk }): JSX.Element {
       {noting === 'reject' && (
         <InlineNote optional danger placeholder="Why reject? A note is optional and goes on the desk." submitLabel="Reject" onSubmit={reject} onCancel={() => setNoting(null)} />
       )}
-      <footer className="desk-review-foot">
-        <button className="primary-btn" disabled={busy || selection.length === 0 || blocked} title={blocked ? 'Pick a note to append to' : undefined} onClick={() => void accept()}>
+      {undecided.length > 0 && <footer className="desk-review-foot">
+        <button className="primary-btn" disabled={busy || selection.length === 0 || blocked} title={blocked ? 'Pick a file to append to' : undefined} onClick={() => void accept()}>
           <Check size={13} /> Accept selected{selection.length > 0 ? ` (${selection.length})` : ''}
         </button>
         <button className="ghost-btn" aria-expanded={noting === 'back'} onClick={() => setNoting(noting === 'back' ? null : 'back')}>Send back</button>
@@ -273,7 +273,7 @@ export default function DeskReview({ desk }: { desk: FullDesk }): JSX.Element {
         >
           <X size={13} /> Reject{selection.length > 0 ? ' selected' : ' all'}
         </button>
-      </footer>
+      </footer>}
     </div>
   )
 }

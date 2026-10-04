@@ -15,3 +15,11 @@ test('mergeChatSearch never lists a conversation twice', () => {
   assert.deepEqual(r.titled.map((t) => [t.convo.id, !!t.hit]), [['a', false], ['b', true]])
   assert.deepEqual(r.inMessages.map((x) => x.id), ['c'])
 })
+
+test('snippetParts strips markdown, also across the match markers', () => {
+  assert.deepEqual(snippetParts('Python is **\x023.14\x03**, see [docs](https://x.y) `py`'), [
+    { text: 'Python is ', hit: false }, { text: '3.14', hit: true }, { text: ', see docs py', hit: false }
+  ])
+  assert.deepEqual(snippetParts('# Title'), [{ text: 'Title', hit: false }])
+  assert.deepEqual(snippetParts('2*3 = 6, *really*'), [{ text: '2*3 = 6, really', hit: false }])
+})

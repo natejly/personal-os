@@ -16,8 +16,8 @@ const VERBS: Record<string, string> = {
   web_search: 'Search the web', fetch_url: 'Read web page', open_page: 'Open web page',
   youtube_search: 'Search YouTube', youtube_video: 'Read YouTube video', github_search: 'Search GitHub',
   github_read: 'Read from GitHub', read_feed: 'Read RSS feed',
-  search_documents: 'Search documents', read_document: 'Read document', list_documents: 'List documents',
-  doc_list: 'List docs', doc_search: 'Search docs', doc_read: 'Read doc', doc_create: 'Create doc', doc_edit: 'Edit doc',
+  search_documents: 'Search files', read_document: 'Read uploaded file', list_documents: 'List uploaded files',
+  doc_list: 'List files', doc_search: 'Search file text', doc_read: 'Read file', doc_create: 'Create file', doc_edit: 'Edit file',
   search_memory: 'Search memory', save_memory: 'Save to memory', graph_search: 'Search knowledge graph',
   graph_traverse: 'Explore knowledge graph', graph_add: 'Add to knowledge graph',
   run_python: 'Run Python', current_time: 'Check the time',
@@ -34,7 +34,6 @@ const VERBS: Record<string, string> = {
   trash_local_file: 'Move file to Trash', list_shortcuts: 'List Shortcuts', run_shortcut: 'Run shortcut',
   todo_write: 'Update plan', todo_add: 'Add to-do', schedule_task: 'Schedule a task', cancel_scheduled_task: 'Cancel scheduled task',
   scheduled_tasks: 'List scheduled tasks', propose_plan: 'Propose a plan', read_tool_result: 'Read earlier result',
-  board_list: 'List boards', board_create: 'Create board', board_add_card: 'Add board card', board_move_card: 'Move board card',
   meeting_list: 'List meetings', meeting_read: 'Read meeting', meeting_search: 'Search meetings',
   activity_recent: 'Recent activity', activity_insights: 'Activity insights', activity_pause: 'Pause activity monitor',
   activity_access: 'Check activity access',
@@ -44,7 +43,7 @@ const VERBS: Record<string, string> = {
   desk_trash_file: 'Trash desk file', desk_deliver: 'Deliver to desk', desk_ask: 'Ask a question', ask_user: 'Ask a question', desk_done: 'Finish desk task',
   desk_import_sandbox: 'Import from sandbox',
   sandbox_exec: 'Run in sandbox', sandbox_write_file: 'Write sandbox file', sandbox_read_file: 'Read sandbox file',
-  sandbox_list_files: 'List sandbox files', sandbox_put_document: 'Copy document to sandbox', sandbox_export_file: 'Export sandbox file', sandbox_reset: 'Reset sandbox',
+  sandbox_list_files: 'List sandbox files', sandbox_put_document: 'Copy uploaded file to sandbox', sandbox_export_file: 'Export sandbox file', sandbox_reset: 'Reset sandbox',
   sandbox_checkpoint: 'Save sandbox checkpoint', sandbox_restore: 'Restore sandbox checkpoint',
   shell_run: 'Run command', shell_poll: 'Check command output', shell_kill: 'Stop command', python_install: 'Install Python packages',
   fs_glob: 'Find files by name', fs_grep: 'Search file contents', fs_edit: 'Edit file', fs_copy: 'Copy file', fs_mkdir: 'Create folder',
@@ -183,7 +182,7 @@ export type ResultView =
   | { kind: 'list'; items: string[]; total: number }
 
 /** Keys the backend adds for its own bookkeeping; a person does not need them in a result. */
-const RESULT_NOISE = new Set(['verification', 'replayed', 'ok', 'next_offset', 'has_more', 'truncated', 'handle'])
+const RESULT_NOISE = new Set(['verification', 'replayed', 'ok', 'next_offset', 'has_more', 'truncated', 'handle', 'note'])
 
 function oneLine(v: unknown): string {
   if (v && typeof v === 'object' && !Array.isArray(v)) {

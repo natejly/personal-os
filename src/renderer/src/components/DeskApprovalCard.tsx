@@ -41,7 +41,7 @@ export default function DeskApprovalCard({ approval, conversationId, event }: {
   return (
     <div className="desk-approval">
       {note}
-      {Card ? <><Card event={ev} pending decide={decide} /><ApprovalRules event={ev} conversationId={conversationId} /></>
+      {Card ? <><Card event={ev} pending decide={decide} conversationId={conversationId} /><ApprovalRules event={ev} conversationId={conversationId} /></>
         : <GenericApproval event={ev} conversationId={conversationId} decide={(ok) => decide(ok)} />}
     </div>
   )

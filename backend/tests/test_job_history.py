@@ -67,7 +67,7 @@ def test_of_job_filters_orders_and_limits() -> None:
 def test_summarize_run_duration_timed_out_and_proposals() -> None:
     j = mkjob()
     rid = add_run(j["id"], "done", start=NOW - 300, dur=240.0,
-                  budget={"max_seconds": 240, "seconds": 240.0, "cost": 0.12, "max_cost": 0.2},
+                  budget={"max_seconds": 240, "seconds": 240.0, "cost": 0.12},
                   extra={"attempt": 2, "retry_of": "x", "late": True, "missed_slots": 3})
     p = appmod.proposals.create(run_id=rid, tool="gmail_send", args={"to": "a"}, job_id=j["id"])
     appmod.proposals.create(run_id=rid, tool="gmail_send", args={"to": "b"}, job_id=j["id"])
@@ -157,6 +157,10 @@ def test_failed_run_that_will_retry_is_not_news_and_pause_is() -> None:
     appmod.jobs.pause(j["id"], "paused after 3 failed runs: e")
     ev = client.get("/inbox/notify", params={"since": t - 3600}).json()
     assert any(e["kind"] == "job_paused" and e["id"].startswith(f"job:{j['id']}:") for e in ev)
+    x = mkjob("expiring")
+    appmod.jobs.pause(x["id"], "expired")
+    ev = client.get("/inbox/notify", params={"since": t - 3600}).json()
+    assert [e["body"] for e in ev if e["id"].startswith(f"job:{x['id']}:")] == ["Its schedule expired. Switch it back on to keep it running."]
 
 
 def test_notify_setting_round_trips() -> None:

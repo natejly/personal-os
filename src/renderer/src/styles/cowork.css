@@ -184,7 +184,7 @@
 .desk-checklist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .desk-checklist li { display: flex; gap: 8px; }
 .desk-checklist li.dropped, .desk-checklist li.rejected { opacity: 0.5; }
-.desk-mark { flex: none; font-family: var(--mono); font-size: 12px; color: var(--text-faint); padding-top: 1px; }
+.desk-mark { flex: none; display: inline-flex; color: var(--text-faint); padding-top: 2px; }
 .desk-checklist li.done .desk-mark { color: var(--chart-3, var(--text-muted)); }
 .desk-checklist li.consumed .desk-mark { color: var(--accent); }
 .desk-checklist li.failed .desk-mark { color: var(--danger); }

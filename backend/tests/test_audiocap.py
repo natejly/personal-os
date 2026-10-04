@@ -238,6 +238,16 @@ def test_input_specs() -> None:
     assert not audiocap.is_native_input(audiocap.device_input("0"))
 
 
+def test_a_native_uid_reaches_ffmpeg_by_its_name() -> None:
+    # ffmpeg's avfoundation input cannot open a uniqueID; the listed name is what it matches.
+    saved = audiocap._dev_cache
+    audiocap._dev_cache = (audiocap.now(), [{"index": "BlackHole2ch_UID", "name": "BlackHole 2ch"}])
+    try:
+        assert audiocap.device_input("BlackHole2ch_UID") == ["-f", "avfoundation", "-i", ":BlackHole 2ch"]
+    finally:
+        audiocap._dev_cache = saved
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

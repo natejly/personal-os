@@ -131,7 +131,7 @@ class TitleJobs:
         except asyncio.CancelledError:
             raise
         except Exception as e:  # noqa: BLE001
-            log.debug("title job for %s failed: %s", conv_id, e)
+            log.warning("title job for %s failed: %s", conv_id, e)
 
     async def stop(self) -> None:
         for ev in self._cancels.values():

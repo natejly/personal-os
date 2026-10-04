@@ -54,7 +54,7 @@ Four consequences we accept deliberately:
    that a restart silently orphans.
 3. **Long autonomy is bought by chaining bounded replies, never by raising `maxToolRounds`.** `maxToolRounds`
    stays 25 (`llm.py:54`). A desk that exhausts a reply's budget mid-plan starts a *fresh* bounded run against
-   the same approved plan, guarded by a desk-level turn and cost budget. That is a standing project anti-goal
+   the same approved plan, guarded by a desk-level turn budget. That is a standing project anti-goal
    honoured, not dodged.
 4. **The plan binds arguments, not intentions.** Approving step 3 approves `sha256(canonical(args))` for that
    one call, once. A different argument, a second use, or an unplanned call still shows a card.
@@ -339,7 +339,7 @@ CREATE TABLE IF NOT EXISTS desks (
   workspace       TEXT NOT NULL,                   -- "cowork/<id>", RELATIVE to db.data_dir
   turn            INTEGER NOT NULL DEFAULT 0,
   cost            REAL NOT NULL DEFAULT 0,
-  budget          TEXT NOT NULL DEFAULT '{}',      -- {maxTurns, maxCost} overriding the global caps
+  budget          TEXT NOT NULL DEFAULT '{}',      -- {maxTurns} overriding the global cap
   last_error      TEXT,
   archived        INTEGER NOT NULL DEFAULT 0,
   created_at      REAL NOT NULL,
@@ -1239,7 +1239,7 @@ export interface ActionPlan { plan_id: string; call_id: string | null; conversat
   status: 'pending'|'approved'|'rejected'|'superseded'; tainted: boolean
   expected_taint: string[]; note: string; decided_by: string | null
   created_at: number; decided_at: number | null; steps: ActionPlanStep[] }
-export interface DeskBudget { maxTurns?: number; maxCost?: number }
+export interface DeskBudget { maxTurns?: number }
 export interface Desk { id: string; conversation_id: string; project_id: string | null; title: string
   brief: string; status: DeskStatus; status_reason: string; headline: string; question: string
   autonomy: DeskAutonomy; plan_id: string | null; run_id: string | null; turn: number; cost: number
@@ -1377,7 +1377,7 @@ case 'desk_handoff':  return prev
 | `components/DeskReview.tsx` | The Output tab and the reason the feature exists. One card per output: title, path, size, preview excerpt, checkbox, and a `.seg` destination of **Doc / Append to doc / Document / Download**. Footer: **Accept selected**, **Send back** (prompts for a note, posts it as a message and resumes — review is a loop, not a binary), **Reject**. After accept, a verified tick or a red *"could not verify the write"* row, read from the response, never assumed. |
 | `components/ActionPlanCard.tsx` | One component, two mount points (inline in chat via `ToolEvents`, and the Plan tab). Header, intent, a **computed side-effect strip** from each step's danger (*"sends 1 email · writes 2 files · reads the web"*), a taint banner when `expected_taint` is non-empty, then numbered step rows with a drop checkbox, tool chip, `why`, and an **Edit** disclosure turning the arguments into a validated JSON textarea. Footer: **Approve & run** (⌘⇧A), **Approve with changes**, **Reject** (⌘⇧D) + a note. Also exports `AskUserCard` for `desk_ask`. Takes actions via single selectors only (`useStore((s) => s.decidePlan)`) and keeps all edit state local — `Message.tsx:10-11` documents that any broader subscription in that subtree re-renders every message per streamed token. |
 | `components/PlanModeToggle.tsx` | `ListChecks` icon, `aria-pressed`, ⌘⇧P, cycling `off → auto → always`, spreading the old settings object. |
-| `components/HomeCowork.tsx` | The Today card listing `deskInbox`, gated by `homeModuleOn(settings, 'cowork')`. |
+| `components/AgentInbox.tsx` | The Today card. It lists `deskInbox` rows under "Needs you" beside approvals and proposals; a desk event whose run has a pending approval is dropped so it is not shown twice. |
 | `styles/cowork.css` | `.cowork-body` (`min-height: 0; overflow: hidden`, so the `.app` grid row stays definite — `styles.css:120-126`), `.cowork-side`, `.desk-row`/`.active`, `.desk-ring-*`, `.desk-tabs`, `.desk-file-*`, `.diff-add`/`.diff-del`, `.desk-output-*`. `var(--token)` colours only; every class feature-prefixed, because `styles.css` is one flat namespace. |
 
 Edited components: `ToolEvents.tsx` (icons for the nine tools; route a pending `propose_plan` to
@@ -1386,7 +1386,7 @@ Edited components: `ToolEvents.tsx` (icons for the nine tools; route a pending `
 when `blocked_by === 'plan_mode'`); `Message.tsx` (render `{message.plan && <ActionPlanCard …/>}` as a sibling
 of `<ToolEvents>` inside `.markdown`, `Message.tsx:24-32`); `ToolPermissions.tsx` (`GROUP_ICON` gains
 `plan`/`desk`, `DANGER_LABEL` gains `'plan' → 'Always asks'`); `Composer.tsx` (mount `PlanModeToggle`);
-`HomeView.tsx` (`<HomeCowork/>`); `styles.css` (an `/* ---------- Action plans ---------- */` block after the
+`HomeView.tsx`; `styles.css` (an `/* ---------- Action plans ---------- */` block after the
 Approvals section at `styles.css:989-995`, reusing the `.approval` recipe, with `.aplan-*` names).
 
 ### 7.7 Shell wiring
@@ -1397,8 +1397,7 @@ Approvals section at `styles.css:989-995`, reusing the `.approval` recipe, with 
   does not exist. `libCount` (`Sidebar.tsx:103-111`) gains `if (v === 'cowork') return needsYouCount || null`
   before the fallthrough, which otherwise shows a nonsense document count.
 * `modules.ts` — `OPTIONAL_VIEWS` gains `{ view: 'cowork', label: 'Cowork' }` (SettingsModal renders the
-  checkbox from this array, `SettingsModal.tsx:125-130`, with no edit there) and `HOME_MODULES` gains
-  `{ key: 'cowork', label: 'Cowork desks' }`.
+  checkbox from this array, `SettingsModal.tsx:125-130`, with no edit there) (the Today card is the Agent inbox, which also lists desks; there is no separate Today toggle).
 * `src/main/index.ts:169` — `{ label: 'Cowork', accelerator: 'CmdOrCtrl+Shift+K', click: () => sendMenu('view:cowork') }`
   after the Activity ⌘9 item. ⌘0–⌘9 are exhausted (`index.ts:160-169`) and ⌘⇧C/⌘B/⌘I are taken
   (`index.ts:171-173`); ⌘⇧K is free. No renderer change — `store.ts:373` routes any `view:*`.
@@ -1516,7 +1515,7 @@ status at `done`, and that a `plan` event moves it to `awaiting-plan` and `plan_
 
 **WP-9 · Cowork components**
 Owns: `components/CoworkView.tsx`, `DeskRail.tsx`, `DeskDetail.tsx`, `DeskPlan.tsx`, `DeskFiles.tsx`,
-`DeskReview.tsx`, `ActionPlanCard.tsx`, `PlanModeToggle.tsx`, `HomeCowork.tsx`, `styles/cowork.css`.
+`DeskReview.tsx`, `ActionPlanCard.tsx`, `PlanModeToggle.tsx`, `styles/cowork.css`.
 Depends on: WP-7, WP-8.
 Accept: `npm run typecheck` green; every screen state in §7.8 reachable; `ActionPlanCard` has no store
 subscription in its render path.
@@ -1583,8 +1582,8 @@ from `GET /conversations` and present with `?include_desks=true`; three desks ru
 unanswered approval with **zero watchers** parks after `parkAfterSeconds` and the desk goes `blocked` with the
 run ended and no task alive; the same approval with a watcher attached does **not** park; deciding it resumes
 the desk through the same `resume()` the recovery path uses; a chained turn publishes `desk_handoff` before
-`done`; `_should_chain` refuses a turn that consumed no step and lands in `failed`; the desk cost budget caps
-the chain even when turns remain; `desk_ask` / `desk_done` set `blocked` / `review`; accept is exactly-once
+`done`; `_should_chain` refuses a turn that consumed no step and lands in `failed`; the desk turn budget caps
+the chain; `desk_ask` / `desk_done` set `blocked` / `review`; accept is exactly-once
 under a repeated POST and read-back verification turns a truncated write into `promote_failed`; `doc_append`
 creates a pending revision and does not touch the doc; deleting without `purge` leaves the workspace on disk.
 
@@ -1610,8 +1609,8 @@ creates a pending revision and does not touch the doc; deleting without `purge` 
    `RESERVED_TOOL_NAMES` is still maintained because its test enforces it.
 6. **No faithful tool-message replay on resume.** A resumed desk gets a prose ledger (§3.11), not reconstructed
    `assistant(tool_calls)` / `tool` pairs.
-7. **No cross-desk cost accounting.** Each desk has its own turn and cost budget; four desks can spend four
-   budgets concurrently. A shared parent budget is a later increment.
+7. **No spend limits.** Cost is reported (desk and Usage) but never stops a run; desks are bounded by turns,
+   rounds, time and tokens.
 8. **No raising `maxToolRounds`, no auto-enabled skills, no heartbeat, no pixel clicking.** Standing project
    anti-goals. The notification in §7.7 fires on a transition from an event already flowing, and the re-attach
    in §7.4 is a bounded retry on a known handoff — neither is a poller.

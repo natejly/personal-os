@@ -21,6 +21,8 @@ import tempfile
 import time
 from typing import Any, Awaitable, Callable
 
+from . import permrules
+
 ALLOWED = frozenset({"fs_glob", "fs_grep", "read_local_file", "fs_edit", "search_documents", "web_search", "fetch_url"})
 MAX_CALLS = 50
 MAX_SECONDS = 300
@@ -173,10 +175,21 @@ class Bridge:
         # The same effective-mode rules the model's own calls get: taint upgrades on -> ask.
         # Args go too, so a cancel of a queued send is visible to the gate and a list is not.
         mode = self.tb.gate(name, raw, self.ctx, args)
+        # Then the user's argument-pattern rules and this chat's session grants: a deny refuses, an ask rule cards.
+        cfg = self.ctx.get("settings") or {}
+        roots = [r for r in (cfg.get("workspaceRoots") or []) if isinstance(r, str) and r]
+        if self.ctx.get("desk_id") and (ws := getattr(self.tb, "workspace", None)) is not None:
+            roots.append(str(ws.desk_root(self.ctx["desk_id"])))
+        perm = permrules.resolve(name, args, mode, mode != raw, rules=cfg.get("permissionRules"), roots=roots,
+                                 conv=self.ctx.get("conversation_id"))
+        if perm.refusal:
+            return self._refuse(name, f"{name} was refused: {perm.refusal}")
+        mode = perm.mode
         if mode == "ask":
             if self.approve is None or self.ctx.get("proposal_only"):
                 return self._refuse(name, f"{name} needs the user's approval and there is nobody to ask in this run.")
-            forced = raw != "ask"
+            # An ask rule's card is never lifted by skip-permissions, the same as in the reply loop.
+            forced = perm.forced or perm.kind == "rule"
             self._pending += 1
             if self._pending == 1:
                 self._since = time.monotonic()
@@ -188,7 +201,9 @@ class Bridge:
                     self._paused += time.monotonic() - self._since
             if not allowed:
                 return self._refuse(name, f"the user declined {name}.")
-        result = await self.tb.call(name, args, self.ctx)
+        # The run's own caller when the lane has one (undo snapshot, idempotency journal), else the toolbox directly.
+        call = self.ctx.get("bridge_call")
+        result = await (call(name, args, self.ctx) if call else self.tb.call(name, args, self.ctx))
         if self.tb.taints(name) and not (isinstance(result, dict) and result.get("error")):
             self.ctx.setdefault("taint_sources", []).append(name)  # appended every time: the fence reads growth
         self.log.append({"tool": name, "ok": not (isinstance(result, dict) and result.get("error"))})
@@ -216,7 +231,9 @@ async def run(tb: Any, ctx: dict[str, Any], code: str, timeout: int, wanted: lis
         out["tools_refused"] = refused
     if bridge.full_stdout is not None and getattr(tb, "results", None) is not None and ctx.get("conversation_id"):
         row = tb.results.store(ctx["conversation_id"], ctx.get("message_id"), "run_python", bridge.full_stdout,
-                               {"type": "string", "chars": len(bridge.full_stdout)})
+                               {"type": "string", "chars": len(bridge.full_stdout),
+                                # Paging it later has to taint again, even after the chat's banner is cleared.
+                                **({"untrusted": True} if ctx.get("tainted") else {})})
         out["result_id"] = row["id"]
         out["note"] = (f"stdout was {len(bridge.full_stdout)} characters; the middle is cut. The whole text is behind "
                        f"result_id {row['id']} (read_tool_result with an offset).")

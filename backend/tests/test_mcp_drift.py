@@ -88,6 +88,31 @@ def test_poisoned_change_is_quarantined_and_filtered() -> None:
     assert store.tool(slug)["quarantined_at"]
 
 
+def test_poisoned_new_tool_is_quarantined() -> None:
+    store, sid, slug = fresh()
+    out = sync(store, sid, EVIL)
+    assert out["added"] == [slug]
+    review = mcp_drift.apply_review(store, slug)
+    assert review and review["quarantine"] and store.tool(slug)["quarantined_at"]
+    assert mcp_drift.offerable(store.tools()) == []
+    assert mcp_drift.view(store, store.tool(slug))["quarantined"]
+    mcp_drift.accept(store, slug)
+    assert mcp_drift.offerable(store.tools()) and mcp_drift.view(store, store.tool(slug)) is None
+    clean_store, clean_sid, clean_slug = fresh()
+    sync(clean_store, clean_sid, "Send an email.")
+    mcp_drift.apply_review(clean_store, clean_slug)
+    assert not clean_store.tool(clean_slug)["quarantined_at"] and clean_store.evals(tool_slug=clean_slug) == []
+
+
+def test_grant_during_unread_drift_stays_stale() -> None:
+    store, sid, slug = fresh()
+    sync(store, sid, "Send an email.")
+    sync(store, sid, "Send an email to someone.")  # warn-free drift: offered, not yet reviewed
+    store.set_grant(slug, "on", "global")
+    eff = store.effective_mode(slug)
+    assert eff["stale"] and eff["mode"] == "ask"
+
+
 def test_benign_change_shows_diff_without_quarantine() -> None:
     store, sid, slug = fresh()
     sync(store, sid, "Send an email.")

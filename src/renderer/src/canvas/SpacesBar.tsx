@@ -117,20 +117,8 @@ function Tab({ canvasId, index }: { canvasId: string; index: number }): JSX.Elem
         />
       )}
       {index < 9 && <span className="space-count">⌃{index + 1}</span>}
-      {/* The padlock replaces the delete button rather than joining it: `deleteSpace` refuses a
-          locked space, so the trash would be a button that does nothing but toast. */}
-      {locked ? <Lock size={11} className="space-lock" /> : active && (
-        <button
-          className="icon-btn ghost sm danger"
-          title="Delete space"
-          onClick={(e) => {
-            e.stopPropagation()
-            if (count === 0 || confirm(`Delete "${name}" and its ${count} windows?`)) void useCanvas.getState().deleteSpace(canvasId)
-          }}
-        >
-          <Trash2 size={11} />
-        </button>
-      )}
+      {/* Delete lives in the sidebar's Space actions menu, not beside the name on the tab you click to switch. */}
+      {locked && <Lock size={11} className="space-lock" />}
     </div>
   )
 }

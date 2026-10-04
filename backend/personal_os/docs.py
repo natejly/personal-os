@@ -460,17 +460,19 @@ class Docs:
         q = (query or "").strip()
         if not q:
             return []
-        match = " OR ".join(f'"{w}"' for w in re.findall(r"\w+", q)) or f'"{q}"'
+        # Prefix terms, so search-as-you-type finds "Alpha" from "alph".
+        match = " OR ".join(f'"{w}"*' for w in re.findall(r"\w+", q)) or f'"{q}"'
         isolated = is_isolated(self.db, project_id)
         with self.db.tx() as c:
             try:
                 rows = c.execute(
-                    "SELECT f.doc_id, snippet(docs_fts, 1, '', '', ' … ', 24) AS snippet, bm25(docs_fts) AS score "
+                    "SELECT f.doc_id, snippet(docs_fts, 1, '', '', ' … ', 12) AS snippet, bm25(docs_fts) AS score "
                     "FROM docs_fts f WHERE docs_fts MATCH ? ORDER BY score LIMIT ?", (match, max(1, limit) * 3)).fetchall()
             except Exception:  # malformed FTS expression — fall back to LIKE
                 rows = c.execute(
-                    "SELECT id AS doc_id, substr(content,1,200) AS snippet, 0 AS score FROM docs "
-                    "WHERE deleted_at IS NULL AND (content LIKE ? OR title LIKE ?) LIMIT ?", (f"%{q}%", f"%{q}%", max(1, limit) * 3)).fetchall()
+                    # The window starts a little before the match, so the snippet shows why the doc matched.
+                    "SELECT id AS doc_id, substr(content, max(1, instr(lower(content), lower(?)) - 40), 120) AS snippet, 0 AS score FROM docs "
+                    "WHERE deleted_at IS NULL AND (content LIKE ? OR title LIKE ?) LIMIT ?", (q, f"%{q}%", f"%{q}%", max(1, limit) * 3)).fetchall()
             out = []
             for r in rows:
                 d = c.execute("SELECT id, title, project_id FROM docs WHERE id=? AND deleted_at IS NULL", (r["doc_id"],)).fetchone()
@@ -732,9 +734,9 @@ class Docs:
         return self.folders()
 
     def delete_folder(self, path: str, delete_docs: bool = False, scope: str | None = "") -> list[dict[str, Any]]:
-        """Remove a folder and its subfolders. Its docs move up to the parent unless asked otherwise:
-        losing a folder must not silently lose what was written in it. With delete_docs they go to the
-        trash (each one restorable on its own) rather than being erased."""
+        """Remove a folder. Unless asked otherwise its docs and subfolders move up one level, keeping
+        their own shape: losing a folder must not silently lose what was written or filed in it. With
+        delete_docs the whole subtree goes, its docs to the trash (each one restorable on its own)."""
         src = folder_path(path)
         sc = scope_key(scope)
         if not src:
@@ -747,11 +749,21 @@ class Docs:
                 c.execute(
                     f"UPDATE docs SET deleted_at=?, deleted_with=NULL WHERE deleted_at IS NULL"
                     f" AND (folder=? OR substr(folder, 1, ?) = ?) AND {proj_match}", (now(), src, len(src) + 1, src + "/", *proj_args))
-            else:
-                c.execute(f"UPDATE docs SET folder=? WHERE deleted_at IS NULL AND (folder=? OR substr(folder, 1, ?) = ?) AND {proj_match}",
-                          (parent, src, len(src) + 1, src + "/", *proj_args))
+                c.execute("DELETE FROM doc_folders WHERE scope=? AND (path=? OR substr(path, 1, ?) = ?)",
+                          (sc, src, len(src) + 1, src + "/"))
+                return self.folders()
+            up = parent + "/" if parent else ""
+            c.execute(f"UPDATE docs SET folder=? WHERE deleted_at IS NULL AND folder=? AND {proj_match}", (parent, src, *proj_args))
+            c.execute(f"UPDATE docs SET folder=? || substr(folder, ?) WHERE deleted_at IS NULL AND substr(folder, 1, ?) = ? AND {proj_match}",
+                      (up, len(src) + 2, len(src) + 1, src + "/", *proj_args))
+            rows = c.execute("SELECT path, created_at FROM doc_folders WHERE scope=? AND substr(path, 1, ?) = ?",
+                             (sc, len(src) + 1, src + "/")).fetchall()
             c.execute("DELETE FROM doc_folders WHERE scope=? AND (path=? OR substr(path, 1, ?) = ?)",
                       (sc, src, len(src) + 1, src + "/"))
+            # A same-named folder already in the parent absorbs the moved one.
+            for r in rows:
+                c.execute("INSERT OR IGNORE INTO doc_folders(scope, path, created_at) VALUES(?,?,?)",
+                          (sc, up + r["path"][len(src) + 1:], r["created_at"]))
         return self.folders()
 
     def forget_scope(self, project_id: str) -> None:

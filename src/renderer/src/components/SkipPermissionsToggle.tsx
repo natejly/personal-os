@@ -1,15 +1,16 @@
 import { ShieldOff } from 'lucide-react'
-import { useStore } from '../store'
+import { PAGE_AGENT_DRAFT, useStore } from '../store'
 
 /**
- * One switch for the chat the composer belongs to. It never writes the global default: with no
- * conversation yet (a brand-new chat) the store parks the value and `send` applies it to the chat it
- * creates. Shown: the chat's (or the draft's) own value, else the global default.
+ * One switch for the chat the composer belongs to; the chat's own value wins over the global one.
+ * A chat with no row yet (a brand-new chat, the ⌘I panel before its first message) parks the choice
+ * and the send that creates the row writes it there. The global default lives in Settings only.
  */
 export default function SkipPermissionsToggle({ conversationId }: { conversationId?: string }): JSX.Element {
   const convId = useStore((s) => conversationId ?? s.focusedConversationId)
   const convSkip = useStore((s) => {
     const id = conversationId ?? s.focusedConversationId
+    if (id === PAGE_AGENT_DRAFT) return s.pageAgentChatSettings.skipPermissions
     return id ? s.sessions[id]?.conversation.settings.skipPermissions : s.draftChatSettings.skipPermissions
   })
   const globalOn = useStore((s) => !!s.settings.skipPermissions)

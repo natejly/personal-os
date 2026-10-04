@@ -258,18 +258,16 @@ def _windows(kind: str, ref: str) -> int:
         return c.execute("SELECT COUNT(*) FROM canvas_windows WHERE kind=? AND ref_id=?", (kind, ref)).fetchone()[0]
 
 
-def test_deleting_a_chat_board_widget_and_project_sweeps_windows() -> None:
+def test_deleting_a_chat_and_project_sweeps_windows() -> None:
     cv = appmod.canvases.list()[0]["id"] if appmod.canvases.list() else appmod.canvases.create("c")["id"]
     conv = appmod.convos.create(None, "t", "m")["id"]
-    board = appmod.boards.create("b")["id"]
     proj = appmod.projects.create("p")["id"]
-    for kind, ref in (("chat", conv), ("board", board), ("project", proj)):
+    for kind, ref in (("chat", conv), ("project", proj)):
         appmod.canvases.add_window(cv, kind, ref)
         assert _windows(kind, ref) == 1
     client.delete(f"/conversations/{conv}")
-    client.delete(f"/boards/{board}")
     client.delete(f"/projects/{proj}")
-    assert (_windows("chat", conv), _windows("board", board), _windows("project", proj)) == (0, 0, 0)
+    assert (_windows("chat", conv), _windows("project", proj)) == (0, 0)
 
 
 # ---- 12. Docs writers: stale project is a 404 -----------------------------------------------------------------
@@ -295,7 +293,16 @@ def test_negative_limits_are_clamped() -> None:
     assert len(client.get("/runs?status=all&limit=-1").json()) <= 1
 
 
-# ---- 15. Boards ---------------------------------------------------------------------------------------------------
-def test_board_routes_do_not_500_on_bad_ids() -> None:
-    assert client.post("/boards/nope/cards", json={"title": "x", "column_id": "nope"}).status_code in (400, 404)
-    assert client.post("/boards/nope/columns", json={"name": "x"}).status_code in (400, 404)
+# ---- 16. Recap ----------------------------------------------------------------------------------------------------
+def test_recap_runs_without_a_key_and_marks_google_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: list[dict[str, Any]] = []
+
+    async def fake(cfg: dict[str, Any], model: str, facts: dict[str, Any]) -> str:
+        seen.append(facts)
+        return "recap"
+
+    monkeypatch.setattr(appmod, "generate_recap", fake)
+    monkeypatch.setattr(appmod.google, "status", lambda: {"connected": False})
+    appmod.db.set_settings({"apiKey": "", "defaultModel": "m"})
+    assert client.get("/recap?force=true").json()["content"] == "recap"
+    assert "not connected" in seen[0]["calendar_next_3_days"] and "not connected" in seen[0]["unread_mail"]

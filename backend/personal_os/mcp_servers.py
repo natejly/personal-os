@@ -64,8 +64,7 @@ RESERVED_TOOL_NAMES = frozenset({
     "google_drive_search", "google_drive_read",
     "google_docs_search", "google_docs_read", "google_docs_create", "google_docs_append",
     "google_sheets_read", "google_sheets_write", "google_sheets_create",
-    "board_list", "board_add_card", "board_move_card", "board_create",
-    "board_claim", "board_comment", "board_release", "propose_times_draft",
+    "propose_times_draft",
     "sandbox_exec", "sandbox_write_file", "sandbox_read_file", "sandbox_list_files",
     "sandbox_put_document", "sandbox_export_file", "sandbox_reset", "sandbox_checkpoint", "sandbox_restore",
     "doc_list", "doc_search", "doc_read", "doc_create", "doc_edit",
@@ -502,7 +501,8 @@ class McpServers:
         if scope not in SCOPES:
             raise ValueError(f"scope must be one of {SCOPES}")
         tool = self.tool(tool_slug)
-        h = schema_hash if schema_hash is not None else (tool["schema_hash"] if tool else "")
+        # Unpinned: bind to the shape the user last reviewed, so a grant given while a drift is unread stays stale.
+        h = schema_hash if schema_hash is not None else ((tool["reviewed_hash"] or tool["schema_hash"]) if tool else "")
         slug = tool["slug"] if tool else tool_slug
         t = now()
         with self.db.tx() as c:

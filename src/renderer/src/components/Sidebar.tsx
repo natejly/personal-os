@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Pin, ArchiveRestore, MessageSquare, MessageSquarePlus, Search, Settings, PanelLeftClose, FileText, Files, Plus, Folder, FolderKanban, ChevronRight, Home, KanbanSquare, LayoutDashboard, Library, Mic, Users, MonitorDot, Globe } from 'lucide-react'
+import { Pin, ArchiveRestore, Trash2, MessageSquare, MessageSquarePlus, Search, Settings, PanelLeftClose, FileText, Files, Plus, Folder, FolderKanban, ChevronRight, Home, Gauge, Library, Mic, Users, MonitorDot, Globe } from 'lucide-react'
 import { useShallow } from 'zustand/react/shallow'
 import GrainLogo from './GrainLogo'
 import { useStore, type View } from '../store'
@@ -33,7 +33,7 @@ function Snippet({ hit }: { hit?: ChatSearchHit }): JSX.Element | null {
 /** Rows shown under a project group before the "View all" link takes over. */
 const PROJECT_ROWS = 4
 /**
- * `kind` makes the row a canvas drag source (contract §7, payload kind 'nav'). Boards and Dashboards
+ * `kind` makes the row a canvas drag source (contract §7, payload kind 'nav'). Dashboards
  * have none: their widgets need a `ref_id`, so a bare drag would open a window with nothing in it.
  * A row without a `view` (Web) exists only as a widget, so it only shows in canvas mode and a click
  * opens its window directly.
@@ -48,8 +48,7 @@ type ProjectRow =
 // Todos, Calendar and Mail live in the title bar instead (AppSwitcher).
 const SHELL_NAV: NavEntry[] = [
   { view: 'home', label: 'Today', icon: <Home size={15} />, kind: 'recap' },
-  { view: 'boards', label: 'Boards', icon: <KanbanSquare size={15} /> },
-  { view: 'dashboards', label: 'Dashboards', icon: <LayoutDashboard size={15} /> },
+  { view: 'dashboards', label: 'Dashboards', icon: <Gauge size={15} /> },
   { view: 'docs', label: 'Files', icon: <Files size={15} /> },
   // No `kind`: no `meeting` widget kind ships in this slice, and a kind outside the WidgetKind
   // union would not typecheck — so the row is not a canvas drag source.
@@ -172,6 +171,12 @@ export default function Sidebar(): JSX.Element {
     if (archivedOpen) void api.conversations.listArchived().then(setArchived).catch(() => undefined)
   }, [archivedOpen, archiveBump])
   const archiveChat = useStore((s) => s.archiveChat)
+  const deleteChat = useStore((s) => s.deleteChat)
+  // Search narrows the archived rows by title too, like the active list.
+  const shownArchived = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    return q ? archived.filter((c) => c.title.toLowerCase().includes(q)) : archived
+  }, [archived, query])
   // ⌘⇧F: the store opens the sidebar; this brings the search field up. The tick seen at mount is
   // skipped, or a remount would reopen the search for a press handled before it.
   const searchTick = useStore((s) => s.sidebarSearchTick)
@@ -190,7 +195,7 @@ export default function Sidebar(): JSX.Element {
   // fresh array with the same counts does not re-render.
   const moduleBadges = useStore(useShallow((s) => NAV_MODULES.map((m) => m.nav?.badge?.(s) ?? null)))
   const libCount = (v: View): number | null => {
-    if (v === 'home' || v === 'boards' || v === 'dashboards' || v === 'activity') return null
+    if (v === 'home' || v === 'dashboards' || v === 'activity') return null
     const mi = NAV_MODULES.findIndex((m) => m.view?.id === v)
     if (mi >= 0) return moduleBadges[mi]
     // Counted off the inbox rather than `desks`, which is only loaded once Cowork has been opened:
@@ -205,7 +210,7 @@ export default function Sidebar(): JSX.Element {
 
   // A row without a `view` (Web) exists only as a canvas widget: a click opens its window directly.
   const navItem = (n: NavEntry): JSX.Element => (
-    <button key={n.label} className={`nav-item ${n.view && view === n.view ? 'active' : ''}`}
+    <button key={n.label} className={`nav-item ${n.view && view === n.view ? 'active' : ''}`} aria-current={n.view && view === n.view ? 'page' : undefined}
       onClick={() => (n.view ? setView(n.view) : void useCanvas.getState().openWindow(n.kind as WidgetKind))}
       {...(n.kind ? dragProps({ kind: 'nav', id: n.kind, label: n.label }) : {})}>
       {n.icon}<span>{n.label}</span>
@@ -232,12 +237,19 @@ export default function Sidebar(): JSX.Element {
       <div className="sidebar-scroll">
       <nav className="nav">
         {NAV.filter((n) => (n.view ? n.view === 'home' || !viewHidden(settings, n.view) : inCanvas)).map(navItem)}
+        {/* Hidden views leave no trace otherwise; this is the way back to them. */}
+        {NAV.some((n) => n.view && n.view !== 'home' && viewHidden(settings, n.view)) && (
+          <button className="nav-item nav-more" title="Turn on hidden views in Settings → Modules"
+            onClick={() => useStore.getState().openSettings('modules')}>
+            <Plus size={15} /><span>More modules…</span>
+          </button>
+        )}
       </nav>
 
       <SidebarSpaces />
 
       <div className="section-row">
-        <button className="section-toggle" onClick={() => setProjectsOpen((o) => !o)}>
+        <button className="section-toggle" aria-expanded={projectsOpen} onClick={() => setProjectsOpen((o) => !o)}>
           <ChevronRight size={12} className={projectsOpen ? 'rot90' : ''} /><FolderKanban size={13} /> Projects
         </button>
         <button className="icon-btn ghost sm" aria-label="New project" title="New project" onClick={() => setProjectModal({ mode: 'create' })}><Plus size={14} /></button>
@@ -249,7 +261,7 @@ export default function Sidebar(): JSX.Element {
             const rows = rowsByProject[p.id] ?? []
             return (
               <div key={p.id} className="project-group">
-                <div className={`project-item ${view === 'project' && projectViewId === p.id ? 'active' : ''}`} onClick={() => openProject(p.id)} role="button" tabIndex={0}
+                <div className={`project-item ${view === 'project' && projectViewId === p.id ? 'active' : ''}`} aria-current={view === 'project' && projectViewId === p.id ? 'page' : undefined} onClick={() => openProject(p.id)} role="button" tabIndex={0}
                   {...dragProps({ kind: 'project', id: p.id, label: p.name })}>
                   <Folder size={13} style={{ color: p.color }} />
                   <span className="project-name">{p.name}</span>
@@ -273,7 +285,7 @@ export default function Sidebar(): JSX.Element {
       )}
 
       <div className="section-row">
-        <button className="section-toggle" onClick={() => setRecentsOpen((o) => !o)}>
+        <button className="section-toggle" aria-expanded={recentsOpen} onClick={() => setRecentsOpen((o) => !o)}>
           <ChevronRight size={12} className={recentsOpen ? 'rot90' : ''} /><MessageSquare size={13} /> Recents
         </button>
         <button
@@ -339,7 +351,7 @@ export default function Sidebar(): JSX.Element {
           <section>
             <h4>In messages</h4>
             {inMessages.map((h) => (
-              <div key={h.id} className={`convo-item ${h.id === focusedId && view === 'chat' ? 'active' : ''}`} onClick={() => openConversation(h.id)} role="button" tabIndex={0}
+              <div key={h.id} className={`convo-item ${h.id === focusedId && view === 'chat' ? 'active' : ''}`} aria-current={h.id === focusedId && view === 'chat' ? 'page' : undefined} onClick={() => openConversation(h.id)} role="button" tabIndex={0}
                 onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openConversation(h.id) } }}>
                 <span className="convo-title">
                   {h.project_id && projectById[h.project_id] && <span className="project-dot sm" style={{ background: projectById[h.project_id].color }} title={projectById[h.project_id].name} />}
@@ -352,13 +364,14 @@ export default function Sidebar(): JSX.Element {
           </section>
         )}
         <section>
-          <h4 className="archived-head"><button className="section-toggle" onClick={() => setArchivedOpen((o) => !o)}><ChevronRight size={11} className={archivedOpen ? 'rot90' : ''} /> Archived</button></h4>
-          {archivedOpen && archived.length === 0 && <p className="empty-hint">Nothing archived.</p>}
-          {archivedOpen && archived.map((c) => (
+          <h4 className="archived-head"><button className="section-toggle" aria-expanded={archivedOpen} onClick={() => setArchivedOpen((o) => !o)}><ChevronRight size={11} className={archivedOpen ? 'rot90' : ''} /> Archived</button></h4>
+          {archivedOpen && shownArchived.length === 0 && <p className="empty-hint">{archived.length ? 'No archived chats match.' : 'Nothing archived.'}</p>}
+          {archivedOpen && shownArchived.map((c) => (
             <div key={c.id} className="convo-item archived" role="button" tabIndex={0} onClick={() => void selectChat(c.id)}
               onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); void selectChat(c.id) } }}>
               <span className="convo-title">{c.title}</span>
               <button className="icon-btn ghost" aria-label={`Unarchive chat: ${c.title}`} title="Unarchive" onClick={(e) => { e.stopPropagation(); void archiveChat(c.id, false) }}><ArchiveRestore size={13} /></button>
+              <button className="icon-btn ghost" aria-label={`Delete chat: ${c.title}`} title="Delete" onClick={(e) => { e.stopPropagation(); void deleteChat(c.id).then(() => setArchived((a) => a.filter((x) => x.id !== c.id))) }}><Trash2 size={13} /></button>
             </div>
           ))}
         </section>

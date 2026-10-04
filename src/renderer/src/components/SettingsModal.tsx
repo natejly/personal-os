@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
-import { X, Eye, EyeOff, Plug, Cpu, Brain, Mail, Mic, Wrench, LayoutGrid, SlidersHorizontal, Database, RotateCcw, RefreshCw, type LucideIcon } from 'lucide-react'
+import { X, Download, Upload, Eye, EyeOff, Plug, Cpu, Brain, Mail, Mic, Wrench, LayoutGrid, SlidersHorizontal, Database, RotateCcw, RefreshCw, type LucideIcon } from 'lucide-react'
 import { useStore, type SettingsTab } from '../store'
 import { useOnboarding } from './onboarding/onboardingStore'
 import { api } from '../lib/api'
+import { downloadJson, pickJson } from '../lib/jsonFile'
+import { usePresets } from '../canvas/presets'
 import { HOME_MODULES, OPTIONAL_VIEWS } from '../modules'
 import { DEFAULT_HIDDEN_VIEWS, homeModuleOn } from '../moduleToggles'
 import { useModal } from '../lib/useModal'
@@ -26,6 +28,7 @@ import ScopeSelect from './ScopeSelect'
 import DataSettings from './DataSettings'
 import TrashPanel from './TrashPanel'
 import AdvancedRetrieval, { rebuildIndex } from './AdvancedRetrieval'
+import PlannerMailSettings from './PlannerMailSettings'
 
 type Tab = SettingsTab
 
@@ -72,6 +75,38 @@ function IndexStatusLine(): JSX.Element | null {
       <button className="ghost-btn" type="button" disabled={busy} onClick={() => void rebuild()}><RefreshCw size={14} /> {busy ? 'Rebuilding…' : 'Rebuild search index'}</button>
       <span className="muted small">Search index: {done} of {total} passages embedded ({st.mode}{st.model ? `, ${st.model}` : ', no embedding model'}).</span>
     </div>
+  )
+}
+
+/** Space presets as files: export one to a JSON file, or import one (it is added to the presets list, not opened). */
+function PresetFiles(): JSX.Element {
+  const presets = usePresets((s) => s.presets)
+  const toast = useStore((s) => s.toast)
+  useEffect(() => { void usePresets.getState().load() }, [])
+  const exportOne = async (p: { id: string; name: string }): Promise<void> => {
+    try { downloadJson(`${p.name.replace(/[^\w-]+/g, '-') || 'preset'}.grain-preset.json`, await api.presets.exportFile(p.id)) } catch (e) { toast((e as Error).message, 'error') }
+  }
+  const importOne = async (): Promise<void> => {
+    try {
+      const file = await pickJson()
+      if (!file) return
+      const r = await api.presets.importFile(file)
+      toast(`Imported preset "${r.preset.name}"`)
+      await usePresets.getState().load()
+    } catch (e) { toast((e as Error).message, 'error') }
+  }
+  return (
+    <section>
+      <h3>Space presets</h3>
+      <p className="muted small">Save a space as a preset from the sidebar, then share it as a file. Notes and dashboard widgets travel with it; chats never do.</p>
+      {presets.map((p) => (
+        <div className="test-row" key={p.id}>
+          <span>{p.name} <small className="muted">· {p.windows.length} window{p.windows.length === 1 ? '' : 's'}</small></span>
+          <button className="ghost-btn" type="button" onClick={() => void exportOne(p)}><Download size={14} /> Export</button>
+        </div>
+      ))}
+      <div className="test-row"><button className="ghost-btn" type="button" onClick={() => void importOne()}><Upload size={14} /> Import preset…</button></div>
+    </section>
   )
 }
 
@@ -147,11 +182,12 @@ export default function SettingsModal(): JSX.Element {
 
   const testConnection = async (): Promise<void> => {
     setTest({ state: 'testing' })
+    // Tests the draft without saving it: Cancel must still discard it. A blank key means the saved one.
     try {
-      await saveSettings({ baseUrl: draft.baseUrl, apiKey: draft.apiKey })
-      const list = await api.models()
-      setReplacingKey(false)
-      setTest({ state: 'ok', msg: `Connected. ${list.length} model${list.length === 1 ? '' : 's'} available.` })
+      const r = await api.setup.test({ provider: 'custom', baseUrl: draft.baseUrl, apiKey: draft.apiKey || null, model: draft.defaultModel })
+      if (!r.ok) return setTest({ state: 'fail', msg: r.error ?? 'The connection test failed.' })
+      const n = r.models?.length
+      setTest({ state: 'ok', msg: n == null ? 'Connected.' : `Connected. ${n} model${n === 1 ? '' : 's'} available.` })
     } catch (e) {
       setTest({ state: 'fail', msg: (e as Error).message })
     }
@@ -162,6 +198,8 @@ export default function SettingsModal(): JSX.Element {
     const accel = draft.gatherShortcut.trim()
     const applied = accel === settings.gatherShortcut.trim() ? null : await window.os.shortcuts.setGather(accel)
     if (applied) setShortcut(applied)
+    // A rejected accelerator is never saved; the old one stays bound and the reason shows under the field.
+    if (applied && !applied.ok) return setTab('behavior')
     const capAccel = (draft.quickCaptureShortcut ?? '').trim()
     const capApplied = capAccel === (settings.quickCaptureShortcut ?? '').trim() ? null : await window.os.shortcuts.setCapture(capAccel)
     if (capApplied) setCapShortcut(capApplied)
@@ -183,8 +221,6 @@ export default function SettingsModal(): JSX.Element {
     }
     // The active view can be removed from the sidebar; don't leave the app parked on an unreachable one.
     if ((draft.hiddenViews ?? [...DEFAULT_HIDDEN_VIEWS]).includes(view)) setView('home')
-    // The reason is printed under the shortcut field, so show that tab.
-    if (applied && !applied.ok) return setTab('behavior')
     setSettingsOpen(false)
   }
 
@@ -243,7 +279,7 @@ export default function SettingsModal(): JSX.Element {
               </label>
               <div className="test-row">
                 <button className="ghost-btn" onClick={() => void testConnection()} disabled={test.state === 'testing'}><Plug size={14} /> {test.state === 'testing' ? 'Testing…' : 'Test connection'}</button>
-                {test.msg && <span className={`test-msg ${test.state}`}>{test.msg}</span>}
+                {test.msg && <span className={`test-msg ${test.state}`} role={test.state === 'fail' ? 'alert' : 'status'}>{test.msg}</span>}
               </div>
               <div className="test-row">
                 <button className="ghost-btn" type="button" onClick={() => void rerunSetup()}><RotateCcw size={14} /> Run setup again</button>
@@ -257,6 +293,12 @@ export default function SettingsModal(): JSX.Element {
             {tab === 'provider' && <section>
               <h3>Usage &amp; cost</h3>
               <p className="muted">Every model call is logged locally with its token counts and cost.</p>
+              <label className="inline"><span>Warn me when spend passes</span>
+                <input type="number" min={0} step={0.5} aria-label="Daily spend alert, dollars" value={draft.usageAlerts?.dailyCost ?? 0} onChange={(e) => patch({ usageAlerts: { monthlyCost: 0, ...draft.usageAlerts, dailyCost: Math.max(0, Number(e.target.value) || 0) } })} />
+                <span>$ a day or</span>
+                <input type="number" min={0} step={1} aria-label="Monthly spend alert, dollars" value={draft.usageAlerts?.monthlyCost ?? 0} onChange={(e) => patch({ usageAlerts: { dailyCost: 0, ...draft.usageAlerts, monthlyCost: Math.max(0, Number(e.target.value) || 0) } })} />
+                <span>$ a month (0 = off)</span>
+              </label>
               <UsageView />
             </section>}
 
@@ -284,13 +326,13 @@ export default function SettingsModal(): JSX.Element {
                 <input type="checkbox" checked={draft.autoTitle !== false} onChange={(e) => patch({ autoTitle: e.target.checked })} /><span className="switch" />
               </label>
               <label className="toggle-row plain">
-                <span className="toggle-text"><b>Learn how you write</b><small>Bank long messages you write and docs you save as writing samples, and keep your voice profile current, so drafts sound like you. Review it above under Voice.</small></span>
+                <span className="toggle-text"><b>Learn how you write</b><small>Bank long messages you write and files you save as writing samples, and keep your voice profile current, so drafts sound like you. Review it above under Voice.</small></span>
                 <input type="checkbox" checked={draft.learnStyle !== false} onChange={(e) => patch({ learnStyle: e.target.checked })} /><span className="switch" />
               </label>
               <label><span>Extraction model <small className="muted">(blank = same as chat model)</small></span>
                 <input list="model-options" value={draft.extractionModel} onChange={(e) => patch({ extractionModel: e.target.value })} placeholder="Same as the default model" spellCheck={false} />
               </label>
-              <label><span>Embedding model <small className="muted">(shared with document search; changing it re-embeds both)</small></span>
+              <label><span>Embedding model <small className="muted">(shared with file search; after changing it, Save, then press Rebuild search index. Memories re-embed as they are searched)</small></span>
                 <input value={draft.embeddingModel ?? ''} onChange={(e) => patch({ embeddingModel: e.target.value })} placeholder="qwen3-embedding-8b" spellCheck={false} />
               </label>
               <label className="toggle-row plain">
@@ -300,7 +342,7 @@ export default function SettingsModal(): JSX.Element {
               <label><span>Suggest a memory tidy-up every <small className="muted">(new auto memories; 0 = manual only)</small></span><input type="number" min={0} value={draft.consolidateEvery ?? 25} onChange={(e) => patch({ consolidateEvery: Math.max(0, Number(e.target.value) || 0) })} /></label>
               <IndexStatusLine />
               <label className="toggle-row plain">
-                <span className="toggle-text"><b>Contextual chunks</b><small>Ask the model to write one sentence situating each chunk in its document, and index it with the chunk. Applies to new and re-indexed passages; Rebuild search index covers the rest. Costs one model call per chunk. Off by default.</small></span>
+                <span className="toggle-text"><b>Contextual chunks</b><small>Ask the model to write one sentence situating each chunk in its file, and index it with the chunk. Applies to new and re-indexed passages; Rebuild search index covers the rest. Costs one model call per chunk. Off by default.</small></span>
                 <input type="checkbox" checked={draft.contextualChunks === true} onChange={(e) => patch({ contextualChunks: e.target.checked })} /><span className="switch" />
               </label>
               <AdvancedRetrieval draft={draft} patch={patch} models={models} />
@@ -347,6 +389,7 @@ export default function SettingsModal(): JSX.Element {
                   Turning this off makes every send immediate and final.
                 </p>
               </div>
+              <PlannerMailSettings />
               <h3>Web search</h3>
               <label><span>Brave Search API key <small className="muted">(optional; without a key web search uses Exa, then DuckDuckGo)</small></span><input type="password" value={draft.braveApiKey} onChange={(e) => patch({ braveApiKey: e.target.value })} placeholder={settings.braveApiKeySet ? 'Saved. Type to replace' : 'BSA…'} spellCheck={false} /></label>
               <label><span>Tavily API key <small className="muted">(optional alternative)</small></span><input type="password" value={draft.tavilyApiKey} onChange={(e) => patch({ tavilyApiKey: e.target.value })} placeholder={settings.tavilyApiKeySet ? 'Saved. Type to replace' : 'tvly-…'} spellCheck={false} /></label>
@@ -372,12 +415,12 @@ export default function SettingsModal(): JSX.Element {
               </label>
               <p className="muted"><b>on</b> runs automatically, <b>ask</b> pauses the reply for your approval, <b>off</b> hides the tool. Anything that acts outside the app (email, calendar, Google Tasks) asks by default.</p>
               <div className="send-hold">
-                <span className="toggle-text"><b>Document edits</b><small>Every change the assistant makes to a doc shows as a diff in the chat.</small></span>
-                <div className="seg" role="group" aria-label="Document edits">
+                <span className="toggle-text"><b>File edits</b><small>Every change the assistant makes to a file shows as a diff in the chat.</small></span>
+                <div className="seg" role="group" aria-label="File edits">
                   <button type="button" className={(draft.docEditMode ?? 'review') === 'review' ? 'on' : ''} onClick={() => patch({ docEditMode: 'review' })}>Ask</button>
                   <button type="button" className={draft.docEditMode === 'apply' ? 'on' : ''} onClick={() => patch({ docEditMode: 'apply' })}>Accept all</button>
                 </div>
-                <p className="muted small">Ask waits for you to accept or reject each diff. Accept all writes the change and still shows the diff. You can undo either one from the doc's history.</p>
+                <p className="muted small">Ask waits for you to accept or reject each diff. Accept all writes the change and still shows the diff. You can undo either one from the file's history.</p>
               </div>
               <ToolGlobalToggles value={draft.tools ?? {}} onChange={(tools) => patch({ tools })} />
               <PermissionRules value={draft.permissionRules} onChange={(permissionRules) => patch({ permissionRules })} />
@@ -408,6 +451,7 @@ export default function SettingsModal(): JSX.Element {
 
             {tab === 'data' && <>
               <DataSettings />
+              <PresetFiles />
               <TrashPanel />
               <section>
                 <h3>Diagnostics</h3>
@@ -489,7 +533,7 @@ export default function SettingsModal(): JSX.Element {
               {capShortcut && !capShortcut.ok && (
                 <p className="test-msg fail">{capShortcut.message ?? `${capShortcut.accelerator} could not be registered.`}</p>
               )}
-              <label><span>Dictation chord <small className="muted">(in a doc: hold to dictate, tap to latch)</small></span>
+              <label><span>Dictation chord <small className="muted">(in a file: hold to dictate, tap to latch)</small></span>
                 <input value={draft.dictationChord ?? ''} onChange={(e) => patch({ dictationChord: e.target.value })}
                   placeholder="Control+Alt+D" spellCheck={false} />
               </label>

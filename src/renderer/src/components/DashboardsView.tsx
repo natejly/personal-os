@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Plus, Trash2, PanelLeftOpen, LayoutDashboard, RefreshCw, Wand2, Database, ChevronDown, X, Sparkles, Code2, Pencil } from 'lucide-react'
+import { Plus, Trash2, PanelLeftOpen, Gauge, RefreshCw, Wand2, Database, ChevronDown, X, Sparkles, Code2, Pencil } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { SAFE_MD } from './Message'
@@ -115,7 +115,7 @@ function WidgetCard({ w, sources, onChange }: { w: Widget; sources: DataSource[]
   return (
     <div className={`dwidget w${w.width}`} style={{ minHeight: w.height + 40 }}>
       <header>
-        <span className="dw-title">{w.kind === 'summary' || isDeclarative(w.kind) ? <Sparkles size={13} /> : w.kind === 'html' ? <Code2 size={13} /> : null}{w.title}</span>
+        <span className="dw-title" title={w.title}>{w.kind === 'summary' || isDeclarative(w.kind) ? <Sparkles size={13} /> : w.kind === 'html' ? <Code2 size={13} /> : null}{w.title}</span>
         <span className="muted small">{w.source_ids.map((id) => sources.find((s) => s.id === id)?.name).filter(Boolean).join(', ')}</span>
         <span style={{ flex: 1 }} />
         {w.refreshed_at && <span className="muted small">{new Date(w.refreshed_at * 1000).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}</span>}
@@ -123,7 +123,7 @@ function WidgetCard({ w, sources, onChange }: { w: Widget; sources: DataSource[]
         {w.kind === 'html' && <button className="icon-btn sm" title="View code" aria-label={`View code for ${w.title}`} onClick={() => setShowCode((v) => !v)}><Code2 size={13} /></button>}
         <button className="icon-btn sm" title="Refresh" aria-label={`Refresh ${w.title}`} onClick={() => void run(() => api.widgets.refresh(w.id))}><RefreshCw size={13} className={busy ? 'spin' : ''} /></button>
         <select className="dw-width" value={w.width} title="Width" aria-label={`Width of ${w.title}`} onChange={(e) => void run(() => api.widgets.update(w.id, { width: Number(e.target.value) }))}><option value={1}>1×</option><option value={2}>2×</option><option value={3}>3×</option></select>
-        <button className="icon-btn sm danger" aria-label={`Delete widget ${w.title}`} onClick={() => void run(() => api.widgets.delete(w.id))}><Trash2 size={13} /></button>
+        <button className="icon-btn sm danger" aria-label={`Delete widget ${w.title}`} title="Delete widget" onClick={() => { if (confirm(`Delete "${w.title}"? This can't be undone.`)) void run(() => api.widgets.delete(w.id)) }}><Trash2 size={13} /></button>
       </header>
       {revising && (
         <div className="dw-revise">
@@ -207,23 +207,23 @@ export default function DashboardsView(): JSX.Element {
     <main className="page dash-page">
       <header className="page-header drag">
         {!sidebarOpen && <button className="icon-btn no-drag" aria-label="Show sidebar" onClick={toggleSidebar}><PanelLeftOpen size={16} /></button>}
-        <h2><LayoutDashboard size={16} /> Dashboards</h2>
+        <h2><Gauge size={16} /> Dashboards</h2>
         <div className="no-drag header-right">
           <SendToSpace
             items={dash ? dash.widgets.map((w) => ({ kind: 'dashboard-widget' as const, refId: w.id, config: { dashboard_id: dash.id } })) : []}
             title="Send widgets to space"
           />
           {list.length > 0 && (
-            <label className="model-picker"><select aria-label="Active dashboard" value={activeId ?? ''} onChange={(e) => setActiveId(e.target.value)}>{list.map((d) => <option key={d.id} value={d.id}>{d.name} ({d.widget_count})</option>)}</select><ChevronDown size={14} /></label>
+            <label className="model-picker"><select aria-label="Active dashboard" value={activeId ?? ''} onChange={(e) => setActiveId(e.target.value)}>{list.map((d) => <option key={d.id} value={d.id}>{d.name} ({d.id === dash?.id ? dash.widgets.length : d.widget_count})</option>)}</select><ChevronDown size={14} /></label>
           )}
           <button className="ghost-btn" onClick={() => setShowSources(true)}><Database size={14} /> Sources <span className="count">{sources.length}</span></button>
-          {creating ? (
+          {creating && dash ? (
             <div className="add-inline"><input autoFocus aria-label="Dashboard name" placeholder="Dashboard name" value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void create(); if (e.key === 'Escape') setCreating(false) }} /><button className="primary-btn" onClick={() => void create()}>Create</button></div>
           ) : (
             <button className="ghost-btn" onClick={() => setCreating(true)}><Plus size={14} /> New dashboard</button>
           )}
           {dash && <button className="primary-btn" onClick={() => setComposer((v) => !v)}><Wand2 size={14} /> Add widget</button>}
-          {dash && <button className="icon-btn danger" title="Delete dashboard" aria-label={`Delete dashboard ${dash.name}`} onClick={() => { if (confirm(`Delete "${dash.name}"?`)) void api.dashboards.delete(dash.id).then(() => { setActiveId(null); setDash(null); void loadList() }) }}><Trash2 size={15} /></button>}
+          {dash && <button className="icon-btn danger" title="Delete dashboard" aria-label={`Delete dashboard ${dash.name}`} onClick={() => { if (confirm(`Delete "${dash.name}" and its widgets? This can't be undone.`)) void api.dashboards.delete(dash.id).then(() => { setActiveId(null); setDash(null); void loadList() }) }}><Trash2 size={15} /></button>}
         </div>
         <AppSwitcher />
       </header>
@@ -252,10 +252,14 @@ export default function DashboardsView(): JSX.Element {
       {!dash ? (
         <div className="page-body">
           <div className="empty-state">
-            <LayoutDashboard size={28} />
+            <Gauge size={28} />
             <h2>No dashboards yet</h2>
             <p>Add a data source (an API URL and key, an RSS feed, or your own todos and calendar), then describe the widget you want.</p>
-            <button className="primary-btn" onClick={() => setCreating(true)}><Plus size={14} /> New dashboard</button>
+            {creating ? (
+              <div className="add-inline"><input autoFocus aria-label="Dashboard name" placeholder="Dashboard name" value={newName} onChange={(e) => setNewName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void create(); if (e.key === 'Escape') setCreating(false) }} /><button className="primary-btn" onClick={() => void create()}>Create</button></div>
+            ) : (
+              <button className="primary-btn" onClick={() => setCreating(true)}><Plus size={14} /> New dashboard</button>
+            )}
           </div>
         </div>
       ) : (

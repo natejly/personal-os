@@ -1,6 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readDocMode, adoptServerDoc, applyEvent, editCut, learnedText, settleInterrupted, stopOutcome, useStore, type ChatSession } from './store'
+import { learnedText, readDocMode, adoptServerDoc, flushDocOnUnload, applyEvent, editCut, settleInterrupted, stopOutcome, useStore, PAGE_AGENT_DRAFT, type ChatSession } from './store'
+import { insertIntoComposer } from './lib/composerInsert'
+import { getDraft } from './lib/drafts'
 import { ApiError } from './lib/apiError'
 import { api } from './lib/api'
 import { mergeConversation } from './sessionStatus'
@@ -308,6 +310,96 @@ test('overlapping flushes run one after another, so the second finds nothing lef
     assert.deepEqual(bases, [1])
   } finally {
     Object.assign(docs, orig)
+  }
+})
+
+test('text typed while a save is in flight is sent by the next flush, not marked saved', async () => {
+  const docs = api.docs as unknown as Stubs
+  const orig = { ...docs }
+  const sent: unknown[] = []
+  let release: () => void = () => undefined
+  docs.save = async (_id, p) => {
+    const c = (p as { content: string }).content
+    sent.push(c)
+    if (sent.length === 1) await new Promise<void>((r) => { release = r })
+    return docFull({ content: c, updated_at: 1 + sent.length })
+  }
+  docs.list = async () => []
+  docs.revisions = async () => []
+  try {
+    useStore.setState({ activeDoc: docFull({}) as never, docDraft: 'b', docTitleDraft: null })
+    const first = useStore.getState().flushDoc()
+    await new Promise((r) => setTimeout(r, 0))
+    useStore.setState({ docDraft: 'bc' })
+    release()
+    await first
+    await useStore.getState().flushDoc()
+    assert.deepEqual(sent, ['b', 'bc'])
+    assert.equal(useStore.getState().docDraft, null)
+  } finally {
+    Object.assign(docs, orig)
+  }
+})
+
+test('an untitled doc takes its title from the first heading, and keeps following it until renamed by hand', async () => {
+  const docs = api.docs as unknown as Stubs
+  const orig = { ...docs }
+  const titles: unknown[] = []
+  docs.save = async (_id, p) => {
+    const { content, title } = p as { content: string; title?: string }
+    titles.push(title)
+    return docFull({ content, title: title ?? useStore.getState().activeDoc?.title })
+  }
+  docs.list = async () => []
+  docs.revisions = async () => []
+  try {
+    useStore.setState({ activeDoc: docFull({ title: 'Untitled', content: '' }) as never, docDraft: '# Proj', docTitleDraft: null })
+    await useStore.getState().flushDoc()
+    useStore.setState({ docDraft: '# Project Alpha\n\nbody' })
+    await useStore.getState().flushDoc()
+    useStore.setState({ docDraft: '# Project Alpha\n\nbody', docTitleDraft: 'Mine' })
+    await useStore.getState().flushDoc()
+    useStore.setState({ docDraft: '# Other\n\nbody' })
+    await useStore.getState().flushDoc()
+    assert.deepEqual(titles, ['Proj', 'Project Alpha', 'Mine', undefined])
+  } finally {
+    Object.assign(docs, orig)
+  }
+})
+
+test('closing the last tab or re-opening the active doc saves the buffered draft first', async () => {
+  const docs = api.docs as unknown as Stubs
+  const orig = { ...docs }
+  const sent: unknown[] = []
+  docs.save = async (_id, p) => { sent.push((p as { content: string }).content); return docFull({ content: (p as { content: string }).content, updated_at: 9 }) }
+  docs.get = async () => docFull({ content: 'server', updated_at: 9 })
+  docs.list = async () => []
+  docs.revisions = async () => []
+  try {
+    useStore.setState({ activeDoc: docFull({}) as never, docTabs: ['d1'], docDraft: 'typed', docTitleDraft: null })
+    await useStore.getState().openDoc('d1')
+    useStore.setState({ docDraft: 'closing' })
+    await useStore.getState().closeDocTab('d1')
+    assert.deepEqual(sent, ['typed', 'closing'])
+    assert.equal(useStore.getState().activeDoc, null)
+  } finally {
+    Object.assign(docs, orig)
+  }
+})
+
+test('flushDocOnUnload sends the buffered draft as a keepalive PUT', () => {
+  const g = globalThis as { fetch: typeof fetch }
+  const prev = g.fetch
+  const calls: RequestInit[] = []
+  g.fetch = (async (_u: unknown, init: RequestInit) => { calls.push(init); return new Response('{}') }) as typeof fetch
+  try {
+    useStore.setState({ activeDoc: docFull({}) as never, docDraft: 'last', docTitleDraft: null })
+    flushDocOnUnload()
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0].keepalive, true)
+    assert.deepEqual(JSON.parse(calls[0].body as string), { content: 'last', base_updated_at: 1 })
+  } finally {
+    g.fetch = prev
   }
 })
 
@@ -920,7 +1012,7 @@ test('an update-only learn pass toasts "updated 1", refreshes, and Undo restores
   try {
     useStore.getState().onLearned({ memories: [], updated: [{ id: 'new' }], superseded: [{ old_id: 'old', new_id: 'new' }], removed: [{ id: 'gone' }], nodes: [], edges: [] } as never)
     const t = useStore.getState().toasts.at(-1)
-    assert.match(t?.text ?? '', /updated 1/)
+    assert.match(t?.text ?? '', /updated 1/i)
     assert.match(t?.text ?? '', /forgot 1/)
     assert.ok(refreshed > 0, 'an update with no new rows still refreshes the open lists')
     assert.equal(t?.action?.label, 'Undo')
@@ -960,10 +1052,8 @@ test('the memory proposals badge counts every pending proposal', async () => {
 })
 
 test('learnedText counts updates and forgets as changes', () => {
-  assert.deepEqual(learnedText({ memories: [], nodes: [], edges: [] }), { text: 'Learned 0 memories, 0 entities, 0 relations', changed: false })
-  const r = learnedText({ memories: [], removed: [{}], nodes: [], edges: [] } as never)
-  assert.equal(r.changed, true)
-  assert.equal(r.text, 'Learned 0 memories, forgot 1, 0 entities, 0 relations')
+  assert.equal(learnedText({ memories: [], nodes: [], edges: [] }), '')
+  assert.equal(learnedText({ memories: [], removed: [{}], nodes: [], edges: [] } as never), 'Forgot 1')
 })
 
 test('the Private switch on a draft is parked and sent with the create, then cleared by a new chat', async (t) => {
@@ -978,4 +1068,85 @@ test('the Private switch on a draft is parked and sent with the create, then cle
   assert.equal(create?.body.private, true)
   useStore.getState().newChat()
   assert.equal(useStore.getState().draftPrivate, false)
+})
+
+test('skip permissions on a chat with no row is parked for that chat, never written as the global default', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  useStore.setState({ sessions: {}, toasts: [], focusedConversationId: null, draftChatSettings: {}, pageAgentChatSettings: {}, uploadTaintTarget: null, draftPendingSend: null })
+  const { calls } = stubFetch(t, (m, p, b) => {
+    if (m === 'POST' && p.endsWith('/conversations')) return json(row({ id: 'c9', settings: {} }))
+    if (m === 'PATCH') return json(row({ id: 'c9', settings: b.settings }))
+    if (m === 'POST') return json({ detail: 'down' }, 500)
+    return json([])
+  })
+  await useStore.getState().setChatSettings({ skipPermissions: true })
+  await useStore.getState().setChatSettings({ planMode: 'always', skipPermissions: true }, PAGE_AGENT_DRAFT)
+  assert.equal(calls.length, 0)
+  assert.deepEqual(useStore.getState().draftChatSettings, { skipPermissions: true })
+  assert.deepEqual(useStore.getState().pageAgentChatSettings, { planMode: 'always', skipPermissions: true })
+  await useStore.getState().send('hi')
+  assert.deepEqual(calls.find((c) => c.method === 'PATCH')?.body, { settings: { skipPermissions: true } })
+  assert.equal(calls.some((c) => c.path.includes('/settings')), false)
+  assert.deepEqual(useStore.getState().draftChatSettings, {})
+})
+
+test('a send while Stop is pending waits for the run to end and starts a reply instead of steering', async () => {
+  const realSteer = api.steer
+  const realChat = api.chat
+  const steers: string[] = []
+  const chats: string[] = []
+  api.steer = (async (_c: string, text: string) => { steers.push(text); return { ok: true } }) as never
+  api.chat = (async (_c: string, b: { content?: string }) => { chats.push(b.content ?? ''); throw new ApiError('down', { status: 500 }) }) as never
+  try {
+    useStore.setState({ toasts: [], uploadTaintTarget: null, sessions: { c1: session({ streaming: { messageId: 'm1', runId: 'r1', abort: new AbortController(), answering: true, stopping: true } } as unknown as Partial<ChatSession>) } })
+    setTimeout(() => useStore.setState((s) => ({ sessions: { ...s.sessions, c1: { ...s.sessions.c1, streaming: null } } })), 30)
+    await useStore.getState().send('do X instead', 'c1')
+    assert.deepEqual(steers, [])
+    assert.deepEqual(chats, ['do X instead'])
+  } finally {
+    api.steer = realSteer
+    api.chat = realChat
+  }
+})
+
+test('a timed-out chat POST with no run behind it says the message may not have been sent', async (t) => {
+  const realChat = api.chat
+  api.chat = (async () => { throw new ApiError('slow', { kind: 'timeout' }) }) as never
+  t.after(() => { api.chat = realChat })
+  seed()
+  stubFetch(t, (_m, p) => (p.includes('/runs') ? json([]) : json({ ...row(), messages: [] })))
+  assert.equal(await useStore.getState().send('hi', 'c1'), false)
+  assert.match(useStore.getState().toasts[0].text, /may not have been sent/)
+})
+
+test("a slot chip inserts into the draft of the chat the card is in; the open ⌘I thread's is the panel's", () => {
+  useStore.setState({ focusedConversationId: 'other', pageAgentOpen: true, pageAgentId: 'c7' })
+  insertIntoComposer('Tue 3pm', { conversationId: 'c7' })
+  insertIntoComposer('Wed 4pm', { conversationId: 'c8' })
+  assert.equal(getDraft('page')?.text, 'Tue 3pm')
+  assert.equal(getDraft('c:c8')?.text, 'Wed 4pm')
+  assert.equal(getDraft('c:other'), undefined)
+})
+
+test('a held toast keeps its remaining time and expires only after it is released', (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] })
+  useStore.setState({ toasts: [] })
+  const s = useStore.getState()
+  s.toast('Deleted chat', 'info', { label: 'Undo', run: () => undefined })
+  const live = (): number => useStore.getState().toasts.length
+  t.mock.timers.tick(5000)
+  s.holdToasts(true)
+  t.mock.timers.tick(60000)
+  assert.equal(live(), 1, 'hovered or focused, the Undo stays')
+  s.holdToasts(false)
+  t.mock.timers.tick(2999)
+  assert.equal(live(), 1, 'released, it gets back only what was left')
+  t.mock.timers.tick(1)
+  assert.equal(live(), 0)
+})
+
+test('learnedText leaves out zero counts and says nothing when nothing changed', () => {
+  assert.equal(learnedText({ memories: [1], nodes: [], edges: [] }), 'Learned 1 memory')
+  assert.equal(learnedText({ memories: [], nodes: [1, 2], edges: [1], removed: [1] }), 'Forgot 1, 2 entities, 1 relation')
+  assert.equal(learnedText({ memories: [], nodes: [], edges: [] }), '')
 })

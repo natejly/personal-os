@@ -20,6 +20,8 @@ interface Props {
   /** Layout-affecting styles applied to both the textarea and its mirror. */
   sharedStyle?: React.CSSProperties
   placeholder?: string
+  /** The field's accessible name; defaults to the placeholder. */
+  ariaLabel?: string
   autoFocus?: boolean
   rows?: number
   className?: string
@@ -39,7 +41,7 @@ const DEBOUNCE_MS = 600
 const MIN_CHARS = 15
 
 export default function SmartTextarea({
-  value, onChange, kind, context = '', variant = 'field', sharedStyle, placeholder, autoFocus, onBlur, onKeyDown, onPaste,
+  value, onChange, kind, context = '', variant = 'field', sharedStyle, placeholder, ariaLabel, autoFocus, onBlur, onKeyDown, onPaste,
   rows = 2, className = '', minChars = MIN_CHARS, autoGrow = false, maxHeight = 240, noGhost = false
 }: Props): JSX.Element {
   const [ghost, setGhost] = useState('')
@@ -108,6 +110,7 @@ export default function SmartTextarea({
         rows={rows}
         value={value}
         placeholder={placeholder}
+        aria-label={ariaLabel ?? placeholder}
         autoFocus={autoFocus}
         style={sharedStyle}
         onChange={(e) => { setGhost(''); onChange(e.target.value) }}

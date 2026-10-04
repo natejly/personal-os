@@ -178,6 +178,12 @@ class StoreTests(unittest.TestCase):
         self.put(thread("a", msg("1", "al@y.com", 1, "Can you help?"), msg("2", "al@y.com", 0.5, "Ping?")))
         self.assertIsNone(self.store.get("a")["snoozed_until"])
 
+    def test_snooze_before_first_refresh_survives_it(self) -> None:
+        self.store.snooze("a", NOW + timedelta(days=2), subject="Can you help?")  # untracked thread
+        self.put(thread("a", msg("1", "al@y.com", 1, "Can you help?")))
+        self.assertIsNotNone(self.store.get("a")["snoozed_until"])
+        self.assertEqual(self.store.list("to_reply", at=NOW), [])
+
     def test_snooze_column_migrates_old_table(self) -> None:
         with tempfile.TemporaryDirectory() as d:
             db = Database(d)

@@ -36,10 +36,37 @@ def _messages_fts(c: sqlite3.Connection) -> None:
     c.execute("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')")
 
 
+def _boards_into_todos(c: sqlite3.Connection) -> None:
+    """Kanban boards merge into Todos: each card becomes a todo on a list named for its board (todos.import_boards)."""
+    from . import todos
+    todos.import_boards(c)
+
+
+def _activity_record_everything_keys(c: sqlite3.Connection) -> None:
+    """Rename the stored activity keys the old two stored keys to `recordEverything` / `recordEverythingRestore`."""
+    import json
+    row = c.execute("SELECT value FROM settings WHERE key = 'activity'").fetchone()
+    if not row:
+        return
+    try:
+        cfg = json.loads(row[0])
+    except ValueError:
+        return
+    if not isinstance(cfg, dict):
+        return
+    for old, new in (("pal" "antir", "recordEverything"), ("pal" "antirRestore", "recordEverythingRestore")):
+        if old in cfg:
+            cfg.setdefault(new, cfg[old])
+            del cfg[old]
+    c.execute("UPDATE settings SET value = ? WHERE key = 'activity'", (json.dumps(cfg),))
+
+
 # (version, name, step). Versions are consecutive from 1; append, never edit or reorder.
 MIGRATIONS: list[tuple[int, str, Step]] = [
     (1, "baseline", _baseline),
     (2, "messages_fts", _messages_fts),
+    (3, "boards_into_todos", _boards_into_todos),
+    (4, "activity_record_everything_keys", _activity_record_everything_keys),
 ]
 
 

@@ -41,7 +41,7 @@ def run_of(partial: str | None, *, steps: int = 0, tools: int = 0, content: str 
 
 
 def test_every_budget_stop_chains_on_progress() -> None:
-    for p in ("rounds", "tokens", "time", "cost"):
+    for p in ("rounds", "tokens", "time"):
         check(_chain_kind(BASE, run_of(p, tools=1)) == "continue", f"{p} stop with a clean tool call chains, no plan needed")
         check(_chain_kind(BASE, run_of(p, steps=1)) == "continue", f"{p} stop with a consumed step chains")
         check(_chain_kind(BASE, run_of(p)) is None, f"{p} stop with no progress does not chain")
@@ -54,8 +54,7 @@ def test_guards() -> None:
     r = run_of("time", tools=1)
     check(_chain_kind({**BASE, "status": "review"}, r) is None, "a desk that is not working never chains")
     check(_chain_kind({**BASE, "turn": 99}, r) is None, "turn cap")
-    check(_chain_kind({**BASE, "cost": 99.0}, r) is None, "cost cap")
-    check(_chain_kind({**BASE, "cost": 0.001, "budget": {"maxCost": 0.0001}}, r) is None, "a desk's own budget is stricter")
+    check(_chain_kind({**BASE, "cost": 99.0}, r) == "continue", "spend never stops a desk")
     check(_chain_kind(BASE, r, error="boom") is None, "an errored turn does not chain")
     r.stop.set()
     check(_chain_kind(BASE, r) is None, "a stopped run does not chain")

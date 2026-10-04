@@ -1,6 +1,6 @@
 import { useCallback, type FC } from 'react'
 import {
-  Brain, Calendar, CheckSquare, FileText, KanbanSquare, LayoutDashboard, MessageSquare, Network,
+  Brain, Calendar, CheckSquare, FileText, LayoutDashboard, MessageSquare, Network,
   Notebook, FolderKanban, Sparkles, Gauge, MonitorDot, Globe, AppWindow
 } from 'lucide-react'
 import type { CanvasWindow, WidgetKind } from '@shared/types'
@@ -13,12 +13,11 @@ export const KIND_LABEL: Record<WidgetKind, string> = {
   chat: 'Chat',
   todos: 'Todos',
   calendar: 'Calendar',
-  board: 'Board',
   note: 'Sticky note',
-  'dashboard-widget': 'Widget',
+  'dashboard-widget': 'Dashboard widget',
   memory: 'Memory',
   graph: 'Graph',
-  documents: 'Documents',
+  documents: 'Uploads',
   recap: 'Recap',
   project: 'Project',
   usage: 'Usage',
@@ -31,7 +30,6 @@ export const KIND_ICON: Record<WidgetKind, JSX.Element> = {
   chat: <MessageSquare size={18} />,
   todos: <CheckSquare size={18} />,
   calendar: <Calendar size={18} />,
-  board: <KanbanSquare size={18} />,
   note: <Notebook size={18} />,
   'dashboard-widget': <LayoutDashboard size={18} />,
   memory: <Brain size={18} />,

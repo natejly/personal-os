@@ -155,6 +155,16 @@ class TTLCacheTests(unittest.TestCase):
         self.assertLessEqual(len(cache.fingerprint(("x" * 500,), {})), 160)
 
 
+class IdTokenTests(unittest.TestCase):
+    def test_email_comes_from_the_id_token_claims(self) -> None:
+        import base64
+        import json
+        from personal_os.google import _id_token_email
+        claims = base64.urlsafe_b64encode(json.dumps({"email": "me@x.com"}).encode()).decode().rstrip("=")
+        self.assertEqual(_id_token_email(f"h.{claims}.sig"), "me@x.com")
+        self.assertIsNone(_id_token_email(None))
+
+
 class CalendarCacheTests(unittest.TestCase):
     def test_second_read_is_served_from_cache(self) -> None:
         events = _Events([_EVENT])
@@ -163,6 +173,13 @@ class CalendarCacheTests(unittest.TestCase):
         second = g.calendar_events(days=7)
         self.assertEqual(first, second)
         self.assertEqual(events.counts["list"], 1)
+
+    def test_zero_max_results_returns_the_whole_window(self) -> None:
+        items = [{"id": f"e{i}", "summary": "x", "start": {"dateTime": f"2026-10-0{1 + i % 6}T{i % 20:02d}:00:00Z"},
+                  "end": {"dateTime": f"2026-10-0{1 + i % 6}T{i % 20:02d}:30:00Z"}} for i in range(80)]
+        g = _google(_Events(items))
+        self.assertEqual(len(g.calendar_events(7, "primary", 0, "2026-09-30T12:00:00Z")), 80)
+        self.assertEqual(len(g.calendar_events(7, "primary", 60, "2026-09-30T12:00:00Z")), 60)
 
     def test_different_arguments_are_fetched_separately(self) -> None:
         events = _Events([_EVENT])
@@ -468,6 +485,21 @@ class IncrementalTests(unittest.TestCase):
         self.assertEqual([m["id"] for m in g.gmail_search("in:inbox", 10)], ["a", "b"])
         self.assertEqual([m["id"] for m in g.gmail_search("in:inbox", 10)], ["a", "b"])
         self.assertEqual(svc.gets, ["a", "b", "b", "b"])
+
+    def test_gmail_search_follows_page_tokens(self) -> None:
+        class _Paged(_Gmail):
+            def list(self, **kw: Any) -> _Req:
+                if "startHistoryId" in kw:
+                    return super().list(**kw)
+                ids = ["a", "b", "c"]
+                at = int(kw.get("pageToken") or 0)
+                nxt = at + min(2, kw["maxResults"])
+                res = {"messages": [{"id": i} for i in ids[at:nxt]], "historyId": "5"}
+                return _Req({**res, "nextPageToken": str(nxt)} if nxt < len(ids) else res)
+
+        g = Google(dict, lambda _s: None)
+        g._svc = lambda name, version: _Paged()  # type: ignore[method-assign]
+        self.assertEqual([m["id"] for m in g.gmail_search("in:inbox", 60)], ["a", "b", "c"])
 
     def test_a_saved_message_body_is_not_fetched_again(self) -> None:
         svc = _Gmail()

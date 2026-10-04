@@ -12,15 +12,14 @@ instructions, files, memories and graph.
 ┌──────────────┬──────────────────────────────────────┬──────────────┐
 │ + New chat   │  Today · Monday, September 29        │  Context     │
 │ Today      2 │  ┌ Calendar ─────┐ ┌ Todos ────────┐ │  ☑ Memory    │
-│ Boards       │  │ 10:00 Standup │ │ ○ Ship v0.1   │ │  ☑ Graph     │
-│ Dashboards   │  │ 14:00 1:1     │ │ ○ USB-C hub   │ │  ☑ Documents │
-│ Files        │  └───────────────┘ └───────────────┘ │  ☑ Auto-learn│
-│ Cowork       │  ┌ Inbox ────────┐ ┌ Projects ─────┐ │  ☑ Tools  ▾  │
-│ Library      │  │ Alice: Q4 …   │ │ ■ Grain       │ │   web search │
-│ SPACES     + │  └───────────────┘ └───────────────┘ │   run python │
-│ ▦ Space 1    │                                      │   gmail send │
-│ PROJECTS   + │  [Brief me]                          │  Last reply… │
-│ ■ Grain      │                                      │              │
+│ Dashboards   │  │ 10:00 Standup │ │ ○ Ship v0.1   │ │  ☑ Graph     │
+│ Files        │  │ 14:00 1:1     │ │ ○ USB-C hub   │ │  ☑ Files     │
+│ Cowork       │  └───────────────┘ └───────────────┘ │  ☑ Auto-learn│
+│ Library      │  ┌ Unread mail ──┐ ┌ Projects ─────┐ │  ☑ Tools  ▾  │
+│ SPACES     + │  │ Alice: Q4 …   │ │ ■ Grain       │ │   web search │
+│ ▦ Space 1    │  └───────────────┘ └───────────────┘ │   run python │
+│ PROJECTS   + │                                      │   gmail send │
+│ ■ Grain      │  [Brief me]                          │  Last reply… │
 │ RECENTS      │                                      │              │
 │ · …          │                                      │              │
 └──────────────┴──────────────────────────────────────┴──────────────┘
@@ -34,11 +33,11 @@ Settings → Modules.
 
 - **Provider-agnostic chat.** Streaming replies from any model LiteLLM routes to,
   one key. Per-chat model picker. Markdown, code copy, regenerate, stop.
-- **Tools with permissions.** The assistant can search your documents, read and
-  revise your docs, search
+- **Tools with permissions.** The assistant can search your uploaded files, read and
+  revise your files, search
   and save memory, traverse and extend the knowledge graph, read your writing
   style before drafting as you, search the web and
-  read pages, run Python in a sandbox, manage todos and kanban boards, and (once
+  read pages, run Python in a sandbox, manage todos (list or board view), and (once
   connected) read your Google Calendar, triage Gmail, draft or send email, and
   manage Google Tasks. Each tool has a mode: **on** (runs automatically),
   **ask** (pauses the reply with an inline approve/deny card) or **off**.
@@ -53,7 +52,9 @@ Settings → Modules.
   or the voice profile on its own:
   - *Memories* — facts, preferences and goals, auto-extracted after each reply
     or added by hand or by the assistant. Edit, pin, move between personal and
-    project scope, forget.
+    project scope, forget, see a memory's past versions, and export or import
+    a scope as a JSON file. It lives in Settings → Memory & learning, next to
+    the auto-learn switches.
   - *Knowledge graph* — entities and relations, auto-extracted and
     hand-editable in a force-directed view. Relevant subgraphs are injected
     into chats.
@@ -71,7 +72,7 @@ Settings → Modules.
     per project, and full revision history. The assistant can read and revise
     a note. By default its edits are *proposed*: each one arrives as a diff you
     accept or reject, so you can point a model at prose you care about.
-    Settings → Tools → **Document edits** → *Accept all* writes them straight
+    Settings → Tools → **File edits** → *Accept all* writes them straight
     in instead, still showing the diff and still undoable from the history.
     A `/` menu, `[[wikilinks]]` and backlinks, an outline, templates and a
     daily note. On macOS any note can be recorded or dictated into, with the
@@ -85,7 +86,7 @@ Settings → Modules.
     network access, every version is kept and restorable, and a page can sit
     on a space as a window.
 - **Spaces.** A desktop of live windows beside the ordinary views (⌘⇧C, or a
-  space in the sidebar; ⌃1–⌃9 jump between spaces). Chats, notes, boards,
+  space in the sidebar; ⌃1–⌃9 jump between spaces). Chats, notes,
   todos, calendar, memory, pages, dashboard widgets and a web browser sit side
   by side; drag anything from the sidebar or right-click to add. A window can
   pop out into its own OS window, pinned on top and see-through, and one
@@ -117,7 +118,8 @@ Settings → Modules.
   keeps coming back, a calendar block around your real focus window. Suggestions
   are proposals: the common action opens a chat pre-loaded with the request rather
   than acting, "not now" hides one for a week, and dismissing one is permanent.
-- **Meetings** (macOS, opt-in, off by default). A notepad that listens: type
+- **Meetings** (macOS, opt-in, off by default; the view starts hidden, turn it
+  on in Settings → Modules). A notepad that listens: type
   during a call while the recorder captures it natively (AVAudioEngine and, on
   macOS 14.2+, a Core Audio tap for the far side of the call), segments
   transcribe in the background, and afterwards the enhance pass proposes your
@@ -129,7 +131,8 @@ Settings → Modules.
   then whisper.cpp, then your LLM proxy. Meetings never expire, are unreachable
   from the activity monitor's purge, and never reach auto-learn. See
   [docs/meetings.md](docs/meetings.md).
-- **Cowork desks.** A desk is a task you hand over: its own conversation, its own
+- **Cowork desks** (the view starts hidden; turn it on in Settings → Modules). A desk that needs you shows up in the Agent inbox on Today, next to approvals and proposals.
+  A desk is a task you hand over: its own conversation, its own
   folder, and one plan you approve before it acts. Several run at once. Long
   autonomy is bought by chaining bounded replies, never by a longer leash — each
   turn is an ordinary reply with an ordinary budget, and the desk chains another
@@ -167,7 +170,7 @@ Settings → Modules.
   candidate — there is no tool that approves one, and a revision of an approved
   procedure is forked beside it rather than overwriting the text in use. The
   preview shows the real injected block, assembled by the function the chat uses.
-- **Context management.** Per-chat toggles for memory, graph, documents, activity,
+- **Context management.** Per-chat toggles for memory, graph, files, activity,
   meetings, auto-learn and tools; an inspector showing exactly what was injected into
   each reply; a live preview for a draft message.
 - **Charts and diagrams.** Replies can include a ```` ```chart ```` block (a small
@@ -186,15 +189,17 @@ Settings → Modules.
   cost. Settings shows spend, tokens, calls and frequency charts over 7/30/90
   days, broken down by model, kind and project. Prices come from your LiteLLM
   proxy and can be overridden per model.
-- **Today, todos, calendar, boards.** A Today screen with a generated daily
+- **Today, todos, calendar.** A Today screen with a generated daily
   recap, calendar, unread inbox, todos, projects and recently learned memories,
   plus a one-click brief. A native todo list, a week calendar (Google events
-  plus due todos, double-click to add), and kanban boards with drag and drop.
+  plus due todos, double-click to add), and a board view of the same todos (columns by status or by list, drag and
+  drop to move). Boards from older versions were migrated into todos: each board
+  is now a list, each card a todo with the column as its status.
   The assistant can drive all of them through tools.
 - **Scheduled tasks and the agent inbox.** Give the assistant work to do later:
   once at a time you pick ("tomorrow at 3pm, check whether they replied") or
   repeatedly on a cron expression ("every Friday at 17:00, write my weekly
-  review"). Schedule it from the Agent inbox on Today, or just ask in a chat —
+  review"). Schedule it from the Scheduled tab of the Agent inbox on Today, or just ask in a chat —
   the assistant has a `schedule_task` tool, which asks before it books anything.
   A scheduled run happens with nobody watching, so it is deliberately boxed in:
   it runs in a fresh chat on a tighter budget, it can read and write inside
@@ -231,7 +236,7 @@ Settings → Modules.
   LiteLLM's `ollama/` route): activity summaries, meeting enhance, auto-learn
   over mail and keystrokes, voice extraction from your docs. If that model is
   down, those jobs skip or fail closed instead of forwarding the payload to
-  Fireworks. That is the air-gap switch an on-premises deploy would use:
+  Fireworks. That is the switch an air-gapped deployment would use:
   private data stays on the box; only ordinary chat hits a remote API.
   `extractionModel` today is just a cheaper LiteLLM name, not an on-device
   guarantee. Audio already has a local path (whisper.cpp); this is the same
@@ -246,8 +251,8 @@ Settings → Modules.
   and raw keystrokes and call audio are never uploaded. A task has one home,
   local or cloud, so a late catch-up and a cloud run cannot both fire. The
   worker keeps its own database for the stores those jobs read, synced per
-  domain the way [docs/sources-of-truth.md](docs/sources-of-truth.md) already
-  describes, rather than a network copy of the desktop SQLite file. Signing the
+  domain the way [docs/sources-of-truth.md](docs/sources-of-truth.md)
+  proposes, rather than a network copy of the desktop SQLite file. Signing the
   desktop into the worker replaces the loopback sidecar token, and Google
   sign-in on the worker is a web OAuth client with a fixed redirect, not the
   Desktop client the app ships now. Its tool box is the scheduled-run box, drawn
@@ -282,11 +287,23 @@ Electron (TypeScript)               Python (FastAPI)                      LiteLL
 ```
 
 Electron spawns the backend on a free port with a data directory under the
-app's user-data folder. All state is one SQLite file plus an `uploads/` folder.
+app's user-data folder. State is one SQLite file plus folders beside it:
+`uploads/` and `doc_assets/` (your files and pasted images), `recordings/` (meeting
+audio you keep), `cowork/` (desk workspaces), `context/` (`activity.md`),
+`backups/` and `logs/`. API keys and Google tokens are kept in the macOS
+Keychain, or a 0600 file in the data folder when the Keychain is unavailable.
 In development, `scripts/dev.sh` runs LiteLLM, the backend (autoreload) and
 Electron (HMR) together.
 
-## Setup
+## Install
+
+The packaged app (`npm run package`, see [docs/releasing.md](docs/releasing.md))
+is self-contained: no Python, uv or LiteLLM needed. On first launch a setup
+wizard asks a few things about you and has you pick a model provider (Fireworks
+AI, OpenAI, Anthropic, OpenRouter, a local Ollama, a LiteLLM proxy or any
+OpenAI-compatible endpoint). Google is connected from Settings → Integrations.
+
+## Development
 
 Requirements: Node 20+, Python 3.10+, [uv](https://docs.astral.sh/uv/), and a
 Fireworks AI key (or any provider LiteLLM supports).
@@ -315,7 +332,7 @@ the app signs in with is set up once per install:
 
 1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
    create a project and enable the **Calendar**, **Gmail**, **Tasks**,
-   **Drive**, **Docs** and **Sheets** APIs.
+   **Drive**, **Docs** and **Sheets** APIs (the Integrations panel links each one).
 2. Configure the OAuth consent screen (External; add yourself as a test user).
    Publishing it, or making it Internal on a Workspace account, avoids the
    7-day refresh-token expiry that "Testing" apps have.
@@ -333,8 +350,9 @@ client pasted there always overrides the one from `.env`.
 
 Scopes: `calendar`, `gmail.modify`, `tasks`, `drive.readonly`, `drive.file`,
 `documents` and `spreadsheets`, plus `openid` and `email` to know which account
-signed in. Tokens live in the local database. `gmail_send` is a separate tool
-you can keep off; `gmail_draft` never sends.
+signed in. Tokens and the client secret are kept in the macOS Keychain (a 0600
+file in the data folder if the Keychain is unavailable). `gmail_send` is a
+separate tool you can keep off; `gmail_draft` never sends.
 
 Connecting turns on two-way sync between your todos and Google Tasks, and
 creates a calendar named "Grain Todos" that mirrors every todo with a due date.
@@ -388,8 +406,9 @@ Anything but `verified` is surfaced as a failure, not a success:
 
 ### Undo on outgoing mail
 
-Agency people will actually use is reversible, so nothing sends mail
-immediately. A send — from the compose window or from the assistant — is written
+Agency people will actually use is reversible, so by default nothing sends
+mail immediately (Settings → Integrations can turn the hold off, which makes
+every send immediate and final). A send — from the compose window or from the assistant — is written
 to `pending_sends` and held for 90 s (configurable, 60–120, Settings →
 Integrations) while a countdown with an **Undo** button sits above the toasts.
 "Send now" is in that card and deliberately not a tool: the assistant can cancel
@@ -416,13 +435,14 @@ and its verdict is kept on the row.
 | ⌘N | New chat |
 | ⌘⇧N / ⌘⇧D | New note / today's note |
 | ⌘U | Upload file (Files → Uploads) |
-| ⌘0 … ⌘5 | Today / Chats / Todos / Calendar / Boards / Dashboards |
+| ⌘0 … ⌘3, ⌘5 | Today / Chats / Todos / Calendar / Dashboards |
 | ⌘6 / ⌘7 | Settings → Memory / its knowledge graph |
 | ⌘8 | Files → Uploads |
 | ⌘9 | Activity |
 | ⌘⇧M | Meetings (maths while typing in a doc) |
 | ⌘⇧K | Cowork |
 | ⌘⇧F | Search chats |
+| ⌘⇧[ / ⌘⇧] | Previous / next chat |
 | ⌘F | Find in this chat |
 | ⌘⇧P | Cycle plan mode in the composer |
 | ⌘B | Toggle sidebar (bold while typing in a doc) |
@@ -598,8 +618,8 @@ from character counts and the row is flagged `estimated`.
 ## Activity monitor
 
 Off by default. Turn it on in the **Activity** panel (⌘9), where each signal is a
-separate switch with a plain description of what it records — or flip **Palantir
-mode** for one switch that records everything, with the redaction and
+separate switch with a plain description of what it records — or flip **Record
+everything** for one switch that records everything, with the redaction and
 “never record” filters down. Turning that mode off restores the settings it
 replaced rather than resetting to defaults.
 
@@ -659,7 +679,7 @@ src/preload/        contextBridge (backend URL, menu events)
 src/renderer/       React UI (store.ts holds all state; lib/api.ts is the client)
 src/shared/         Types shared between processes
 backend/personal_os app.py routes · repos.py storage · context.py · learn.py
-                    tools.py · sandbox.py · google.py · todos.py · boards.py
+                    tools.py · sandbox.py · google.py · todos.py
                     docs.py · dashboards.py · usage.py · trace.py · llm.py
                     activity.py collectors, privacy gate, rollup, activity.md
                     meetings.py repo + service · meeting_notes.py templates/enhance
@@ -668,7 +688,7 @@ scripts/dev.sh      LiteLLM + backend + Electron
 scripts/litellm.sh  LiteLLM proxy alone
 litellm.yaml        Model routing (Fireworks by default)
 docs/research/      Feature research, the roadmap, per-track source reports
-docs/docs-editor.md The Docs editor: revisions, diffs and the doc_* tools
+docs/docs-editor.md The Files editor: revisions, diffs and the doc_* tools
 docs/spaces.md      Spaces: windows, pop-outs, presets, lock, agent tools
 docs/health.md      Health: metrics and connected services
 docs/activity-monitor.md  Activity monitor: signals, privacy model, API
@@ -681,14 +701,10 @@ See [docs/research/roadmap.md](docs/research/roadmap.md) for the researched road
 memory, retrieval, app features, life-OS features and agentic capabilities,
 with the per-track source reports under [docs/research/](docs/research/).
 
-**Read Track 5 first.** It documents four live security defects in the current
-tool defaults — the stock permission modes let an injected web page or email
-read the Fireworks key and the whole database and exfiltrate them without ever
-showing an approval card — and it establishes that durable runs (an agent run
-that survives its HTTP connection) are the shared prerequisite for the
-approval queue, the scheduled brief, scheduled tasks and the session tape.
-
-Near-term after those: budgets replacing the fixed tool-round cap, taint
-tracking and an undo journal, tool-use examples and result pagination, and
-skills. Later: MCP client, code mode and file/browser reach — after an eval
-harness exists.
+Track 5's four security defects (G1–G4: sandbox profile, SSRF guard, sidecar
+auth, CSP images) were fixed on 2026-09-29. Much of what the roadmap then listed
+as later work has shipped since: durable runs, budgets, taint tracking and the
+undo journal, skills, MCP connectors, scripts that call tools, local file tools
+and the agent browser (see [CHANGELOG.md](CHANGELOG.md)). What is still open is
+the **Planned** items under Features, plus whatever in the roadmap is not in
+the changelog yet.

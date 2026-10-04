@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ListChecks, Wrench } from 'lucide-react'
+import { Circle, CircleDot, CircleCheck, CircleAlert, CircleMinus, ListChecks, Wrench } from 'lucide-react'
 import type { FullDesk, PlanStepStatus } from '@shared/types'
 import { argRows } from '../lib/planDigest'
 import { useStore } from '../store'
@@ -8,18 +8,18 @@ import InlineNote from './InlineNote'
 
 /**
  * The Plan tab. While the plan is pending this is the approval card itself; once decided it becomes
- * the live checklist — the same marks `ActionPlans.block()` re-injects into the model each round, so
+ * the live checklist — the same step states `ActionPlans.block()` re-injects into the model each round, so
  * what the user reads here is literally what the agent is being held to.
  */
 
-const MARK: Record<PlanStepStatus, string> = {
-  proposed: '[ ]',
-  approved: '[ ]',
-  consumed: '[>]',
-  done: '[x]',
-  failed: '[!]',
-  dropped: '[-]',
-  rejected: '[-]'
+const MARK: Record<PlanStepStatus, JSX.Element> = {
+  proposed: <Circle size={13} />,
+  approved: <Circle size={13} />,
+  consumed: <CircleDot size={13} />,
+  done: <CircleCheck size={13} />,
+  failed: <CircleAlert size={13} />,
+  dropped: <CircleMinus size={13} />,
+  rejected: <CircleMinus size={13} />
 }
 
 export default function DeskPlan({ desk }: { desk: FullDesk }): JSX.Element {
@@ -69,7 +69,7 @@ export default function DeskPlan({ desk }: { desk: FullDesk }): JSX.Element {
       <ol className="desk-checklist">
         {plan.steps.map((s) => (
           <li key={s.step_id} className={s.status}>
-            <span className="desk-mark">{MARK[s.status]}</span>
+            <span className="desk-mark" title={s.status} aria-label={s.status}>{MARK[s.status]}</span>
             <div className="desk-check-main">
               <div className="desk-check-head">
                 <b>{s.title || s.tool || 'Think it through'}</b>

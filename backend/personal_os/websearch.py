@@ -99,7 +99,7 @@ async def tavily(cfg: dict[str, Any], q: str, n: int, tr: str) -> list[dict[str,
 
 
 async def exa(cfg: dict[str, Any], q: str, n: int, tr: str) -> list[dict[str, Any]]:
-    # Exa (Agent Reach's pick: semantic, page highlights rather than one-line snippets). The keyless MCP has no date filter.
+    # Exa (semantic, page highlights rather than one-line snippets). The keyless MCP has no date filter.
     try:
         return await reach.exa_search(q, n, str(cfg.get("exaApiKey") or ""))
     except (reach.ReachError, httpx.HTTPError, ValueError) as e:

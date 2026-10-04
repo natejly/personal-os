@@ -16,6 +16,7 @@ import { useStore } from '../store'
 import { api } from '../lib/api'
 import { DAYS, DEFAULT_SCHEDULE, type Preset, type Schedule, cronPreset, diffJob, presetCron, toLocalInput } from '../lib/jobSchedule'
 import { chatModelIds, modelLabel } from '../lib/modelLabel'
+import { describeCron } from '../lib/cron'
 import { SAFE_MD } from './Message'
 import { AUTONOMY } from './DeskRail'
 
@@ -144,6 +145,7 @@ const skipReason = (why: string): string => why.replace('previous run still runn
 function JobHistory({ job }: { job: Job }): JSX.Element {
   const selectChat = useStore((s) => s.selectChat)
   const [runs, setRuns] = useState<(JobRunRecord | JobSkipRecord)[] | null>(null)
+  const previews = runs?.filter((r) => 'dry_run' in r && r.dry_run).length ?? 0
   const [stats, setStats] = useState<JobStats | null>(null)
   const [err, setErr] = useState<string | null>(null)
 
@@ -173,7 +175,9 @@ function JobHistory({ job }: { job: Job }): JSX.Element {
       {err && <p className="msg-error">{err}</p>}
       {stats && (
         <div className="job-history-stats muted small">
-          {stats.success_rate === null ? 'No finished runs in 30 days' : `${Math.round(stats.success_rate * 100)}% ok`}
+          {stats.success_rate === null
+            ? (previews ? `No scheduled runs yet (${previews} preview${previews === 1 ? '' : 's'})` : 'No finished runs in 30 days')
+            : `${Math.round(stats.success_rate * 100)}% ok`}
           {` · ${stats.runs} run${stats.runs === 1 ? '' : 's'}`}
           {stats.median_duration_s !== null && ` · median ${fmtDur(stats.median_duration_s)}`}
           {stats.total_cost > 0 && ` · $${stats.total_cost.toFixed(2)}`}
@@ -195,7 +199,7 @@ function JobHistory({ job }: { job: Job }): JSX.Element {
           <span>{fmtDate(r.started_at)}</span>
           <span className="muted">{fmtDur(r.duration_s)}</span>
           {r.attempt > 1 && <span className="chip warn">retry {r.attempt}</span>}
-          {r.manual && <span className="chip">by hand</span>}
+          {r.dry_run ? <span className="chip">preview</span> : r.manual && <span className="chip">by hand</span>}
           {r.late && (
             <span className="chip warn" title={r.due_at ? `Due ${fmtDate(r.due_at)}` : undefined}>
               late{r.missed_slots > 0 ? ` · ${r.missed_slots} slot${r.missed_slots === 1 ? '' : 's'} missed` : ''}
@@ -291,11 +295,11 @@ function JobRow({ job }: { job: Job }): JSX.Element {
           ? <span className="muted small" title={job.watch_dir ?? ''}>watching {tildePath(job.watch_dir ?? '')}{job.cron && <> · <code>{job.cron}</code></>}</span>
           : job.kind === 'mail'
             ? <code className="muted small" title="Runs when matching mail arrives">{job.mail_query}</code>
-          : <code className="muted small">{job.cron}</code>}
+          : <span className="muted small" title={job.cron}>{describeCron(job.cron)}</span>}
       <span className="muted small">
         {spent
           ? `ran ${fmtWhen(job.last_fired_at as number)}`
-          : job.enabled && job.next_due_at ? `next ${fmtWhen(job.next_due_at)}` : job.enabled && job.kind === 'watch' ? 'on' : 'off'}
+          : job.enabled && job.next_due_at ? `next ${fmtWhen(job.next_due_at)}` : job.enabled && job.kind === 'watch' ? 'on' : 'paused'}
       </span>
       {job.last_skip_reason && job.last_skip_at && (
         <span className="muted small" title={`Slot at ${fmtWhen(job.last_skip_at)} was skipped`}>skipped: {skipReason(job.last_skip_reason)}</span>
@@ -358,8 +362,7 @@ function JobRow({ job }: { job: Job }): JSX.Element {
   )
 }
 
-/** The fixed caps of every scheduled run (backend JOB_BUDGET). A job may only set its own lower. */
-const JOB_MAX_COST = 0.2
+/** The fixed time cap of every scheduled run (backend JOB_BUDGET). A job may only set its own lower. */
 const JOB_MAX_MINUTES = 4
 
 /** Which model a job's runs use, and the tighter caps it may set for itself. */
@@ -369,7 +372,7 @@ function JobRunSettings({ job, save }: { job: Job; save: (patch: Parameters<type
   if (job.model && !ids.includes(job.model)) ids.unshift(job.model)
   const budget = job.budget ?? {}
   // A cleared or out-of-range field drops that cap, so the job falls back to the fixed one.
-  const setCap = (key: 'maxRunCost' | 'maxRunSeconds', raw: string, scale: number, max: number): void => {
+  const setCap = (key: 'maxRunSeconds', raw: string, scale: number, max: number): void => {
     const n = Number(raw) * scale
     const next = { ...budget }
     if (raw.trim() && n > 0 && n <= max * scale) next[key] = n
@@ -388,13 +391,7 @@ function JobRunSettings({ job, save }: { job: Job; save: (patch: Parameters<type
         </select>
       </label>
       <details>
-        <summary className="muted small">Advanced: a tighter budget per run</summary>
-        <label className="small">
-          <span className="muted">Max cost ($)</span>{' '}
-          <input key={`c${budget.maxRunCost ?? ''}`} type="number" min={0.01} max={JOB_MAX_COST} step={0.01}
-            placeholder={String(JOB_MAX_COST)} defaultValue={budget.maxRunCost ?? ''} aria-label={`Max cost per run of ${job.name}`}
-            onBlur={(e) => setCap('maxRunCost', e.target.value, 1, JOB_MAX_COST)} />
-        </label>{' '}
+        <summary className="muted small">Advanced: a tighter time limit per run</summary>
         <label className="small">
           <span className="muted">Max minutes</span>{' '}
           <input key={`s${budget.maxRunSeconds ?? ''}`} type="number" min={0.5} max={JOB_MAX_MINUTES} step={0.5}
@@ -402,7 +399,7 @@ function JobRunSettings({ job, save }: { job: Job; save: (patch: Parameters<type
             aria-label={`Max minutes per run of ${job.name}`}
             onBlur={(e) => setCap('maxRunSeconds', e.target.value, 60, JOB_MAX_MINUTES)} />
         </label>
-        <p className="muted small">Every scheduled run already stops at ${JOB_MAX_COST.toFixed(2)} or {JOB_MAX_MINUTES} minutes; these can
+        <p className="muted small">Every scheduled run already stops after {JOB_MAX_MINUTES} minutes; this can
           only lower that, and your own settings still win when they are stricter.</p>
       </details>
     </div>
@@ -579,7 +576,9 @@ export default function AgentInbox(): JSX.Element | null {
   if (!box) return null
   const { approvals, proposals } = box.needs_you
   const paused = box.needs_you.paused_jobs ?? []
-  const deskRows = box.needs_you.desks ?? []
+  // A desk waiting on an approval is already a row above with Allow/Deny, so its desk event is dropped.
+  const approvalRuns = new Set(approvals.map((a) => a.run_id).filter(Boolean))
+  const deskRows = (box.needs_you.desks ?? []).filter((e) => !(e.run_id && approvalRuns.has(e.run_id)))
   const elsewhere = box.needs_you.elsewhere ?? []
   // A job with several pending proposals gets one "Reject all" row, so a noisy job is one click to clear.
   const perJob = new Map<string, { name: string; n: number }>()

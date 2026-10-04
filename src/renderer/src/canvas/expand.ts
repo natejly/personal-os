@@ -4,12 +4,12 @@ import { viewHidden } from '../moduleToggles'
 import { useStore } from '../store'
 
 /** Kinds with a classic equivalent. A note and usage have none, so they get no Expand. */
-const EXPANDABLE = new Set<WidgetKind>(['chat', 'todos', 'calendar', 'board', 'dashboard-widget', 'memory', 'graph', 'documents', 'recap', 'project'])
+const EXPANDABLE = new Set<WidgetKind>(['chat', 'todos', 'calendar', 'dashboard-widget', 'memory', 'graph', 'documents', 'recap', 'project'])
 
 /** Kinds whose classic equivalent is a view the user can hide (Settings → Modules). Memory lives in
- * Settings → Knowledge base and uploads in Files, neither of which can be hidden. */
+ * Settings → Memory and uploads in Files, neither of which can be hidden. */
 const HIDEABLE_VIEW: Partial<Record<WidgetKind, string>> = {
-  todos: 'todos', calendar: 'calendar', board: 'boards', 'dashboard-widget': 'dashboards'
+  todos: 'todos', calendar: 'calendar', 'dashboard-widget': 'dashboards'
 }
 
 /** Whether a window kind has a reachable classic equivalent (false for note, usage, or a hidden view). */
@@ -23,7 +23,7 @@ export const canExpand = (w: CanvasWindow): boolean => {
 }
 
 /** Navigate the main window to the classic equivalent. Leaves the canvas; the window stays. Memory and
- * graph open Settings → Knowledge base over the canvas instead; uploads open Files -> Uploads. */
+ * graph open Settings → Memory over the canvas instead; uploads open Files -> Uploads. */
 export function expandWindow(w: CanvasWindow): void {
   if (!canExpand(w)) return
   const app = useStore.getState()
@@ -32,14 +32,11 @@ export function expandWindow(w: CanvasWindow): void {
       if (w.ref_id) app.selectChat(w.ref_id).catch((e: unknown) => useStore.getState().toast((e as Error)?.message ?? String(e), 'error'))
       break
     case 'todos':
+      handoff('todos-view', w.config.view === 'board' ? 'board' : null)  // the page opens in the window's view
       app.setView('todos')
       break
     case 'calendar':
       app.setView('calendar')
-      break
-    case 'board':
-      handoff('board', w.ref_id)
-      app.setView('boards')
       break
     case 'dashboard-widget':
       handoff('dashboard', String(w.config.dashboard_id ?? '') || null)

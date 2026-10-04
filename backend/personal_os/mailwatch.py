@@ -179,7 +179,8 @@ class MailWatch:
                 # A row snooze() made has no last message yet: its first refresh is not new mail.
                 same = bool(old) and old["last_msg_id"] in (None, last.get("id"))
                 dismissed = int(old["dismissed"]) if same else 0
-                snooze = old["snoozed_until"] if same else None  # a new message wakes the thread
+                # A new message wakes the thread. A row snooze() made has no last message yet: not seen, not new.
+                snooze = old["snoozed_until"] if same or (old and old["last_msg_id"] is None) else None
                 c.execute(
                     "INSERT INTO thread_status(thread_id,subject,status,reason,last_msg_id,last_from,last_date,age_days,dismissed,followup_todo_id,updated_at) "
                     "VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(thread_id) DO UPDATE SET subject=excluded.subject, status=excluded.status, "

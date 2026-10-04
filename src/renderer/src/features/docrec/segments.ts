@@ -99,7 +99,7 @@ export function recordAvailability(status: MeetingStatusInfo | null, docId: stri
   if (a.doc_id === docId) return { kind: 'live-here', meetingId: a.meeting_id, mode: a.doc_mode ?? 'record' }
   return {
     kind: 'live-elsewhere',
-    reason: a.doc_id ? 'Another note is being recorded. Stop that one first.' : 'A meeting is being recorded. Stop it first.'
+    reason: a.doc_id ? 'Another file is being recorded. Stop that one first.' : 'A meeting is being recorded. Stop it first.'
   }
 }
 

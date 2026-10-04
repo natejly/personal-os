@@ -7,9 +7,9 @@ in the `canvases` and `canvas_windows` tables (`backend/personal_os/canvas.py`).
 
 ## Windows
 
-Each window is a widget of one kind: `chat`, `todos`, `calendar`, `board`, `note`,
+Each window is a widget of one kind: `chat`, `todos`, `calendar`, `note`,
 `dashboard-widget`, `memory`, `graph`, `documents`, `recap`, `project`, `usage`, `activity`, `web`
-or `artifact`. Add one by dragging a row from the sidebar (a chat, a note, a nav row) onto the plane,
+or `artifact` (a `todos` window has a list and a board view). Add one by dragging a row from the sidebar (a chat, a note, a nav row) onto the plane,
 from the **+** on the Spaces bar, or by right-clicking the plane. Several chats can stream at once,
 each with a status ring. Sticky notes and the Web browser exist only here.
 

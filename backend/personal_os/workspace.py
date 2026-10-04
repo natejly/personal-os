@@ -366,7 +366,7 @@ class Workspace:
         if p == root:
             raise WorkspaceError("path must name a file, not the workspace root")
         parts = PurePosixPath(self._rel_of(desk_id, p)).parts
-        if parts[0] in RESERVED_DIRS:
+        if parts[0].casefold() in RESERVED_DIRS:  # APFS is case-insensitive
             raise WorkspaceError(f"{parts[0]}/ is reserved for the workspace itself and is not writable")
         if err := _read_only(parts[0]):
             raise err

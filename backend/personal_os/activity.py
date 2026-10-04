@@ -30,7 +30,7 @@ import httpx
 
 from . import insights as insights_mod
 from . import stt
-from .audiocap import IS_MAC, LOOPBACK_HINTS, audio_devices, ffmpeg_path, looks_like_loopback, write_pcm16_wav  # noqa: F401
+from .audiocap import IS_MAC, LOOPBACK_HINTS, audio_devices, device_input, ffmpeg_path, looks_like_loopback, write_pcm16_wav  # noqa: F401
 from . import native_audio
 from .db import Database, new_id, now, row_to_dict
 from . import activity_categories as categories_mod
@@ -92,11 +92,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # Insights: habits worth remembering and automations worth offering, mined from the same data.
     # See insights.py. Proposals only - nothing here ever acts on its own.
     "insights": dict(insights_mod.DEFAULTS),
-    # Palantir mode: every signal on and the gate's discretionary filters stood down. Never on by
-    # default, and it keeps what it replaced in palantirRestore so switching it off puts the old
+    # Record-everything mode: every signal on and the gate's discretionary filters stood down. Never on by
+    # default, and it keeps what it replaced in recordEverythingRestore so switching it off puts the old
     # settings back instead of guessing at defaults.
-    "palantir": False,
-    "palantirRestore": {},
+    "recordEverything": False,
+    "recordEverythingRestore": {},
     # Category rules (activity_categories.py). None = the shipped default tree; a list replaces it.
     "categories": None,
 }
@@ -219,7 +219,7 @@ class Gate:
         return out
 
     def scrub_url(self, url: str) -> str:
-        """A page address with its secrets taken out. Unchanged when redaction is off (Palantir)."""
+        """A page address with its secrets taken out. Unchanged when redaction is off (record-everything mode)."""
         if not url or not self.cfg().get("redact", True):
             return url or ""
         return redact_mod.sanitize_url(url)
@@ -779,8 +779,8 @@ def capabilities(cfg: dict[str, Any]) -> list[dict[str, Any]]:
     return [
         _cap("platform", "Supported platform", IS_MAC, f"Running on {sys.platform}.",
              "The collectors are macOS-only; the rest of the app is unaffected."),
-        _cap("pyobjc", "Native bridge (pyobjc)", pyobjc_ok,
-             "App names, window titles, idle time and keystroke taps come through pyobjc."
+        _cap("pyobjc", "macOS system access", pyobjc_ok,
+             "App names, window titles, idle time and typing counts come through it."
              if pyobjc_ok else f"pyobjc not importable: {_pyobjc_error or 'not installed'}.",
              "Run `cd backend && uv pip install -e '.[activity]'`, then restart the app. Without it, app "
              "tracking falls back to lsappinfo (name only).",
@@ -1333,7 +1333,7 @@ class AudioCollector(Collector):
                         self.sleep(5)
                         continue
                     r = subprocess.run(
-                        [ff, "-hide_banner", "-loglevel", "error", "-f", "avfoundation", "-i", f":{device}",
+                        [ff, "-hide_banner", "-loglevel", "error", *device_input(device),
                          "-t", str(chunk), "-ac", "1", "-ar", "16000", "-y", str(path)],
                         capture_output=True, text=True, timeout=chunk + 30,
                     )
@@ -1517,17 +1517,22 @@ class Monitor:
     # ---- config ----
     def config(self) -> dict[str, Any]:
         stored = self.db.get_settings().get("activity")
+        if isinstance(stored, dict):  # accept the pre-rename keys once, in case the migration has not run
+            stored = dict(stored)
+            for old, new in (("pal" "antir", "recordEverything"), ("pal" "antirRestore", "recordEverythingRestore")):
+                if old in stored:
+                    stored.setdefault(new, stored.pop(old))
         return _deep_merge(DEFAULT_CONFIG, stored if isinstance(stored, dict) else {})
 
     def set_config(self, patch: dict[str, Any]) -> dict[str, Any]:
         cur = self.config()
         patch = dict(patch or {})
-        if cur.get("palantir") and patch.get("palantir") is not False:
+        if cur.get("recordEverything") and patch.get("recordEverything") is not False:
             # While the mode is on these three are flattened on purpose; an edit to them is the
             # user's new baseline, so it goes into the snapshot that turning the mode off restores.
             kept = {k: patch.pop(k) for k in ("excludeApps", "excludeTitlePatterns", "excludeRules", "redact") if k in patch}
             if kept:
-                patch["palantirRestore"] = {**(cur.get("palantirRestore") or {}), **kept}
+                patch["recordEverythingRestore"] = {**(cur.get("recordEverythingRestore") or {}), **kept}
         cfg = _deep_merge(cur, patch)
         cfg["signals"] = {k: bool(v) for k, v in (cfg.get("signals") or {}).items() if k in SIGNALS}
         self.db.set_settings({"activity": cfg})
@@ -1540,7 +1545,7 @@ class Monitor:
             self.start()
         return cfg
 
-    def set_palantir(self, on: bool) -> dict[str, Any]:
+    def set_record_everything(self, on: bool) -> dict[str, Any]:
         """One switch for "record everything".
 
         On: all six signals, redaction off, and both exclusion lists emptied - so the password
@@ -1557,8 +1562,8 @@ class Monitor:
         """
         cfg = self.config()
         if on:
-            restore = cfg.get("palantirRestore") or {}
-            if not cfg.get("palantir"):
+            restore = cfg.get("recordEverythingRestore") or {}
+            if not cfg.get("recordEverything"):
                 restore = {
                     "signals": dict(cfg.get("signals") or {}),
                     "redact": bool(cfg.get("redact", True)),
@@ -1567,14 +1572,14 @@ class Monitor:
                     "excludeRules": list(cfg.get("excludeRules") or []),
                 }
             new = {
-                **cfg, "palantir": True, "palantirRestore": restore, "enabled": True,
+                **cfg, "recordEverything": True, "recordEverythingRestore": restore, "enabled": True,
                 "signals": {s: True for s in SIGNALS},
                 "redact": False, "excludeApps": [], "excludeTitlePatterns": [], "excludeRules": [],
             }
         else:
-            r = cfg.get("palantirRestore") or {}
+            r = cfg.get("recordEverythingRestore") or {}
             new = {
-                **cfg, "palantir": False, "palantirRestore": {},
+                **cfg, "recordEverything": False, "recordEverythingRestore": {},
                 "signals": dict(r.get("signals") or DEFAULT_CONFIG["signals"]),
                 "redact": bool(r.get("redact", True)),
                 "excludeApps": list(r.get("excludeApps", DEFAULT_CONFIG["excludeApps"])),
@@ -1582,7 +1587,7 @@ class Monitor:
                 "excludeRules": list(r.get("excludeRules", [])),
             }
         self.db.set_settings({"activity": new})   # a full replace: the restore snapshot must clear
-        log.info("activity: palantir mode %s", "ON - recording everything" if on else "off - previous settings back")
+        log.info("activity: record-everything mode %s", "ON - recording everything" if on else "off - previous settings back")
         self.set_config({})                       # re-reads the stored config and restarts collectors
         return self.status()
 
@@ -1597,7 +1602,7 @@ class Monitor:
         cfg = self.config()
         self.stop_event = threading.Event()
         self.running = True
-        self.paused = False
+        # A pause outlives a restart (any config edit restarts); only stop() or expiry ends it.
         self.db.set_settings({"activity": {**cfg, "enabled": True}})
         sig = cfg.get("signals") or {}
         self.collectors = []
@@ -1623,6 +1628,7 @@ class Monitor:
         self.collectors = []
         self.last_focus = {}
         if persist:
+            self.paused, self.pause_until = False, 0.0
             self.db.set_settings({"activity": {**self.config(), "enabled": False}})
         log.info("activity: stopped")
         return self.status()
@@ -1667,7 +1673,7 @@ class Monitor:
             "md_path": str(self.md_path),
             "audio_devices": audio_devices() if (cfg.get("signals") or {}).get("micAudio") or (cfg.get("signals") or {}).get("outputAudio") else [],
             "secure_input": secure_input_active(),
-            "palantir": bool(cfg.get("palantir")),
+            "recordEverything": bool(cfg.get("recordEverything")),
             "redactions": self.gate.counts,
         }
 

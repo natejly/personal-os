@@ -8,7 +8,7 @@ Everything runs offline against a scripted llm.stream_chat. The claims worth a t
   - several read-only spawns in one round run side by side, through the real reply loop;
   - the report comes back wrapped as untrusted data and taints the parent;
   - background spawn then wait, stop cascades and still returns partial output, a stale child is stopped;
-  - at its step limit a child is forced into one tool-free summary; the cost cap is a hard stop;
+  - at its step limit a child is forced into one tool-free summary;
   - a child's approval card rides the parent's stream and decides the call;
   - writers never share a root; user-authored definitions are inert until approved;
   - desk_start always asks and only ever creates a plan-mode desk.
@@ -47,7 +47,7 @@ def check(cond: Any, label: str) -> None:
 
 
 appmod.db.set_settings({"autoLearn": False, "baseUrl": ""})
-DEFAULTS = {k: llm.DEFAULT_SETTINGS[k] for k in ("subagentMaxConcurrent", "subagentMaxDepth", "subagentMaxRounds", "subagentMaxCost",
+DEFAULTS = {k: llm.DEFAULT_SETTINGS[k] for k in ("subagentMaxConcurrent", "subagentMaxDepth", "subagentMaxRounds",
                                                   "subagentStaleSeconds", "subagentToolSeconds")}
 
 # ---- a scripted model ----------------------------------------------------------------------------
@@ -244,8 +244,8 @@ def test_identical_spawns_dedupe() -> None:
     check(b.get("duplicate") and b["agent_id"] == a["agent_id"], "the repeat is answered with the first result, marked as such")
 
 
-def test_budget_rollup_and_cost_cap() -> None:
-    reset(subagentMaxCost=0.25)
+def test_budget_rollup() -> None:
+    reset()
     prev = appmod.pricing.cost
     appmod.pricing.cost = lambda cfg, model, pt, ct, *a, **k: (pt + ct) / 1000.0
     try:
@@ -254,25 +254,7 @@ def test_budget_rollup_and_cost_cap() -> None:
         ctx = mkctx(new_conv())
         out = run(appmod.toolbox.call("agent_spawn", {"task": "spend"}, ctx))
         check(abs(ctx["budget"].cost - 0.3) < 1e-9 and ctx["budget"].tokens == 300, "the child's cost and tokens land on the parent's budget")
-        check(out["state"] == "completed" or out["exit_reason"] == "cost_cap", "it ended")
-
-        # the cost cap is a hard stop, not a summary turn
-        reset(subagentMaxCost=0.2)
-        SCRIPTS["burn"] = [{"text": "step", "calls": [call("c1", "current_time", {})], "usage": {"prompt_tokens": 150, "completion_tokens": 100}},
-                           {"text": "never", "calls": [call("c2", "current_time", {})]}]
-        out = run(appmod.toolbox.call("agent_spawn", {"task": "burn"}, mkctx(new_conv())))
-        check(out["exit_reason"] == "cost_cap" and out["state"] == "partial", "over its own cost cap the child stops")
-        check(len([s for s in SEEN if s["child"]]) == 1, "and no further model call is made")
-        check("step" in out["report"], "the partial output is returned")
-
-        # the parent's own cost limit stops its children too
-        reset()
-        pctx = mkctx(new_conv())
-        pctx["budget"].max_cost = 0.05
-        SCRIPTS["over"] = [{"text": "x", "calls": [call("c1", "current_time", {})], "usage": {"prompt_tokens": 80, "completion_tokens": 20}},
-                           {"text": "y", "calls": [call("c2", "current_time", {})]}]
-        out = run(appmod.toolbox.call("agent_spawn", {"task": "over"}, pctx))
-        check(out["exit_reason"] == "cost_cap", "a child stops when the parent's budget is spent")
+        check(out["state"] == "completed", "it ended")
     finally:
         appmod.pricing.cost = prev
 
@@ -406,6 +388,19 @@ def test_resume_continues_history() -> None:
     check(third["state"] == "completed", "a child can be resumed from its recorded transcript")
 
 
+def test_resume_after_a_mid_round_halt_answers_every_call() -> None:
+    reset()
+    SCRIPTS["first task"] = [{"text": "first answer"}]
+    ctx = mkctx(new_conv())
+    first = run(appmod.toolbox.call("agent_spawn", {"task": "first task"}, ctx))
+    mgr.children[first["agent_id"]].messages.append(
+        {"role": "assistant", "content": None, "tool_calls": [{"id": "x1", "type": "function", "function": {"name": "current_time", "arguments": "{}"}}]})
+    SCRIPTS["again"] = [{"text": "ok"}]
+    run(appmod.toolbox.call("agent_spawn", {"task": "again", "resume_id": first["agent_id"]}, ctx))
+    msgs = next(s for s in SEEN if s["task"] == "again")["messages"]
+    check(any(m["role"] == "tool" and m.get("tool_call_id") == "x1" for m in msgs), "a call left unanswered by a halt gets a result on resume")
+
+
 def test_duplicate_calls_in_a_child_run_once() -> None:
     reset()
     ran: list[str] = []
@@ -531,6 +526,31 @@ def test_child_ask_is_refused_when_nobody_can_answer() -> None:
             row = appmod.run_store.approval(cards[0]["id"]) if cards else None
             check(row is not None and row["status"] != "pending", f"{label}: the card is settled, not left waiting")
             check("running" not in fr.statuses, f"{label}: the ended parent's status is not rewritten")
+
+
+def test_background_child_never_parks_a_card() -> None:
+    """A child of a proposal-only run (a scheduled job) refuses a call that would ask instead of waiting on a card."""
+    reset()
+    spec = appmod.toolbox.specs["fetch_url"]
+    real, hits = spec.fn, []
+
+    async def fake(ctx: dict[str, Any], **kw: Any) -> Any:
+        hits.append(kw)
+        return {"url": kw.get("url"), "text": "page"}
+
+    spec.fn = fake
+    try:
+        SCRIPTS["browse"] = [{"text": "", "calls": [call("f1", "fetch_url", {"url": "https://example.com/a"})]}, {"text": "fetched"}]
+        fr = FakeRun()
+        modes = appmod.toolbox.effective({}, None, None)
+        modes["fetch_url"] = "ask"
+        ctx = mkctx(new_conv(), modes=modes, run=fr, message_id=None, proposal_only=True)
+        ctx["allowed_urls"] = {"https://example.com/a"}
+        out = run(asyncio.wait_for(appmod.toolbox.call("agent_spawn", {"task": "browse"}, ctx), 5))
+    finally:
+        spec.fn = real
+    cards = [d for e, d in fr.events if e == "tool_call" and d.get("needs_approval")]
+    check(not hits and not cards and out["state"] == "completed", "no card, no call, and the child finishes")
 
 
 def test_child_calls_obey_permission_rules() -> None:
@@ -694,6 +714,17 @@ def test_writers_confined_and_serialized() -> None:
 
 
 # ---- definitions -----------------------------------------------------------------------------------
+
+def test_worker_can_spawn_a_worker_on_its_own_root() -> None:
+    root = tempfile.mkdtemp()
+    reset(workspaceRoots=[root], subagentStaleSeconds=1)
+    SCRIPTS["outer"] = [{"text": "", "calls": [call("g", "agent_spawn", {"task": "inner", "role": "worker"})]}, {"text": "outer done"}]
+    SCRIPTS["inner"] = [{"text": "inner done"}]
+    modes = {**appmod.toolbox.effective({}, None, None), "write_local_file": "on"}
+    run(appmod.toolbox.call("agent_spawn", {"task": "outer", "role": "worker"}, mkctx(new_conv(), modes=modes)))
+    inner = next(c for c in mgr.children.values() if c.task == "inner")
+    check(inner.roots and inner.state == "completed", "a nested worker inherits its ancestor's root lock instead of deadlocking")
+
 
 def test_definitions_need_approval() -> None:
     reset()
@@ -890,7 +921,7 @@ def test_settings_and_routes() -> None:
     for k, v in DEFAULTS.items():
         check(llm.DEFAULT_SETTINGS[k] == v, f"default {k}")
     check(llm.DEFAULT_SETTINGS["subagentMaxConcurrent"] == 4 and llm.DEFAULT_SETTINGS["subagentMaxDepth"] == 2
-          and llm.DEFAULT_SETTINGS["subagentMaxRounds"] == 12 and llm.DEFAULT_SETTINGS["subagentMaxCost"] == 0.25, "the specified defaults")
+          and llm.DEFAULT_SETTINGS["subagentMaxRounds"] == 12, "the specified defaults")
     reset()
     store = appmod.run_store
     store.create("parent_r", None, "chat")

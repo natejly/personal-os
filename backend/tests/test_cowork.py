@@ -401,6 +401,28 @@ def test_an_unanswered_card_parks_rather_than_auto_denying() -> None:
         settings_patch(parkAfterSeconds=0)
 
 
+def test_a_turn_that_parks_after_reading_untrusted_content_leaves_the_chat_tainted() -> None:
+    """The park returns before the normal end; taint must still reach the conversation, or the next turn starts clean."""
+    from personal_os.app import convos
+    spec = toolbox.specs["desk_list_files"]
+    settings_patch(parkAfterSeconds=1)
+    spec.taints = True  # stand-in for any third-party read (mail, a web page)
+    try:
+        script({"calls": [call("desk_list_files")]},
+               {"calls": [propose("Needs a decision", step("desk_write_file", WRITE["arguments"]))]},
+               {"text": "Done."})
+        made = make_desk("Read then park")
+        did = made["desk"]["id"]
+        card(did, PLAN_TOOL)
+        wait_until(lambda: desk(did)["status"] == "blocked", "the unwatched desk to park")
+        quiet(did)
+        conv = convos.get(made["conversation_id"], with_messages=False)
+        check(conv["settings"].get("tainted") is True, f"the parked turn persisted its taint, got {conv['settings']}")
+    finally:
+        spec.taints = False
+        settings_patch(parkAfterSeconds=0)
+
+
 def test_deciding_a_parked_card_resumes_the_desk() -> None:
     settings_patch(parkAfterSeconds=1)
     try:
@@ -545,12 +567,9 @@ def test_the_desk_budget_caps_the_chain_even_with_turns_left() -> None:
     run.partial, run.steps_consumed = "rounds", 1
     try:
         check(_should_chain(base, run) is True, "the baseline turn would chain")
-        check(_should_chain({**base, "cost": 99.0}, run) is False, "the cost cap stops it with turns left over")
+        check(_should_chain({**base, "cost": 99.0}, run) is True, "spend never stops a desk")
         check(_should_chain({**base, "turn": 99}, run) is False, "so does the turn cap")
-        check(_should_chain({**base, "cost": 0.001, "budget": {"maxCost": 0.0001}}, run) is False,
-              "a desk's own budget may make the user's settings stricter")
-        check(_should_chain({**base, "cost": 0.001}, run) is True,
-              "and the same spend is nothing against the default cap")
+        check(_should_chain({**base, "budget": {"maxTurns": 1}}, run) is False, "a desk's own budget may make the user's settings stricter")
         run.steps_consumed = 0
         check(_should_chain(base, run) is False, "a turn that consumed no step is not progress")
         run.steps_consumed = 1
@@ -573,6 +592,16 @@ def test_desk_ask_moves_the_desk_to_needs_you() -> None:
     state = desk(did)
     check(state["status_reason"] != "question" and not state["question"],
           f"an approval with no answer does not park the desk on the question, got {state['status']}/{state['status_reason']}")
+
+
+def test_leaving_needs_you_clears_the_old_ask() -> None:
+    did = make_desk("Waits on an approval", start=False)["desk"]["id"]
+    desks.set_status(did, "needs_approval", reason="approval")
+    check([e for e in j("GET", "/cowork/inbox") if e["desk_id"] == did], "an approval puts the desk in the inbox")
+    # The approval was answered elsewhere (the Agent inbox); the desk runs on and its old ask must not linger.
+    desks.set_status(did, "working", reason="resumed")
+    check(not [e for e in j("GET", "/cowork/inbox") if e["desk_id"] == did],
+          "a status outside Needs you marks the desk's waiting rows seen")
 
 
 def test_a_steer_does_not_double_charge_the_turn() -> None:
@@ -617,6 +646,7 @@ def test_accept_is_exactly_once_and_reads_the_promotion_back() -> None:
     state = delivering_desk("Promote the report")
     did, oid = state["id"], state["outputs"][0]["id"]
     body = {"outputs": [{"output_id": oid, "destination": "doc", "title": "The report"}]}
+    j("POST", f"/cowork/desks/{did}/accept", {"outputs": [{"output_id": oid, "destination": "pdf"}]}, expect=422)
     first = j("POST", f"/cowork/desks/{did}/accept", body)["results"][0]
     check(first["ok"] is True and first["verified"] is True, f"the promotion was read back and matched, got {first}")
     check(docs.get(first["ref"])["content"] == REPORT, "and the doc really holds the file's bytes")
@@ -859,6 +889,7 @@ TESTS = [test_a_desk_is_a_conversation_the_chat_list_hides,
          test_the_live_desk_cap_queues,
          test_a_double_start_makes_one_run,
          test_an_unanswered_card_parks_rather_than_auto_denying,
+         test_a_turn_that_parks_after_reading_untrusted_content_leaves_the_chat_tainted,
          test_deciding_a_parked_card_resumes_the_desk,
          test_a_wake_that_lost_the_race_with_its_own_run_is_retried,
          test_a_watched_card_never_parks,
@@ -868,6 +899,7 @@ TESTS = [test_a_desk_is_a_conversation_the_chat_list_hides,
          test_desk_ask_moves_the_desk_to_needs_you,
          test_ask_as_it_goes_cards_each_change_instead_of_planning_first,
          test_seen_clears_the_desks_needs_you_badge,
+         test_leaving_needs_you_clears_the_old_ask,
          test_a_steer_does_not_double_charge_the_turn,
          test_desk_done_with_an_output_lands_in_review,
          test_accept_is_exactly_once_and_reads_the_promotion_back,
@@ -1063,6 +1095,20 @@ def test_a_planning_desk_is_not_offered_desk_done_or_desk_start() -> None:
           "an approved/ask desk is offered desk_done, and still never desk_start")
 
 
+def test_a_chat_is_offered_desk_start_only_while_cowork_is_shown() -> None:
+    settings_patch(hiddenViews=["cowork"])
+    try:
+        script({"text": "ok"})
+        _chat_turn(_chat("off"), "start a desk")
+        check("desk_start" not in SCRIPT["tools"][0], "with Cowork hidden a chat is not offered desk_start")
+        settings_patch(hiddenViews=[])
+        script({"text": "ok"})
+        _chat_turn(_chat("off"), "start a desk")
+        check("desk_start" in SCRIPT["tools"][0], "with Cowork shown it is")
+    finally:
+        settings_patch(hiddenViews=list(llm.DEFAULT_SETTINGS["hiddenViews"]))
+
+
 def test_a_reply_that_just_ends_gets_exactly_one_nudge() -> None:
     script({"text": "I think that is everything."}, {"text": "Still nothing."})
     did = make_desk("Do it", autonomy="ask")["desk"]["id"]
@@ -1077,6 +1123,7 @@ def test_a_reply_that_just_ends_gets_exactly_one_nudge() -> None:
 
 
 TESTS += [test_a_planning_desk_is_not_offered_desk_done_or_desk_start,
+         test_a_chat_is_offered_desk_start_only_while_cowork_is_shown,
          test_a_reply_that_just_ends_gets_exactly_one_nudge,
          test_a_desk_is_told_it_is_a_desk,
          test_a_desk_is_told_its_inputs,

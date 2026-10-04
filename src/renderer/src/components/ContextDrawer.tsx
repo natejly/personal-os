@@ -6,6 +6,7 @@ import ShellJobs from './ShellJobs'
 import { useStore, useProject, useConversation, useStreamingMessageId } from '../store'
 import { api } from '../lib/api'
 import ChunkViewer, { type ChunkRef } from './ChunkViewer'
+import { citeLabel, openCite } from '../lib/remarkCites'
 import { DEFAULT_EFFORT, type ContextMeter, type ContextUsed, type ConversationSettings, type ConversationUsage } from '@shared/types'
 import { fmtCost, usageLine } from '../lib/chatMeta'
 
@@ -147,7 +148,7 @@ function ContextUsedView({ ctx }: { ctx: ContextUsed }): JSX.Element {
       {ctx.chunks.length > 0 && (
         <section>
           <h5><FileText size={12} /> Documents ({ctx.chunks.length} excerpt{ctx.chunks.length === 1 ? '' : 's'}) <button className="link" onClick={() => openSettings('knowledge', 'documents')}>manage</button></h5>
-          <ul>{ctx.chunks.map((c) => <li key={c.chunk_id}><button className="link" title="Open the passage in its source" onClick={() => setViewing(c)}>{c.n ? `[${c.n}] ` : ''}<b>{c.name}</b> · chunk {c.idx + 1}</button><div className="chunk-preview">{c.text}</div></li>)}</ul>
+          <ul>{ctx.chunks.map((c, i) => <li key={c.chunk_id ?? c.url ?? `${c.n ?? i}`}><button className="link" title={c.source === 'web' ? c.url : 'Open the passage in its source'} onClick={() => openCite(c, setViewing)}>{c.n ? `[${c.n}] ` : ''}<b>{c.source === 'web' ? citeLabel(c) : c.name}</b>{c.idx != null ? ` · chunk ${c.idx + 1}` : ''}</button><div className="chunk-preview">{c.text}</div></li>)}</ul>
           {viewing && <ChunkViewer chunk={viewing} onClose={() => setViewing(null)} />}
         </section>
       )}

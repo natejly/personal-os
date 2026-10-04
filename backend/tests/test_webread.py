@@ -52,7 +52,7 @@ def test_numberize_links() -> None:
           "[mail](mailto:a@b.c), [js](javascript:alert(1)), ![img](/i.png).")
     out, links = webread.numberize_links(md, "https://x.com/start")
     assert [(l["n"], l["url"]) for l in links] == [(1, "https://x.com/docs/a"), (2, "https://y.org/p")]
-    assert "[docs][1]" in out and "[again][1]" in out and "[other][2]" in out
+    assert "[docs](^L1)" in out and "[again](^L1)" in out and "[other](^L2)" in out
     assert "mailto" not in out and "javascript" not in out and "mail," in out and "![img](/i.png)" in out
 
 
@@ -235,7 +235,11 @@ def test_links_numbered_with_references(box: Toolbox) -> None:
     out = fetch(box, url="https://a.com/p", links=True)
     urls = [l["url"] for l in out["links"]]
     assert "https://a.com/guide" in urls and "https://other.org/x" in urls
-    assert "## References" in out["text"] and "[1]: https://a.com/guide" in out["text"]
+    assert "## References" in out["text"] and "^L1: https://a.com/guide" in out["text"]
+    # Link numbers live in their own ^L namespace: the only [n] in the result is the page's own citation.
+    import re
+    assert not re.search(r"\]\[\d|\[\d+\]", out["text"])
+    assert out["cite_as"] == f"Cite this page as [{out['cite']}]"
     plain = fetch(box, url="https://a.com/p", fresh=True)
     assert "links" not in plain and "References" not in plain["text"]
 
@@ -277,3 +281,25 @@ def test_tainted_run_cannot_read_a_cached_url_it_could_not_fetch(box: Toolbox) -
 
 def test_setting_default_present() -> None:
     assert llm.DEFAULT_SETTINGS["fetchCacheSeconds"] == 3600
+
+
+def test_search_and_fetch_share_one_citation_ledger(box: Toolbox, monkeypatch: pytest.MonkeyPatch) -> None:
+    from personal_os import websearch
+
+    async def fake(cfg: Any, query: str, want: int, *a: Any) -> Any:
+        return [{"title": "One", "url": "https://one.com/a", "snippet": "first"},
+                {"title": "Widgets", "url": "https://www.a.com/p/", "snippet": "about widgets"},
+                {"title": "Three", "url": "https://three.com/", "snippet": "third"}][:want], {}
+    monkeypatch.setattr(websearch, "search", fake)
+    Net.routes["https://a.com/p"] = FakeResp("https://a.com/p", PAGE.encode(), "text/html")
+    # A doc excerpt was already cited by the prompt: web numbers continue after it, and a chunk after them still works.
+    ctx: dict[str, Any] = {"citations": [{"n": 1, "chunk_id": "c1", "document_id": "d1", "name": "lease.txt", "idx": 0, "text": "x"}],
+                           "allowed_urls": ["https://a.com/p"]}
+    rows = run(box.specs["web_search"].fn(ctx, query="widgets"))["results"]
+    assert [r["cite"] for r in rows] == [2, 3, 4]
+    page = fetch(box, ctx, url="https://a.com/p")
+    assert page["cite"] == 3 and page["cite_as"] == "Cite this page as [3]"  # same page as result 2: no new number
+    assert [c["n"] for c in ctx["citations"]] == [1, 2, 3, 4]
+    web = ctx["citations"][2]
+    assert web["source"] == "web" and web["domain"] == "a.com" and web["url"] == "https://www.a.com/p/" and "chunk_id" not in web
+    assert tools._cite(ctx, {"chunk_id": "c2", "document_id": "d1", "name": "lease.txt", "idx": 1, "text": "y"}) == 5

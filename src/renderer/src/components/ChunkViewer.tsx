@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
 import { FileText, X } from 'lucide-react'
 import { api } from '../lib/api'
-import { lineAt, splitHighlight } from '../lib/highlight'
+import { lineAt, meetingView, rangeSpan, splitHighlight } from '../lib/highlight'
 import { useStore } from '../store'
 import type { ContextUsed } from '@shared/types'
 
 export type ChunkRef = ContextUsed['chunks'][number]
 
-/** A cited excerpt in its source text: the chunk's span wrapped in <mark> and scrolled into view. */
+/** A cited excerpt in its source text: the chunk's (or read range's) span wrapped in <mark> and scrolled into view. */
 export default function ChunkViewer({ chunk, onClose }: { chunk: ChunkRef; onClose: () => void }): JSX.Element {
   const [view, setView] = useState<{ text: string; start: number; end: number } | null>(null)
   const [err, setErr] = useState(false)
@@ -15,11 +15,16 @@ export default function ChunkViewer({ chunk, onClose }: { chunk: ChunkRef; onClo
   const isDoc = chunk.source === 'doc'
 
   useEffect(() => {
-    const id = (isDoc && chunk.doc_id) || chunk.document_id
+    const id = (isDoc && chunk.doc_id) || chunk.document_id || ''
     void (async () => {
       try {
+        if (chunk.source === 'meeting' && chunk.meeting_id) {
+          // A transcript is not part of the meeting payload: show the cited lines on their own.
+          setView(meetingView(chunk, await api.meetings.get(chunk.meeting_id)))
+          return
+        }
         const [span, text] = await Promise.all([
-          api.chunkSpan(isDoc, id, chunk.chunk_id),
+          chunk.chunk_id ? api.chunkSpan(isDoc, id, chunk.chunk_id) : rangeSpan(chunk),
           isDoc ? api.docs.get(id).then((d) => d.content) : api.documents.get(id).then((d) => d.text ?? '')
         ])
         setView({ text, start: span.start, end: span.end })

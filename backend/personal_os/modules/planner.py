@@ -148,10 +148,10 @@ class PlannerModule(Module):
             blocks = [{"todo_id": b["todo_id"], "title": b["title"], "start": b["start"], "end": b["end"], "part": b["part"],
                        "why": "due {due}, priority {priority}, energy {energy}, time {time} (weighted)".format(**b["why"])} for b in plan["blocks"]]
             return {"proposed_blocks": blocks, "unplaced": [{**u, "title": titles.get(u["id"])} for u in plan["unplaced"]],
-                    "note": "Proposals only; nothing was added to the calendar. Present them and let the user press Plan my day, then Add selected to calendar."}
+                    "note": "Proposals only; nothing was added to the calendar. Present these as one calendar_propose call (one create per block) so the user approves them on one card."}
         box.specs["schedule_suggest"] = ToolSpec(
             "schedule_suggest",
-            "Suggest calendar time blocks for the user's open todos (uses their estimates, due dates, priorities, work hours and existing meetings). Read-only: it proposes and never creates events. Show the proposal and let the user apply it in the Todos view; do not call calendar_create for it unless they explicitly confirm.",
+            "Suggest calendar time blocks for the user's open todos (uses their estimates, due dates, priorities, work hours and existing meetings). Read-only: it proposes and never creates events. Present these as one calendar_propose call (one create per block) so the user approves them on one card.",
             _obj({"days": {"type": "integer", "default": 5}}, []), schedule_suggest, "google",
             examples=[{}, {"days": 3}])
 

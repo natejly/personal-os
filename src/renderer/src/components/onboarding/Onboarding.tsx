@@ -137,7 +137,7 @@ export default function Onboarding(): JSX.Element {
 
         {state.step === 'welcome' && (
           <>
-            <p className="ob-lead">Grain is your personal AI workspace: chat, notes, calendar, mail and tasks in one place, with an assistant that can work across all of it.</p>
+            <p className="ob-lead">Grain is your personal AI workspace: chat, notes, calendar, mail and tasks in one place, with an assistant that can work across all of it. Spaces lay out chats, notes, the web and your apps side by side, and any window can pop out on top of other apps.</p>
             <p className="ob-privacy"><Lock size={13} /> Your data stays on this Mac. Only the messages you send go to the AI provider you choose.</p>
             <p className="muted">Setup takes about two minutes. You will need an API key from an AI provider (or a local model).</p>
           </>
@@ -212,6 +212,7 @@ export default function Onboarding(): JSX.Element {
         {state.step === 'google' && (
           <>
             <p className="muted">Optional. Connecting Google lets the assistant read your Calendar, Gmail, Tasks and Drive. You can skip this and do it later in Settings.</p>
+            <p className="muted">Connecting also turns on two-way sync between Todos and Google Tasks, and creates a &ldquo;Grain Todos&rdquo; calendar that shows todos with a due date. Both can be switched off in Settings → Integrations.</p>
             {google?.connected ? (
               <p className="ob-ok"><Check size={15} /> Signed in as {google.email}</p>
             ) : google?.configured ? (
@@ -224,7 +225,7 @@ export default function Onboarding(): JSX.Element {
 
         {state.step === 'about' && (
           <>
-            <p className="muted">Optional. Anything here is saved as a memory the assistant reads in every chat — your role, how you like replies, what it should never do without asking.</p>
+            <p className="muted">Optional. Anything here is saved as a memory the assistant reads in every chat — your role, how you like replies, what it should keep in mind.</p>
             <label><span>About you</span>
               <textarea data-autofocus rows={4} value={state.about} onChange={(e) => dispatch({ type: 'about', about: e.target.value })} placeholder="I am a…" />
             </label>

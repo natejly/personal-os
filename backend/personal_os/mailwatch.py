@@ -21,12 +21,10 @@ from .db import Database, now as _now
 STATUSES = ("to_reply", "awaiting_reply", "fyi", "actioned")
 
 DEFAULT_CONFIG: dict[str, Any] = {
-    "enabled": True,
     "awaitingAfterDays": 3,
     "needsReplyAfterHours": 24,
     "useLLM": False,
     "query": "newer_than:14d -category:promotions -category:social",
-    "proposeFollowups": True,
 }
 
 REQUEST_PHRASES = ("let me know", "can you", "could you", "please confirm", "when are you", "would you", "do you ", "are you able", "please send", "please let")
@@ -213,13 +211,12 @@ class MailWatch:
         with self.db.tx() as c:
             return c.execute("UPDATE thread_status SET dismissed=? WHERE thread_id=?", (int(dismissed), thread_id)).rowcount > 0
 
-    def snooze(self, thread_id: str, until: datetime | None, subject: str = "", create: bool = True) -> bool:
-        """Hide a thread from list() until `until` (None clears). Local only; Gmail is untouched. With `create`, a
-        thread not tracked yet gets a row, so any thread in the mail list can be snoozed."""
+    def snooze(self, thread_id: str, until: datetime | None, subject: str = "") -> bool:
+        """Hide a thread from list() until `until` (None clears). Local only; Gmail is untouched. A thread not
+        tracked yet gets a row, so any thread in the mail list can be snoozed."""
         with self.db.tx() as c:
-            if create:
-                c.execute("INSERT INTO thread_status(thread_id,subject,status,updated_at) VALUES(?,?,'fyi',?) "
-                          "ON CONFLICT(thread_id) DO NOTHING", (thread_id, subject, _now()))
+            c.execute("INSERT INTO thread_status(thread_id,subject,status,updated_at) VALUES(?,?,'fyi',?) "
+                      "ON CONFLICT(thread_id) DO NOTHING", (thread_id, subject, _now()))
             return c.execute("UPDATE thread_status SET snoozed_until=? WHERE thread_id=?",
                              (_aware(until).timestamp() if until else None, thread_id)).rowcount > 0
 
@@ -232,15 +229,6 @@ class MailWatch:
         to_reply = len(self.list("to_reply", at=at))
         overdue = sum(1 for r in self.list("awaiting_reply", at=at) if r["age_days"] >= cfg["awaitingAfterDays"])
         return {"to_reply": to_reply, "awaiting_reply_overdue": overdue}
-
-    def propose_followups(self, cfg: dict[str, Any], at: datetime, today: date) -> list[dict[str, Any]]:
-        """Todo suggestions for stale awaiting_reply threads with no follow-up yet. Creates nothing."""
-        if not cfg.get("proposeFollowups"):
-            return []
-        return [{"thread_id": r["thread_id"], "title": f"Follow up: {_line(r['subject']) or '(no subject)'}",
-                 "notes": f"Waiting on a reply since {str(r['last_date'] or '')[:10]}. Gmail thread {r['thread_id']}", "due": today.isoformat()}
-                for r in self.list("awaiting_reply", at=at)
-                if r["age_days"] >= cfg["awaitingAfterDays"] and not r["followup_todo_id"]]
 
     def create_followup(self, thread_id: str, todos: Any, today: date) -> dict[str, Any] | None:
         """Make the follow-up todo for one thread, once. A second call returns the same todo."""

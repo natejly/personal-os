@@ -118,5 +118,5 @@ export function firstPrompts(googleConnected: boolean): string[] {
 export const ABOUT_EXAMPLES = [
   'I am a software engineer. Keep answers short and show code first.',
   'I run a small design studio with four people.',
-  'I am a student. Do not email anyone without asking me first.'
+  'I am a student. Explain things plainly and use metric units.'
 ]

@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { CalendarClock } from 'lucide-react'
 import { api } from '../lib/api'
 import { useStore } from '../store'
-import { blockKey, blockWhen } from '../lib/todayCards'
+import { blockKey, blockWhen, pickedBlocks } from '../lib/todayCards'
 import type { PlannerBlock, PlannerSuggestion } from '@shared/types'
 
 const when = blockWhen
@@ -10,20 +10,27 @@ const key = blockKey
 const why = (b: PlannerBlock): string =>
   b.why ? `Score ${b.score.toFixed(2)}: due ${b.why.due.toFixed(2)}, priority ${b.why.priority.toFixed(2)}, energy ${b.why.energy.toFixed(2)}, time of day ${b.why.time.toFixed(2)}` : `Score ${b.score.toFixed(2)}`
 
-/** "Plan my day": proposes calendar blocks for todos with estimates. Nothing reaches Google until "Add selected". */
-export default function PlannerPanel(): JSX.Element {
+type Plan = Pick<PlannerSuggestion, 'blocks' | 'unplaced'>
+const fromBlocks = (blocks?: PlannerBlock[]): Plan | null => (blocks?.length ? { blocks, unplaced: [] } : null)
+
+/**
+ * "Plan my day" (or week, with `days`): proposes calendar blocks for todos with estimates. Nothing reaches
+ * Google until "Add selected". `initial` shows blocks already proposed (Today's dashboard) without a call.
+ */
+export default function PlannerPanel({ initial, days, onApplied }: { initial?: PlannerBlock[]; days?: number; onApplied?: () => void }): JSX.Element {
   const toast = useStore((s) => s.toast)
   const google = useStore((s) => s.google)
-  const [plan, setPlan] = useState<PlannerSuggestion | null>(null)
-  const [picked, setPicked] = useState<Set<string>>(new Set())
+  const [plan, setPlan] = useState<Plan | null>(() => fromBlocks(initial))
+  const [picked, setPicked] = useState<Set<string>>(() => new Set((initial ?? []).map(key)))
   const [busy, setBusy] = useState(false)
+  useEffect(() => { setPlan(fromBlocks(initial)); setPicked(new Set((initial ?? []).map(key))) }, [initial])
 
   if (!google?.connected) return <></>
 
   const suggest = async (): Promise<void> => {
     setBusy(true)
     try {
-      const p = await api.planner.suggest()
+      const p = await api.planner.suggest(days)
       setPlan(p)
       setPicked(new Set(p.blocks.map(key)))
     } catch (e) {
@@ -34,11 +41,12 @@ export default function PlannerPanel(): JSX.Element {
     if (!plan) return
     setBusy(true)
     try {
-      const { results } = await api.planner.apply(plan.blocks.filter((b) => picked.has(key(b))))
+      const { results } = await api.planner.apply(pickedBlocks(plan.blocks, picked))
       const failed = results.filter((r) => !r.ok)
       if (failed.length) toast(`${results.length - failed.length} added, ${failed.length} failed: ${failed[0].error}`, 'error')
       else toast(`${results.length} block${results.length === 1 ? '' : 's'} added to your calendar`)
       setPlan(null)
+      onApplied?.()
     } catch (e) {
       toast((e as Error).message, 'error')
     } finally { setBusy(false) }
@@ -46,7 +54,7 @@ export default function PlannerPanel(): JSX.Element {
 
   return (
     <div className="planner-panel">
-      {!plan && <button className="ghost-btn" onClick={() => void suggest()} disabled={busy}><CalendarClock size={14} /> {busy ? 'Planning…' : 'Plan my day'}</button>}
+      {!plan && <button className="ghost-btn" onClick={() => void suggest()} disabled={busy}><CalendarClock size={14} /> {busy ? 'Planning…' : (days ?? 1) > 1 ? 'Plan my week' : 'Plan my day'}</button>}
       {plan && (
         <section className="todo-section">
           <h4 className="section-h">Proposed blocks <span>{plan.blocks.length}</span></h4>

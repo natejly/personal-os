@@ -2,8 +2,7 @@ import { useEffect, useState } from 'react'
 import { Home, Calendar, Mail, Brain, FolderKanban, Sparkles, RefreshCw, PanelLeftOpen, ExternalLink, Plus, MessageSquare, Mic, SlidersHorizontal, X, ListChecks, HardDrive } from 'lucide-react'
 import { useStore } from '../store'
 import { useDocRec } from '../features/docrec/store'
-import { blockKey, blockWhen, mailWatchLines, pickedBlocks } from '../lib/todayCards'
-import type { PlannerBlock } from '@shared/types'
+import { mailWatchLines } from '../lib/todayCards'
 import { api } from '../lib/api'
 import { formatOffset, offerableCandidates } from '../lib/transcript'
 import { HOME_MODULES, homeModuleOn } from '../modules'
@@ -17,6 +16,7 @@ import remarkGfm from 'remark-gfm'
 import { SAFE_MD } from './Message'
 import { fenced, lines, usePageContext } from '../lib/pageContext'
 import AppSwitcher from './AppSwitcher'
+import PlannerPanel from './PlannerPanel'
 
 function greeting(): string {
   const h = new Date().getHours()
@@ -170,42 +170,12 @@ function ConnectGoogle({ what, onConnect }: { what: string; onConnect: () => voi
   )
 }
 
-/** Today's proposed blocks. The only write is the confirm button, which posts the ticked blocks to /planner/apply. */
-function PlanCard({ blocks }: { blocks: PlannerBlock[] }): JSX.Element {
-  const toast = useStore((s) => s.toast)
-  const refreshDashboard = useStore((s) => s.refreshDashboard)
-  const [picked, setPicked] = useState<Set<string>>(() => new Set(blocks.map(blockKey)))
-  const [busy, setBusy] = useState(false)
-  useEffect(() => { setPicked(new Set(blocks.map(blockKey))) }, [blocks])
-  const confirm = async (): Promise<void> => {
-    setBusy(true)
-    try {
-      const { results } = await api.planner.apply(pickedBlocks(blocks, picked))
-      const failed = results.filter((r) => !r.ok)
-      if (failed.length) toast(`${results.length - failed.length} added, ${failed.length} failed: ${failed[0].error}`, 'error')
-      else toast(`${results.length} block${results.length === 1 ? '' : 's'} added to your calendar`)
-      await refreshDashboard()
-    } catch (e) { toast((e as Error).message, 'error') } finally { setBusy(false) }
-  }
-  return (
-    <section className="widget">
-      <header><Calendar size={14} /> Day plan <span className="muted small">proposed</span></header>
-      {blocks.map((b) => (
-        <label key={blockKey(b)} className="planner-row">
-          <input type="checkbox" checked={picked.has(blockKey(b))} onChange={() => setPicked((p) => { const n = new Set(p); n.has(blockKey(b)) ? n.delete(blockKey(b)) : n.add(blockKey(b)); return n })} />
-          <span>{b.title}</span><span className="planner-when">{blockWhen(b)}</span>
-        </label>
-      ))}
-      <button className="primary-btn" onClick={() => void confirm()} disabled={busy || picked.size === 0}>Add selected to calendar</button>
-    </section>
-  )
-}
-
 export default function HomeView(): JSX.Element {
   const TodosCard = moduleHome('todos')?.home?.Card
   const HealthCard = moduleHome('health')?.home?.Card
   const d = useStore((s) => s.dashboard)
   const google = useStore((s) => s.google)
+  const tasksSync = useStore((s) => s.tasksSync)
   const sidebarOpen = useStore((s) => s.sidebarOpen)
   const { toggleSidebar, refreshDashboard, setView, newChat, send, askAboutEmail, openProject, selectChat, addTodo, refreshRecap, openMemory } = useStore()
   const recap = useStore((s) => s.recap)
@@ -216,19 +186,27 @@ export default function HomeView(): JSX.Element {
   const [quick, setQuick] = useState('')
   const [busy, setBusy] = useState(false)
   const [customizing, setCustomizing] = useState(false)
+  const [watchBusy, setWatchBusy] = useState(false)
 
   const on = (key: string): boolean => homeModuleOn(settings, key)
   const toggleModule = (key: string): void => {
     void saveSettings({ homeWidgets: { ...(settings.homeWidgets ?? {}), [key]: !on(key) } })
   }
 
-  useEffect(() => { void refreshDashboard() }, [refreshDashboard])
+  useEffect(() => {
+    void refreshDashboard()
+    if (!useStore.getState().tasksSync) void useStore.getState().refreshTasksSync()
+  }, [refreshDashboard])
 
   const brief = async (): Promise<void> => {
     newChat(null)
     await send('Give me my daily brief: check my calendar for today and tomorrow, scan unread email for anything that needs a reply, list my open todos (flag overdue ones), and end with the 3 things I should do first. Be concise and use headers.')
   }
   const refresh = async (): Promise<void> => { setBusy(true); await refreshDashboard(); setBusy(false) }
+  const rescanMail = async (): Promise<void> => {
+    setWatchBusy(true)
+    try { await api.mailWatch.refresh(); await refreshDashboard() } catch (e) { useStore.getState().toast((e as Error).message, 'error') } finally { setWatchBusy(false) }
+  }
   const quickAdd = async (): Promise<void> => {
     if (!quick.trim()) return
     await addTodo({ title: quick })
@@ -299,7 +277,10 @@ export default function HomeView(): JSX.Element {
         {on('agent') && <AgentInbox />}
         {on('cowork') && <HomeCowork />}
 
-        {on('recap') && (recap?.content || recapLoading) && recapOpen && (
+        {on('recap') && recapOpen && !settings.apiKeySet && (
+          <p className="muted widget-connect">The daily recap needs a model API key. <button className="link" onClick={() => useStore.getState().openSettings('provider')}>Add a key</button></p>
+        )}
+        {on('recap') && settings.apiKeySet && (recap?.content || recapLoading) && recapOpen && (
           <section className="recap">
             <header>Daily recap <span className="muted small">{recap?.cached ? 'generated earlier today' : 'fresh'}</span>
               <span style={{ flex: 1 }} />
@@ -311,7 +292,7 @@ export default function HomeView(): JSX.Element {
         )}
         <div className="widgets">
           {on('calendar') && <section className="widget">
-            <header><Calendar size={14} /> Calendar {google?.connected && <span className="muted small">next 48h</span>}</header>
+            <header><Calendar size={14} /> Calendar {google?.connected && <span className="muted small">next 48h</span>}<button className="link small" onClick={() => setView('calendar')}>open</button></header>
             {!google?.connected ? (
               <ConnectGoogle what="your calendar" onConnect={() => useStore.getState().openSettings('integrations')} />
             ) : d?.errors.calendar ? <p className="msg-error">{d.errors.calendar}</p> : events.length === 0 ? <p className="muted">Nothing scheduled.</p> : (
@@ -347,13 +328,20 @@ export default function HomeView(): JSX.Element {
           </section>}
 
           {on('mailwatch') && d?.mail_watch && <section className="widget">
-            <header><Mail size={14} /> Waiting mail <button className="link small" onClick={() => setView('mail')}>View all</button></header>
+            <header><Mail size={14} /> Waiting mail
+              <button className="link small" onClick={() => { useStore.setState({ mailWatchKind: 'to_reply' }); setView('mail') }}>View all</button>
+              <button className="icon-btn sm" title="Re-scan recent threads" aria-label="Re-scan recent threads" onClick={() => void rescanMail()} disabled={watchBusy}><RefreshCw size={13} className={watchBusy ? 'spin' : ''} /></button>
+            </header>
             {mailWatchLines(d.mail_watch).length === 0 ? <p className="muted">Nothing waiting.</p> : mailWatchLines(d.mail_watch).map((l) => <p key={l}>{l}</p>)}
           </section>}
 
-          {on('plan') && google?.connected && (d?.planner_blocks?.length ?? 0) > 0 && <PlanCard blocks={d!.planner_blocks!} />}
+          {on('plan') && <section className="widget">
+            <header><Calendar size={14} /> Day plan {(d?.planner_blocks?.length ?? 0) > 0 && <span className="muted small">proposed</span>}</header>
+            {!google?.connected ? <ConnectGoogle what="a proposed day plan" onConnect={() => useStore.getState().openSettings('integrations')} />
+              : <PlannerPanel initial={d?.planner_blocks} onApplied={() => void refreshDashboard()} />}
+          </section>}
 
-          {on('gtasks') && <section className="widget">
+          {on('gtasks') && tasksSync?.config.enabled === false && <section className="widget">
             <header><ListChecks size={14} /> Google Tasks</header>
             {!google?.connected ? <ConnectGoogle what="Google Tasks" onConnect={() => useStore.getState().openSettings('integrations')} /> : d?.errors.tasks ? <p className="msg-error">{d.errors.tasks}</p> : (d?.tasks?.length ?? 0) === 0 ? <p className="muted">No open tasks.</p> : (
               <ul className="events">

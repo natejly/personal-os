@@ -9,8 +9,7 @@ A module is constructed once, with a ModuleContext, after the app's shared servi
 - merges `today()` into GET /dashboard.
 
 Tables stay where they are declared today (a module-level SCHEMA run by the store class), so a module
-adds no migration step. `tool_available` lets a module veto one of its own tools at schema time, the
-way Toolbox.available() special-cases google/sandbox/mac today; returning None means "no opinion".
+adds no migration step.
 
 This is the pilot contract (docs/module-manifest.md). Built-in only: nothing is loaded at runtime.
 """
@@ -54,9 +53,6 @@ class Module:
 
     def register_tools(self, box: Toolbox) -> None:
         """Add ToolSpecs to box.specs. Called from Toolbox.__init__."""
-
-    def tool_available(self, name: str) -> bool | None:
-        return None
 
     async def start(self) -> None:
         """Start background loops. Must return promptly; spawn tasks, do not await them."""

@@ -12,6 +12,7 @@ import { oneLine } from '../lib/emailAsk'
 import { lines, usePageContext } from '../lib/pageContext'
 import { calendarViewKey, readView, writeView } from '../lib/viewCache'
 import AppSwitcher from './AppSwitcher'
+import PlannerPanel from './PlannerPanel'
 
 function CalToggle({ c, on, onToggle }: { c: GoogleCalendar; on: boolean; onToggle: () => void }): JSX.Element {
   const color = c.color ?? 'var(--accent-solid)'
@@ -55,7 +56,7 @@ export default function CalendarView(): JSX.Element {
   const sidebarOpen = useStore((s) => s.sidebarOpen)
   const google = useStore((s) => s.google)
   const todos = useStore((s) => s.todos)
-  const { toggleSidebar, refreshTodos, toast, newChat, send, updateTodo, setView } = useStore()
+  const { toggleSidebar, refreshTodos, toast, updateTodo, setView } = useStore()
   const [week, setWeek] = useState(() => startOfWeek(new Date()))
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [loading, setLoading] = useState(false)
@@ -206,7 +207,7 @@ export default function CalendarView(): JSX.Element {
           {google?.connected && <button className="icon-btn" title="Refresh" onClick={() => void load(true)} disabled={loading}><RefreshCw size={15} className={loading ? 'spin' : ''} /></button>}
           <button className="icon-btn" aria-label="Previous week" onClick={() => setWeek(addDays(week, -7))}><ChevronLeft size={16} /></button>
           <button className="icon-btn" aria-label="Next week" onClick={() => setWeek(addDays(week, 7))}><ChevronRight size={16} /></button>
-          <button className="primary-btn" onClick={() => { newChat(null); void send('Help me plan this week. Look at my calendar for the next 7 days and my open todos, then propose a schedule.') }}>Plan my week</button>
+          <div className="cal-plan"><PlannerPanel days={7} onApplied={() => void load(true)} /></div>
         </div>
         <AppSwitcher />
       </header>

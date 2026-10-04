@@ -148,6 +148,8 @@ export interface State {
   google: GoogleStatus | null
   tasksSync: TasksSyncStatus | null
   todoCalendar: TodoCalendarStatus | null
+  /** Mail-watch chip to open expanded on the next Mail visit (Today's "View all"); MailWatchPanel clears it. */
+  mailWatchKind: 'to_reply' | 'awaiting_reply' | null
   dashboard: TodayDashboard | null
   todos: Todo[]
   recap: Recap | null
@@ -1588,6 +1590,7 @@ export const useStore = create<State>((set, get) => {
     google: null,
     tasksSync: null,
     todoCalendar: null,
+    mailWatchKind: null,
     dashboard: null,
     todos: [],
     recap: null,

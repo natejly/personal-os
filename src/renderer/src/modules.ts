@@ -34,7 +34,7 @@ export const HOME_MODULES: HomeModule[] = [
   { key: 'inbox', label: 'Inbox' },
   { key: 'mailwatch', label: 'Waiting mail' },
   { key: 'plan', label: 'Day plan' },
-  { key: 'gtasks', label: 'Google Tasks' },
+  { key: 'gtasks', label: 'Google Tasks (when sync is off)' },
   { key: 'drive', label: 'Drive files' },
   { key: 'meetings', label: 'Upcoming meetings' },
   { key: 'projects', label: 'Projects' },

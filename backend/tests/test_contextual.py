@@ -118,4 +118,30 @@ with db.tx() as c:
     for i in range(70):
         c.execute("INSERT INTO chunks(id, document_id, idx, text, blurb) VALUES(?,?,?,?, '')", (f"big{i}", did, 100 + i, f"part {i}"))
 check(run(retriever.contextualize_all(S)) >= 71 and all(blurbs()), "contextualize_all drains past one pass")
+
+
+# ---- overlapping runs (Rebuild index on 2 files + embed-backfill) send each chunk to the model once ----
+async def slow(settings_: dict[str, Any], model: str, messages: list[dict[str, Any]], kind: str = "") -> str:
+    calls.append(messages[0]["content"].split("<chunk>\n")[1])
+    await asyncio.sleep(0.001)  # yield, so overlapping passes would interleave
+    return "Quarterly zeppelin audit findings."
+
+
+async def overlapping() -> None:
+    documents.reindex(None)  # on_chunks schedules one background run per re-chunked file
+    await asyncio.gather(retriever.contextualize_all(S), *list(retriever._tasks))
+
+
+retriever.complete = slow
+client.post("/documents", files={"file": ("second.txt", b"Costs fell two percent this quarter.", "text/plain")})
+with db.tx() as c:
+    c.execute("DELETE FROM chunks WHERE id LIKE 'big%'")
+calls.clear()
+prev = documents.on_chunks
+documents.on_chunks = lambda did, _rows: retriever.schedule(lambda: S, did)
+run(overlapping())
+documents.on_chunks = prev
+with db.tx() as c:
+    n_chunks = c.execute("SELECT COUNT(*) n FROM chunks").fetchone()["n"]
+check(n_chunks >= 2 and len(calls) == n_chunks == len(set(calls)) and all(blurbs()), "one model call per chunk")
 print(f"test_contextual: {passed} checks passed")

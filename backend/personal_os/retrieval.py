@@ -44,6 +44,8 @@ class Retriever:
         self._tasks: set[asyncio.Task[Any]] = set()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._docs_pending = False
+        # One blurb pass at a time: overlapping passes would select the same blurb='' rows and call the model twice.
+        self._ctx_lock = asyncio.Lock()
         self.complete: Any = llm.complete  # tests stub this
         self.rerank_fn: Any = None  # tests stub this; None = retrieval_rerank.rerank
 
@@ -84,23 +86,25 @@ class Retriever:
         return embedded, None
 
     async def contextualize_pending(self, settings: dict[str, Any], limit: int = 64,
-                                    stores: tuple[str, ...] = ALL_SOURCES) -> int:
+                                    stores: tuple[str, ...] = ALL_SOURCES, document_id: str | None = None) -> int:
         """Write a model-made blurb for up to `limit` chunks per store that have none, re-index it with the
         chunk and drop the chunk's vector so embed_pending re-makes it. Off unless contextualChunks; a model
-        error stops the pass and leaves the chunk as it was. Returns blurbs written. Never raises."""
+        error stops the pass and leaves the chunk as it was. `document_id` narrows to one uploaded file (and skips
+        Docs). Returns blurbs written. Never raises."""
         model = settings.get("defaultModel")
         if not settings.get("contextualChunks") or not model:
             return 0
         done = 0
         for store in stores:
-            if store == "docs" and self.docs is None:
+            if store == "docs" and (document_id or self.docs is None):
                 continue
             s = _STORE[store]
+            where, args = (f"AND ch.{s['fk']}=?", [document_id]) if document_id else ("", [])
             with self.db.tx() as c:
                 rows = c.execute(
                     f"""SELECT ch.id, ch.{s['fk']} AS parent_id, ch.text, ch.heading, p.{s['name']} AS name FROM {s['chunks']} ch
-                        JOIN {s['parent']} p ON p.id=ch.{s['fk']} WHERE ch.blurb='' AND p.deleted_at IS NULL
-                        ORDER BY ch.{s['fk']}, ch.idx LIMIT ?""", (limit,)).fetchall()
+                        JOIN {s['parent']} p ON p.id=ch.{s['fk']} WHERE ch.blurb='' AND p.deleted_at IS NULL {where}
+                        ORDER BY ch.{s['fk']}, ch.idx LIMIT ?""", (*args, limit)).fetchall()
             docs_text: dict[str, str] = {}
             for r in rows:
                 try:
@@ -130,11 +134,13 @@ class Retriever:
                 done += 1
         return done
 
-    async def contextualize_all(self, settings: dict[str, Any], stores: tuple[str, ...] = ALL_SOURCES) -> int:
+    async def contextualize_all(self, settings: dict[str, Any], stores: tuple[str, ...] = ALL_SOURCES,
+                                document_id: str | None = None) -> int:
         """contextualize_pending until a pass writes nothing, so a large upload is not left part-done. Never raises."""
         total = 0
-        while n := await self.contextualize_pending(settings, stores=stores):
-            total += n
+        async with self._ctx_lock:
+            while n := await self.contextualize_pending(settings, stores=stores, document_id=document_id):
+                total += n
         return total
 
     async def embed_pending(self, settings: dict[str, Any], document_id: str | None = None, limit: int = 256,
@@ -187,7 +193,7 @@ class Retriever:
         async def run() -> None:
             try:
                 # Before embedding: a blurb drops the chunk's vector, so the other order embeds it twice.
-                await self.contextualize_all(settings_fn(), stores=("files",))
+                await self.contextualize_all(settings_fn(), stores=("files",), document_id=document_id)
                 if self._embeds(settings_fn()):
                     await self.embed_pending(settings_fn(), document_id, stores=("files",))
             except Exception:  # noqa: BLE001 - rows simply stay unembedded

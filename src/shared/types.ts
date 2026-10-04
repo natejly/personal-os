@@ -1441,7 +1441,10 @@ export interface Learned {
   memories: Memory[]
   /** Durable preferences auto-learn superseded or dropped, rather than adding a near-duplicate. */
   updated?: Memory[]
+  /** The rows auto-learn dropped; their ids are the ones Undo restores. */
   removed?: Memory[]
+  /** Each update that replaced a row: `old_id` is the wording Undo brings back. A pinned row is rewritten in place and has no entry. */
+  superseded?: { old_id: string; new_id: string }[]
   nodes: GraphNode[]
   edges: GraphEdge[]
   conversation_id?: string
@@ -1455,6 +1458,8 @@ export interface Learned {
 export type BackgroundEvent =
   | { event: 'learned'; data: Learned }
   | { event: 'learn_error'; data: { conversation_id?: string; message_id?: string; message: string } }
+  /** Auto tidy-up queued memory proposals. `count` is only the new ones: re-read the pending list for the badge. */
+  | { event: 'proposals'; data: { count: number } }
   | { event: 'job_finished'; data: { run_id: string; job_id: string } }
   | { event: 'usage_alert'; data: { period: 'daily' | 'monthly'; spent: number; limit: number } }
   /** Every desk write, for desks nobody is watching: the rail, the badge and the Today card stay live. */

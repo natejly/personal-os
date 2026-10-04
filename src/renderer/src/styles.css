@@ -1941,8 +1941,12 @@ input[type=date]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
 .mail-review ul { margin: 0 0 10px; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
 .mail-review .doc-text { padding: 10px 12px; background: var(--bg-input); border-radius: 8px; max-height: 220px; overflow: auto; margin-bottom: 10px; }
 
-/* Nav badge for assistant doc edits awaiting review (Docs). */
-.nav-item .count.pending {
+/* Nav badge for assistant doc edits awaiting review (Docs), and memory tidy-up suggestions. */
+.settings-btn .count.pending, .settings-tabs .count.pending, .primary-btn .count.pending {
+  margin-left: auto; font-size: 11px; font-variant-numeric: tabular-nums; padding: 0 6px; border-radius: 999px;
+}
+.primary-btn .count.pending { margin-left: 4px; background: var(--on-accent); color: var(--accent-solid); font-weight: 600; }
+.nav-item .count.pending, .settings-btn .count.pending, .settings-tabs .count.pending {
   background: var(--accent-solid);
   color: var(--on-accent);
   font-weight: 600;

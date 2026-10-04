@@ -70,6 +70,7 @@ export default function SettingsModal(): JSX.Element {
   const [shortcut, setShortcut] = useState<ShortcutState | null>(null)
   const [tab, setTab] = useState<Tab>(() => useStore.getState().settingsTab)
   const knowledgeTab = useStore((s) => s.knowledgeTab)
+  const memoryProposals = useStore((s) => s.memoryProposals)
   const libraryScope = useStore((s) => s.libraryScope)
   const { setKnowledgeTab, setLibraryScope } = useStore()
   const tabRefs = useRef<Partial<Record<Tab, HTMLButtonElement | null>>>({})
@@ -208,6 +209,7 @@ export default function SettingsModal(): JSX.Element {
               <button key={id} ref={(el) => { tabRefs.current[id] = el }} role="tab" id={`settings-tab-${id}`} aria-controls="settings-pane"
                 aria-selected={tab === id} tabIndex={tab === id ? 0 : -1} className={tab === id ? 'active' : undefined} onClick={() => setTab(id)}>
                 <Icon size={15} /><span>{label}</span>
+                {id === 'knowledge' && memoryProposals > 0 && <span className="count pending" title="Memory tidy-up suggestions to review">{memoryProposals}</span>}
               </button>
             ))}
           </nav>

@@ -19,7 +19,7 @@ import { homeModuleOn, viewHidden } from './moduleToggles'
 import { chainTo, folderKey, groupShutKey } from './lib/docTree'
 import { clearViews } from './lib/viewCache'
 import { emailAsk } from './lib/emailAsk'
-import type { UploadResult } from '@shared/types'
+import type { Learned, UploadResult } from '@shared/types'
 import { uploadToast, type UploadOutcome } from './lib/uploadNote'
 
 /**
@@ -564,6 +564,11 @@ export interface State {
   /** Status only — cheap enough to poll, and it keeps its own 5s tick while a recording is live. */
   refreshMeetingStatus: () => Promise<void>
   refreshMeetingsPending: () => Promise<void>
+  /** Pending memory tidy-up proposals in every scope: the Settings and Tidy-up badge. */
+  memoryProposals: number
+  refreshMemoryProposals: () => Promise<void>
+  /** Toast one learn pass with an Undo, and refresh what it touched. */
+  onLearned: (l: Learned) => void
   openMeeting: (id: string) => Promise<void>
   /** No id creates a meeting first. Opens the consent modal instead when the notice is unacknowledged. */
   startRecording: (meetingId?: string) => Promise<void>
@@ -931,6 +936,16 @@ const applyMeetingEvent = (s: MeetingWatch, ev: MeetingStreamEvent): MeetingWatc
 
 export { adjacentChatId }
 
+/** The toast for one learn pass, and whether anything changed. Updates and forgets count: they edit open lists too. */
+export const learnedText = (l: Learned): { text: string; changed: boolean } => {
+  const { memories, nodes, edges, updated = [], removed = [] } = l
+  const parts = [`Learned ${memories.length} memor${memories.length === 1 ? 'y' : 'ies'}`]
+  if (updated.length) parts.push(`updated ${updated.length}`)
+  if (removed.length) parts.push(`forgot ${removed.length}`)
+  parts.push(`${nodes.length} entities, ${edges.length} relations`)
+  return { text: parts.join(', '), changed: memories.length + updated.length + removed.length + nodes.length + edges.length > 0 }
+}
+
 export const useStore = create<State>((set, get) => {
   /**
    * App's init effect runs twice under React.StrictMode, so both of these are latched. A second
@@ -1152,9 +1167,9 @@ export const useStore = create<State>((set, get) => {
         for await (const ev of backgroundStream(eventsSince, undefined, () => { backoff = 1000 })) {
           if (ev.seq !== null) eventsSince = ev.seq
           if (ev.event === 'learned') {
-            const { memories, nodes, edges } = ev.data
-            get().toast(`Learned ${memories.length} memor${memories.length === 1 ? 'y' : 'ies'}, ${nodes.length} entities, ${edges.length} relations`, 'learned')
-            if (memories.length + nodes.length + edges.length) refreshAll()
+            get().onLearned(ev.data)
+          } else if (ev.event === 'proposals') {
+            void get().refreshMemoryProposals()
           } else if (ev.event === 'learn_error') {
             get().toast(`Auto-learn failed: ${ev.data.message}`, 'error')
           } else if (ev.event === 'job_finished') {
@@ -1414,16 +1429,9 @@ export const useStore = create<State>((set, get) => {
             if (ev.data.reason) get().toast(`Regenerate failed: ${ev.data.reason}. The previous answer is back.`, 'error')
             break
           // Only the `remember` tool reaches here now; auto-learn reports on `/events` instead.
-          case 'learned': {
-            const { memories, nodes, edges, updated = [], removed = [] } = ev.data
-            const parts = [`Learned ${memories.length} memor${memories.length === 1 ? 'y' : 'ies'}`]
-            if (updated.length) parts.push(`updated ${updated.length}`)
-            if (removed.length) parts.push(`forgot ${removed.length}`)
-            parts.push(`${nodes.length} entities, ${edges.length} relations`)
-            get().toast(parts.join(', '), 'learned')
-            if (memories.length + updated.length + removed.length + nodes.length + edges.length) refreshAll()
+          case 'learned':
+            get().onLearned(ev.data)
             break
-          }
           case 'style_learned':
             // A banked sample is quiet; a refreshed voice profile is worth saying once.
             if (ev.data.profile) get().toast('Updated how you write', 'learned')
@@ -1657,6 +1665,7 @@ export const useStore = create<State>((set, get) => {
     meetingCursor: 0,
     meetingPreflight: null,
     meetingsPending: 0,
+    memoryProposals: 0,
     meetingQuery: '',
     meetingNotesDraft: null,
     meetingSaving: false,
@@ -1772,6 +1781,7 @@ export const useStore = create<State>((set, get) => {
       // `refreshMeetingStatus` also starts the live tick, so a meeting a crash left running is visible.
       void get().refreshMeetingsPending()
       void get().refreshMeetingStatus()
+      void get().refreshMemoryProposals()
     },
 
     restartBackend: async () => {
@@ -3025,6 +3035,29 @@ export const useStore = create<State>((set, get) => {
           meetingLiveTimer = null
         }
       } catch { /* the panel shows whatever it last had; a failed poll is not worth a toast */ }
+    },
+    refreshMemoryProposals: async () => {
+      try {
+        set({ memoryProposals: (await api.memories.proposals('all')).length })
+      } catch { /* a badge is not worth a toast */ }
+    },
+    onLearned: (l) => {
+      const { text, changed } = learnedText(l)
+      // Undo puts back what this pass replaced or dropped and trashes what it added. Graph rows stay: they
+      // merge into existing entities, so removing them could take the user's own relations with them.
+      const added = l.memories.map((m) => m.id)
+      const back = [...(l.superseded ?? []).map((x) => x.old_id), ...(l.removed ?? []).map((m) => m.id)]
+      const undo = added.length + back.length ? {
+        label: 'Undo',
+        run: () => void (async () => {
+          try {
+            await Promise.all([...back.map((id) => api.memories.restore(id)), ...added.map((id) => api.memories.delete(id))])
+          } catch (e) { get().toast(`Undo failed: ${(e as Error).message}`, 'error') }
+          refreshAll()
+        })()
+      } : undefined
+      get().toast(text, 'learned', undo)
+      if (changed) refreshAll()
     },
     refreshMeetingsPending: async () => {
       try {

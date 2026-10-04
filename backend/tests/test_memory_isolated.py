@@ -59,6 +59,7 @@ style.save_profile(None, {"summary": "Breezy personal voice", "enabled": True})
 
 def personal_visible(pid) -> dict[str, bool]:
     used = ctx(pid)
+    c = {"project_id": pid}
     return {
         "memory": any(m["project_id"] is None for m in used["memories"]),
         "graph": any(n["label"] == "Home" for n in used["nodes"]),
@@ -71,6 +72,12 @@ def personal_visible(pid) -> dict[str, bool]:
         "search_documents": "personal" in str(call("search_documents", {"query": "zebra"}, pid)),
         "doc_list": "Personal note" in str(call("doc_list", {}, pid)),
         "doc_search": "Personal note" in str(call("doc_search", {"query": "zebra"}, pid)),
+        "doc_read": "zebra personal note" in str(call("doc_read", {"doc": "Personal note"}, pid)),
+        "doc_missing": "Personal note" in str(call("doc_read", {"doc": "nothing"}, pid)),
+        "doc_edit": "revision_id" in str(run(toolbox.specs["doc_edit"].fn(c, "Personal note", append="more"))),
+        "skill_list": "Personal way" in str(call("skill_list", {}, pid)),
+        "skill_missing": "Personal way" in str(run(toolbox.specs["skill_revise"].fn(c, "nothing", procedure="1. x"))),
+        "skill_revise": "forked_from" in str(run(toolbox.specs["skill_revise"].fn(c, "Personal way", procedure="1. do it better"))),
     }
 
 
@@ -88,6 +95,7 @@ run(toolbox.specs["save_writing_sample"].fn({"project_id": pid}, "Hey all, quick
 assert style.samples(pid) and not style.samples(None)
 mid = memories.list(pid, include_global=False)[0]["id"]
 assert client.put(f"/memories/{mid}", json={"move_to_global": True}).status_code == 409
+assert client.put(f"/memories/{mid}", json={"project_id": "personal"}).status_code == 409
 assert memories.get(mid)["project_id"] == pid
 
 # Switching back to shared restores every personal source.

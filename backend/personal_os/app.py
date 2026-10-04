@@ -4623,12 +4623,13 @@ def create_memory(body: MemoryIn) -> dict[str, Any]:
 def update_memory(id: str, body: MemoryPatch) -> dict[str, Any]:
     patch = body.model_dump(exclude_none=True, exclude={"move_to_global"})
     if body.move_to_global:
-        cur = memories.get(id)
-        if cur and is_isolated(memories.db, cur["project_id"]):
-            raise HTTPException(409, "This project keeps its memory to itself. Switch it to shared memory to make this personal.")
         patch["project_id"] = None
     elif "project_id" in patch:
         patch["project_id"] = wsid(patch["project_id"])
+    if "project_id" in patch and patch["project_id"] is None:
+        cur = memories.get(id)
+        if cur and is_isolated(memories.db, cur["project_id"]):
+            raise HTTPException(409, "This project keeps its memory to itself. Switch it to shared memory to make this personal.")
     m = memories.update(id, patch)
     if not m:
         raise HTTPException(404)

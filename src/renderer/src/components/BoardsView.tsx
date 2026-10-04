@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Plus, Trash2, PanelLeftOpen, KanbanSquare, Calendar, X, ChevronDown } from 'lucide-react'
+import { Plus, Trash2, PanelLeftOpen, KanbanSquare, Calendar, X, ChevronDown, Check } from 'lucide-react'
 import { useStore } from '../store'
 import { api } from '../lib/api'
 import type { Board, BoardCard, BoardColumn, CardEvent } from '@shared/types'
@@ -62,6 +62,9 @@ function CardModal({ card, board, onClose, onChange }: { card: BoardCard; board:
           <button className="ghost-btn danger" onClick={() => void api.boards.deleteCard(card.id).then(() => { onChange(); onClose() })}><Trash2 size={14} /> Delete</button>
           <span style={{ flex: 1 }} />
           <button className="ghost-btn" onClick={onClose}>Cancel</button>
+          <button className="ghost-btn" disabled={card.completed} onClick={() => void api.boards.complete(card.id).then(() => { onChange(); onClose() })}>
+            <Check size={14} /> {card.completed ? 'Done' : 'Mark done'}
+          </button>
           <button className="primary-btn" onClick={() => void save()}>Save</button>
         </footer>
       </div>

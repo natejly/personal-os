@@ -453,6 +453,8 @@ class RunBudget:
 # ---- storage ------------------------------------------------------------------------------------
 
 DONE = ("done", "skipped")
+# A run started from a chat tells that chat when it reaches one of these (once per transition).
+REPORT_ON = ("awaiting_approval", "done", "failed")
 
 
 class Workflows:
@@ -460,6 +462,17 @@ class Workflows:
 
     def __init__(self, db: Any, tools: Callable[[], set[str]], role_ok: Callable[[str], bool] | None = None) -> None:
         self.db, self.tools, self.role_ok = db, tools, role_ok
+        self.on_report: Callable[[dict[str, Any]], None] | None = None
+
+    def _report(self, run_id: str) -> None:
+        if self.on_report is None:
+            return
+        run = self.get_run(run_id)
+        if run and run.get("conversation_id") and run["status"] in REPORT_ON:
+            try:
+                self.on_report(run)
+            except Exception:  # noqa: BLE001 - telling the chat must never fail the status write
+                log.exception("workflow report failed for %s", run_id)
 
     def check(self, defn: Any) -> list[str]:
         return validate(defn, self.tools(), self.role_ok)
@@ -559,6 +572,8 @@ class Workflows:
             for i, s in enumerate(defn["steps"]):
                 c.execute("INSERT INTO workflow_steps(run_id, step_id, idx, kind, status, idempotency_key) VALUES(?,?,?,?,'pending',?)",
                           (rid, s["id"], i, "tool" if "tool" in s else "agent" if "agent" in s else "fan_out", f"{rid}:{s['id']}"))
+        if conversation_id:
+            self._report(rid)
         return self.get_run(rid) or {}
 
     def set_run(self, run_id: str, **f: Any) -> None:
@@ -567,7 +582,10 @@ class Workflows:
                 for k, v in f.items() if k in allowed}
         if cols:
             with self.db.tx() as c:
+                prev = c.execute("SELECT status FROM workflow_runs WHERE id=?", (run_id,)).fetchone()
                 c.execute(f"UPDATE workflow_runs SET {', '.join(k + '=?' for k in cols)}, updated_at=? WHERE id=?", (*cols.values(), now(), run_id))
+            if prev and "status" in cols and cols["status"] != prev[0] and cols["status"] in REPORT_ON:
+                self._report(run_id)
 
     def set_step(self, run_id: str, step_id: str, **f: Any) -> None:
         allowed = {"status", "result", "items", "error", "approval_call_id", "started_at", "ended_at", "attempts"}

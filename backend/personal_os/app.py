@@ -49,7 +49,7 @@ from . import cache as google_cache
 from .google import Google, GoogleNotConnected, json_safe
 from . import job_history, job_tools
 from .jobs_policy import JobPolicy
-from .jobs import (KINDS, PowerWake, check_watch_dir, PROPOSAL_STATUSES, Jobs, Proposals, Scheduler, local_tz_name, spent, valid_cron,
+from .jobs import (KINDS, PowerWake, check_watch_dir, Jobs, Proposals, Scheduler, local_tz_name, spent, valid_cron,
                    valid_tz)
 from . import meeting_import, skillbuild, skillmd
 from . import mail_edits  # noqa: F401 - mail_edits registers the gmail validators
@@ -296,7 +296,7 @@ _DEFAULT_OFF_VIEWS = ("meetings", "activity")
 # Stamp 4 shows these once: agent work waits for review there (desks, skill and workflow approvals), and a hidden row
 # meant the user could not find work the assistant had already handed back.
 _SHOWN_AT_4 = ("library", "cowork")
-_DEFAULT_OFF_HOME = ("cowork", "meetings")
+_DEFAULT_OFF_HOME = ("meetings",)
 
 
 def _seed_hidden_modules() -> None:
@@ -320,10 +320,6 @@ def _seed_hidden_modules() -> None:
     if not current:
         for k in _DEFAULT_OFF_HOME:
             widgets.setdefault(k, False)
-    # Stamp 3 turns the Today cowork card off once, even if an older install had it on.
-    # The Today slider and Settings → Modules can turn it back on.
-    if current < 3:
-        widgets["cowork"] = False
     db.set_settings({"hiddenViews": hidden, "homeWidgets": widgets, "modulesDefault": _MODULES_DEFAULT})
 
 
@@ -1493,8 +1489,10 @@ def _propose(run: Run, name: str, args: dict[str, Any], call_id: str, ctx: dict[
                          conversation_id=run.conversation_id, message_id=ctx.get("message_id"), call_id=call_id)
     log.info("run %s proposed %s (proposal %s)", run.run_id, name, p["id"])
     return {"proposed": True, "proposal_id": p["id"], "tool": name, "status": "pending",
-            "note": f"{name} was NOT executed. This is a background run, so it was recorded as a proposal in the "
-                    "user's Agent Inbox; they accept, edit or reject it there, and accepting is what runs it. "
+            "note": f"{name} was NOT executed. "
+                    + ("This is a background run" if proposal_only(run) else "This desk only proposes outside actions")
+                    + ", so it was recorded as a proposal in the user's Agent Inbox; they accept, edit or reject it there, "
+                    "and accepting is what runs it. "
                     "Do not call it again — say in your report what you proposed."}
 
 
@@ -2541,8 +2539,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                         # "turned off".
                         mode, forced, blocked_reason = "off", True, PLAN_BLOCKED
                     elif autonomy == "propose" and danger == "external":
-                        # A propose-only desk may plan an external action, never perform one.
-                        mode, forced, blocked_reason = "off", True, PROPOSE_ONLY
+                        # A propose-only desk never performs an external action: it is filed as a proposal below
+                        # (`proposing`), or refused when there is no run to file it under.
+                        if run is None:
+                            mode, forced, blocked_reason = "off", True, PROPOSE_ONLY
                     elif plan_voided_by_taint(danger, bool(tool_ctx["tainted"]),
                                               taint_expected(active_plan, tool_ctx["taint_sources"])):
                         # Taint the approved plan did not predict voids the pre-approval: ask, and
@@ -2573,7 +2573,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 # going to happen either way. It becomes a proposal in _call_tool and the run carries on.
                 # MCP tools are external by construction but are not in Toolbox.specs, so proposes()
                 # cannot see them. A scheduled run must still record them instead of calling them.
-                proposing = proposal_only(run) and mode != "off" and (toolbox.proposes(c["name"]) or mcp_is(c["name"]))
+                # A 'propose' desk files its external calls the same way, without a job's budget or hint.
+                proposing = mode != "off" and run is not None and (
+                    (proposal_only(run) and (toolbox.proposes(c["name"]) or mcp_is(c["name"])))
+                    or (autonomy == "propose" and danger == "external"))
                 if proposing:
                     mode, forced = "on", False
                 # The provider's call id is only unique within one request -- llm.stream_chat falls back
@@ -2885,17 +2888,14 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                               "note": "The user answered your question. Carry on with it; do not ask it again."}
                     if answer in [str(o).strip() for o in (args.get("options") or []) if isinstance(o, str)]:
                         result["choice"] = answer  # they picked one of the choices the question offered
+                elif proposing and run is not None:
+                    # A job or a 'propose' desk: the call (built-in or connector) is a proposals row, and nothing is contacted.
+                    result, ran = _propose(run, c["name"], args, uid, tool_ctx), True
                 elif mcp_is(c["name"]):
-                    # The branch above only reaches here when the call was allowed. A job has nobody
-                    # to allow it, so the connector call is a proposal and the server is not contacted.
-                    if proposal_only(run) and run is not None:
-                        result = _propose(run, c["name"], args, uid, tool_ctx)
-                    else:
-                        inflight = {"id": uid, "name": c["name"], "arguments": args}
-                        result, interrupted = await _await_tool(_mcp_call(c["name"], args), stop,
-                                                                grace=STOP_GRACE_SECONDS if danger in IDEMPOTENT_DANGER else 0.0)
-                        mcp_ran = not interrupted
-                    ran = not interrupted
+                    inflight = {"id": uid, "name": c["name"], "arguments": args}
+                    result, interrupted = await _await_tool(_mcp_call(c["name"], args), stop,
+                                                            grace=STOP_GRACE_SECONDS if danger in IDEMPOTENT_DANGER else 0.0)
+                    mcp_ran = ran = not interrupted
                 elif not asks and (wkey := tools.call_key(c["name"], args)) in warm:
                     # Started with its neighbours; an identical call in the round shares this one run.
                     result = await warm[wkey]
@@ -4260,14 +4260,6 @@ class ProposalIn(BaseModel):
     args: dict[str, Any] | None = None  # the user's edit, accept only
 
 
-@app.get("/proposals")
-def list_proposals(status: str | None = "pending", run_id: str | None = None, limit: int = 100) -> list[dict[str, Any]]:
-    """Outward-facing calls a background run recorded instead of making. Pending by default."""
-    if status not in (None, "", "all", *PROPOSAL_STATUSES):
-        raise HTTPException(400, "status must be pending, accepted, rejected or all")
-    return proposals.list(None if status in (None, "", "all") else status, run_id, _clamp(limit))
-
-
 @app.post("/proposals/{pid}/accept")
 async def accept_proposal(pid: str, body: ProposalIn | None = None) -> dict[str, Any]:
     """Execute a proposal, as the user. The pending -> accepted flip is the claim: it happens once, so a second
@@ -4355,7 +4347,18 @@ def agent_inbox(hours: float = 72.0, limit: int = 20, include_dry: int = 0) -> d
         row = run_store.get(a["run_id"]) if a["run_id"] else None
         pending_approvals.append({**a, "live": a["call_id"] in _approvals, "run_kind": (row or {}).get("kind"),
                                   "job": ((row or {}).get("input") or {}).get("job")})
-    pending_proposals = proposals.list("pending", limit=100)
+    pending_proposals = []
+    for p in proposals.list("pending", limit=100):
+        # Where it came from: the job that proposed it, or the desk whose run did (agent_runs.desk_id).
+        row = run_store.get(p["run_id"]) if p.get("run_id") else None
+        d = desks.get(row["desk_id"], with_outputs=False) if row and row.get("desk_id") else None
+        if p.get("job_id"):
+            jb = jobs.get(p["job_id"])
+            name = (jb or {}).get("name") or ((row or {}).get("input") or {}).get("job") or "Scheduled job"
+            source = {"kind": "job", "id": p["job_id"], "run_id": p["run_id"], "name": name}
+        else:
+            source = {"kind": "desk", "id": d["id"], "run_id": p["run_id"], "name": d["title"]} if d else None
+        pending_proposals.append({**p, "source": source})
 
     runs = run_store.of_kind("job", since=cutoff, limit=_clamp(limit))
     if not include_dry:  # a preview is not something that happened while the user was away
@@ -5471,35 +5474,9 @@ def move_card(cid: str, body: MoveIn) -> dict[str, Any]:
     return c
 
 
-class ClaimIn(BaseModel):
-    holder: str
-    ttl_s: float = 600
-
-
-class ReleaseIn(BaseModel):
-    token: str
-    reason: str = "finished"
-
-
 @app.get("/boards/{id}/cards/{card}/events")
 def card_events(id: str, card: str) -> list[dict[str, Any]]:
     return boards.events(card)
-
-
-@app.post("/boards/cards/{cid}/claim")
-def claim_card(cid: str, body: ClaimIn) -> dict[str, Any]:
-    token = boards.claim(cid, body.holder, body.ttl_s)
-    if token is None:
-        raise HTTPException(409, "That card is already claimed")
-    return {"token": token}
-
-
-@app.post("/boards/cards/{cid}/release")
-def release_card(cid: str, body: ReleaseIn) -> dict[str, bool]:
-    try:
-        return {"ok": boards.release(cid, body.token, body.reason)}
-    except ValueError as e:
-        raise HTTPException(400, str(e)) from e
 
 
 @app.post("/boards/cards/{cid}/complete")
@@ -7842,12 +7819,17 @@ def _desk_report(desk: dict[str, Any]) -> None:
     origin = desk.get("origin_conversation_id")
     if not origin or not convos.get(origin):
         return  # the chat was deleted since: nothing to tell
-    convos.add_message(origin, "assistant", origin_report(desk, desks.outputs(desk["id"])))
+    _tell_chat(origin, origin_report(desk, desks.outputs(desk["id"])))
+
+
+def _tell_chat(cid: str, text: str) -> None:
+    """Add one assistant message to a chat and tell any open window to re-read it (callable from any thread)."""
+    convos.add_message(cid, "assistant", text)
     try:
         running = asyncio.get_running_loop()
     except RuntimeError:
         running = None
-    payload = {"id": origin, "reload": True}
+    payload = {"id": cid, "reload": True}
     if running is not None:
         events.publish("conversation_changed", payload)
     elif _loop is not None and not _loop.is_closed():
@@ -7855,6 +7837,26 @@ def _desk_report(desk: dict[str, Any]) -> None:
 
 
 desks.on_report = _desk_report
+
+
+def _workflow_report(run: dict[str, Any]) -> None:
+    """Tell the chat that started a workflow run that it needs approval, finished or failed (one message per transition)."""
+    cid = run.get("conversation_id")
+    if not cid or not convos.get(cid):
+        return
+    name, status = run.get("name") or "workflow", run["status"]
+    if status == "awaiting_approval":
+        text = f"Workflow **{name}** is waiting for approval. Approve it in Library -> Workflows."
+    elif status == "done":
+        res = run.get("result")
+        res = res if isinstance(res, str) else json.dumps(res, ensure_ascii=False, default=str) if res is not None else ""
+        text = f"Workflow **{name}** finished." + (f"\n\n{res[:600]}{'…' if len(res) > 600 else ''}" if res else "")
+    else:
+        text = f"Workflow **{name}** failed: {run.get('error') or 'unknown error'}"
+    _tell_chat(cid, text)
+
+
+workflow_store.on_report = _workflow_report
 
 
 toolbox.desk_starter = _desk_start_tool

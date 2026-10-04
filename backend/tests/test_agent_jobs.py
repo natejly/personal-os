@@ -456,8 +456,7 @@ def test_a_proposal_can_be_edited_before_it_is_accepted_or_simply_rejected() -> 
     assert j("POST", f"/proposals/{q['id']}/reject")["proposal"]["status"] == "rejected"
     assert [n for n, _ in SENT] == ["gmail_send"], "a rejected proposal never runs"
     assert all(x["id"] != q["id"] for x in proposals.list("pending"))
-    assert j("GET", "/proposals?status=rejected")[0]["id"] == q["id"]
-    j("GET", "/proposals?status=sideways", expect=400)
+    assert proposals.list("rejected")[0]["id"] == q["id"]
 
 
 # ---------------- the inbox ----------------
@@ -480,7 +479,8 @@ def test_the_inbox_is_built_from_journal_rows() -> None:
     assert entry["tool_calls"] == store.event_counts(run["run_id"])["tool_result"]
 
     pid = proposals.list("pending", run_id=run["run_id"])[0]["id"]
-    assert any(p["id"] == pid for p in box["needs_you"]["proposals"])
+    assert next(p for p in box["needs_you"]["proposals"] if p["id"] == pid)["source"] == {
+        "kind": "job", "id": job["id"], "run_id": run["run_id"], "name": job["name"]}
     assert box["counts"]["needs_you"] == len(box["needs_you"]["approvals"]) + len(box["needs_you"]["proposals"])
     assert box["counts"]["late"] >= 1 and box["scheduler"]["next_due_at"] is not None
 
@@ -493,6 +493,22 @@ def test_the_inbox_is_built_from_journal_rows() -> None:
     assert after["counts"]["proposals"] == box["counts"]["proposals"] - 1
 
     assert j("GET", "/inbox?hours=0")["while_you_were_away"] == [], "the window is a WHERE on started_at"
+
+
+def test_a_propose_desk_files_an_external_call_as_a_proposal() -> None:
+    args = {"to": "mira@example.com", "subject": "Re: desk", "body": "Proposed by a desk."}
+    ROUNDS.append({"tool_calls": [call("gmail_send", args)]})
+    made = j("POST", "/cowork/desks", {"brief": "Reply to Mira", "title": "Mira reply", "autonomy": "propose", "start": True})
+    wait_done(made["run_id"])
+    assert SENT == [], "the desk's external call was not executed"
+    mine = proposals.list("pending", run_id=made["run_id"])
+    assert len(mine) == 1 and mine[0]["tool"] == "gmail_send" and mine[0]["args"] == args and mine[0]["job_id"] is None
+    assert "background run" not in json.dumps(store.events(made["run_id"])), "a desk is not told it is a background run"
+    row = next(p for p in j("GET", "/inbox")["needs_you"]["proposals"] if p["id"] == mine[0]["id"])
+    assert row["source"] == {"kind": "desk", "id": made["desk"]["id"], "run_id": made["run_id"], "name": "Mira reply"}
+    j("POST", f"/proposals/{mine[0]['id']}/accept")
+    _flush_outbox()
+    assert [n for n, _ in SENT] == ["gmail_send"], "accepting it runs the call, outside the desk"
 
 
 def test_a_failed_job_shows_up_as_a_failure_and_a_pending_approval_needs_you() -> None:

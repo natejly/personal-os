@@ -150,6 +150,21 @@ def test_run_python_outside_a_desk_is_unchanged(box: Box) -> None:
     assert r["stdout"].strip() == "42" and "workspace_files" not in r
 
 
+def test_run_python_outside_a_desk_keeps_outputs_in_the_chat_files(box: Box) -> None:
+    del box.ctx["desk_id"]
+    r = box.run("run_python", code="import os\nos.makedirs('outputs', exist_ok=True)\nopen('outputs/a.csv','w').write('x,y\\n')\n"
+                                   "for i in range(12):\n    open(f'outputs/n{i:02d}.txt','w').write(str(i))\nopen('scratch.txt','w').write('tmp')\nprint(os.getcwd())")
+    assert r["exit_code"] == 0, r
+    chat = box.tb.chat_outputs.desk_root("c1")
+    assert (chat / "outputs" / "a.csv").read_text() == "x,y\n"
+    assert r["outputs"][0] == {"name": "a.csv", "size": 4, "path": "outputs/a.csv"} and len(r["outputs"]) == 10
+    assert not (chat / "outputs" / "scratch.txt").exists() and not (chat / "scratch.txt").exists()  # only outputs/ is kept
+    assert not os.path.exists(r["stdout"].strip())  # the temp dir is still deleted
+    assert not (box.ws.desk_root(DESK) / "outputs" / "a.csv").exists()
+    # nothing saved under outputs/: no outputs key, as before
+    assert "outputs" not in box.run("run_python", code="print(1)")
+
+
 def test_run_python_warns_when_the_workspace_is_over_quota(tmp_path: Path) -> None:
     b = Box(tmp_path, max_total_bytes=50)
     (b.root / "work" / "big.bin").write_bytes(b"x" * 200)

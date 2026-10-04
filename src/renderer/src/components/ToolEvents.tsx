@@ -11,6 +11,7 @@ import RenderBoundary from './RenderBoundary'
 import ApprovalRules from './ApprovalRules'
 import { describeCall, errorLine, fmtMs, groupSummary, partitionEvents } from '../lib/toolDisplay'
 import { GenericApproval, GenericBody } from './toolcards/GenericCard'
+import { OutputFiles } from './toolcards/parts'
 // Importing the index registers every dedicated card (TaskCard, FileCard, and whatever other workstreams add).
 import { TOOL_CARDS } from './toolcards'
 // The ask card mounts inline in a chat bubble, so it needs the sheet the desk panes use.
@@ -393,6 +394,7 @@ function ToolEvents({ events, conversationId, streaming = false }: { events: Too
             {t.pending && t.needs_approval && <ApprovalRules event={t} conversationId={conversationId} />}
           </>
         ) : <Row render={() => genericRow(t)} />}
+        <OutputFiles event={t} conversationId={conversationId} />
       </RenderBoundary>
     )
   }

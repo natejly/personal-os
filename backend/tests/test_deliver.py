@@ -248,7 +248,15 @@ def test_outside_a_desk_an_absolute_path_under_a_granted_root(env: Any) -> None:
     (env.grant / "a.md").write_text("x")
     out = env.call("convert_document", ctx=env.chat, path=str(env.grant / "a.md"), to="docx")
     assert out["output"] == str(env.grant / "a.docx"), out
+    # A relative path in a plain chat means the chat's own files (where sandbox exports and run_python outputs land).
     rel = env.call("convert_document", ctx=env.chat, path="a.md", to="docx")
+    assert "error" in rel and "not a file" in rel["error"]
+    env.tb.chat_outputs.save_bytes("c1", "outputs/a.md", b"# hi\n")
+    out = env.call("convert_document", ctx=env.chat, path="outputs/a.md", to="docx")
+    assert out["output"] == "outputs/a.docx", out
+    assert "error" in env.call("convert_document", ctx=env.chat, path="../cowork/desk1/x.md", to="docx")
+    nochat = {k: v for k, v in env.chat.items() if k != "conversation_id"}
+    rel = env.call("convert_document", ctx=nochat, path="a.md", to="docx")
     assert "error" in rel and "workspace" in rel["error"]
     other = env.grant.parent / "elsewhere"
     other.mkdir()

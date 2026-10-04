@@ -18,6 +18,11 @@ fills a quota and is told what it filled rather than filling the disk. Usage cou
 the desk root including `.trash/` and `.baseline/`: trashing does not free quota, which is the
 honest consequence of never unlinking.
 
+The same class also serves a plain chat's outbox, `<data_dir>/chats/<conversation_id>/` (`sub="chats"`), so a file a
+sandbox, a browser download or a run_python script produces in a chat without a desk goes through the same containment,
+the same quotas and the same never-overwrite rule as a desk's files. `keep_files` is how run_python's temp `outputs/`
+outlives the temp dir.
+
 No SQL here. `desks.workspace` stores the relative `cowork/<id>` (see `rel_root`), never an absolute
 path, so moving the data directory does not strand every desk.
 """
@@ -51,6 +56,9 @@ WRITE_MODES = ("create", "overwrite", "append")
 _EXTRACT_SUFFIXES = frozenset({".pdf", ".docx", ".doc", ".xlsx", ".xls", ".pptx", ".ppt", ".odt", ".rtf"})
 # A shorter shared opening is too common to treat as the same download.
 _CARRY_PREFIX = 80
+# What one run_python call may hand over from its temp outputs/ into a chat's outbox.
+KEEP_MAX_FILES = 10
+KEEP_MAX_BYTES = 25_000_000
 
 
 class WorkspaceError(Exception):
@@ -102,9 +110,9 @@ def _unique(dest: Path) -> Path:
 class Workspace:
     """Path-safe file access scoped to one desk. `max_*` exist so tests can hit a quota cheaply."""
 
-    def __init__(self, data_dir: str | Path, *, max_files: int = MAX_FILES,
+    def __init__(self, data_dir: str | Path, *, sub: str = "cowork", max_files: int = MAX_FILES,
                  max_total_bytes: int = MAX_TOTAL_BYTES) -> None:
-        self.root = Path(data_dir) / "cowork"
+        self.root = Path(data_dir) / sub
         self.max_files = max_files
         self.max_total_bytes = max_total_bytes
 
@@ -116,7 +124,7 @@ class Workspace:
 
     def rel_root(self, desk_id: str) -> str:
         """What `desks.workspace` stores: relative to the data dir, so the dir can move."""
-        return f"cowork/{self.desk_root(desk_id).name}"
+        return f"{self.root.name}/{self.desk_root(desk_id).name}"
 
     def ensure(self, desk_id: str) -> Path:
         root = self.desk_root(desk_id)
@@ -162,7 +170,7 @@ class Workspace:
     def _fetch_ledger(self, desk_id: str) -> Path:
         """Outside the workspace, so a desk cannot delete the record of a file it downloaded."""
         name = self.desk_root(desk_id).name
-        return self.root.parent / "cowork-fetched" / name
+        return self.root.parent / f"{self.root.name}-fetched" / name
 
     def _fetch_rows(self, desk_id: str) -> list[tuple[str, str]]:
         """Ledger lines are `path` or `path\\tsha256`. A hash lets a rename be recognized after the old path is gone."""
@@ -362,6 +370,44 @@ class Workspace:
             raise WorkspaceError(f"this workspace already holds {use['bytes']} bytes and the limit is {self.max_total_bytes}.",
                                  usage=use)
         return _unique(p), room
+
+    def save_bytes(self, desk_id: str, rel: str, data: bytes) -> dict[str, Any]:
+        """Write `data` where `reserve_file` says it may go (never over an existing file) and describe it as an output."""
+        target, room = self.reserve_file(desk_id, rel)
+        if len(data) > room:
+            raise WorkspaceError("This workspace has no room for the file.", usage=self.usage(desk_id))
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+        except OSError as e:
+            raise _oserror(rel, "written", e) from e
+        return self.output_entry(desk_id, target)
+
+    def output_entry(self, desk_id: str, path: Path) -> dict[str, Any]:
+        """{name, size, path}: what a tool result lists so the chat can offer Download and Show in Finder."""
+        return {"name": path.name, "size": path.stat().st_size, "path": self._rel_of(desk_id, path.resolve())}
+
+    def keep_files(self, desk_id: str, src_dir: str | Path, dest: str = "outputs") -> list[dict[str, Any]]:
+        """Copy what a script left in `src_dir` (a temp dir about to be deleted) into `dest/`: at most KEEP_MAX_FILES
+        files of KEEP_MAX_BYTES each. Symlinks are skipped (a script can point one anywhere), and a refused file
+        (quota, blocked suffix) is skipped rather than failing the run."""
+        src = Path(src_dir)
+        if src.is_symlink() or not src.is_dir():
+            return []
+        kept: list[dict[str, Any]] = []
+        for dirpath, dirnames, filenames in os.walk(src):
+            dirnames.sort()
+            for name in sorted(filenames):
+                if len(kept) >= KEEP_MAX_FILES:
+                    return kept
+                p = Path(dirpath) / name
+                try:
+                    if p.is_symlink() or not p.is_file() or p.stat().st_size > KEEP_MAX_BYTES:
+                        continue
+                    kept.append(self.save_bytes(desk_id, f"{dest}/{p.relative_to(src).as_posix()}", p.read_bytes()))
+                except (OSError, WorkspaceError):
+                    continue
+        return kept
 
     def state(self, desk_id: str, rel: str) -> str:
         """new | modified | unchanged, against `.baseline/`. No baseline means the desk made it."""

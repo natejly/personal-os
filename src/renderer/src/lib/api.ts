@@ -9,7 +9,7 @@ import type {
   AgentInbox, AgentProposal, Job, JobNotifyEvent, JobRunRecord, JobStats,
   Doc, DocFolder, FullDoc, DocRevision,
   HealthEntry, HealthMetric, HealthProvider, HealthSource, HealthSourcePlan, HealthSummary, HealthSyncResult, McpSignIn,
-  TrashKind, TrashListing, ChatSearchHit,
+  TrashKind, TrashListing, ChatSearchHit, ChatOutputs,
   McpEffective, McpReport, McpServer, McpServerDraft, McpTool, ToolMode,
   ActivityApplyResult, ActivityCapability, ActivityConfig, ActivityContextFile, ActivityEvent, ActivityGrantResult,
   ActivityCategoryReport, ActivityCategoryRule, ActivityInsights, ActivityRedactTest, ActivityStatus, ActivitySuggestion, ActivitySummary, InsightStatus,
@@ -107,6 +107,21 @@ export async function req<T>(path: string, init?: RequestInit, timeoutMs = REQUE
 }
 
 export const json = (v: unknown): string => JSON.stringify(v)
+
+/**
+ * Save a file the backend serves as octet-stream. A bare <a href> 401s (the auth middleware reads the token header
+ * only), so the bytes are fetched with the header and handed to the browser through an object URL.
+ */
+export async function saveDownload(path: string, name: string): Promise<void> {
+  const r = await fetch(`${base}${path}`, { headers: await auth() })
+  if (!r.ok) throw new ApiError(`${r.status} ${r.statusText}`, { status: r.status, kind: 'http' })
+  const url = URL.createObjectURL(await r.blob())
+  const a = document.createElement('a')
+  a.href = url
+  a.download = name.split('/').pop() || 'download'
+  a.click()
+  URL.revokeObjectURL(url)
+}
 
 /** Human sentence for a read-back that did not prove the write (mirrors verify.summary_text). */
 export function verificationMessage(v: Verification): string {
@@ -432,7 +447,10 @@ export const api = {
     listArchived: () => req<Conversation[]>('/conversations?project_id=all&archived=true'),
     delete: (id: string) => req<{ ok: boolean; stopped?: boolean }>(`/conversations/${id}`, { method: 'DELETE' }),
     deleteMessage: (id: string, mid: string) => req(`/conversations/${id}/messages/${mid}`, { method: 'DELETE' }),
-    search: (q: string, limit = 20) => req<ChatSearchHit[]>(`/conversations/search?q=${encodeURIComponent(q)}&limit=${limit}`)
+    search: (q: string, limit = 20) => req<ChatSearchHit[]>(`/conversations/search?q=${encodeURIComponent(q)}&limit=${limit}`),
+    /** Files the chat's tools saved for the user (sandbox exports, browser downloads, run_python outputs/). */
+    outputs: (id: string) => req<ChatOutputs>(`/conversations/${id}/outputs`),
+    downloadOutput: (id: string, path: string) => saveDownload(`/conversations/${id}/outputs/download?path=${encodeURIComponent(path)}`, path)
   },
   /** The chat's plan artifact: the model writes it with `todo_write`, the user ticks steps off here. */
   plan: {

@@ -1630,6 +1630,9 @@ export interface DeskFile {
 /** GET /cowork/desks/{id}/files */
 export interface DeskFileTree { files: DeskFile[]; usage: { files: number; bytes: number } }
 
+/** GET /conversations/{id}/outputs: what a plain chat's tools saved for the user. `folder` is for Show in Finder. */
+export interface ChatOutputs extends DeskFileTree { folder: string }
+
 /** GET /cowork/desks/{id}/file — a character window, or a named-and-sized stub for a binary. */
 export interface DeskFilePreview {
   path: string

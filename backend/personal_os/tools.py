@@ -950,7 +950,9 @@ class Toolbox:
 
         async def save_memory(ctx: dict[str, Any], content: str = "", kind: str = "", personal: bool = False,
                               replaces: str = "", forget: bool = False) -> Any:
-            learned = ctx.setdefault("learned", {"memories": [], "nodes": [], "edges": []})
+            # Created only on a successful write, so a refused call emits no "learned" event.
+            def learned() -> dict[str, Any]:
+                return ctx.setdefault("learned", {"memories": [], "nodes": [], "edges": []})
             prov = {"conversation_id": ctx.get("conversation_id"), "message_id": ctx.get("message_id")}
             old = None
             if replaces or forget:
@@ -968,7 +970,7 @@ class Toolbox:
                     gone = self.memories.invalidate(replaces)
                     if not gone:
                         return tool_error(f"Could not forget {replaces}: it is no longer current.")
-                    learned.setdefault("removed", []).append(gone)
+                    learned().setdefault("removed", []).append(gone)
                     return {"forgotten": replaces, "content": gone["content"]}
             # The same normalisation auto-learn applies: never store a credential, or a relative date that will rot.
             text = normalize_memory(content, datetime.now().date())
@@ -982,10 +984,10 @@ class Toolbox:
                 m = self.memories.supersede(old["id"], text, kind=kind or None, source="auto", provenance=prov)
                 if not m:
                     return tool_error(f"Could not update {replaces}: it is no longer current.")
-                learned.setdefault("updated", []).append(m)
+                learned().setdefault("updated", []).append(m)
                 return {"updated": replaces, "saved": m["id"], "content": m["content"]}
             m = self.memories.create(None if personal else ctx["project_id"], text, kind=kind or "fact", source="auto", provenance=prov)
-            learned["memories"].append(m)
+            learned()["memories"].append(m)
             return {"saved": m["id"], "content": m["content"]}
         R("save_memory", ToolSpec("save_memory", "Explicitly remember something durable about the user (a fact, preference or goal) for future chats. Use when the user says 'remember that…' or shares something clearly worth keeping. "
                                   "To correct a memory, pass its id from search_memory as `replaces` with the corrected content; to forget one, pass `replaces` and `forget: true`.",

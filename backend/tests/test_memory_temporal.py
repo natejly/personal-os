@@ -214,7 +214,8 @@ def test_save_memory_absolutizes_dates_and_refuses_unresolvable(stores) -> None:
     _, memories, graph = stores
     out, _ = _save(memories, graph, content="User has a dentist appointment tomorrow")
     assert (date.today() + timedelta(days=1)).isoformat() in memories.get(out["saved"])["content"]
-    bad, _ = _save(memories, graph, content="User starts the new job next month")
+    bad, bad_ctx = _save(memories, graph, content="User starts the new job next month")
+    assert "learned" not in bad_ctx  # a refused save emits no "learned" event
     assert "error" in bad and all("next month" not in m["content"] for m in memories.list(None))
 
 
@@ -235,7 +236,8 @@ def test_save_memory_forget_and_pinned_refusals(stores) -> None:
     assert out["forgotten"] == plain["id"] and memories.get(plain["id"])["invalid_at"] is not None
     assert [m["id"] for m in ctx["learned"]["removed"]] == [plain["id"]]
     pinned = memories.create(None, "User's name is Sam", source="user", pinned=True)
-    assert "error" in _save(memories, graph, replaces=pinned["id"], forget=True)[0]
+    refused, refused_ctx = _save(memories, graph, replaces=pinned["id"], forget=True)
+    assert "error" in refused and "learned" not in refused_ctx
     assert "error" in _save(memories, graph, replaces=pinned["id"], content="User's name is Samuel")[0]
     row = memories.get(pinned["id"])
     assert row["content"] == "User's name is Sam" and row["invalid_at"] is None

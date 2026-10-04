@@ -5009,6 +5009,18 @@ def update_memory(id: str, body: MemoryPatch) -> dict[str, Any]:
         patch["project_id"] = None
     elif "project_id" in patch:
         patch["project_id"] = wsid(patch["project_id"])
+    cur = memories.get(id)
+    if not cur:
+        raise HTTPException(404)
+    content = patch.pop("content", None)
+    if content is not None and content.strip() and content.strip() != cur["content"]:
+        # A hand edit is a new version, like the model's: the old wording stays in history and can be restored.
+        new = memories.supersede(id, content, kind=patch.pop("kind", None), source="user", keep_pinned=True)
+        if not new:
+            raise HTTPException(409, "This memory is no longer current")
+        id = new["id"]
+    elif content is not None:
+        patch["content"] = content  # unchanged text is a no-op; empty text is refused by update()
     m = memories.update(id, patch)
     if not m:
         raise HTTPException(404)

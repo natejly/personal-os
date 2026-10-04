@@ -83,6 +83,12 @@ def absolutize(text: str, today: date) -> str | None:
     return out if ok else None
 
 
+def normalize_memory(text: str, today: date) -> str | None:
+    """What every memory write applies first: credentials scrubbed, relative dates made absolute.
+    None when a relative date cannot be resolved, so the caller drops it instead of storing it to rot."""
+    return absolutize(redact.scrub_secrets(text), today)
+
+
 SELF_LABELS = {"user", "the user", "me", "myself", "i"}
 
 
@@ -161,7 +167,7 @@ async def learn_from_exchange(
         if not isinstance(u, dict):
             continue
         target = tagged.get(_s(u.get("id")))
-        content = redact.scrub_secrets(_s(u.get("content")))
+        content = normalize_memory(_s(u.get("content")), today) or ""
         if not target or len(content) < 6 or content == target["content"]:
             continue
         # The snapshot predates the model call: re-read so a memory the user pinned or reworded
@@ -194,9 +200,8 @@ async def learn_from_exchange(
 
     added_memories = []
     for m in _list(data.get("memories")):
-        # A credential the user typed in chat must never become a memory, whatever the model returned.
-        content = redact.scrub_secrets(_s(m.get("content")) if isinstance(m, dict) else _s(m))
-        content = absolutize(content, today) or ""  # a relative date the store cannot resolve is dropped, not kept to rot
+        # A credential the user typed must never become a memory; a relative date the store cannot resolve is dropped.
+        content = normalize_memory(_s(m.get("content")) if isinstance(m, dict) else _s(m), today) or ""
         if len(content) < 6:
             continue
         kind = m.get("kind", "fact") if isinstance(m, dict) else "fact"

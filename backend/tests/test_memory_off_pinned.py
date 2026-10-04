@@ -87,3 +87,35 @@ def test_pinned_row_survives_the_hybrid_cut(monkeypatch) -> None:
     asyncio.run(learn.learn_from_exchange(settings=cfg, memories=mem, graph=appmod.graph, project_id=None,
                                           user_text="zebra", assistant_text="ok", model="m"))
     assert mem.get(pin["id"])["content"] == "Zebra crossing allergy"
+
+
+# ---- a hand edit through PUT /memories/{id} keeps the previous version ----
+def test_hand_edit_keeps_the_previous_version() -> None:
+    mem = appmod.memories
+    old = mem.create(None, "User walks the dog at 7", kind="fact")
+    r = client.put(f"/memories/{old['id']}", json={"content": "User walks the dog at 8"})
+    assert r.status_code == 200, r.text
+    new = r.json()
+    assert new["id"] != old["id"] and new["content"] == "User walks the dog at 8"
+    o = mem.get(old["id"])
+    assert o["invalid_at"] is not None and o["superseded_by"] == new["id"]
+    assert [m["id"] for m in mem.history(new["id"])] == [old["id"], new["id"]]
+    assert client.post(f"/memories/{old['id']}/restore").json()["content"] == "User walks the dog at 7"
+    assert mem.get(new["id"])["invalid_at"] is not None
+
+
+def test_hand_edit_of_a_pinned_row_stays_pinned_and_keeps_history() -> None:
+    mem = appmod.memories
+    old = mem.create(None, "User's badge number is on the fridge", pinned=True)
+    new = client.put(f"/memories/{old['id']}", json={"content": "User's badge is in the drawer", "kind": "note"}).json()
+    assert new["id"] != old["id"] and new["pinned"] and new["kind"] == "note"
+    assert mem.get(old["id"])["superseded_by"] == new["id"]
+
+
+def test_pin_only_or_same_text_edit_stays_in_place() -> None:
+    mem = appmod.memories
+    old = mem.create(None, "User reads before bed")
+    assert client.put(f"/memories/{old['id']}", json={"pinned": True}).json()["id"] == old["id"]
+    same = client.put(f"/memories/{old['id']}", json={"content": " User reads before bed "}).json()
+    assert same["id"] == old["id"] and same["pinned"]
+    assert [m["id"] for m in mem.history(old["id"])] == [old["id"]]

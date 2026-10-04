@@ -524,24 +524,25 @@ class Memories:
 
     # ---- non-destructive changes: the old row stays as history, only `invalid_at` says it no longer holds ----
     def supersede(self, old_id: str, new_content: str, kind: str | None = None, source: str = "auto",
-                  provenance: dict[str, Any] | None = None) -> dict[str, Any] | None:
+                  provenance: dict[str, Any] | None = None, keep_pinned: bool = False) -> dict[str, Any] | None:
         """Replace a memory with a new version, keeping the old one as history. Returns the new row.
 
-        A pinned memory is user-curated: it is rewritten in place and stays valid, never archived.
+        A pinned memory is user-curated: it is rewritten in place and stays valid, never archived, unless
+        `keep_pinned` (the user's own edit), which versions it like any other row and pins the new one.
         """
         old = self.get(old_id)
         new_content = new_content.strip()
         if not old or old["invalid_at"] is not None or not new_content:
             return None
-        if old["pinned"]:
+        if old["pinned"] and not keep_pinned:
             return self.update(old_id, {"content": new_content, **({"kind": kind} if kind else {})})
         prov = provenance or {}
         mid, t = new_id(), now()
         with self.db.tx() as c:
             c.execute(
                 "INSERT INTO memories(id,project_id,content,kind,source,pinned,created_at,updated_at,valid_from,source_conversation_id,source_message_id) "
-                "VALUES(?,?,?,?,?,0,?,?,?,?,?)",
-                (mid, old["project_id"], new_content, kind or old["kind"], source, t, t, t,
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (mid, old["project_id"], new_content, kind or old["kind"], source, int(bool(old["pinned"])), t, t, t,
                  prov.get("conversation_id"), prov.get("message_id")),
             )
             c.execute("INSERT INTO memories_fts(content, memory_id) VALUES(?,?)", (new_content, mid))

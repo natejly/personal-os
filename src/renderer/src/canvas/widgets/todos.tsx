@@ -131,7 +131,7 @@ function TodosWidget({ window: win, live, onConfig }: WidgetProps): JSX.Element 
       </div>
 
       <div className="widget-scroll">
-        {!rows.length && <p className="widget-sub">Nothing matches.</p>}
+        {!rows.length && <p className="widget-sub">{q.trim() || c.scope !== 'all' ? 'Nothing matches.' : 'No todos yet.'}</p>}
         {section('Overdue', overdue)}
         {section('Today', dueToday)}
         {section('Upcoming', upcoming)}

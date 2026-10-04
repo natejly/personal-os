@@ -106,7 +106,7 @@ function WindowFrame({ win, live, selected = false, status = null }: WindowFrame
         // would now refuse, and without it a detached window is stranded until the space is unlocked.
         ...(win.state === 'popped' ? [{ label: 'Return to canvas', accel: '⌃⌘⇧O', run: () => void returnToCanvas(win.id) }] : []),
         // Expand only navigates the main window; it moves nothing on the plane, so a lock keeps it.
-        ...(canExpand(win) ? [{ label: 'Expand', run: () => expandWindow(win) }] : []),
+        ...(canExpand(win) ? [{ label: 'Open full view', run: () => expandWindow(win) }] : []),
         { label: 'Unlock space', accel: '⌃⌘L', run: () => useCanvas.getState().toggleLock() }
       ]
     : [
@@ -120,7 +120,7 @@ function WindowFrame({ win, live, selected = false, status = null }: WindowFrame
         win.state === 'popped'
           ? { label: 'Return to canvas', accel: '⌃⌘⇧O', run: () => void returnToCanvas(win.id) }
           : { label: 'Pop out', accel: '⌃⌘O', run: () => void popOut(win.id) },
-        ...(canExpand(win) ? [{ label: 'Expand', run: () => expandWindow(win) }] : []),
+        ...(canExpand(win) ? [{ label: 'Open full view', run: () => expandWindow(win) }] : []),
         { label: 'Close', accel: '⌘W', danger: true, run: () => void closeWindow(win.id) }
       ]
 
@@ -161,6 +161,10 @@ function WindowFrame({ win, live, selected = false, status = null }: WindowFrame
         onPointerDown={locked ? undefined : onDragPointerDown}
       >
         <span className="win-grip">{status}</span>
+        {!locked && (
+          <button className="win-close" title="Close (⌘W)" aria-label={`Close ${win.title || def?.label || 'window'}`}
+            onPointerDown={(e) => e.stopPropagation()} onClick={() => void closeWindow(win.id)}>×</button>
+        )}
       </div>
 
       <div className="win-body">

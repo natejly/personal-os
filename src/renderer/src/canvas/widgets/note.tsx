@@ -30,7 +30,13 @@ function NoteWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
   const [note, setNote] = useState<Note | null>(null)
   const [body, setBody] = useState('')
   const [editing, setEditing] = useState(false)
+  /** A failed load: there is no note to show. */
   const [error, setError] = useState('')
+  /** A failed save or recolour: the editor stays up with a Retry, and the text stays pending. */
+  const [saveError, setSaveError] = useState('')
+  /** Saves in flight, and whether one has finished, so the label never says 'saved' before the server does. */
+  const inFlight = useRef(0)
+  const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle')
   /** Unsaved body, or null when the note on the server matches what is on screen. */
   const pending = useRef<string | null>(null)
   /** The last window title this widget derived, so a hand-renamed window is never overwritten. */
@@ -45,7 +51,16 @@ function NoteWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
       derived.current = line
       onTitle(line)
     }
-    void api.notes.update(id, { body: next }).then(setNote).catch((e) => setError((e as Error).message))
+    inFlight.current++
+    setSaveState('saving')
+    void api.notes.update(id, { body: next })
+      .then((n) => { setNote(n); setSaveError('') })
+      .catch((e) => {
+        // Put the text back so Retry, the next keystroke or closing the window sends it again.
+        if (pending.current === null) pending.current = next
+        setSaveError((e as Error).message || 'Could not save this note')
+      })
+      .finally(() => { if (--inFlight.current === 0) setSaveState('saved') })
   }, [id, onTitle])
 
   useEffect(() => {
@@ -106,10 +121,18 @@ function NoteWidget({ window: win, live, onTitle }: WidgetProps): JSX.Element {
               width: 12, height: 12, borderRadius: 999, background: COLORS[k].bg,
               border: `1px solid ${note?.color === k ? skin.ink : 'rgba(0,0,0,0.2)'}`
             }}
-            onClick={() => void api.notes.update(id, { color: k }).then(setNote).catch(() => setError('Could not recolour this note'))} />
+            onClick={() => void api.notes.update(id, { color: k }).then(setNote).catch(() => setSaveError('Could not recolour this note'))} />
         ))}
         <span className="spacer" />
-        <span style={{ fontSize: 10, opacity: 0.55 }}>{pending.current === null ? 'saved' : 'saving…'}</span>
+        {saveError ? (
+          <span style={{ fontSize: 10 }} title={saveError}>
+            Not saved{' '}
+            <button style={{ font: 'inherit', textDecoration: 'underline', color: 'inherit' }}
+              onClick={() => { setSaveError(''); if (pending.current !== null) save(pending.current) }}>Retry</button>
+          </span>
+        ) : (pending.current !== null || saveState !== 'idle') && (
+          <span style={{ fontSize: 10, opacity: 0.55 }}>{pending.current === null && saveState === 'saved' ? 'saved' : 'saving…'}</span>
+        )}
       </div>
 
       {editing ? (

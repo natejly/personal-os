@@ -102,7 +102,7 @@ export function addWidgetEntries(opts: { canvasId: string; at?: Point }): MenuEn
 
   const widget = async (): Promise<MenuEntry[]> => {
     const dashboards = await api.dashboards.list()
-    if (!dashboards.length) return [{ label: 'No dashboards', disabled: true, run: noop }]
+    if (!dashboards.length) return [{ label: 'New dashboard…', icon: <Plus size={14} />, run: () => useStore.getState().setView('dashboards') }]
     return dashboards.map((d): MenuEntry => ({
       kind: 'submenu',
       label: d.name,
@@ -119,14 +119,19 @@ export function addWidgetEntries(opts: { canvasId: string; at?: Point }): MenuEn
 
   const artifact = async (): Promise<MenuEntry[]> => {
     const list = (await api.artifacts.list()).slice(0, RECENT_NOTES)
-    if (!list.length) return [{ label: 'No artifacts yet. Ask the chat to make one.', disabled: true, run: noop }]
+    if (!list.length) {
+      return [
+        { label: 'No artifacts yet. Ask the chat to make one.', disabled: true, run: noop },
+        { label: 'Open Library', run: () => { useStore.getState().setLibraryTab('artifacts'); useStore.getState().setView('library') } }
+      ]
+    }
     return list.map((a): MenuEntry => ({ label: a.title || 'Untitled', run: act(() => cv().ensureWindow(canvasId, 'artifact', a.id, undefined, at)) }))
   }
 
   const project = (): MenuEntry[] => {
     const bound = projectOf()
     const projects = useStore.getState().projects
-    if (!projects.length) return [{ label: 'No projects', disabled: true, run: noop }]
+    if (!projects.length) return [{ label: 'New project…', icon: <Plus size={14} />, run: () => useStore.getState().setProjectModal({ mode: 'create' }) }]
     // The space's own project first; the rest keep the sidebar's order.
     const sorted = [...projects.filter((p) => p.id === bound), ...projects.filter((p) => p.id !== bound)]
     return sorted.map((p): MenuEntry => ({

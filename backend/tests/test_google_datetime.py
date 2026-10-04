@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import datetime as dt
+import os
 import sys
+import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from personal_os.google import _parse_iso, _rfc2822_iso  # noqa: E402
+from personal_os.google import _overlaps, _parse_iso, _rfc2822_iso  # noqa: E402
 
 
 def test_js_toisostring_with_millis_and_z() -> None:
@@ -39,7 +41,25 @@ def test_rfc2822_empty_and_passthrough() -> None:
     assert _rfc2822_iso("not a date") == "not a date"
 
 
+def test_all_day_event_lasts_the_whole_local_day() -> None:
+    old = os.environ.get("TZ")
+    os.environ["TZ"] = "America/Los_Angeles"
+    time.tzset()
+    try:
+        ev = {"start": "2026-10-03", "end": "2026-10-04"}
+        now = dt.datetime(2026, 10, 3, 21, 0).astimezone()  # 9pm local is already the 4th in UTC
+        assert _overlaps(ev, now, now + dt.timedelta(days=1))
+        assert not _overlaps(ev, now + dt.timedelta(hours=4), now + dt.timedelta(days=1))  # 1am on the 4th
+    finally:
+        if old is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = old
+        time.tzset()
+
+
 if __name__ == "__main__":
+    test_all_day_event_lasts_the_whole_local_day()
     test_js_toisostring_with_millis_and_z()
     test_z_without_millis()
     test_offset_and_naive()

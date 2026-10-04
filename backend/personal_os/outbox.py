@@ -40,6 +40,7 @@ from typing import Any, Callable
 
 from .db import Database, new_id, row_to_dict
 from . import verify
+from .google import GoogleNotConnected, NotSent
 
 log = logging.getLogger(__name__)
 
@@ -241,6 +242,13 @@ class Outbox:
     def _deliver(self, row: dict[str, Any]) -> None:
         try:
             out = self.google.gmail_send(row["to_addr"], row["subject"], row["body"], row["reply_to_message_id"])
+        except (NotSent, GoogleNotConnected) as e:
+            # Gmail was never asked to send: the row stays open so Send now can try again.
+            log.warning("outbox: send %s not attempted: %s", row["id"], e)
+            with self.db.tx() as c:
+                c.execute("UPDATE pending_sends SET status = ?, error = ? WHERE id = ?",
+                          (EXPIRED, f"Not sent: {_first_line(e)[:300]}", row["id"]))
+            return
         except Exception as e:  # noqa: BLE001 - the row carries the failure; the loop keeps running
             log.warning("outbox: send %s failed: %s", row["id"], e)
             with self.db.tx() as c:

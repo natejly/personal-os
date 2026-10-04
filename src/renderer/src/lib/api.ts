@@ -4,7 +4,7 @@ import type {
   Memory, MemoryProposal, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
   Command, AgentDef, BuiltinAgent, Workflow, WorkflowRun, Plan, PlanStep, Skill, SkillStatus, SkillDraftResult, SkillFinding, SkillPreview, ToolResultHandle,
   Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
-  Desk, DeskAutonomy, DeskBudget, DeskDiff, DeskEvent, DeskFilePreview, DeskFileTree, DeskOutput, DeskRichPreview,
+  Desk, DeskAutonomy, DeskBudget, DeskDiff, DeskEvent, DeskInputRef, DeskFilePreview, DeskFileTree, DeskOutput, DeskRichPreview,
   DeskQueued, DeskStatus, FullDesk, PlanRecord, PromotionKind, PromotionResult,
   AgentInbox, AgentProposal, Job, JobNotifyEvent, JobRunRecord, JobStats,
   Doc, DocFolder, FullDoc, DocRevision,
@@ -635,8 +635,11 @@ export const api = {
         req<Desk[]>(`/cowork/desks?project_id=${encodeURIComponent(s)}&status=${encodeURIComponent(status)}&archived=${archived}`),
       get: (id: string) => req<FullDesk>(`/cowork/desks/${id}`),
       /** `start: false` leaves the desk a draft. Over `deskMaxLive` the desk is queued: no run_id, `queued: true`. */
-      create: (d: { brief: string; title?: string; project_id?: string | null; autonomy?: DeskAutonomy; budget?: DeskBudget; start?: boolean }) =>
+      create: (d: { brief: string; title?: string; project_id?: string | null; autonomy?: DeskAutonomy; budget?: DeskBudget; start?: boolean; inputs?: DeskInputRef[] }) =>
         req<{ desk: Desk; conversation_id: string; run_id?: string; seq?: number } & Partial<DeskQueued>>('/cowork/desks', { method: 'POST', body: json(d) }),
+      /** Snapshot copies into the desk's read-only inputs/ folder; the desk's next turn is told about them. */
+      addInputs: (id: string, inputs: DeskInputRef[]) =>
+        req<{ added: { path: string; bytes: number; source: string }[] }>(`/cowork/desks/${id}/inputs`, { method: 'POST', body: json({ inputs }) }),
       patch: (id: string, patch: { title?: string; autonomy?: DeskAutonomy; project_id?: string | null; archived?: boolean; budget?: DeskBudget; clear_project?: boolean }) =>
         req<Desk>(`/cowork/desks/${id}`, { method: 'PATCH', body: json(patch) }),
       /** The workspace is kept unless `purge`: a deleted desk's files are the one thing the user cannot regenerate. */

@@ -516,6 +516,20 @@ def test_overview_counts_what_the_panel_shows() -> None:
     assert o["last_run"] > 0 and o["next_run"] > o["last_run"]
 
 
+def test_a_habit_never_adopts_or_rewrites_the_users_matching_memory() -> None:
+    m = _monitor(REPLY)
+    _seeded(m)
+    mine = m.insights.memories.create(None, "user writes code in cursor every weekday morning.", source="user", pinned=True)
+    asyncio.run(m.insights.refresh(force=True))
+    h = m.insights.get_habit_by_key("habit-mornings-in-cursor")
+    assert h is not None and h["memory_id"] != mine["id"]
+    moved = json.dumps({"habits": [{"key": "habit-mornings-in-cursor", "statement": "User writes code in Cursor every afternoon.",
+                                    "kind": "fact", "confidence": 0.85, "evidence": []}], "suggestions": []})
+    m.insights._complete = _monitor(moved)._complete
+    asyncio.run(m.insights.refresh(force=True))
+    assert m.insights.memories.get(mine["id"])["content"] == mine["content"]
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

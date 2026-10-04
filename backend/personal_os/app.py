@@ -30,7 +30,7 @@ from . import activity, approval_edits, assist, backups, llm, mac, mcp_drift, mc
 from . import compaction, otel_export, titles
 from .context import build_context, estimate_tokens, layout_messages
 from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
-from .extract_text import MAX_UPLOAD_BYTES, extract_structured, extract_text, for_index, has_readable_text, safe_upload_name
+from .extract_text import MAX_UPLOAD_BYTES, extract_both, extract_text, for_index, has_readable_text, safe_upload_name
 from .consolidate import Consolidator
 from .learn import MAX_INJECTED_SKILLS, LearnJob, LearnWorker, Skills, induce_skill, run_transcript, skill_block
 from .embed import Embedder
@@ -4858,11 +4858,8 @@ def _store_upload(project_id: str | None, name: str, mime: str, data: bytes) -> 
     dup = documents.find_by_hash(pid, digest)
     if dup:
         return {**dup, "duplicate": True, "extracted": has_readable_text(dup.get("text") or "")}
-    text = for_index(extract_text(safe, data, mime))
-    try:
-        blocks = extract_structured(safe, data, mime)
-    except Exception:  # noqa: BLE001 - the chunker falls back to the plain text
-        blocks = None
+    text, blocks = extract_both(safe, data, mime)
+    text = for_index(text)
     dest = db.data_dir / "uploads" / f"{new_id()}-{safe}"
     dest.write_bytes(data)
     try:

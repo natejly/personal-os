@@ -198,6 +198,15 @@ def test_rewrite_candidate_flow_and_only_rot_goes_to_model(env, monkeypatch) -> 
     assert [x["content"] for x in m.list(None)] == ["User travels to Lisbon in April 2026"]
 
 
+def test_candidate_scan_runs_off_the_event_loop(env, monkeypatch) -> None:
+    import threading
+
+    _, _, _, c = env
+    seen: list[int] = []
+    monkeypatch.setattr(c, "candidates", lambda pid: seen.append(threading.get_ident()) or [])
+    assert _propose(c) == [] and seen and seen[0] != threading.get_ident()
+
+
 def test_migration_is_idempotent_and_schema_present() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         db = Database(tmp)

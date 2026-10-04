@@ -9,6 +9,7 @@ that are mapped back server-side, so it cannot name a row it was not shown.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -173,8 +174,10 @@ class Consolidator:
         rows = [m for m in self.memories.list(project_id, include_global=project_id != ALL) if not m["pinned"]]
         out: list[dict[str, Any]] = []
         uf = _UF()
+        toks = {m["id"]: _norm_tokens(m["content"]) for m in rows}  # once per row, not once per pair
         for a, b in combinations(rows, 2):
-            if a["project_id"] == b["project_id"] and jaccard(a["content"], b["content"]) >= JACCARD:
+            ta, tb = toks[a["id"]], toks[b["id"]]
+            if a["project_id"] == b["project_id"] and ta and tb and len(ta & tb) / len(ta | tb) >= JACCARD:
                 uf.union(a["id"], b["id"])
         groups: dict[str, list[dict[str, Any]]] = {}
         for m in rows:
@@ -207,7 +210,7 @@ class Consolidator:
     # ---------------- propose ----------------
     async def propose(self, settings: dict[str, Any], project_id: str | None, model: str) -> list[dict[str, Any]]:
         """Ask the model about each batch of candidates and store what survives validation as *pending*."""
-        cands = self.candidates(project_id)
+        cands = await asyncio.to_thread(self.candidates, project_id)  # O(n^2) pair scan: off the event loop
         created: list[dict[str, Any]] = []
         known = self._known_sets()
         for i in range(0, len(cands), BATCH):

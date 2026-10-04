@@ -169,6 +169,13 @@ def test_scanned_pdf_is_ocred_with_faked_binaries(monkeypatch: Any, tmp_path: Pa
     assert seen.count("pdftoppm") == 3 and seen.count("tesseract") == 3
     blocks = ex.extract_structured("scan.pdf", pdf)
     assert [b["page"] for b in blocks if b["kind"] == "page"] == [1, 2, 3]
+    assert blocks[0]["text"].startswith("[OCR text")  # the structured copy carries the warning too
+
+    # the upload path asks for text and blocks: the scan is OCRed once, not twice
+    seen.clear()
+    text, both = ex.extract_both("scan.pdf", pdf)
+    assert text.startswith("[OCR text") and both and both[0]["text"].startswith("[OCR text")
+    assert seen.count("tesseract") == 3
 
     # without the binaries the old behaviour stands: no text, the plain marker
     monkeypatch.setattr(ex, "_which", lambda b: None)
@@ -194,3 +201,19 @@ def test_scanned_pdf_stops_at_the_page_limit(monkeypatch: Any) -> None:
     monkeypatch.setattr(ex, "_run", run)
     texts, ocr = ex._pdf_page_texts(buf.getvalue())
     assert ocr and len(texts) == ex.OCR_PDF_PAGES
+
+
+def test_docx_bomb_is_refused_before_parsing(monkeypatch: Any) -> None:
+    import docx
+
+    d = docx.Document()
+    d.add_paragraph("x" * 5000)
+    buf = io.BytesIO()
+    d.save(buf)
+    monkeypatch.setattr(ex, "MAX_UNZIPPED_BYTES", 1000)
+    try:
+        ex.extract_structured("bomb.docx", buf.getvalue())
+        raise AssertionError("parsed past the inflate cap")
+    except ValueError:
+        pass
+    assert "x" * 100 not in ex.extract_text("bomb.docx", buf.getvalue())

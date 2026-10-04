@@ -108,6 +108,16 @@ def test_invalid_rows_are_not_indexed_or_returned(env) -> None:
     assert [m["id"] for m in idx.search(None, "live", qv, settings=CFG)] == [b["id"]]
 
 
+def test_trashed_rows_neither_ranked_nor_reembedded(env) -> None:
+    db, memories, graph, idx, fake = env
+    gone = memories.create(None, "User visited Austin in Austin", kind="fact")
+    live = memories.create(None, "User lives in Denver", kind="fact")
+    with db.tx() as c:
+        c.execute("UPDATE memories SET deleted_at=1 WHERE id=?", (gone["id"],))
+    assert [m["id"] for m in idx.search(None, "Austin", limit=1)] == [live["id"]]
+    assert idx.pending_count("fake-embed") == 1
+
+
 def test_model_mismatch_ignored_then_reindexed(env) -> None:
     db, memories, graph, idx, fake = env
     m = memories.create(None, "Priya is the user's manager", kind="fact")

@@ -23,7 +23,7 @@ bare = TestClient(app)  # no token: what an iframe sends
 passed = 0
 fx: dict[str, Any] = {}
 CALLS: list[str] = []
-REPLIES: list[str] = []
+REPLIES: list[Any] = []
 
 GOOD = "<!doctype html><html><head><title>Tip</title></head><body><h1>Tip splitter</h1><p>Enter a bill</p><script>var a=1;</script></body></html>"
 BAD = "<!doctype html><html><head><title>Tip</title></head><body><h1>Tip splitter</h1><script>fetch('/x').then(r=>r.json())</script></body></html>"
@@ -31,7 +31,10 @@ BAD = "<!doctype html><html><head><title>Tip</title></head><body><h1>Tip splitte
 
 async def fake_complete(settings: Any, model: Any, messages: Any, **kw: Any) -> str:
     CALLS.append(messages[-1]["content"][:60])
-    return REPLIES.pop(0)
+    r = REPLIES.pop(0)
+    if isinstance(r, Exception):
+        raise r
+    return r
 
 llm.complete = fake_complete  # type: ignore[assignment]
 
@@ -100,6 +103,9 @@ def test_generate_with_one_repair() -> None:
     REPLIES[:] = [BAD, BAD]
     b = j("POST", "/artifacts", {"prompt": "again"})
     check(len(CALLS) == 2 and b["lint"]["blocked"] == ["network"], "a failed repair stops after one round and reports it")
+    REPLIES[:] = [BAD, llm.LLMError("timed out")]
+    d = j("POST", "/artifacts", {"prompt": "provider hiccup"})
+    check(d["version"] == 1 and d["lint"]["repaired"] is False, "a repair call that errors keeps the first generation")
     CALLS.clear()
     REPLIES[:] = [GOOD]
     c = j("POST", f"/artifacts/{a['id']}/revise", {"instruction": "bigger title"})

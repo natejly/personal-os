@@ -25,6 +25,9 @@ def _mod(source: str) -> PlannerModule:
         def calendar_events(self, *_a, **_k):
             return []
 
+        def calendar_ensure(self, summary):
+            return {"id": "grain-cal", "summary": summary, "created": False}
+
     class Ctx:
         google = Google()
 

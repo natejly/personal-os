@@ -246,6 +246,11 @@ class ModuleTests(unittest.TestCase):
         out = asyncio.run(spec.fn({}, days=5))
         self.assertTrue(out["proposed_blocks"])
         self.assertEqual(self.google.created, [])
+        # each change is what /planner/apply would write, so an approved card is seen as planned next time
+        c = out["changes"][0]
+        self.assertEqual((c["op"], c["calendar_id"]), ("create", "grain-cal"))
+        self.assertTrue(c["summary"].startswith(pl.FOCUS_PREFIX))
+        self.assertEqual(pl.locked_from_events([{**c, "all_day": False}], ["grain-cal"])[0]["todo_id"], out["proposed_blocks"][0]["todo_id"])
 
 
 if __name__ == "__main__":

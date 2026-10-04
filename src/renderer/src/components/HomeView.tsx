@@ -3,6 +3,7 @@ import { Home, Calendar, Mail, Brain, FolderKanban, Sparkles, RefreshCw, PanelLe
 import { useStore } from '../store'
 import { useDocRec } from '../features/docrec/store'
 import { mailWatchLines } from '../lib/todayCards'
+import { hasModelKey } from '../lib/modelLabel'
 import { api } from '../lib/api'
 import { formatOffset, offerableCandidates } from '../lib/transcript'
 import { HOME_MODULES, homeModuleOn } from '../modules'
@@ -277,10 +278,10 @@ export default function HomeView(): JSX.Element {
         {on('agent') && <AgentInbox />}
         {on('cowork') && <HomeCowork />}
 
-        {on('recap') && recapOpen && !settings.apiKeySet && (
+        {on('recap') && recapOpen && !hasModelKey(settings) && (
           <p className="muted widget-connect">The daily recap needs a model API key. <button className="link" onClick={() => useStore.getState().openSettings('provider')}>Add a key</button></p>
         )}
-        {on('recap') && settings.apiKeySet && (recap?.content || recapLoading) && recapOpen && (
+        {on('recap') && hasModelKey(settings) && (recap?.content || recapLoading) && recapOpen && (
           <section className="recap">
             <header>Daily recap <span className="muted small">{recap?.cached ? 'generated earlier today' : 'fresh'}</span>
               <span style={{ flex: 1 }} />

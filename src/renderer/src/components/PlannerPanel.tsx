@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { CalendarClock } from 'lucide-react'
 import { api } from '../lib/api'
 import { useStore } from '../store'
@@ -17,13 +17,19 @@ const fromBlocks = (blocks?: PlannerBlock[]): Plan | null => (blocks?.length ? {
  * "Plan my day" (or week, with `days`): proposes calendar blocks for todos with estimates. Nothing reaches
  * Google until "Add selected". `initial` shows blocks already proposed (Today's dashboard) without a call.
  */
-export default function PlannerPanel({ initial, days, onApplied }: { initial?: PlannerBlock[]; days?: number; onApplied?: () => void }): JSX.Element {
+export default function PlannerPanel({ initial, days = 1, onApplied }: { initial?: PlannerBlock[]; days?: number; onApplied?: () => void }): JSX.Element {
   const toast = useStore((s) => s.toast)
   const google = useStore((s) => s.google)
   const [plan, setPlan] = useState<Plan | null>(() => fromBlocks(initial))
   const [picked, setPicked] = useState<Set<string>>(() => new Set((initial ?? []).map(key)))
   const [busy, setBusy] = useState(false)
-  useEffect(() => { setPlan(fromBlocks(initial)); setPicked(new Set((initial ?? []).map(key))) }, [initial])
+  // A dashboard refresh hands a new array each time: follow its content, and never over a plan the user asked for.
+  const asked = useRef(false)
+  const initialKey = (initial ?? []).map(key).join('|')
+  useEffect(() => {
+    if (asked.current) return
+    setPlan(fromBlocks(initial)); setPicked(new Set((initial ?? []).map(key)))
+  }, [initialKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!google?.connected) return <></>
 
@@ -31,6 +37,7 @@ export default function PlannerPanel({ initial, days, onApplied }: { initial?: P
     setBusy(true)
     try {
       const p = await api.planner.suggest(days)
+      asked.current = true
       setPlan(p)
       setPicked(new Set(p.blocks.map(key)))
     } catch (e) {
@@ -45,6 +52,7 @@ export default function PlannerPanel({ initial, days, onApplied }: { initial?: P
       const failed = results.filter((r) => !r.ok)
       if (failed.length) toast(`${results.length - failed.length} added, ${failed.length} failed: ${failed[0].error}`, 'error')
       else toast(`${results.length} block${results.length === 1 ? '' : 's'} added to your calendar`)
+      asked.current = false
       setPlan(null)
       onApplied?.()
     } catch (e) {
@@ -54,7 +62,7 @@ export default function PlannerPanel({ initial, days, onApplied }: { initial?: P
 
   return (
     <div className="planner-panel">
-      {!plan && <button className="ghost-btn" onClick={() => void suggest()} disabled={busy}><CalendarClock size={14} /> {busy ? 'Planning…' : (days ?? 1) > 1 ? 'Plan my week' : 'Plan my day'}</button>}
+      {!plan && <button className="ghost-btn" onClick={() => void suggest()} disabled={busy}><CalendarClock size={14} /> {busy ? 'Planning…' : days > 1 ? 'Plan my week' : 'Plan my day'}</button>}
       {plan && (
         <section className="todo-section">
           <h4 className="section-h">Proposed blocks <span>{plan.blocks.length}</span></h4>
@@ -69,7 +77,7 @@ export default function PlannerPanel({ initial, days, onApplied }: { initial?: P
           {plan.unplaced.length > 0 && <p className="empty-hint">{plan.unplaced.length} could not fit before their due date.</p>}
           <div className="planner-row">
             <button className="primary-btn" onClick={() => void apply()} disabled={busy || picked.size === 0}>Add selected to calendar</button>
-            <button className="ghost-btn" onClick={() => setPlan(null)} disabled={busy}>Dismiss</button>
+            <button className="ghost-btn" onClick={() => { asked.current = false; setPlan(null) }} disabled={busy}>Dismiss</button>
           </div>
         </section>
       )}

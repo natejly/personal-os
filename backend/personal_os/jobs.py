@@ -26,6 +26,7 @@ it skipped, which is what the Agent Inbox shows as "ran late".
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import itertools
 import json
 import logging
@@ -232,15 +233,25 @@ def scan_dir(path: str) -> dict[str, int]:
 
 
 class PowerWake:
-    """The real wake sink: asks the macOS power scheduler to wake the Mac at an instant. It needs privileges and
-    may not exist, so it fails quietly; the next wake then catches up late, which is how it worked before."""
+    """The real wake sink: asks the macOS power scheduler to wake the Mac at an instant. That needs root, which the
+    app does not have, so the first refusal marks it `unavailable` for good and every later call is a no-op. Missed
+    slots then catch up when the Mac next wakes (see Scheduler.nudge), and the inbox says jobs need the Mac awake."""
 
-    @staticmethod
-    def _pmset(*args: str) -> None:
+    def __init__(self, runner: Callable[..., Any] = subprocess.run) -> None:
+        self._run = runner
+        self.unavailable = False
+
+    def _pmset(self, *args: str) -> None:
+        if self.unavailable:
+            return
         try:
-            subprocess.run(["pmset", "schedule", *args], capture_output=True, timeout=10, check=False)
+            done = self._run(["pmset", "schedule", *args], capture_output=True, timeout=10, check=False)
+            ok = done.returncode == 0
         except Exception:  # noqa: BLE001 - never a scheduler fault
-            log.debug("pmset schedule failed", exc_info=True)
+            ok = False
+        if not ok:
+            self.unavailable = True
+            log.info("pmset schedule is not available here; jobs will run when the Mac is awake")
 
     @staticmethod
     def _stamp(at: float) -> str:
@@ -278,7 +289,7 @@ class Jobs:
     """CRUD over the `jobs` table. Every writer keeps `next_due_at` in step with the schedule and `enabled`."""
 
     FIELDS = ("name", "kind", "cron", "run_at", "timezone", "enabled", "prompt", "project_id", "max_retries",
-              "allowed_tools", "watch_dir")
+              "allowed_tools", "watch_dir", "notify")
     # Changing any of these re-arms the job: a new schedule must not inherit the old one's pending slot.
     RE_ARM = frozenset({"kind", "cron", "run_at", "timezone", "enabled"})
     # Taking a baseline listing when these change is what makes "idle until a file appears" true.
@@ -313,7 +324,7 @@ class Jobs:
     def create(self, name: str, cron: str, prompt: str, *, kind: str = "cron", run_at: float | None = None,
                timezone: str | None = None, enabled: bool = False, project_id: str | None = None,
                at: float | None = None, max_retries: int = 1, allowed_tools: list[str] | None = None,
-               watch_dir: str | None = None) -> dict[str, Any]:
+               watch_dir: str | None = None, notify: str = "problems") -> dict[str, Any]:
         tz = timezone or local_tz_name()
         t = at if at is not None else now()
         jid = new_id()
@@ -323,10 +334,11 @@ class Jobs:
         nxt = next_due_for(fresh, t) if enabled else None
         with self.db.tx() as c:
             c.execute("INSERT INTO jobs(id, name, kind, cron, run_at, timezone, enabled, prompt, project_id, next_due_at, "
-                      "created_at, updated_at, max_retries, allowed_tools, watch_dir, watch_seen) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                      "created_at, updated_at, max_retries, allowed_tools, watch_dir, watch_seen, notify) "
+                      "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                       (jid, name, kind, cron, run_at, tz, int(enabled), prompt, project_id, nxt, t, t, int(max_retries),
                        None if allowed_tools is None else json.dumps(list(allowed_tools)), watch_dir,
-                       json.dumps(scan_dir(watch_dir)) if watch_dir else None))
+                       json.dumps(scan_dir(watch_dir)) if watch_dir else None, notify))
         return self.get(jid)  # type: ignore[return-value]
 
     def update(self, id: str, patch: dict[str, Any], at: float | None = None) -> dict[str, Any] | None:
@@ -590,11 +602,26 @@ class Scheduler:
         # Optional OS wake sink with schedule(at) / cancel(at): asks the machine to be awake for the next slot.
         self.wake = wake
         self._woken: float | None = None
+        # Set by nudge() (the Mac woke or unlocked): cuts the current nap short so a missed slot fires now.
+        self._poke = asyncio.Event()
         self.last_tick: float | None = None
         self.fires = 0
 
     async def _nap(self, seconds: float) -> None:
-        await (self._sleep(seconds) if self._sleep is not None else asyncio.sleep(seconds))
+        if self._sleep is not None:
+            await self._sleep(seconds)
+        else:
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(self._poke.wait(), seconds)
+        self._poke.clear()
+
+    def nudge(self) -> None:
+        """Run the next pass now instead of at the end of the nap. On the event loop."""
+        self._poke.set()
+
+    @property
+    def wake_unavailable(self) -> bool:
+        return bool(getattr(self.wake, "unavailable", False))
 
     def sync_wake(self) -> None:
         """Keep one OS wake booked for the earliest due slot: none when nothing is due, and an unchanged instant

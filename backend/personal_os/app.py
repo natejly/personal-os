@@ -17,7 +17,7 @@ import sqlite3
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Annotated, Any, AsyncIterator, Callable
+from typing import Annotated, Any, AsyncIterator, Callable, Literal
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.encoders import jsonable_encoder
@@ -4077,6 +4077,8 @@ class JobIn(BaseModel):
     allowed_tools: list[str] | None = None
     # kind='watch': a folder under the home folder; each pass that finds new or touched files in it fires one run.
     watch_dir: str | None = Field(default=None, max_length=1000)
+    # When a run is worth an OS notification (job_history.notify_events).
+    notify: Literal["problems", "always", "never"] = "problems"
 
 
 class JobPatch(BaseModel):
@@ -4091,6 +4093,7 @@ class JobPatch(BaseModel):
     max_retries: int | None = Field(default=None, ge=0, le=5)
     allowed_tools: list[str] | None = None  # an explicit null resets to "every tool"
     watch_dir: str | None = Field(default=None, max_length=1000)
+    notify: Literal["problems", "always", "never"] | None = None
 
 
 # How far in the past a one-off may be set, on a write. The scheduler is happy to run a late task — that is the
@@ -4151,7 +4154,7 @@ def create_job(body: JobIn) -> dict[str, Any]:
     _check_allowed_tools(body.allowed_tools)
     return jobs.create(body.name, body.cron, body.prompt, kind=body.kind, run_at=body.run_at,
                        timezone=body.timezone, enabled=body.enabled, project_id=wsid(body.project_id),
-                       max_retries=body.max_retries, allowed_tools=body.allowed_tools,
+                       max_retries=body.max_retries, allowed_tools=body.allowed_tools, notify=body.notify,
                        watch_dir=body.watch_dir and check_watch_dir(body.watch_dir) if body.kind == "watch" else None)
 
 
@@ -4160,6 +4163,8 @@ def update_job(id: str, body: JobPatch) -> dict[str, Any]:
     patch = body.model_dump(exclude_unset=True)
     if "project_id" in patch:
         patch["project_id"] = wsid(patch["project_id"])
+    if "notify" in patch and patch["notify"] is None:
+        del patch["notify"]  # the column has no "unset"; null means leave it
     cur = jobs.get(id)
     if not cur:
         raise HTTPException(404, "No such job")
@@ -4403,7 +4408,8 @@ def agent_inbox(hours: float = 72.0, limit: int = 20, include_dry: int = 0) -> d
                        "runs": len(away), "late": sum(1 for a in away if a["late"]),
                        "failed": sum(1 for a in away if a["status"] in ("error", "interrupted"))},
             "scheduler": {"last_tick": scheduler.last_tick, "fires": scheduler.fires,
-                          "next_due_at": jobs.earliest_due(), "timezone": local_tz_name()}}
+                          "next_due_at": jobs.earliest_due(), "timezone": local_tz_name(),
+                          "wake_unavailable": scheduler.wake_unavailable}}
 
 
 @app.get("/inbox/notify")
@@ -4415,6 +4421,14 @@ def inbox_notify(since: float = 0.0) -> list[dict[str, Any]]:
     counts = proposals.counts([r["run_id"] for r in runs])
     rows = [job_history.summarize_run(r, None, counts.get(r["run_id"], {})) for r in runs]
     return job_history.notify_events(rows, by_id, proposals.list("pending", limit=100), since)
+
+
+@app.post("/jobs/wake")
+async def jobs_wake() -> dict[str, bool]:
+    """The Mac woke or unlocked (the Electron main process says so): run the scheduler pass now, so a slot missed
+    while asleep fires at once instead of at the end of the current nap. On the event loop, so the waiter wakes."""
+    scheduler.nudge()
+    return {"ok": True}
 
 
 @app.on_event("startup")

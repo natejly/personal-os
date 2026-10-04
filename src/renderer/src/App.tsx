@@ -93,6 +93,15 @@ const writeSeen = (t: number): void => {
   }
 }
 
+/** A job notification's click: 'run:<conversation_id>' opens that run's transcript, anything else Today's inbox. */
+function openNotifyTarget(target: string | undefined): void {
+  const s = useStore.getState()
+  const cid = target?.startsWith('run:') ? target.slice(4) : ''
+  if (!cid) return s.setView('home')
+  s.setView('chat')
+  void s.selectChat(cid)
+}
+
 /**
  * An OS notification when an unattended job fails, is paused or leaves proposals. Doorbell, not poller: the
  * backend rings `job_finished` on the app topic and this asks /inbox/notify what is new since the last look.
@@ -113,7 +122,7 @@ function JobNotifier(): null {
         const events = await api.inboxNotify(since)
         if (events.length) writeSeen(Math.max(...events.map((e) => e.at)))
         if (typeof Notification !== 'function' || Notification.permission === 'denied') return
-        for (const e of events) notify(e.title, e.body, { tag: e.id, onClick: () => useStore.getState().setView('home') })
+        for (const e of events) notify(e.title, e.body, { tag: e.id, onClick: () => openNotifyTarget(e.target) })
       } catch {
         // A notification is never worth a render crash, and a backend that is down has nothing to say.
       } finally {

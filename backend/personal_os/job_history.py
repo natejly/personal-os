@@ -93,19 +93,35 @@ def to_csv(rows: Iterable[dict[str, Any]]) -> str:
     return buf.getvalue()
 
 
+def _run_target(r: dict[str, Any]) -> str:
+    """Where clicking the notification goes: the run's own conversation, or the inbox if it has none."""
+    cid = r.get("conversation_id")
+    return f"run:{cid}" if cid else "inbox"
+
+
 def notify_events(runs: Iterable[dict[str, Any]], jobs: dict[str, dict[str, Any]], pending: Iterable[dict[str, Any]],
                   since: float, cap: int = NOTIFY_CAP) -> list[dict[str, Any]]:
     """Compact OS-notification events newer than `since`. Titles and bodies hold names and counts only.
 
     `runs` are summarised job runs each carrying `job_id`; `jobs` maps id -> job row; `pending` is the pending
     proposals. A failed run only notifies when nothing will retry it (a retry that succeeds is not news).
+    Each job's `notify` decides the rest: 'problems' (default) is failures, pauses and proposals; 'always' adds a
+    plain successful run; 'never' is silent. Every event carries a `target` for the click: 'inbox' or 'run:<cid>'.
     """
     out: list[dict[str, Any]] = []
     covered: set[str | None] = set()
+
+    def mode(job_id: Any) -> str:
+        return (jobs.get(job_id or "") or {}).get("notify") or "problems"
+
     for r in runs:
         if r.get("dry_run") or r["ended_at"] is None or r["ended_at"] <= since:
             continue
         job = jobs.get(r.get("job_id") or "") or {}
+        want = mode(r.get("job_id"))
+        if want == "never":
+            covered.add(r["run_id"])
+            continue
         name = job.get("name") or r.get("job") or "A scheduled job"
         pend = r["proposals"]["pending"]
         if r["status"] in FAILED:
@@ -113,20 +129,26 @@ def notify_events(runs: Iterable[dict[str, Any]], jobs: dict[str, dict[str, Any]
             if final:
                 out.append({"id": f"run:{r['run_id']}:error", "kind": "job_failed", "title": f"{name} failed",
                             "body": "The run did not finish." + (f" Attempt {r['attempt']}." if r["attempt"] > 1 else ""),
-                            "at": r["ended_at"]})
+                            "at": r["ended_at"], "target": _run_target(r)})
         elif r["status"] == "done" and pend:
             covered.add(r["run_id"])
             out.append({"id": f"run:{r['run_id']}:done", "kind": "job_done_with_proposals", "title": f"{name} finished",
-                        "body": f"{pend} proposal{'s' if pend != 1 else ''} waiting for you.", "at": r["ended_at"]})
+                        "body": f"{pend} proposal{'s' if pend != 1 else ''} waiting for you.", "at": r["ended_at"],
+                        "target": "inbox"})
+        elif r["status"] == "done" and want == "always":
+            out.append({"id": f"run:{r['run_id']}:done", "kind": "job_done", "title": f"{name} finished",
+                        "body": "The run finished.", "at": r["ended_at"], "target": _run_target(r)})
     for j in jobs.values():
+        if mode(j["id"]) == "never":
+            continue
         if not j.get("enabled") and j.get("paused_reason") and (j.get("updated_at") or 0) > since:
             out.append({"id": f"job:{j['id']}:paused:{int(j['updated_at'])}", "kind": "job_paused",
                         "title": f"{j['name']} was paused", "body": f"{j.get('consecutive_failures') or 0} failed runs in a row.",
-                        "at": j["updated_at"]})
+                        "at": j["updated_at"], "target": "inbox"})
     for p in pending:
-        if p["created_at"] > since and p.get("run_id") not in covered and p.get("job_id"):
+        if p["created_at"] > since and p.get("run_id") not in covered and p.get("job_id") and mode(p["job_id"]) != "never":
             name = (jobs.get(p["job_id"]) or {}).get("name") or "A scheduled job"
             out.append({"id": f"proposal:{p['id']}", "kind": "proposal_pending", "title": f"{name} has a proposal",
-                        "body": "One action is waiting for your approval.", "at": p["created_at"]})
+                        "body": "One action is waiting for your approval.", "at": p["created_at"], "target": "inbox"})
     out.sort(key=lambda e: e["at"])
     return out[-cap:]

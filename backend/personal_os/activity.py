@@ -1936,7 +1936,7 @@ class Monitor:
     def context_block(self, max_chars: int = 4000) -> str:
         """The compact version injected into a chat's system prompt. Empty when off or opted out."""
         cfg = self.config()
-        if not cfg.get("injectContext", True):
+        if cfg.get("enabled") is not True or not cfg.get("injectContext", True):
             return ""
         prof = self.store.profile()["content"].strip()
         recent = self.store.summaries(since=now() - 86400, limit=6)

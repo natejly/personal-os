@@ -84,7 +84,7 @@ function MeetingsCard(): JSX.Element {
   const offers = offerableCandidates(candidates, meetings, active?.meeting_id ?? null)
   // The backend refuses `start` while the master switch is off, so the offer says why up front.
   const recorderOff = meetingStatus !== null && !meetingStatus.config.enabled
-  const OFF_TITLE = 'The meeting recorder is off. Turn it on in the Meetings panel.'
+  const OFF_TITLE = 'The meeting recorder is off. Turn it on in Settings → Meetings.'
 
   return (
     <section className="widget">

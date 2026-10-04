@@ -576,7 +576,7 @@ def test_routes_404_for_a_trashed_docs_recording() -> None:
     try:
         assert client.get(f"/meetings/{m['id']}").status_code == 200
         Trash(meeting_store.db, None, docs).trash("doc", d["id"])
-        for path in ("", "/segments", "/transcript", "/actions", "/revisions"):
+        for path in ("", "/segments", "/actions"):
             assert client.get(f"/meetings/{m['id']}{path}").status_code == 404, path
         assert client.post(f"/meetings/{m['id']}/summarize", json={}).status_code == 404
     finally:

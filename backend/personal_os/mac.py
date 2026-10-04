@@ -69,6 +69,15 @@ def _app_data_dir() -> Path | None:
         return None
 
 
+def mcp_media_dir() -> Path | None:
+    """Where pictures and files an MCP tool returned are saved, so view_image can look at them.
+
+    Inside the app data folder, which allowed_path refuses on purpose: only view_image carves this one
+    subfolder back out (vision.resolve), so the file read/write/move tools stay out of it."""
+    data = _app_data_dir()
+    return data / "mcp_media" if data is not None else None
+
+
 def _under(path: Path, root: Path) -> bool:
     """True when `path` is `root` or a directory inside it.
 

@@ -146,6 +146,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "mcpDeferAbove": 12,
     # Past this many built-in tools, offer the core set plus tool_search instead of every schema (0 = send them all).
     "toolDeferAbove": 40,
+    # Put the notes each connected MCP server sends at initialize into the prompt (fenced, scanned, capped).
+    "mcpServerNotes": True,
     # Approved skills are inlined in the system prompt up to this many characters; past it, an index + skill_view.
     "skillsInlineBudget": 6000,
     # Per-section token budgets for the retrieval blocks of a turn (0 = unlimited). Past a budget the

@@ -1261,6 +1261,8 @@ export interface Settings {
   mcpDeferAbove?: number
   /** Built-in tool count above which only the core tools plus tool_search are sent; 0 sends every schema. */
   toolDeferAbove?: number
+  /** Put the notes each connected connector server sends at initialize into the prompt, fenced and scanned. Default on. */
+  mcpServerNotes?: boolean
   /** Characters of skill bodies inlined into the prompt before falling back to a manifest. */
   skillsInlineBudget?: number
   /** Embedding model id used by memory and document retrieval. Changing it re-embeds both stores. */

@@ -615,6 +615,15 @@ def _mcp_tooling(project_id: str | None, conversation_id: str | None) -> tuple[d
     return modes, schemas
 
 
+def _mcp_server_notes(slugs: set[str]) -> str:
+    """mcp_search.server_notes for the live servers that own one of `slugs`. Instructions are read from the live
+    connection, never stored, so a reconnect or Refresh re-pulls them."""
+    owners = {t["server_id"] for t in mcp_store.tools() if t["slug"] in slugs}
+    live = [{"server_id": i["server_id"], "name": i["name"], "instructions": (i.get("server_info") or {}).get("instructions")}
+            for i in mcp.status() if i["server_id"] in owners and i.get("status") == "ready"]
+    return mcp_search.server_notes(live, {s["server_id"]: mcp_store.latest_eval(s["server_id"]) for s in live})
+
+
 def _gate(name: str, mode: str, ctx: dict[str, Any], args: dict[str, Any] | None = None) -> str:
     """Effective mode for one call. Untrusted content in the run forces every external tool to ask.
 
@@ -2168,6 +2177,10 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 _groups[_g] = _groups.get(_g, 0) + 1
             tools_hint = "\n".join(p for p in (tools_hint, mcp_search.group_hint(sorted(_groups.items()))) if p)
         used["tools_deferred"] = len(tool_ctx["deferred"])  # the Context drawer's "N tools loaded on demand"
+        if mcp_modes and cfg.get("mcpServerNotes", True):
+            # What each connected server said about its own tools at initialize, for servers with a tool offered this
+            # turn (deferred or not). Kept with tools_hint so it stays in the cacheable prefix.
+            tools_hint = "\n\n".join(p for p in (tools_hint, _mcp_server_notes(set(mcp_modes))) if p)
         hints = (RENDER_HINT, tools_hint, JOB_HINT if proposal_only(run) else "",
                  DESK_HINT + _desk_manual_text() if desk else "", DESK_PLAN_HINT if planning and desk else "",
                  CHAT_PLAN_HINT if chat_plan_mode in ("auto", "always") and tool_schemas else "")

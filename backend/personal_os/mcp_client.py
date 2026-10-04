@@ -25,12 +25,16 @@ tools carry `name` / `description` / `input_schema` / `annotations`, and `call_t
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import contextlib
+import hashlib
 import json
 import logging
 import os
 import sys
 import tempfile
+import time
 from dataclasses import dataclass
 from typing import Any, TextIO
 
@@ -39,7 +43,8 @@ from anyio.abc import TaskGroup
 from mcp import ClientSession, Implementation, StdioServerParameters, stdio_client
 from mcp.client.streamable_http import create_mcp_http_client, streamable_http_client
 
-from . import mcp_drift, redact
+from . import mac, mcp_drift, redact
+from .vision import MAX_FILE_BYTES
 from .mcp_oauth import McpNeedsAuth, OAuthFlows, SignIn, headers_of
 from .mcp_servers import DEFAULT_DANGER, McpServers
 
@@ -64,7 +69,13 @@ STDERR_LINE_CHARS = 400
 STDERR_MAX_BYTES = 1 << 20   # the file is truncated past this, read or not
 STDERR_TRIM_BYTES = 64 << 10  # ...and once fully read past this
 STDERR_DRAIN_BYTES = 256 << 10  # most one drain reads, so the event loop is never held long
-MAX_RESULT_CHARS = 20_000
+# A memory guard, not a context cap: past working.INLINE_CHARS the chat loop stores the result as a paged handle
+# that read_tool_result reads in windows, so a big result reaches the model whole.
+MAX_RESULT_CHARS = 200_000
+MEDIA_KEEP_DAYS = 7
+_MEDIA_EXT = {"image/png": ".png", "image/jpeg": ".jpg", "image/jpg": ".jpg", "image/gif": ".gif", "image/webp": ".webp",
+              "image/bmp": ".bmp", "image/tiff": ".tiff", "application/pdf": ".pdf", "text/plain": ".txt",
+              "application/json": ".json", "audio/wav": ".wav", "audio/mpeg": ".mp3"}
 
 # Every discovered tool gets the strictest danger level there is, whatever the server says about
 # itself. MCP `annotations.read_only_hint` is self-reported by the same party that would benefit
@@ -240,19 +251,89 @@ def _public_value(value: Any) -> Any:
     return value
 
 
+def _save_media(data_b64: Any, mime: str) -> dict[str, Any]:
+    """Decode a base64 block from a tool result to <data>/mcp_media/<sha256><ext>, readable by the owner only.
+
+    Third-party content: the run is already tainted by the MCP result that carried it, and view_image taints again."""
+    mime = str(mime or "application/octet-stream").split(";")[0].strip().lower()
+    raw = str(data_b64 or "")
+    if len(raw) * 3 // 4 > MAX_FILE_BYTES:
+        return {"mime_type": mime, "error": f"not saved: larger than {MAX_FILE_BYTES // (1024 * 1024)} MB"}
+    try:
+        data = base64.b64decode(raw, validate=False)
+    except (binascii.Error, ValueError):
+        return {"mime_type": mime, "error": "not saved: the base64 data is malformed"}
+    if len(data) > MAX_FILE_BYTES:
+        return {"mime_type": mime, "error": f"not saved: larger than {MAX_FILE_BYTES // (1024 * 1024)} MB"}
+    folder = mac.mcp_media_dir()
+    if folder is None:
+        return {"mime_type": mime, "error": "not saved: no data folder"}
+    path = folder / (hashlib.sha256(data).hexdigest() + _MEDIA_EXT.get(mime, ".bin"))
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        if path.exists():
+            with contextlib.suppress(OSError):
+                os.utime(path)  # a fresh reference: keep sweep_media off it
+        else:
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+    except OSError as e:
+        return {"mime_type": mime, "error": f"not saved: {e}"}
+    return {"mime_type": mime, "path": str(path), "bytes": len(data)}
+
+
+def sweep_media(days: float = MEDIA_KEEP_DAYS) -> int:
+    """Delete saved MCP media older than `days`. Returns how many files went."""
+    folder = mac.mcp_media_dir()
+    if folder is None or not folder.is_dir():
+        return 0
+    cutoff, n = time.time() - days * 86400, 0
+    for f in folder.iterdir():
+        with contextlib.suppress(OSError):
+            if f.is_file() and f.stat().st_mtime < cutoff:
+                f.unlink()
+                n += 1
+    return n
+
+
 def _result_dict(result: Any) -> dict[str, Any]:
-    """A CallToolResult as plain JSON for the chat loop. Text blocks win; others are named."""
+    """A CallToolResult as plain JSON for the chat loop.
+
+    Text blocks and text resources are joined into `content`. Images and binary resources are saved to
+    mcp_media and listed under `media` with their path, so the model can look at a picture with view_image."""
     parts: list[str] = []
+    media: list[dict[str, Any]] = []
     for block in getattr(result, "content", None) or []:
+        kind = getattr(block, "type", type(block).__name__)
         text = getattr(block, "text", None)
+        res = getattr(block, "resource", None)
         if text is not None:
             parts.append(str(text))
+        elif kind in ("image", "audio"):
+            item = {"type": kind, **_save_media(getattr(block, "data", ""), getattr(block, "mime_type", ""))}
+            if kind == "image" and "path" in item:
+                item["note"] = "look at it with view_image"
+            media.append(item)
+            parts.append(f"[{kind}: {item.get('path') or item.get('error')}]")
+        elif res is not None and getattr(res, "text", None) is not None:
+            parts.append(f"[resource {getattr(res, 'uri', '')}]\n{res.text}")
+        elif res is not None and getattr(res, "blob", None) is not None:
+            item = {"type": "resource", "uri": str(getattr(res, "uri", "")), **_save_media(res.blob, getattr(res, "mime_type", ""))}
+            if str(item.get("mime_type", "")).startswith("image/") and "path" in item:
+                item["note"] = "look at it with view_image"
+            media.append(item)
+            parts.append(f"[resource {item['uri']}: {item.get('path') or item.get('error')}]")
+        elif kind == "resource_link":
+            parts.append(f"[resource link {getattr(block, 'uri', '')}: {getattr(block, 'name', '')}]")
         else:
-            parts.append(f"[{getattr(block, 'type', type(block).__name__)} content]")
+            parts.append(f"[{kind} content]")
     content = _public_value("\n".join(parts))
     if len(content) > MAX_RESULT_CHARS:
         content = content[:MAX_RESULT_CHARS] + f"\n[truncated at {MAX_RESULT_CHARS} chars]"
     out: dict[str, Any] = {"content": content, "is_error": bool(getattr(result, "is_error", False))}
+    if media:
+        out["media"] = _public_value(media)
     structured = getattr(result, "structured_content", None)
     if structured is not None:
         out["structured"] = _public_value(structured)

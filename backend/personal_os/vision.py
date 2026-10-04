@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import io
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -161,6 +162,17 @@ async def describe(settings: dict[str, Any], data: bytes, question: str = "", ch
     return {"error": "no vision model is configured and tesseract is not installed"}
 
 
+def allowed_image_path(raw: str) -> Path:
+    """mac.allowed_path, plus the folder MCP tool results save pictures to (mcp_client._save_media). That folder
+    sits in the app data folder, which every other file tool must keep refusing, so the exception lives here."""
+    media = mac.mcp_media_dir()
+    if media is not None:
+        p = Path(os.path.expanduser(raw.strip())).resolve()
+        if mac._under(p, media.resolve()) and p != media.resolve():
+            return p
+    return mac.allowed_path(raw)
+
+
 # ---- the tool ----
 def register(tb: Any) -> None:
     """Register view_image on a Toolbox (group `vision`)."""
@@ -187,7 +199,7 @@ def register(tb: Any) -> None:
                 return ws.resolve_in(did, raw)
             except WorkspaceError as e:
                 raise mac.LocalPathError(str(e)) from e
-        return mac.allowed_path(raw)
+        return allowed_image_path(raw)
 
     async def view_image(ctx: dict[str, Any], path: str = "", question: str = "") -> Any:
         fix = dict(field="path", expected="a PNG, JPEG, GIF, WebP, BMP or TIFF file: a desk path like outputs/chart.png, or a path under your home folder",

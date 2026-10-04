@@ -128,6 +128,39 @@ def test_job_run_clears_skip() -> None:
     check(asyncio.run(CTX["bridge_approve"]("t_write", {"x": "a"}, False)) is False, "job bridge call not skip-approved")
 
 
+def test_bridge_card_unattended_refused_and_wait_off_the_clock() -> None:
+    """A job's bridge card is refused on the spot; a chat's wait is off the budget; bridged calls are journaled."""
+    cid = T.setup(None, unattendedApprovals="deny", skipPermissions=False)
+    appmod.convos.update(cid, {"settings": {"tools": {"t_probe": "on"}}})
+    T.drive(cid, [[call(0, "t_probe")], []], run=Run(cid, appmod.run_store, kind="job"))
+    job_ap = CTX["bridge_approve"]
+    check(asyncio.run(asyncio.wait_for(job_ap("t_write", {"x": "a"}, False), 5)) is False, "job bridge card refused, not parked")
+    check([a["decided_by"] for a in appmod.run_store.approvals(status=None, run_id=CTX["run_id"])] == ["unattended"],
+          "refusal recorded as unattended")
+
+    run = Run(cid, appmod.run_store)
+    T.drive(cid, [[call(0, "t_probe")], []], run=run)
+    ap, budget, seen = CTX["bridge_approve"], CTX["budget"], []
+
+    async def go() -> bool:
+        before = budget.paused
+        task = asyncio.create_task(ap("t_write", {"x": "a"}, False))
+        while not (uid := next((u for u in appmod._approvals if ":bridge" in u), None)):
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.3)
+        seen.append(run.status)
+        await appmod.approve_tool_call(uid, appmod.ApprovalIn(decision="allow"))
+        ok = await task
+        seen.append(budget.paused - before)
+        return ok
+    check(asyncio.run(go()) is True and seen[0] == "awaiting_approval" and seen[1] >= 0.3 and run.status == "running",
+          "bridge wait marks the run waiting and is credited back to the budget")
+    CALLS.clear()
+    asyncio.run(CTX["bridge_call"]("t_write", {"x": "j"}, CTX))
+    check(CALLS == ["j"] and any(r["tool"] == "t_write" for r in appmod.run_store.executed(run.run_id)),
+          "bridged write goes through the journal")
+
+
 def test_plan_stays_ask_in_chat() -> None:
     plan = {"title": "t", "steps": [{"tool": "t_write", "arguments": {"x": "a"}}]}
     ev = run([[{"id": "p0", "name": "propose_plan", "arguments": json.dumps(plan)}], []])

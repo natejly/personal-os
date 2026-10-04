@@ -17,6 +17,8 @@ import { classifyPaste, messageCharLimit } from '../lib/messageLimit'
 import { compactCommand, compactNow } from '../lib/compact'
 import { appendToDraft, clearRedirect, composerKey, dropDraft, getDraft, moveDraft, restoreDraft, useDraft } from '../lib/drafts'
 import { promptList, recallKey, step, type Recall } from '../lib/promptHistory'
+import { enqueue, enterAction, removeQueued, requeueFront, sendNext, updateQueue, type QueuedItem } from '../lib/followQueue'
+import QueueTray from './QueueTray'
 
 interface ComposerProps {
   conversationId?: string
@@ -51,6 +53,13 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   const openWizard = useOnboarding((s) => s.openWizard)
   const uploadDocuments = useStore((s) => s.uploadDocuments)
   const noteUntrustedUpload = useStore((s) => s.noteUntrustedUpload)
+  // The follow-up queue is a chat's: the page agent panel (`onSend`) keeps steering on Enter.
+  const queueId = !onSend && activeId ? activeId : null
+  const cardPending = useStore((s) => !!queueId && (s.sessions[queueId]?.pendingApprovals ?? 0) > 0)
+  const desk = useStore((s) => !!queueId && s.desks.some((d) => d.conversation_id === queueId))
+  /** A steer that would decline an open card, waiting on the user's yes. `item` when it came from the tray. */
+  const [confirm, setConfirm] = useState<{ item?: QueuedItem } | null>(null)
+  useEffect(() => { if (!cardPending) setConfirm(null) }, [cardPending])
 
   useEffect(() => { box.current?.querySelector('textarea')?.focus() }, [activeId])
 
@@ -170,10 +179,10 @@ export default function Composer({ conversationId, footer, compact = false, onSe
    * at that moment (a chat created by this send included). Mid-reply, `send` steers the live run
    * instead of refusing, so the composer stays open while the assistant works.
    */
-  const submit = async (): Promise<void> => {
-    if (!text.trim()) return
+  const deliver = async (): Promise<void> => {
     const k0 = key
-    const t = text
+    const t = getDraft(k0)?.text ?? ''
+    if (!t.trim()) return
     // "/compact [focus]" summarizes this chat's history instead of sending a message.
     const focus = onSend ? null : compactCommand(t)
     if (focus !== null) {
@@ -204,10 +213,73 @@ export default function Composer({ conversationId, footer, compact = false, onSe
     if (!ok) restoreDraft(k1, t)
   }
 
+  /** A queued item sent ahead of its turn: a steer while the reply runs. Refused, it goes back in front. */
+  const deliverItem = async (item: QueuedItem): Promise<void> => {
+    if (!queueId) return
+    updateQueue(queueId, (q) => removeQueued(q, item.id))
+    const ok = await send(item.text, conversationId ?? queueId).catch(() => false)
+    if (!ok) updateQueue(queueId, (q) => requeueFront(q, item))
+  }
+
+  /**
+   * Enter (and the send button) while a reply runs queues the text as the next turn; ⌘Enter steers the
+   * live reply. A steer while a card waits declines that card, so it asks first (lib/followQueue.ts).
+   */
+  const submit = (mod = false): void => {
+    if (!text.trim()) return
+    // "/compact" runs now, never queued: it is not a message for the reply.
+    const action = queueId && compactCommand(text) === null ? enterAction({ busy: streaming, mod, cardPending, desk }) : 'send'
+    if (action === 'queue' && queueId) {
+      updateQueue(queueId, (q) => enqueue(q, text, crypto.randomUUID()))
+      clearRedirect(key)
+      dropDraft(key)
+    } else if (action === 'confirm-steer') setConfirm({})
+    else void deliver()
+  }
+
+  const sendNow = (item: QueuedItem): void => {
+    if (streaming && cardPending && !desk) setConfirm({ item })
+    else void deliverItem(item)
+  }
+
+  const resume = (): void => {
+    if (!queueId) return
+    updateQueue(queueId, (q) => ({ ...q, paused: false }))
+    // Idle, nothing will finish to pull the next one: it goes now.
+    if (!streaming) sendNext(queueId, {}, (t) => send(t, conversationId ?? queueId))
+  }
+
+  const confirmSteer = (): void => {
+    const c = confirm
+    setConfirm(null)
+    if (c?.item) void deliverItem(c.item)
+    else void deliver()
+  }
+
+  const queueInstead = (): void => {
+    const c = confirm
+    setConfirm(null)
+    if (!c?.item) submit(false)
+  }
+
+  const sendLabel = !streaming ? 'Send' : queueId ? 'Queue a follow-up (⌘↵ steers now)' : 'Steer the reply'
+
   return (
     <div className={compact ? 'composer-wrap compact' : 'composer-wrap'}>
       {!hasKey && (
         <div className="notice">Finish setup to start chatting. <button className="link" onClick={openWizard}>Finish setup</button></div>
+      )}
+      {queueId && (
+        <QueueTray conversationId={queueId} busy={streaming} onSendNow={sendNow} onResume={resume}
+          onEdit={(t) => { appendToDraft(key, t); box.current?.querySelector('textarea')?.focus() }} />
+      )}
+      {confirm && (
+        <div className="notice queue-confirm" role="alertdialog" aria-label="Decline the open card?">
+          Sending now declines the open card and tells the assistant why. To change the card instead (add a cc, move a time), edit it in place.{' '}
+          <button className="link danger" onClick={confirmSteer}>Decline and send</button>{' '}
+          {!confirm.item && <><button className="link" onClick={queueInstead}>Queue instead</button>{' '}</>}
+          <button className="link" onClick={() => setConfirm(null)}>Cancel</button>
+        </div>
       )}
       <div
         className="composer"
@@ -227,7 +299,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
           value={text}
           onChange={(v) => { recall.current = null; setText(v) }}
           onPaste={onPaste}
-          placeholder={streaming ? 'Steer the reply…' : placeholder}
+          placeholder={streaming ? (queueId ? 'Queue a follow-up… ⌘↵ to steer now' : 'Steer the reply…') : placeholder}
           noGhost={!!slash}
           onKeyDown={(e) => {
             const act = slash && !e.shiftKey && !e.nativeEvent.isComposing ?slashMenuKey(e.key, slashActive, slash.length) : null
@@ -238,8 +310,9 @@ export default function Composer({ conversationId, footer, compact = false, onSe
               else setSlashClosedAt(text)
             }
             else if (onRecallKey(e)) return
-            else if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void submit() }
-            // Escape ends the reply; while an input method is composing it belongs to the method.
+            else if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit(e.metaKey || e.ctrlKey) }
+            // Escape closes the decline prompt first, then ends the reply; while an input method is composing it belongs to the method.
+            else if (e.key === 'Escape' && confirm && !e.nativeEvent.isComposing) { e.preventDefault(); setConfirm(null) }
             else if (e.key === 'Escape' && streaming && !e.nativeEvent.isComposing) { e.preventDefault(); halt() }
           }}
         />
@@ -256,7 +329,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
             </button>
           )}
           {(!streaming || text.trim()) && (
-            <button className="send" title={streaming ? 'Steer the reply' : 'Send'} aria-label={streaming ? 'Steer the reply' : 'Send'} disabled={!text.trim()} onClick={() => void submit()}><ArrowUp size={16} /></button>
+            <button className="send" title={sendLabel} aria-label={sendLabel} disabled={!text.trim()} onClick={() => submit()}><ArrowUp size={16} /></button>
           )}
         </div>
       </div>

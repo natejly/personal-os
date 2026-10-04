@@ -21,6 +21,7 @@ import { clearViews } from './lib/viewCache'
 import { emailAsk } from './lib/emailAsk'
 import type { Learned, UploadResult } from '@shared/types'
 import { uploadToast, type UploadOutcome } from './lib/uploadNote'
+import { pauseQueue, sendNext, updateQueue, type DoneInfo } from './lib/followQueue'
 
 /**
  * Settings as the renderer holds them: without the legacy `mode`, which only init() reads. Kept out
@@ -1321,6 +1322,13 @@ export const useStore = create<State>((set, get) => {
   }
 
   /**
+   * A run's final `done`: the next queued follow-up (lib/followQueue.ts) goes out as its own turn, through the
+   * ordinary send, which by now is not a steer since the run has stopped answering. A refused send goes back
+   * to the front and the queue pauses, so a failure never fires the rest.
+   */
+  const sendQueued = (convId: string, done: DoneInfo): void => sendNext(convId, done, (text) => get().send(text, convId))
+
+  /**
    * Consume one run's events into a session. `attached` means the run was started by someone else.
    *
    * `replay` is an attach that starts at the in-flight message: that message is blanked once, the tape up to
@@ -1425,6 +1433,7 @@ export const useStore = create<State>((set, get) => {
             // Retried silently on the way (a provider hiccup before the first token): worth saying once, after the fact.
             if (ev.data.notice) get().toast(ev.data.notice, 'info')
             void get().refreshConversations()
+            if (!ev.data.segment) sendQueued(convId, ev.data)
             break
           case 'restored_message':
             if (ev.data.reason) get().toast(`Regenerate failed: ${ev.data.reason}. The previous answer is back.`, 'error')
@@ -1447,6 +1456,8 @@ export const useStore = create<State>((set, get) => {
             const s = get().sessions[convId]
             const answeredHere = !!s?.streaming?.messageId && (s.conversation.messages ?? []).some((m) => m.id === s.streaming?.messageId)
             if (!focused || !answeredHere) get().toast(ev.data.message, 'error')
+            // After the final `done` the queue has already moved on; only a run that died mid-reply pauses it.
+            if (!settled) updateQueue(convId, pauseQueue)
             break
           }
           default:
@@ -1479,7 +1490,10 @@ export const useStore = create<State>((set, get) => {
               : 'The backend stopped responding. Restart it from Settings > Support.'
           get().toast(text, 'error')
         }
-        if (live) announce(convId, run.run_id, 'failed', visible, notified)
+        if (live) {
+          announce(convId, run.run_id, 'failed', visible, notified)
+          updateQueue(convId, pauseQueue)
+        }
       }
     } finally {
       // Backstop: a stream that dies before `user_message` must not leave the dimmed bubble behind.
@@ -1502,6 +1516,7 @@ export const useStore = create<State>((set, get) => {
           // Settled here rather than by an `error` frame, so the one notice that frame would have raised is raised here.
           if (get().sessions[convId]?.streaming?.abort === abort) {
             announce(convId, run.run_id, 'failed', onScreen(convId, { view: get().view, focusedId: get().focusedConversationId, retained }), notified)
+            updateQueue(convId, pauseQueue)
           }
         }
       }

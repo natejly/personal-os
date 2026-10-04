@@ -753,6 +753,16 @@ def test_a_desk_is_told_it_is_a_desk() -> None:
           "DESK_HINT reaches the model, so it knows about outputs/, desk_deliver, desk_ask and desk_done")
 
 
+def test_a_desk_is_told_its_inputs() -> None:
+    """The wiring, not desk_manual alone: the first round's system context lists what was handed in."""
+    script({"text": "Read them."})
+    d = docs.create("Input Brief", "Acme, Globex")
+    did = make_desk("Read the inputs", inputs=[{"kind": "doc", "id": d["id"]}])["desk"]["id"]
+    quiet(did)
+    first = _system_text(SCRIPT["messages"][0])
+    check("inputs/Input Brief.md" in first and "MANIFEST.md" in first, "the desk's first turn lists its inputs")
+
+
 def test_a_woken_desk_sees_its_approved_plan_and_what_the_user_said() -> None:
     """A parked plan approved later wakes the desk with a fresh turn whose history is text only, so
     the plan and the answer have to be put in front of the model explicitly."""
@@ -923,6 +933,7 @@ def test_a_reply_that_just_ends_gets_exactly_one_nudge() -> None:
 TESTS += [test_a_planning_desk_is_not_offered_desk_done_or_desk_start,
          test_a_reply_that_just_ends_gets_exactly_one_nudge,
          test_a_desk_is_told_it_is_a_desk,
+         test_a_desk_is_told_its_inputs,
          test_a_woken_desk_sees_its_approved_plan_and_what_the_user_said,
          test_an_approved_parked_call_runs_on_the_next_turn_without_a_second_card,
          test_answering_a_desk_ask_card_carries_on_in_the_same_turn,

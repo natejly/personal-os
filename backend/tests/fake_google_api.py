@@ -10,6 +10,7 @@ No network, no credentials: FakeGoogle overrides _svc, so nothing below it is ev
 from __future__ import annotations
 
 import base64
+import copy
 import email
 from typing import Any
 
@@ -44,6 +45,7 @@ class FakeServer:
         self.drafts: dict[str, dict[str, Any]] = {}
         self.tasks: dict[tuple[str, str], dict[str, Any]] = {}
         self.n = 0
+        self.versions = 0
         # ---- knobs ----
         self.hide: set[str] = set()            # these ids never come back from a read
         self.flaky: dict[str, int] = {}        # id -> this many more reads 404 before it appears
@@ -51,6 +53,7 @@ class FakeServer:
         self.corrupt: dict[str, dict[str, Any]] = {}  # id -> fields a read reports differently
         self.send_labels: list[str] = ["SENT"]  # labels a freshly sent message gets
         self.keep_deleted = False              # a "delete" that does not actually delete
+        self.tombstone = False                 # a deleted event stays readable as status=cancelled, like Google's
         self.reads: list[str] = []             # every id a read-back asked for, in order
 
     # ---- shared read gate ----
@@ -69,10 +72,15 @@ class FakeServer:
         self.n += 1
         return f"{prefix}{self.n}"
 
+    def _etag(self) -> str:
+        """A new version stamp (an event etag, a task's `updated`); its own counter, so ids stay ev1, ev2, ..."""
+        self.versions += 1
+        return f"{self.versions:06d}"
+
     # ---- calendar ----
     def insert_event(self, calendar_id: str, body: dict[str, Any]) -> dict[str, Any]:
         eid = self._id("ev")
-        e = {"id": eid, "status": "confirmed", "htmlLink": f"https://cal.test/{eid}", **body}
+        e = {"id": eid, "status": "confirmed", "htmlLink": f"https://cal.test/{eid}", **body, "etag": self._etag()}
         self.events[(calendar_id, eid)] = e
         return dict(e)
 
@@ -81,19 +89,22 @@ class FakeServer:
         e = self.events.get((calendar_id, event_id))
         if e is None:
             raise ApiError(404, "Not Found")
-        return {**e, **self.corrupt.get(event_id, {})}
+        return copy.deepcopy({**e, **self.corrupt.get(event_id, {})})  # a fresh JSON object per read, like the API
 
     def patch_event(self, calendar_id: str, event_id: str, body: dict[str, Any]) -> dict[str, Any]:
         e = self.events.get((calendar_id, event_id))
         if e is None:
             raise ApiError(404, "Not Found")
         e.update({k: v for k, v in body.items()})
+        e["etag"] = self._etag()
         return dict(e)
 
     def delete_event(self, calendar_id: str, event_id: str) -> str:
         if (calendar_id, event_id) not in self.events:
             raise ApiError(404, "Not Found")
-        if not self.keep_deleted:
+        if self.tombstone:
+            self.events[(calendar_id, event_id)].update({"status": "cancelled", "etag": self._etag()})
+        elif not self.keep_deleted:
             del self.events[(calendar_id, event_id)]
         return ""
 
@@ -154,6 +165,7 @@ class FakeServer:
         if t is None:
             raise ApiError(404, "Not Found")
         t.update(body)
+        t["updated"] = f"2026-01-02T00:00:00.{self._etag()[-3:]}Z"
         return dict(t)
 
     def delete_task(self, tasklist: str, task_id: str) -> str:

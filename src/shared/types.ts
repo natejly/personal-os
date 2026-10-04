@@ -451,8 +451,11 @@ export interface ToolEvent {
   result_id?: string | null
   /** Set when a subagent made this call: its card rides the parent's stream, labelled with the child. */
   agent?: string
-  /** write_local_file / move_local_file: the pre-image kept so the user can undo it (id is null when too large to keep). */
-  undo?: { snapshot_id: string | null; reason?: string | null } | null
+  /**
+   * write_local_file / move_local_file: the pre-image kept so the user can undo it (id is null when too large to keep).
+   * Calendar / Google Tasks writes carry `external_id` instead; `notifies` means undoing emails the guests too.
+   */
+  undo?: { snapshot_id?: string | null; reason?: string | null; external_id?: string; notifies?: boolean } | null
   /** Set when the user rewrote the arguments on the approval card (approval_edits.py). `arguments` is then what ran. */
   edited_by?: 'user' | null
   /** What the model originally asked for, kept beside the edit so a card can show what changed. */

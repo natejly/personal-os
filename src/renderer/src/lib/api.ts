@@ -534,6 +534,8 @@ export const api = {
   resumableRun: (convId: string) => req<{ run_id: string | null; resumable: boolean; reason: string; message_id: string | null }>(`/conversations/${encodeURIComponent(convId)}/resumable`),
   /** The user's Undo for a local file write or move. A 409 message is JSON `{reason, conflict}`; `force` overrides a conflict. */
   restoreFileSnapshot: (id: string, force = false) => req<{ ok: boolean; path: string }>(`/file-snapshots/${id}/restore`, { method: 'POST', body: json({ force }) }),
+  /** The user's Undo for a calendar or Google Tasks write. A 409 message is JSON `{reason, conflict}`; there is no force. */
+  undoExternal: (id: string) => req<{ ok: boolean; kind: string }>(`/external-undo/${encodeURIComponent(id)}`, { method: 'POST' }),
   /** Folder changes a reply made (whole-folder snapshots), and the user's Undo / Redo of them. */
   runChanges: (runId: string) => req<RunChanges>(`/runs/${runId}/changes`),
   messageChanges: (messageId: string) => req<RunChanges>(`/messages/${messageId}/changes`),

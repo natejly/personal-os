@@ -256,20 +256,25 @@ function AskAnswer({ callId, question, context, conversationId }: {
   )
 }
 
-/** Undo for a file the agent wrote or moved. A changed file asks before it is overwritten; this is the user's action, never the model's. */
-function UndoButton({ snapshotId }: { snapshotId: string }): JSX.Element {
+/**
+ * Undo for a file the agent wrote or moved, or for a calendar / Google Tasks write. A changed file asks before it is
+ * overwritten; a changed event or task is never overwritten. This is the user's action, never the model's.
+ */
+function UndoButton({ undo }: { undo: NonNullable<ToolEvent['undo']> }): JSX.Element {
   const [state, setState] = useState<'idle' | 'busy' | 'restored'>('idle')
   const toast = useStore((s) => s.toast)
+  const external = undo.external_id
   const go = async (force: boolean): Promise<void> => {
     setState('busy')
     try {
-      await api.restoreFileSnapshot(snapshotId, force)
+      if (external) await api.undoExternal(external)
+      else await api.restoreFileSnapshot(undo.snapshot_id ?? '', force)
       setState('restored')
     } catch (e) {
       let info: { reason?: string; conflict?: boolean } = {}
       try { info = JSON.parse((e as Error).message) } catch { /* plain message */ }
-      if (info.conflict && window.confirm('That file changed since the assistant wrote it. Restore the earlier version anyway?')) return go(true)
-      if (/restored/.test(info.reason ?? '')) setState('restored')
+      if (!external && info.conflict && window.confirm('That file changed since the assistant wrote it. Restore the earlier version anyway?')) return go(true)
+      if (/restored|undone/.test(info.reason ?? '')) setState('restored')
       else {
         setState('idle')
         toast(info.reason ?? (e as Error).message, 'error')
@@ -277,9 +282,14 @@ function UndoButton({ snapshotId }: { snapshotId: string }): JSX.Element {
     }
   }
   return state === 'restored'
-    ? <span className="tag">Restored</span>
-    : <button className="ghost-btn" disabled={state === 'busy'} onClick={() => void go(false)}><Undo2 size={12} /> Undo</button>
+    ? <span className="tag">{external ? 'Undone' : 'Restored'}</span>
+    : <button className="ghost-btn" disabled={state === 'busy'} onClick={() => void go(false)}
+        title={undo.notifies ? 'Guests are emailed about the undo, as they were about the change' : undefined}>
+        <Undo2 size={12} /> Undo{undo.notifies ? ' (emails guests)' : ''}
+      </button>
 }
+
+const undoable = (t: ToolEvent): boolean => !t.pending && !t.error && !!(t.undo?.snapshot_id || t.undo?.external_id)
 
 /**
  * What a tool row degrades to when its card throws. It depends on nothing that could have thrown (no
@@ -352,7 +362,7 @@ function ToolEvents({ events, conversationId, streaming = false }: { events: Too
             ))}
           </div>
         )}
-        {!t.pending && !t.error && t.undo?.snapshot_id && <UndoButton snapshotId={t.undo.snapshot_id} />}
+        {undoable(t) && t.undo && <UndoButton undo={t.undo} />}
         {t.name === 'doc_edit' && !t.pending && !t.error && t.result_preview && <DocEditDiff preview={t.result_preview} />}
         {t.name === 'desk_start' && !t.pending && !t.error && /"desk_id":\s*"([^"]+)"/.test(t.result_preview ?? '') && (
           <button className="link small" onClick={() => {
@@ -389,7 +399,7 @@ function ToolEvents({ events, conversationId, streaming = false }: { events: Too
         {Card ? (
           <>
             <Card event={t} pending={!!t.pending && !!t.needs_approval} decide={decideFor(t)} />
-            {!t.pending && !t.error && t.undo?.snapshot_id && <UndoButton snapshotId={t.undo.snapshot_id} />}
+            {undoable(t) && t.undo && <UndoButton undo={t.undo} />}
             {t.pending && t.needs_approval && <ApprovalRules event={t} conversationId={conversationId} />}
           </>
         ) : <Row render={() => genericRow(t)} />}

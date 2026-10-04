@@ -626,6 +626,32 @@ class Google:
         out = _event_out(e, calendar_id, full=True)
         return verify.attach(out, self._verify_rsvp(calendar_id, event_id, response))
 
+    def calendar_raw(self, event_id: str, calendar_id: str = "primary") -> dict[str, Any] | None:
+        """The API resource as stored, uncached; None when Google no longer has it. A deleted event
+        usually comes back as a cancelled tombstone rather than None."""
+        try:
+            return self._svc("calendar", "v3").events().get(calendarId=calendar_id, eventId=event_id).execute()
+        except Exception as e:  # noqa: BLE001
+            if verify.is_missing(e):
+                return None
+            raise
+
+    @invalidates("calendar")
+    def calendar_restore(self, event_id: str | None, body: dict[str, Any], calendar_id: str = "primary", send_updates: str = "none") -> dict[str, Any]:
+        """Write a raw API body back: patch `event_id`, or insert when it is None. Used only by the
+        user's undo (extundo.py), which builds the body from a pre-image this module read."""
+        svc = self._svc("calendar", "v3").events()
+        kwargs: dict[str, Any] = {"calendarId": calendar_id, "body": body, "sendUpdates": _send_updates(send_updates)}
+        if "conferenceData" in body:
+            kwargs["conferenceDataVersion"] = 1
+        if event_id:
+            self._drop_saved_event(calendar_id, event_id)
+            e = svc.patch(eventId=event_id, **kwargs).execute()
+        else:
+            e = svc.insert(**kwargs).execute()
+        out = _event_out(e, calendar_id, full=True)
+        return verify.attach(out, self._verify_event(calendar_id, out["id"], out, body))
+
     # ---------- Calendar read-backs ----------
     # Each one re-fetches from the server rather than trusting the write's own echo, and names in
     # `compared` exactly which fields it proved.

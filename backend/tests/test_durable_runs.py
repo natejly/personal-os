@@ -273,6 +273,25 @@ def test_idempotency_failed_and_unknown_outcomes() -> None:
     assert [r["attempts"] for r in store.executed(run.run_id) if r["step"] == 1] == [2]
 
 
+def test_an_unverified_write_is_replayed_never_written_again() -> None:
+    cid = j("POST", "/conversations", {})["id"]
+    run, resumed = Run(cid, store), Run(cid, store)
+    calls: list[int] = []
+
+    async def create() -> dict[str, Any]:
+        calls.append(1)
+        return {"id": "ev1", "verification": {"status": "unverified"}, "error": "UNVERIFIED - do not retry"}
+
+    async def go() -> tuple[Any, Any]:
+        await store.call_once(run.run_id, 1, "calendar_create", {"t": 1}, create)
+        again = await store.call_once(run.run_id, 1, "calendar_create", {"t": 1}, create)
+        resume = await store.call_once(resumed.run_id, 1, "calendar_create", {"t": 1}, create, inherit=run.run_id)
+        return again, resume
+
+    again, resume = asyncio.run(go())
+    assert again[1] is True and resume[1] is True and calls == [1]
+
+
 def test_a_duplicate_write_in_one_round_runs_once_end_to_end() -> None:
     title = f"durable dup {time.time()}"
     ROUNDS.append({"tool_calls": [call("todo_add", {"title": title}, "call_0"), call("todo_add", {"title": title}, "call_1")]})

@@ -1830,18 +1830,32 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 return False
             bridge_n += 1
             uid = f"{am['id']}:bridge{bridge_n}"
-            fut: asyncio.Future = asyncio.get_event_loop().create_future()
-            _approvals[uid] = fut
             spec = toolbox.specs.get(name)
             run.store.open_approval(uid, run.run_id, name, args, conversation_id=conv_id, message_id=am["id"], forced=forced,
                                     desk_id=run.desk_id, danger=spec.danger if spec else "external")
+            if proposal_only(run) or (run.kind in UNATTENDED_KINDS and cfg.get("unattendedApprovals") == "deny"):
+                # Nobody is at the keyboard: refuse with a recorded reason, as the reply loop does, rather than park.
+                run.store.decide(uid, "deny", by="unattended", note="no one is available to approve it in a background run")
+                return False
+            fut: asyncio.Future = asyncio.get_event_loop().create_future()
+            _approvals[uid] = fut
             run.publish("tool_call", {"message_id": am["id"], "id": uid, "name": name, "arguments": args,
                                       "needs_approval": True, "forced": forced, "proposal": None, "plan": None})
             decision = "deny"
+            # The wait is the user's time, not the run's: off the wall clock, and the run shows as waiting.
+            budget, waited_from = tool_ctx.get("budget"), time.time()
+            if budget is not None:
+                run.budget = budget.snapshot()
+            run.set_status("awaiting_approval")
             try:
                 while not fut.done():
                     if stop.is_set():
                         run.store.decide(uid, "deny", by="stop")
+                        fut.set_result("deny")
+                        break
+                    if steers and not tool_ctx.get("desk_id"):
+                        # The user wrote instead of answering: a no; the loop folds their message in afterwards.
+                        run.store.decide(uid, "deny", by="steer", note=str(steers[-1]["content"]).strip()[:500])
                         fut.set_result("deny")
                         break
                     try:
@@ -1853,6 +1867,9 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
                 decision = fut.result() if fut.done() else "deny"
             finally:
                 _approvals.pop(uid, None)
+                if budget is not None:
+                    budget.paused += time.time() - waited_from
+                run.set_status("running")
             allowed = decision in ("allow", "always_chat", "always_global")
             run.publish("tool_result", {"message_id": am["id"], "id": uid, "name": name, "arguments": args,
                                         "result_preview": "", "duration_ms": 0,
@@ -1861,6 +1878,14 @@ async def _chat_stream(conv_id: str, body: ChatIn, stop: asyncio.Event, steers: 
             return allowed
 
         tool_ctx["bridge_approve"] = _bridge_approve
+
+        def _bridge_call(name: str, args: dict[str, Any], ctx: dict[str, Any]) -> Any:
+            """A script's bridged call through _call_tool, so it gets the undo snapshot and the idempotency journal."""
+            nonlocal bridge_n
+            bridge_n += 1
+            return _call_tool(run, _round, name, args, ctx, f"{am['id']}:bridgecall{bridge_n}")
+
+        tool_ctx["bridge_call"] = _bridge_call
         # The same one-shot card, for a tool that has to ask about part of what it was called to do (a browser form
         # submit, a host the shell may not reach). Absent in lanes with nobody to ask: a tool treats that as "no".
         tool_ctx["approve"] = _bridge_approve

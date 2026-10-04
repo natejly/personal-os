@@ -324,3 +324,28 @@ def test_profile_with_a_socket_allows_exactly_that_path(tmp_path: Path) -> None:
     p = sandbox._mac_profile(str(tmp_path), sys.executable, str(tmp_path / "b.sock"))
     assert "(deny network*)" in p and "unix-socket" in p and "b.sock" in p
     assert "unix-socket" not in sandbox._mac_profile(str(tmp_path), sys.executable)
+
+
+def test_permission_rules_apply_to_bridged_calls(tmp_path: Path) -> None:
+    """A deny rule refuses a bridged call, and an ask rule cards an `on` tool, as they would a direct call."""
+    r = Rig(tmp_path)
+    r.ctx["settings"] = {"permissionRules": {"deny": [f"Edit({r.root}/a.py)"], "ask": [f"Edit({r.root}/b.py)"]}}
+    asked: list[str] = []
+
+    async def approve(name: str, args: dict[str, Any], forced: bool) -> bool:
+        asked.append(args["path"])
+        return False
+    b = toolbridge.Bridge(r.tb, r.ctx, ["fs_edit"], {"fs_edit": "on"}, approve)
+    res = asyncio.run(b.handle("fs_edit", {"path": str(r.root / "a.py"), "old": "1", "new": "9"}))
+    assert res["ok"] is False and "refused" in res["error"] and not asked
+    res = asyncio.run(b.handle("fs_edit", {"path": str(r.root / "b.py"), "old": "2", "new": "9"}))
+    assert res["ok"] is False and asked == [str(r.root / "b.py")] and not r.seen
+
+
+@needs_seatbelt
+def test_big_stdout_of_a_tainted_run_is_stored_untrusted(rig: Rig) -> None:
+    rig.ctx["tainted"] = True
+    out = asyncio.run(rig.run("print('A' * 60000)", ["fs_glob"]))
+    with rig.db.tx() as c:
+        shape = c.execute("SELECT shape FROM tool_results WHERE id=?", (out["result_id"],)).fetchone()[0]
+    assert '"untrusted": true' in shape

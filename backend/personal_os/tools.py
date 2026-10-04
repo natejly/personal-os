@@ -3015,7 +3015,7 @@ def _register_cowork(self: Toolbox) -> None:
             out["warning"] = ("The file still contains placeholder text: " + ", ".join(marks)
                               + ". If these are unfinished, fix them and deliver again.")
         return out
-    R("desk_deliver", ToolSpec("desk_deliver", "Nominate a file under outputs/ as a deliverable. It is queued for the user's review with its current contents recorded, and rewriting the file afterwards sends it back for review. This proposes, it does not promote: the user chooses whether it becomes a doc, a document or a download.",
+    R("desk_deliver", ToolSpec("desk_deliver", "Nominate a file under outputs/ as a deliverable. It is queued for the user's review with its current contents recorded, and rewriting the file afterwards sends it back for review. This proposes, it does not promote: the user chooses whether it becomes a note, an upload or a download, and can turn a delivered checklist into todos, an .html or .svg file into a page, or a file starting with To: and Subject: lines (then a blank line and the body) into a Gmail draft.",
         _obj({"path": {"type": "string", "description": "A path under outputs/"},
               "title": {"type": "string", "description": "What the user will see this called"},
               "summary": {"type": "string", "description": "One or two lines: what it is and what you would do with it"}},

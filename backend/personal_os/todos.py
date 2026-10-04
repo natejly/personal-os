@@ -24,7 +24,7 @@ from . import todo_rules
 from .db import Database, new_id, now, row_to_dict
 
 # Titles that were not typed in this app. Listing them is the same as reading the mail or the meeting.
-UNTRUSTED_SOURCES = frozenset({"meeting", "email", "google"})
+UNTRUSTED_SOURCES = frozenset({"meeting", "email", "google", "desk"})
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS todos (

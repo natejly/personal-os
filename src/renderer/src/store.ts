@@ -292,7 +292,6 @@ export interface State {
   activeDeskId: string | null
   activeDesk: FullDesk | null
   deskFiles: DeskFile[]
-  deskPreview: { path: string; text: string } | null
   /** Unseen `needs_you` events across every desk: the sidebar badge and the Today card. */
   deskInbox: DeskEvent[]
   deskBusy: boolean
@@ -419,8 +418,6 @@ export interface State {
   deleteDesk: (id: string, purge?: boolean) => Promise<void>
   /** `quiet` is for the live refresh: a failed background reload must not toast every few seconds. */
   loadDeskFiles: (id: string, path?: string, quiet?: boolean) => Promise<void>
-  /** Selects a file; the Files tab fetches the rich preview itself (pictures, pages, load-more). */
-  previewDeskFile: (id: string, path: string) => Promise<void>
   /** The promotion verdicts, so the Output tab can show a verified tick or the write that failed. */
   acceptOutputs: (id: string, sel: Parameters<typeof api.cowork.desks.accept>[1]) => Promise<PromotionResult[]>
   rejectOutputs: (id: string, outputIds?: string[], note?: string) => Promise<void>
@@ -1611,7 +1608,6 @@ export const useStore = create<State>((set, get) => {
     activeDeskId: null,
     activeDesk: null,
     deskFiles: [],
-    deskPreview: null,
     deskInbox: [],
     deskBusy: false,
     deskShowArchived: false,
@@ -2648,9 +2644,9 @@ export const useStore = create<State>((set, get) => {
       } catch { /* a badge is not worth a toast */ }
     },
     openDesk: async (id) => {
-      // The files and the preview belong to the desk that was open, so they go now rather than
+      // The files belong to the desk that was open, so they go now rather than
       // after the fetch: the Files tab must never paint another desk's workspace for a frame.
-      if (get().activeDeskId !== id) set({ activeDeskId: id, activeDesk: null, deskFiles: [], deskPreview: null })
+      if (get().activeDeskId !== id) set({ activeDeskId: id, activeDesk: null, deskFiles: [] })
       try {
         const desk = await api.cowork.desks.get(id)
         // A slower fetch must not clobber a desk the user has since switched away from.
@@ -2748,8 +2744,7 @@ export const useStore = create<State>((set, get) => {
         desks: st.desks.filter((d) => d.id !== id),
         activeDeskId: st.activeDeskId === id ? null : st.activeDeskId,
         activeDesk: st.activeDesk?.id === id ? null : st.activeDesk,
-        deskFiles: st.activeDeskId === id ? [] : st.deskFiles,
-        deskPreview: st.activeDeskId === id ? null : st.deskPreview
+        deskFiles: st.activeDeskId === id ? [] : st.deskFiles
       }))
       void get().refreshConversations()
     },
@@ -2761,9 +2756,6 @@ export const useStore = create<State>((set, get) => {
       } catch (e) {
         if (!quiet) get().toast((e as Error).message, 'error')
       }
-    },
-    previewDeskFile: async (_id, path) => {
-      set({ deskPreview: { path, text: '' } })
     },
     acceptOutputs: async (id, sel) => {
       if (!sel.length) return []

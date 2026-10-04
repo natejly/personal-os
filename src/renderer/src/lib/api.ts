@@ -4,8 +4,8 @@ import type {
   Memory, MemoryProposal, ModelInfo, ModelPrice, PageContext, Settings, Project, StyleProfile, StyleSample, StyleState, UsageReport, ChatRunStarted, RunInfo, RunTapeEvent,
   Command, AgentDef, BuiltinAgent, Workflow, WorkflowRun, Plan, PlanStep, Skill, SkillStatus, SkillFinding, ToolResultHandle,
   Canvas, CanvasPreset, CanvasWindow, InstantiatedCanvas, Note, PopoutBounds, Rect, SnapMode, WidgetKind, WindowLayout, WindowState,
-  Desk, DeskAutonomy, DeskBudget, DeskDiff, DeskEvent, DeskFilePreview, DeskFileTree, DeskOutput, DeskRichPreview,
-  DeskStatus, FullDesk, PlanRecord, PromotionKind, PromotionResult,
+  Desk, DeskAutonomy, DeskBudget, DeskDiff, DeskEvent, DeskFilePreview, DeskFileTree, DeskRichPreview,
+  DeskStatus, FullDesk, PromotionKind, PromotionResult,
   AgentInbox, AgentProposal, Job, JobNotifyEvent, JobRunRecord, JobStats,
   Doc, DocFolder, FullDoc, DocRevision,
   HealthEntry, HealthMetric, HealthProvider, HealthSource, HealthSourcePlan, HealthSummary, HealthSyncResult, McpSignIn,
@@ -624,27 +624,18 @@ export const api = {
       seen: (id: string) => req<Desk>(`/cowork/desks/${id}/seen`, { method: 'POST' }),
       pause: (id: string) => req<Desk>(`/cowork/desks/${id}/pause`, { method: 'POST' }),
       stop: (id: string) => req<Desk>(`/cowork/desks/${id}/stop`, { method: 'POST' }),
-      events: (id: string, limit = 200) => req<DeskEvent[]>(`/cowork/desks/${id}/events?limit=${limit}`),
       files: (id: string, path = '') => req<DeskFileTree>(`/cowork/desks/${id}/files?path=${encodeURIComponent(path)}`),
       file: (id: string, path: string, offset = 0, length = 6000) =>
         req<DeskFilePreview>(`/cowork/desks/${id}/file?path=${encodeURIComponent(path)}&offset=${offset}&length=${length}`),
       preview: (id: string, path: string, offset = 0) =>
         req<DeskRichPreview>(`/cowork/desks/${id}/preview?path=${encodeURIComponent(path)}&offset=${offset}`),
       diff: (id: string, path: string) => req<DeskDiff>(`/cowork/desks/${id}/diff?path=${encodeURIComponent(path)}`),
-      /** Each sha re-checked against the disk, so a row the agent has since rewritten reads `stale`. */
-      outputs: (id: string) => req<DeskOutput[]>(`/cowork/desks/${id}/outputs`),
       /** Exactly-once per output: a double-clicked Accept promotes once. `verified` is read, never assumed. */
       accept: (id: string, outputs: { output_id: string; destination: PromotionKind; title?: string; doc_id?: string; project_id?: string | null }[]) =>
         req<{ results: PromotionResult[] }>(`/cowork/desks/${id}/accept`, { method: 'POST', body: json({ outputs }) }),
       /** No `output_ids` rejects every undecided output. */
       reject: (id: string, output_ids?: string[], note?: string) =>
         req<Desk>(`/cowork/desks/${id}/reject`, { method: 'POST', body: json({ output_ids, note }) })
-    },
-    /** Read only. A plan is decided through `api.approve(call_id, ...)` like every other card: one
-     *  decision path, so a plan cannot be approved by a route that skips the approval row, the
-     *  edited-digest re-derivation or the single-use claim. */
-    plans: {
-      get: (planId: string) => req<PlanRecord>(`/cowork/plans/${planId}`)
     },
     /** The shared Python environment desks run code in. `setup` builds it and takes minutes. */
     env: {

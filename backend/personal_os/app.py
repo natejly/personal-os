@@ -26,7 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from pydantic import AfterValidator, BaseModel, Field
 
-from . import activity, approval_edits, assist, backups, llm, mac, mcp_drift, mcp_eval, mcp_search, tools
+from . import activity, approval_edits, assist, backups, llm, mac, mcp_drift, mcp_eval, mcp_search, tools, verify
 from . import compaction, otel_export, titles
 from .context import build_context, estimate_tokens, layout_messages
 from .db import SECRET_SETTINGS, Database, data_dir_from_env, new_id
@@ -60,7 +60,7 @@ from .meeting_recorder import RecorderBusy
 from .meetings import MeetingBlocked, Meetings, MeetingService
 from .cowork import (AUTONOMY, DESK_HINT, DESK_NUDGE, DESK_PLAN_HINT, LIVE as DESK_LIVE, continue_message, desk_manual, read_notes,
                      STATUSES as DESK_STATUSES, UNDECIDED_OUTPUTS, DeskRuntime, Desks,
-                     origin_report, parked_report)
+                     OUTPUT_KINDS, checklist_items, mail_parts, origin_report, parked_report)
 from .workspace import MAX_PREVIEW, Workspace, WorkspaceError
 from .envs import WorkEnv
 from .microvm import Sandboxes
@@ -7557,7 +7557,7 @@ class DeskResumeIn(BaseModel):
 
 class AcceptItem(BaseModel):
     output_id: str
-    destination: str                      # doc | doc_append | document | download
+    destination: str                      # one of cowork.OUTPUT_KINDS
     title: str | None = None
     doc_id: str | None = None
     project_id: str | None = None
@@ -8084,7 +8084,7 @@ async def _promote(desk_id: str, out: dict[str, Any], item: AcceptItem) -> dict[
     """
     rel = out["path"]
     dest = item.destination
-    if dest not in ("doc", "doc_append", "document", "download"):
+    if dest not in OUTPUT_KINDS:
         return {"ref": None, "verified": False, "error": f"unknown destination {dest!r}"}
     title = (item.title or out["title"] or Path(rel).name).strip()
     if dest == "download":
@@ -8124,6 +8124,38 @@ async def _promote(desk_id: str, out: dict[str, Any], item: AcceptItem) -> dict[
         ok = bool(fresh) and fresh["after"] == after and untouched
         return {"ref": rev["id"], "verified": ok,
                 "error": None if ok else "the pending revision does not match the file"}
+    if dest == "todo":
+        # source='desk': the titles are agent-written, so listing them taints a turn like mail or a meeting does.
+        items = checklist_items(content)
+        if not items:
+            return {"ref": None, "verified": False, "error": "the file has no lines to make todos from"}
+        pid = wsid(item.project_id) if item.project_id else None
+        made = [todos.create(t, pid, source="desk") for t in items]
+        ok = all((todos.get(t["id"]) or {}).get("title") == line for t, line in zip(made, items))
+        return {"ref": ",".join(t["id"] for t in made), "verified": ok,
+                "error": None if ok else "a saved todo does not match its line"}
+    if dest == "artifact":
+        if Path(rel).suffix.lower() not in (".html", ".htm", ".svg"):
+            return {"ref": None, "verified": False, "error": "not an html or svg file"}
+        # An svg is stored as an html artifact: the page renders a bare <svg> document as it is.
+        art = artifacts.create(title, content, project_id=wsid(item.project_id) if item.project_id else None)
+        ok = (artifacts.get(art["id"]) or {}).get("code") == content.strip()
+        return {"ref": art["id"], "verified": ok, "error": None if ok else "the saved page does not match the file"}
+    if dest == "mail_draft":
+        if Path(rel).suffix.lower() not in (".eml", ".md", ".markdown", ".txt"):
+            return {"ref": None, "verified": False, "error": "not an .eml, markdown or text file"}
+        try:
+            to, subject, body = mail_parts(rel, workspace.resolve_in(desk_id, rel).read_bytes())
+        except ValueError as e:
+            return {"ref": None, "verified": False, "error": str(e)}
+        # A draft, never a send: the same call and read-back as the gmail_draft tool.
+        try:
+            d = await asyncio.to_thread(google.gmail_draft, to, subject, body)
+        except GoogleNotConnected:
+            return {"ref": None, "verified": False, "error": "Google is not connected"}
+        ok = bool(d.get("verified"))
+        return {"ref": d.get("draft_id"), "verified": ok,
+                "error": None if ok else verify.summary_text(d.get("verification"))}
     src = workspace.resolve_in(desk_id, rel)
     if msg := _too_big(src.stat().st_size):
         return {"ref": None, "verified": False, "error": msg}
@@ -8234,14 +8266,6 @@ def cowork_inbox(limit: int = 40) -> list[dict[str, Any]]:
 def cowork_inbox_seen(event_id: str) -> dict[str, bool]:
     desks.mark_seen(event_id)
     return {"ok": True}
-
-
-@app.get("/cowork/plans/{plan_id}")
-def get_action_plan(plan_id: str) -> dict[str, Any]:
-    plan = plans.get(plan_id)
-    if not plan:
-        raise HTTPException(404, "No such plan")
-    return plan
 
 
 # A plan is decided through POST /approvals/{call_id} like every other card, not through a route of

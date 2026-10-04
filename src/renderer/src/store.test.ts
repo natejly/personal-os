@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readDocMode, adoptServerDoc, applyEvent, editCut, settleInterrupted, stopOutcome, useStore, type ChatSession } from './store'
+import { readDocMode, adoptServerDoc, applyEvent, editCut, learnedText, settleInterrupted, stopOutcome, useStore, type ChatSession } from './store'
 import { ApiError } from './lib/apiError'
 import { api } from './lib/api'
 import { mergeConversation } from './sessionStatus'
@@ -829,4 +829,64 @@ test('status: sets the live line, and a token, tool call, done or null clears it
   for (const ev of clears) assert.equal(applyEvent(held, ev, true).conversation?.messages?.[0].status ?? null, null, ev.event)
   const other = applyEvent(session(), { event: 'status', data: { id: 'nope', kind: 'compacting' } } as ChatEvent, true)
   assert.equal(other.conversation?.messages?.[0].status, undefined)
+})
+
+test('an update-only learn pass toasts "updated 1", refreshes, and Undo restores the old wording', async () => {
+  const mem = api.memories as Record<string, unknown>
+  const orig = { ...mem }
+  const restored: string[] = []
+  const deleted: string[] = []
+  let refreshed = 0
+  mem.restore = async (id: string) => { restored.push(id); return {} }
+  mem.delete = async (id: string) => { deleted.push(id); return {} }
+  const bump = async (): Promise<void> => { refreshed++ }
+  const before = useStore.getState()
+  useStore.setState({ toasts: [], refreshMemories: bump, refreshGraph: bump, refreshDocuments: bump, refreshProjects: bump })
+  try {
+    useStore.getState().onLearned({ memories: [], updated: [{ id: 'new' }], superseded: [{ old_id: 'old', new_id: 'new' }], removed: [{ id: 'gone' }], nodes: [], edges: [] } as never)
+    const t = useStore.getState().toasts.at(-1)
+    assert.match(t?.text ?? '', /updated 1/)
+    assert.match(t?.text ?? '', /forgot 1/)
+    assert.ok(refreshed > 0, 'an update with no new rows still refreshes the open lists')
+    assert.equal(t?.action?.label, 'Undo')
+    refreshed = 0
+    t!.action!.run()
+    await new Promise((r) => setTimeout(r, 0))
+    assert.deepEqual(restored.sort(), ['gone', 'old'])
+    assert.deepEqual(deleted, [], 'nothing was added, so nothing is trashed')
+    assert.ok(refreshed > 0)
+
+    useStore.getState().onLearned({ memories: [{ id: 'fresh' }], nodes: [], edges: [] } as never)
+    useStore.getState().toasts.at(-1)!.action!.run()
+    await new Promise((r) => setTimeout(r, 0))
+    assert.deepEqual(deleted, ['fresh'], 'Undo trashes a memory the pass created')
+
+    useStore.getState().onLearned({ memories: [], nodes: [{ id: 'n' }], edges: [] } as never)
+    assert.equal(useStore.getState().toasts.at(-1)?.action, undefined, 'graph-only passes offer no Undo')
+  } finally {
+    Object.assign(mem, orig)
+    useStore.setState({ refreshMemories: before.refreshMemories, refreshGraph: before.refreshGraph, refreshDocuments: before.refreshDocuments, refreshProjects: before.refreshProjects, toasts: [] })
+  }
+})
+
+test('the memory proposals badge counts every pending proposal', async () => {
+  const mem = api.memories as Record<string, unknown>
+  const orig = mem.proposals
+  const asked: string[] = []
+  mem.proposals = async (s: string) => { asked.push(s); return [{ id: 'p1' }, { id: 'p2' }] }
+  try {
+    useStore.setState({ memoryProposals: 0 })
+    await useStore.getState().refreshMemoryProposals()
+    assert.equal(useStore.getState().memoryProposals, 2)
+    assert.deepEqual(asked, ['all'])
+  } finally {
+    mem.proposals = orig
+  }
+})
+
+test('learnedText counts updates and forgets as changes', () => {
+  assert.deepEqual(learnedText({ memories: [], nodes: [], edges: [] }), { text: 'Learned 0 memories, 0 entities, 0 relations', changed: false })
+  const r = learnedText({ memories: [], removed: [{}], nodes: [], edges: [] } as never)
+  assert.equal(r.changed, true)
+  assert.equal(r.text, 'Learned 0 memories, forgot 1, 0 entities, 0 relations')
 })

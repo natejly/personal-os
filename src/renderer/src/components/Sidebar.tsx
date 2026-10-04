@@ -90,6 +90,7 @@ export default function Sidebar(): JSX.Element {
   /** Desks with something unseen that needs you: the one badge worth interrupting for. */
   const needsYou = useStore((s) => new Set(s.deskInbox.map((e) => e.desk_id)).size)
   const meetingsPending = useStore((s) => s.meetingsPending)
+  const memoryProposals = useStore((s) => s.memoryProposals)
   /** Everything agents left for the user (approvals, proposals, desks, review queues): the Agent inbox on Today. */
   const inboxCount = useStore((s) => s.agentInbox?.counts.needs_you ?? 0)
   const inCanvas = useStore((s) => s.view === 'canvas')
@@ -371,7 +372,9 @@ export default function Sidebar(): JSX.Element {
         {/* Both are mounted in every view: a capture running somewhere must never be invisible. */}
         <MeetingIndicator />
         <ActivityIndicator />
-        <button className="settings-btn" onClick={() => setSettingsOpen(true)}><Settings size={16} /><span>Settings</span><kbd>⌘,</kbd></button>
+        <button className="settings-btn" onClick={() => setSettingsOpen(true)}><Settings size={16} /><span>Settings</span>
+          {memoryProposals > 0 && <span className="count pending" title={`${memoryProposals} memory tidy-up suggestion${memoryProposals === 1 ? '' : 's'} to review, under Knowledge base`}>{memoryProposals}</span>}
+          <kbd>⌘,</kbd></button>
       </div>
     </aside>
   )

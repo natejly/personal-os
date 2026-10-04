@@ -480,6 +480,8 @@ export const api = {
     /** A new chat holding this chat's live transcript up to and including `messageId`; the source is untouched. */
     fork: (id: string, messageId: string) =>
       req<Conversation>(`/conversations/${id}/fork`, { method: 'POST', body: json({ message_id: messageId }) }, CONTROL_TIMEOUT_MS),
+    /** The chat as Markdown: active rows in order, tool calls as one-line summaries. */
+    exportMd: (id: string) => req<{ title: string; text: string }>(`/conversations/${id}/export`),
     search: (q: string, limit = 20) => req<ChatSearchHit[]>(`/conversations/search?q=${encodeURIComponent(q)}&limit=${limit}`),
     /** Files the chat's tools saved for the user (sandbox exports, browser downloads, run_python outputs/). */
     outputs: (id: string) => req<ChatOutputs>(`/conversations/${id}/outputs`),

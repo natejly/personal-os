@@ -88,6 +88,12 @@ export default function SmartTextarea({
       setGhost('')
       return
     }
+    // With a suggestion showing, an arrow only moves the caret (and drops the ghost): the host's own
+    // arrow handling (the composer's prompt recall) waits until the box is plain text again.
+    if (ghost && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      setGhost('')
+      return
+    }
     onKeyDown?.(e)
   }
 

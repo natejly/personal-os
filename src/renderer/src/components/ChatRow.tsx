@@ -4,11 +4,13 @@ import ContextMenu, { type MenuEntry } from '../canvas/Menu'
 import { dragProps } from '../canvas/dnd'
 import { useStore } from '../store'
 import ChatPulse from './ChatPulse'
+import { api } from '../lib/api'
+import { copyMarkdown, downloadMarkdown } from '../features/notes/exportDoc'
 import type { Conversation } from '@shared/types'
 
 /**
  * One chat row in the sidebar lists: click or Enter opens it, right-click or the "…" button opens
- * the row menu (rename, pin, move, archive, delete). The menu and the rename input stop their own
+ * the row menu (rename, pin, move, export, archive, delete). The menu and the rename input stop their own
  * events so neither navigates the row or starts its drag. `lead` sits before the title (a project
  * dot), `trail` after it (a search excerpt); neither shows while renaming.
  */
@@ -36,10 +38,22 @@ export default function ChatRow({ conv, active, sub = false, lead, trail }: { co
         ...projects.map((p): MenuEntry => ({ label: p.name, disabled: p.id === conv.project_id, run: () => void moveChat(conv.id, p.id) }))
       ]
     },
+    { label: 'Export as Markdown', run: () => void exportMd(false) },
+    { label: 'Copy as Markdown', run: () => void exportMd(true) },
     { label: 'Archive', run: () => void archiveChat(conv.id, true) },
     { kind: 'separator' },
     { label: 'Delete', danger: true, run: () => void deleteChat(conv.id) }
   ]
+
+  const exportMd = async (copy: boolean): Promise<void> => {
+    const toast = useStore.getState().toast
+    try {
+      const { title, text } = await api.conversations.exportMd(conv.id)
+      if (copy) { await copyMarkdown(text); toast('Copied as Markdown') } else downloadMarkdown(title, text)
+    } catch (e) {
+      toast(`Could not export: ${(e as Error).message}`, 'error')
+    }
+  }
 
   const commit = (value: string | null): void => {
     if (settled.current) return

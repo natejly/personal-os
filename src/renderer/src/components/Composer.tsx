@@ -15,6 +15,7 @@ import { useOnboarding } from './onboarding/onboardingStore'
 import { COMPOSER_INSERT_EVENT } from '../lib/composerInsert'
 import { classifyPaste, messageCharLimit } from '../lib/messageLimit'
 import { appendToDraft, clearRedirect, composerKey, dropDraft, getDraft, moveDraft, restoreDraft, useDraft } from '../lib/drafts'
+import { promptList, recallKey, step, type Recall } from '../lib/promptHistory'
 
 interface ComposerProps {
   conversationId?: string
@@ -61,6 +62,26 @@ export default function Composer({ conversationId, footer, compact = false, onSe
   const found = slashClosedAt === text ? null : composerSlash(text, commands)
   const slash = found?.length ? found : null
   useEffect(() => setSlashActive(0), [text])
+
+  /** Up/Down through this chat's earlier prompts (lib/promptHistory.ts); null when not recalling. */
+  const recall = useRef<Recall | null>(null)
+  useEffect(() => { recall.current = null }, [key])
+
+  /** Handles the key when it is a recall step; returns whether it did. */
+  const onRecallKey = (e: React.KeyboardEvent<HTMLTextAreaElement>): boolean => {
+    if (e.nativeEvent.isComposing) return false
+    const ta = e.currentTarget
+    const act = recallKey(e.key, { value: text, selStart: ta.selectionStart, selEnd: ta.selectionEnd, streaming, modified: e.shiftKey || e.altKey || e.metaKey || e.ctrlKey }, recall.current)
+    if (act === 'exit') { recall.current = null; e.preventDefault(); return true }
+    if (!act) return false
+    const s = useStore.getState()
+    const next = step(promptList(s.sessions[conversationId ?? s.focusedConversationId ?? '']?.conversation.messages ?? []), recall.current, text, act)
+    if (!next) return false
+    e.preventDefault()
+    recall.current = next.recall
+    setText(next.text)
+    return true
+  }
 
   /** Stop, then hand the keyboard back: the button that was pressed is about to be replaced or disabled. */
   const halt = (): void => {
@@ -158,6 +179,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
     if (entry?.taint && useStore.getState().uploadTaintTarget === null) {
       useStore.setState({ uploadTaintTarget: onSend ? 'page' : 'draft', uploadTaintSource: entry.taint })
     }
+    recall.current = null
     clearRedirect(k0)
     dropDraft(k0)
     const ok = await (onSend ? onSend(t) : send(t, conversationId)).catch(() => false)
@@ -188,7 +210,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
           maxHeight={240}
           minChars={8}
           value={text}
-          onChange={setText}
+          onChange={(v) => { recall.current = null; setText(v) }}
           onPaste={onPaste}
           placeholder={streaming ? 'Steer the reply…' : placeholder}
           noGhost={!!slash}
@@ -200,6 +222,7 @@ export default function Composer({ conversationId, footer, compact = false, onSe
               else if (act.kind === 'pick') setText(`/${slash![slashActive].name} `)
               else setSlashClosedAt(text)
             }
+            else if (onRecallKey(e)) return
             else if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void submit() }
             // Escape ends the reply; while an input method is composing it belongs to the method.
             else if (e.key === 'Escape' && streaming && !e.nativeEvent.isComposing) { e.preventDefault(); halt() }

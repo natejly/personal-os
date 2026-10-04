@@ -37,7 +37,9 @@ export async function scheduleTodo(todo: Todo, start?: string): Promise<Todo> {
   let ev: CalendarEvent | null = null
   if (cur.calendar_event_id) {
     // Gone or not writable: fall through and make a new one; the server tombstones the old link.
-    try { ev = await api.google.updateEvent(cur.calendar_event_id, { start: when, calendar_id: cur.calendar_id ?? 'primary' }) } catch { ev = null }
+    // The mirror's all-day marker is free time; a block placed at an hour should look booked, like a new event.
+    const busy = when.length > 10 ? { transparency: 'opaque' } : {}
+    try { ev = await api.google.updateEvent(cur.calendar_event_id, { start: when, calendar_id: cur.calendar_id ?? 'primary', ...busy }) } catch { ev = null }
   }
   ev ??= await api.google.createEvent({
     summary: todo.title,

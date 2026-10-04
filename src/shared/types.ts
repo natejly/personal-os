@@ -7,6 +7,8 @@ export interface Project {
   system_prompt: string
   color: string
   tools: Record<string, ToolOverride>
+  /** 'isolated' = chats here see no personal memory, graph, docs, skills or voice, and save nothing personal. */
+  memory_mode: 'shared' | 'isolated'
   created_at: number
   stats?: { conversations: number; memories: number; nodes: number; documents: number }
 }

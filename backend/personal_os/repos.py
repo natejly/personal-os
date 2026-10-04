@@ -13,15 +13,29 @@ from .db import Database, new_id, now, row_to_dict
 ALL = "__all__"  # sentinel: every scope (used by the library views)
 
 
+MEMORY_MODES = ("shared", "isolated")
+# An isolated project ("this project only") never sees personal rows. Every scoped read goes through
+# _scope_clause, so the check lives in its SQL rather than in each caller.
+_ISOLATED_SQL = "EXISTS (SELECT 1 FROM projects WHERE id=? AND memory_mode='isolated')"
+
+
 def _scope_clause(project_id: str | None, include_global: bool = True) -> tuple[str, list[Any]]:
-    """Items visible in a scope: the project's own items plus (optionally) global ones."""
+    """Items visible in a scope: the project's own items plus (optionally) global ones, unless the project is isolated."""
     if project_id == ALL:
         return "1=1", []
     if project_id is None:
         return "project_id IS NULL", []
     if include_global:
-        return "(project_id = ? OR project_id IS NULL)", [project_id]
+        return f"(project_id = ? OR (project_id IS NULL AND NOT {_ISOLATED_SQL}))", [project_id, project_id]
     return "project_id = ?", [project_id]
+
+
+def is_isolated(db: Database, project_id: str | None) -> bool:
+    """Whether a chat in this project must keep personal memory, docs, skills and voice out (and write none)."""
+    if not project_id or project_id == ALL:
+        return False
+    with db.tx() as c:
+        return bool(c.execute(f"SELECT {_ISOLATED_SQL}", (project_id,)).fetchone()[0])
 
 
 def fts_query(text: str, max_terms: int = 12, prefix: bool = False) -> str:
@@ -55,17 +69,18 @@ class Projects:
         with self.db.tx() as c:
             return row_to_dict(c.execute("SELECT * FROM projects WHERE id=? AND deleted_at IS NULL", (id,)).fetchone(), ("tools",))
 
-    def create(self, name: str, description: str = "", system_prompt: str = "", color: str = "#d97757") -> dict[str, Any]:
+    def create(self, name: str, description: str = "", system_prompt: str = "", color: str = "#d97757",
+               memory_mode: str = "shared") -> dict[str, Any]:
         sid = new_id()
         with self.db.tx() as c:
             c.execute(
-                "INSERT INTO projects(id,name,description,system_prompt,color,created_at) VALUES(?,?,?,?,?,?)",
-                (sid, name, description, system_prompt, color, now()),
+                "INSERT INTO projects(id,name,description,system_prompt,color,memory_mode,created_at) VALUES(?,?,?,?,?,?,?)",
+                (sid, name, description, system_prompt, color, memory_mode if memory_mode in MEMORY_MODES else "shared", now()),
             )
         return self.get(sid)  # type: ignore[return-value]
 
     def update(self, id: str, patch: dict[str, Any]) -> dict[str, Any] | None:
-        allowed = {k: v for k, v in patch.items() if k in {"name", "description", "system_prompt", "color", "tools"} and v is not None}
+        allowed = {k: v for k, v in patch.items() if k in {"name", "description", "system_prompt", "color", "tools", "memory_mode"} and v is not None}
         if "tools" in allowed:
             allowed["tools"] = json.dumps(allowed["tools"])
         if allowed:

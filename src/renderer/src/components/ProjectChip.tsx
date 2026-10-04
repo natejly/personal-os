@@ -1,4 +1,4 @@
-import { Globe } from 'lucide-react'
+import { Globe, Lock } from 'lucide-react'
 import { useProject, useStore } from '../store'
 
 /** Small coloured label naming the project an item belongs to (or "personal"). */
@@ -9,7 +9,7 @@ export default function ProjectChip({ projectId, clickable = true, showPersonal 
   if (!project) return null
   return (
     <button className="tag project-tag" style={{ color: project.color }} onClick={(e) => { if (!clickable) return; e.stopPropagation(); openProject(project.id) }} disabled={!clickable}>
-      <span className="project-dot sm" style={{ background: project.color }} />{project.name}
+      <span className="project-dot sm" style={{ background: project.color }} />{project.name}{project.memory_mode === 'isolated' && <Lock size={10} aria-label="Memory: this project only"><title>Memory: this project only</title></Lock>}
     </button>
   )
 }

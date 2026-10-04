@@ -45,7 +45,7 @@ from .jobs import local_tz_name, parse_when, valid_cron, valid_tz
 from . import audiocap, stt
 from .learn import SELF_LABELS, SKILL_STATUSES, induce_skill, run_transcript
 from .microvm import SandboxError, Sandboxes
-from .repos import Documents, Graph, Memories
+from .repos import Documents, Graph, Memories, is_isolated
 from .sandbox import WORKSPACE_REPORT_CAP, run_python
 
 ToolFn = Callable[..., Awaitable[Any]]
@@ -949,6 +949,9 @@ class Toolbox:
             examples=[{"query": "coffee"}, {"query": "work schedule"}, {"query": "preferences", "offset": 20}]))
 
         async def save_memory(ctx: dict[str, Any], content: str, kind: str = "fact", personal: bool = False) -> Any:
+            if personal and is_isolated(self.memories.db, ctx["project_id"]):
+                return tool_error("This project keeps its memory to itself, so nothing said here can be saved as personal.",
+                                  field="personal", expected="false (save it to this project)")
             m = self.memories.create(None if personal else ctx["project_id"], content, kind=kind, source="auto")
             ctx.setdefault("learned", {"memories": [], "nodes": [], "edges": []})["memories"].append(m)
             return {"saved": m["id"], "content": m["content"]}
@@ -2138,6 +2141,8 @@ def _register_style(self: Toolbox) -> None:
         _obj({}, []), writing_style, "style", examples=[{}]))
 
     async def save_writing_sample(ctx: dict[str, Any], text: str, personal: bool = True) -> Any:
+        if is_isolated(self.style.db, ctx["project_id"]):
+            personal = False  # an isolated project's writing stays in the project
         s = self.style.add_sample(None if personal else ctx["project_id"], text, source="chat", check=False)
         if not s:
             return tool_error("Empty sample.", field="text", expected="a passage the user wrote, at least a short paragraph")
@@ -2178,7 +2183,8 @@ def _register_docs(self: Toolbox) -> None:
         return [{"doc_id": d["id"], "title": d["title"], "words": d["words"],
                  "scope": "project" if d["project_id"] else "personal",
                  "pending_edits": d["pending"], "folder": d["folder"] or None}
-                for d in self.docs.list(q=query) if d["project_id"] in (None, ctx.get("project_id"))]  # the chat's project plus personal
+                for d in self.docs.list(q=query) if d["project_id"] == ctx.get("project_id")
+                or (d["project_id"] is None and not is_isolated(self.docs.db, ctx.get("project_id")))]  # the chat's project plus personal, unless isolated
     R("doc_list", ToolSpec("doc_list", "List the docs the user writes in the Docs editor — their markdown notes, drafts and documents. (Files they uploaded are a different thing: use search_documents for those.) Start here when they mention 'my notes', 'my essay' or 'the doc' and you need its id.",
         _obj({"query": {"type": "string", "description": "Optional filter on title or body"}}, []), doc_list, "docs"))
 

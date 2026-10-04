@@ -27,6 +27,7 @@ from typing import Any
 
 from . import llm, redact
 from .db import Database, new_id, now, row_to_dict
+from .repos import is_isolated
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS style_samples (
@@ -308,6 +309,8 @@ class WritingStyle:
             p = self.profile(project_id)
             if p and p["enabled"] and (p["summary"] or p["guidelines"]):
                 return p
+            if is_isolated(self.db, project_id):  # "this project only": no personal fallback
+                return None
         return self.profile(None)
 
     def save_profile(self, project_id: str | None, patch: dict[str, Any]) -> dict[str, Any]:

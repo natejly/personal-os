@@ -759,6 +759,7 @@ h2 .muted, h3 .muted, header .muted, .page-header .muted { margin: 0; font-weigh
 .modal label.toggle-row { flex-direction: row; align-items: center; gap: 16px; }
 .modal label.toggle-row .toggle-text { gap: 2px; font-size: 13px; }
 .modal label.toggle-row .toggle-text small { font-size: 12px; line-height: 1.45; }
+.modal label.memory-mode-opt { flex-direction: row; align-items: baseline; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .modal .toggle-row input { width: 1px; padding: 0; border: 0; }
 .accent-picks { display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 0 2px; }
 .accent-swatch {

@@ -19,7 +19,7 @@ from .retention import RetentionWorker
 
 LOG_LINES = 300
 # A settings key that holds a credential, by name. Matching by name means a key added later is masked by default.
-_SECRET_KEY = ("key", "secret", "token", "password", "credential")
+_SECRET_KEY = ("key", "secret", "token", "password", "credential", "authorization", "headers")  # headers: collector auth
 
 
 def _is_secret_key(k: str) -> bool:

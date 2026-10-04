@@ -383,6 +383,13 @@ class RetentionTests(unittest.TestCase):
 
 
 class DiagnosticsRoute(unittest.TestCase):
+    def test_trace_export_headers_are_masked(self) -> None:
+        from personal_os.reliability import mask_settings, secret_values
+
+        cfg = {"otelExport": {"endpoint": "http://x", "headers": {"X-Team": "team-secret-abcdefgh"}}}
+        self.assertEqual(mask_settings(cfg)["otelExport"], {"endpoint": "http://x", "headers": "set"})
+        self.assertEqual(secret_values(cfg), ["team-secret-abcdefgh"])
+
     def test_report_is_masked_and_carries_versions_and_logs(self) -> None:
         from fastapi.testclient import TestClient
 

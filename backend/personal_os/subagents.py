@@ -57,6 +57,8 @@ CHILD_BLOCK = frozenset({
 CHILD_DANGER_BLOCK = ("plan", "schedules", "external")
 FILE_WRITERS = ("write_local_file", "move_local_file", "fs_edit", "fs_copy", "fs_mkdir")
 SHELL_TOOLS = ("shell_run", "shell_poll", "shell_kill")
+# Run kinds that have nobody at the keyboard; with unattendedApprovals = "deny" a call that would ask is refused.
+UNATTENDED_KINDS = ("job", "scheduled")
 STATEFUL_GROUPS = ("browser", "shell", "sandbox")  # tools that hold session state never run side by side
 
 
@@ -272,15 +274,17 @@ class RootLocks:
     def _overlap(a: Path, b: Path) -> bool:
         return a == b or a in b.parents or b in a.parents
 
-    def _free(self, roots: tuple[Path, ...], owner: str) -> bool:
-        return not any(self._overlap(r, h) for o, hs in self.held.items() if o != owner for h in hs for r in roots)
+    def _free(self, roots: tuple[Path, ...], owner: str, ancestors: tuple[str, ...] = ()) -> bool:
+        """An ancestor's lock does not block: it is waiting on this child, so waiting on it back would deadlock."""
+        skip = {owner, *ancestors}
+        return not any(self._overlap(r, h) for o, hs in self.held.items() if o not in skip for h in hs for r in roots)
 
-    async def acquire(self, roots: tuple[Path, ...], owner: str) -> None:
+    async def acquire(self, roots: tuple[Path, ...], owner: str, ancestors: tuple[str, ...] = ()) -> None:
         if not roots:
             return
         cond = self._c()
         async with cond:
-            await cond.wait_for(lambda: self._free(roots, owner))
+            await cond.wait_for(lambda: self._free(roots, owner, ancestors))
             self.held[owner] = roots
 
     async def release(self, owner: str) -> None:
@@ -389,6 +393,14 @@ class Subagents:
     # ---- registry ------------------------------------------------------------------------------
     def running(self) -> list[Child]:
         return [c for c in self.children.values() if not c.finished.is_set() and not (c.task_obj is not None and c.task_obj.done())]
+
+    def _ancestors(self, ch: Child) -> tuple[str, ...]:
+        out: list[str] = []
+        p = self.children.get(ch.parent_id)
+        while p is not None and p.id not in out:
+            out.append(p.id)
+            p = self.children.get(p.parent_id)
+        return tuple(out)
 
     def descendants(self, cid: str) -> list[Child]:
         """Children below `cid`, parents before their children (reverse it for leaves-first)."""
@@ -556,7 +568,7 @@ class Subagents:
 
     def _seed(self, ch: Child, cfg: dict[str, Any], prior: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
         if prior is not None:
-            return [*prior, {"role": "user", "content": ch.task}]
+            return [*_close_calls(prior), {"role": "user", "content": ch.task}]
         parts = [COMMON_PROMPT, ch.role.prompt]
         cx = ch.ctx
         project = None
@@ -610,7 +622,7 @@ class Subagents:
     async def _drive(self, ch: Child) -> None:
         try:
             if ch.roots:
-                await self.locks.acquire(ch.roots, ch.id)
+                await self.locks.acquire(ch.roots, ch.id, self._ancestors(ch))
             ch.touch()
             await self._loop(ch)
         except _Halt as h:
@@ -710,9 +722,13 @@ class Subagents:
             raise _Halt("cost_cap" if not ch.halt_reason else ch.halt_reason)
         ch.messages.append({"role": "system", "content": "You are out of tool rounds. Do not call tools. In one message, summarize what "
                                                          "you have done and found so far, and what remains unfinished."})
-        text, _ = await self._model_round(ch, schemas, final=True)
+        try:
+            text, _ = await self._model_round(ch, schemas, final=True)
+        finally:
+            ch.messages.pop()  # the 'out of tool rounds' line: a resumed child must not inherit it
         if text:
             ch.text = text
+            ch.messages.append({"role": "assistant", "content": text})
 
     # ---- one round of tool calls -------------------------------------------------------------------
     def _parallel_ok(self, ch: Child, name: str) -> bool:
@@ -802,6 +818,14 @@ class Subagents:
             bad = perm.refusal or self._confine(ch, name, args)
             if bad:
                 result = denied(name, bad)
+            elif mode == "ask" and (unattended := self._unattended(ch)):
+                # The parent loop's two refusals: nobody is watching a background run, so never park a card.
+                decision = "deny"
+                result = denied(name, unattended)
+                if self.store is not None:
+                    self.store.open_approval(uid, ch.id, name, args, conversation_id=ch.conversation_id, message_id=ch.message_id,
+                                             forced=forced, desk_id=ch.desk_id, danger=spec.danger)
+                    self.store.decide(uid, "deny", by="unattended", note=unattended)
             elif mode == "ask":
                 decision = await self._ask(ch, uid, name, args, forced, spec.danger)
                 if decision != "allow":
@@ -835,6 +859,15 @@ class Subagents:
                 res = {**res, "replayed": True}
             return res
         return await go()
+
+    def _unattended(self, ch: Child) -> str | None:
+        """Why a card may not open for this child (mirrors the parent loop), or None when one may."""
+        if ch.ctx.get("proposal_only"):
+            return "not available in a background run: it needs an approval and nobody is watching"
+        run = ch.ctx.get("run")
+        if getattr(run, "kind", None) in UNATTENDED_KINDS and (ch.ctx.get("settings") or self.settings()).get("unattendedApprovals") == "deny":
+            return "refused: no one is available to approve it and unattendedApprovals is set to deny"
+        return None
 
     def _perm_roots(self, ch: Child) -> list[str]:
         roots = [r for r in (self.settings().get("workspaceRoots") or []) if isinstance(r, str) and r]
@@ -1090,6 +1123,29 @@ class Subagents:
             except asyncio.TimeoutError:
                 pass
         return {"stopped": stopped, **(self.report(c) if c.finished.is_set() else {"agent_id": c.id, "state": "stopping"})}
+
+
+def _close_calls(msgs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Answer every tool call that has no result (a child halted mid-round), so the history is valid to resend."""
+    out: list[dict[str, Any]] = []
+    pending: list[str] = []
+
+    def close() -> None:
+        out.extend({"role": "tool", "tool_call_id": i, "content": json.dumps({"error": "not run: the subagent was stopped"})}
+                   for i in pending)
+        pending.clear()
+
+    for m in msgs:
+        if m.get("role") == "tool":
+            if m.get("tool_call_id") in pending:
+                pending.remove(m["tool_call_id"])
+        else:
+            close()
+        out.append(m)
+        if m.get("role") == "assistant" and m.get("tool_calls"):
+            pending[:] = [c["id"] for c in m["tool_calls"]]
+    close()
+    return out
 
 
 def _waiting(sub: Subagents, ch: Child) -> list[bool]:

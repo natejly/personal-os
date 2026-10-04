@@ -28,6 +28,8 @@ import logging
 import time
 from typing import Any, Awaitable, Callable
 
+from .jobs import retryable
+
 log = logging.getLogger(__name__)
 
 LIVE = ("running", "awaiting_approval")
@@ -142,7 +144,7 @@ class JobPolicy:
         for job in self.jobs.list():
             last = next(iter(self.runs.of_job(job["id"], limit=1)), None)
             inp = last.get("input") if last and isinstance(last.get("input"), dict) else {}
-            if (not job["enabled"] or not last or last.get("status") != "interrupted" or inp.get("manual")
+            if (not retryable(job) or not last or last.get("status") != "interrupted" or inp.get("manual")
                     or inp.get("dry_run") or self.live_run(job["id"])):
                 continue
             attempt = int(inp.get("attempt") or 0)
@@ -168,10 +170,10 @@ class JobPolicy:
         if cur is None:
             return
         retries = int(cur.get("max_retries") or 0)
-        if attempt <= retries and cur["enabled"] and self.live_run(jid) is None:
+        if attempt <= retries and retryable(cur) and self.live_run(jid) is None:
             await self._nap(self.backoff(attempt))
             cur = self.jobs.get(jid)
-            if cur is not None and cur["enabled"] and self.live_run(jid) is None:
+            if cur is not None and retryable(cur) and self.live_run(jid) is None:
                 retry = {**fire, "attempt": attempt + 1, "retry_of": run_id, "late": False}
                 nxt = await self.launch(cur, retry)
                 if nxt:

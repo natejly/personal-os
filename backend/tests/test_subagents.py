@@ -405,6 +405,19 @@ def test_resume_continues_history() -> None:
     check(third["state"] == "completed", "a child can be resumed from its recorded transcript")
 
 
+def test_resume_after_a_mid_round_halt_answers_every_call() -> None:
+    reset()
+    SCRIPTS["first task"] = [{"text": "first answer"}]
+    ctx = mkctx(new_conv())
+    first = run(appmod.toolbox.call("agent_spawn", {"task": "first task"}, ctx))
+    mgr.children[first["agent_id"]].messages.append(
+        {"role": "assistant", "content": None, "tool_calls": [{"id": "x1", "type": "function", "function": {"name": "current_time", "arguments": "{}"}}]})
+    SCRIPTS["again"] = [{"text": "ok"}]
+    run(appmod.toolbox.call("agent_spawn", {"task": "again", "resume_id": first["agent_id"]}, ctx))
+    msgs = next(s for s in SEEN if s["task"] == "again")["messages"]
+    check(any(m["role"] == "tool" and m.get("tool_call_id") == "x1" for m in msgs), "a call left unanswered by a halt gets a result on resume")
+
+
 def test_duplicate_calls_in_a_child_run_once() -> None:
     reset()
     ran: list[str] = []
@@ -487,6 +500,31 @@ def test_child_approval_rides_the_parent_stream() -> None:
         check(any(e == "tool_result" and d["id"] == card[0]["id"] for e, d in fr.events), f"{decision}: the card is settled on the stream")
         check("awaiting_approval" in fr.statuses and fr.statuses[-1] == "running", f"{decision}: the parent shows it is waiting, then running")
         check(out["state"] == "completed", f"{decision}: the child carried on")
+
+
+def test_background_child_never_parks_a_card() -> None:
+    """A child of a proposal-only run (a scheduled job) refuses a call that would ask instead of waiting on a card."""
+    reset()
+    spec = appmod.toolbox.specs["fetch_url"]
+    real, hits = spec.fn, []
+
+    async def fake(ctx: dict[str, Any], **kw: Any) -> Any:
+        hits.append(kw)
+        return {"url": kw.get("url"), "text": "page"}
+
+    spec.fn = fake
+    try:
+        SCRIPTS["browse"] = [{"text": "", "calls": [call("f1", "fetch_url", {"url": "https://example.com/a"})]}, {"text": "fetched"}]
+        fr = FakeRun()
+        modes = appmod.toolbox.effective({}, None, None)
+        modes["fetch_url"] = "ask"
+        ctx = mkctx(new_conv(), modes=modes, run=fr, message_id=None, proposal_only=True)
+        ctx["allowed_urls"] = {"https://example.com/a"}
+        out = run(asyncio.wait_for(appmod.toolbox.call("agent_spawn", {"task": "browse"}, ctx), 5))
+    finally:
+        spec.fn = real
+    cards = [d for e, d in fr.events if e == "tool_call" and d.get("needs_approval")]
+    check(not hits and not cards and out["state"] == "completed", "no card, no call, and the child finishes")
 
 
 def test_child_calls_obey_permission_rules() -> None:
@@ -619,6 +657,17 @@ def test_writers_confined_and_serialized() -> None:
 
 
 # ---- definitions -----------------------------------------------------------------------------------
+
+def test_worker_can_spawn_a_worker_on_its_own_root() -> None:
+    root = tempfile.mkdtemp()
+    reset(workspaceRoots=[root], subagentStaleSeconds=1)
+    SCRIPTS["outer"] = [{"text": "", "calls": [call("g", "agent_spawn", {"task": "inner", "role": "worker"})]}, {"text": "outer done"}]
+    SCRIPTS["inner"] = [{"text": "inner done"}]
+    modes = {**appmod.toolbox.effective({}, None, None), "write_local_file": "on"}
+    run(appmod.toolbox.call("agent_spawn", {"task": "outer", "role": "worker"}, mkctx(new_conv(), modes=modes)))
+    inner = next(c for c in mgr.children.values() if c.task == "inner")
+    check(inner.roots and inner.state == "completed", "a nested worker inherits its ancestor's root lock instead of deadlocking")
+
 
 def test_definitions_need_approval() -> None:
     reset()
